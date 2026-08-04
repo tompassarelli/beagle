@@ -51,14 +51,7 @@
            "self-hosted, oracle-certified, fuzz-guarded"
            "lazy attrsets"
            "Nix expressions type-checked against the NixOS option schema: system and package configuration.")
-   (target 'odin "Odin" ".bodin" "beagle/odin" ".odin" 'live "emit-odin.rkt"
-           "Racket emitter; self-host port pending conformance goldens"
-           "structs and explicit context"
-           "Native Odin for graphics and systems work against wgpu and SDL3.")
-   (target 'zig "Zig" ".bzig" "beagle/zig" ".zig" 'live "emit-zig.rkt"
-           "Racket emitter with restored structural goldens"
-           "explicit allocators and error unions"
-           "Native Zig for standalone linked executables and low-level systems code.")))
+   ))
 
 ;; Extensions that are real beagle sources but name no target.
 (define NEUTRAL-EXTENSIONS

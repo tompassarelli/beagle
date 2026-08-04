@@ -49,8 +49,7 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
-             "batch-compile.rkt"        ; D1 — compile-source oracle vs one-shot bin/beagle-build (not yet wired to any consumer)
-             "scratch-containment-test.rkt" ; identity-scoped direct-run scratch reaper (conformance/batch-compile) — normal/exception/child-reap/identity-scope
+             "scratch-containment-test.rkt" ; identity-scoped direct-run scratch reaper — normal/exception/child-reap/identity-scope
 
              "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
@@ -107,10 +106,6 @@
              ;; runs the emitted clj via bb (Babashka).
              "emit.rkt"                 ; emit-clj structural
              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
-             ;; Odin backend — native target (2026-06-13).
-             "emit-odin.rkt"
-             ;; Zig backend — restored strategic native target (2026-07-28).
-             "emit-zig.rkt"
              ;; Form × live-backend matrix: every cell emits or rejects
              ;; pointedly (cracks thread 20260613013145 #2).
              "emit-matrix.rkt"

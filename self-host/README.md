@@ -129,7 +129,7 @@ absolute checkout paths and remain byte-stable across machines.
 - **Source locations** — the chain carries none; seed emission is
   srcloc-free by construction, so this cannot affect seed bytes.
 - **Non-clj targets** — this gap is target-specific: the chain emits the `clj`
-  target only (no nix reader macros / `nix-*` forms, no js/odin emitters).
+  target only (no nix reader macros / `nix-*` forms or js emitters).
 
 ## Native distribution binary (stage0)
 

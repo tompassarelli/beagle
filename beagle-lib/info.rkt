@@ -2,7 +2,7 @@
 (define collection "beagle")
 (define deps '("base"))
 (define version "0.19.0")
-(define pkg-desc "Agent-native typed authoring layer — emits Clojure, ClojureScript, JavaScript, Nix, Zig, or Odin.")
+(define pkg-desc "Agent-native typed authoring layer — emits Clojure, ClojureScript, JavaScript, or Nix.")
 (define pkg-authors '(tom))
 (define license '(Apache-2.0 OR MIT))
 (define raco-commands

@@ -19,7 +19,7 @@
 
 (define PRIMITIVES
   '(String Int Float Bool Keyword Symbol Nil Any Regex NixType
-    ;; Odin/low-level numeric types — concrete widths for native backends
+    ;; Low-level numeric types — concrete widths for native backends
     U8 U16 U32 U64 I8 I16 I32 F32))
 
 ;; Target-specific sugar: #lang beagle/clj accepts JVM names.
@@ -344,8 +344,7 @@
      (or (eq? (type-prim-name actual) (type-prim-name expected))
          ;; Int widens to Float, one direction only (JVM/Clojure
          ;; numeric semantics: (defn g [] :- Float (+ 1 2)) passes;
-         ;; the Zig compiler stays the strict second wall on that
-         ;; target, where comptime ints coerce to f64 anyway).
+         ;; target backends retain their own stricter numeric wall).
          (and (eq? (type-prim-name expected) 'Float)
               (eq? (type-prim-name actual) 'Int))
          ;; Numeric width widening: Int coerces to any integer subtype,

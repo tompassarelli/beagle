@@ -28,7 +28,6 @@ tools/*/target/
 # Python bytecode (bin/beagle_repair_apply.py + tests)
 __pycache__/
 *.pyc
-.odin-root/
 
 # Scratch + default emit output (regenerated; never source).
 # beagle-build / beagle-build-all default here when no output is named, so

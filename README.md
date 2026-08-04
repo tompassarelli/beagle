@@ -126,7 +126,7 @@ projections of that same sealed program. They are judged by correct binaries and
 independent agreement, not by whether a human would maintain the generated C or
 QBE.
 
-Fram's files remain Beagle; they are not rewritten as C, Zig, or another systems
+Fram's files remain Beagle; they are not rewritten as C or another systems
 language. The current native path is exercised by the `native-core/validation`
 drivers while the general CLI profile is being finished. The generated
 [`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
@@ -150,10 +150,8 @@ target is *for*).
 | `clj` | Clojure | `.bclj` | `#lang beagle` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `js` | JavaScript | `.bjs` | `#lang beagle/js` | `.js` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
-| `odin` | Odin | `.bodin` | `#lang beagle/odin` | `.odin` | live — Racket emitter; self-host port pending conformance goldens |
-| `zig` | Zig | `.bzig` | `#lang beagle/zig` | `.zig` | live — Racket emitter with restored structural goldens |
 
-Five language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
+Three language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
 Native Core is not a seventh row in this table: it is a target-neutral lowering

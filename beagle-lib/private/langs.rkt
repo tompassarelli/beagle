@@ -40,7 +40,7 @@
 ;; block. doc-fill decides from the rendered string, so a view's shape is
 ;; decided here and nowhere else.
 
-;; "Clojure, JavaScript, Nix, Odin, Zig, and TypeScript"
+;; "Clojure, JavaScript, and Nix"
 (define (view-names)
   (prose-join (map target-name TARGETS)))
 

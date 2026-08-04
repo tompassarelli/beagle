@@ -101,15 +101,6 @@
                  "target required — use #lang beagle/js, beagle/clj, beagle/nix, or add (define-target <target>)"
                  stx)))))
 
-       ;; Multi-module: package-based targets (Odin, Zig) spread one namespace
-       ;; across sibling files in a directory. Pull their top-level signatures
-       ;; into this program's import tables before checking so cross-file calls
-       ;; resolve and type-check (real compiles only — the golden/parse-only
-       ;; test paths never reach module-begin).
-       (when (memq (program-target prog) '(odin zig))
-         (with-handlers ([exn:fail? void])
-           (import-same-ns-siblings! prog user-src-path)))
-
        ;; #:capture-types? #t feeds the per-node type table to emit (P3
        ;; scalar-=== rep-selection). Emit-path opt-in only — diagnostic-only
        ;; callers (lsp/file-load/check) stay #f and pay nothing.

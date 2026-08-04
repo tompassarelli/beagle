@@ -4300,8 +4300,7 @@
       (= value "#lang")
       (= value "clj")
       (= value "js")
-      (= value "nix")
-      (= value "zig")))
+      (= value "nix")))
 
 (defn term-is-clean? [term: worlds/TermV0] -> Bool
   (if (instance? native.worlds.TextTermV0 term)

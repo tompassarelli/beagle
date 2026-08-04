@@ -21,8 +21,6 @@
     [(js)   ".js"]
     [(py)   ".py"]
     [(nix)  ".nix"]
-    [(zig)  ".zig"]
-    [(odin) ".odin"]
     [else   ".clj"]))
 
 (define (ns->path ns-sym target)

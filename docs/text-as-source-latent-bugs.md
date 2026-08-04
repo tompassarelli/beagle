@@ -98,7 +98,7 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 > for `match` — its temp was `(format "match__~a" (random 99999))`, so the *same*
 > source produced different `.clj` each build. Fixed in `emit-clj.rkt`: the temp is
 > now a deterministic per-program counter (`match__0`, `match__1`, … — parameterized
-> fresh in `clj-emit-program`, the emit-odin pattern), so the same source compiles
+> fresh in `clj-emit-program`), so the same source compiles
 > byte-identically every build. Gated by `bin/test/build-reproducible`. Not a
 > facts-loop loss (the loop was always datum-faithful), but it makes the committed
 > `out/` and the recompile gate robust without relying on the build-nondeterminism guard.

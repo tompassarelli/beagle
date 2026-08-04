@@ -152,7 +152,7 @@ def extract_module_from_path(path):
     if not path or path == '?':
         return None
     base = os.path.basename(path)
-    for ext in ['.bclj', '.bjs', '.bnix', '.bodin', '.bzig', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
+    for ext in ['.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
         if base.endswith(ext):
             return base[:-len(ext)]
     return None

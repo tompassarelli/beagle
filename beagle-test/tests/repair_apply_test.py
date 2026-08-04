@@ -27,21 +27,18 @@ def _with_file(name, probe):
         shutil.rmtree(d, ignore_errors=True)
 
 check("as-is absolute path",
-      _with_file('mod.bzig', lambda d: resolve_source_file(os.path.join(d, 'mod.bzig'), d) == os.path.join(d, 'mod.bzig')),
+      _with_file('mod.bclj', lambda d: resolve_source_file(os.path.join(d, 'mod.bclj'), d) == os.path.join(d, 'mod.bclj')),
       True)
-check("zig output ext maps back to .bzig",
-      _with_file('mod.bzig', lambda d: resolve_source_file('mod.zig', d) == os.path.join(d, 'mod.bzig')),
-      True)
-check("odin output ext maps back to .bodin",
-      _with_file('mod.bodin', lambda d: resolve_source_file('mod.odin', d) == os.path.join(d, 'mod.bodin')),
+check("nix output ext maps back to .bnix",
+      _with_file('mod.bnix', lambda d: resolve_source_file('mod.nix', d) == os.path.join(d, 'mod.bnix')),
       True)
 check("bare basename fallback",
-      _with_file('mod.bzig', lambda d: resolve_source_file('mod.bzig', d) == os.path.join(d, 'mod.bzig')),
+      _with_file('mod.bclj', lambda d: resolve_source_file('mod.bclj', d) == os.path.join(d, 'mod.bclj')),
       True)
 check("unresolvable file is None",
-      _with_file('mod.bzig', lambda d: resolve_source_file('nope.zig', d)), None)
+      _with_file('mod.bclj', lambda d: resolve_source_file('nope.clj', d)), None)
 check("missing file field is None",
-      _with_file('mod.bzig', lambda d: resolve_source_file('?', d)), None)
+      _with_file('mod.bclj', lambda d: resolve_source_file('?', d)), None)
 
 
 CL = ['[(Square side) (throw "TODO: handle Square")]']

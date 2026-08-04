@@ -359,7 +359,7 @@ profiling. The *correctness* invariant and harness are not gated.)
 Owned resolution has so far been about **names** — Beagle owns what a reference points
 to; the target can't (see fram `docs/ADDRESSING_THESIS.md`). This is the **second
 axis: Beagle owns what a value *is and means*, identically across Clojure, CLJS, JS,
-Nix, Odin — the target can't.** Same founding assertion ("graph-as-truth requires owned
+Nix — the target can't.** Same founding assertion ("graph-as-truth requires owned
 resolution requires a language"), applied to value semantics instead of identity — and
 unlike name-resolution, this one is *immediately demonstrable* via §9.
 
@@ -413,8 +413,8 @@ field behind it.
   the eddy-on-claims convergence), not a bugfix
   ([§5](#5-the-load-bearing-case-eddy-the-downstream-consumer)). Open: does the *next*
   reactivity tier want to gate on value — i.e. is the enabler demand-real soon?
-- **Other backends' current conformance.** Do Nix (attrset `==`) and Odin (struct/array
-  `==`) already conform, or need work? The harness will tell.
+- **Other backends' current conformance.** Does Nix attrset `==` already
+  conform, or need work? The harness will tell.
 - **No author-facing knob.** Representation stays a compiler decision from types — never
   a runtime flag (spec: no escape hatches, no two-semantics-under-one-extension).
 

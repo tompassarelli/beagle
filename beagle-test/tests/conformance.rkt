@@ -17,8 +17,8 @@
 ;; Two runnable targets are wired here:
 ;;   - clj : compile .bclj, run via Babashka (bb), print with pr-str
 ;;   - js  : compile .bjs,  run via node,      print structurally (JSON)
-;; CLJS and Odin runtimes are absent in this env and Nix eval is unwired, so
-;; they are NOT wired. The TARGETS table below is the single extension point:
+;; Nix eval is unwired in this environment, so it is not wired. The TARGETS
+;; table below is the single extension point:
 ;; add a target descriptor (header / extension / runner / printer) and the
 ;; whole corpus runs against it.
 ;;

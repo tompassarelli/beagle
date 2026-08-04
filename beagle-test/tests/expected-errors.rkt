@@ -18,7 +18,7 @@
 ;;   BEAGLE_EXPECTED_UPDATE=1 raco test beagle-test/tests/expected-errors.rkt
 ;; rewrites each fixture's `;; @error[...]` line from the ACTUAL output and
 ;; reports the file as updated instead of failing — the per-fixture analog of
-;; the odin/zig BEAGLE_*_BLESS golden flow.
+;; the backend golden-update flow.
 
 (require rackunit
          racket/file

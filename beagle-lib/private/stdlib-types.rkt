@@ -8,16 +8,14 @@
 
 (require "stdlib-portable.rkt"
          "stdlib-nix.rkt"
-         ;; CLJ/JS/Odin stdlib catalogs are live.
+         ;; Target-specific stdlib catalogs are live.
          "stdlib-clj.rkt"
          "stdlib-bb.rkt"
          ;; GENERATED fram API catalog — `fram bin/fram-primer --beagle-catalog`. Lets
          ;; .bclj that rents fram (require fram.cnf/datalog/schema) type as the real fram
          ;; types instead of Any. bb/clj-only.
          "stdlib-fram.rkt"
-         "stdlib-js.rkt"
-         "stdlib-zig.rkt"
-         "stdlib-odin.rkt")
+         "stdlib-js.rkt")
 
 (define (merge-hashes . hs)
   (for*/fold ([out (hash)]) ([h (in-list hs)]
@@ -36,16 +34,11 @@
 (define stdlib-nix-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-NIX))
 
-(define stdlib-zig-combined
-  (merge-hashes STDLIB-PORTABLE STDLIB-ZIG))
-
 (define (stdlib-for-target target)
   (case target
     [(clj)  stdlib-clj-combined]
     [(js)   stdlib-js-combined]
     [(nix)  stdlib-nix-combined]
-    [(zig)  stdlib-zig-combined]
-    [(odin) (merge-hashes STDLIB-PORTABLE STDLIB-ODIN)]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
 (define (target-excludes-for target)
@@ -60,6 +53,4 @@
          stdlib-for-target target-excludes-for
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT
-         STDLIB-NIX
-         STDLIB-ZIG
-         STDLIB-ODIN)
+         STDLIB-NIX)

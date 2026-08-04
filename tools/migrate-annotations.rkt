@@ -45,7 +45,7 @@
   (displayln "never auto-rewritten inside a string literal.")
   (exit 0))
 
-(define beagle-source-exts '("bgl" "bclj" "bnix" "bjs" "bsc" "bzig"))
+(define beagle-source-exts '("bgl" "bclj" "bnix" "bjs"))
 (define host-scan-exts '("rkt" "py" "rktd" "edn"))
 
 (define (path-ext p)

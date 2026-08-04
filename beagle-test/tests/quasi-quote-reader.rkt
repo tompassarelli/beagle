@@ -5,7 +5,7 @@
 ;;
 ;; SURFACE: matches Clojure — unquote is `~` / `~@`, and `,` is WHITESPACE.
 ;; (Beagle previously had the CL-style `,`=unquote; that silent divergence was
-;; removed — P0 #21.) The base (clj/js/odin) readtable uses `~`; the nix
+;; removed — P0 #21.) The base (clj/js) readtable uses `~`; the nix
 ;; readtable keeps `,`=unquote (Racket default) because `~` is taken by nix
 ;; tilde-strings (`~"…"`) — see the nix-suite below.
 ;;
@@ -136,7 +136,7 @@
 (define nix-suite
   (test-suite "beagle/nix readtable: quasiquote + Clojure-whitespace comma"
     ;; nix inherits the base readtable, so `,` is WHITESPACE here too (coherent
-    ;; with clj/js/odin). `~` is the nix TILDE-STRING reader (not unquote), so
+    ;; with clj/js). `~` is the nix TILDE-STRING reader (not unquote), so
     ;; quasiquote-unquote on nix is an OPEN question — see beagle-nix-readtable.
 
     (test-case "`x reads as (quasiquote x) under beagle-nix-readtable"

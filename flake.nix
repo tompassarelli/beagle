@@ -1,13 +1,9 @@
 {
-  description = "Beagle — typed authoring layer for dynamic languages (Clojure / ClojureScript / JavaScript / Nix / Odin)";
+  description = "Beagle — typed authoring layer for dynamic languages (Clojure / ClojureScript / JavaScript / Nix)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    # Zig backend toolchain (thread 20260612232001). Pinned to the
-    # latest tagged release per the §9.6 decision — bump deliberately.
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
     # clj-nix: the standard tool for a PURE, reproducible GraalVM native-image
     # of a deps.edn Clojure project — a fixed-output deps derivation (from a
     # committed deps-lock.json) makes the maven fetch pure, and mkGraalBin wraps
@@ -18,7 +14,7 @@
     clj-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, zig-overlay, clj-nix }:
+  outputs = { self, nixpkgs, flake-utils, clj-nix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -100,7 +96,7 @@
               "$out/beagle-lib/main.rkt"
               "$out/beagle-lib/lang/reader.rkt"
             )
-            for d in clj js nix odin sql py; do
+            for d in clj js nix sql py; do
               [ -f "$out/beagle-lib/$d/main.rkt" ] && core_roots+=("$out/beagle-lib/$d/main.rkt")
               [ -f "$out/beagle-lib/$d/lang/reader.rkt" ] && core_roots+=("$out/beagle-lib/$d/lang/reader.rkt")
             done
@@ -161,7 +157,7 @@
           # PATH the wrapper prepends. patchShebangs still runs on the bash
           # entrypoints for good measure.
           meta = {
-            description = "Agent-native typed authoring layer that compiles to Clojure / ClojureScript / JavaScript / Nix / Odin";
+            description = "Agent-native typed authoring layer that compiles to Clojure / ClojureScript / JavaScript / Nix";
             homepage = "https://github.com/Autonymy/beagle";
             license = [ pkgs.lib.licenses.mit pkgs.lib.licenses.asl20 ];
             platforms = pkgs.lib.platforms.unix;
@@ -236,8 +232,6 @@
             # relying on an undeclared ambient system cargo.
             pkgs.cargo
             pkgs.rustc
-            # Zig backend + tick kernel (thread 20260612232001)
-            zig-overlay.packages.${system}.master
             # sokol_app X11/GLX link deps (kernel render harness)
             pkgs.libx11
             pkgs.libxi

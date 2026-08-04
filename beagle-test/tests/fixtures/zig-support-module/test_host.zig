@@ -1,3 +1,0 @@
-pub fn answer() i64 {
-    return 42;
-}

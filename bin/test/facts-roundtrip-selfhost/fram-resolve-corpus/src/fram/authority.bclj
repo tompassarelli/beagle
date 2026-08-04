@@ -296,7 +296,7 @@
       digest)))
 
 (def beagle-source-extensions :- (Vec String)
-  [".bclj" ".bcljs" ".bjs" ".bnix" ".bgl" ".bsql" ".bpy" ".bzig" ".bodin"])
+  [".bclj" ".bcljs" ".bjs" ".bnix" ".bgl" ".bsql" ".bpy"])
 
 (defn- portable-relative-path?
   [value :- Any

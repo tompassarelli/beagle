@@ -1,3 +1,0 @@
-(ns g)
-(defn checks [n: Int] -> Bool
-  (and (not (zero? n)) (pos? n) (even? n)))

@@ -1,7 +1,0 @@
-(ns i)
-(defn color-name [c: Int] -> String
-  (condp = c
-    :red "red"
-    :green "green"
-    :blue "blue"
-    "unknown"))

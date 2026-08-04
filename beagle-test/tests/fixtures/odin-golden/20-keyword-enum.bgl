@@ -1,9 +1,0 @@
-(ns e)
-
-(defenum Color :red :green :blue)
-
-(defn default-color [] -> Color
-  :red)
-
-(defn is-warm [c: Color] -> Bool
-  (or (= c :red) (= c :green)))

@@ -13,11 +13,12 @@
 # honest, unmasked, real gjoa E009 failure.
 --- a/private/check.rkt
 +++ b/private/check.rkt
-@@ -1819,7 +1819,6 @@
+@@ -3272,7 +3272,7 @@
       ;; rather than a silent miscompile.
       (define target (set!-form-target e))
       (unless (or (symbol? target)
--                 (method-call? target)
-                  (memq (current-check-target) '(odin zig)))
+-                 (method-call? target))
++                 #f)
         (define target-desc
           (if (and (call-form? target) (symbol? (call-form-fn target)))
+              (format "(~a …)" (call-form-fn target))

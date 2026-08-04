@@ -1,2 +1,0 @@
-map-fallible :raises AllocationError
-classify :raises RewriteError

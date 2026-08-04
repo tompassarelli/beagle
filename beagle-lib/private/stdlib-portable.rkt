@@ -26,7 +26,7 @@
    'conj       (fn-of '(Any) 'Any #:rest 'Any)
    'cons       (fn-of '(Any Any) 'Any)
    ;; concat/distinct/sort: parametric over the element type so the typed
-   ;; pipeline carries (Vec A) through (the zig backend needs this — it
+   ;; pipeline carries (Vec A) through (native lowering needs this — it
    ;; can't bind a native loop's element type to Any). concat stays
    ;; variadic; the extra vecs share the element type.
    'concat     (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))

@@ -3,7 +3,7 @@
 ;; Query-tool extraction tests (beagle-sig/-fields/-callers backbone).
 ;; These extractors rotted silently against the surface twice — bare-`:`
 ;; matching made every annotated fn report `-> Any`, and docstring-bearing
-;; defns vanished entirely (found dogfooding the zig kernel, 2026-06-13).
+;; defns vanished entirely during compiler dogfooding.
 ;; No more silent: the canonical surface shapes are pinned here.
 
 (require rackunit

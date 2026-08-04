@@ -1,1 +1,0 @@
-(assert-eq "trivial" 1 1)

@@ -15,8 +15,6 @@ beagle syntax FILE          # parse check (+ --ledger, --repair --emit-patch)
 beagle check [PATH...]      # type-check without emitting (--profile N)
 beagle validate [FILE...]   # parse + check + schema validation
 beagle build [--target T] PATH [OUT]
-beagle build --target zig --exe OUT SOURCE...   # retarget and link an executable
-beagle build --target zig --lib OUTDIR SOURCE...# stage modules only, no main
 beagle fix [--dry-run] [PATH...]                # high-confidence auto-fixes
 beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
 beagle doctor [--deep]      # is the authoring loop online and working?

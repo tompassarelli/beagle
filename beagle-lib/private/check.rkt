@@ -478,8 +478,8 @@
                 (< (add1 i) (string-length pattern))
                 (char=? (string-ref pattern (add1 i)) #\0)))))
 
-;; Parse only the semantic shape: balanced structure, capture optionality, and
-;; target capability. Host regex engines remain responsible for execution.
+;; Parse only the semantic shape: balanced structure and capture optionality.
+;; Host regex engines remain responsible for execution.
 (define (analyze-regex-pattern pattern node)
   (unless (string? pattern)
     (regex-contract-error
@@ -487,17 +487,6 @@
      "dynamic regex pattern requires an explicit match shape at its Regex boundary"
      (hasheq 'expected "compile-time String pattern"
              'actual (format "~v" pattern))))
-  (when (eq? (current-check-target) 'odin)
-    (regex-contract-error
-     node
-     "odin regex runtime capability is not selected"
-     (hasheq 'target "odin" 'capability "regex-runtime")))
-  (when (and (eq? (current-check-target) 'zig)
-             (> (string-length pattern) 512))
-    (regex-contract-error
-     node
-     "zig regex pattern exceeds the checked 512-byte static limit"
-     (hasheq 'target "zig" 'limit 512)))
   (define captures '())
   ;; frame = (list capture-start-index open-offset)
   (define groups '())
@@ -513,12 +502,6 @@
        (define capture-types
          (for/list ([optional? (in-list captures)])
            (if optional? (nullable-type STRING) STRING)))
-       (when (and (eq? (current-check-target) 'zig)
-                  (> (length capture-types) 15))
-         (regex-contract-error
-          node
-          "zig regex supports at most 15 capturing groups"
-          (hasheq 'target "zig" 'captures (length capture-types) 'limit 15)))
        (regex-contract
         pattern
         (if (null? capture-types)
@@ -533,13 +516,6 @@
             (regex-contract-error node "regex pattern ends with a dangling escape"
                                   (hasheq 'pattern pattern 'offset i)))
           (define escaped (string-ref pattern (add1 i)))
-          (when (and (eq? (current-check-target) 'zig)
-                     (or (char-numeric? escaped)
-                         (memq escaped '(#\p #\P))))
-            (regex-contract-error
-             node
-             (format "zig regex does not support \\~a" escaped)
-             (hasheq 'target "zig" 'pattern pattern 'offset i)))
           (loop (+ i 2))]
          [(char=? ch #\[)
           (let class-loop ([j (add1 i)] [escaped? #f])
@@ -559,12 +535,6 @@
           (define noncapturing?
             (and special? (< (+ i 2) n)
                  (char=? (string-ref pattern (+ i 2)) #\:)))
-          (when (and special? (not noncapturing?)
-                     (eq? (current-check-target) 'zig))
-            (regex-contract-error
-             node
-             "zig regex supports non-capturing (?:...) groups, but not lookaround, inline flags, or named groups"
-             (hasheq 'target "zig" 'pattern pattern 'offset i)))
           (define capture-start (length captures))
           (unless special?
             (set! captures (append captures (list #f))))
@@ -581,20 +551,10 @@
           (loop (add1 i))]
          [(char=? ch #\|)
           (set! captures (map (lambda (_) #t) captures))
-          (when (eq? (current-check-target) 'zig)
-            (regex-contract-error
-             node
-             "zig regex alternation is not yet supported"
-             (hasheq 'target "zig" 'pattern pattern 'offset i)))
           (loop (add1 i))]
          [(and (memq ch '(#\* #\+ #\?))
                (< (add1 i) n)
                (char=? (string-ref pattern (add1 i)) #\?))
-          (when (eq? (current-check-target) 'zig)
-            (regex-contract-error
-             node
-             "zig regex lazy quantifiers are not yet supported"
-             (hasheq 'target "zig" 'pattern pattern 'offset i)))
           (loop (+ i 2))]
          [else (loop (add1 i))])])))
 
@@ -824,7 +784,6 @@
             (check-form form env)))
         (check-module-interface-resolution! prog)
         (check-qualified-resolution! prog env)
-        (check-zig-native-boundaries! prog)
         (check-ownership-contracts! prog)
         (check-scalar-provenance! prog)
         (check-nix-free-dotted! prog)
@@ -832,11 +791,7 @@
 
 ;; --- concrete native boundaries ---------------------------------------------
 
-;; `Any` is universal during ordinary inference, so compatibility checking
-;; cannot enforce a native ABI. Zig has no runtime representation for it:
-;; every declaration type the emitter renders must be recursively concrete.
-;; Keep this target well-formedness rule separate from check-form so GC/dynamic
-;; targets retain their existing Any behavior and emitted bytes.
+;; `Any` is universal during ordinary inference.
 (define (type-contains-any? t)
   (cond
     [(not t) #f]
@@ -965,10 +920,8 @@
            (walk (type-fn-ret ty))]
           [else (void)]))
       (walk t)))
-  ;; Type aliases erase before the checked AST, but a closed Dyn alias still
-  ;; owns a concrete native ABI when a declared Zig module set shares it.
-  ;; Record its contract now so the owning module can materialize that ABI
-  ;; even when the alias is only mentioned by downstream interfaces.
+  ;; Type aliases erase before the checked AST, but their closed dynamic
+  ;; contracts remain available to downstream interfaces.
   (for ([ty (in-hash-values (program-declared-type-aliases prog))])
     (record-type-node! ty #f)
     (record! #f ty))
@@ -1012,20 +965,6 @@
        (call-form? arg)
        (memq (call-form-fn arg) '(keys vals))))
 
-(define (collection-value-contract? t)
-  (cond
-    [(type-prim? t)
-     (not (memq (type-prim-name t) '(Any Regex Ctx Symbol)))]
-    [(dynamic-type? t)
-     (and (pair? (type-app-args t))
-          (andmap collection-value-contract? (type-app-args t)))]
-    [(type-app? t)
-     (and (memq (type-app-ctor t) COLLECTION-CTORS)
-          (andmap collection-value-contract? (type-app-args t)))]
-    [(type-union? t)
-     (andmap collection-value-contract? (type-union-alts t))]
-    [else #f]))
-
 (define (make-collection-contract t node #:extern [extern-name #f])
   (define kind (type-app-ctor t))
   (define args (type-app-args t))
@@ -1037,42 +976,7 @@
     (case kind
       [(Map) (cadr args)]
       [else (car args)]))
-  (when (and (eq? (current-check-target) 'zig)
-             key-type
-             (not (collection-value-contract? key-type)))
-    (collection-contract-error
-     node
-     (format "~a key/element type ~a does not support clojure-value equality and clojure-hash"
-             kind (type->string key-type))
-     (hasheq 'collection (symbol->string kind)
-             'declared (type->string t)
-             'key-type (type->string key-type)
-             'equality "clojure-value"
-             'hashing "clojure-hash")))
-  (define layout
-    (cond
-      [(not (eq? (current-check-target) 'zig))
-       'target-private]
-      [(and extern-name (type-contains-any? t))
-       ;; The concrete-native-boundary pass owns the more fundamental Any
-       ;; diagnostic. Do not mask it with the later layout contract.
-       'target-private]
-      [(and extern-name (memq kind '(Vec List)))
-       (list 'abi-record
-             (string->symbol
-              (format "beagle.~a" (string-downcase (symbol->string kind))))
-             1)]
-      [extern-name
-       (collection-contract-error
-        node
-        (format "extern ~a cannot expose target-private ~a layout — wrap it in a named versioned ABI record"
-                extern-name kind)
-        (hasheq 'extern (symbol->string extern-name)
-                'collection (symbol->string kind)
-                'declared (type->string t)
-                'layout "target-private"
-                'repair "named versioned ABI record"))]
-      [else 'target-private]))
+  (define layout 'target-private)
   (collection-contract
    kind
    key-type
@@ -1204,33 +1108,14 @@
     clojure.string/lower-case clojure.string/upper-case
     clojure.string/join clojure.string/replace clojure.string/split))
 
-(define NATIVE-ALLOCATING-FNS
-  '(map filter remove vec repeat apply pr-str println keys vals slurp path
-    clojure.string/split-lines babashka.fs/path
-    zig/args zig/getenv zig/process-capture zig/temp-dir
-    zig/unique-id zig/json-escape))
-
-(define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by str))
-
-;; Candidate-world compilation populates this incrementally in declared module
-;; order.  Keys are canonical provider/name symbols and values are native
-;; allocation modes.  Imported allocating calls then participate in the same
-;; local fixed point as allocating local callees.
-(define current-imported-allocation-modes (make-parameter (hasheq)))
-
 (define (allocation-contract-error node message [details (hasheq)])
   (raise-diag 'allocation-contract message details
               #:src (and node (src-for node))))
 
-(define (native-allocation-target? target)
-  (memq target '(zig odin)))
-
-(define (allocating-call? value target canonical-fn)
+(define (allocating-call? value _target canonical-fn)
   (and (call-form? value)
        (symbol? canonical-fn)
-       (or (memq canonical-fn PORTABLE-ALLOCATING-FNS)
-           (and (native-allocation-target? target)
-                (memq canonical-fn NATIVE-ALLOCATING-FNS)))
+       (memq canonical-fn PORTABLE-ALLOCATING-FNS)
        (case canonical-fn
          [(str concat) (>= (length (call-form-args value)) 2)]
          ;; Only `(apply str xs)` is an allocating apply lowering. Other
@@ -1239,32 +1124,9 @@
                        (eq? (car (call-form-args value)) 'str))]
          [else #t])))
 
-;; Container literals are allocation sites when evaluated inside a function.
-;; The Zig emitter can borrow fully-static top-level storage, but a runtime
-;; literal — especially one returned from a function — must never become an
-;; escaping `&.{...}` temporary. Maps/sets likewise lower through persistent
-;; collection construction and therefore consume the current arena.
-(define (allocating-literal? value)
-  (or (vec-form? value) (map-form? value) (set-form? value)))
-
-(define (ctx-first-defn? form)
-  (and (defn-form? form)
-       (pair? (defn-form-params form))
-       (let ([first-param (car (defn-form-params form))])
-         (and (param? first-param)
-              (param-type first-param)
-              (type-prim? (param-type first-param))
-              (eq? (type-prim-name (param-type first-param)) 'Ctx)))))
-
-(define (allocation-region target form failure)
+(define (allocation-region target _form _failure)
   (case target
     [(clj js nix) 'gc]
-    [(zig)
-     ;; Zig always receives allocation policy from its caller. A source-visible
-     ;; Ctx is the tick arena; the hidden native ABI is classified explicitly
-     ;; as caller-owned rather than pretending it is process-global.
-     (if (ctx-first-defn? form) 'tick 'caller)]
-    [(odin) (if (ctx-first-defn? form) 'tick 'process)]
     [else 'process]))
 
 (define (raise-alternatives raises)
@@ -1289,7 +1151,6 @@
 (define (prepare-allocation-contracts! prog)
   (define table (program-semantic-contracts prog))
   (define target (program-target prog))
-  (define native-target? (native-allocation-target? target))
   (define require-aliases
     (for/hasheq ([entry (in-list (program-requires prog))]
                  #:when (require-entry-alias entry))
@@ -1338,10 +1199,7 @@
       (cond
        [(call-form? value)
          (define canonical-fn (canonical-call-fn value))
-         (when (or (allocating-call? value target canonical-fn)
-                   (hash-has-key?
-                    (current-imported-allocation-modes)
-                    canonical-fn))
+         (when (allocating-call? value target canonical-fn)
            (set! sites (cons value sites)))
          (when (and (symbol? (call-form-fn value))
                     (set-member? local-names (call-form-fn value)))
@@ -1353,15 +1211,12 @@
                (walk-error-payload arg)
                (walk arg)))]
         [(vec-form? value)
-         (when native-target? (set! sites (cons value sites)))
          (for ([item (in-list (vec-form-items value))]) (walk item))]
         [(map-form? value)
-         (when native-target? (set! sites (cons value sites)))
          (for ([entry (in-list (map-form-pairs value))])
            (walk (car entry))
            (walk (cdr entry)))]
         [(set-form? value)
-         (when native-target? (set! sites (cons value sites)))
          (for ([item (in-list (set-form-items value))]) (walk item))]
         [(struct? value)
          (for ([field (in-vector (struct->vector value))]
@@ -1385,17 +1240,7 @@
     (for/seteq ([form (in-list defns)]
                 #:when (pair? (hash-ref direct-sites form)))
       (defn-form-name form)))
-  (define allocating-names
-    (if native-target?
-        (let loop ([known direct-allocating])
-          (define next
-            (for/fold ([out known]) ([form (in-list defns)])
-              (if (for/or ([callee (in-list (hash-ref local-calls form))])
-                    (set-member? known (call-form-fn callee)))
-                  (set-add out (defn-form-name form))
-                  out)))
-          (if (set=? known next) known (loop next)))
-        direct-allocating))
+  (define allocating-names direct-allocating)
 
   (for ([form (in-list defns)]
         #:when (set-member? allocating-names (defn-form-name form)))
@@ -1419,31 +1264,6 @@
                    'declared (type->string (cadr failure))
                    'required "AllocationError"
                    'repair ":raises AllocationError")))
-        (when (and (eq? target 'zig) (pair? failure))
-          (for ([expr (in-list allocating-exprs)])
-            ;; Literal construction already lowers through the same fallible
-            ;; arena primitive as mapv/filterv. Only named calls need the
-            ;; backend-support allowlist.
-            (cond
-              [(or (map-form? expr) (set-form? expr))
-               (allocation-contract-error
-                expr
-                "zig typed allocation failure is not yet available for Map/Set literals"
-                (hasheq 'function
-                        (symbol->string (defn-form-name form))
-                        'operation (if (map-form? expr) "Map literal" "Set literal")
-                        'failure "raises AllocationError"))]
-              [(and (call-form? expr)
-                    (not (memq (canonical-call-fn expr)
-                               ZIG-FALLIBLE-ALLOCATING-FNS)))
-               (allocation-contract-error
-                expr
-                (format "zig typed allocation failure is not yet available for ~a"
-                        (call-form-fn expr))
-                (hasheq 'function
-                        (symbol->string (defn-form-name form))
-                        'operation (symbol->string (call-form-fn expr))
-                        'failure "raises AllocationError"))])))
         (define contract
           (allocation-contract (allocation-region target form failure) failure))
         (hash-set! table form contract)
@@ -1486,7 +1306,6 @@
 (define (error-mode target)
   (case target
     [(clj js) 'exception]
-    [(zig) 'native-error-union]
     [else 'result]))
 
 (define (error-payload-layout form)
@@ -1539,20 +1358,6 @@
          (format "throwable union ~a must declare at least one payload variant"
                  name)
          (hasheq 'error-type (symbol->string name))))
-      (for ([variant (in-list layout)])
-        (define member (car variant))
-        (define fields (cdr variant))
-        (when (eq? (program-target prog) 'zig)
-          (for ([field (in-list fields)])
-            (when (type-contains-any? (param-type field))
-              (error-contract-error
-               field
-               (format "zig throwable payload ~a.~a cannot contain Any"
-                       member (param-name field))
-               (hasheq 'error-type (symbol->string name)
-                       'member (symbol->string member)
-                       'field (symbol->string (param-name field))
-                       'actual "Any"))))))
     (hash-set!
      contracts
      name
@@ -1806,14 +1611,6 @@
      (define inner (rescue-form-expr e))
      (define contract (raising-call-contract inner))
      (when contract
-       (when (and (eq? (current-check-target) 'zig)
-                  (> (length (error-contract-payload-layout contract)) 1))
-         (error-contract-error
-          e
-          "zig rescue currently requires a single declared payload variant"
-          (hasheq
-           'error-type (type->string (error-contract-error-type contract))
-           'variants (length (error-contract-payload-layout contract)))))
        (hash-set! table e contract)
        (hash-set! table inner contract))
      (if contract
@@ -1847,48 +1644,6 @@
      (for ([item (in-vector e)])
        (check-error-expr! item env))]
     [else (void)]))
-
-(define (check-zig-native-boundaries! prog)
-  (when (eq? (program-target prog) 'zig)
-    (define imported-bindings (imported-interface-binding-names prog))
-    (define (check! label t [node #f])
-      (when (type-contains-any? t)
-        (raise-diag
-         'type-mismatch
-         (format "zig native boundary ~a cannot contain Any — annotate it with a concrete :- type"
-                 label)
-         (hasheq 'target "zig"
-                 'boundary label
-                 'declared (type->string t)
-                 'expected "concrete native type"
-                 'actual "Any")
-         #:src (and node (src-for node)))))
-    (for ([raw-form (in-list (program-forms prog))])
-      (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
-      (match form
-        [(def-form name t _ _ _)
-         (check! (format "def ~a" name) t form)]
-        [(defonce-form name t _ _)
-         (check! (format "defonce ~a" name) t form)]
-        [(defn-form name params rest-p ret _ _ raises _)
-         (for ([p (in-list params)]
-               #:when (param? p))
-           (check! (format "defn ~a parameter ~a" name (param-name p))
-                   (param-type p) form))
-         (when (and rest-p (param? rest-p))
-           (check! (format "defn ~a rest parameter ~a" name (param-name rest-p))
-                   (param-type rest-p) form))
-         (check! (format "defn ~a return" name) ret form)
-         (when raises
-           (check! (format "defn ~a :raises" name) raises form))]
-        [(record-form name fields)
-         (for ([field (in-list fields)])
-           (check! (format "record ~a field ~a" name (param-name field))
-                   (param-type field) form))]
-        [_ (void)]))
-    (for ([(name t) (in-hash (program-externs prog))]
-          #:unless (set-member? imported-bindings name))
-      (check! (format "extern ~a" name) t))))
 
 ;; --- environment -----------------------------------------------------------
 
@@ -2183,59 +1938,6 @@
                                (hasheq) #:src src)))
                #t)))))
 
-(define (check-collection-literal value expected env src)
-  (define (check-item! item item-type label)
-    (define actual (infer-expr item env))
-    (unless (or (check-collection-literal item item-type env src)
-                (type-compatible? actual item-type))
-      (collection-contract-error
-       item
-       (format "~a expects ~a, got ~a"
-               label (type->string item-type) (type->string actual))
-       (hasheq 'expected (type->string item-type)
-               'actual (type->string actual)
-               'position label))))
-  (and
-   (eq? (current-check-target) 'zig)
-   (collection-type? expected)
-   (case (type-app-ctor expected)
-     [(Vec List)
-      (and (vec-form? value)
-           (begin
-             (for ([item (in-list (vec-form-items value))]
-                   [i (in-naturals)])
-               (check-item! item (car (type-app-args expected))
-                            (format "collection element ~a" i)))
-             #t))]
-     [(Set)
-      (define elem-type (car (type-app-args expected)))
-      (cond
-        [(set-form? value)
-         (for ([item (in-list (set-form-items value))]
-               [i (in-naturals)])
-           (check-item! item elem-type (format "set element ~a" i)))
-         #t]
-        [(and (call-form? value)
-              (eq? (call-form-fn value) 'set)
-              (= (length (call-form-args value)) 1)
-              (vec-form? (car (call-form-args value))))
-         (check-collection-literal
-          (car (call-form-args value))
-          (type-app 'Vec (list elem-type))
-          env
-          src)]
-        [else #f])]
-     [(Map)
-      (and (map-form? value)
-           (let ([key-type (car (type-app-args expected))]
-                 [value-type (cadr (type-app-args expected))])
-             (for ([pair (in-list (map-form-pairs value))]
-                   [i (in-naturals)])
-               (check-item! (car pair) key-type (format "map key ~a" i))
-               (check-item! (cdr pair) value-type (format "map value ~a" i)))
-             #t))]
-     [else #f])))
-
 ;; G2b — annotation-directed Atom CONSTRUCTION. A fresh cell checked against an
 ;; expected (Atom T) adopts T when the value IS the constructor call `(atom init)`:
 ;; the init is checked against T (raising pointedly), so `(atom nil)` can be born
@@ -2266,7 +1968,6 @@
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
        (unless (or (check-hvec-literal value effective-type env (src-for value))
-                   (check-collection-literal value effective-type env (src-for value))
                    (check-atom-ctor value effective-type env (src-for value))
                    (type-compatible? inferred effective-type))
          (raise-diag 'def-type
@@ -2279,8 +1980,7 @@
      (define inferred (infer-expr value env))
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
-       (unless (or (check-collection-literal value effective-type env (src-for value))
-                   (check-atom-ctor value effective-type env (src-for value))
+       (unless (or (check-atom-ctor value effective-type env (src-for value))
                    (type-compatible? inferred effective-type))
          (raise-diag 'def-type
                      (format "defonce ~a: expected ~a, got ~a"
@@ -2306,11 +2006,7 @@
          (check-error-expr! expr body-env))
        (define last-type (last-expr-type body body-env))
        (when effective-ret
-         (unless (or (check-collection-literal
-                      (last body) effective-ret body-env
-                      (or (src-for (last body))
-                          (body-loc-at body (sub1 (length body)))))
-                     (type-compatible? last-type effective-ret)
+         (unless (or (type-compatible? last-type effective-ret)
                      (and (type-app? effective-ret)
                           (eq? (type-app-ctor effective-ret) 'Promise)
                           (= 1 (length (type-app-args effective-ret)))
@@ -3333,12 +3029,6 @@
         (format "~a expects String, Regex, and optional Int limit" fn)
         (hasheq 'function (symbol->string fn)
                 'actual-arity (length args))))
-     (when (and (eq? (current-check-target) 'zig)
-                (= (length args) 3))
-       (regex-contract-error
-        e
-        "zig regex split limit is not yet supported"
-        (hasheq 'target "zig" 'function (symbol->string fn))))
      (check-string-arg! (car args) env fn)
      (define contract (check-regex-arg! (cadr args) env fn))
      (when (= (length args) 3)
@@ -3366,13 +3056,6 @@
      (cond
        [(regex-type? pattern-type)
         (define contract (check-regex-arg! (cadr args) env fn))
-        (when (and (eq? (current-check-target) 'zig)
-                   (string? (caddr args))
-                   (regexp-match? #rx"\\$[0-9]" (caddr args)))
-          (regex-contract-error
-           (caddr args)
-           "zig regex replacement capture references are not yet supported"
-           (hasheq 'target "zig" 'replacement (caddr args))))
         (store-regex-contract! e contract)]
        [(type-compatible? pattern-type STRING) (void)]
        [else
@@ -3573,20 +3256,17 @@
      (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
      ANY]
     [(set!-form? e)
-     ;; A set! target must be an assignable PLACE. On value targets (js,
-     ;; clj, nix) the only places are a bare local variable and a field access
+     ;; A set! target must be an assignable PLACE. The only places are a bare
+     ;; local variable and a field access
      ;; (`.-field` / `.field`, a method-call node). A general call form like
      ;; `(get m k)` is NOT a place: emit would lower it to `$$bc$get(m, k) = v`,
-     ;; an invalid assignment target (silent miscompile). The systems targets
-     ;; (odin, zig) DO give `(get …)` / `(nth …)` / `(:kw …)` / deref place
-     ;; semantics — their own emitters validate — so only carve those out.
+     ;; an invalid assignment target (silent miscompile).
      ;; There is no typed string-keyed object mutation surface (aset is
      ;; (Any Int Any)); until one exists, this reads as a checker rejection
      ;; rather than a silent miscompile.
      (define target (set!-form-target e))
      (unless (or (symbol? target)
-                 (method-call? target)
-                 (memq (current-check-target) '(odin zig)))
+                 (method-call? target))
        (define target-desc
          (if (and (call-form? target) (symbol? (call-form-fn target)))
              (format "(~a …)" (call-form-fn target))
@@ -4339,10 +4019,7 @@
          (hash-set! out (seq-destructure-rest-name bname) (or inferred ANY)))]
       [else
        (when declared
-         (unless (or (check-collection-literal
-                      (let-binding-value b) declared out
-                      (src-for (let-binding-value b)))
-                     (check-atom-ctor (let-binding-value b) declared out
+         (unless (or (check-atom-ctor (let-binding-value b) declared out
                                       (src-for (let-binding-value b)))
                      (type-compatible? inferred declared))
            (raise-diag 'let-binding
@@ -4456,25 +4133,7 @@
       (for/list ([a (in-list rest-args)] [i (in-naturals (+ n-fixed 1))])
         (check-one-arg fn-name fn-type i rest-t a env call-src)))]
     [else
-     ;; Package targets (Odin, Zig) render records as struct literals, where
-     ;; partial / zero-value construction is idiomatic: (->Chunk) → Chunk{},
-     ;; (->Color r) → Color{r=r}. Allow a record constructor (->Name) to take
-     ;; 0..n-fixed args on those targets; the emitter fills the remaining
-     ;; fields with the struct's zero value. Too many args is still an error.
-     (define record-ctor-partial?
-       (and (memq (current-check-target) '(odin zig))
-            (let ([s (symbol->string fn-name)])
-              (and (>= (string-length s) 3)
-                   (char=? (string-ref s 0) #\-)
-                   (char=? (string-ref s 1) #\>)
-                   ;; Only genuine record constructors get the partial /
-                   ;; zero-value allowance — not arbitrary ->prefixed
-                   ;; functions. RECORD-FIELDS includes imported sibling
-                   ;; records (folded in build-initial-env), so this still
-                   ;; covers (->Chunk) across package modules.
-                   (hash-has-key? RECORD-FIELDS (string->symbol (substring s 2)))))
-            (<= n-args n-fixed)))
-     (unless (or record-ctor-partial? (= n-fixed n-args))
+     (unless (= n-fixed n-args)
        (define help
          (cond
            [(> n-args n-fixed)
@@ -4559,7 +4218,6 @@
              'declared (type->string a-type)
              'repair "guard the value with a type predicate before this operation")))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
-              (check-collection-literal arg expected-type env call-src)
               (type-compatible? a-type expected-type))
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
     (define suggestions (find-accessor-suggestions arg expected-type a-type env))
@@ -4669,7 +4327,6 @@
         (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
           (check-module-interface-resolution! prog)
           (check-qualified-resolution! prog env)
-          (check-zig-native-boundaries! prog)
           (check-ownership-contracts! prog))))))
 
 ;; =============================================================================
@@ -5501,12 +5158,9 @@
     [(warn)  (if (>= (current-check-profile) 3) 'error 'warn)]
     [else    'off]))
 
-(define (check-defn-purity target name body src-table node effectful-defs)
-  ;; Runtime entry-point names are host ABI contracts, so they cannot carry
-  ;; `!`: clj/bb resolves `-main`, while Zig's native wrapper resolves `main`.
-  (define entry-point?
-    (or (eq? name '-main)
-        (and (eq? target 'zig) (eq? name 'main))))
+(define (check-defn-purity _target name body src-table node effectful-defs)
+  ;; Runtime entry-point names are host ABI contracts, so they cannot carry `!`.
+  (define entry-point? (eq? name '-main))
   (define markers
     (if entry-point?
         '()
@@ -6018,5 +5672,4 @@
          kind->error-code
          current-check-profile
          current-purity-enforcement
-         current-imported-allocation-modes
          check-form infer-expr build-initial-env)

@@ -180,7 +180,6 @@
     [(regexp-match? #rx"beagle/nix"    lang-line) 'nix]
     [(regexp-match? #rx"beagle/clj"    lang-line) 'clj]
     [(regexp-match? #rx"beagle/js"     lang-line) 'js]
-    [(regexp-match? #rx"beagle/scriptc" lang-line) 'scriptc]
     [else #f]))
 
 (define (read-beagle-syntax path)
@@ -953,8 +952,7 @@
     (when imp-rec-fields
       (hash-set! imp-rec-fields name field-map))
     (when imp-rec-field-order
-      ;; Field-name STRINGS: emit-clj/emit-js/emit-zig all read this table that
-      ;; way (emit-zig rebuilds the `:name` key from the string).
+      ;; Field-name STRINGS: the emitters read this table that way.
       (hash-set! imp-rec-field-order name
                  (map (lambda (f) (symbol->string (param-name f))) fields)))
     (when imp-rec-ns
@@ -1157,77 +1155,11 @@
        (defn-reg! name (type-fn ptypes rtype (type-prim 'Any)))]
       ;; Enum: register the name so keyword literals type-check against it in
       ;; the importing module (Keyword <: EnumType, types.rkt). Variants emit
-      ;; as enum-qualified members on package targets.
+      ;; as enum-qualified members on targets that support them.
       [(list* 'defenum (? symbol? name) _variants)
        (note-type! name)
        (when imp-enums (hash-set! imp-enums name #t))]
         [_ (void)])))))
-
-;; --- multi-module: same-ns sibling auto-import (package targets) -------------
-;;
-;; Package-based targets (Odin, Zig) spread one logical namespace across several
-;; files in a directory (an Odin package == a directory). When compiling file X,
-;; sibling files in the same directory that declare the same (ns N) form one
-;; module together with X: their top-level signatures are pulled into X's import
-;; tables via the same engine as an explicit (require ...). Bare cross-file calls
-;; (chunk-set, ->Chunk, terrain-height, ...) then resolve and type-check instead
-;; of degrading to "call to undefined function" notes.
-;;
-;; Invoked from the module-begin driver (real compiles only), never from the
-;; golden/parse-only test paths which call parse-program directly. Mutates the
-;; program's (mutable) extern/import hashes in place — see parse-program, where
-;; those hashes are stored into the struct by reference. Never raises: a sibling
-;; that fails to read/parse warns and is skipped (it surfaces its own errors when
-;; compiled on its own).
-
-;; Cheap datum-level scan: does file `f` declare exactly (ns target-ns)?
-;; Read a sibling's datums once and return them iff it declares target-ns, so
-;; the caller can gate on the namespace AND reuse the datums for the actual
-;; type import without a second read of the file.
-(define (file-ns-datums f target-ns)
-  (with-handlers ([exn:fail? (lambda (_e) #f)])
-    (define datums (read-beagle-datums f))
-    (and (for/or ([d (in-list datums)])
-           (match d
-             [(list* 'ns (? symbol? n) _) (eq? n target-ns)]
-             [_ #f]))
-         datums)))
-
-(define (import-same-ns-siblings! prog source-path)
-  (define ns (program-namespace prog))
-  (when (and source-path ns (not (eq? ns DEFAULT-NAMESPACE)))
-    (define self (simplify-path
-                  (path->complete-path
-                   (if (path? source-path) source-path (string->path source-path)))))
-    (define-values (dir _name _dir?) (split-path self))
-    (when (path? dir)
-      (for ([f (in-list (directory-list dir #:build? #t))])
-        (define sib-datums
-          (and (file-exists? f)
-               (beagle-source-file? (path->string f))
-               (not (equal? (simplify-path (path->complete-path f)) self))
-               (file-ns-datums f ns)))   ;; reads the sibling exactly once
-        (when sib-datums
-          (with-handlers ([exn:fail?
-                           (lambda (e)
-                             (eprintf "warning: sibling type import from ~a failed: ~a\n"
-                                      f (exn-message e)))])
-            (import-module-types! f ns
-                                  (program-externs prog)
-                                  (program-macros prog)
-                                  (program-imported-record-fields prog)
-                                  (program-imported-record-field-order prog)
-                                  (program-imported-record-ns prog)
-                                  ns
-                                  #:type-names (program-imported-type-names prog)
-                                  #:scalar-preds (program-imported-scalar-preds prog)
-                                  #:symbol-ns (program-imported-symbol-ns prog)
-                                  #:union-members (program-imported-union-members prog)
-                                  #:parametric-unions (program-imported-parametric-unions prog)
-                                  #:enums (program-imported-enums prog)
-                                  #:dynamic-vars (program-imported-dynamic-vars prog)
-                                  #:datums sib-datums
-                                  #:bare-all? #t)))))))
 
 ;; --- reader-conditional resolution ----------------------------------------
 ;;
@@ -1962,16 +1894,11 @@
        (set! mode m)
        (set! mode-set? #t)]
 
-      [(list 'define-target 'scriptc)
-       (raise-parse-error
-        'removed-form
-        "target 'scriptc' was removed — use .bjs/#lang beagle/js for hosted JavaScript; native Beagle code goes through Beagle Native Core")]
-
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-      (unless (memq t '(clj js nix py rkt zig odin))
+      (unless (memq t '(clj js nix py rkt))
         (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, js, nix, py, rkt, zig, or odin)" t))
+                            "unknown target: ~a (expected clj, js, nix, py, or rkt)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -2103,7 +2030,7 @@
                           "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
       [(cons 'define-target _)
        (raise-parse-error 'bad-meta-value
-                          "malformed define-target — expected (define-target clj|js|nix|py|rkt|zig|odin), got: ~v" d)]
+                          "malformed define-target — expected (define-target clj|js|nix|py|rkt), got: ~v" d)]
       [(cons 'define-mode _)
        (raise-parse-error 'bad-meta-value
                           "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]
@@ -2126,12 +2053,10 @@
   ;; Mode-2 hygiene: the set of this program's top-level definition names, and
   ;; a fresh alias table the expander fills with free-ref -> alias entries.
   ;; GATED to the live targets that emit the injected `(def alias orig)`
-  ;; correctly — clj/nix/js, and odin (emit-odin renders an untyped
-  ;; identifier-valued def as a constant alias `name :: value`). Dormant
-  ;; targets (py/rkt/zig) keep use-site resolution until their emitters
+  ;; correctly — clj/nix/js. Other targets keep use-site resolution until their emitters
   ;; are verified to handle the alias form. When the set is #f, free-ref
   ;; resolution is inert and expansion is unchanged.
-  (define hygiene-capable? (memq target '(clj nix js odin)))
+  (define hygiene-capable? (memq target '(clj nix js)))
   (define module-def-name-set
     (and hygiene-capable?
          (for/fold ([acc (hasheq)]) ([d (in-list datums)])
@@ -5314,7 +5239,6 @@
  (all-from-out "parse-jst.rkt")
  (all-from-out "parse-js-quote.rkt")
  parse-program
- import-same-ns-siblings!
  read-beagle-datums
  read-beagle-syntax
  parse-params

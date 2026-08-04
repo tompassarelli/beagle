@@ -2,8 +2,8 @@
 
 ;; Emit matrix (cracks thread 20260613013145 #2): every catalog form ×
 ;; every LIVE backend must either EMIT or reject POINTEDLY. The crack
-;; this closes: with four live targets, a new surface form that lands
-;; with three emitter cases quietly crashes the fourth with a match
+;; this closes: with two live targets, a new surface form that lands
+;; with one emitter case quietly crashes the second with a match
 ;; error — a latent landmine instead of a red test. Here every cell is
 ;; pinned: emission may succeed, types may reject, backends may say
 ;; "not yet supported by X backend" — but an INTERNAL crash signature
@@ -11,8 +11,8 @@
 ;; the suite immediately.
 ;;
 ;; When adding a surface form: add a catalog entry. The matrix then
-;; forces the form to be handled (or pointedly rejected) on nix, clj,
-;; odin, and zig before it ships.
+;; forces the form to be handled (or pointedly rejected) on nix and clj
+;; before it ships.
 
 (require rackunit
          racket/file
@@ -20,7 +20,7 @@
          beagle/private/check
          beagle/private/emit)
 
-(define LIVE-TARGETS '(nix clj odin zig))
+(define LIVE-TARGETS '(nix clj))
 
 ;; Compile SRC (a full beagle program, real reader: brackets/braces)
 ;; for TARGET. Returns the emitted string or raises whatever parse/

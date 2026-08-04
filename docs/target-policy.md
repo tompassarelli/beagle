@@ -18,7 +18,6 @@ edit plus one fill.
 |---|---|---|---|
 | SQL | 2026-06-28 | unused, rotting | `sql-archive-2026-06-28` |
 | ClojureScript | 2026-07-04 | zero users, redundant against the native JS target | `cljs-final` |
-| ScriptC | 2026-08-04 | zero users, redundant boundary over the JavaScript lowering | `scriptc-archive-2026-08-04` |
 
 The tags exist in the repository, so the removed emitters remain readable at
 those points in history.

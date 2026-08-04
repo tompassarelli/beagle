@@ -14,8 +14,7 @@ set -euo pipefail
 
 # Target → #lang/extension comes from the generated projection of
 # beagle-lib/private/targets.rkt, so `--target` accepts exactly the targets the
-# compiler has (this is what `beagle build --target odin` always accepted and
-# `beagle init --target odin` used to reject). Regenerate: `beagle doc-fill`.
+# compiler has. Regenerate the projection with `beagle doc-fill`.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/share/targets.sh"
 
 # --- Parse args ---
@@ -49,11 +48,6 @@ mkdir -p "$DIR"
 cd "$DIR"
 
 # --- Target → lang/extension (derived; never hand-listed) ---
-if [[ "$TARGET" == "scriptc" ]]; then
-    echo "target 'scriptc' was removed — use .bjs/#lang beagle/js for hosted JavaScript; native Beagle code goes through Beagle Native Core" >&2
-    exit 2
-fi
-
 if ! beagle_known_target "$TARGET"; then
     echo "unknown target: $TARGET (expected $BEAGLE_TARGET_IDS_LIST)" >&2
     exit 1

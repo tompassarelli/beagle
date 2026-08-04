@@ -1179,13 +1179,6 @@
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
   '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url))))
 
-(test-case "removed ScriptC target is rejected with a migration path"
-  (check-exn
-   #rx"target 'scriptc' was removed.*beagle/js.*Native Core"
-   (lambda ()
-     (parse-program
-      (list (datum->syntax #f '(define-target scriptc)))))))
-
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"
   #rx"inherit is only supported in beagle/nix"

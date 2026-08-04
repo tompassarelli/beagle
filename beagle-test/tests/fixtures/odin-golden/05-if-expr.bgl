@@ -1,3 +1,0 @@
-(ns g)
-(defn abs-val [n: Int] -> Int
-  (if (< n 0) (- n) n))

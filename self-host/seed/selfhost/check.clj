@@ -573,7 +573,7 @@
   (= (get e "node") "set!") (let [target (get e "target")
    tnode (get target "node")
    tgt (get (deref STATE) "target")]
-  (if (not (or (= tnode "ref") (= tnode "method-call") (= tgt "odin") (= tgt "zig"))) (do
+  (if (not (or (= tnode "ref") (= tnode "method-call"))) (do
   (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref")) (str "(" (get (get target "fn") "name") " …)") "that form")]
   (emit-diag! (str "beagle: set! target must be a local variable or a field access (.-field); " target-desc " is not an assignable place on the " (str tgt) " target")))))
   (infer-expr! target env)

@@ -136,8 +136,7 @@
              "the alias must point at the module's helper"))
 
 ;; EMIT-LEVEL coverage: a mode-2 program must actually COMPILE on every live
-;; target with the hygiene alias present. (The parse-only tests above missed
-;; that odin's emit-def rejected the untyped alias — this catches that class.)
+;; target with the hygiene alias present.
 ;; Driven through the #lang loader so the reader handles the backtick/comma.
 (define HYG-EMIT-SRC
   (string-append
@@ -157,7 +156,7 @@
 
 (test-case "mode-2 hygiene compiles with the alias on every live target"
   (for ([spec (in-list '((clj "bclj") (nix "bnix")
-                         (js "bjs") (odin "bodin")))])
+                         (js "bjs")))])
     (define tgt (car spec))
     (define out (emit-via-lang tgt (cadr spec)))
     (check-true (regexp-match? #rx"hyg" out)

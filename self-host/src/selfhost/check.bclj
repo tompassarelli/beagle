@@ -228,7 +228,7 @@
           ;; lets a union collapse Int under a present Float (merge-types dedup),
           ;; matching the oracle's (U .. Float) narrowing.
           (and (= (get expected "name") "Float") (= (get actual "name") "Int"))
-          ;; Numeric width widening (Odin/Zig integer + float subtypes).
+          ;; Native numeric width widening (integer + float subtypes).
           (and (= (get actual "name") "Int")
                (or (= (get expected "name") "I8") (= (get expected "name") "I16")
                    (= (get expected "name") "I32") (= (get expected "name") "U8")
@@ -1305,12 +1305,10 @@
       ;; A set! target must be an assignable PLACE. On value targets (js,
       ;; clj, nix) the only places are a bare local (ref) and a field access
       ;; (.-field / .field, a method-call). A call like (get m k) is NOT a place;
-      ;; the systems targets (odin, zig) give it place semantics — carve those out.
       (let [target (get e "target")
             tnode (get target "node")
             tgt (get (deref STATE) "target")]
-        (when (not (or (= tnode "ref") (= tnode "method-call")
-                       (= tgt "odin") (= tgt "zig")))
+        (when (not (or (= tnode "ref") (= tnode "method-call")))
           (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref"))
                               (str "(" (get (get target "fn") "name") " …)")
                               "that form")]

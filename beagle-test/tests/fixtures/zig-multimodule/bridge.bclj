@@ -1,9 +1,0 @@
-#lang beagle/clj
-(ns zig-multimodule.bridge
-  (:require [fram.rt-core :as rt]))
-(define-mode strict)
-
-(defn before?
-  [a: String
-   b: String] -> Bool
-  (rt/str-lt? a b))

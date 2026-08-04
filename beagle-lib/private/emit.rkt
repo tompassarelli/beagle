@@ -7,8 +7,6 @@
          "emit-dispatch.rkt"
          "emit-nix.rkt"
          "emit-clj.rkt"
-         "emit-odin.rkt"
-         "emit-zig.rkt"
          "emit-js.rkt")
 
 (define (emit-program prog)

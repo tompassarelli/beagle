@@ -172,7 +172,7 @@ is_beagle() {
   # Extensions come from the generated target projection in THIS hook's own
   # checkout (the hook ships inside the beagle repo, so readlink -f finds it
   # even when ~/.agents/hooks symlinks it). The old hand list globbed a
-  # phantom .bcljs and never learned about .bodin/.bzig. If the
+  # phantom .bcljs and omitted current target extensions. If the
   # projection is unreachable the extension probe is simply skipped — the
   # .beagle/ marker and path checks above still identify a beagle project, so
   # no stale duplicate list is kept as a fallback.
