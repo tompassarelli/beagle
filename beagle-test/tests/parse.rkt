@@ -1659,6 +1659,7 @@
      "(defn zero [] 0)\n"
      "(defn one [x] x)\n"
      "(defn two\n  [x\n   y] -> Int\n  (+ x y))\n"
+     "(defn varied\n  [abc: Int\n   b: String\n   bc: (Vec Int)]\n  abc)\n"
      "(defn multi\n  ([x] x)\n  ([x\n    y] (+ x y)))\n"
      "(defn bare [x] x\n  [x\n   y] (+ x y))\n"
      "(def anon (fn\n            [x\n             y] (+ x y)))\n"
@@ -1679,6 +1680,11 @@
      (cons "fn" "(def f (fn [x y] (+ x y)))\n")
      (cons "owner indentation" "(defn f\n    [x\n     y] (+ x y))\n")
      (cons "return spacing" "(defn f\n  [x\n   y]  -> Int (+ x y))\n")
+     (cons "typed column padding" "(defn f\n  [abc: Int\n   b:   String\n   bc:  (Vec Int)]\n  abc)\n")
+     (cons "detached typed marker" "(defn f\n  [abc : Int\n   b: String]\n  abc)\n")
+     (cons "single typed spacing" "(defn f [x:  Int] x)\n")
+     (cons "wrapped typed spacing" "(defn f [(x :  Int)] x)\n")
+     (cons "record typed spacing" "(defrecord R [x:  Int])\n")
      (cons "multi-arity" "(defn f ([x] x) ([x y] (+ x y)))\n")
      (cons "multi-arity clause placement" "(defn f\n  (\n   [x] x))\n")
      (cons "bare multi-arity" "(defn f [x] x [x y] (+ x y))\n")
@@ -1705,6 +1711,16 @@
     (check-equal? (hash-ref suggestion 'type) "replace-range" (car case))
     (define repaired (apply-layout-suggestion source suggestion))
     (check-not-exn (lambda () (parse-source-text repaired)) (car case))))
+
+(test-case "typed binding repairs remove padding without aligning columns"
+  (define source
+    "(defn f\n  [abc: Int\n   b:   String\n   bc:  (Vec Int)]\n  abc)\n")
+  (define e (layout-error source))
+  (define suggestion (hash-ref (beagle-parse-error-details e) 'suggestion #f))
+  (check-true (hash? suggestion))
+  (check-equal?
+   (apply-layout-suggestion source suggestion)
+   "(defn f\n  [abc: Int\n   b: String\n   bc: (Vec Int)]\n  abc)\n"))
 
 (test-case "comment-bearing layout violations get no lossy repair"
   (define source

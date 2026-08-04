@@ -314,11 +314,49 @@
             #f]
            [else (loop (cdr rest) (cons (car rest) acc))]))))
 
-(define (fragment->inline tokens start end)
+(define (typed-binding-marker-pairs vector-stx)
+  (define subs (stx-subs vector-stx))
+  (define items (and subs (cdr subs)))
+  (define (wrapped-pair item)
+    (define parts (stx-subs item))
+    (and parts
+         (= (length parts) 3)
+         (symbol? (->datum (car parts)))
+         (eq? (->datum (cadr parts)) ANN-MARKER)
+         (cons (car parts) (cadr parts))))
+  (if (not items)
+      '()
+      (let loop ([rest items] [acc '()])
+        (cond
+          [(null? rest) (reverse acc)]
+          [(and (>= (length rest) 3)
+                (symbol? (->datum (car rest)))
+                (eq? (->datum (cadr rest)) ANN-MARKER))
+           (loop (cdddr rest) (cons (cons (car rest) (cadr rest)) acc))]
+          [else
+           (define pair (wrapped-pair (car rest)))
+           (loop (cdr rest) (if pair (cons pair acc) acc))]))))
+
+(define (canonical-marker-spacing-valid? source tokens marker-pair)
+  (define name-end (syntax-end-offset (car marker-pair) tokens))
+  (define marker-start (syntax-start-offset (cdr marker-pair)))
+  (define marker-end (syntax-end-offset (cdr marker-pair) tokens))
+  (define source-length (string-length source))
+  (and name-end marker-start marker-end
+       (= name-end marker-start)
+       (< (add1 marker-end) source-length)
+       (char=? (string-ref source marker-end) #\space)
+       (not (char-whitespace? (string-ref source (add1 marker-end))))))
+
+(define (fragment->inline tokens start end [marker-offsets '()])
   (define out (open-output-string))
   (define pending-space? #f)
   (define previous-type #f)
   (define wrote? #f)
+  (define (marker-token? tok)
+    (for/or ([offset (in-list marker-offsets)])
+      (and (<= (token-offset tok) offset)
+           (< offset (token-end tok)))))
   (define (write-token! tok text type)
     (when (and pending-space? wrote?
                (not (closer? tok))
@@ -332,10 +370,16 @@
   (for ([tok (in-list tokens)]
         #:when (and (>= (token-offset tok) start)
                     (<= (token-end tok) end)))
-    (case (token-type tok)
-      [(whitespace newline) (set! pending-space? #t)]
-      [(line-comment)
+    (cond
+      [(memq (token-type tok) '(whitespace newline))
+       (set! pending-space? #t)]
+      [(eq? (token-type tok) 'line-comment)
        (write-token! tok (token-text tok) 'line-comment)
+       (set! pending-space? #t)]
+      [(marker-token? tok)
+       (when (string=? (token-text tok) ":")
+         (set! pending-space? #f))
+       (write-token! tok (token-text tok) (token-type tok))
        (set! pending-space? #t)]
       [else (write-token! tok (token-text tok) (token-type tok))]))
   (string-trim (get-output-string out)))
@@ -365,19 +409,20 @@
                                       (not (layout-trivia? tok))))
     tok))
 
-(define (canonical-vector-text tokens open close entries continuation-col)
+(define (canonical-vector-text tokens open close entries continuation-col
+                               marker-offsets)
   (define open-end (token-end open))
   (define close-start (token-offset close))
   (define starts (map syntax-start-offset entries))
   (cond
     [(or (null? starts) (null? (cdr starts)))
-     (string-append "[" (fragment->inline tokens open-end close-start) "]")]
+     (string-append "[" (fragment->inline tokens open-end close-start marker-offsets) "]")]
     [else
      (define boundaries (append (cdr starts) (list close-start)))
      (define fragments
        (for/list ([start (in-list (cons open-end (cdr starts)))]
                   [end (in-list boundaries)])
-         (fragment->inline tokens start end)))
+         (fragment->inline tokens start end marker-offsets)))
      (string-append
       "["
       (car fragments)
@@ -386,7 +431,8 @@
                (string-append "\n" (make-string continuation-col #\space) fragment)))
       "]")]))
 
-(define (canonical-layout-valid? source tokens form-stx anchor entries open close placement)
+(define (canonical-layout-valid? source tokens form-stx anchor entries open close
+                                 placement marker-pairs)
   (define count (length entries))
   (define open-line (token-line open))
   (define open-col (token-col open))
@@ -443,16 +489,21 @@
                        " "))))
   (and placement-valid?
        entries-positioned?
+       (andmap (lambda (pair)
+                 (canonical-marker-spacing-valid? source tokens pair))
+               marker-pairs)
        close-after-final?
        return-inline?))
 
 (define (check-layout-vector! source tokens form-stx anchor vector-stx placement role)
   (define start (syntax-start-offset vector-stx))
   (define entries (and start (logical-entry-stxs vector-stx)))
+  (define marker-pairs (and start (typed-binding-marker-pairs vector-stx)))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
   (define close (and open (matching-token tokens open)))
   (when (and entries open close anchor
-             (not (canonical-layout-valid? source tokens form-stx anchor entries open close placement)))
+             (not (canonical-layout-valid? source tokens form-stx anchor entries
+                                           open close placement marker-pairs)))
     (define anchor-end (and (eq? placement 'owner) (syntax-end-offset anchor tokens)))
     (define clause-open (previous-significant-token tokens (token-offset open)))
     (define region-start
@@ -472,8 +523,11 @@
         [(owner) (if (> (length entries) 1) (+ form-col 2) (token-col open))]
         [(clause) (if clause-open (add1 (token-col clause-open)) (token-col open))]
         [else (token-col open)]))
+    (define marker-offsets
+      (filter values
+              (map (lambda (pair) (syntax-start-offset (cdr pair))) marker-pairs)))
     (define vector-text
-      (canonical-vector-text tokens open close entries (add1 vector-col)))
+      (canonical-vector-text tokens open close entries (add1 vector-col) marker-offsets))
     (define prefix-text
       (cond
         [(not (eq? placement 'owner)) ""]
@@ -487,7 +541,7 @@
     (define before (substring source region-start region-end))
     (raise-parse-error
      'noncanonical-binding-layout
-     "noncanonical ~a vector layout — zero/one logical entry stays inline; 2+ entries put the vector on the following line two columns past the owning form with one aligned entry start per line; keep `]` after the final entry and exactly one space before `->`"
+     "noncanonical ~a vector layout — zero/one logical entry stays inline; 2+ entries put the vector on the following line two columns past the owning form with one aligned entry start per line; attach `:` to each binding name with exactly one following space; keep `]` after the final entry and exactly one space before `->`"
      role
      #:details
      (hasheq 'error-file (let ([src (syntax-source vector-stx)])
