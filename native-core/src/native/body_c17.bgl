@@ -1826,7 +1826,10 @@
         (str "  if (" source-name ".tag != INT64_C(" tag ")) {\n"
           "    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
           "  }\n"
-          "  " target " = " source-name ".payload.variant_" tag ";\n"))
+          "  " target " = " source-name ".payload.variant_" tag ";\n"
+          (if (unit-type? types (core/ssavaluev0-type-id result))
+            (str "  (void)" target ";\n")
+            "")))
 
       (instance? native.core.CheckedInstruction instruction)
       (emit-checked-instruction layouts function slots target result
