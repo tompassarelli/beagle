@@ -128,7 +128,7 @@
           #:when (string=? (cheat-category c) cat))
       (fprintf out "### ~a\n~a\n\n```clojure\n~a\n```\n\n"
                (cheat-form c) (cheat-summary c) (cheat-example c))))
-  (get-output-string out))
+  (string-append (string-trim (get-output-string out)) "\n"))
 
 (module+ main
   (display (render-cheatsheet)))

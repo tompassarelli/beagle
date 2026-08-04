@@ -46,7 +46,7 @@
    (E "E001" "Arity mismatch"
       "Function call has wrong number of arguments."
       "Agents often miscount parameters, especially with variadic functions or threading macros."
-      "(defn greet [name: String age: Int] -> String (str \"Hi \" name))\n(greet \"Tom\")  ;; ERROR: expected 2 arg(s), got 1"
+      "(defn greet\n  [name: String\n   age: Int] -> String\n  (str \"Hi \" name))\n(greet \"Tom\")  ;; ERROR: expected 2 arg(s), got 1"
       "(greet \"Tom\" 30)"
       "Add missing arguments or remove extra ones. Check the signature with: beagle-sig <fn-name> <file>")
 

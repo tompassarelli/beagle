@@ -1,5 +1,7 @@
 # Beagle
 
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
+
 **Typed Clojure with canonical source and structured diagnostics, compiling to
 idiomatic <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->.**
 
@@ -179,4 +181,6 @@ canonical anchor for any surface question.
 
 ## License
 
-MIT or Apache-2.0, at your option — see [`LICENSE`](LICENSE).
+Dual-licensed under the [MIT License](LICENSE-MIT) or the
+[Apache License, Version 2.0](LICENSE-APACHE), at your option. See
+[`LICENSE`](LICENSE) for the chooser.
