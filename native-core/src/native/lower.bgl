@@ -811,6 +811,11 @@
     (= "String" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
 
+    ;; Regex values stay as their sealed pattern text until a regex operation
+    ;; consumes them; compilation belongs to the materializer/runtime boundary.
+    (= "Regex" spelling)
+    (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
+
     (= "SpaceId" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
 
@@ -2935,6 +2940,118 @@
                         [(core/->Parameter join-parameter result-type)])
                       join-parameter result-type false)))))))
 
+        (= "cond" kind)
+        (let [clauses-node: (U core/NativeId Nil)
+              (index-first-object index expr "clauses")
+              clauses: (Vec core/NativeId)
+              (if (nil? clauses-node) []
+                (index-sequence-items index clauses-node))
+              join-id: core/NativeId (state-id state owner "cond-join")
+              join-parameter: core/NativeId
+              (state-id state owner "cond-value")]
+          (loop [position: Int 0
+                 current: BodyStateV0 state
+                 result-type: (U core/NativeId Nil) nil
+                 live-arms: Int 0]
+            (if (>= position (count clauses))
+              (cond
+                (state-blocked? current) (dead-result current)
+                (nil? result-type)
+                (->ExprResultV0 current (lower-id "body" ["cond-terminated"])
+                  (type-id "LowerFailure") true)
+                :else
+                (->ExprResultV0
+                  (state-open-block current join-id
+                    [(core/->Parameter join-parameter result-type)])
+                  join-parameter result-type false))
+              (let [clause: core/NativeId (nth clauses position)
+                    test-node: (U core/NativeId Nil)
+                    (index-first-object index clause "test")
+                    body-node: (U core/NativeId Nil)
+                    (index-first-object index clause "body")
+                    fallback: Bool
+                    (and (some? test-node)
+                      (= "ref" (fact-text index test-node "form-kind"))
+                      (= "else" (fact-text index test-node "name")))]
+                (cond
+                  (or (nil? test-node) (nil? body-node))
+                  (fail-result current
+                    "TODO-NATIVE-COND-CLAUSE: cond clauses need one test and one body")
+
+                  fallback
+                  (let [body: ExprResultV0
+                        (lower-expr env owner current body-node)
+                        body-state: BodyStateV0 (exprresultv0-state body)]
+                    (cond
+                      (state-blocked? body-state) (dead-result body-state)
+                      (exprresultv0-terminated body)
+                      (recur (count clauses) body-state result-type live-arms)
+                      (and (some? result-type)
+                        (not (same-id? result-type
+                               (exprresultv0-type-id body))))
+                      (fail-result body-state
+                        "TODO-NATIVE-COND-JOIN: live cond arms have different native types")
+                      :else
+                      (recur (count clauses)
+                        (state-close body-state
+                          (core/->JumpTerminator join-id
+                            [(exprresultv0-value-id body)]))
+                        (if (nil? result-type)
+                          (exprresultv0-type-id body) result-type)
+                        (+ live-arms 1))))
+
+                  :else
+                  (let [condition: ExprResultV0
+                        (lower-expr env owner current test-node)
+                        condition-state: BodyStateV0
+                        (exprresultv0-state condition)]
+                    (cond
+                      (state-blocked? condition-state)
+                      (dead-result condition-state)
+                      (exprresultv0-terminated condition) condition
+                      (not (same-id? (exprresultv0-type-id condition)
+                             (bool-type-id)))
+                      (fail-result condition-state
+                        "TODO-NATIVE-COND-CONDITION: cond tests must lower to Bool")
+                      :else
+                      (let [body-id: core/NativeId
+                            (state-id condition-state owner "cond-body")
+                            next-id: core/NativeId
+                            (state-id (state-bump condition-state) owner "cond-next")
+                            branched: BodyStateV0
+                            (state-open-block
+                              (state-close (state-bump (state-bump condition-state))
+                                (core/->BranchTerminator
+                                  (exprresultv0-value-id condition)
+                                  body-id next-id))
+                              body-id [])
+                            body: ExprResultV0
+                            (lower-expr env owner branched body-node)
+                            body-state: BodyStateV0 (exprresultv0-state body)
+                            body-live: Bool
+                            (not (exprresultv0-terminated body))
+                            mismatch: Bool
+                            (and body-live (some? result-type)
+                              (not (same-id? result-type
+                                     (exprresultv0-type-id body))))]
+                        (cond
+                          (state-blocked? body-state) (dead-result body-state)
+                          mismatch
+                          (fail-result body-state
+                            "TODO-NATIVE-COND-JOIN: live cond arms have different native types")
+                          :else
+                          (recur (+ position 1)
+                            (state-open-block
+                              (if body-live
+                                (state-close body-state
+                                  (core/->JumpTerminator join-id
+                                    [(exprresultv0-value-id body)]))
+                                body-state)
+                              next-id [])
+                            (if (and body-live (nil? result-type))
+                              (exprresultv0-type-id body) result-type)
+                            (if body-live (+ live-arms 1) live-arms)))))))))))
+
         (= "loop" kind)
         (let [bindings-node: (U core/NativeId Nil)
               (index-first-object index expr "bindings")
@@ -3457,6 +3574,14 @@
                 (fail-result current
                   (str "TODO-NATIVE-PRESENCE-ARITY: " callee
                     " takes one operand"))
+
+                (and (= "re-pattern" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (->ExprResultV0 current (nth values 0) (text-type-id) false)
+
+                (= "re-pattern" callee)
+                (fail-result current
+                  "TODO-NATIVE-REGEX-PATTERN-OPERAND: re-pattern takes one native Text operand")
 
                 (and (or (= "str/starts-with?" callee)
                            (= "str/includes?" callee))

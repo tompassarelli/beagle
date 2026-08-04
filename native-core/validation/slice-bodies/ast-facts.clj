@@ -79,6 +79,22 @@
     (row! n "value" "n" (emit-expr (get b "value")))
     n))
 
+(defn emit-cond-clause [clause]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "cond-clause")
+    (row! n "test" "n" (emit-expr (get clause "test")))
+    (let [forms (get clause "body")]
+      (when (= 1 (count forms))
+        (row! n "body" "n" (emit-expr (first forms)))))
+    n))
+
+(defn emit-map-pair [pair]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "map-pair")
+    (row! n "key" "n" (emit-expr (get pair "key")))
+    (row! n "value" "n" (emit-expr (get pair "val")))
+    n))
+
 (defn emit-expr [e]
   (let [n (nid)]
     (case (get e "node")
@@ -117,6 +133,17 @@
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "vec"     (do (row! n "form-kind" "t" "vec")
                     (row! n "items" "n" (emit-seq (get e "items") emit-expr)))
+      "set"     (do (row! n "form-kind" "t" "set")
+                    (row! n "items" "n" (emit-seq (get e "items") emit-expr)))
+      "map"     (do (row! n "form-kind" "t" "map")
+                    (row! n "pairs" "n" (emit-seq (get e "pairs") emit-map-pair)))
+      "cond"    (do (row! n "form-kind" "t" "cond")
+                    (row! n "clauses" "n"
+                          (emit-seq (get e "clauses") emit-cond-clause)))
+      "kw-access"
+      (do (row! n "form-kind" "t" "kw-access")
+          (row! n "keyword" "t" (subs (get e "kw") 1))
+          (row! n "target" "n" (emit-expr (get e "target"))))
       (row! n "form-kind" "t" (str "unsupported-" (get e "node"))))
     n))
 
