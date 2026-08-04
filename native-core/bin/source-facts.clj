@@ -47,6 +47,14 @@
 (defn emit-node-seq [items]
   (emit-seq items identity))
 
+(defn emit-body [forms]
+  (if (= 1 (count forms))
+    (emit-expr (first forms))
+    (let [n (nid)]
+      (row! n "form-kind" "t" "do")
+      (row! n "body" "n" (emit-seq forms emit-expr))
+      n)))
+
 (defn emit-ann [a]
   (let [n (nid)]
     (case (get a "kind")
@@ -88,9 +96,7 @@
   (let [n (nid)]
     (row! n "form-kind" "t" "cond-clause")
     (row! n "test" "n" (emit-expr (get clause "test")))
-    (let [forms (get clause "body")]
-      (when (= 1 (count forms))
-        (row! n "body" "n" (emit-expr (first forms)))))
+    (row! n "body" "n" (emit-body (get clause "body")))
     n))
 
 (defn emit-map-pair [pair]
@@ -123,13 +129,13 @@
       (do (row! n "form-kind" "t" "static-call")
           (row! n "callee" "t" (get e "name"))
           (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
+      "do"      (do (row! n "form-kind" "t" "do")
+                    (row! n "body" "n" (emit-seq (get e "body") emit-expr)))
       "fn"      (do (row! n "form-kind" "t" "fn")
                     (row! n "params" "n" (emit-seq (get e "params") emit-param))
                     (row! n "rest" "t" (str (boolean (get e "rest"))))
                     (when-let [r (get e "ret")] (row! n "ret" "n" (emit-ann r)))
-                    (let [forms (get e "body")]
-                      (when (= 1 (count forms))
-                        (row! n "body" "n" (emit-expr (first forms))))))
+                    (row! n "body" "n" (emit-body (get e "body"))))
       "if"      (do (row! n "form-kind" "t" "if")
                     (row! n "cond" "n" (emit-expr (get e "cond")))
                     (row! n "then" "n" (emit-expr (get e "then")))
@@ -138,9 +144,7 @@
       "let"     (do (row! n "form-kind" "t" "let")
                     (row! n "bindings" "n"
                           (emit-seq (get e "bindings") emit-binding))
-                    (let [forms (get e "body")]
-                      (when (= 1 (count forms))
-                        (row! n "body" "n" (emit-expr (first forms))))))
+                    (row! n "body" "n" (emit-body (get e "body"))))
       "loop"    (do (row! n "form-kind" "t" "loop")
                     (row! n "bindings" "n"
                           (emit-seq (get e "bindings") emit-binding))
@@ -186,9 +190,7 @@
                      (row! n "native-op" "t" op))
                    (row! n "params" "n" (emit-seq (get f "params") emit-param))
                    (when-let [r (get f "ret")] (row! n "ret" "n" (emit-ann r)))
-                   (let [forms (get f "body")]
-                     (when (= 1 (count forms))
-                       (row! n "body" "n" (emit-expr (first forms))))))
+                   (row! n "body" "n" (emit-body (get f "body"))))
       nil)
     n))
 

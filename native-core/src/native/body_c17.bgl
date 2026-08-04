@@ -1560,6 +1560,53 @@
 
         :else ""))))
 
+(defn value-referenced?
+  [function: core/FunctionDef
+   target: core/NativeId] -> Bool
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0]
+      (if (>= position (count blocks))
+        false
+        (let [block: core/BasicBlock (nth blocks position)
+              instructions: (Vec core/Instruction)
+              (core/basicblock-instructions block)
+              terminators: (Vec core/Terminator)
+              (core/basicblock-terminators block)
+              instruction-use: Bool
+              (loop [inner: Int 0]
+                (if (>= inner (count instructions))
+                  false
+                  (if (core/id-in?
+                        (core/instruction-ssa-refs (nth instructions inner)) target)
+                    true
+                    (recur (+ inner 1)))))
+              terminator-use: Bool
+              (loop [inner: Int 0]
+                (if (>= inner (count terminators))
+                  false
+                  (if (core/id-in?
+                        (core/terminator-ssa-refs (nth terminators inner)) target)
+                    true
+                    (recur (+ inner 1)))))]
+          (if (or instruction-use terminator-use)
+            true
+            (recur (+ position 1))))))))
+
+(defn emit-unused-block-parameters
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   block: core/BasicBlock] -> String
+  (let [parameters: (Vec core/Parameter) (core/basicblock-parameters block)]
+    (loop [position: Int 0 emitted: String ""]
+      (if (>= position (count parameters))
+        emitted
+        (let [parameter: core/Parameter (nth parameters position)]
+          (recur (+ position 1)
+            (if (value-referenced? function (core/parameter-id parameter))
+              emitted
+              (str emitted "  (void)"
+                (value-name function slots (core/parameter-id parameter)) ";\n"))))))))
+
 (defn emit-instruction
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
@@ -1571,8 +1618,9 @@
    slots: (Vec ValueSlotV0)
    instruction: core/Instruction] -> String
   (let [result: core/SsaValueV0 (get instruction :result)
-        target: String (value-name function slots (core/ssavaluev0-id result))]
-    (cond
+        target: String (value-name function slots (core/ssavaluev0-id result))
+        emitted: String
+        (cond
       (instance? native.core.AtomInstruction instruction)
       (str "  " target " = "
         (atom-expression module-index pool
@@ -2261,7 +2309,15 @@
       (instance? native.core.ExternCallInstruction instruction)
       (emit-extern-call types layouts abis function slots target instruction)
 
-      :else "")))
+      :else "")]
+    (str emitted
+      (if (or (instance? native.core.AtomInstruction instruction)
+              (instance? native.core.ArenaInstruction instruction)
+              (and (instance? native.core.UnionExtractInstruction instruction)
+                (unit-type? types (core/ssavaluev0-type-id result)))
+              (value-referenced? function (core/ssavaluev0-id result)))
+        ""
+        (str "  (void)" target ";\n")))))
 
 (defn variant-tag
   [layouts: (Vec core/LayoutDef)
@@ -2402,12 +2458,14 @@
    slots: (Vec ValueSlotV0)
    position: Int] -> String
   (let [block: core/BasicBlock (nth (core/functiondef-blocks function) position)
+        targeted: Bool (block-targeted? function (core/basicblock-id block))
         label: String
-        (if (block-targeted? function (core/basicblock-id block))
+        (if targeted
           (str (label-name function-index position) ": ;\n")
           "")
         instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
     (str label
+      (if targeted (emit-unused-block-parameters function slots block) "")
       (loop [inner: Int 0 result: String ""]
         (if (>= inner (count instructions))
           result

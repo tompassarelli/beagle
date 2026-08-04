@@ -1,0 +1,189 @@
+{
+  "namespace": "native.do-sequence-validation",
+  "requires": [],
+  "forms": [
+    {
+      "node": "defn",
+      "name": "body-last",
+      "params": [
+        {
+          "type": "param",
+          "name": "x",
+          "ann": { "kind": "prim", "name": "Int" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        {
+          "node": "call",
+          "fn": { "node": "ref", "name": "+" },
+          "args": [
+            { "node": "ref", "name": "x" },
+            { "node": "literal", "kind": "number", "value": 1 }
+          ]
+        },
+        {
+          "node": "call",
+          "fn": { "node": "ref", "name": "+" },
+          "args": [
+            { "node": "ref", "name": "x" },
+            { "node": "literal", "kind": "number", "value": 2 }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "defn",
+      "name": "do-last",
+      "params": [
+        {
+          "type": "param",
+          "name": "x",
+          "ann": { "kind": "prim", "name": "Int" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        {
+          "node": "do",
+          "body": [
+            {
+              "node": "call",
+              "fn": { "node": "ref", "name": "+" },
+              "args": [
+                { "node": "ref", "name": "x" },
+                { "node": "literal", "kind": "number", "value": 3 }
+              ]
+            },
+            {
+              "node": "call",
+              "fn": { "node": "ref", "name": "+" },
+              "args": [
+                { "node": "ref", "name": "x" },
+                { "node": "literal", "kind": "number", "value": 4 }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "defn",
+      "name": "do-first-traps",
+      "params": [
+        {
+          "type": "param",
+          "name": "x",
+          "ann": { "kind": "prim", "name": "Int" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        {
+          "node": "do",
+          "body": [
+            {
+              "node": "call",
+              "fn": { "node": "ref", "name": "+" },
+              "args": [
+                { "node": "ref", "name": "x" },
+                { "node": "literal", "kind": "number", "value": 1 }
+              ]
+            },
+            { "node": "literal", "kind": "number", "value": 7 }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "defn",
+      "name": "do-ref-last",
+      "params": [
+        {
+          "type": "param",
+          "name": "x",
+          "ann": { "kind": "prim", "name": "Int" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        {
+          "node": "do",
+          "body": [
+            { "node": "ref", "name": "x" },
+            { "node": "literal", "kind": "number", "value": 11 }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "defn",
+      "name": "do-branch-last",
+      "params": [
+        {
+          "type": "param",
+          "name": "flag",
+          "ann": { "kind": "prim", "name": "Bool" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        {
+          "node": "do",
+          "body": [
+            {
+              "node": "if",
+              "cond": { "node": "ref", "name": "flag" },
+              "then": { "node": "literal", "kind": "number", "value": 1 },
+              "else": { "node": "literal", "kind": "number", "value": 2 }
+            },
+            { "node": "literal", "kind": "number", "value": 12 }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "defn",
+      "name": "do-empty",
+      "params": [
+        {
+          "type": "param",
+          "name": "x",
+          "ann": { "kind": "prim", "name": "Int" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        { "node": "do", "body": [] }
+      ]
+    },
+    {
+      "node": "defn",
+      "name": "do-doseq",
+      "params": [
+        {
+          "type": "param",
+          "name": "x",
+          "ann": { "kind": "prim", "name": "Int" }
+        }
+      ],
+      "rest": false,
+      "ret": { "kind": "prim", "name": "Int" },
+      "body": [
+        {
+          "node": "do",
+          "body": [
+            { "node": "doseq", "clauses": [], "body": [] },
+            { "node": "ref", "name": "x" }
+          ]
+        }
+      ]
+    }
+  ]
+}

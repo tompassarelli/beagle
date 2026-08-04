@@ -5395,6 +5395,31 @@
         (fail-result state
           "TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback")
 
+        (= "do" kind)
+        (let [body-node: (U core/NativeId Nil)
+              (index-first-object index expr "body")
+              forms: (Vec core/NativeId)
+              (if (nil? body-node) [] (index-sequence-items index body-node))]
+          (cond
+            (nil? body-node)
+            (fail-result state "TODO-NATIVE-DO-BODY: do form has no body sequence")
+
+            (= 0 (count forms))
+            (fail-result state "TODO-NATIVE-DO-EMPTY: empty do is outside the native slice")
+
+            :else
+            (loop [position: Int 0 current: BodyStateV0 state]
+              (let [result: ExprResultV0
+                    (lower-expr env owner current (nth forms position))]
+                (cond
+                  (or (state-blocked? (exprresultv0-state result))
+                      (exprresultv0-terminated result)
+                      (= (+ position 1) (count forms)))
+                  result
+
+                  :else
+                  (recur (+ position 1) (exprresultv0-state result)))))))
+
         (= "let" kind)
         (let [outer-locals: (Vec LocalBindingV0) (bodystatev0-locals state)
               bindings-node: (U core/NativeId Nil)
