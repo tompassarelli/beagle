@@ -1451,6 +1451,77 @@
           definition
           (recur (+ position 1)))))))
 
+(defn type-carries-function?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId
+   visited: (Vec core/NativeId)
+   fuel: Int] -> Bool
+  (if (or (<= fuel 0) (core/id-in? visited target))
+    false
+    (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+      (if (nil? definition)
+        false
+        (let [shape: core/TypeShape (core/typedef-shape definition)
+              next-visited: (Vec core/NativeId) (conj visited target)
+              references: (Vec core/NativeId)
+              (cond
+                (instance? native.core.AtomType shape)
+                (let [kind: core/AtomKind (core/atomtype-kind shape)]
+                  (if (instance? native.core.RefKind kind)
+                    [(core/refkind-target kind)]
+                    []))
+
+                (instance? native.core.RecordType shape)
+                (mapv
+                  (fn [field: core/TypeField] -> core/NativeId
+                    (core/typefield-type-id field))
+                  (core/recordtype-fields shape))
+
+                (instance? native.core.UnionType shape)
+                (loop [position: Int 0
+                       variants: (Vec core/TypeVariant)
+                       (core/uniontype-variants shape)
+                       collected: (Vec core/NativeId) []]
+                  (if (>= position (count variants))
+                    collected
+                    (let [payload: (U core/NativeId Nil)
+                          (core/typevariant-payload-type
+                            (nth variants position))]
+                      (recur (+ position 1) variants
+                        (if (nil? payload) collected
+                          (conj collected payload))))))
+
+                (instance? native.core.VectorType shape)
+                [(core/vectortype-element-type shape)]
+
+                (instance? native.core.ReferenceType shape)
+                [(core/referencetype-target-type shape)]
+
+                (instance? native.core.OutcomeType shape)
+                [(core/outcometype-value-type shape)
+                 (core/outcometype-failure-type shape)]
+
+                :else [])]
+          (or (instance? native.core.FunctionType shape)
+            (some?
+              (some
+                (fn [reference: core/NativeId] -> Bool
+                  (type-carries-function? types reference next-visited
+                    (- fuel 1)))
+                references))))))))
+
+(defn function-signature-carries-function?
+  [types: (Vec core/TypeDef)
+   function: TypedFunctionV0] -> Bool
+  (let [fuel: Int (+ 1 (count types))]
+    (or
+      (type-carries-function? types (typedfunctionv0-return-type function) [] fuel)
+      (some?
+        (some
+          (fn [parameter: core/Parameter] -> Bool
+            (type-carries-function? types (core/parameter-type-id parameter) [] fuel))
+          (typedfunctionv0-parameters function))))))
+
 (defrecord LocalBindingV0
   [name: String
    value-id: core/NativeId
@@ -5404,9 +5475,15 @@
   (let [signature: TypedFunctionV0 (functionresolutionv0-function resolution)
         prior: NativeReadinessV0 (typedfunctionv0-readiness signature)
         readiness: NativeReadinessV0
-        (if (ready-function? signature)
-          prior
-          (lower-function-body env signature source-function))
+        (cond
+          (function-signature-carries-function? (bodyenvv0-types env) signature)
+          (->NativeTodoV0 "TODO-NATIVE-FUNCTION-ABI"
+            (str (typedfunctionv0-name signature)
+              " has a function-bearing parameter or return type; v0 has no closure ABI"))
+
+          (ready-function? signature) prior
+
+          :else (lower-function-body env signature source-function))
         ;; A vector allocation is discovered in the body, not the signature, so
         ;; the effect that admits it is added once the blocks exist.
         prior-effects: (Vec core/NativeId) (typedfunctionv0-effects signature)
