@@ -7,8 +7,8 @@ source-imports 3
 source-import 0 native-id-v0:20:native-slice-v0/node:3:307
 source-import 1 native-id-v0:20:native-slice-v0/node:3:308
 source-import 2 native-id-v0:20:native-slice-v0/node:3:309
-world-types 12
-world-layouts 12
+world-types 11
+world-layouts 11
 world-functions 0
 world-abis 0
 projected-types 0
@@ -21,10 +21,10 @@ obligation discharged-tokens PASS
 obligation bounded-effects PASS
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [sym?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [sym?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-l]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-r]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [first-sym-fact]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [first-sym-fact]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/new-store: no native lowering for this callee [-main]
 c17 module_0 REFUSED native world is not complete
 qbe module_0 REFUSED native world is not complete
@@ -32,31 +32,29 @@ receipt-obligation source-seal PASS source Term identities and module roots are 
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
-receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
-receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
-receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-fn: no native lowering for this source form [sym?]
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [sym?]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-l]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-r]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
-receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-fn: no native lowering for this source form [first-sym-fact]
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [first-sym-fact]
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-c/new-store: no native lowering for this callee [-main]
 receipt-obligation source-to-typed PASS every reachable type is a closed Native Core TypeShape
 receipt-obligation source-to-typed PASS typed Terms contain no raw Any, host exception, host collection, or target syntax
 receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
 receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
-receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [sym?]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [sym?]
 receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-l]
 receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-r]
-receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [first-sym-fact]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [first-sym-fact]
 receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/new-store: no native lowering for this callee [-main]
 receipt-diagnostic typed-to-native TODO-NATIVE-PROBE-ABI no implemented probe entry point is available for ABI declaration
 receipt-diagnostic typed-to-native TODO-NATIVE-SLICE-BODIES typed source functions with unimplemented bodies remain explicit obligations
@@ -70,8 +68,8 @@ receipt-obligation typed-to-native PASS implemented function effects stay inside
 receipt-obligation typed-to-native PASS native Terms contain no raw Any, host exception, host collection, or target syntax
 receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
 receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
-receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [sym?]
+receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [sym?]
 receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-l]
 receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-r]
-receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [first-sym-fact]
+receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [first-sym-fact]
 receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/new-store: no native lowering for this callee [-main]

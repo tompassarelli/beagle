@@ -7,8 +7,8 @@ source-imports 3
 source-import 0 native-id-v0:20:native-slice-v0/node:3:202
 source-import 1 native-id-v0:20:native-slice-v0/node:3:203
 source-import 2 native-id-v0:20:native-slice-v0/node:3:204
-world-types 12
-world-layouts 12
+world-types 11
+world-layouts 11
 world-functions 0
 world-abis 0
 projected-types 0
@@ -29,13 +29,11 @@ receipt-obligation source-seal PASS source Term identities and module roots are 
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
-receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
-receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
 receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
 receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-c/fact-of: no native lowering for this callee [dump-fact!]
