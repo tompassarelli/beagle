@@ -966,25 +966,15 @@
             (nth type-ids index)))))))
 
 (defn nullable-map-value-type-id [value-type: core/NativeId] -> core/NativeId
-  (lower-id "nullable-map-value-type-v0" [(id-value value-type)]))
+  (lower-id "closed-union-type"
+    [(id-value value-type) (id-value (type-id "Nil"))]))
 
 (defn nullable-map-value-type [value-type: core/NativeId] -> core/TypeDef
   (let [id: core/NativeId (nullable-map-value-type-id value-type)
         owner: String (id-value id)]
-    (core/->TypeDef id "NullableMapValue"
+    (core/->TypeDef id "ClosedUnion"
       (core/->UnionType
-        [(core/->TypeVariant (variant-id owner "value") "value" value-type)
-         (core/->TypeVariant (variant-id owner "nil") "nil" nil)]))))
-
-(defn optional-union-value-type [type-ids: (Vec core/NativeId)] -> (U core/NativeId Nil)
-  (if (not (= 2 (count type-ids)))
-    nil
-    (let [left: core/NativeId (nth type-ids 0)
-          right: core/NativeId (nth type-ids 1)]
-      (cond
-        (same-id? left (type-id "Nil")) right
-        (same-id? right (type-id "Nil")) left
-        :else nil))))
+        (union-variants owner [value-type (type-id "Nil")])))))
 
 (defn application-resolution
   [source-type: core/NativeId
@@ -1039,23 +1029,14 @@
 
       (or (= "Dyn" constructor) (= "U" constructor))
       (let [members: (Vec core/NativeId) (union-member-ids record-names ids)
-            member-definitions: (Vec core/TypeDef)
-            (union-member-definitions record-names ids definitions)
-            optional-value: (U core/NativeId Nil)
-            (if (= "U" constructor)
-              (optional-union-value-type members)
-              nil)
             id: core/NativeId
-            (if (nil? optional-value)
-              (lower-id "closed-union-type"
-                (mapv (fn [part: core/NativeId] -> String (id-value part)) members))
-              (nullable-map-value-type-id optional-value))]
+            (lower-id "closed-union-type"
+              (mapv (fn [part: core/NativeId] -> String (id-value part)) members))]
         (->TypeResolutionV0 id
-          (append-type-def member-definitions
-            (if (nil? optional-value)
-              (core/->TypeDef id "ClosedUnion"
-                (core/->UnionType (union-variants (id-value id) members)))
-              (nullable-map-value-type optional-value)))
+          (append-type-def
+            (union-member-definitions record-names ids definitions)
+            (core/->TypeDef id "ClosedUnion"
+              (core/->UnionType (union-variants (id-value id) members))))
           diagnostics
           true))
 
