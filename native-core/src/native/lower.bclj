@@ -3195,6 +3195,36 @@
         (core/->JumpTerminator join-id
           [(exprresultv0-value-id injected)])))))
 
+;; A nested target path is ordered outer-to-inner, so construction reverses it.
+(defn inject-variant-path
+  [owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   target: core/NativeId
+   path: (Vec core/TypeVariant)] -> ExprResultV0
+  (loop [position: Int (- (count path) 1)
+         current: BodyStateV0 state
+         current-id: core/NativeId value-id]
+    (if (< position 0)
+      (->ExprResultV0 current current-id target false)
+      (let [variant: core/TypeVariant (nth path position)
+            wrapper-type: (U core/NativeId Nil)
+            (if (= 0 position)
+              target
+              (core/typevariant-payload-type (nth path (- position 1))))]
+        (if (nil? wrapper-type)
+          (fail-result current
+            "TODO-NATIVE-WIDEN-TARGET-PATH: nested target path reached a unit variant")
+          (let [result-id: core/NativeId
+                (state-id current owner (str "inject-nested-" position))]
+            (recur (- position 1)
+              (state-emit (state-bump current)
+                (core/->UnionConstructInstruction
+                  (core/->SsaValueV0 result-id wrapper-type)
+                  (core/typevariant-id variant)
+                  current-id))
+              result-id)))))))
+
 (defn lower-widen
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -3218,6 +3248,8 @@
           (variant-for-payload target-variants from)
           boxed: (U core/TypeVariant Nil)
           (variant-for-record-reference types target-variants from)
+          nested-target: VariantPathV0
+          (variant-path-to-payload-with-budget types to from budget)
           source-variants: (Vec core/TypeVariant) (union-variants-of types from)]
       (cond
         (= 0 (count target-variants))
@@ -3257,6 +3289,11 @@
                     (core/typevariant-id boxed)
                     reference-id))
                 result-id to false))))
+
+        (and (= 1 (variantpathv0-matches nested-target))
+          (> (count (variantpathv0-variants nested-target)) 0))
+        (inject-variant-path owner state value-id to
+          (variantpathv0-variants nested-target))
 
         (= 0 (count source-variants))
         (fail-result state
@@ -6026,13 +6063,17 @@
     (< budget 0) false
     :else
     (let [targets: (Vec core/TypeVariant) (union-variants-of types to)
-          sources: (Vec core/TypeVariant) (union-variants-of types from)]
+          sources: (Vec core/TypeVariant) (union-variants-of types from)
+          nested-target: VariantPathV0
+          (variant-path-to-payload-with-budget types to from budget)]
       (cond
         (= 0 (count targets)) false
         (some? (variant-for-payload targets from)) true
         (some? (variant-for-record-reference types targets from)) true
         (same-id? from (type-id "Nil"))
         (some? (some nil-variant? targets))
+        (and (= 1 (variantpathv0-matches nested-target))
+          (> (count (variantpathv0-variants nested-target)) 0)) true
         (= 0 (count sources)) false
         :else
         (every?
@@ -6352,29 +6393,62 @@
                 [(core/->Parameter join-value (bool-type-id))])
               join-value (bool-type-id) false)))))))
 
+(defn strict-widen-subtype?
+  [types: (Vec core/TypeDef)
+   narrower: core/NativeId
+   wider: core/NativeId] -> Bool
+  (and (type-widens-to? types narrower wider (widen-budget))
+    (not (type-widens-to? types wider narrower (widen-budget)))))
+
+(defn join-candidate-dominated?
+  [types: (Vec core/TypeDef)
+   candidate: core/NativeId
+   minima: (Vec core/NativeId)] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count minima))
+      false
+      (if (strict-widen-subtype? types (nth minima position) candidate)
+        true
+        (recur (+ position 1))))))
+
+(defn remove-dominated-join-candidates
+  [types: (Vec core/TypeDef)
+   candidate: core/NativeId
+   minima: (Vec core/NativeId)] -> (Vec core/NativeId)
+  (loop [position: Int 0 collected: (Vec core/NativeId) []]
+    (if (>= position (count minima))
+      collected
+      (let [current: core/NativeId (nth minima position)]
+        (recur (+ position 1)
+          (if (strict-widen-subtype? types candidate current)
+            collected
+            (conj collected current)))))))
+
 (defn join-type-for
   [types: (Vec core/TypeDef)
    left: core/NativeId
    right: core/NativeId] -> (U core/NativeId Nil)
-  (cond
-    (same-id? left right) left
-    (type-widens-to? types right left (widen-budget)) left
-    (type-widens-to? types left right (widen-budget)) right
-    :else
+  (if (same-id? left right)
+    left
     (loop [position: Int 0
-           chosen: (U core/NativeId Nil) nil
-           chosen-width: Int 2147483647]
+           minima: (Vec core/NativeId) []]
       (if (>= position (count types))
-        chosen
+        (if (= 1 (count minima)) (nth minima 0) nil)
         (let [candidate: core/NativeId (core/typedef-id (nth types position))
               variants: (Vec core/TypeVariant) (union-variants-of types candidate)
-              width: Int (count variants)]
-          (if (and (> width 0)
-                (< width chosen-width)
+              common: Bool
+              (and (> (count variants) 0)
                 (type-widens-to? types left candidate (widen-budget))
-                (type-widens-to? types right candidate (widen-budget)))
-            (recur (+ position 1) candidate width)
-            (recur (+ position 1) chosen chosen-width)))))))
+                (type-widens-to? types right candidate (widen-budget)))]
+          (cond
+            (or (not common) (core/id-in? minima candidate)
+              (join-candidate-dominated? types candidate minima))
+            (recur (+ position 1) minima)
+
+            :else
+            (recur (+ position 1)
+              (conj (remove-dominated-join-candidates types candidate minima)
+                candidate))))))))
 
 (defn bridge-join-arms
   [types: (Vec core/TypeDef)

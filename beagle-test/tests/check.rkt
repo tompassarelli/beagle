@@ -264,6 +264,13 @@
 (check-err "union annotation rejects non-member"
   '(def x #%: (U String Nil) 42))
 
+;; Only `Dyn` is a dynamic type here — a `U` union would pass without the
+;; record-constructor totality rule and so could not guard it.
+(check-ok "record Any field accepts a closed dynamic union"
+  '(defrecord Box [(value #%: Any)])
+  '(defn box-dyn [value #%: (Dyn String Int)] -> Box
+     (->Box value)))
+
 ;; =============================================================================
 ;; Tests — type narrowing (fixtures)
 ;; =============================================================================

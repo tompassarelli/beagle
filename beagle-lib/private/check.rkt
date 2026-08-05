@@ -4190,12 +4190,17 @@
 ;; collects these so callers can refine return types — numeric
 ;; preservation — without re-inferring, which would duplicate
 ;; diagnostics from nested calls).
+(define (record-constructor-operation? fn-name)
+  (regexp-match? #rx"(^|/)->[^/]+$" (symbol->string fn-name)))
+
 (define (dynamic-total-operation? fn-name)
   ;; Runtime type predicates inspect only the stable Dyn tag and are total over
-  ;; every alternative. Other Any-typed stdlib calls are not presumed total:
-  ;; they must receive an arm after occurrence typing proves it.
+  ;; every alternative. Record construction only stores its arguments, so a
+  ;; closed dynamic value may enter an explicitly Any field without erasing a
+  ;; precondition. Other Any consumers must receive a narrowed arm.
   (or (hash-has-key? TYPE-PREDICATES fn-name)
-      (memq fn-name '(some?))))
+      (memq fn-name '(some?))
+      (record-constructor-operation? fn-name)))
 
 (define (check-one-arg fn-name fn-type i expected-type arg env call-src)
   (define a-type
