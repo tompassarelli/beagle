@@ -13,47 +13,27 @@
 (defunion LowerFailureV0
   (MissingGraphRootV0 [root: core/NativeId])
   (DuplicateTermIdentityV0 [identity: core/NativeId])
-  (UnclosedTermReferenceV0
-    [owner: core/NativeId
-     target: core/NativeId])
-  (MalformedSourceTermV0
-    [identity: core/NativeId
-     detail: String])
-  (MissingSourceFactV0
-    [subject: core/NativeId
-     predicate: String])
-  (UnresolvedSourceTypeV0
-    [source-type: core/NativeId
-     detail: String])
-  (UnsupportedSourceTypeV0
-    [source-type: core/NativeId
-     spelling: String])
-  (MissingFunctionAnnotationV0
-    [function-id: core/NativeId
-     binding: String])
-  (InvalidSourceModuleV0
-    [module-id: core/NativeId
-     detail: String]))
+  (UnclosedTermReferenceV0 [owner: core/NativeId target: core/NativeId])
+  (MalformedSourceTermV0 [identity: core/NativeId detail: String])
+  (MissingSourceFactV0 [subject: core/NativeId predicate: String])
+  (UnresolvedSourceTypeV0 [source-type: core/NativeId detail: String])
+  (UnsupportedSourceTypeV0 [source-type: core/NativeId spelling: String])
+  (MissingFunctionAnnotationV0 [function-id: core/NativeId binding: String])
+  (InvalidSourceModuleV0 [module-id: core/NativeId detail: String]))
 
 (defunion SourceSealResultV0
   (SourceSealAcceptedV0
     [sealed: worlds/SealedSourceWorldV0
      receipt: core/PassReceiptV0])
-  (SourceSealRejectedV0
-    [failure: LowerFailureV0
-     receipt: core/PassReceiptV0]))
+  (SourceSealRejectedV0 [failure: LowerFailureV0 receipt: core/PassReceiptV0]))
 
-(defn lower-id
-  [domain: String
-   parts: (Vec String)] -> core/NativeId
+(defn lower-id [domain: String parts: (Vec String)] -> core/NativeId
   (core/canonical-id (str "native-lower-v0/" domain) parts))
 
 (defn id-value [id: core/NativeId] -> String
   (core/nativeid-value id))
 
-(defn same-id?
-  [left: core/NativeId
-   right: core/NativeId] -> Bool
+(defn same-id? [left: core/NativeId right: core/NativeId] -> Bool
   (core/native-id= left right))
 
 (defn find-node
@@ -185,18 +165,14 @@
   (let [value: (U String Nil) (get texts (id-value target))]
     (if (nil? value) "" value)))
 
-(defn source-index-key
-  [subject: core/NativeId
-   predicate: String] -> String
+(defn source-index-key [subject: core/NativeId predicate: String] -> String
   (let [identity: String (id-value subject)]
     (str (count identity) ":" identity predicate)))
 
 (defn index-facts [index: SourceIndexV0] -> Int
   (sourceindexv0-fact-count index))
 
-(defn index-has-callee?
-  [index: SourceIndexV0
-   expected: String] -> Bool
+(defn index-has-callee? [index: SourceIndexV0 expected: String] -> Bool
   (= true (get (sourceindexv0-callee-names index) expected)))
 
 (defn index-first-object
@@ -215,9 +191,7 @@
           (source-index-key subject predicate))]
     (if (or (nil? value) (= 0 (count value))) nil value)))
 
-(defn index-form-ids
-  [index: SourceIndexV0
-   kind: String] -> (Vec core/NativeId)
+(defn index-form-ids [index: SourceIndexV0 kind: String] -> (Vec core/NativeId)
   (let [forms: (U (Vec core/NativeId) Nil)
         (get (sourceindexv0-form-ids index) kind)]
     (if (nil? forms) [] forms)))
@@ -579,12 +553,8 @@
 ;; typed Term graph. They are discarded and rebuilt from the sealed world.
 (defunion NativeReadinessV0
   (NativeReadyV0 [operation: String])
-  (NativeLoweredV0
-    [entry-block: core/NativeId
-     blocks: (Vec core/BasicBlock)])
-  (NativeTodoV0
-    [code: String
-     detail: String]))
+  (NativeLoweredV0 [entry-block: core/NativeId blocks: (Vec core/BasicBlock)])
+  (NativeTodoV0 [code: String detail: String]))
 
 (defrecord TypedFunctionV0
   [id: core/NativeId
@@ -640,13 +610,9 @@
     [sealed: worlds/SealedTypedWorldV0
      slice: TypedSliceV0
      receipt: core/PassReceiptV0])
-  (TypingRejectedV0
-    [failure: LowerFailureV0
-     receipt: core/PassReceiptV0]))
+  (TypingRejectedV0 [failure: LowerFailureV0 receipt: core/PassReceiptV0]))
 
-(defn ends-with?
-  [value: String
-   suffix: String] -> Bool
+(defn ends-with? [value: String suffix: String] -> Bool
   (let [value-count: Int (count value)
         suffix-count: Int (count suffix)]
     (and (>= value-count suffix-count)
@@ -702,19 +668,13 @@
 (defn source-type-id [qualified-name: String] -> core/NativeId
   (lower-id "type" [qualified-name]))
 
-(defn field-id
-  [record-key: String
-   field-name: String] -> core/NativeId
+(defn field-id [record-key: String field-name: String] -> core/NativeId
   (lower-id "field" [record-key field-name]))
 
-(defn function-id
-  [source-id: core/NativeId
-   name: String] -> core/NativeId
+(defn function-id [source-id: core/NativeId name: String] -> core/NativeId
   (lower-id "function" [(id-value source-id) name]))
 
-(defn variant-id
-  [owner: String
-   name: String] -> core/NativeId
+(defn variant-id [owner: String name: String] -> core/NativeId
   (lower-id "variant" [owner name]))
 
 (defn bool-type [] -> core/TypeDef
@@ -936,9 +896,7 @@
    (socket-bytes-result-type) (socket-bytes-outcome-type)
    (socket-close-result-type) (socket-close-outcome-type)])
 
-(defn type-def-in?
-  [definitions: (Vec core/TypeDef)
-   id: core/NativeId] -> Bool
+(defn type-def-in? [definitions: (Vec core/TypeDef) id: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count definitions))
       false
@@ -1060,13 +1018,15 @@
         arguments: (U core/NativeId Nil) (if (some? direct) direct legacy)]
     (if (nil? arguments) [] (index-sequence-items index arguments))))
 
-(defn resolution-ids [resolutions: (Vec TypeResolutionV0)] -> (Vec core/NativeId)
+(defn resolution-ids
+  [resolutions: (Vec TypeResolutionV0)] -> (Vec core/NativeId)
   (mapv
     (fn [resolution: TypeResolutionV0] -> core/NativeId
       (typeresolutionv0-type-id resolution))
     resolutions))
 
-(defn resolution-definitions [resolutions: (Vec TypeResolutionV0)] -> (Vec core/TypeDef)
+(defn resolution-definitions
+  [resolutions: (Vec TypeResolutionV0)] -> (Vec core/TypeDef)
   (loop [index: Int 0 definitions: (Vec core/TypeDef) []]
     (if (>= index (count resolutions))
       definitions
@@ -1074,7 +1034,8 @@
         (append-type-defs definitions
           (typeresolutionv0-definitions (nth resolutions index)))))))
 
-(defn resolution-diagnostics [resolutions: (Vec TypeResolutionV0)] -> (Vec core/DiagnosticV0)
+(defn resolution-diagnostics
+  [resolutions: (Vec TypeResolutionV0)] -> (Vec core/DiagnosticV0)
   (loop [index: Int 0 diagnostics: (Vec core/DiagnosticV0) []]
     (if (>= index (count resolutions))
       diagnostics
@@ -1925,9 +1886,7 @@
    source-type: core/NativeId
    accepted-types: (Vec core/NativeId)])
 
-(defrecord VariantPathV0
-  [matches: Int
-   variants: (Vec core/TypeVariant)])
+(defrecord VariantPathV0 [matches: Int variants: (Vec core/TypeVariant)])
 
 ;; One live `loop`: the SSA header block whose block-parameters ARE the typed
 ;; accumulators. `recur` is a Jump back to this header, so the innermost frame
@@ -1987,18 +1946,14 @@
 (defn state-blocked? [state: BodyStateV0] -> Bool
   (> (count (bodystatev0-failure state)) 0))
 
-(defn state-fail
-  [state: BodyStateV0
-   detail: String] -> BodyStateV0
+(defn state-fail [state: BodyStateV0 detail: String] -> BodyStateV0
   (if (state-blocked? state) state (with state [:failure detail])))
 
 (defn dead-result [state: BodyStateV0] -> ExprResultV0
   (->ExprResultV0 state (lower-id "body" ["unreachable"])
     (type-id "LowerFailure") true))
 
-(defn fail-result
-  [state: BodyStateV0
-   detail: String] -> ExprResultV0
+(defn fail-result [state: BodyStateV0 detail: String] -> ExprResultV0
   (dead-result (state-fail state detail)))
 
 (defn state-id
@@ -2119,9 +2074,7 @@
       [:keyword-refinements keyword-refinements])
     [:value-refinements value-refinements]))
 
-(defn state-push-loop
-  [state: BodyStateV0
-   frame: LoopFrameV0] -> BodyStateV0
+(defn state-push-loop [state: BodyStateV0 frame: LoopFrameV0] -> BodyStateV0
   (with state [:loop-frames (conj (bodystatev0-loop-frames state) frame)]))
 
 (defn current-loop [state: BodyStateV0] -> (U LoopFrameV0 Nil)
@@ -2245,9 +2198,7 @@
               source
               (recur (+ position 1)))))))))
 
-(defn signature-traps?
-  [env: BodyEnvV0
-   signature: TypedFunctionV0] -> Bool
+(defn signature-traps? [env: BodyEnvV0 signature: TypedFunctionV0] -> Bool
   (let [signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
         sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)
         index: SourceIndexV0 (bodyenvv0-index env)]
@@ -2613,9 +2564,7 @@
         (get (sourceindexv0-child-nodes index) (id-value subject))]
     (if (nil? children) [] children)))
 
-(defn string-member?
-  [values: (Vec String)
-   target: String] -> Bool
+(defn string-member? [values: (Vec String) target: String] -> Bool
   (some?
     (some (fn [value: String] -> Bool (= value target)) values)))
 
@@ -3048,7 +2997,8 @@
               variant
               (recur (+ position 1)))))))))
 
-(defn payloadless-variants [variants: (Vec core/TypeVariant)] -> (Vec core/TypeVariant)
+(defn payloadless-variants
+  [variants: (Vec core/TypeVariant)] -> (Vec core/TypeVariant)
   (loop [position: Int 0 collected: (Vec core/TypeVariant) []]
     (if (>= position (count variants))
       collected
@@ -3617,16 +3567,12 @@
                 (arena-value-id owner)))
             push-id))))))
 
-(defn vector-type?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn vector-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
     (and (not (nil? definition))
       (instance? native.core.VectorType (core/typedef-shape definition)))))
 
-(defn record-type?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn record-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
     (and (not (nil? definition))
       (instance? native.core.RecordType (core/typedef-shape definition)))))
@@ -3670,9 +3616,7 @@
           (core/vectortype-element-type shape)
           (type-id "LowerFailure"))))))
 
-(defn map-type?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn map-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
     (and (not (nil? definition))
       (instance? native.core.MapTypeV0 (core/typedef-shape definition)))))
@@ -3713,9 +3657,7 @@
           (core/maptypev0-value-type shape)
           (type-id "LowerFailure"))))))
 
-(defn set-type?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn set-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
     (and (not (nil? definition))
       (instance? native.core.SetTypeV0 (core/typedef-shape definition)))))
@@ -3867,9 +3809,7 @@
 
             :else false))))))
 
-(defn comparable-type?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn comparable-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (comparable-type-inner? types target []))
 
 ;; The vector TypeDef for an element type exists only when some annotation in
@@ -3901,9 +3841,7 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
-(defn map-value?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn map-value? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
     (and (some? definition)
       (= "MapEntries" (core/typedef-name definition)))))
@@ -3941,7 +3879,8 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
-(defn concrete-equality-for [target: core/NativeId] -> (U core/ConcreteEqualityV0 Nil)
+(defn concrete-equality-for
+  [target: core/NativeId] -> (U core/ConcreteEqualityV0 Nil)
   (cond
     (same-id? target (type-id "Bool")) (core/->BoolEqualityV0 true)
     (same-id? target (type-id "Int")) (core/->I64EqualityV0 true)
@@ -4115,9 +4054,7 @@
             (instructions-allocate? (core/basicblock-instructions block)))
       blocks)))
 
-(defn empty-vector-form?
-  [index: SourceIndexV0
-   node: core/NativeId] -> Bool
+(defn empty-vector-form? [index: SourceIndexV0 node: core/NativeId] -> Bool
   (if (not (= "vec" (fact-text index node "form-kind")))
     false
     (let [items-node: (U core/NativeId Nil) (index-first-object index node "items")]
@@ -4200,9 +4137,7 @@
     (not (source-contains-transient-operator? index node
       (+ 1 (index-facts index))))))
 
-(defn source-any-annotation?
-  [index: SourceIndexV0
-   owner: core/NativeId] -> Bool
+(defn source-any-annotation? [index: SourceIndexV0 owner: core/NativeId] -> Bool
   (let [annotation: (U core/NativeId Nil)
         (index-first-object index owner "ann")]
     (and (some? annotation)
@@ -4528,9 +4463,7 @@
   (and (vector-type? types target)
     (same-id? (vector-element-of types target) (int-type-id))))
 
-(defn empty-map-form?
-  [index: SourceIndexV0
-   node: core/NativeId] -> Bool
+(defn empty-map-form? [index: SourceIndexV0 node: core/NativeId] -> Bool
   (if (not (= "map" (fact-text index node "form-kind")))
     false
     (let [pairs-node: (U core/NativeId Nil) (index-first-object index node "pairs")]
@@ -4538,9 +4471,7 @@
         true
         (= 0 (count (index-sequence-items index pairs-node)))))))
 
-(defn empty-set-form?
-  [index: SourceIndexV0
-   node: core/NativeId] -> Bool
+(defn empty-set-form? [index: SourceIndexV0 node: core/NativeId] -> Bool
   (if (not (= "set" (fact-text index node "form-kind")))
     false
     (let [items-node: (U core/NativeId Nil) (index-first-object index node "items")]
@@ -5825,7 +5756,8 @@
           (exprresultv0-state pair)
           (exprresultv0-value-id pair))))))
 
-(defn equality-comparison [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
+(defn equality-comparison
+  [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
   (cond
     (same-id? type-id-value (int-type-id)) (core/->CompareEqI64V0 true)
     (same-id? type-id-value (float-type-id)) (core/->CompareEqF64V0 true)
@@ -8505,9 +8437,7 @@
                         (arena-value-id owner))))
                   result-id container-type false)))))))))
 
-(defn match-pattern-kind
-  [index: SourceIndexV0
-   pattern: core/NativeId] -> String
+(defn match-pattern-kind [index: SourceIndexV0 pattern: core/NativeId] -> String
   (fact-text index pattern "pattern-kind"))
 
 (defn match-clause-pattern
@@ -8575,9 +8505,7 @@
             (reference-variant-for (bodyenvv0-types env) target-type record-type)]
         (if (narrowhitv0-found hit) (narrowhitv0-variant-id hit) nil)))))
 
-(defn native-id-count
-  [ids: (Vec core/NativeId)
-   target: core/NativeId] -> Int
+(defn native-id-count [ids: (Vec core/NativeId) target: core/NativeId] -> Int
   (loop [position: Int 0 found: Int 0]
     (if (>= position (count ids))
       found
@@ -13922,7 +13850,8 @@
             (attach-body env (nth resolutions position)
               (nth sources position))))))))
 
-(defn instruction-callee [instruction: core/Instruction] -> (U core/NativeId Nil)
+(defn instruction-callee
+  [instruction: core/Instruction] -> (U core/NativeId Nil)
   (cond
     (instance? native.core.CallInstruction instruction)
     (core/callinstruction-function-id instruction)
@@ -13948,7 +13877,8 @@
 
 ;; A CallInstruction must name a function the world actually carries, so a
 ;; caller is only ready once every callee it reaches is ready too.
-(defn settle-readiness [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
+(defn settle-readiness
+  [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
   (loop [round: Int 0 current: (Vec TypedFunctionV0) functions]
     (if (> round (count functions))
       current
@@ -14163,7 +14093,8 @@
         (append-type-defs current
           (functionresolutionv0-definitions (nth resolutions index)))))))
 
-(defn collect-functions [resolutions: (Vec FunctionResolutionV0)] -> (Vec TypedFunctionV0)
+(defn collect-functions
+  [resolutions: (Vec FunctionResolutionV0)] -> (Vec TypedFunctionV0)
   (mapv
     (fn [resolution: FunctionResolutionV0] -> TypedFunctionV0
       (functionresolutionv0-function resolution))
@@ -14426,9 +14357,7 @@
       (term-is-clean? (worlds/termnodev0-term node)))
     (worlds/termgraphv0-nodes graph)))
 
-(defn encode-id-roots
-  [tag: String
-   roots: (Vec core/NativeId)] -> String
+(defn encode-id-roots [tag: String roots: (Vec core/NativeId)] -> String
   (worlds/canonical-set tag
     (mapv (fn [id: core/NativeId] -> String (id-value id)) roots)))
 
@@ -14596,17 +14525,13 @@
      receipt: core/PassReceiptV0
      obligations: (Vec core/ReceiptObligationV0)]))
 
-(defn align-up
-  [offset: Int
-   alignment: Int] -> Int
+(defn align-up [offset: Int alignment: Int] -> Int
   (if (= 0 alignment)
     offset
     (let [remainder: Int (mod offset alignment)]
       (if (= 0 remainder) offset (+ offset (- alignment remainder))))))
 
-(defn max-int
-  [left: Int
-   right: Int] -> Int
+(defn max-int [left: Int right: Int] -> Int
   (if (> left right) left right))
 
 (defn find-type-def
@@ -14898,7 +14823,8 @@
       (resolve-layout types definition))
     types))
 
-(defn collect-layouts [resolutions: (Vec LayoutResolutionV0)] -> (Vec core/LayoutDef)
+(defn collect-layouts
+  [resolutions: (Vec LayoutResolutionV0)] -> (Vec core/LayoutDef)
   (mapv
     (fn [resolution: LayoutResolutionV0] -> core/LayoutDef
       (layoutresolutionv0-layout resolution))
@@ -14915,7 +14841,8 @@
     (core/->AtomType (core/->I64Kind true))))
 
 
-(defn ready-functions [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
+(defn ready-functions
+  [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
   (filterv
     (fn [function: TypedFunctionV0] -> Bool (ready-function? function))
     functions))
@@ -14954,7 +14881,8 @@
       (same-id? capability (host-socket-capability-id))
       (same-id? capability (host-clock-capability-id))))
 
-(defn function-affine-capabilities [function: TypedFunctionV0] -> (Vec core/NativeId)
+(defn function-affine-capabilities
+  [function: TypedFunctionV0] -> (Vec core/NativeId)
   (filterv
     (fn [capability: core/NativeId] -> Bool
       (not (host-capability-id? capability)))
@@ -14990,7 +14918,8 @@
       (write-capability-id))
     (core/->TokenFlowV0 (arena-function-tokens function) [])))
 
-(defn atom-state-acquire-instruction [function: TypedFunctionV0] -> core/Instruction
+(defn atom-state-acquire-instruction
+  [function: TypedFunctionV0] -> core/Instruction
   (core/->AtomStateInstruction
     (core/->SsaValueV0 (atom-state-value-id (typedfunctionv0-id function))
       (atom-state-handle-type-id))
@@ -15012,7 +14941,8 @@
         block))
     blocks))
 
-(defn lower-function-instructions [function: TypedFunctionV0] -> (Vec core/Instruction)
+(defn lower-function-instructions
+  [function: TypedFunctionV0] -> (Vec core/Instruction)
   (let [operation: String (function-operation function)
         parameters: (Vec core/Parameter) (typedfunctionv0-parameters function)
         result-id: core/NativeId
@@ -15077,17 +15007,20 @@
       (function-regions function)
       (function-capabilities function))))
 
-(defn lower-ready-functions [functions: (Vec TypedFunctionV0)] -> (Vec core/FunctionDef)
+(defn lower-ready-functions
+  [functions: (Vec TypedFunctionV0)] -> (Vec core/FunctionDef)
   (mapv
     (fn [function: TypedFunctionV0] -> core/FunctionDef
       (lower-ready-function function))
     (ready-functions functions)))
 
-(defn instruction-consumed-tokens [instruction: core/Instruction] -> (Vec core/NativeId)
+(defn instruction-consumed-tokens
+  [instruction: core/Instruction] -> (Vec core/NativeId)
   (let [flow: (U core/TokenFlowV0 Nil) (get instruction :tokens nil)]
     (if (nil? flow) [] (core/tokenflowv0-consumed flow))))
 
-(defn function-consumed-tokens [function: core/FunctionDef] -> (Vec core/NativeId)
+(defn function-consumed-tokens
+  [function: core/FunctionDef] -> (Vec core/NativeId)
   (loop [position: Int 0
          blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
          consumed: (Vec core/NativeId) []]
@@ -15222,9 +15155,7 @@
     "v0"
     layouts-digest))
 
-(defn borrowed-abi-value
-  [name: String
-   type: core/NativeId] -> core/AbiValueV0
+(defn borrowed-abi-value [name: String type: core/NativeId] -> core/AbiValueV0
   (core/->AbiValueV0 name type (core/->BorrowedV0 true) nil))
 
 (defn host-socket-abi
@@ -15498,7 +15429,8 @@
     (worlds/canonical-record "structural-equality-v0"
       [(id-value (core/structuralequalityv0-domain-type equality))])))
 
-(defn encode-value-semantics-operation [operation: core/ValueSemanticsOpV0] -> String
+(defn encode-value-semantics-operation
+  [operation: core/ValueSemanticsOpV0] -> String
   (match operation
     [(ValueEqualV0 domain-type left-id right-id)
      (worlds/canonical-record "value-equal-v0"
@@ -15510,7 +15442,8 @@
      (worlds/canonical-record "value-compare-v0"
        [(id-value domain-type) (id-value left-id) (id-value right-id)])]))
 
-(defn encode-codec-primitive-operation [operation: core/CodecPrimitiveOpV0] -> String
+(defn encode-codec-primitive-operation
+  [operation: core/CodecPrimitiveOpV0] -> String
   (match operation
     [(Utf8EncodeV0 arena-id source-id)
      (worlds/canonical-record "utf8-encode-v0"
@@ -16517,9 +16450,7 @@
     (worlds/nativeworldv0-terms
       (worlds/sealednativeworldv0-world sealed))))
 
-(defn fixture-id
-  [kind: String
-   label: String] -> core/NativeId
+(defn fixture-id [kind: String label: String] -> core/NativeId
   (lower-id "fixture" [kind label]))
 
 (defn fixture-text-id [value: String] -> core/NativeId
@@ -16879,9 +16810,7 @@
 
 (defunion FixturePipelineResultV0
   (FixturePipelineCompleteV0 [sealed: worlds/SealedNativeWorldV0])
-  (FixturePipelineFailedV0
-    [stage: String
-     detail: String]))
+  (FixturePipelineFailedV0 [stage: String detail: String]))
 
 (defn lower-pipeline-fixture
   [source-world: worlds/SourceProgramWorldV0

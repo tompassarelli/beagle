@@ -15,9 +15,7 @@
     (deref acc)))
 
 ;; probe 3: char-at convention (JS charAt -> bounds-checked 1-char substring)
-(defn char-at
-  [s: String
-   i: Int] -> String
+(defn char-at [s: String i: Int] -> String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
 ;; probe 4: JS substring semantics (clamped)

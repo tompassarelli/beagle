@@ -154,7 +154,8 @@
       (spit (str directory "/main.c") fixture-main-text))
     (throw (ex-info "permuted fixture world changed materialization" {}))))
 
-(defn require-fold-lowered-world [result: lower/FixturePipelineResultV0] -> core/NativeWorld
+(defn require-fold-lowered-world
+  [result: lower/FixturePipelineResultV0] -> core/NativeWorld
   (if (instance? native.lower.FixturePipelineCompleteV0 result)
     (worlds/nativeworldv0-program
       (worlds/sealednativeworldv0-world

@@ -40,9 +40,7 @@
 
 ;; Canonical ids are length-prefixed, so this is a deterministic order and
 ;; never a semantic one: use it only where any stable order is correct.
-(defn id-before?
-  [left: core/NativeId
-   right: core/NativeId] -> Bool
+(defn id-before? [left: core/NativeId right: core/NativeId] -> Bool
   (< (compare (core/nativeid-value left) (core/nativeid-value right)) 0))
 
 (defn insert-type
@@ -79,9 +77,7 @@
       [(FunctionType value) []]
       [(OutcomeType value) []])))
 
-(defn type-emitted?
-  [emitted: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn type-emitted? [emitted: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count emitted))
       false
@@ -89,9 +85,7 @@
         true
         (recur (+ index 1))))))
 
-(defn ready-type?
-  [emitted: (Vec core/TypeDef)
-   definition: core/TypeDef] -> Bool
+(defn ready-type? [emitted: (Vec core/TypeDef) definition: core/TypeDef] -> Bool
   (every?
     (fn [reference: core/NativeId] -> Bool (type-emitted? emitted reference))
     (type-field-refs definition)))
@@ -145,7 +139,8 @@
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-functions [functions: (Vec core/FunctionDef)] -> (Vec core/FunctionDef)
+(defn ordered-functions
+  [functions: (Vec core/FunctionDef)] -> (Vec core/FunctionDef)
   (loop [index: Int 0 result: (Vec core/FunctionDef) []]
     (if (>= index (count functions))
       result
@@ -162,15 +157,14 @@
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-field-layouts [fields: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
+(defn ordered-field-layouts
+  [fields: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
   (loop [index: Int 0 result: (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       result
       (recur (+ index 1) (insert-field-layout (nth fields index) result)))))
 
-(defn type-index
-  [types: (Vec core/TypeDef)
-   type-id: core/NativeId] -> Int
+(defn type-index [types: (Vec core/TypeDef) type-id: core/NativeId] -> Int
   (loop [index: Int 0]
     (if (>= index (count types))
       -1
@@ -341,9 +335,7 @@
 (defn module-prefix [module-index: Int] -> String
   (str "native_m" module-index))
 
-(defn type-name
-  [module-index: Int
-   type-index-value: Int] -> String
+(defn type-name [module-index: Int type-index-value: Int] -> String
   (str (module-prefix module-index) "_type_" type-index-value))
 
 (defn c-type

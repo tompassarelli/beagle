@@ -190,7 +190,8 @@
               "FAIL")
             " " (nth names position) "\n"))))))
 
-(defn failing-obligation-verdicts [verdicts: (Vec obligations/ObligationVerdictV0)] -> String
+(defn failing-obligation-verdicts
+  [verdicts: (Vec obligations/ObligationVerdictV0)] -> String
   (let [names: (Vec String) (slice/obligation-names)]
     (loop [position: Int 0 report: String ""]
       (if (>= position (count verdicts))
@@ -245,7 +246,8 @@
         (core/nativeworld-abis world))
       (core/nativeworld-observations world))))
 
-(defn obligations-pass? [verdicts: (Vec obligations/ObligationVerdictV0)] -> Bool
+(defn obligations-pass?
+  [verdicts: (Vec obligations/ObligationVerdictV0)] -> Bool
   (every? obligations/obligation-passed?
     verdicts))
 

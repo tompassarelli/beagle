@@ -18,15 +18,11 @@
   (BodySuccessV0 [artifact: BodyArtifactV0])
   (BodyFailureV0 [detail: String]))
 
-(defrecord ValueSlotV0
-  [id: core/NativeId
-   type-id: core/NativeId])
+(defrecord ValueSlotV0 [id: core/NativeId type-id: core/NativeId])
 
 ;; Text and Keyword literals become length-prefixed constant blobs. Their
 ;; distinct static types share one immutable UTF-8 handle representation.
-(defrecord ConstantPoolV0
-  [texts: (Vec String)
-   keywords: (Vec String)])
+(defrecord ConstantPoolV0 [texts: (Vec String) keywords: (Vec String)])
 
 ;; v0 C17 literal alphabet. Anything else is refused rather than escaped
 ;; wrongly: without a code-point primitive the emitter cannot tell a control
@@ -36,9 +32,7 @@
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
     "abcdefghijklmnopqrstuvwxyz{|}~"))
 
-(defn character-in?
-  [alphabet: String
-   character: String] -> Bool
+(defn character-in? [alphabet: String character: String] -> Bool
   (loop [position: Int 0]
     (cond
       (>= position (count alphabet)) false
@@ -69,18 +63,14 @@
         (str result
           (escape-c-character (subs value position (+ position 1))))))))
 
-(defn value-position
-  [values: (Vec String)
-   target: String] -> Int
+(defn value-position [values: (Vec String) target: String] -> Int
   (loop [position: Int 0]
     (cond
       (>= position (count values)) -1
       (= target (nth values position)) position
       :else (recur (+ position 1)))))
 
-(defn conj-value
-  [values: (Vec String)
-   candidate: String] -> (Vec String)
+(defn conj-value [values: (Vec String) candidate: String] -> (Vec String)
   (if (>= (value-position values candidate) 0) values (conj values candidate)))
 
 (defn pool-with-atom
@@ -284,9 +274,7 @@
         (core/nativeworld-abis world))
       (every? function-supported? (core/nativeworld-functions world)))))
 
-(defn block-index
-  [blocks: (Vec core/BasicBlock)
-   target: core/NativeId] -> Int
+(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count blocks))
       -1
@@ -294,14 +282,10 @@
         position
         (recur (+ position 1))))))
 
-(defn label-name
-  [function-index: Int
-   block: Int] -> String
+(defn label-name [function-index: Int block: Int] -> String
   (str "native_l" function-index "_" block))
 
-(defn function-name
-  [module-index: Int
-   function-index: Int] -> String
+(defn function-name [module-index: Int function-index: Int] -> String
   (str (c17/module-prefix module-index) "_fn_" function-index))
 
 ;; Every block parameter and instruction result gets one C local declared at the
@@ -339,9 +323,7 @@
                       instructions))))]
           (recur (+ position 1) with-results))))))
 
-(defn slot-index
-  [slots: (Vec ValueSlotV0)
-   target: core/NativeId] -> Int
+(defn slot-index [slots: (Vec ValueSlotV0) target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count slots))
       -1
@@ -381,14 +363,10 @@
           (c17/c-type types module-index (valueslotv0-type-id (nth slots position)))
           " native_s_" position ";\n")))))
 
-(defn text-symbol
-  [module-index: Int
-   position: Int] -> String
+(defn text-symbol [module-index: Int position: Int] -> String
   (str (c17/module-prefix module-index) "_text_" position))
 
-(defn keyword-symbol
-  [module-index: Int
-   position: Int] -> String
+(defn keyword-symbol [module-index: Int position: Int] -> String
   (str (c17/module-prefix module-index) "_keyword_" position))
 
 (defn atom-expression
@@ -436,9 +414,7 @@
       "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
       " \"text blob is length-prefixed\");\n")))
 
-(defn emit-keyword-pool
-  [module-index: Int
-   keywords: (Vec String)] -> String
+(defn emit-keyword-pool [module-index: Int keywords: (Vec String)] -> String
   (if (= 0 (count keywords))
     ""
     (loop [position: Int 0 result: String ""]
@@ -456,9 +432,7 @@
               "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
               " \"keyword blob is length-prefixed\");\n")))))))
 
-(defn emit-text-pool
-  [module-index: Int
-   pool: ConstantPoolV0] -> String
+(defn emit-text-pool [module-index: Int pool: ConstantPoolV0] -> String
   (let [texts: (Vec String) (constantpoolv0-texts pool)
         keywords: (Vec String) (constantpoolv0-keywords pool)]
     (str
@@ -828,9 +802,7 @@
                 (core/unionvariantlayoutv0-tag variant)
                 (recur (+ position 1))))))))))
 
-(defn unit-type?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn unit-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (let [definition: (U core/TypeDef Nil) (type-with-id types target)]
     (if (nil? definition)
       false
@@ -1320,9 +1292,7 @@
       (core/setshapev0-element-type shape)
       set-type)))
 
-(defn set-stride
-  [layouts: (Vec core/LayoutDef)
-   set-type: core/NativeId] -> Int
+(defn set-stride [layouts: (Vec core/LayoutDef) set-type: core/NativeId] -> Int
   (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
     (if (instance? native.core.SetShapeV0 shape)
       (core/setshapev0-stride-bytes shape)
@@ -1374,9 +1344,7 @@
    result-id: core/NativeId] -> String
   (str "native_" prefix "_" (slot-index slots result-id)))
 
-(defn parts-symbol
-  [slots: (Vec ValueSlotV0)
-   result-id: core/NativeId] -> String
+(defn parts-symbol [slots: (Vec ValueSlotV0) result-id: core/NativeId] -> String
   (str "native_parts_" (slot-index slots result-id)))
 
 (defn text-operand-expression
@@ -2822,9 +2790,7 @@
       (core/switchterminator-cases terminator))
     :else []))
 
-(defn block-targeted?
-  [function: core/FunctionDef
-   target: core/NativeId] -> Bool
+(defn block-targeted? [function: core/FunctionDef target: core/NativeId] -> Bool
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))

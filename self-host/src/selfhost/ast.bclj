@@ -14,9 +14,7 @@
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
-(defn char-at
-  [s: String
-   i: Int] -> String
+(defn char-at [s: String i: Int] -> String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
 (defn substring2
@@ -54,9 +52,7 @@
 (defn set-body [d: Any] -> Any
   (if (vector? d) (subvec d 1) []))
 
-(defn unwrap-items
-  [d: Any
-   what: String] -> Any
+(defn unwrap-items [d: Any what: String] -> Any
   (cond
     (bracketed? d) (bracket-body d)
     (vector? d) d
@@ -132,9 +128,7 @@
    body: (Vec Any)] -> Any
   {"node" "fn" "params" params "rest-param" rest-param "ret" ret "body" body})
 
-(defn make-let
-  [bindings: (Vec Any)
-   body: (Vec Any)] -> Any
+(defn make-let [bindings: (Vec Any) body: (Vec Any)] -> Any
   {"node" "let" "bindings" bindings "body" body})
 
 (defn make-if
@@ -146,25 +140,19 @@
 (defn make-cond [clauses: (Vec Any)] -> Any
   {"node" "cond" "clauses" clauses})
 
-(defn make-when
-  [test: Any
-   body: (Vec Any)] -> Any
+(defn make-when [test: Any body: (Vec Any)] -> Any
   {"node" "when" "test" test "body" body})
 
 (defn make-do [body: (Vec Any)] -> Any
   {"node" "do" "body" body})
 
-(defn make-call
-  [fn-name: Any
-   args: (Vec Any)] -> Any
+(defn make-call [fn-name: Any args: (Vec Any)] -> Any
   {"node" "call" "fn" fn-name "args" args})
 
 (defn make-ref [name: String] -> Any
   {"node" "ref" "name" name})
 
-(defn make-literal
-  [kind: String
-   value: Any] -> Any
+(defn make-literal [kind: String value: Any] -> Any
   {"node" "literal" "kind" kind "value" value})
 
 (defn make-vec [items: (Vec Any)] -> Any
@@ -179,22 +167,16 @@
 (defn make-regex [pattern: String] -> Any
   {"node" "regex" "pattern" pattern})
 
-(defn make-loop
-  [bindings: (Vec Any)
-   body: (Vec Any)] -> Any
+(defn make-loop [bindings: (Vec Any) body: (Vec Any)] -> Any
   {"node" "loop" "bindings" bindings "body" body})
 
 (defn make-recur [args: (Vec Any)] -> Any
   {"node" "recur" "args" args})
 
-(defn make-for
-  [clauses: (Vec Any)
-   body: Any] -> Any
+(defn make-for [clauses: (Vec Any) body: Any] -> Any
   {"node" "for" "clauses" clauses "body" body})
 
-(defn make-record
-  [name: String
-   fields: (Vec Any)] -> Any
+(defn make-record [name: String fields: (Vec Any)] -> Any
   {"node" "record" "name" name "fields" fields})
 
 (defn make-method-call
@@ -203,9 +185,7 @@
    args: (Vec Any)] -> Any
   {"node" "method-call" "method" method "target" target "args" args})
 
-(defn make-static-call
-  [class-method: String
-   args: (Vec Any)] -> Any
+(defn make-static-call [class-method: String args: (Vec Any)] -> Any
   {"node" "static-call" "class-method" class-method "args" args})
 
 (defn make-map [pairs: (Vec Any)] -> Any
@@ -232,9 +212,7 @@
    body: (Vec Any)] -> Any
   {"node" "catch" "exception-type" exception-type "name" name "body" body})
 
-(defn make-doseq
-  [clauses: (Vec Any)
-   body: (Vec Any)] -> Any
+(defn make-doseq [clauses: (Vec Any) body: (Vec Any)] -> Any
   {"node" "doseq" "clauses" clauses "body" body})
 
 (defn make-case
@@ -243,24 +221,16 @@
    fallback: Any] -> Any
   {"node" "case" "test" test "clauses" clauses "default" fallback})
 
-(defn make-match
-  [target: Any
-   clauses: (Vec Any)] -> Any
+(defn make-match [target: Any clauses: (Vec Any)] -> Any
   {"node" "match" "target" target "clauses" clauses})
 
-(defn make-with
-  [target: Any
-   updates: (Vec Any)] -> Any
+(defn make-with [target: Any updates: (Vec Any)] -> Any
   {"node" "with" "target" target "updates" updates})
 
-(defn make-defrecord
-  [name: String
-   fields: (Vec Any)] -> Any
+(defn make-defrecord [name: String fields: (Vec Any)] -> Any
   {"node" "defrecord" "name" name "fields" fields})
 
-(defn make-defenum
-  [name: String
-   values: (Vec String)] -> Any
+(defn make-defenum [name: String values: (Vec String)] -> Any
   {"node" "defenum" "name" name "values" values})
 
 (defn make-defunion
@@ -322,39 +292,27 @@
    body: (Vec Any)] -> Any
   {"node" "dotimes" "name" name "count-expr" count-expr "body" body})
 
-(defn make-letfn
-  [fns: (Vec Any)
-   body: (Vec Any)] -> Any
+(defn make-letfn [fns: (Vec Any) body: (Vec Any)] -> Any
   {"node" "letfn" "fns" fns "body" body})
 
-(defn make-set!
-  [target: Any
-   value: Any] -> Any
+(defn make-set! [target: Any value: Any] -> Any
   {"node" "set!" "target" target "value" value})
 
 (defn make-await [expr: Any] -> Any
   {"node" "await" "expr" expr})
 
-(defn make-block-string
-  [text: String
-   tag: String] -> Any
+(defn make-block-string [text: String tag: String] -> Any
   {"node" "block-string" "text" text "tag" tag})
 
 ;; --- param constructors ------------------------------------------------------
 
-(defn make-param
-  [name: String
-   ann: Any] -> Any
+(defn make-param [name: String ann: Any] -> Any
   {"type" "param" "name" name "ann" ann})
 
-(defn make-map-destructure
-  [keys: (Vec String)
-   as-name: Any] -> Any
+(defn make-map-destructure [keys: (Vec String) as-name: Any] -> Any
   {"type" "map-destructure" "keys" keys "as" as-name})
 
-(defn make-seq-destructure
-  [names: (Vec String)
-   rest-name: Any] -> Any
+(defn make-seq-destructure [names: (Vec String) rest-name: Any] -> Any
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
 (defn make-let-binding
@@ -371,9 +329,7 @@
 (defn make-pat-literal [value: Any] -> Any
   {"pattern" "literal" "value" value})
 
-(defn make-pat-record
-  [type-name: String
-   bindings: (Vec Any)] -> Any
+(defn make-pat-record [type-name: String bindings: (Vec Any)] -> Any
   {"pattern" "record" "type-name" type-name "bindings" bindings})
 
 (defn make-pat-map [entries: (Vec Any)] -> Any
@@ -387,22 +343,16 @@
 (defn make-nix-inherit [names: (Vec String)] -> Any
   {"node" "nix-inherit" "names" names})
 
-(defn make-nix-inherit-from
-  [ns-expr: Any
-   names: (Vec String)] -> Any
+(defn make-nix-inherit-from [ns-expr: Any names: (Vec String)] -> Any
   {"node" "nix-inherit-from" "ns-expr" ns-expr "names" names})
 
-(defn make-nix-with
-  [ns-expr: Any
-   body: Any] -> Any
+(defn make-nix-with [ns-expr: Any body: Any] -> Any
   {"node" "nix-with" "ns-expr" ns-expr "body" body})
 
 (defn make-nix-rec-attrs [pairs: (Vec Any)] -> Any
   {"node" "nix-rec-attrs" "pairs" pairs})
 
-(defn make-nix-assert
-  [cond-expr: Any
-   body: Any] -> Any
+(defn make-nix-assert [cond-expr: Any body: Any] -> Any
   {"node" "nix-assert" "cond-expr" cond-expr "body" body})
 
 (defn make-nix-get-or
@@ -411,9 +361,7 @@
    fallback: Any] -> Any
   {"node" "nix-get-or" "base" base "path" path "default" fallback})
 
-(defn make-nix-has-attr
-  [base: Any
-   path: Any] -> Any
+(defn make-nix-has-attr [base: Any path: Any] -> Any
   {"node" "nix-has-attr" "base" base "path" path})
 
 (defn make-nix-search-path [name: String] -> Any
@@ -441,9 +389,7 @@
    rhs: Any] -> Any
   {"node" "nix-pipe" "direction" direction "lhs" lhs "rhs" rhs})
 
-(defn make-nix-impl
-  [lhs: Any
-   rhs: Any] -> Any
+(defn make-nix-impl [lhs: Any rhs: Any] -> Any
   {"node" "nix-impl" "lhs" lhs "rhs" rhs})
 
 ;; --- program -----------------------------------------------------------------
@@ -484,9 +430,7 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn- expect!
-  [label: String
-   result: Bool] -> Nil
+(defn- expect! [label: String result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))

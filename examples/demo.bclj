@@ -51,8 +51,7 @@
 (defn greet
   ([(name: String)] -> String
     (str "Hello, " name))
-  ([(name: String)
-    (title: String)] -> String
+  ([(name: String) (title: String)] -> String
     (str "Hello, " title " " name)))
 
 ;; Entry point

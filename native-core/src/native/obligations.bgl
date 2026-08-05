@@ -23,9 +23,7 @@
   [definitions: (Map String DefSiteV0)
    paths-avoiding: (Map String Bool)])
 
-(defrecord CheckedUseScanV0
-  [handled :- Bool
-   legal :- Bool])
+(defrecord CheckedUseScanV0 [handled :- Bool legal :- Bool])
 
 (defrecord TokenStateV0
   [live :- (Vec core/NativeId)
@@ -35,9 +33,7 @@
 (defn obligation-id [name :- String] :- core/NativeId
   (core/canonical-id "native-obligations-v0" [name]))
 
-(defn dynamic-id=
-  [left :- Any
-   right :- Any] :- Bool
+(defn dynamic-id= [left :- Any right :- Any] :- Bool
   (and (not (nil? left))
     (not (nil? right))
     (= (get left :value "left-missing") (get right :value "right-missing"))))
@@ -70,9 +66,7 @@
 (defn native-id-key [id: core/NativeId] -> String
   (core/nativeid-value id))
 
-(defn avoiding-path-key
-  [avoided: core/NativeId
-   target: core/NativeId] -> String
+(defn avoiding-path-key [avoided: core/NativeId target: core/NativeId] -> String
   (let [avoided-value: String (native-id-key avoided)]
     (str (count avoided-value) ":" avoided-value (native-id-key target))))
 
@@ -124,7 +118,8 @@
           (recur (+ index 1)
             (index-instruction-sites with-block-parameters block)))))))
 
-(defn block-index [blocks: (Vec core/BasicBlock)] -> (Map String core/BasicBlock)
+(defn block-index
+  [blocks: (Vec core/BasicBlock)] -> (Map String core/BasicBlock)
   (loop [index: Int 0 current: (Map String core/BasicBlock) {}]
     (if (>= index (count blocks))
       current
@@ -197,7 +192,8 @@
           (let [site :- DefSiteV0 (block-site (nth blocks index) value-id)]
             (if (defsitev0-found site) site (recur (+ index 1) blocks))))))))
 
-(defn terminator-successors [terminator :- core/Terminator] :- (Vec core/NativeId)
+(defn terminator-successors
+  [terminator :- core/Terminator] :- (Vec core/NativeId)
   (let [jump-block :- Any (get terminator :block-id nil)
         true-block :- Any (get terminator :true-block nil)
         false-block :- Any (get terminator :false-block nil)
@@ -411,9 +407,7 @@
       (nth types index)
       :else (recur (+ index 1)))))
 
-(defn unit-type?
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId] :- Bool
+(defn unit-type? [types :- (Vec core/TypeDef) type-id :- core/NativeId] :- Bool
   (let [type-def :- (U core/TypeDef Nil) (find-type types type-id)]
     (if (nil? type-def)
       false
@@ -513,9 +507,7 @@
           (+ found 1)
           found)))))
 
-(defn aligned?
-  [offset :- Int
-   alignment :- Int] :- Bool
+(defn aligned? [offset :- Int alignment :- Int] :- Bool
   (and (> alignment 0) (= 0 (mod offset alignment))))
 
 (defn field-layout-valid?
@@ -637,9 +629,7 @@
                 (union-payload-valid? layouts parent-size variant))
         variants))))
 
-(defn collection-order-exact?
-  [type-order :- Any
-   layout-order :- Any] :- Bool
+(defn collection-order-exact? [type-order :- Any layout-order :- Any] :- Bool
   (and (not (nil? type-order))
     (not (nil? layout-order))
     (= (get type-order :token false) (get layout-order :token false))))
@@ -979,9 +969,7 @@
       (nth variants index)
       :else (recur (+ index 1)))))
 
-(defn i64-type?
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId] :- Bool
+(defn i64-type? [types :- (Vec core/TypeDef) type-id :- core/NativeId] :- Bool
   (let [definition :- (U core/TypeDef Nil) (find-type types type-id)]
     (if (nil? definition)
       false
@@ -1030,9 +1018,7 @@
                       (optional-i64-type? types
                         (core/typevariant-payload-type error)))))))))))))
 
-(defn abi-decl-legal?
-  [world :- core/NativeWorld
-   abi :- core/AbiDeclV0] :- Bool
+(defn abi-decl-legal? [world :- core/NativeWorld abi :- core/AbiDeclV0] :- Bool
   (let [function :- (U core/FunctionDef Nil)
         (find-function (core/nativeworld-functions world) (get abi :function-id))
         types :- (Vec core/TypeDef) (core/nativeworld-types world)
@@ -1181,7 +1167,8 @@
         (->TokenStateV0 live (tokenstatev0-seen state) true)
         (recur (+ index 1) (remove-id live (nth consumed index)))))))
 
-(defn produced-token-ids [produced :- (Vec core/ResourceTokenV0)] :- (Vec core/NativeId)
+(defn produced-token-ids
+  [produced :- (Vec core/ResourceTokenV0)] :- (Vec core/NativeId)
   (mapv (fn [token :- core/ResourceTokenV0] :- core/NativeId
           (get token :id)) produced))
 
@@ -1249,9 +1236,7 @@
    right :- (Vec core/NativeId)] :- Bool
   (and (= (count left) (count right)) (core/ids-in? left right)))
 
-(defn token-visit-matches?
-  [visit: TokenVisitV0
-   state: TokenStateV0] -> Bool
+(defn token-visit-matches? [visit: TokenVisitV0 state: TokenStateV0] -> Bool
   (and (token-sets-equal? (tokenvisitv0-live visit) (tokenstatev0-live state))
     (token-sets-equal? (tokenvisitv0-seen visit) (tokenstatev0-seen state))))
 
@@ -1377,9 +1362,7 @@
   (or (= kind (core/->WriteEffect region))
     (= kind (core/->AtomicEffect region capability))))
 
-(defn effect-covers-allocation?
-  [kind :- Any
-   region :- core/NativeId] :- Bool
+(defn effect-covers-allocation? [kind :- Any region :- core/NativeId] :- Bool
   (= kind (core/->AllocateEffect region)))
 
 (defn effect-covers-atom-state?
@@ -2168,7 +2151,8 @@
 (def fourteen-rejection-depth-fixtures-named? :- Bool
   (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
 
-(defn validate-native-world [world :- core/NativeWorld] :- (Vec ObligationVerdictV0)
+(defn validate-native-world
+  [world :- core/NativeWorld] :- (Vec ObligationVerdictV0)
   [(valid-ssa world)
    (exhaustive-matches world)
    (closed-layouts world)

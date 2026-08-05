@@ -19,13 +19,9 @@
      predicate :- core/NativeId
      object :- core/NativeId]))
 
-(defrecord TermNodeV0
-  [identity :- core/NativeId
-   term :- TermV0])
+(defrecord TermNodeV0 [identity :- core/NativeId term :- TermV0])
 
-(defrecord TermGraphV0
-  [root :- core/NativeId
-   nodes :- (Vec TermNodeV0)])
+(defrecord TermGraphV0 [root :- core/NativeId nodes :- (Vec TermNodeV0)])
 
 (defrecord SourceLocationV0
   [module-id :- core/NativeId
@@ -133,14 +129,10 @@
   (PromotionAcceptedV0 [promoted :- PromotedWorldV0])
   (PromotionRejectedV0 [reason :- String]))
 
-(defn canonical-record
-  [tag :- String
-   fields :- (Vec String)] :- String
+(defn canonical-record [tag :- String fields :- (Vec String)] :- String
   (str (count tag) ":" tag ":" (core/canonical-parts fields)))
 
-(defn canonical-set
-  [tag :- String
-   items :- (Vec String)] :- String
+(defn canonical-set [tag :- String items :- (Vec String)] :- String
   (canonical-record tag (sort items)))
 
 (defn encode-bool [value :- Bool] :- String
@@ -175,9 +167,7 @@
    payload :- WorldPayloadV0] :- WorldDraftV0
   (->WorldDraftV0 (sealed-world-digest parent) pass-id pass-version payload))
 
-(defn canonical-vector
-  [tag :- String
-   items :- (Vec String)] :- String
+(defn canonical-vector [tag :- String items :- (Vec String)] :- String
   (canonical-record tag items))
 
 (defn encode-int [value :- Int] :- String
@@ -191,9 +181,7 @@
     (canonical-record "none" [])
     (canonical-record "some" [(encode-id value)])))
 
-(defn encode-ids
-  [tag :- String
-   ids :- (Vec core/NativeId)] :- String
+(defn encode-ids [tag :- String ids :- (Vec core/NativeId)] :- String
   (canonical-set tag (mapv (fn [id :- core/NativeId] :- String (encode-id id)) ids)))
 
 (defn encode-term [term :- TermV0] :- String
@@ -320,7 +308,8 @@
       (mapv (fn [entry :- String] :- String (encode-string entry))
         configuration))))
 
-(defn all-obligations-passed? [obligations :- (Vec core/ReceiptObligationV0)] :- Bool
+(defn all-obligations-passed?
+  [obligations :- (Vec core/ReceiptObligationV0)] :- Bool
   (every? (fn [obligation :- core/ReceiptObligationV0] :- Bool
             (core/receiptobligationv0-passed obligation))
     obligations))

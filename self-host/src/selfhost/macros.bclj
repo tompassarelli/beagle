@@ -48,9 +48,7 @@
 (defn make-root-ctx [name: String] -> Any
   {"macro-name" name "depth" 0 "parent" nil})
 
-(defn push-ctx
-  [parent: Any
-   name: String] -> Any
+(defn push-ctx [parent: Any name: String] -> Any
   {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
 
 (defn collect-chain-lines [ctx: Any] -> (Vec String)
@@ -132,16 +130,12 @@
 (defn datum-cdr [d: Any] -> Any
   (subvec d 1))
 
-(defn datum-cons
-  [h: Any
-   t: Any] -> Any
+(defn datum-cons [h: Any t: Any] -> Any
   (if (vector? t)
     (into [h] t)
     [h t]))
 
-(defn datum-append
-  [a: Any
-   b: Any] -> Any
+(defn datum-append [a: Any b: Any] -> Any
   (into a b))
 
 ;; --- strip-reader-tags -------------------------------------------------------
@@ -186,9 +180,7 @@
         {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template})
       nil)))
 
-(defn lookup-macro
-  [reg: Any
-   name: String] -> Any
+(defn lookup-macro [reg: Any name: String] -> Any
   (get (deref reg) name))
 
 ;; --- contract checking -------------------------------------------------------
@@ -235,9 +227,7 @@
    fixed-args: (Vec Any)
    rest-name: Any
    rest-args: (Vec Any)] -> Any
-  (let [base (reduce (fn
-                       [acc: Any
-                        i: Int] -> Any
+  (let [base (reduce (fn [acc: Any i: Int] -> Any
                         (assoc acc (nth fixed-params i) (nth fixed-args i)))
                       {} (range (count fixed-params)))]
     (if (not (nil? rest-name))
@@ -246,9 +236,7 @@
 
 ;; --- substitute (template expansion core) ------------------------------------
 
-(defn splice-into-list
-  [head: Any
-   tail: Any] -> Any
+(defn splice-into-list [head: Any tail: Any] -> Any
   (if (and (datum-pair? head) (= (datum-car head) "splice-marker"))
     (datum-append (datum-cdr head) tail)
     (datum-cons head tail)))
@@ -323,13 +311,9 @@
           (recur (+ i 1) (conj acc (nth (nth items i) 0)))
         :else (recur (+ i 1) acc)))))
 
-(defn collect-let-binders
-  [form: Any
-   macro-params: (Vec String)] -> (Vec String)
+(defn collect-let-binders [form: Any macro-params: (Vec String)] -> (Vec String)
   (let [items (unwrap-brackets form)]
-    (reduce (fn
-              [acc: (Vec String)
-               i: Int] -> (Vec String)
+    (reduce (fn [acc: (Vec String) i: Int] -> (Vec String)
               (if (and (= (mod i 2) 0) (< (+ i 1) (count items)))
                 (let [item (nth items i)]
                   (cond
@@ -358,13 +342,9 @@
 (defn collect-template-binders
   [template: Any
    macro-params: (Vec String)] -> (Vec String)
-  (letfn [(add-unique
-            [acc: (Vec String)
-             name: String] -> (Vec String)
+  (letfn [(add-unique [acc: (Vec String) name: String] -> (Vec String)
             (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
-          (walk
-            [acc: (Vec String)
-             datum: Any] -> (Vec String)
+          (walk [acc: (Vec String) datum: Any] -> (Vec String)
             (if (datum-pair? datum)
               (let [head (datum-car datum)]
                 (cond
@@ -410,13 +390,9 @@
    macro-params: (Vec String)
    binders: (Vec String)
    reg: Any] -> (Vec String)
-  (letfn [(add-unique
-            [acc: (Vec String)
-             name: String] -> (Vec String)
+  (letfn [(add-unique [acc: (Vec String) name: String] -> (Vec String)
             (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
-          (walk
-            [acc: (Vec String)
-             datum: Any] -> (Vec String)
+          (walk [acc: (Vec String) datum: Any] -> (Vec String)
             (cond
               (string? datum)
                 (if (and (module-def-name? datum)
@@ -433,9 +409,7 @@
               :else acc))]
     (walk [] template)))
 
-(defn rename-in-template
-  [template: Any
-   renames: Any] -> Any
+(defn rename-in-template [template: Any renames: Any] -> Any
   (cond
     (and (string? template) (not (nil? (get renames template))))
       (get renames template)
@@ -450,9 +424,7 @@
 ;; semantics; only the OUTERMOST unquote at the right level fires. Outside any
 ;; quasiquote (depth 0), pass through unchanged.
 
-(defn qq-form?
-  [d: Any
-   tag: String] -> Bool
+(defn qq-form? [d: Any tag: String] -> Bool
   (and (datum-pair? d) (= (count d) 2) (= (datum-car d) tag)))
 
 ;; Bracketed vecs splice their elements (strip the tag); plain lists as-is.
@@ -465,9 +437,7 @@
               [])))
 
 (defn qq-eval [datum: Any] -> Any
-  (letfn [(walk
-            [d: Any
-             depth: Int] -> Any
+  (letfn [(walk [d: Any depth: Int] -> Any
             (cond
               (qq-form? d "quasiquote")
                 (if (= depth 0)
@@ -495,12 +465,8 @@
               :else d))
           ;; List inside a quasiquote: handle unquote-splicing inline (a
           ;; BRACKET-TAG head is just an element, so vec semantics survive).
-          (walk-list
-            [d: Any
-             depth: Int] -> Any
-            (reduce (fn
-                      [acc: Any
-                       item: Any] -> Any
+          (walk-list [d: Any depth: Int] -> Any
+            (reduce (fn [acc: Any item: Any] -> Any
                       (if (and (qq-form? item "unquote-splicing") (= depth 1))
                         (into acc (qq-splice-elements (nth item 1)))
                         (conj acc (walk item depth))))
@@ -524,14 +490,10 @@
         free-refs (if (some? (deref MODULE-DEF-NAMES))
                     (collect-template-free-refs template macro-params binders reg)
                     [])
-        renames0 (reduce (fn
-                           [acc: Any
-                            b: String] -> Any
+        renames0 (reduce (fn [acc: Any b: String] -> Any
                            (assoc acc b (fresh-lowered-sym! b)))
                          {} (reverse binders))
-        renames (reduce (fn
-                          [acc: Any
-                           r: String] -> Any
+        renames (reduce (fn [acc: Any r: String] -> Any
                           (assoc acc r (hygiene-alias-for! r)))
                         renames0 (reverse free-refs))]
     (if (= (count renames) 0)
@@ -588,9 +550,7 @@
 
 ;; --- macro-application? ------------------------------------------------------
 
-(defn macro-application?
-  [reg: Any
-   datum: Any] -> Bool
+(defn macro-application? [reg: Any datum: Any] -> Bool
   (and (datum-pair? datum)
        (string? (datum-car datum))
        (not (nil? (lookup-macro reg (datum-car datum))))))
@@ -625,9 +585,7 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn- expect!
-  [label: String
-   result: Bool] -> Nil
+(defn- expect! [label: String result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
