@@ -2,8 +2,13 @@ fram.fold Native Core slice — provenance and named gaps
 
 upstream source (read-only)
   fram:src/fram/fold.bclj
-  sha256 0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2
-  fram commit aeb91c7fff3e1e6bb4dfc005c925ecefba2068ea
+  sha256 0fab0e17ecaf25d572ca269acf54c1b5e1841fe39af387b0dbf1f3da58897904
+  fram:src/fram/types.bgl   Triple and TripleRow field vocabulary
+  sha256 261c4ff4360f01ef3f2457aa06d9418f3a8de2974ea3ec7bbb6e286cae144770
+  fram commit  pending: the t1/t2/t3 triple-position rename has not landed on
+  fram main, so these are content pins with no commit to name yet. fold.bclj
+  itself is unchanged by the rename; against fram main it differs only in
+  parameter-vector physical layout.
 
 pipeline
   native.fold-slice-corpus  source Term graph for fold.bclj + the fram.types
