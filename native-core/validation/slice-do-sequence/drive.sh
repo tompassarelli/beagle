@@ -78,7 +78,7 @@ for expected in \
   'lowered fn_[0-9]+ do-ref-last ' \
   'lowered fn_[0-9]+ do-branch-last ' \
   'pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-DO-EMPTY: empty do is outside the native slice \[do-empty\]' \
-  'pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-doseq: no native lowering for this source form \[do-doseq\]' \
+  'pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-DOSEQ-CLAUSES: v0 accepts exactly one binding clause \[do-doseq\]' \
   'materialize OK module_0.h module_0.c'; do
   rg -q "$expected" "$report" || {
     echo "drive.sh: report omitted expected evidence: $expected" >&2

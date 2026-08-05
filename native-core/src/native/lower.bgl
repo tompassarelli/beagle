@@ -2513,6 +2513,43 @@
             (append-unique-strings binding-refs
               (source-free-ref-names index body body-bound (- fuel 1)))))
 
+        (= "doseq" kind)
+        (let [clauses-node: (U core/NativeId Nil)
+              (index-first-object index node "clauses")
+              clauses: (Vec core/NativeId)
+              (if (nil? clauses-node) []
+                (index-sequence-items index clauses-node))
+              binding-name: String
+              (if (and (= 1 (count clauses))
+                    (= "binding" (fact-text index (nth clauses 0) "clause-kind"))
+                    (= "true" (fact-text index (nth clauses 0) "simple")))
+                (fact-text index (nth clauses 0) "name")
+                "")
+              clause-refs: (Vec String)
+              (loop [position: Int 0 names: (Vec String) []]
+                (if (>= position (count clauses))
+                  names
+                  (let [value: (U core/NativeId Nil)
+                        (index-first-object index (nth clauses position) "value")]
+                    (recur (+ position 1)
+                      (if (nil? value)
+                        names
+                        (append-unique-strings names
+                          (source-free-ref-names index value bound (- fuel 1))))))))
+              body-node: (U core/NativeId Nil)
+              (index-first-object index node "body")
+              bodies: (Vec core/NativeId)
+              (if (nil? body-node) [] (index-sequence-items index body-node))
+              body-bound: (Vec String)
+              (if (= "" binding-name) bound (conj bound binding-name))]
+          (loop [position: Int 0 names: (Vec String) clause-refs]
+            (if (>= position (count bodies))
+              names
+              (recur (+ position 1)
+                (append-unique-strings names
+                  (source-free-ref-names index (nth bodies position) body-bound
+                    (- fuel 1)))))))
+
         :else
         (let [children: (Vec core/NativeId) (index-child-nodes index node)]
           (loop [position: Int 0 names: (Vec String) []]
@@ -6954,6 +6991,182 @@
                       (core/->JumpTerminator (loopframev0-header-id frame)
                         (argsresultv0-values copied)))
                     (lower-id "body" ["recur"]) (type-id "LowerFailure") true))))))
+
+        (= "doseq" kind)
+        (let [clauses-node: (U core/NativeId Nil)
+              (index-first-object index expr "clauses")
+              clauses: (Vec core/NativeId)
+              (if (nil? clauses-node) []
+                (index-sequence-items index clauses-node))
+              body-node: (U core/NativeId Nil)
+              (index-first-object index expr "body")
+              bodies: (Vec core/NativeId)
+              (if (nil? body-node) [] (index-sequence-items index body-node))
+              modifier-position: Int
+              (loop [position: Int 0]
+                (cond
+                  (>= position (count clauses)) -1
+                  (= "binding"
+                    (fact-text index (nth clauses position) "clause-kind"))
+                  (recur (+ position 1))
+                  :else position))
+              outer-locals: (Vec LocalBindingV0) (bodystatev0-locals state)
+              outer-frames: (Vec LoopFrameV0) (bodystatev0-loop-frames state)
+              outer-refinements: (Vec KeywordFlowRefinementV0)
+              (bodystatev0-keyword-refinements state)]
+          (cond
+            (>= modifier-position 0)
+            (fail-result state
+              "TODO-NATIVE-DOSEQ-MODIFIER: v0 accepts no :let, :when, or :while clause")
+
+            (not (= 1 (count clauses)))
+            (fail-result state
+              "TODO-NATIVE-DOSEQ-CLAUSES: v0 accepts exactly one binding clause")
+
+            (not (= 1 (count bodies)))
+            (fail-result state
+              "TODO-NATIVE-DOSEQ-BODY: v0 accepts exactly one body form")
+
+            :else
+            (let [clause: core/NativeId (nth clauses 0)
+                  simple: String (fact-text index clause "simple")
+                  name: String (fact-text index clause "name")
+                  annotation: (U core/NativeId Nil)
+                  (index-first-object index clause "ann")
+                  collection-node: (U core/NativeId Nil)
+                  (index-first-object index clause "value")]
+              (cond
+                (or (not (= "true" simple)) (= "" name))
+                (fail-result state
+                  "TODO-NATIVE-DOSEQ-BINDING: v0 needs one simple named binding")
+
+                (nil? collection-node)
+                (fail-result state
+                  "TODO-NATIVE-DOSEQ-COLLECTION: the binding has no collection expression")
+
+                :else
+                (let [collection: ExprResultV0
+                      (lower-expr env owner state collection-node)
+                      collection-state: BodyStateV0 (exprresultv0-state collection)]
+                  (cond
+                    (exprresultv0-terminated collection) collection
+                    (state-blocked? collection-state) (dead-result collection-state)
+                    (not (vector-type? types (exprresultv0-type-id collection)))
+                    (fail-result collection-state
+                      "TODO-NATIVE-DOSEQ-COLLECTION: v0 iterates one closed native Vec")
+
+                    :else
+                    (let [element-type: core/NativeId
+                          (vector-element-of types (exprresultv0-type-id collection))
+                          annotation-resolution: (U TypeResolutionV0 Nil)
+                          (if (nil? annotation) nil
+                            (resolve-source-type index annotation))]
+                      (cond
+                        (and (some? annotation-resolution)
+                          (not (typeresolutionv0-valid annotation-resolution)))
+                        (fail-result collection-state
+                          "TODO-NATIVE-DOSEQ-BINDING-TYPE: the binding annotation is not a closed native type")
+
+                        (and (some? annotation-resolution)
+                          (not (same-id? element-type
+                                 (typeresolutionv0-type-id annotation-resolution))))
+                        (fail-result collection-state
+                          "TODO-NATIVE-DOSEQ-BINDING-TYPE: the binding annotation does not match the Vec element type")
+
+                        :else
+                        (let [length-id: core/NativeId
+                              (state-id collection-state owner "doseq-length")
+                              zero-id: core/NativeId
+                              (state-id collection-state owner "doseq-zero")
+                              header-id: core/NativeId
+                              (state-id collection-state owner "doseq-header")
+                              body-id: core/NativeId
+                              (state-id collection-state owner "doseq-body")
+                              exit-id: core/NativeId
+                              (state-id collection-state owner "doseq-exit")
+                              header-index: core/NativeId
+                              (state-id collection-state owner "doseq-index")
+                              prepared: BodyStateV0
+                              (state-emit
+                                (state-emit (state-bump collection-state)
+                                  (core/->VecLengthInstruction
+                                    (core/->SsaValueV0 length-id (int-type-id))
+                                    (exprresultv0-value-id collection)))
+                                (core/->AtomInstruction
+                                  (core/->SsaValueV0 zero-id (int-type-id))
+                                  (core/->I64Atom 0)))
+                              entered: BodyStateV0
+                              (state-open-block
+                                (state-close (state-bump prepared)
+                                  (core/->JumpTerminator header-id [zero-id]))
+                                header-id
+                                [(core/->Parameter header-index (int-type-id))])
+                              has-item: core/NativeId
+                              (state-id entered owner "doseq-has-item")
+                              compared: BodyStateV0
+                              (state-emit (state-bump entered)
+                                (core/->CompareInstruction
+                                  (core/->SsaValueV0 has-item (bool-type-id))
+                                  (core/->CompareLtI64V0 true)
+                                  header-index length-id))
+                              branched: BodyStateV0
+                              (state-open-block
+                                (state-close compared
+                                  (core/->BranchTerminator has-item body-id exit-id))
+                                body-id [])
+                              item-id: core/NativeId
+                              (state-id branched owner "doseq-item")
+                              body-state: BodyStateV0
+                              (state-bind
+                                (state-emit (state-bump branched)
+                                  (core/->VecGetInstruction
+                                    (core/->SsaValueV0 item-id element-type)
+                                    (exprresultv0-value-id collection)
+                                    header-index))
+                                name item-id element-type)
+                              body: ExprResultV0
+                              (lower-expr env owner body-state (nth bodies 0))
+                              restored: BodyStateV0
+                              (with
+                                (with
+                                  (with (exprresultv0-state body)
+                                    [:locals outer-locals])
+                                  [:loop-frames outer-frames])
+                                [:keyword-refinements outer-refinements])]
+                          (cond
+                            (state-blocked? restored) (dead-result restored)
+                            (exprresultv0-terminated body)
+                            (fail-result restored
+                              "TODO-NATIVE-DOSEQ-BODY-CONTROL: the body must return to the doseq back edge")
+                            :else
+                            (let [one-id: core/NativeId
+                                  (state-id restored owner "doseq-one")
+                                  with-one: BodyStateV0
+                                  (state-emit (state-bump restored)
+                                    (core/->AtomInstruction
+                                      (core/->SsaValueV0 one-id (int-type-id))
+                                      (core/->I64Atom 1)))
+                                  next-index: ExprResultV0
+                                  (lower-checked-arith with-one owner "+"
+                                    header-index one-id)
+                                  next-state: BodyStateV0
+                                  (exprresultv0-state next-index)]
+                              (if (state-blocked? next-state)
+                                (dead-result next-state)
+                                (let [exited: BodyStateV0
+                                      (state-open-block
+                                        (state-close next-state
+                                          (core/->JumpTerminator header-id
+                                            [(exprresultv0-value-id next-index)]))
+                                        exit-id [])
+                                      unit-id: core/NativeId
+                                      (state-id exited owner "doseq-unit")]
+                                  (->ExprResultV0
+                                    (state-emit (state-bump exited)
+                                      (core/->UnionConstructInstruction
+                                        (core/->SsaValueV0 unit-id (type-id "Nil"))
+                                        (variant-id "Unit" "unit") nil))
+                                    unit-id (type-id "Nil") false))))))))))))))
 
         (= "vec" kind)
         (let [items-node: (U core/NativeId Nil) (index-first-object index expr "items")

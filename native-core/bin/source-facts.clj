@@ -92,6 +92,19 @@
     (row! n "value" "n" (emit-expr (get b "value")))
     n))
 
+(defn emit-doseq-clause [clause]
+  (let [n (nid)
+        clause-kind (str (get clause "type"))
+        name (get clause "name")]
+    (row! n "form-kind" "t" "doseq-clause")
+    (row! n "clause-kind" "t" clause-kind)
+    (row! n "simple" "t" (str (string? name)))
+    (when (string? name) (row! n "name" "t" name))
+    (when-let [a (get clause "ann")] (row! n "ann" "n" (emit-ann a)))
+    (when-let [value (get clause "expr")]
+      (row! n "value" "n" (emit-expr value)))
+    n))
+
 (defn emit-cond-clause [clause]
   (let [n (nid)]
     (row! n "form-kind" "t" "cond-clause")
@@ -159,6 +172,11 @@
                     (row! n "body" "n" (emit-body (get e "body"))))
       "recur"   (do (row! n "form-kind" "t" "recur")
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
+      "doseq"   (do (row! n "form-kind" "t" "doseq")
+                    (row! n "clauses" "n"
+                          (emit-seq (get e "clauses") emit-doseq-clause))
+                    (row! n "body" "n"
+                          (emit-seq (get e "body") emit-expr)))
       "vec"     (do (row! n "form-kind" "t" "vec")
                     (row! n "items" "n" (emit-seq (get e "items") emit-expr)))
       "set"     (do (row! n "form-kind" "t" "set")
