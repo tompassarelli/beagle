@@ -141,6 +141,9 @@ parser actually does** (`postfix-annotation-parse.rkt` is the contract):
 - `[x : Int]` in binding position — REJECTED, pointing at `(x : Int)`. `[...]`
   is sequential destructuring at every binding site, so a bracketed annotation
   is a collision, not a spelling; the wrapped form uses parens.
+- `(PATTERN : Type)` in a PARAM slot — the pattern may be a name, `[a b]`, or
+  `{:keys [...]}`; the declared type is what callers are checked against.
+  `let`/`loop` still take a name only in the wrapped form.
 
 The removal cut flips `legacy-annotation-marker-mode` to `'error` and drops
 `LEGACY-MARKER` from the marker predicates in `parse.rkt`; it is blocked on the

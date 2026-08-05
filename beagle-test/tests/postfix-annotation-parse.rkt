@@ -163,6 +163,34 @@
 (ok "nested + rest destructuring still parses"
     "(defn f [[a [b c]] & more] -> Int a)")
 
+;; --- (PATTERN : Type) — the parenthesized form carries a pattern -------------
+
+(define REC "(defrecord Point [x: Int y: Int])\n")
+
+(ok "seq pattern with a type"
+    "(defn sq [([a b] : (Vec Int))] -> Int (+ a b))")
+(ok "map pattern with a type"
+    (string-append REC "(defn m [({:keys [x y]} : Point)] -> Int 0)"))
+(ok "a typed pattern accepts a matching argument"
+    (string-append REC
+                   "(defn m [({:keys [x y]} : Point)] -> Int 0)\n"
+                   "(defn use [p: Point] -> Int (m p))"))
+
+(test-case "a typed seq pattern enforces its declared type at the call site"
+  (check-exn #rx"call to sq: arg 1 expected \\(Vec Int\\), got String"
+             (lambda ()
+               (check-src (string-append
+                           "(defn sq [([a b] : (Vec Int))] -> Int (+ a b))\n"
+                           "(defn use [] -> Int (sq \"nope\"))")))))
+
+(test-case "a typed map pattern enforces its declared type at the call site"
+  (check-exn #rx"call to m: arg 1 expected Point, got String"
+             (lambda ()
+               (check-src (string-append
+                           REC
+                           "(defn m [({:keys [x y]} : Point)] -> Int 0)\n"
+                           "(defn use [] -> Int (m \"nope\"))")))))
+
 ;; --- the `:-` migration diagnostic ------------------------------------------
 
 (test-case "legacy `:-` warns once per source in the default 'warn mode"

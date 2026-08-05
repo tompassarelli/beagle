@@ -1909,8 +1909,8 @@
 
 (define (param-or-destr-type p)
   (cond
-    [(map-destructure? p) ANY]
-    [(seq-destructure? p) ANY]
+    [(map-destructure? p) (or (map-destructure-type p) ANY)]
+    [(seq-destructure? p) (or (seq-destructure-type p) ANY)]
     [else (or (param-type p) ANY)]))
 
 ;; --- check a top-level form ------------------------------------------------

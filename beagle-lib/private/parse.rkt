@@ -4886,20 +4886,40 @@
             (parse-seq-destructure item)]
            [(map-destructure-form? item)
             (parse-map-destructure item)]
-           [(and (list? item)
-                 (= (length item) 3)
-                 (symbol? (car item))
-                 (annotation-marker? (cadr item)))
-            (validate-identifier! (car item) "parameter")
-            (param (car item) (parse-type (caddr item)))]
+           [(wrapped-annotation? item)
+            (parse-wrapped-annotation item "parameter")]
            [(symbol? item)
             (validate-identifier! item "parameter")
             (param item #f)]
            [else
             (error 'beagle
-                   "bad parameter: ~v~nexpected name, (name: Type), name: Type, or {:keys [...]}"
+                   "bad parameter: ~v~nexpected name, (name: Type), name: Type, ([a b] : Type), or {:keys [...]}"
                    item)]))
        (loop (cdr rest) (cons parsed acc))])))
+
+;; `(PATTERN : Type)` — the parenthesized typed binding. Parens are the only
+;; delimiter free in binding position, so PATTERN may be anything an
+;; unannotated slot accepts: a name, `[a b]`, or `{:keys [...]}`.
+(define (wrapped-annotation? item)
+  (and (list? item)
+       (= (length item) 3)
+       (not (bracketed? item))
+       (not (map-tagged? item))
+       (annotation-marker? (cadr item))))
+
+(define (parse-wrapped-annotation item where)
+  (define pat (car item))
+  (define ty (parse-type (caddr item)))
+  (cond
+    [(bracketed? pat) (parse-seq-destructure pat ty)]
+    [(map-destructure-form? pat) (parse-map-destructure pat ty)]
+    [(symbol? pat)
+     (validate-identifier! pat where)
+     (param pat ty)]
+    [else
+     (error 'beagle
+            "bad ~a: ~v~nthe annotated form is (name : Type), ([a b] : Type), or ({:keys [...]} : Type)"
+            where item)]))
 
 (define (map-destructure-form? item)
   (and (map-tagged? item)
@@ -4911,7 +4931,7 @@
 ;; Map destructure: {:keys [a b] :or {b 2} :as m}. All real-Clojure options
 ;; are either supported (:keys/:or/:as) or pointedly rejected (:strs/:syms,
 ;; {alias :key}) — never silently dropped (the :or bug class, 2026-06-12).
-(define (parse-map-destructure item)
+(define (parse-map-destructure item [ty #f])
   (define d (->datum item))
   (define body (map-body d))
   (unless (and (>= (length body) 2)
@@ -4925,7 +4945,7 @@
   (let loop ([rest (cddr body)] [as-name #f] [or-defaults '()])
     (cond
       [(null? rest)
-       (map-destructure key-names as-name or-defaults)]
+       (map-destructure key-names as-name or-defaults ty)]
       [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
        (loop (cddr rest) (cadr rest) or-defaults)]
       [(and (eq? (car rest) ':or) (pair? (cdr rest)) (map-tagged? (cadr rest)))
@@ -5188,7 +5208,7 @@
 ;; Sequential destructure: [a b], [a [b c]], [{:keys [x]} y], [a & rest].
 ;; Nested patterns recurse (real Clojure); entries other than symbols and
 ;; nested patterns are rejected pointedly.
-(define (parse-seq-destructure item)
+(define (parse-seq-destructure item [ty #f])
   (define d (->datum item))
   (define body (bracket-body d))
   (when (ormap (lambda (e) (or (eq? e ANN-MARKER) (eq? e LEGACY-MARKER))) body)
@@ -5211,7 +5231,7 @@
          (error 'beagle
                 "sequential destructure: expected a symbol, nested [..] pattern, or {:keys [..]} pattern, got: ~v"
                 (car items))])))
-  (seq-destructure names rest-name))
+  (seq-destructure names rest-name ty))
 
 (define (parse-for-clauses b)
   (define d (->datum b))
