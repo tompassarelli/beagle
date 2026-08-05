@@ -2,3 +2,6 @@
 
 (defrecord Item [value: Int])
 (defalias Term (Dyn String Int Item))
+
+(def provider-label: String "provider")
+(def exported-label: String provider-label)

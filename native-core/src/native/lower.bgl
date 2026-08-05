@@ -2107,27 +2107,8 @@
             refinement
             (recur (- position 1))))))))
 
-(defn owner-source
-  [env: BodyEnvV0
-   owner: core/NativeId] -> (U core/NativeId Nil)
-  (let [signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
-        sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)]
-    (loop [position: Int 0]
-      (if (or (>= position (count signatures)) (>= position (count sources)))
-        nil
-        (if (same-id? owner (typedfunctionv0-id (nth signatures position)))
-          (nth sources position)
-          (recur (+ position 1)))))))
-
-(defn body-owner-module
-  [env: BodyEnvV0
-   owner: core/NativeId] -> String
-  (let [source: (U core/NativeId Nil) (owner-source env owner)]
-    (if (nil? source) "" (source-module-name (bodyenvv0-index env) source))))
-
 (defn source-ref-binding
   [env: BodyEnvV0
-   owner: core/NativeId
    state: BodyStateV0
    source: core/NativeId] -> (U LocalBindingV0 Nil)
   (let [index: SourceIndexV0 (bodyenvv0-index env)]
@@ -2138,20 +2119,20 @@
             (find-local (bodystatev0-locals state) name)
             canonical: String
             (resolved-source-key
-              (resolve-source-name index (body-owner-module env owner) name))]
+              (resolve-source-name index (source-module-name index source) name))]
         (if (some? direct)
           direct
           (find-local (bodystatev0-locals state) canonical))))))
 
 (defn find-signature
   [env: BodyEnvV0
-   owner: core/NativeId
+   source: core/NativeId
    spelling: String] -> (U TypedFunctionV0 Nil)
   (let [index: SourceIndexV0 (bodyenvv0-index env)
         signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
         sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)
         resolved: ResolvedSourceNameV0
-        (resolve-source-name index (body-owner-module env owner) spelling)]
+        (resolve-source-name index (source-module-name index source) spelling)]
     (if (not (resolvedsourcenamev0-visible resolved))
       nil
       (loop [position: Int 0]
@@ -2601,14 +2582,13 @@
 
 (defn needed-globals
   [env: BodyEnvV0
-   owner: core/NativeId
    body: core/NativeId
    bound: (Vec String)] -> (Vec GlobalBindingV0)
   (let [index: SourceIndexV0 (bodyenvv0-index env)
         globals: (Vec GlobalBindingV0) (bodyenvv0-globals env)
         keys: (Vec String)
         (close-global-keys index globals
-          (source-ref-keys index (body-owner-module env owner) body bound
+          (source-ref-keys index (source-module-name index body) body bound
             (+ 1 (index-facts index))))]
     (loop [position: Int 0 selected: (Vec GlobalBindingV0) []]
       (if (>= position (count globals))
@@ -3226,7 +3206,6 @@
 
 (defn source-ref-type
   [env: BodyEnvV0
-   owner: core/NativeId
    state: BodyStateV0
    expr: core/NativeId] -> (U core/NativeId Nil)
   (let [index: SourceIndexV0 (bodyenvv0-index env)]
@@ -3237,7 +3216,7 @@
             (find-local (bodystatev0-locals state) name)
             canonical: String
             (resolved-source-key
-              (resolve-source-name index (body-owner-module env owner) name))
+              (resolve-source-name index (source-module-name index expr) name))
             binding: (U LocalBindingV0 Nil)
             (if (some? direct)
               direct
@@ -3246,11 +3225,10 @@
 
 (defn source-ref-record?
   [env: BodyEnvV0
-   owner: core/NativeId
    state: BodyStateV0
    expr: core/NativeId] -> Bool
   (let [source-type: (U core/NativeId Nil)
-        (source-ref-type env owner state expr)]
+        (source-ref-type env state expr)]
     (and (not (nil? source-type))
       (record-type? (bodyenvv0-types env) source-type))))
 
@@ -5818,7 +5796,7 @@
             (nil? target))
       nil
       (let [binding: (U LocalBindingV0 Nil)
-            (source-ref-binding env owner state target)]
+            (source-ref-binding env state target)]
         (if (nil? binding)
           nil
           (let [source-type: core/NativeId (localbindingv0-type-id binding)]
@@ -5862,7 +5840,7 @@
 
       (= "ref" kind)
       (let [binding: (U LocalBindingV0 Nil)
-            (source-ref-binding env owner state source)]
+            (source-ref-binding env state source)]
         (if (nil? binding)
           nil
           (let [type-id-value: core/NativeId (localbindingv0-type-id binding)]
@@ -6621,7 +6599,7 @@
         (= "ref" kind)
         (let [name: String (fact-text index expr "name")
               binding: (U LocalBindingV0 Nil)
-              (source-ref-binding env owner state expr)]
+              (source-ref-binding env state expr)]
           (if (nil? binding)
             (fail-result state
               (str "TODO-NATIVE-FREE-REFERENCE: " name
@@ -7692,7 +7670,7 @@
               "TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading")
 
             (and (= "assoc" callee) (> (count args) 0)
-              (source-ref-record? env owner state (nth args 0)))
+              (source-ref-record? env state (nth args 0)))
             (if (or (< (count args) 3) (= 0 (mod (count args) 2)))
               (fail-result state
                 "TODO-NATIVE-RECORD-ASSOC-ARITY: assoc takes a record and one or more key/value pairs")
@@ -8225,7 +8203,8 @@
                 "TODO-NATIVE-INSTANCE-ARITY: instance? takes a type and a value")
               (let [record-spelling: String (fact-text index (nth args 0) "name")
                     resolved-record: ResolvedSourceNameV0
-                    (resolve-source-name index (body-owner-module env owner)
+                    (resolve-source-name index
+                      (source-module-name index (nth args 0))
                       record-spelling)
                     record-key: String (resolved-source-key resolved-record)
                     value: ExprResultV0 (lower-expr env owner state (nth args 1))]
@@ -8298,7 +8277,7 @@
                   (let [updater-name: String
                         (fact-text index (nth args 1) "name")
                         signature: (U TypedFunctionV0 Nil)
-                        (find-signature env owner updater-name)
+                        (find-signature env (nth args 1) updater-name)
                         content: (U core/NativeId Nil)
                         (atom-cell-content-of types (exprresultv0-type-id cell))]
                     (cond
@@ -8369,14 +8348,14 @@
 
             :else
             (let [resolved-callee: ResolvedSourceNameV0
-                  (resolve-source-name index (body-owner-module env owner) callee)
+                  (resolve-source-name index (source-module-name index expr) callee)
                   accessor: AccessorHitV0
                   (record-accessor types resolved-callee)
                   bare-callee: String (unqualified-name callee)
                   constructor: (U core/TypeDef Nil)
                   (record-constructor types resolved-callee)
                   signature: (U TypedFunctionV0 Nil)
-                  (find-signature env owner callee)
+                  (find-signature env expr callee)
                   lowered: ArgsResultV0
                   (loop [position: Int 0
                          current: BodyStateV0 state
@@ -10000,7 +9979,7 @@
       (let [globalized: BodyStateV0
             (lower-global-bindings env id
               (->BodyStateV0 [] entry-id [] [] true 0 [] "" [] [])
-              (needed-globals env id body-node
+              (needed-globals env body-node
                 (mapv
                   (fn [binding: LocalBindingV0] -> String
                     (localbindingv0-name binding))
