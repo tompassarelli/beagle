@@ -16,7 +16,8 @@
           BoolAtom I64Atom F64Atom TextAtom KeywordAtom RefAtom
           CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0
           CheckedQuotI64V0 CheckedRemI64V0 CheckedModI64V0 CheckedBoundsV0
-          AtomInstruction CopyInstruction AddF64Instruction DivF64InstructionV0
+          AtomInstruction CopyInstruction AddF64Instruction
+          SubF64InstructionV0 MulF64InstructionV0 DivF64InstructionV0
           CheckedInstruction
           StoreInstruction AllocateInstruction CallInstruction
           ReturnTerminator JumpTerminator BranchTerminator SwitchTerminator
@@ -276,6 +277,8 @@
     (instance? native.core.AtomInstruction instruction)
     (atom-supported? (core/atominstruction-atom instruction))
     (instance? native.core.AddF64Instruction instruction) true
+    (instance? native.core.SubF64InstructionV0 instruction) true
+    (instance? native.core.MulF64InstructionV0 instruction) true
     (instance? native.core.DivF64InstructionV0 instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
@@ -551,6 +554,22 @@
       (instance? native.core.AddF64Instruction instruction)
       (str "  double " result-name " = " (value-name function block (core/addf64instruction-left-id instruction)) " + "
         (value-name function block (core/addf64instruction-right-id instruction)) ";\n  (void)" result-name ";\n")
+
+      (instance? native.core.SubF64InstructionV0 instruction)
+      (str "  double " result-name " = "
+        (value-name function block
+          (core/subf64instructionv0-left-id instruction)) " - "
+        (value-name function block
+          (core/subf64instructionv0-right-id instruction))
+        ";\n  (void)" result-name ";\n")
+
+      (instance? native.core.MulF64InstructionV0 instruction)
+      (str "  double " result-name " = "
+        (value-name function block
+          (core/mulf64instructionv0-left-id instruction)) " * "
+        (value-name function block
+          (core/mulf64instructionv0-right-id instruction))
+        ";\n  (void)" result-name ";\n")
 
       (instance? native.core.DivF64InstructionV0 instruction)
       (let [left: String

@@ -94,7 +94,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.int-division\"
     \"beagle:native-core/validation/slice-int-division/fixture.bclj\"
-    \"$scratch\" \"native-int-division-v0\" \"float-divide\" 0))
+    \"$scratch\" \"native-int-division-v0\" \"float-arithmetic\" 0))
 (spit \"$scratch/integer-qbe-report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.int-division\"
@@ -130,6 +130,8 @@ quot_index="$(function_index quot-int)"
 rem_index="$(function_index rem-int)"
 mod_index="$(function_index mod-int)"
 float_add_index="$(function_index float-add)"
+float_subtract_index="$(function_index float-subtract)"
+float_multiply_index="$(function_index float-multiply)"
 float_divide_index="$(function_index float-divide)"
 add_index="$(function_index variadic-add)"
 multiply_index="$(function_index variadic-multiply)"
@@ -137,6 +139,7 @@ negate_index="$(function_index unary-negate)"
 keyword_index="$(function_index literal-keyword-equal?)"
 if [[ -z "$quot_index" || -z "$rem_index" || -z "$mod_index" ||
       -z "$float_add_index" || -z "$float_divide_index" ||
+      -z "$float_subtract_index" || -z "$float_multiply_index" ||
       -z "$add_index" || -z "$multiply_index" || -z "$negate_index" ||
       -z "$keyword_index" ]]; then
   echo "drive.sh: failed to resolve integer function indices" >&2
@@ -152,6 +155,8 @@ clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M -e "
 (assert (= -1 (native.int-division/rem-int -7 3)))
 (assert (= 2 (native.int-division/mod-int -7 3)))
 (assert (= 4.0 (native.int-division/float-add 1.5 2.5)))
+(assert (= 5.0 (native.int-division/float-subtract 7.5 2.5)))
+(assert (= 3.0 (native.int-division/float-multiply 1.5 2.0)))
 (assert (= 3.0 (native.int-division/float-divide 7.5 2.5)))
 (assert
   (try
@@ -174,6 +179,8 @@ definitions=(
   "-DREM_FN=native_m0_fn_$rem_index"
   "-DMOD_FN=native_m0_fn_$mod_index"
   "-DFLOAT_ADD_FN=native_m0_fn_$float_add_index"
+  "-DFLOAT_SUBTRACT_FN=native_m0_fn_$float_subtract_index"
+  "-DFLOAT_MULTIPLY_FN=native_m0_fn_$float_multiply_index"
   "-DFLOAT_DIVIDE_FN=native_m0_fn_$float_divide_index"
   "-DADD_FN=native_m0_fn_$add_index"
   "-DMULTIPLY_FN=native_m0_fn_$multiply_index"
@@ -203,7 +210,7 @@ run_compiler gcc probe_gcc
 run_compiler "$clang_bin" probe_clang
 
 "$qbe_bin" "$scratch/module_0.ssa" >"$scratch/module_0.s"
-gcc "${strict[@]}" -DFLOAT_DIVIDE_FN=native_m0_fn_0 \
+gcc "${strict[@]}" -DFLOAT_ARITHMETIC_FN=native_m0_fn_0 \
   -o "$scratch/qbe_probe" "$scratch/module_0.s" "$here/qbe_main.c" \
   "$repo/native-core/shim/native_shim.c"
 "$scratch/qbe_probe"

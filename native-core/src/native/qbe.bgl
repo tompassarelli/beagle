@@ -237,6 +237,10 @@
     [(AtomInstruction value) (core/atominstruction-result instruction)]
     [(CopyInstruction value) (core/copyinstruction-result instruction)]
     [(AddF64Instruction value) (core/addf64instruction-result instruction)]
+    [(SubF64InstructionV0 value)
+     (core/subf64instructionv0-result instruction)]
+    [(MulF64InstructionV0 value)
+     (core/mulf64instructionv0-result instruction)]
     [(DivF64InstructionV0 value)
      (core/divf64instructionv0-result instruction)]
     [(I64ToF64InstructionV0 value)
@@ -990,6 +994,8 @@
     [(AtomInstruction value) false]
     [(CopyInstruction value) false]
     [(AddF64Instruction value) false]
+    [(SubF64InstructionV0 value) false]
+    [(MulF64InstructionV0 value) false]
     [(DivF64InstructionV0 value) true]
     [(I64ToF64InstructionV0 value) false]
     [(CheckedInstruction value) true]
@@ -1336,6 +1342,14 @@
        (str "  " result-name " =" (value-letter-or context result-id "d") " add "
          (value-name context (core/addf64instruction-left-id instruction)) ", "
          (value-name context (core/addf64instruction-right-id instruction)) "\n")]
+      [(SubF64InstructionV0 value)
+       (str "  " result-name " =" (value-letter-or context result-id "d") " sub "
+         (value-name context (core/subf64instructionv0-left-id instruction)) ", "
+         (value-name context (core/subf64instructionv0-right-id instruction)) "\n")]
+      [(MulF64InstructionV0 value)
+       (str "  " result-name " =" (value-letter-or context result-id "d") " mul "
+         (value-name context (core/mulf64instructionv0-left-id instruction)) ", "
+         (value-name context (core/mulf64instructionv0-right-id instruction)) "\n")]
       [(DivF64InstructionV0 value)
        (emit-f64-divide context block-index-value position result-name
          (core/divf64instructionv0-left-id instruction)
@@ -1867,6 +1881,8 @@
     [(AtomInstruction value) (atom-supported? (core/atominstruction-atom instruction))]
     [(CopyInstruction value) true]
     [(AddF64Instruction value) true]
+    [(SubF64InstructionV0 value) true]
+    [(MulF64InstructionV0 value) true]
     [(DivF64InstructionV0 value) true]
     [(I64ToF64InstructionV0 value) true]
     [(CheckedInstruction value)

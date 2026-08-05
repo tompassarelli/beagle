@@ -160,6 +160,8 @@
           (instance? native.core.KeywordAtom atom)))
     (instance? native.core.CopyInstruction instruction) true
     (instance? native.core.AddF64Instruction instruction) true
+    (instance? native.core.SubF64InstructionV0 instruction) true
+    (instance? native.core.MulF64InstructionV0 instruction) true
     (instance? native.core.DivF64InstructionV0 instruction) true
     (instance? native.core.I64ToF64InstructionV0 instruction) true
     (instance? native.core.CompareInstruction instruction) true
@@ -1957,6 +1959,24 @@
         " + "
         (value-name function slots
           (core/addf64instruction-right-id instruction))
+        ";\n")
+
+      (instance? native.core.SubF64InstructionV0 instruction)
+      (str "  " target " = "
+        (value-name function slots
+          (core/subf64instructionv0-left-id instruction))
+        " - "
+        (value-name function slots
+          (core/subf64instructionv0-right-id instruction))
+        ";\n")
+
+      (instance? native.core.MulF64InstructionV0 instruction)
+      (str "  " target " = "
+        (value-name function slots
+          (core/mulf64instructionv0-left-id instruction))
+        " * "
+        (value-name function slots
+          (core/mulf64instructionv0-right-id instruction))
         ";\n")
 
       (instance? native.core.DivF64InstructionV0 instruction)

@@ -2410,11 +2410,22 @@
    right: core/NativeId] -> ExprResultV0
   (let [result-id: core/NativeId (state-id state owner "f64-arith")
         instruction: core/Instruction
-        (if (= "+" callee)
+        (cond
+          (= "+" callee)
           (core/->AddF64Instruction
-           (core/->SsaValueV0 result-id (float-type-id)) left right)
+            (core/->SsaValueV0 result-id (float-type-id)) left right)
+
+          (= "-" callee)
+          (core/->SubF64InstructionV0
+            (core/->SsaValueV0 result-id (float-type-id)) left right)
+
+          (= "*" callee)
+          (core/->MulF64InstructionV0
+            (core/->SsaValueV0 result-id (float-type-id)) left right)
+
+          :else
           (core/->DivF64InstructionV0
-           (core/->SsaValueV0 result-id (float-type-id)) left right))]
+            (core/->SsaValueV0 result-id (float-type-id)) left right))]
     (->ExprResultV0
      (state-emit (state-bump state) instruction)
      result-id (float-type-id) false)))
@@ -12172,7 +12183,8 @@
                 (fail-result current
                   "TODO-NATIVE-ATOM-RESET-ARITY: reset! takes one Atom and one replacement value")
 
-                (and (or (= "+" callee) (= "/" callee))
+                (and (or (= "+" callee) (= "-" callee)
+                         (= "*" callee) (= "/" callee))
                   (exact-binary-float-values? value-types))
                 (lower-f64-binary current owner callee
                   (nth values 0) (nth values 1))
@@ -15505,6 +15517,18 @@
       [(encode-ssa-value (core/addf64instruction-result instruction))
        (id-value (core/addf64instruction-left-id instruction))
        (id-value (core/addf64instruction-right-id instruction))])
+
+    (instance? native.core.SubF64InstructionV0 instruction)
+    (worlds/canonical-record "sub-f64-instruction-v0"
+      [(encode-ssa-value (core/subf64instructionv0-result instruction))
+       (id-value (core/subf64instructionv0-left-id instruction))
+       (id-value (core/subf64instructionv0-right-id instruction))])
+
+    (instance? native.core.MulF64InstructionV0 instruction)
+    (worlds/canonical-record "mul-f64-instruction-v0"
+      [(encode-ssa-value (core/mulf64instructionv0-result instruction))
+       (id-value (core/mulf64instructionv0-left-id instruction))
+       (id-value (core/mulf64instructionv0-right-id instruction))])
 
     (instance? native.core.DivF64InstructionV0 instruction)
     (worlds/canonical-record "div-f64-instruction-v0"

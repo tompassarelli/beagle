@@ -22,10 +22,25 @@
    right: Float] -> Float
   (+ left right))
 
+(defn float-subtract
+  [left: Float
+   right: Float] -> Float
+  (- left right))
+
+(defn float-multiply
+  [left: Float
+   right: Float] -> Float
+  (* left right))
+
 (defn float-divide
   [left: Float
    right: Float] -> Float
   (/ left right))
+
+(defn float-arithmetic
+  [left: Float
+   right: Float] -> Float
+  (/ (* (- (+ left right) right) right) right))
 
 (defn variadic-add
   [first: Int

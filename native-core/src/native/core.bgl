@@ -312,6 +312,14 @@
     [result: SsaValueV0
      left-id: NativeId
      right-id: NativeId])
+  (SubF64InstructionV0
+    [result: SsaValueV0
+     left-id: NativeId
+     right-id: NativeId])
+  (MulF64InstructionV0
+    [result: SsaValueV0
+     left-id: NativeId
+     right-id: NativeId])
   ;; Clojure Float division traps on either signed zero divisor.
   (DivF64InstructionV0
     [result: SsaValueV0
@@ -840,6 +848,8 @@
     [(AtomInstruction result atom) (ssavaluev0-id result)]
     [(CopyInstruction result source-id) (ssavaluev0-id result)]
     [(AddF64Instruction result left-id right-id) (ssavaluev0-id result)]
+    [(SubF64InstructionV0 result left-id right-id) (ssavaluev0-id result)]
+    [(MulF64InstructionV0 result left-id right-id) (ssavaluev0-id result)]
     [(DivF64InstructionV0 result left-id right-id) (ssavaluev0-id result)]
     [(I64ToF64InstructionV0 result source-id) (ssavaluev0-id result)]
     [(CheckedInstruction result operation) (ssavaluev0-id result)]
@@ -1387,6 +1397,8 @@
     [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
+    [(SubF64InstructionV0 result left-id right-id) true]
+    [(MulF64InstructionV0 result left-id right-id) true]
     [(DivF64InstructionV0 result left-id right-id) true]
     [(I64ToF64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
@@ -1642,6 +1654,8 @@
     [(AtomInstruction result atom) []]
     [(CopyInstruction result source-id) [source-id]]
     [(AddF64Instruction result left-id right-id) [left-id right-id]]
+    [(SubF64InstructionV0 result left-id right-id) [left-id right-id]]
+    [(MulF64InstructionV0 result left-id right-id) [left-id right-id]]
     [(DivF64InstructionV0 result left-id right-id) [left-id right-id]]
     [(I64ToF64InstructionV0 result source-id) [source-id]]
     [(CheckedInstruction result operation) (checked-operation-ssa-refs operation)]
@@ -1799,6 +1813,8 @@
     [(AtomInstruction result atom) true]
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
+    [(SubF64InstructionV0 result left-id right-id) true]
+    [(MulF64InstructionV0 result left-id right-id) true]
     [(DivF64InstructionV0 result left-id right-id) true]
     [(I64ToF64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]

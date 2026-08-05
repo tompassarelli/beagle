@@ -15,6 +15,12 @@
 #ifndef FLOAT_ADD_FN
 #error "FLOAT_ADD_FN must name the generated float add function"
 #endif
+#ifndef FLOAT_SUBTRACT_FN
+#error "FLOAT_SUBTRACT_FN must name the generated float subtract function"
+#endif
+#ifndef FLOAT_MULTIPLY_FN
+#error "FLOAT_MULTIPLY_FN must name the generated float multiply function"
+#endif
 #ifndef FLOAT_DIVIDE_FN
 #error "FLOAT_DIVIDE_FN must name the generated float division function"
 #endif
@@ -54,6 +60,8 @@ static int check_results(void) {
     return 4;
   }
   if (FLOAT_ADD_FN(1.5, 2.5) != 4.0 ||
+      FLOAT_SUBTRACT_FN(7.5, 2.5) != 5.0 ||
+      FLOAT_MULTIPLY_FN(1.5, 2.0) != 3.0 ||
       FLOAT_DIVIDE_FN(7.5, 2.5) != 3.0) {
     return 5;
   }
