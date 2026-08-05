@@ -1905,6 +1905,11 @@
    type-id: core/NativeId
    terminated: Bool])
 
+(defrecord LogicArmV0
+  [start: Int
+   end: Int
+   type-id: core/NativeId])
+
 (defrecord ArgsResultV0
   [state: BodyStateV0
    values: (Vec core/NativeId)
@@ -3848,6 +3853,26 @@
           (core/->BoolAtom value)))
       result-id (bool-type-id) false)))
 
+(defn nil-constant-result
+  [types: (Vec core/TypeDef)
+   state: BodyStateV0
+   owner: core/NativeId
+   label: String] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant)
+        (union-variants-of types (type-id "Nil"))]
+    (if (not (and (= 1 (count variants))
+              (nil? (core/typevariant-payload-type (nth variants 0)))))
+      (fail-result state
+        "TODO-NATIVE-LITERAL-NIL-TYPE: Nil has no closed unit variant")
+      (let [result-id: core/NativeId (state-id state owner label)]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->UnionConstructInstruction
+              (core/->SsaValueV0 result-id (type-id "Nil"))
+              (core/typevariant-id (nth variants 0))
+              nil))
+          result-id (type-id "Nil") false)))))
+
 (defn static-predicate-condition-value
   [index: SourceIndexV0
    owner: core/NativeId
@@ -5070,6 +5095,63 @@
                       [(exprresultv0-value-id right)]))
                   join-id [(core/->Parameter join-parameter target)])
                 join-parameter target false))))))))
+
+(defn logic-result-type
+  [types: (Vec core/TypeDef)
+   arms: (Vec LogicArmV0)] -> (U core/NativeId Nil)
+  (loop [position: Int 0
+         chosen: (U core/NativeId Nil) nil]
+    (if (>= position (count arms))
+      chosen
+      (let [arm-type: core/NativeId
+            (logicarmv0-type-id (nth arms position))
+            joined: (U core/NativeId Nil)
+            (if (nil? chosen)
+              arm-type
+              (join-type-for types chosen arm-type))]
+        (if (nil? joined)
+          nil
+          (recur (+ position 1) joined))))))
+
+(defn bridge-logic-arms
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   arms: (Vec LogicArmV0)
+   join-id: core/NativeId
+   join-parameter: core/NativeId] -> ExprResultV0
+  (let [target: (U core/NativeId Nil) (logic-result-type types arms)]
+    (if (nil? target)
+      (fail-result state
+        "TODO-NATIVE-JOIN-TYPE: live arms have no declared native union")
+      (loop [position: Int 0 current: BodyStateV0 state]
+        (if (>= position (count arms))
+          (->ExprResultV0
+            (state-open-block current join-id
+              [(core/->Parameter join-parameter target)])
+            join-parameter target false)
+          (let [arm: LogicArmV0 (nth arms position)
+                arm-type: core/NativeId (logicarmv0-type-id arm)
+                bridge-id: core/NativeId
+                (state-id current owner (str "logic-coerce-" position))
+                bridge-value: core/NativeId
+                (state-id current owner (str "logic-arm-" position))
+                rewired: BodyStateV0
+                (retarget-jumps-between current
+                  (logicarmv0-start arm) (logicarmv0-end arm)
+                  join-id bridge-id)
+                opened: BodyStateV0
+                (state-open-block rewired bridge-id
+                  [(core/->Parameter bridge-value arm-type)])
+                coerced: ExprResultV0
+                (lower-boundary-coerce types owner opened
+                  bridge-value arm-type target)]
+            (if (state-blocked? (exprresultv0-state coerced))
+              (dead-result (exprresultv0-state coerced))
+              (recur (+ position 1)
+                (state-close (exprresultv0-state coerced)
+                  (core/->JumpTerminator join-id
+                    [(exprresultv0-value-id coerced)]))))))))))
 
 (defn host-socket-operands-valid?
   [callee: String
@@ -6919,13 +7001,9 @@
             (or (= "and" callee) (= "or" callee))
             (let [arity: Int (count args)]
               (if (= 0 arity)
-                (let [result-id: core/NativeId (state-id state owner "logic-empty")]
-                  (->ExprResultV0
-                    (state-emit (state-bump state)
-                      (core/->AtomInstruction
-                        (core/->SsaValueV0 result-id (bool-type-id))
-                        (core/->BoolAtom (= "and" callee))))
-                    result-id (bool-type-id) false))
+                (if (= "and" callee)
+                  (bool-constant-result state owner "logic-empty" true)
+                  (nil-constant-result types state owner "logic-empty"))
                 (if (= 1 arity)
                   (let [only: ExprResultV0
                         (lower-expr env owner state (nth args 0))]
@@ -6933,20 +7011,13 @@
                       (exprresultv0-terminated only) only
                       (state-blocked? (exprresultv0-state only))
                       (dead-result (exprresultv0-state only))
-                      (not (same-id? (exprresultv0-type-id only) (bool-type-id)))
-                      (fail-result (exprresultv0-state only)
-                        (str "TODO-NATIVE-BOOL-OPERAND: " callee
-                          " needs native Bool operands"))
                       :else only))
-                  (let [shortcut-id: core/NativeId
-                        (state-id state owner "logic-shortcut")
-                        join-id: core/NativeId (state-id state owner "logic-join")
+                  (let [join-id: core/NativeId (state-id state owner "logic-join")
                         join-parameter: core/NativeId
-                        (state-id state owner "logic-value")
-                        short-value: core/NativeId
-                        (state-id state owner "logic-const")]
+                        (state-id state owner "logic-value")]
                     (loop [position: Int 0
-                           current: BodyStateV0 (state-bump state)]
+                           current: BodyStateV0 state
+                           arms: (Vec LogicArmV0) []]
                       (let [operand: ExprResultV0
                             (lower-expr env owner current (nth args position))]
                         (cond
@@ -6955,47 +7026,64 @@
                           (exprresultv0-terminated operand)
                           (if (= 0 position)
                             operand
-                            (fail-result (exprresultv0-state operand)
-                              (str "TODO-NATIVE-DIVERGENT-OPERAND: " callee
-                                " operand " (+ position 1)
-                                " does not produce a value")))
-                          (not (same-id? (exprresultv0-type-id operand) (bool-type-id)))
-                          (fail-result (exprresultv0-state operand)
-                            (str "TODO-NATIVE-BOOL-OPERAND: " callee
-                              " needs native Bool operands"))
+                            (bridge-logic-arms types owner
+                              (exprresultv0-state operand) arms
+                              join-id join-parameter))
                           (= (+ position 1) arity)
-                          (let [after-value: BodyStateV0
-                                (state-close (state-bump (exprresultv0-state operand))
+                          (let [arm-start: Int
+                                (count (bodystatev0-blocks
+                                         (exprresultv0-state operand)))
+                                after-value: BodyStateV0
+                                (state-close (exprresultv0-state operand)
                                   (core/->JumpTerminator join-id
                                     [(exprresultv0-value-id operand)]))
-                                shortcut: BodyStateV0
-                                (state-emit
-                                  (state-open-block after-value shortcut-id [])
-                                  (core/->AtomInstruction
-                                    (core/->SsaValueV0 short-value (bool-type-id))
-                                    (core/->BoolAtom (= "or" callee))))
-                                after-shortcut: BodyStateV0
-                                (state-close (state-bump shortcut)
-                                  (core/->JumpTerminator join-id [short-value]))]
-                            (->ExprResultV0
-                              (state-open-block after-shortcut join-id
-                                [(core/->Parameter join-parameter (bool-type-id))])
-                              join-parameter (bool-type-id) false))
+                                live-arms: (Vec LogicArmV0)
+                                (conj arms
+                                  (->LogicArmV0 arm-start
+                                    (count (bodystatev0-blocks after-value))
+                                    (exprresultv0-type-id operand)))]
+                            (bridge-logic-arms types owner after-value live-arms
+                              join-id join-parameter))
                           :else
-                          (let [next-id: core/NativeId
-                                (state-id (exprresultv0-state operand) owner
+                          (let [truthy: ExprResultV0
+                                (lower-truthy types owner
+                                  (exprresultv0-state operand)
+                                  (exprresultv0-value-id operand)
+                                  (exprresultv0-type-id operand))
+                                condition-state: BodyStateV0
+                                (exprresultv0-state truthy)
+                                next-id: core/NativeId
+                                (state-id condition-state owner
                                   (str "logic-rest-" position))
+                                shortcut-id: core/NativeId
+                                (state-id condition-state owner
+                                  (str "logic-shortcut-" position))
                                 branched: BodyStateV0
-                                (state-close (state-bump (exprresultv0-state operand))
+                                (state-close (state-bump condition-state)
                                   (if (= "and" callee)
                                     (core/->BranchTerminator
-                                      (exprresultv0-value-id operand)
+                                      (exprresultv0-value-id truthy)
                                       next-id shortcut-id)
                                     (core/->BranchTerminator
-                                      (exprresultv0-value-id operand)
+                                      (exprresultv0-value-id truthy)
                                       shortcut-id next-id)))]
-                            (recur (+ position 1)
-                              (state-open-block branched next-id []))))))))))
+                            (if (state-blocked? condition-state)
+                              (dead-result condition-state)
+                              (let [shortcut-start: Int
+                                    (count (bodystatev0-blocks branched))
+                                    after-shortcut: BodyStateV0
+                                    (state-close
+                                      (state-open-block branched shortcut-id [])
+                                      (core/->JumpTerminator join-id
+                                        [(exprresultv0-value-id operand)]))
+                                    live-arms: (Vec LogicArmV0)
+                                    (conj arms
+                                      (->LogicArmV0 shortcut-start
+                                        (count (bodystatev0-blocks after-shortcut))
+                                        (exprresultv0-type-id operand)))]
+                                (recur (+ position 1)
+                                  (state-open-block after-shortcut next-id [])
+                                  live-arms)))))))))))
 
             (= "not" callee)
             (if (not (= 1 (count args)))

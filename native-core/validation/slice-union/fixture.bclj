@@ -43,3 +43,45 @@
   (if (pair? value)
     value
     (throw (ex-info "expected Pair" {}))))
+
+(defn logic-and
+  [left: Any
+   right: Any] -> Any
+  (and left right))
+
+(defn logic-or
+  [left: Any
+   right: Any] -> Any
+  (or left right))
+
+(defn logic-three-and
+  [left: Any
+   middle: Any
+   right: Any] -> Any
+  (and left middle right))
+
+(defn logic-three-or
+  [left: Any
+   middle: Any
+   right: Any] -> Any
+  (or left middle right))
+
+(defn logic-false-or-int [value: Int] -> Any
+  (or false value))
+
+(defn logic-true-and-int [value: Int] -> Any
+  (and true value))
+
+(defn logic-empty-and [] -> Bool (and))
+
+(defn logic-empty-or [] -> Nil (or))
+
+(defn logic-single-and [value: Any] -> Any (and value))
+
+(defn logic-single-or [value: Any] -> Any (or value))
+
+(defn logic-or-skips [value: Any] -> Any
+  (or value (throw nil)))
+
+(defn logic-and-skips [value: Any] -> Any
+  (and value (throw nil)))
