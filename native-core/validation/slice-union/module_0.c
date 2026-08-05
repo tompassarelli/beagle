@@ -7,20 +7,24 @@ _Static_assert(offsetof(struct native_m0_text_0_blob, bytes) == 8, "text blob is
 struct native_m0_text_1_blob { uint64_t length; uint8_t bytes[sizeof "unavailable"]; };
 static const struct native_m0_text_1_blob native_m0_text_1 = { (uint64_t)(sizeof "unavailable" - 1U), "unavailable" };
 _Static_assert(offsetof(struct native_m0_text_1_blob, bytes) == 8, "text blob is length-prefixed");
-static const uint8_t native_m0_keyword_0[] = "string";
-static const uint8_t native_m0_keyword_1[] = "int";
-static const uint8_t native_m0_keyword_2[] = "float";
-static const uint8_t native_m0_keyword_3[] = "bool";
-static const uint8_t native_m0_keyword_4[] = "keyword";
-static const uint8_t native_m0_keyword_5[] = "pair";
-static const native_value_keyword_descriptor native_m0_value_keywords[] = {
-  { .bytes = native_m0_keyword_0, .length = sizeof native_m0_keyword_0 - 1U },
-  { .bytes = native_m0_keyword_1, .length = sizeof native_m0_keyword_1 - 1U },
-  { .bytes = native_m0_keyword_2, .length = sizeof native_m0_keyword_2 - 1U },
-  { .bytes = native_m0_keyword_3, .length = sizeof native_m0_keyword_3 - 1U },
-  { .bytes = native_m0_keyword_4, .length = sizeof native_m0_keyword_4 - 1U },
-  { .bytes = native_m0_keyword_5, .length = sizeof native_m0_keyword_5 - 1U },
-};
+struct native_m0_keyword_0_blob { uint64_t length; uint8_t bytes[sizeof "string"]; };
+static const struct native_m0_keyword_0_blob native_m0_keyword_0 = { (uint64_t)(sizeof "string" - 1U), "string" };
+_Static_assert(offsetof(struct native_m0_keyword_0_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_1_blob { uint64_t length; uint8_t bytes[sizeof "int"]; };
+static const struct native_m0_keyword_1_blob native_m0_keyword_1 = { (uint64_t)(sizeof "int" - 1U), "int" };
+_Static_assert(offsetof(struct native_m0_keyword_1_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_2_blob { uint64_t length; uint8_t bytes[sizeof "float"]; };
+static const struct native_m0_keyword_2_blob native_m0_keyword_2 = { (uint64_t)(sizeof "float" - 1U), "float" };
+_Static_assert(offsetof(struct native_m0_keyword_2_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_3_blob { uint64_t length; uint8_t bytes[sizeof "bool"]; };
+static const struct native_m0_keyword_3_blob native_m0_keyword_3 = { (uint64_t)(sizeof "bool" - 1U), "bool" };
+_Static_assert(offsetof(struct native_m0_keyword_3_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_4_blob { uint64_t length; uint8_t bytes[sizeof "keyword"]; };
+static const struct native_m0_keyword_4_blob native_m0_keyword_4 = { (uint64_t)(sizeof "keyword" - 1U), "keyword" };
+_Static_assert(offsetof(struct native_m0_keyword_4_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_5_blob { uint64_t length; uint8_t bytes[sizeof "pair"]; };
+static const struct native_m0_keyword_5_blob native_m0_keyword_5 = { (uint64_t)(sizeof "pair" - 1U), "pair" };
+_Static_assert(offsetof(struct native_m0_keyword_5_blob, bytes) == 8, "keyword blob is length-prefixed");
 
 extern const native_value_descriptor native_m0_value_0;
 extern const native_value_descriptor native_m0_value_1;
@@ -230,8 +234,8 @@ const native_value_descriptor native_m0_value_6 = {
   .stride = (size_t)0,
   .map_key = NULL,
   .map_value = NULL,
-  .keywords = native_m0_value_keywords,
-  .keyword_count = (size_t)6
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_7 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -1525,7 +1529,7 @@ native_l23_4: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_4 = native_v_0.payload.variant_3;
-  native_s_5 = UINT64_C(0);
+  native_s_5 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_5;
   native_s_6 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_7 = (native_m0_type_9){ .tag = INT64_C(0) };
@@ -1585,7 +1589,7 @@ native_l23_9: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_21 = native_v_0.payload.variant_1;
-  native_s_22 = UINT64_C(1);
+  native_s_22 = (uint64_t)(uintptr_t)&native_m0_keyword_1;
   (void)native_s_22;
   native_s_23 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_24 = (native_m0_type_9){ .tag = INT64_C(0) };
@@ -1645,7 +1649,7 @@ native_l23_14: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_38 = native_v_0.payload.variant_2;
-  native_s_39 = UINT64_C(2);
+  native_s_39 = (uint64_t)(uintptr_t)&native_m0_keyword_2;
   (void)native_s_39;
   native_s_40 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_41 = (native_m0_type_9){ .tag = INT64_C(0) };
@@ -1705,7 +1709,7 @@ native_l23_19: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_55 = native_v_0.payload.variant_0;
-  native_s_56 = UINT64_C(3);
+  native_s_56 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
   (void)native_s_56;
   native_s_57 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_58 = (native_m0_type_9){ .tag = INT64_C(0) };
@@ -1765,7 +1769,7 @@ native_l23_24: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_72 = native_v_0.payload.variant_4;
-  native_s_73 = UINT64_C(4);
+  native_s_73 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
   (void)native_s_73;
   native_s_74 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_75 = (native_m0_type_9){ .tag = INT64_C(0) };
@@ -1797,7 +1801,7 @@ native_l23_26: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_88 = *((const native_m0_type_2 *)native_s_87);
-  native_s_89 = UINT64_C(5);
+  native_s_89 = (uint64_t)(uintptr_t)&native_m0_keyword_5;
   (void)native_s_89;
   native_s_90 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_91 = (native_m0_type_9){ .tag = INT64_C(0) };
