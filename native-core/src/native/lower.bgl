@@ -1949,7 +1949,8 @@
    failure: String
    loop-frames: (Vec LoopFrameV0)
    keyword-refinements: (Vec KeywordFlowRefinementV0)
-   value-refinements: (Vec ValueFlowRefinementV0)])
+   value-refinements: (Vec ValueFlowRefinementV0)
+   transient-type: (U core/NativeId Nil)])
 
 (defrecord ExprResultV0
   [state: BodyStateV0
@@ -3989,6 +3990,51 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
+(defn instruction-defines-empty-collection?
+  [instruction: core/Instruction
+   source-id: core/NativeId
+   collection-kind: String] -> Bool
+  (and (same-id? source-id (core/instruction-result-id instruction))
+    (if (= "map" collection-kind)
+      (and (instance? native.core.MapLiteralInstructionV0 instruction)
+        (= 0 (count
+          (core/mapliteralinstructionv0-key-ids instruction)))
+        (= 0 (count
+          (core/mapliteralinstructionv0-value-ids instruction))))
+      (and (= "set" collection-kind)
+        (instance? native.core.SetLiteralInstructionV0 instruction)
+        (= 0 (count
+          (core/setliteralinstructionv0-value-ids instruction)))))))
+
+(defn instructions-define-empty-collection?
+  [instructions: (Vec core/Instruction)
+   source-id: core/NativeId
+   collection-kind: String] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count instructions))
+      false
+      (if (instruction-defines-empty-collection?
+            (nth instructions position) source-id collection-kind)
+        true
+        (recur (+ position 1))))))
+
+(defn state-defines-empty-collection?
+  [state: BodyStateV0
+   source-id: core/NativeId
+   collection-kind: String] -> Bool
+  (if (instructions-define-empty-collection?
+        (bodystatev0-instructions state) source-id collection-kind)
+    true
+    (let [blocks: (Vec core/BasicBlock) (bodystatev0-blocks state)]
+      (loop [position: Int 0]
+        (if (>= position (count blocks))
+          false
+          (if (instructions-define-empty-collection?
+                (core/basicblock-instructions (nth blocks position))
+                source-id collection-kind)
+            true
+            (recur (+ position 1))))))))
+
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.VecAssocInstructionV0 instruction)
       (instance? native.core.VecPushInstruction instruction)
@@ -4006,6 +4052,10 @@
       (instance? native.core.SetConjInstructionV0 instruction)
       (instance? native.core.SetDisjInstructionV0 instruction)
       (instance? native.core.SetVectorInstructionV0 instruction)
+      (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
+      (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
+      (instance? native.core.TransientMapAssocInstructionV0 instruction)
+      (instance? native.core.TransientSetConjInstructionV0 instruction)
       (instance? native.core.RecordAssocInstructionV0 instruction)
       (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
@@ -4094,6 +4144,361 @@
    node: core/NativeId] -> (Vec core/NativeId)
   (let [args: (U core/NativeId Nil) (index-first-object index node "args")]
     (if (nil? args) [] (index-sequence-items index args))))
+
+(defn source-contains-ref-named?
+  [index: SourceIndexV0
+   node: core/NativeId
+   name: String
+   fuel: Int] -> Bool
+  (if (<= fuel 0)
+    true
+    (if (source-ref-named? index node name)
+      true
+      (let [children: (Vec core/NativeId) (index-child-nodes index node)]
+        (loop [position: Int 0]
+          (if (>= position (count children))
+            false
+            (if (source-contains-ref-named? index (nth children position)
+                  name (- fuel 1))
+              true
+              (recur (+ position 1)))))))))
+
+(defn source-excludes-ref-named?
+  [index: SourceIndexV0
+   node: core/NativeId
+   name: String] -> Bool
+  (not (source-contains-ref-named? index node name
+    (+ 1 (index-facts index)))))
+
+(defn source-contains-transient-operator?
+  [index: SourceIndexV0
+   node: core/NativeId
+   fuel: Int] -> Bool
+  (if (<= fuel 0)
+    true
+    (let [operator: Bool
+          (or (source-call-named? index node "transient")
+            (source-call-named? index node "persistent!")
+            (source-call-named? index node "assoc!")
+            (source-call-named? index node "conj!"))]
+      (if operator
+        true
+        (let [children: (Vec core/NativeId) (index-child-nodes index node)]
+          (loop [position: Int 0]
+            (if (>= position (count children))
+              false
+              (if (source-contains-transient-operator? index
+                    (nth children position) (- fuel 1))
+                true
+                (recur (+ position 1))))))))))
+
+(defn closed-transient-neutral-expression?
+  [index: SourceIndexV0
+   node: core/NativeId
+   owner: String] -> Bool
+  (and (source-excludes-ref-named? index node owner)
+    (not (source-contains-transient-operator? index node
+      (+ 1 (index-facts index))))))
+
+(defn source-any-annotation?
+  [index: SourceIndexV0
+   owner: core/NativeId] -> Bool
+  (let [annotation: (U core/NativeId Nil)
+        (index-first-object index owner "ann")]
+    (and (some? annotation)
+      (= "type-prim" (fact-text index annotation "form-kind"))
+      (= "Any" (fact-text index annotation "name")))))
+
+;; A transient map may be borrowed only by exact `get`; every other occurrence
+;; of its accumulator must remain on the single update thread.
+(defn closed-transient-read-expression?
+  [index: SourceIndexV0
+   node: core/NativeId
+   accumulator: String
+   fuel: Int] -> Bool
+  (if (<= fuel 0)
+    false
+    (cond
+      (source-ref-named? index node accumulator) false
+
+      (source-call-named? index node "get")
+      (let [args: (Vec core/NativeId) (source-call-arguments index node)]
+        (and (or (= 2 (count args)) (= 3 (count args)))
+          (source-ref-named? index (nth args 0) accumulator)
+          (loop [position: Int 1]
+            (if (>= position (count args))
+              true
+              (if (closed-transient-neutral-expression? index
+                    (nth args position)
+                    accumulator)
+                (recur (+ position 1))
+                false)))))
+
+      (or (source-call-named? index node "transient")
+        (source-call-named? index node "persistent!")
+        (source-call-named? index node "assoc!")
+        (source-call-named? index node "conj!"))
+      false
+
+      :else
+      (let [children: (Vec core/NativeId) (index-child-nodes index node)]
+        (loop [position: Int 0]
+          (if (>= position (count children))
+            true
+            (if (closed-transient-read-expression? index
+                  (nth children position) accumulator (- fuel 1))
+              (recur (+ position 1))
+              false)))))))
+
+(defn closed-transient-bang-body?
+  [index: SourceIndexV0
+   body: core/NativeId
+   collection-kind: String
+   accumulator: String] -> Bool
+  (let [args: (Vec core/NativeId) (source-call-arguments index body)]
+    (cond
+      (= "set" collection-kind)
+      (and (source-call-named? index body "conj!")
+        (= 2 (count args))
+        (source-ref-named? index (nth args 0) accumulator)
+        (closed-transient-neutral-expression? index (nth args 1) accumulator))
+
+      (= "map" collection-kind)
+      (and (source-call-named? index body "assoc!")
+        (= 3 (count args))
+        (source-ref-named? index (nth args 0) accumulator)
+        (closed-transient-neutral-expression? index (nth args 1) accumulator)
+        (closed-transient-read-expression? index (nth args 2) accumulator
+          (+ 1 (index-facts index))))
+
+      :else false)))
+
+(defn closed-transient-reduce?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String
+   initial-owner: String] -> Bool
+  (if (not (source-call-named? index node "reduce"))
+    false
+    (let [args: (Vec core/NativeId) (source-call-arguments index node)]
+      (if (not (= 3 (count args)))
+        false
+        (let [callback: core/NativeId (nth args 0)
+              initial: core/NativeId (nth args 1)
+              collection: core/NativeId (nth args 2)
+              parameters: (Vec core/NativeId)
+              (function-parameter-items index callback)
+              body: (U core/NativeId Nil)
+              (index-first-object index callback "body")
+              callback-return: (U core/NativeId Nil)
+              (index-first-object index callback "ret")]
+          (if (or (not (= "fn" (fact-text index callback "form-kind")))
+                (not (= "false" (fact-text index callback "rest")))
+                (not (= 2 (count parameters)))
+                (nil? body)
+                (nil? callback-return))
+            false
+            (let [accumulator-node: core/NativeId (nth parameters 0)
+                  accumulator: String
+                  (parameter-name-at index accumulator-node)
+                  initial-valid: Bool
+                  (if (= "" initial-owner)
+                    (and (source-call-named? index initial "transient")
+                      (= 1 (count (source-call-arguments index initial))))
+                    (source-ref-named? index initial initial-owner))]
+              (and (> (count accumulator) 0)
+                (source-any-annotation? index accumulator-node)
+                (= "type-prim" (fact-text index callback-return "form-kind"))
+                (= "Any" (fact-text index callback-return "name"))
+                initial-valid
+                (closed-transient-neutral-expression? index collection
+                  accumulator)
+                (or (= "" initial-owner)
+                  (closed-transient-neutral-expression? index collection
+                    initial-owner))
+                (closed-transient-bang-body? index body collection-kind
+                  accumulator)))))))))
+
+(defn closed-transient-thread-expression?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String
+   owner: String] -> Bool
+  (let [kind: String (fact-text index node "form-kind")]
+    (cond
+      (source-ref-named? index node owner) true
+
+      (= "if" kind)
+      (let [condition: (U core/NativeId Nil)
+            (index-first-object index node "cond")
+            then-node: (U core/NativeId Nil)
+            (index-first-object index node "then")
+            else-node: (U core/NativeId Nil)
+            (index-first-object index node "else")]
+        (and (some? condition) (some? then-node) (some? else-node)
+          (closed-transient-neutral-expression? index condition owner)
+          (closed-transient-thread-expression? index then-node collection-kind
+            owner)
+          (closed-transient-thread-expression? index else-node collection-kind
+            owner)))
+
+      (source-call-named? index node "reduce")
+      (closed-transient-reduce? index node collection-kind owner)
+
+      :else false)))
+
+(declare closed-transient-loop-tail?)
+
+(defn closed-transient-let-tail?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String
+   owner: String
+   binding-count: Int
+   owner-position: Int] -> Bool
+  (let [bindings-node: (U core/NativeId Nil)
+        (index-first-object index node "bindings")
+        bindings: (Vec core/NativeId)
+        (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
+        body: (U core/NativeId Nil) (index-first-object index node "body")]
+    (and (some? body)
+      (loop [position: Int 0]
+        (if (>= position (count bindings))
+          true
+          (let [binding: core/NativeId (nth bindings position)
+                value: (U core/NativeId Nil)
+                (index-first-object index binding "value")]
+            (if (and (not (= owner (fact-text index binding "name")))
+                  (some? value)
+                  (closed-transient-neutral-expression? index value owner))
+              (recur (+ position 1))
+              false))))
+      (closed-transient-loop-tail? index body collection-kind owner
+        binding-count owner-position))))
+
+(defn closed-transient-loop-tail?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String
+   owner: String
+   binding-count: Int
+   owner-position: Int] -> Bool
+  (let [kind: String (fact-text index node "form-kind")]
+    (cond
+      (source-ref-named? index node owner) true
+
+      (= "if" kind)
+      (let [condition: (U core/NativeId Nil)
+            (index-first-object index node "cond")
+            then-node: (U core/NativeId Nil)
+            (index-first-object index node "then")
+            else-node: (U core/NativeId Nil)
+            (index-first-object index node "else")]
+        (and (some? condition) (some? then-node) (some? else-node)
+          (closed-transient-neutral-expression? index condition owner)
+          (closed-transient-loop-tail? index then-node collection-kind owner
+            binding-count owner-position)
+          (closed-transient-loop-tail? index else-node collection-kind owner
+            binding-count owner-position)))
+
+      (= "let" kind)
+      (closed-transient-let-tail? index node collection-kind owner
+        binding-count owner-position)
+
+      (= "recur" kind)
+      (let [args-node: (U core/NativeId Nil)
+            (index-first-object index node "args")
+            args: (Vec core/NativeId)
+            (if (nil? args-node) [] (index-sequence-items index args-node))]
+        (and (= binding-count (count args))
+          (loop [position: Int 0]
+            (if (>= position (count args))
+              true
+              (let [argument: core/NativeId (nth args position)]
+                (if (if (= position owner-position)
+                      (closed-transient-thread-expression? index argument
+                        collection-kind owner)
+                      (closed-transient-neutral-expression? index argument
+                        owner))
+                  (recur (+ position 1))
+                  false))))))
+
+      :else false)))
+
+(defn transient-loop-binding-position
+  [index: SourceIndexV0
+   bindings: (Vec core/NativeId)] -> Int
+  (loop [position: Int 0 found: Int -1]
+    (if (>= position (count bindings))
+      found
+      (let [value: (U core/NativeId Nil)
+            (index-first-object index (nth bindings position) "value")]
+        (if (and (some? value) (source-call-named? index value "transient"))
+          (if (>= found 0)
+            -2
+            (recur (+ position 1) position))
+          (recur (+ position 1) found))))))
+
+(defn closed-transient-loop?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String] -> Bool
+  (if (not (= "loop" (fact-text index node "form-kind")))
+    false
+    (let [bindings-node: (U core/NativeId Nil)
+          (index-first-object index node "bindings")
+          bindings: (Vec core/NativeId)
+          (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
+          owner-position: Int (transient-loop-binding-position index bindings)
+          body: (U core/NativeId Nil) (index-first-object index node "body")]
+      (if (or (< owner-position 0) (nil? body))
+        false
+        (let [owner-binding: core/NativeId (nth bindings owner-position)
+              owner: String (fact-text index owner-binding "name")
+              initial: (U core/NativeId Nil)
+              (index-first-object index owner-binding "value")]
+          (and (> (count owner) 0)
+            (source-any-annotation? index owner-binding)
+            (some? initial)
+            (= 1 (count (source-call-arguments index initial)))
+            (loop [position: Int 0]
+              (if (>= position (count bindings))
+                true
+                (if (= position owner-position)
+                  (recur (+ position 1))
+                  (let [binding: core/NativeId (nth bindings position)
+                        value: (U core/NativeId Nil)
+                        (index-first-object index binding "value")]
+                    (if (and (not (= owner (fact-text index binding "name")))
+                          (some? value)
+                          (closed-transient-neutral-expression? index value
+                            owner))
+                      (recur (+ position 1))
+                      false)))))
+            (closed-transient-loop-tail? index body collection-kind owner
+              (count bindings) owner-position)))))))
+
+(defn closed-transient-source?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String] -> Bool
+  (or (closed-transient-reduce? index node collection-kind "")
+    (closed-transient-loop? index node collection-kind)))
+
+(defn active-transient-reduce?
+  [index: SourceIndexV0
+   node: core/NativeId
+   collection-kind: String] -> Bool
+  (let [args: (Vec core/NativeId) (source-call-arguments index node)]
+    (if (not (= 3 (count args)))
+      false
+      (let [initial: core/NativeId (nth args 1)]
+        (if (source-call-named? index initial "transient")
+          (closed-transient-reduce? index node collection-kind "")
+          (if (= "ref" (fact-text index initial "form-kind"))
+            (closed-transient-reduce? index node collection-kind
+              (fact-text index initial "name"))
+            false))))))
 
 (defn source-string-literal-value
   [index: SourceIndexV0
@@ -9227,6 +9632,209 @@
                         (arena-value-id owner)))
                     result-id content false))))))))))
 
+(defn transient-collection-kind
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> String
+  (cond
+    (map-type? types target) "map"
+    (set-type? types target) "set"
+    :else ""))
+
+(defn lower-transient-open
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        active: (U core/NativeId Nil) (bodystatev0-transient-type state)]
+    (cond
+      (nil? active)
+      (fail-result state
+        "TODO-NATIVE-TRANSIENT-SCOPE: transient must be owned by one closed persistent! boundary")
+
+      (not (= 1 (count args)))
+      (fail-result state "TODO-NATIVE-TRANSIENT-ARITY: transient takes one seed")
+
+      :else
+      (let [seed: ExprResultV0
+            (lower-contextual-boundary env owner state (nth args 0) active active)
+            settled: BodyStateV0 (exprresultv0-state seed)
+            collection-kind: String (transient-collection-kind types active)]
+        (cond
+          (exprresultv0-terminated seed) seed
+          (state-blocked? settled) (dead-result settled)
+          (not (same-id? active (exprresultv0-type-id seed)))
+          (fail-result settled
+            "TODO-NATIVE-TRANSIENT-SEED-TYPE: seed does not match its closed collection")
+          (not (state-defines-empty-collection? settled
+                 (exprresultv0-value-id seed) collection-kind))
+          (fail-result settled
+            "TODO-NATIVE-TRANSIENT-SEED-OWNERSHIP: v0 transient builders require a proven fresh empty seed")
+          :else
+          (let [result-id: core/NativeId
+                (state-id settled owner "transient-open")]
+            (->ExprResultV0
+              (state-emit (state-bump settled)
+                (core/->CollectionTransientOpenInstructionV0
+                  (core/->SsaValueV0 result-id active)
+                  (exprresultv0-value-id seed) (arena-value-id owner)))
+              result-id active false)))))))
+
+(defn lower-transient-set-conj
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        active: (U core/NativeId Nil) (bodystatev0-transient-type state)]
+    (cond
+      (or (nil? active) (not (set-type? types active)))
+      (fail-result state
+        "TODO-NATIVE-CONJ!-SCOPE: conj! requires one closed transient Set owner")
+      (not (= 2 (count args)))
+      (fail-result state "TODO-NATIVE-CONJ!-ARITY: conj! takes one value")
+      :else
+      (let [element-type: core/NativeId (set-element-of types active)
+            equality: (U core/ConcreteEqualityV0 Nil)
+            (set-element-equality-for types element-type)
+            source: ExprResultV0
+            (lower-contextual-boundary env owner state (nth args 0) active active)
+            value: ExprResultV0
+            (if (or (exprresultv0-terminated source)
+                  (state-blocked? (exprresultv0-state source)))
+              source
+              (lower-contextual-boundary env owner
+                (exprresultv0-state source) (nth args 1)
+                element-type element-type))
+            settled: BodyStateV0 (exprresultv0-state value)]
+        (cond
+          (exprresultv0-terminated value) value
+          (state-blocked? settled) (dead-result settled)
+          (nil? equality)
+          (fail-result settled
+            "TODO-NATIVE-CONJ!-EQUALITY: transient Set element needs closed equality")
+          (or (not (same-id? active (exprresultv0-type-id source)))
+            (not (same-id? element-type (exprresultv0-type-id value))))
+          (fail-result settled
+            "TODO-NATIVE-CONJ!-OPERANDS: transient Set operands do not match their closed types")
+          :else
+          (let [result-id: core/NativeId
+                (state-id settled owner "transient-set-conj")]
+            (->ExprResultV0
+              (state-emit (state-bump settled)
+                (core/->TransientSetConjInstructionV0
+                  (core/->SsaValueV0 result-id active)
+                  (exprresultv0-value-id source)
+                  (exprresultv0-value-id value)
+                  (arena-value-id owner) equality))
+              result-id active false)))))))
+
+(defn lower-transient-map-assoc
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        active: (U core/NativeId Nil) (bodystatev0-transient-type state)]
+    (cond
+      (or (nil? active) (not (map-type? types active)))
+      (fail-result state
+        "TODO-NATIVE-ASSOC!-SCOPE: assoc! requires one closed transient Map owner")
+      (not (= 3 (count args)))
+      (fail-result state "TODO-NATIVE-ASSOC!-ARITY: assoc! takes one key/value pair")
+      :else
+      (let [key-type: core/NativeId (map-key-of types active)
+            value-type: core/NativeId (map-value-of types active)
+            equality: (U core/ConcreteEqualityV0 Nil)
+            (map-key-equality-for types key-type)
+            source: ExprResultV0
+            (lower-contextual-boundary env owner state (nth args 0) active active)
+            key: ExprResultV0
+            (if (or (exprresultv0-terminated source)
+                  (state-blocked? (exprresultv0-state source)))
+              source
+              (lower-contextual-boundary env owner
+                (exprresultv0-state source) (nth args 1) key-type key-type))
+            value: ExprResultV0
+            (if (or (exprresultv0-terminated key)
+                  (state-blocked? (exprresultv0-state key)))
+              key
+              (lower-contextual-boundary env owner
+                (exprresultv0-state key) (nth args 2) value-type value-type))
+            settled: BodyStateV0 (exprresultv0-state value)]
+        (cond
+          (exprresultv0-terminated value) value
+          (state-blocked? settled) (dead-result settled)
+          (nil? equality)
+          (fail-result settled
+            "TODO-NATIVE-ASSOC!-EQUALITY: transient Map key needs closed equality")
+          (or (not (same-id? active (exprresultv0-type-id source)))
+            (not (same-id? key-type (exprresultv0-type-id key)))
+            (not (same-id? value-type (exprresultv0-type-id value))))
+          (fail-result settled
+            "TODO-NATIVE-ASSOC!-OPERANDS: transient Map operands do not match their closed types")
+          :else
+          (let [result-id: core/NativeId
+                (state-id settled owner "transient-map-assoc")]
+            (->ExprResultV0
+              (state-emit (state-bump settled)
+                (core/->TransientMapAssocInstructionV0
+                  (core/->SsaValueV0 result-id active)
+                  (exprresultv0-value-id source)
+                  (exprresultv0-value-id key)
+                  (exprresultv0-value-id value)
+                  (arena-value-id owner) equality))
+              result-id active false)))))))
+
+(defn lower-closed-persistent
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   args: (Vec core/NativeId)
+   expected: (U core/NativeId Nil)] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        prior: (U core/NativeId Nil) (bodystatev0-transient-type state)]
+    (cond
+      (some? prior)
+      (fail-result state
+        "TODO-NATIVE-PERSISTENT!-NESTED: transient ownership cannot nest")
+      (not (= 1 (count args)))
+      (fail-result state "TODO-NATIVE-PERSISTENT!-ARITY: persistent! takes one builder")
+      (nil? expected)
+      (fail-result state
+        "TODO-NATIVE-PERSISTENT!-TYPE: persistent! needs an exact collection boundary")
+      :else
+      (let [collection-kind: String (transient-collection-kind types expected)]
+        (if (or (= "" collection-kind)
+              (not (closed-transient-source? index (nth args 0)
+                     collection-kind)))
+          (fail-result state
+            "TODO-NATIVE-PERSISTENT!-OWNERSHIP: transient builder escapes, aliases, or has a dynamic updater")
+          (let [scoped: BodyStateV0 (with state [:transient-type expected])
+                source: ExprResultV0
+                (lower-contextual-boundary env owner scoped (nth args 0)
+                  expected expected)
+                restored: BodyStateV0
+                (with (exprresultv0-state source) [:transient-type prior])]
+            (cond
+              (exprresultv0-terminated source)
+              (->ExprResultV0 restored (exprresultv0-value-id source)
+                (exprresultv0-type-id source) true)
+              (state-blocked? restored) (dead-result restored)
+              (not (same-id? expected (exprresultv0-type-id source)))
+              (fail-result restored
+                "TODO-NATIVE-PERSISTENT!-RESULT: builder does not match its exact collection boundary")
+              :else
+              (let [result-id: core/NativeId
+                    (state-id restored owner "persistent-close")]
+                (->ExprResultV0
+                  (state-emit (state-bump restored)
+                    (core/->CollectionPersistentCloseInstructionV0
+                      (core/->SsaValueV0 result-id expected)
+                      (exprresultv0-value-id source) (arena-value-id owner)))
+                  result-id expected false)))))))))
+
 (defn lower-expr-raw
   [env: BodyEnvV0
    owner: core/NativeId
@@ -9721,8 +10329,16 @@
                             (loopinitsv0-value-types accumulated) false)
                           (let [current: BodyStateV0
                                 (loopinitsv0-state accumulated)
+                                active-transient: (U core/NativeId Nil)
+                                (bodystatev0-transient-type current)
+                                transient-owner: Bool
+                                (and (some? active-transient)
+                                  (source-any-annotation? index item)
+                                  (source-call-named? index value-node
+                                    "transient"))
                                 expected: (U core/NativeId Nil)
-                                (annotation-native-type index annotation)
+                                (if transient-owner active-transient
+                                  (annotation-native-type index annotation))
                                 raw: ExprResultV0
                                 (lower-expr-expected env owner current value-node expected)
                                 value: ExprResultV0
@@ -10470,6 +11086,18 @@
                                         (recur (+ position 2) next-state result-id
                                           record-type)))))))))))))))
 
+            (= "persistent!" callee)
+            (lower-closed-persistent env owner state args expected)
+
+            (= "transient" callee)
+            (lower-transient-open env owner state args)
+
+            (= "conj!" callee)
+            (lower-transient-set-conj env owner state args)
+
+            (= "assoc!" callee)
+            (lower-transient-map-assoc env owner state args)
+
             (= "update" callee)
             (lower-static-update-call env owner state args)
 
@@ -10539,15 +11167,29 @@
                   :else
                   (let [callback-return: TypeResolutionV0
                         (resolve-source-type index callback-return-source)
+                        active-transient: (U core/NativeId Nil)
+                        (bodystatev0-transient-type state)
+                        active-kind: String
+                        (if (nil? active-transient) ""
+                          (transient-collection-kind types active-transient))
+                        transient-reducer: Bool
+                        (and (some? active-transient)
+                          (active-transient-reduce? index expr active-kind))
                         accumulator-type: core/NativeId
-                        (core/parameter-type-id (nth callback-parameters 0))
+                        (if (and transient-reducer (some? active-transient))
+                          active-transient
+                          (core/parameter-type-id (nth callback-parameters 0)))
+                        callback-return-type: core/NativeId
+                        (if (and transient-reducer (some? active-transient))
+                          active-transient
+                          (typeresolutionv0-type-id callback-return))
                         element-type: core/NativeId
                         (core/parameter-type-id (nth callback-parameters 1))]
                     (if (not (typeresolutionv0-valid callback-return))
                       (fail-result state
                         "TODO-NATIVE-REDUCE-CALLBACK-RETURN: callback return is not a closed native type")
                       (if (not (same-id? accumulator-type
-                                 (typeresolutionv0-type-id callback-return)))
+                                 callback-return-type))
                         (fail-result state
                           "TODO-NATIVE-REDUCE-ACCUMULATOR: callback return must match its accumulator parameter")
                         (let [initial-expected: (U core/NativeId Nil)
@@ -12916,7 +13558,7 @@
         (str "the checked source projection carries no body form for " name))
       (let [globalized: BodyStateV0
             (lower-global-bindings env id
-              (->BodyStateV0 [] entry-id [] [] true 0 [] "" [] [] [])
+              (->BodyStateV0 [] entry-id [] [] true 0 [] "" [] [] [] nil)
               (needed-globals env body-node
                 (mapv
                   (fn [binding: LocalBindingV0] -> String
@@ -15150,6 +15792,47 @@
        (id-value (core/setvectorinstructionv0-source-id instruction))
        (id-value (core/setvectorinstructionv0-arena-id instruction))])
 
+    (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
+    (worlds/canonical-record "collection-transient-open-instruction-v0"
+      [(encode-ssa-value
+         (core/collectiontransientopeninstructionv0-result instruction))
+       (id-value
+         (core/collectiontransientopeninstructionv0-source-id instruction))
+       (id-value
+         (core/collectiontransientopeninstructionv0-arena-id instruction))])
+
+    (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
+    (worlds/canonical-record "collection-persistent-close-instruction-v0"
+      [(encode-ssa-value
+         (core/collectionpersistentcloseinstructionv0-result instruction))
+       (id-value
+         (core/collectionpersistentcloseinstructionv0-source-id instruction))
+       (id-value
+         (core/collectionpersistentcloseinstructionv0-arena-id instruction))])
+
+    (instance? native.core.TransientMapAssocInstructionV0 instruction)
+    (worlds/canonical-record "transient-map-assoc-instruction-v0"
+      [(encode-ssa-value
+         (core/transientmapassocinstructionv0-result instruction))
+       (id-value
+         (core/transientmapassocinstructionv0-source-id instruction))
+       (id-value (core/transientmapassocinstructionv0-key-id instruction))
+       (id-value (core/transientmapassocinstructionv0-value-id instruction))
+       (id-value (core/transientmapassocinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/transientmapassocinstructionv0-key-equality instruction))])
+
+    (instance? native.core.TransientSetConjInstructionV0 instruction)
+    (worlds/canonical-record "transient-set-conj-instruction-v0"
+      [(encode-ssa-value
+         (core/transientsetconjinstructionv0-result instruction))
+       (id-value
+         (core/transientsetconjinstructionv0-source-id instruction))
+       (id-value (core/transientsetconjinstructionv0-value-id instruction))
+       (id-value (core/transientsetconjinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/transientsetconjinstructionv0-element-equality instruction))])
+
     (instance? native.core.ArenaInstruction instruction)
     (worlds/canonical-record "arena-instruction"
       [(encode-ssa-value (core/arenainstruction-result instruction))
@@ -15881,7 +16564,7 @@
   (empty-context-id "owner"))
 
 (defn empty-context-state [] -> BodyStateV0
-  (->BodyStateV0 [] (empty-context-id "entry") [] [] true 0 [] "" [] [] []))
+  (->BodyStateV0 [] (empty-context-id "entry") [] [] true 0 [] "" [] [] [] nil))
 
 (defn contextual-result-matches?
   [result: (U ExprResultV0 Nil)

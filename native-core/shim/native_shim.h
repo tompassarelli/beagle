@@ -78,6 +78,12 @@ typedef struct native_collection_equality {
   ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_STRUCTURAL,         \
                                 (value_descriptor)})
 
+typedef enum native_collection_state {
+  NATIVE_COLLECTION_PERSISTENT = 1,
+  NATIVE_COLLECTION_TRANSIENT = 2,
+  NATIVE_COLLECTION_RETIRED = 3
+} native_collection_state;
+
 /* Map/Set headers own parallel insertion-order storage in the arena. The
    headers are opaque to generated modules; descriptor code reads through the
    checked address accessors below. */
@@ -88,6 +94,8 @@ typedef struct native_map {
   int64_t capacity;
   int64_t key_stride;
   int64_t value_stride;
+  native_collection_state state;
+  native_arena *edit_arena;
 } native_map;
 
 typedef struct native_set {
@@ -95,6 +103,8 @@ typedef struct native_set {
   int64_t length;
   int64_t capacity;
   int64_t stride;
+  native_collection_state state;
+  native_arena *edit_arena;
 } native_set;
 
 #define NATIVE_VALUE_ABI_VERSION UINT32_C(2)
@@ -220,6 +230,12 @@ native_map *native_map_from_arrays(
     native_arena *arena, const void *keys, const void *values, int64_t count,
     int64_t key_stride, size_t key_alignment, int64_t value_stride,
     size_t value_alignment, native_collection_equality equality);
+native_map *native_map_transient_open(native_arena *arena,
+                                      const native_map *source,
+                                      size_t key_alignment,
+                                      size_t value_alignment);
+native_map *native_map_persistent_close(native_arena *arena,
+                                        native_map *source);
 int64_t native_map_count(const native_map *map);
 const void *native_map_key_at(const native_map *map, int64_t index);
 const void *native_map_value_at(const native_map *map, int64_t index);
@@ -228,6 +244,11 @@ const void *native_map_get(const native_map *map, const void *key,
 bool native_map_contains(const native_map *map, const void *key,
                          native_collection_equality equality);
 native_map *native_map_assoc(
+    native_arena *arena, native_map *map, const void *key,
+    const void *value, int64_t key_stride, size_t key_alignment,
+    int64_t value_stride, size_t value_alignment,
+    native_collection_equality equality);
+native_map *native_map_assoc_transient(
     native_arena *arena, native_map *map, const void *key,
     const void *value, int64_t key_stride, size_t key_alignment,
     int64_t value_stride, size_t value_alignment,
@@ -244,6 +265,11 @@ native_vec *native_map_values(native_arena *arena, const native_map *map,
 native_set *native_set_from_array(
     native_arena *arena, const void *values, int64_t count, int64_t stride,
     size_t alignment, native_collection_equality equality);
+native_set *native_set_transient_open(native_arena *arena,
+                                      const native_set *source,
+                                      size_t alignment);
+native_set *native_set_persistent_close(native_arena *arena,
+                                        native_set *source);
 int64_t native_set_count(const native_set *set);
 const void *native_set_item_at(const native_set *set, int64_t index);
 bool native_set_contains(const native_set *set, const void *value,
@@ -251,6 +277,9 @@ bool native_set_contains(const native_set *set, const void *value,
 native_set *native_set_conj(native_arena *arena, native_set *set,
                             const void *value, int64_t stride, size_t alignment,
                             native_collection_equality equality);
+native_set *native_set_conj_transient(
+    native_arena *arena, native_set *set, const void *value, int64_t stride,
+    size_t alignment, native_collection_equality equality);
 native_set *native_set_disj(native_arena *arena, native_set *set,
                             const void *value, int64_t stride, size_t alignment,
                             native_collection_equality equality);

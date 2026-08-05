@@ -3933,6 +3933,8 @@ static native_map *native_map_new(native_arena *arena, int64_t capacity,
   map->capacity = capacity;
   map->key_stride = key_stride;
   map->value_stride = value_stride;
+  map->state = NATIVE_COLLECTION_PERSISTENT;
+  map->edit_arena = NULL;
   return map;
 }
 
@@ -3943,7 +3945,29 @@ static void native_map_check(const native_map *map) {
       ((map->capacity == INT64_C(0)) &&
        ((map->keys != NULL) || (map->values != NULL))) ||
       ((map->capacity > INT64_C(0)) &&
-       ((map->keys == NULL) || (map->values == NULL)))) {
+       ((map->keys == NULL) || (map->values == NULL))) ||
+      ((map->state == NATIVE_COLLECTION_PERSISTENT) &&
+       (map->edit_arena != NULL)) ||
+      ((map->state == NATIVE_COLLECTION_TRANSIENT) &&
+       (map->edit_arena == NULL)) ||
+      ((map->state != NATIVE_COLLECTION_PERSISTENT) &&
+       (map->state != NATIVE_COLLECTION_TRANSIENT))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_map_check_persistent(const native_map *map) {
+  native_map_check(map);
+  if (map->state != NATIVE_COLLECTION_PERSISTENT) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_map_check_transient(const native_map *map,
+                                       const native_arena *arena) {
+  native_map_check(map);
+  if ((map->state != NATIVE_COLLECTION_TRANSIENT) ||
+      (map->edit_arena != arena)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 }
@@ -3955,6 +3979,25 @@ static void native_map_check_shape(const native_map *map, int64_t key_stride,
       (map->value_stride != value_stride)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+}
+
+static void native_map_check_persistent_shape(const native_map *map,
+                                              int64_t key_stride,
+                                              int64_t value_stride) {
+  native_map_check_shape(map, key_stride, value_stride);
+  if (map->state != NATIVE_COLLECTION_PERSISTENT) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static int64_t native_collection_grown_capacity(int64_t capacity) {
+  if (capacity == INT64_C(0)) {
+    return INT64_C(4);
+  }
+  if (capacity > (INT64_MAX / INT64_C(2))) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  return capacity * INT64_C(2);
 }
 
 int64_t native_map_count(const native_map *map) {
@@ -4042,6 +4085,36 @@ native_map *native_map_from_arrays(
   return map;
 }
 
+native_map *native_map_transient_open(native_arena *arena,
+                                      const native_map *source,
+                                      size_t key_alignment,
+                                      size_t value_alignment) {
+  native_map *result;
+  native_map_check_persistent(source);
+  if (source->length != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_map_new(arena, INT64_C(4), source->key_stride, key_alignment,
+                          source->value_stride, value_alignment);
+  result->state = NATIVE_COLLECTION_TRANSIENT;
+  result->edit_arena = arena;
+  return result;
+}
+
+native_map *native_map_persistent_close(native_arena *arena,
+                                        native_map *source) {
+  native_map *result;
+  native_map_check_transient(source, arena);
+  result = (native_map *)native_arena_alloc(arena, sizeof(native_map),
+                                             _Alignof(native_map));
+  memcpy(result, source, sizeof(native_map));
+  result->state = NATIVE_COLLECTION_PERSISTENT;
+  result->edit_arena = NULL;
+  source->state = NATIVE_COLLECTION_RETIRED;
+  source->edit_arena = NULL;
+  return result;
+}
+
 native_map *native_map_assoc(
     native_arena *arena, native_map *map, const void *key, const void *value,
     int64_t key_stride, size_t key_alignment, int64_t value_stride,
@@ -4049,7 +4122,7 @@ native_map *native_map_assoc(
   int64_t prior;
   int64_t length;
   native_map *result;
-  native_map_check_shape(map, key_stride, value_stride);
+  native_map_check_persistent_shape(map, key_stride, value_stride);
   if ((key == NULL) || (value == NULL)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
@@ -4082,6 +4155,52 @@ native_map *native_map_assoc(
   return result;
 }
 
+native_map *native_map_assoc_transient(
+    native_arena *arena, native_map *map, const void *key, const void *value,
+    int64_t key_stride, size_t key_alignment, int64_t value_stride,
+    size_t value_alignment, native_collection_equality equality) {
+  int64_t prior;
+  native_map_check_shape(map, key_stride, value_stride);
+  native_map_check_transient(map, arena);
+  if ((key == NULL) || (value == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  prior = native_map_find(map, key, equality);
+  if (prior >= INT64_C(0)) {
+    memcpy((uint8_t *)map->values +
+               native_collection_bytes(prior, value_stride),
+           value, (size_t)value_stride);
+    return map;
+  }
+  if (map->length == INT64_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  if (map->length == map->capacity) {
+    int64_t grown = native_collection_grown_capacity(map->capacity);
+    void *keys = native_arena_alloc(
+        arena, native_collection_bytes(grown, key_stride), key_alignment);
+    void *values = native_arena_alloc(
+        arena, native_collection_bytes(grown, value_stride), value_alignment);
+    if (map->length > INT64_C(0)) {
+      memcpy(keys, map->keys,
+             native_collection_bytes(map->length, key_stride));
+      memcpy(values, map->values,
+             native_collection_bytes(map->length, value_stride));
+    }
+    map->keys = keys;
+    map->values = values;
+    map->capacity = grown;
+  }
+  memcpy((uint8_t *)map->keys +
+             native_collection_bytes(map->length, key_stride),
+         key, (size_t)key_stride);
+  memcpy((uint8_t *)map->values +
+             native_collection_bytes(map->length, value_stride),
+         value, (size_t)value_stride);
+  map->length += INT64_C(1);
+  return map;
+}
+
 native_map *native_map_dissoc(
     native_arena *arena, native_map *map, const void *key, int64_t key_stride,
     size_t key_alignment, int64_t value_stride, size_t value_alignment,
@@ -4089,7 +4208,7 @@ native_map *native_map_dissoc(
   int64_t removed;
   int64_t source_index;
   native_map *result;
-  native_map_check_shape(map, key_stride, value_stride);
+  native_map_check_persistent_shape(map, key_stride, value_stride);
   removed = native_map_find(map, key, equality);
   if (removed < INT64_C(0)) {
     return map;
@@ -4113,7 +4232,7 @@ native_map *native_map_dissoc(
 native_vec *native_map_keys(native_arena *arena, const native_map *map,
                             size_t key_alignment) {
   native_vec *result;
-  native_map_check(map);
+  native_map_check_persistent(map);
   result = native_vec_new(arena, map->length, map->key_stride, key_alignment);
   if (map->length > INT64_C(0)) {
     memcpy(result->elements, map->keys,
@@ -4126,7 +4245,7 @@ native_vec *native_map_keys(native_arena *arena, const native_map *map,
 native_vec *native_map_values(native_arena *arena, const native_map *map,
                               size_t value_alignment) {
   native_vec *result;
-  native_map_check(map);
+  native_map_check_persistent(map);
   result = native_vec_new(arena, map->length, map->value_stride,
                           value_alignment);
   if (map->length > INT64_C(0)) {
@@ -4148,6 +4267,8 @@ static native_set *native_set_new(native_arena *arena, int64_t capacity,
   set->length = INT64_C(0);
   set->capacity = capacity;
   set->stride = stride;
+  set->state = NATIVE_COLLECTION_PERSISTENT;
+  set->edit_arena = NULL;
   return set;
 }
 
@@ -4155,7 +4276,29 @@ static void native_set_check(const native_set *set) {
   if ((set == NULL) || (set->length < INT64_C(0)) ||
       (set->capacity < set->length) || (set->stride <= INT64_C(0)) ||
       ((set->capacity == INT64_C(0)) && (set->elements != NULL)) ||
-      ((set->capacity > INT64_C(0)) && (set->elements == NULL))) {
+      ((set->capacity > INT64_C(0)) && (set->elements == NULL)) ||
+      ((set->state == NATIVE_COLLECTION_PERSISTENT) &&
+       (set->edit_arena != NULL)) ||
+      ((set->state == NATIVE_COLLECTION_TRANSIENT) &&
+       (set->edit_arena == NULL)) ||
+      ((set->state != NATIVE_COLLECTION_PERSISTENT) &&
+       (set->state != NATIVE_COLLECTION_TRANSIENT))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_set_check_persistent(const native_set *set) {
+  native_set_check(set);
+  if (set->state != NATIVE_COLLECTION_PERSISTENT) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_set_check_transient(const native_set *set,
+                                       const native_arena *arena) {
+  native_set_check(set);
+  if ((set->state != NATIVE_COLLECTION_TRANSIENT) ||
+      (set->edit_arena != arena)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 }
@@ -4163,6 +4306,14 @@ static void native_set_check(const native_set *set) {
 static void native_set_check_shape(const native_set *set, int64_t stride) {
   native_set_check(set);
   if (set->stride != stride) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_set_check_persistent_shape(const native_set *set,
+                                              int64_t stride) {
+  native_set_check_shape(set, stride);
+  if (set->state != NATIVE_COLLECTION_PERSISTENT) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 }
@@ -4226,11 +4377,39 @@ native_set *native_set_from_array(
   return set;
 }
 
+native_set *native_set_transient_open(native_arena *arena,
+                                      const native_set *source,
+                                      size_t alignment) {
+  native_set *result;
+  native_set_check_persistent(source);
+  if (source->length != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_set_new(arena, INT64_C(4), source->stride, alignment);
+  result->state = NATIVE_COLLECTION_TRANSIENT;
+  result->edit_arena = arena;
+  return result;
+}
+
+native_set *native_set_persistent_close(native_arena *arena,
+                                        native_set *source) {
+  native_set *result;
+  native_set_check_transient(source, arena);
+  result = (native_set *)native_arena_alloc(arena, sizeof(native_set),
+                                             _Alignof(native_set));
+  memcpy(result, source, sizeof(native_set));
+  result->state = NATIVE_COLLECTION_PERSISTENT;
+  result->edit_arena = NULL;
+  source->state = NATIVE_COLLECTION_RETIRED;
+  source->edit_arena = NULL;
+  return result;
+}
+
 native_set *native_set_conj(native_arena *arena, native_set *set,
                             const void *value, int64_t stride, size_t alignment,
                             native_collection_equality equality) {
   native_set *result;
-  native_set_check_shape(set, stride);
+  native_set_check_persistent_shape(set, stride);
   if (native_set_find(set, value, equality) >= INT64_C(0)) {
     return set;
   }
@@ -4249,13 +4428,42 @@ native_set *native_set_conj(native_arena *arena, native_set *set,
   return result;
 }
 
+native_set *native_set_conj_transient(
+    native_arena *arena, native_set *set, const void *value, int64_t stride,
+    size_t alignment, native_collection_equality equality) {
+  native_set_check_shape(set, stride);
+  native_set_check_transient(set, arena);
+  if (native_set_find(set, value, equality) >= INT64_C(0)) {
+    return set;
+  }
+  if (set->length == INT64_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  if (set->length == set->capacity) {
+    int64_t grown = native_collection_grown_capacity(set->capacity);
+    void *elements = native_arena_alloc(
+        arena, native_collection_bytes(grown, stride), alignment);
+    if (set->length > INT64_C(0)) {
+      memcpy(elements, set->elements,
+             native_collection_bytes(set->length, stride));
+    }
+    set->elements = elements;
+    set->capacity = grown;
+  }
+  memcpy((uint8_t *)set->elements +
+             native_collection_bytes(set->length, stride),
+         value, (size_t)stride);
+  set->length += INT64_C(1);
+  return set;
+}
+
 native_set *native_set_disj(native_arena *arena, native_set *set,
                             const void *value, int64_t stride, size_t alignment,
                             native_collection_equality equality) {
   int64_t removed;
   int64_t source_index;
   native_set *result;
-  native_set_check_shape(set, stride);
+  native_set_check_persistent_shape(set, stride);
   removed = native_set_find(set, value, equality);
   if (removed < INT64_C(0)) {
     return set;
@@ -4275,7 +4483,7 @@ native_set *native_set_disj(native_arena *arena, native_set *set,
 native_vec *native_set_vector(native_arena *arena, const native_set *set,
                               size_t alignment) {
   native_vec *result;
-  native_set_check(set);
+  native_set_check_persistent(set);
   result = native_vec_new(arena, set->length, set->stride, alignment);
   if (set->length > INT64_C(0)) {
     memcpy(result->elements, set->elements,

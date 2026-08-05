@@ -209,6 +209,10 @@
     (instance? native.core.SetConjInstructionV0 instruction) true
     (instance? native.core.SetDisjInstructionV0 instruction) true
     (instance? native.core.SetVectorInstructionV0 instruction) true
+    (instance? native.core.CollectionTransientOpenInstructionV0 instruction) true
+    (instance? native.core.CollectionPersistentCloseInstructionV0 instruction) true
+    (instance? native.core.TransientMapAssocInstructionV0 instruction) true
+    (instance? native.core.TransientSetConjInstructionV0 instruction) true
     (instance? native.core.ArenaInstruction instruction) true
     (instance? native.core.AtomStateInstruction instruction) true
     (instance? native.core.AtomCreateInstruction instruction) true
@@ -695,6 +699,12 @@
     (instance? native.core.SetDisjInstructionV0 instruction)
     (instance? native.core.StructuralEqualityV0
       (core/setdisjinstructionv0-element-equality instruction))
+    (instance? native.core.TransientMapAssocInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/transientmapassocinstructionv0-key-equality instruction))
+    (instance? native.core.TransientSetConjInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/transientsetconjinstructionv0-element-equality instruction))
     :else false))
 
 (defn value-descriptors-used? [functions: (Vec core/FunctionDef)] -> Bool
@@ -2611,6 +2621,88 @@
             (core/setvectorinstructionv0-arena-id instruction))
           ", " (value-name function slots source) ", (size_t)"
           (set-alignment layouts set-type) ");\n"))
+
+      (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
+      (let [collection-type: core/NativeId (core/ssavaluev0-type-id result)
+            shape: core/LayoutShapeV0
+            (collection-layout-of layouts collection-type)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/collectiontransientopeninstructionv0-arena-id instruction)))
+            source: String
+            (value-name function slots
+              (core/collectiontransientopeninstructionv0-source-id instruction))]
+        (cond
+          (instance? native.core.MapShapeV0 shape)
+          (str "  " target " = native_map_transient_open(" arena ", " source
+            ", (size_t)" (map-key-alignment layouts collection-type)
+            ", (size_t)" (map-value-alignment layouts collection-type) ");\n")
+          (instance? native.core.SetShapeV0 shape)
+          (str "  " target " = native_set_transient_open(" arena ", " source
+            ", (size_t)" (set-alignment layouts collection-type) ");\n")
+          :else "  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"))
+
+      (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
+      (let [collection-type: core/NativeId (core/ssavaluev0-type-id result)
+            shape: core/LayoutShapeV0
+            (collection-layout-of layouts collection-type)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/collectionpersistentcloseinstructionv0-arena-id instruction)))
+            source: String
+            (value-name function slots
+              (core/collectionpersistentcloseinstructionv0-source-id instruction))]
+        (cond
+          (instance? native.core.MapShapeV0 shape)
+          (str "  " target " = native_map_persistent_close(" arena ", " source
+            ");\n")
+          (instance? native.core.SetShapeV0 shape)
+          (str "  " target " = native_set_persistent_close(" arena ", " source
+            ");\n")
+          :else "  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"))
+
+      (instance? native.core.TransientMapAssocInstructionV0 instruction)
+      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_map_assoc_transient((native_arena *)"
+          (value-name function slots
+            (core/transientmapassocinstructionv0-arena-id instruction))
+          ", "
+          (value-name function slots
+            (core/transientmapassocinstructionv0-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/transientmapassocinstructionv0-key-id instruction))
+          ", &"
+          (value-name function slots
+            (core/transientmapassocinstructionv0-value-id instruction))
+          ", INT64_C(" (map-key-stride layouts map-type) "), (size_t)"
+          (map-key-alignment layouts map-type) ", INT64_C("
+          (map-value-stride layouts map-type) "), (size_t)"
+          (map-value-alignment layouts map-type) ", "
+          (concrete-equality-name
+            types module-index
+            (core/transientmapassocinstructionv0-key-equality instruction))
+          ");\n"))
+
+      (instance? native.core.TransientSetConjInstructionV0 instruction)
+      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_set_conj_transient((native_arena *)"
+          (value-name function slots
+            (core/transientsetconjinstructionv0-arena-id instruction))
+          ", "
+          (value-name function slots
+            (core/transientsetconjinstructionv0-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/transientsetconjinstructionv0-value-id instruction))
+          ", INT64_C(" (set-stride layouts set-type) "), (size_t)"
+          (set-alignment layouts set-type) ", "
+          (concrete-equality-name
+            types module-index
+            (core/transientsetconjinstructionv0-element-equality instruction))
+          ");\n"))
 
       (instance? native.core.CallInstruction instruction)
       (str "  " target " = "

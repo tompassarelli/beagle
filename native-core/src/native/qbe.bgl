@@ -303,6 +303,14 @@
     [(SetDisjInstructionV0 value) (core/setdisjinstructionv0-result instruction)]
     [(SetVectorInstructionV0 value)
      (core/setvectorinstructionv0-result instruction)]
+    [(CollectionTransientOpenInstructionV0 value)
+     (core/collectiontransientopeninstructionv0-result instruction)]
+    [(CollectionPersistentCloseInstructionV0 value)
+     (core/collectionpersistentcloseinstructionv0-result instruction)]
+    [(TransientMapAssocInstructionV0 value)
+     (core/transientmapassocinstructionv0-result instruction)]
+    [(TransientSetConjInstructionV0 value)
+     (core/transientsetconjinstructionv0-result instruction)]
     [(ArenaInstruction value) (core/arenainstruction-result instruction)]
     [(AtomStateInstruction value) (core/atomstateinstruction-result instruction)]
     [(AtomCreateInstruction value) (core/atomcreateinstruction-result instruction)]
@@ -1049,6 +1057,10 @@
     [(SetConjInstructionV0 value) false]
     [(SetDisjInstructionV0 value) false]
     [(SetVectorInstructionV0 value) false]
+    [(CollectionTransientOpenInstructionV0 value) false]
+    [(CollectionPersistentCloseInstructionV0 value) false]
+    [(TransientMapAssocInstructionV0 value) false]
+    [(TransientSetConjInstructionV0 value) false]
     [(ArenaInstruction value) false]
     [(AtomStateInstruction value) false]
     [(AtomCreateInstruction value) false]
@@ -1515,6 +1527,10 @@
       [(SetConjInstructionV0 value) ""]
       [(SetDisjInstructionV0 value) ""]
       [(SetVectorInstructionV0 value) ""]
+      [(CollectionTransientOpenInstructionV0 value) ""]
+      [(CollectionPersistentCloseInstructionV0 value) ""]
+      [(TransientMapAssocInstructionV0 value) ""]
+      [(TransientSetConjInstructionV0 value) ""]
       [(ArenaInstruction value)
        (str "  " result-name " =l copy %arena\n")]
       [(AtomStateInstruction value) ""]
@@ -1941,6 +1957,10 @@
     [(SetConjInstructionV0 value) false]
     [(SetDisjInstructionV0 value) false]
     [(SetVectorInstructionV0 value) false]
+    [(CollectionTransientOpenInstructionV0 value) false]
+    [(CollectionPersistentCloseInstructionV0 value) false]
+    [(TransientMapAssocInstructionV0 value) false]
+    [(TransientSetConjInstructionV0 value) false]
     [(ArenaInstruction value) true]
     [(AtomStateInstruction value) false]
     [(AtomCreateInstruction value) false]

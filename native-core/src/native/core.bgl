@@ -589,6 +589,30 @@
     [result: SsaValueV0
      source-id: NativeId
      arena-id: NativeId])
+  ;; Transient collections stay in the persistent collection's SSA type. The
+  ;; explicit open/close boundary is what permits mutation without exposing a
+  ;; backend-specific builder representation.
+  (CollectionTransientOpenInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
+  (CollectionPersistentCloseInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
+  (TransientMapAssocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  (TransientSetConjInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
   (ArenaInstruction
@@ -980,6 +1004,16 @@
     [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
      (ssavaluev0-id result)]
     [(SetVectorInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
+    [(CollectionTransientOpenInstructionV0 result source-id arena-id)
+     (ssavaluev0-id result)]
+    [(CollectionPersistentCloseInstructionV0 result source-id arena-id)
+     (ssavaluev0-id result)]
+    [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
+       key-equality)
+     (ssavaluev0-id result)]
+    [(TransientSetConjInstructionV0 result source-id value-id arena-id
+       element-equality)
+     (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
     [(AtomStateInstruction result region capability tokens)
      (ssavaluev0-id result)]
@@ -1521,6 +1555,14 @@
     [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
      (concrete-equality-refs-closed? element-equality known-types)]
     [(SetVectorInstructionV0 result source-id arena-id) true]
+    [(CollectionTransientOpenInstructionV0 result source-id arena-id) true]
+    [(CollectionPersistentCloseInstructionV0 result source-id arena-id) true]
+    [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
+       key-equality)
+     (concrete-equality-refs-closed? key-equality known-types)]
+    [(TransientSetConjInstructionV0 result source-id value-id arena-id
+       element-equality)
+     (concrete-equality-refs-closed? element-equality known-types)]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(AtomStateInstruction result region capability tokens)
@@ -1765,6 +1807,16 @@
     [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
      [arena-id source-id value-id]]
     [(SetVectorInstructionV0 result source-id arena-id) [arena-id source-id]]
+    [(CollectionTransientOpenInstructionV0 result source-id arena-id)
+     [arena-id source-id]]
+    [(CollectionPersistentCloseInstructionV0 result source-id arena-id)
+     [arena-id source-id]]
+    [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
+       key-equality)
+     [arena-id source-id key-id value-id]]
+    [(TransientSetConjInstructionV0 result source-id value-id arena-id
+       element-equality)
+     [arena-id source-id value-id]]
     [(ArenaInstruction result region capability tokens) []]
     [(AtomStateInstruction result region capability tokens) []]
     [(AtomCreateInstruction result initial-id arena-id state-id)
@@ -1894,6 +1946,12 @@
     [(SetConjInstructionV0 result source-id value-id arena-id element-equality) true]
     [(SetDisjInstructionV0 result source-id value-id arena-id element-equality) true]
     [(SetVectorInstructionV0 result source-id arena-id) true]
+    [(CollectionTransientOpenInstructionV0 result source-id arena-id) true]
+    [(CollectionPersistentCloseInstructionV0 result source-id arena-id) true]
+    [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
+       key-equality) true]
+    [(TransientSetConjInstructionV0 result source-id value-id arena-id
+       element-equality) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
