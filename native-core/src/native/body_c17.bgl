@@ -2364,11 +2364,14 @@
       (loop [inner: Int 0 result: String ""]
         (if (>= inner (count arguments))
           result
-          (recur (+ inner 1)
-            (str result "  "
-              (value-name function slots
-                (core/parameter-id (nth parameters inner)))
-              " = " (value-name function slots (nth arguments inner)) ";\n"))))
+          (let [parameter-id: core/NativeId
+                (core/parameter-id (nth parameters inner))
+                argument-id: core/NativeId (nth arguments inner)]
+            (recur (+ inner 1)
+              (if (core/native-id= parameter-id argument-id)
+                result
+                (str result "  " (value-name function slots parameter-id)
+                  " = " (value-name function slots argument-id) ";\n"))))))
       "  goto " (label-name function-index position) ";\n")))
 
 (defn emit-terminator

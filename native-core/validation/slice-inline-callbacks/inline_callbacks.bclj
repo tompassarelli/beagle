@@ -1,0 +1,54 @@
+#lang beagle/clj
+
+(ns native.inline-callbacks)
+
+(define-mode strict)
+
+(defrecord OptionalBoolCarrier [value: (U Bool Nil)])
+
+(defn captured-reduce [offset: Int] -> Int
+  (let [values: (Vec Int) [1 2 3]]
+    (reduce
+      (fn
+        [total: Int
+         value: Int] -> Int
+        (+ total (+ value offset)))
+      0 values)))
+
+(defn captured-map [offset: Int] -> Int
+  (let [values: (Vec Int) [1 2]]
+    (nth
+      (mapv (fn [value: Int] -> Int (+ value offset)) values)
+      1)))
+
+(defn captured-filter [threshold: Int] -> Int
+  (let [values: (Vec Int) [1 4 7]]
+    (count
+      (filterv (fn [value: Int] -> Bool (> value threshold)) values))))
+
+(defn captured-every? [threshold: Int] -> Bool
+  (let [values: (Vec Int) [1 2 3]]
+    (every? (fn [value: Int] -> Bool (> value threshold)) values)))
+
+(defn captured-some? [target: Int] -> Bool
+  (let [values: (Vec Int) [1 3 5]]
+    (boolean
+      (some (fn [value: Int] -> Bool (= value target)) values))))
+
+(defn shadowed-map-parameter [value: Int] -> Int
+  (let [values: (Vec Int) [10]]
+    (nth
+      (mapv (fn [value: Int] -> Int (+ value 1)) values)
+      0)))
+
+(defn nested-captures [threshold: Int] -> Bool
+  (let [values: (Vec Int) [1 2]
+        candidates: (Vec Int) [2 3 4]]
+    (every?
+      (fn [value: Int] -> Bool
+        (some?
+          (some
+            (fn [candidate: Int] -> Bool
+              (= candidate (+ value threshold)))
+            candidates)))
+      values)))

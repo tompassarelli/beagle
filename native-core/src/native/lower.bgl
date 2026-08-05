@@ -5612,6 +5612,538 @@
       state
       (state-add-keyword-refinement state refinement))))
 
+(declare lower-expr)
+
+;; Captured SSA locals remain dominated, but recur cannot cross an fn boundary.
+(defn state-enter-inline-callback [state: BodyStateV0] -> BodyStateV0
+  (with state [:loop-frames []]))
+
+(defn lower-nil-union-value
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   target: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types target)
+        nil-variants: (Vec core/TypeVariant)
+        (loop [position: Int 0 collected: (Vec core/TypeVariant) []]
+          (if (>= position (count variants))
+            collected
+            (recur (+ position 1)
+              (if (nil-variant? (nth variants position))
+                (conj collected (nth variants position))
+                collected))))]
+    (if (not (= 1 (count nil-variants)))
+      (fail-result state
+        "TODO-NATIVE-NIL-INJECTION: target union needs exactly one nil alternative")
+      (let [variant: core/TypeVariant (nth nil-variants 0)
+            payload-type: (U core/NativeId Nil)
+            (core/typevariant-payload-type variant)
+            result-id: core/NativeId (state-id state owner "nil-inject")]
+        (if (nil? payload-type)
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->UnionConstructInstruction
+                (core/->SsaValueV0 result-id target)
+                (core/typevariant-id variant) nil))
+            result-id target false)
+          (let [payload-variants: (Vec core/TypeVariant)
+                (payloadless-variants (union-variants-of types payload-type))]
+            (if (not (= 1 (count payload-variants)))
+              (fail-result state
+                "TODO-NATIVE-NIL-INJECTION: carried Nil needs one unit alternative")
+              (let [payload-id: core/NativeId
+                    (state-id state owner "nil-payload")]
+                (->ExprResultV0
+                  (state-emit
+                    (state-emit (state-bump (state-bump state))
+                      (core/->UnionConstructInstruction
+                        (core/->SsaValueV0 payload-id payload-type)
+                        (core/typevariant-id (nth payload-variants 0)) nil))
+                    (core/->UnionConstructInstruction
+                      (core/->SsaValueV0 result-id target)
+                      (core/typevariant-id variant) payload-id))
+                  result-id target false)))))))))
+
+(defn lower-eager-vector-collect
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   callback-body: core/NativeId
+   callback-name: String
+   callback-return: core/NativeId
+   element-type: core/NativeId
+   collection-id: core/NativeId
+   collection-type: core/NativeId] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        mapping: Bool (= "mapv" callee)
+        result-vector-type: (U core/NativeId Nil)
+        (if mapping
+          (vector-type-of types callback-return)
+          collection-type)]
+    (if (nil? result-vector-type)
+      (fail-result state
+        "TODO-NATIVE-MAPV-RESULT: the module declares no Vec of the callback return type")
+      (let [outer-locals: (Vec LocalBindingV0) (bodystatev0-locals state)
+            outer-frames: (Vec LoopFrameV0) (bodystatev0-loop-frames state)
+            outer-refinements: (Vec KeywordFlowRefinementV0)
+            (bodystatev0-keyword-refinements state)
+            length-id: core/NativeId (state-id state owner (str callee "-length"))
+            zero-id: core/NativeId (state-id state owner (str callee "-zero"))
+            empty-id: core/NativeId (state-id state owner (str callee "-empty"))
+            header-id: core/NativeId (state-id state owner (str callee "-header"))
+            body-id: core/NativeId (state-id state owner (str callee "-body"))
+            exit-id: core/NativeId (state-id state owner (str callee "-exit"))
+            header-index: core/NativeId (state-id state owner (str callee "-index"))
+            header-output: core/NativeId (state-id state owner (str callee "-output"))
+            prepared: BodyStateV0
+            (state-emit
+              (state-emit
+                (state-emit (state-bump state)
+                  (core/->VecLengthInstruction
+                    (core/->SsaValueV0 length-id (int-type-id))
+                    collection-id))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 zero-id (int-type-id))
+                  (core/->I64Atom 0)))
+              (core/->VecEmptyInstruction
+                (core/->SsaValueV0 empty-id result-vector-type)
+                length-id (arena-value-id owner)))
+            entered: BodyStateV0
+            (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id empty-id]))
+              header-id
+              [(core/->Parameter header-index (int-type-id))
+               (core/->Parameter header-output result-vector-type)])
+            has-item: core/NativeId
+            (state-id entered owner (str callee "-has-item"))
+            compared: BodyStateV0
+            (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-item (bool-type-id))
+                (core/->CompareLtI64V0 true)
+                header-index length-id))
+            branched: BodyStateV0
+            (state-open-block
+              (state-close compared
+                (core/->BranchTerminator has-item body-id exit-id))
+              body-id [])
+            item-id: core/NativeId
+            (state-id branched owner (str callee "-item"))
+            isolated: BodyStateV0
+            (state-enter-inline-callback
+              (state-emit (state-bump branched)
+                (core/->VecGetInstruction
+                  (core/->SsaValueV0 item-id element-type)
+                  collection-id header-index)))
+            callback-state: BodyStateV0
+            (state-bind isolated callback-name item-id element-type)
+            callback-result: ExprResultV0
+            (lower-expr env owner callback-state callback-body)
+            restored: BodyStateV0
+            (with
+              (with
+                (with (exprresultv0-state callback-result)
+                  [:locals outer-locals])
+                [:loop-frames outer-frames])
+              [:keyword-refinements outer-refinements])]
+        (cond
+          (state-blocked? restored) (dead-result restored)
+
+          (exprresultv0-terminated callback-result)
+          (fail-result restored
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-DIVERGES: " callee
+              " callback does not produce a value"))
+
+          (not (same-id? callback-return
+                 (exprresultv0-type-id callback-result)))
+          (fail-result restored
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-RESULT: " callee
+              " callback body does not produce its declared type"))
+
+          :else
+          (let [one-id: core/NativeId
+                (state-id restored owner (str callee "-one"))
+                with-one: BodyStateV0
+                (state-emit (state-bump restored)
+                  (core/->AtomInstruction
+                    (core/->SsaValueV0 one-id (int-type-id))
+                    (core/->I64Atom 1)))
+                next-index: ExprResultV0
+                (lower-checked-arith with-one owner "+" header-index one-id)
+                next-state: BodyStateV0 (exprresultv0-state next-index)]
+            (if (state-blocked? next-state)
+              (dead-result next-state)
+              (if mapping
+                (let [next-output: core/NativeId
+                      (state-id next-state owner "mapv-next-output")
+                      pushed: BodyStateV0
+                      (state-emit (state-bump next-state)
+                        (core/->VecPushInstruction
+                          (core/->SsaValueV0 next-output result-vector-type)
+                          header-output
+                          (exprresultv0-value-id callback-result)
+                          (arena-value-id owner)))]
+                  (->ExprResultV0
+                    (state-open-block
+                      (state-close pushed
+                        (core/->JumpTerminator header-id
+                          [(exprresultv0-value-id next-index) next-output]))
+                      exit-id [])
+                    header-output result-vector-type false))
+                (let [keep-id: core/NativeId
+                      (state-id next-state owner "filterv-keep")
+                      skip-id: core/NativeId
+                      (state-id next-state owner "filterv-skip")
+                      next-output: core/NativeId
+                      (state-id next-state owner "filterv-next-output")
+                      selected: BodyStateV0
+                      (state-close (state-bump next-state)
+                        (core/->BranchTerminator
+                          (exprresultv0-value-id callback-result)
+                          keep-id skip-id))
+                      kept: BodyStateV0
+                      (state-close
+                        (state-emit (state-open-block selected keep-id [])
+                          (core/->VecPushInstruction
+                            (core/->SsaValueV0 next-output result-vector-type)
+                            header-output item-id (arena-value-id owner)))
+                        (core/->JumpTerminator header-id
+                          [(exprresultv0-value-id next-index) next-output]))
+                      skipped: BodyStateV0
+                      (state-close
+                        (state-open-block kept skip-id [])
+                        (core/->JumpTerminator header-id
+                          [(exprresultv0-value-id next-index) header-output]))]
+                  (->ExprResultV0
+                    (state-open-block skipped exit-id [])
+                    header-output result-vector-type false))))))))))
+
+(defn lower-eager-vector-predicate
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   callback-body: core/NativeId
+   callback-name: String
+   callback-return: core/NativeId
+   element-type: core/NativeId
+   collection-id: core/NativeId] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        every-mode: Bool (= "every?" callee)
+        callback-variants: (Vec core/TypeVariant)
+        (union-variants-of types callback-return)
+        optional-result: (U core/NativeId Nil)
+        (if every-mode
+          nil
+          (if (= 1 (nil-variant-count callback-variants))
+            callback-return
+            (optional-scalar-type-of types callback-return)))
+        result-type: core/NativeId
+        (if every-mode
+          (bool-type-id)
+          (if (nil? optional-result)
+            (type-id "LowerFailure")
+            optional-result))
+        result-variants: (Vec core/TypeVariant)
+        (if every-mode [] (union-variants-of types result-type))]
+    (cond
+      (and (not every-mode) (nil? optional-result))
+      (fail-result state
+        "TODO-NATIVE-SOME-RESULT-TYPE: the callback type has no nullable native result")
+
+      (and (not every-mode) (not (= 1 (nil-variant-count result-variants))))
+      (fail-result state
+        "TODO-NATIVE-SOME-RESULT-TYPE: the result needs one nil alternative")
+
+      :else
+      (let [outer-locals: (Vec LocalBindingV0) (bodystatev0-locals state)
+            outer-frames: (Vec LoopFrameV0) (bodystatev0-loop-frames state)
+            outer-refinements: (Vec KeywordFlowRefinementV0)
+            (bodystatev0-keyword-refinements state)
+            length-id: core/NativeId (state-id state owner (str callee "-length"))
+            zero-id: core/NativeId (state-id state owner (str callee "-zero"))
+            header-id: core/NativeId (state-id state owner (str callee "-header"))
+            body-id: core/NativeId (state-id state owner (str callee "-body"))
+            exhausted-id: core/NativeId
+            (state-id state owner (str callee "-exhausted"))
+            continue-id: core/NativeId
+            (state-id state owner (str callee "-continue"))
+            terminal-id: core/NativeId
+            (state-id state owner (str callee "-terminal"))
+            join-id: core/NativeId (state-id state owner (str callee "-join"))
+            join-value: core/NativeId (state-id state owner (str callee "-result"))
+            header-index: core/NativeId (state-id state owner (str callee "-index"))
+            prepared: BodyStateV0
+            (state-emit
+              (state-emit (state-bump state)
+                (core/->VecLengthInstruction
+                  (core/->SsaValueV0 length-id (int-type-id)) collection-id))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            entered: BodyStateV0
+            (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id]))
+              header-id [(core/->Parameter header-index (int-type-id))])
+            has-item: core/NativeId
+            (state-id entered owner (str callee "-has-item"))
+            compared: BodyStateV0
+            (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-item (bool-type-id))
+                (core/->CompareLtI64V0 true) header-index length-id))
+            branched: BodyStateV0
+            (state-open-block
+              (state-close compared
+                (core/->BranchTerminator has-item body-id exhausted-id))
+              body-id [])
+            item-id: core/NativeId
+            (state-id branched owner (str callee "-item"))
+            isolated: BodyStateV0
+            (state-enter-inline-callback
+              (state-emit (state-bump branched)
+                (core/->VecGetInstruction
+                  (core/->SsaValueV0 item-id element-type)
+                  collection-id header-index)))
+            callback-state: BodyStateV0
+            (state-bind isolated callback-name item-id element-type)
+            callback-result: ExprResultV0
+            (lower-expr env owner callback-state callback-body)
+            callback-outer-state: BodyStateV0
+            (with
+              (with
+                (with (exprresultv0-state callback-result)
+                  [:locals outer-locals])
+                [:loop-frames outer-frames])
+              [:keyword-refinements outer-refinements])]
+        (cond
+          (state-blocked? callback-outer-state) (dead-result callback-outer-state)
+
+          (exprresultv0-terminated callback-result)
+          (fail-result callback-outer-state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-DIVERGES: " callee
+              " callback does not produce a value"))
+
+          (not (same-id? callback-return
+                 (exprresultv0-type-id callback-result)))
+          (fail-result callback-outer-state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-RESULT: " callee
+              " callback body does not produce its declared type"))
+
+          :else
+          (let [condition: ExprResultV0
+                (if every-mode
+                  callback-result
+                  (lower-truthy types owner
+                    (exprresultv0-state callback-result)
+                    (exprresultv0-value-id callback-result)
+                    (exprresultv0-type-id callback-result)))
+                restored: BodyStateV0
+                (with
+                  (with
+                    (with (exprresultv0-state condition)
+                      [:locals outer-locals])
+                    [:loop-frames outer-frames])
+                  [:keyword-refinements outer-refinements])]
+            (if (state-blocked? restored)
+              (dead-result restored)
+              (let [one-id: core/NativeId
+                    (state-id restored owner (str callee "-one"))
+                    with-one: BodyStateV0
+                    (state-emit (state-bump restored)
+                      (core/->AtomInstruction
+                        (core/->SsaValueV0 one-id (int-type-id))
+                        (core/->I64Atom 1)))
+                    next-index: ExprResultV0
+                    (lower-checked-arith with-one owner "+" header-index one-id)
+                    next-state: BodyStateV0
+                    (exprresultv0-state next-index)]
+                (if (state-blocked? next-state)
+                  (dead-result next-state)
+                  (let [selected: BodyStateV0
+                    (state-close (state-bump next-state)
+                      (core/->BranchTerminator
+                        (exprresultv0-value-id condition)
+                        (if every-mode continue-id terminal-id)
+                        (if every-mode terminal-id continue-id)))
+                    continued: BodyStateV0
+                    (state-close
+                      (state-open-block selected continue-id [])
+                      (core/->JumpTerminator header-id
+                        [(exprresultv0-value-id next-index)]))]
+                (if every-mode
+                  (let [false-id: core/NativeId
+                        (state-id continued owner "every-false")
+                        terminal: BodyStateV0
+                        (state-close
+                          (state-emit
+                            (state-open-block continued terminal-id [])
+                            (core/->AtomInstruction
+                              (core/->SsaValueV0 false-id (bool-type-id))
+                              (core/->BoolAtom false)))
+                          (core/->JumpTerminator join-id [false-id]))
+                        true-id: core/NativeId
+                        (state-id terminal owner "every-true")
+                        exhausted: BodyStateV0
+                        (state-close
+                          (state-emit
+                            (state-open-block terminal exhausted-id [])
+                            (core/->AtomInstruction
+                              (core/->SsaValueV0 true-id (bool-type-id))
+                              (core/->BoolAtom true)))
+                          (core/->JumpTerminator join-id [true-id]))]
+                    (->ExprResultV0
+                      (state-open-block exhausted join-id
+                        [(core/->Parameter join-value result-type)])
+                      join-value result-type false))
+                  (let [terminal-open: BodyStateV0
+                        (state-open-block continued terminal-id [])
+                        hit: ExprResultV0
+                        (lower-boundary-coerce types owner terminal-open
+                          (exprresultv0-value-id callback-result)
+                          callback-return result-type)
+                        hit-state: BodyStateV0 (exprresultv0-state hit)]
+                    (if (state-blocked? hit-state)
+                      (dead-result hit-state)
+                      (let [terminal: BodyStateV0
+                            (state-close hit-state
+                              (core/->JumpTerminator join-id
+                                [(exprresultv0-value-id hit)]))
+                            miss: ExprResultV0
+                            (lower-nil-union-value types owner
+                              (state-open-block terminal exhausted-id [])
+                              result-type)
+                            miss-state: BodyStateV0 (exprresultv0-state miss)]
+                        (if (state-blocked? miss-state)
+                          (dead-result miss-state)
+                          (let [exhausted: BodyStateV0
+                                (state-close miss-state
+                                  (core/->JumpTerminator join-id
+                                    [(exprresultv0-value-id miss)]))]
+                            (->ExprResultV0
+                              (state-open-block exhausted join-id
+                                [(core/->Parameter join-value result-type)])
+                              join-value result-type false)))))))))))))))))
+
+(defn lower-eager-vector-hof
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)]
+    (if (not (= 2 (count args)))
+      (fail-result state
+        (str "TODO-NATIVE-VECTOR-HOF-ARITY: " callee
+          " lowers only as (" callee " fn vector)"))
+      (let [callback-node: core/NativeId (nth args 0)
+            callback-kind: String (fact-text index callback-node "form-kind")
+            callback-rest: String (fact-text index callback-node "rest")
+            callback-body: (U core/NativeId Nil)
+            (index-first-object index callback-node "body")
+            callback-return-source: (U core/NativeId Nil)
+            (index-first-object index callback-node "ret")
+            callback-source-parameters: (Vec core/NativeId)
+            (function-parameter-items index callback-node)
+            callback-owner: core/NativeId
+            (state-id state owner (str callee "-callback"))
+            callback-resolution: ParameterResolutionV0
+            (resolve-parameters index callback-node callback-owner)
+            callback-parameters: (Vec core/Parameter)
+            (parameterresolutionv0-parameters callback-resolution)
+            callback-names: (Vec String)
+            (mapv
+              (fn [parameter: core/NativeId] -> String
+                (parameter-name-at index parameter))
+              callback-source-parameters)]
+        (cond
+          (not (= "fn" callback-kind))
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
+              " requires an anonymous function literal"))
+
+          (not (= "false" callback-rest))
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-VARIADIC: " callee
+              " callbacks must have fixed arity"))
+
+          (or (not (= 1 (count callback-source-parameters)))
+              (not (= 1 (count callback-parameters))))
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-ARITY: " callee
+              " callbacks take exactly one vector element"))
+
+          (not (parameterresolutionv0-valid callback-resolution))
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-TYPES: " callee
+              " callback parameters need closed native types"))
+
+          (nil? callback-body)
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-BODY: " callee
+              " callback needs exactly one body form"))
+
+          (nil? callback-return-source)
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-RETURN: " callee
+              " callback needs a closed return annotation"))
+
+          :else
+          (let [callback-return-resolution: TypeResolutionV0
+                (resolve-source-type index callback-return-source)
+                callback-return: core/NativeId
+                (typeresolutionv0-type-id callback-return-resolution)
+                element-type: core/NativeId
+                (core/parameter-type-id (nth callback-parameters 0))]
+            (cond
+              (not (typeresolutionv0-valid callback-return-resolution))
+              (fail-result state
+                (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-RETURN: " callee
+                  " callback return is not a closed native type"))
+
+              (and (or (= "filterv" callee) (= "every?" callee))
+                (not (same-id? callback-return (bool-type-id))))
+              (fail-result state
+                (str "TODO-NATIVE-VECTOR-HOF-PREDICATE: " callee
+                  " callback must declare Bool"))
+
+              :else
+              (let [collection: ExprResultV0
+                    (lower-expr env owner state (nth args 1))
+                    collection-state: BodyStateV0 (exprresultv0-state collection)]
+                (cond
+                  (exprresultv0-terminated collection) collection
+
+                  (state-blocked? collection-state)
+                  (dead-result collection-state)
+
+                  (not (vector-type? types (exprresultv0-type-id collection)))
+                  (fail-result collection-state
+                    (str "TODO-NATIVE-VECTOR-HOF-COLLECTION: " callee
+                      " requires a closed native Vec"))
+
+                  (not (same-id? element-type
+                         (vector-element-of types
+                           (exprresultv0-type-id collection))))
+                  (fail-result collection-state
+                    (str "TODO-NATIVE-VECTOR-HOF-ELEMENT: " callee
+                      " vector element must match its callback parameter"))
+
+                  (or (= "mapv" callee) (= "filterv" callee))
+                  (lower-eager-vector-collect env owner collection-state callee
+                    callback-body (nth callback-names 0) callback-return
+                    element-type (exprresultv0-value-id collection)
+                    (exprresultv0-type-id collection))
+
+                  :else
+                  (lower-eager-vector-predicate env owner collection-state callee
+                    callback-body (nth callback-names 0) callback-return element-type
+                    (exprresultv0-value-id collection)))))))))))
+
 (defn lower-expr
   [env: BodyEnvV0
    owner: core/NativeId
@@ -5699,7 +6231,7 @@
 
         (= "fn" kind)
         (fail-result state
-          "TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback")
+          "TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an eager inline callback")
 
         (= "do" kind)
         (let [body-node: (U core/NativeId Nil)
@@ -6658,6 +7190,10 @@
                                         (recur (+ position 2) next-state result-id
                                           record-type)))))))))))))))
 
+            (or (= "mapv" callee) (= "filterv" callee)
+                (= "every?" callee) (= "some" callee))
+            (lower-eager-vector-hof env owner state callee args)
+
             (= "reduce" callee)
             (if (not (= 3 (count args)))
               (fail-result state
@@ -6682,12 +7218,7 @@
                     (mapv
                       (fn [parameter: core/NativeId] -> String
                         (parameter-name-at index parameter))
-                      callback-source-parameters)
-                    captures: (Vec String)
-                    (if (nil? callback-body)
-                      []
-                      (source-free-ref-names index callback-body callback-names
-                        (+ 1 (index-facts index))))]
+                      callback-source-parameters)]
                 (cond
                   (not (= "fn" callback-kind))
                   (fail-result state
@@ -6713,11 +7244,6 @@
                   (nil? callback-return-source)
                   (fail-result state
                     "TODO-NATIVE-REDUCE-CALLBACK-RETURN: callback needs a closed return annotation")
-
-                  (> (count captures) 0)
-                  (fail-result state
-                    (str "TODO-NATIVE-FN-CAPTURE: reduce callback captures "
-                      (nth captures 0) " instead of receiving it as a parameter"))
 
                   :else
                   (let [callback-return: TypeResolutionV0
@@ -6824,18 +7350,13 @@
                                       item-id: core/NativeId
                                       (state-id branched owner "reduce-item")
                                       isolated: BodyStateV0
-                                      (with
-                                        (with
-                                          (with
-                                            (state-emit (state-bump branched)
-                                              (core/->VecGetInstruction
-                                                (core/->SsaValueV0 item-id
-                                                  element-type)
-                                                (exprresultv0-value-id collection)
-                                                header-index))
-                                            [:locals []])
-                                          [:loop-frames []])
-                                        [:keyword-refinements []])
+                                      (state-enter-inline-callback
+                                        (state-emit (state-bump branched)
+                                          (core/->VecGetInstruction
+                                            (core/->SsaValueV0 item-id
+                                              element-type)
+                                            (exprresultv0-value-id collection)
+                                            header-index)))
                                       callback-state: BodyStateV0
                                       (state-bind
                                         (state-bind isolated
@@ -7564,12 +8085,12 @@
                 (fail-result current
                   "TODO-NATIVE-TEXT-JOIN-OPERANDS: str/join takes Text and Vec Text")
 
-                (and (or (= "boolean" callee) (= "long" callee))
-                  (= 1 (count values))
-                  (or (and (= "boolean" callee)
-                        (same-id? (nth value-types 0) (bool-type-id)))
-                      (and (= "long" callee)
-                        (same-id? (nth value-types 0) (int-type-id)))))
+                (and (= "boolean" callee) (= 1 (count values)))
+                (lower-truthy types owner current
+                  (nth values 0) (nth value-types 0))
+
+                (and (= "long" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (int-type-id)))
                 (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
 
                 (and (= "min" callee)
