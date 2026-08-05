@@ -1444,6 +1444,16 @@
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
           (declared-effect-covers? world function region capability false)))
+      ;; A non-allocating writer acquires the arena under the write capability,
+      ;; so the acquire is covered by a write effect as well as an allocate one.
+      (instance? native.core.ArenaInstruction instruction)
+      (let [region :- core/NativeId (core/arenainstruction-region instruction)
+            capability :- core/NativeId
+            (core/arenainstruction-capability instruction)]
+        (and (core/id-in? (core/functiondef-regions function) region)
+          (core/id-in? (core/functiondef-capabilities function) capability)
+          (or (declared-effect-covers? world function region capability true)
+            (declared-effect-covers? world function region capability false))))
       (and (not (nil? allocation-region)) (not (nil? allocation-capability)))
       (and (core/id-in? (core/functiondef-regions function) allocation-region)
         (core/id-in? (core/functiondef-capabilities function)
