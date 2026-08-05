@@ -19,10 +19,15 @@
 #define NATIVE_HOST_SOCKET_INHERITED_FD INT64_C(3)
 #define NATIVE_HOST_SOCKET_MAX_IO INT64_C(1048576)
 
+typedef struct native_arena_chunk native_arena_chunk;
+
 typedef struct native_arena {
   uint8_t *bytes;
   size_t capacity;
   size_t offset;
+  native_arena_chunk *chunks;
+  size_t growth_floor;
+  bool growable;
 } native_arena;
 
 typedef struct native_capability {
@@ -176,8 +181,11 @@ extern uint64_t native_vec_storage_allocations;
 #define NATIVE_TEXT_HEADER_BYTES ((uint64_t)sizeof(uint64_t))
 
 void native_arena_init(native_arena *arena, uint8_t *storage, size_t capacity);
+bool native_arena_init_growable(native_arena *arena, size_t growth_floor);
 void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment);
 void native_arena_reset(native_arena *arena);
+void native_arena_destroy(native_arena *arena);
+size_t native_arena_reserved_bytes(const native_arena *arena);
 _Noreturn void native_trap(uint32_t code);
 
 native_atom *native_atom_new(native_arena *arena,

@@ -3501,19 +3501,79 @@ struct native_atom {
   void *value;
 };
 
+struct native_arena_chunk {
+  struct native_arena_chunk *next;
+  uint8_t *storage;
+  size_t capacity;
+};
+
 uint64_t native_vec_storage_allocations = UINT64_C(0);
 
 /* Smallest capacity a first push claims; every later growth doubles, which is
    what keeps a run of n pushes at O(log n) storage allocations. */
 #define NATIVE_VEC_MIN_CAPACITY INT64_C(4)
 
+static void native_arena_clear(native_arena *arena) {
+  arena->bytes = NULL;
+  arena->capacity = 0U;
+  arena->offset = 0U;
+  arena->chunks = NULL;
+  arena->growth_floor = 0U;
+  arena->growable = false;
+}
+
+static bool native_arena_add_chunk(native_arena *arena, size_t required) {
+  native_arena_chunk *chunk;
+  size_t capacity = arena->capacity;
+
+  if (capacity < arena->growth_floor) {
+    capacity = arena->growth_floor;
+  }
+  if (capacity == 0U) {
+    capacity = (size_t)4096U;
+  }
+  while (capacity < required) {
+    if (capacity > SIZE_MAX / (size_t)2U) {
+      capacity = required;
+      break;
+    }
+    capacity *= (size_t)2U;
+  }
+  chunk = (native_arena_chunk *)malloc(sizeof(*chunk));
+  if (chunk == NULL) {
+    return false;
+  }
+  chunk->storage = (uint8_t *)malloc(capacity);
+  if (chunk->storage == NULL) {
+    free(chunk);
+    return false;
+  }
+  chunk->next = arena->chunks;
+  chunk->capacity = capacity;
+  arena->chunks = chunk;
+  arena->bytes = chunk->storage;
+  arena->capacity = capacity;
+  arena->offset = 0U;
+  return true;
+}
+
 void native_arena_init(native_arena *arena, uint8_t *storage, size_t capacity) {
   if ((arena == NULL) || ((storage == NULL) && (capacity != 0U))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  native_arena_clear(arena);
   arena->bytes = storage;
   arena->capacity = capacity;
-  arena->offset = 0U;
+}
+
+bool native_arena_init_growable(native_arena *arena, size_t growth_floor) {
+  if (arena == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_arena_clear(arena);
+  arena->growth_floor = growth_floor;
+  arena->growable = true;
+  return growth_floor == 0U || native_arena_add_chunk(arena, growth_floor);
 }
 
 void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment) {
@@ -3537,8 +3597,24 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment) {
     native_trap(NATIVE_TRAP_OVERFLOW);
   }
   size_t aligned_offset = (size_t)(aligned - base);
-  if ((aligned_offset > arena->capacity) || (size > (arena->capacity - aligned_offset))) {
-    native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+  if ((aligned_offset > arena->capacity) ||
+      (size > (arena->capacity - aligned_offset))) {
+    size_t required;
+
+    if (!arena->growable || size > SIZE_MAX - (alignment - (size_t)1U)) {
+      native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+    }
+    required = size + alignment - (size_t)1U;
+    if (!native_arena_add_chunk(arena, required)) {
+      native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+    }
+    base = (uintptr_t)arena->bytes;
+    current = base;
+    if (current > (UINTPTR_MAX - padding_mask)) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    aligned = (current + padding_mask) & ~padding_mask;
+    aligned_offset = (size_t)(aligned - base);
   }
   arena->offset = aligned_offset + size;
   return arena->bytes + aligned_offset;
@@ -3548,7 +3624,49 @@ void native_arena_reset(native_arena *arena) {
   if (arena == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  if (arena->growable) {
+    native_arena_chunk *chunk = arena->chunks;
+
+    while (chunk != NULL) {
+      native_arena_chunk *next = chunk->next;
+      free(chunk->storage);
+      free(chunk);
+      chunk = next;
+    }
+    arena->bytes = NULL;
+    arena->capacity = 0U;
+    arena->chunks = NULL;
+  }
   arena->offset = 0U;
+}
+
+void native_arena_destroy(native_arena *arena) {
+  if (arena == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_arena_reset(arena);
+  native_arena_clear(arena);
+}
+
+size_t native_arena_reserved_bytes(const native_arena *arena) {
+  size_t total = 0U;
+  const native_arena_chunk *chunk;
+
+  if (arena == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (!arena->growable) {
+    return arena->capacity;
+  }
+  chunk = arena->chunks;
+  while (chunk != NULL) {
+    if (total > SIZE_MAX - chunk->capacity) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    total += chunk->capacity;
+    chunk = chunk->next;
+  }
+  return total;
 }
 
 _Noreturn void native_trap(uint32_t code) {
