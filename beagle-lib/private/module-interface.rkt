@@ -602,6 +602,7 @@
 (provide
  INTERFACE-SCHEMA-VERSION
  INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?
+ qualify-provider-local-type-references
  type->canonical-datum
  program->module-interface
  module-interface-export?

@@ -765,6 +765,44 @@
         [_ (values local visible)])))
   local)
 
+(define (raw-local-type-names datums)
+  (define (member-name member)
+    (cond
+      [(symbol? member) member]
+      [(and (pair? member) (symbol? (car member))) (car member)]
+      [else #f]))
+  (define (add-members names members)
+    (for/fold ([found names]) ([member (in-list members)])
+      (define name (member-name member))
+      (if name (set-add found name) found)))
+  (for/fold ([names (seteq)]) ([datum (in-list datums)])
+    (match datum
+      [(list 'defalias (? symbol? name) _)
+       (set-add names name)]
+      [(list 'defrecord (? symbol? name) _)
+       (set-add names name)]
+      [(list* 'defprotocol (? symbol? name) _)
+       (set-add names name)]
+      [(list* 'defenum (? symbol? name) _)
+       (set-add names name)]
+      [(list* 'defscalar (? symbol? name) _)
+       (set-add names name)]
+      [(list* 'defunion ':throwable (? symbol? name) members)
+       (add-members (set-add names name) members)]
+      [(list* 'defunion (? symbol? name) members)
+       (add-members (set-add names name) members)]
+      [(list* 'defunion (list (? symbol? name) _ ...) members)
+       (add-members (set-add names name) members)]
+      [_ names])))
+
+(define (canonicalize-local-aliases aliases namespace datums)
+  (define local-type-names (raw-local-type-names datums))
+  (for/hasheq ([(name expansion) (in-hash aliases)])
+    (values
+     name
+     (qualify-provider-local-type-references
+      expansion namespace local-type-names))))
+
 ;; Provider-private type qualifiers must resolve while its signatures are read,
 ;; but must not enter the consumer's alias namespace.
 (define (collect-required-type-aliases datums source-path seen)
@@ -785,7 +823,11 @@
                (collect-required-type-aliases
                 dependency-datums canonical-path (set-add seen canonical-path)))
              (define dependency-locals
-               (collect-local-type-aliases dependency-datums dependency-imports))
+               (canonicalize-local-aliases
+                (collect-local-type-aliases
+                 dependency-datums dependency-imports)
+                namespace
+                dependency-datums))
              (for/fold ([visible aliases])
                        ([(name expansion) (in-hash dependency-locals)])
                (define prefixed-name (qualify-name prefix name))
@@ -850,7 +892,10 @@
   ;; The raw-source importer is the standalone-check counterpart to candidate
   ;; interfaces: collect provider aliases before importing provider signatures.
   (define raw-provider-aliases
-    (collect-local-type-aliases datums provider-import-aliases))
+    (canonicalize-local-aliases
+     (collect-local-type-aliases datums provider-import-aliases)
+     mod-ns
+     datums))
   (define provider-aliases
     (for/hasheq ([(name expansion) (in-hash raw-provider-aliases)])
       (define displayed-expansion

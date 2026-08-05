@@ -1,0 +1,11 @@
+#lang beagle/clj
+
+(require record-owner :as t)
+(define-mode strict)
+
+(defrecord Item [value: String])
+
+(defn keep
+  [value: t/Term
+   fallback: t/Term?] -> t/Term
+  (if fallback fallback value))

@@ -1,0 +1,5 @@
+(ns consumer
+  (:require [provider :as t]))
+
+(defn echo-term [value: t/Term] -> t/Term value)
+(defn echo-term-maybe [value: t/Term?] -> t/Term? value)
