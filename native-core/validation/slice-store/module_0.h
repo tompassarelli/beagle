@@ -11,42 +11,42 @@ _Static_assert(_Alignof(native_m0_type_0) == 8, "layout alignment");
 typedef struct native_m0_type_1 {
   native_m0_type_0 field_0;
   native_m0_type_0 field_1;
-  native_m0_type_0 field_2;
 } native_m0_type_1;
-_Static_assert(sizeof(native_m0_type_1) == 24, "layout size");
+_Static_assert(sizeof(native_m0_type_1) == 16, "layout size");
 _Static_assert(_Alignof(native_m0_type_1) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_1, field_0) == 0, "field offset");
 _Static_assert(offsetof(native_m0_type_1, field_1) == 8, "field offset");
-_Static_assert(offsetof(native_m0_type_1, field_2) == 16, "field offset");
 
 typedef struct native_m0_type_2 {
   native_m0_type_0 field_0;
   native_m0_type_0 field_1;
+  native_m0_type_0 field_2;
 } native_m0_type_2;
-_Static_assert(sizeof(native_m0_type_2) == 16, "layout size");
+_Static_assert(sizeof(native_m0_type_2) == 24, "layout size");
 _Static_assert(_Alignof(native_m0_type_2) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_2, field_0) == 0, "field offset");
 _Static_assert(offsetof(native_m0_type_2, field_1) == 8, "field offset");
+_Static_assert(offsetof(native_m0_type_2, field_2) == 16, "field offset");
 
 typedef struct native_m0_type_3 {
   native_m0_type_0 field_0;
   native_m0_type_0 field_1;
+  native_m0_type_0 field_2;
 } native_m0_type_3;
-_Static_assert(sizeof(native_m0_type_3) == 16, "layout size");
+_Static_assert(sizeof(native_m0_type_3) == 24, "layout size");
 _Static_assert(_Alignof(native_m0_type_3) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_3, field_0) == 0, "field offset");
 _Static_assert(offsetof(native_m0_type_3, field_1) == 8, "field offset");
+_Static_assert(offsetof(native_m0_type_3, field_2) == 16, "field offset");
 
 typedef struct native_m0_type_4 {
   native_m0_type_0 field_0;
   native_m0_type_0 field_1;
-  native_m0_type_0 field_2;
 } native_m0_type_4;
-_Static_assert(sizeof(native_m0_type_4) == 24, "layout size");
+_Static_assert(sizeof(native_m0_type_4) == 16, "layout size");
 _Static_assert(_Alignof(native_m0_type_4) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_4, field_0) == 0, "field offset");
 _Static_assert(offsetof(native_m0_type_4, field_1) == 8, "field offset");
-_Static_assert(offsetof(native_m0_type_4, field_2) == 16, "field offset");
 
 
 #endif

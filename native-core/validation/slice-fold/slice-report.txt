@@ -1,7 +1,7 @@
 fram.fold Native Core slice
 source: fram:src/fram/fold.bclj
-types: 52
-layouts: 52
+types: 54
+layouts: 54
 functions: 0
 abis: 0
 native lowering complete: no

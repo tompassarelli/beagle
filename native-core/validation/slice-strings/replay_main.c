@@ -10,7 +10,7 @@ static void reset_arena(void) {
   native_arena_init(&arena, storage, sizeof storage);
 }
 
-static native_m0_type_3 text_of(const char *bytes) {
+static native_m0_type_4 text_of(const char *bytes) {
   uint8_t *destination = NULL;
   size_t length = strlen(bytes);
   uint64_t handle = native_text_alloc(&arena, (uint64_t)length, &destination);
@@ -20,31 +20,31 @@ static native_m0_type_3 text_of(const char *bytes) {
   return handle;
 }
 
-static bool text_is(native_m0_type_3 handle, const char *bytes) {
+static bool text_is(native_m0_type_4 handle, const char *bytes) {
   size_t length = strlen(bytes);
   return native_text_length(handle) == (uint64_t)length &&
          (length == 0u || memcmp(native_text_bytes(handle), bytes, length) == 0);
 }
 
-static native_m0_type_3 vector_text(native_m0_type_14 values, int64_t index) {
-  return *(const native_m0_type_3 *)native_vec_at(values, index, INT64_C(8));
+static native_m0_type_4 vector_text(native_m0_type_13 values, int64_t index) {
+  return *(const native_m0_type_4 *)native_vec_at(values, index, INT64_C(8));
 }
 
-static native_m0_type_4 vector_fact(native_m0_type_17 facts, int64_t index) {
-  return *(const native_m0_type_4 *)native_vec_at(facts, index, INT64_C(40));
+static native_m0_type_6 vector_fact(native_m0_type_17 facts, int64_t index) {
+  return *(const native_m0_type_6 *)native_vec_at(facts, index, INT64_C(40));
 }
 
-static native_m0_type_14 strings_of(const char *const *values, int64_t count) {
-  native_m0_type_14 result =
+static native_m0_type_13 strings_of(const char *const *values, int64_t count) {
+  native_m0_type_13 result =
       native_vec_new(&arena, count, INT64_C(8), (size_t)8);
   for (int64_t index = INT64_C(0); index < count; ++index) {
-    native_m0_type_3 value = text_of(values[index]);
+    native_m0_type_4 value = text_of(values[index]);
     result = native_vec_push(&arena, result, &value, INT64_C(8), (size_t)8);
   }
   return result;
 }
 
-static bool fact_is(native_m0_type_4 fact, bool valid, const char *predicate,
+static bool fact_is(native_m0_type_6 fact, bool valid, const char *predicate,
                     const char *value, int64_t base, bool has_base) {
   return fact.field_0 == valid && text_is(fact.field_1, predicate) &&
          text_is(fact.field_2, value) && fact.field_3 == base &&
@@ -63,9 +63,9 @@ static bool op_is(native_m0_type_18 operation, int64_t kind,
          text_is(operation.field_7, error);
 }
 
-static native_m0_type_5 triple_of(const char *t1, const char *t2,
+static native_m0_type_7 triple_of(const char *t1, const char *t2,
                                   const char *t3) {
-  native_m0_type_5 triple;
+  native_m0_type_7 triple;
   triple.field_0 = text_of(t1);
   triple.field_1 = text_of(t2);
   triple.field_2 = text_of(t3);
@@ -77,25 +77,25 @@ static native_m0_type_19 triple_vector(int64_t capacity) {
 }
 
 static native_m0_type_19 push_triple(native_m0_type_19 triples,
-                                     native_m0_type_5 triple) {
+                                     native_m0_type_7 triple) {
   return native_vec_push(&arena, triples, &triple, INT64_C(24), (size_t)8);
 }
 
-static native_m0_type_5 vector_triple(native_m0_type_19 triples,
+static native_m0_type_7 vector_triple(native_m0_type_19 triples,
                                       int64_t index) {
-  return *(const native_m0_type_5 *)native_vec_at(triples, index,
+  return *(const native_m0_type_7 *)native_vec_at(triples, index,
                                                   INT64_C(24));
 }
 
-static native_m0_type_6 vector_commit(native_m0_type_23 commits,
+static native_m0_type_8 vector_commit(native_m0_type_23 commits,
                                       int64_t index) {
-  return *(const native_m0_type_6 *)native_vec_at(commits, index,
+  return *(const native_m0_type_8 *)native_vec_at(commits, index,
                                                   INT64_C(32));
 }
 
-static native_m0_type_15 vector_outcome(native_m0_type_16 outcomes,
+static native_m0_type_14 vector_outcome(native_m0_type_16 outcomes,
                                         int64_t index) {
-  return *(const native_m0_type_15 *)native_vec_at(outcomes, index,
+  return *(const native_m0_type_14 *)native_vec_at(outcomes, index,
                                                    INT64_C(48));
 }
 
@@ -105,16 +105,16 @@ static native_m0_type_25 vector_frame(native_m0_type_21 frames,
                                                    INT64_C(16));
 }
 
-static bool triple_is(native_m0_type_5 triple, const char *t1,
+static bool triple_is(native_m0_type_7 triple, const char *t1,
                       const char *t2, const char *t3) {
   return text_is(triple.field_0, t1) && text_is(triple.field_1, t2) &&
          text_is(triple.field_2, t3);
 }
 
-static native_m0_type_7 action_of(int64_t operation, const char *t1,
+static native_m0_type_5 action_of(int64_t operation, const char *t1,
                                   const char *t2, const char *t3,
                                   bool local_base) {
-  native_m0_type_7 action;
+  native_m0_type_5 action;
   action.field_0 = operation;
   action.field_1 = text_of(t1);
   action.field_2 = text_of(t2);
@@ -123,12 +123,12 @@ static native_m0_type_7 action_of(int64_t operation, const char *t1,
   return action;
 }
 
-static native_m0_type_13 action_vector(int64_t capacity) {
+static native_m0_type_15 action_vector(int64_t capacity) {
   return native_vec_new(&arena, capacity, INT64_C(40), (size_t)8);
 }
 
-static native_m0_type_13 push_action(native_m0_type_13 actions,
-                                     native_m0_type_7 action) {
+static native_m0_type_15 push_action(native_m0_type_15 actions,
+                                     native_m0_type_5 action) {
   return native_vec_push(&arena, actions, &action, INT64_C(40), (size_t)8);
 }
 
@@ -146,16 +146,16 @@ int main(void) {
       "assert", "subject", "predicate", "value"};
   static const char *const batch_fields[] = {
       "assert-batch", "subject", "p=v|q=w@8"};
-  native_m0_type_3 text;
-  native_m0_type_3 separator;
-  native_m0_type_3 result;
-  native_m0_type_4 fact;
-  native_m0_type_5 triple;
-  native_m0_type_7 action;
-  native_m0_type_8 parsed;
-  native_m0_type_13 actions;
-  native_m0_type_14 fields;
-  native_m0_type_14 parts;
+  native_m0_type_4 text;
+  native_m0_type_4 separator;
+  native_m0_type_4 result;
+  native_m0_type_6 fact;
+  native_m0_type_7 triple;
+  native_m0_type_5 action;
+  native_m0_type_3 parsed;
+  native_m0_type_15 actions;
+  native_m0_type_13 fields;
+  native_m0_type_13 parts;
   native_m0_type_17 facts;
   native_m0_type_18 operation;
   native_m0_type_19 reduced;

@@ -1,8 +1,8 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
-world-types 76
-world-layouts 76
+world-types 79
+world-layouts 79
 world-functions 0
 world-abis 0
 projected-types 5

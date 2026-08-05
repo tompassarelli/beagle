@@ -100,10 +100,7 @@ native_l2_4: ;
   native_s_9 = native_s_6;
   goto native_l2_6;
 native_l2_5: ;
-  if (native_s_1.tag != INT64_C(1)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  native_s_7 = native_s_1.payload.variant_1;
+  native_s_7 = (native_m0_type_6){ .tag = INT64_C(0) };
   (void)native_s_7;
   native_s_8 = INT64_C(0);
   (void)native_s_8;

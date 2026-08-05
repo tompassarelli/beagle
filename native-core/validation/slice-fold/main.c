@@ -21,7 +21,7 @@ static int probe_type(native_arena *arena, size_t size, size_t align) {
 }
 
 int main(void) {
-  static uint8_t storage[1434];
+  static uint8_t storage[1466];
   native_arena arena;
   native_arena_init(&arena, storage, sizeof(storage));
   if (probe_type(&arena, sizeof(native_m0_type_0), _Alignof(native_m0_type_0)) != 0) {
@@ -179,6 +179,12 @@ int main(void) {
   }
   if (probe_type(&arena, sizeof(native_m0_type_51), _Alignof(native_m0_type_51)) != 0) {
     return 52;
+  }
+  if (probe_type(&arena, sizeof(native_m0_type_52), _Alignof(native_m0_type_52)) != 0) {
+    return 53;
+  }
+  if (probe_type(&arena, sizeof(native_m0_type_53), _Alignof(native_m0_type_53)) != 0) {
+    return 54;
   }
   native_arena_reset(&arena);
   return 0;

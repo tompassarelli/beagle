@@ -317,7 +317,33 @@
               module-roots
               (assoc module-roots module-name root))))))))
 
-(defn build-source-index [graph: worlds/TermGraphV0] -> SourceIndexV0
+;; The module table, not the term graph, is authoritative for a module's root
+;; and name; a projection that spells neither is still a named module world.
+(defn seed-module-table
+  [index: SourceIndexV0
+   modules: (Vec worlds/SourceModuleV0)] -> SourceIndexV0
+  (loop [position: Int 0 seeded: SourceIndexV0 index]
+    (if (>= position (count modules))
+      seeded
+      (let [module: worlds/SourceModuleV0 (nth modules position)
+            root: core/NativeId (worlds/sourcemodulev0-root-term module)
+            texts: (Map String String)
+            (if (nil? (index-first-text seeded root "namespace"))
+              (assoc (sourceindexv0-first-texts seeded)
+                (source-index-key root "namespace")
+                (worlds/sourcemodulev0-name module))
+              (sourceindexv0-first-texts seeded))
+            roots: (Vec core/NativeId) (index-form-ids seeded "module-root")
+            listed: (Vec core/NativeId)
+            (if (core/id-in? roots root) roots (conj roots root))]
+        (recur (+ position 1)
+          (with (with seeded [:first-texts texts])
+            [:form-ids
+             (assoc (sourceindexv0-form-ids seeded) "module-root" listed)]))))))
+
+(defn build-source-index
+  [graph: worlds/TermGraphV0
+   modules: (Vec worlds/SourceModuleV0)] -> SourceIndexV0
   (let [facts: (Vec SourceFactV0) (source-facts graph)
         graph-texts: (Map String String) (graph-text-index graph)
         partial: SourceIndexV0
@@ -366,7 +392,8 @@
                 (if (nil? (get parent-nodes object-key))
                   (assoc parent-nodes object-key subject)
                   parent-nodes)))))
-        indexed: SourceIndexV0 (add-module-indexes partial)
+        named: SourceIndexV0 (seed-module-table partial modules)
+        indexed: SourceIndexV0 (add-module-indexes named)
         records: (Vec core/NativeId) (index-form-ids indexed "record")
         keys: (Vec String)
         (loop [position: Int 0 collected: (Vec String) []]
@@ -640,6 +667,17 @@
         position
         (recur (+ position 1))))))
 
+;; A projection with one module root and no import table is a closed
+;; single-module world, so an alias-qualified spelling can only name that module.
+(defn sole-module-name
+  [index: SourceIndexV0
+   module-name: String] -> (U String Nil)
+  (let [roots: (Vec core/NativeId) (index-form-ids index "module-root")]
+    (if (and (= 1 (count roots))
+             (= 0 (count (module-sequence index (nth roots 0) "imports"))))
+      module-name
+      nil)))
+
 (defn resolve-source-name
   [index: SourceIndexV0
    module-name: String
@@ -649,10 +687,12 @@
       (->ResolvedSourceNameV0 module-name spelling (> (count spelling) 0))
       (let [alias: String (subs spelling 0 slash)
             local-name: String (subs spelling (+ slash 1) (count spelling))
-            imported: (U String Nil)
+            declared: (U String Nil)
             (if (= alias module-name)
               module-name
-              (imported-module-name index module-name alias))]
+              (imported-module-name index module-name alias))
+            imported: (U String Nil)
+            (if (some? declared) declared (sole-module-name index module-name))]
         (if (or (nil? imported) (= "" local-name))
           (->ResolvedSourceNameV0 "" local-name false)
           (->ResolvedSourceNameV0 imported local-name true))))))
@@ -14523,7 +14563,8 @@
         (worlds/sealedsourceworldv0-world sealed-source)
         source-digest: String (worlds/sealedsourceworldv0-digest sealed-source)
         graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms source)
-        index: SourceIndexV0 (build-source-index graph)
+        index: SourceIndexV0
+        (build-source-index graph (worlds/sourceprogramworldv0-modules source))
         record-keys: (Vec String) (sourceindexv0-record-keys index)
         record-resolutions: (Vec RecordResolutionV0) (resolve-records index)
         function-sources: (Vec core/NativeId) (index-form-ids index "defn")

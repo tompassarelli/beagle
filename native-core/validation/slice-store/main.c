@@ -15,14 +15,14 @@ int main(void) {
     return 1;
   }
 
-  native_m0_type_1 *row_a =
-      native_arena_alloc(&arena, sizeof(*row_a), _Alignof(native_m0_type_1));
-  native_m0_type_4 *row_b =
-      native_arena_alloc(&arena, sizeof(*row_b), _Alignof(native_m0_type_4));
-  native_m0_type_2 *pair_a =
-      native_arena_alloc(&arena, sizeof(*pair_a), _Alignof(native_m0_type_2));
-  native_m0_type_3 *pair_b =
-      native_arena_alloc(&arena, sizeof(*pair_b), _Alignof(native_m0_type_3));
+  native_m0_type_2 *row_a =
+      native_arena_alloc(&arena, sizeof(*row_a), _Alignof(native_m0_type_2));
+  native_m0_type_3 *row_b =
+      native_arena_alloc(&arena, sizeof(*row_b), _Alignof(native_m0_type_3));
+  native_m0_type_1 *pair_a =
+      native_arena_alloc(&arena, sizeof(*pair_a), _Alignof(native_m0_type_1));
+  native_m0_type_4 *pair_b =
+      native_arena_alloc(&arena, sizeof(*pair_b), _Alignof(native_m0_type_4));
   if ((row_a == NULL) || (row_b == NULL) || (pair_a == NULL) || (pair_b == NULL)) {
     return 2;
   }

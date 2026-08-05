@@ -354,7 +354,8 @@
 
 (defn main-text [world: core/NativeWorld] -> String
   (let [types: (Vec core/TypeDef) (c11/ordered-types (core/nativeworld-types world))
-        instant-index: Int (c11/type-index types (lower/type-id "Instant"))
+        instant-index: Int
+        (c11/type-index types (lower/source-type-id "fram.types/Instant"))
         instant-type: String (c11/type-name 0 instant-index)]
     (if (< instant-index 0)
       (throw (ex-info "Instant type is absent from C17 projection" {}))

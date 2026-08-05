@@ -3,7 +3,7 @@ stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 3
 source-imports 2
-world-types 83
+world-types 84
 world-functions 74
 world-abis 74
 projected-types 79
