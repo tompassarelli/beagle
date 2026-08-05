@@ -13,7 +13,47 @@
 
 (provide format-signature-files)
 
-(struct file-format (path source edits) #:transparent)
+(struct file-format (path formatted edits) #:transparent)
+
+(define (source-extension path)
+  (define extension (path-get-extension path))
+  (if extension (bytes->string/utf-8 extension) ".bgl"))
+
+(define (signature-layout-edits-for-source path source)
+  (define parent (or (path-only path) (current-directory)))
+  (define tmp
+    (make-temporary-file
+     (string-append ".beagle-fmt-pass-~a" (source-extension path)) #f parent))
+  (with-handlers ([exn:fail?
+                   (lambda (exn)
+                     (when (file-exists? tmp) (delete-file tmp))
+                     (raise exn))])
+    (call-with-output-file tmp
+      (lambda (out) (display source out))
+      #:exists 'truncate/replace)
+    (define edits
+      (for/list ([edit (in-list (signature-layout-edits tmp))])
+        (struct-copy layout-edit edit [path (path->string path)])))
+    (delete-file tmp)
+    edits))
+
+(define (converged-signature-layout path source)
+  (let loop ([candidate source]
+             [passes '()]
+             [seen (hash source #t)])
+    (define edits (signature-layout-edits-for-source path candidate))
+    (define next-passes (cons edits passes))
+    (cond
+      [(null? edits)
+       (values candidate (apply append (reverse next-passes)))]
+      [(ormap (lambda (edit) (not (layout-edit-safe? edit))) edits)
+       (values candidate (apply append (reverse next-passes)))]
+      [else
+       (define next (apply-signature-layout-edits candidate edits))
+       (when (hash-has-key? seen next)
+         (raise-user-error 'beagle-fmt
+                           "signature formatting did not converge for ~a" path))
+       (loop next next-passes (hash-set seen next #t))])))
 
 (define (analyze-file path-like)
   (define path
@@ -22,7 +62,10 @@
       (if (path? path-like) path-like (string->path path-like)))))
   (unless (file-exists? path)
     (raise-user-error 'beagle-fmt "file does not exist: ~a" path))
-  (file-format path (file->string path) (signature-layout-edits path)))
+  (define source (file->string path))
+  (define-values (formatted edits)
+    (converged-signature-layout path source))
+  (file-format path formatted edits))
 
 (define (print-edit edit)
   (eprintf "~a:~a:~a: signature layout: ~a~a\n"
@@ -62,8 +105,7 @@
      (for ([file (in-list files)] #:when (pair? (file-format-edits file)))
        (atomic-write-string
         (file-format-path file)
-        (apply-signature-layout-edits
-         (file-format-source file) (file-format-edits file))))
+        (file-format-formatted file)))
      (eprintf "beagle fmt: formatted ~a file~a\n"
               (count (lambda (file) (pair? (file-format-edits file))) files)
               (if (= (count (lambda (file) (pair? (file-format-edits file))) files) 1)

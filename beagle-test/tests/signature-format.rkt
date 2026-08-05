@@ -119,3 +119,16 @@
      (check-equal? (format-signature-files 'write (list path)) 0)
      (check-equal? (file->string path) "(defn add [x y] (+ x y))\n")
      (check-equal? (format-signature-files 'check (list path)) 0))))
+
+(test-case "one write converges nested signatures after outer column shifts"
+  (define return-type (make-string 50 #\R))
+  (define source
+    (format "(defn outer [a b c] (fn [x y] -> ~a x))\n" return-type))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-true
+      (string-contains? (file->string path)
+                        (format "c] (fn [x y] -> ~a x)" return-type))))))
