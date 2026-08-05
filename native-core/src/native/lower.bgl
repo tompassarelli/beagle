@@ -1701,12 +1701,10 @@
         (let [shape: core/TypeShape (core/typedef-shape definition)
               next-visited: (Vec core/NativeId) (conj visited target)
               references: (Vec core/NativeId)
+              ;; Only inline payloads inherit callable ABI requirements.
               (cond
                 (instance? native.core.AtomType shape)
-                (let [kind: core/AtomKind (core/atomtype-kind shape)]
-                  (if (instance? native.core.RefKind kind)
-                    [(core/refkind-target kind)]
-                    []))
+                []
 
                 (instance? native.core.RecordType shape)
                 (mapv
@@ -1727,12 +1725,6 @@
                       (recur (+ position 1) variants
                         (if (nil? payload) collected
                           (conj collected payload))))))
-
-                (instance? native.core.VectorType shape)
-                [(core/vectortype-element-type shape)]
-
-                (instance? native.core.ReferenceType shape)
-                [(core/referencetype-target-type shape)]
 
                 (instance? native.core.OutcomeType shape)
                 [(core/outcometype-value-type shape)
