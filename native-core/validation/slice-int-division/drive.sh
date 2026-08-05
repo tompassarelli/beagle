@@ -102,8 +102,14 @@ function_index() {
 quot_index="$(function_index quot-int)"
 rem_index="$(function_index rem-int)"
 mod_index="$(function_index mod-int)"
-if [[ -z "$quot_index" || -z "$rem_index" || -z "$mod_index" ]]; then
-  echo "drive.sh: failed to resolve division function indices" >&2
+add_index="$(function_index variadic-add)"
+multiply_index="$(function_index variadic-multiply)"
+negate_index="$(function_index unary-negate)"
+keyword_index="$(function_index literal-keyword-equal?)"
+if [[ -z "$quot_index" || -z "$rem_index" || -z "$mod_index" ||
+      -z "$add_index" || -z "$multiply_index" || -z "$negate_index" ||
+      -z "$keyword_index" ]]; then
+  echo "drive.sh: failed to resolve integer function indices" >&2
   exit 1
 fi
 
@@ -115,6 +121,10 @@ clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M -e "
 (assert (= -2 (native.int-division/quot-int -7 3)))
 (assert (= -1 (native.int-division/rem-int -7 3)))
 (assert (= 2 (native.int-division/mod-int -7 3)))
+(assert (= 9 (native.int-division/variadic-add 2 3 4)))
+(assert (= -24 (native.int-division/variadic-multiply -2 3 4)))
+(assert (= -7 (native.int-division/unary-negate 7)))
+(assert (native.int-division/literal-keyword-equal?))
 (assert (= Long/MIN_VALUE
   (native.int-division/quot-int Long/MIN_VALUE -1)))
 (assert (= 0 (native.int-division/rem-int Long/MIN_VALUE -1)))
@@ -126,6 +136,10 @@ definitions=(
   "-DQUOT_FN=native_m0_fn_$quot_index"
   "-DREM_FN=native_m0_fn_$rem_index"
   "-DMOD_FN=native_m0_fn_$mod_index"
+  "-DADD_FN=native_m0_fn_$add_index"
+  "-DMULTIPLY_FN=native_m0_fn_$multiply_index"
+  "-DNEGATE_FN=native_m0_fn_$negate_index"
+  "-DKEYWORD_FN=native_m0_fn_$keyword_index"
 )
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 
@@ -137,7 +151,7 @@ run_compiler() {
     "$compiler" "${strict[@]}" "${definitions[@]}" -o "$output" \
       module_0.c native_shim.c main.c
     "./$output"
-    for mode in zero-quot zero-rem zero-mod; do
+    for mode in zero-quot zero-rem zero-mod overflow-add; do
       if (ulimit -c 0 && "./$output" "$mode") 2>/dev/null; then
         echo "drive.sh: $compiler accepted $mode" >&2
         exit 1
@@ -149,4 +163,4 @@ run_compiler() {
 run_compiler gcc probe_gcc
 run_compiler "$clang_bin" probe_clang
 
-echo "int-division: managed parity, Native obligations, strict GCC+Clang, guarded edges, and QBE refusal PASS"
+echo "int-arithmetic: managed parity, Native obligations, strict GCC+Clang, guarded edges, and QBE refusal PASS"

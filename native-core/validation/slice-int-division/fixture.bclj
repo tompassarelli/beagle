@@ -16,3 +16,21 @@
   [left: Int
    right: Int] -> Int
   (mod left right))
+
+(defn variadic-add
+  [first: Int
+   second: Int
+   third: Int] -> Int
+  (+ first second third))
+
+(defn variadic-multiply
+  [first: Int
+   second: Int
+   third: Int] -> Int
+  (* first second third))
+
+(defn unary-negate [value: Int] -> Int
+  (- value))
+
+(defn literal-keyword-equal? [] -> Bool
+  (= (keyword "-") (keyword "-")))

@@ -2371,6 +2371,47 @@
           carried (core/checked-ok-variant-id)))
       value-id (int-type-id) false)))
 
+(defn lower-checked-arith-values
+  [state: BodyStateV0
+   owner: core/NativeId
+   callee: String
+   values: (Vec core/NativeId)] -> ExprResultV0
+  (cond
+    (= 0 (count values))
+    (let [result-id: core/NativeId (state-id state owner "arith-identity")]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->AtomInstruction
+            (core/->SsaValueV0 result-id (int-type-id))
+            (core/->I64Atom (if (= "*" callee) 1 0))))
+        result-id (int-type-id) false))
+
+    (and (= "-" callee) (= 1 (count values)))
+    (let [zero-id: core/NativeId (state-id state owner "arith-zero")
+          with-zero: BodyStateV0
+          (state-emit (state-bump state)
+            (core/->AtomInstruction
+              (core/->SsaValueV0 zero-id (int-type-id))
+              (core/->I64Atom 0)))]
+      (lower-checked-arith with-zero owner callee zero-id (nth values 0)))
+
+    (= 1 (count values))
+    (->ExprResultV0 state (nth values 0) (int-type-id) false)
+
+    :else
+    (loop [position: Int 1
+           current: BodyStateV0 state
+           left: core/NativeId (nth values 0)]
+      (let [step: ExprResultV0
+            (lower-checked-arith current owner callee left
+              (nth values position))
+            settled: BodyStateV0 (exprresultv0-state step)]
+        (cond
+          (state-blocked? settled) (dead-result settled)
+          (= (+ position 1) (count values)) step
+          :else
+          (recur (+ position 1) settled (exprresultv0-value-id step)))))))
+
 (defn lower-checked-division
   [state: BodyStateV0
    owner: core/NativeId
@@ -3634,6 +3675,14 @@
    node: core/NativeId] -> (Vec core/NativeId)
   (let [args: (U core/NativeId Nil) (index-first-object index node "args")]
     (if (nil? args) [] (index-sequence-items index args))))
+
+(defn source-string-literal-value
+  [index: SourceIndexV0
+   node: core/NativeId] -> (U String Nil)
+  (if (and (= "literal" (fact-text index node "form-kind"))
+           (= "string" (fact-text index node "literal-kind")))
+    (fact-text index node "value")
+    nil))
 
 (defn text-vector-value?
   [types: (Vec core/TypeDef)
@@ -8398,6 +8447,10 @@
                   (if (= 1 (count values))
                     (static-type-predicate-value types callee
                       (nth value-types 0))
+                    nil)
+                  static-keyword: (U String Nil)
+                  (if (and (= "keyword" callee) (= 1 (count args)))
+                    (source-string-literal-value index (nth args 0))
                     nil)]
               (cond
                 (argsresultv0-terminated lowered)
@@ -8420,6 +8473,21 @@
                 (fail-result current
                   (str "TODO-NATIVE-PREDICATE-ARITY: " callee
                     " takes one operand"))
+
+                (some? static-keyword)
+                (let [spelling: String static-keyword
+                      result-id: core/NativeId
+                      (state-id current owner "keyword-literal")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->AtomInstruction
+                        (core/->SsaValueV0 result-id (keyword-type-id))
+                        (core/->KeywordAtom spelling)))
+                    result-id (keyword-type-id) false))
+
+                (= "keyword" callee)
+                (fail-result current
+                  "TODO-NATIVE-KEYWORD-CONSTRUCTION: keyword needs one literal Text spelling")
 
                 (and (= "utf8-encode" callee) (= 1 (count values))
                   (text-operand? (nth value-types 0)))
@@ -8759,10 +8827,9 @@
 
                 (checked-arith-op? callee)
                 (cond
-                  (not (= 2 (count values)))
+                  (and (= "-" callee) (= 0 (count values)))
                   (fail-result current
-                    (str "TODO-NATIVE-ARITH-ARITY: " callee
-                      " lowers only in its two-operand form"))
+                    "TODO-NATIVE-ARITH-ARITY: - takes one or more operands")
 
                   :else
                   (let [coerced: ArgsResultV0
@@ -8773,9 +8840,8 @@
                       (fail-result settled
                         (str "TODO-NATIVE-ARITH-OPERANDS: " callee
                           " needs values safely narrowable to Int"))
-                      (lower-checked-arith settled owner callee
-                        (nth (argsresultv0-values coerced) 0)
-                        (nth (argsresultv0-values coerced) 1)))))
+                      (lower-checked-arith-values settled owner callee
+                        (argsresultv0-values coerced)))))
 
                 (and (= "println" callee)
                   (= 1 (count values))
