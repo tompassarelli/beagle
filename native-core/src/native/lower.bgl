@@ -7067,10 +7067,12 @@
       recorded
       (let [target: core/NativeId (nth refined 0)
             narrowed: ExprResultV0
-            (lower-boundary-coerce types owner recorded
-              (valueflowsitev0-source-id site)
-              (valueflowsitev0-source-type site)
-              target)]
+            (if (same-id? target (type-id "Nil"))
+              (nil-constant-result types recorded owner "refined-nil")
+              (lower-boundary-coerce types owner recorded
+                (valueflowsitev0-source-id site)
+                (valueflowsitev0-source-type site)
+                target))]
         (if (state-blocked? (exprresultv0-state narrowed))
           (exprresultv0-state narrowed)
           (state-bind (exprresultv0-state narrowed)
