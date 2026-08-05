@@ -3125,28 +3125,74 @@
 (defn atom-state-value-id [owner: core/NativeId] -> core/NativeId
   (lower-id "atom-state-handle" [(id-value owner)]))
 
-;; The absent alternative carries nothing to extract, so this arm injects the
-;; target's own unit variant and never reads the source payload.
-(defn widen-unit-arm
-  [state: BodyStateV0
+(defn nil-variant? [variant: core/TypeVariant] -> Bool
+  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
+    (if (nil? payload)
+      (= "nil" (core/typevariant-name variant))
+      (same-id? payload (type-id "Nil")))))
+
+(defn lower-nil-union-value
+  [types: (Vec core/TypeDef)
    owner: core/NativeId
-   label: String
-   variant-name: String
+   state: BodyStateV0
+   target: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types target)
+        nil-variants: (Vec core/TypeVariant)
+        (loop [position: Int 0 collected: (Vec core/TypeVariant) []]
+          (if (>= position (count variants))
+            collected
+            (recur (+ position 1)
+              (if (nil-variant? (nth variants position))
+                (conj collected (nth variants position))
+                collected))))]
+    (if (not (= 1 (count nil-variants)))
+      (fail-result state
+        "TODO-NATIVE-NIL-INJECTION: target union needs exactly one nil alternative")
+      (let [variant: core/TypeVariant (nth nil-variants 0)
+            payload-type: (U core/NativeId Nil)
+            (core/typevariant-payload-type variant)
+            result-id: core/NativeId (state-id state owner "nil-inject")]
+        (if (nil? payload-type)
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->UnionConstructInstruction
+                (core/->SsaValueV0 result-id target)
+                (core/typevariant-id variant) nil))
+            result-id target false)
+          (let [payload-variants: (Vec core/TypeVariant)
+                (payloadless-variants (union-variants-of types payload-type))]
+            (if (not (= 1 (count payload-variants)))
+              (fail-result state
+                "TODO-NATIVE-NIL-INJECTION: carried Nil needs one unit alternative")
+              (let [payload-id: core/NativeId
+                    (state-id state owner "nil-payload")]
+                (->ExprResultV0
+                  (state-emit
+                    (state-emit (state-bump (state-bump state))
+                      (core/->UnionConstructInstruction
+                        (core/->SsaValueV0 payload-id payload-type)
+                        (core/typevariant-id (nth payload-variants 0)) nil))
+                    (core/->UnionConstructInstruction
+                      (core/->SsaValueV0 result-id target)
+                      (core/typevariant-id variant) payload-id))
+                  result-id target false)))))))))
+
+;; A payloadless source absence may target either a direct nil arm or an arm
+;; carrying the canonical Nil union.
+(defn widen-unit-arm
+  [types: (Vec core/TypeDef)
+   state: BodyStateV0
+   owner: core/NativeId
    to: core/NativeId
-   unit-variants: (Vec core/TypeVariant)
    join-id: core/NativeId] -> BodyStateV0
-  (if (not (= 1 (count unit-variants)))
-    (state-fail state
-      (str "TODO-NATIVE-WIDEN-UNIT: " variant-name
-        " carries no value and the target has no unit alternative"))
-    (let [unit-id: core/NativeId (state-id state owner label)]
-      (state-close
-        (state-emit (state-bump state)
-          (core/->UnionConstructInstruction
-            (core/->SsaValueV0 unit-id to)
-            (core/typevariant-id (nth unit-variants 0))
-            nil))
-        (core/->JumpTerminator join-id [unit-id])))))
+  (let [injected: ExprResultV0
+        (lower-nil-union-value types owner state to)
+        settled: BodyStateV0 (exprresultv0-state injected)]
+    (if (state-blocked? settled)
+      settled
+      (state-close settled
+        (core/->JumpTerminator join-id
+          [(exprresultv0-value-id injected)])))))
 
 (defn lower-widen
   [types: (Vec core/TypeDef)
@@ -3171,13 +3217,14 @@
           (variant-for-payload target-variants from)
           boxed: (U core/TypeVariant Nil)
           (variant-for-record-reference types target-variants from)
-          unit-variants: (Vec core/TypeVariant)
-          (payloadless-variants target-variants)
           source-variants: (Vec core/TypeVariant) (union-variants-of types from)]
       (cond
         (= 0 (count target-variants))
         (fail-result state
           "TODO-NATIVE-WIDEN-TARGET: the declared type is not a closed union")
+
+        (same-id? from (type-id "Nil"))
+        (lower-nil-union-value types owner state to)
 
         (some? direct)
         (let [result-id: core/NativeId (state-id state owner "inject")]
@@ -3209,18 +3256,6 @@
                     (core/typevariant-id boxed)
                     reference-id))
                 result-id to false))))
-
-        ;; Nil is the absence of a value, so it widens to the target's own
-        ;; payload-less alternative rather than to a variant carrying Unit.
-        (and (same-id? from (type-id "Nil")) (= 1 (count unit-variants)))
-        (let [result-id: core/NativeId (state-id state owner "inject-unit")]
-          (->ExprResultV0
-            (state-emit (state-bump state)
-              (core/->UnionConstructInstruction
-                (core/->SsaValueV0 result-id to)
-                (core/typevariant-id (nth unit-variants 0))
-                nil))
-            result-id to false))
 
         (= 0 (count source-variants))
         (fail-result state
@@ -3255,10 +3290,7 @@
                         opened: BodyStateV0 (state-open-block current arm-id [])]
                     (if (nil? payload-type)
                       (recur (+ position 1)
-                        (widen-unit-arm opened owner
-                          (str "widen-unit-" position)
-                          (core/typevariant-name variant)
-                          to unit-variants join-id))
+                        (widen-unit-arm types opened owner to join-id))
                       (let [extract-id: core/NativeId
                             (state-id opened owner (str "widen-extract-" position))
                             extracted: BodyStateV0
@@ -5237,12 +5269,6 @@
           (state-open-block false-block join-id
             [(core/->Parameter join-parameter (bool-type-id))])
           join-parameter (bool-type-id) false)))))
-
-(defn nil-variant? [variant: core/TypeVariant] -> Bool
-  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
-    (if (nil? payload)
-      (= "nil" (core/typevariant-name variant))
-      (same-id? payload (type-id "Nil")))))
 
 (defn nil-variant-count [variants: (Vec core/TypeVariant)] -> Int
   (loop [position: Int 0 found: Int 0]
@@ -7714,52 +7740,6 @@
       :else
       (fail-result settled
         "TODO-NATIVE-REDUCE-COLLECTION: reduce needs a native Vec or closed insertion-order Set"))))
-
-(defn lower-nil-union-value
-  [types: (Vec core/TypeDef)
-   owner: core/NativeId
-   state: BodyStateV0
-   target: core/NativeId] -> ExprResultV0
-  (let [variants: (Vec core/TypeVariant) (union-variants-of types target)
-        nil-variants: (Vec core/TypeVariant)
-        (loop [position: Int 0 collected: (Vec core/TypeVariant) []]
-          (if (>= position (count variants))
-            collected
-            (recur (+ position 1)
-              (if (nil-variant? (nth variants position))
-                (conj collected (nth variants position))
-                collected))))]
-    (if (not (= 1 (count nil-variants)))
-      (fail-result state
-        "TODO-NATIVE-NIL-INJECTION: target union needs exactly one nil alternative")
-      (let [variant: core/TypeVariant (nth nil-variants 0)
-            payload-type: (U core/NativeId Nil)
-            (core/typevariant-payload-type variant)
-            result-id: core/NativeId (state-id state owner "nil-inject")]
-        (if (nil? payload-type)
-          (->ExprResultV0
-            (state-emit (state-bump state)
-              (core/->UnionConstructInstruction
-                (core/->SsaValueV0 result-id target)
-                (core/typevariant-id variant) nil))
-            result-id target false)
-          (let [payload-variants: (Vec core/TypeVariant)
-                (payloadless-variants (union-variants-of types payload-type))]
-            (if (not (= 1 (count payload-variants)))
-              (fail-result state
-                "TODO-NATIVE-NIL-INJECTION: carried Nil needs one unit alternative")
-              (let [payload-id: core/NativeId
-                    (state-id state owner "nil-payload")]
-                (->ExprResultV0
-                  (state-emit
-                    (state-emit (state-bump (state-bump state))
-                      (core/->UnionConstructInstruction
-                        (core/->SsaValueV0 payload-id payload-type)
-                        (core/typevariant-id (nth payload-variants 0)) nil))
-                    (core/->UnionConstructInstruction
-                      (core/->SsaValueV0 result-id target)
-                      (core/typevariant-id variant) payload-id))
-                  result-id target false)))))))))
 
 (defn lower-eager-vector-collect
   [env: BodyEnvV0
