@@ -56,7 +56,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (spit \"$art/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\" \"fixture.union\"
     \"native-core/validation/slice-union/fixture.bclj\" \"$art\"
-    \"native-slice-union-v0\" \"logic-false-or-int\" 1))"
+    \"native-slice-union-v0\" \"numeric-int-double-less?\" 2))"
 
 cat "$art/report.txt"
 
@@ -99,7 +99,11 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc null ) 2>/dev/null; then
   echo "drive.sh: the null record reference did not trap" >&2
   exit 1
 fi
-echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + mismatch/null traps ok"
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc double ) 2>/dev/null; then
+  echo "drive.sh: double accepted a non-numeric union tag" >&2
+  exit 1
+fi
+echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + mismatch/null/double traps ok"
 
 find_clang() {
   if command -v clang >/dev/null 2>&1; then command -v clang; return 0; fi
@@ -121,7 +125,11 @@ if [ -n "$clang_bin" ]; then
     echo "drive.sh: clang build did not trap on the null record reference" >&2
     exit 1
   fi
-  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + mismatch/null traps ok"
+  if ( cd "$build" && ulimit -c 0 && ./probe_clang double ) 2>/dev/null; then
+    echo "drive.sh: clang build did not trap on an invalid double operand" >&2
+    exit 1
+  fi
+  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + mismatch/null/double traps ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
 fi

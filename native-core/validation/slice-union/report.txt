@@ -4,8 +4,8 @@ stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
 world-types 23
-world-functions 32
-world-abis 32
+world-functions 44
+world-abis 44
 projected-types 23
 lowered fn_0 pair? 4 blocks
 lowered fn_1 wrap-int 1 blocks
@@ -39,6 +39,18 @@ lowered fn_28 false-any? 4 blocks
 lowered fn_29 true-any? 4 blocks
 lowered fn_30 false-int? 1 blocks
 lowered fn_31 true-int? 1 blocks
+lowered fn_32 numeric-literal 1 blocks
+lowered fn_33 numeric-int-to-double 1 blocks
+lowered fn_34 numeric-float-to-double 1 blocks
+lowered fn_35 numeric-any-to-double 5 blocks
+lowered fn_36 numeric-float-equal? 1 blocks
+lowered fn_37 numeric-float-less? 1 blocks
+lowered fn_38 numeric-float-less-or-equal? 1 blocks
+lowered fn_39 numeric-float-greater? 1 blocks
+lowered fn_40 numeric-float-greater-or-equal? 1 blocks
+lowered fn_41 numeric-parse-long 9 blocks
+lowered fn_42 numeric-parse-long-any 17 blocks
+lowered fn_43 numeric-int-double-less? 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -48,10 +60,10 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 materialize OK module_0.h module_0.c
 qbe-stage typed-to-native COMPLETE
-qbe-selected-function logic-false-or-int
+qbe-selected-function numeric-int-double-less?
 qbe-world-functions 1
 qbe-world-abis 1
-qbe-projected-types 21
+qbe-projected-types 5
 qbe-obligation PASS valid-ssa
 qbe-obligation PASS exhaustive-matches
 qbe-obligation PASS closed-layouts
@@ -59,4 +71,4 @@ qbe-obligation PASS checked-arithmetic
 qbe-obligation PASS legal-abi
 qbe-obligation PASS discharged-tokens
 qbe-obligation PASS bounded-effects
-qbe-materialize REFUSED native world uses a shape outside the QBE materializer's slice
+qbe-materialize OK module_2.ssa

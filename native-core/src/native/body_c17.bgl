@@ -169,6 +169,7 @@
           (instance? native.core.TextAtom atom)
           (instance? native.core.KeywordAtom atom)))
     (instance? native.core.CopyInstruction instruction) true
+    (instance? native.core.I64ToF64InstructionV0 instruction) true
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
@@ -407,9 +408,12 @@
 
 (defn compare-operator [comparison: core/CompareOpV0] -> String
   (cond
-    (instance? native.core.CompareEqI64V0 comparison) "=="
-    (instance? native.core.CompareLtI64V0 comparison) "<"
-    (instance? native.core.CompareLeI64V0 comparison) "<="
+    (or (instance? native.core.CompareEqI64V0 comparison)
+        (instance? native.core.CompareEqF64V0 comparison)) "=="
+    (or (instance? native.core.CompareLtI64V0 comparison)
+        (instance? native.core.CompareLtF64V0 comparison)) "<"
+    (or (instance? native.core.CompareLeI64V0 comparison)
+        (instance? native.core.CompareLeF64V0 comparison)) "<="
     :else "=="))
 
 (defn emit-text-constant
@@ -1919,6 +1923,12 @@
       (instance? native.core.CopyInstruction instruction)
       (str "  " target " = "
         (value-name function slots (core/copyinstruction-source-id instruction))
+        ";\n")
+
+      (instance? native.core.I64ToF64InstructionV0 instruction)
+      (str "  " target " = (double)"
+        (value-name function slots
+          (core/i64tof64instructionv0-source-id instruction))
         ";\n")
 
       (instance? native.core.CompareInstruction instruction)

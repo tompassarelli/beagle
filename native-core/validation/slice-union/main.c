@@ -3,8 +3,10 @@
    wrong tag, which must trap instead of reading the payload as a reference.
    fn_0 pair?  fn_1 wrap-int  fn_2 pair-left-of  fn_3 pair-right-of
    fn_4 any-equal? fn_5 any-hash fn_6 any-compare fn_7 pair-copy-of
-   fn_8..19 logic probes. fn_26..31 exact Bool predicate probes.
+   fn_8..19 logic probes; fn_26..31 exact Bool predicate probes;
+   fn_32..43 numeric scalar probes.
    Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair. */
+#include <math.h>
 #include "module_0.h"
 
 #ifndef SLICE_ANY_TYPE
@@ -34,6 +36,15 @@ static const struct slice_text_blob text_abc_right = {
 };
 static const struct slice_text_blob text_abd = {
   UINT64_C(3), { UINT8_C('a'), UINT8_C('b'), UINT8_C('d') }
+};
+
+struct slice_text_blob_2 {
+  uint64_t length;
+  uint8_t bytes[2];
+};
+
+static const struct slice_text_blob_2 text_42 = {
+  UINT64_C(2), { UINT8_C('4'), UINT8_C('2') }
 };
 
 static slice_any slice_pair(void *target) {
@@ -98,7 +109,12 @@ int main(int argc, char **argv) {
     return 10;
   }
 
-  if (argc > 1) {
+  if ((argc > 1) && (argv[1][0] == 'd')) {
+    native_m0_fn_35(as_abc_left);
+    return 11;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'm')) {
     /* the extract expects the Pair tag and this value carries i64 */
     native_m0_fn_2(as_number);
     return 9;
@@ -255,6 +271,66 @@ int main(int argc, char **argv) {
   }
   if (native_m0_fn_31(INT64_C(0)) || native_m0_fn_31(INT64_C(1))) {
     return 32;
+  }
+
+  if (native_m0_fn_32() != 1.5) {
+    return 33;
+  }
+  if ((native_m0_fn_33(INT64_C(42)) != 42.0)
+      || (native_m0_fn_33(INT64_C(9007199254740993))
+        != 9007199254740992.0)) {
+    return 34;
+  }
+  if ((native_m0_fn_34(3.25) != 3.25)
+      || !signbit(native_m0_fn_34(-0.0))
+      || !isnan(native_m0_fn_34(NAN))) {
+    return 35;
+  }
+  if ((native_m0_fn_35(as_number) != 42.0)
+      || !signbit(native_m0_fn_35(as_negative_zero))) {
+    return 36;
+  }
+  if (!native_m0_fn_36(2.5, 2.5)
+      || !native_m0_fn_36(0.0, -0.0)
+      || native_m0_fn_36(NAN, NAN)) {
+    return 37;
+  }
+  if (!native_m0_fn_37(1.0, 2.0)
+      || native_m0_fn_37(2.0, 1.0)
+      || native_m0_fn_37(NAN, 1.0)) {
+    return 38;
+  }
+  if (!native_m0_fn_38(1.0, 1.0)
+      || !native_m0_fn_38(1.0, 2.0)
+      || native_m0_fn_38(NAN, 1.0)) {
+    return 39;
+  }
+  if (!native_m0_fn_39(2.0, 1.0)
+      || native_m0_fn_39(1.0, 2.0)
+      || native_m0_fn_39(NAN, 1.0)) {
+    return 40;
+  }
+  if (!native_m0_fn_40(2.0, 2.0)
+      || !native_m0_fn_40(2.0, 1.0)
+      || native_m0_fn_40(NAN, 1.0)) {
+    return 41;
+  }
+
+  uint64_t text_42_address = (uint64_t)(uintptr_t)&text_42;
+  uint64_t text_abc_address = (uint64_t)(uintptr_t)&text_abc_left;
+  if ((native_m0_fn_41(text_42_address) != INT64_C(42))
+      || (native_m0_fn_41(text_abc_address) != -INT64_C(1))) {
+    return 42;
+  }
+  if ((native_m0_fn_42(slice_text((const struct slice_text_blob *)&text_42))
+        != INT64_C(42))
+      || (native_m0_fn_42(as_abc_left) != -INT64_C(1))
+      || (native_m0_fn_42(as_number) != -INT64_C(2))) {
+    return 43;
+  }
+  if (!native_m0_fn_43(INT64_C(1), INT64_C(2))
+      || native_m0_fn_43(INT64_C(2), INT64_C(1))) {
+    return 44;
   }
   return 0;
 }

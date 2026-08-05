@@ -220,5 +220,17 @@ native_m0_type_3 native_m0_fn_28(native_m0_type_14 native_v_0);
 native_m0_type_3 native_m0_fn_29(native_m0_type_14 native_v_0);
 native_m0_type_3 native_m0_fn_30(native_m0_type_1 native_v_0);
 native_m0_type_3 native_m0_fn_31(native_m0_type_1 native_v_0);
+native_m0_type_4 native_m0_fn_32(void);
+native_m0_type_4 native_m0_fn_33(native_m0_type_1 native_v_0);
+native_m0_type_4 native_m0_fn_34(native_m0_type_4 native_v_0);
+native_m0_type_4 native_m0_fn_35(native_m0_type_14 native_v_0);
+native_m0_type_3 native_m0_fn_36(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
+native_m0_type_3 native_m0_fn_37(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
+native_m0_type_3 native_m0_fn_38(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
+native_m0_type_3 native_m0_fn_39(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
+native_m0_type_3 native_m0_fn_40(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
+native_m0_type_1 native_m0_fn_41(native_m0_type_5 native_v_0);
+native_m0_type_1 native_m0_fn_42(native_m0_type_14 native_v_0);
+native_m0_type_3 native_m0_fn_43(native_m0_type_1 native_v_0, native_m0_type_1 native_v_1);
 
 #endif

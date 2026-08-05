@@ -129,7 +129,6 @@
            (keyword? (taggedvalue-tag value)))
     (taggedvalue-tag value)
     nil))
-
 (defn false-bool? [value: Bool] -> Bool (false? value))
 
 (defn true-bool? [value: Bool] -> Bool (true? value))
@@ -141,3 +140,52 @@
 (defn false-int? [value: Int] -> Bool (false? value))
 
 (defn true-int? [value: Int] -> Bool (true? value))
+
+(defn numeric-literal [] -> Float 1.5)
+
+(defn numeric-int-to-double [value: Int] -> Float
+  (double value))
+
+(defn numeric-float-to-double [value: Float] -> Float
+  (double value))
+
+(defn numeric-any-to-double [value: Any] -> Float
+  (double value))
+
+(defn numeric-float-equal?
+  [left: Float
+   right: Float] -> Bool
+  (= left right))
+
+(defn numeric-float-less?
+  [left: Float
+   right: Float] -> Bool
+  (< left right))
+
+(defn numeric-float-less-or-equal?
+  [left: Float
+   right: Float] -> Bool
+  (<= left right))
+
+(defn numeric-float-greater?
+  [left: Float
+   right: Float] -> Bool
+  (> left right))
+
+(defn numeric-float-greater-or-equal?
+  [left: Float
+   right: Float] -> Bool
+  (>= left right))
+
+(defn numeric-parse-long [value: String] -> Int
+  (or (parse-long value) -1))
+
+(defn numeric-parse-long-any [value: Any] -> Int
+  (if (string? value)
+    (or (parse-long value) -1)
+    -2))
+
+(defn numeric-int-double-less?
+  [left: Int
+   right: Int] -> Bool
+  (< (double left) (double right)))

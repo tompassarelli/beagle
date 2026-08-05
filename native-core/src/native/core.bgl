@@ -231,6 +231,9 @@
   (CompareEqI64V0 [token: Bool])
   (CompareLtI64V0 [token: Bool])
   (CompareLeI64V0 [token: Bool])
+  (CompareEqF64V0 [token: Bool])
+  (CompareLtF64V0 [token: Bool])
+  (CompareLeF64V0 [token: Bool])
   (CompareEqBoolV0 [token: Bool])
   (CompareEqTextV0 [token: Bool]))
 
@@ -365,6 +368,9 @@
     [result: SsaValueV0
      left-id: NativeId
      right-id: NativeId])
+  (I64ToF64InstructionV0
+    [result: SsaValueV0
+     source-id: NativeId])
   (CheckedInstruction
     [result: SsaValueV0
      operation: CheckedOperationV0])
@@ -900,6 +906,7 @@
     [(AtomInstruction result atom) (ssavaluev0-id result)]
     [(CopyInstruction result source-id) (ssavaluev0-id result)]
     [(AddF64Instruction result left-id right-id) (ssavaluev0-id result)]
+    [(I64ToF64InstructionV0 result source-id) (ssavaluev0-id result)]
     [(CheckedInstruction result operation) (ssavaluev0-id result)]
     [(BitwiseInstructionV0 result operation) (ssavaluev0-id result)]
     [(StoreInstruction result store tokens) (ssavaluev0-id result)]
@@ -1439,6 +1446,7 @@
     [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
+    [(I64ToF64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
     [(BitwiseInstructionV0 result operation) true]
     [(StoreInstruction result store tokens)
@@ -1678,6 +1686,7 @@
     [(AtomInstruction result atom) []]
     [(CopyInstruction result source-id) [source-id]]
     [(AddF64Instruction result left-id right-id) [left-id right-id]]
+    [(I64ToF64InstructionV0 result source-id) [source-id]]
     [(CheckedInstruction result operation) (checked-operation-ssa-refs operation)]
     [(BitwiseInstructionV0 result operation)
      (bitwise-operation-ssa-refs operation)]
@@ -1821,6 +1830,7 @@
     [(AtomInstruction result atom) true]
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
+    [(I64ToF64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
     [(BitwiseInstructionV0 result operation) true]
     [(StoreInstruction result store tokens)

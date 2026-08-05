@@ -1,6 +1,3 @@
-;; @upstream:text-arm — operator-authorized for Native Stage 3; re-ingest this
-;; module into the graph after landing. Authority: North thread 019fbd6c,
-;; accepted design lane-msch3uwf sections 2-3.
 (ns native.lower
   (:require [native.core :as core]
             [native.worlds :as worlds]))
@@ -2387,6 +2384,14 @@
 (defn bool-type-id [] -> core/NativeId (type-id "Bool"))
 
 (defn int-type-id [] -> core/NativeId (type-id "Int"))
+
+(defn float-type-id [] -> core/NativeId (type-id "Float"))
+
+(defn float-compare-op-for [callee: String] -> core/CompareOpV0
+  (cond
+    (= "=" callee) (core/->CompareEqF64V0 true)
+    (or (= "<" callee) (= ">" callee)) (core/->CompareLtF64V0 true)
+    :else (core/->CompareLeF64V0 true)))
 
 ;; v0 traps carry an i64 failure code, not a payload: the closed LowerFailure
 ;; union names the codes, and the host exception argument is discarded.
@@ -4969,6 +4974,143 @@
             (core/->CompareEqI64V0 true) value-id zero-id))
         result-id (bool-type-id) false))))
 
+(defn lower-int-to-float
+  [state: BodyStateV0
+   owner: core/NativeId
+   source-id: core/NativeId] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner "double-int")]
+    (->ExprResultV0
+      (state-emit (state-bump state)
+        (core/->I64ToF64InstructionV0
+          (core/->SsaValueV0 result-id (float-type-id)) source-id))
+      result-id (float-type-id) false)))
+
+(defn double-payload-id? [payload: core/NativeId] -> Bool
+  (or (same-id? payload (int-type-id))
+      (same-id? payload (float-type-id))))
+
+(defn double-payload? [payload: (U core/NativeId Nil)] -> Bool
+  (if (nil? payload)
+    false
+    (double-payload-id? payload)))
+
+(defn double-union-has-numeric? [variants: (Vec core/TypeVariant)] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count variants))
+      false
+      (if (double-payload? (core/typevariant-payload-type (nth variants position)))
+        true
+        (recur (+ position 1))))))
+
+(defn double-union-has-invalid? [variants: (Vec core/TypeVariant)] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count variants))
+      false
+      (if (double-payload? (core/typevariant-payload-type (nth variants position)))
+        (recur (+ position 1))
+        true))))
+
+;; `double` accepts the closed numeric alternatives of Any. Other runtime tags
+;; take the same fail-closed boundary as an invalid JVM numeric cast.
+(defn lower-double-union
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (if (not (double-union-has-numeric? variants))
+      (fail-result state
+        "TODO-NATIVE-DOUBLE-OPERAND: double needs a closed Int or Float alternative")
+      (let [failure-id: core/NativeId (state-id state owner "double-invalid")
+            join-id: core/NativeId (state-id state owner "double-join")
+            join-value: core/NativeId (state-id state owner "double-value")
+            cases: (Vec core/SwitchCaseV0)
+            (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+              (if (>= position (count variants))
+                collected
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0 (core/typevariant-id variant)
+                        (if (double-payload? payload)
+                          (state-id state owner (str "double-arm-" position))
+                          failure-id)
+                        []))))))
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator value-id cases))
+            converted: BodyStateV0
+            (loop [position: Int 0 current: BodyStateV0 switched]
+              (if (or (>= position (count variants)) (state-blocked? current))
+                current
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (nil? payload)
+                    (recur (+ position 1) current)
+                    (if (not (double-payload-id? payload))
+                      (recur (+ position 1) current)
+                      (let [arm-id: core/NativeId
+                            (state-id state owner (str "double-arm-" position))
+                            opened: BodyStateV0 (state-open-block current arm-id [])
+                            extracted-id: core/NativeId
+                            (state-id opened owner (str "double-payload-" position))
+                            extracted: BodyStateV0
+                            (state-emit (state-bump opened)
+                              (core/->UnionExtractInstruction
+                                (core/->SsaValueV0 extracted-id payload)
+                                value-id (core/typevariant-id variant)))
+                            value: ExprResultV0
+                            (if (same-id? payload (int-type-id))
+                              (lower-int-to-float extracted owner extracted-id)
+                              (->ExprResultV0 extracted extracted-id
+                                (float-type-id) false))]
+                        (recur (+ position 1)
+                          (state-close (exprresultv0-state value)
+                            (core/->JumpTerminator join-id
+                              [(exprresultv0-value-id value)])))))))))
+            settled: BodyStateV0
+            (if (not (double-union-has-invalid? variants))
+              converted
+              (let [opened: BodyStateV0
+                    (state-open-block converted failure-id [])
+                    code-id: core/NativeId (state-id opened owner "double-trap")
+                    emitted: BodyStateV0
+                    (state-emit (state-bump opened)
+                      (core/->AtomInstruction
+                        (core/->SsaValueV0 code-id (int-type-id))
+                        (core/->I64Atom (trap-failure-code))))]
+                (state-close emitted (core/->TrapTerminator code-id))))]
+        (if (state-blocked? settled)
+          (dead-result settled)
+          (->ExprResultV0
+            (state-open-block settled join-id
+              [(core/->Parameter join-value (float-type-id))])
+            join-value (float-type-id) false))))))
+
+(defn lower-double
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (cond
+    (same-id? value-type (float-type-id))
+    (->ExprResultV0 state value-id (float-type-id) false)
+
+    (same-id? value-type (int-type-id))
+    (lower-int-to-float state owner value-id)
+
+    (> (count (union-variants-of types value-type)) 0)
+    (lower-double-union types owner state value-id value-type)
+
+    :else
+    (fail-result state
+      "TODO-NATIVE-DOUBLE-OPERAND: double takes one closed Int or Float value")))
+
 (defn int-value-types? [value-types: (Vec core/NativeId)] -> Bool
   (every?
     (fn [value-type: core/NativeId] -> Bool
@@ -5036,6 +5178,7 @@
 (defn equality-comparison [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
   (cond
     (same-id? type-id-value (int-type-id)) (core/->CompareEqI64V0 true)
+    (same-id? type-id-value (float-type-id)) (core/->CompareEqF64V0 true)
     (same-id? type-id-value (keyword-type-id)) (core/->CompareEqI64V0 true)
     (same-id? type-id-value (bool-type-id)) (core/->CompareEqBoolV0 true)
     (same-id? type-id-value (text-type-id)) (core/->CompareEqTextV0 true)
@@ -8538,6 +8681,19 @@
                       (core/->I64Atom parsed)))
                   result-id (int-type-id) false)))
 
+            (= "float" literal-kind)
+            (let [parsed: (U Float Nil) (parse-double text)]
+              (if (nil? parsed)
+                (fail-result state
+                  (str "TODO-NATIVE-LITERAL-FLOAT: " text
+                    " is not an exact native Float"))
+                (->ExprResultV0
+                  (state-emit bumped
+                    (core/->AtomInstruction
+                      (core/->SsaValueV0 result-id (float-type-id))
+                      (core/->F64Atom parsed)))
+                  result-id (float-type-id) false)))
+
             (= "bool" literal-kind)
             (->ExprResultV0
               (state-emit bumped
@@ -10538,6 +10694,14 @@
                 (fail-result current
                   "TODO-NATIVE-FLOAT-FROM-BITS-OPERAND: float-from-bits takes one native Int value")
 
+                (and (= "double" callee) (= 1 (count values)))
+                (lower-double types owner current
+                  (nth values 0) (nth value-types 0))
+
+                (= "double" callee)
+                (fail-result current
+                  "TODO-NATIVE-DOUBLE-ARITY: double takes one operand")
+
                 (and (= "compare" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
                   (text-operand? (nth value-types 1)))
@@ -10938,20 +11102,26 @@
                 (fail-result current
                   "TODO-NATIVE-TEXT-BLANK-OPERAND: str/blank? takes one native Text operand")
 
-                (and (= "parse-long" callee) (= 1 (count values))
-                  (text-operand? (nth value-types 0)))
-                (let [optional: (U core/NativeId Nil)
+                (and (= "parse-long" callee) (= 1 (count values)))
+                (let [source: ExprResultV0
+                      (lower-boundary-coerce types owner current
+                        (nth values 0) (nth value-types 0) (text-type-id))
+                      settled: BodyStateV0 (exprresultv0-state source)
+                      optional: (U core/NativeId Nil)
                       (optional-scalar-type-of types (int-type-id))]
-                  (if (nil? optional)
-                    (fail-result current
+                  (cond
+                    (state-blocked? settled) (dead-result settled)
+                    (nil? optional)
+                    (fail-result settled
                       "TODO-NATIVE-PARSE-I64-TYPE: parse-long needs a nullable Int in the source world")
+                    :else
                     (let [result-id: core/NativeId
-                          (state-id current owner "parse-i64")]
+                          (state-id settled owner "parse-i64")]
                       (->ExprResultV0
-                        (state-emit (state-bump current)
+                        (state-emit (state-bump settled)
                           (core/->TextParseI64Instruction
                             (core/->SsaValueV0 result-id optional)
-                            (nth values 0)))
+                            (exprresultv0-value-id source)))
                         result-id optional false))))
 
                 (= "parse-long" callee)
@@ -11577,6 +11747,9 @@
                         both-int: Bool
                         (and (same-id? left-type (int-type-id))
                              (same-id? right-type (int-type-id)))
+                        both-float: Bool
+                        (and (same-id? left-type (float-type-id))
+                             (same-id? right-type (float-type-id)))
                         both-bool: Bool
                         (and (same-id? left-type (bool-type-id))
                              (same-id? right-type (bool-type-id)))
@@ -11597,6 +11770,14 @@
                           (core/->CompareInstruction
                             (core/->SsaValueV0 result-id (bool-type-id))
                             comparison left-id right-id))
+                        result-id (bool-type-id) false)
+
+                      both-float
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->CompareInstruction
+                            (core/->SsaValueV0 result-id (bool-type-id))
+                            (float-compare-op-for callee) left-id right-id))
                         result-id (bool-type-id) false)
 
                       (and both-bool (= "=" callee))
@@ -13949,6 +14130,11 @@
        (id-value (core/addf64instruction-left-id instruction))
        (id-value (core/addf64instruction-right-id instruction))])
 
+    (instance? native.core.I64ToF64InstructionV0 instruction)
+    (worlds/canonical-record "i64-to-f64-instruction-v0"
+      [(encode-ssa-value (core/i64tof64instructionv0-result instruction))
+       (id-value (core/i64tof64instructionv0-source-id instruction))])
+
     (instance? native.core.CheckedInstruction instruction)
     (let [operation: core/CheckedOperationV0
           (core/checkedinstruction-operation instruction)
@@ -14011,6 +14197,9 @@
             (instance? native.core.CompareEqI64V0 comparison) "compare-eq-i64-instruction"
             (instance? native.core.CompareLtI64V0 comparison) "compare-lt-i64-instruction"
             (instance? native.core.CompareLeI64V0 comparison) "compare-le-i64-instruction"
+            (instance? native.core.CompareEqF64V0 comparison) "compare-eq-f64-instruction"
+            (instance? native.core.CompareLtF64V0 comparison) "compare-lt-f64-instruction"
+            (instance? native.core.CompareLeF64V0 comparison) "compare-le-f64-instruction"
             (instance? native.core.CompareEqBoolV0 comparison) "compare-eq-bool-instruction"
             :else "compare-eq-text-instruction")]
       (worlds/canonical-record label
