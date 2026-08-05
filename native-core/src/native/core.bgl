@@ -1,4 +1,5 @@
-(ns native.core)
+(ns native.core
+  (:require [clojure.string :as str]))
 
 (define-mode strict)
 
@@ -791,11 +792,12 @@
         (if (id-in? seen current) false (recur (+ index 1) (conj seen current)))))))
 
 (defn canonical-parts [parts :- (Vec String)] :- String
-  (loop [index :- Int 0 encoded :- String ""]
+  (loop [index :- Int 0 encoded-parts :- (Vec String) []]
     (if (>= index (count parts))
-      encoded
+      (str/join "" encoded-parts)
       (let [part :- String (nth parts index)]
-        (recur (+ index 1) (str encoded (count part) ":" part))))))
+        (recur (+ index 1)
+               (conj encoded-parts (str (count part) ":" part)))))))
 
 (defn canonical-id [domain :- String parts :- (Vec String)] :- NativeId
   (->NativeId (str "native-id-v0:" (count domain) ":" domain ":" (canonical-parts parts))))
