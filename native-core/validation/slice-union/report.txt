@@ -4,8 +4,8 @@ stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
 world-types 11
-world-functions 7
-world-abis 7
+world-functions 8
+world-abis 8
 projected-types 10
 lowered fn_0 pair? 4 blocks
 lowered fn_1 wrap-int 1 blocks
@@ -14,6 +14,7 @@ lowered fn_3 pair-right-of 1 blocks
 lowered fn_4 any-equal? 1 blocks
 lowered fn_5 any-hash 1 blocks
 lowered fn_6 any-compare 1 blocks
+lowered fn_7 pair-copy-of 4 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

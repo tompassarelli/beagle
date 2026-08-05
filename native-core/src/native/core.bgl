@@ -414,6 +414,11 @@
     [result: SsaValueV0
      source-id: NativeId
      arena-id: NativeId])
+  ;; Crossing back from a recursive union's reference payload into a direct
+  ;; record ABI performs an explicit checked shallow copy.
+  (RecordMaterializeInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId])
   ;; Widening into a closed union is a tag inject: the payload is already the
   ;; variant's declared type, so no check can fail and none is emitted.
   (UnionConstructInstruction
@@ -857,6 +862,8 @@
     [(RecordAssocInstructionV0 result source-id field-id value-id arena-id)
      (ssavaluev0-id result)]
     [(BoxRecordInstruction result source-id arena-id) (ssavaluev0-id result)]
+    [(RecordMaterializeInstructionV0 result source-id)
+     (ssavaluev0-id result)]
     [(UnionConstructInstruction result variant-id payload-id)
      (ssavaluev0-id result)]
     [(UnionExtractInstruction result source-id variant-id)
@@ -1052,6 +1059,45 @@
       (every?
         (fn [instruction: Instruction] -> Bool
           (record-assoc-instruction-valid? types function instruction))
+        (basicblock-instructions block)))
+    (functiondef-blocks function)))
+
+(defn record-materialize-instruction-valid?
+  [types: (Vec TypeDef)
+   function: FunctionDef
+   instruction: Instruction] -> Bool
+  (if (not (instance? native.core.RecordMaterializeInstructionV0 instruction))
+    true
+    (let [result: SsaValueV0
+          (recordmaterializeinstructionv0-result instruction)
+          result-type: NativeId (ssavaluev0-type-id result)
+          source-type: (U NativeId Nil)
+          (function-value-type function
+            (recordmaterializeinstructionv0-source-id instruction))
+          result-definition: (U TypeDef Nil)
+          (type-definition-with-id types result-type)
+          source-definition: (U TypeDef Nil)
+          (if (nil? source-type)
+            nil
+            (type-definition-with-id types source-type))]
+      (if (or (nil? result-definition) (nil? source-definition))
+        false
+        (let [result-shape: TypeShape (typedef-shape result-definition)
+              source-shape: TypeShape (typedef-shape source-definition)]
+          (and (instance? native.core.RecordType result-shape)
+            (instance? native.core.ReferenceType source-shape)
+            (native-id=
+              (referencetype-target-type source-shape)
+              result-type)))))))
+
+(defn function-record-materializations-valid?
+  [types: (Vec TypeDef)
+   function: FunctionDef] -> Bool
+  (every?
+    (fn [block: BasicBlock] -> Bool
+      (every?
+        (fn [instruction: Instruction] -> Bool
+          (record-materialize-instruction-valid? types function instruction))
         (basicblock-instructions block)))
     (functiondef-blocks function)))
 
@@ -1343,6 +1389,7 @@
     [(RecordAssocInstructionV0 result source-id field-id value-id arena-id)
      (id-in? known-owned field-id)]
     [(BoxRecordInstruction result source-id arena-id) true]
+    [(RecordMaterializeInstructionV0 result source-id) true]
     [(UnionConstructInstruction result variant-id payload-id)
      (id-in? known-owned variant-id)]
     [(UnionExtractInstruction result source-id variant-id)
@@ -1449,6 +1496,7 @@
       (ids-in? (functiondef-regions function) known-regions)
       (ids-in? (functiondef-capabilities function) known-capabilities)
       (function-record-assocs-valid? types function)
+      (function-record-materializations-valid? types function)
       (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-abis known-regions known-capabilities known-owned known-blocks))
         blocks))))
 
@@ -1557,6 +1605,7 @@
     [(RecordAssocInstructionV0 result source-id field-id value-id arena-id)
      [arena-id source-id value-id]]
     [(BoxRecordInstruction result source-id arena-id) [arena-id source-id]]
+    [(RecordMaterializeInstructionV0 result source-id) [source-id]]
     [(UnionConstructInstruction result variant-id payload-id)
      (if (nil? payload-id) [] [payload-id])]
     [(UnionExtractInstruction result source-id variant-id) [source-id]]
@@ -1689,6 +1738,7 @@
     [(RecordInstruction result field-ids) true]
     [(RecordAssocInstructionV0 result source-id field-id value-id arena-id) true]
     [(BoxRecordInstruction result source-id arena-id) true]
+    [(RecordMaterializeInstructionV0 result source-id) true]
     [(UnionConstructInstruction result variant-id payload-id) true]
     [(UnionExtractInstruction result source-id variant-id) true]
     [(VecLengthInstruction result source-id) true]

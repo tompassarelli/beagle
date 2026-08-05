@@ -2941,7 +2941,8 @@
           (same-id? (core/referencetype-target-type shape) target))))))
 
 ;; Source annotations and calls are semantic boundaries: widen into their
-;; declared union, or checked-extract the one alternative the boundary names.
+;; declared union, or checked-extract the named alternative. A reference-backed
+;; record alternative is materialized before crossing a direct-record boundary.
 (defn lower-boundary-coerce
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -2966,14 +2967,21 @@
             result-id to false))
 
         (narrowhitv0-found record)
-        (let [result-id: core/NativeId (state-id state owner "boundary-reference")]
+        (let [reference-id: core/NativeId
+              (state-id state owner "boundary-reference")
+              result-id: core/NativeId
+              (state-id (state-bump state) owner "boundary-record")]
           (->ExprResultV0
-            (state-emit (state-bump state)
-              (core/->UnionExtractInstruction
-                (core/->SsaValueV0 result-id
-                  (narrowhitv0-reference-type record))
-                value-id (narrowhitv0-variant-id record)))
-            result-id (narrowhitv0-reference-type record) false))
+            (state-emit
+              (state-emit (state-bump (state-bump state))
+                (core/->UnionExtractInstruction
+                  (core/->SsaValueV0 reference-id
+                    (narrowhitv0-reference-type record))
+                  value-id (narrowhitv0-variant-id record)))
+              (core/->RecordMaterializeInstructionV0
+                (core/->SsaValueV0 result-id to)
+                reference-id))
+            result-id to false))
 
         (= 1 (variantpathv0-matches nested))
         (extract-variant-path owner state value-id from "boundary-nested"
@@ -10591,6 +10599,13 @@
       [(encode-ssa-value (core/boxrecordinstruction-result instruction))
        (id-value (core/boxrecordinstruction-source-id instruction))
        (id-value (core/boxrecordinstruction-arena-id instruction))])
+
+    (instance? native.core.RecordMaterializeInstructionV0 instruction)
+    (worlds/canonical-record "record-materialize-instruction-v0"
+      [(encode-ssa-value
+         (core/recordmaterializeinstructionv0-result instruction))
+       (id-value
+         (core/recordmaterializeinstructionv0-source-id instruction))])
 
     (instance? native.core.UnionConstructInstruction instruction)
     (let [payload: (U core/NativeId Nil)

@@ -259,6 +259,8 @@
     [(RecordAssocInstructionV0 value)
      (core/recordassocinstructionv0-result instruction)]
     [(BoxRecordInstruction value) (core/boxrecordinstruction-result instruction)]
+    [(RecordMaterializeInstructionV0 value)
+     (core/recordmaterializeinstructionv0-result instruction)]
     [(UnionConstructInstruction value)
      (core/unionconstructinstruction-result instruction)]
     [(UnionExtractInstruction value)
@@ -1006,6 +1008,7 @@
     [(RecordInstruction value) false]
     [(RecordAssocInstructionV0 value) false]
     [(BoxRecordInstruction value) false]
+    [(RecordMaterializeInstructionV0 value) false]
     [(UnionConstructInstruction value) false]
     [(UnionExtractInstruction value) false]
     [(VecLengthInstruction value) false]
@@ -1387,6 +1390,7 @@
       [(RecordInstruction value) ""]
       [(RecordAssocInstructionV0 value) ""]
       [(BoxRecordInstruction value) ""]
+      [(RecordMaterializeInstructionV0 value) ""]
       [(UnionConstructInstruction value) ""]
       [(UnionExtractInstruction value) ""]
       [(VecLengthInstruction value) ""]
@@ -1836,6 +1840,7 @@
     [(RecordInstruction value) false]
     [(RecordAssocInstructionV0 value) false]
     [(BoxRecordInstruction value) false]
+    [(RecordMaterializeInstructionV0 value) false]
     [(UnionConstructInstruction value) false]
     [(UnionExtractInstruction value) false]
     [(VecLengthInstruction value) false]

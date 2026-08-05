@@ -71,5 +71,6 @@ native_m0_type_0 native_m0_fn_3(native_m0_type_9 native_v_0);
 native_m0_type_1 native_m0_fn_4(native_m0_type_9 native_v_0, native_m0_type_9 native_v_1);
 native_m0_type_0 native_m0_fn_5(native_m0_type_9 native_v_0);
 native_m0_type_0 native_m0_fn_6(native_m0_type_9 native_v_0, native_m0_type_9 native_v_1);
+native_m0_type_2 native_m0_fn_7(native_m0_type_9 native_v_0);
 
 #endif

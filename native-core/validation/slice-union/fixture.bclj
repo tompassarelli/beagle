@@ -36,3 +36,10 @@
   [left: Any
    right: Any] -> Int
   (compare left right))
+
+;; A narrowed record crosses a by-value return boundary. The native world
+;; extracts its reference payload, then materializes a checked shallow copy.
+(defn pair-copy-of [value: Any] -> Pair
+  (if (pair? value)
+    value
+    (throw (ex-info "expected Pair" {}))))

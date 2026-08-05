@@ -171,6 +171,7 @@
     (instance? native.core.RecordInstruction instruction) true
     (instance? native.core.RecordAssocInstructionV0 instruction) true
     (instance? native.core.BoxRecordInstruction instruction) true
+    (instance? native.core.RecordMaterializeInstructionV0 instruction) true
     (instance? native.core.CallInstruction instruction) true
     (instance? native.core.ExternCallInstruction instruction) true
     (instance? native.core.VariantValueInstruction instruction) true
@@ -1997,6 +1998,18 @@
               (value-name function slots
                 (core/boxrecordinstruction-source-id instruction))
               ";\n"))))
+
+      (instance? native.core.RecordMaterializeInstructionV0 instruction)
+      (let [record-type: String
+            (c17/c-type types module-index
+              (core/ssavaluev0-type-id result))
+            source: String
+            (value-name function slots
+              (core/recordmaterializeinstructionv0-source-id instruction))]
+        (str "  if (" source " == NULL) {\n"
+          "    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
+          "  }\n"
+          "  " target " = *((const " record-type " *)" source ");\n"))
 
       (instance? native.core.VecLengthInstruction instruction)
       (str "  " target " = native_vec_length("

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Drive validation/slice-union/fixture.bclj through the native pipeline and run
 # the coercion rule's own C probe: a tag inject, a checked extract that reads a
-# record reference out of the Any union, and one that traps on a wrong tag.
+# record reference out of the Any union, a checked by-value record copy, and
+# traps for a wrong tag or null record reference.
 # fram.types guards every narrowing it performs, so only this fixture can fire
 # the trap; the projection reuses slice-bodies' AST-to-facts step unchanged.
 set -euo pipefail
@@ -74,7 +75,11 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc mismatch ) 2>/dev/null; then
   echo "drive.sh: the mismatched union tag did not trap" >&2
   exit 1
 fi
-echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + mismatch trap ok"
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc null ) 2>/dev/null; then
+  echo "drive.sh: the null record reference did not trap" >&2
+  exit 1
+fi
+echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + mismatch/null traps ok"
 
 find_clang() {
   if command -v clang >/dev/null 2>&1; then command -v clang; return 0; fi
@@ -91,7 +96,11 @@ if [ -n "$clang_bin" ]; then
     echo "drive.sh: clang build did not trap on the mismatched union tag" >&2
     exit 1
   fi
-  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + mismatch trap ok"
+  if ( cd "$build" && ulimit -c 0 && ./probe_clang null ) 2>/dev/null; then
+    echo "drive.sh: clang build did not trap on the null record reference" >&2
+    exit 1
+  fi
+  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + mismatch/null traps ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
 fi

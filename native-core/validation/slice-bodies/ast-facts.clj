@@ -3,6 +3,7 @@
 
 (def repo-root
   (-> (io/file *file*)
+      .getCanonicalFile
       .getParentFile
       .getParentFile
       .getParentFile
