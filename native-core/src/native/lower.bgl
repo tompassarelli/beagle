@@ -10473,6 +10473,11 @@
             (= "update" callee)
             (lower-static-update-call env owner state args)
 
+            (and (= "vec" callee) (= 1 (count args))
+              (source-call-named? index (nth args 0) "filter"))
+            (lower-eager-vector-hof env owner state "filterv"
+              (source-call-arguments index (nth args 0)))
+
             (or (= "mapv" callee) (= "filterv" callee)
                 (= "every?" callee) (= "some" callee))
             (lower-eager-vector-hof env owner state callee args)
