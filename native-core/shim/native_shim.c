@@ -325,12 +325,20 @@ static size_t native_collection_bytes(int64_t count, int64_t stride) {
 
 static void native_collection_check_equality(
     native_collection_equality equality) {
-  switch (equality) {
-  case NATIVE_COLLECTION_EQ_BOOL:
-  case NATIVE_COLLECTION_EQ_I64:
-  case NATIVE_COLLECTION_EQ_F64:
-  case NATIVE_COLLECTION_EQ_TEXT:
-  case NATIVE_COLLECTION_EQ_KEYWORD:
+  switch (equality.kind) {
+  case NATIVE_COLLECTION_EQ_KIND_BOOL:
+  case NATIVE_COLLECTION_EQ_KIND_I64:
+  case NATIVE_COLLECTION_EQ_KIND_F64:
+  case NATIVE_COLLECTION_EQ_KIND_TEXT:
+  case NATIVE_COLLECTION_EQ_KIND_KEYWORD:
+    if (equality.descriptor != NULL) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    return;
+  case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
+    if (equality.descriptor == NULL) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
     return;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -343,42 +351,44 @@ static bool native_collection_equal(const void *left, const void *right,
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_collection_check_equality(equality);
-  switch (equality) {
-  case NATIVE_COLLECTION_EQ_BOOL: {
+  switch (equality.kind) {
+  case NATIVE_COLLECTION_EQ_KIND_BOOL: {
     bool left_value;
     bool right_value;
     memcpy(&left_value, left, sizeof left_value);
     memcpy(&right_value, right, sizeof right_value);
     return left_value == right_value;
   }
-  case NATIVE_COLLECTION_EQ_I64: {
+  case NATIVE_COLLECTION_EQ_KIND_I64: {
     int64_t left_value;
     int64_t right_value;
     memcpy(&left_value, left, sizeof left_value);
     memcpy(&right_value, right, sizeof right_value);
     return left_value == right_value;
   }
-  case NATIVE_COLLECTION_EQ_F64: {
+  case NATIVE_COLLECTION_EQ_KIND_F64: {
     double left_value;
     double right_value;
     memcpy(&left_value, left, sizeof left_value);
     memcpy(&right_value, right, sizeof right_value);
     return left_value == right_value;
   }
-  case NATIVE_COLLECTION_EQ_TEXT: {
+  case NATIVE_COLLECTION_EQ_KIND_TEXT: {
     uint64_t left_value;
     uint64_t right_value;
     memcpy(&left_value, left, sizeof left_value);
     memcpy(&right_value, right, sizeof right_value);
     return native_text_eq(left_value, right_value);
   }
-  case NATIVE_COLLECTION_EQ_KEYWORD: {
+  case NATIVE_COLLECTION_EQ_KIND_KEYWORD: {
     uint64_t left_value;
     uint64_t right_value;
     memcpy(&left_value, left, sizeof left_value);
     memcpy(&right_value, right, sizeof right_value);
     return left_value == right_value;
   }
+  case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
+    return native_value_equal(equality.descriptor, left, right);
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }

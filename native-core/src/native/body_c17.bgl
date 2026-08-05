@@ -653,6 +653,37 @@
           (if keyword-type (count keywords) 0) "\n"
           "};\n")))))
 
+(defn structural-collection-equality? [instruction: core/Instruction] -> Bool
+  (cond
+    (instance? native.core.MapLiteralInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/mapliteralinstructionv0-key-equality instruction))
+    (instance? native.core.SetLiteralInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/setliteralinstructionv0-element-equality instruction))
+    (instance? native.core.MapGetInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/mapgetinstructionv0-key-equality instruction))
+    (instance? native.core.MapContainsInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/mapcontainsinstructionv0-key-equality instruction))
+    (instance? native.core.MapAssocInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/mapassocinstructionv0-key-equality instruction))
+    (instance? native.core.MapDissocInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/mapdissocinstructionv0-key-equality instruction))
+    (instance? native.core.SetContainsInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/setcontainsinstructionv0-element-equality instruction))
+    (instance? native.core.SetConjInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/setconjinstructionv0-element-equality instruction))
+    (instance? native.core.SetDisjInstructionV0 instruction)
+    (instance? native.core.StructuralEqualityV0
+      (core/setdisjinstructionv0-element-equality instruction))
+    :else false))
+
 (defn value-descriptors-used? [functions: (Vec core/FunctionDef)] -> Bool
   (some?
     (some
@@ -666,7 +697,8 @@
                     (or
                       (instance? native.core.ValueSemanticsInstruction instruction)
                       (instance? native.core.ValueToTextInstructionV0 instruction)
-                      (instance? native.core.VecSortInstructionV0 instruction)))
+                      (instance? native.core.VecSortInstructionV0 instruction)
+                      (structural-collection-equality? instruction)))
                   (core/basicblock-instructions block))))
             (core/functiondef-blocks function))))
       functions)))
@@ -1274,7 +1306,10 @@
       (core/setshapev0-align-bytes shape)
       1)))
 
-(defn concrete-equality-name [equality: core/ConcreteEqualityV0] -> String
+(defn concrete-equality-name
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   equality: core/ConcreteEqualityV0] -> String
   (cond
     (instance? native.core.BoolEqualityV0 equality)
     "NATIVE_COLLECTION_EQ_BOOL"
@@ -1284,7 +1319,13 @@
     "NATIVE_COLLECTION_EQ_F64"
     (instance? native.core.TextEqualityV0 equality)
     "NATIVE_COLLECTION_EQ_TEXT"
-    :else "NATIVE_COLLECTION_EQ_KEYWORD"))
+    (instance? native.core.KeywordEqualityV0 equality)
+    "NATIVE_COLLECTION_EQ_KEYWORD"
+    :else
+    (str "NATIVE_COLLECTION_EQ_STRUCTURAL(&"
+      (descriptor-symbol types module-index
+        (core/structuralequalityv0-domain-type equality))
+      ")")))
 
 (defn emit-value-list
   [function: core/FunctionDef
@@ -1459,6 +1500,7 @@
           (value-name function slots (core/mapgetinstructionv0-key-id instruction))
           ", "
           (concrete-equality-name
+            types module-index
             (core/mapgetinstructionv0-key-equality instruction))
           ")")]
     (if (some? default)
@@ -2217,6 +2259,7 @@
                 (core/mapliteralinstructionv0-arena-id instruction)))
             equality: String
             (concrete-equality-name
+              types module-index
               (core/mapliteralinstructionv0-key-equality instruction))]
         (if (= 0 (count keys))
           (str "  " target " = native_map_from_arrays(" arena
@@ -2253,6 +2296,7 @@
                 (core/setliteralinstructionv0-arena-id instruction)))
             equality: String
             (concrete-equality-name
+              types module-index
               (core/setliteralinstructionv0-element-equality instruction))]
         (if (= 0 (count values))
           (str "  " target " = native_set_from_array(" arena
@@ -2287,6 +2331,7 @@
           (core/mapcontainsinstructionv0-key-id instruction))
         ", "
         (concrete-equality-name
+          types module-index
           (core/mapcontainsinstructionv0-key-equality instruction))
         ");\n")
 
@@ -2310,6 +2355,7 @@
           (map-value-stride layouts map-type) "), (size_t)"
           (map-value-alignment layouts map-type) ", "
           (concrete-equality-name
+            types module-index
             (core/mapassocinstructionv0-key-equality instruction))
           ");\n"))
 
@@ -2330,6 +2376,7 @@
           (map-value-stride layouts map-type) "), (size_t)"
           (map-value-alignment layouts map-type) ", "
           (concrete-equality-name
+            types module-index
             (core/mapdissocinstructionv0-key-equality instruction))
           ");\n"))
 
@@ -2367,6 +2414,7 @@
           (core/setcontainsinstructionv0-value-id instruction))
         ", "
         (concrete-equality-name
+          types module-index
           (core/setcontainsinstructionv0-element-equality instruction))
         ");\n")
 
@@ -2384,6 +2432,7 @@
           ", INT64_C(" (set-stride layouts set-type) "), (size_t)"
           (set-alignment layouts set-type) ", "
           (concrete-equality-name
+            types module-index
             (core/setconjinstructionv0-element-equality instruction))
           ");\n"))
 
@@ -2401,6 +2450,7 @@
           ", INT64_C(" (set-stride layouts set-type) "), (size_t)"
           (set-alignment layouts set-type) ", "
           (concrete-equality-name
+            types module-index
             (core/setdisjinstructionv0-element-equality instruction))
           ");\n"))
 

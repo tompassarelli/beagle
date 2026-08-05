@@ -48,13 +48,35 @@ typedef struct native_vec {
   int64_t capacity;
 } native_vec;
 
-typedef enum native_collection_equality {
-  NATIVE_COLLECTION_EQ_BOOL = 1,
-  NATIVE_COLLECTION_EQ_I64 = 2,
-  NATIVE_COLLECTION_EQ_F64 = 3,
-  NATIVE_COLLECTION_EQ_TEXT = 4,
-  NATIVE_COLLECTION_EQ_KEYWORD = 5
+typedef struct native_value_descriptor native_value_descriptor;
+
+typedef enum native_collection_equality_kind {
+  NATIVE_COLLECTION_EQ_KIND_BOOL = 1,
+  NATIVE_COLLECTION_EQ_KIND_I64 = 2,
+  NATIVE_COLLECTION_EQ_KIND_F64 = 3,
+  NATIVE_COLLECTION_EQ_KIND_TEXT = 4,
+  NATIVE_COLLECTION_EQ_KIND_KEYWORD = 5,
+  NATIVE_COLLECTION_EQ_KIND_STRUCTURAL = 6
+} native_collection_equality_kind;
+
+typedef struct native_collection_equality {
+  native_collection_equality_kind kind;
+  const native_value_descriptor *descriptor;
 } native_collection_equality;
+
+#define NATIVE_COLLECTION_EQ_BOOL                                             \
+  ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_BOOL, NULL})
+#define NATIVE_COLLECTION_EQ_I64                                              \
+  ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_I64, NULL})
+#define NATIVE_COLLECTION_EQ_F64                                              \
+  ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_F64, NULL})
+#define NATIVE_COLLECTION_EQ_TEXT                                             \
+  ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_TEXT, NULL})
+#define NATIVE_COLLECTION_EQ_KEYWORD                                          \
+  ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_KEYWORD, NULL})
+#define NATIVE_COLLECTION_EQ_STRUCTURAL(value_descriptor)                     \
+  ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_STRUCTURAL,         \
+                                (value_descriptor)})
 
 /* Map/Set headers own parallel insertion-order storage in the arena. The
    headers are opaque to generated modules; descriptor code reads through the
@@ -96,8 +118,6 @@ typedef enum native_value_text_mode {
   NATIVE_VALUE_STR = 1,
   NATIVE_VALUE_PR_STR = 2
 } native_value_text_mode;
-
-typedef struct native_value_descriptor native_value_descriptor;
 
 typedef struct native_value_keyword_descriptor {
   const uint8_t *bytes;

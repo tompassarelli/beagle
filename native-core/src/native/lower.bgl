@@ -3549,6 +3549,18 @@
     (same-id? target (type-id "Keyword")) (core/->KeywordEqualityV0 true)
     :else nil))
 
+(defn map-key-equality-for
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/ConcreteEqualityV0 Nil)
+  (let [scalar: (U core/ConcreteEqualityV0 Nil)
+        (concrete-equality-for target)]
+    (if (some? scalar)
+      scalar
+      (if (and (not (same-id? target (type-id "SliceValue")))
+            (value-semantics-type? types target))
+        (core/->StructuralEqualityV0 target)
+        nil))))
+
 (defn atom-cell-content-of
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> (U core/NativeId Nil)
@@ -3789,7 +3801,7 @@
         (fail-result state
           "TODO-NATIVE-EMPTY-MAP-LITERAL: the contextual type is not an exact native map type")
         (let [equality: (U core/ConcreteEqualityV0 Nil)
-              (concrete-equality-for (map-key-of types expected))]
+              (map-key-equality-for types (map-key-of types expected))]
           (if (nil? equality)
             (fail-result state
               "TODO-NATIVE-MAP-KEY-EQUALITY: the key type has no closed concrete equality")
@@ -7574,7 +7586,7 @@
                     exact-map-type
                     (map-type-for-widened-values types key-type value-types))
                   equality: (U core/ConcreteEqualityV0 Nil)
-                  (concrete-equality-for key-type)]
+                  (map-key-equality-for types key-type)]
               (cond
                 (not uniform-keys)
                 (fail-result current
@@ -7644,7 +7656,7 @@
                       result-type: (U core/NativeId Nil)
                       (nullable-value-type-of types value-type)
                       equality: (U core/ConcreteEqualityV0 Nil)
-                      (concrete-equality-for key-type)]
+                      (map-key-equality-for types key-type)]
                   (cond
                     (not (same-id? key-type (keyword-type-id)))
                     (fail-result current
@@ -9049,7 +9061,7 @@
                       key-type: core/NativeId (map-key-of types map-type)
                       value-type: core/NativeId (map-value-of types map-type)
                       equality: (U core/ConcreteEqualityV0 Nil)
-                      (concrete-equality-for key-type)]
+                      (map-key-equality-for types key-type)]
                   (cond
                     (not (same-id? key-type (nth value-types 1)))
                     (fail-result current
@@ -9101,7 +9113,7 @@
                 (let [map-type: core/NativeId (nth value-types 0)
                       key-type: core/NativeId (map-key-of types map-type)
                       equality: (U core/ConcreteEqualityV0 Nil)
-                      (concrete-equality-for key-type)]
+                      (map-key-equality-for types key-type)]
                   (cond
                     (not (same-id? key-type (nth value-types 1)))
                     (fail-result current
@@ -9152,7 +9164,7 @@
                       key-type: core/NativeId (map-key-of types map-type)
                       value-type: core/NativeId (map-value-of types map-type)
                       equality: (U core/ConcreteEqualityV0 Nil)
-                      (concrete-equality-for key-type)]
+                      (map-key-equality-for types key-type)]
                   (cond
                     (not (same-id? key-type (nth value-types 1)))
                     (fail-result current
@@ -9198,7 +9210,7 @@
                 (let [map-type: core/NativeId (nth value-types 0)
                       key-type: core/NativeId (map-key-of types map-type)
                       equality: (U core/ConcreteEqualityV0 Nil)
-                      (concrete-equality-for key-type)]
+                      (map-key-equality-for types key-type)]
                   (cond
                     (not (same-id? key-type (nth value-types 1)))
                     (fail-result current
@@ -11818,7 +11830,10 @@
     (instance? native.core.I64EqualityV0 equality) "i64-equality-v0"
     (instance? native.core.F64EqualityV0 equality) "f64-equality-v0"
     (instance? native.core.TextEqualityV0 equality) "text-equality-v0"
-    :else "keyword-equality-v0"))
+    (instance? native.core.KeywordEqualityV0 equality) "keyword-equality-v0"
+    :else
+    (worlds/canonical-record "structural-equality-v0"
+      [(id-value (core/structuralequalityv0-domain-type equality))])))
 
 (defn encode-value-semantics-operation [operation: core/ValueSemanticsOpV0] -> String
   (match operation

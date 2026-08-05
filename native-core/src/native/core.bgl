@@ -36,15 +36,15 @@
 (defunion CollectionOrderV0
   (InsertionOrderV0 [token: Bool]))
 
-;; Collection lookup equality is closed over concrete native scalars. Dyn/Any
-;; descriptors extend this vocabulary elsewhere; ordinary Map/Set ops never
-;; smuggle a host hash or equality callback through the runtime ABI.
+;; Collection lookup equality is either scalar or closed over one sealed native
+;; type descriptor; Map/Set ops never smuggle a host callback through the ABI.
 (defunion ConcreteEqualityV0
   (BoolEqualityV0 [token: Bool])
   (I64EqualityV0 [token: Bool])
   (F64EqualityV0 [token: Bool])
   (TextEqualityV0 [token: Bool])
-  (KeywordEqualityV0 [token: Bool]))
+  (KeywordEqualityV0 [token: Bool])
+  (StructuralEqualityV0 [domain-type: NativeId]))
 
 (defunion TypeShape
   (AtomType [kind :- AtomKind])
@@ -1394,6 +1394,13 @@
     [(StoreText address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(StoreRef address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]))
 
+(defn concrete-equality-refs-closed?
+  [equality: ConcreteEqualityV0
+   known-types: (Vec NativeId)] -> Bool
+  (if (instance? native.core.StructuralEqualityV0 equality)
+    (id-in? known-types (structuralequalityv0-domain-type equality))
+    true))
+
 (defn instruction-semantic-refs-closed?
   [instruction :- Instruction
    known-functions :- (Vec NativeId)
@@ -1440,20 +1447,28 @@
     [(VecSortInstructionV0 result source-id arena-id element-type)
      (id-in? known-types element-type)]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
-     (= (count key-ids) (count value-ids))]
-    [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
+     (and (= (count key-ids) (count value-ids))
+       (concrete-equality-refs-closed? key-equality known-types))]
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
+     (concrete-equality-refs-closed? element-equality known-types)]
     [(MapCountInstructionV0 result source-id) true]
-    [(MapGetInstructionV0 result source-id key-id default-id key-equality) true]
-    [(MapContainsInstructionV0 result source-id key-id key-equality) true]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality)
+     (concrete-equality-refs-closed? key-equality known-types)]
+    [(MapContainsInstructionV0 result source-id key-id key-equality)
+     (concrete-equality-refs-closed? key-equality known-types)]
     [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
-     true]
-    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality) true]
+     (concrete-equality-refs-closed? key-equality known-types)]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality)
+     (concrete-equality-refs-closed? key-equality known-types)]
     [(MapKeysInstructionV0 result source-id arena-id) true]
     [(MapValuesInstructionV0 result source-id arena-id) true]
     [(SetCountInstructionV0 result source-id) true]
-    [(SetContainsInstructionV0 result source-id value-id element-equality) true]
-    [(SetConjInstructionV0 result source-id value-id arena-id element-equality) true]
-    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetContainsInstructionV0 result source-id value-id element-equality)
+     (concrete-equality-refs-closed? element-equality known-types)]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality)
+     (concrete-equality-refs-closed? element-equality known-types)]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
+     (concrete-equality-refs-closed? element-equality known-types)]
     [(SetVectorInstructionV0 result source-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
