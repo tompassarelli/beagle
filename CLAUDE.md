@@ -70,26 +70,24 @@ validation runtime behind it.
 boundaries `def` / `defonce` / `defn` (params + return) / `defrecord`
 (fields required). Parameter vectors may mix typed and inferred entries.
 
-Parameter and typed-field vectors have one canonical physical layout. Zero or
-one logical entry stays inline with the owning function, method, macro, record,
-or variant name: `(defn id [x] x)`. Two or more entries put the vector on the
-following line, with its first entry beside `[` and every later logical entry
-starting once per line at the same column. The `[` is exactly two columns past
-the owning form's opening parenthesis; `]` remains after the final entry and is
-followed by exactly one space before any `-> RET`. Binding names are
-left-aligned at that shared entry-start column. In a typed entry, `:`
-immediately follows the name and exactly one space follows `:`; never pad names,
-colons, or types into columns:
+Parameter and typed-field vectors have one canonical physical layout. A vector
+with zero, one, or two logical entries stays inline when the complete owner
+signature through any `-> RET` fits within 80 columns. Three or more entries
+always put the vector on the following line; an over-width zero-, one-, or
+two-entry signature does the same. A vertical vector has its first entry beside
+`[` and every later logical entry starting once per line at the same column.
+The `[` is exactly two columns past the owning form's opening parenthesis; `]`
+remains after the final entry and is followed by exactly one space before any
+`-> RET`. Never partially wrap a vector. Binding names are left-aligned at that
+shared entry-start column. In a typed entry, `:` immediately follows the name
+and exactly one space follows `:`; never pad names, colons, or types into
+columns:
 
 ```clojure
-(defn add
-  [left: Int
-   r: Int] -> Int
+(defn add [left: Int r: Int] -> Int
   (+ left r))
 
-(defrecord Point
-  [x: Int
-   y: Int])
+(defrecord Point [x: Int y: Int])
 ```
 
 Thus `[abc: Int b: String bc: (Vec Int)]` lays out as:
@@ -120,10 +118,10 @@ A typed `name: Type`, destructuring form, or `& rest` pair is one logical
 entry. The same rule covers `defn`/`defn-`/`fn`, multi-arity clauses, `letfn`,
 protocol and implementation methods, `defmacro`, and typed record/union/error
 fields. It does not apply to data vectors or let-style value-binding vectors.
-The parser attaches an exact source-range repair when moving the range cannot
-change a line comment's reach; comment-bearing violations remain hard errors
-without a lossy rewrite. Source-less macro-produced datums have no
-physical-layout obligation.
+The reader accepts physical layout; `beagle fmt --check` owns canonical style
+and `beagle fmt --write` applies the same token-aware source-range rewrite.
+Comment-bearing ranges that cannot move safely are reported without a lossy
+rewrite. Source-less macro-produced datums have no physical-layout obligation.
 
 **This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
 parser actually does** (`postfix-annotation-parse.rkt` is the contract):

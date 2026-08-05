@@ -61,6 +61,7 @@ targets.
 |---|---|
 | parse and pointed repair | `beagle syntax FILE` (`--ledger`, `--repair --emit-patch`) |
 | type check | `beagle check --agent FILE...` |
+| canonical formatting | `beagle fmt --check PATH...`; `beagle fmt --write PATH...` |
 | signature / record fields | `beagle sig NAME FILE...`; `beagle fields RECORD FILE...` |
 | exports / callers / impact | `beagle provides FILE`; `beagle callers NAME FILE...`; `beagle impact NAME FILE...` |
 | targets and domains | `beagle langs` (`--view domains`, `--json`) |
@@ -78,13 +79,12 @@ Beagle is Clojure plus types. Any divergence must be load-bearing for the type
 system or a backend. Bare names must behave as their Clojure namesake; qualify
 every target-specific meaning, such as `nix/assert`.
 
-Canonical annotations are postfix:
+Canonical annotations are postfix. Keep up to two logical parameters inline
+when the complete signature fits 80 columns:
 
 ```clojure
 (def total: Int 0)
-(defn add
-  [left: Int
-   right: Int] -> Int
+(defn add [left: Int right: Int] -> Int
   (+ left right))
 ```
 
@@ -96,13 +96,16 @@ Canonical annotations are postfix:
 - `name : Type` is reader-accepted but noncanonical.
 - `: Return` is rejected; return annotations use `-> Return`.
 
-For zero or one logical parameter/field, keep the vector inline. With two or
-more, put `[` on the next line two columns past the owning form's opening
-parenthesis, one aligned logical entry per line, and exactly one space between
-`]` and `-> Return`. Do not align colons or pad names. Typed bindings,
-destructures, and `& rest` each count as one entry. This covers
-function/method/macro vectors and typed record/union/error fields, not ordinary
-data or `let` binding vectors.
+For zero to two logical parameters/fields, keep the vector inline only when the
+complete owner signature through any `-> Return` fits 80 columns. With three or
+more, or when the full signature is over width, put `[` on the next line two
+columns past the owning form's opening parenthesis. Use one aligned logical
+entry per line; never partially wrap. Keep exactly one space between `]` and
+`-> Return`. Do not align colons or pad names. Typed bindings, destructures,
+and `& rest` each count as one entry. This covers function/method/macro vectors
+and typed record/union/error fields, not ordinary data or `let` binding
+vectors. The reader accepts either physical layout; run `beagle fmt --write .`
+instead of formatting by hand, and use `beagle fmt --check .` in CI/review.
 
 ## Treat `Any` as an explicit gap
 

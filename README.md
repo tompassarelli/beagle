@@ -79,27 +79,32 @@ path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 
 ## One canonical source shape
 
-Zero- and one-entry parameter or typed-field vectors stay inline:
+Zero-, one-, and two-entry parameter or typed-field vectors stay inline when
+the complete signature fits within 80 columns:
 
 ```clojure
 (defn zero [] -> Int 0)
 (defn increment [x: Int] -> Int (+ x 1))
+(defn add [x: Int y: Int] -> Int (+ x y))
 ```
 
-Two or more entries put the vector on the following line. Binding names start
+Three or more entries always put the vector on the following line. An
+over-width zero-, one-, or two-entry signature does too. A wrapped vector has
+one logical entry per line and is never partially packed. Binding names start
 in the same column; `:` attaches to the name and has exactly one following
 space. Names and types are never padded into columns:
 
 ```clojure
-(defn add
+(defn clamp
   [long-name: Int
-   x: Int] -> Int
-  (+ long-name x))
+   minimum: Int
+   maximum: Int] -> Int
+  ...)
 ```
 
-The parser hard-rejects other physical layouts and carries an exact
-source-range repair when changing the range cannot alter a comment. This gives
-people, formatters, and agents the same answer instead of a style choice.
+The reader accepts either physical layout. `beagle fmt --write .` performs the
+token-aware mechanical rewrite; `beagle fmt --check .` gives people, CI, and
+agents the same answer without making whitespace part of language validity.
 
 ## Two compilation paths
 
