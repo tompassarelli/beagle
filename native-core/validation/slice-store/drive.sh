@@ -1,28 +1,41 @@
 #!/usr/bin/env bash
-# Drive fram:src/fram/store.bclj through the whole native pipeline and emit the
+# Drive fram:src/fram/store.bgl through the whole native pipeline and emit the
 # C17 projection of the record ABI its signatures close over.
 #
 #   beagle-ast -> source facts -> sealed source world -> typed world
 #     -> native world -> 7 obligations -> native.c11 emitters
 #
-# store.bclj declares no record of its own: every type in its signatures comes
+# store.bgl declares no record of its own: every type in its signatures comes
 # from fram.types, so both ASTs are projected into one source world.
 #
-# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_STORE, FRAM_TYPES.
+# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_STORE, FRAM_TYPES,
+#      NATIVE_SLICE_COMMITTED_FACTS.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-src="${FRAM_STORE:-$HOME/code/fram/main/src/fram/store.bclj}"
-dep="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bclj}"
+src="${FRAM_STORE:-$HOME/code/fram/main/src/fram/store.bgl}"
+dep="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bgl}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-store.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-# The committed projection is the fallback input, so the driver still runs when
-# the fram checkout is absent; when it is present the projection is rebuilt and
-# must match byte for byte.
-if [[ -f "$src" && -f "$dep" ]]; then
+banner=""
+if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
+  # Opt-in only, and it says so in the report: this mode proves the committed
+  # projection still lowers, never that it still matches live fram.
+  [[ -f "$art/store.facts" ]] \
+    || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/store.facts" >&2; exit 1; }
+  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches live fram"
+  echo "drive.sh: $banner" >&2
+  cp "$art/store.facts" "$scratch/store.facts"
+else
+  for upstream in "$dep" "$src"; do
+    [[ -f "$upstream" ]] && continue
+    echo "drive.sh: upstream fram source is missing: $upstream" >&2
+    echo "drive.sh: point FRAM_TYPES/FRAM_STORE at the live sources, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
+    exit 1
+  done
   "$repo/bin/beagle-ast" "$dep" >"$scratch/types.ast.json"
   "$repo/bin/beagle-ast" "$src" >"$scratch/store.ast.json"
   bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/store.ast.json" \
@@ -33,11 +46,6 @@ if [[ -f "$src" && -f "$dep" ]]; then
   fi
   cp "$scratch/store.facts" "$art/store.facts"
   { sha256sum "$dep"; sha256sum "$src"; } | cut -d' ' -f1 >"$art/source.sha256"
-elif [[ -f "$art/store.facts" ]]; then
-  cp "$art/store.facts" "$scratch/store.facts"
-else
-  echo "drive.sh: no $src and no committed store.facts" >&2
-  exit 1
 fi
 
 "$repo/bin/beagle-build-all" \
@@ -69,8 +77,11 @@ clojure -J-Xmx4g -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
   (native.slice/emit-slice! \"$scratch/store.facts\" \"fram.store\"
-    \"fram:src/fram/store.bclj\" \"$art\" \"native-slice-store-v0\"))"
+    \"fram:src/fram/store.bgl\" \"$art\" \"native-slice-store-v0\"))"
 
+if [[ -n "$banner" ]]; then
+  sed -i "1i $banner" "$art/report.txt"
+fi
 cat "$art/report.txt"
 
 # The driver is fail-closed on its own C: a projection that no longer compiles

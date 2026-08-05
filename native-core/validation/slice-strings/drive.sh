@@ -62,6 +62,8 @@ if [[ -n "${FRAM_REPLAY:-}" ]]; then
   fi
   cp "$scratch/replay_text.facts" "$art/replay_text.facts"
   sha256sum "$FRAM_REPLAY" | cut -d' ' -f1 >"$art/replay_text.source.sha256"
+else
+  echo "drive.sh: MODE committed-facts for the replay projection: fram.fri-replay NOT read; set FRAM_REPLAY to prove it still matches live fram" >&2
 fi
 
 "$repo/bin/beagle-build-all" \

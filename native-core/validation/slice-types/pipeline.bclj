@@ -223,7 +223,7 @@
         [(worlds/->SourceModuleV0
            (slice-id "module" ["fram.types"])
            "fram.types"
-           "src/fram/types.bclj"
+           "src/fram/types.bgl"
            (worlds/content-digest source-text)
            (worlds/content-digest (str root-number ":Instant:Int:Int"))
            (node-id root-number))]

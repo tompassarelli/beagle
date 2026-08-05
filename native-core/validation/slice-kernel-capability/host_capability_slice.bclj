@@ -57,7 +57,7 @@
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0
-        (slice/source-world rows "fram.kernel" "fram:src/fram/kernel.bclj")
+        (slice/source-world rows "fram.kernel" "fram:src/fram/kernel.bgl")
         seal-result: lower/SourceSealResultV0
         (lower/seal-source-world source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceSealAcceptedV0 seal-result))

@@ -4,8 +4,8 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-types_file="${FRAM_TYPES:-/home/tom/code/fram/main/src/fram/types.bclj}"
-kernel_file="${FRAM_KERNEL:-/home/tom/code/fram/main/src/fram/kernel.bclj}"
+types_file="${FRAM_TYPES:-/home/tom/code/fram/main/src/fram/types.bgl}"
+kernel_file="${FRAM_KERNEL:-/home/tom/code/fram/main/src/fram/kernel.bgl}"
 probe_file="$here/host_capability_probe.bclj"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-capability.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
@@ -28,15 +28,15 @@ mkdir -p "$art" "$scratch/generated"
 "$repo/bin/beagle-ast" "$kernel_file" >"$scratch/kernel.ast.json"
 "$repo/bin/beagle-ast" "$probe_file" >"$scratch/probe.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/types.ast.json=fram:src/fram/types.bclj" \
-  --input "$scratch/kernel.ast.json=fram:src/fram/kernel.bclj" \
+  --input "$scratch/types.ast.json=fram:src/fram/types.bgl" \
+  --input "$scratch/kernel.ast.json=fram:src/fram/kernel.bgl" \
   --input "$scratch/probe.ast.json=beagle:native-core/validation/slice-kernel-capability/host_capability_probe.bclj" \
   --output "$scratch/generated/kernel_capability.facts" \
   --include-defs
 
 {
-  sha256sum "$types_file" | sed 's#  .*#  fram:src/fram/types.bclj#'
-  sha256sum "$kernel_file" | sed 's#  .*#  fram:src/fram/kernel.bclj#'
+  sha256sum "$types_file" | sed 's#  .*#  fram:src/fram/types.bgl#'
+  sha256sum "$kernel_file" | sed 's#  .*#  fram:src/fram/kernel.bgl#'
   sha256sum "$probe_file" | sed 's#  .*#  beagle:native-core/validation/slice-kernel-capability/host_capability_probe.bclj#'
 } >"$scratch/generated/source.sha256"
 

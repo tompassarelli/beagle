@@ -1,6 +1,6 @@
 ;; bin/beagle-ast JSON -> the canonical source-fact projection native.slice seals.
 ;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object.
-;; Takes several ASTs: store.bclj declares no record, so its annotations only
+;; Takes several ASTs: store.bgl declares no record, so its annotations only
 ;; close over Native Core types when its declared dependency is projected first.
 (require '[cheshire.core :as json])
 

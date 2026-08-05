@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
-# Drive fram:src/fram/types.bclj function BODIES through the native pipeline:
+# Drive fram:src/fram/types.bgl function BODIES through the native pipeline:
 #   beagle-ast -> source facts (signatures + bodies) -> sealed source world
 #     -> typed world -> native world with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
-# Re-runnable: the projection is rebuilt from the source file when fram is
-# checked out here, and must match the committed types.facts byte for byte.
+# Re-runnable: the projection is rebuilt from live fram and must match the
+# committed types.facts byte for byte.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-src="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bclj}"
+src="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bgl}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-bodies.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-if [[ -f "$src" ]]; then
+banner=""
+if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
+  # Opt-in only, and it says so in the report: this mode proves the committed
+  # projection still lowers, never that it still matches live fram.
+  [[ -f "$art/types.facts" ]] \
+    || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/types.facts" >&2; exit 1; }
+  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches live fram"
+  echo "drive.sh: $banner" >&2
+  cp "$art/types.facts" "$scratch/types.facts"
+elif [[ ! -f "$src" ]]; then
+  echo "drive.sh: upstream fram source is missing: $src" >&2
+  echo "drive.sh: point FRAM_TYPES at the live source, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
+  exit 1
+else
   "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
   bb "$here/ast-facts.clj" \
-    "$scratch/types.ast.json=fram:src/fram/types.bclj" "$scratch/types.facts" \
+    "$scratch/types.ast.json=fram:src/fram/types.bgl" "$scratch/types.facts" \
     --include-defs
   if [[ -f "$art/types.facts" ]] && ! cmp -s "$scratch/types.facts" "$art/types.facts"; then
     echo "drive.sh: regenerated projection differs from the committed types.facts" >&2
@@ -25,11 +38,6 @@ if [[ -f "$src" ]]; then
   fi
   cp "$scratch/types.facts" "$art/types.facts"
   sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
-elif [[ -f "$art/types.facts" ]]; then
-  cp "$art/types.facts" "$scratch/types.facts"
-else
-  echo "drive.sh: no $src and no committed types.facts" >&2
-  exit 1
 fi
 
 "$repo/bin/beagle-build-all" \
@@ -62,8 +70,11 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"
-    \"fram:src/fram/types.bclj\" \"$art\" \"native-slice-bodies-v0\"))"
+    \"fram:src/fram/types.bgl\" \"$art\" \"native-slice-bodies-v0\"))"
 
+if [[ -n "$banner" ]]; then
+  sed -i "1i $banner" "$art/report.txt"
+fi
 cat "$art/report.txt"
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then

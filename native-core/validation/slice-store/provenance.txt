@@ -1,12 +1,27 @@
 slice          store
-source         fram:src/fram/store.bclj  (746 lines, 71 defn, 0 defrecord)
-dependency     fram:src/fram/types.bclj  (projected into the same source world)
+source         fram:src/fram/store.bgl
+dependency     fram:src/fram/types.bgl  (projected into the same source world)
 driver         native-core/validation/slice-store/drive.sh
 pipeline       beagle-ast -> ast-facts.clj -> native.slice -> native.lower -> native.c11
-bar            native-core/bin/native-slice --module store  =>  5/5
+bar            native-core/bin/native-slice --module store  =>  3/5, blocked on
+               "The committed projection is stale" below
+
+The committed projection is stale
+  store.facts in this directory describes a 746-line, 71-defn, 0-defrecord
+  fram.store and does not reproduce from live fram. Its `triple` signature
+  reads `t1: Any`, a spelling that exists in no fram revision: beagle 0d043c06
+  hand-renamed slot0/slot1/slot2 to t1/t2/t3 inside the derived evidence
+  instead of re-deriving it, while fram's own rename (3275dea) simultaneously
+  retyped those parameters to `Term`. source.sha256 is older still — it pins
+  the pre-Core-migration types.bclj.
+
+  The driver reads fram:src/fram/types.bgl + fram:src/fram/store.bgl and fails
+  on the difference. It no longer falls back to this file; committed-facts mode
+  is NATIVE_SLICE_COMMITTED_FACTS=1 and stamps a MODE line into report.txt.
+  Clearing the drift is a cross-repo evidence refresh, not a driver change.
 
 Why the dependency is in the world
-  store.bclj declares no record; every type in its signatures is a fram.types
+  store.bgl declares no record; every type in its signatures is a fram.types
   record. Projected alone, its typed world fails types-refs-closed? and the
   source-to-typed pass rejects. The source world therefore carries both ASTs
   and names fram.store as its module.
@@ -21,7 +36,7 @@ Named gaps
      an explicit reference edge stay unclosed. The C17 projection restores the
      obligation by excluding them, which is why obligation-projection passes.
   3  The restricted C17 vocabulary admits 5 of 57 world types. Every shape
-     store.bclj itself contributes -- (Vec T), closed (U T Nil), Text/Keyword
+     store.bgl itself contributes -- (Vec T), closed (U T Nil), Text/Keyword
      atoms, map-entry vectors, (Atom T) references -- is outside it, so the
      emitted C is byte-identical to native-core/validation/slice-types-full's.
      The store-specific evidence in this slice is the sealed world, the typed

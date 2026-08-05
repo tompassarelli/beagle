@@ -1,30 +1,45 @@
 #!/usr/bin/env bash
-# Drive fram:src/fram/types.bclj + fram:src/fram/store.bclj BODIES through the
+# Drive fram:src/fram/types.bgl + fram:src/fram/store.bgl BODIES through the
 # native pipeline with the Vec vocabulary live:
 #   beagle-ast -> source facts (signatures + bodies + vector literals)
 #     -> sealed source world -> typed world -> native world -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
-# The pair is projected together because store.bclj declares no record of its
+# The pair is projected together because store.bgl declares no record of its
 # own: every (Vec T) in its signatures is a fram.types record vector.
-# Re-runnable: the projection is rebuilt from source when fram is checked out
-# here, and must match the committed vec.facts byte for byte.
+# Re-runnable: the projection is rebuilt from live fram and must match the
+# committed vec.facts byte for byte.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-src="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bclj}"
-dep="${FRAM_STORE:-$HOME/code/fram/main/src/fram/store.bclj}"
+src="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bgl}"
+dep="${FRAM_STORE:-$HOME/code/fram/main/src/fram/store.bgl}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-vec.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-if [[ -f "$src" && -f "$dep" ]]; then
+banner=""
+if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
+  # Opt-in only, and it says so in the report: this mode proves the committed
+  # projection still lowers, never that it still matches live fram.
+  [[ -f "$art/vec.facts" ]] \
+    || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/vec.facts" >&2; exit 1; }
+  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches live fram"
+  echo "drive.sh: $banner" >&2
+  cp "$art/vec.facts" "$scratch/vec.facts"
+else
+  for upstream in "$src" "$dep"; do
+    [[ -f "$upstream" ]] && continue
+    echo "drive.sh: upstream fram source is missing: $upstream" >&2
+    echo "drive.sh: point FRAM_TYPES/FRAM_STORE at the live sources, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
+    exit 1
+  done
   "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
   "$repo/bin/beagle-ast" "$dep" >"$scratch/store.ast.json"
   "$repo/bin/beagle-ast" "$here/vec_probe.bclj" >"$scratch/probe.ast.json"
   bb "$here/ast-facts.clj" \
-    "$scratch/types.ast.json=fram:src/fram/types.bclj" \
-    "$scratch/store.ast.json=fram:src/fram/store.bclj" \
+    "$scratch/types.ast.json=fram:src/fram/types.bgl" \
+    "$scratch/store.ast.json=fram:src/fram/store.bgl" \
     "$scratch/probe.ast.json=beagle:native-core/validation/slice-vec/vec_probe.bclj" \
     "$scratch/vec.facts"
   if [[ -f "$art/vec.facts" && "${NATIVE_SLICE_UPDATE:-0}" != 1 ]] \
@@ -35,11 +50,6 @@ if [[ -f "$src" && -f "$dep" ]]; then
   cp "$scratch/vec.facts" "$art/vec.facts"
   { sha256sum "$src" | cut -d' ' -f1; sha256sum "$dep" | cut -d' ' -f1; } \
     >"$art/source.sha256"
-elif [[ -f "$art/vec.facts" ]]; then
-  cp "$art/vec.facts" "$scratch/vec.facts"
-else
-  echo "drive.sh: no $src / $dep and no committed vec.facts" >&2
-  exit 1
 fi
 
 "$repo/bin/beagle-build-all" \
@@ -72,8 +82,11 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/vec.facts\" \"fram.store\"
-    \"fram:src/fram/store.bclj\" \"$art\" \"native-slice-vec-v0\"))"
+    \"fram:src/fram/store.bgl\" \"$art\" \"native-slice-vec-v0\"))"
 
+if [[ -n "$banner" ]]; then
+  sed -i "1i $banner" "$art/report.txt"
+fi
 cat "$art/report.txt"
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then

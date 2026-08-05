@@ -31,8 +31,10 @@ CLJ_CONFIG="$fold_tmp/clj-config" clojure \
                   native.c11-validation-corpus/fold-obligations-pass?)
      (throw (ex-info \"fold pipeline failed\" {})))"
 
-if [[ -f "$fold_source" ]]; then
-  "$fold_repo/bin/beagle-roundtrip" --emit-edn-typed "$fold_source" \
-    > "$fold_tmp/typed.edn"
-  install -m 0644 "$fold_tmp/typed.edn" "$fold_artifacts/typed.edn"
+if [[ ! -f "$fold_source" ]]; then
+  echo "driver: upstream fram source is missing: $fold_source" >&2
+  exit 1
 fi
+"$fold_repo/bin/beagle-roundtrip" --emit-edn-typed "$fold_source" \
+  > "$fold_tmp/typed.edn"
+install -m 0644 "$fold_tmp/typed.edn" "$fold_artifacts/typed.edn"

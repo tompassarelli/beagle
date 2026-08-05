@@ -1,12 +1,20 @@
 Vec vocabulary tier — provenance, layout rule, and named gaps
 
-upstream sources (read-only)
-  fram:src/fram/types.bclj
-  sha256 7a34d4633243073adecb86900639cb4bf4764e006078b8c34a71fbb2b5fa111c
-  fram:src/fram/store.bclj
-  sha256 1b8cc582103385bf4e6e1f285db37579a3616e8587ba0374bb9b21fee19deaaf
-  fram commit bbceba9bdf1acd21c1f0148556e5b2c3841a209d
+upstream sources (read-only) — what drive.sh reads
+  fram:src/fram/types.bgl
+  fram:src/fram/store.bgl
   native-core/validation/slice-vec/vec_probe.bclj  (this repo; C-callable leaves)
+
+the committed vec.facts is stale and does not name its own origin
+  It reproduces from no fram revision: beagle 0d043c06 hand-renamed
+  slot0/slot1/slot2 to t1/t2/t3 inside this derived evidence instead of
+  re-deriving it, while fram 3275dea also retyped those parameters to `Term`.
+  The digests that stood here (7a34d463…, 1b8cc582…) and source.sha256
+  (69c3feb6…, 6a09fb73…) disagree with each other and with live fram, so they
+  are removed rather than refreshed to a value nothing was derived from.
+  drive.sh now regenerates from live fram and FAILS on the difference; the
+  committed-facts path is NATIVE_SLICE_COMMITTED_FACTS=1 and stamps a MODE
+  line into report.txt. Clearing the drift is a cross-repo evidence refresh.
 
 layout rule — a vector value is a REFERENCE to its header
   A (Vec T) value is one 8-byte handle on a shim-owned
@@ -32,7 +40,7 @@ layout rule — a vector value is a REFERENCE to its header
 pipeline
   ast-facts.clj             beagle-ast JSON -> source facts (signatures, bodies,
                             definitions, namespaces/import aliases, vector
-                            literals) for types.bclj + store.bclj + probe; the
+                            literals) for types.bgl + store.bgl + probe; the
                             sealed Source World contains three SourceModuleV0s
   native.lower              seal-source-world -> lower-typed-world -> lower-native-world
   native.obligations        validate-native-world (seven structural obligations)

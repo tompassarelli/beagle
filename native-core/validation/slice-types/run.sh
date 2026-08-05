@@ -2,7 +2,7 @@
 set -euo pipefail
 
 types_root="$(git rev-parse --show-toplevel)"
-types_source="/home/tom/code/fram/main/src/fram/types.bclj"
+types_source="${FRAM_TYPES:-/home/tom/code/fram/main/src/fram/types.bgl}"
 types_output="$types_root/native-core/validation/slice-types"
 types_scratch="$(mktemp -d /tmp/native-slice-types.XXXXXX)"
 types_clang_bin="$(command -v clang || true)"
@@ -12,6 +12,14 @@ if [[ -z "$types_clang_bin" ]]; then
 fi
 if [[ -z "$types_clang_bin" ]]; then
   echo "clang is required" >&2
+  exit 1
+fi
+
+# This slice has no committed fact projection to fall back to, so an absent
+# upstream is fatal here and must name the path instead of dying inside racket.
+if [[ ! -f "$types_source" ]]; then
+  echo "run.sh: upstream fram source is missing: $types_source" >&2
+  echo "run.sh: set FRAM_TYPES to the live fram.types source; this slice has no committed-facts mode" >&2
   exit 1
 fi
 
