@@ -5908,6 +5908,31 @@
       (fail-result state
         "TODO-NATIVE-NOT-EQUAL-OPERANDS: not= has no native equality for these operand types"))))
 
+(defn lower-exact-bool-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (cond
+      (or (same-id? value-type (bool-type-id)) (> (count variants) 0))
+      (let [target: ExprResultV0
+            (bool-constant-result state owner "exact-bool-target"
+              (= "true?" callee))]
+        (lower-native-equality types owner (exprresultv0-state target)
+          (exprresultv0-value-id target) (bool-type-id)
+          value-id value-type))
+
+      (exact-closed-type? types value-type)
+      (bool-constant-result state owner "exact-bool-miss" false)
+
+      :else
+      (fail-result state
+        (str "TODO-NATIVE-EXACT-BOOL-TYPE: " callee
+          " needs a known closed native value")))))
+
 (defn lower-not-equal
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -10932,6 +10957,16 @@
                 (= "parse-long" callee)
                 (fail-result current
                   "TODO-NATIVE-PARSE-I64-OPERAND: parse-long takes one native Text operand")
+
+                (and (or (= "false?" callee) (= "true?" callee))
+                  (= 1 (count values)))
+                (lower-exact-bool-predicate types owner current callee
+                  (nth values 0) (nth value-types 0))
+
+                (or (= "false?" callee) (= "true?" callee))
+                (fail-result current
+                  (str "TODO-NATIVE-EXACT-BOOL-ARITY: " callee
+                    " takes one operand"))
 
                 (and (scalar-predicate? callee) (= 1 (count values)))
                 (lower-scalar-predicate types owner current callee

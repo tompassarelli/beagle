@@ -3,7 +3,7 @@
    wrong tag, which must trap instead of reading the payload as a reference.
    fn_0 pair?  fn_1 wrap-int  fn_2 pair-left-of  fn_3 pair-right-of
    fn_4 any-equal? fn_5 any-hash fn_6 any-compare fn_7 pair-copy-of
-   fn_8..19 logic probes.
+   fn_8..19 logic probes. fn_26..31 exact Bool predicate probes.
    Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair. */
 #include "module_0.h"
 
@@ -90,6 +90,7 @@ int main(int argc, char **argv) {
   slice_any as_abc_right = slice_text(&text_abc_right);
   slice_any as_abd = slice_text(&text_abd);
   slice_any as_false = slice_bool(false);
+  slice_any as_true = slice_bool(true);
   slice_any as_nil = slice_nil();
 
   if ((argc > 1) && (argv[1][0] == 'n')) {
@@ -228,6 +229,32 @@ int main(int argc, char **argv) {
   result = native_m0_fn_19(as_nil);
   if (result.tag != INT64_C(5)) {
     return 26;
+  }
+  if (!native_m0_fn_26(false) || native_m0_fn_26(true)) {
+    return 27;
+  }
+  if (!native_m0_fn_27(true) || native_m0_fn_27(false)) {
+    return 28;
+  }
+  if (!native_m0_fn_28(as_false)
+      || native_m0_fn_28(as_true)
+      || native_m0_fn_28(as_nil)
+      || native_m0_fn_28(as_number)
+      || native_m0_fn_28(as_pair)) {
+    return 29;
+  }
+  if (!native_m0_fn_29(as_true)
+      || native_m0_fn_29(as_false)
+      || native_m0_fn_29(as_nil)
+      || native_m0_fn_29(as_number)
+      || native_m0_fn_29(as_pair)) {
+    return 30;
+  }
+  if (native_m0_fn_30(INT64_C(0)) || native_m0_fn_30(INT64_C(1))) {
+    return 31;
+  }
+  if (native_m0_fn_31(INT64_C(0)) || native_m0_fn_31(INT64_C(1))) {
+    return 32;
   }
   return 0;
 }

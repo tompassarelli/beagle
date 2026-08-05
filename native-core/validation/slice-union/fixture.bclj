@@ -129,3 +129,15 @@
            (keyword? (taggedvalue-tag value)))
     (taggedvalue-tag value)
     nil))
+
+(defn false-bool? [value: Bool] -> Bool (false? value))
+
+(defn true-bool? [value: Bool] -> Bool (true? value))
+
+(defn false-any? [value: Any] -> Bool (false? value))
+
+(defn true-any? [value: Any] -> Bool (true? value))
+
+(defn false-int? [value: Int] -> Bool (false? value))
+
+(defn true-int? [value: Int] -> Bool (true? value))
