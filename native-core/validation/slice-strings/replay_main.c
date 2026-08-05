@@ -63,12 +63,12 @@ static bool op_is(native_m0_type_18 operation, int64_t kind,
          text_is(operation.field_7, error);
 }
 
-static native_m0_type_5 triple_of(const char *slot0, const char *slot1,
-                                  const char *slot2) {
+static native_m0_type_5 triple_of(const char *t1, const char *t2,
+                                  const char *t3) {
   native_m0_type_5 triple;
-  triple.field_0 = text_of(slot0);
-  triple.field_1 = text_of(slot1);
-  triple.field_2 = text_of(slot2);
+  triple.field_0 = text_of(t1);
+  triple.field_1 = text_of(t2);
+  triple.field_2 = text_of(t3);
   return triple;
 }
 
@@ -105,20 +105,20 @@ static native_m0_type_25 vector_frame(native_m0_type_21 frames,
                                                    INT64_C(16));
 }
 
-static bool triple_is(native_m0_type_5 triple, const char *slot0,
-                      const char *slot1, const char *slot2) {
-  return text_is(triple.field_0, slot0) && text_is(triple.field_1, slot1) &&
-         text_is(triple.field_2, slot2);
+static bool triple_is(native_m0_type_5 triple, const char *t1,
+                      const char *t2, const char *t3) {
+  return text_is(triple.field_0, t1) && text_is(triple.field_1, t2) &&
+         text_is(triple.field_2, t3);
 }
 
-static native_m0_type_7 action_of(int64_t operation, const char *slot0,
-                                  const char *slot1, const char *slot2,
+static native_m0_type_7 action_of(int64_t operation, const char *t1,
+                                  const char *t2, const char *t3,
                                   bool local_base) {
   native_m0_type_7 action;
   action.field_0 = operation;
-  action.field_1 = text_of(slot0);
-  action.field_2 = text_of(slot1);
-  action.field_3 = text_of(slot2);
+  action.field_1 = text_of(t1);
+  action.field_2 = text_of(t2);
+  action.field_3 = text_of(t3);
   action.field_4 = local_base;
   return action;
 }

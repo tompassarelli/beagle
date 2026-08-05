@@ -190,9 +190,9 @@
      [(->FieldSpecV0 "epoch-seconds" "ty-Int")
       (->FieldSpecV0 "nanos" "ty-Int")])
    (->RecordSpecV0 "rec-Triple" "Triple"
-     [(->FieldSpecV0 "slot0" "ty-Any")
-      (->FieldSpecV0 "slot1" "ty-Any")
-      (->FieldSpecV0 "slot2" "ty-Any")])
+     [(->FieldSpecV0 "t1" "ty-Any")
+      (->FieldSpecV0 "t2" "ty-Any")
+      (->FieldSpecV0 "t3" "ty-Any")])
    (->RecordSpecV0 "rec-AtomRow" "AtomRow"
      [(->FieldSpecV0 "kind" "ty-Keyword")
       (->FieldSpecV0 "string-value" "ty-StringOpt")
@@ -202,9 +202,9 @@
       (->FieldSpecV0 "keyword-value" "ty-KeywordOpt")
       (->FieldSpecV0 "instant-value" "ty-InstantOpt")])
    (->RecordSpecV0 "rec-TripleRow" "TripleRow"
-     [(->FieldSpecV0 "slot0" "ty-Int")
-      (->FieldSpecV0 "slot1" "ty-Int")
-      (->FieldSpecV0 "slot2" "ty-Int")])
+     [(->FieldSpecV0 "t1" "ty-Int")
+      (->FieldSpecV0 "t2" "ty-Int")
+      (->FieldSpecV0 "t3" "ty-Int")])
    (->RecordSpecV0 "rec-TermBucket" "TermBucket"
      [(->FieldSpecV0 "key" "ty-Int")
       (->FieldSpecV0 "positions" "ty-VecInt")])
