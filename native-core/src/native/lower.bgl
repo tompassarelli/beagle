@@ -1573,6 +1573,21 @@
 (defn host-environment-callee? [name: String] -> Bool
   (or (= name "System/getenv") (= name "java.lang.System/getenv")))
 
+(defn host-clock-effect-id [] -> core/NativeId
+  (lower-id "effect" ["host-monotonic-clock-read-v0"]))
+
+(defn host-clock-capability-id [] -> core/NativeId
+  (lower-id "capability" ["host-monotonic-clock-v0"]))
+
+(defn host-clock-abi-id [] -> core/NativeId
+  (lower-id "abi" ["host-clock-monotonic-nanoseconds-v0"]))
+
+(defn host-clock-function-id [] -> core/NativeId
+  (lower-id "extern" ["host-clock-monotonic-nanoseconds-v0"]))
+
+(defn host-clock-callee? [name: String] -> Bool
+  (= name "monotonic-nanoseconds"))
+
 (defn host-stdout-effect-id [] -> core/NativeId
   (lower-id "effect" ["host-stdout-write"]))
 
@@ -1623,7 +1638,8 @@
 (defn slice-effects
   [include-environment: Bool
    include-stdout: Bool
-   include-socket: Bool] -> (Vec core/EffectDef)
+   include-socket: Bool
+   include-clock: Bool] -> (Vec core/EffectDef)
   (let [base: (Vec core/EffectDef)
         [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
          (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))
@@ -1643,12 +1659,18 @@
           (conj with-environment
             (core/->EffectDef (host-stdout-effect-id)
               (core/->IoEffect (host-stdout-capability-id))))
-          with-environment)]
-      (if include-socket
-        (conj with-stdout
-          (core/->EffectDef (host-socket-effect-id)
-            (core/->SocketEffect (host-socket-capability-id))))
-        with-stdout)))
+          with-environment)
+        with-socket: (Vec core/EffectDef)
+        (if include-socket
+          (conj with-stdout
+            (core/->EffectDef (host-socket-effect-id)
+              (core/->SocketEffect (host-socket-capability-id))))
+          with-stdout)]
+      (if include-clock
+        (conj with-socket
+          (core/->EffectDef (host-clock-effect-id)
+            (core/->ClockEffect (host-clock-capability-id))))
+        with-socket)))
 
 ;; RULING (v0): a pure-named function MAY allocate. v0 source carries no effect
 ;; annotation, so the Allocate effect is inferred from the lowered body and from
@@ -9797,7 +9819,8 @@
         (or (= "call" kind)
           (and (= "static-call" kind)
             (or (host-environment-callee? (fact-text index expr "callee"))
-                (host-socket-callee? (fact-text index expr "callee")))))
+                (host-socket-callee? (fact-text index expr "callee"))
+                (host-clock-callee? (fact-text index expr "callee")))))
         (let [callee: String (fact-text index expr "callee")
               callee-form: (U core/NativeId Nil)
               (index-first-object index expr "callee-form")
@@ -11017,6 +11040,23 @@
                 (= "println" callee)
                 (fail-result current
                   "TODO-NATIVE-HOST-STDOUT-OPERAND: println takes one native Text value")
+
+                (and (host-clock-callee? callee) (= 0 (count values)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "host-clock")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ExternCallInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (host-clock-abi-id)
+                        []
+                        nil
+                        (core/->TokenFlowV0 [] [])))
+                    result-id (int-type-id) false))
+
+                (host-clock-callee? callee)
+                (fail-result current
+                  "TODO-NATIVE-HOST-CLOCK-ARITY: monotonic-nanoseconds takes no operands")
 
                 (and (host-environment-callee? callee)
                   (= 1 (count values))
@@ -12413,6 +12453,19 @@
             (core/basicblock-instructions block))))
       blocks)))
 
+(defn blocks-use-host-clock? [blocks: (Vec core/BasicBlock)] -> Bool
+  (some?
+    (some
+      (fn [block: core/BasicBlock] -> Bool
+        (some?
+          (some
+            (fn [instruction: core/Instruction] -> Bool
+              (and (instance? native.core.ExternCallInstruction instruction)
+                (same-id? (core/externcallinstruction-abi-id instruction)
+                  (host-clock-abi-id))))
+            (core/basicblock-instructions block))))
+      blocks)))
+
 ;; Checked-arithmetic types enter the world only where a body lowered a checked
 ;; operation, so a slice without arithmetic keeps its type set — and the C type
 ;; indices its committed artifacts already name.
@@ -12446,6 +12499,9 @@
   (core/id-in? (typedfunctionv0-effects function)
     (host-environment-effect-id)))
 
+(defn function-uses-host-clock? [function: TypedFunctionV0] -> Bool
+  (core/id-in? (typedfunctionv0-effects function) (host-clock-effect-id)))
+
 (defn function-uses-stdout? [function: TypedFunctionV0] -> Bool
   (core/id-in? (typedfunctionv0-effects function) (host-stdout-effect-id)))
 
@@ -12460,6 +12516,9 @@
 
 (defn any-function-uses-environment? [functions: (Vec TypedFunctionV0)] -> Bool
   (some? (some function-uses-environment? functions)))
+
+(defn any-function-uses-host-clock? [functions: (Vec TypedFunctionV0)] -> Bool
+  (some? (some function-uses-host-clock? functions)))
 
 (defn any-function-uses-stdout? [functions: (Vec TypedFunctionV0)] -> Bool
   (some? (some function-uses-stdout? functions)))
@@ -12508,10 +12567,14 @@
         (if (blocks-use-host-stdout? (readiness-blocks readiness))
           (with-effect environment-effects (host-stdout-effect-id))
           environment-effects)
-        effects: (Vec core/NativeId)
+        socket-effects: (Vec core/NativeId)
         (if (blocks-use-host-socket? (readiness-blocks readiness))
           (with-effect stdout-effects (host-socket-effect-id))
           stdout-effects)
+        effects: (Vec core/NativeId)
+        (if (blocks-use-host-clock? (readiness-blocks readiness))
+          (with-effect socket-effects (host-clock-effect-id))
+          socket-effects)
         encoding: String
         (encode-typed-function
           (typedfunctionv0-id signature)
@@ -12680,11 +12743,13 @@
     (settle-effect
       (settle-effect
         (settle-effect
-          (settle-effect functions (allocate-effect-id))
-          (atom-state-effect-id))
-        (host-environment-effect-id))
-      (host-stdout-effect-id))
-    (host-socket-effect-id)))
+          (settle-effect
+            (settle-effect functions (allocate-effect-id))
+            (atom-state-effect-id))
+          (host-environment-effect-id))
+        (host-stdout-effect-id))
+      (host-socket-effect-id))
+    (host-clock-effect-id)))
 
 (defn slice-regions [] -> (Vec core/RegionDef)
   [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)
@@ -12693,7 +12758,8 @@
 (defn slice-capabilities
   [include-environment: Bool
    include-stdout: Bool
-   include-socket: Bool] -> (Vec core/CapabilityDef)
+   include-socket: Bool
+   include-clock: Bool] -> (Vec core/CapabilityDef)
   (let [base: (Vec core/CapabilityDef)
         [(core/->CapabilityDef
            (write-capability-id)
@@ -12727,20 +12793,30 @@
               (core/->HostCapability true)
               nil
               false))
-          with-environment)]
-    (if include-socket
-      (conj with-stdout
+          with-environment)
+        with-socket: (Vec core/CapabilityDef)
+        (if include-socket
+          (conj with-stdout
+            (core/->CapabilityDef
+              (host-socket-capability-id)
+              (core/->HostCapability true)
+              nil
+              false))
+          with-stdout)]
+    (if include-clock
+      (conj with-socket
         (core/->CapabilityDef
-          (host-socket-capability-id)
+          (host-clock-capability-id)
           (core/->HostCapability true)
           nil
           false))
-      with-stdout)))
+      with-socket)))
 
 (defn slice-capability-ids
   [include-environment: Bool
    include-stdout: Bool
-   include-socket: Bool] -> (Vec core/NativeId)
+   include-socket: Bool
+   include-clock: Bool] -> (Vec core/NativeId)
   (let [base: (Vec core/NativeId)
         [(write-capability-id) (allocate-capability-id)
          (atom-state-capability-id)]
@@ -12751,10 +12827,14 @@
         with-stdout: (Vec core/NativeId)
         (if include-stdout
           (conj with-environment (host-stdout-capability-id))
-          with-environment)]
-    (if include-socket
-      (conj with-stdout (host-socket-capability-id))
-      with-stdout)))
+          with-environment)
+        with-socket: (Vec core/NativeId)
+        (if include-socket
+          (conj with-stdout (host-socket-capability-id))
+          with-stdout)]
+    (if include-clock
+      (conj with-socket (host-clock-capability-id))
+      with-socket)))
 
 (defn collect-record-types
   [record-keys: (Vec String)
@@ -12943,7 +13023,8 @@
    effects: (Vec core/EffectDef)
    include-environment: Bool
    include-stdout: Bool
-   include-socket: Bool] -> (Vec worlds/TermNodeV0)
+   include-socket: Bool
+   include-clock: Bool] -> (Vec worlds/TermNodeV0)
   (let [type-nodes: (Vec worlds/TermNodeV0)
         (mapv
           (fn [definition: core/TypeDef] -> worlds/TermNodeV0
@@ -13003,10 +13084,20 @@
                  [(id-value (host-socket-capability-id))
                   "host-socket-peer-lifecycle-v0"
                   "non-affine"])))]
+          [])
+        clock-capability-nodes: (Vec worlds/TermNodeV0)
+        (if include-clock
+          [(worlds/->TermNodeV0 (host-clock-capability-id)
+             (worlds/->TextTermV0
+               (worlds/canonical-record "capability-v0"
+                 [(id-value (host-clock-capability-id))
+                  "host-monotonic-clock-v0"
+                  "non-affine"])))]
           [])]
     (vec (concat type-nodes function-nodes effect-nodes
            [region-node capability-node] environment-capability-nodes
-           stdout-capability-nodes socket-capability-nodes))))
+           stdout-capability-nodes socket-capability-nodes
+           clock-capability-nodes))))
 
 (defn forbidden-world-text? [value: String] -> Bool
   (or (= value "Any")
@@ -13115,6 +13206,7 @@
         uses-environment: Bool (any-function-uses-environment? functions)
         uses-stdout: Bool (any-function-uses-stdout? functions)
         sockets: Bool (any-function-uses-host-socket? functions)
+        clock: Bool (any-function-uses-host-clock? functions)
         ;; Bodies contribute types of their own (checked arithmetic answers an
         ;; Outcome), so the world's type set closes only after they lower.
         body-types: (Vec core/TypeDef)
@@ -13128,13 +13220,14 @@
           (append-type-def arena-types (atom-state-handle-type))
           arena-types)
         effects: (Vec core/EffectDef)
-        (slice-effects uses-environment uses-stdout sockets)
+        (slice-effects uses-environment uses-stdout sockets clock)
         regions: (Vec core/RegionDef) (slice-regions)
         capabilities: (Vec core/CapabilityDef)
-        (slice-capabilities uses-environment uses-stdout sockets)
+        (slice-capabilities uses-environment uses-stdout sockets clock)
         root: core/NativeId (lower-id "typed-world" [source-digest])
         nodes: (Vec worlds/TermNodeV0)
-        (typed-term-nodes types functions effects uses-environment uses-stdout sockets)
+        (typed-term-nodes types functions effects uses-environment uses-stdout
+          sockets clock)
         terms: worlds/TermGraphV0
         (worlds/->TermGraphV0 root
           (conj nodes
@@ -13151,7 +13244,7 @@
           (mapv (fn [effect: core/EffectDef] -> core/NativeId
                   (core/effectdef-id effect)) effects)
           [(arena-region-id) (atom-state-region-id)]
-          (slice-capability-ids uses-environment uses-stdout sockets)
+          (slice-capability-ids uses-environment uses-stdout sockets clock)
           [(type-id "LowerFailure")])
         encoding: String (worlds/encode-typed-world typed-world)
         digest: String (worlds/content-digest encoding)
@@ -13542,15 +13635,20 @@
         with-stdout: (Vec core/NativeId)
         (if (function-uses-stdout? function)
           (conj with-environment (host-stdout-capability-id))
-          with-environment)]
-    (if (function-uses-host-socket? function)
-      (conj with-stdout (host-socket-capability-id))
-      with-stdout)))
+          with-environment)
+        with-socket: (Vec core/NativeId)
+        (if (function-uses-host-socket? function)
+          (conj with-stdout (host-socket-capability-id))
+          with-stdout)]
+    (if (function-uses-host-clock? function)
+      (conj with-socket (host-clock-capability-id))
+      with-socket)))
 
 (defn host-capability-id? [capability: core/NativeId] -> Bool
   (or (same-id? capability (host-environment-capability-id))
       (same-id? capability (host-stdout-capability-id))
-      (same-id? capability (host-socket-capability-id))))
+      (same-id? capability (host-socket-capability-id))
+      (same-id? capability (host-clock-capability-id))))
 
 (defn function-affine-capabilities [function: TypedFunctionV0] -> (Vec core/NativeId)
   (filterv
@@ -13804,6 +13902,22 @@
     "v0"
     layouts-digest))
 
+(defn host-clock-abi [layouts-digest: String] -> core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-clock-abi-id)
+    (host-clock-function-id)
+    "native_host_clock_monotonic_nanoseconds_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    []
+    (core/->AbiValueV0 "result" (int-type-id)
+      (core/->OwnedV0 true) nil)
+    (type-id "LowerFailure")
+    [(host-clock-effect-id)]
+    [(host-clock-capability-id)]
+    "v0"
+    layouts-digest))
+
 (defn borrowed-abi-value
   [name: String
    type: core/NativeId] -> core/AbiValueV0
@@ -13899,10 +14013,14 @@
         with-stdout: (Vec core/AbiDeclV0)
         (if (any-function-uses-stdout? functions)
           (conj with-environment (host-stdout-abi digest))
-          with-environment)]
+          with-environment)
+        with-clock: (Vec core/AbiDeclV0)
+        (if (any-function-uses-host-clock? functions)
+          (conj with-stdout (host-clock-abi digest))
+          with-stdout)]
     (if (any-function-uses-host-socket? functions)
-      (vec (concat with-stdout (host-socket-abis digest)))
-      with-stdout)))
+      (vec (concat with-clock (host-socket-abis digest)))
+      with-clock)))
 
 (defn encode-scalar-repr [representation: core/ScalarReprV0] -> String
   (cond
@@ -14786,10 +14904,21 @@
                  [(id-value (host-socket-capability-id))
                   "host-socket-peer-lifecycle-v0"
                   "non-affine"])))]
+          [])
+        clock-capability-nodes: (Vec worlds/TermNodeV0)
+        (if (core/id-in? (core/capability-ids capabilities)
+              (host-clock-capability-id))
+          [(worlds/->TermNodeV0 (host-clock-capability-id)
+             (worlds/->TextTermV0
+               (worlds/canonical-record "capability-v0"
+                 [(id-value (host-clock-capability-id))
+                  "host-monotonic-clock-v0"
+                  "non-affine"])))]
           [])]
     (vec (concat type-nodes effect-nodes layout-nodes function-nodes abi-nodes
            obligation-nodes environment-capability-nodes
            stdout-capability-nodes socket-capability-nodes
+           clock-capability-nodes
            [(worlds/->TermNodeV0 (arena-region-id)
               (worlds/->TextTermV0
                 (worlds/canonical-record "region-v0"
@@ -14964,6 +15093,7 @@
           (= (+ (count functions)
                (if (any-function-uses-environment? typed-functions) 1 0)
                (if (any-function-uses-stdout? typed-functions) 1 0)
+               (if (any-function-uses-host-clock? typed-functions) 1 0)
                (if (any-function-uses-host-socket? typed-functions) 5 0))
             (count abis)))
         tokens-discharged: Bool

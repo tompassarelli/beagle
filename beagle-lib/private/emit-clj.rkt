@@ -806,6 +806,10 @@ CLJ
              (not (set-member? (current-emit-local-names) fn-sym)))
         (format "(beagle$sha256_bytes_v0 ~a)"
                 (emit-expr (car (call-form-args e))))]
+       [(and (eq? fn-sym 'monotonic-nanoseconds)
+             (= 0 (length (call-form-args e)))
+             (not (set-member? (current-emit-local-names) fn-sym)))
+        "(System/nanoTime)"]
        [else
         (define qualified-str
           (if (symbol? fn-sym)

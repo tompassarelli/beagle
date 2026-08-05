@@ -315,6 +315,8 @@ double native_float_from_bits(int64_t source);
 bool native_host_environment_lookup_v0(
     native_arena *arena, const native_capability *capability,
     uint64_t name, uint64_t *out);
+int64_t native_host_clock_monotonic_nanoseconds_v0(
+    const native_capability *capability);
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text);
 /* Listener ownership is inherited at FD 3; this ABI never creates a socket. */

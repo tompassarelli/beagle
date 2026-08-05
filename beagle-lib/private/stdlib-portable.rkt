@@ -80,6 +80,8 @@
    (type-fn (list (type-app 'Vec (list (p 'Int)))) #f (p 'String))
    'float-to-bits (fn-of '(Float) 'Int)
    'float-from-bits (fn-of '(Int) 'Float)
+   ;; The epoch is unspecified; readings support elapsed time, never wall time.
+   'monotonic-nanoseconds (fn-of '() 'Int)
    ;; --- math (variadic on Int; Clojure's are polymorphic, v0 narrows) -----
    ;; Math operators are polymorphic in real Clojure (Long/Double/Ratio).
    ;; v0 types them as variadic Any to avoid spurious type errors on FP work.

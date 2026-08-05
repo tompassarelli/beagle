@@ -19,6 +19,8 @@ int main(void) {
   const native_capability capability = { UINT64_C(1) };
   uint64_t present;
   uint64_t missing;
+  int64_t first_clock;
+  int64_t second_clock;
 
   native_arena_init(&arena, storage, sizeof storage);
   present = text(&arena, "BEAGLE_NATIVE_HOST_TEST");
@@ -35,6 +37,14 @@ int main(void) {
   }
   if (HOST_GETENV_LENGTH(&arena, &capability, missing) != INT64_C(0)) {
     return 4;
+  }
+  first_clock = HOST_MONOTONIC_NOW(&capability);
+  second_clock = HOST_MONOTONIC_NOW(&capability);
+  if (first_clock < INT64_C(0)) {
+    return 5;
+  }
+  if (second_clock < first_clock) {
+    return 6;
   }
   return 0;
 }

@@ -83,16 +83,16 @@ for line in \
   'stage typed-to-native PENDING' \
   'source-modules 3' \
   'source-imports 2' \
-  'host-world-functions 3' \
-  'host-world-abis 4' \
+  'host-world-functions 4' \
+  'host-world-abis 6' \
   'materialize OK module_0.h module_0.c' \
-  'qbe REFUSED QBE host extern ABI is unsupported: optional Text handles have no QBE representation'; do
+  'qbe REFUSED QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation'; do
   if ! rg -Fx "$line" "$report" >/dev/null; then
     cat "$report" >&2
     die "report is missing: $line"
   fi
 done
-for function in getenv getenv-present? getenv-length; do
+for function in getenv getenv-present? getenv-length monotonic-now; do
   rg -n "^lowered fn_[0-9]+ ${function//\?/\\?} " "$report" >/dev/null \
     || die "host function did not lower: $function"
 done
@@ -118,6 +118,7 @@ done <<'FUNCTIONS'
 HOST_GETENV|getenv
 HOST_GETENV_PRESENT|getenv-present?
 HOST_GETENV_LENGTH|getenv-length
+HOST_MONOTONIC_NOW|monotonic-now
 FUNCTIONS
 printf '\n#endif\n' >>"$map"
 

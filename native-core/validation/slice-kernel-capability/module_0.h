@@ -33,17 +33,26 @@ _Static_assert(offsetof(native_m0_type_5, tag) == 0, "union tag offset");
 
 typedef struct native_m0_type_6 {
   native_m0_type_4 tag;
-  union {
-    native_m0_type_3 variant_0;
-  } payload;
 } native_m0_type_6;
-_Static_assert(sizeof(native_m0_type_6) == 16, "layout size");
+_Static_assert(sizeof(native_m0_type_6) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_6) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_6, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_6, payload) == 8, "union payload offset");
 
-native_m0_type_6 native_m0_fn_0(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
+typedef struct native_m0_type_7 {
+  native_m0_type_4 tag;
+  union {
+    native_m0_type_3 variant_0;
+    native_m0_type_6 variant_1;
+  } payload;
+} native_m0_type_7;
+_Static_assert(sizeof(native_m0_type_7) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_7) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_7, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_7, payload) == 8, "union payload offset");
+
+native_m0_type_7 native_m0_fn_0(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
 native_m0_type_2 native_m0_fn_1(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
 native_m0_type_1 native_m0_fn_2(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
+native_m0_type_1 native_m0_fn_3(const native_capability *capability);
 
 #endif

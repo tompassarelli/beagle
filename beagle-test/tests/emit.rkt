@@ -75,6 +75,10 @@
   (define out (compile '(def y (add 1 2))))
   (check-true (matches? #rx"\\(add 1 2\\)" out)))
 
+(test-case "monotonic clock primitive emits the JVM monotonic clock"
+  (define out (compile '(defn now [] (monotonic-nanoseconds))))
+  (check-true (matches? #rx"\\(System/nanoTime\\)" out)))
+
 (test-case "keyword access in call position emits as an expression-valued head"
   (define out (compile '(defn call-keyword [m] ((:k m)))))
   (check-true (matches? #rx"\\(\\(:k m\\)\\)" out)))

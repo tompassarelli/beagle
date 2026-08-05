@@ -2152,6 +2152,17 @@
                 (core/abideclv0-symbol abi))))
       (core/nativeworld-abis world))))
 
+(defn world-has-clock-extern? [world: core/NativeWorld] -> Bool
+  (some?
+    (some (fn [abi: core/AbiDeclV0] -> Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (instance? native.core.RestrictedCAbiV0
+                (core/abideclv0-convention abi))
+              (= "native_host_clock_monotonic_nanoseconds_v0"
+                (core/abideclv0-symbol abi))))
+      (core/nativeworld-abis world))))
+
 (defn socket-extern-symbol? [symbol: String] -> Bool
   (or (= symbol "native_host_socket_inherited_listener_v0")
       (= symbol "native_host_socket_accept_v0")
@@ -2206,6 +2217,9 @@
       (world-has-socket-extern? world)
       (->QbeFailure
         "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")
+      (world-has-clock-extern? world)
+      (->QbeFailure
+        "QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation")
       (world-has-stdout-extern? world)
       (->QbeFailure
         "QBE stdout extern ABI is unsupported: Text handles have no QBE call representation")

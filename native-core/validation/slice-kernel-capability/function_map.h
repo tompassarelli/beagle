@@ -4,5 +4,6 @@
 #define HOST_GETENV native_m0_fn_0
 #define HOST_GETENV_PRESENT native_m0_fn_1
 #define HOST_GETENV_LENGTH native_m0_fn_2
+#define HOST_MONOTONIC_NOW native_m0_fn_3
 
 #endif

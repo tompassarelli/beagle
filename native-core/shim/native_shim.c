@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 struct native_atom {
@@ -3371,6 +3372,30 @@ double native_float_from_bits(int64_t source) {
                  "native binary64 requires an eight-byte double");
   memcpy(&result, &source, sizeof result);
   return result;
+}
+
+int64_t native_host_clock_monotonic_nanoseconds_v0(
+    const native_capability *capability) {
+  struct timespec now;
+  int64_t seconds;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    native_trap(NATIVE_TRAP_IO);
+  }
+  if ((now.tv_sec < (time_t)0) || (now.tv_nsec < 0) ||
+      (now.tv_nsec >= 1000000000L) ||
+      ((uintmax_t)now.tv_sec > (uintmax_t)INT64_MAX)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  seconds = (int64_t)now.tv_sec;
+  if (seconds >
+      (INT64_MAX - (int64_t)now.tv_nsec) / INT64_C(1000000000)) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  return seconds * INT64_C(1000000000) + (int64_t)now.tv_nsec;
 }
 
 bool native_host_environment_lookup_v0(

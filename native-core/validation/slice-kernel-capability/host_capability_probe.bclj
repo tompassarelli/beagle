@@ -11,3 +11,6 @@
 (defn getenv-length [name: String] -> Int
   (let [value (getenv name)]
     (if (some? value) (count value) 0)))
+
+(defn monotonic-now [] -> Int
+  (monotonic-nanoseconds))
