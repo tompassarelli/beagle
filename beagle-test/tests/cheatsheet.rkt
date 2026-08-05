@@ -37,7 +37,16 @@
      (lambda ()
        (parameterize ([current-check-profile 2])
          (type-check!
-          (parse-program (read-forms (string-append PRELUDE (cheat-example c))))))))))
+          (parse-program (read-forms (string-append PRELUDE (cheat-example c)))))))))
+  (test-case (format "cheatsheet example uses canonical layout: ~a" (cheat-form c))
+    (define path (make-temporary-file "beagle-cheatsheet-~a.bclj"))
+    (dynamic-wind
+      (lambda ()
+        (call-with-output-file path
+          (lambda (out) (display (cheat-example c) out))
+          #:exists 'truncate/replace))
+      (lambda () (check-equal? (signature-layout-edits path) '()))
+      (lambda () (when (file-exists? path) (delete-file path))))))
 
 (test-case "render produces a non-trivial document mentioning each form"
   (define doc (render-cheatsheet))
