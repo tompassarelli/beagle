@@ -49,7 +49,7 @@ lowered fn_38 numeric-float-less-or-equal? 1 blocks
 lowered fn_39 numeric-float-greater? 1 blocks
 lowered fn_40 numeric-float-greater-or-equal? 1 blocks
 lowered fn_41 numeric-parse-long 9 blocks
-lowered fn_42 numeric-parse-long-any 17 blocks
+lowered fn_42 numeric-parse-long-any 15 blocks
 lowered fn_43 numeric-int-double-less? 1 blocks
 lowered fn_44 vector-value? 4 blocks
 lowered fn_45 vector-probe 1 blocks
