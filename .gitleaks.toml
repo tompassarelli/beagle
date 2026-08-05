@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+# Postfix `name: Type` makes a binding ending in "key" read as `key: <secret>`.
+# Scoped to generic-api-key by rule; `paths` is deliberately unused here because
+# it skips whole files from scanning rather than filtering a finding.
+[[allowlists]]
+description = "Beagle postfix type annotations are type names, not secrets"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^[A-Z][A-Za-z0-9]*$''']
