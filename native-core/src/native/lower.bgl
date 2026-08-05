@@ -5342,8 +5342,10 @@
    right: core/NativeId] -> core/BitwiseOperationV0
   (cond
     (= "bit-and" callee) (core/->BitAndI64V0 left right)
+    (= "bit-or" callee) (core/->BitOrI64V0 left right)
     (= "bit-xor" callee) (core/->BitXorI64V0 left right)
-    :else (core/->BitShiftLeftI64V0 left right)))
+    (= "bit-shift-left" callee) (core/->BitShiftLeftI64V0 left right)
+    :else (core/->UnsignedBitShiftRightI64V0 left right)))
 
 (defn lower-bitwise
   [types: (Vec core/TypeDef)
@@ -5352,7 +5354,9 @@
    callee: String
    values: (Vec core/NativeId)
    value-types: (Vec core/NativeId)] -> ExprResultV0
-  (let [shift: Bool (= "bit-shift-left" callee)
+  (let [shift: Bool
+        (or (= "bit-shift-left" callee)
+          (= "unsigned-bit-shift-right" callee))
         arity-ok: Bool (if shift (= 2 (count values)) (>= (count values) 2))]
     (if (not arity-ok)
       (fail-result state
@@ -8229,8 +8233,10 @@
                     " takes one operand"))
 
                 (or (= "bit-and" callee)
+                    (= "bit-or" callee)
                     (= "bit-xor" callee)
-                    (= "bit-shift-left" callee))
+                    (= "bit-shift-left" callee)
+                    (= "unsigned-bit-shift-right" callee))
                 (lower-bitwise types owner current callee values value-types)
 
                 (and (= "atom" bare-callee) (= 1 (count values)))
@@ -11323,11 +11329,17 @@
     [(BitAndI64V0 left-id right-id)
      (worlds/canonical-record "bit-and-i64-v0"
        [(id-value left-id) (id-value right-id)])]
+    [(BitOrI64V0 left-id right-id)
+     (worlds/canonical-record "bit-or-i64-v0"
+       [(id-value left-id) (id-value right-id)])]
     [(BitXorI64V0 left-id right-id)
      (worlds/canonical-record "bit-xor-i64-v0"
        [(id-value left-id) (id-value right-id)])]
     [(BitShiftLeftI64V0 value-id distance-id)
      (worlds/canonical-record "bit-shift-left-i64-v0"
+       [(id-value value-id) (id-value distance-id)])]
+    [(UnsignedBitShiftRightI64V0 value-id distance-id)
+     (worlds/canonical-record "unsigned-bit-shift-right-i64-v0"
        [(id-value value-id) (id-value distance-id)])]))
 
 (defn encode-instruction [instruction: core/Instruction] -> String

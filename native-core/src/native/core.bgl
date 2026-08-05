@@ -210,10 +210,16 @@
   (BitAndI64V0
     [left-id: NativeId
      right-id: NativeId])
+  (BitOrI64V0
+    [left-id: NativeId
+     right-id: NativeId])
   (BitXorI64V0
     [left-id: NativeId
      right-id: NativeId])
   (BitShiftLeftI64V0
+    [value-id: NativeId
+     distance-id: NativeId])
+  (UnsignedBitShiftRightI64V0
     [value-id: NativeId
      distance-id: NativeId]))
 
@@ -1571,8 +1577,11 @@
 (defn bitwise-operation-ssa-refs [operation: BitwiseOperationV0] -> (Vec NativeId)
   (match operation
     [(BitAndI64V0 left-id right-id) [left-id right-id]]
+    [(BitOrI64V0 left-id right-id) [left-id right-id]]
     [(BitXorI64V0 left-id right-id) [left-id right-id]]
-    [(BitShiftLeftI64V0 value-id distance-id) [value-id distance-id]]))
+    [(BitShiftLeftI64V0 value-id distance-id) [value-id distance-id]]
+    [(UnsignedBitShiftRightI64V0 value-id distance-id)
+     [value-id distance-id]]))
 
 (defn switch-case-ssa-refs [cases :- (Vec SwitchCaseV0)] :- (Vec NativeId)
   (loop [index :- Int 0 ids :- (Vec NativeId) []]

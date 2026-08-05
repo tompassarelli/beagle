@@ -182,8 +182,10 @@ native_vec *native_vec_slice(native_arena *arena, const native_vec *source,
 native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
                                int64_t stride, size_t alignment);
 int64_t native_bit_and_i64(int64_t left, int64_t right);
+int64_t native_bit_or_i64(int64_t left, int64_t right);
 int64_t native_bit_xor_i64(int64_t left, int64_t right);
 int64_t native_bit_shift_left_i64(int64_t value, int64_t distance);
+int64_t native_unsigned_bit_shift_right_i64(int64_t value, int64_t distance);
 native_map *native_map_from_arrays(
     native_arena *arena, const void *keys, const void *values, int64_t count,
     int64_t key_stride, size_t key_alignment, int64_t value_stride,

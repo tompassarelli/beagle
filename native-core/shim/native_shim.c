@@ -295,6 +295,10 @@ int64_t native_bit_and_i64(int64_t left, int64_t right) {
   return native_i64_from_bits((uint64_t)left & (uint64_t)right);
 }
 
+int64_t native_bit_or_i64(int64_t left, int64_t right) {
+  return native_i64_from_bits((uint64_t)left | (uint64_t)right);
+}
+
 int64_t native_bit_xor_i64(int64_t left, int64_t right) {
   return native_i64_from_bits((uint64_t)left ^ (uint64_t)right);
 }
@@ -302,6 +306,11 @@ int64_t native_bit_xor_i64(int64_t left, int64_t right) {
 int64_t native_bit_shift_left_i64(int64_t value, int64_t distance) {
   uint32_t shift = (uint32_t)((uint64_t)distance & UINT64_C(63));
   return native_i64_from_bits((uint64_t)value << shift);
+}
+
+int64_t native_unsigned_bit_shift_right_i64(int64_t value, int64_t distance) {
+  uint32_t shift = (uint32_t)((uint64_t)distance & UINT64_C(63));
+  return native_i64_from_bits((uint64_t)value >> shift);
 }
 
 static size_t native_collection_bytes(int64_t count, int64_t stride) {

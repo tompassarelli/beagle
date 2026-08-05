@@ -1345,6 +1345,12 @@
               ", l "
               (value-name context (core/bitandi64v0-right-id operation))
               ")\n")]
+           [(BitOrI64V0 value)
+            (str "  " result-name " =l call $native_bit_or_i64(l "
+              (value-name context (core/bitori64v0-left-id operation))
+              ", l "
+              (value-name context (core/bitori64v0-right-id operation))
+              ")\n")]
            [(BitXorI64V0 value)
             (str "  " result-name " =l call $native_bit_xor_i64(l "
               (value-name context (core/bitxori64v0-left-id operation))
@@ -1357,6 +1363,15 @@
               ", l "
               (value-name context
                 (core/bitshiftlefti64v0-distance-id operation))
+              ")\n")]
+           [(UnsignedBitShiftRightI64V0 value)
+            (str "  " result-name
+              " =l call $native_unsigned_bit_shift_right_i64(l "
+              (value-name context
+                (core/unsignedbitshiftrighti64v0-value-id operation))
+              ", l "
+              (value-name context
+                (core/unsignedbitshiftrighti64v0-distance-id operation))
               ")\n")]))]
       [(StoreInstruction value)
        ;; A world store carries an SSA result; QBE stores are valueless, so
