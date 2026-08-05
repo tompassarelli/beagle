@@ -1,0 +1,38 @@
+#lang beagle/clj
+(ns native.atom-mutations)
+(define-mode strict)
+
+(defrecord Counter [value: Int])
+
+(defn direct-update
+  [counter: Counter
+   delta: Int] -> Counter
+  (update counter :value
+    (fn [current: Int] -> Int (+ current delta))))
+
+(defn make-counter-cell [initial: Int] -> (Atom Counter)
+  (atom (->Counter initial)))
+
+(defn make-vector-cell [initial: Int] -> (Atom (Vec Int))
+  (atom [initial]))
+
+(defn reset-counter!
+  [cell: (Atom Counter)
+   replacement: Counter] -> Counter
+  (reset! cell replacement))
+
+(defn update-counter!
+  [cell: (Atom Counter)
+   delta: Int] -> Counter
+  (swap! cell update :value
+    (fn [current: Int] -> Int (+ current delta))))
+
+(defn append-value!
+  [cell: (Atom (Vec Int))
+   value: Int] -> (Vec Int)
+  (swap! cell conj value))
+
+(defn append-values!
+  [cell: (Atom (Vec Int))
+   values: (Vec Int)] -> (Vec Int)
+  (swap! cell into values))

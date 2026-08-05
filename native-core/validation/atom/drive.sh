@@ -8,14 +8,29 @@ repo="${NATIVE_ATOM_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-atom.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
+mkdir -p "$scratch/source-art" "$scratch/refusal-art"
+"$repo/bin/beagle-ast" "$here/atom_mutations.bclj" \
+  >"$scratch/atom_mutations.ast.json"
+"$repo/bin/beagle-ast" "$here/atom_mutation_refusals.bclj" \
+  >"$scratch/atom_mutation_refusals.ast.json"
+bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+  --input "$scratch/atom_mutations.ast.json=beagle:native-core/validation/atom/atom_mutations.bclj" \
+  --output "$scratch/atom_mutations.facts"
+bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+  --input "$scratch/atom_mutation_refusals.ast.json=beagle:native-core/validation/atom/atom_mutation_refusals.bclj" \
+  --output "$scratch/atom_mutation_refusals.facts"
+
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bgl" \
   "$repo/native-core/src/native/worlds.bgl" \
   "$repo/native-core/src/native/lower.bgl" \
   "$repo/native-core/src/native/obligations.bgl" \
+  "$repo/native-core/src/native/c11.bgl" \
+  "$repo/native-core/src/native/slice.bgl" \
   "$repo/native-core/src/native/qbe.bgl" \
   "$repo/native-core/src/native/fold_c17.bgl" \
   "$repo/native-core/src/native/body_c17.bgl" \
+  "$repo/native-core/src/native/body_slice.bgl" \
   "$repo/native-core/src/native/qbe_validation_corpus.bgl" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || {
     sed -n '1,240p' "$scratch/build.log" >&2
@@ -29,7 +44,8 @@ core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
 qbe_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/qbe.clj" | tr '\n' ' ')"
 
-for name in worlds lower obligations qbe fold_c17 body_c17 qbe_validation_corpus; do
+for name in worlds lower obligations c11 slice qbe fold_c17 body_c17 body_slice \
+    qbe_validation_corpus; do
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$name.clj"
   awk -v imp="(import '[native.core $core_records])" \
@@ -42,6 +58,35 @@ sed -i 's/\[native\.qbe :as qbe\]/[native.qbe :as qbe :refer :all]/' \
   "$scratch/out/native/qbe_validation_corpus.clj"
 sed -i "4i(import '[native.qbe $qbe_records])" \
   "$scratch/out/native/qbe_validation_corpus.clj"
+
+clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+(require 'native.body-slice)
+(spit \"$scratch/source-report.txt\"
+  (native.body-slice/emit-slice!
+    \"$scratch/atom_mutations.facts\"
+    \"native.atom-mutations\"
+    \"beagle:native-core/validation/atom/atom_mutations.bclj\"
+    \"$scratch/source-art\" \"native-atom-mutations-v0\"))
+(spit \"$scratch/refusal-report.txt\"
+  (native.body-slice/emit-slice!
+    \"$scratch/atom_mutation_refusals.facts\"
+    \"native.atom-mutation-refusals\"
+    \"beagle:native-core/validation/atom/atom_mutation_refusals.bclj\"
+    \"$scratch/refusal-art\" \"native-atom-mutation-refusals-v0\"))"
+
+for name in direct-update make-counter-cell make-vector-cell reset-counter! \
+    update-counter! append-value! append-values!; do
+  awk -v name="$name" \
+    '$1 == "lowered" && $3 == name { found = 1 } END { exit !found }' \
+    "$scratch/source-report.txt" || {
+    echo "drive.sh: source mutation did not lower: $name" >&2
+    sed -n '1,200p' "$scratch/source-report.txt" >&2
+    exit 1
+  }
+done
+rg -q '^materialize OK module_0.h module_0.c$' "$scratch/source-report.txt"
+rg -q 'TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure native updater' \
+  "$scratch/refusal-report.txt"
 
 mkdir -p "$scratch/c"
 clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
@@ -87,12 +132,20 @@ int main(void) {
   if (native_m4_fn_2(&arena, &capability, cell) != INT64_C(41)) return 3;
   if (native_m4_fn_3(&arena, &capability, cell, INT64_C(-7)) != INT64_C(-7)) return 4;
   if (native_m4_fn_2(&arena, &capability, cell) != INT64_C(-7)) return 5;
+  if (native_m4_fn_4(&arena, &capability, cell, INT64_C(99)) != INT64_C(99)) return 6;
+  if (native_m4_fn_2(&arena, &capability, cell) != INT64_C(99)) return 7;
+  if (!native_m4_fn_5(&arena, &capability, cell, INT64_C(99), INT64_C(123))) return 8;
+  if (native_m4_fn_2(&arena, &capability, cell) != INT64_C(123)) return 9;
+  if (native_m4_fn_5(&arena, &capability, cell, INT64_C(99), INT64_C(456))) return 10;
+  if (native_m4_fn_2(&arena, &capability, cell) != INT64_C(123)) return 11;
   return 0;
 }
 '
 printf '%s' "$main_source" >"$scratch/c/main.c"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
+(cd "$scratch/source-art" && gcc "${strict[@]}" -I"$repo/native-core/shim" \
+  -c module_0.c -o source_mutations.o)
 (cd "$scratch/c" && gcc "${strict[@]}" -o atom_gcc \
   module_4.c native_shim.c main.c && ./atom_gcc)
 echo "drive.sh: seven obligations + QBE refusal + gcc strict C17 run ok"
@@ -103,6 +156,8 @@ if [[ -z "$clang_bin" ]]; then
     sort -V | tail -1)"
 fi
 if [[ -n "$clang_bin" ]]; then
+  (cd "$scratch/source-art" && "$clang_bin" "${strict[@]}" \
+    -I"$repo/native-core/shim" -c module_0.c -o source_mutations_clang.o)
   (cd "$scratch/c" && "$clang_bin" "${strict[@]}" -o atom_clang \
     module_4.c native_shim.c main.c && ./atom_clang)
   echo "drive.sh: clang strict C17 run ok"

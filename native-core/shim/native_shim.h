@@ -183,6 +183,10 @@ void native_atom_lock(native_atom *atom,
 void native_atom_store_unlock(native_atom *atom,
                               const native_capability *capability,
                               const void *value, size_t size);
+bool native_atom_compare_exchange(native_atom *atom,
+                                  const native_capability *capability,
+                                  const void *expected,
+                                  const void *replacement, size_t size);
 
 native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride,
                            size_t alignment);

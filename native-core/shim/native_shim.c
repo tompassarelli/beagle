@@ -136,6 +136,22 @@ void native_atom_store_unlock(native_atom *atom,
   native_atom_release(atom);
 }
 
+bool native_atom_compare_exchange(native_atom *atom,
+                                  const native_capability *capability,
+                                  const void *expected,
+                                  const void *replacement, size_t size) {
+  bool matches;
+  native_atom_require(atom, capability, expected, size);
+  native_atom_require(atom, capability, replacement, size);
+  native_atom_acquire(atom);
+  matches = memcmp(atom->value, expected, size) == 0;
+  if (matches) {
+    memcpy(atom->value, replacement, size);
+  }
+  native_atom_release(atom);
+  return matches;
+}
+
 static size_t native_vec_bytes(int64_t capacity, int64_t stride) {
   if ((capacity < INT64_C(0)) || (stride <= INT64_C(0))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);

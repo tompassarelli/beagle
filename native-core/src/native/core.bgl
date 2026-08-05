@@ -590,6 +590,17 @@
     [result: SsaValueV0
      cell-id: NativeId
      state-id: NativeId])
+  (AtomResetInstruction
+    [result: SsaValueV0
+     cell-id: NativeId
+     state-id: NativeId
+     value-id: NativeId])
+  (AtomCompareExchangeInstruction
+    [result: SsaValueV0
+     cell-id: NativeId
+     state-id: NativeId
+     expected-id: NativeId
+     replacement-id: NativeId])
   ;; swap! is deliberately not a general higher-order call: updater-id names a
   ;; statically sealed pure function and arguments excludes the current value.
   (AtomSwapInstruction
@@ -944,6 +955,11 @@
     [(AtomCreateInstruction result initial-id arena-id state-id)
      (ssavaluev0-id result)]
     [(AtomDerefInstruction result cell-id state-id) (ssavaluev0-id result)]
+    [(AtomResetInstruction result cell-id state-id value-id)
+     (ssavaluev0-id result)]
+    [(AtomCompareExchangeInstruction result cell-id state-id expected-id
+       replacement-id)
+     (ssavaluev0-id result)]
     [(AtomSwapInstruction result cell-id state-id updater-id arguments)
      (ssavaluev0-id result)]
     [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
@@ -1476,6 +1492,9 @@
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(AtomCreateInstruction result initial-id arena-id state-id) true]
     [(AtomDerefInstruction result cell-id state-id) true]
+    [(AtomResetInstruction result cell-id state-id value-id) true]
+    [(AtomCompareExchangeInstruction result cell-id state-id expected-id
+       replacement-id) true]
     [(AtomSwapInstruction result cell-id state-id updater-id arguments)
      (id-in? known-functions updater-id)]
     [(TextLengthInstruction result source-id) true]
@@ -1710,6 +1729,11 @@
     [(AtomCreateInstruction result initial-id arena-id state-id)
      [initial-id arena-id state-id]]
     [(AtomDerefInstruction result cell-id state-id) [cell-id state-id]]
+    [(AtomResetInstruction result cell-id state-id value-id)
+     [cell-id state-id value-id]]
+    [(AtomCompareExchangeInstruction result cell-id state-id expected-id
+       replacement-id)
+     [cell-id state-id expected-id replacement-id]]
     [(AtomSwapInstruction result cell-id state-id updater-id arguments)
      (into [cell-id state-id] arguments)]
     [(TextLengthInstruction result source-id) [source-id]]
@@ -1833,6 +1857,9 @@
        (id-in? allowed-capabilities capability))]
     [(AtomCreateInstruction result initial-id arena-id state-id) true]
     [(AtomDerefInstruction result cell-id state-id) true]
+    [(AtomResetInstruction result cell-id state-id value-id) true]
+    [(AtomCompareExchangeInstruction result cell-id state-id expected-id
+       replacement-id) true]
     [(AtomSwapInstruction result cell-id state-id updater-id arguments) true]
     [(TextLengthInstruction result source-id) true]
     [(TextIndexOfInstruction result source-id needle-id) true]

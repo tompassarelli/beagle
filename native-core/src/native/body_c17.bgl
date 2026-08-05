@@ -209,6 +209,8 @@
     (instance? native.core.AtomStateInstruction instruction) true
     (instance? native.core.AtomCreateInstruction instruction) true
     (instance? native.core.AtomDerefInstruction instruction) true
+    (instance? native.core.AtomResetInstruction instruction) true
+    (instance? native.core.AtomCompareExchangeInstruction instruction) true
     (instance? native.core.AtomSwapInstruction instruction) true
     (instance? native.core.TextLengthInstruction instruction) true
     (instance? native.core.TextIndexOfInstruction instruction) true
@@ -1777,6 +1779,40 @@
                 (core/atomderefinstruction-state-id instruction)))]
         (str "  native_atom_deref(" cell ", " state ", &" target
           ", sizeof(" target "));\n"))
+
+      (instance? native.core.AtomResetInstruction instruction)
+      (let [cell: String
+            (value-name function slots
+              (core/atomresetinstruction-cell-id instruction))
+            state: String
+            (str "(const native_capability *)"
+              (value-name function slots
+                (core/atomresetinstruction-state-id instruction)))
+            value: String
+            (value-name function slots
+              (core/atomresetinstruction-value-id instruction))]
+        (str "  native_atom_lock(" cell ", " state ", &" target
+          ", sizeof(" target "));\n"
+          "  " target " = " value ";\n"
+          "  native_atom_store_unlock(" cell ", " state ", &" target
+          ", sizeof(" target "));\n"))
+
+      (instance? native.core.AtomCompareExchangeInstruction instruction)
+      (let [cell: String
+            (value-name function slots
+              (core/atomcompareexchangeinstruction-cell-id instruction))
+            state: String
+            (str "(const native_capability *)"
+              (value-name function slots
+                (core/atomcompareexchangeinstruction-state-id instruction)))
+            expected: String
+            (value-name function slots
+              (core/atomcompareexchangeinstruction-expected-id instruction))
+            replacement: String
+            (value-name function slots
+              (core/atomcompareexchangeinstruction-replacement-id instruction))]
+        (str "  " target " = native_atom_compare_exchange(" cell ", " state
+          ", &" expected ", &" replacement ", sizeof(" replacement "));\n"))
 
       (instance? native.core.AtomSwapInstruction instruction)
       (let [cell: String

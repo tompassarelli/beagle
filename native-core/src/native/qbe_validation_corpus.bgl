@@ -880,6 +880,10 @@
   (core/->TypeDef (atom-fixture-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
 
+(def atom-bool-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-bool") "Bool"
+    (core/->AtomType (core/->BoolKind true))))
+
 (def atom-cell-type: core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-cell") "AtomCell"
     (core/->AtomCellTypeV0 (atom-fixture-id "type-i64"))))
@@ -896,6 +900,11 @@
   (core/->LayoutDef (atom-fixture-id "layout-i64")
     (atom-fixture-id "type-i64") 8 8
     (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def atom-bool-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-bool")
+    (atom-fixture-id "type-bool") 1 1
+    (core/->ScalarShapeV0 (core/->BoolReprV0 8))))
 
 (def atom-cell-layout: core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-cell")
@@ -1048,15 +1057,75 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
+(def atom-reset-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-4-rst") "reset-atom"
+    [(core/->Parameter (atom-fixture-id "rst-cell")
+       (atom-fixture-id "type-cell"))
+     (core/->Parameter (atom-fixture-id "rst-next")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-rst") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "rst-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->AtomResetInstruction
+          (core/->SsaValueV0 (atom-fixture-id "rst-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "rst-cell")
+          (atom-fixture-id "rst-state")
+          (atom-fixture-id "rst-next"))]
+       [(core/->ReturnTerminator (atom-fixture-id "rst-result"))])]
+    (atom-fixture-id "block-rst")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-state")]))
+
+(def atom-cas-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-5-cas") "compare-exchange-atom"
+    [(core/->Parameter (atom-fixture-id "cas-cell")
+       (atom-fixture-id "type-cell"))
+     (core/->Parameter (atom-fixture-id "cas-expected")
+       (atom-fixture-id "type-i64"))
+     (core/->Parameter (atom-fixture-id "cas-replacement")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-cas") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "cas-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->AtomCompareExchangeInstruction
+          (core/->SsaValueV0 (atom-fixture-id "cas-result")
+            (atom-fixture-id "type-bool"))
+          (atom-fixture-id "cas-cell")
+          (atom-fixture-id "cas-state")
+          (atom-fixture-id "cas-expected")
+          (atom-fixture-id "cas-replacement"))]
+       [(core/->ReturnTerminator (atom-fixture-id "cas-result"))])]
+    (atom-fixture-id "block-cas")
+    (atom-fixture-id "type-bool")
+    [(atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-state")]))
+
 (def atom-world: core/NativeWorld
   (core/->NativeWorld (atom-fixture-id "world") nil "native-atom-fixture-v0"
-    [atom-i64-type atom-cell-type atom-state-type atom-arena-type]
+    [atom-i64-type atom-bool-type atom-cell-type atom-state-type atom-arena-type]
     [atom-pure-effect atom-allocate-effect atom-state-effect]
     [atom-arena-region atom-state-region]
     [atom-allocate-capability atom-state-capability]
-    [atom-i64-layout atom-cell-layout atom-state-layout atom-arena-layout]
+    [atom-i64-layout atom-bool-layout atom-cell-layout atom-state-layout
+     atom-arena-layout]
     [atom-updater-function atom-create-function atom-deref-function
-     atom-swap-function]
+     atom-swap-function atom-reset-function atom-cas-function]
     [(atom-fixture-id "effect-pure") (atom-fixture-id "effect-allocate")
      (atom-fixture-id "effect-state")]
     [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]

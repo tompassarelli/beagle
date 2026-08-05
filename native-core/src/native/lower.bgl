@@ -3623,6 +3623,8 @@
 (defn atom-state-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.AtomCreateInstruction instruction)
       (instance? native.core.AtomDerefInstruction instruction)
+      (instance? native.core.AtomResetInstruction instruction)
+      (instance? native.core.AtomCompareExchangeInstruction instruction)
       (instance? native.core.AtomSwapInstruction instruction)))
 
 (defn blocks-use-atom-state? [blocks: (Vec core/BasicBlock)] -> Bool
@@ -6594,6 +6596,395 @@
                     callback-body (nth callback-names 0) callback-return element-type
                     (exprresultv0-value-id collection)))))))))))
 
+(defn lower-static-update-value
+  [env: BodyEnvV0
+   owner: core/NativeId
+   container: ExprResultV0
+   key-node: core/NativeId
+   updater-node: core/NativeId] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        state: BodyStateV0 (exprresultv0-state container)
+        updater-kind: String (fact-text index updater-node "form-kind")
+        updater-rest: String (fact-text index updater-node "rest")
+        updater-body: (U core/NativeId Nil)
+        (index-first-object index updater-node "body")
+        updater-return-source: (U core/NativeId Nil)
+        (index-first-object index updater-node "ret")
+        updater-source-parameters: (Vec core/NativeId)
+        (function-parameter-items index updater-node)
+        updater-owner: core/NativeId
+        (state-id state owner "update-callback")
+        updater-resolution: ParameterResolutionV0
+        (resolve-parameters index updater-node updater-owner)
+        updater-parameters: (Vec core/Parameter)
+        (parameterresolutionv0-parameters updater-resolution)
+        updater-names: (Vec String)
+        (mapv
+          (fn [parameter: core/NativeId] -> String
+            (parameter-name-at index parameter))
+          updater-source-parameters)]
+    (cond
+      (exprresultv0-terminated container) container
+      (state-blocked? state) (dead-result state)
+
+      (not (= "fn" updater-kind))
+      (fail-result state
+        "TODO-NATIVE-UPDATE-UPDATER: update requires an inline statically known function literal")
+
+      (not (= "false" updater-rest))
+      (fail-result state
+        "TODO-NATIVE-UPDATE-VARIADIC: update functions must have fixed arity")
+
+      (or (not (= 1 (count updater-source-parameters)))
+          (not (= 1 (count updater-parameters))))
+      (fail-result state
+        "TODO-NATIVE-UPDATE-UPDATER-ARITY: the update function takes the current value")
+
+      (not (parameterresolutionv0-valid updater-resolution))
+      (fail-result state
+        "TODO-NATIVE-UPDATE-UPDATER-TYPES: the update parameter needs a closed native type")
+
+      (nil? updater-body)
+      (fail-result state
+        "TODO-NATIVE-UPDATE-UPDATER-BODY: the update function needs exactly one body form")
+
+      (nil? updater-return-source)
+      (fail-result state
+        "TODO-NATIVE-UPDATE-UPDATER-RETURN: the update function needs a closed return annotation")
+
+      :else
+      (let [updater-return: TypeResolutionV0
+            (resolve-source-type index updater-return-source)
+            container-type: core/NativeId (exprresultv0-type-id container)
+            map-container: Bool (map-type? types container-type)
+            record-container: Bool (record-type? types container-type)
+            key: ExprResultV0
+            (if record-container
+              (->ExprResultV0 state
+                (state-id state owner "update-record-key")
+                (keyword-type-id) false)
+              (lower-expr env owner state key-node))
+            current: BodyStateV0 (exprresultv0-state key)
+            keyword-literal: Bool
+            (and (= "literal" (fact-text index key-node "form-kind"))
+              (= "keyword" (fact-text index key-node "literal-kind")))
+            accessor: AccessorHitV0
+            (if (and record-container keyword-literal)
+              (record-keyword-field types container-type
+                (fact-text index key-node "value"))
+              (accessor-miss))
+            key-type: core/NativeId
+            (if map-container
+              (map-key-of types container-type)
+              (keyword-type-id))
+            value-type: core/NativeId
+            (cond
+              map-container (map-value-of types container-type)
+              (accessorhitv0-found accessor)
+              (accessorhitv0-field-type accessor)
+              :else (type-id "LowerFailure"))
+            updater-input: (U core/NativeId Nil)
+            (if map-container
+              (nullable-value-type-of types value-type)
+              (if (accessorhitv0-found accessor) value-type nil))
+            equality: (U core/ConcreteEqualityV0 Nil)
+            (if map-container
+              (concrete-equality-for key-type)
+              (core/->KeywordEqualityV0 true))]
+        (cond
+          (not (typeresolutionv0-valid updater-return))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-UPDATER-RETURN: the update return is not a closed native type")
+
+          (exprresultv0-terminated key) key
+          (state-blocked? current) (dead-result current)
+
+          (not (or map-container record-container))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-CONTAINER: update lowers a closed Map or Record")
+
+          (and record-container (not keyword-literal))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-RECORD-KEY: record update needs a literal keyword field")
+
+          (and record-container (not (accessorhitv0-found accessor)))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-RECORD-FIELD: the keyword is not a field of the closed record")
+
+          (and map-container
+            (not (same-id? key-type (exprresultv0-type-id key))))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-KEY: the key does not match the map key type")
+
+          (nil? equality)
+          (fail-result current
+            "TODO-NATIVE-MAP-KEY-EQUALITY: update needs closed concrete key equality")
+
+          (and map-container (record-type? types value-type))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-RECORD-VALUE: nullable record values need an explicit borrow or arena boxing seam")
+
+          (nil? updater-input)
+          (fail-result current
+            "TODO-NATIVE-UPDATE-ABSENCE: map update needs a closed value-or-nil input type")
+
+          (not (same-id?
+                 (core/parameter-type-id (nth updater-parameters 0))
+                 updater-input))
+          (fail-result current
+            (if map-container
+              "TODO-NATIVE-UPDATE-UPDATER-INPUT: map update takes exactly (U Value Nil)"
+              "TODO-NATIVE-UPDATE-UPDATER-INPUT: record update takes exactly the field type"))
+
+          (not (same-id?
+                 (typeresolutionv0-type-id updater-return)
+                 value-type))
+          (fail-result current
+            "TODO-NATIVE-UPDATE-UPDATER-RESULT: the update return must exactly match the stored value type")
+
+          :else
+          (let [current-id: core/NativeId
+                (state-id current owner "update-current")
+                read: BodyStateV0
+                (if map-container
+                  (state-emit (state-bump current)
+                    (core/->MapGetInstructionV0
+                      (core/->SsaValueV0 current-id updater-input)
+                      (exprresultv0-value-id container)
+                      (exprresultv0-value-id key) nil equality))
+                  (state-emit (state-bump current)
+                    (core/->FieldInstruction
+                      (core/->SsaValueV0 current-id updater-input)
+                      (exprresultv0-value-id container)
+                      (accessorhitv0-field-id accessor))))
+                outer-locals: (Vec LocalBindingV0) (bodystatev0-locals read)
+                outer-frames: (Vec LoopFrameV0) (bodystatev0-loop-frames read)
+                outer-refinements: (Vec KeywordFlowRefinementV0)
+                (bodystatev0-keyword-refinements read)
+                updater-state: BodyStateV0
+                (state-bind (state-enter-inline-callback read)
+                  (nth updater-names 0) current-id updater-input)
+                updater-result: ExprResultV0
+                (lower-expr env owner updater-state updater-body)
+                restored: BodyStateV0
+                (with
+                  (with
+                    (with (exprresultv0-state updater-result)
+                      [:locals outer-locals])
+                    [:loop-frames outer-frames])
+                  [:keyword-refinements outer-refinements])]
+            (cond
+              (state-blocked? restored) (dead-result restored)
+
+              (exprresultv0-terminated updater-result)
+              (fail-result restored
+                "TODO-NATIVE-UPDATE-UPDATER-DIVERGES: the inline updater does not produce a value")
+
+              (not (same-id? value-type
+                     (exprresultv0-type-id updater-result)))
+              (fail-result restored
+                "TODO-NATIVE-UPDATE-UPDATER-BODY-RESULT: the update body does not produce its declared stored value type")
+
+              :else
+              (let [result-id: core/NativeId
+                    (state-id restored owner "update-result")]
+                (->ExprResultV0
+                  (state-emit (state-bump restored)
+                    (if map-container
+                      (core/->MapAssocInstructionV0
+                        (core/->SsaValueV0 result-id container-type)
+                        (exprresultv0-value-id container)
+                        (exprresultv0-value-id key)
+                        (exprresultv0-value-id updater-result)
+                        (arena-value-id owner) equality)
+                      (core/->RecordAssocInstructionV0
+                        (core/->SsaValueV0 result-id container-type)
+                        (exprresultv0-value-id container)
+                        (accessorhitv0-field-id accessor)
+                        (exprresultv0-value-id updater-result)
+                        (arena-value-id owner))))
+                  result-id container-type false)))))))))
+
+(defn lower-static-update-call
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (= 3 (count args)))
+    (fail-result state
+      "TODO-NATIVE-UPDATE-ARITY: update lowers only as (update container key fn)")
+    (let [container: ExprResultV0
+          (lower-expr env owner state (nth args 0))]
+      (lower-static-update-value env owner container
+        (nth args 1) (nth args 2)))))
+
+(defn lower-atom-cas-retry
+  [owner: core/NativeId
+   state: BodyStateV0
+   cell-id: core/NativeId
+   content: core/NativeId
+   lower-replacement: [ExprResultV0 -> ExprResultV0]] -> ExprResultV0
+  (let [header-id: core/NativeId (state-id state owner "atom-cas-header")
+        success-id: core/NativeId (state-id state owner "atom-cas-success")
+        entered: BodyStateV0
+        (state-open-block
+          (state-close (state-bump state)
+            (core/->JumpTerminator header-id []))
+          header-id [])
+        current-id: core/NativeId (state-id entered owner "atom-cas-current")
+        loaded: BodyStateV0
+        (state-emit (state-bump entered)
+          (core/->AtomDerefInstruction
+            (core/->SsaValueV0 current-id content)
+            cell-id (atom-state-value-id owner)))
+        replacement: ExprResultV0
+        (lower-replacement
+          (->ExprResultV0 loaded current-id content false))
+        settled: BodyStateV0 (exprresultv0-state replacement)]
+    (cond
+      (state-blocked? settled) (dead-result settled)
+
+      (exprresultv0-terminated replacement)
+      (fail-result settled
+        "TODO-NATIVE-ATOM-SWAP-UPDATER-DIVERGES: static updater does not produce a value")
+
+      (not (same-id? content (exprresultv0-type-id replacement)))
+      (fail-result settled
+        "TODO-NATIVE-ATOM-SWAP-UPDATER-RESULT: static updater does not preserve the Atom content type")
+
+      :else
+      (let [exchanged-id: core/NativeId
+            (state-id settled owner "atom-cas-exchanged")
+            compared: BodyStateV0
+            (state-emit (state-bump settled)
+              (core/->AtomCompareExchangeInstruction
+                (core/->SsaValueV0 exchanged-id (bool-type-id))
+                cell-id (atom-state-value-id owner) current-id
+                (exprresultv0-value-id replacement)))
+            branched: BodyStateV0
+            (state-close (state-bump compared)
+              (core/->BranchTerminator exchanged-id success-id header-id))]
+        (->ExprResultV0
+          (state-open-block branched success-id [])
+          (exprresultv0-value-id replacement) content false)))))
+
+(defn static-atom-builtin-updater? [callee: String] -> Bool
+  (or (= "update" callee) (= "conj" callee) (= "into" callee)))
+
+(defn lower-static-atom-builtin-swap
+  [env: BodyEnvV0
+   owner: core/NativeId
+   cell: ExprResultV0
+   content: core/NativeId
+   updater: String
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        state: BodyStateV0 (exprresultv0-state cell)
+        cell-id: core/NativeId (exprresultv0-value-id cell)]
+    (cond
+      (= "update" updater)
+      (cond
+        (not (= 4 (count args)))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-UPDATE-ARITY: swap! update takes a key and inline updater")
+
+        (not (record-type? types content))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-UPDATE-TYPE: static Atom update currently requires a closed record")
+
+        :else
+        (lower-atom-cas-retry owner state cell-id content
+          (fn [current: ExprResultV0] -> ExprResultV0
+            (lower-static-update-value env owner current
+              (nth args 2) (nth args 3)))))
+
+      (= "conj" updater)
+      (cond
+        (not (= 3 (count args)))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-CONJ-ARITY: swap! conj takes one value")
+
+        (not (vector-type? types content))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-CONJ-TYPE: static Atom conj currently requires a closed vector")
+
+        :else
+        (let [element-type: core/NativeId (vector-element-of types content)
+              raw: ExprResultV0
+              (lower-expr env owner state (nth args 2))
+              argument: ExprResultV0
+              (if (or (exprresultv0-terminated raw)
+                    (state-blocked? (exprresultv0-state raw)))
+                raw
+                (lower-boundary-coerce types owner
+                  (exprresultv0-state raw)
+                  (exprresultv0-value-id raw)
+                  (exprresultv0-type-id raw) element-type))
+              settled: BodyStateV0 (exprresultv0-state argument)]
+          (cond
+            (exprresultv0-terminated argument) argument
+            (state-blocked? settled) (dead-result settled)
+            (not (same-id? element-type (exprresultv0-type-id argument)))
+            (fail-result settled
+              "TODO-NATIVE-ATOM-SWAP-CONJ-VALUE: conj value does not match the vector element type")
+            :else
+            (lower-atom-cas-retry owner settled cell-id content
+              (fn [current: ExprResultV0] -> ExprResultV0
+                (let [result-id: core/NativeId
+                      (state-id (exprresultv0-state current) owner
+                        "atom-conj")]
+                  (->ExprResultV0
+                    (state-emit (state-bump (exprresultv0-state current))
+                      (core/->VecPushInstruction
+                        (core/->SsaValueV0 result-id content)
+                        (exprresultv0-value-id current)
+                        (exprresultv0-value-id argument)
+                        (arena-value-id owner)))
+                    result-id content false)))))))
+
+      :else
+      (cond
+        (not (= 3 (count args)))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-INTO-ARITY: swap! into takes one collection")
+
+        (not (vector-type? types content))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-INTO-TYPE: static Atom into currently requires a closed vector")
+
+        :else
+        (let [raw: ExprResultV0 (lower-expr env owner state (nth args 2))
+              source: ExprResultV0
+              (if (or (exprresultv0-terminated raw)
+                    (state-blocked? (exprresultv0-state raw)))
+                raw
+                (lower-boundary-coerce types owner
+                  (exprresultv0-state raw)
+                  (exprresultv0-value-id raw)
+                  (exprresultv0-type-id raw) content))
+              settled: BodyStateV0 (exprresultv0-state source)]
+          (cond
+            (exprresultv0-terminated source) source
+            (state-blocked? settled) (dead-result settled)
+            (not (same-id? content (exprresultv0-type-id source)))
+            (fail-result settled
+              "TODO-NATIVE-ATOM-SWAP-INTO-SOURCE: into source does not match the Atom vector type")
+            :else
+            (lower-atom-cas-retry owner settled cell-id content
+              (fn [current: ExprResultV0] -> ExprResultV0
+                (let [result-id: core/NativeId
+                      (state-id (exprresultv0-state current) owner
+                        "atom-into")]
+                  (->ExprResultV0
+                    (state-emit (state-bump (exprresultv0-state current))
+                      (core/->VecConcatInstruction
+                        (core/->SsaValueV0 result-id content)
+                        (exprresultv0-value-id current)
+                        (exprresultv0-value-id source)
+                        (arena-value-id owner)))
+                    result-id content false))))))))))
+
 (defn lower-expr-raw
   [env: BodyEnvV0
    owner: core/NativeId
@@ -7818,6 +8209,9 @@
                                         (recur (+ position 2) next-state result-id
                                           record-type)))))))))))))))
 
+            (= "update" callee)
+            (lower-static-update-call env owner state args)
+
             (or (= "mapv" callee) (= "filterv" callee)
                 (= "every?" callee) (= "some" callee))
             (lower-eager-vector-hof env owner state callee args)
@@ -8365,6 +8759,7 @@
                   :else
                   (let [updater-name: String
                         (fact-text index (nth args 1) "name")
+                        bare-updater: String (unqualified-name updater-name)
                         signature: (U TypedFunctionV0 Nil)
                         (find-signature env (nth args 1) updater-name)
                         content: (U core/NativeId Nil)
@@ -8373,6 +8768,9 @@
                       (nil? content)
                       (fail-result cell-state
                         "TODO-NATIVE-ATOM-SWAP-CELL: swap! first operand is not an Atom")
+                      (static-atom-builtin-updater? bare-updater)
+                      (lower-static-atom-builtin-swap env owner cell content
+                        bare-updater args)
                       (nil? signature)
                       (fail-result cell-state
                         (str "TODO-NATIVE-ATOM-SWAP-UPDATER: " updater-name
@@ -8834,9 +9232,35 @@
                 (fail-result current
                   "TODO-NATIVE-ATOM-DEREF-ARITY: deref takes exactly one Atom")
 
+                (and (= "reset!" bare-callee) (= 2 (count values)))
+                (let [content: (U core/NativeId Nil)
+                      (atom-cell-content-of types (nth value-types 0))]
+                  (if (nil? content)
+                    (fail-result current
+                      "TODO-NATIVE-ATOM-RESET-CELL: reset! first operand is not an Atom")
+                    (let [coerced: ExprResultV0
+                          (lower-boundary-coerce types owner current
+                            (nth values 1) (nth value-types 1) content)
+                          settled: BodyStateV0 (exprresultv0-state coerced)]
+                      (if (or (state-blocked? settled)
+                            (not (same-id? content
+                              (exprresultv0-type-id coerced))))
+                        (fail-result settled
+                          "TODO-NATIVE-ATOM-RESET-VALUE: reset! value does not match the Atom content type")
+                        (let [result-id: core/NativeId
+                              (state-id settled owner "atom-reset")]
+                          (->ExprResultV0
+                            (state-emit (state-bump settled)
+                              (core/->AtomResetInstruction
+                                (core/->SsaValueV0 result-id content)
+                                (nth values 0)
+                                (atom-state-value-id owner)
+                                (exprresultv0-value-id coerced)))
+                            result-id content false))))))
+
                 (= "reset!" bare-callee)
                 (fail-result current
-                  "TODO-NATIVE-ATOM-RESET-REFUSED: reset! is outside the measured Atom seam; use a statically named swap! updater")
+                  "TODO-NATIVE-ATOM-RESET-ARITY: reset! takes one Atom and one replacement value")
 
                 (refused-arith-op? callee)
                 (fail-result current
@@ -12246,6 +12670,23 @@
       [(encode-ssa-value (core/atomderefinstruction-result instruction))
        (id-value (core/atomderefinstruction-cell-id instruction))
        (id-value (core/atomderefinstruction-state-id instruction))])
+
+    (instance? native.core.AtomResetInstruction instruction)
+    (worlds/canonical-record "atom-reset-instruction"
+      [(encode-ssa-value (core/atomresetinstruction-result instruction))
+       (id-value (core/atomresetinstruction-cell-id instruction))
+       (id-value (core/atomresetinstruction-state-id instruction))
+       (id-value (core/atomresetinstruction-value-id instruction))])
+
+    (instance? native.core.AtomCompareExchangeInstruction instruction)
+    (worlds/canonical-record "atom-compare-exchange-instruction"
+      [(encode-ssa-value
+         (core/atomcompareexchangeinstruction-result instruction))
+       (id-value (core/atomcompareexchangeinstruction-cell-id instruction))
+       (id-value (core/atomcompareexchangeinstruction-state-id instruction))
+       (id-value (core/atomcompareexchangeinstruction-expected-id instruction))
+       (id-value
+         (core/atomcompareexchangeinstruction-replacement-id instruction))])
 
     (instance? native.core.AtomSwapInstruction instruction)
     (worlds/canonical-record "atom-swap-instruction"
