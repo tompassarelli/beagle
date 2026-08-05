@@ -3397,6 +3397,67 @@
    target: core/NativeId] -> (Vec core/NativeId)
   (possible-value-types-with-budget types target (widen-budget)))
 
+(defn boundary-record-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (some? definition)
+      (instance? native.core.RecordType (core/typedef-shape definition)))))
+
+(defn variant-path-to-record-reference-with-budget
+  [types: (Vec core/TypeDef)
+   current: core/NativeId
+   target: core/NativeId
+   budget: Int] -> VariantPathV0
+  (cond
+    (reference-targets? types current target) (->VariantPathV0 1 [])
+    (< budget 0) (->VariantPathV0 0 [])
+    :else
+    (let [variants: (Vec core/TypeVariant) (union-variants-of types current)]
+      (loop [position: Int 0
+             matches: Int 0
+             chosen: (Vec core/TypeVariant) []]
+        (if (>= position (count variants))
+          (->VariantPathV0 matches chosen)
+          (let [variant: core/TypeVariant (nth variants position)
+                payload: (U core/NativeId Nil)
+                (core/typevariant-payload-type variant)
+                nested: VariantPathV0
+                (if (nil? payload)
+                  (->VariantPathV0 0 [])
+                  (variant-path-to-record-reference-with-budget types payload
+                    target (- budget 1)))
+                nested-matches: Int (variantpathv0-matches nested)]
+            (recur (+ position 1) (+ matches nested-matches)
+              (if (and (= 0 matches) (> nested-matches 0))
+                (into [variant] (variantpathv0-variants nested))
+                chosen))))))))
+
+(defn variant-path-to-record-reference
+  [types: (Vec core/TypeDef)
+   current: core/NativeId
+   target: core/NativeId] -> VariantPathV0
+  (variant-path-to-record-reference-with-budget types current target
+    (widen-budget)))
+
+(defn materialize-boundary-record
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   reference-id: core/NativeId
+   reference-type: core/NativeId
+   record-type: core/NativeId] -> ExprResultV0
+  (if (not (reference-targets? types reference-type record-type))
+    (fail-result state
+      "TODO-NATIVE-BOUNDARY-RECORD: narrowed value is not the record reference")
+    (let [result-id: core/NativeId (state-id state owner "boundary-record")]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->RecordMaterializeInstructionV0
+            (core/->SsaValueV0 result-id record-type)
+            reference-id))
+        result-id record-type false))))
+
 ;; Source annotations and calls are semantic boundaries: widen into their
 ;; declared union, or checked-extract the named alternative. A reference-backed
 ;; record alternative is materialized before crossing a direct-record boundary.
@@ -3412,7 +3473,11 @@
     (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
           scalar: (U core/TypeVariant Nil) (variant-for-payload source-variants to)
           record: NarrowHitV0 (reference-variant-for types from to)
-          nested: VariantPathV0 (variant-path-to-payload types from to)]
+          nested: VariantPathV0 (variant-path-to-payload types from to)
+          nested-record: VariantPathV0
+          (if (boundary-record-type? types to)
+            (variant-path-to-record-reference types from to)
+            (->VariantPathV0 0 []))]
       (cond
         (some? scalar)
         (let [result-id: core/NativeId (state-id state owner "boundary-extract")]
@@ -3426,19 +3491,26 @@
         (narrowhitv0-found record)
         (let [reference-id: core/NativeId
               (state-id state owner "boundary-reference")
-              result-id: core/NativeId
-              (state-id (state-bump state) owner "boundary-record")]
-          (->ExprResultV0
-            (state-emit
-              (state-emit (state-bump (state-bump state))
+              extracted: BodyStateV0
+              (state-emit (state-bump state)
                 (core/->UnionExtractInstruction
                   (core/->SsaValueV0 reference-id
                     (narrowhitv0-reference-type record))
-                  value-id (narrowhitv0-variant-id record)))
-              (core/->RecordMaterializeInstructionV0
-                (core/->SsaValueV0 result-id to)
-                reference-id))
-            result-id to false))
+                  value-id (narrowhitv0-variant-id record)))]
+          (materialize-boundary-record types owner extracted reference-id
+            (narrowhitv0-reference-type record) to))
+
+        (= 1 (variantpathv0-matches nested-record))
+        (let [reference: ExprResultV0
+              (extract-variant-path owner state value-id from
+                "boundary-record-nested"
+                (variantpathv0-variants nested-record))]
+          (if (state-blocked? (exprresultv0-state reference))
+            reference
+            (materialize-boundary-record types owner
+              (exprresultv0-state reference)
+              (exprresultv0-value-id reference)
+              (exprresultv0-type-id reference) to)))
 
         (= 1 (variantpathv0-matches nested))
         (extract-variant-path owner state value-id from "boundary-nested"
@@ -4568,6 +4640,112 @@
                           nested: ExprResultV0
                           (lower-scalar-predicate-with-budget types owner extracted
                             callee extracted-id payload (- budget 1))]
+                      (if (state-blocked? (exprresultv0-state nested))
+                        (exprresultv0-state nested)
+                        (recur (+ position 1)
+                          (state-close (exprresultv0-state nested)
+                            (core/->JumpTerminator join-id
+                              [(exprresultv0-value-id nested)])))))))))
+            true-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block armed true-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 true-value (bool-type-id))
+                  (core/->BoolAtom true)))
+              (core/->JumpTerminator join-id [true-value]))
+            false-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block true-block false-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 false-value (bool-type-id))
+                  (core/->BoolAtom false)))
+              (core/->JumpTerminator join-id [false-value]))]
+        (->ExprResultV0
+          (state-open-block false-block join-id
+            [(core/->Parameter join-parameter (bool-type-id))])
+          join-parameter (bool-type-id) false)))))
+
+(defn record-predicate-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId
+   record-type: core/NativeId] -> Bool
+  (or (same-id? target record-type)
+    (reference-targets? types target record-type)))
+
+;; Optional map values nest their declared union under Nil. Record tests follow
+;; that sealed union path instead of requiring the record at the outermost tag.
+(defn lower-record-predicate-with-budget
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId
+   record-type: core/NativeId
+   budget: Int] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (cond
+      (= 0 (count variants))
+      (bool-constant-result state owner "record-predicate"
+        (record-predicate-type? types value-type record-type))
+
+      (< budget 0)
+      (fail-result state
+        "TODO-NATIVE-INSTANCE-DEPTH: record test nested past the v0 budget")
+
+      :else
+      (let [true-id: core/NativeId (state-id state owner "record-true")
+            false-id: core/NativeId (state-id state owner "record-false")
+            join-id: core/NativeId (state-id state owner "record-join")
+            join-parameter: core/NativeId
+            (state-id state owner "record-value")
+            true-value: core/NativeId (state-id state owner "record-yes")
+            false-value: core/NativeId (state-id state owner "record-no")
+            cases: (Vec core/SwitchCaseV0)
+            (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+              (if (>= position (count variants))
+                collected
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)
+                      target: core/NativeId
+                      (cond
+                        (nil? payload) false-id
+                        (record-predicate-type? types payload record-type) true-id
+                        (> (count (union-variants-of types payload)) 0)
+                        (state-id state owner (str "record-arm-" position))
+                        :else false-id)]
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0
+                        (core/typevariant-id variant) target []))))))
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator value-id cases))
+            armed: BodyStateV0
+            (loop [position: Int 0 current: BodyStateV0 switched]
+              (if (or (>= position (count variants)) (state-blocked? current))
+                current
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (or (nil? payload)
+                        (record-predicate-type? types payload record-type)
+                        (= 0 (count (union-variants-of types payload))))
+                    (recur (+ position 1) current)
+                    (let [arm-id: core/NativeId
+                          (state-id state owner (str "record-arm-" position))
+                          opened: BodyStateV0 (state-open-block current arm-id [])
+                          extracted-id: core/NativeId
+                          (state-id opened owner
+                            (str "record-payload-" position))
+                          extracted: BodyStateV0
+                          (state-emit (state-bump opened)
+                            (core/->UnionExtractInstruction
+                              (core/->SsaValueV0 extracted-id payload)
+                              value-id (core/typevariant-id variant)))
+                          nested: ExprResultV0
+                          (lower-record-predicate-with-budget types owner extracted
+                            extracted-id payload record-type (- budget 1))]
                       (if (state-blocked? (exprresultv0-state nested))
                         (exprresultv0-state nested)
                         (recur (+ position 1)
@@ -10395,63 +10573,23 @@
               (fail-result state
                 "TODO-NATIVE-INSTANCE-ARITY: instance? takes a type and a value")
               (let [record-spelling: String (fact-text index (nth args 0) "name")
-                    resolved-record: ResolvedSourceNameV0
-                    (resolve-source-name index
-                      (source-module-name index (nth args 0))
-                      record-spelling)
-                    record-key: String (resolved-source-key resolved-record)
+                    record-type: (U core/NativeId Nil)
+                    (match-record-type-id env owner (nth args 0))
                     value: ExprResultV0 (lower-expr env owner state (nth args 1))]
                 (cond
                   (exprresultv0-terminated value) value
                   (state-blocked? (exprresultv0-state value))
                   (dead-result (exprresultv0-state value))
+                  (nil? record-type)
+                  (fail-result (exprresultv0-state value)
+                    (str "TODO-NATIVE-INSTANCE-TYPE: " record-spelling
+                      " is not a visible closed record"))
                   :else
-                  (let [variants: (Vec core/TypeVariant)
-                        (union-variants-of types (exprresultv0-type-id value))
-                        target: (U core/TypeVariant Nil)
-                        (variant-named variants record-key)]
-                    (if (or (= "" record-key) (= 0 (count variants)) (nil? target))
-                      (fail-result (exprresultv0-state value)
-                        (str "TODO-NATIVE-INSTANCE-TEST: " record-spelling
-                          " is not an alternative of the tested closed union"))
-                      (let [base: BodyStateV0 (exprresultv0-state value)
-                            true-id: core/NativeId (state-id base owner "is")
-                            false-id: core/NativeId (state-id base owner "is-not")
-                            join-id: core/NativeId (state-id base owner "is-join")
-                            join-parameter: core/NativeId
-                            (state-id base owner "is-value")
-                            true-value: core/NativeId (state-id base owner "is-true")
-                            false-value: core/NativeId (state-id base owner "is-false")
-                            cases: (Vec core/SwitchCaseV0)
-                            (mapv
-                              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
-                                (core/->SwitchCaseV0 (core/typevariant-id variant)
-                                  (if (= record-key (core/typevariant-name variant))
-                                    true-id false-id)
-                                  []))
-                              variants)
-                            switched: BodyStateV0
-                            (state-close (state-bump base)
-                              (core/->SwitchTerminator
-                                (exprresultv0-value-id value) cases))
-                            true-block: BodyStateV0
-                            (state-close
-                              (state-emit (state-open-block switched true-id [])
-                                (core/->AtomInstruction
-                                  (core/->SsaValueV0 true-value (bool-type-id))
-                                  (core/->BoolAtom true)))
-                              (core/->JumpTerminator join-id [true-value]))
-                            false-block: BodyStateV0
-                            (state-close
-                              (state-emit (state-open-block true-block false-id [])
-                                (core/->AtomInstruction
-                                  (core/->SsaValueV0 false-value (bool-type-id))
-                                  (core/->BoolAtom false)))
-                              (core/->JumpTerminator join-id [false-value]))]
-                        (->ExprResultV0
-                          (state-open-block false-block join-id
-                            [(core/->Parameter join-parameter (bool-type-id))])
-                          join-parameter (bool-type-id) false)))))))
+                  (lower-record-predicate-with-budget types owner
+                    (exprresultv0-state value)
+                    (exprresultv0-value-id value)
+                    (exprresultv0-type-id value)
+                    record-type (widen-budget)))))
 
             (= "swap!" (unqualified-name callee))
             (if (< (count args) 2)
