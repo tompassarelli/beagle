@@ -75,7 +75,8 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"$scratch/refusal-art\" \"native-atom-mutation-refusals-v0\"))"
 
 for name in direct-update make-counter-cell make-vector-cell reset-counter! \
-    update-counter! append-value! append-values!; do
+    update-counter! assoc-counter! assoc-counter-map! append-value! \
+    append-values!; do
   awk -v name="$name" \
     '$1 == "lowered" && $3 == name { found = 1 } END { exit !found }' \
     "$scratch/source-report.txt" || {

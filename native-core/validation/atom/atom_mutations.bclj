@@ -3,6 +3,7 @@
 (define-mode strict)
 
 (defrecord Counter [value: Int])
+(defalias CounterMap (Map Keyword Int))
 
 (defn direct-update
   [counter: Counter
@@ -26,6 +27,17 @@
    delta: Int] -> Counter
   (swap! cell update :value
     (fn [current: Int] -> Int (+ current delta))))
+
+(defn assoc-counter!
+  [cell: (Atom Counter)
+   replacement: Int] -> Counter
+  (swap! cell assoc :value replacement))
+
+(defn assoc-counter-map!
+  [cell: (Atom CounterMap)
+   key: Keyword
+   replacement: Int] -> CounterMap
+  (swap! cell assoc key replacement))
 
 (defn append-value!
   [cell: (Atom (Vec Int))

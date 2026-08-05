@@ -8911,7 +8911,151 @@
           (exprresultv0-value-id replacement) content false)))))
 
 (defn static-atom-builtin-updater? [callee: String] -> Bool
-  (or (= "update" callee) (= "conj" callee) (= "into" callee)))
+  (or (= "assoc" callee) (= "update" callee) (= "conj" callee)
+    (= "into" callee)))
+
+(defn lower-static-atom-assoc-swap
+  [env: BodyEnvV0
+   owner: core/NativeId
+   cell: ExprResultV0
+   content: core/NativeId
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        state: BodyStateV0 (exprresultv0-state cell)
+        cell-id: core/NativeId (exprresultv0-value-id cell)]
+    (cond
+      (not (= 4 (count args)))
+      (fail-result state
+        "TODO-NATIVE-ATOM-SWAP-ASSOC-ARITY: swap! assoc takes one key/value pair")
+
+      (record-type? types content)
+      (let [key-node: core/NativeId (nth args 2)
+            literal-key: Bool
+            (and (= "literal" (fact-text index key-node "form-kind"))
+              (= "keyword" (fact-text index key-node "literal-kind")))
+            field: AccessorHitV0
+            (if literal-key
+              (record-keyword-field types content
+                (fact-text index key-node "value"))
+              (accessor-miss))]
+        (cond
+          (not literal-key)
+          (fail-result state
+            "TODO-NATIVE-ATOM-SWAP-ASSOC-RECORD-KEY: record swap! assoc requires a literal keyword")
+
+          (or (not (accessorhitv0-found field))
+            (not (same-id? content (accessorhitv0-owner-type field))))
+          (fail-result state
+            "TODO-NATIVE-ATOM-SWAP-ASSOC-RECORD-FIELD: keyword is not a field of the Atom record")
+
+          :else
+          (let [field-type: core/NativeId (accessorhitv0-field-type field)
+                raw: ExprResultV0
+                (lower-expr-expected env owner state (nth args 3) field-type)]
+            (cond
+              (exprresultv0-terminated raw) raw
+              (state-blocked? (exprresultv0-state raw))
+              (dead-result (exprresultv0-state raw))
+              :else
+              (let [replacement: ExprResultV0
+                    (lower-boundary-coerce types owner
+                      (exprresultv0-state raw)
+                      (exprresultv0-value-id raw)
+                      (exprresultv0-type-id raw) field-type)
+                    settled: BodyStateV0 (exprresultv0-state replacement)]
+                (cond
+                  (state-blocked? settled) (dead-result settled)
+                  (not (same-id? field-type
+                         (exprresultv0-type-id replacement)))
+                  (fail-result settled
+                    "TODO-NATIVE-ATOM-SWAP-ASSOC-RECORD-VALUE: replacement does not match the record field type")
+                  :else
+                  (lower-atom-cas-retry owner settled cell-id content
+                    (fn [current: ExprResultV0] -> ExprResultV0
+                      (let [result-id: core/NativeId
+                            (state-id (exprresultv0-state current) owner
+                              "atom-record-assoc")]
+                        (->ExprResultV0
+                          (state-emit
+                            (state-bump (exprresultv0-state current))
+                            (core/->RecordAssocInstructionV0
+                              (core/->SsaValueV0 result-id content)
+                              (exprresultv0-value-id current)
+                              (accessorhitv0-field-id field)
+                              (exprresultv0-value-id replacement)
+                              (arena-value-id owner)))
+                          result-id content false))))))))))
+
+      (map-type? types content)
+      (let [key-type: core/NativeId (map-key-of types content)
+            value-type: core/NativeId (map-value-of types content)
+            equality: (U core/ConcreteEqualityV0 Nil)
+            (map-key-equality-for types key-type)]
+        (if (nil? equality)
+          (fail-result state
+            "TODO-NATIVE-ATOM-SWAP-ASSOC-MAP-EQUALITY: map key needs closed concrete equality")
+          (let [raw-key: ExprResultV0
+                (lower-expr-expected env owner state (nth args 2) key-type)]
+            (cond
+              (exprresultv0-terminated raw-key) raw-key
+              (state-blocked? (exprresultv0-state raw-key))
+              (dead-result (exprresultv0-state raw-key))
+              :else
+              (let [key: ExprResultV0
+                    (lower-boundary-coerce types owner
+                      (exprresultv0-state raw-key)
+                      (exprresultv0-value-id raw-key)
+                      (exprresultv0-type-id raw-key) key-type)
+                    keyed: BodyStateV0 (exprresultv0-state key)]
+                (cond
+                  (state-blocked? keyed) (dead-result keyed)
+                  (not (same-id? key-type (exprresultv0-type-id key)))
+                  (fail-result keyed
+                    "TODO-NATIVE-ATOM-SWAP-ASSOC-MAP-KEY: key does not match the map key type")
+                  :else
+                  (let [raw-value: ExprResultV0
+                        (lower-expr-expected env owner keyed
+                          (nth args 3) value-type)]
+                    (cond
+                      (exprresultv0-terminated raw-value) raw-value
+                      (state-blocked? (exprresultv0-state raw-value))
+                      (dead-result (exprresultv0-state raw-value))
+                      :else
+                      (let [value: ExprResultV0
+                            (lower-boundary-coerce types owner
+                              (exprresultv0-state raw-value)
+                              (exprresultv0-value-id raw-value)
+                              (exprresultv0-type-id raw-value) value-type)
+                            settled: BodyStateV0 (exprresultv0-state value)]
+                        (cond
+                          (state-blocked? settled) (dead-result settled)
+                          (not (same-id? value-type
+                                 (exprresultv0-type-id value)))
+                          (fail-result settled
+                            "TODO-NATIVE-ATOM-SWAP-ASSOC-MAP-VALUE: value does not match the map value type")
+                          :else
+                          (lower-atom-cas-retry owner settled cell-id content
+                            (fn [current: ExprResultV0] -> ExprResultV0
+                              (let [result-id: core/NativeId
+                                    (state-id
+                                      (exprresultv0-state current) owner
+                                      "atom-map-assoc")]
+                                (->ExprResultV0
+                                  (state-emit
+                                    (state-bump
+                                      (exprresultv0-state current))
+                                    (core/->MapAssocInstructionV0
+                                      (core/->SsaValueV0 result-id content)
+                                      (exprresultv0-value-id current)
+                                      (exprresultv0-value-id key)
+                                      (exprresultv0-value-id value)
+                                      (arena-value-id owner) equality))
+                                  result-id content false))))))))))))))
+
+      :else
+      (fail-result state
+        "TODO-NATIVE-ATOM-SWAP-ASSOC-TYPE: static Atom assoc requires a closed map or record"))))
 
 (defn lower-static-atom-builtin-swap
   [env: BodyEnvV0
@@ -8924,6 +9068,9 @@
         state: BodyStateV0 (exprresultv0-state cell)
         cell-id: core/NativeId (exprresultv0-value-id cell)]
     (cond
+      (= "assoc" updater)
+      (lower-static-atom-assoc-swap env owner cell content args)
+
       (= "update" updater)
       (cond
         (not (= 4 (count args)))
