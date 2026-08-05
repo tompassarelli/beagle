@@ -36,7 +36,9 @@ used by code-as-facts; "lossless" means reader-datum identity, not byte
 identity. The two projections share the fact layer, not a fidelity contract, so
 no single sentence describes both.
 
-Bare `#lang beagle` on `.bgl` names the Core profile and lowers to a sealed
-Native World. Hosted profiles use their explicit language paths and extensions,
-such as `#lang beagle/clj` on `.bclj`. Only `.rkt` remains legacy and exempt
-from extension/header validation.
+Bare `#lang beagle` on `.bgl` names the Native Core profile and always lowers
+to a sealed Native World. `.bgl` never means target-neutral or "no target
+selected"; only the resulting Native World is backend-neutral. Hosted profiles
+use their explicit language paths and extensions, such as `#lang beagle/clj`
+on `.bclj`. Only `.rkt` remains legacy and exempt from extension/header
+validation.

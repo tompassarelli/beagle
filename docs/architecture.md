@@ -12,6 +12,13 @@
 ```
 <!-- /beagle:langs -->
 
+`.bgl` is a compilation-path decision: bare `#lang beagle` always enters
+Native Core and produces a Native World. "Backend-neutral" describes that
+sealed world, not the `.bgl` extension. C17 and QBE are the current
+materializers; Wasm belongs at the same materializer layer. The lowering tool
+may run from hosted `.bclj` during compiler bootstrapping without making `.bgl`
+a hosted or target-neutral source profile.
+
 `check` is where the NixOS option schema (loaded from a cache at compile time)
 becomes typed context: unknown option paths fail at parse time, wrong-typed
 values fail at type-check time, ahead of any build. Sourcemap fidelity is

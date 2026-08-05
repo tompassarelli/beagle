@@ -61,7 +61,8 @@ whole path end to end. `beagle init --hooks` wires the same loop into a project'
 
 ## Build output paths
 
-Bare `#lang beagle` on `.bgl` is Core. Its build always publishes
+Bare `#lang beagle` on `.bgl` is Native Core, never a target-neutral or
+unselected source profile. Its build always publishes
 `module.native-world`, `module.native-world.sha256`, `source.facts`, and
 `report.txt`; `--materializer c17` adds `module_0.h`/`module_0.c`, while
 `--materializer qbe` adds `module_0.ssa`. No materializer is implicit, and

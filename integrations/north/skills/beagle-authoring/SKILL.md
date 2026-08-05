@@ -40,6 +40,15 @@ otherwise default to text. Never activate graph authoring or require a flip
 level without that policy or explicit human adoption. A coordinator failure
 never changes the selected source channel.
 
+## Choose the compilation path explicitly
+
+`.bgl` with bare `#lang beagle` always selects Native Core and lowers to a
+sealed Native World. It never means target-neutral or "no target selected";
+backend-neutral describes the Native World, whose current materializers are
+reported by `beagle langs`. Hosted compiler or application code uses an
+explicit hosted profile such as `.bclj` with `#lang beagle/clj`. A hosted
+implementation of the lowering tool does not make `.bgl` a hosted source file.
+
 ## Repair compiler defects upstream
 
 A confirmed parser, checker, lowering, emitter, runtime, or authoring-tool

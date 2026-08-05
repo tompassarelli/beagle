@@ -16,6 +16,12 @@ ahead-of-time `parse → check → emit`, held byte-identical by gates. Core use
 the Racket oracle front end, then lowers to a sealed Native World before
 materialization:
 
+The source-profile boundary is absolute: `.bgl` with bare `#lang beagle`
+always selects Core and the native lowering pipeline. The source is not
+target-neutral; the sealed Native World is backend-neutral. Hosted compiler
+machinery may use explicit `.bclj` and `#lang beagle/clj` while bootstrapping
+that pipeline, but `.bclj` itself remains hosted Clojure source.
+
 1. **Racket (the oracle)** — `beagle-lib/*.rkt`, all <!-- beagle:langs count -->four<!-- /beagle:langs --> targets. Entry
    points: `beagle-lib/main.rkt` (Core `#lang beagle`),
    `beagle-lib/clj/main.rkt` (hosted `#lang beagle/clj`), and
@@ -50,7 +56,7 @@ The spec is **generative** — three statements determine every surface question
 
 1. **Beagle is Clojure plus types.** Clojure surface, types threaded through.
 2. **Divergence from Clojure must be load-bearing for the type system or a backend, or it dies.** (See "Rules with teeth".)
-3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Core sealed Native World, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
+3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Native Core sealed Native World, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
 
 Run a form through these and one answer falls out. **Do not surface decisions the spec already determines** — fact-finds ("what does bare `{…}` mean?" → match Clojure), unfinished analysis ("N rows ambiguous" → run the load-bearing test: does the divergence buy type precision or a backend anything?), and invisible implementation choices (AST shape, helper placement) are not forks. Pick, execute, report.
 

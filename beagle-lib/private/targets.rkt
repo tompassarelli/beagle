@@ -58,9 +58,9 @@
 
 (define CORE-PROFILE
   (core-profile
-   'core "Beagle Core" ".bgl" "beagle" 'live
-   "sealed Native World; select C17 or QBE separately"
-   "System-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
+   'core "Beagle Native Core" ".bgl" "beagle" 'live
+   "native pipeline: sealed Native World; select C17 or QBE materializer"
+   "Native system-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
    MATERIALIZERS))
 
 (define TARGETS
@@ -79,9 +79,7 @@
            "Nix expressions type-checked against the NixOS option schema: system and package configuration.")
    ))
 
-;; Extensions that are real Beagle sources but name no profile. Headerless
-;; `.bgl` files remain readable only for the compiler's legacy hosted tooling;
-;; authored `.bgl` starts with bare `#lang beagle` and selects CORE-PROFILE.
+;; Extensions that are real Beagle sources but name no profile.
 (define NEUTRAL-EXTENSIONS
   '((".rkt" . "legacy — no extension/header validation")))
 

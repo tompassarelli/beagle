@@ -6,7 +6,7 @@ BEAGLE_TARGET_IDS=(core clj js nix)
 BEAGLE_HOSTED_TARGET_IDS=(clj js nix)
 BEAGLE_TARGET_IDS_RE='core|clj|js|nix'
 BEAGLE_TARGET_IDS_LIST='core, clj, js, and nix'
-BEAGLE_TARGET_NAMES='Beagle Core, Clojure, JavaScript, and Nix'
+BEAGLE_TARGET_NAMES='Beagle Native Core, Clojure, JavaScript, and Nix'
 BEAGLE_TARGET_COUNT=4
 declare -A BEAGLE_TARGET_LANG=([core]=beagle [clj]=beagle/clj [js]=beagle/js [nix]=beagle/nix)
 declare -A BEAGLE_TARGET_SRC_EXT=([core]=bgl [clj]=bclj [js]=bjs [nix]=bnix)

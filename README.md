@@ -10,10 +10,20 @@ loop. The product is not a high target count: it is one source language whose
 parser, checker, canonicalizer, and repair tools give people and agents the same
 answer. A backend stays only when a real consumer makes its semantics testable.
 
-There are two deliberate compilation paths. Hosted targets emit source for a
-runtime or evaluator that remains part of the system; Native Core lowers
-system-layer code into an immutable, target-neutral Native World and then
-materializes that world as native code. Fram stays Beagle source in both cases.
+There are two deliberate compilation paths. The source profile chooses between
+them: `.bgl` with bare `#lang beagle` always targets Native Core and lowers to
+an immutable Native World. The `.bgl` source is not target-neutral and does not
+mean "no target selected"; the resulting Native World is backend-neutral so it
+can be materialized as native code. C17 and QBE are the current materializers;
+Wasm belongs at that same materializer layer rather than becoming another
+source profile.
+
+Hosted profiles emit source for a runtime or evaluator that remains part of the
+system: `.bclj`, `.bjs`, and `.bnix` select Clojure, JavaScript, and Nix
+respectively. The Native Core lowering tool may itself be implemented and run
+as hosted `.bclj` during bootstrapping. That is an implementation detail of the
+compiler, not an optional native path from `.bclj`. Fram stays Beagle source in
+both cases.
 
 Types exist here for a specific job: making authoring, diagnostics, and
 automated repair reliable. They check at compile time and erase before emit. The
@@ -121,12 +131,13 @@ is useful because Beagle can type a NixOS option against the real option schema:
 assigning a `String` to `services.openssh.enable` fails before
 `nixos-rebuild`.
 
-Native Core is a lowering path, not another idiomatic source emitter:
+Native Core is the `.bgl` lowering path, not another idiomatic source emitter:
 
 ```text
-Beagle source  →  source world  →  typed world  →  Native World
-                                                    ├─→ restricted C reference
-                                                    └─→ QBE IL → native object
+.bgl + #lang beagle  →  source world  →  typed world  →  Native World
+                                                              ├─→ restricted C reference
+                                                              ├─→ QBE IL → native object
+                                                              └─→ Wasm (materializer)
 ```
 
 The Native World owns typed operations, effects, regions, layouts, control
@@ -157,7 +168,7 @@ target is *for*).
 <!-- beagle:langs table -->
 | target | language | source | `#lang` | output | status |
 |---|---|---|---|---|---|
-| `core` | Beagle Core | `.bgl` | `#lang beagle` | sealed Native World | live — sealed Native World; select C17 or QBE separately |
+| `core` | Beagle Native Core | `.bgl` | `#lang beagle` | sealed Native World | live — native pipeline: sealed Native World; select C17 or QBE materializer |
 | `clj` | Clojure | `.bclj` | `#lang beagle/clj` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `js` | JavaScript | `.bjs` | `#lang beagle/js` | `.js` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
@@ -179,8 +190,8 @@ Profiles are removed rather than deprecated when they stop earning their place �
 - **[wake](https://github.com/tompassarelli/wake)** — an application compiler
   (entities, views, routes → direct-DOM JS), itself authored in `.bjs`.
 - **[fram](https://github.com/Autonymy/fram)** — a slot-addressable,
-  typed-triple substrate with stratified Datalog, authored in `.bclj`; its replay
-  path is the current Native Core vertical slice.
+  typed-triple substrate with stratified Datalog, authored in Native Core
+  `.bgl`.
 - **[north](https://github.com/tompassarelli/north)** — a work tracker and
   agent orchestrator over one triple graph, authored in `.bclj` and built on
   Fram.
