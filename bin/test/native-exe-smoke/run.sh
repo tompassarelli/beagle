@@ -105,26 +105,19 @@ if grep -Eq 'unreachable|bad-entry|hidden|^pending ' "$projection_c17/report.txt
 fi
 printf 'native-exe smoke: repeatable entry closure + exact function map ok\n'
 
-qbe_c17="$scratch/qbe-c17"
-qbe_qbe="$scratch/qbe-qbe"
-"$repo/bin/beagle" build --materializer c17 \
-    --out "$qbe_c17" \
+qbe_both="$scratch/qbe-both"
+"$repo/bin/beagle" build --materializer c17 --materializer qbe \
+    --out "$qbe_both" \
     --entry native.qbe-entry/entry \
-    "$qbe_source" >"$scratch/qbe-c17.log"
-"$repo/bin/beagle" build --materializer qbe \
-    --out "$qbe_qbe" \
-    --entry native.qbe-entry/entry \
-    "$qbe_source" >"$scratch/qbe-qbe.log"
-grep -Fqx "materialize-c17 OK module_0.h module_0.c" "$qbe_c17/report.txt"
-grep -Fqx "materialize-qbe OK module_0.ssa" "$qbe_qbe/report.txt"
-grep -Fqx "result PASS" "$qbe_c17/report.txt"
-grep -Fqx "result PASS" "$qbe_qbe/report.txt"
-[[ "$(grep -c '^obligation-projection PASS ' "$qbe_c17/report.txt")" == "7" ]]
-[[ "$(grep -c '^obligation-projection PASS ' "$qbe_qbe/report.txt")" == "7" ]]
-cmp "$qbe_c17/module.native-world" "$qbe_qbe/module.native-world"
-cmp "$qbe_c17/module.native-world.sha256" "$qbe_qbe/module.native-world.sha256"
-[[ -f "$qbe_c17/module_0.c" && ! -e "$qbe_c17/module_0.ssa" ]]
-[[ -f "$qbe_qbe/module_0.ssa" && ! -e "$qbe_qbe/module_0.c" ]]
+    "$qbe_source" >"$scratch/qbe-both.log"
+grep -Fqx "materialize-c17 OK module_0.h module_0.c" "$qbe_both/report.txt"
+grep -Fqx "materialize-qbe OK module_0.ssa" "$qbe_both/report.txt"
+grep -Fqx "result PASS" "$qbe_both/report.txt"
+[[ "$(grep -c '^obligation-projection PASS ' "$qbe_both/report.txt")" == "7" ]]
+[[ "$(grep -c '^stage-progress source-seal ' "$qbe_both/report.txt")" == "1" ]]
+[[ "$(grep -c '^stage-progress source-to-typed ' "$qbe_both/report.txt")" == "1" ]]
+[[ "$(grep -c '^stage-progress typed-to-native ' "$qbe_both/report.txt")" == "1" ]]
+[[ -f "$qbe_both/module_0.c" && -f "$qbe_both/module_0.ssa" ]]
 printf 'native-exe smoke: one sealed Native World + explicit C17/QBE materializers ok\n'
 
 set +e
