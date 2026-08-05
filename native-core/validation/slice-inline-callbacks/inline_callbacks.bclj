@@ -80,3 +80,13 @@
          value: Int] -> Int
         (+ (* total 10) value))
       0 values)))
+
+(defn insertion-order-map-reduce-kv [] -> Int
+  (let [values: (Map Int Int) {3 4 1 2}]
+    (reduce-kv
+      (fn
+        [total: Int
+         key: Int
+         value: Int] -> Int
+        (+ (* total 100) (+ (* key 10) value)))
+      0 values)))

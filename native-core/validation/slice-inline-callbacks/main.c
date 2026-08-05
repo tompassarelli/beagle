@@ -30,6 +30,9 @@
 #ifndef SET_REDUCE_FN
 #error "SET_REDUCE_FN must name insertion-order-set-reduce"
 #endif
+#ifndef MAP_REDUCE_KV_FN
+#error "MAP_REDUCE_KV_FN must name insertion-order-map-reduce-kv"
+#endif
 
 #define ARENA_BYTES ((size_t)65536)
 
@@ -72,6 +75,9 @@ int main(void) {
   }
   if (SET_REDUCE_FN(&arena, &capability) != INT64_C(312)) {
     return 10;
+  }
+  if (MAP_REDUCE_KV_FN(&arena, &capability) != INT64_C(3412)) {
+    return 11;
   }
   return 0;
 }

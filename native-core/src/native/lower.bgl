@@ -3371,6 +3371,20 @@
     (and (not (nil? definition))
       (instance? native.core.MapTypeV0 (core/typedef-shape definition)))))
 
+(defn insertion-order-map-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      false
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.MapTypeV0 shape))
+          false
+          (let [order: core/CollectionOrderV0
+                (core/maptypev0-iteration-order shape)]
+            (and (instance? native.core.InsertionOrderV0 order)
+              (core/insertionorderv0-token order))))))))
+
 (defn map-key-of
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> core/NativeId
@@ -7285,6 +7299,266 @@
 
       :else state)))
 
+(defn lower-eager-map-reduce-kv
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   args: (Vec core/NativeId)] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)]
+    (if (not (= 3 (count args)))
+      (fail-result state
+        "TODO-NATIVE-REDUCE-KV-ARITY: reduce-kv lowers only as (reduce-kv fn init map)")
+      (let [callback-node: core/NativeId (nth args 0)
+            callback-kind: String (fact-text index callback-node "form-kind")
+            callback-rest: String (fact-text index callback-node "rest")
+            callback-body: (U core/NativeId Nil)
+            (index-first-object index callback-node "body")
+            callback-return-source: (U core/NativeId Nil)
+            (index-first-object index callback-node "ret")
+            callback-source-parameters: (Vec core/NativeId)
+            (function-parameter-items index callback-node)
+            callback-owner: core/NativeId
+            (state-id state owner "reduce-kv-callback")
+            callback-resolution: ParameterResolutionV0
+            (resolve-parameters index callback-node callback-owner)
+            callback-parameters: (Vec core/Parameter)
+            (parameterresolutionv0-parameters callback-resolution)
+            callback-names: (Vec String)
+            (mapv
+              (fn [parameter: core/NativeId] -> String
+                (parameter-name-at index parameter))
+              callback-source-parameters)]
+        (cond
+          (not (= "fn" callback-kind))
+          (fail-result state
+            "TODO-NATIVE-REDUCE-KV-CALLBACK: reduce-kv requires an anonymous function literal")
+
+          (not (= "false" callback-rest))
+          (fail-result state
+            "TODO-NATIVE-REDUCE-KV-VARIADIC: reduce-kv callbacks must have fixed arity")
+
+          (or (not (= 3 (count callback-source-parameters)))
+              (not (= 3 (count callback-parameters))))
+          (fail-result state
+            "TODO-NATIVE-REDUCE-KV-CALLBACK-ARITY: reduce-kv callbacks take accumulator, key, and value")
+
+          (not (parameterresolutionv0-valid callback-resolution))
+          (fail-result state
+            "TODO-NATIVE-REDUCE-KV-CALLBACK-TYPES: callback parameters need closed native types")
+
+          (nil? callback-body)
+          (fail-result state
+            "TODO-NATIVE-REDUCE-KV-CALLBACK-BODY: callback needs exactly one body form")
+
+          (nil? callback-return-source)
+          (fail-result state
+            "TODO-NATIVE-REDUCE-KV-CALLBACK-RETURN: callback needs a closed return annotation")
+
+          :else
+          (let [callback-return: TypeResolutionV0
+                (resolve-source-type index callback-return-source)
+                accumulator-type: core/NativeId
+                (core/parameter-type-id (nth callback-parameters 0))
+                key-type: core/NativeId
+                (core/parameter-type-id (nth callback-parameters 1))
+                value-type: core/NativeId
+                (core/parameter-type-id (nth callback-parameters 2))]
+            (cond
+              (not (typeresolutionv0-valid callback-return))
+              (fail-result state
+                "TODO-NATIVE-REDUCE-KV-CALLBACK-RETURN: callback return is not a closed native type")
+
+              (not (same-id? accumulator-type
+                     (typeresolutionv0-type-id callback-return)))
+              (fail-result state
+                "TODO-NATIVE-REDUCE-KV-ACCUMULATOR: callback return must match its accumulator parameter")
+
+              :else
+                (let [initial: ExprResultV0
+                      (lower-contextual-boundary env owner state
+                      (nth args 1) accumulator-type accumulator-type)]
+                (cond
+                  (exprresultv0-terminated initial) initial
+                  (state-blocked? (exprresultv0-state initial))
+                  (dead-result (exprresultv0-state initial))
+                  :else
+                  (let [source: ExprResultV0
+                        (lower-expr env owner (exprresultv0-state initial)
+                          (nth args 2))
+                        source-state: BodyStateV0 (exprresultv0-state source)
+                        source-type: core/NativeId (exprresultv0-type-id source)
+                        key-vector-type: (U core/NativeId Nil)
+                        (vector-type-of types key-type)
+                        value-vector-type: (U core/NativeId Nil)
+                        (vector-type-of types value-type)]
+                    (cond
+                      (exprresultv0-terminated source) source
+                      (state-blocked? source-state) (dead-result source-state)
+
+                      (not (same-id? accumulator-type
+                             (exprresultv0-type-id initial)))
+                      (fail-result source-state
+                        "TODO-NATIVE-REDUCE-KV-INIT: initial value must match the callback accumulator")
+
+                      (not (insertion-order-map-type? types source-type))
+                      (fail-result source-state
+                        "TODO-NATIVE-REDUCE-KV-COLLECTION: reduce-kv needs a closed insertion-order Map")
+
+                      (not (same-id? key-type (map-key-of types source-type)))
+                      (fail-result source-state
+                        "TODO-NATIVE-REDUCE-KV-KEY: callback key must match the map key type")
+
+                      (not (same-id? value-type (map-value-of types source-type)))
+                      (fail-result source-state
+                        "TODO-NATIVE-REDUCE-KV-VALUE: callback value must match the map value type")
+
+                      (nil? key-vector-type)
+                      (fail-result source-state
+                        "TODO-NATIVE-REDUCE-KV-KEY-VECTOR: the world declares no Vec carrier for map keys")
+
+                      (nil? value-vector-type)
+                      (fail-result source-state
+                        "TODO-NATIVE-REDUCE-KV-VALUE-VECTOR: the world declares no Vec carrier for map values")
+
+                      :else
+                      (let [key-vector-id: core/NativeId
+                            (state-id source-state owner "reduce-kv-keys")
+                            with-keys: BodyStateV0
+                            (state-emit (state-bump source-state)
+                              (core/->MapKeysInstructionV0
+                                (core/->SsaValueV0 key-vector-id key-vector-type)
+                                (exprresultv0-value-id source)
+                                (arena-value-id owner)))
+                            value-vector-id: core/NativeId
+                            (state-id with-keys owner "reduce-kv-values")
+                            with-vectors: BodyStateV0
+                            (state-emit (state-bump with-keys)
+                              (core/->MapValuesInstructionV0
+                                (core/->SsaValueV0 value-vector-id value-vector-type)
+                                (exprresultv0-value-id source)
+                                (arena-value-id owner)))
+                            outer-locals: (Vec LocalBindingV0)
+                            (bodystatev0-locals with-vectors)
+                            outer-frames: (Vec LoopFrameV0)
+                            (bodystatev0-loop-frames with-vectors)
+                            outer-refinements: (Vec KeywordFlowRefinementV0)
+                            (bodystatev0-keyword-refinements with-vectors)
+                            length-id: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-length")
+                            zero-id: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-zero")
+                            header-id: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-header")
+                            body-id: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-body")
+                            exit-id: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-exit")
+                            header-index: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-index")
+                            header-accumulator: core/NativeId
+                            (state-id with-vectors owner "reduce-kv-accumulator")
+                            prepared: BodyStateV0
+                            (state-emit
+                              (state-emit (state-bump with-vectors)
+                                (core/->VecLengthInstruction
+                                  (core/->SsaValueV0 length-id (int-type-id))
+                                  key-vector-id))
+                              (core/->AtomInstruction
+                                (core/->SsaValueV0 zero-id (int-type-id))
+                                (core/->I64Atom 0)))
+                            entered: BodyStateV0
+                            (state-open-block
+                              (state-close (state-bump prepared)
+                                (core/->JumpTerminator header-id
+                                  [zero-id (exprresultv0-value-id initial)]))
+                              header-id
+                              [(core/->Parameter header-index (int-type-id))
+                               (core/->Parameter header-accumulator
+                                 accumulator-type)])
+                            has-item: core/NativeId
+                            (state-id entered owner "reduce-kv-has-item")
+                            compared: BodyStateV0
+                            (state-emit (state-bump entered)
+                              (core/->CompareInstruction
+                                (core/->SsaValueV0 has-item (bool-type-id))
+                                (core/->CompareLtI64V0 true)
+                                header-index length-id))
+                            branched: BodyStateV0
+                            (state-open-block
+                              (state-close compared
+                                (core/->BranchTerminator has-item body-id exit-id))
+                              body-id [])
+                            key-id: core/NativeId
+                            (state-id branched owner "reduce-kv-key")
+                            with-key: BodyStateV0
+                            (state-emit (state-bump branched)
+                              (core/->VecGetInstruction
+                                (core/->SsaValueV0 key-id key-type)
+                                key-vector-id header-index))
+                            value-id: core/NativeId
+                            (state-id with-key owner "reduce-kv-value")
+                            isolated: BodyStateV0
+                            (state-enter-inline-callback
+                              (state-emit (state-bump with-key)
+                                (core/->VecGetInstruction
+                                  (core/->SsaValueV0 value-id value-type)
+                                  value-vector-id header-index)))
+                            callback-state: BodyStateV0
+                            (state-bind
+                              (state-bind
+                                (state-bind isolated
+                                  (nth callback-names 0)
+                                  header-accumulator accumulator-type)
+                                (nth callback-names 1) key-id key-type)
+                              (nth callback-names 2) value-id value-type)
+                            callback-result: ExprResultV0
+                            (lower-contextual-boundary env owner callback-state
+                              callback-body accumulator-type accumulator-type)
+                            restored: BodyStateV0
+                            (with
+                              (with
+                                (with (exprresultv0-state callback-result)
+                                  [:locals outer-locals])
+                                [:loop-frames outer-frames])
+                              [:keyword-refinements outer-refinements])]
+                        (cond
+                          (state-blocked? restored) (dead-result restored)
+
+                          (exprresultv0-terminated callback-result)
+                          (fail-result restored
+                            "TODO-NATIVE-REDUCE-KV-CALLBACK-DIVERGES: callback does not produce the next accumulator")
+
+                          (not (same-id? accumulator-type
+                                 (exprresultv0-type-id callback-result)))
+                          (fail-result restored
+                            "TODO-NATIVE-REDUCE-KV-CALLBACK-RESULT: callback body does not produce its declared accumulator type")
+
+                          :else
+                          (let [one-id: core/NativeId
+                                (state-id restored owner "reduce-kv-one")
+                                with-one: BodyStateV0
+                                (state-emit (state-bump restored)
+                                  (core/->AtomInstruction
+                                    (core/->SsaValueV0 one-id (int-type-id))
+                                    (core/->I64Atom 1)))
+                                next-index: ExprResultV0
+                                (lower-checked-arith with-one owner "+"
+                                  header-index one-id)
+                                next-state: BodyStateV0
+                                (exprresultv0-state next-index)]
+                            (if (state-blocked? next-state)
+                              (dead-result next-state)
+                              (->ExprResultV0
+                                (state-open-block
+                                  (state-close next-state
+                                    (core/->JumpTerminator header-id
+                                      [(exprresultv0-value-id next-index)
+                                       (exprresultv0-value-id callback-result)]))
+                                  exit-id [])
+                                header-accumulator accumulator-type
+                                false))))))))))))))))
+
 (defn lower-match-expr
   [env: BodyEnvV0
    owner: core/NativeId
@@ -8857,6 +9131,9 @@
             (or (= "mapv" callee) (= "filterv" callee)
                 (= "every?" callee) (= "some" callee))
             (lower-eager-vector-hof env owner state callee args)
+
+            (= "reduce-kv" callee)
+            (lower-eager-map-reduce-kv env owner state args)
 
             (= "reduce" callee)
             (if (not (= 3 (count args)))
