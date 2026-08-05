@@ -12183,6 +12183,39 @@
                 (fail-result current
                   "TODO-NATIVE-ATOM-RESET-ARITY: reset! takes one Atom and one replacement value")
 
+                (and (= "compare-and-set!" bare-callee)
+                  (= 3 (count values)))
+                (let [content: (U core/NativeId Nil)
+                      (atom-cell-content-of types (nth value-types 0))]
+                  (if (nil? content)
+                    (fail-result current
+                      "TODO-NATIVE-ATOM-CAS-CELL: compare-and-set! first operand is not an Atom")
+                    (let [coerced: ArgsResultV0
+                          (coerce-values-to-type types owner current
+                            [(nth values 1) (nth values 2)]
+                            [(nth value-types 1) (nth value-types 2)] content)
+                          settled: BodyStateV0 (argsresultv0-state coerced)
+                          operands: (Vec core/NativeId)
+                          (argsresultv0-values coerced)]
+                      (if (state-blocked? settled)
+                        (fail-result settled
+                          "TODO-NATIVE-ATOM-CAS-VALUES: compare-and-set! values do not match the Atom content type")
+                        (let [result-id: core/NativeId
+                              (state-id settled owner "atom-cas")]
+                          (->ExprResultV0
+                            (state-emit (state-bump settled)
+                              (core/->AtomCompareExchangeInstruction
+                                (core/->SsaValueV0 result-id (bool-type-id))
+                                (nth values 0)
+                                (atom-state-value-id owner)
+                                (nth operands 0)
+                                (nth operands 1)))
+                            result-id (bool-type-id) false))))))
+
+                (= "compare-and-set!" bare-callee)
+                (fail-result current
+                  "TODO-NATIVE-ATOM-CAS-ARITY: compare-and-set! takes one Atom, one expected value, and one replacement value")
+
                 (and (or (= "+" callee) (= "-" callee)
                          (= "*" callee) (= "/" callee))
                   (exact-binary-float-values? value-types))
