@@ -29,7 +29,9 @@ done
   || die "managed projection is unavailable: $managed_out/fram/rt_core.clj"
 [[ -d "$native_repo/native-core/src/native" ]] \
   || die "native source root is unavailable: $native_repo/native-core/src/native"
-[[ -f "$native_shim/native_shim.c" && -f "$native_shim/native_shim.h" ]] \
+[[ -f "$native_shim/native_shim.c" &&
+   -f "$native_shim/native_shim.h" &&
+   -f "$native_shim/native_unicode15_data.h" ]] \
   || die "native shim is unavailable: $native_shim"
 mkdir -p "$generated" "$artifacts"
 
@@ -140,6 +142,8 @@ digest_line() {
     'beagle:native-core/shim/native_shim.c'
   digest_line "$native_shim/native_shim.h" \
     'beagle:native-core/shim/native_shim.h'
+  digest_line "$native_shim/native_unicode15_data.h" \
+    'beagle:native-core/shim/native_unicode15_data.h'
 } >"$generated/source.sha256"
 
 artifact_names=(rt_core.facts inventory.txt managed.out lowered-managed.out
@@ -194,22 +198,10 @@ if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
   mkdir -p "$build"
   cp "$generated/module_0.h" "$generated/module_0.c" \
     "$generated/function_map.h" "$here/main.c" "$build/"
-  cp "$native_shim/native_shim.c" "$native_shim/native_shim.h" "$build/"
+  cp "$native_shim/native_shim.c" "$native_shim/native_shim.h" "$native_shim/native_unicode15_data.h" "$build/"
 
-  unicode_cflags=()
-  unicode_libs=()
-  if rg -Fxq '/* native-link-requirement icu-uc=72.1 */' \
-      "$generated/module_0.c"; then
-    pkg-config --exact-version=72.1 icu-uc \
-      || die "generated C17 requires exact icu-uc version 72.1"
-    read -r -a icu_cflags <<<"$(pkg-config --cflags icu-uc)"
-    read -r -a icu_libs <<<"$(pkg-config --libs icu-uc)"
-    unicode_cflags=(-DNATIVE_UNICODE_ICU "${icu_cflags[@]}")
-    unicode_libs=("${icu_libs[@]}")
-  fi
-
-  (cd "$build" && gcc "${strict[@]}" "${unicode_cflags[@]}" -o probe_gcc \
-    module_0.c native_shim.c main.c "${unicode_libs[@]}")
+  (cd "$build" && gcc "${strict[@]}" -o probe_gcc \
+    module_0.c native_shim.c main.c)
   "$build/probe_gcc" >"$scratch/gcc.out"
   clang_bin="$(command -v clang || true)"
   if [[ -z "$clang_bin" ]]; then
@@ -217,8 +209,8 @@ if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
       | sort -V | tail -1 || true)"
   fi
   [[ -n "$clang_bin" ]] || die "Clang is required for the second C17 frontend"
-  (cd "$build" && "$clang_bin" "${strict[@]}" "${unicode_cflags[@]}" \
-    -o probe_clang module_0.c native_shim.c main.c "${unicode_libs[@]}")
+  (cd "$build" && "$clang_bin" "${strict[@]}" \
+    -o probe_clang module_0.c native_shim.c main.c)
   "$build/probe_clang" >"$scratch/clang.out"
   cmp -s "$scratch/gcc.out" "$generated/lowered-managed.out" \
     || die "GCC C17 probe differs from the lowered managed oracle"

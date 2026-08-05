@@ -49,7 +49,7 @@ find_clang() {
 build="$work/c"
 mkdir -p "$build"
 cp "$artifacts/module_0.h" "$artifacts/module_0.c" "$artifacts/main.c" "$build/"
-cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$build/"
+cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 ( cd "$build" && gcc "${strict[@]}" -o probe_gcc module_0.c native_shim.c main.c )

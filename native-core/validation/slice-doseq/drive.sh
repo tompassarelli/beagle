@@ -123,7 +123,7 @@ fi
 
 cp "$scratch/art/module_0.h" "$scratch/art/module_0.c" "$here/main.c" \
   "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/c/"
+  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$scratch/c/"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 definition="-DDRIVE_FN=native_m0_fn_$drive_index"

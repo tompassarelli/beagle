@@ -95,7 +95,7 @@ cp "$sequence_scratch/artifacts-one/module_0.h" \
   "$sequence_scratch/artifacts-one/module_0.c" \
   "$sequence_here/main.c" \
   "$sequence_repo/native-core/shim/native_shim.c" \
-  "$sequence_repo/native-core/shim/native_shim.h" \
+  "$sequence_repo/native-core/shim/native_shim.h" "$sequence_repo/native-core/shim/native_unicode15_data.h" \
   "$build/"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)

@@ -73,7 +73,7 @@ fi
 build="$scratch/c"
 mkdir -p "$build"
 cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
-cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$build/"
+cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
 any_type="$(sed -nE \
   's/^(native_m0_type_[0-9]+) native_m0_fn_1\(.*/\1/p' \

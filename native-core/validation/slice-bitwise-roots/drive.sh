@@ -98,7 +98,7 @@ clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M \
 
 cp "$scratch/module_0.h" "$scratch/module_0.c" "$scratch/module_1.ssa" \
   "$here/main.c" "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/build/"
+  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$scratch/build/"
 "$qbe_bin" "$scratch/build/module_1.ssa" >"$scratch/build/module_1.s"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)

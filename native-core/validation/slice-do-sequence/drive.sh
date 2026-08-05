@@ -105,7 +105,7 @@ if [[ -z "$body_last" || -z "$do_last" || -z "$do_first_traps" ||
 fi
 
 cp "$here/main.c" "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/"
+  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$scratch/"
 
 definitions=(
   "-DBODY_LAST_FN=native_m0_fn_$body_last"

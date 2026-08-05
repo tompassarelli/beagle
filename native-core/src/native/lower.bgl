@@ -10996,6 +10996,40 @@
                 (fail-result current
                   "TODO-NATIVE-KEYWORD-ACCESS-TARGET: keyword access needs a closed map or known record field")))))
 
+        (= "method-call" kind)
+        (let [method: String (fact-text index expr "method")
+              target-node: (U core/NativeId Nil)
+              (index-first-object index expr "target")
+              args-node: (U core/NativeId Nil) (index-first-object index expr "args")
+              args: (Vec core/NativeId)
+              (if (nil? args-node) [] (index-sequence-items index args-node))]
+          (if (or (not (= ".toLowerCase" method))
+                (nil? target-node)
+                (not (= 1 (count args)))
+                (not (source-ref-named? index (nth args 0)
+                       "java.util.Locale/ROOT")))
+            (fail-result state
+              "TODO-NATIVE-METHOD-CALL: v0 lowers only String.toLowerCase(Locale.ROOT)")
+            (let [target: ExprResultV0
+                  (lower-expr env owner state target-node)
+                  current: BodyStateV0 (exprresultv0-state target)]
+              (cond
+                (exprresultv0-terminated target) target
+                (state-blocked? current) (dead-result current)
+                (not (text-operand? (exprresultv0-type-id target)))
+                (fail-result current
+                  "TODO-NATIVE-TEXT-LOWER-OPERAND: toLowerCase(Locale.ROOT) needs one native Text target")
+                :else
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-lower-root")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->TextLowerV0 (arena-value-id owner)
+                          (exprresultv0-value-id target))))
+                    result-id (text-type-id) false))))))
+
         (or (= "call" kind)
           (and (= "static-call" kind)
             (or (host-environment-callee? (fact-text index expr "callee"))

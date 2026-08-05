@@ -64,7 +64,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 
 cp "$artifacts/module_0.h" "$artifacts/module_0.c" "$here/main.c" "$scratch/c/"
 cp "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/c/"
+  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$scratch/c/"
 
 pair_type="$(sed -nE 's/^(native_m0_type_[0-9]+) native_m0_fn_0\(.*/\1/p' \
   "$artifacts/module_0.h")"

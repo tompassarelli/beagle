@@ -168,7 +168,7 @@ clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M -e "
 (assert (= 0 (native.int-division/mod-int Long/MIN_VALUE -1)))"
 
 cp "$here/main.c" "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/"
+  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$scratch/"
 definitions=(
   "-DQUOT_FN=native_m0_fn_$quot_index"
   "-DREM_FN=native_m0_fn_$rem_index"

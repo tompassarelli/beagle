@@ -2,7 +2,7 @@
 # Link one public zero-argument Beagle function as a native executable.
 #
 # Usage:
-#   beagle native-exe --out FILE --entry NS/NAME [--cc CC]
+#   beagle native-exe --out FILE --entry NS/NAME [--cc CC] [--static]
 #                     [--artifacts DIR] SOURCE...
 #
 # The native-module report and projection artifacts are copied to DIR (default:
@@ -28,6 +28,7 @@ out=""
 entry=""
 artifacts=""
 cc="${CC:-cc}"
+static_link=0
 sources=()
 
 while [[ $# -gt 0 ]]; do
@@ -72,6 +73,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cc=*)
             cc="${1#*=}"
+            shift
+            ;;
+        --static)
+            static_link=1
             shift
             ;;
         --help|-h)
@@ -125,6 +130,8 @@ published_names=(
     module_0.ssa
     native_shim.h
     native_shim.c
+    native_unicode15_data.h
+    UNICODE-LICENSE.txt
     entry.c
     native-exe.log
     native-exe.report.txt
@@ -257,7 +264,8 @@ if [[ $module_rc -ne 0 ]]; then
     exit "$module_rc"
 fi
 
-for name in source.facts report.txt module_0.h module_0.c module_0.ssa native_shim.h native_shim.c; do
+for name in source.facts report.txt module_0.h module_0.c module_0.ssa \
+    native_shim.h native_shim.c native_unicode15_data.h UNICODE-LICENSE.txt; do
     [[ -f "$module_dir/$name" ]] || die "native-module omitted required artifact: $name"
 done
 
@@ -294,24 +302,6 @@ if [[ ${#entry_rows[@]} -ne 1 ]]; then
 fi
 function_index="${entry_rows[0]#fn_}"
 symbol="native_m0_fn_$function_index"
-
-native_cflags=()
-native_libs=()
-native_dependency=""
-if grep -Fqx '/* native-link-requirement icu-uc=72.1 */' \
-    "$module_dir/module_0.c"; then
-    pkg_config="${PKG_CONFIG:-pkg-config}"
-    pkg_config_path="$(command -v -- "$pkg_config" 2>/dev/null || true)"
-    [[ -n "$pkg_config_path" && -x "$pkg_config_path" ]] ||
-        die "native module requires pkg-config for icu-uc=72.1"
-    "$pkg_config_path" --exact-version=72.1 icu-uc ||
-        die "native module requires exact icu-uc version 72.1"
-    read -r -a icu_cflags <<<"$("$pkg_config_path" --cflags icu-uc)"
-    read -r -a icu_libs <<<"$("$pkg_config_path" --libs icu-uc)"
-    native_cflags=(-DNATIVE_UNICODE_ICU "${icu_cflags[@]}")
-    native_libs=("${icu_libs[@]}")
-    native_dependency=" dependency=icu-uc@72.1"
-fi
 
 mapfile -t prototypes < <(grep -E "^[A-Za-z_][A-Za-z0-9_]* ${symbol}\\(.*\\);$" \
     "$module_dir/module_0.h" || true)
@@ -433,14 +423,17 @@ EOF
 } >"$entry_source"
 
 linked="$work/native-executable"
+link_flags=()
+if [[ $static_link -eq 1 ]]; then
+    link_flags=(-static)
+fi
 set +e
 "$cc_path" -std=c17 -pedantic -Wall -Wextra -Werror \
-    "${native_cflags[@]}" \
+    "${link_flags[@]}" \
     -I "$module_dir" \
     "$module_dir/module_0.c" \
     "$module_dir/native_shim.c" \
     "$entry_source" \
-    "${native_libs[@]}" \
     -o "$linked" >"$work/native-exe.log" 2>&1
 link_rc=$?
 set -e
@@ -450,14 +443,15 @@ if [[ $link_rc -ne 0 ]]; then
 fi
 [[ -x "$linked" ]] || die "C17 compiler reported success without an executable"
 
-for name in source.facts report.txt module_0.h module_0.c module_0.ssa native_shim.h native_shim.c; do
+for name in source.facts report.txt module_0.h module_0.c module_0.ssa \
+    native_shim.h native_shim.c native_unicode15_data.h UNICODE-LICENSE.txt; do
     cp -- "$module_dir/$name" "$artifacts/$name"
 done
 cp -- "$entry_source" "$artifacts/entry.c"
 cp -- "$work/native-exe.log" "$artifacts/native-exe.log"
 
 entry_line="native-exe-entry PASS name=$entry symbol=$symbol return=$entry_return abi=$abi"
-c17_line="native-exe-c17 PASS compiler=$cc_path output=$out$native_dependency"
+c17_line="native-exe-c17 PASS compiler=$cc_path output=$out"
 printf '%s\n%s\n' "$entry_line" "$c17_line" >"$artifacts/native-exe.report.txt"
 mv -f -- "$linked" "$out"
 success=1

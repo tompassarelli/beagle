@@ -227,6 +227,11 @@
       (do (row! n "form-kind" "t" "static-call")
           (row! n "callee" "t" (get e "name"))
           (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
+      "method-call"
+      (do (row! n "form-kind" "t" "method-call")
+          (row! n "method" "t" (get e "method"))
+          (row! n "target" "n" (emit-expr (get e "target")))
+          (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "do"      (do (row! n "form-kind" "t" "do")
                     (row! n "body" "n" (emit-seq (get e "body") emit-expr)))
       "fn"      (do (row! n "form-kind" "t" "fn")

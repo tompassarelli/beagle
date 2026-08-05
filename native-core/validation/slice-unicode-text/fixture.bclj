@@ -2,10 +2,11 @@
 (ns native.unicode-text)
 (define-mode strict)
 
-(require clojure.string :as str)
+(declare-extern java.util.Locale/ROOT Any)
+(declare-extern .toLowerCase [String Any -> String])
 
 (defn lower-root [value: String] -> String
-  (str/lower-case value))
+  (.toLowerCase value java.util.Locale/ROOT))
 
 (defn letter-decimal-runs [value: String] -> (Vec String)
   (re-seq #"[\p{L}\p{Nd}]+" value))

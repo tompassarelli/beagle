@@ -3495,15 +3495,7 @@ ffc_result ffc_parse_json_number(const char *start, const char *end,
 #undef ffc_internal
 /* END vendored ffc.h. */
 
-#ifdef NATIVE_UNICODE_ICU
-#include <unicode/uchar.h>
-#include <unicode/ucasemap.h>
-#include <unicode/uvernum.h>
-
-#if (U_ICU_VERSION_MAJOR_NUM != 72) || (U_ICU_VERSION_MINOR_NUM != 1)
-#error "Native Unicode operations require ICU4C 72.1"
-#endif
-#endif
+#include "native_unicode15_data.h"
 
 struct native_atom {
   _Atomic bool locked;
@@ -6642,46 +6634,390 @@ uint64_t native_text_trim(native_arena *arena, uint64_t source) {
   return native_text_copy_range(arena, source, first, last);
 }
 
-#ifdef NATIVE_UNICODE_ICU
-uint64_t native_text_lower_root(native_arena *arena, uint64_t source) {
-  uint64_t source_length = native_text_length(source);
-  const uint8_t *source_bytes = native_text_bytes(source);
-  UErrorCode status = U_ZERO_ERROR;
-  UCaseMap *case_map;
-  int32_t needed;
-  uint8_t *destination = NULL;
-  uint64_t result;
-  int32_t written;
-  if (source_length > (uint64_t)INT32_MAX) {
-    native_trap(NATIVE_TRAP_OVERFLOW);
-  }
-  case_map = ucasemap_open("", UINT32_C(0), &status);
-  if (U_FAILURE(status) || (case_map == NULL)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  needed = ucasemap_utf8ToLower(case_map, NULL, 0,
-                                (const char *)source_bytes,
-                                (int32_t)source_length, &status);
-  if ((status != U_BUFFER_OVERFLOW_ERROR) && U_FAILURE(status)) {
-    ucasemap_close(case_map);
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  if (needed < 0) {
-    ucasemap_close(case_map);
-    native_trap(NATIVE_TRAP_OVERFLOW);
-  }
-  result = native_text_alloc(arena, (uint64_t)needed, &destination);
-  if (needed != 0) {
-    status = U_ZERO_ERROR;
-    written = ucasemap_utf8ToLower(case_map, (char *)destination, needed,
-                                   (const char *)source_bytes,
-                                   (int32_t)source_length, &status);
-    if (U_FAILURE(status) || (written != needed)) {
-      ucasemap_close(case_map);
-      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+typedef enum native_jdk_word_base {
+  NATIVE_JDK_WORD_NONE,
+  NATIVE_JDK_WORD_LETTER,
+  NATIVE_JDK_WORD_NUMBER
+} native_jdk_word_base;
+
+static uint32_t native_unicode15_properties(uint32_t codepoint) {
+  size_t lower = 0U;
+  size_t upper = NATIVE_UNICODE15_RANGE_COUNT;
+  while (lower < upper) {
+    size_t middle = lower + ((upper - lower) / 2U);
+    const native_unicode15_range *range = &native_unicode15_ranges[middle];
+    if (codepoint < range->first) {
+      upper = middle;
+    } else if (codepoint > range->last) {
+      lower = middle + 1U;
+    } else {
+      return range->flags;
     }
   }
-  ucasemap_close(case_map);
+  return UINT32_C(0);
+}
+
+static uint32_t native_unicode15_simple_lower(uint32_t codepoint) {
+  size_t lower = 0U;
+  size_t upper = NATIVE_UNICODE15_LOWER_COUNT;
+  while (lower < upper) {
+    size_t middle = lower + ((upper - lower) / 2U);
+    const native_unicode15_lower *mapping = &native_unicode15_lowers[middle];
+    if (codepoint < mapping->source) {
+      upper = middle;
+    } else if (codepoint > mapping->source) {
+      lower = middle + 1U;
+    } else {
+      return mapping->target;
+    }
+  }
+  return codepoint;
+}
+
+static const native_unicode15_special_lower *native_unicode15_special_lowercase(
+    uint32_t codepoint) {
+  size_t lower = 0U;
+  size_t upper = NATIVE_UNICODE15_SPECIAL_LOWER_COUNT;
+  while (lower < upper) {
+    size_t middle = lower + ((upper - lower) / 2U);
+    const native_unicode15_special_lower *mapping =
+        &native_unicode15_special_lowers[middle];
+    if (codepoint < mapping->source) {
+      upper = middle;
+    } else if (codepoint > mapping->source) {
+      lower = middle + 1U;
+    } else {
+      return mapping;
+    }
+  }
+  return NULL;
+}
+
+static bool native_utf8_previous(const uint8_t *bytes, uint64_t length,
+                                 uint64_t *offset, uint32_t *out) {
+  uint64_t start;
+  uint64_t decoded;
+  if ((offset == NULL) || (out == NULL) || (*offset == UINT64_C(0)) ||
+      (*offset > length)) {
+    return false;
+  }
+  start = *offset - UINT64_C(1);
+  while ((start > UINT64_C(0)) &&
+         ((bytes[start] & UINT8_C(0xc0)) == UINT8_C(0x80))) {
+    start -= UINT64_C(1);
+  }
+  decoded = start;
+  if (!native_utf8_next(bytes, length, &decoded, out) ||
+      (decoded != *offset)) {
+    return false;
+  }
+  *offset = start;
+  return true;
+}
+
+static bool native_jdk_separate_letter(uint32_t codepoint) {
+  return (codepoint == UINT32_C(0x3005)) ||
+         ((codepoint >= UINT32_C(0x4e00)) &&
+          (codepoint <= UINT32_C(0x9fa5))) ||
+         ((codepoint >= UINT32_C(0xf900)) &&
+          (codepoint <= UINT32_C(0xfa2d))) ||
+         ((codepoint >= UINT32_C(0x30a1)) &&
+          (codepoint <= UINT32_C(0x30fa))) ||
+         (codepoint == UINT32_C(0x30fd)) ||
+         (codepoint == UINT32_C(0x30fe)) ||
+         ((codepoint >= UINT32_C(0x3041)) &&
+          (codepoint <= UINT32_C(0x3094))) ||
+         (codepoint == UINT32_C(0x309d)) ||
+         (codepoint == UINT32_C(0x309e)) ||
+         ((codepoint >= UINT32_C(0x3099)) &&
+          (codepoint <= UINT32_C(0x309c))) ||
+         (codepoint == UINT32_C(0x30fb)) ||
+         (codepoint == UINT32_C(0x30fc));
+}
+
+static native_jdk_word_base native_jdk_base(uint32_t codepoint,
+                                            uint32_t properties) {
+  if (((properties &
+        (NATIVE_UNICODE15_LETTER | NATIVE_UNICODE15_SPACING_MARK)) !=
+       UINT32_C(0)) &&
+      !native_jdk_separate_letter(codepoint)) {
+    return NATIVE_JDK_WORD_LETTER;
+  }
+  if ((properties & NATIVE_UNICODE15_NUMBER) != UINT32_C(0)) {
+    return NATIVE_JDK_WORD_NUMBER;
+  }
+  return NATIVE_JDK_WORD_NONE;
+}
+
+static bool native_jdk_mid_word(uint32_t codepoint, uint32_t properties) {
+  return ((properties &
+           (NATIVE_UNICODE15_DASH | NATIVE_UNICODE15_CONNECTOR)) !=
+          UINT32_C(0)) ||
+         (codepoint == UINT32_C(0x2027)) ||
+         (codepoint == UINT32_C(0x0022)) ||
+         (codepoint == UINT32_C(0x0027)) ||
+         (codepoint == UINT32_C(0x002e));
+}
+
+static bool native_jdk_mid_number(uint32_t codepoint) {
+  return (codepoint == UINT32_C(0x0022)) ||
+         (codepoint == UINT32_C(0x0027)) ||
+         (codepoint == UINT32_C(0x002c)) ||
+         (codepoint == UINT32_C(0x002e)) ||
+         (codepoint == UINT32_C(0x066b));
+}
+
+static bool native_jdk_mid(native_jdk_word_base base, uint32_t codepoint,
+                           uint32_t properties) {
+  return ((base == NATIVE_JDK_WORD_LETTER) &&
+          native_jdk_mid_word(codepoint, properties)) ||
+         ((base == NATIVE_JDK_WORD_NUMBER) &&
+          native_jdk_mid_number(codepoint));
+}
+
+static bool native_jdk_has_cased_after(const uint8_t *bytes, uint64_t length,
+                                       uint64_t offset) {
+  native_jdk_word_base current = NATIVE_JDK_WORD_LETTER;
+  uint64_t cursor = offset;
+  while (cursor < length) {
+    uint64_t next = cursor;
+    uint32_t codepoint;
+    uint32_t properties;
+    native_jdk_word_base base;
+    if (!native_utf8_next(bytes, length, &next, &codepoint)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    properties = native_unicode15_properties(codepoint);
+    if ((properties & (NATIVE_UNICODE15_FORMAT |
+                       NATIVE_UNICODE15_ENCLOSING_MARK)) != UINT32_C(0)) {
+      cursor = next;
+      continue;
+    }
+    base = native_jdk_base(codepoint, properties);
+    if (base != NATIVE_JDK_WORD_NONE) {
+      cursor = next;
+      current = base;
+      if ((properties & NATIVE_UNICODE15_CASED) != UINT32_C(0)) {
+        return true;
+      }
+      continue;
+    }
+    if (native_jdk_mid(current, codepoint, properties)) {
+      uint64_t candidate = next;
+      uint32_t candidate_codepoint;
+      uint32_t candidate_properties;
+      native_jdk_word_base candidate_base;
+      do {
+        if (candidate >= length) {
+          return false;
+        }
+        next = candidate;
+        if (!native_utf8_next(bytes, length, &next, &candidate_codepoint)) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        candidate_properties =
+            native_unicode15_properties(candidate_codepoint);
+        candidate = next;
+      } while ((candidate_properties & NATIVE_UNICODE15_FORMAT) !=
+               UINT32_C(0));
+      candidate_base =
+          native_jdk_base(candidate_codepoint, candidate_properties);
+      if (candidate_base != current) {
+        return false;
+      }
+      cursor = candidate;
+      if ((candidate_properties & NATIVE_UNICODE15_CASED) != UINT32_C(0)) {
+        return true;
+      }
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+static bool native_jdk_has_cased_before(const uint8_t *bytes, uint64_t length,
+                                        uint64_t offset) {
+  native_jdk_word_base current = NATIVE_JDK_WORD_LETTER;
+  uint64_t cursor = offset;
+  while (cursor > UINT64_C(0)) {
+    uint64_t previous = cursor;
+    uint32_t codepoint;
+    uint32_t properties;
+    native_jdk_word_base base;
+    if (!native_utf8_previous(bytes, length, &previous, &codepoint)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    properties = native_unicode15_properties(codepoint);
+    if ((properties & (NATIVE_UNICODE15_FORMAT |
+                       NATIVE_UNICODE15_ENCLOSING_MARK)) != UINT32_C(0)) {
+      cursor = previous;
+      continue;
+    }
+    base = native_jdk_base(codepoint, properties);
+    if (base != NATIVE_JDK_WORD_NONE) {
+      cursor = previous;
+      current = base;
+      if ((properties & NATIVE_UNICODE15_CASED) != UINT32_C(0)) {
+        return true;
+      }
+      continue;
+    }
+    if (native_jdk_mid(current, codepoint, properties)) {
+      uint64_t candidate = previous;
+      uint32_t candidate_codepoint;
+      uint32_t candidate_properties;
+      native_jdk_word_base candidate_base;
+      do {
+        if (candidate == UINT64_C(0)) {
+          return false;
+        }
+        previous = candidate;
+        if (!native_utf8_previous(bytes, length, &previous,
+                                  &candidate_codepoint)) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        candidate_properties =
+            native_unicode15_properties(candidate_codepoint);
+        candidate = previous;
+      } while ((candidate_properties &
+                (NATIVE_UNICODE15_FORMAT |
+                 NATIVE_UNICODE15_ENCLOSING_MARK)) != UINT32_C(0));
+      candidate_base =
+          native_jdk_base(candidate_codepoint, candidate_properties);
+      if (candidate_base != current) {
+        return false;
+      }
+      cursor = candidate;
+      if ((candidate_properties & NATIVE_UNICODE15_CASED) != UINT32_C(0)) {
+        return true;
+      }
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+static uint64_t native_utf8_codepoint_length(uint32_t codepoint) {
+  if (codepoint <= UINT32_C(0x7f)) {
+    return UINT64_C(1);
+  }
+  if (codepoint <= UINT32_C(0x7ff)) {
+    return UINT64_C(2);
+  }
+  if (codepoint <= UINT32_C(0xffff)) {
+    return UINT64_C(3);
+  }
+  if (codepoint <= UINT32_C(0x10ffff)) {
+    return UINT64_C(4);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static uint64_t native_utf8_write_codepoint(uint8_t *destination,
+                                            uint32_t codepoint) {
+  if (codepoint <= UINT32_C(0x7f)) {
+    destination[0] = (uint8_t)codepoint;
+    return UINT64_C(1);
+  }
+  if (codepoint <= UINT32_C(0x7ff)) {
+    destination[0] = (uint8_t)(UINT32_C(0xc0) | (codepoint >> 6));
+    destination[1] =
+        (uint8_t)(UINT32_C(0x80) | (codepoint & UINT32_C(0x3f)));
+    return UINT64_C(2);
+  }
+  if (codepoint <= UINT32_C(0xffff)) {
+    destination[0] = (uint8_t)(UINT32_C(0xe0) | (codepoint >> 12));
+    destination[1] =
+        (uint8_t)(UINT32_C(0x80) | ((codepoint >> 6) & UINT32_C(0x3f)));
+    destination[2] =
+        (uint8_t)(UINT32_C(0x80) | (codepoint & UINT32_C(0x3f)));
+    return UINT64_C(3);
+  }
+  if (codepoint <= UINT32_C(0x10ffff)) {
+    destination[0] = (uint8_t)(UINT32_C(0xf0) | (codepoint >> 18));
+    destination[1] =
+        (uint8_t)(UINT32_C(0x80) | ((codepoint >> 12) & UINT32_C(0x3f)));
+    destination[2] =
+        (uint8_t)(UINT32_C(0x80) | ((codepoint >> 6) & UINT32_C(0x3f)));
+    destination[3] =
+        (uint8_t)(UINT32_C(0x80) | (codepoint & UINT32_C(0x3f)));
+    return UINT64_C(4);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static uint8_t native_jdk_lower_mapping(const uint8_t *bytes, uint64_t length,
+                                        uint64_t start, uint64_t end,
+                                        uint32_t codepoint,
+                                        uint32_t mapping[3]) {
+  const native_unicode15_special_lower *special;
+  if (codepoint == UINT32_C(0x03a3)) {
+    mapping[0] =
+        native_jdk_has_cased_before(bytes, length, start) &&
+                !native_jdk_has_cased_after(bytes, length, end)
+            ? UINT32_C(0x03c2)
+            : UINT32_C(0x03c3);
+    return UINT8_C(1);
+  }
+  special = native_unicode15_special_lowercase(codepoint);
+  if (special != NULL) {
+    uint8_t index;
+    for (index = UINT8_C(0); index < special->length; index++) {
+      mapping[index] = special->mapping[index];
+    }
+    return special->length;
+  }
+  mapping[0] = native_unicode15_simple_lower(codepoint);
+  return UINT8_C(1);
+}
+
+uint64_t native_text_lower_root(native_arena *arena, uint64_t source) {
+  uint64_t length = native_text_length(source);
+  const uint8_t *bytes = native_text_bytes(source);
+  uint64_t offset = UINT64_C(0);
+  uint64_t measured = UINT64_C(0);
+  uint8_t *destination = NULL;
+  uint64_t result;
+  while (offset < length) {
+    uint64_t start = offset;
+    uint32_t codepoint;
+    uint32_t mapping[3];
+    uint8_t count;
+    uint8_t index;
+    if (!native_utf8_next(bytes, length, &offset, &codepoint)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    count = native_jdk_lower_mapping(bytes, length, start, offset, codepoint,
+                                     mapping);
+    for (index = UINT8_C(0); index < count; index++) {
+      uint64_t amount = native_utf8_codepoint_length(mapping[index]);
+      if (measured > (UINT64_MAX - amount)) {
+        native_trap(NATIVE_TRAP_OVERFLOW);
+      }
+      measured += amount;
+    }
+  }
+  result = native_text_alloc(arena, measured, &destination);
+  offset = UINT64_C(0);
+  measured = UINT64_C(0);
+  while (offset < length) {
+    uint64_t start = offset;
+    uint32_t codepoint;
+    uint32_t mapping[3];
+    uint8_t count;
+    uint8_t index;
+    if (!native_utf8_next(bytes, length, &offset, &codepoint)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    count = native_jdk_lower_mapping(bytes, length, start, offset, codepoint,
+                                     mapping);
+    for (index = UINT8_C(0); index < count; index++) {
+      measured +=
+          native_utf8_write_codepoint(destination + measured, mapping[index]);
+    }
+  }
   return result;
 }
 
@@ -6708,8 +7044,12 @@ native_vec *native_text_letter_decimal_runs(native_arena *arena,
     if (!native_utf8_next(bytes, length, &offset, &codepoint)) {
       native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
     }
-    member = (u_isalpha((UChar32)codepoint) != 0) ||
-             (u_charType((UChar32)codepoint) == U_DECIMAL_DIGIT_NUMBER);
+    {
+      uint32_t properties = native_unicode15_properties(codepoint);
+      member = (properties &
+                (NATIVE_UNICODE15_LETTER | NATIVE_UNICODE15_DECIMAL)) !=
+               UINT32_C(0);
+    }
     if (member && (run_start == UINT64_MAX)) {
       run_start = start;
     } else if (!member && (run_start != UINT64_MAX)) {
@@ -6726,7 +7066,6 @@ native_vec *native_text_letter_decimal_runs(native_arena *arena,
   }
   return result;
 }
-#endif
 
 #define NATIVE_REGEX_MAX_TOKENS 128U
 #define NATIVE_REGEX_MAX_CAPTURES 8U

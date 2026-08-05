@@ -95,7 +95,7 @@ run_qbe "$artifacts/module_0.ssa" > "$build/module_0.s"
 run_qbe "$artifacts/module_1.ssa" > "$build/module_1.s"
 run_qbe "$artifacts/module_2.ssa" > "$build/module_2.s"
 cp "$artifacts/qbe_main.c" "$build/"
-cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$build/"
+cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c native_shim.c -o native_shim.o )
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c qbe_main.c -o qbe_main.o )

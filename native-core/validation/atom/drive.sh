@@ -116,7 +116,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 "
 
 cp "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/c/"
+  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$scratch/c/"
 
 main_source='/* Atom C17 validation driver. */
 #include "module_4.h"

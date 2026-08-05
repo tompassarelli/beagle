@@ -18,6 +18,18 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        unicodeData15 = pkgs.fetchurl {
+          url = "https://www.unicode.org/Public/15.0.0/ucd/UnicodeData.txt";
+          hash = "sha256-gG6a7WUDcZfx7IXhK+bozYcPxWCLTeD//ZkPaJ83anM=";
+        };
+        specialCasing15 = pkgs.fetchurl {
+          url = "https://www.unicode.org/Public/15.0.0/ucd/SpecialCasing.txt";
+          hash = "sha256-eLKcZLWEDSXBGp8xtmXuVRuKSZ7KbHDXcPytfdcQ9JQ=";
+        };
+        derivedCoreProperties15 = pkgs.fetchurl {
+          url = "https://www.unicode.org/Public/15.0.0/ucd/DerivedCoreProperties.txt";
+          hash = "sha256-02cpC8CGfmtITGg3BTC90aCLazJARgG4x6zK+D4FYo0=";
+        };
         # clj-nix builders (mkCljBin uberjar + mkGraalBin native-image), already
         # instantiated for this system's pkgs.
         cljpkgs = clj-nix.packages.${system};
@@ -218,15 +230,18 @@
         };
 
         devShells.default = pkgs.mkShell {
+          NATIVE_MUSL_CC =
+            "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
+          NATIVE_UNICODE_DATA15 = unicodeData15;
+          NATIVE_SPECIAL_CASING15 = specialCasing15;
+          NATIVE_DERIVED_CORE_PROPERTIES15 = derivedCoreProperties15;
+
           buildInputs = [
             racket
             pkgs.babashka
             pkgs.clojure
             pkgs.bun
             pkgs.qbe
-            pkgs.pkg-config
-            pkgs.icu72.dev
-            pkgs.icu72
             # Rust toolchain for tools/nix-parse-json (the rnix-backed Nix
             # importer helper). The nix-import-roundtrip test bootstraps this
             # helper via `cargo build --locked` from tracked source; pinning

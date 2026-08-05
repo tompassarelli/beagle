@@ -239,8 +239,9 @@
 
 ;; Text library operations share one closed instruction family. Allocation is
 ;; explicit in each operation through its arena SSA value; pure comparisons do
-;; not acquire one. Lowering is full Unicode root-locale mapping, and token runs
-;; are maximal Unicode Letter or DecimalDigit sequences.
+;; not acquire one. Lowering matches OpenJDK 21.0.12+2 Locale.ROOT over Unicode
+;; 15.0 scalars, and token runs are maximal Unicode Letter or DecimalDigit
+;; sequences.
 (defunion TextBuiltinOpV0
   (TextCompareV0
     [left-id: NativeId

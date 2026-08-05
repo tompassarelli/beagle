@@ -592,6 +592,10 @@ for artifact in module_0.h module_0.c module_0.ssa report.txt; do
 done
 cp "$BEAGLE_DIR/native-core/shim/native_shim.c" "$out/native_shim.c"
 cp "$BEAGLE_DIR/native-core/shim/native_shim.h" "$out/native_shim.h"
+cp "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h" \
+    "$out/native_unicode15_data.h"
+cp "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \
+    "$out/UNICODE-LICENSE.txt"
 
 cat "$out/report.txt"
 printf 'native-module: wrote C17 + QBE artifacts to %s\n' "$out"
