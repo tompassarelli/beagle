@@ -28,3 +28,17 @@
 
 (defn sort-texts [values: (Vec String)] -> (Vec String)
   (sort values))
+
+(defn rest-values [values: (Vec Int)] -> (Vec Int)
+  (rest values))
+
+(defn range-end [end: Int] -> (Vec Int)
+  (range end))
+
+(defn range-bounds
+  [start: Int
+   end: Int] -> (Vec Int)
+  (range start end))
+
+(defn pop-values [values: (Vec Int)] -> (Vec Int)
+  (pop values))

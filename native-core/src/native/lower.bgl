@@ -3887,6 +3887,7 @@
 
 (defn text-builtin-allocates? [operation: core/TextBuiltinOpV0] -> Bool
   (not (or (instance? native.core.TextCompareV0 operation)
+           (instance? native.core.TextEndsWithV0 operation)
            (instance? native.core.TextRegexMatchesV0 operation))))
 
 (defn map-type-of
@@ -4380,6 +4381,7 @@
 
 (defn static-type-predicate? [callee: String] -> Bool
   (or (= "sequential?" callee)
+    (= "vector?" callee)
     (= "map?" callee)
     (= "set?" callee)
     (= "string?" callee)
@@ -4387,7 +4389,8 @@
     (= "int?" callee)))
 
 (defn static-collection-predicate? [callee: String] -> Bool
-  (or (= "sequential?" callee) (= "map?" callee) (= "set?" callee)))
+  (or (= "sequential?" callee) (= "vector?" callee)
+    (= "map?" callee) (= "set?" callee)))
 
 (defn static-type-predicate-value
   [types: (Vec core/TypeDef)
@@ -4400,6 +4403,7 @@
       (= "sequential?" callee)
       (and (vector-type? types value-type)
         (not (map-value? types value-type)))
+      (= "vector?" callee) (vector-type? types value-type)
       (= "map?" callee)
       (or (map-type? types value-type) (map-value? types value-type))
       (= "set?" callee) (set-type? types value-type)
@@ -4774,6 +4778,7 @@
 (defn collection-predicate? [callee: String] -> Bool
   (or (= "map?" callee)
     (= "set?" callee)
+    (= "vector?" callee)
     (= "sequential?" callee)))
 
 (defn collection-predicate-type?
@@ -4787,6 +4792,7 @@
         (cond
           (= "map?" callee) (instance? native.core.MapTypeV0 shape)
           (= "set?" callee) (instance? native.core.SetTypeV0 shape)
+          (= "vector?" callee) (instance? native.core.VectorType shape)
           (= "sequential?" callee) (instance? native.core.VectorType shape)
           :else false)))))
 
@@ -5103,6 +5109,19 @@
             (core/->TextIndexOfInstruction
               (core/->SsaValueV0 result-id optional) source-id needle-id))
           result-id optional false)))))
+
+(defn lower-text-ends-with
+  [owner: core/NativeId
+   state: BodyStateV0
+   source-id: core/NativeId
+   suffix-id: core/NativeId] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner "text-ends-with")]
+    (->ExprResultV0
+      (state-emit (state-bump state)
+        (core/->TextBuiltinInstruction
+          (core/->SsaValueV0 result-id (bool-type-id))
+          (core/->TextEndsWithV0 source-id suffix-id)))
+      result-id (bool-type-id) false)))
 
 (defn lower-positive
   [types: (Vec core/TypeDef)
@@ -6515,6 +6534,163 @@
             (if taking (exprresultv0-value-id bounded) length-id)
             (arena-value-id owner)))
         result-id (nth value-types 1) false))))
+
+(defn lower-vector-rest
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (and (= 1 (count values))
+             (vector-type? types (nth value-types 0))))
+    (fail-result state
+      "TODO-NATIVE-REST-OPERAND: rest takes one closed native vector")
+    (let [one-id: core/NativeId (state-id state owner "rest-one")
+          prepared: BodyStateV0
+          (state-emit (state-bump state)
+            (core/->AtomInstruction
+              (core/->SsaValueV0 one-id (int-type-id))
+              (core/->I64Atom 1)))]
+      (lower-vector-take-drop types owner prepared "drop"
+        [one-id (nth values 0)]
+        [(int-type-id) (nth value-types 0)]))))
+
+(defn lower-vector-pop
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (and (= 1 (count values))
+             (vector-type? types (nth value-types 0))))
+    (fail-result state
+      "TODO-NATIVE-POP-OPERAND: pop takes one closed native vector")
+    (let [vector-type: core/NativeId (nth value-types 0)
+          length-id: core/NativeId (state-id state owner "pop-length")
+          with-length: BodyStateV0
+          (state-emit (state-bump state)
+            (core/->VecLengthInstruction
+              (core/->SsaValueV0 length-id (int-type-id))
+              (nth values 0)))
+          one-id: core/NativeId (state-id with-length owner "pop-one")
+          with-one: BodyStateV0
+          (state-emit (state-bump with-length)
+            (core/->AtomInstruction
+              (core/->SsaValueV0 one-id (int-type-id))
+              (core/->I64Atom 1)))
+          end: ExprResultV0
+          (lower-checked-arith with-one owner "-" length-id one-id)
+          settled: BodyStateV0 (exprresultv0-state end)]
+      (if (state-blocked? settled)
+        (dead-result settled)
+        (let [zero-id: core/NativeId (state-id settled owner "pop-zero")
+              with-zero: BodyStateV0
+              (state-emit (state-bump settled)
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 zero-id (int-type-id))
+                  (core/->I64Atom 0)))
+              result-id: core/NativeId (state-id with-zero owner "pop-vector")]
+          (->ExprResultV0
+            (state-emit (state-bump with-zero)
+              (core/->VecSliceInstructionV0
+                (core/->SsaValueV0 result-id vector-type)
+                (nth values 0) zero-id (exprresultv0-value-id end)
+                (arena-value-id owner)))
+            result-id vector-type false))))))
+
+(defn lower-int-range
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (or (= 1 (count values)) (= 2 (count values))))
+    (fail-result state
+      "TODO-NATIVE-RANGE-ARITY: range lowers its one- or two-Int finite form")
+    (let [coerced: ArgsResultV0
+          (coerce-values-to-type types owner state values value-types
+            (int-type-id))
+          settled: BodyStateV0 (argsresultv0-state coerced)
+          vector-type: (U core/NativeId Nil)
+          (vector-type-of types (int-type-id))]
+      (cond
+        (state-blocked? settled)
+        (fail-result settled
+          "TODO-NATIVE-RANGE-OPERANDS: range bounds must be safely narrowable to Int")
+
+        (nil? vector-type)
+        (fail-result settled
+          "TODO-NATIVE-RANGE-TYPE: range needs a closed (Vec Int) result type")
+
+        :else
+        (let [zero-id: core/NativeId (state-id settled owner "range-zero")
+              with-zero: BodyStateV0
+              (state-emit (state-bump settled)
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 zero-id (int-type-id))
+                  (core/->I64Atom 0)))
+              one-id: core/NativeId (state-id with-zero owner "range-one")
+              with-one: BodyStateV0
+              (state-emit (state-bump with-zero)
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 one-id (int-type-id))
+                  (core/->I64Atom 1)))
+              empty-id: core/NativeId (state-id with-one owner "range-empty")
+              prepared: BodyStateV0
+              (state-emit (state-bump with-one)
+                (core/->VecEmptyInstruction
+                  (core/->SsaValueV0 empty-id vector-type)
+                  zero-id (arena-value-id owner)))
+              operands: (Vec core/NativeId) (argsresultv0-values coerced)
+              start-id: core/NativeId
+              (if (= 1 (count operands)) zero-id (nth operands 0))
+              end-id: core/NativeId
+              (if (= 1 (count operands)) (nth operands 0) (nth operands 1))
+              header-id: core/NativeId (state-id prepared owner "range-header")
+              body-id: core/NativeId (state-id prepared owner "range-body")
+              exit-id: core/NativeId (state-id prepared owner "range-exit")
+              header-value: core/NativeId
+              (state-id prepared owner "range-current")
+              header-vector: core/NativeId
+              (state-id prepared owner "range-vector")
+              entered: BodyStateV0
+              (state-open-block
+                (state-close (state-bump prepared)
+                  (core/->JumpTerminator header-id [start-id empty-id]))
+                header-id
+                [(core/->Parameter header-value (int-type-id))
+                 (core/->Parameter header-vector vector-type)])
+              has-item: core/NativeId
+              (state-id entered owner "range-has-item")
+              compared: BodyStateV0
+              (state-emit (state-bump entered)
+                (core/->CompareInstruction
+                  (core/->SsaValueV0 has-item (bool-type-id))
+                  (core/->CompareLtI64V0 true) header-value end-id))
+              body-state: BodyStateV0
+              (state-open-block
+                (state-close compared
+                  (core/->BranchTerminator has-item body-id exit-id))
+                body-id [])
+              pushed-id: core/NativeId
+              (state-id body-state owner "range-push")
+              with-push: BodyStateV0
+              (state-emit (state-bump body-state)
+                (core/->VecPushInstruction
+                  (core/->SsaValueV0 pushed-id vector-type)
+                  header-vector header-value (arena-value-id owner)))
+              advanced: ExprResultV0
+              (lower-checked-arith with-push owner "+" header-value one-id)
+              looped: BodyStateV0 (exprresultv0-state advanced)]
+          (if (state-blocked? looped)
+            (dead-result looped)
+            (->ExprResultV0
+              (state-open-block
+                (state-close looped
+                  (core/->JumpTerminator header-id
+                    [(exprresultv0-value-id advanced) pushed-id]))
+                exit-id [])
+              header-vector vector-type false)))))))
 
 (defn lower-vector-sort
   [types: (Vec core/TypeDef)
@@ -10747,12 +10923,15 @@
                   static-predicate)
 
                 (and (static-collection-predicate? callee)
-                  (= 1 (count values)))
+                  (= 1 (count values))
+                  (= 0 (count
+                    (union-variants-of types (nth value-types 0)))))
                 (fail-result current
                   (str "TODO-NATIVE-PREDICATE-TYPE: " callee
                     " needs a known exact native type"))
 
-                (static-collection-predicate? callee)
+                (and (static-collection-predicate? callee)
+                  (not (= 1 (count values))))
                 (fail-result current
                   (str "TODO-NATIVE-PREDICATE-ARITY: " callee
                     " takes one operand"))
@@ -11254,6 +11433,17 @@
                 (fail-result current
                   (str "TODO-NATIVE-TEXT-SEARCH-OPERANDS: " callee
                     " takes two native Text operands"))
+
+                (and (= "str/ends-with?" callee)
+                  (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (lower-text-ends-with owner current
+                  (nth values 0) (nth values 1))
+
+                (= "str/ends-with?" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-ENDS-WITH-OPERANDS: str/ends-with? takes two native Text operands")
 
                 (and (= "str/index-of" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
@@ -11766,8 +11956,17 @@
                 (= "subvec" callee)
                 (lower-vector-slice types owner current values value-types)
 
+                (= "rest" callee)
+                (lower-vector-rest types owner current values value-types)
+
+                (= "pop" callee)
+                (lower-vector-pop types owner current values value-types)
+
                 (or (= "take" callee) (= "drop" callee))
                 (lower-vector-take-drop types owner current callee values value-types)
+
+                (= "range" callee)
+                (lower-int-range types owner current values value-types)
 
                 (and (= "reverse" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
@@ -14265,6 +14464,10 @@
     (worlds/canonical-record "text-compare"
       [(id-value (core/textcomparev0-left-id operation))
        (id-value (core/textcomparev0-right-id operation))])
+    (instance? native.core.TextEndsWithV0 operation)
+    (worlds/canonical-record "text-ends-with"
+      [(id-value (core/textendswithv0-source-id operation))
+       (id-value (core/textendswithv0-suffix-id operation))])
     (instance? native.core.TextTrimV0 operation)
     (worlds/canonical-record "text-trim"
       [(id-value (core/texttrimv0-arena-id operation))

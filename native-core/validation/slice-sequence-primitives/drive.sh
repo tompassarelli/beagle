@@ -68,6 +68,10 @@ grep -Fq "lowered fn_3 take-values " "$report"
 grep -Fq "lowered fn_4 drop-values " "$report"
 grep -Fq "lowered fn_5 sort-values " "$report"
 grep -Fq "lowered fn_6 sort-texts " "$report"
+grep -Fq "lowered fn_7 rest-values " "$report"
+grep -Fq "lowered fn_8 range-end " "$report"
+grep -Fq "lowered fn_9 range-bounds " "$report"
+grep -Fq "lowered fn_10 pop-values " "$report"
 grep -Fxq "qbe-materialize REFUSED QBE vector sort is unsupported: sealed value descriptors have no QBE data representation" \
   "$report"
 if grep -Fq "pending TODO-NATIVE" "$report"; then
@@ -98,7 +102,7 @@ strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 (cd "$build" && gcc "${strict[@]}" -o sequence-gcc \
   module_0.c native_shim.c main.c)
 (cd "$build" && ./sequence-gcc)
-for edge in first last peek; do
+for edge in first last peek pop; do
   if (cd "$build" && ulimit -c 0 && ./sequence-gcc "$edge") 2>/dev/null; then
     echo "drive.sh: empty $edge returned instead of trapping" >&2
     exit 1
@@ -122,7 +126,7 @@ if test -n "$clang_bin"; then
   (cd "$build" && "$clang_bin" -std=c17 -Werror -o sequence-clang \
     module_0.c native_shim.c main.c)
   (cd "$build" && ./sequence-clang)
-  for edge in first last peek; do
+  for edge in first last peek pop; do
     if (cd "$build" && ulimit -c 0 && ./sequence-clang "$edge") 2>/dev/null; then
       echo "drive.sh: empty $edge returned under clang instead of trapping" >&2
       exit 1

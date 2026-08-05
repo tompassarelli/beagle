@@ -244,6 +244,9 @@
   (TextCompareV0
     [left-id: NativeId
      right-id: NativeId])
+  (TextEndsWithV0
+    [source-id: NativeId
+     suffix-id: NativeId])
   (TextTrimV0
     [arena-id: NativeId
      source-id: NativeId])
@@ -1657,6 +1660,7 @@
 (defn text-builtin-ssa-refs [operation: TextBuiltinOpV0] -> (Vec NativeId)
   (match operation
     [(TextCompareV0 left-id right-id) [left-id right-id]]
+    [(TextEndsWithV0 source-id suffix-id) [source-id suffix-id]]
     [(TextTrimV0 arena-id source-id) [arena-id source-id]]
     [(TextLowerV0 arena-id source-id) [arena-id source-id]]
     [(TextRegexReplaceV0 arena-id source-id pattern-id replacement-id)

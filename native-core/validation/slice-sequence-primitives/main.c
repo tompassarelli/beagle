@@ -43,8 +43,10 @@ int main(int argc, char **argv) {
       (void)native_m0_fn_0(empty);
     } else if (strcmp(argv[1], "last") == 0) {
       (void)native_m0_fn_1(empty);
-    } else {
+    } else if (strcmp(argv[1], "peek") == 0) {
       (void)native_m0_fn_2(empty);
+    } else {
+      (void)native_m0_fn_10(&arena, &capability, empty);
     }
     return 99;
   }
@@ -82,13 +84,54 @@ int main(int argc, char **argv) {
     return 6;
   }
 
+  selected = native_m0_fn_7(&arena, &capability, values);
+  if ((native_vec_length(selected) != INT64_C(2)) ||
+      (int_at(selected, INT64_C(0)) != INT64_C(1)) ||
+      (int_at(selected, INT64_C(1)) != INT64_C(2))) {
+    return 7;
+  }
+  selected = native_m0_fn_7(&arena, &capability,
+      native_vec_new(&arena, INT64_C(0), INT64_C(8), (size_t)8));
+  if (native_vec_length(selected) != INT64_C(0)) {
+    return 8;
+  }
+
+  selected = native_m0_fn_8(&arena, &capability, INT64_C(4));
+  if ((native_vec_length(selected) != INT64_C(4)) ||
+      (int_at(selected, INT64_C(0)) != INT64_C(0)) ||
+      (int_at(selected, INT64_C(3)) != INT64_C(3))) {
+    return 9;
+  }
+  selected = native_m0_fn_8(&arena, &capability, INT64_C(-3));
+  if (native_vec_length(selected) != INT64_C(0)) {
+    return 10;
+  }
+  selected = native_m0_fn_9(&arena, &capability,
+      INT64_C(-2), INT64_C(2));
+  if ((native_vec_length(selected) != INT64_C(4)) ||
+      (int_at(selected, INT64_C(0)) != INT64_C(-2)) ||
+      (int_at(selected, INT64_C(3)) != INT64_C(1))) {
+    return 11;
+  }
+  selected = native_m0_fn_9(&arena, &capability,
+      INT64_C(4), INT64_C(2));
+  if (native_vec_length(selected) != INT64_C(0)) {
+    return 12;
+  }
+  selected = native_m0_fn_10(&arena, &capability, values);
+  if ((native_vec_length(selected) != INT64_C(2)) ||
+      (int_at(selected, INT64_C(0)) != INT64_C(3)) ||
+      (int_at(selected, INT64_C(1)) != INT64_C(1))) {
+    return 13;
+  }
+
   sorted = native_m0_fn_5(&arena, &capability, values);
   if ((native_vec_length(sorted) != INT64_C(3)) ||
       (int_at(sorted, INT64_C(0)) != INT64_C(1)) ||
       (int_at(sorted, INT64_C(1)) != INT64_C(2)) ||
       (int_at(sorted, INT64_C(2)) != INT64_C(3)) ||
       (int_at(values, INT64_C(0)) != INT64_C(3))) {
-    return 7;
+    return 14;
   }
 
   {
@@ -107,7 +150,7 @@ int main(int argc, char **argv) {
          beta_first) ||
         (*(const uint64_t *)native_vec_at(sorted, INT64_C(2), INT64_C(8)) !=
          beta_second)) {
-      return 8;
+      return 15;
     }
   }
 

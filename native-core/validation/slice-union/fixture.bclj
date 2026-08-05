@@ -5,6 +5,8 @@
 (ns fixture.union)
 (define-mode strict)
 
+(require clojure.string :as str)
+
 (defrecord Pair
   [left: Int
    right: Int])
@@ -189,3 +191,17 @@
   [left: Int
    right: Int] -> Bool
   (< (double left) (double right)))
+
+(defn vector-value? [value: (U (Vec Int) Int)] -> Bool
+  (vector? value))
+
+(defn vector-probe [values: (Vec Int)] -> Bool
+  (vector-value? values))
+
+(defn int-vector? [value: Int] -> Bool
+  (vector-value? value))
+
+(defn text-ends-with?
+  [value: String
+   suffix: String] -> Bool
+  (str/ends-with? value suffix))

@@ -1440,6 +1440,22 @@
     (str "  " target " = native_text_compare("
       (value-name function slots (core/textcomparev0-left-id operation)) ", "
       (value-name function slots (core/textcomparev0-right-id operation)) ");\n")
+    (instance? native.core.TextEndsWithV0 operation)
+    (let [source: String
+          (value-name function slots (core/textendswithv0-source-id operation))
+          suffix: String
+          (value-name function slots (core/textendswithv0-suffix-id operation))
+          source-length: String (str target "_source_length")
+          suffix-length: String (str target "_suffix_length")]
+      (str "  {\n"
+        "    const uint64_t " source-length " = native_text_length(" source ");\n"
+        "    const uint64_t " suffix-length " = native_text_length(" suffix ");\n"
+        "    " target " = (" suffix-length " <= " source-length ") &&\n"
+        "      ((" suffix-length " == UINT64_C(0)) ||\n"
+        "       (memcmp(native_text_bytes(" source ") + (" source-length " - "
+        suffix-length "), native_text_bytes(" suffix "), (size_t)"
+        suffix-length ") == 0));\n"
+        "  }\n"))
     (instance? native.core.TextTrimV0 operation)
     (str "  " target " = native_text_trim((native_arena *)"
       (value-name function slots (core/texttrimv0-arena-id operation)) ", "

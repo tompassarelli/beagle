@@ -4,7 +4,8 @@
    fn_0 pair?  fn_1 wrap-int  fn_2 pair-left-of  fn_3 pair-right-of
    fn_4 any-equal? fn_5 any-hash fn_6 any-compare fn_7 pair-copy-of
    fn_8..19 logic probes; fn_26..31 exact Bool predicate probes;
-   fn_32..43 numeric scalar probes.
+   fn_32..43 numeric scalar probes; fn_44..46 vector predicates;
+   fn_47 text suffix.
    Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair. */
 #include <math.h>
 #include "module_0.h"
@@ -22,6 +23,10 @@
 typedef SLICE_ANY_TYPE slice_any;
 typedef SLICE_NIL_TYPE slice_nil_value;
 typedef SLICE_PAIR_TYPE slice_pair_value;
+
+#define ARENA_BYTES ((size_t)16384)
+
+static uint8_t arena_storage[ARENA_BYTES];
 
 struct slice_text_blob {
   uint64_t length;
@@ -87,7 +92,18 @@ static slice_any slice_nil(void) {
   return value;
 }
 
+static uint64_t text_value(native_arena *arena, const char *value) {
+  uint8_t *bytes;
+  size_t length = strlen(value);
+  uint64_t handle = native_text_alloc(arena, (uint64_t)length, &bytes);
+  if (length > 0U) {
+    memcpy(bytes, value, length);
+  }
+  return handle;
+}
+
 int main(int argc, char **argv) {
+  native_arena arena;
   slice_pair_value pair = { INT64_C(3), INT64_C(4) };
   slice_pair_value equal_pair = { INT64_C(3), INT64_C(4) };
   slice_pair_value different_pair = { INT64_C(3), INT64_C(5) };
@@ -103,6 +119,8 @@ int main(int argc, char **argv) {
   slice_any as_false = slice_bool(false);
   slice_any as_true = slice_bool(true);
   slice_any as_nil = slice_nil();
+
+  native_arena_init(&arena, arena_storage, ARENA_BYTES);
 
   if ((argc > 1) && (argv[1][0] == 'n')) {
     native_m0_fn_7(slice_pair(NULL));
@@ -272,7 +290,6 @@ int main(int argc, char **argv) {
   if (native_m0_fn_31(INT64_C(0)) || native_m0_fn_31(INT64_C(1))) {
     return 32;
   }
-
   if (native_m0_fn_32() != 1.5) {
     return 33;
   }
@@ -331,6 +348,30 @@ int main(int argc, char **argv) {
   if (!native_m0_fn_43(INT64_C(1), INT64_C(2))
       || native_m0_fn_43(INT64_C(2), INT64_C(1))) {
     return 44;
+  }
+  {
+    native_vec *values =
+        native_vec_new(&arena, INT64_C(0), INT64_C(8), (size_t)8);
+    if (!native_m0_fn_45(values) || native_m0_fn_46(INT64_C(42))) {
+      return 45;
+    }
+  }
+  {
+    uint64_t alphabet = text_value(&arena, "alphabet");
+    uint64_t alpha = text_value(&arena, "alpha");
+    uint64_t bet = text_value(&arena, "bet");
+    uint64_t empty = text_value(&arena, "");
+    uint64_t snowman = text_value(&arena, "snow\xE9\x9B\xAA\xE4\xBA\xBA");
+    uint64_t person = text_value(&arena, "\xE4\xBA\xBA");
+    if (!native_m0_fn_47(alphabet, bet) ||
+        native_m0_fn_47(alphabet, alpha) ||
+        !native_m0_fn_47(alphabet, alphabet) ||
+        !native_m0_fn_47(alphabet, empty) ||
+        !native_m0_fn_47(empty, empty) ||
+        native_m0_fn_47(empty, bet) ||
+        !native_m0_fn_47(snowman, person)) {
+      return 46;
+    }
   }
   return 0;
 }
