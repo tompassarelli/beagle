@@ -2,6 +2,8 @@
 (ns native.keyword-access)
 (define-mode strict)
 
+(require native.keyword-provider :as provider)
+
 (defrecord Pair
   [left: Int
    right: String])
@@ -65,3 +67,9 @@
 
 (defn missing-record-field [pair: Pair] -> Int
   (:missing pair))
+
+(defn imported-pair-value [pair: provider/Pair] -> String
+  (provider/pair-value pair))
+
+(defn imported-pair-roundtrip [value: String] -> String
+  (provider/pair-value (provider/->Pair value)))

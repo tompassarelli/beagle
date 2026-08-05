@@ -5,19 +5,29 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
 src="$here/fixture.bclj"
+provider="$here/provider.bclj"
+collision="$here/collision.bclj"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-keyword-access.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 "$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
+"$repo/bin/beagle-ast" "$provider" >"$scratch/provider.ast.json"
+"$repo/bin/beagle-ast" "$collision" >"$scratch/collision.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json=native-core/validation/slice-keyword-access/fixture.bclj" \
-  "$scratch/fixture.facts"
+  --input "$scratch/fixture.ast.json=native-core/validation/slice-keyword-access/fixture.bclj" \
+  --input "$scratch/provider.ast.json=native-core/validation/slice-keyword-access/provider.bclj" \
+  --output "$scratch/fixture.facts"
+bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+  --input "$scratch/fixture.ast.json=native-core/validation/slice-keyword-access/fixture.bclj" \
+  --input "$scratch/provider.ast.json=native-core/validation/slice-keyword-access/provider.bclj" \
+  --input "$scratch/collision.ast.json=native-core/validation/slice-keyword-access/collision.bclj" \
+  --output "$scratch/collision.facts"
 if [[ -f "$art/fixture.facts" ]] && ! cmp -s "$scratch/fixture.facts" "$art/fixture.facts"; then
   echo "drive.sh: regenerated projection differs from the committed fixture.facts" >&2
   exit 1
 fi
 cp "$scratch/fixture.facts" "$art/fixture.facts"
-sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
+sha256sum "$src" "$provider" | sed "s#  $here/#  #" >"$art/source.sha256"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bgl" \
@@ -52,15 +62,41 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"$art\" \"native-slice-keyword-access-v0\"))"
 cat "$art/report.txt"
 
+clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+(require '[native.core :as core]
+         '[native.lower :as lower]
+         '[native.slice :as slice])
+(let [rows (slice/parse-facts (slurp \"$scratch/collision.facts\"))
+      world (slice/source-world rows \"native.keyword-access\"
+              \"native-core/validation/slice-keyword-access/fixture.bclj\")
+      configuration [\"profile=3\"]
+      sealed (lower/sourcesealacceptedv0-sealed
+               (lower/seal-source-world world \"native-record-identity-v0\"
+                 configuration))
+      result (lower/lower-typed-world sealed \"native-record-identity-v0\"
+               configuration)]
+  (when-not (instance? native.lower.TypingRejectedV0 result)
+    (throw (ex-info \"same-module record shape collision was accepted\" {})))
+  (let [diagnostics (core/passreceiptv0-diagnostics
+                      (lower/typingrejectedv0-receipt result))]
+    (when-not (some #(= \"LOWER-RECORD-ID-SHAPE-COLLISION\"
+                         (core/diagnosticv0-code %)) diagnostics)
+      (throw (ex-info \"record collision rejection omitted its diagnostic\" {})))
+    (spit \"$art/collision-report.txt\"
+      \"same-module different-shape record identity REJECTED LOWER-RECORD-ID-SHAPE-COLLISION\n\")))"
+
 grep -q '^materialize OK ' "$art/report.txt"
 grep -q 'TODO-NATIVE-KEYWORD-MAP-KEY' "$art/report.txt"
 grep -q 'TODO-NATIVE-KEYWORD-ACCESS-TARGET' "$art/report.txt"
 for function in map-code-value map-code-value-cond map-code-value-equal \
     map-version-value optional-map-branch map-reject-count \
     map-other-after-code-check map-code-from-other-source \
-    map-code-false-arm; do
+    map-code-false-arm imported-pair-value imported-pair-roundtrip; do
   grep -Eq "^lowered [^ ]+ ${function} " "$art/report.txt"
 done
+grep -Fx 'source-modules 2' "$art/report.txt"
+grep -Fx 'same-module different-shape record identity REJECTED LOWER-RECORD-ID-SHAPE-COLLISION' \
+  "$art/collision-report.txt"
 if grep -q '^obligation-projection FAIL' "$art/report.txt"; then
   echo "drive.sh: keyword-access projection failed a Native obligation" >&2
   exit 1

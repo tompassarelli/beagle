@@ -163,9 +163,10 @@
    form-ids: (Map String (Vec core/NativeId))
    callee-names: (Map String Bool)
    child-nodes: (Map String (Vec core/NativeId))
+   parent-nodes: (Map String core/NativeId)
    definition-roots: (Map String core/NativeId)
    module-roots: (Map String core/NativeId)
-   record-names: (Vec String)])
+   record-keys: (Vec String)])
 
 (defn graph-text-index [graph: worlds/TermGraphV0] -> (Map String String)
   (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
@@ -254,11 +255,31 @@
         (index-first-object index module-root predicate)]
     (if (nil? sequence) [] (index-sequence-items index sequence))))
 
+(defn source-parent
+  [index: SourceIndexV0
+   node: core/NativeId] -> (U core/NativeId Nil)
+  (get (sourceindexv0-parent-nodes index) (id-value node)))
+
+(defn source-module-root-with-fuel
+  [index: SourceIndexV0
+   node: core/NativeId
+   fuel: Int] -> (U core/NativeId Nil)
+  (let [root: (U core/NativeId Nil)
+        (get (sourceindexv0-definition-roots index) (id-value node))]
+    (if (some? root)
+      root
+      (if (<= fuel 0)
+        nil
+        (let [parent: (U core/NativeId Nil) (source-parent index node)]
+          (if (nil? parent)
+            nil
+            (source-module-root-with-fuel index parent (- fuel 1))))))))
+
 (defn source-module-root
   [index: SourceIndexV0
-   definition: core/NativeId] -> (U core/NativeId Nil)
+   node: core/NativeId] -> (U core/NativeId Nil)
   (let [root: (U core/NativeId Nil)
-        (get (sourceindexv0-definition-roots index) (id-value definition))
+        (source-module-root-with-fuel index node (+ 1 (index-facts index)))
         roots: (Vec core/NativeId) (index-form-ids index "module-root")]
     (if (nil? root)
       (if (= 1 (count roots)) (nth roots 0) nil)
@@ -291,7 +312,9 @@
         (let [import-node: core/NativeId (nth imports position)
               candidate: (U String Nil) (index-first-text index import-node "alias")
               target: (U String Nil) (index-first-text index import-node "namespace")]
-          (if (and (some? candidate) (= alias candidate) (some? target))
+          (if (and (some? target)
+                (or (and (some? candidate) (= alias candidate))
+                    (= alias target)))
             target
             (recur (+ position 1))))))))
 
@@ -331,10 +354,11 @@
                first-texts: (Map String String) {}
                form-ids: (Map String (Vec core/NativeId)) {}
                callee-names: (Map String Bool) {}
-               child-nodes: (Map String (Vec core/NativeId)) {}]
+               child-nodes: (Map String (Vec core/NativeId)) {}
+               parent-nodes: (Map String core/NativeId) {}]
           (if (>= position (count facts))
             (->SourceIndexV0 (count facts) first-objects first-texts form-ids
-              callee-names child-nodes {} {} [])
+              callee-names child-nodes parent-nodes {} {} [])
             (let [fact: SourceFactV0 (nth facts position)
                   subject: core/NativeId (sourcefactv0-subject fact)
                   object: core/NativeId (sourcefactv0-object fact)
@@ -351,7 +375,8 @@
                   prior-children: (U (Vec core/NativeId) Nil)
                   (get child-nodes subject-key)
                   children: (Vec core/NativeId)
-                  (if (nil? prior-children) [] prior-children)]
+                  (if (nil? prior-children) [] prior-children)
+                  object-key: String (id-value object)]
               (recur (+ position 1)
                 (if (nil? existing-object)
                   (assoc first-objects key object)
@@ -365,18 +390,30 @@
                 (if (= "callee" predicate)
                   (assoc callee-names object-text true)
                   callee-names)
-                (assoc child-nodes subject-key (conj children object))))))
+                (assoc child-nodes subject-key (conj children object))
+                (if (nil? (get parent-nodes object-key))
+                  (assoc parent-nodes object-key subject)
+                  parent-nodes)))))
         indexed: SourceIndexV0 (add-module-indexes partial)
         records: (Vec core/NativeId) (index-form-ids indexed "record")
-        names: (Vec String)
+        keys: (Vec String)
         (loop [position: Int 0 collected: (Vec String) []]
           (if (>= position (count records))
             collected
-            (let [name: (U String Nil)
-                  (index-first-text indexed (nth records position) "name")]
+            (let [record: core/NativeId (nth records position)
+                  name: (U String Nil) (index-first-text indexed record "name")
+                  module-name: String (source-module-name indexed record)
+                  key: String
+                  (if (or (nil? name) (= "" module-name))
+                    ""
+                    (str module-name "/" name))]
               (recur (+ position 1)
-                (if (nil? name) collected (conj collected name))))))]
-    (with indexed [:record-names names])))
+                (if (or (= "" key)
+                      (some? (some (fn [prior: String] -> Bool (= prior key))
+                               collected)))
+                  collected
+                  (conj collected key))))))]
+    (with indexed [:record-keys keys])))
 
 (defn encode-term [term: worlds/TermV0] -> String
   (cond
@@ -665,10 +702,13 @@
 (defn type-id [name: String] -> core/NativeId
   (lower-id "type" [(unqualified-name name)]))
 
+(defn source-type-id [qualified-name: String] -> core/NativeId
+  (lower-id "type" [qualified-name]))
+
 (defn field-id
-  [record-name: String
+  [record-key: String
    field-name: String] -> core/NativeId
-  (lower-id "field" [(unqualified-name record-name) field-name]))
+  (lower-id "field" [record-key field-name]))
 
 (defn function-id
   [source-id: core/NativeId
@@ -735,16 +775,16 @@
     (core/->UnionType
       [(core/->TypeVariant (variant-id "Unit" "unit") "unit" nil)])))
 
-(defn record-reference-type-id [record-name: String] -> core/NativeId
-  (lower-id "reference-type" [(id-value (type-id record-name))]))
+(defn record-reference-type-id [record-key: String] -> core/NativeId
+  (lower-id "reference-type" [(id-value (source-type-id record-key))]))
 
-(defn record-reference-type [record-name: String] -> core/TypeDef
-  (core/->TypeDef (record-reference-type-id record-name) "Reference"
-    (core/->ReferenceType (type-id record-name))))
+(defn record-reference-type [record-key: String] -> core/TypeDef
+  (core/->TypeDef (record-reference-type-id record-key) "Reference"
+    (core/->ReferenceType (source-type-id record-key))))
 
 ;; Records enter Any by reference, never by value: a record whose own fields are
 ;; Any (Triple) would otherwise have no finite layout.
-(defn slice-value-variants [record-names: (Vec String)] -> (Vec core/TypeVariant)
+(defn slice-value-variants [record-keys: (Vec String)] -> (Vec core/TypeVariant)
   (loop [position: Int 0
          variants: (Vec core/TypeVariant)
          [(core/->TypeVariant (variant-id "SliceValue" "bool") "bool" (type-id "Bool"))
@@ -754,47 +794,47 @@
           (core/->TypeVariant (variant-id "SliceValue" "keyword") "keyword"
             (type-id "Keyword"))
           (core/->TypeVariant (variant-id "SliceValue" "nil") "nil" nil)]]
-    (if (>= position (count record-names))
+    (if (>= position (count record-keys))
       variants
-      (let [name: String (nth record-names position)]
+      (let [key: String (nth record-keys position)]
         (recur (+ position 1)
           (conj variants
-            (core/->TypeVariant (variant-id "SliceValue" name) name
-              (record-reference-type-id name))))))))
+            (core/->TypeVariant (variant-id "SliceValue" key) key
+              (record-reference-type-id key))))))))
 
-(defn slice-value-type [record-names: (Vec String)] -> core/TypeDef
+(defn slice-value-type [record-keys: (Vec String)] -> core/TypeDef
   (core/->TypeDef (type-id "SliceValue") "SliceValue"
-    (core/->UnionType (slice-value-variants record-names))))
+    (core/->UnionType (slice-value-variants record-keys))))
 
-(defn slice-value-definitions [record-names: (Vec String)] -> (Vec core/TypeDef)
+(defn slice-value-definitions [record-keys: (Vec String)] -> (Vec core/TypeDef)
   (loop [position: Int 0
          definitions: (Vec core/TypeDef)
-         [(slice-value-type record-names) (bool-type) (i64-type) (f64-type)
+         [(slice-value-type record-keys) (bool-type) (i64-type) (f64-type)
           (text-type) (keyword-type)]]
-    (if (>= position (count record-names))
+    (if (>= position (count record-keys))
       definitions
       (recur (+ position 1)
-        (conj definitions (record-reference-type (nth record-names position)))))))
+        (conj definitions (record-reference-type (nth record-keys position)))))))
 
 ;; A record enters every closed union by reference, as it enters Any: a by-value
 ;; alternative has no address to hand a tag-inject coercion.
 (defn union-member-id
-  [record-names: (Vec String)
+  [record-keys: (Vec String)
    member: core/NativeId] -> core/NativeId
   (loop [position: Int 0]
-    (if (>= position (count record-names))
+    (if (>= position (count record-keys))
       member
-      (let [name: String (nth record-names position)]
-        (if (same-id? member (type-id name))
-          (record-reference-type-id name)
+      (let [key: String (nth record-keys position)]
+        (if (same-id? member (source-type-id key))
+          (record-reference-type-id key)
           (recur (+ position 1)))))))
 
 (defn union-member-ids
-  [record-names: (Vec String)
+  [record-keys: (Vec String)
    ids: (Vec core/NativeId)] -> (Vec core/NativeId)
   (mapv
     (fn [member: core/NativeId] -> core/NativeId
-      (union-member-id record-names member))
+      (union-member-id record-keys member))
     ids))
 
 (defn lower-failure-type [] -> core/TypeDef
@@ -906,23 +946,23 @@
       (recur (+ index 1) (append-type-def current (nth additions index))))))
 
 (defn union-member-definitions
-  [record-names: (Vec String)
+  [record-keys: (Vec String)
    ids: (Vec core/NativeId)
    definitions: (Vec core/TypeDef)] -> (Vec core/TypeDef)
   (loop [position: Int 0 current: (Vec core/TypeDef) definitions]
-    (if (>= position (count record-names))
+    (if (>= position (count record-keys))
       current
-      (let [name: String (nth record-names position)]
+      (let [key: String (nth record-keys position)]
         (recur (+ position 1)
-          (if (core/id-in? ids (type-id name))
-            (append-type-def current (record-reference-type name))
+          (if (core/id-in? ids (source-type-id key))
+            (append-type-def current (record-reference-type key))
             current))))))
 
-(defn builtin-types [record-names: (Vec String)] -> (Vec core/TypeDef)
+(defn builtin-types [record-keys: (Vec String)] -> (Vec core/TypeDef)
   (append-type-defs
     [(bool-type) (i64-type) (f64-type) (text-type) (keyword-type)
      (nil-type) (lower-failure-type)]
-    (slice-value-definitions record-names)))
+    (slice-value-definitions record-keys)))
 
 (defn append-diagnostics
   [left: (Vec core/DiagnosticV0)
@@ -975,16 +1015,26 @@
     (= "Any" spelling)
     (->TypeResolutionV0
       (type-id "SliceValue")
-      (slice-value-definitions (sourceindexv0-record-names index))
+      (slice-value-definitions (sourceindexv0-record-keys index))
       [(core/->DiagnosticV0
          "LOWER-CLOSED-RAW-ANY"
          "raw Any was closed to the finite SliceValue union")]
       true)
 
     :else
-    (let [name: String (unqualified-name spelling)
-          id: core/NativeId (type-id name)]
-      (->TypeResolutionV0 id [] [] true))))
+    (let [module-name: String (source-module-name index source-type)
+          resolved: ResolvedSourceNameV0
+          (resolve-source-name index module-name spelling)]
+      (if (resolvedsourcenamev0-visible resolved)
+        (->TypeResolutionV0
+          (source-type-id (resolved-source-key resolved)) [] [] true)
+        (->TypeResolutionV0
+          (type-id "LowerFailure")
+          [(lower-failure-type)]
+          [(core/->DiagnosticV0
+             "LOWER-UNRESOLVED-TYPE-OWNER"
+             (str "source type is not visible from " module-name ": " spelling))]
+          false)))))
 
 (defn source-type-arguments
   [index: SourceIndexV0
@@ -1043,7 +1093,7 @@
 (defn application-resolution
   [source-type: core/NativeId
    constructor: String
-   record-names: (Vec String)
+   record-keys: (Vec String)
    resolutions: (Vec TypeResolutionV0)] -> TypeResolutionV0
   (let [ids: (Vec core/NativeId) (resolution-ids resolutions)
         definitions: (Vec core/TypeDef) (resolution-definitions resolutions)
@@ -1092,13 +1142,13 @@
           true))
 
       (or (= "Dyn" constructor) (= "U" constructor))
-      (let [members: (Vec core/NativeId) (union-member-ids record-names ids)
+      (let [members: (Vec core/NativeId) (union-member-ids record-keys ids)
             id: core/NativeId
             (lower-id "closed-union-type"
               (mapv (fn [part: core/NativeId] -> String (id-value part)) members))]
         (->TypeResolutionV0 id
           (append-type-def
-            (union-member-definitions record-names ids definitions)
+            (union-member-definitions record-keys ids definitions)
             (core/->TypeDef id "ClosedUnion"
               (core/->UnionType (union-variants (id-value id) members))))
           diagnostics
@@ -1156,7 +1206,7 @@
                   (resolve-source-type index argument))
                 arguments)]
           (application-resolution source-type spelling
-            (sourceindexv0-record-names index) resolutions)))
+            (sourceindexv0-record-keys index) resolutions)))
 
       (or (= "type-union" kind) (= "union" kind))
       (let [arguments: (Vec core/NativeId) (source-type-arguments index source-type)
@@ -1166,7 +1216,7 @@
                 (resolve-source-type index argument))
               arguments)]
         (application-resolution source-type "U"
-          (sourceindexv0-record-names index) resolutions))
+          (sourceindexv0-record-keys index) resolutions))
 
       (= "type-fn" kind)
       (let [parameters-node: (U core/NativeId Nil)
@@ -1293,17 +1343,20 @@
 (defn resolve-record
   [index: SourceIndexV0
    source-record: core/NativeId] -> RecordResolutionV0
-  (let [record-name: (U String Nil) (index-first-text index source-record "name")]
-    (if (nil? record-name)
+  (let [record-name: (U String Nil) (index-first-text index source-record "name")
+        module-name: String (source-module-name index source-record)]
+    (if (or (nil? record-name) (= "" module-name))
       (->RecordResolutionV0
         (core/->TypeDef (type-id "LowerFailure") "LowerFailure"
           (core/->ReferenceType (type-id "LowerFailure")))
         [(lower-failure-type)]
         [(core/->DiagnosticV0
            "LOWER-RECORD-MISSING-NAME"
-           (str "record form has no name: " (id-value source-record)))]
+           (str "record form has no module-qualified name: "
+             (id-value source-record)))]
         false)
-      (let [source-fields: (Vec core/NativeId) (record-field-items index source-record)]
+      (let [record-key: String (str module-name "/" record-name)
+            source-fields: (Vec core/NativeId) (record-field-items index source-record)]
         (loop [position: Int 0
                fields: (Vec core/TypeField) []
                definitions: (Vec core/TypeDef) []
@@ -1311,7 +1364,7 @@
                valid: Bool true]
           (if (>= position (count source-fields))
             (->RecordResolutionV0
-              (core/->TypeDef (type-id record-name) record-name
+              (core/->TypeDef (source-type-id record-key) record-name
                 (core/->RecordType fields))
               definitions
               diagnostics
@@ -1334,7 +1387,7 @@
                   (recur (+ position 1)
                     (conj fields
                       (core/->TypeField
-                        (field-id record-name name)
+                        (field-id record-key name)
                         name
                         (typeresolutionv0-type-id resolution)))
                     (append-type-defs definitions
@@ -1343,11 +1396,72 @@
                       (typeresolutionv0-diagnostics resolution))
                     (and valid (typeresolutionv0-valid resolution))))))))))))
 
+(defn record-fields-same?
+  [left: (Vec core/TypeField)
+   right: (Vec core/TypeField)] -> Bool
+  (and (= (count left) (count right))
+    (loop [position: Int 0]
+      (if (>= position (count left))
+        true
+        (let [left-field: core/TypeField (nth left position)
+              right-field: core/TypeField (nth right position)]
+          (if (and
+                (= (core/typefield-name left-field)
+                  (core/typefield-name right-field))
+                (same-id? (core/typefield-id left-field)
+                  (core/typefield-id right-field))
+                (same-id? (core/typefield-type-id left-field)
+                  (core/typefield-type-id right-field)))
+            (recur (+ position 1))
+            false))))))
+
+(defn record-definitions-same-shape?
+  [left: core/TypeDef
+   right: core/TypeDef] -> Bool
+  (let [left-shape: core/TypeShape (core/typedef-shape left)
+        right-shape: core/TypeShape (core/typedef-shape right)]
+    (and (instance? native.core.RecordType left-shape)
+      (instance? native.core.RecordType right-shape)
+      (record-fields-same? (core/recordtype-fields left-shape)
+        (core/recordtype-fields right-shape)))))
+
+(defn record-definition-conflicts?
+  [definitions: (Vec core/TypeDef)
+   candidate: core/TypeDef] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count definitions))
+      false
+      (let [prior: core/TypeDef (nth definitions position)]
+        (if (same-id? (core/typedef-id prior) (core/typedef-id candidate))
+          (not (record-definitions-same-shape? prior candidate))
+          (recur (+ position 1)))))))
+
 (defn resolve-records [index: SourceIndexV0] -> (Vec RecordResolutionV0)
-  (mapv
-    (fn [source-record: core/NativeId] -> RecordResolutionV0
-      (resolve-record index source-record))
-    (index-form-ids index "record")))
+  (let [source-records: (Vec core/NativeId) (index-form-ids index "record")]
+    (loop [position: Int 0
+           definitions: (Vec core/TypeDef) []
+           resolutions: (Vec RecordResolutionV0) []]
+      (if (>= position (count source-records))
+        resolutions
+        (let [resolution: RecordResolutionV0
+              (resolve-record index (nth source-records position))
+              definition: core/TypeDef (recordresolutionv0-definition resolution)
+              conflict: Bool (record-definition-conflicts? definitions definition)
+              settled: RecordResolutionV0
+              (if conflict
+                (with
+                  (with resolution
+                    [:diagnostics
+                     (conj (recordresolutionv0-diagnostics resolution)
+                       (core/->DiagnosticV0
+                         "LOWER-RECORD-ID-SHAPE-COLLISION"
+                         (str "record identity has incompatible shapes: "
+                           (id-value (core/typedef-id definition)))))])
+                  [:valid false])
+                resolution)]
+          (recur (+ position 1)
+            (append-type-def definitions definition)
+            (conj resolutions settled)))))))
 
 (defn parameter-name-at
   [index: SourceIndexV0
@@ -1674,17 +1788,6 @@
       nil
       (let [definition: core/TypeDef (nth types position)]
         (if (same-id? target (core/typedef-id definition))
-          definition
-          (recur (+ position 1)))))))
-
-(defn lookup-named-type
-  [types: (Vec core/TypeDef)
-   name: String] -> (U core/TypeDef Nil)
-  (loop [position: Int 0]
-    (if (>= position (count types))
-      nil
-      (let [definition: core/TypeDef (nth types position)]
-        (if (= name (core/typedef-name definition))
           definition
           (recur (+ position 1)))))))
 
@@ -2061,9 +2164,7 @@
       (= 1 (count effects))
       (same-id? (pure-effect-id) (nth effects 0)))))
 
-;; A Beagle record accessor is spelled <lowercased record name>-<field>; the
-;; native world knows records only by their TypeDef, so the spelling is rebuilt.
-;; Types already enter by unqualified name, so the accessor drops its alias too.
+;; A Beagle record accessor is spelled <lowercased record name>-<field>.
 (defrecord AccessorHitV0
   [found: Bool
    owner-type: core/NativeId
@@ -2076,14 +2177,20 @@
 
 (defn record-accessor
   [types: (Vec core/TypeDef)
-   qualified: String] -> AccessorHitV0
-  (let [callee: String (unqualified-name qualified)]
+   resolved: ResolvedSourceNameV0] -> AccessorHitV0
+  (let [callee: String (resolvedsourcenamev0-local-name resolved)
+        module-name: String (resolvedsourcenamev0-module-name resolved)]
    (loop [position: Int 0]
     (if (>= position (count types))
       (accessor-miss)
       (let [definition: core/TypeDef (nth types position)
             shape: core/TypeShape (core/typedef-shape definition)]
-        (if (not (instance? native.core.RecordType shape))
+        (if (or (not (resolvedsourcenamev0-visible resolved))
+              (not (instance? native.core.RecordType shape))
+              (not
+                (same-id? (core/typedef-id definition)
+                  (source-type-id
+                    (str module-name "/" (core/typedef-name definition))))))
           (recur (+ position 1))
           (let [prefix: String (str (ascii-lower (core/typedef-name definition)) "-")
                 fields: (Vec core/TypeField) (core/recordtype-fields shape)
@@ -2097,6 +2204,19 @@
                           (core/typefield-id field) (core/typefield-type-id field))
                         (recur (+ field-position 1))))))]
             (if (accessorhitv0-found hit) hit (recur (+ position 1))))))))))
+
+(defn record-constructor
+  [types: (Vec core/TypeDef)
+   resolved: ResolvedSourceNameV0] -> (U core/TypeDef Nil)
+  (let [local-name: String (resolvedsourcenamev0-local-name resolved)]
+    (if (or (not (resolvedsourcenamev0-visible resolved))
+          (<= (count local-name) 2)
+          (not (= "->" (subs local-name 0 2))))
+      nil
+      (lookup-type types
+        (source-type-id
+          (str (resolvedsourcenamev0-module-name resolved) "/"
+            (subs local-name 2 (count local-name))))))))
 
 (defn record-keyword-field
   [types: (Vec core/TypeDef)
@@ -6822,7 +6942,11 @@
             (if (not (= 2 (count args)))
               (fail-result state
                 "TODO-NATIVE-INSTANCE-ARITY: instance? takes a type and a value")
-              (let [record-name: String (fact-text index (nth args 0) "name")
+              (let [record-spelling: String (fact-text index (nth args 0) "name")
+                    resolved-record: ResolvedSourceNameV0
+                    (resolve-source-name index (body-owner-module env owner)
+                      record-spelling)
+                    record-key: String (resolved-source-key resolved-record)
                     value: ExprResultV0 (lower-expr env owner state (nth args 1))]
                 (cond
                   (exprresultv0-terminated value) value
@@ -6832,10 +6956,10 @@
                   (let [variants: (Vec core/TypeVariant)
                         (union-variants-of types (exprresultv0-type-id value))
                         target: (U core/TypeVariant Nil)
-                        (variant-named variants record-name)]
-                    (if (or (= 0 (count variants)) (nil? target))
+                        (variant-named variants record-key)]
+                    (if (or (= "" record-key) (= 0 (count variants)) (nil? target))
                       (fail-result (exprresultv0-state value)
-                        (str "TODO-NATIVE-INSTANCE-TEST: " record-name
+                        (str "TODO-NATIVE-INSTANCE-TEST: " record-spelling
                           " is not an alternative of the tested closed union"))
                       (let [base: BodyStateV0 (exprresultv0-state value)
                             true-id: core/NativeId (state-id base owner "is")
@@ -6849,7 +6973,7 @@
                             (mapv
                               (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
                                 (core/->SwitchCaseV0 (core/typevariant-id variant)
-                                  (if (= record-name (core/typevariant-name variant))
+                                  (if (= record-key (core/typevariant-name variant))
                                     true-id false-id)
                                   []))
                               variants)
@@ -6963,20 +7087,13 @@
                                 result-id content false))))))))))
 
             :else
-            (let [callee-visible: Bool
-                  (resolvedsourcenamev0-visible
-                    (resolve-source-name index (body-owner-module env owner) callee))
+            (let [resolved-callee: ResolvedSourceNameV0
+                  (resolve-source-name index (body-owner-module env owner) callee)
                   accessor: AccessorHitV0
-                  (if callee-visible
-                    (record-accessor types callee)
-                    (accessor-miss))
+                  (record-accessor types resolved-callee)
                   bare-callee: String (unqualified-name callee)
                   constructor: (U core/TypeDef Nil)
-                  (if (and callee-visible (> (count bare-callee) 2)
-                           (= "->" (subs bare-callee 0 2)))
-                    (lookup-named-type types
-                      (subs bare-callee 2 (count bare-callee)))
-                    nil)
+                  (record-constructor types resolved-callee)
                   signature: (U TypedFunctionV0 Nil)
                   (find-signature env owner callee)
                   lowered: ArgsResultV0
@@ -9029,9 +9146,9 @@
       with-stdout)))
 
 (defn collect-record-types
-  [record-names: (Vec String)
+  [record-keys: (Vec String)
    resolutions: (Vec RecordResolutionV0)] -> (Vec core/TypeDef)
-  (loop [index: Int 0 definitions: (Vec core/TypeDef) (builtin-types record-names)]
+  (loop [index: Int 0 definitions: (Vec core/TypeDef) (builtin-types record-keys)]
     (if (>= index (count resolutions))
       definitions
       (let [resolution: RecordResolutionV0 (nth resolutions index)]
@@ -9360,12 +9477,12 @@
         source-digest: String (worlds/sealedsourceworldv0-digest sealed-source)
         graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms source)
         index: SourceIndexV0 (build-source-index graph)
-        record-names: (Vec String) (sourceindexv0-record-names index)
+        record-keys: (Vec String) (sourceindexv0-record-keys index)
         record-resolutions: (Vec RecordResolutionV0) (resolve-records index)
         function-sources: (Vec core/NativeId) (index-form-ids index "defn")
         signature-resolutions: (Vec FunctionResolutionV0) (resolve-functions index)
         base-record-types: (Vec core/TypeDef)
-        (collect-record-types record-names record-resolutions)
+        (collect-record-types record-keys record-resolutions)
         record-types: (Vec core/TypeDef)
         (if (index-has-callee? index "re-find")
           (append-type-def base-record-types (regex-match-type))
@@ -11338,7 +11455,7 @@
        (source-index-key empty-context-vector-annotation "name") "Vec"
        (source-index-key int-annotation "form-kind") "type-prim"
        (source-index-key int-annotation "name") "Int"}
-      {} {} {} {} {} [])))
+      {} {} {} {} {} {} [])))
 
 (def empty-context-types: (Vec core/TypeDef)
   [(i64-type) (text-type) (keyword-type) (lower-failure-type)

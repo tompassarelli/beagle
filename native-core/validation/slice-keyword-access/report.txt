@@ -1,12 +1,12 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
-source-modules 1
-source-imports 0
-world-types 25
-world-functions 14
-world-abis 14
-projected-types 21
+source-modules 2
+source-imports 1
+world-types 27
+world-functions 16
+world-abis 16
+projected-types 22
 lowered fn_0 record-left 1 blocks
 lowered fn_1 code-key 1 blocks
 lowered fn_2 map-has-code 4 blocks
@@ -21,6 +21,8 @@ lowered fn_10 map-reject-count 11 blocks
 lowered fn_11 map-other-after-code-check 11 blocks
 lowered fn_12 map-code-from-other-source 11 blocks
 lowered fn_13 map-code-false-arm 13 blocks
+lowered fn_14 imported-pair-value 1 blocks
+lowered fn_15 imported-pair-roundtrip 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns native.keyword-access)
+(define-mode strict)
+
+(defrecord Pair [value: String])
