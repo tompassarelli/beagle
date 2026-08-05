@@ -15,6 +15,7 @@
    fn_34 render-text-map  fn_35 print-text-map
    fn_36 render-printable  fn_37 print-printable
    fn_38 render-framed-printable
+   fn_39 dynamic-keyword  fn_40 literal-assert  fn_41 literal-retract
    type_1 Int  type_2 Bool  type_3 Float  type_4 Text  type_5 Keyword
    type_8 Nil  type_9 Map  type_10 Vec  type_11 Printable */
 #include "module_0.h"
@@ -24,6 +25,12 @@
 static uint8_t storage[1u << 16];
 static native_arena arena;
 static const native_capability capability = { UINT64_C(0) };
+static const native_value_descriptor keyword_descriptor = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_KEYWORD,
+  .size = sizeof(uint64_t),
+  .alignment = _Alignof(uint64_t)
+};
 
 /* A fresh arena blob per call, so equal bytes never share a handle. */
 static native_m0_type_4 text_of(const char *bytes) {
@@ -125,6 +132,11 @@ int main(int argc, char **argv) {
   native_m0_type_4 hello_b;
   native_m0_type_4 hell;
   native_m0_type_4 empty;
+  native_m0_type_5 literal_assert;
+  native_m0_type_5 literal_retract;
+  native_m0_type_5 dynamic_assert;
+  native_m0_type_5 dynamic_assert_copy;
+  native_m0_type_5 dynamic_custom;
 
   (void)argv;
   native_arena_init(&arena, storage, sizeof storage);
@@ -132,6 +144,11 @@ int main(int argc, char **argv) {
   hello_b = text_of("hello");
   hell = text_of("hell");
   empty = text_of("");
+  literal_assert = native_m0_fn_40();
+  literal_retract = native_m0_fn_41();
+  dynamic_assert = native_m0_fn_39(text_of("assert"));
+  dynamic_assert_copy = native_m0_fn_39(text_of("assert"));
+  dynamic_custom = native_m0_fn_39(text_of("rpc/custom"));
 
   if (argc > 1) {
     if (strcmp(argv[1], "cycle") == 0) {
@@ -230,15 +247,23 @@ int main(int argc, char **argv) {
     return 20;
   }
 
-  /* keyword handles are sealed table indices, compared as integers */
-  if (!native_m0_fn_7(UINT64_C(0)) || native_m0_fn_7(UINT64_C(1))) {
+  /* Keyword handles share Text's byte representation. Dynamic construction
+     must compare equal to a distinct same-spelling literal handle. */
+  if ((dynamic_assert == literal_assert) ||
+      (dynamic_assert == dynamic_assert_copy)) {
     return 21;
   }
-  if (!native_m0_fn_8(UINT64_C(1)) || native_m0_fn_8(UINT64_C(0))) {
+  if (!native_m0_fn_7(dynamic_assert) || native_m0_fn_7(dynamic_custom)) {
+    return 21;
+  }
+  if (!native_m0_fn_8(literal_retract) || native_m0_fn_8(dynamic_assert)) {
     return 22;
   }
-  if (!native_m0_fn_6(UINT64_C(1), UINT64_C(1)) ||
-      native_m0_fn_6(UINT64_C(0), UINT64_C(1))) {
+  if (!native_m0_fn_6(dynamic_assert, literal_assert) ||
+      !native_m0_fn_6(dynamic_assert, dynamic_assert_copy) ||
+      native_m0_fn_6(dynamic_custom, literal_assert) ||
+      (native_value_hash(&keyword_descriptor, &dynamic_assert) !=
+       native_value_hash(&keyword_descriptor, &literal_assert))) {
     return 23;
   }
 
@@ -317,7 +342,9 @@ int main(int argc, char **argv) {
                "\"line\\n\\\"\"") ||
       !text_is(native_m0_fn_28(&arena, &capability, INT64_MIN),
                "-9223372036854775808") ||
-      !text_is(native_m0_fn_29(&arena, &capability, UINT64_C(0)), ":assert") ||
+      !text_is(native_m0_fn_29(&arena, &capability, literal_assert), ":assert") ||
+      !text_is(native_m0_fn_29(&arena, &capability, dynamic_custom),
+               ":rpc/custom") ||
       !text_is(native_m0_fn_30(&arena, &capability), "") ||
       !text_is(native_m0_fn_31(&arena, &capability), "nil")) {
     return 42;
@@ -341,7 +368,7 @@ int main(int argc, char **argv) {
     }
   }
   {
-    native_m0_type_5 keys[] = { UINT64_C(1), UINT64_C(0) };
+    native_m0_type_5 keys[] = { literal_retract, dynamic_assert };
     native_m0_type_4 values[] = { text_of("two"), text_of("line\n\"") };
     native_m0_type_9 map = native_map_from_arrays(
         &arena, keys, values, INT64_C(2), (int64_t)sizeof(keys[0]),
@@ -364,7 +391,7 @@ int main(int argc, char **argv) {
       !text_is(native_m0_fn_36(&arena, &capability,
                                printable_bool(false)), "false") ||
       !text_is(native_m0_fn_37(&arena, &capability,
-                               printable_keyword(UINT64_C(1))), ":retract") ||
+                               printable_keyword(literal_retract)), ":retract") ||
       !text_is(native_m0_fn_36(&arena, &capability, printable_nil()), "") ||
       !text_is(native_m0_fn_37(&arena, &capability, printable_nil()), "nil")) {
     return 45;

@@ -221,9 +221,12 @@
                           (if (instance? native.core.AtomInstruction instruction)
                             (let [atom: core/NativeAtom
                                   (core/atominstruction-atom instruction)]
-                              (if (instance? native.core.TextAtom atom)
+                              (cond
+                                (instance? native.core.TextAtom atom)
                                 (conj-text kept (core/textatom-value atom))
-                                kept))
+                                (instance? native.core.KeywordAtom atom)
+                                (conj-text kept (core/keywordatom-value atom))
+                                :else kept))
                             kept))))))))))))))
 
 (defn block-index
@@ -483,7 +486,7 @@
     [(F64Kind token) (if (= size 4) "s" "d")]
     [(TextKind token) (if (= size 8) "l" "")]
     [(BytesKind token) ""]
-    [(KeywordKind token) ""]
+    [(KeywordKind token) (if (= size 8) "l" "")]
     [(RefKind target) ""]))
 
 (defn member-letter
@@ -497,7 +500,7 @@
     [(F64Kind token) (cond (= size 4) "s" (= size 8) "d" :else "")]
     [(TextKind token) (if (= size 8) "l" "")]
     [(BytesKind token) ""]
-    [(KeywordKind token) ""]
+    [(KeywordKind token) (if (= size 8) "l" "")]
     [(RefKind target) ""]))
 
 (defn letter-size [letter: String] -> Int
@@ -1118,7 +1121,9 @@
     [(TextAtom value)
      (str "$" (text-symbol (qbefn-module-index context)
        (text-position (qbefn-texts context) (core/textatom-value atom))))]
-    [(KeywordAtom value) ""]
+    [(KeywordAtom value)
+     (str "$" (text-symbol (qbefn-module-index context)
+       (text-position (qbefn-texts context) (core/keywordatom-value atom))))]
     [(RefAtom value) ""]))
 
 (defn atom-letter [atom: core/NativeAtom] -> String
@@ -1127,7 +1132,7 @@
     [(I64Atom value) "l"]
     [(F64Atom value) "d"]
     [(TextAtom value) "l"]
-    [(KeywordAtom value) ""]
+    [(KeywordAtom value) "l"]
     [(RefAtom value) ""]))
 
 (defn store-mnemonic [store: core/StoreOp] -> String
@@ -1845,7 +1850,7 @@
     [(F64Kind token) true]
     [(TextKind token) true]
     [(BytesKind token) false]
-    [(KeywordKind token) false]
+    [(KeywordKind token) true]
     [(RefKind target) false]))
 
 (defn type-supported?
@@ -1897,7 +1902,7 @@
     [(I64Atom value) true]
     [(F64Atom value) true]
     [(TextAtom value) true]
-    [(KeywordAtom value) false]
+    [(KeywordAtom value) true]
     [(RefAtom target) false]))
 
 (defn store-supported? [store: core/StoreOp] -> Bool
@@ -2336,7 +2341,8 @@
         (str "QBE checked integer division is unsupported: "
           unsupported-division))
       (not (every? text-emittable? texts))
-      (->QbeFailure "native world contains a Text literal outside the QBE literal slice")
+      (->QbeFailure
+        "native world contains a Text or Keyword literal outside the QBE literal slice")
       (not (world-supported? world))
       (->QbeFailure "native world uses a shape outside the QBE materializer's slice")
       :else

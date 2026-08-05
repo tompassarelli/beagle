@@ -122,3 +122,9 @@
    value: (U String Int Float Bool Keyword Nil (Vec String))
    suffix: Int] -> String
   (str prefix value suffix))
+
+(defn dynamic-keyword [value: String] -> Keyword (keyword value))
+
+(defn literal-assert [] -> Keyword :assert)
+
+(defn literal-retract [] -> Keyword :retract)

@@ -4,8 +4,9 @@
 
 (defrecord NativeId [value :- String])
 
-;; TextKind and KeywordKind are 64-bit handles. BytesKind is an owned byte span;
-;; it remains distinct because bounded socket reads need not end on UTF-8 edges.
+;; TextKind and KeywordKind are 64-bit handles to the same immutable,
+;; length-prefixed UTF-8 representation. BytesKind is an owned byte span; it
+;; remains distinct because bounded socket reads need not end on UTF-8 edges.
 (defunion AtomKind
   (BoolKind [token :- Bool])
   (I64Kind [token :- Bool])

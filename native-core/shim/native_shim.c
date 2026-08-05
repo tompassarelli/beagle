@@ -4025,7 +4025,7 @@ static bool native_collection_equal(const void *left, const void *right,
     uint64_t right_value;
     memcpy(&left_value, left, sizeof left_value);
     memcpy(&right_value, right, sizeof right_value);
-    return left_value == right_value;
+    return native_text_eq(left_value, right_value);
   }
   case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
     return native_value_equal(equality.descriptor, left, right);
@@ -4659,7 +4659,6 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
     case NATIVE_VALUE_BOOL:
     case NATIVE_VALUE_SIGNED:
     case NATIVE_VALUE_UNSIGNED:
-    case NATIVE_VALUE_KEYWORD:
       return memcmp(left, right, descriptor->size) == 0;
 
     case NATIVE_VALUE_FLOAT:
@@ -4679,9 +4678,13 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
       }
       native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
 
-    case NATIVE_VALUE_TEXT: {
+    case NATIVE_VALUE_TEXT:
+    case NATIVE_VALUE_KEYWORD: {
       uint64_t left_handle;
       uint64_t right_handle;
+      if (descriptor->size != sizeof(uint64_t)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
       memcpy(&left_handle, left, sizeof left_handle);
       memcpy(&right_handle, right, sizeof right_handle);
       return native_text_eq(left_handle, right_handle);
@@ -4927,7 +4930,6 @@ static void native_value_hash_inner(const native_value_descriptor *descriptor,
       return;
 
     case NATIVE_VALUE_UNSIGNED:
-    case NATIVE_VALUE_KEYWORD:
       native_value_hash_u64(
           state, native_value_semantic_unsigned(value, descriptor->size));
       return;
@@ -4936,7 +4938,8 @@ static void native_value_hash_inner(const native_value_descriptor *descriptor,
       native_value_hash_float(descriptor, value, state);
       return;
 
-    case NATIVE_VALUE_TEXT: {
+    case NATIVE_VALUE_TEXT:
+    case NATIVE_VALUE_KEYWORD: {
       uint64_t handle;
       uint64_t length;
       const uint8_t *bytes;
@@ -5182,7 +5185,6 @@ static int64_t native_value_compare_inner(
           native_value_semantic_signed(right, descriptor->size));
 
     case NATIVE_VALUE_UNSIGNED:
-    case NATIVE_VALUE_KEYWORD:
       return native_value_order_u64(
           native_value_semantic_unsigned(left, descriptor->size),
           native_value_semantic_unsigned(right, descriptor->size));
@@ -5191,6 +5193,7 @@ static int64_t native_value_compare_inner(
       return native_value_compare_float(descriptor, left, right);
 
     case NATIVE_VALUE_TEXT:
+    case NATIVE_VALUE_KEYWORD:
       if (descriptor->size != sizeof(uint64_t)) {
         native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
       }
@@ -5401,16 +5404,8 @@ static void native_value_text_descriptor_inner(
       return;
 
     case NATIVE_VALUE_KEYWORD:
-      if ((descriptor->size != sizeof(uint64_t)) ||
-          (descriptor->keywords == NULL) ||
-          (descriptor->keyword_count == 0U)) {
+      if (descriptor->size != sizeof(uint64_t)) {
         native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-      }
-      for (index = 0U; index < descriptor->keyword_count; index++) {
-        if ((descriptor->keywords[index].bytes == NULL) &&
-            (descriptor->keywords[index].length != 0U)) {
-          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-        }
       }
       return;
 
@@ -5836,14 +5831,16 @@ static void native_value_text_inner(const native_value_descriptor *descriptor,
 
     case NATIVE_VALUE_KEYWORD: {
       uint64_t handle;
-      const native_value_keyword_descriptor *keyword;
+      uint64_t length;
+      size_t narrowed_length;
       memcpy(&handle, value, sizeof handle);
-      if (handle >= (uint64_t)descriptor->keyword_count) {
+      length = native_text_length(handle);
+      narrowed_length = (size_t)length;
+      if ((uint64_t)narrowed_length != length) {
         native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
       }
-      keyword = &descriptor->keywords[(size_t)handle];
       native_value_text_character(writer, (uint8_t)':');
-      native_value_text_append(writer, keyword->bytes, keyword->length);
+      native_value_text_append(writer, native_text_bytes(handle), narrowed_length);
       return;
     }
 

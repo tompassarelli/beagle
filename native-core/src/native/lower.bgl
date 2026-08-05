@@ -5829,7 +5829,7 @@
   (cond
     (same-id? type-id-value (int-type-id)) (core/->CompareEqI64V0 true)
     (same-id? type-id-value (float-type-id)) (core/->CompareEqF64V0 true)
-    (same-id? type-id-value (keyword-type-id)) (core/->CompareEqI64V0 true)
+    (same-id? type-id-value (keyword-type-id)) (core/->CompareEqTextV0 true)
     (same-id? type-id-value (bool-type-id)) (core/->CompareEqBoolV0 true)
     (same-id? type-id-value (text-type-id)) (core/->CompareEqTextV0 true)
     :else nil))
@@ -11517,7 +11517,11 @@
               (if (= 0 arity)
                 (if (= "and" callee)
                   (bool-constant-result state owner "logic-empty" true)
-                  (nil-constant-result types state owner "logic-empty"))
+                  ;; The checker's Any result lets a Bool boundary own empty-or's carrier.
+                  (if (and (some? expected)
+                           (same-id? expected (bool-type-id)))
+                    (bool-constant-result state owner "logic-empty" false)
+                    (nil-constant-result types state owner "logic-empty")))
                 (if (= 1 arity)
                   (let [only: ExprResultV0
                         (lower-expr-expected env owner state
@@ -11842,9 +11846,20 @@
                         (core/->KeywordAtom spelling)))
                     result-id (keyword-type-id) false))
 
+                (and (= "keyword" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "keyword")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CopyInstruction
+                        (core/->SsaValueV0 result-id (keyword-type-id))
+                        (nth values 0)))
+                    result-id (keyword-type-id) false))
+
                 (= "keyword" callee)
                 (fail-result current
-                  "TODO-NATIVE-KEYWORD-CONSTRUCTION: keyword needs one literal Text spelling")
+                  "TODO-NATIVE-KEYWORD-CONSTRUCTION: keyword takes one native Text value")
 
                 (and (= "utf8-encode" callee) (= 1 (count values))
                   (text-operand? (nth value-types 0)))
@@ -13124,14 +13139,12 @@
                             (core/->CompareEqTextV0 true) left-id right-id))
                         result-id (bool-type-id) false)
 
-                      ;; The keyword table is sealed at lowering and a handle is
-                      ;; its index, so index equality IS keyword equality.
                       (and both-keyword (= "=" callee))
                       (->ExprResultV0
                         (state-emit (state-bump current)
                           (core/->CompareInstruction
                             (core/->SsaValueV0 result-id (bool-type-id))
-                            (core/->CompareEqI64V0 true) left-id right-id))
+                            (core/->CompareEqTextV0 true) left-id right-id))
                         result-id (bool-type-id) false)
 
                       :else

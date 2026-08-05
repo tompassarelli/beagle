@@ -22,8 +22,8 @@
   [id: core/NativeId
    type-id: core/NativeId])
 
-;; Text literals become one length-prefixed constant blob each; keyword literals
-;; become table indices. Both tables are sealed by this walk over the world.
+;; Text and Keyword literals become length-prefixed constant blobs. Their
+;; distinct static types share one immutable UTF-8 handle representation.
 (defrecord ConstantPoolV0
   [texts: (Vec String)
    keywords: (Vec String)])
@@ -391,9 +391,6 @@
    position: Int] -> String
   (str (c17/module-prefix module-index) "_keyword_" position))
 
-(defn keyword-table-symbol [module-index: Int] -> String
-  (str (c17/module-prefix module-index) "_value_keywords"))
-
 (defn atom-expression
   [module-index: Int
    pool: ConstantPoolV0
@@ -410,10 +407,10 @@
         (value-position (constantpoolv0-texts pool)
           (core/textatom-value atom))))
     (instance? native.core.KeywordAtom atom)
-    (str "UINT64_C("
-      (value-position (constantpoolv0-keywords pool)
-        (core/keywordatom-value atom))
-      ")")
+    (str "(uint64_t)(uintptr_t)&"
+      (keyword-symbol module-index
+        (value-position (constantpoolv0-keywords pool)
+          (core/keywordatom-value atom))))
     :else ""))
 
 (defn compare-operator [comparison: core/CompareOpV0] -> String
@@ -444,30 +441,24 @@
    keywords: (Vec String)] -> String
   (if (= 0 (count keywords))
     ""
-    (str
-      (loop [position: Int 0 result: String ""]
-        (if (>= position (count keywords))
-          result
-          (let [symbol: String (keyword-symbol module-index position)
-                literal: String
-                (str "\"" (escape-c-text (nth keywords position)) "\"")]
-            (recur (+ position 1)
-              (str result "static const uint8_t " symbol "[] = " literal ";\n")))))
-      "static const native_value_keyword_descriptor "
-      (keyword-table-symbol module-index) "[] = {\n"
-      (loop [position: Int 0 result: String ""]
-        (if (>= position (count keywords))
-          result
-          (let [symbol: String (keyword-symbol module-index position)]
-            (recur (+ position 1)
-              (str result "  { .bytes = " symbol ", .length = sizeof "
-                symbol " - 1U },\n")))))
-      "};\n")))
+    (loop [position: Int 0 result: String ""]
+      (if (>= position (count keywords))
+        result
+        (let [symbol: String (keyword-symbol module-index position)
+              literal: String
+              (str "\"" (escape-c-text (nth keywords position)) "\"")]
+          (recur (+ position 1)
+            (str result
+              "struct " symbol "_blob { uint64_t length; uint8_t bytes[sizeof "
+              literal "]; };\n"
+              "static const struct " symbol "_blob " symbol
+              " = { (uint64_t)(sizeof " literal " - 1U), " literal " };\n"
+              "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
+              " \"keyword blob is length-prefixed\");\n")))))))
 
 (defn emit-text-pool
   [module-index: Int
-   pool: ConstantPoolV0
-   emit-keywords: Bool] -> String
+   pool: ConstantPoolV0] -> String
   (let [texts: (Vec String) (constantpoolv0-texts pool)
         keywords: (Vec String) (constantpoolv0-keywords pool)]
     (str
@@ -477,9 +468,8 @@
           (recur (+ position 1)
             (str result
               (emit-text-constant module-index position (nth texts position))))))
-      (if emit-keywords (emit-keyword-pool module-index keywords) "")
-      (if (and (= 0 (count texts))
-            (or (not emit-keywords) (= 0 (count keywords))))
+      (emit-keyword-pool module-index keywords)
+      (if (and (= 0 (count texts)) (= 0 (count keywords)))
         ""
         "\n"))))
 
@@ -617,11 +607,6 @@
         (core/mapshapev0-value-type shape)))
       "NULL")))
 
-(defn keyword-definition? [definition: core/TypeDef] -> Bool
-  (let [shape: core/TypeShape (core/typedef-shape definition)]
-    (and (instance? native.core.AtomType shape)
-      (instance? native.core.KeywordKind (core/atomtype-kind shape)))))
-
 (defn descriptor-tag-offset [layout: core/LayoutDef] -> Int
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (if (instance? native.core.UnionShapeV0 shape)
@@ -632,7 +617,6 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    module-index: Int
-   pool: ConstantPoolV0
    definition: core/TypeDef] -> String
   (let [target: core/NativeId (core/typedef-id definition)
         layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts target)]
@@ -640,9 +624,7 @@
       ""
       (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)
             variants: (Vec core/UnionVariantLayoutV0)
-            (c17/union-layout-variants layout)
-            keywords: (Vec String) (constantpoolv0-keywords pool)
-            keyword-type: Bool (keyword-definition? definition)]
+            (c17/union-layout-variants layout)]
         (str "const native_value_descriptor "
           (descriptor-symbol types module-index target) " = {\n"
           "  .abi_version = NATIVE_VALUE_ABI_VERSION,\n"
@@ -662,12 +644,8 @@
           "  .stride = (size_t)" (descriptor-stride layout) ",\n"
           "  .map_key = " (descriptor-map-key types module-index layout) ",\n"
           "  .map_value = " (descriptor-map-value types module-index layout) ",\n"
-          "  .keywords = "
-          (if (and keyword-type (> (count keywords) 0))
-            (keyword-table-symbol module-index)
-            "NULL") ",\n"
-          "  .keyword_count = (size_t)"
-          (if keyword-type (count keywords) 0) "\n"
+          "  .keywords = NULL,\n"
+          "  .keyword_count = (size_t)0\n"
           "};\n")))))
 
 (defn structural-collection-equality? [instruction: core/Instruction] -> Bool
@@ -730,8 +708,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
-   module-index: Int
-   pool: ConstantPoolV0] -> String
+   module-index: Int] -> String
   (if (not (value-descriptors-used? functions))
     ""
     (str
@@ -762,7 +739,7 @@
           (recur (+ position 1)
             (str result
               (emit-value-descriptor types layouts module-index
-                pool (nth types position))))))
+                (nth types position))))))
       "\n")))
 
 (defn field-position
@@ -2956,8 +2933,8 @@
    header-name: String] -> String
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
-    (emit-text-pool module-index pool (value-descriptors-used? functions))
-    (emit-value-descriptors types layouts functions module-index pool)
+    (emit-text-pool module-index pool)
+    (emit-value-descriptors types layouts functions module-index)
     (emit-functions types layouts functions abis module-index pool)))
 
 (defn materialize-world

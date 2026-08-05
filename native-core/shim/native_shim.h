@@ -175,9 +175,9 @@ struct native_value_descriptor {
    push sequence's reallocation count is observable from a test. */
 extern uint64_t native_vec_storage_allocations;
 
-/* A Text handle is the address of a length-prefixed strict-UTF-8 blob: an
-   8-byte native-endian uint64_t length, then exactly that many bytes. Handles
-   are world-local addresses and never cross a world boundary. */
+/* Text and Keyword handles are addresses of length-prefixed strict-UTF-8 blobs:
+   an 8-byte native-endian uint64_t length, then exactly that many bytes.
+   Handles are world-local addresses and never cross a world boundary. */
 #define NATIVE_TEXT_HEADER_BYTES ((uint64_t)sizeof(uint64_t))
 
 void native_arena_init(native_arena *arena, uint8_t *storage, size_t capacity);
@@ -297,9 +297,9 @@ native_vec *native_set_vector(native_arena *arena, const native_set *set,
 /* Value semantics recurse through the sealed descriptor graph. Hash is a
    nonnegative 63-bit FNV-1a digest over a kind-separated, low-byte-first
    structural stream. Compare returns only -1, 0, or 1: records and vectors are
-   lexicographic, unions compare tag then payload, and Text compares UTF-8
-   bytes. Float zeros coalesce; NaNs hash canonically and sort after numbers,
-   ordered among themselves by representation. */
+   lexicographic, unions compare tag then payload, and Text/Keyword compare
+   UTF-8 bytes. Float zeros coalesce; NaNs hash canonically and sort after
+   numbers, ordered among themselves by representation. */
 bool native_value_equal(const native_value_descriptor *descriptor,
                         const void *left, const void *right);
 int64_t native_value_hash(const native_value_descriptor *descriptor,

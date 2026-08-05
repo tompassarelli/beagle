@@ -112,5 +112,8 @@ native_m0_type_4 native_m0_fn_35(native_arena *arena, const native_capability *c
 native_m0_type_4 native_m0_fn_36(native_arena *arena, const native_capability *capability, native_m0_type_11 native_v_0);
 native_m0_type_4 native_m0_fn_37(native_arena *arena, const native_capability *capability, native_m0_type_11 native_v_0);
 native_m0_type_4 native_m0_fn_38(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0, native_m0_type_11 native_v_1, native_m0_type_1 native_v_2);
+native_m0_type_5 native_m0_fn_39(native_m0_type_4 native_v_0);
+native_m0_type_5 native_m0_fn_40(void);
+native_m0_type_5 native_m0_fn_41(void);
 
 #endif
