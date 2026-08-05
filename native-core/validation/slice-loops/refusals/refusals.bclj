@@ -18,3 +18,34 @@
 (defn wrong-types [n: Int] -> Int
   (loop [a: Int 0]
     (if (>= a n) a (recur true))))
+
+(defn non-tail-do [n: Int] -> Int
+  (loop [a: Int 0]
+    (do
+      (recur a)
+      n)))
+
+(defn non-tail-cond-test [n: Int] -> Int
+  (loop [a: Int 0]
+    (cond
+      (recur a) n
+      :else a)))
+
+(defn through-try [n: Int] -> Int
+  (loop [a: Int 0]
+    (try
+      (recur a)
+      (catch Exception problem n))))
+
+;; Nested loop init forms still belong to the outer control context, but are
+;; not tail positions of it.
+(defn nested-init [n: Int] -> Int
+  (loop [outer: Int 0]
+    (loop [inner: Int (recur outer)]
+      n)))
+
+;; A nested body belongs to its own loop header, which must diagnose its arity.
+(defn nested-wrong-target [n: Int] -> Int
+  (loop [outer: Int 0]
+    (loop [inner: Int outer]
+      (recur inner n))))

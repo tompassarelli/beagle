@@ -1,5 +1,8 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+source-modules 1
+source-imports 0
 world-types 9
 world-functions 0
 world-abis 0
@@ -15,4 +18,9 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in t
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-OUTSIDE-LOOP: recur has no enclosing loop header [outside-loop]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-ARITY: recur passes 2 arguments to a loop with 1 accumulators [wrong-arity]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-TYPES: recur argument 0 is not the native type its accumulator's init fixed [wrong-types]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop [non-tail-do]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop [non-tail-cond-test]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop [through-try]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop [nested-init]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-ARITY: recur passes 2 arguments to a loop with 1 accumulators [nested-wrong-target]
 materialize OK module_0.h module_0.c

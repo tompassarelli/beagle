@@ -2634,6 +2634,41 @@
             (or (nil? else-node)
                 (recur-tail-only? index else-node tail (- fuel 1)))))
 
+        (= "cond" kind)
+        (let [clauses-node: (U core/NativeId Nil)
+              (index-first-object index node "clauses")
+              clauses: (Vec core/NativeId)
+              (if (nil? clauses-node) []
+                (index-sequence-items index clauses-node))]
+          (loop [position: Int 0]
+            (if (>= position (count clauses))
+              true
+              (let [clause: core/NativeId (nth clauses position)
+                    test-node: (U core/NativeId Nil)
+                    (index-first-object index clause "test")
+                    body-node: (U core/NativeId Nil)
+                    (index-first-object index clause "body")]
+                (if (and
+                      (or (nil? test-node)
+                        (recur-tail-only? index test-node false (- fuel 1)))
+                      (or (nil? body-node)
+                        (recur-tail-only? index body-node tail (- fuel 1))))
+                  (recur (+ position 1))
+                  false)))))
+
+        (= "do" kind)
+        (let [body-node: (U core/NativeId Nil)
+              (index-first-object index node "body")
+              forms: (Vec core/NativeId)
+              (if (nil? body-node) [] (index-sequence-items index body-node))]
+          (loop [position: Int 0]
+            (if (>= position (count forms))
+              true
+              (if (recur-tail-only? index (nth forms position)
+                    (and tail (= (+ position 1) (count forms))) (- fuel 1))
+                (recur (+ position 1))
+                false))))
+
         (= "let" kind)
         (let [bindings-node: (U core/NativeId Nil)
               (index-first-object index node "bindings")

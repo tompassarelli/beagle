@@ -102,9 +102,18 @@ fi
 
 emit_slice "$here/refusals/refusals.bclj" "$here/refusals" "native.loops-refusals" \
   "" allow-pending
-for name in RECUR-NON-TAIL RECUR-OUTSIDE-LOOP RECUR-ARITY RECUR-TYPES; do
-  grep -q "TODO-NATIVE-$name" "$here/refusals/report.txt" ||
-    { echo "drive.sh: refusals/ no longer refuses TODO-NATIVE-$name" >&2; exit 1; }
+for expected in \
+  'TODO-NATIVE-RECUR-NON-TAIL.*\[non-tail\]' \
+  'TODO-NATIVE-RECUR-OUTSIDE-LOOP.*\[outside-loop\]' \
+  'TODO-NATIVE-RECUR-ARITY.*\[wrong-arity\]' \
+  'TODO-NATIVE-RECUR-TYPES.*\[wrong-types\]' \
+  'TODO-NATIVE-RECUR-NON-TAIL.*\[non-tail-do\]' \
+  'TODO-NATIVE-RECUR-NON-TAIL.*\[non-tail-cond-test\]' \
+  'TODO-NATIVE-RECUR-NON-TAIL.*\[through-try\]' \
+  'TODO-NATIVE-RECUR-NON-TAIL.*\[nested-init\]' \
+  'TODO-NATIVE-RECUR-ARITY.*\[nested-wrong-target\]'; do
+  grep -q "$expected" "$here/refusals/report.txt" ||
+    { echo "drive.sh: refusals/ omitted expected evidence: $expected" >&2; exit 1; }
 done
 # every function refused, so the refusal world materializes nothing worth keeping
 rm -f "$here/refusals/module_0.c" "$here/refusals/module_0.h"

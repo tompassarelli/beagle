@@ -79,3 +79,19 @@
   [left: Int
    right: Int] -> Int
   (max left right))
+
+;; the projected loop body is an ordered sequence; only its final form is tail
+(defn settle-do [start: Bool] -> Bool
+  (loop [flag: Bool start done: Bool false]
+    (not flag)
+    (if done
+      flag
+      (recur (not flag) true))))
+
+;; every cond body is tail, while the tests are not
+(defn settle-cond [start: Bool] -> Bool
+  (loop [flag: Bool start done: Bool false]
+    (cond
+      done flag
+      flag (recur false true)
+      :else (recur true true))))

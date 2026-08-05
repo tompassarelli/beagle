@@ -2,6 +2,8 @@
 #include "module_0.h"
 
 native_m0_type_0 native_m0_fn_0(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_0 native_s_0;
   if (__builtin_add_overflow(native_v_0, native_v_1, &native_s_0)) {
     native_trap(NATIVE_TRAP_OVERFLOW);
@@ -9,6 +11,7 @@ native_m0_type_0 native_m0_fn_0(native_m0_type_0 native_v_0, native_m0_type_0 na
   return native_s_0;
 }
 native_m0_type_0 native_m0_fn_1(native_m0_type_0 native_v_0) {
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
   native_m0_type_0 native_s_1;
   native_m0_type_0 native_s_2;
@@ -19,7 +22,9 @@ native_m0_type_0 native_m0_fn_1(native_m0_type_0 native_v_0) {
   native_m0_type_0 native_s_7;
   native_m0_type_0 native_s_8;
   native_s_0 = INT64_C(0);
+  (void)native_s_0;
   native_s_1 = INT64_C(0);
+  (void)native_s_1;
   native_s_2 = native_s_0;
   native_s_3 = native_s_1;
   goto native_l1_1;
@@ -35,6 +40,7 @@ native_l1_2: ;
   goto native_l1_4;
 native_l1_3: ;
   native_s_5 = INT64_C(1);
+  (void)native_s_5;
   native_s_6 = native_m0_fn_0(native_s_2, native_s_5);
   native_s_7 = native_m0_fn_0(native_s_3, native_s_2);
   native_s_2 = native_s_6;
@@ -44,6 +50,8 @@ native_l1_4: ;
   return native_s_8;
 }
 native_m0_type_0 native_m0_fn_2(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_0 native_s_0;
   native_m0_type_0 native_s_1;
   native_m0_type_1 native_s_2;
@@ -54,6 +62,7 @@ native_m0_type_0 native_m0_fn_2(native_m0_type_0 native_v_0, native_m0_type_0 na
   native_m0_type_0 native_s_7;
   native_m0_type_0 native_s_8;
   native_s_0 = INT64_C(0);
+  (void)native_s_0;
   native_s_1 = native_s_0;
   goto native_l2_1;
 native_l2_1: ;
@@ -65,6 +74,7 @@ native_l2_1: ;
   }
 native_l2_2: ;
   native_s_3 = INT64_C(-1);
+  (void)native_s_3;
   native_s_8 = native_s_3;
   goto native_l2_7;
 native_l2_3: ;
@@ -79,6 +89,7 @@ native_l2_4: ;
   goto native_l2_6;
 native_l2_5: ;
   native_s_5 = INT64_C(1);
+  (void)native_s_5;
   native_s_6 = native_m0_fn_0(native_s_1, native_s_5);
   native_s_1 = native_s_6;
   goto native_l2_1;
@@ -89,6 +100,7 @@ native_l2_7: ;
   return native_s_8;
 }
 native_m0_type_0 native_m0_fn_3(native_m0_type_0 native_v_0) {
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
   native_m0_type_0 native_s_1;
   native_m0_type_0 native_s_2;
@@ -107,7 +119,9 @@ native_m0_type_0 native_m0_fn_3(native_m0_type_0 native_v_0) {
   native_m0_type_0 native_s_15;
   native_m0_type_0 native_s_16;
   native_s_0 = INT64_C(0);
+  (void)native_s_0;
   native_s_1 = INT64_C(0);
+  (void)native_s_1;
   native_s_2 = native_s_0;
   native_s_3 = native_s_1;
   goto native_l3_1;
@@ -123,8 +137,10 @@ native_l3_2: ;
   goto native_l3_8;
 native_l3_3: ;
   native_s_5 = INT64_C(1);
+  (void)native_s_5;
   native_s_6 = native_m0_fn_0(native_s_2, native_s_5);
   native_s_7 = INT64_C(0);
+  (void)native_s_7;
   native_s_8 = native_s_7;
   native_s_9 = native_s_3;
   goto native_l3_4;
@@ -140,8 +156,10 @@ native_l3_5: ;
   goto native_l3_7;
 native_l3_6: ;
   native_s_11 = INT64_C(1);
+  (void)native_s_11;
   native_s_12 = native_m0_fn_0(native_s_8, native_s_11);
   native_s_13 = INT64_C(1);
+  (void)native_s_13;
   native_s_14 = native_m0_fn_0(native_s_9, native_s_13);
   native_s_8 = native_s_12;
   native_s_9 = native_s_14;
@@ -154,6 +172,8 @@ native_l3_8: ;
   return native_s_16;
 }
 native_m0_type_2 native_m0_fn_4(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_0 native_s_0;
   native_m0_type_0 native_s_1;
   native_m0_type_0 native_s_2;
@@ -195,12 +215,19 @@ native_m0_type_2 native_m0_fn_4(native_m0_type_0 native_v_0, native_m0_type_0 na
   native_m0_type_2 native_s_38;
   native_m0_type_2 native_s_39;
   native_s_0 = INT64_C(0);
+  (void)native_s_0;
   native_s_1 = INT64_C(0);
+  (void)native_s_1;
   native_s_2 = INT64_C(0);
+  (void)native_s_2;
   native_s_3 = false;
+  (void)native_s_3;
   native_s_4 = INT64_C(-1);
+  (void)native_s_4;
   native_s_5 = INT64_C(0);
+  (void)native_s_5;
   native_s_6 = INT64_C(0);
+  (void)native_s_6;
   native_s_7 = (native_m0_type_2){ .field_0 = native_s_5, .field_1 = native_s_6 };
   native_s_8 = native_s_0;
   native_s_9 = native_s_1;
@@ -229,10 +256,13 @@ native_l4_3: ;
   }
 native_l4_4: ;
   native_s_17 = INT64_C(1);
+  (void)native_s_17;
   native_s_18 = native_m0_fn_0(native_s_8, native_s_17);
   native_s_19 = INT64_C(1);
+  (void)native_s_19;
   native_s_20 = native_m0_fn_0(native_s_9, native_s_19);
   native_s_21 = true;
+  (void)native_s_21;
   if (native_s_11) {
     goto native_l4_5;
   } else {
@@ -260,8 +290,10 @@ native_l4_7: ;
   goto native_l4_1;
 native_l4_8: ;
   native_s_29 = INT64_C(1);
+  (void)native_s_29;
   native_s_30 = native_m0_fn_0(native_s_8, native_s_29);
   native_s_31 = INT64_C(1);
+  (void)native_s_31;
   native_s_32 = native_m0_fn_0(native_s_10, native_s_31);
   native_s_33 = native_s_30;
   native_s_34 = native_s_9;

@@ -79,5 +79,18 @@ int main(int argc, char **argv) {
     return 17;
   }
 
+  if (native_m0_fn_10(false) != true) {
+    return 18;
+  }
+  if (native_m0_fn_10(true) != false) {
+    return 19;
+  }
+  if (native_m0_fn_11(false) != true) {
+    return 20;
+  }
+  if (native_m0_fn_11(true) != false) {
+    return 21;
+  }
+
   return 0;
 }

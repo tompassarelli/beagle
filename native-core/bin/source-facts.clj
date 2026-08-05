@@ -156,9 +156,7 @@
       "loop"    (do (row! n "form-kind" "t" "loop")
                     (row! n "bindings" "n"
                           (emit-seq (get e "bindings") emit-binding))
-                    (let [forms (get e "body")]
-                      (when (= 1 (count forms))
-                        (row! n "body" "n" (emit-expr (first forms))))))
+                    (row! n "body" "n" (emit-body (get e "body"))))
       "recur"   (do (row! n "form-kind" "t" "recur")
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "vec"     (do (row! n "form-kind" "t" "vec")
