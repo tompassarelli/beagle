@@ -169,6 +169,8 @@
           (instance? native.core.TextAtom atom)
           (instance? native.core.KeywordAtom atom)))
     (instance? native.core.CopyInstruction instruction) true
+    (instance? native.core.AddF64Instruction instruction) true
+    (instance? native.core.DivF64InstructionV0 instruction) true
     (instance? native.core.I64ToF64InstructionV0 instruction) true
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
@@ -1984,6 +1986,27 @@
       (str "  " target " = "
         (value-name function slots (core/copyinstruction-source-id instruction))
         ";\n")
+
+      (instance? native.core.AddF64Instruction instruction)
+      (str "  " target " = "
+        (value-name function slots
+          (core/addf64instruction-left-id instruction))
+        " + "
+        (value-name function slots
+          (core/addf64instruction-right-id instruction))
+        ";\n")
+
+      (instance? native.core.DivF64InstructionV0 instruction)
+      (let [left: String
+            (value-name function slots
+              (core/divf64instructionv0-left-id instruction))
+            right: String
+            (value-name function slots
+              (core/divf64instructionv0-right-id instruction))]
+        (str "  if (" right " == 0.0) {\n"
+          "    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
+          "  }\n"
+          "  " target " = " left " / " right ";\n"))
 
       (instance? native.core.I64ToF64InstructionV0 instruction)
       (str "  " target " = (double)"

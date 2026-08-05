@@ -392,10 +392,10 @@
 
 ;; --- numeric-preserving arithmetic (mirrors check.rkt numeric-refine) ---------
 ;; + - * inc dec min max abs keep Int when every operand is Int, produce Float on
-;; any Float operand, Number on any Number operand, and fall back to the declared
-;; stdlib return (Any for + - *; Int for inc dec min max) the moment ANY operand
-;; is non-numeric ('other) — so a bad-arg arithmetic call dissolves to Any and
-;; drops out of downstream unions, exactly as the oracle narrows.
+;; any Float operand, and Number on any Number operand. Exact binary Float `/`
+;; also stays Float; every other `/` keeps its declared Any because integer
+;; division can produce Ratio. A non-numeric operand falls back to the declared
+;; return, exactly as the oracle narrows.
 (defn numeric-preserving-op? [op: String] -> Bool
   (or (= op "+") (= op "-") (= op "*") (= op "inc") (= op "dec")
       (= op "min") (= op "max") (= op "abs")))
@@ -419,7 +419,7 @@
    arg-types: (Vec Any)
    declared: Any] -> Any
   (cond
-    (not (numeric-preserving-op? op)) declared
+    (not (or (numeric-preserving-op? op) (= op "/"))) declared
     (not (or (any-type? declared)
              (and (prim? declared)
                   (or (= (get declared "name") "Int")
@@ -429,6 +429,11 @@
     :else
       (let [classes (mapv (fn [t: Any] -> String (numeric-class t)) arg-types)]
         (cond
+          (= op "/")
+            (if (and (= 2 (count classes))
+                     (every? (fn [class: String] -> Bool (= class "float")) classes))
+              FLOAT-TYPE
+              declared)
           (boolean (some (fn [c: Any] -> Bool (= c "other")) classes)) declared
           (boolean (some (fn [c: Any] -> Bool (= c "float")) classes)) FLOAT-TYPE
           (boolean (some (fn [c: Any] -> Bool (= c "number")) classes)) NUMBER-TYPE

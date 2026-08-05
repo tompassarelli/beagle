@@ -1451,6 +1451,23 @@
   #rx"expected Int, got Float"
   '(def d #%: Int (+ 1 2.5)))
 
+(check-ok "numeric: exact binary Float division produces Float"
+  '(def float-ratio #%: Float (/ 3.0 2.0)))
+
+(check-err/rx "numeric: exact binary Float division does NOT narrow into Int"
+  #rx"expected Int, got Float"
+  '(def float-ratio-int #%: Int (/ 3.0 2.0)))
+
+(test-case "numeric: all-Int division remains unrefined for Ratio semantics"
+  (define refine
+    (parameterize ([current-namespace
+                    (module->namespace 'beagle/private/check)])
+      (namespace-variable-value 'numeric-refine)))
+  (check-true
+    (any-type?
+      (refine '/ (list (type-prim 'Int) (type-prim 'Int))
+        (type-prim 'Any)))))
+
 (check-ok "numeric: inc accepts and preserves Float"
   '(def e #%: Float (inc 2.5)))
 

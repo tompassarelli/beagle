@@ -4037,12 +4037,13 @@
 ;;
 ;; + - * inc dec min max abs keep Int when every operand is Int and
 ;; produce Float on mixed Int/Float — interiors stop dissolving into
-;; Any at the first arithmetic chain. A Number operand degrades to
-;; Number; anything else (Any, strings, …) falls back to the declared
-;; stdlib return, which is exactly today's behavior. `/` is excluded
-;; deliberately (Clojure `/` can produce Ratio). The refinement only
-;; fires when the declared return is itself numeric-or-Any, so a
-;; user-shadowed op with a different contract is untouched.
+;; Any at the first arithmetic chain. Exact binary Float `/` also stays
+;; Float; every other `/` remains Any because Clojure integer division can
+;; produce Ratio. A Number operand degrades to Number; anything else (Any,
+;; strings, …) falls back to the declared stdlib return, which is exactly
+;; today's behavior. The refinement only fires when the declared return is
+;; itself numeric-or-Any, so a user-shadowed op with a different contract is
+;; untouched.
 
 (define NUMERIC-PRESERVING-OPS '(+ - * inc dec min max abs))
 
@@ -4060,7 +4061,7 @@
 
 (define (numeric-refine op arg-types declared)
   (cond
-    [(not (memq op NUMERIC-PRESERVING-OPS)) declared]
+    [(not (or (memq op NUMERIC-PRESERVING-OPS) (eq? op '/))) declared]
     [(not (or (any-type? declared)
               (and (type-prim? declared)
                    (memq (type-prim-name declared) '(Int Float Number)))))
@@ -4068,6 +4069,11 @@
     [else
      (define classes (map numeric-class arg-types))
      (cond
+       [(eq? op '/)
+        (if (and (= (length classes) 2)
+                 (andmap (lambda (class) (eq? class 'float)) classes))
+            (type-prim 'Float)
+            declared)]
        [(memq 'other classes) declared]
        [(memq 'float classes) (type-prim 'Float)]
        [(memq 'number classes) (type-prim 'Number)]

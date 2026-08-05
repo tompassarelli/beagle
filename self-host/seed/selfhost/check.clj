@@ -188,10 +188,11 @@
 
 (defn numeric-refine [^String op arg-types declared]
   (cond
-  (not (numeric-preserving-op? op)) declared
+  (not (or (numeric-preserving-op? op) (= op "/"))) declared
   (not (or (any-type? declared) (and (prim? declared) (or (= (get declared "name") "Int") (= (get declared "name") "Float") (= (get declared "name") "Number"))))) declared
   :else (let [classes (mapv (fn [t] (numeric-class t)) arg-types)]
   (cond
+  (= op "/") (if (and (= 2 (count classes)) (every? (fn [class] (= class "float")) classes)) FLOAT-TYPE declared)
   (boolean (some (fn [c] (= c "other")) classes)) declared
   (boolean (some (fn [c] (= c "float")) classes)) FLOAT-TYPE
   (boolean (some (fn [c] (= c "number")) classes)) NUMBER-TYPE

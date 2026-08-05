@@ -243,6 +243,8 @@
     [(AtomInstruction value) (core/atominstruction-result instruction)]
     [(CopyInstruction value) (core/copyinstruction-result instruction)]
     [(AddF64Instruction value) (core/addf64instruction-result instruction)]
+    [(DivF64InstructionV0 value)
+     (core/divf64instructionv0-result instruction)]
     [(I64ToF64InstructionV0 value)
      (core/i64tof64instructionv0-result instruction)]
     [(CheckedInstruction value) (core/checkedinstruction-result instruction)]
@@ -1007,6 +1009,7 @@
     [(AtomInstruction value) false]
     [(CopyInstruction value) false]
     [(AddF64Instruction value) false]
+    [(DivF64InstructionV0 value) true]
     [(I64ToF64InstructionV0 value) false]
     [(CheckedInstruction value) true]
     [(BitwiseInstructionV0 value) false]
@@ -1166,6 +1169,25 @@
   [label: String
    code: Int] -> String
   (str label "\n  call $native_trap(w " code ")\n  hlt\n"))
+
+(defn emit-f64-divide
+  [context: QbeFn
+   block-index-value: Int
+   position: Int
+   result-name: String
+   left-id: core/NativeId
+   right-id: core/NativeId] -> String
+  (let [left: String (value-name context left-id)
+        right: String (value-name context right-id)
+        trap-label: String (str (block-label block-index-value) "_t" position)
+        continue-label: String (str (block-label block-index-value) "_c" position)]
+    (str
+      "  " (temp-name block-index-value position 0) " =w ceqd " right ", d_0.0\n"
+      "  jnz " (temp-name block-index-value position 0) ", " trap-label ", "
+      continue-label "\n"
+      (emit-trap-block trap-label trap-invalid-argument)
+      continue-label "\n"
+      "  " result-name " =d div " left ", " right "\n")))
 
 ;; Mirrors the C materializer's overflow predicate; INT64_MIN is built by
 ;; subtraction because QBE's literal grammar cannot spell it directly.
@@ -1341,6 +1363,10 @@
        (str "  " result-name " =" (value-letter-or context result-id "d") " add "
          (value-name context (core/addf64instruction-left-id instruction)) ", "
          (value-name context (core/addf64instruction-right-id instruction)) "\n")]
+      [(DivF64InstructionV0 value)
+       (emit-f64-divide context block-index-value position result-name
+         (core/divf64instructionv0-left-id instruction)
+         (core/divf64instructionv0-right-id instruction))]
       [(I64ToF64InstructionV0 value)
        (str "  " result-name " =d sltof "
          (value-name context (core/i64tof64instructionv0-source-id instruction))
@@ -1870,6 +1896,7 @@
     [(AtomInstruction value) (atom-supported? (core/atominstruction-atom instruction))]
     [(CopyInstruction value) true]
     [(AddF64Instruction value) true]
+    [(DivF64InstructionV0 value) true]
     [(I64ToF64InstructionV0 value) true]
     [(CheckedInstruction value)
      (let [operation: core/CheckedOperationV0

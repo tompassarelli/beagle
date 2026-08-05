@@ -2433,6 +2433,28 @@
 (defn refused-arith-op? [callee: String] -> Bool
   (= "/" callee))
 
+(defn exact-binary-float-values? [value-types: (Vec core/NativeId)] -> Bool
+  (and (= 2 (count value-types))
+       (same-id? (nth value-types 0) (float-type-id))
+       (same-id? (nth value-types 1) (float-type-id))))
+
+(defn lower-f64-binary
+  [state: BodyStateV0
+   owner: core/NativeId
+   callee: String
+   left: core/NativeId
+   right: core/NativeId] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner "f64-arith")
+        instruction: core/Instruction
+        (if (= "+" callee)
+          (core/->AddF64Instruction
+           (core/->SsaValueV0 result-id (float-type-id)) left right)
+          (core/->DivF64InstructionV0
+           (core/->SsaValueV0 result-id (float-type-id)) left right))]
+    (->ExprResultV0
+     (state-emit (state-bump state) instruction)
+     result-id (float-type-id) false)))
+
 (defn checked-arith-operation
   [callee: String
    left: core/NativeId
@@ -11444,6 +11466,11 @@
                 (fail-result current
                   "TODO-NATIVE-ATOM-RESET-ARITY: reset! takes one Atom and one replacement value")
 
+                (and (or (= "+" callee) (= "/" callee))
+                  (exact-binary-float-values? value-types))
+                (lower-f64-binary current owner callee
+                  (nth values 0) (nth values 1))
+
                 (refused-arith-op? callee)
                 (fail-result current
                   "TODO-NATIVE-DIVISION-/: ratio division is outside native Int semantics; use quot, rem, or mod")
@@ -14763,6 +14790,12 @@
       [(encode-ssa-value (core/addf64instruction-result instruction))
        (id-value (core/addf64instruction-left-id instruction))
        (id-value (core/addf64instruction-right-id instruction))])
+
+    (instance? native.core.DivF64InstructionV0 instruction)
+    (worlds/canonical-record "div-f64-instruction-v0"
+      [(encode-ssa-value (core/divf64instructionv0-result instruction))
+       (id-value (core/divf64instructionv0-left-id instruction))
+       (id-value (core/divf64instructionv0-right-id instruction))])
 
     (instance? native.core.I64ToF64InstructionV0 instruction)
     (worlds/canonical-record "i64-to-f64-instruction-v0"

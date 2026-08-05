@@ -364,6 +364,7 @@
     (instance? native.core.AtomInstruction instruction)
     (atom-supported? (core/atominstruction-atom instruction))
     (instance? native.core.AddF64Instruction instruction) true
+    (instance? native.core.DivF64InstructionV0 instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
     :else false))
@@ -752,6 +753,19 @@
         (value-name function block (core/addf64instruction-left-id instruction)) " + "
         (value-name function block (core/addf64instruction-right-id instruction))
         ";\n  (void)" result-name ";\n")
+
+      (instance? native.core.DivF64InstructionV0 instruction)
+      (let [left: String
+            (value-name function block
+              (core/divf64instructionv0-left-id instruction))
+            right: String
+            (value-name function block
+              (core/divf64instructionv0-right-id instruction))]
+        (str "  if (" right " == 0.0) {\n"
+          "    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
+          "  }\n"
+          "  double " result-name " = " left " / " right
+          ";\n  (void)" result-name ";\n"))
 
       (instance? native.core.CheckedInstruction instruction)
       (emit-checked-instruction function block result-name

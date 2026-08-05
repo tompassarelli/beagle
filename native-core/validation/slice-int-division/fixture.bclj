@@ -17,6 +17,16 @@
    right: Int] -> Int
   (mod left right))
 
+(defn float-add
+  [left: Float
+   right: Float] -> Float
+  (+ left right))
+
+(defn float-divide
+  [left: Float
+   right: Float] -> Float
+  (/ left right))
+
 (defn variadic-add
   [first: Int
    second: Int

@@ -371,6 +371,11 @@
     [result: SsaValueV0
      left-id: NativeId
      right-id: NativeId])
+  ;; Clojure Float division traps on either signed zero divisor.
+  (DivF64InstructionV0
+    [result: SsaValueV0
+     left-id: NativeId
+     right-id: NativeId])
   (I64ToF64InstructionV0
     [result: SsaValueV0
      source-id: NativeId])
@@ -914,6 +919,7 @@
     [(AtomInstruction result atom) (ssavaluev0-id result)]
     [(CopyInstruction result source-id) (ssavaluev0-id result)]
     [(AddF64Instruction result left-id right-id) (ssavaluev0-id result)]
+    [(DivF64InstructionV0 result left-id right-id) (ssavaluev0-id result)]
     [(I64ToF64InstructionV0 result source-id) (ssavaluev0-id result)]
     [(CheckedInstruction result operation) (ssavaluev0-id result)]
     [(BitwiseInstructionV0 result operation) (ssavaluev0-id result)]
@@ -1455,6 +1461,7 @@
     [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
+    [(DivF64InstructionV0 result left-id right-id) true]
     [(I64ToF64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
     [(BitwiseInstructionV0 result operation) true]
@@ -1697,6 +1704,7 @@
     [(AtomInstruction result atom) []]
     [(CopyInstruction result source-id) [source-id]]
     [(AddF64Instruction result left-id right-id) [left-id right-id]]
+    [(DivF64InstructionV0 result left-id right-id) [left-id right-id]]
     [(I64ToF64InstructionV0 result source-id) [source-id]]
     [(CheckedInstruction result operation) (checked-operation-ssa-refs operation)]
     [(BitwiseInstructionV0 result operation)
@@ -1842,6 +1850,7 @@
     [(AtomInstruction result atom) true]
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
+    [(DivF64InstructionV0 result left-id right-id) true]
     [(I64ToF64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
     [(BitwiseInstructionV0 result operation) true]
