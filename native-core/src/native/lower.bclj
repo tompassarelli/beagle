@@ -6490,6 +6490,8 @@
               (conj (remove-dominated-join-candidates types candidate minima)
                 candidate))))))))
 
+;; A join with no computable arm type falls back to the declared type the arms
+;; are being produced for; a computable join keeps its existing world.
 (defn bridge-join-arms
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -6501,8 +6503,11 @@
    join-id: core/NativeId
    join-parameter: core/NativeId
    left-type: core/NativeId
-   right-type: core/NativeId] -> ExprResultV0
-  (let [target: (U core/NativeId Nil) (join-type-for types left-type right-type)]
+   right-type: core/NativeId
+   expected: (U core/NativeId Nil)] -> ExprResultV0
+  (let [computed: (U core/NativeId Nil) (join-type-for types left-type right-type)
+        target: (U core/NativeId Nil)
+        (if (some? computed) computed expected)]
     (if (nil? target)
       (fail-result state
         "TODO-NATIVE-JOIN-TYPE: live arms have no declared native union")
@@ -6611,7 +6616,8 @@
    join-parameter: core/NativeId
    outer-locals: (Vec LocalBindingV0)
    outer-keywords: (Vec KeywordFlowRefinementV0)
-   outer-values: (Vec ValueFlowRefinementV0)] -> ExprResultV0
+   outer-values: (Vec ValueFlowRefinementV0)
+   expected: (U core/NativeId Nil)] -> ExprResultV0
   (let [settled: BodyStateV0
         (state-with-flow-context state
           outer-locals outer-keywords outer-values)]
@@ -6621,7 +6627,10 @@
       (->ExprResultV0 settled (lower-id "body" ["logic-terminated"])
         (type-id "LowerFailure") true)
       :else
-      (bridge-logic-arms types owner settled arms join-id join-parameter nil))))
+      ;; bridge-logic-arms lets a supplied expectation win outright, so the
+      ;; declared type is handed over only when the arms alone cannot join.
+      (bridge-logic-arms types owner settled arms join-id join-parameter
+        (if (nil? (logic-result-type types arms)) expected nil)))))
 
 (defn host-socket-operands-valid?
   [callee: String
@@ -10186,7 +10195,8 @@
                       then-start then-end else-block-start else-end
                       join-id join-parameter
                       (exprresultv0-type-id then-result)
-                      (exprresultv0-type-id else-result))
+                      (exprresultv0-type-id else-result)
+                      expected)
                     :else
                     (->ExprResultV0
                       (state-open-block settled join-id
@@ -10227,7 +10237,7 @@
                           (count (bodystatev0-blocks closed))
                           (exprresultv0-type-id implicit)))
                       join-id join-parameter
-                      outer-locals outer-keywords outer-values))))
+                      outer-locals outer-keywords outer-values expected))))
               (let [clause: core/NativeId (nth clauses position)
                     test-node: (U core/NativeId Nil)
                     (index-first-object index clause "test")
@@ -10257,7 +10267,7 @@
                       (exprresultv0-terminated body)
                       (finish-flow-logic-join types owner body-state arms
                         join-id join-parameter
-                        outer-locals outer-keywords outer-values)
+                        outer-locals outer-keywords outer-values expected)
                       :else
                       (let [closed: BodyStateV0
                             (state-close body-state
@@ -10269,7 +10279,7 @@
                               (count (bodystatev0-blocks closed))
                               (exprresultv0-type-id body)))
                           join-id join-parameter
-                          outer-locals outer-keywords outer-values))))
+                          outer-locals outer-keywords outer-values expected))))
 
                   :else
                   (let [condition: ExprResultV0
@@ -10284,7 +10294,7 @@
                         condition
                         (finish-flow-logic-join types owner condition-state arms
                           join-id join-parameter
-                          outer-locals outer-keywords outer-values))
+                          outer-locals outer-keywords outer-values expected))
                       (not (same-id? (exprresultv0-type-id condition)
                              (bool-type-id)))
                       (fail-result condition-state

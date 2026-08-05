@@ -491,7 +491,9 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
   (if (empty? entries)
     {:ok? true :rows rows}
     (let [source (slice/source-world rows "native.module" "source.facts")
-          index (lower/build-source-index (worlds/sourceprogramworldv0-terms source))
+          index (lower/build-source-index
+                 (worlds/sourceprogramworldv0-terms source)
+                 (worlds/sourceprogramworldv0-modules source))
           definitions (definitions-by-key index)
           seeds (entry-seeds definitions index entries)]
       (if-not (:ok? seeds)
