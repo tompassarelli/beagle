@@ -179,6 +179,7 @@ export BEAGLE_CORE_FACTS="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
 export BEAGLE_CORE_MATERIALIZER="$materializer"
+export BEAGLE_CORE_REPORT="$out/report.txt"
 printf '%s\n' "${entries[@]}" >"$work/entries"
 export BEAGLE_CORE_ENTRIES="$work/entries"
 export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
@@ -194,6 +195,94 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
          (quote [native.body-slice :as body-slice])
          (quote [native.qbe :as qbe])
          (quote [clojure.string :as str]))
+
+(import (quote [java.io FileOutputStream])
+        (quote [java.lang ProcessHandle])
+        (quote [java.nio.channels FileChannel])
+        (quote [java.nio.charset StandardCharsets])
+        (quote [java.nio.file AtomicMoveNotSupportedException CopyOption Files
+                OpenOption Paths StandardCopyOption StandardOpenOption]))
+
+(def report-path (System/getenv "BEAGLE_CORE_REPORT"))
+(def stage-progress (atom []))
+(def active-stage (atom nil))
+
+(defn durable-write! [path text]
+  (let [destination (Paths/get path (make-array String 0))
+        directory (.getParent destination)
+        temporary (.resolve directory
+                            (str "." (.getFileName destination) "."
+                                 (.pid (ProcessHandle/current)) "."
+                                 (System/nanoTime) ".tmp"))]
+    (try
+      (with-open [stream (FileOutputStream. (.toFile temporary))]
+        (.write stream (.getBytes text StandardCharsets/UTF_8))
+        (.flush stream)
+        (.sync (.getFD stream)))
+      (try
+        (Files/move temporary destination
+                    (into-array CopyOption
+                                [StandardCopyOption/ATOMIC_MOVE
+                                 StandardCopyOption/REPLACE_EXISTING]))
+        (catch AtomicMoveNotSupportedException _
+          (Files/move temporary destination
+                      (into-array CopyOption
+                                  [StandardCopyOption/REPLACE_EXISTING]))))
+      (with-open [channel (FileChannel/open directory
+                                            (into-array OpenOption
+                                                        [StandardOpenOption/READ]))]
+        (.force channel true))
+      (finally
+        (Files/deleteIfExists temporary)))))
+
+(defn stage-progress-text []
+  (apply str
+         (for [{:keys [name status elapsed-ms]} @stage-progress]
+           (str "stage-progress " name " " status
+                " elapsed-ms " elapsed-ms "\n"))))
+
+(defn publish-progress! []
+  (durable-write! report-path
+                  (str (stage-progress-text) "result RUNNING\n")))
+
+(defn start-stage! [name]
+  (when (some? @active-stage)
+    (throw (ex-info "Core build stage overlap" {:active @active-stage
+                                                 :next name})))
+  (let [started (System/nanoTime)]
+    (swap! stage-progress conj {:name name
+                                :status "RUNNING"
+                                :elapsed-ms 0})
+    (reset! active-stage {:name name :started started})
+    (publish-progress!)))
+
+(defn finish-stage! [name status]
+  (let [active @active-stage]
+    (when-not (= name (:name active))
+      (throw (ex-info "Core build stage mismatch" {:active active
+                                                    :finished name})))
+    (let [elapsed (quot (- (System/nanoTime) (:started active)) 1000000)]
+      (swap! stage-progress
+             (fn [stages]
+               (conj (vec (butlast stages))
+                     (assoc (last stages)
+                            :status status
+                            :elapsed-ms elapsed))))
+      (reset! active-stage nil)
+      (publish-progress!))))
+
+(defn fail-active-stage! []
+  (when-let [active @active-stage]
+    (finish-stage! (:name active) "ERROR")))
+
+(defn report-with-stage-progress [report]
+  (let [lines (str/split-lines report)
+        result (last lines)]
+    (when-not (str/starts-with? result "result ")
+      (throw (ex-info "Core build report omitted its final result" {:report report})))
+    (str (str/join "\n" (butlast lines)) "\n"
+         (stage-progress-text)
+         result "\n")))
 
 (defn id-value [id]
   (core/nativeid-value id))
@@ -434,116 +523,147 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
        (slice/obligation-report "obligation-projection" projected)
        (body-slice/failing-obligations projected)))
 
+(defn materialize-c17! [projected artifacts-dir head]
+  (start-stage! "materialization-c17")
+  (let [result (body/materialize-world projected 0)
+        ok? (body/materialization-ok? result)
+        report (str "materialize-c17 "
+                    (if ok?
+                      (let [artifact (body/materialization-artifact result)]
+                        (str "OK "
+                             (body/bodyartifactv0-header-name artifact) " "
+                             (body/bodyartifactv0-source-name artifact)))
+                      (str "REFUSED " (body/materialization-detail result)))
+                    "\n")]
+    (if-not ok?
+      (do
+        (finish-stage! "materialization-c17" "REFUSED")
+        {:ok? false
+         :report (str head report "result FAIL materialization\n")})
+      (let [artifact (body/materialization-artifact result)]
+        (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
+              (body/bodyartifactv0-header-text artifact))
+        (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
+              (body/bodyartifactv0-source-text artifact))
+        (finish-stage! "materialization-c17" "OK")
+        {:ok? true
+         :report (str head report "result PASS\n")}))))
+
+(defn materialize-qbe! [projected artifacts-dir head]
+  (start-stage! "materialization-qbe")
+  (let [result (qbe/materialize-world projected 0)
+        ok? (instance? native.qbe.QbeSuccess result)
+        report (str "materialize-qbe "
+                    (if ok?
+                      (let [artifact (qbe/qbesuccess-artifact result)]
+                        (str "OK " (qbe/qbeartifact-module-name artifact)))
+                      (str "REFUSED " (qbe/qbefailure-detail result)))
+                    "\n")]
+    (if-not ok?
+      (do
+        (finish-stage! "materialization-qbe" "REFUSED")
+        {:ok? false
+         :report (str head report "result FAIL materialization\n")})
+      (let [artifact (qbe/qbesuccess-artifact result)]
+        (spit (str artifacts-dir "/" (qbe/qbeartifact-module-name artifact))
+              (qbe/qbeartifact-module-text artifact))
+        (finish-stage! "materialization-qbe" "OK")
+        {:ok? true
+         :report (str head report "result PASS\n")}))))
+
 (defn compile-core!
   [facts-path projected-facts-path artifacts-dir compiler-commit entries materializer]
+  (start-stage! "source-projection")
   (let [raw-rows (slice/parse-facts (slurp facts-path))
         projection (project-entry-rows raw-rows entries)]
     (if-not (:ok? projection)
-      {:ok? false
-       :report (str "stage source-projection REJECTED\n"
-                    "entry-error " (:detail projection) "\n"
-                    "result FAIL entry projection\n")}
+      (do
+        (finish-stage! "source-projection" "REJECTED")
+        {:ok? false
+         :report (str "stage source-projection REJECTED\n"
+                      "entry-error " (:detail projection) "\n"
+                      "result FAIL entry projection\n")})
       (let [rows (:rows projection)
             _ (spit projected-facts-path (rows-text rows))
             configuration ["profile=3"]
+            _finish-projection (finish-stage! "source-projection" "ACCEPTED")
+            _start-seal (start-stage! "source-seal")
             source (slice/source-world rows "beagle.core" "source.facts")
             seal-result (lower/seal-source-world source compiler-commit configuration)]
         (if-not (instance? native.lower.SourceSealAcceptedV0 seal-result)
-          {:ok? false
-           :report "stage source-seal REJECTED\nresult FAIL source seal\n"}
-          (let [sealed-source (lower/sourcesealacceptedv0-sealed seal-result)
+          (do
+            (finish-stage! "source-seal" "REJECTED")
+            {:ok? false
+             :report "stage source-seal REJECTED\nresult FAIL source seal\n"})
+          (let [_finish-seal (finish-stage! "source-seal" "ACCEPTED")
+                sealed-source (lower/sourcesealacceptedv0-sealed seal-result)
+                _start-typing (start-stage! "source-to-typed")
                 typing-result (lower/lower-typed-world sealed-source compiler-commit configuration)]
             (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
-              {:ok? false
-               :report (str "stage source-seal ACCEPTED\n"
-                            "stage source-to-typed REJECTED\n"
-                            "result FAIL source typing\n")}
-              (let [sealed-typed (lower/typingacceptedv0-sealed typing-result)
+              (do
+                (finish-stage! "source-to-typed" "REJECTED")
+                {:ok? false
+                 :report (str "stage source-seal ACCEPTED\n"
+                              "stage source-to-typed REJECTED\n"
+                              "result FAIL source typing\n")})
+              (let [_finish-typing (finish-stage! "source-to-typed" "ACCEPTED")
+                    sealed-typed (lower/typingacceptedv0-sealed typing-result)
                     typed-slice (lower/typingacceptedv0-slice typing-result)
+                    _start-lowering (start-stage! "typed-to-native")
                     native-result (lower/lower-native-world sealed-typed typed-slice
                                     compiler-commit configuration)]
                 (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
-                  {:ok? false
-                   :report (str "stage source-seal ACCEPTED\n"
-                                "stage source-to-typed ACCEPTED\n"
-                                "stage typed-to-native PENDING\n"
-                                (slice/pending-reports (slice/native-pending native-result))
-                                "result FAIL NativeLoweringCompleteV0 required\n")}
-                  (let [sealed-native (lower/nativeloweringcompletev0-sealed native-result)
+                  (do
+                    (finish-stage! "typed-to-native" "PENDING")
+                    {:ok? false
+                     :report (str "stage source-seal ACCEPTED\n"
+                                  "stage source-to-typed ACCEPTED\n"
+                                  "stage typed-to-native PENDING\n"
+                                  (slice/pending-reports (slice/native-pending native-result))
+                                  "result FAIL NativeLoweringCompleteV0 required\n")})
+                  (let [_finish-lowering (finish-stage! "typed-to-native" "COMPLETE")
+                        sealed-native (lower/nativeloweringcompletev0-sealed native-result)
                         native-encoding (worlds/sealednativeworldv0-encoding sealed-native)
                         _write-native
                         (spit (str artifacts-dir "/module.native-world") native-encoding)
                         program (worlds/nativeworldv0-program
                                  (worlds/sealednativeworldv0-world sealed-native))
                         projected (body-slice/projected-world program)
+                        _start-obligations (start-stage! "native-obligations")
                         verdicts (obligations/validate-native-world projected)
                         head (native-report-head rows entries source program projected)]
                     (if-not (obligation-pass? verdicts)
-                      {:ok? false
-                       :report (str head "result FAIL seven native obligations required\n")}
-                      (case materializer
-                        "c17"
-                        (let [result (body/materialize-world projected 0)
-                              ok? (body/materialization-ok? result)
-                              report (str "materialize-c17 "
-                                          (if ok?
-                                            (let [artifact
-                                                  (body/materialization-artifact result)]
-                                              (str "OK "
-                                                   (body/bodyartifactv0-header-name artifact)
-                                                   " "
-                                                   (body/bodyartifactv0-source-name artifact)))
-                                            (str "REFUSED "
-                                                 (body/materialization-detail result)))
-                                          "\n")]
-                          (if-not ok?
-                            {:ok? false
-                             :report (str head report "result FAIL materialization\n")}
-                            (let [artifact (body/materialization-artifact result)]
-                              (spit (str artifacts-dir "/"
-                                         (body/bodyartifactv0-header-name artifact))
-                                    (body/bodyartifactv0-header-text artifact))
-                              (spit (str artifacts-dir "/"
-                                         (body/bodyartifactv0-source-name artifact))
-                                    (body/bodyartifactv0-source-text artifact))
-                              {:ok? true
-                               :report (str head report "result PASS\n")})))
+                      (do
+                        (finish-stage! "native-obligations" "FAIL")
+                        {:ok? false
+                         :report (str head
+                                      "result FAIL seven native obligations required\n")})
+                      (do
+                        (finish-stage! "native-obligations" "PASS")
+                        (case materializer
+                          "c17" (materialize-c17! projected artifacts-dir head)
+                          "qbe" (materialize-qbe! projected artifacts-dir head))))))))))))))
 
-                        "qbe"
-                        (let [result (qbe/materialize-world projected 0)
-                              ok? (instance? native.qbe.QbeSuccess result)
-                              report (str "materialize-qbe "
-                                          (if ok?
-                                            (let [artifact (qbe/qbesuccess-artifact result)]
-                                              (str "OK "
-                                                   (qbe/qbeartifact-module-name artifact)))
-                                            (str "REFUSED "
-                                                 (qbe/qbefailure-detail result)))
-                                          "\n")]
-                          (if-not ok?
-                            {:ok? false
-                             :report (str head report "result FAIL materialization\n")}
-                            (let [artifact (qbe/qbesuccess-artifact result)]
-                              (spit (str artifacts-dir "/"
-                                         (qbe/qbeartifact-module-name artifact))
-                                    (qbe/qbeartifact-module-text artifact))
-                              {:ok? true
-                               :report (str head report "result PASS\n")})))))))))))))))
-
-(let [facts-path (System/getenv "BEAGLE_CORE_FACTS")
-      projected-facts-path (System/getenv "BEAGLE_CORE_PROJECTED_FACTS")
-      artifacts-dir (System/getenv "BEAGLE_CORE_ARTIFACTS")
-      compiler-commit (System/getenv "BEAGLE_CORE_COMMIT")
-      materializer (System/getenv "BEAGLE_CORE_MATERIALIZER")
-      entries (vec (remove str/blank?
-                           (str/split-lines
-                            (slurp (System/getenv "BEAGLE_CORE_ENTRIES")))))
-      result (compile-core! facts-path projected-facts-path artifacts-dir
-                            compiler-commit entries materializer)]
-  (spit (str artifacts-dir "/report.txt") (:report result))
-  (print (:report result))
-  (flush)
-  (when-not (:ok? result) (System/exit 1)))
+(try
+  (let [facts-path (System/getenv "BEAGLE_CORE_FACTS")
+        projected-facts-path (System/getenv "BEAGLE_CORE_PROJECTED_FACTS")
+        artifacts-dir (System/getenv "BEAGLE_CORE_ARTIFACTS")
+        compiler-commit (System/getenv "BEAGLE_CORE_COMMIT")
+        materializer (System/getenv "BEAGLE_CORE_MATERIALIZER")
+        entries (vec (remove str/blank?
+                             (str/split-lines
+                              (slurp (System/getenv "BEAGLE_CORE_ENTRIES")))))
+        result (compile-core! facts-path projected-facts-path artifacts-dir
+                              compiler-commit entries materializer)
+        final-report (report-with-stage-progress (:report result))]
+    (durable-write! report-path final-report)
+    (spit (str artifacts-dir "/report.txt") final-report)
+    (print final-report)
+    (flush)
+    (when-not (:ok? result) (System/exit 1)))
+  (catch Throwable error
+    (fail-active-stage!)
+    (throw error)))
 ' >"$work/run.log" 2>&1
 runner_rc=$?
 set -e
