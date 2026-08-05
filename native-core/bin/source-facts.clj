@@ -207,6 +207,9 @@
       "literal" (do (row! n "form-kind" "t" "literal")
                     (row! n "literal-kind" "t" (str (get e "kind")))
                     (row! n "value" "t" (str (get e "value"))))
+      "regex"   (do (row! n "form-kind" "t" "literal")
+                    (row! n "literal-kind" "t" "regex")
+                    (row! n "value" "t" (str (get e "pattern"))))
       ;; the parser spells a boolean constant as a reference; the projection
       ;; restores the literal so the lowering never resolves it as a binding
       "ref"     (if (#{"true" "false"} (get e "name"))

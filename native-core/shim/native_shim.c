@@ -3495,6 +3495,16 @@ ffc_result ffc_parse_json_number(const char *start, const char *end,
 #undef ffc_internal
 /* END vendored ffc.h. */
 
+#ifdef NATIVE_UNICODE_ICU
+#include <unicode/uchar.h>
+#include <unicode/ucasemap.h>
+#include <unicode/uvernum.h>
+
+#if (U_ICU_VERSION_MAJOR_NUM != 72) || (U_ICU_VERSION_MINOR_NUM != 1)
+#error "Native Unicode operations require ICU4C 72.1"
+#endif
+#endif
+
 struct native_atom {
   _Atomic bool locked;
   size_t size;
@@ -6632,20 +6642,91 @@ uint64_t native_text_trim(native_arena *arena, uint64_t source) {
   return native_text_copy_range(arena, source, first, last);
 }
 
-uint64_t native_text_lower_ascii(native_arena *arena, uint64_t source) {
+#ifdef NATIVE_UNICODE_ICU
+uint64_t native_text_lower_root(native_arena *arena, uint64_t source) {
+  uint64_t source_length = native_text_length(source);
+  const uint8_t *source_bytes = native_text_bytes(source);
+  UErrorCode status = U_ZERO_ERROR;
+  UCaseMap *case_map;
+  int32_t needed;
+  uint8_t *destination = NULL;
+  uint64_t result;
+  int32_t written;
+  if (source_length > (uint64_t)INT32_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  case_map = ucasemap_open("", UINT32_C(0), &status);
+  if (U_FAILURE(status) || (case_map == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  needed = ucasemap_utf8ToLower(case_map, NULL, 0,
+                                (const char *)source_bytes,
+                                (int32_t)source_length, &status);
+  if ((status != U_BUFFER_OVERFLOW_ERROR) && U_FAILURE(status)) {
+    ucasemap_close(case_map);
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (needed < 0) {
+    ucasemap_close(case_map);
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  result = native_text_alloc(arena, (uint64_t)needed, &destination);
+  if (needed != 0) {
+    status = U_ZERO_ERROR;
+    written = ucasemap_utf8ToLower(case_map, (char *)destination, needed,
+                                   (const char *)source_bytes,
+                                   (int32_t)source_length, &status);
+    if (U_FAILURE(status) || (written != needed)) {
+      ucasemap_close(case_map);
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+  }
+  ucasemap_close(case_map);
+  return result;
+}
+
+native_vec *native_text_letter_decimal_runs(native_arena *arena,
+                                            uint64_t source,
+                                            uint64_t pattern) {
+  static const uint8_t required_pattern[] = "[\\p{L}\\p{Nd}]+";
   uint64_t length = native_text_length(source);
-  const uint8_t *input = native_text_bytes(source);
-  uint8_t *output = NULL;
-  uint64_t result = native_text_alloc(arena, length, &output);
-  uint64_t index;
-  for (index = UINT64_C(0); index < length; index++) {
-    uint8_t byte = input[index];
-    output[index] = ((byte >= (uint8_t)'A') && (byte <= (uint8_t)'Z'))
-                        ? (uint8_t)(byte + ((uint8_t)'a' - (uint8_t)'A'))
-                        : byte;
+  const uint8_t *bytes = native_text_bytes(source);
+  uint64_t offset = UINT64_C(0);
+  uint64_t run_start = UINT64_MAX;
+  native_vec *result;
+  if ((native_text_length(pattern) !=
+       (uint64_t)(sizeof required_pattern - sizeof required_pattern[0])) ||
+      (memcmp(native_text_bytes(pattern), required_pattern,
+              sizeof required_pattern - sizeof required_pattern[0]) != 0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_vec_new(arena, INT64_C(0), INT64_C(8), _Alignof(uint64_t));
+  while (offset < length) {
+    uint64_t start = offset;
+    uint32_t codepoint;
+    bool member;
+    if (!native_utf8_next(bytes, length, &offset, &codepoint)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    member = (u_isalpha((UChar32)codepoint) != 0) ||
+             (u_charType((UChar32)codepoint) == U_DECIMAL_DIGIT_NUMBER);
+    if (member && (run_start == UINT64_MAX)) {
+      run_start = start;
+    } else if (!member && (run_start != UINT64_MAX)) {
+      uint64_t run = native_text_copy_range(arena, source, run_start, start);
+      result = native_vec_push(arena, result, &run, INT64_C(8),
+                               _Alignof(uint64_t));
+      run_start = UINT64_MAX;
+    }
+  }
+  if (run_start != UINT64_MAX) {
+    uint64_t run = native_text_copy_range(arena, source, run_start, length);
+    result = native_vec_push(arena, result, &run, INT64_C(8),
+                             _Alignof(uint64_t));
   }
   return result;
 }
+#endif
 
 #define NATIVE_REGEX_MAX_TOKENS 128U
 #define NATIVE_REGEX_MAX_CAPTURES 8U

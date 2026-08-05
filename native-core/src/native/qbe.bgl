@@ -2105,6 +2105,45 @@
             (recur (+ position 1))
             operation))))))
 
+(defn unicode-text-operation-name [operation: core/TextBuiltinOpV0] -> (U String Nil)
+  (cond
+    (instance? native.core.TextLowerV0 operation) "root-lowercase"
+    (instance? native.core.TextLetterDecimalRunsV0 operation)
+    "letter-decimal-runs"
+    :else nil))
+
+(defn unsupported-block-unicode-text [block: core/BasicBlock] -> (U String Nil)
+  (let [instructions: (Vec core/Instruction)
+        (core/basicblock-instructions block)]
+    (loop [position: Int 0]
+      (if (>= position (count instructions))
+        nil
+        (let [instruction: core/Instruction (nth instructions position)]
+          (if (instance? native.core.TextBuiltinInstruction instruction)
+            (let [operation: (U String Nil)
+                  (unicode-text-operation-name
+                    (core/textbuiltininstruction-builtin instruction))]
+              (if (nil? operation) (recur (+ position 1)) operation))
+            (recur (+ position 1))))))))
+
+(defn unsupported-function-unicode-text [function: core/FunctionDef] -> (U String Nil)
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0]
+      (if (>= position (count blocks))
+        nil
+        (let [operation: (U String Nil)
+              (unsupported-block-unicode-text (nth blocks position))]
+          (if (nil? operation) (recur (+ position 1)) operation))))))
+
+(defn unsupported-unicode-text [world: core/NativeWorld] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+    (loop [position: Int 0]
+      (if (>= position (count functions))
+        nil
+        (let [operation: (U String Nil)
+              (unsupported-function-unicode-text (nth functions position))]
+          (if (nil? operation) (recur (+ position 1)) operation))))))
+
 (defn world-has-vector-sort? [world: core/NativeWorld] -> Bool
   (some?
     (some
@@ -2256,6 +2295,7 @@
   (let [validation: core/ValidationReport (core/validate-world world)
         unsupported: (U String Nil) (unsupported-value-semantics world)
         unsupported-codec: (U String Nil) (unsupported-codec-primitive world)
+        unsupported-unicode: (U String Nil) (unsupported-unicode-text world)
         unsupported-division: (U String Nil)
         (unsupported-checked-division world)
         functions: (Vec core/FunctionDef)
@@ -2287,6 +2327,10 @@
       (some? unsupported-codec)
       (->QbeFailure
         (str "QBE codec primitive is unsupported: " unsupported-codec))
+      (some? unsupported-unicode)
+      (->QbeFailure
+        (str "QBE Unicode text primitive is unsupported: "
+          unsupported-unicode))
       (some? unsupported-division)
       (->QbeFailure
         (str "QBE checked integer division is unsupported: "

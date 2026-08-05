@@ -328,7 +328,12 @@ uint64_t native_text_concat(native_arena *arena, const uint64_t *parts,
                             uint64_t count);
 int64_t native_text_compare(uint64_t left, uint64_t right);
 uint64_t native_text_trim(native_arena *arena, uint64_t source);
-uint64_t native_text_lower_ascii(native_arena *arena, uint64_t source);
+#ifdef NATIVE_UNICODE_ICU
+uint64_t native_text_lower_root(native_arena *arena, uint64_t source);
+native_vec *native_text_letter_decimal_runs(native_arena *arena,
+                                            uint64_t source,
+                                            uint64_t pattern);
+#endif
 bool native_text_regex_matches(uint64_t source, uint64_t pattern);
 uint64_t native_text_regex_replace(native_arena *arena, uint64_t source,
                                    uint64_t pattern, uint64_t replacement);

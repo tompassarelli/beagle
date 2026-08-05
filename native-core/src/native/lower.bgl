@@ -4508,6 +4508,14 @@
     (fact-text index node "value")
     nil))
 
+(defn source-regex-literal-value
+  [index: SourceIndexV0
+   node: core/NativeId] -> (U String Nil)
+  (if (and (= "literal" (fact-text index node "form-kind"))
+           (= "regex" (fact-text index node "literal-kind")))
+    (fact-text index node "value")
+    nil))
+
 (defn text-vector-value?
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> Bool
@@ -7249,6 +7257,7 @@
           (or (= "int" literal-kind) (= "number" literal-kind)) (int-type-id)
           (= "bool" literal-kind) (bool-type-id)
           (= "string" literal-kind) (text-type-id)
+          (= "regex" literal-kind) (text-type-id)
           (= "keyword" literal-kind) (keyword-type-id)
           :else nil))
 
@@ -9887,7 +9896,7 @@
                   (core/->BoolAtom (= "true" text))))
               result-id (bool-type-id) false)
 
-            (= "string" literal-kind)
+            (or (= "string" literal-kind) (= "regex" literal-kind))
             (->ExprResultV0
               (state-emit bumped
                 (core/->AtomInstruction
@@ -11991,6 +12000,31 @@
                 (= "re-find" callee)
                 (fail-result current
                   "TODO-NATIVE-REGEX-FIND-OPERANDS: re-find takes Regex and Text")
+
+                (and (= "re-seq" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1))
+                  (= "[\\p{L}\\p{Nd}]+"
+                    (source-regex-literal-value index (nth args 0))))
+                (let [vector-type: (U core/NativeId Nil)
+                      (text-vector-type-of types)]
+                  (if (nil? vector-type)
+                    (fail-result current
+                      "TODO-NATIVE-TEXT-LETTER-DECIMAL-RUNS-TYPE: re-seq needs a declared Vec Text")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "text-letter-decimal-runs")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->TextBuiltinInstruction
+                            (core/->SsaValueV0 result-id vector-type)
+                            (core/->TextLetterDecimalRunsV0
+                              (arena-value-id owner)
+                              (nth values 1) (nth values 0))))
+                        result-id vector-type false))))
+
+                (= "re-seq" callee)
+                (fail-result current
+                  "TODO-NATIVE-REGEX-SEQ-PATTERN: re-seq only supports the exact [\\p{L}\\p{Nd}]+ Unicode token pattern")
 
                 (and (= "str/split" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
@@ -15362,6 +15396,11 @@
     (worlds/canonical-record "text-lower"
       [(id-value (core/textlowerv0-arena-id operation))
        (id-value (core/textlowerv0-source-id operation))])
+    (instance? native.core.TextLetterDecimalRunsV0 operation)
+    (worlds/canonical-record "text-letter-decimal-runs"
+      [(id-value (core/textletterdecimalrunsv0-arena-id operation))
+       (id-value (core/textletterdecimalrunsv0-source-id operation))
+       (id-value (core/textletterdecimalrunsv0-pattern-id operation))])
     (instance? native.core.TextRegexReplaceV0 operation)
     (worlds/canonical-record "text-regex-replace"
       [(id-value (core/textregexreplacev0-arena-id operation))

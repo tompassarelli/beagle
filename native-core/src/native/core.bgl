@@ -239,7 +239,8 @@
 
 ;; Text library operations share one closed instruction family. Allocation is
 ;; explicit in each operation through its arena SSA value; pure comparisons do
-;; not acquire one.
+;; not acquire one. Lowering is full Unicode root-locale mapping, and token runs
+;; are maximal Unicode Letter or DecimalDigit sequences.
 (defunion TextBuiltinOpV0
   (TextCompareV0
     [left-id: NativeId
@@ -253,6 +254,10 @@
   (TextLowerV0
     [arena-id: NativeId
      source-id: NativeId])
+  (TextLetterDecimalRunsV0
+    [arena-id: NativeId
+     source-id: NativeId
+     pattern-id: NativeId])
   (TextRegexReplaceV0
     [arena-id: NativeId
      source-id: NativeId
@@ -1719,6 +1724,8 @@
     [(TextEndsWithV0 source-id suffix-id) [source-id suffix-id]]
     [(TextTrimV0 arena-id source-id) [arena-id source-id]]
     [(TextLowerV0 arena-id source-id) [arena-id source-id]]
+    [(TextLetterDecimalRunsV0 arena-id source-id pattern-id)
+     [arena-id source-id pattern-id]]
     [(TextRegexReplaceV0 arena-id source-id pattern-id replacement-id)
      [arena-id source-id pattern-id replacement-id]]
     [(TextRegexMatchesV0 source-id pattern-id) [source-id pattern-id]]
