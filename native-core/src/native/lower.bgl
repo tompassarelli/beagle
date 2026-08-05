@@ -3264,6 +3264,20 @@
     (and (not (nil? definition))
       (instance? native.core.SetTypeV0 (core/typedef-shape definition)))))
 
+(defn insertion-order-set-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      false
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.SetTypeV0 shape))
+          false
+          (let [order: core/CollectionOrderV0
+                (core/settypev0-iteration-order shape)]
+            (and (instance? native.core.InsertionOrderV0 order)
+              (core/insertionorderv0-token order))))))))
+
 (defn set-element-of
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> core/NativeId
@@ -5725,6 +5739,66 @@
 (defn state-enter-inline-callback [state: BodyStateV0] -> BodyStateV0
   (with state [:loop-frames []]))
 
+;; Callback annotations own empty-literal shapes and every value crossing them.
+(defn lower-contextual-boundary
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expression: core/NativeId
+   expected: core/NativeId] -> ExprResultV0
+  (let [contextual: (U ExprResultV0 Nil)
+        (lower-contextual-value env owner state expression expected
+          (fn
+            [item-state: BodyStateV0
+             item-node: core/NativeId] -> ExprResultV0
+            (lower-expr env owner item-state item-node)))
+        raw: ExprResultV0
+        (if (nil? contextual)
+          (lower-expr env owner state expression)
+          contextual)]
+    (if (or (exprresultv0-terminated raw)
+            (state-blocked? (exprresultv0-state raw)))
+      raw
+      (lower-boundary-coerce (bodyenvv0-types env) owner
+        (exprresultv0-state raw)
+        (exprresultv0-value-id raw)
+        (exprresultv0-type-id raw)
+        expected))))
+
+(defn lower-reduce-collection
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expression: core/NativeId] -> ExprResultV0
+  (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
+        source: ExprResultV0 (lower-expr env owner state expression)
+        settled: BodyStateV0 (exprresultv0-state source)
+        source-type: core/NativeId (exprresultv0-type-id source)]
+    (cond
+      (exprresultv0-terminated source) source
+      (state-blocked? settled) (dead-result settled)
+      (vector-type? types source-type) source
+
+      (insertion-order-set-type? types source-type)
+      (let [element-type: core/NativeId (set-element-of types source-type)
+            vector-type: (U core/NativeId Nil)
+            (vector-type-of types element-type)]
+        (if (nil? vector-type)
+          (fail-result settled
+            "TODO-NATIVE-REDUCE-COLLECTION: insertion-order Set has no declared Vec carrier")
+          (let [result-id: core/NativeId
+                (state-id settled owner "reduce-set-vector")]
+            (->ExprResultV0
+              (state-emit (state-bump settled)
+                (core/->SetVectorInstructionV0
+                  (core/->SsaValueV0 result-id vector-type)
+                  (exprresultv0-value-id source) (arena-value-id owner)))
+              result-id vector-type false))))
+
+      :else
+      (fail-result settled
+        "TODO-NATIVE-REDUCE-COLLECTION: reduce needs a native Vec or closed insertion-order Set"))))
+
 (defn lower-nil-union-value
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -5847,7 +5921,8 @@
             callback-state: BodyStateV0
             (state-bind isolated callback-name item-id element-type)
             callback-result: ExprResultV0
-            (lower-expr env owner callback-state callback-body)
+            (lower-contextual-boundary env owner callback-state callback-body
+              callback-return)
             restored: BodyStateV0
             (with
               (with
@@ -6018,7 +6093,8 @@
             callback-state: BodyStateV0
             (state-bind isolated callback-name item-id element-type)
             callback-result: ExprResultV0
-            (lower-expr env owner callback-state callback-body)
+            (lower-contextual-boundary env owner callback-state callback-body
+              callback-return)
             callback-outer-state: BodyStateV0
             (with
               (with
@@ -7304,7 +7380,7 @@
             (= "reduce" callee)
             (if (not (= 3 (count args)))
               (fail-result state
-                "TODO-NATIVE-REDUCE-ARITY: reduce lowers only as (reduce fn init vector)")
+                "TODO-NATIVE-REDUCE-ARITY: reduce lowers only as (reduce fn init collection)")
               (let [callback-node: core/NativeId (nth args 0)
                     callback-kind: String
                     (fact-text index callback-node "form-kind")
@@ -7367,14 +7443,15 @@
                         (fail-result state
                           "TODO-NATIVE-REDUCE-ACCUMULATOR: callback return must match its accumulator parameter")
                         (let [initial: ExprResultV0
-                              (lower-expr env owner state (nth args 1))]
+                              (lower-contextual-boundary env owner state
+                                (nth args 1) accumulator-type)]
                           (cond
                             (exprresultv0-terminated initial) initial
                             (state-blocked? (exprresultv0-state initial))
                             (dead-result (exprresultv0-state initial))
                             :else
                             (let [collection: ExprResultV0
-                                  (lower-expr env owner
+                                  (lower-reduce-collection env owner
                                     (exprresultv0-state initial) (nth args 2))
                                   collection-state: BodyStateV0
                                   (exprresultv0-state collection)]
@@ -7389,7 +7466,7 @@
                                 (not (vector-type? types
                                        (exprresultv0-type-id collection)))
                                 (fail-result collection-state
-                                  "TODO-NATIVE-REDUCE-COLLECTION: v0 reduces a native vector")
+                                  "TODO-NATIVE-REDUCE-COLLECTION: reduce needs a native Vec or closed insertion-order Set")
                                 (not (same-id? element-type
                                        (vector-element-of types
                                          (exprresultv0-type-id collection))))
@@ -7471,8 +7548,8 @@
                                           header-accumulator accumulator-type)
                                         (nth callback-names 1) item-id element-type)
                                       callback-result: ExprResultV0
-                                      (lower-expr env owner callback-state
-                                        callback-body)
+                                      (lower-contextual-boundary env owner
+                                        callback-state callback-body accumulator-type)
                                       restored: BodyStateV0
                                       (with
                                         (with

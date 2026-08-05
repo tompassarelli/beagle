@@ -5,6 +5,7 @@
 (define-mode strict)
 
 (defrecord OptionalBoolCarrier [value: (U Bool Nil)])
+(defrecord CallbackBox [value: Int])
 
 (defn captured-reduce [offset: Int] -> Int
   (let [values: (Vec Int) [1 2 3]]
@@ -52,3 +53,30 @@
               (= candidate (+ value threshold)))
             candidates)))
       values)))
+
+(defn contextual-reduce-any [offset: Int] -> Bool
+  (let [values: (Vec Int) [1 2]]
+    (instance? CallbackBox
+      (reduce
+        (fn
+          [tail: Any
+           value: Int] -> Any
+          (->CallbackBox (+ value offset)))
+        :callback/seed values))))
+
+(defn contextual-map-any [offset: Int] -> Int
+  (let [values: (Vec Int) [1 2]
+        mapped: (Vec Any)
+        (mapv
+          (fn [value: Int] -> Any (->CallbackBox (+ value offset)))
+          values)]
+    (count mapped)))
+
+(defn insertion-order-set-reduce [] -> Int
+  (let [values: (Set Int) #{3 1 2}]
+    (reduce
+      (fn
+        [total: Int
+         value: Int] -> Int
+        (+ (* total 10) value))
+      0 values)))

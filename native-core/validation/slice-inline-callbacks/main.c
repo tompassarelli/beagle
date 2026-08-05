@@ -21,6 +21,15 @@
 #ifndef NESTED_CAPTURES_FN
 #error "NESTED_CAPTURES_FN must name nested-captures"
 #endif
+#ifndef CONTEXTUAL_REDUCE_FN
+#error "CONTEXTUAL_REDUCE_FN must name contextual-reduce-any"
+#endif
+#ifndef CONTEXTUAL_MAP_FN
+#error "CONTEXTUAL_MAP_FN must name contextual-map-any"
+#endif
+#ifndef SET_REDUCE_FN
+#error "SET_REDUCE_FN must name insertion-order-set-reduce"
+#endif
 
 #define ARENA_BYTES ((size_t)65536)
 
@@ -54,6 +63,15 @@ int main(void) {
   if (!NESTED_CAPTURES_FN(&arena, &capability, INT64_C(1))
       || NESTED_CAPTURES_FN(&arena, &capability, INT64_C(3))) {
     return 7;
+  }
+  if (!CONTEXTUAL_REDUCE_FN(&arena, &capability, INT64_C(5))) {
+    return 8;
+  }
+  if (CONTEXTUAL_MAP_FN(&arena, &capability, INT64_C(5)) != INT64_C(2)) {
+    return 9;
+  }
+  if (SET_REDUCE_FN(&arena, &capability) != INT64_C(312)) {
+    return 10;
   }
   return 0;
 }

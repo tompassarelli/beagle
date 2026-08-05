@@ -94,7 +94,8 @@ refusal_report="$scratch/refusal-report.txt"
 cat "$report" "$refusal_report"
 
 for name in captured-reduce captured-map captured-filter captured-every? \
-    captured-some? shadowed-map-parameter nested-captures; do
+    captured-some? shadowed-map-parameter nested-captures \
+    contextual-reduce-any contextual-map-any insertion-order-set-reduce; do
   awk -v name="$name" \
     '$1 == "lowered" && $3 == name { found = 1 } END { exit !found }' \
     "$report" || {
@@ -135,9 +136,13 @@ captured_every="$(function_index captured-every?)"
 captured_some="$(function_index captured-some?)"
 shadowed_map="$(function_index shadowed-map-parameter)"
 nested_captures="$(function_index nested-captures)"
+contextual_reduce="$(function_index contextual-reduce-any)"
+contextual_map="$(function_index contextual-map-any)"
+set_reduce="$(function_index insertion-order-set-reduce)"
 
 for index in "$captured_reduce" "$captured_map" "$captured_filter" \
-    "$captured_every" "$captured_some" "$shadowed_map" "$nested_captures"; do
+    "$captured_every" "$captured_some" "$shadowed_map" "$nested_captures" \
+    "$contextual_reduce" "$contextual_map" "$set_reduce"; do
   [[ -n "$index" ]] || {
     echo "drive.sh: could not resolve a materialized function index" >&2
     exit 1
@@ -156,6 +161,9 @@ definitions=(
   "-DCAPTURED_SOME_FN=native_m0_fn_$captured_some"
   "-DSHADOWED_MAP_FN=native_m0_fn_$shadowed_map"
   "-DNESTED_CAPTURES_FN=native_m0_fn_$nested_captures"
+  "-DCONTEXTUAL_REDUCE_FN=native_m0_fn_$contextual_reduce"
+  "-DCONTEXTUAL_MAP_FN=native_m0_fn_$contextual_map"
+  "-DSET_REDUCE_FN=native_m0_fn_$set_reduce"
 )
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 
@@ -173,4 +181,4 @@ strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
   ./probe_clang
 )
 
-echo "inline-callbacks: captures, shadowing, nested callbacks, strict C17, and QBE refusal PASS"
+echo "inline-callbacks: captures, boundary coercion, insertion-order Set reduction, strict C17, and QBE refusal PASS"
