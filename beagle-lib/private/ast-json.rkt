@@ -313,7 +313,8 @@
      (hasheq 'node "if"
              'cond (expr->json (if-form-cond-expr e))
              'then (expr->json (if-form-then-expr e))
-             'else (expr->json (if-form-else-expr e)))]
+             'else (and (if-form-else-expr e)
+                        (expr->json (if-form-else-expr e))))]
 
     [(when-form? e)
      (hasheq 'node "when"

@@ -63,6 +63,8 @@ grep -Fq "lowered fn_44 vector-value? " "$art/report.txt"
 grep -Fq "lowered fn_45 vector-probe " "$art/report.txt"
 grep -Fq "lowered fn_46 int-vector? " "$art/report.txt"
 grep -Fq "lowered fn_47 text-ends-with? " "$art/report.txt"
+grep -Fq "lowered fn_48 maybe-int-if " "$art/report.txt"
+grep -Fq "lowered fn_49 maybe-int-when " "$art/report.txt"
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
   exit 0

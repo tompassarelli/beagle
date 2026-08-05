@@ -253,5 +253,7 @@ native_m0_type_3 native_m0_fn_44(native_m0_type_24 native_v_0);
 native_m0_type_3 native_m0_fn_45(native_m0_type_10 native_v_0);
 native_m0_type_3 native_m0_fn_46(native_m0_type_1 native_v_0);
 native_m0_type_3 native_m0_fn_47(native_m0_type_5 native_v_0, native_m0_type_5 native_v_1);
+native_m0_type_18 native_m0_fn_48(native_m0_type_3 native_v_0);
+native_m0_type_18 native_m0_fn_49(native_m0_type_3 native_v_0);
 
 #endif

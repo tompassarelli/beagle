@@ -234,8 +234,12 @@
       "if"      (do (row! n "form-kind" "t" "if")
                     (row! n "cond" "n" (emit-expr (get e "cond")))
                     (row! n "then" "n" (emit-expr (get e "then")))
-                    (when-let [alt (get e "else")]
-                      (row! n "else" "n" (emit-expr alt))))
+                    (let [alt (get e "else")]
+                      (row! n "else" "n"
+                            (emit-expr
+                             (if alt
+                               alt
+                               {"node" "literal" "kind" "nil"})))))
       "let"     (do (row! n "form-kind" "t" "let")
                     (row! n "bindings" "n"
                           (emit-seq (get e "bindings") emit-binding))

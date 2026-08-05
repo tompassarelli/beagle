@@ -205,3 +205,9 @@
   [value: String
    suffix: String] -> Bool
   (str/ends-with? value suffix))
+
+(defn maybe-int-if [available: Bool] -> Int?
+  (if available 7))
+
+(defn maybe-int-when [available: Bool] -> Int?
+  (when available 9))

@@ -2483,3 +2483,71 @@ native_m0_type_3 native_m0_fn_47(native_m0_type_5 native_v_0, native_m0_type_5 n
   }
   return native_s_0;
 }
+native_m0_type_18 native_m0_fn_48(native_m0_type_3 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_m0_type_9 native_s_1;
+  native_m0_type_1 native_s_2;
+  native_m0_type_18 native_s_3;
+  native_m0_type_9 native_s_4;
+  native_m0_type_18 native_s_5;
+  native_m0_type_18 native_s_6;
+  if (native_v_0) {
+    goto native_l48_1;
+  } else {
+    goto native_l48_2;
+  }
+native_l48_1: ;
+  native_s_0 = INT64_C(7);
+  (void)native_s_0;
+  native_s_2 = native_s_0;
+  goto native_l48_3;
+native_l48_2: ;
+  native_s_1 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_4 = native_s_1;
+  goto native_l48_4;
+native_l48_3: ;
+  native_s_3 = (native_m0_type_18){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_2 } };
+  native_s_6 = native_s_3;
+  goto native_l48_5;
+native_l48_4: ;
+  native_s_5 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_4 } };
+  native_s_6 = native_s_5;
+  goto native_l48_5;
+native_l48_5: ;
+  return native_s_6;
+}
+native_m0_type_18 native_m0_fn_49(native_m0_type_3 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_m0_type_9 native_s_1;
+  native_m0_type_1 native_s_2;
+  native_m0_type_18 native_s_3;
+  native_m0_type_9 native_s_4;
+  native_m0_type_18 native_s_5;
+  native_m0_type_18 native_s_6;
+  if (native_v_0) {
+    goto native_l49_1;
+  } else {
+    goto native_l49_2;
+  }
+native_l49_1: ;
+  native_s_0 = INT64_C(9);
+  (void)native_s_0;
+  native_s_2 = native_s_0;
+  goto native_l49_3;
+native_l49_2: ;
+  native_s_1 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_4 = native_s_1;
+  goto native_l49_4;
+native_l49_3: ;
+  native_s_3 = (native_m0_type_18){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_2 } };
+  native_s_6 = native_s_3;
+  goto native_l49_5;
+native_l49_4: ;
+  native_s_5 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_4 } };
+  native_s_6 = native_s_5;
+  goto native_l49_5;
+native_l49_5: ;
+  return native_s_6;
+}

@@ -4,8 +4,8 @@ stage typed-to-native COMPLETE
 source-modules 1
 source-imports 1
 world-types 25
-world-functions 48
-world-abis 48
+world-functions 50
+world-abis 50
 projected-types 25
 lowered fn_0 pair? 4 blocks
 lowered fn_1 wrap-int 1 blocks
@@ -55,6 +55,8 @@ lowered fn_44 vector-value? 4 blocks
 lowered fn_45 vector-probe 1 blocks
 lowered fn_46 int-vector? 1 blocks
 lowered fn_47 text-ends-with? 1 blocks
+lowered fn_48 maybe-int-if 6 blocks
+lowered fn_49 maybe-int-when 6 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
