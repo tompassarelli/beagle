@@ -3564,6 +3564,98 @@
             reference-id))
         result-id record-type false))))
 
+(declare failure-code)
+
+;; A source alternative the target cannot spell carries nothing across, so the
+;; arm traps on the LowerFailure ordinal rather than reinterpreting its bytes.
+(defn narrow-mismatch-arm
+  [owner: core/NativeId
+   state: BodyStateV0
+   position: Int] -> BodyStateV0
+  (let [code-id: core/NativeId
+        (state-id state owner (str "narrow-trap-" position))]
+    (state-close
+      (state-emit (state-bump state)
+        (core/->AtomInstruction
+          (core/->SsaValueV0 code-id (int-type-id))
+          (core/->I64Atom (failure-code "union-variant-mismatch"))))
+      (core/->TrapTerminator code-id))))
+
+(defrecord NarrowArmsV0 [state: BodyStateV0 crossed: Int])
+
+;; A refused widen IS the "alternative not in the target" test, so the arm loop
+;; drops the attempt and traps from the untouched state; `fallback` keeps the
+;; widen refusal when nothing crosses at all.
+(defn lower-union-narrow
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   from: core/NativeId
+   to: core/NativeId
+   fallback: ExprResultV0] -> ExprResultV0
+  (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
+        join-id: core/NativeId (state-id state owner "narrow-join")
+        join-parameter: core/NativeId (state-id state owner "narrow-value")
+        cases: (Vec core/SwitchCaseV0)
+        (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+          (if (>= position (count source-variants))
+            collected
+            (recur (+ position 1)
+              (conj collected
+                (core/->SwitchCaseV0
+                  (core/typevariant-id (nth source-variants position))
+                  (state-id state owner (str "narrow-arm-" position))
+                  [])))))
+        switched: BodyStateV0
+        (state-close (state-bump state)
+          (core/->SwitchTerminator value-id cases))
+        narrowed: NarrowArmsV0
+        (loop [position: Int 0
+               current: BodyStateV0 switched
+               crossed: Int 0]
+          (if (or (>= position (count source-variants))
+                  (state-blocked? current))
+            (->NarrowArmsV0 current crossed)
+            (let [variant: core/TypeVariant (nth source-variants position)
+                  arm-id: core/NativeId
+                  (state-id state owner (str "narrow-arm-" position))
+                  payload-type: (U core/NativeId Nil)
+                  (core/typevariant-payload-type variant)
+                  opened: BodyStateV0 (state-open-block current arm-id [])
+                  carried: BodyStateV0
+                  (if (nil? payload-type)
+                    (widen-unit-arm types opened owner to join-id)
+                    (let [extract-id: core/NativeId
+                          (state-id opened owner
+                            (str "narrow-extract-" position))
+                          extracted: BodyStateV0
+                          (state-emit (state-bump opened)
+                            (core/->UnionExtractInstruction
+                              (core/->SsaValueV0 extract-id payload-type)
+                              value-id (core/typevariant-id variant)))
+                          widened: ExprResultV0
+                          (lower-widen types owner extracted extract-id
+                            payload-type to (widen-budget))]
+                      (if (state-blocked? (exprresultv0-state widened))
+                        (exprresultv0-state widened)
+                        (state-close (exprresultv0-state widened)
+                          (core/->JumpTerminator join-id
+                            [(exprresultv0-value-id widened)])))))]
+              (if (state-blocked? carried)
+                (recur (+ position 1)
+                  (narrow-mismatch-arm owner opened position) crossed)
+                (recur (+ position 1) carried (+ crossed 1))))))
+        armed: BodyStateV0 (narrowarmsv0-state narrowed)]
+    (cond
+      (state-blocked? armed) (dead-result armed)
+      (= 0 (narrowarmsv0-crossed narrowed)) fallback
+      :else
+      (->ExprResultV0
+        (state-open-block armed join-id
+          [(core/->Parameter join-parameter to)])
+        join-parameter to false))))
+
 ;; Source annotations and calls are semantic boundaries: widen into their
 ;; declared union, or checked-extract the named alternative. A reference-backed
 ;; record alternative is materialized before crossing a direct-record boundary.
@@ -3622,7 +3714,16 @@
         (extract-variant-path owner state value-id from "boundary-nested"
           (variantpathv0-variants nested))
         :else
-        (lower-widen types owner state value-id from to (widen-budget))))))
+        ;; Widening runs first, so every program that already lowers keeps its
+        ;; world; only a refused widen is reconsidered as a narrowing.
+        (let [widened: ExprResultV0
+              (lower-widen types owner state value-id from to (widen-budget))]
+          (if (or (not (state-blocked? (exprresultv0-state widened)))
+                  (= 0 (count source-variants))
+                  (= 0 (count (union-variants-of types to))))
+            widened
+            (lower-union-narrow types owner state value-id from to
+              widened)))))))
 
 (defn coerce-arguments
   [types: (Vec core/TypeDef)
