@@ -4,6 +4,21 @@
 struct native_m0_text_0_blob { uint64_t length; uint8_t bytes[sizeof "unknown op"]; };
 static const struct native_m0_text_0_blob native_m0_text_0 = { (uint64_t)(sizeof "unknown op" - 1U), "unknown op" };
 _Static_assert(offsetof(struct native_m0_text_0_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_keyword_0_blob { uint64_t length; uint8_t bytes[sizeof "code"]; };
+static const struct native_m0_keyword_0_blob native_m0_keyword_0 = { (uint64_t)(sizeof "code" - 1U), "code" };
+_Static_assert(offsetof(struct native_m0_keyword_0_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_1_blob { uint64_t length; uint8_t bytes[sizeof "version"]; };
+static const struct native_m0_keyword_1_blob native_m0_keyword_1 = { (uint64_t)(sizeof "version" - 1U), "version" };
+_Static_assert(offsetof(struct native_m0_keyword_1_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_2_blob { uint64_t length; uint8_t bytes[sizeof "error"]; };
+static const struct native_m0_keyword_2_blob native_m0_keyword_2 = { (uint64_t)(sizeof "error" - 1U), "error" };
+_Static_assert(offsetof(struct native_m0_keyword_2_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_3_blob { uint64_t length; uint8_t bytes[sizeof "reject"]; };
+static const struct native_m0_keyword_3_blob native_m0_keyword_3 = { (uint64_t)(sizeof "reject" - 1U), "reject" };
+_Static_assert(offsetof(struct native_m0_keyword_3_blob, bytes) == 8, "keyword blob is length-prefixed");
+struct native_m0_keyword_4_blob { uint64_t length; uint8_t bytes[sizeof "other"]; };
+static const struct native_m0_keyword_4_blob native_m0_keyword_4 = { (uint64_t)(sizeof "other" - 1U), "other" };
+_Static_assert(offsetof(struct native_m0_keyword_4_blob, bytes) == 8, "keyword blob is length-prefixed");
 
 native_m0_type_0 native_m0_fn_0(native_m0_type_4 native_v_0) {
   (void)native_v_0;
@@ -13,7 +28,7 @@ native_m0_type_0 native_m0_fn_0(native_m0_type_4 native_v_0) {
 }
 native_m0_type_6 native_m0_fn_1(void) {
   native_m0_type_6 native_s_0;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   return native_s_0;
 }
@@ -24,7 +39,7 @@ native_m0_type_1 native_m0_fn_2(native_m0_type_13 native_v_0) {
   native_m0_type_1 native_s_2;
   native_m0_type_1 native_s_3;
   native_m0_type_1 native_s_4;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -66,7 +81,7 @@ native_m0_type_1 native_m0_fn_3(native_m0_type_13 native_v_0, native_m0_type_0 n
   native_m0_type_1 native_s_3;
   native_m0_type_1 native_s_4;
   native_m0_type_1 native_s_5;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -118,7 +133,7 @@ native_m0_type_0 native_m0_fn_4(native_m0_type_13 native_v_0) {
   native_m0_type_0 native_s_11;
   native_m0_type_0 native_s_12;
   native_m0_type_0 native_s_13;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -178,7 +193,7 @@ native_l4_7: ;
     goto native_l4_9;
   }
 native_l4_8: ;
-  native_s_9 = UINT64_C(0);
+  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_9;
   {
     const void *native_map_hit_10 = native_map_get(native_v_0, &native_s_9, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -222,7 +237,7 @@ native_m0_type_0 native_m0_fn_5(native_m0_type_13 native_v_0) {
   native_m0_type_0 native_s_13;
   native_m0_type_0 native_s_14;
   native_m0_type_0 native_s_15;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -282,7 +297,7 @@ native_l5_7: ;
     goto native_l5_9;
   }
 native_l5_8: ;
-  native_s_9 = UINT64_C(0);
+  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_9;
   {
     const void *native_map_hit_10 = native_map_get(native_v_0, &native_s_9, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -328,7 +343,7 @@ native_m0_type_0 native_m0_fn_6(native_m0_type_13 native_v_0, native_m0_type_0 n
   native_m0_type_0 native_s_8;
   native_m0_type_0 native_s_9;
   native_m0_type_0 native_s_10;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -368,7 +383,7 @@ native_l6_3: ;
     goto native_l6_5;
   }
 native_l6_4: ;
-  native_s_6 = UINT64_C(0);
+  native_s_6 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_6;
   {
     const void *native_map_hit_7 = native_map_get(native_v_0, &native_s_6, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -417,7 +432,7 @@ native_m0_type_0 native_m0_fn_7(native_m0_type_11 native_v_0) {
   native_m0_type_0 native_s_18;
   native_m0_type_0 native_s_19;
   native_m0_type_0 native_s_20;
-  native_s_0 = UINT64_C(1);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_1;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -504,7 +519,7 @@ native_l7_11: ;
     goto native_l7_13;
   }
 native_l7_12: ;
-  native_s_13 = UINT64_C(1);
+  native_s_13 = (uint64_t)(uintptr_t)&native_m0_keyword_1;
   (void)native_s_13;
   {
     const void *native_map_hit_14 = native_map_get(native_v_0, &native_s_13, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -560,7 +575,7 @@ native_m0_type_19 native_m0_fn_8(native_m0_type_10 native_v_0) {
   native_m0_type_19 native_s_15;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_0;
   (void)native_s_0;
-  native_s_1 = UINT64_C(2);
+  native_s_1 = (uint64_t)(uintptr_t)&native_m0_keyword_2;
   (void)native_s_1;
   {
     const void *native_map_hit_2 = native_map_get(native_v_0, &native_s_1, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -664,7 +679,7 @@ native_m0_type_0 native_m0_fn_10(native_m0_type_12 native_v_0) {
   native_m0_type_0 native_s_15;
   native_m0_type_0 native_s_16;
   native_m0_type_0 native_s_17;
-  native_s_0 = UINT64_C(3);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -729,7 +744,7 @@ native_l10_7: ;
     goto native_l10_9;
   }
 native_l10_8: ;
-  native_s_9 = UINT64_C(3);
+  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
   (void)native_s_9;
   {
     const void *native_map_hit_10 = native_map_get(native_v_0, &native_s_9, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -782,7 +797,7 @@ native_m0_type_20 native_m0_fn_11(native_m0_type_13 native_v_0) {
   native_m0_type_6 native_s_11;
   native_m0_type_20 native_s_12;
   native_m0_type_20 native_s_13;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -842,7 +857,7 @@ native_l11_7: ;
     goto native_l11_9;
   }
 native_l11_8: ;
-  native_s_9 = UINT64_C(4);
+  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
   (void)native_s_9;
   {
     const void *native_map_hit_10 = native_map_get(native_v_0, &native_s_9, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -857,7 +872,7 @@ native_l11_8: ;
   native_s_13 = native_s_10;
   goto native_l11_10;
 native_l11_9: ;
-  native_s_11 = UINT64_C(4);
+  native_s_11 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
   (void)native_s_11;
   {
     const void *native_map_hit_12 = native_map_get(native_v_0, &native_s_11, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -891,7 +906,7 @@ native_m0_type_20 native_m0_fn_12(native_m0_type_13 native_v_0, native_m0_type_1
   native_m0_type_6 native_s_11;
   native_m0_type_20 native_s_12;
   native_m0_type_20 native_s_13;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -951,7 +966,7 @@ native_l12_7: ;
     goto native_l12_9;
   }
 native_l12_8: ;
-  native_s_9 = UINT64_C(0);
+  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_9;
   {
     const void *native_map_hit_10 = native_map_get(native_v_1, &native_s_9, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -966,7 +981,7 @@ native_l12_8: ;
   native_s_13 = native_s_10;
   goto native_l12_10;
 native_l12_9: ;
-  native_s_11 = UINT64_C(0);
+  native_s_11 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_11;
   {
     const void *native_map_hit_12 = native_map_get(native_v_1, &native_s_11, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -1001,7 +1016,7 @@ native_m0_type_20 native_m0_fn_13(native_m0_type_13 native_v_0) {
   native_m0_type_20 native_s_13;
   native_m0_type_20 native_s_14;
   native_m0_type_20 native_s_15;
-  native_s_0 = UINT64_C(0);
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   {
     const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -1066,7 +1081,7 @@ native_l13_8: ;
   native_s_12 = native_s_9;
   goto native_l13_10;
 native_l13_9: ;
-  native_s_10 = UINT64_C(0);
+  native_s_10 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_10;
   {
     const void *native_map_hit_11 = native_map_get(native_v_0, &native_s_10, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -1189,10 +1204,7 @@ native_l17_3: ;
     goto native_l17_5;
   }
 native_l17_4: ;
-  if (native_v_0.tag != INT64_C(1)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  native_s_3 = native_v_0.payload.variant_1;
+  native_s_3 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_3;
   native_s_4 = (native_m0_type_9){ .tag = INT64_C(0) };
   native_s_8 = native_s_4;

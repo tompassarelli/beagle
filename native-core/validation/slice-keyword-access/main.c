@@ -1,5 +1,16 @@
 #include "module_0.h"
 
+struct keyword_blob {
+  uint64_t length;
+  uint8_t bytes[8];
+};
+
+/* Distinct handles require Keyword map equality to compare UTF-8 bytes. */
+static const struct keyword_blob code_keyword = {UINT64_C(4), "code"};
+static const struct keyword_blob version_keyword = {UINT64_C(7), "version"};
+static const struct keyword_blob error_keyword = {UINT64_C(5), "error"};
+static const struct keyword_blob reject_keyword = {UINT64_C(6), "reject"};
+
 int main(void) {
   struct text_blob {
     uint64_t length;
@@ -12,9 +23,9 @@ int main(void) {
   uint8_t storage[4096];
   native_arena arena;
   native_m0_type_4 pair = {INT64_C(17), UINT64_C(0)};
-  uint64_t keys[] = {native_m0_fn_1()};
+  uint64_t keys[] = {(uint64_t)(uintptr_t)&code_keyword};
   int64_t values[] = {INT64_C(42)};
-  uint64_t version_keys[] = {UINT64_C(1)};
+  uint64_t version_keys[] = {(uint64_t)(uintptr_t)&version_keyword};
   native_m0_type_23 version_values[] = {{
       .tag = INT64_C(1),
       .payload = {.variant_1 = INT64_C(19)},
@@ -25,14 +36,14 @@ int main(void) {
           .variant_0 = (uint64_t)(uintptr_t)&unknown_op,
       },
   }};
-  uint64_t error_keys[] = {UINT64_C(2)};
+  uint64_t error_keys[] = {(uint64_t)(uintptr_t)&error_keyword};
   native_m0_type_21 error_values[] = {{
       .tag = INT64_C(0),
       .payload = {
           .variant_0 = (uint64_t)(uintptr_t)&unknown_op,
       },
   }};
-  uint64_t reject_keys[] = {UINT64_C(3)};
+  uint64_t reject_keys[] = {(uint64_t)(uintptr_t)&reject_keyword};
 
   native_arena_init(&arena, storage, sizeof storage);
   uint64_t rejection_item = (uint64_t)(uintptr_t)&unknown_op;
@@ -85,6 +96,10 @@ int main(void) {
       _Alignof(uint64_t), sizeof reject_values[0],
       _Alignof(native_m0_type_25), NATIVE_COLLECTION_EQ_KEYWORD);
 
+  if ((native_m0_fn_1() == keys[0]) ||
+      !native_text_eq(native_m0_fn_1(), keys[0])) {
+    return 12;
+  }
   if (native_m0_fn_0(pair) != INT64_C(17)) {
     return 1;
   }
