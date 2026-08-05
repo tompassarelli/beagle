@@ -3,7 +3,7 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
-world-types 74
+world-types 76
 world-functions 31
 world-abis 31
 projected-types 74
@@ -26,18 +26,18 @@ lowered fn_15 rpc-response-payload-value 12 blocks
 lowered fn_16 commit-operation? 4 blocks
 lowered fn_17 transaction-frame? 4 blocks
 lowered fn_18 term-store-dump? 4 blocks
-lowered fn_19 atom? 37 blocks
-lowered fn_20 term? 10 blocks
+lowered fn_19 atom? 49 blocks
+lowered fn_20 term? 14 blocks
 lowered fn_21 triple 4 blocks
 lowered fn_22 transaction-coordinate 7 blocks
-lowered fn_23 transaction-coordinate? 25 blocks
+lowered fn_23 transaction-coordinate? 35 blocks
 lowered fn_24 occurrence-coordinate 7 blocks
-lowered fn_25 occurrence-coordinate? 19 blocks
+lowered fn_25 occurrence-coordinate? 27 blocks
 lowered fn_26 assertion-occurrence 7 blocks
 lowered fn_27 retraction-occurrence 7 blocks
 lowered fn_28 withdrawal 7 blocks
 lowered fn_29 recorded-at 7 blocks
-lowered fn_30 occurrence-before? 16 blocks
+lowered fn_30 occurrence-before? 20 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
