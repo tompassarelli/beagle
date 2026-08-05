@@ -5502,7 +5502,7 @@
                   (logicarmv0-start arm) (logicarmv0-end arm)
                   join-id bridge-id)
                 opened: BodyStateV0
-                (state-open-block rewired bridge-id
+                (state-open-block (state-bump rewired) bridge-id
                   [(core/->Parameter bridge-value arm-type)])
                 coerced: ExprResultV0
                 (lower-boundary-coerce types owner opened
@@ -9494,7 +9494,7 @@
                         join-parameter: core/NativeId
                         (state-id state owner "logic-value")]
                     (loop [position: Int 0
-                           current: BodyStateV0 state
+                           current: BodyStateV0 (state-bump state)
                            arms: (Vec LogicArmV0) []]
                       (let [operand: ExprResultV0
                             (lower-expr env owner current (nth args position))]
