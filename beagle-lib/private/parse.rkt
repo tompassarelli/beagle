@@ -55,17 +55,6 @@
           'to (format "~a" to)
           'label (format "Replace `~a` with `~a`" from to)))
 
-;; Exact source-range replacement. Physical-layout diagnostics carry the
-;; compiler-produced replacement rather than asking repair tools to reproduce
-;; the grammar-aware formatting decision.
-(define (replace-range-suggestion offset before replacement label)
-  (hasheq 'type "replace-range"
-          'offset offset
-          'length (string-length before)
-          'before before
-          'replacement replacement
-          'label label))
-
 (define (raise-parse-error kind fmt
                            #:suggestion [suggestion #f]
                            #:details [extra-details (hasheq)]
@@ -237,6 +226,16 @@
 
 ;; --- canonical parameter / field layout -----------------------------------
 
+(define SIGNATURE-LINE-WIDTH 80)
+
+;; Physical layout is formatter policy, not language validity. The reader
+;; syntax positions and tokenizer still live here so the formatter can reuse
+;; the compiler's exact grammar-site discovery without reparsing source text.
+(struct layout-edit (path line col role offset before replacement safe?)
+  #:transparent)
+
+(define current-layout-edits (make-parameter '()))
+
 (define layout-trivia-types
   '(whitespace newline line-comment block-comment))
 
@@ -352,17 +351,6 @@
            (define pair (wrapped-pair (car rest)))
            (loop (cdr rest) (if pair (cons pair acc) acc))]))))
 
-(define (canonical-marker-spacing-valid? source tokens marker-pair)
-  (define name-end (syntax-end-offset (car marker-pair) tokens))
-  (define marker-start (syntax-start-offset (cdr marker-pair)))
-  (define marker-end (syntax-end-offset (cdr marker-pair) tokens))
-  (define source-length (string-length source))
-  (and name-end marker-start marker-end
-       (= name-end marker-start)
-       (< (add1 marker-end) source-length)
-       (char=? (string-ref source marker-end) #\space)
-       (not (char-whitespace? (string-ref source (add1 marker-end))))))
-
 (define (fragment->inline tokens start end [marker-offsets '()])
   (define out (open-output-string))
   (define pending-space? #f)
@@ -417,20 +405,13 @@
                                       (not (layout-trivia? tok))))
     tok))
 
-(define (last-significant-token tokens start end)
-  (for/fold ([found #f]) ([tok (in-list tokens)]
-                          #:when (and (>= (token-offset tok) start)
-                                      (<= (token-end tok) end)
-                                      (not (layout-trivia? tok))))
-    tok))
-
 (define (canonical-vector-text tokens open close entries continuation-col
-                               marker-offsets)
+                               marker-offsets vertical?)
   (define open-end (token-end open))
   (define close-start (token-offset close))
   (define starts (map syntax-start-offset entries))
   (cond
-    [(or (null? starts) (null? (cdr starts)))
+    [(or (not vertical?) (null? starts) (null? (cdr starts)))
      (string-append "[" (fragment->inline tokens open-end close-start marker-offsets) "]")]
     [else
      (define boundaries (append (cdr starts) (list close-start)))
@@ -446,76 +427,38 @@
                (string-append "\n" (make-string continuation-col #\space) fragment)))
       "]")]))
 
-(define (canonical-layout-valid? source tokens form-stx anchor entries open close
-                                 placement marker-pairs)
-  (define count (length entries))
-  (define open-line (token-line open))
-  (define open-col (token-col open))
-  (define close-line (token-line close))
-  (define entry-lines
-    (map (lambda (entry) (physical-syntax-line entry tokens)) entries))
-  (define entry-cols
-    (map (lambda (entry) (physical-syntax-column entry tokens)) entries))
-  (define entry-positions-known?
-    (and (andmap exact-positive-integer? entry-lines)
-         (andmap exact-nonnegative-integer? entry-cols)))
-  (define anchor-line
-    (and anchor (physical-syntax-line anchor tokens)))
-  (define anchor-end (and anchor (syntax-end-offset anchor tokens)))
-  (define clause-open (previous-significant-token tokens (token-offset open)))
-  (define owner-inline?
-    (and (eq? placement 'owner)
-         anchor-line (= open-line anchor-line)
-         anchor-end
-         (<= anchor-end (token-offset open))
-         (string=? (substring source anchor-end (token-offset open)) " ")))
-  (define owner-continuation?
-    (and (eq? placement 'owner)
-         anchor-line
-         (= open-line (add1 anchor-line))
-         (= open-col (+ (or (physical-syntax-column form-stx tokens) 0) 2))))
-  (define clause-inline?
-    (and clause-open
-         (eq? (token-type clause-open) 'open-paren)
-         (= (token-end clause-open) (token-offset open))))
-  (define placement-valid?
-    (case placement
-      [(owner) (if (<= count 1) owner-inline? owner-continuation?)]
-      [(clause) clause-inline?]
-      [(bare) #t]
-      [else #f]))
-  (define entries-positioned?
-    (cond
-      [(null? entries) #t]
-      [(not entry-positions-known?) #t]
-      [(<= count 1)
-       (and (= (car entry-lines) open-line)
-            (= (car entry-cols) (add1 open-col)))]
-      [else
-       (and (= (car entry-lines) open-line)
-            (= (car entry-cols) (add1 open-col))
-            (= (length (remove-duplicates entry-lines)) count)
-            (andmap (lambda (col) (= col (car entry-cols))) (cdr entry-cols)))]))
-  (define final-code
-    (last-significant-token tokens (token-end open) (token-offset close)))
-  (define close-after-final?
-    (= close-line (if final-code (token-line final-code) open-line)))
+(define (expression-end-offset tokens tok)
+  (cond
+    [(and tok (opener? tok))
+     (define close (matching-token tokens tok))
+     (and close (token-end close))]
+    [tok (token-end tok)]
+    [else #f]))
+
+(define (signature-end-offset tokens close)
   (define after-close (next-significant-token tokens (token-end close)))
-  (define return-inline?
-    (or (not after-close)
-        (not (member (token-text after-close) '("->" ":-")))
-        (and (= (token-line after-close) close-line)
-             (string=? (substring source
-                                  (token-end close)
-                                  (token-offset after-close))
-                       " "))))
-  (and placement-valid?
-       entries-positioned?
-       (andmap (lambda (pair)
-                 (canonical-marker-spacing-valid? source tokens pair))
-               marker-pairs)
-       close-after-final?
-       return-inline?))
+  (cond
+    [(and after-close (member (token-text after-close) '("->" ":-")))
+     (define return-type
+       (next-significant-token tokens (token-end after-close)))
+     (or (expression-end-offset tokens return-type) (token-end after-close))]
+    [else (token-end close)]))
+
+(define (inline-signature-fits? tokens form-stx open close placement marker-offsets)
+  (define start
+    (if (eq? placement 'bare)
+        (token-offset open)
+        (syntax-start-offset form-stx)))
+  (define start-col
+    (if (eq? placement 'bare)
+        (token-col open)
+        (or (physical-syntax-column form-stx tokens) 0)))
+  (define end (signature-end-offset tokens close))
+  (and start end
+       (<= (+ start-col
+              (string-length
+               (fragment->inline tokens start end marker-offsets)))
+           SIGNATURE-LINE-WIDTH)))
 
 (define (check-layout-vector! source tokens form-stx anchor vector-stx placement role)
   (define start (syntax-start-offset vector-stx))
@@ -523,9 +466,7 @@
   (define marker-pairs (and start (typed-binding-marker-pairs vector-stx)))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
   (define close (and open (matching-token tokens open)))
-  (when (and entries open close anchor (syntax-start-offset anchor)
-             (not (canonical-layout-valid? source tokens form-stx anchor entries
-                                           open close placement marker-pairs)))
+  (when (and entries open close anchor (syntax-start-offset anchor))
     (define anchor-end (and (eq? placement 'owner) (syntax-end-offset anchor tokens)))
     (define clause-open (previous-significant-token tokens (token-offset open)))
     (define region-start
@@ -540,20 +481,26 @@
       (and (eq? placement 'owner)
            (fragment->inline tokens anchor-end (token-offset open))))
     (define form-col (or (physical-syntax-column form-stx tokens) 0))
-    (define vector-col
-      (case placement
-        [(owner) (if (> (length entries) 1) (+ form-col 2) (token-col open))]
-        [(clause) (if clause-open (add1 (token-col clause-open)) (token-col open))]
-        [else (token-col open)]))
     (define marker-offsets
       (filter values
               (map (lambda (pair) (syntax-start-offset (cdr pair))) marker-pairs)))
+    (define entry-count (length entries))
+    (define vertical?
+      (or (>= entry-count 3)
+          (not (inline-signature-fits? tokens form-stx open close placement
+                                       marker-offsets))))
+    (define vector-col
+      (case placement
+        [(owner) (if vertical? (+ form-col 2) (token-col open))]
+        [(clause) (if clause-open (add1 (token-col clause-open)) (token-col open))]
+        [else (token-col open)]))
     (define vector-text
-      (canonical-vector-text tokens open close entries (add1 vector-col) marker-offsets))
+      (canonical-vector-text tokens open close entries (add1 vector-col)
+                             marker-offsets vertical?))
     (define prefix-text
       (cond
         [(not (eq? placement 'owner)) ""]
-        [(<= (length entries) 1)
+        [(not vertical?)
          (string-append " " (if (string=? gap "") "" (string-append gap " ")))]
         [else
          (string-append (if (string=? gap "") "" (string-append " " gap))
@@ -561,24 +508,17 @@
     (define replacement
       (string-append prefix-text vector-text (if return? " " "")))
     (define before (substring source region-start region-end))
-    (raise-parse-error
-     'noncanonical-binding-layout
-     "noncanonical ~a vector layout — zero/one logical entry stays inline; 2+ entries put the vector on the following line two columns past the owning form with one aligned entry start per line; attach `:` to each binding name with exactly one following space; keep `]` after the final entry and exactly one space before `->`"
-     role
-     #:details
-     (hasheq 'error-file (let ([src (syntax-source vector-stx)])
-                           (if (path? src) (path->string src) src))
-             'error-line (physical-syntax-line vector-stx tokens)
-             'error-col (physical-syntax-column vector-stx tokens)
-             'error-position (syntax-position vector-stx)
-             'error-span (syntax-span vector-stx))
-     #:suggestion
-     ;; Moving a line comment can change which code it comments out. Keep the
-     ;; diagnostic, but require a human edit instead of changing comment syntax.
-     (and (not (line-comment-in-range? tokens region-start region-end))
-          (replace-range-suggestion
-           region-start before replacement
-           (format "Canonicalize ~a vector layout" role))))))
+    (unless (string=? before replacement)
+      (define path
+        (let ([src (syntax-source vector-stx)])
+          (if (path? src) (path->string src) src)))
+      (current-layout-edits
+       (cons (layout-edit path
+                          (physical-syntax-line vector-stx tokens)
+                          (physical-syntax-column vector-stx tokens)
+                          role region-start before replacement
+                          (not (line-comment-in-range? tokens region-start region-end)))
+             (current-layout-edits))))))
 
 (define (vector-stx? stx)
   (and (syntax? stx) (bracketed? (->datum stx))))
@@ -597,6 +537,20 @@
              (symbol? (->datum (car subs)))
              (vector-stx? (cadr subs)))
     (check-layout-vector! source tokens method-stx (car subs) (cadr subs) 'owner role)))
+
+(define (inspect-fn-layout! source tokens form-stx)
+  (define subs (stx-subs form-stx))
+  (when (and subs (>= (length subs) 2))
+    (cond
+      [(vector-stx? (cadr subs))
+       (check-layout-vector! source tokens form-stx (car subs) (cadr subs)
+                             'owner "parameter")]
+      [(and (>= (length subs) 3)
+            (symbol? (->datum (cadr subs)))
+            (vector-stx? (caddr subs)))
+       (check-layout-vector! source tokens form-stx (cadr subs) (caddr subs)
+                             'owner "parameter")]
+      [else (void)])))
 
 (define (inspect-defn-layout! source tokens form-stx)
   (define subs (stx-subs form-stx))
@@ -637,7 +591,7 @@
     (define head (->datum (car subs)))
     (case head
       [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
-      [(fn) (inspect-named-form-vector! source tokens form-stx 1 0 "parameter")]
+      [(fn) (inspect-fn-layout! source tokens form-stx)]
       [(defmacro) (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter")]
       [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
       [(letfn)
@@ -664,23 +618,37 @@
       (for ([child (in-list subs)] #:when (pair? (->datum child)))
         (inspect-layout-form! source tokens child)))))
 
-(define (validate-canonical-layout! stxs source-path)
-  (define physical-stx
-    (for/first ([stx (in-list stxs)]
-                #:when (and (syntax? stx)
-                            (syntax-source stx)
-                            (syntax-position stx)))
-      stx))
-  (when physical-stx
-    ;; Target wrappers prepend a synthetic `(define-target …)` whose source is
-    ;; the wrapper module. The parser's explicit source path remains the
-    ;; authority for the user's physical layout.
-    (define physical-source (or source-path (syntax-source physical-stx)))
-    (when (and (path-string? physical-source) (file-exists? physical-source))
-      (define source (file->string physical-source))
-      (define tokens (tokenize source))
-      (for ([stx (in-list stxs)] #:when (syntax-position stx))
-        (inspect-layout-form! source tokens stx)))))
+(define (signature-layout-edits source-path)
+  (define path
+    (simplify-path
+     (path->complete-path
+      (if (path? source-path) source-path (string->path source-path)))))
+  (define source (file->string path))
+  (define tokens (tokenize source))
+  (define stxs (read-beagle-syntax path))
+  (parameterize ([current-layout-edits '()])
+    (for ([stx (in-list stxs)] #:when (syntax-position stx))
+      (inspect-layout-form! source tokens stx))
+    (sort (current-layout-edits) < #:key layout-edit-offset)))
+
+(define (apply-signature-layout-edits source edits)
+  (define unsafe (filter (lambda (edit) (not (layout-edit-safe? edit))) edits))
+  (when (pair? unsafe)
+    (error 'apply-signature-layout-edits
+           "refusing to move ~a comment-bearing signature region~a"
+           (length unsafe) (if (= (length unsafe) 1) "" "s")))
+  (for/fold ([out source])
+            ([edit (in-list (sort edits > #:key layout-edit-offset))])
+    (define start (layout-edit-offset edit))
+    (define before (layout-edit-before edit))
+    (define end (+ start (string-length before)))
+    (unless (and (<= end (string-length out))
+                 (string=? before (substring out start end)))
+      (error 'apply-signature-layout-edits
+             "source changed under formatter at byte offset ~a" start))
+    (string-append (substring out 0 start)
+                   (layout-edit-replacement edit)
+                   (substring out end))))
 
 (define (copy-type type)
   (cond
@@ -2193,10 +2161,6 @@
   ;; body tails that store-src! refused to record.
   (when (positive? (hash-count body-locs-table))
     (register-program-body-locs-table! prog body-locs-table))
-  ;; Run this after grammar parsing so malformed forms keep their more specific
-  ;; diagnostics. Macro-expanded/synthetic datums are absent from STXS* and
-  ;; therefore intentionally carry no physical-layout obligation.
-  (validate-canonical-layout! stxs* source-path)
   prog)
 
 (define (meta-form? d)
@@ -5288,6 +5252,9 @@
  parse-program
  read-beagle-datums
  read-beagle-syntax
+ (struct-out layout-edit)
+ signature-layout-edits
+ apply-signature-layout-edits
  parse-params
  parse-record-fields
  beagle-parse-error

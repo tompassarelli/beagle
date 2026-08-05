@@ -43,21 +43,6 @@
       (parse-program (read-beagle-syntax tmp) #:source-path tmp))
     (lambda () (delete-file tmp))))
 
-(define (layout-error source)
-  (with-handlers ([beagle-parse-error? values])
-    (parse-source-text source)
-    #f))
-
-(define (apply-layout-suggestion source suggestion)
-  (define offset (hash-ref suggestion 'offset))
-  (define length (hash-ref suggestion 'length))
-  (define replacement (hash-ref suggestion 'replacement))
-  (check-equal? (substring source offset (+ offset length))
-                (hash-ref suggestion 'before))
-  (string-append (substring source 0 offset)
-                 replacement
-                 (substring source (+ offset length))))
-
 ;; --- meta forms ------------------------------------------------------------
 
 (test-case "default namespace and mode"
@@ -1672,7 +1657,7 @@
      "(defmacro pair\n  [x\n   y] `(vector ~x ~y))\n"))
   (check-not-exn (lambda () (parse-source-text source))))
 
-(test-case "noncanonical layouts carry exact machine-applicable repairs"
+(test-case "physical signature layout is formatter policy, not parse validity"
   (define cases
     (list
      (cons "defn" "(defn add [x y] -> Int (+ x y))\n")
@@ -1698,36 +1683,12 @@
      (cons "destructure/rest" "(defn f [x {:keys [y]} & rest] x)\n")
      (cons "legacy typed" "(defn f [x :- Int y :- Int] :- Int x)\n")))
   (for ([case (in-list cases)])
-    (define source (cdr case))
-    (define e (layout-error source))
-    (check-true (beagle-parse-error? e) (car case))
-    (check-eq? (beagle-parse-error-kind e) 'noncanonical-binding-layout (car case))
-    (define details (beagle-parse-error-details e))
-    (check-pred string? (hash-ref details 'error-file #f) (car case))
-    (check-pred exact-positive-integer? (hash-ref details 'error-line #f) (car case))
-    (check-pred exact-nonnegative-integer? (hash-ref details 'error-col #f) (car case))
-    (define suggestion (hash-ref details 'suggestion #f))
-    (check-true (hash? suggestion) (car case))
-    (check-equal? (hash-ref suggestion 'type) "replace-range" (car case))
-    (define repaired (apply-layout-suggestion source suggestion))
-    (check-not-exn (lambda () (parse-source-text repaired)) (car case))))
+    (check-not-exn (lambda () (parse-source-text (cdr case))) (car case))))
 
-(test-case "typed binding repairs remove padding without aligning columns"
-  (define source
-    "(defn f\n  [abc: Int\n   b:   String\n   bc:  (Vec Int)]\n  abc)\n")
-  (define e (layout-error source))
-  (define suggestion (hash-ref (beagle-parse-error-details e) 'suggestion #f))
-  (check-true (hash? suggestion))
-  (check-equal?
-   (apply-layout-suggestion source suggestion)
-   "(defn f\n  [abc: Int\n   b: String\n   bc: (Vec Int)]\n  abc)\n"))
-
-(test-case "comment-bearing layout violations get no lossy repair"
+(test-case "comment-bearing layout remains valid source"
   (define source
     "(defn f ; owner comment\n  [x ; first parameter\n   y]\n  -> Int x)\n")
-  (define e (layout-error source))
-  (check-true (beagle-parse-error? e))
-  (check-false (hash-ref (beagle-parse-error-details e) 'suggestion #f))
+  (check-not-exn (lambda () (parse-source-text source)))
   (check-true (string-contains? source "; owner comment"))
   (check-true (string-contains? source "; first parameter"))
   ;; Structurally-built datums have no physical source; the long-standing

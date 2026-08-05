@@ -224,7 +224,6 @@
    'bare-nix-form          'surface-divergence
    'legacy-macro-form      'surface-divergence
    'legacy-pipe-form       'surface-divergence
-   'noncanonical-binding-layout 'surface-divergence
    'macro-expansion-parse-error 'surface-divergence
    'reader-conditional-no-match 'surface-divergence
    'duplicate-meta         'type-error
