@@ -1,0 +1,18 @@
+#lang beagle/clj
+(ns native.int-division)
+(define-mode strict)
+
+(defn quot-int
+  [left: Int
+   right: Int] -> Int
+  (quot left right))
+
+(defn rem-int
+  [left: Int
+   right: Int] -> Int
+  (rem left right))
+
+(defn mod-int
+  [left: Int
+   right: Int] -> Int
+  (mod left right))

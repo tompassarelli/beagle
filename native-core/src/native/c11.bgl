@@ -14,7 +14,8 @@
           AtomType RecordType UnionType VectorType MapTypeV0 SetTypeV0
           ReferenceType AtomCellTypeV0 FunctionType OutcomeType
           BoolAtom I64Atom F64Atom TextAtom KeywordAtom RefAtom
-          CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0 CheckedBoundsV0
+          CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0
+          CheckedQuotI64V0 CheckedRemI64V0 CheckedModI64V0 CheckedBoundsV0
           AtomInstruction CopyInstruction AddF64Instruction CheckedInstruction
           StoreInstruction AllocateInstruction CallInstruction
           ReturnTerminator JumpTerminator BranchTerminator SwitchTerminator
@@ -267,6 +268,9 @@
     [(CheckedAddI64V0 value) true]
     [(CheckedSubI64V0 value) false]
     [(CheckedMulI64V0 value) false]
+    [(CheckedQuotI64V0 value) false]
+    [(CheckedRemI64V0 value) false]
+    [(CheckedModI64V0 value) false]
     [(CheckedBoundsV0 value) false]))
 
 ;; Qualified instance? rather than match: a match on an imported union emits

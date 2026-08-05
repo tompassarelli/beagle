@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns native.ratio-refusal)
+(define-mode strict)
+
+(defn ratio-divide
+  [left: Int
+   right: Int] -> Int
+  (/ left right))

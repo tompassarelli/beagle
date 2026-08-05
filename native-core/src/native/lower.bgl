@@ -859,8 +859,27 @@
   (core/->TypeDef (core/checked-i64-type-id) "CheckedI64"
     (core/->OutcomeType (type-id "Int") (core/checked-i64-result-type-id))))
 
+(defn checked-division-i64-result-type [] -> core/TypeDef
+  (core/->TypeDef
+    (core/checked-division-i64-result-type-id) "CheckedDivisionI64Result"
+    (core/->UnionType
+      [(core/->TypeVariant
+         (core/checked-division-ok-variant-id) "ok" (type-id "Int"))
+       (core/->TypeVariant
+         (core/checked-division-zero-variant-id) "division-by-zero" nil)])))
+
+(defn checked-division-i64-type [] -> core/TypeDef
+  (core/->TypeDef
+    (core/checked-division-i64-type-id) "CheckedDivisionI64"
+    (core/->OutcomeType (type-id "Int")
+      (core/checked-division-i64-result-type-id))))
+
 (defn checked-arithmetic-types [] -> (Vec core/TypeDef)
-  [(i64-type) (checked-i64-result-type) (checked-i64-type)])
+  [(i64-type)
+   (checked-i64-result-type)
+   (checked-i64-type)
+   (checked-division-i64-result-type)
+   (checked-division-i64-type)])
 
 (defn socket-int-result-type-id [] -> core/NativeId
   (type-id "HostSocketIntResult"))
@@ -2305,11 +2324,11 @@
 (defn checked-arith-op? [callee: String] -> Bool
   (or (= "+" callee) (= "-" callee) (= "*" callee)))
 
-;; Division and modulo are absent on purpose: what a zero divisor does (trap,
-;; or a third Outcome alternative) is an open design decision, so v0 refuses
-;; them by name rather than picking one silently.
+(defn checked-division-op? [callee: String] -> Bool
+  (or (= "quot" callee) (= "rem" callee) (= "mod" callee)))
+
 (defn refused-arith-op? [callee: String] -> Bool
-  (or (= "/" callee) (= "quot" callee) (= "rem" callee) (= "mod" callee)))
+  (= "/" callee))
 
 (defn checked-arith-operation
   [callee: String
@@ -2319,6 +2338,15 @@
     (= "+" callee) (core/->CheckedAddI64V0 left right)
     (= "-" callee) (core/->CheckedSubI64V0 left right)
     :else (core/->CheckedMulI64V0 left right)))
+
+(defn checked-division-operation
+  [callee: String
+   left: core/NativeId
+   right: core/NativeId] -> core/CheckedOperationV0
+  (cond
+    (= "quot" callee) (core/->CheckedQuotI64V0 left right)
+    (= "rem" callee) (core/->CheckedRemI64V0 left right)
+    :else (core/->CheckedModI64V0 left right)))
 
 ;; The trap-on-overflow variant is not a second instruction: it is the ordinary
 ;; dispatch, with the overflow arm closing on a trap and the ok arm reading the
@@ -2360,6 +2388,46 @@
         (core/->VariantValueInstruction
           (core/->SsaValueV0 value-id (int-type-id))
           carried (core/checked-ok-variant-id)))
+      value-id (int-type-id) false)))
+
+(defn lower-checked-division
+  [state: BodyStateV0
+   owner: core/NativeId
+   callee: String
+   left: core/NativeId
+   right: core/NativeId] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner "division")
+        ok-id: core/NativeId (state-id state owner "division-ok")
+        zero-id: core/NativeId (state-id state owner "division-zero")
+        carried: core/NativeId (state-id state owner "division-outcome")
+        value-id: core/NativeId (state-id state owner "division-value")
+        code-id: core/NativeId (state-id state owner "division-trap")
+        outcome-type: core/NativeId (core/checked-division-i64-type-id)
+        switched: BodyStateV0
+        (state-close
+          (state-emit (state-bump state)
+            (core/->CheckedInstruction
+              (core/->SsaValueV0 result-id outcome-type)
+              (checked-division-operation callee left right)))
+          (core/->SwitchTerminator result-id
+            [(core/->SwitchCaseV0
+               (core/checked-division-ok-variant-id) ok-id [result-id])
+             (core/->SwitchCaseV0
+               (core/checked-division-zero-variant-id) zero-id [])]))
+        trapped: BodyStateV0
+        (state-close
+          (state-emit (state-open-block switched zero-id [])
+            (core/->AtomInstruction
+              (core/->SsaValueV0 code-id (int-type-id))
+              (core/->I64Atom (trap-failure-code))))
+          (core/->TrapTerminator code-id))]
+    (->ExprResultV0
+      (state-emit
+        (state-open-block trapped ok-id
+          [(core/->Parameter carried outcome-type)])
+        (core/->VariantValueInstruction
+          (core/->SsaValueV0 value-id (int-type-id))
+          carried (core/checked-division-ok-variant-id)))
       value-id (int-type-id) false)))
 
 ;; One accumulator's init, lowered: the name it binds, its value and the type
@@ -8177,9 +8245,27 @@
 
                 (refused-arith-op? callee)
                 (fail-result current
-                  (str "TODO-NATIVE-DIVISION-" callee
-                    ": integer division semantics on a zero divisor is an open"
-                    " design decision, so v0 refuses it by name"))
+                  "TODO-NATIVE-DIVISION-/: ratio division is outside native Int semantics; use quot, rem, or mod")
+
+                (checked-division-op? callee)
+                (cond
+                  (not (= 2 (count values)))
+                  (fail-result current
+                    (str "TODO-NATIVE-DIVISION-ARITY: " callee
+                      " lowers only in its two-operand form"))
+
+                  :else
+                  (let [coerced: ArgsResultV0
+                        (coerce-values-to-type types owner current values
+                          value-types (int-type-id))
+                        settled: BodyStateV0 (argsresultv0-state coerced)]
+                    (if (state-blocked? settled)
+                      (fail-result settled
+                        (str "TODO-NATIVE-DIVISION-OPERANDS: " callee
+                          " needs values safely narrowable to Int"))
+                      (lower-checked-division settled owner callee
+                        (nth (argsresultv0-values coerced) 0)
+                        (nth (argsresultv0-values coerced) 1)))))
 
                 (checked-arith-op? callee)
                 (cond
@@ -11249,6 +11335,24 @@
           [result
            (id-value (core/checkedmuli64v0-left-id operation))
            (id-value (core/checkedmuli64v0-right-id operation))])
+
+        (instance? native.core.CheckedQuotI64V0 operation)
+        (worlds/canonical-record "checked-quot-i64-instruction"
+          [result
+           (id-value (core/checkedquoti64v0-left-id operation))
+           (id-value (core/checkedquoti64v0-right-id operation))])
+
+        (instance? native.core.CheckedRemI64V0 operation)
+        (worlds/canonical-record "checked-rem-i64-instruction"
+          [result
+           (id-value (core/checkedremi64v0-left-id operation))
+           (id-value (core/checkedremi64v0-right-id operation))])
+
+        (instance? native.core.CheckedModI64V0 operation)
+        (worlds/canonical-record "checked-mod-i64-instruction"
+          [result
+           (id-value (core/checkedmodi64v0-left-id operation))
+           (id-value (core/checkedmodi64v0-right-id operation))])
 
         :else
         (worlds/canonical-record "checked-bounds-instruction"

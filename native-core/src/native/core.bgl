@@ -191,6 +191,15 @@
   (CheckedMulI64V0
     [left-id: NativeId
      right-id: NativeId])
+  (CheckedQuotI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (CheckedRemI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (CheckedModI64V0
+    [left-id: NativeId
+     right-id: NativeId])
   (CheckedBoundsV0
     [index-id: NativeId
      length-id: NativeId]))
@@ -827,6 +836,18 @@
 
 (defn checked-overflow-variant-id [] :- NativeId
   (checked-id ["CheckedI64Result" "overflow"]))
+
+(defn checked-division-i64-result-type-id [] -> NativeId
+  (checked-id ["CheckedDivisionI64Result"]))
+
+(defn checked-division-i64-type-id [] -> NativeId
+  (checked-id ["CheckedDivisionI64"]))
+
+(defn checked-division-ok-variant-id [] -> NativeId
+  (checked-id ["CheckedDivisionI64Result" "ok"]))
+
+(defn checked-division-zero-variant-id [] -> NativeId
+  (checked-id ["CheckedDivisionI64Result" "division-by-zero"]))
 
 (defn optional-id-in?
   [candidate :- (U NativeId Nil)
@@ -1542,6 +1563,9 @@
     [(CheckedAddI64V0 left-id right-id) [left-id right-id]]
     [(CheckedSubI64V0 left-id right-id) [left-id right-id]]
     [(CheckedMulI64V0 left-id right-id) [left-id right-id]]
+    [(CheckedQuotI64V0 left-id right-id) [left-id right-id]]
+    [(CheckedRemI64V0 left-id right-id) [left-id right-id]]
+    [(CheckedModI64V0 left-id right-id) [left-id right-id]]
     [(CheckedBoundsV0 index-id length-id) [index-id length-id]]))
 
 (defn bitwise-operation-ssa-refs [operation: BitwiseOperationV0] -> (Vec NativeId)

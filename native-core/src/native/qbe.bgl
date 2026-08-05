@@ -1329,6 +1329,9 @@
               (core/checkedaddi64v0-left-id checked) (core/checkedaddi64v0-right-id checked))]
            [(CheckedSubI64V0 operation) ""]
            [(CheckedMulI64V0 operation) ""]
+           [(CheckedQuotI64V0 operation) ""]
+           [(CheckedRemI64V0 operation) ""]
+           [(CheckedModI64V0 operation) ""]
            [(CheckedBoundsV0 operation)
             (emit-checked-bounds context block-index-value position result-name result-letter
               (core/checkedboundsv0-index-id checked) (core/checkedboundsv0-length-id checked))]))]
@@ -1880,6 +1883,46 @@
     [(ValueToTextInstructionV0 value) false]
     [(CodecPrimitiveInstructionV0 value) false]))
 
+(defn unsupported-checked-division-name [operation: core/CheckedOperationV0] -> (U String Nil)
+  (cond
+    (instance? native.core.CheckedQuotI64V0 operation) "quot"
+    (instance? native.core.CheckedRemI64V0 operation) "rem"
+    (instance? native.core.CheckedModI64V0 operation) "mod"
+    :else nil))
+
+(defn unsupported-block-checked-division [block: core/BasicBlock] -> (U String Nil)
+  (let [instructions: (Vec core/Instruction)
+        (core/basicblock-instructions block)]
+    (loop [position: Int 0]
+      (if (>= position (count instructions))
+        nil
+        (let [instruction: core/Instruction (nth instructions position)]
+          (if (instance? native.core.CheckedInstruction instruction)
+            (let [name: (U String Nil)
+                  (unsupported-checked-division-name
+                    (core/checkedinstruction-operation instruction))]
+              (if (nil? name) (recur (+ position 1)) name))
+            (recur (+ position 1))))))))
+
+(defn unsupported-function-checked-division [function: core/FunctionDef] -> (U String Nil)
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0]
+      (if (>= position (count blocks))
+        nil
+        (let [name: (U String Nil)
+              (unsupported-block-checked-division (nth blocks position))]
+          (if (nil? name) (recur (+ position 1)) name))))))
+
+(defn unsupported-checked-division [world: core/NativeWorld] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+    (loop [position: Int 0]
+      (if (>= position (count functions))
+        nil
+        (let [name: (U String Nil)
+              (unsupported-function-checked-division
+                (nth functions position))]
+          (if (nil? name) (recur (+ position 1)) name))))))
+
 (defn codec-primitive-operation-name [operation: core/CodecPrimitiveOpV0] -> String
   (cond
     (instance? native.core.Utf8EncodeV0 operation) "utf8-encode"
@@ -2090,6 +2133,8 @@
   (let [validation: core/ValidationReport (core/validate-world world)
         unsupported: (U String Nil) (unsupported-value-semantics world)
         unsupported-codec: (U String Nil) (unsupported-codec-primitive world)
+        unsupported-division: (U String Nil)
+        (unsupported-checked-division world)
         functions: (Vec core/FunctionDef)
         (ordered-functions (core/nativeworld-functions world))
         texts: (Vec String) (collect-texts functions)]
@@ -2113,6 +2158,10 @@
       (some? unsupported-codec)
       (->QbeFailure
         (str "QBE codec primitive is unsupported: " unsupported-codec))
+      (some? unsupported-division)
+      (->QbeFailure
+        (str "QBE checked integer division is unsupported: "
+          unsupported-division))
       (not (every? text-emittable? texts))
       (->QbeFailure "native world contains a Text literal outside the QBE literal slice")
       (not (world-supported? world))

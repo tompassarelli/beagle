@@ -154,7 +154,10 @@
 (defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
   (or (instance? native.core.CheckedAddI64V0 operation)
       (instance? native.core.CheckedSubI64V0 operation)
-      (instance? native.core.CheckedMulI64V0 operation)))
+      (instance? native.core.CheckedMulI64V0 operation)
+      (instance? native.core.CheckedQuotI64V0 operation)
+      (instance? native.core.CheckedRemI64V0 operation)
+      (instance? native.core.CheckedModI64V0 operation)))
 
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
   (cond
@@ -1032,6 +1035,12 @@
     (core/checkedsubi64v0-left-id operation)
     (instance? native.core.CheckedMulI64V0 operation)
     (core/checkedmuli64v0-left-id operation)
+    (instance? native.core.CheckedQuotI64V0 operation)
+    (core/checkedquoti64v0-left-id operation)
+    (instance? native.core.CheckedRemI64V0 operation)
+    (core/checkedremi64v0-left-id operation)
+    (instance? native.core.CheckedModI64V0 operation)
+    (core/checkedmodi64v0-left-id operation)
     (instance? native.core.CheckedBoundsV0 operation)
     (core/checkedboundsv0-index-id operation)
     :else (core/->NativeId "")))
@@ -1044,9 +1053,69 @@
     (core/checkedsubi64v0-right-id operation)
     (instance? native.core.CheckedMulI64V0 operation)
     (core/checkedmuli64v0-right-id operation)
+    (instance? native.core.CheckedQuotI64V0 operation)
+    (core/checkedquoti64v0-right-id operation)
+    (instance? native.core.CheckedRemI64V0 operation)
+    (core/checkedremi64v0-right-id operation)
+    (instance? native.core.CheckedModI64V0 operation)
+    (core/checkedmodi64v0-right-id operation)
     (instance? native.core.CheckedBoundsV0 operation)
     (core/checkedboundsv0-length-id operation)
     :else (core/->NativeId "")))
+
+(defn checked-division? [operation: core/CheckedOperationV0] -> Bool
+  (or (instance? native.core.CheckedQuotI64V0 operation)
+      (instance? native.core.CheckedRemI64V0 operation)
+      (instance? native.core.CheckedModI64V0 operation)))
+
+;; Guard C's one signed-division UB edge before emitting either / or %.
+(defn emit-checked-division
+  [layouts: (Vec core/LayoutDef)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   result: core/SsaValueV0
+   operation: core/CheckedOperationV0] -> String
+  (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
+        ok-tag: Int
+        (variant-tag layouts outcome (core/checked-division-ok-variant-id))
+        zero-tag: Int
+        (variant-tag layouts outcome (core/checked-division-zero-variant-id))
+        left: String (value-name function slots (checked-left operation))
+        right: String (value-name function slots (checked-right operation))
+        payload: String (str target ".payload.variant_" ok-tag)
+        remainder: String (str target "_remainder")
+        edge-value: String
+        (if (instance? native.core.CheckedQuotI64V0 operation)
+          "INT64_MIN"
+          "INT64_C(0)")
+        ordinary: String
+        (cond
+          (instance? native.core.CheckedQuotI64V0 operation)
+          (str "    " payload " = " left " / " right ";\n")
+          (instance? native.core.CheckedRemI64V0 operation)
+          (str "    " payload " = " left " % " right ";\n")
+          :else
+          (str "    int64_t " remainder " = " left " % " right ";\n"
+            "    " payload " = ((" remainder " != INT64_C(0)) &&\n"
+            "        ((" remainder " < INT64_C(0)) != (" right
+            " < INT64_C(0))))\n"
+            "      ? " remainder " + " right " : " remainder ";\n"))]
+    (if (or (< ok-tag 0) (< zero-tag 0))
+      (str "  if (" right " == INT64_C(0)) {\n"
+        "    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
+        "  }\n")
+      (str "  if (" right " == INT64_C(0)) {\n"
+        "    " target ".tag = INT64_C(" zero-tag ");\n"
+        "  } else {\n"
+        "    " target ".tag = INT64_C(" ok-tag ");\n"
+        "    if ((" left " == INT64_MIN) && (" right
+        " == -INT64_C(1))) {\n"
+        "      " payload " = " edge-value ";\n"
+        "    } else {\n"
+        ordinary
+        "    }\n"
+        "  }\n"))))
 
 ;; No wrapped value ever escapes: the builtin reports overflow as a tag, and the
 ;; payload is written only where the ok tag is the one the switch will select.
@@ -1057,8 +1126,11 @@
    target: String
    result: core/SsaValueV0
    operation: core/CheckedOperationV0] -> String
-  (if (instance? native.core.CheckedBoundsV0 operation)
-    ""
+  (cond
+    (instance? native.core.CheckedBoundsV0 operation) ""
+    (checked-division? operation)
+    (emit-checked-division layouts function slots target result operation)
+    :else
     (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
           ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
           overflow-tag: Int
