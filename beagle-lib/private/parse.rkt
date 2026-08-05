@@ -5158,12 +5158,41 @@
                     (parse-body (or (stx-tail subs 2) body))))]
     [_ (error 'beagle "bad method implementation: ~v" d)]))
 
+;; Render a reader-tagged binding datum back to its source spelling — pointed
+;; messages only; unknown shapes fall back to `~a`.
+(define (binding-datum->src d)
+  (cond
+    [(bracketed? d)  (format "[~a]" (string-join (map binding-datum->src (bracket-body d)) " "))]
+    [(map-tagged? d) (format "{~a}" (string-join (map binding-datum->src (map-body d)) " "))]
+    [(eq? d ANN-MARKER) ":"]
+    [(and (pair? d) (list? d)) (format "(~a)" (string-join (map binding-datum->src d) " "))]
+    [else (format "~a" d)]))
+
+;; `[...]` means sequential destructuring at EVERY binding site, so an
+;; annotation marker inside one would bind a variable literally named `#%:`.
+(define (raise-bracketed-annotation body)
+  (define idx
+    (for/first ([e (in-list body)] [i (in-naturals)]
+                #:when (or (eq? e ANN-MARKER) (eq? e LEGACY-MARKER)))
+      i))
+  (define name (if (> idx 0) (binding-datum->src (list-ref body (sub1 idx))) "name"))
+  (define ty (if (< (add1 idx) (length body))
+               (binding-datum->src (list-ref body (add1 idx)))
+               "Type"))
+  (raise-parse-error
+   'inline-type-annotation
+   "`[~a]` is not a typed binding — `[...]` in binding position is sequential destructuring. Write the parenthesized form: `(~a : ~a)`"
+   (string-join (map binding-datum->src body) " ")
+   name ty))
+
 ;; Sequential destructure: [a b], [a [b c]], [{:keys [x]} y], [a & rest].
 ;; Nested patterns recurse (real Clojure); entries other than symbols and
 ;; nested patterns are rejected pointedly.
 (define (parse-seq-destructure item)
   (define d (->datum item))
   (define body (bracket-body d))
+  (when (ormap (lambda (e) (or (eq? e ANN-MARKER) (eq? e LEGACY-MARKER))) body)
+    (raise-bracketed-annotation body))
   (define-values (names rest-name)
     (let loop ([items body] [acc '()])
       (cond

@@ -144,6 +144,25 @@
   #rx"the return annotation goes after the param vector"
   "(defn f -> Int [a: Int] a)")
 
+;; --- bracketed annotation collides with sequential destructuring ------------
+
+(err/rx "bracketed annotation in a param slot names the paren form"
+  #rx"`\\[x : Int\\]` is not a typed binding.*Write the parenthesized form: `\\(x : Int\\)`"
+  "(defn f [[x : Int]] -> Int x)")
+
+(err/rx "bracketed annotation in a let binding names the paren form"
+  #rx"`\\[n : Int\\]` is not a typed binding.*Write the parenthesized form: `\\(n : Int\\)`"
+  "(defn f [a: Int] -> Int (let [[n : Int] a] n))")
+
+(err/rx "bracketed legacy annotation is caught too"
+  #rx"`\\[x :- Int\\]` is not a typed binding.*Write the parenthesized form: `\\(x : Int\\)`"
+  "(defn f [[x :- Int]] -> Int x)")
+
+(ok "genuine sequential destructuring still parses"
+    "(defn f [[a b]] -> Int a)")
+(ok "nested + rest destructuring still parses"
+    "(defn f [[a [b c]] & more] -> Int a)")
+
 ;; --- the `:-` migration diagnostic ------------------------------------------
 
 (test-case "legacy `:-` warns once per source in the default 'warn mode"

@@ -138,6 +138,9 @@ parser actually does** (`postfix-annotation-parse.rkt` is the contract):
   reader, so it is ACCEPTED in binding position. Spacing is not enforced.
 - `: Ret` in RETURN position — REJECTED, pointing at `-> Ret`. This is the one
   structural difference between the two positions.
+- `[x : Int]` in binding position — REJECTED, pointing at `(x : Int)`. `[...]`
+  is sequential destructuring at every binding site, so a bracketed annotation
+  is a collision, not a spelling; the wrapped form uses parens.
 
 The removal cut flips `legacy-annotation-marker-mode` to `'error` and drops
 `LEGACY-MARKER` from the marker predicates in `parse.rkt`; it is blocked on the
