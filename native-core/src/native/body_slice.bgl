@@ -176,10 +176,22 @@
     (id-text (get verdict :function-id nil))
     (id-text (get verdict :abi-id nil))))
 
-(defn failing-obligations [world: core/NativeWorld] -> String
-  (let [verdicts: (Vec obligations/ObligationVerdictV0)
-        (obligations/validate-native-world world)
-        names: (Vec String) (slice/obligation-names)]
+(defn obligation-report
+  [label: String
+   verdicts: (Vec obligations/ObligationVerdictV0)] -> String
+  (let [names: (Vec String) (slice/obligation-names)]
+    (loop [position: Int 0 report: String ""]
+      (if (>= position (count verdicts))
+        report
+        (recur (+ position 1)
+          (str report label " "
+            (if (obligations/obligation-passed? (nth verdicts position))
+              "PASS"
+              "FAIL")
+            " " (nth names position) "\n"))))))
+
+(defn failing-obligation-verdicts [verdicts: (Vec obligations/ObligationVerdictV0)] -> String
+  (let [names: (Vec String) (slice/obligation-names)]
     (loop [position: Int 0 report: String ""]
       (if (>= position (count verdicts))
         report
@@ -188,6 +200,10 @@
             report
             (str report "obligation-detail " (nth names position) " "
               (verdict-subject (nth verdicts position)) "\n")))))))
+
+(defn failing-obligations [world: core/NativeWorld] -> String
+  (failing-obligation-verdicts
+    (obligations/validate-native-world world)))
 
 (defn function-report [functions: (Vec core/FunctionDef)] -> String
   (let [ordered: (Vec core/FunctionDef) (c17/ordered-functions functions)]
@@ -229,9 +245,9 @@
         (core/nativeworld-abis world))
       (core/nativeworld-observations world))))
 
-(defn obligations-pass? [world: core/NativeWorld] -> Bool
+(defn obligations-pass? [verdicts: (Vec obligations/ObligationVerdictV0)] -> Bool
   (every? obligations/obligation-passed?
-    (obligations/validate-native-world world)))
+    verdicts))
 
 (defn qbe-leaf? [function: core/FunctionDef] -> Bool
   (every? (fn [block: core/BasicBlock] -> Bool
@@ -256,6 +272,8 @@
             " has calls outside the one-function projection\n")
           (let [projected: core/NativeWorld
                 (projected-world (function-world program selected))
+                verdicts: (Vec obligations/ObligationVerdictV0)
+                (obligations/validate-native-world projected)
                 head: String
                 (str "qbe-selected-function " function-name "\n"
                   "qbe-world-functions "
@@ -263,9 +281,9 @@
                   "qbe-world-abis " (count (core/nativeworld-abis projected)) "\n"
                   "qbe-projected-types "
                   (count (core/nativeworld-types projected)) "\n"
-                  (slice/obligation-report "qbe-obligation" projected)
-                  (failing-obligations projected))]
-            (if (not (obligations-pass? projected))
+                  (obligation-report "qbe-obligation" verdicts)
+                  (failing-obligation-verdicts verdicts))]
+            (if (not (obligations-pass? verdicts))
               (str head "qbe-materialize REFUSED structural obligations failed\n")
               (let [result: qbe/QbeMaterialization
                     (qbe/materialize-world projected module-index)]
@@ -315,6 +333,8 @@
                   (worlds/sealednativeworldv0-world sealed-native))
                 projected: core/NativeWorld (projected-world program)
                 result: body/BodyMaterializationV0 (body/materialize-world projected 0)
+                verdicts: (Vec obligations/ObligationVerdictV0)
+                (obligations/validate-native-world projected)
                 head: String
                 (str "stage source-seal ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
@@ -333,8 +353,8 @@
                   "projected-types "
                   (str (count (core/nativeworld-types projected))) "\n"
                   (function-report (core/nativeworld-functions projected))
-                  (slice/obligation-report "obligation-projection" projected)
-                  (failing-obligations projected)
+                  (obligation-report "obligation-projection" verdicts)
+                  (failing-obligation-verdicts verdicts)
                   (slice/pending-reports (slice/native-pending native-result)))]
             (if (not (body/materialization-ok? result))
               (str head "materialize REFUSED "
@@ -387,6 +407,8 @@
                 projected: core/NativeWorld (projected-world program)
                 result: body/BodyMaterializationV0
                 (body/materialize-world projected 0)
+                verdicts: (Vec obligations/ObligationVerdictV0)
+                (obligations/validate-native-world projected)
                 complete: Bool
                 (instance? native.lower.NativeLoweringCompleteV0 native-result)
                 qbe-report: String
@@ -411,8 +433,8 @@
                   "projected-types "
                   (count (core/nativeworld-types projected)) "\n"
                   (function-report (core/nativeworld-functions projected))
-                  (slice/obligation-report "obligation-projection" projected)
-                  (failing-obligations projected)
+                  (obligation-report "obligation-projection" verdicts)
+                  (failing-obligation-verdicts verdicts)
                   (slice/pending-reports (slice/native-pending native-result)))]
             (if (not (body/materialization-ok? result))
               (str head "materialize REFUSED "
