@@ -573,7 +573,10 @@
 (define (grammar-vector-break? d ctx)
   (and (grammar-vector-context? ctx)
        (bracket-datum? d)
-       (>= (length (logical-vector-elems d)) 2)))
+       (>= (length (logical-vector-elems d)) 3)))
+
+(define (grammar-vector? d ctx)
+  (and (grammar-vector-context? ctx) (bracket-datum? d)))
 
 (define (logical-elem->src item)
   (string-join (map datum->src item) " "))
@@ -582,12 +585,14 @@
   (define logical (logical-vector-elems d))
   (define inner-col (add1 col))
   (define pad (make-string inner-col #\space))
-  (string-append
-   "[" (logical-elem->src (car logical))
-   (apply string-append
-          (for/list ([item (in-list (cdr logical))])
-            (string-append "\n" pad (logical-elem->src item))))
-   "]"))
+  (if (null? logical)
+      "[]"
+      (string-append
+       "[" (logical-elem->src (car logical))
+       (apply string-append
+              (for/list ([item (in-list (cdr logical))])
+                (string-append "\n" pad (logical-elem->src item))))
+       "]")))
 
 (define (list-elems d)
   (and (pair? d)
@@ -766,12 +771,20 @@
      (define after (cdr elems))
      (define keep (min (context-head-keep ctx head after) (length after)))
      (define body-pad (make-string (+ col BODY-INDENT) #\space))
+     (define inline-signature
+       (for/fold ([out (string-append open (datum->src head))])
+                 ([e (in-list (take after keep))])
+         (string-append out " " (datum->src e))))
+     (define signature-over-width?
+       (> (+ col (string-length inline-signature)) PP-WIDTH))
      (define signature
        (for/fold ([out (string-append open (datum->src head))])
                  ([e (in-list (take after keep))] [i (in-naturals 1)])
          (define child-ctx (grammar-child-context d ctx i e))
          (cond
-           [(grammar-vector-break? e child-ctx)
+           [(and (grammar-vector? e child-ctx)
+                 (or (grammar-vector-break? e child-ctx)
+                     signature-over-width?))
             (string-append out "\n" body-pad
                            (datum->pretty/context e (+ col BODY-INDENT) child-ctx))]
            [(canonical-layout-needed? e child-ctx)
@@ -793,8 +806,17 @@
      (define keep (if return? 3 1))
      (define inner-col (+ col (string-length open)))
      (define pad (make-string inner-col #\space))
+     (define inline-signature
+       (string-append open
+                      (string-join (map datum->src (take elems keep)) " ")))
+     (define signature-over-width?
+       (> (+ col (string-length inline-signature)) PP-WIDTH))
      (string-append
-      open (datum->pretty/context (car elems) inner-col vector-ctx)
+      open (if (and (grammar-vector? (car elems) vector-ctx)
+                    (or (grammar-vector-break? (car elems) vector-ctx)
+                        signature-over-width?))
+               (grammar-vector->pretty (car elems) inner-col)
+               (datum->pretty/context (car elems) inner-col vector-ctx))
       (apply string-append
              (for/list ([e (in-list (take (cdr elems) (sub1 keep)))])
                (string-append " " (datum->src e))))

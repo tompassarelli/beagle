@@ -90,31 +90,31 @@
 (define CANONICAL-LAYOUT
   (list
    (cons "(defn add [x: Int y: Int] -> Int (+ x y))"
-         "(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))")
+         "(defn add [x: Int y: Int] -> Int (+ x y))")
    (cons "(defn resty [x: Int & more: Int] -> Int x)"
-         "(defn resty\n  [x: Int\n   & more: Int] -> Int\n  x)")
+         "(defn resty [x: Int & more: Int] -> Int x)")
    (cons "(fn [x: Int y: Int] -> Int (+ x y))"
-         "(fn\n  [x: Int\n   y: Int] -> Int\n  (+ x y))")
+         "(fn [x: Int y: Int] -> Int (+ x y))")
    (cons "(fn add [x: Int y: Int] -> Int (+ x y))"
-         "(fn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))")
+         "(fn add [x: Int y: Int] -> Int (+ x y))")
    (cons "(defmacro pair [x y] `[~x ~y])"
-         "(defmacro pair\n  [x\n   y]\n  `[~x ~y])")
+         "(defmacro pair [x y] `[~x ~y])")
    (cons "(defn choose ([x] x) ([x y] y))"
-         "(defn choose\n  ([x] x)\n  ([x\n    y]\n   y))")
+         "(defn choose ([x] x) ([x y] y))")
    (cons "(defn choose [x] x [x y] y)"
-         "(defn choose [x]\n  x\n  [x\n   y]\n  y)")
+         "(defn choose [x] x [x y] y)")
    (cons "(letfn [(sum [x: Int y: Int] -> Int (+ x y))] (sum 1 2))"
-         "(letfn [(sum\n          [x: Int\n           y: Int] -> Int\n          (+ x y))]\n  (sum 1 2))")
+         "(letfn [(sum [x: Int y: Int] -> Int (+ x y))] (sum 1 2))")
    (cons "(defprotocol P (m [self x: Int] -> Int))"
-         "(defprotocol P\n  (m\n    [self\n     x: Int] -> Int))")
+         "(defprotocol P (m [self x: Int] -> Int))")
    (cons "(extend-type T P (m [self x: Int] -> Int x))"
-         "(extend-type T\n  P\n  (m\n    [self\n     x: Int] -> Int\n    x))")
+         "(extend-type T P (m [self x: Int] -> Int x))")
    (cons "(defrecord P [x: Int y: String])"
-         "(defrecord P\n  [x: Int\n   y: String])")
+         "(defrecord P [x: Int y: String])")
    (cons "(defunion Shape (Rect [width: Int height: Int]))"
-         "(defunion Shape\n  (Rect\n    [width: Int\n     height: Int]))")
+         "(defunion Shape (Rect [width: Int height: Int]))")
    (cons "(defunion :throwable Failure (Bad [message: String path: String]))"
-         "(defunion :throwable Failure\n  (Bad\n    [message: String\n     path: String]))")))
+         "(defunion :throwable Failure (Bad [message: String path: String]))")))
 
 (for ([example (in-list CANONICAL-LAYOUT)])
   (test-case (format "canonical grammar layout: ~a" (car example))
@@ -122,10 +122,34 @@
     (check-equal? out (cdr example))
     (check-equal? (rd out) (rd (car example)))))
 
-(test-case "zero/one grammar vectors stay inline with their owner"
+(test-case "zero through two grammar vectors stay inline when the signature fits"
   (check-equal? (pp "(defn zero [] -> Int 0)") "(defn zero [] -> Int 0)")
   (check-equal? (pp "(defn one [x: Int] -> Int x)") "(defn one [x: Int] -> Int x)")
+  (check-equal? (pp "(defn two [x: Int y: Int] -> Int x)")
+                "(defn two [x: Int y: Int] -> Int x)")
   (check-equal? (pp "(defrecord One [x: Int])") "(defrecord One [x: Int])"))
+
+(test-case "three grammar entries force one logical entry per line"
+  (check-equal? (pp "(defn f [a b c] a)")
+                "(defn f\n  [a\n   b\n   c]\n  a)"))
+
+(test-case "complete signature width is inclusive at 80 columns"
+  (define prefix "(defn ")
+  (define suffix " [x: Int y: Int] -> Int")
+  (define name-80 (make-string (- 80 (string-length prefix) (string-length suffix)) #\x))
+  (define signature-80 (string-append prefix name-80 suffix))
+  (define out-80 (pp (string-append signature-80 " 0)")))
+  (check-equal? (car (string-split out-80 "\n")) signature-80)
+  (define name-81 (string-append name-80 "x"))
+  (define out-81 (pp (string-append prefix name-81 suffix " 0)")))
+  (check-equal? (car (string-split out-81 "\n")) (string-append prefix name-81))
+  (check-true (string-prefix? (cadr (string-split out-81 "\n")) "  [x: Int")))
+
+(test-case "over-width zero-parameter signature moves the vector as a unit"
+  (define name (make-string 72 #\z))
+  (define out (pp (format "(defn ~a [] -> Int 0)" name)))
+  (check-equal? (car (string-split out "\n")) (format "(defn ~a" name))
+  (check-true (string-prefix? (cadr (string-split out "\n")) "  [] -> Int")))
 
 (test-case "ordinary data and let binding vectors keep generic pretty-printing"
   (check-equal? (pp "[a b]") "[a b]")

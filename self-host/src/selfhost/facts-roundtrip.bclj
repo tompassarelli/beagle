@@ -968,7 +968,12 @@
    ctx: String] -> Bool
   (and (grammar-vector-context? ctx)
     (bracket-datum? datum)
-    (>= (count (logical-vector-items datum)) 2)))
+    (>= (count (logical-vector-items datum)) 3)))
+
+(defn- grammar-vector?
+  [datum: Any
+   ctx: String] -> Bool
+  (and (grammar-vector-context? ctx) (bracket-datum? datum)))
 
 (defn- logical-item-source [item: Any] -> String
   (str/join " " (mapv (fn [part: Any] -> String (datum-source part)) item)))
@@ -980,15 +985,17 @@
         inner-col (+ col 1)
         pad (loop [i 0 out ""]
               (if (>= i inner-col) out (recur (+ i 1) (str out " "))))]
-    (str "["
-      (logical-item-source (nth items 0))
-      (reduce (fn
-                [out: String
-                 item: Any] -> String
-                (str out "\n" pad (logical-item-source item)))
-        ""
-        (subvec items 1))
-      "]")))
+    (if (= (count items) 0)
+      "[]"
+      (str "["
+        (logical-item-source (nth items 0))
+        (reduce (fn
+                  [out: String
+                   item: Any] -> String
+                  (str out "\n" pad (logical-item-source item)))
+          ""
+          (subvec items 1))
+        "]"))))
 
 (defn- list-items [datum: Any] -> Any
   (if (datum-list? datum) (group-anns datum) []))
@@ -1221,21 +1228,30 @@
    keep: Int
    col: Int
    pad: String] -> String
-  (loop [i 0 out (str "(" (datum-source (nth (list-items parent) 0)))]
-    (if (>= i keep)
-      out
-      (let [item (nth after i)
-            child-index (+ i 1)
-            child-ctx (grammar-child-context parent ctx child-index item)]
-        (cond
-          (grammar-vector-break? item child-ctx)
-          (recur (+ i 1)
-            (str out "\n" pad (datum-pretty-context item (+ col 2) child-ctx)))
-          (canonical-layout-needed? item child-ctx)
-          (recur (+ i 1)
-            (str out " " (datum-pretty-context item (+ 1 (current-col out col)) child-ctx)))
-          :else
-          (recur (+ i 1) (str out " " (datum-source item))))))))
+  (let [inline-signature
+        (reduce (fn
+                  [out: String
+                   item: Any] -> String
+                  (str out " " (datum-source item)))
+          (str "(" (datum-source (nth (list-items parent) 0)))
+          (subvec after 0 keep))
+        signature-over-width? (> (+ col (count inline-signature)) 80)]
+    (loop [i 0 out (str "(" (datum-source (nth (list-items parent) 0)))]
+      (if (>= i keep)
+        out
+        (let [item (nth after i)
+              child-index (+ i 1)
+              child-ctx (grammar-child-context parent ctx child-index item)]
+          (cond
+            (and (grammar-vector? item child-ctx)
+              (or (grammar-vector-break? item child-ctx) signature-over-width?))
+            (recur (+ i 1)
+              (str out "\n" pad (datum-pretty-context item (+ col 2) child-ctx)))
+            (canonical-layout-needed? item child-ctx)
+            (recur (+ i 1)
+              (str out " " (datum-pretty-context item (+ 1 (current-col out col)) child-ctx)))
+            :else
+            (recur (+ i 1) (str out " " (datum-source item)))))))))
 
 (defn- datum-pretty-context
   [datum: Any
@@ -1272,9 +1288,16 @@
                       (or (= (nth items 1) ":-") (= (nth items 1) "->")))
             keep (if return? 3 1)
             inner-col (+ col (count (get parts "open")))
-            pad (spaces inner-col)]
+            pad (spaces inner-col)
+            inline-signature (str (get parts "open")
+                               (joined-source (subvec items 0 keep)))
+            signature-over-width? (> (+ col (count inline-signature)) 80)]
         (str (get parts "open")
-          (datum-pretty-context (nth items 0) inner-col "params")
+          (if (and (grammar-vector? (nth items 0) "params")
+                (or (grammar-vector-break? (nth items 0) "params")
+                  signature-over-width?))
+            (grammar-vector-pretty (nth items 0) inner-col)
+            (datum-pretty-context (nth items 0) inner-col "params"))
           (if (> keep 1) (str " " (joined-source (subvec items 1 keep))) "")
           (pretty-context-items datum ctx (subvec items keep) keep pad inner-col)
           (get parts "close")))

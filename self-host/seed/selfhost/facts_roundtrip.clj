@@ -662,7 +662,10 @@
   (or (= ctx "params") (= ctx "fields")))
 
 (defn- ^Boolean grammar-vector-break? [datum ^String ctx]
-  (and (grammar-vector-context? ctx) (bracket-datum? datum) (>= (count (logical-vector-items datum)) 2)))
+  (and (grammar-vector-context? ctx) (bracket-datum? datum) (>= (count (logical-vector-items datum)) 3)))
+
+(defn- ^Boolean grammar-vector? [datum ^String ctx]
+  (and (grammar-vector-context? ctx) (bracket-datum? datum)))
 
 (defn- ^String logical-item-source [item]
   (str/join " " (mapv (fn [part] (datum-source part)) item)))
@@ -673,7 +676,7 @@
    pad (loop [i 0
    out ""]
   (if (>= i inner-col) out (recur (+ i 1) (str out " "))))]
-  (str "[" (logical-item-source (nth items 0)) (reduce (fn [out item] (str out "\n" pad (logical-item-source item))) "" (subvec items 1)) "]")))
+  (if (= (count items) 0) "[]" (str "[" (logical-item-source (nth items 0)) (reduce (fn [out item] (str out "\n" pad (logical-item-source item))) "" (subvec items 1)) "]"))))
 
 (defn- list-items [datum]
   (if (datum-list? datum) (group-anns datum) []))
@@ -818,15 +821,17 @@
   (recur (+ i 1) (str out "\n" prefix (datum-pretty-context item col child-ctx)))))))
 
 (defn- ^String signature-pretty [parent ^String ctx after keep col ^String pad]
+  (let [inline-signature (reduce (fn [out item] (str out " " (datum-source item))) (str "(" (datum-source (nth (list-items parent) 0))) (subvec after 0 keep))
+   signature-over-width? (> (+ col (count inline-signature)) 80)]
   (loop [i 0
    out (str "(" (datum-source (nth (list-items parent) 0)))]
   (if (>= i keep) out (let [item (nth after i)
    child-index (+ i 1)
    child-ctx (grammar-child-context parent ctx child-index item)]
   (cond
-  (grammar-vector-break? item child-ctx) (recur (+ i 1) (str out "\n" pad (datum-pretty-context item (+ col 2) child-ctx)))
+  (and (grammar-vector? item child-ctx) (or (grammar-vector-break? item child-ctx) signature-over-width?)) (recur (+ i 1) (str out "\n" pad (datum-pretty-context item (+ col 2) child-ctx)))
   (canonical-layout-needed? item child-ctx) (recur (+ i 1) (str out " " (datum-pretty-context item (+ 1 (current-col out col)) child-ctx)))
-  :else (recur (+ i 1) (str out " " (datum-source item))))))))
+  :else (recur (+ i 1) (str out " " (datum-source item)))))))))
 
 (defn- ^String datum-pretty-context [datum col ^String ctx]
   (let [one-line (datum-source datum)
@@ -851,8 +856,10 @@
    return? (and (>= (count items) 3) (or (= (nth items 1) ":-") (= (nth items 1) "->")))
    keep (if return? 3 1)
    inner-col (+ col (count (get parts "open")))
-   pad (spaces inner-col)]
-  (str (get parts "open") (datum-pretty-context (nth items 0) inner-col "params") (if (> keep 1) (str " " (joined-source (subvec items 1 keep))) "") (pretty-context-items datum ctx (subvec items keep) keep pad inner-col) (get parts "close")))
+   pad (spaces inner-col)
+   inline-signature (str (get parts "open") (joined-source (subvec items 0 keep)))
+   signature-over-width? (> (+ col (count inline-signature)) 80)]
+  (str (get parts "open") (if (and (grammar-vector? (nth items 0) "params") (or (grammar-vector-break? (nth items 0) "params") signature-over-width?)) (grammar-vector-pretty (nth items 0) inner-col) (datum-pretty-context (nth items 0) inner-col "params")) (if (> keep 1) (str " " (joined-source (subvec items 1 keep))) "") (pretty-context-items datum ctx (subvec items keep) keep pad inner-col) (get parts "close")))
   :else (let [items (get parts "items")
    inner-col (+ col (count (get parts "open")))
    pad (spaces inner-col)]
