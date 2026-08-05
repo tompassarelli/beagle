@@ -190,6 +190,7 @@
     (instance? native.core.VecConcatInstruction instruction) true
     (instance? native.core.VecSliceInstructionV0 instruction) true
     (instance? native.core.VecReverseInstructionV0 instruction) true
+    (instance? native.core.VecSortInstructionV0 instruction) true
     (instance? native.core.MapLiteralInstructionV0 instruction) true
     (instance? native.core.SetLiteralInstructionV0 instruction) true
     (instance? native.core.MapCountInstructionV0 instruction) true
@@ -664,7 +665,8 @@
                   (fn [instruction: core/Instruction] -> Bool
                     (or
                       (instance? native.core.ValueSemanticsInstruction instruction)
-                      (instance? native.core.ValueToTextInstructionV0 instruction)))
+                      (instance? native.core.ValueToTextInstructionV0 instruction)
+                      (instance? native.core.VecSortInstructionV0 instruction)))
                   (core/basicblock-instructions block))))
             (core/functiondef-blocks function))))
       functions)))
@@ -2185,6 +2187,21 @@
         (str "  " target " = native_vec_reverse(" arena ", "
           (value-name function slots
             (core/vecreverseinstructionv0-source-id instruction))
+          ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
+          (vector-element-alignment layouts vector-type) ");\n"))
+
+      (instance? native.core.VecSortInstructionV0 instruction)
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
+            element-type: core/NativeId
+            (core/vecsortinstructionv0-element-type instruction)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/vecsortinstructionv0-arena-id instruction)))]
+        (str "  " target " = native_vec_sort(" arena ", "
+          (value-name function slots
+            (core/vecsortinstructionv0-source-id instruction))
+          ", &" (descriptor-symbol types module-index element-type)
           ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
           (vector-element-alignment layouts vector-type) ");\n"))
 

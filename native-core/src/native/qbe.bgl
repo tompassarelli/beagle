@@ -274,6 +274,8 @@
      (core/vecsliceinstructionv0-result instruction)]
     [(VecReverseInstructionV0 value)
      (core/vecreverseinstructionv0-result instruction)]
+    [(VecSortInstructionV0 value)
+     (core/vecsortinstructionv0-result instruction)]
     [(MapLiteralInstructionV0 value)
      (core/mapliteralinstructionv0-result instruction)]
     [(SetLiteralInstructionV0 value)
@@ -1018,6 +1020,7 @@
     [(VecConcatInstruction value) false]
     [(VecSliceInstructionV0 value) false]
     [(VecReverseInstructionV0 value) false]
+    [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
     [(MapCountInstructionV0 value) false]
@@ -1449,6 +1452,7 @@
              (core/vecreverseinstructionv0-source-id instruction))
            ", l " (vector-stride context vector-type)
            ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(VecSortInstructionV0 value) ""]
       [(MapLiteralInstructionV0 value) ""]
       [(SetLiteralInstructionV0 value) ""]
       [(MapCountInstructionV0 value) ""]
@@ -1868,6 +1872,7 @@
     [(VecConcatInstruction value) true]
     [(VecSliceInstructionV0 value) true]
     [(VecReverseInstructionV0 value) true]
+    [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
     [(MapCountInstructionV0 value) false]
@@ -2023,6 +2028,21 @@
             (recur (+ position 1))
             operation))))))
 
+(defn world-has-vector-sort? [world: core/NativeWorld] -> Bool
+  (some?
+    (some
+      (fn [function: core/FunctionDef] -> Bool
+        (some?
+          (some
+            (fn [block: core/BasicBlock] -> Bool
+              (some?
+                (some
+                  (fn [instruction: core/Instruction] -> Bool
+                    (instance? native.core.VecSortInstructionV0 instruction))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      (core/nativeworld-functions world))))
+
 (defn parameterless-target?
   [blocks: (Vec core/BasicBlock)
    target: core/NativeId] -> Bool
@@ -2167,6 +2187,9 @@
       (world-has-host-extern? world)
       (->QbeFailure
         "QBE host extern ABI is unsupported: optional Text handles have no QBE representation")
+      (world-has-vector-sort? world)
+      (->QbeFailure
+        "QBE vector sort is unsupported: sealed value descriptors have no QBE data representation")
       (some? unsupported)
       (->QbeFailure
         (str "unsupported native value-semantics op: " unsupported))

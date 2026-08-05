@@ -181,6 +181,9 @@ native_vec *native_vec_slice(native_arena *arena, const native_vec *source,
                              size_t alignment);
 native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
                                int64_t stride, size_t alignment);
+native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
+                            const native_value_descriptor *element,
+                            int64_t stride, size_t alignment);
 int64_t native_bit_and_i64(int64_t left, int64_t right);
 int64_t native_bit_or_i64(int64_t left, int64_t right);
 int64_t native_bit_xor_i64(int64_t left, int64_t right);

@@ -1,0 +1,30 @@
+#lang beagle/clj
+
+(ns fram.sequence-probe)
+
+(define-mode strict)
+
+(defn first-value [values: (Vec Int)] -> Int
+  (first values))
+
+(defn last-value [values: (Vec Int)] -> Int
+  (last values))
+
+(defn peek-value [values: (Vec Int)] -> Int
+  (peek values))
+
+(defn take-values
+  [amount: Int
+   values: (Vec Int)] -> (Vec Int)
+  (take amount values))
+
+(defn drop-values
+  [amount: Int
+   values: (Vec Int)] -> (Vec Int)
+  (drop amount values))
+
+(defn sort-values [values: (Vec Int)] -> (Vec Int)
+  (sort values))
+
+(defn sort-texts [values: (Vec String)] -> (Vec String)
+  (sort values))

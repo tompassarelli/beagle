@@ -486,6 +486,13 @@
     [result: SsaValueV0
      source-id: NativeId
      arena-id: NativeId])
+  ;; Sort borrows the source and orders a fresh vector through the sealed
+  ;; element descriptor. No source or runtime comparator crosses this seam.
+  (VecSortInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId
+     element-type: NativeId])
   (MapLiteralInstructionV0
     [result: SsaValueV0
      key-ids: (Vec NativeId)
@@ -905,6 +912,8 @@
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id)
      (ssavaluev0-id result)]
     [(VecReverseInstructionV0 result source-id arena-id)
+     (ssavaluev0-id result)]
+    [(VecSortInstructionV0 result source-id arena-id element-type)
      (ssavaluev0-id result)]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (ssavaluev0-id result)]
@@ -1428,6 +1437,8 @@
     [(VecConcatInstruction result left-id right-id arena-id) true]
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
     [(VecReverseInstructionV0 result source-id arena-id) true]
+    [(VecSortInstructionV0 result source-id arena-id element-type)
+     (id-in? known-types element-type)]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (= (count key-ids) (count value-ids))]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
@@ -1653,6 +1664,8 @@
      [arena-id source-id start-id end-id]]
     [(VecReverseInstructionV0 result source-id arena-id)
      [arena-id source-id]]
+    [(VecSortInstructionV0 result source-id arena-id element-type)
+     [arena-id source-id]]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (into [arena-id] (vec (concat key-ids value-ids)))]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
@@ -1781,6 +1794,7 @@
     [(VecConcatInstruction result left-id right-id arena-id) true]
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
     [(VecReverseInstructionV0 result source-id arena-id) true]
+    [(VecSortInstructionV0 result source-id arena-id element-type) true]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality) true]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
     [(MapCountInstructionV0 result source-id) true]

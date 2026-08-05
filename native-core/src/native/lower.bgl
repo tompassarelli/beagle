@@ -3398,6 +3398,61 @@
    target: core/NativeId] -> Bool
   (value-to-text-type-inner? types target []))
 
+;; Sort order is derived only from a sealed, acyclic descriptor graph. Maps,
+;; sets, cells, callables, and outcomes have no implicit collection order.
+(defn comparable-type-inner?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId
+   visiting: (Vec core/NativeId)] -> Bool
+  (if (core/id-in? visiting target)
+    false
+    (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+      (if (nil? definition)
+        false
+        (let [shape: core/TypeShape (core/typedef-shape definition)
+              next: (Vec core/NativeId) (conj visiting target)]
+          (cond
+            (instance? native.core.AtomType shape)
+            (let [kind: core/AtomKind (core/atomtype-kind shape)]
+              (or (instance? native.core.BoolKind kind)
+                (instance? native.core.I64Kind kind)
+                (instance? native.core.F64Kind kind)
+                (instance? native.core.TextKind kind)
+                (instance? native.core.BytesKind kind)
+                (instance? native.core.KeywordKind kind)))
+
+            (instance? native.core.RecordType shape)
+            (every?
+              (fn [field: core/TypeField] -> Bool
+                (comparable-type-inner? types
+                  (core/typefield-type-id field) next))
+              (core/recordtype-fields shape))
+
+            (instance? native.core.UnionType shape)
+            (every?
+              (fn [variant: core/TypeVariant] -> Bool
+                (let [payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (nil? payload)
+                    true
+                    (comparable-type-inner? types payload next))))
+              (core/uniontype-variants shape))
+
+            (instance? native.core.VectorType shape)
+            (comparable-type-inner? types
+              (core/vectortype-element-type shape) next)
+
+            (instance? native.core.ReferenceType shape)
+            (comparable-type-inner? types
+              (core/referencetype-target-type shape) next)
+
+            :else false))))))
+
+(defn comparable-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (comparable-type-inner? types target []))
+
 ;; The vector TypeDef for an element type exists only when some annotation in
 ;; the module named (Vec T); a literal cannot mint one, so it looks one up.
 (defn vector-type-of
@@ -3505,6 +3560,7 @@
       (instance? native.core.VecConcatInstruction instruction)
       (instance? native.core.VecSliceInstructionV0 instruction)
       (instance? native.core.VecReverseInstructionV0 instruction)
+      (instance? native.core.VecSortInstructionV0 instruction)
       (instance? native.core.MapLiteralInstructionV0 instruction)
       (instance? native.core.SetLiteralInstructionV0 instruction)
       (instance? native.core.MapAssocInstructionV0 instruction)
@@ -5621,6 +5677,130 @@
                 end-id
                 (arena-value-id owner)))
             result-id (nth value-types 0) false))))))
+
+(defn lower-vector-edge
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (and (= 1 (count values))
+             (vector-type? types (nth value-types 0))))
+    (fail-result state
+      (str "TODO-NATIVE-VECTOR-EDGE-OPERAND: " callee
+        " takes one closed native vector"))
+    (let [vector-type: core/NativeId (nth value-types 0)
+          element-type: core/NativeId (vector-element-of types vector-type)]
+      (if (= "first" callee)
+        (let [zero-id: core/NativeId (state-id state owner "first-index")
+              result-id: core/NativeId
+              (state-id (state-bump state) owner "first-value")]
+          (->ExprResultV0
+            (state-emit
+              (state-emit (state-bump (state-bump state))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 zero-id (int-type-id))
+                  (core/->I64Atom 0)))
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 result-id element-type)
+                (nth values 0) zero-id))
+            result-id element-type false))
+        (let [length-id: core/NativeId
+              (state-id state owner (str callee "-length"))
+              one-id: core/NativeId
+              (state-id (state-bump state) owner (str callee "-one"))
+              prepared: BodyStateV0
+              (state-emit
+                (state-emit (state-bump (state-bump state))
+                  (core/->VecLengthInstruction
+                    (core/->SsaValueV0 length-id (int-type-id))
+                    (nth values 0)))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 one-id (int-type-id))
+                  (core/->I64Atom 1)))
+              index: ExprResultV0
+              (lower-checked-arith prepared owner "-" length-id one-id)
+              settled: BodyStateV0 (exprresultv0-state index)
+              result-id: core/NativeId
+              (state-id settled owner (str callee "-value"))]
+          (if (state-blocked? settled)
+            (dead-result settled)
+            (->ExprResultV0
+              (state-emit (state-bump settled)
+                (core/->VecGetInstruction
+                  (core/->SsaValueV0 result-id element-type)
+                  (nth values 0) (exprresultv0-value-id index)))
+              result-id element-type false)))))))
+
+(defn lower-vector-take-drop
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (and (= 2 (count values))
+             (same-id? (nth value-types 0) (int-type-id))
+             (vector-type? types (nth value-types 1))))
+    (fail-result state
+      (str "TODO-NATIVE-VECTOR-SLICE-OPERANDS: " callee
+        " takes an Int count and one closed native vector"))
+    (let [length-id: core/NativeId
+          (state-id state owner (str callee "-length"))
+          zero-id: core/NativeId
+          (state-id (state-bump state) owner (str callee "-zero"))
+          prepared: BodyStateV0
+          (state-emit
+            (state-emit (state-bump (state-bump state))
+              (core/->VecLengthInstruction
+                (core/->SsaValueV0 length-id (int-type-id))
+                (nth values 1)))
+            (core/->AtomInstruction
+              (core/->SsaValueV0 zero-id (int-type-id))
+              (core/->I64Atom 0)))
+          nonnegative: ExprResultV0
+          (lower-int-extreme-pair prepared owner "max"
+            (nth values 0) zero-id)
+          bounded: ExprResultV0
+          (lower-int-extreme-pair (exprresultv0-state nonnegative) owner "min"
+            (exprresultv0-value-id nonnegative) length-id)
+          settled: BodyStateV0 (exprresultv0-state bounded)
+          result-id: core/NativeId
+          (state-id settled owner (str callee "-vector"))
+          taking: Bool (= "take" callee)]
+      (->ExprResultV0
+        (state-emit (state-bump settled)
+          (core/->VecSliceInstructionV0
+            (core/->SsaValueV0 result-id (nth value-types 1))
+            (nth values 1)
+            (if taking zero-id (exprresultv0-value-id bounded))
+            (if taking (exprresultv0-value-id bounded) length-id)
+            (arena-value-id owner)))
+        result-id (nth value-types 1) false))))
+
+(defn lower-vector-sort
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (and (= 1 (count values))
+             (vector-type? types (nth value-types 0))))
+    (fail-result state
+      "TODO-NATIVE-SORT-OPERAND: sort takes one closed native vector")
+    (let [vector-type: core/NativeId (nth value-types 0)
+          element-type: core/NativeId (vector-element-of types vector-type)]
+      (if (not (comparable-type? types element-type))
+        (fail-result state
+          "TODO-NATIVE-SORT-ELEMENT: sort needs sealed comparable element semantics")
+        (let [result-id: core/NativeId (state-id state owner "vec-sort")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->VecSortInstructionV0
+                (core/->SsaValueV0 result-id vector-type)
+                (nth values 0) (arena-value-id owner) element-type))
+            result-id vector-type false))))))
 
 ;; Only a literal keyword access of an already-bound Map SSA can seed flow;
 ;; calls, persistent updates, and dynamic get keys cannot manufacture a match.
@@ -9040,6 +9220,9 @@
                 (fail-result current
                   "TODO-NATIVE-MAP-VALUES-OPERAND: vals lowers one closed map")
 
+                (or (= "first" callee) (= "last" callee) (= "peek" callee))
+                (lower-vector-edge types owner current callee values value-types)
+
                 (and (= "nth" callee) (= 2 (count values))
                   (vector-type? types (nth value-types 0)))
                 (if (not (same-id? (nth value-types 1) (int-type-id)))
@@ -9148,6 +9331,9 @@
                 (= "subvec" callee)
                 (lower-vector-slice types owner current values value-types)
 
+                (or (= "take" callee) (= "drop" callee))
+                (lower-vector-take-drop types owner current callee values value-types)
+
                 (and (= "reverse" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
                 (let [result-id: core/NativeId
@@ -9162,6 +9348,9 @@
                 (= "reverse" callee)
                 (fail-result current
                   "TODO-NATIVE-REVERSE-OPERAND: reverse takes one native vector")
+
+                (= "sort" callee)
+                (lower-vector-sort types owner current values value-types)
 
                 (and (= "into" callee) (= 2 (count values))
                   (same-id? (nth value-types 0) (nth value-types 1))
@@ -11824,6 +12013,13 @@
       [(encode-ssa-value (core/vecreverseinstructionv0-result instruction))
        (id-value (core/vecreverseinstructionv0-source-id instruction))
        (id-value (core/vecreverseinstructionv0-arena-id instruction))])
+
+    (instance? native.core.VecSortInstructionV0 instruction)
+    (worlds/canonical-record "vec-sort-instruction-v0"
+      [(encode-ssa-value (core/vecsortinstructionv0-result instruction))
+       (id-value (core/vecsortinstructionv0-source-id instruction))
+       (id-value (core/vecsortinstructionv0-arena-id instruction))
+       (id-value (core/vecsortinstructionv0-element-type instruction))])
 
     (instance? native.core.MapLiteralInstructionV0 instruction)
     (worlds/canonical-record "map-literal-instruction-v0"

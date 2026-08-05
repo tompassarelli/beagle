@@ -1441,6 +1441,53 @@ int64_t native_value_compare(const native_value_descriptor *descriptor,
   return native_value_compare_inner(descriptor, left, right);
 }
 
+native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
+                            const native_value_descriptor *element,
+                            int64_t stride, size_t alignment) {
+  native_vec *result;
+  void *held;
+  int64_t position;
+  if (!native_value_descriptor_valid(element) || (source == NULL) ||
+      (stride <= INT64_C(0)) || ((size_t)stride < element->size) ||
+      ((size_t)stride % element->alignment != 0U) ||
+      (alignment < element->alignment) ||
+      ((alignment & (alignment - 1U)) != 0U) ||
+      (source->length < INT64_C(0)) ||
+      (source->capacity < source->length) ||
+      ((source->capacity == INT64_C(0)) && (source->elements != NULL)) ||
+      ((source->capacity > INT64_C(0)) && (source->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_vec_slice(arena, source, INT64_C(0), source->length,
+                            stride, alignment);
+  if (result->length < INT64_C(2)) {
+    return result;
+  }
+  held = native_arena_alloc(arena, (size_t)stride, alignment);
+  for (position = INT64_C(1); position < result->length; ++position) {
+    int64_t insertion = position;
+    memcpy(held,
+           (const uint8_t *)result->elements +
+               native_vec_bytes(position, stride),
+           (size_t)stride);
+    while (insertion > INT64_C(0)) {
+      const void *previous =
+          (const uint8_t *)result->elements +
+          native_vec_bytes(insertion - INT64_C(1), stride);
+      if (native_value_compare(element, previous, held) <= INT64_C(0)) {
+        break;
+      }
+      memmove((uint8_t *)result->elements +
+                  native_vec_bytes(insertion, stride),
+              previous, (size_t)stride);
+      insertion -= INT64_C(1);
+    }
+    memcpy((uint8_t *)result->elements + native_vec_bytes(insertion, stride),
+           held, (size_t)stride);
+  }
+  return result;
+}
+
 #define NATIVE_VALUE_TEXT_MAX_DEPTH 128U
 #define NATIVE_VALUE_FLOAT_BUFFER 64U
 
