@@ -6,9 +6,7 @@
 ;;
 ;; Every authored Beagle source file declares its profile via its extension
 ;; (`.bgl` → bare `#lang beagle`, `.bclj` → `#lang beagle/clj`, and so on).
-;; Headerless `.bgl` remains a temporary compatibility seam for the compiler's
-;; hosted Native Core implementation modules; an explicit mismatched header is
-;; always a hard compile error.
+;; The extension and declared target must agree.
 ;; Render the current mapping with `bin/beagle langs --view extensions`.
 
 (require racket/string
@@ -40,19 +38,10 @@
            EXTENSION-TARGET-MAP))
   (and match (cdr match)))
 
-(define (source-has-lang-header? path-str)
-  (and (file-exists? path-str)
-       (call-with-input-file path-str
-         (lambda (in)
-           (define line (read-line in 'any))
-           (and (string? line) (regexp-match? #rx"^#lang " line))))))
-
 (define (extension-target-mismatch? path-str actual-target)
   (define expected-target (expected-target-for-extension path-str))
   (and expected-target
-       (not (eq? expected-target actual-target))
-       (not (and (eq? expected-target (core-profile-id CORE-PROFILE))
-                 (not (source-has-lang-header? path-str))))))
+       (not (eq? expected-target actual-target))))
 
 ;; Regex matching all beagle source extensions (for directory scanning).
 (define BEAGLE-FILE-RX

@@ -38,7 +38,7 @@ mkdir -p "$generated" "$artifacts"
 modules=(core worlds lower obligations c11 slice fold_c17 body_c17 body_slice qbe)
 native_sources=()
 for module in "${modules[@]}"; do
-  source="$native_repo/native-core/src/native/$module.bgl"
+  source="$native_repo/native-core/src/native/$module.bclj"
   [[ -f "$source" ]] || die "native module is unavailable: $source"
   native_sources+=("$source")
 done
@@ -136,7 +136,7 @@ digest_line() {
     'beagle:native-core/validation/slice-rt-core/drive.sh'
   for index in "${!modules[@]}"; do
     digest_line "${native_sources[$index]}" \
-      "beagle:native-core/src/native/${modules[$index]}.bgl"
+      "beagle:native-core/src/native/${modules[$index]}.bclj"
   done
   digest_line "$native_shim/native_shim.c" \
     'beagle:native-core/shim/native_shim.c'

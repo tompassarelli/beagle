@@ -7,7 +7,7 @@
 #                                [--repo DIR] [--quiet] [--help]
 #
 # Clauses, per module:
-#   1  profile-3 check over native-core/src/native/*.bgl   (shared, run once)
+#   1  profile-3 check over native-core/src/native/*.bclj  (shared, run once)
 #   2  the module's slice driver script                    (materialization)
 #   3  gcc   -std=c17 -Wall -Wextra -Werror                (compile + link/run)
 #   4  clang -std=c17 -Werror                              (second frontend)
@@ -276,10 +276,10 @@ run_profile3() {
   [[ -n "$PROFILE3_STATUS" ]] && return
   local -a srcs=()
   local f
-  for f in "$REPO"/native-core/src/native/*.bgl; do [[ -f "$f" ]] && srcs+=("$f"); done
+  for f in "$REPO"/native-core/src/native/*.bclj; do [[ -f "$f" ]] && srcs+=("$f"); done
   if [[ ${#srcs[@]} -eq 0 ]]; then
     PROFILE3_STATUS=FAIL
-    PROFILE3_DETAIL="no sources matched native-core/src/native/*.bgl"
+    PROFILE3_DETAIL="no sources matched native-core/src/native/*.bclj"
     return
   fi
   local checker="$REPO/bin/beagle-check-all"

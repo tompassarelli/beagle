@@ -10,11 +10,11 @@ trap 'rm -rf "${fold_tmp:?}"' EXIT
 mkdir -p "$fold_artifacts" "$fold_tmp/out" "$fold_tmp/clj-config"
 
 "$fold_repo/bin/beagle" build --out "$fold_tmp/out" \
-  "$fold_repo/native-core/src/native/core.bgl" \
-  "$fold_repo/native-core/src/native/worlds.bgl" \
-  "$fold_repo/native-core/src/native/lower.bgl" \
-  "$fold_repo/native-core/src/native/obligations.bgl" \
-  "$fold_repo/native-core/src/native/c11.bgl" \
+  "$fold_repo/native-core/src/native/core.bclj" \
+  "$fold_repo/native-core/src/native/worlds.bclj" \
+  "$fold_repo/native-core/src/native/lower.bclj" \
+  "$fold_repo/native-core/src/native/obligations.bclj" \
+  "$fold_repo/native-core/src/native/c11.bclj" \
   "$fold_repo/native-core/src/native/c11_validation_corpus.bclj"
 
 # The Clojure projection still needs imported union classes qualified at runtime.

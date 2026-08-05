@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; Drives one source-fact projection through seal -> typed -> native -> the
 ;; seven obligations -> the restricted C17 body materializer.
 ;; The projection keeps exactly the types the lowered functions reach, so the

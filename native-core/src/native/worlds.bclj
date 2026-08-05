@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; @upstream:text-arm — operator-authorized for Native Stage 2; re-ingest this
 ;; module into the graph after landing. Authority: North thread 019fbd6c,
 ;; accepted design lane-msch3uwf section 2.

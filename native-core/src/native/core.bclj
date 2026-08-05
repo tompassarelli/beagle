@@ -1,3 +1,4 @@
+#lang beagle/clj
 (ns native.core
   (:require [clojure.string :as str]))
 

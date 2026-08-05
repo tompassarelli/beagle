@@ -23,11 +23,11 @@ fi
 } >"$types_scratch/facts.edn"
 
 "$types_root/bin/beagle-build-all" \
-  "$types_root/native-core/src/native/core.bgl" \
-  "$types_root/native-core/src/native/worlds.bgl" \
-  "$types_root/native-core/src/native/lower.bgl" \
-  "$types_root/native-core/src/native/obligations.bgl" \
-  "$types_root/native-core/src/native/c11.bgl" \
+  "$types_root/native-core/src/native/core.bclj" \
+  "$types_root/native-core/src/native/worlds.bclj" \
+  "$types_root/native-core/src/native/lower.bclj" \
+  "$types_root/native-core/src/native/obligations.bclj" \
+  "$types_root/native-core/src/native/c11.bclj" \
   "$types_output/pipeline.bclj" \
   --out "$types_scratch/out" >"$types_scratch/build.log" 2>&1 || {
     sed -n '1,240p' "$types_scratch/build.log" >&2

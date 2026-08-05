@@ -1,4 +1,5 @@
-(ns native.main-capability-slice)
+#lang beagle/clj
+(ns native.host-capability-slice)
 
 (define-mode strict)
 
@@ -10,6 +11,39 @@
 (require native.body-slice :as body-slice)
 (require native.body-c17 :as body)
 (require native.qbe :as qbe)
+
+(defn host-function? [function: core/FunctionDef] -> Bool
+  (or (= "getenv" (core/functiondef-name function))
+      (= "getenv-present?" (core/functiondef-name function))
+      (= "getenv-length" (core/functiondef-name function))
+      (= "monotonic-now" (core/functiondef-name function))))
+
+(defn host-world [world: core/NativeWorld] -> core/NativeWorld
+  (let [functions: (Vec core/FunctionDef)
+        (filterv host-function? (core/nativeworld-functions world))
+        function-ids: (Vec core/NativeId) (core/function-ids functions)
+        abis: (Vec core/AbiDeclV0)
+        (filterv
+          (fn [abi: core/AbiDeclV0] -> Bool
+            (or (instance? native.core.AbiImportV0
+                  (core/abideclv0-direction abi))
+              (core/id-in? function-ids (core/abideclv0-function-id abi))))
+          (core/nativeworld-abis world))]
+    (core/->NativeWorld
+      (core/nativeworld-id world)
+      (core/nativeworld-parent world)
+      (core/nativeworld-compiler-pass world)
+      (core/nativeworld-types world)
+      (core/nativeworld-effects world)
+      (core/nativeworld-regions world)
+      (core/nativeworld-capabilities world)
+      (core/nativeworld-layouts world)
+      functions
+      (core/nativeworld-allowed-effects world)
+      (core/nativeworld-allowed-regions world)
+      (core/nativeworld-allowed-capabilities world)
+      abis
+      (core/nativeworld-observations world))))
 
 (defn qbe-report [result: qbe/QbeMaterialization] -> String
   (if (instance? native.qbe.QbeSuccess result)
@@ -23,7 +57,7 @@
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0
-        (slice/source-world rows "fram.main" "fram:src/fram/main.bclj")
+        (slice/source-world rows "fram.kernel" "fram:src/fram/kernel.bclj")
         seal-result: lower/SourceSealResultV0
         (lower/seal-source-world source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceSealAcceptedV0 seal-result))
@@ -46,7 +80,8 @@
                 full: core/NativeWorld
                 (worlds/nativeworldv0-program
                   (worlds/sealednativeworldv0-world sealed-native))
-                selected: core/NativeWorld (body-slice/projected-world full)
+                selected: core/NativeWorld
+                (body-slice/projected-world (host-world full))
                 c-result: body/BodyMaterializationV0
                 (body/materialize-world selected 0)
                 qbe-result: qbe/QbeMaterialization
@@ -61,13 +96,17 @@
                   (str (count (worlds/sourceprogramworldv0-modules source))) "\n"
                   "source-imports "
                   (str (count (worlds/sourceprogramworldv0-imports source))) "\n"
-                  "world-functions "
+                  "full-world-functions "
+                  (str (count (core/nativeworld-functions full))) "\n"
+                  "full-world-abis "
+                  (str (count (core/nativeworld-abis full))) "\n"
+                  "host-world-functions "
                   (str (count (core/nativeworld-functions selected))) "\n"
-                  "world-abis "
+                  "host-world-abis "
                   (str (count (core/nativeworld-abis selected))) "\n"
                   (body-slice/function-report
                     (core/nativeworld-functions selected))
-                  (slice/obligation-report "obligation-main" selected)
+                  (slice/obligation-report "obligation-host" selected)
                   (body-slice/failing-obligations selected)
                   (slice/pending-reports (slice/native-pending native-result)))]
             (if (not (body/materialization-ok? c-result))

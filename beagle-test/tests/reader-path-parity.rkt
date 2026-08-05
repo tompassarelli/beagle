@@ -24,7 +24,8 @@
 (require rackunit
          racket/file
          beagle/lang/reader-impl
-         (only-in beagle/private/parse read-beagle-syntax))
+         (only-in beagle/private/parse read-beagle-syntax)
+         (only-in beagle/private/extensions extension-target-mismatch?))
 
 ;; --- the two paths ----------------------------------------------------------
 
@@ -66,6 +67,10 @@
      (define forms (map syntax->datum (read-beagle-syntax tmp)))
      (check-equal? (car forms) '(define-target core)))
    (lambda () (delete-file tmp))))
+
+(test-case ".bgl admits only the Core profile"
+  (check-false (extension-target-mismatch? "program.bgl" 'core))
+  (check-true (extension-target-mismatch? "program.bgl" 'clj)))
 
 ;; --- battery: every reader feature, with nesting + combinations -------------
 

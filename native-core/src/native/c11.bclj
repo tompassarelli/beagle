@@ -1,3 +1,4 @@
+#lang beagle/clj
 (ns native.c11)
 
 (define-mode strict)

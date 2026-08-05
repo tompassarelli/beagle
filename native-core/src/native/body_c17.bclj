@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; Restricted C17 materializer for lowered function bodies: multi-block SSA with
 ;; block arguments, closed-union dispatch, record extract/construct, and traps.
 ;; Types, layouts and prototypes are native.fold-c17's; only bodies live here.

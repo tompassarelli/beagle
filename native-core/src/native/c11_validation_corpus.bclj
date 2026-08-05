@@ -1,5 +1,4 @@
 #lang beagle/clj
-;; @upstream:graph — operator-authorized text arm; re-ingest after landing.
 (ns native.c11-validation-corpus)
 
 (define-mode strict)

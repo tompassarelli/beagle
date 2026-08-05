@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; Reads the same sealed core/NativeWorld native.c11 reads; every QBE-shaped
 ;; concession stays inside this file. Authority: North thread 019fbd6c A6.
 (ns native.qbe

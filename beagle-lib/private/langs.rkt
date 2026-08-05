@@ -65,9 +65,9 @@
 ;; `beagle-lib/private/emit-{…}.rkt` — the live target emitters.
 (define (view-emitters)
   (string-append
-   "- `native-core/src/native/{worlds,lower,obligations}.bgl` — the Core "
-   "lowering to one sealed Native World; `native-core/src/native/{body_c17,qbe}.bgl` "
-   "are its explicit materializers.\n"
+   "- `native-core/src/native/{worlds,lower,obligations}.bclj` — the hosted "
+   "implementation that lowers Core into one sealed Native World; "
+   "`native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.\n"
    "- `beagle-lib/private/emit-{"
    (string-join (map id-str TARGETS) ",")
    "}.rkt` — the live target emitters (one row each in\n"

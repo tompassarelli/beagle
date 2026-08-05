@@ -1,3 +1,4 @@
+#lang beagle/clj
 (ns native.lower
   (:require [native.core :as core]
             [native.worlds :as worlds]))

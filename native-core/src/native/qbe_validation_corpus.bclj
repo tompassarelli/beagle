@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; Fixture worlds for native.qbe. The module-0 world is byte-for-byte the
 ;; world native.c11-validation-corpus materializes (same id domain, same
 ;; constructors), so both backends read one sealed world.

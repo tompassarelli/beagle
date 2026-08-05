@@ -1,3 +1,4 @@
+#lang beagle/clj
 (ns native.socket-capability-fixture)
 
 (define-mode strict)

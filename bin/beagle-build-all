@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# beagle-build-all: compile multiple .rkt files to Clojure in one process.
+# beagle-build-all: compile multiple hosted Beagle sources in one process.
 #
 # Usage:
 #   bin/beagle-build-all <file-or-dir> ... [--out <dir>] [--warn]
 #
-# Directories are expanded to their .rkt contents. Output goes to a directory:
+# Directories are expanded to their Beagle source contents. Output goes to a directory:
 # --out names it; --in-place writes beside each source. With neither, output
 # defaults to .beagle-out/ (gitignored) instead of the cwd — so a stray
 # invocation can't dump ns-shaped dirs into a tracked tree. Override the

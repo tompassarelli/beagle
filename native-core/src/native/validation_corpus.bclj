@@ -1,3 +1,4 @@
+#lang beagle/clj
 (ns native.validation-corpus (:require [native.core :as core]))
 
 (define-mode strict)

@@ -12,11 +12,11 @@ trap 'rm -rf "${scratch:?}"' EXIT
 mkdir -p "$scratch/out" "$scratch/c" "$artifacts"
 
 "$repo/bin/beagle-build-all" \
-  "$repo/native-core/src/native/core.bgl" \
-  "$repo/native-core/src/native/fold_c17.bgl" \
-  "$repo/native-core/src/native/body_c17.bgl" \
-  "$repo/native-core/src/native/qbe.bgl" \
-  "$repo/native-core/src/native/validation_corpus.bgl" \
+  "$repo/native-core/src/native/core.bclj" \
+  "$repo/native-core/src/native/fold_c17.bclj" \
+  "$repo/native-core/src/native/body_c17.bclj" \
+  "$repo/native-core/src/native/qbe.bclj" \
+  "$repo/native-core/src/native/validation_corpus.bclj" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || {
     sed -n '1,200p' "$scratch/build.log" >&2
     exit 1

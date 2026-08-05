@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; Native Stage 2 validation corpus; authority: North thread 019fbd6c.
 (ns native.worlds-validation-corpus
   (:require [native.core :as core]

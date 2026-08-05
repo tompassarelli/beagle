@@ -13,16 +13,16 @@ bb "$sequence_repo/native-core/validation/slice-vec/ast-facts.clj" \
   "$sequence_scratch/fixture.facts"
 
 "$sequence_repo/bin/beagle-build-all" \
-  "$sequence_repo/native-core/src/native/core.bgl" \
-  "$sequence_repo/native-core/src/native/worlds.bgl" \
-  "$sequence_repo/native-core/src/native/lower.bgl" \
-  "$sequence_repo/native-core/src/native/obligations.bgl" \
-  "$sequence_repo/native-core/src/native/c11.bgl" \
-  "$sequence_repo/native-core/src/native/slice.bgl" \
-  "$sequence_repo/native-core/src/native/fold_c17.bgl" \
-  "$sequence_repo/native-core/src/native/body_c17.bgl" \
-  "$sequence_repo/native-core/src/native/qbe.bgl" \
-  "$sequence_repo/native-core/src/native/body_slice.bgl" \
+  "$sequence_repo/native-core/src/native/core.bclj" \
+  "$sequence_repo/native-core/src/native/worlds.bclj" \
+  "$sequence_repo/native-core/src/native/lower.bclj" \
+  "$sequence_repo/native-core/src/native/obligations.bclj" \
+  "$sequence_repo/native-core/src/native/c11.bclj" \
+  "$sequence_repo/native-core/src/native/slice.bclj" \
+  "$sequence_repo/native-core/src/native/fold_c17.bclj" \
+  "$sequence_repo/native-core/src/native/body_c17.bclj" \
+  "$sequence_repo/native-core/src/native/qbe.bclj" \
+  "$sequence_repo/native-core/src/native/body_slice.bclj" \
   --out "$sequence_scratch/out" >"$sequence_scratch/build.log" 2>&1 || {
     sed -n '1,240p' "$sequence_scratch/build.log" >&2
     exit 1

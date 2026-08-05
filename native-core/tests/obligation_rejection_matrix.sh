@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Evaluates every obligations.bgl fixture (positive + all negatives) via a
+# Evaluates every obligations.bclj fixture (positive + all negatives) via a
 # bb-hosted clj build and reports each corrupt world's rejection tag.
 set -euo pipefail
 
@@ -14,8 +14,7 @@ trap cleanup EXIT
 
 mkdir -p "$work/src/native"
 for name in core worlds lower obligations; do
-  { printf '#lang beagle/clj\n'; cat "$repo/native-core/src/native/$name.bgl"; } \
-    > "$work/src/native/$name.bclj"
+  cp "$repo/native-core/src/native/$name.bclj" "$work/src/native/$name.bclj"
 done
 
 BEAGLE_OUT="$work/out" "$repo/bin/beagle" build "$work"/src/native/*.bclj \

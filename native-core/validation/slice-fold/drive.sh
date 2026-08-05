@@ -21,10 +21,9 @@ trap cleanup EXIT
 
 mkdir -p "$work/src/native" "$artifacts"
 
-# native-core modules are target-neutral .bgl; the clj target needs the header.
+# Native compiler modules are hosted Clojure Beagle sources.
 for name in core worlds obligations lower fold_c17 fold_slice_corpus; do
-  { printf '#lang beagle\n'; cat "$repo/native-core/src/native/$name.bgl"; } \
-    > "$work/src/native/$name.bclj"
+  cp "$repo/native-core/src/native/$name.bclj" "$work/src/native/$name.bclj"
 done
 
 BEAGLE_OUT="$work/out" "$repo/bin/beagle" build --target clj "$work"/src/native/*.bclj \

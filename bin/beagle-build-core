@@ -149,16 +149,16 @@ done
 bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 
 "$BIN/beagle-build-all" \
-    "$BEAGLE_DIR/native-core/src/native/core.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/worlds.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/lower.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/obligations.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/c11.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/slice.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/fold_c17.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/body_c17.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/body_slice.bgl" \
-    "$BEAGLE_DIR/native-core/src/native/qbe.bgl" \
+    "$BEAGLE_DIR/native-core/src/native/core.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/worlds.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/lower.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/obligations.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/c11.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/slice.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/fold_c17.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/body_c17.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/body_slice.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/qbe.bclj" \
     --out "$work/compiled" >"$work/build.log" 2>&1 || {
         sed -n '1,200p' "$work/build.log" >&2
         exit 1

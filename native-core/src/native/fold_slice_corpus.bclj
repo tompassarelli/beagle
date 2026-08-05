@@ -1,3 +1,4 @@
+#lang beagle/clj
 ;; Source-world projection of fram:src/fram/fold.bclj plus the fram.types
 ;; declarations its signatures name, driven seal -> typed -> native -> C17.
 (ns native.fold-slice-corpus)
