@@ -3,10 +3,10 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 1
-world-types 50
+world-types 52
 world-functions 25
 world-abis 25
-projected-types 44
+projected-types 43
 lowered fn_0 str-index-of 1 blocks
 lowered fn_1 split-comma 1 blocks
 lowered fn_2 str-lt? 1 blocks
@@ -14,21 +14,21 @@ lowered fn_3 split-kv 4 blocks
 lowered fn_4 fmt-id 1 blocks
 lowered fn_5 slugify 7 blocks
 lowered fn_6 filter-digits 1 blocks
-lowered fn_7 is-iso-datetime-19 4 blocks
-lowered fn_8 is-iso-datetime-16 4 blocks
+lowered fn_7 is-iso-datetime-19 6 blocks
+lowered fn_8 is-iso-datetime-16 6 blocks
 lowered fn_9 repeat-str 4 blocks
-lowered fn_10 edit-batch-envelope-marker? 4 blocks
-lowered fn_11 digest? 4 blocks
-lowered fn_12 nonblank? 4 blocks
-lowered fn_13 generation-record? 16 blocks
-lowered fn_14 valid-edit-batch-envelope? 117 blocks
-lowered fn_15 classify-rewrite-crash 43 blocks
+lowered fn_10 edit-batch-envelope-marker? 6 blocks
+lowered fn_11 digest? 6 blocks
+lowered fn_12 nonblank? 6 blocks
+lowered fn_13 generation-record? 18 blocks
+lowered fn_14 valid-edit-batch-envelope? 167 blocks
+lowered fn_15 classify-rewrite-crash 54 blocks
 lowered fn_16 log-envelope 13 blocks
 lowered fn_17 reject-message 1 blocks
-lowered fn_18 coord-write-response 44 blocks
-lowered fn_19 coord-version-response 23 blocks
-lowered fn_20 coord-version-for-log-response 23 blocks
-lowered fn_21 coord-status-response 21 blocks
+lowered fn_18 coord-write-response 50 blocks
+lowered fn_19 coord-version-response 15 blocks
+lowered fn_20 coord-version-for-log-response 26 blocks
+lowered fn_21 coord-status-response 25 blocks
 lowered fn_22 coord-status-down 1 blocks
 lowered fn_23 warm-read-response 12 blocks
 lowered fn_24 warm-read-for-log-response 12 blocks
