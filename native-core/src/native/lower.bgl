@@ -2486,6 +2486,44 @@
             current
             (conj current addition)))))))
 
+(defn match-clause-items
+  [index: SourceIndexV0
+   match-node: core/NativeId] -> (Vec core/NativeId)
+  (let [clauses: (U core/NativeId Nil)
+        (index-first-object index match-node "clauses")]
+    (if (nil? clauses) [] (index-sequence-items index clauses))))
+
+(defn match-pattern-binding-items
+  [index: SourceIndexV0
+   pattern: core/NativeId] -> (Vec core/NativeId)
+  (let [bindings: (U core/NativeId Nil)
+        (index-first-object index pattern "bindings")]
+    (if (nil? bindings) [] (index-sequence-items index bindings))))
+
+(defn match-pattern-bound-names
+  [index: SourceIndexV0
+   pattern: core/NativeId] -> (Vec String)
+  (let [kind: String (fact-text index pattern "pattern-kind")]
+    (cond
+      (= "var" kind)
+      (let [name: String (fact-text index pattern "name")]
+        (if (or (= "" name) (= "_" name)) [] [name]))
+
+      (= "record" kind)
+      (loop [position: Int 0
+             bindings: (Vec core/NativeId)
+             (match-pattern-binding-items index pattern)
+             names: (Vec String) []]
+        (if (>= position (count bindings))
+          names
+          (let [name: String
+                (fact-text index (nth bindings position) "name")]
+            (recur (+ position 1) bindings
+              (if (or (= "" name) (= "_" name)) names
+                (conj names name))))))
+
+      :else [])))
+
 (defn source-free-ref-names
   [index: SourceIndexV0
    node: core/NativeId
@@ -2571,6 +2609,31 @@
                 (append-unique-strings names
                   (source-free-ref-names index (nth bodies position) body-bound
                     (- fuel 1)))))))
+
+        (= "match" kind)
+        (let [target: (U core/NativeId Nil)
+              (index-first-object index node "target")
+              clauses: (Vec core/NativeId) (match-clause-items index node)
+              target-refs: (Vec String)
+              (if (nil? target) []
+                (source-free-ref-names index target bound (- fuel 1)))]
+          (loop [position: Int 0 names: (Vec String) target-refs]
+            (if (>= position (count clauses))
+              names
+              (let [clause: core/NativeId (nth clauses position)
+                    pattern: (U core/NativeId Nil)
+                    (index-first-object index clause "pattern")
+                    body: (U core/NativeId Nil)
+                    (index-first-object index clause "body")
+                    arm-bound: (Vec String)
+                    (if (nil? pattern) bound
+                      (append-unique-strings bound
+                        (match-pattern-bound-names index pattern)))
+                    arm-refs: (Vec String)
+                    (if (nil? body) []
+                      (source-free-ref-names index body arm-bound (- fuel 1)))]
+                (recur (+ position 1)
+                  (append-unique-strings names arm-refs))))))
 
         :else
         (let [children: (Vec core/NativeId) (index-child-nodes index node)]
@@ -2713,6 +2776,23 @@
                         (recur-tail-only? index body-node tail (- fuel 1))))
                   (recur (+ position 1))
                   false)))))
+
+        (= "match" kind)
+        (let [target: (U core/NativeId Nil)
+              (index-first-object index node "target")
+              clauses: (Vec core/NativeId) (match-clause-items index node)]
+          (and
+            (or (nil? target)
+              (recur-tail-only? index target false (- fuel 1)))
+            (loop [position: Int 0]
+              (if (>= position (count clauses))
+                true
+                (let [body: (U core/NativeId Nil)
+                      (index-first-object index (nth clauses position) "body")]
+                  (if (or (nil? body)
+                        (recur-tail-only? index body tail (- fuel 1)))
+                    (recur (+ position 1))
+                    false))))))
 
         (= "do" kind)
         (let [body-node: (U core/NativeId Nil)
@@ -6806,6 +6886,565 @@
                         (arena-value-id owner))))
                   result-id container-type false)))))))))
 
+(defn match-pattern-kind
+  [index: SourceIndexV0
+   pattern: core/NativeId] -> String
+  (fact-text index pattern "pattern-kind"))
+
+(defn match-clause-pattern
+  [index: SourceIndexV0
+   clause: core/NativeId] -> (U core/NativeId Nil)
+  (index-first-object index clause "pattern"))
+
+(defn match-clause-body
+  [index: SourceIndexV0
+   clause: core/NativeId] -> (U core/NativeId Nil)
+  (index-first-object index clause "body"))
+
+(defn match-pattern-irrefutable?
+  [index: SourceIndexV0
+   pattern: core/NativeId] -> Bool
+  (let [kind: String (match-pattern-kind index pattern)]
+    (or (= "wildcard" kind) (= "var" kind))))
+
+(defn match-literal-supported?
+  [index: SourceIndexV0
+   pattern: core/NativeId] -> Bool
+  (let [kind: String (fact-text index pattern "literal-kind")]
+    (or (= "number" kind) (= "int" kind) (= "bool" kind)
+      (= "string" kind) (= "keyword" kind) (= "nil" kind))))
+
+(defn match-pattern-supported?
+  [index: SourceIndexV0
+   pattern: core/NativeId] -> Bool
+  (let [kind: String (match-pattern-kind index pattern)]
+    (cond
+      (= "literal" kind) (match-literal-supported? index pattern)
+      (= "record" kind) (> (count (fact-text index pattern "name")) 0)
+      (= "wildcard" kind) true
+      (= "var" kind) (> (count (fact-text index pattern "name")) 0)
+      :else false)))
+
+(defn match-record-type-id
+  [env: BodyEnvV0
+   owner: core/NativeId
+   pattern: core/NativeId] -> (U core/NativeId Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        spelling: String (fact-text index pattern "name")
+        resolved: ResolvedSourceNameV0
+        (resolve-source-name index (body-owner-module env owner) spelling)
+        candidate: core/NativeId (source-type-id (resolved-source-key resolved))
+        definition: (U core/TypeDef Nil)
+        (if (resolvedsourcenamev0-visible resolved)
+          (lookup-type (bodyenvv0-types env) candidate)
+          nil)]
+    (if (and (some? definition)
+          (instance? native.core.RecordType (core/typedef-shape definition)))
+      candidate
+      nil)))
+
+(defn match-record-variant-id
+  [env: BodyEnvV0
+   owner: core/NativeId
+   target-type: core/NativeId
+   pattern: core/NativeId] -> (U core/NativeId Nil)
+  (let [record-type: (U core/NativeId Nil)
+        (match-record-type-id env owner pattern)]
+    (if (nil? record-type)
+      nil
+      (let [hit: NarrowHitV0
+            (reference-variant-for (bodyenvv0-types env) target-type record-type)]
+        (if (narrowhitv0-found hit) (narrowhitv0-variant-id hit) nil)))))
+
+(defn native-id-count
+  [ids: (Vec core/NativeId)
+   target: core/NativeId] -> Int
+  (loop [position: Int 0 found: Int 0]
+    (if (>= position (count ids))
+      found
+      (recur (+ position 1)
+        (+ found (if (same-id? target (nth ids position)) 1 0))))))
+
+;; Without an irrefutable arm, every sealed tag must name exactly one record arm.
+(defn match-record-patterns-exhaustive?
+  [env: BodyEnvV0
+   owner: core/NativeId
+   target-type: core/NativeId
+   clauses: (Vec core/NativeId)] -> Bool
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        variants: (Vec core/TypeVariant)
+        (union-variants-of (bodyenvv0-types env) target-type)
+        direct-record: Bool
+        (record-type? (bodyenvv0-types env) target-type)]
+    (if direct-record
+      (and (= 1 (count clauses))
+        (let [pattern: (U core/NativeId Nil)
+              (match-clause-pattern index (nth clauses 0))]
+          (and (some? pattern)
+            (= "record" (match-pattern-kind index pattern))
+            (let [record-type: (U core/NativeId Nil)
+                  (match-record-type-id env owner pattern)]
+              (and (some? record-type) (same-id? target-type record-type))))))
+      (if (= 0 (count variants))
+        false
+        (let [pattern-variants: (Vec core/NativeId)
+              (loop [position: Int 0 collected: (Vec core/NativeId) []]
+                (if (>= position (count clauses))
+                  collected
+                  (let [pattern: (U core/NativeId Nil)
+                        (match-clause-pattern index (nth clauses position))]
+                    (if (or (nil? pattern)
+                          (not (= "record" (match-pattern-kind index pattern))))
+                      []
+                      (let [variant: (U core/NativeId Nil)
+                            (match-record-variant-id env owner target-type pattern)]
+                        (if (nil? variant)
+                          []
+                          (recur (+ position 1) (conj collected variant))))))))]
+          (and (= (count pattern-variants) (count variants))
+            (loop [position: Int 0]
+              (if (>= position (count variants))
+                true
+                (if (= 1 (native-id-count pattern-variants
+                           (core/typevariant-id (nth variants position))))
+                  (recur (+ position 1))
+                  false)))))))))
+
+(defn match-structure-failure
+  [env: BodyEnvV0
+   owner: core/NativeId
+   target-type: core/NativeId
+   clauses: (Vec core/NativeId)] -> String
+  (let [index: SourceIndexV0 (bodyenvv0-index env)]
+    (if (= 0 (count clauses))
+      "TODO-NATIVE-MATCH-CLAUSES: match needs at least one clause"
+      (loop [position: Int 0]
+        (if (>= position (count clauses))
+          (let [last-pattern: (U core/NativeId Nil)
+                (match-clause-pattern index (nth clauses (- (count clauses) 1)))]
+            (if (or
+                  (and (some? last-pattern)
+                    (match-pattern-irrefutable? index last-pattern))
+                  (match-record-patterns-exhaustive? env owner target-type clauses))
+              ""
+              "TODO-NATIVE-MATCH-NONEXHAUSTIVE: patterns do not cover the sealed target type"))
+          (let [clause: core/NativeId (nth clauses position)
+                pattern: (U core/NativeId Nil)
+                (match-clause-pattern index clause)
+                body: (U core/NativeId Nil) (match-clause-body index clause)]
+            (cond
+              (or (nil? pattern) (nil? body))
+              "TODO-NATIVE-MATCH-CLAUSE: every match clause needs a pattern and body"
+
+              (not (match-pattern-supported? index pattern))
+              (str "TODO-NATIVE-MATCH-PATTERN: no native lowering for "
+                (match-pattern-kind index pattern))
+
+              (and (< (+ position 1) (count clauses))
+                (match-pattern-irrefutable? index pattern))
+              "TODO-NATIVE-MATCH-IRREFUTABLE-ORDER: wildcard or variable pattern must be final"
+
+              :else (recur (+ position 1)))))))))
+
+(defn lower-match-literal
+  [index: SourceIndexV0
+   owner: core/NativeId
+   state: BodyStateV0
+   pattern: core/NativeId] -> ExprResultV0
+  (let [kind: String (fact-text index pattern "literal-kind")
+        text: String (fact-text index pattern "value")
+        result-id: core/NativeId (state-id state owner "match-literal")]
+    (cond
+      (or (= "number" kind) (= "int" kind))
+      (let [parsed: (U Int Nil) (parse-int-text text)]
+        (if (nil? parsed)
+          (fail-result state
+            "TODO-NATIVE-MATCH-LITERAL: number pattern is not an exact Int")
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 result-id (int-type-id))
+                (core/->I64Atom parsed)))
+            result-id (int-type-id) false)))
+
+      (= "bool" kind)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->AtomInstruction
+            (core/->SsaValueV0 result-id (bool-type-id))
+            (core/->BoolAtom (= "true" text))))
+        result-id (bool-type-id) false)
+
+      (= "string" kind)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->AtomInstruction
+            (core/->SsaValueV0 result-id (text-type-id))
+            (core/->TextAtom text)))
+        result-id (text-type-id) false)
+
+      (= "keyword" kind)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->AtomInstruction
+            (core/->SsaValueV0 result-id (keyword-type-id))
+            (core/->KeywordAtom text)))
+        result-id (keyword-type-id) false)
+
+      (= "nil" kind)
+      (fail-result state
+        "TODO-NATIVE-MATCH-LITERAL: nil is tested by its sealed union tag")
+
+      :else
+      (fail-result state
+        (str "TODO-NATIVE-MATCH-LITERAL: no native literal for " kind)))))
+
+(defn lower-union-variant-test
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId
+   expected: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)
+        true-id: core/NativeId (state-id state owner "match-record-true")
+        false-id: core/NativeId (state-id state owner "match-record-false")
+        join-id: core/NativeId (state-id state owner "match-record-join")
+        join-parameter: core/NativeId (state-id state owner "match-record-value")
+        true-value: core/NativeId (state-id state owner "match-record-yes")
+        false-value: core/NativeId (state-id state owner "match-record-no")
+        cases: (Vec core/SwitchCaseV0)
+        (mapv
+          (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
+            (core/->SwitchCaseV0 (core/typevariant-id variant)
+              (if (same-id? expected (core/typevariant-id variant))
+                true-id false-id)
+              []))
+          variants)
+        switched: BodyStateV0
+        (state-close (state-bump state)
+          (core/->SwitchTerminator value-id cases))
+        true-block: BodyStateV0
+        (state-close
+          (state-emit (state-open-block switched true-id [])
+            (core/->AtomInstruction
+              (core/->SsaValueV0 true-value (bool-type-id))
+              (core/->BoolAtom true)))
+          (core/->JumpTerminator join-id [true-value]))
+        false-block: BodyStateV0
+        (state-close
+          (state-emit (state-open-block true-block false-id [])
+            (core/->AtomInstruction
+              (core/->SsaValueV0 false-value (bool-type-id))
+              (core/->BoolAtom false)))
+          (core/->JumpTerminator join-id [false-value]))]
+    (if (= 0 (count variants))
+      (fail-result state
+        "TODO-NATIVE-MATCH-RECORD-TARGET: record pattern needs a sealed union target")
+      (->ExprResultV0
+        (state-open-block false-block join-id
+          [(core/->Parameter join-parameter (bool-type-id))])
+        join-parameter (bool-type-id) false))))
+
+(defn lower-match-test
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   target-id: core/NativeId
+   target-type: core/NativeId
+   pattern: core/NativeId] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        kind: String (match-pattern-kind index pattern)]
+    (cond
+      (= "literal" kind)
+      (if (= "nil" (fact-text index pattern "literal-kind"))
+        (lower-presence-predicate types owner state target-id target-type false)
+        (let [literal: ExprResultV0
+              (lower-match-literal index owner state pattern)
+              current: BodyStateV0 (exprresultv0-state literal)]
+          (if (state-blocked? current)
+            (dead-result current)
+            (lower-native-equality types owner current target-id target-type
+              (exprresultv0-value-id literal)
+              (exprresultv0-type-id literal)))))
+
+      (= "record" kind)
+      (let [record-type: (U core/NativeId Nil)
+            (match-record-type-id env owner pattern)]
+        (cond
+          (nil? record-type)
+          (fail-result state
+            (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "
+              (fact-text index pattern "name")))
+
+          (same-id? target-type record-type)
+          (bool-constant-result state owner "match-record-direct" true)
+
+          :else
+          (let [variant: (U core/NativeId Nil)
+                (match-record-variant-id env owner target-type pattern)]
+            (if (nil? variant)
+              (fail-result state
+                "TODO-NATIVE-MATCH-RECORD: record is not a target union alternative")
+              (lower-union-variant-test types owner state target-id target-type
+                variant)))))
+
+      :else
+      (fail-result state
+        (str "TODO-NATIVE-MATCH-PATTERN: no refutable test for " kind)))))
+
+(defn record-fields-of
+  [types: (Vec core/TypeDef)
+   record-type: core/NativeId] -> (Vec core/TypeField)
+  (let [definition: (U core/TypeDef Nil) (lookup-type types record-type)]
+    (if (nil? definition)
+      []
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.RecordType shape)
+          (core/recordtype-fields shape)
+          [])))))
+
+(defn record-field-named
+  [fields: (Vec core/TypeField)
+   name: String] -> (U core/TypeField Nil)
+  (loop [position: Int 0]
+    (if (>= position (count fields))
+      nil
+      (if (= name (core/typefield-name (nth fields position)))
+        (nth fields position)
+        (recur (+ position 1))))))
+
+(defn match-binding-field
+  [index: SourceIndexV0
+   fields: (Vec core/TypeField)
+   binding: core/NativeId
+   position: Int] -> (U core/TypeField Nil)
+  (let [named: String (fact-text index binding "field")]
+    (if (= "" named)
+      (if (< position (count fields)) (nth fields position) nil)
+      (record-field-named fields named))))
+
+(defn bind-match-pattern
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   target-id: core/NativeId
+   target-type: core/NativeId
+   pattern: core/NativeId] -> BodyStateV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        kind: String (match-pattern-kind index pattern)]
+    (cond
+      (= "var" kind)
+      (let [name: String (fact-text index pattern "name")]
+        (if (= "_" name) state (state-bind state name target-id target-type)))
+
+      (= "record" kind)
+      (let [bindings: (Vec core/NativeId)
+            (match-pattern-binding-items index pattern)
+            record-type: (U core/NativeId Nil)
+            (match-record-type-id env owner pattern)]
+        (if (nil? record-type)
+          (state-fail state
+            (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "
+              (fact-text index pattern "name")))
+          (if (= 0 (count bindings))
+            state
+            (let [record: ExprResultV0
+                  (lower-boundary-coerce types owner state target-id target-type
+                    record-type)
+                  current: BodyStateV0 (exprresultv0-state record)
+                  fields: (Vec core/TypeField) (record-fields-of types record-type)]
+              (if (state-blocked? current)
+                current
+                (loop [position: Int 0 bound: BodyStateV0 current]
+                  (if (or (>= position (count bindings)) (state-blocked? bound))
+                    bound
+                    (let [binding: core/NativeId (nth bindings position)
+                          name: String (fact-text index binding "name")
+                          field: (U core/TypeField Nil)
+                          (match-binding-field index fields binding position)]
+                      (if (or (= "" name) (nil? field))
+                        (state-fail bound
+                          "TODO-NATIVE-MATCH-BINDING: record binding does not name a declared field")
+                        (if (= "_" name)
+                          (recur (+ position 1) bound)
+                          (let [value-id: core/NativeId
+                                (state-id bound owner "match-field")]
+                            (recur (+ position 1)
+                              (state-bind
+                                (state-emit (state-bump bound)
+                                  (core/->FieldInstruction
+                                    (core/->SsaValueV0 value-id
+                                      (core/typefield-type-id field))
+                                    (exprresultv0-value-id record)
+                                    (core/typefield-id field)))
+                                name value-id
+                                (core/typefield-type-id field))))))))))))))
+
+      :else state)))
+
+(defn lower-match-expr
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expr: core/NativeId] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        target-node: (U core/NativeId Nil)
+        (index-first-object index expr "target")
+        clauses: (Vec core/NativeId) (match-clause-items index expr)]
+    (if (nil? target-node)
+      (fail-result state "TODO-NATIVE-MATCH-TARGET: match has no target")
+      (let [target: ExprResultV0 (lower-expr env owner state target-node)
+            target-state: BodyStateV0 (exprresultv0-state target)]
+        (cond
+          (exprresultv0-terminated target) target
+          (state-blocked? target-state) (dead-result target-state)
+          (nil? (lookup-type types (exprresultv0-type-id target)))
+          (fail-result target-state
+            "TODO-NATIVE-MATCH-TARGET: target type is not closed in the Native World")
+          :else
+          (let [failure: String
+                (match-structure-failure env owner
+                  (exprresultv0-type-id target) clauses)]
+            (if (> (count failure) 0)
+              (fail-result target-state failure)
+              (let [join-id: core/NativeId
+                    (state-id target-state owner "match-join")
+                    join-parameter: core/NativeId
+                    (state-id target-state owner "match-value")
+                    outer-locals: (Vec LocalBindingV0)
+                    (bodystatev0-locals target-state)
+                    outer-refinements: (Vec KeywordFlowRefinementV0)
+                    (bodystatev0-keyword-refinements target-state)]
+                (loop [position: Int 0
+                       current: BodyStateV0 target-state
+                       result-type: (U core/NativeId Nil) nil
+                       live-arms: Int 0]
+                  (if (>= position (count clauses))
+                    (cond
+                      (state-blocked? current) (dead-result current)
+                      (nil? result-type)
+                      (->ExprResultV0 current
+                        (lower-id "body" ["match-terminated"])
+                        (type-id "LowerFailure") true)
+                      :else
+                      (->ExprResultV0
+                        (state-open-block current join-id
+                          [(core/->Parameter join-parameter result-type)])
+                        join-parameter result-type false))
+                    (let [clause: core/NativeId (nth clauses position)
+                          pattern: (U core/NativeId Nil)
+                          (match-clause-pattern index clause)
+                          body-node: (U core/NativeId Nil)
+                          (match-clause-body index clause)
+                          final: Bool (= (+ position 1) (count clauses))
+                          body-id: core/NativeId
+                          (state-id current owner (str "match-body-" position))
+                          next-id: core/NativeId
+                          (state-id current owner (str "match-next-" position))]
+                      (if (or (nil? pattern) (nil? body-node))
+                        (fail-result current
+                          "TODO-NATIVE-MATCH-CLAUSE: every match clause needs a pattern and body")
+                        (let [body-start: BodyStateV0
+                              (if final
+                                current
+                                (let [test: ExprResultV0
+                                      (lower-match-test env owner current
+                                        (exprresultv0-value-id target)
+                                        (exprresultv0-type-id target) pattern)
+                                      tested: BodyStateV0 (exprresultv0-state test)]
+                                  (if (state-blocked? tested)
+                                    tested
+                                    (state-open-block
+                                      (state-close
+                                        (state-bump (state-bump tested))
+                                        (core/->BranchTerminator
+                                          (exprresultv0-value-id test)
+                                          body-id next-id))
+                                      body-id []))))
+                              bound: BodyStateV0
+                              (if (state-blocked? body-start)
+                                body-start
+                                (bind-match-pattern env owner body-start
+                                  (exprresultv0-value-id target)
+                                  (exprresultv0-type-id target) pattern))
+                              body: ExprResultV0
+                              (if (state-blocked? bound)
+                                (dead-result bound)
+                                (lower-expr env owner bound body-node))
+                              body-state: BodyStateV0 (exprresultv0-state body)
+                              body-live: Bool (not (exprresultv0-terminated body))]
+                          (cond
+                            (state-blocked? body-state) (dead-result body-state)
+
+                            (not body-live)
+                            (if final
+                              (recur (count clauses)
+                                (with
+                                  (state-with-keyword-refinements body-state
+                                    outer-refinements)
+                                  [:locals outer-locals])
+                                result-type live-arms)
+                              (recur (+ position 1)
+                                (with
+                                  (state-with-keyword-refinements
+                                    (state-open-block body-state next-id [])
+                                    outer-refinements)
+                                  [:locals outer-locals])
+                                result-type live-arms))
+
+                            (nil? result-type)
+                            (let [closed: BodyStateV0
+                                  (state-close body-state
+                                    (core/->JumpTerminator join-id
+                                      [(exprresultv0-value-id body)]))]
+                              (if final
+                                (recur (count clauses)
+                                  (with
+                                    (state-with-keyword-refinements closed
+                                      outer-refinements)
+                                    [:locals outer-locals])
+                                  (exprresultv0-type-id body) (+ live-arms 1))
+                                (recur (+ position 1)
+                                  (with
+                                    (state-with-keyword-refinements
+                                      (state-open-block closed next-id [])
+                                      outer-refinements)
+                                    [:locals outer-locals])
+                                  (exprresultv0-type-id body)
+                                  (+ live-arms 1))))
+
+                            :else
+                            (let [settled: ExprResultV0
+                                  (lower-boundary-coerce types owner body-state
+                                    (exprresultv0-value-id body)
+                                    (exprresultv0-type-id body) result-type)
+                                  settled-state: BodyStateV0
+                                  (exprresultv0-state settled)]
+                              (if (state-blocked? settled-state)
+                                (dead-result settled-state)
+                                (let [closed: BodyStateV0
+                                      (state-close settled-state
+                                        (core/->JumpTerminator join-id
+                                          [(exprresultv0-value-id settled)]))]
+                                  (if final
+                                    (recur (count clauses)
+                                      (with
+                                        (state-with-keyword-refinements closed
+                                          outer-refinements)
+                                        [:locals outer-locals])
+                                      result-type (+ live-arms 1))
+                                    (recur (+ position 1)
+                                      (with
+                                        (state-with-keyword-refinements
+                                          (state-open-block closed next-id [])
+                                          outer-refinements)
+                                        [:locals outer-locals])
+                                      result-type (+ live-arms 1))))))))))))))))))))
+
 (defn lower-static-update-call
   [env: BodyEnvV0
    owner: core/NativeId
@@ -7163,6 +7802,9 @@
                 (exprresultv0-value-id body)
                 (exprresultv0-type-id body)
                 (exprresultv0-terminated body)))))
+
+        (= "match" kind)
+        (lower-match-expr env owner state expr)
 
         (= "if" kind)
         (let [condition-node: (U core/NativeId Nil)

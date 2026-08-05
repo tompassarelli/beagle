@@ -35,7 +35,7 @@
     (swap! rows conj! [s p (if (and (= "t" k) (not= escaped o)) "e" k)
                        escaped])))
 
-(declare emit-ann emit-expr)
+(declare emit-ann emit-expr emit-pattern)
 
 (defn emit-seq [items emit-one]
   (let [n (nid)]
@@ -127,6 +127,80 @@
     (row! n "body" "n" (emit-seq (get clause "body") emit-expr))
     n))
 
+(defn keyword-datum [value]
+  (when (and (map? value)
+             (#{"symbol" "keyword"} (get value "type"))
+             (string? (get value "value")))
+    (let [spelling (get value "value")]
+      (cond
+        (= "keyword" (get value "type"))
+        (if (clojure.string/starts-with? spelling ":")
+          (subs spelling 1)
+          spelling)
+        (clojure.string/starts-with? spelling ":") (subs spelling 1)
+        :else nil))))
+
+(defn emit-pattern-literal! [n value]
+  (let [keyword (keyword-datum value)
+        nil-symbol (and (map? value)
+                        (= "symbol" (get value "type"))
+                        (= "nil" (get value "value")))]
+    (cond
+      (some? keyword)
+      (do (row! n "literal-kind" "t" "keyword")
+          (row! n "value" "t" keyword))
+
+      (or (nil? value) nil-symbol)
+      (do (row! n "literal-kind" "t" "nil")
+          (row! n "value" "t" ""))
+
+      (boolean? value)
+      (do (row! n "literal-kind" "t" "bool")
+          (row! n "value" "t" (str value)))
+
+      (number? value)
+      (do (row! n "literal-kind" "t" "number")
+          (row! n "value" "t" (str value)))
+
+      (string? value)
+      (do (row! n "literal-kind" "t" "string")
+          (row! n "value" "t" value))
+
+      :else
+      (row! n "literal-kind" "t" "unsupported"))))
+
+(defn emit-pattern-binding [binding]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "pattern-binding")
+    (when-let [field (get binding "field")]
+      (row! n "field" "t" field))
+    (row! n "name" "t" (str (get binding "name")))
+    n))
+
+(defn emit-pattern [pattern]
+  (let [n (nid)
+        kind (get pattern "type")]
+    (row! n "form-kind" "t" "match-pattern")
+    (row! n "pattern-kind" "t" (str kind))
+    (case kind
+      "literal" (emit-pattern-literal! n (get pattern "value"))
+      "record" (do (row! n "name" "t" (str (get pattern "name")))
+                    (row! n "bindings" "n"
+                          (emit-seq (get pattern "bindings")
+                                    emit-pattern-binding)))
+      "var" (row! n "name" "t" (str (get pattern "name")))
+      "or" (row! n "alternatives" "n"
+                  (emit-seq (get pattern "alternatives") emit-pattern))
+      nil)
+    n))
+
+(defn emit-match-clause [clause]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "match-clause")
+    (row! n "pattern" "n" (emit-pattern (get clause "pattern")))
+    (row! n "body" "n" (emit-body (get clause "body")))
+    n))
+
 (defn emit-expr [e]
   (let [n (nid)]
     (case (get e "node")
@@ -186,6 +260,10 @@
       "cond"    (do (row! n "form-kind" "t" "cond")
                     (row! n "clauses" "n"
                           (emit-seq (get e "clauses") emit-cond-clause)))
+      "match"   (do (row! n "form-kind" "t" "match")
+                    (row! n "target" "n" (emit-expr (get e "target")))
+                    (row! n "clauses" "n"
+                          (emit-seq (get e "clauses") emit-match-clause)))
       "try"     (do (row! n "form-kind" "t" "unsupported-try")
                     (row! n "body" "n" (emit-seq (get e "body") emit-expr))
                     (row! n "catches" "n"
