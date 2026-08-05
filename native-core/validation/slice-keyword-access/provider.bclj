@@ -3,3 +3,6 @@
 (define-mode strict)
 
 (defrecord Pair [value: String])
+
+(defn pair? [value: Any] -> Bool
+  (instance? Pair value))

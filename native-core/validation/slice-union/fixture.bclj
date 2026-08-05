@@ -85,3 +85,47 @@
 
 (defn logic-and-skips [value: Any] -> Any
   (and value (throw nil)))
+
+(defn cond-mixed [selector: Int] -> Any
+  (cond
+    (= selector 0) "zero"
+    (= selector 1) selector
+    :else nil))
+
+(defn fail-any [message: String] -> Any
+  (throw message))
+
+(defn vector-or-fail
+  [available: Bool
+   values: (Vec Any)] -> (Vec Any)
+  (if available values (fail-any "unavailable")))
+
+(defrecord ValueRow
+  [kind: Keyword
+   text-value: String?
+   int-value: Int?
+   float-value: Float?
+   bool-value: Bool?
+   keyword-value: Keyword?
+   pair-value: Pair?])
+
+(defn classify-value [value: Any] -> ValueRow
+  (cond
+    (string? value) (->ValueRow :string value nil nil nil nil nil)
+    (integer? value) (->ValueRow :int nil value nil nil nil nil)
+    (number? value) (->ValueRow :float nil nil value nil nil nil)
+    (boolean? value) (->ValueRow :bool nil nil nil value nil nil)
+    (keyword? value) (->ValueRow :keyword nil nil nil nil value nil)
+    (pair? value) (->ValueRow :pair nil nil nil nil nil value)
+    :else (throw nil)))
+
+(defrecord TaggedValue [tag: Any])
+
+(defn tagged-value? [value: Any] -> Bool
+  (instance? TaggedValue value))
+
+(defn tagged-keyword [value: Any] -> Keyword?
+  (if (and (tagged-value? value)
+           (keyword? (taggedvalue-tag value)))
+    (taggedvalue-tag value)
+    nil))

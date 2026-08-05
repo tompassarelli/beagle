@@ -3,10 +3,10 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
-world-types 11
-world-functions 20
-world-abis 20
-projected-types 11
+world-types 23
+world-functions 26
+world-abis 26
+projected-types 23
 lowered fn_0 pair? 4 blocks
 lowered fn_1 wrap-int 1 blocks
 lowered fn_2 pair-left-of 1 blocks
@@ -27,6 +27,12 @@ lowered fn_16 logic-single-and 1 blocks
 lowered fn_17 logic-single-or 1 blocks
 lowered fn_18 logic-or-skips 9 blocks
 lowered fn_19 logic-and-skips 9 blocks
+lowered fn_20 cond-mixed 9 blocks
+lowered fn_21 fail-any 1 blocks
+lowered fn_22 vector-or-fail 4 blocks
+lowered fn_23 classify-value 35 blocks
+lowered fn_24 tagged-value? 4 blocks
+lowered fn_25 tagged-keyword 12 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -39,7 +45,7 @@ qbe-stage typed-to-native COMPLETE
 qbe-selected-function logic-false-or-int
 qbe-world-functions 1
 qbe-world-abis 1
-qbe-projected-types 10
+qbe-projected-types 21
 qbe-obligation PASS valid-ssa
 qbe-obligation PASS exhaustive-matches
 qbe-obligation PASS closed-layouts

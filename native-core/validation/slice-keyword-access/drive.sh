@@ -91,7 +91,8 @@ grep -q 'TODO-NATIVE-KEYWORD-ACCESS-TARGET' "$art/report.txt"
 for function in map-code-value map-code-value-cond map-code-value-equal \
     map-version-value optional-map-branch map-reject-count \
     map-other-after-code-check map-code-from-other-source \
-    map-code-false-arm imported-pair-value imported-pair-roundtrip; do
+    map-code-false-arm imported-pair-value imported-pair-roundtrip \
+    imported-pair-refined imported-optional-pair-value; do
   grep -Eq "^lowered [^ ]+ ${function} " "$art/report.txt"
 done
 grep -Fx 'source-modules 2' "$art/report.txt"

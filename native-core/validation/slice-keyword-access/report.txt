@@ -3,26 +3,29 @@ stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 2
 source-imports 1
-world-types 27
-world-functions 16
-world-abis 16
-projected-types 22
+world-types 29
+world-functions 19
+world-abis 19
+projected-types 28
 lowered fn_0 record-left 1 blocks
 lowered fn_1 code-key 1 blocks
 lowered fn_2 map-has-code 4 blocks
 lowered fn_3 map-code-is 4 blocks
 lowered fn_4 map-code-value 11 blocks
-lowered fn_5 map-code-value-cond 11 blocks
+lowered fn_5 map-code-value-cond 13 blocks
 lowered fn_6 map-code-value-equal 7 blocks
-lowered fn_7 map-version-value 15 blocks
+lowered fn_7 map-version-value 17 blocks
 lowered fn_8 optional-map-branch 12 blocks
 lowered fn_9 reject-message 1 blocks
-lowered fn_10 map-reject-count 11 blocks
+lowered fn_10 map-reject-count 13 blocks
 lowered fn_11 map-other-after-code-check 11 blocks
 lowered fn_12 map-code-from-other-source 11 blocks
 lowered fn_13 map-code-false-arm 13 blocks
 lowered fn_14 imported-pair-value 1 blocks
 lowered fn_15 imported-pair-roundtrip 1 blocks
+lowered fn_16 imported-pair-refined 6 blocks
+lowered fn_17 imported-optional-pair-value 9 blocks
+lowered fn_18 pair? 4 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

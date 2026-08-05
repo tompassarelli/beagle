@@ -73,3 +73,11 @@
 
 (defn imported-pair-roundtrip [value: String] -> String
   (provider/pair-value (provider/->Pair value)))
+
+(defn imported-pair-refined [value: Any] -> String?
+  (if (provider/pair? value)
+    (provider/pair-value value)
+    nil))
+
+(defn imported-optional-pair-value [pair: provider/Pair?] -> String?
+  (if (nil? pair) nil (:value pair)))
