@@ -3868,6 +3868,22 @@
 
         :else nil))))
 
+(defn preserved-collection-argument-type
+  [types: (Vec core/TypeDef)
+   callee: String
+   arity: Int
+   position: Int
+   expected: (U core/NativeId Nil)] -> (U core/NativeId Nil)
+  (if (and (= arity 1)
+           (= position 0)
+           (some? expected)
+           (or (vector-type? types expected)
+               (map-type? types expected)
+               (set-type? types expected))
+           (or (= "persistent!" callee) (= "transient" callee)))
+    expected
+    nil))
+
 (defn lower-contextual-empty
   [env: BodyEnvV0
    owner: core/NativeId
@@ -5989,7 +6005,7 @@
       state
       (state-add-keyword-refinement state refinement))))
 
-(declare lower-expr)
+(declare lower-expr lower-expr-expected)
 
 ;; Captured SSA locals remain dominated, but recur cannot cross an fn boundary.
 (defn state-enter-inline-callback [state: BodyStateV0] -> BodyStateV0
@@ -6001,17 +6017,10 @@
    owner: core/NativeId
    state: BodyStateV0
    expression: core/NativeId
-   expected: core/NativeId] -> ExprResultV0
-  (let [contextual: (U ExprResultV0 Nil)
-        (lower-contextual-value env owner state expression expected
-          (fn
-            [item-state: BodyStateV0
-             item-node: core/NativeId] -> ExprResultV0
-            (lower-expr env owner item-state item-node)))
-        raw: ExprResultV0
-        (if (nil? contextual)
-          (lower-expr env owner state expression)
-          contextual)]
+   shape-expected: (U core/NativeId Nil)
+   boundary-expected: core/NativeId] -> ExprResultV0
+  (let [raw: ExprResultV0
+        (lower-expr-expected env owner state expression shape-expected)]
     (if (or (exprresultv0-terminated raw)
             (state-blocked? (exprresultv0-state raw)))
       raw
@@ -6019,15 +6028,17 @@
         (exprresultv0-state raw)
         (exprresultv0-value-id raw)
         (exprresultv0-type-id raw)
-        expected))))
+        boundary-expected))))
 
 (defn lower-reduce-collection
   [env: BodyEnvV0
    owner: core/NativeId
    state: BodyStateV0
-   expression: core/NativeId] -> ExprResultV0
+   expression: core/NativeId
+   expected: (U core/NativeId Nil)] -> ExprResultV0
   (let [types: (Vec core/TypeDef) (bodyenvv0-types env)
-        source: ExprResultV0 (lower-expr env owner state expression)
+        source: ExprResultV0
+        (lower-expr-expected env owner state expression expected)
         settled: BodyStateV0 (exprresultv0-state source)
         source-type: core/NativeId (exprresultv0-type-id source)]
     (cond
@@ -6178,7 +6189,7 @@
             (state-bind isolated callback-name item-id element-type)
             callback-result: ExprResultV0
             (lower-contextual-boundary env owner callback-state callback-body
-              callback-return)
+              callback-return callback-return)
             restored: BodyStateV0
             (with
               (with
@@ -6350,7 +6361,7 @@
             (state-bind isolated callback-name item-id element-type)
             callback-result: ExprResultV0
             (lower-contextual-boundary env owner callback-state callback-body
-              callback-return)
+              callback-return callback-return)
             callback-outer-state: BodyStateV0
             (with
               (with
@@ -6583,11 +6594,12 @@
                     callback-body (nth callback-names 0) callback-return element-type
                     (exprresultv0-value-id collection)))))))))))
 
-(defn lower-expr
+(defn lower-expr-raw
   [env: BodyEnvV0
    owner: core/NativeId
    state: BodyStateV0
-   expr: core/NativeId] -> ExprResultV0
+   expr: core/NativeId
+   expected: (U core/NativeId Nil)] -> ExprResultV0
   (if (state-blocked? state)
     (dead-result state)
     (let [index: SourceIndexV0 (bodyenvv0-index env)
@@ -6686,8 +6698,11 @@
 
             :else
             (loop [position: Int 0 current: BodyStateV0 state]
-              (let [result: ExprResultV0
-                    (lower-expr env owner current (nth forms position))]
+              (let [form-expected: (U core/NativeId Nil)
+                    (if (= (+ position 1) (count forms)) expected nil)
+                    result: ExprResultV0
+                    (lower-expr-expected env owner current
+                      (nth forms position) form-expected)]
                 (cond
                   (or (state-blocked? (exprresultv0-state result))
                       (exprresultv0-terminated result)
@@ -6721,17 +6736,8 @@
                         (lower-id "body" ["let"]) (type-id "LowerFailure") false)
                       (let [expected: (U core/NativeId Nil)
                             (annotation-native-type index annotation)
-                            contextual: (U ExprResultV0 Nil)
-                            (lower-contextual-value env owner current value-node
-                              expected
-                              (fn
-                                [item-state: BodyStateV0
-                                 item-node: core/NativeId] -> ExprResultV0
-                                (lower-expr env owner item-state item-node)))
                             raw: ExprResultV0
-                            (if (nil? contextual)
-                              (lower-expr env owner current value-node)
-                              contextual)
+                            (lower-expr-expected env owner current value-node expected)
                             value: ExprResultV0
                             (if (or (nil? annotation)
                                   (exprresultv0-terminated raw)
@@ -6759,7 +6765,8 @@
               "TODO-NATIVE-LET-BODY: let form has no body")
             :else
             (let [body: ExprResultV0
-                  (lower-expr env owner (exprresultv0-state bound) body-node)]
+                  (lower-expr-expected env owner
+                    (exprresultv0-state bound) body-node expected)]
               (->ExprResultV0
                 (with (exprresultv0-state body) [:locals outer-locals])
                 (exprresultv0-value-id body)
@@ -6797,10 +6804,10 @@
                         condition-node condition)]
                   (if (some? static-condition)
                     ;; Operand instructions are already in state; discard only the predicate atom.
-                    (lower-expr env owner
+                    (lower-expr-expected env owner
                       (drop-static-predicate-result
                         (exprresultv0-state condition))
-                      (if static-condition then-node else-node))
+                      (if static-condition then-node else-node) expected)
                     (let [base: BodyStateV0 (exprresultv0-state condition)
                       outer-refinements: (Vec KeywordFlowRefinementV0)
                       (bodystatev0-keyword-refinements base)
@@ -6817,7 +6824,8 @@
                           then-id [])
                         condition-node)
                       then-start: Int (count (bodystatev0-blocks branched))
-                      then-result: ExprResultV0 (lower-expr env owner branched then-node)
+                      then-result: ExprResultV0
+                      (lower-expr-expected env owner branched then-node expected)
                       after-then: BodyStateV0
                       (if (exprresultv0-terminated then-result)
                         (exprresultv0-state then-result)
@@ -6830,8 +6838,16 @@
                         (state-open-block after-then else-id [])
                         outer-refinements)
                       else-block-start: Int (count (bodystatev0-blocks else-start))
+                      else-expected: (U core/NativeId Nil)
+                      (if (some? expected)
+                        expected
+                        (if (or (exprresultv0-terminated then-result)
+                                (state-blocked? (exprresultv0-state then-result)))
+                          nil
+                          (exprresultv0-type-id then-result)))
                       else-result: ExprResultV0
-                      (lower-expr env owner else-start else-node)
+                      (lower-expr-expected env owner else-start else-node
+                        else-expected)
                       after-else: BodyStateV0
                       (if (exprresultv0-terminated else-result)
                         (exprresultv0-state else-result)
@@ -6905,8 +6921,11 @@
                     "TODO-NATIVE-COND-CLAUSE: cond clauses need one test and one body")
 
                   fallback
-                  (let [body: ExprResultV0
-                        (lower-expr env owner current body-node)
+                  (let [body-expected: (U core/NativeId Nil)
+                        (if (some? expected) expected result-type)
+                        body: ExprResultV0
+                        (lower-expr-expected env owner current body-node
+                          body-expected)
                         body-state: BodyStateV0 (exprresultv0-state body)]
                     (cond
                       (state-blocked? body-state) (dead-result body-state)
@@ -6968,8 +6987,11 @@
                                     body-id next-id))
                                 body-id [])
                               test-node)
+                            body-expected: (U core/NativeId Nil)
+                            (if (some? expected) expected result-type)
                             body: ExprResultV0
-                            (lower-expr env owner branched body-node)
+                            (lower-expr-expected env owner branched body-node
+                              body-expected)
                             body-state: BodyStateV0 (exprresultv0-state body)
                             body-live: Bool
                             (not (exprresultv0-terminated body))]
@@ -7051,17 +7073,8 @@
                                 (loopinitsv0-state accumulated)
                                 expected: (U core/NativeId Nil)
                                 (annotation-native-type index annotation)
-                                contextual: (U ExprResultV0 Nil)
-                                (lower-contextual-value env owner current value-node
-                                  expected
-                                  (fn
-                                    [item-state: BodyStateV0
-                                     item-node: core/NativeId] -> ExprResultV0
-                                    (lower-expr env owner item-state item-node)))
                                 raw: ExprResultV0
-                                (if (nil? contextual)
-                                  (lower-expr env owner current value-node)
-                                  contextual)
+                                (lower-expr-expected env owner current value-node expected)
                                 value: ExprResultV0
                                 (if (or (nil? expected)
                                       (exprresultv0-terminated raw)
@@ -7124,9 +7137,9 @@
                               (core/parameter-id (nth parameters position))
                               (core/parameter-type-id (nth parameters position))))))
                       body: ExprResultV0
-                      (lower-expr env owner
+                      (lower-expr-expected env owner
                         (state-push-loop bound (->LoopFrameV0 header-id parameters))
-                        body-node)]
+                        body-node expected)]
                   ;; the loop's value is the join value of the body exiting
                   ;; without recur, in whatever block that exit left open
                   (->ExprResultV0
@@ -7874,17 +7887,31 @@
                                  (typeresolutionv0-type-id callback-return)))
                         (fail-result state
                           "TODO-NATIVE-REDUCE-ACCUMULATOR: callback return must match its accumulator parameter")
-                        (let [initial: ExprResultV0
+                        (let [initial-expected: (U core/NativeId Nil)
+                              (if (or (vector-type? types accumulator-type)
+                                      (map-type? types accumulator-type)
+                                      (set-type? types accumulator-type))
+                                accumulator-type
+                                (if (and (some? expected)
+                                         (or (vector-type? types expected)
+                                             (map-type? types expected)
+                                             (set-type? types expected)))
+                                  expected
+                                  nil))
+                              initial: ExprResultV0
                               (lower-contextual-boundary env owner state
-                                (nth args 1) accumulator-type)]
+                                (nth args 1) initial-expected accumulator-type)]
                           (cond
                             (exprresultv0-terminated initial) initial
                             (state-blocked? (exprresultv0-state initial))
                             (dead-result (exprresultv0-state initial))
                             :else
-                            (let [collection: ExprResultV0
+                            (let [collection-expected: (U core/NativeId Nil)
+                                  (vector-type-of types element-type)
+                                  collection: ExprResultV0
                                   (lower-reduce-collection env owner
-                                    (exprresultv0-state initial) (nth args 2))
+                                    (exprresultv0-state initial) (nth args 2)
+                                    collection-expected)
                                   collection-state: BodyStateV0
                                   (exprresultv0-state collection)]
                               (cond
@@ -7981,7 +8008,8 @@
                                         (nth callback-names 1) item-id element-type)
                                       callback-result: ExprResultV0
                                       (lower-contextual-boundary env owner
-                                        callback-state callback-body accumulator-type)
+                                        callback-state callback-body accumulator-type
+                                        accumulator-type)
                                       restored: BodyStateV0
                                       (with
                                         (with
@@ -8431,20 +8459,17 @@
                             receiver-expected: (U core/NativeId Nil)
                             (expected-collection-argument-type
                               types callee position value-types)
-                            expected: (U core/NativeId Nil)
+                            preserved-expected: (U core/NativeId Nil)
+                            (preserved-collection-argument-type types bare-callee
+                              (count args) position expected)
+                            argument-expected: (U core/NativeId Nil)
                             (if (some? declared-expected)
-                              declared-expected receiver-expected)
-                            contextual: (U ExprResultV0 Nil)
-                            (lower-contextual-value env owner current
-                              argument-node expected
-                              (fn
-                                [item-state: BodyStateV0
-                                 item-node: core/NativeId] -> ExprResultV0
-                                (lower-expr env owner item-state item-node)))
+                              declared-expected
+                              (if (some? receiver-expected)
+                                receiver-expected preserved-expected))
                             argument: ExprResultV0
-                            (if (nil? contextual)
-                              (lower-expr env owner current argument-node)
-                              contextual)]
+                            (lower-expr-expected env owner current argument-node
+                              argument-expected)]
                         (if (exprresultv0-terminated argument)
                           (->ArgsResultV0 (exprresultv0-state argument) values
                             value-types true)
@@ -9883,6 +9908,29 @@
         (fail-result state
           (str "TODO-NATIVE-FORM-" kind ": no native lowering for this source form"))))))
 
+(defn lower-expr-expected
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expr: core/NativeId
+   expected: (U core/NativeId Nil)] -> ExprResultV0
+  (let [contextual: (U ExprResultV0 Nil)
+        (lower-contextual-value env owner state expr expected
+          (fn
+            [item-state: BodyStateV0
+             item-node: core/NativeId] -> ExprResultV0
+            (lower-expr env owner item-state item-node)))]
+    (if (nil? contextual)
+      (lower-expr-raw env owner state expr expected)
+      contextual)))
+
+(defn lower-expr
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expr: core/NativeId] -> ExprResultV0
+  (lower-expr-expected env owner state expr nil))
+
 ;; Native v0 has no module-init block. A needed immutable module value is
 ;; hoisted once into each function entry, so aggregate allocation remains an
 ;; explicit effect and never occurs inside a loop merely because it is read.
@@ -9899,17 +9947,9 @@
             (globalbindingv0-annotation global)
             expected: (U core/NativeId Nil)
             (annotation-native-type (bodyenvv0-index env) annotation)
-            contextual: (U ExprResultV0 Nil)
-            (lower-contextual-value env owner current
-              (globalbindingv0-value global) expected
-              (fn
-                [item-state: BodyStateV0
-                 item-node: core/NativeId] -> ExprResultV0
-                (lower-expr env owner item-state item-node)))
             raw: ExprResultV0
-            (if (nil? contextual)
-              (lower-expr env owner current (globalbindingv0-value global))
-              contextual)
+            (lower-expr-expected env owner current
+              (globalbindingv0-value global) expected)
             value: ExprResultV0
             (if (or (nil? annotation)
                     (exprresultv0-terminated raw)
@@ -10034,8 +10074,6 @@
         name: String (typedfunctionv0-name signature)
         body-node: (U core/NativeId Nil)
         (index-first-object index source-function "body")
-        return-annotation: (U core/NativeId Nil)
-        (index-first-object index source-function "ret")
         parameters: (Vec core/Parameter) (typedfunctionv0-parameters signature)
         source-parameters: (Vec core/NativeId)
         (function-parameter-items index source-function)
@@ -10072,18 +10110,9 @@
                       (localbindingv0-name binding)
                       (localbindingv0-value-id binding)
                       (localbindingv0-type-id binding))))))
-            expected: (U core/NativeId Nil)
-            (annotation-native-type index return-annotation)
-            contextual: (U ExprResultV0 Nil)
-            (lower-contextual-value env id initialized body-node expected
-              (fn
-                [item-state: BodyStateV0
-                 item-node: core/NativeId] -> ExprResultV0
-                (lower-expr env id item-state item-node)))
             result: ExprResultV0
-            (if (nil? contextual)
-              (lower-expr env id initialized body-node)
-              contextual)
+            (lower-expr-expected env id initialized body-node
+              (typedfunctionv0-return-type signature))
             state: BodyStateV0 (exprresultv0-state result)]
         (cond
           (state-blocked? state)
