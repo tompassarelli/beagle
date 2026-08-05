@@ -11643,6 +11643,32 @@
                 (fail-result current
                   "TODO-NATIVE-PARSE-I64-OPERAND: parse-long takes one native Text operand")
 
+                (and (= "parse-double" callee) (= 1 (count values)))
+                (let [source: ExprResultV0
+                      (lower-boundary-coerce types owner current
+                        (nth values 0) (nth value-types 0) (text-type-id))
+                      settled: BodyStateV0 (exprresultv0-state source)
+                      optional: (U core/NativeId Nil)
+                      (optional-scalar-type-of types (float-type-id))]
+                  (cond
+                    (state-blocked? settled) (dead-result settled)
+                    (nil? optional)
+                    (fail-result settled
+                      "TODO-NATIVE-PARSE-F64-TYPE: parse-double needs a nullable Float in the source world")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id settled owner "parse-f64")]
+                      (->ExprResultV0
+                        (state-emit (state-bump settled)
+                          (core/->TextParseF64Instruction
+                            (core/->SsaValueV0 result-id optional)
+                            (exprresultv0-value-id source)))
+                        result-id optional false))))
+
+                (= "parse-double" callee)
+                (fail-result current
+                  "TODO-NATIVE-PARSE-F64-OPERAND: parse-double takes one native Text operand")
+
                 (and (or (= "false?" callee) (= "true?" callee))
                   (= 1 (count values)))
                 (lower-exact-bool-predicate types owner current callee
@@ -15118,6 +15144,11 @@
     (worlds/canonical-record "text-parse-i64-instruction"
       [(encode-ssa-value (core/textparsei64instruction-result instruction))
        (id-value (core/textparsei64instruction-source-id instruction))])
+
+    (instance? native.core.TextParseF64Instruction instruction)
+    (worlds/canonical-record "text-parse-f64-instruction"
+      [(encode-ssa-value (core/textparsef64instruction-result instruction))
+       (id-value (core/textparsef64instruction-source-id instruction))])
 
     (instance? native.core.TextSliceInstruction instruction)
     (worlds/canonical-record "text-slice-instruction"

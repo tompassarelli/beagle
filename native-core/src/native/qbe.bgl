@@ -317,6 +317,8 @@
      (core/textblankinstruction-result instruction)]
     [(TextParseI64Instruction value)
      (core/textparsei64instruction-result instruction)]
+    [(TextParseF64Instruction value)
+     (core/textparsef64instruction-result instruction)]
     [(TextSliceInstruction value)
      (core/textsliceinstruction-result instruction)]
     [(TextConcatInstruction value)
@@ -1055,6 +1057,7 @@
     [(TextIndexOfInstruction value) false]
     [(TextBlankInstruction value) false]
     [(TextParseI64Instruction value) false]
+    [(TextParseF64Instruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]
     [(TextBuiltinInstruction value) false]
@@ -1498,6 +1501,7 @@
       [(TextIndexOfInstruction value) ""]
       [(TextBlankInstruction value) ""]
       [(TextParseI64Instruction value) ""]
+      [(TextParseF64Instruction value) ""]
       [(TextSliceInstruction value) ""]
       [(TextConcatInstruction value) ""]
       [(TextBuiltinInstruction value) ""]
@@ -1921,6 +1925,7 @@
     [(TextIndexOfInstruction value) false]
     [(TextBlankInstruction value) false]
     [(TextParseI64Instruction value) false]
+    [(TextParseF64Instruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]
     [(TextBuiltinInstruction value) false]

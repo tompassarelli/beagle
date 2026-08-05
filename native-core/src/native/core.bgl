@@ -643,6 +643,11 @@
   (TextParseI64Instruction
     [result: SsaValueV0
      source-id: NativeId])
+  ;; The result is a closed Float-or-unit union. Conversion implements the
+  ;; managed parse-double grammar and exact IEEE-754 rounding in the shim.
+  (TextParseF64Instruction
+    [result: SsaValueV0
+     source-id: NativeId])
   ;; v0 subs copies into the arena: no interior borrow, so the source blob's
   ;; lifetime never constrains the slice.
   (TextSliceInstruction
@@ -986,6 +991,7 @@
     [(TextIndexOfInstruction result source-id needle-id) (ssavaluev0-id result)]
     [(TextBlankInstruction result source-id) (ssavaluev0-id result)]
     [(TextParseI64Instruction result source-id) (ssavaluev0-id result)]
+    [(TextParseF64Instruction result source-id) (ssavaluev0-id result)]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      (ssavaluev0-id result)]
     [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]
@@ -1523,6 +1529,7 @@
     [(TextIndexOfInstruction result source-id needle-id) true]
     [(TextBlankInstruction result source-id) true]
     [(TextParseI64Instruction result source-id) true]
+    [(TextParseF64Instruction result source-id) true]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]
@@ -1766,6 +1773,7 @@
     [(TextIndexOfInstruction result source-id needle-id) [source-id needle-id]]
     [(TextBlankInstruction result source-id) [source-id]]
     [(TextParseI64Instruction result source-id) [source-id]]
+    [(TextParseF64Instruction result source-id) [source-id]]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      [arena-id source-id start-id end-id]]
     [(TextConcatInstruction result arena-id operand-ids)
@@ -1893,6 +1901,7 @@
     [(TextIndexOfInstruction result source-id needle-id) true]
     [(TextBlankInstruction result source-id) true]
     [(TextParseI64Instruction result source-id) true]
+    [(TextParseF64Instruction result source-id) true]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]

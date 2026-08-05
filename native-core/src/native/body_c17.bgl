@@ -218,6 +218,7 @@
     (instance? native.core.TextIndexOfInstruction instruction) true
     (instance? native.core.TextBlankInstruction instruction) true
     (instance? native.core.TextParseI64Instruction instruction) true
+    (instance? native.core.TextParseF64Instruction instruction) true
     (instance? native.core.TextSliceInstruction instruction) true
     (instance? native.core.TextConcatInstruction instruction) true
     (instance? native.core.TextBuiltinInstruction instruction) true
@@ -968,6 +969,17 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
+(defn f64-type-id [types: (Vec core/TypeDef)] -> core/NativeId
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      (core/->NativeId "native-body-c17-missing-f64")
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.AtomType shape)
+              (instance? native.core.F64Kind (core/atomtype-kind shape)))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
 (defn emit-optional-i64-call
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
@@ -977,6 +989,25 @@
   (let [owner: core/NativeId (core/ssavaluev0-type-id result)
         ok-tag: Int
         (variant-tag-for-payload layouts owner (i64-type-id types))
+        absent-tag: Int (absent-variant-tag types layouts owner)]
+    (if (or (< ok-tag 0) (< absent-tag 0))
+      ""
+      (str "  memset(&" target ", 0, sizeof " target ");\n"
+        "  if (" call "&" target ".payload.variant_" ok-tag ")) {\n"
+        "    " target ".tag = INT64_C(" ok-tag ");\n"
+        "  } else {\n"
+        "    " target ".tag = INT64_C(" absent-tag ");\n"
+        "  }\n"))))
+
+(defn emit-optional-f64-call
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   target: String
+   result: core/SsaValueV0
+   call: String] -> String
+  (let [owner: core/NativeId (core/ssavaluev0-type-id result)
+        ok-tag: Int
+        (variant-tag-for-payload layouts owner (f64-type-id types))
         absent-tag: Int (absent-variant-tag types layouts owner)]
     (if (or (< ok-tag 0) (< absent-tag 0))
       ""
@@ -1895,6 +1926,13 @@
         (str "native_text_parse_i64("
           (value-name function slots
             (core/textparsei64instruction-source-id instruction))
+          ", "))
+
+      (instance? native.core.TextParseF64Instruction instruction)
+      (emit-optional-f64-call types layouts target result
+        (str "native_text_parse_f64("
+          (value-name function slots
+            (core/textparsef64instruction-source-id instruction))
           ", "))
 
       (instance? native.core.TextSliceInstruction instruction)

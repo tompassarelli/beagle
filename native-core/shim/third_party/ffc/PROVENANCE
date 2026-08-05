@@ -1,0 +1,17 @@
+Source: https://github.com/kolemannix/ffc.h
+Commit: f0fb776c85bedd41339121caac6caaddf370f3d6
+File: ffc.h
+Source SHA-256: 1b038918337bf4ab90ac73dd6afb79ca375312f2fcbe2f64ad80ec9e4aa34fd9
+Embedded SHA-256: 7648af5e8116c9371d97193efbf30a2e36cc9144d7488cf2e617d9f956fdd3be
+License: MIT (LICENSE-MIT)
+Copyright: 2021 The fast_float authors
+
+The amalgamated implementation is embedded in native_shim.c so consumers that
+copy only native_shim.c and native_shim.h retain a self-contained runtime. The
+integration defines FFC_DISABLE_CLINGER_FAST_PATH and adds one guarded branch
+to the vendored implementation. That branch removes floating-point arithmetic
+from decimal conversion; the integer-backed exact path constructs result bits.
+The embed boundary locally suppresses Clang's static-in-external-inline warning
+for the upstream single-header linkage form and marks internal definitions as
+possibly unused when the host compiler supports that attribute. Trailing
+horizontal whitespace is normalized mechanically.
