@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$BEAGLE_DIR/bin/_beagle-racket"
+source "$BEAGLE_DIR/share/targets.sh"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: beagle fmt --check|--write PATH...
+
+  --check  Report noncanonical Beagle signatures and exit nonzero on drift.
+  --write  Rewrite noncanonical signatures atomically.
+
+Directory operands discover tracked Beagle source recursively. Explicit files
+are always considered, including fixtures excluded from directory discovery.
+EOF
+    exit "${1:-2}"
+}
+
+[[ $# -ge 1 ]] || usage
+mode="$1"
+shift
+case "$mode" in
+    --check|--write) ;;
+    --help|-h) usage 0 ;;
+    *)
+        echo "beagle fmt: expected --check or --write, got '$mode'" >&2
+        usage
+        ;;
+esac
+
+[[ $# -ge 1 ]] || set -- .
+
+declare -A source_extensions=()
+for target in "${BEAGLE_TARGET_IDS[@]}"; do
+    source_extensions[".${BEAGLE_TARGET_SRC_EXT[$target]}"]=1
+done
+
+source_file() {
+    local path="$1"
+    local extension=".${path##*.}"
+    [[ -n "${source_extensions[$extension]:-}" ]]
+}
+
+directory_excluded() {
+    local path="$1"
+    case "$path" in
+        beagle-test/*|bin/test/*|docs/archive/*|native-core/validation/*|self-host/fixtures/*|\
+        */fixtures/*|*/generated/*|*/vendor/*|*/repros/*|*/corpus/*|out/*|*/out/*)
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+declare -A seen=()
+files=()
+
+add_file() {
+    local path
+    path="$(realpath "$1")"
+    if [[ -z "${seen[$path]:-}" ]]; then
+        seen["$path"]=1
+        files+=("$path")
+    fi
+}
+
+for operand in "$@"; do
+    if [[ -f "$operand" ]]; then
+        if ! source_file "$operand"; then
+            echo "beagle fmt: not a Beagle source file: $operand" >&2
+            exit 2
+        fi
+        add_file "$operand"
+    elif [[ -d "$operand" ]]; then
+        operand_abs="$(realpath "$operand")"
+        if ! repo_root="$(git -C "$operand_abs" rev-parse --show-toplevel 2>/dev/null)"; then
+            echo "beagle fmt: directory is not inside a Git worktree: $operand" >&2
+            exit 2
+        fi
+        relative="$(realpath --relative-to="$repo_root" "$operand_abs")"
+        [[ "$relative" == "." ]] && relative=""
+        while IFS= read -r -d '' tracked; do
+            source_file "$tracked" || continue
+            directory_excluded "$tracked" && continue
+            add_file "$repo_root/$tracked"
+        done < <(git -C "$repo_root" ls-files -z -- "${relative:-.}")
+    else
+        echo "beagle fmt: path does not exist: $operand" >&2
+        exit 2
+    fi
+done
+
+if [[ ${#files[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+mapfile -d '' -t sorted_files < <(printf '%s\0' "${files[@]}" | sort -z -u)
+exec "$RACKET" "$BEAGLE_DIR/beagle-lib/private/signature-format.rkt" \
+    "$mode" "${sorted_files[@]}"

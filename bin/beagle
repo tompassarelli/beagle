@@ -34,6 +34,7 @@ Author:
   build [--target T] PATH   Emit an explicit hosted target
   build --materializer M --out DIR [--entry NS/NAME]... PATH.bgl...
                             Seal Core as a Native World, then project c17|qbe
+  fmt --check|--write PATH...  Check or rewrite canonical source layout
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the authoring loop online and working?
@@ -116,6 +117,9 @@ case "$cmd" in
         ;;
     fix)
         exec "$BIN/beagle-fix" "$@"
+        ;;
+    fmt)
+        exec "$BIN/beagle-fmt" "$@"
         ;;
     sig)
         exec "$BIN/beagle-sig" "$@"
