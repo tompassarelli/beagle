@@ -3956,8 +3956,7 @@
         (concrete-equality-for target)]
     (if (some? scalar)
       scalar
-      (if (and (not (same-id? target (type-id "SliceValue")))
-            (value-semantics-type? types target))
+      (if (value-semantics-type? types target)
         (core/->StructuralEqualityV0 target)
         nil))))
 
@@ -7943,7 +7942,7 @@
               (if (accessorhitv0-found accessor) value-type nil))
             equality: (U core/ConcreteEqualityV0 Nil)
             (if map-container
-              (concrete-equality-for key-type)
+              (map-key-equality-for types key-type)
               (core/->KeywordEqualityV0 true))]
         (cond
           (not (typeresolutionv0-valid updater-return))
