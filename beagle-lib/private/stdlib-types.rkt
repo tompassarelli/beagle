@@ -36,6 +36,7 @@
 
 (define (stdlib-for-target target)
   (case target
+    [(core) STDLIB-PORTABLE]
     [(clj)  stdlib-clj-combined]
     [(js)   stdlib-js-combined]
     [(nix)  stdlib-nix-combined]

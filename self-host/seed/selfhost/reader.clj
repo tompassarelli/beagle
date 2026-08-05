@@ -254,8 +254,18 @@
   (make-result (classify-atom text) (get sym-result "pos"))))))))
 
 (defn lang-target [^String lang-text]
-  (let [sp (str/index-of lang-text "/")]
-  (if (nil? sp) nil (subs lang-text (+ sp 1)))))
+  (cond
+  (= lang-text "beagle") "core"
+  (= lang-text "beagle/clj") "clj"
+  (= lang-text "beagle/js") "js"
+  (= lang-text "beagle/nix") "nix"
+  :else nil))
+
+(defn target-lang-line [^String target]
+  (cond
+  (= target "core") "#lang beagle"
+  (or (= target "clj") (= target "js") (= target "nix")) (str "#lang beagle/" target)
+  :else nil))
 
 (defn parse-lang-line [^String src]
   (let [len (count src)]
@@ -372,11 +382,15 @@
   (expect! "char: \\uNNNN printable" (= (rd1 "\\u0041") [CHAR-TAG 65]))
   (expect! "char: \\uNNNN non-ascii" (= (rd1 "\\u00e9") [CHAR-TAG 233]))
   (expect! "char: in list" (= (rd1 "(str \\A \\space)") ["str" [CHAR-TAG 65] [CHAR-TAG 32]]))
+  (expect! "bare #lang beagle selects Core" (= (get (read-all "#lang beagle\n") "target") "core"))
   (expect! "#lang beagle/clj" (= (get (read-all "#lang beagle/clj\n") "target") "clj"))
   (expect! "#lang beagle/js" (let [result (read-all "#lang beagle/js\n(ns app)")]
   (and (= (get result "target") "js") (= (get result "datums") [["ns" "app"]]))))
   (expect! "no #lang" (let [result (read-all "(ns app)")]
   (and (nil? (get result "target")) (= (get result "datums") [["ns" "app"]]))))
+  (expect! "Core renders as bare #lang beagle" (= (target-lang-line "core") "#lang beagle"))
+  (expect! "hosted targets render with explicit language paths" (= (target-lang-line "clj") "#lang beagle/clj"))
+  (expect! "unknown targets have no language path" (nil? (target-lang-line "missing")))
   (expect! "defn form postfix params" (let [result (rd1 "(defn foo [x: Int] -> String x)")]
   (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ANN-MARKER "Int"]) (= (nth result 3) "->") (= (nth result 4) "String") (= (nth result 5) "x"))))
   (expect! "defn form postfix params, space before colon" (= (rd1 "(defn foo [x : Int] -> String x)") (rd1 "(defn foo [x: Int] -> String x)")))
@@ -415,6 +429,7 @@
   (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "define-mode"))))
   (expect! "read-program returns datum vector" (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)") [["ns" "app"] ["def" "x" 1]]))
   (expect! "read-program: clj target injects NO define-target (parser default)" (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
+  (expect! "read-program: Core prepends (define-target core)" (= (read-program "#lang beagle\n(def x 1)") [["define-target" "core"] ["def" "x" 1]]))
   (expect! "read-program: nix target prepends (define-target nix)" (= (read-program "#lang beagle/nix\n(ns app)") [["define-target" "nix"] ["ns" "app"]]))
   (expect! "read-program: no #lang -> no injection" (= (read-program "(ns app)") [["ns" "app"]]))
   (expect! "read-program: explicit define-target present -> no double injection" (= (read-program "#lang beagle/js\n(define-target js)\n(ns app)") [["define-target" "js"] ["ns" "app"]]))

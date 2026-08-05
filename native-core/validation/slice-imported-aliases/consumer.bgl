@@ -1,3 +1,4 @@
+#lang beagle
 (ns consumer
   (:require [provider :as t]))
 

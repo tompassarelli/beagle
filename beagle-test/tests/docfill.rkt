@@ -61,8 +61,18 @@
     (check-true (file-exists? (build-path root "beagle-lib" "private" (target-emitter t)))
                 (format "~a: emitter ~a is missing" where (target-emitter t)))))
 
+(test-case "Core is a sealed-world profile with explicit materializers"
+  (check-equal? (core-profile-id CORE-PROFILE) 'core)
+  (check-equal? (core-profile-source-ext CORE-PROFILE) ".bgl")
+  (check-equal? (core-profile-lang CORE-PROFILE) "beagle")
+  (check-equal? (materializer-ids) '(c17 qbe))
+  (for ([materializer (in-list MATERIALIZERS)])
+    (check-true (string-prefix? (materializer-out-ext materializer) "."))
+    (check-true (> (string-length (materializer-note materializer)) 20))))
+
 (test-case "target ids and extensions are unique"
-  (define ids (map target-id TARGETS))
+  (define ids (source-profile-ids))
   (check-equal? (length (remove-duplicates ids)) (length ids))
-  (define exts (map target-source-ext TARGETS))
+  (define exts (cons (core-profile-source-ext CORE-PROFILE)
+                     (map target-source-ext TARGETS)))
   (check-equal? (length (remove-duplicates exts)) (length exts)))

@@ -15,7 +15,7 @@ for command in gcc rg sed; do
 done
 
 accepted="$scratch/accepted"
-"$repo/bin/beagle-native-module" --out "$accepted" "$here/fixture.bclj"
+"$repo/bin/beagle" build --materializer c17 --out "$accepted" "$here/fixture.bgl"
 report="$accepted/report.txt"
 
 for expected in \
@@ -57,8 +57,8 @@ gcc -std=c17 -pedantic -Wall -Wextra -Werror \
 "$scratch/probe"
 
 refused="$scratch/refused"
-if "$repo/bin/beagle-native-module" --out "$refused" \
-    "$here/refusals.bclj" >"$scratch/refused.log" 2>&1; then
+if "$repo/bin/beagle" build --materializer c17 --out "$refused" \
+    "$here/refusals.bgl" >"$scratch/refused.log" 2>&1; then
   echo "drive.sh: unsupported matches unexpectedly lowered" >&2
   exit 1
 fi

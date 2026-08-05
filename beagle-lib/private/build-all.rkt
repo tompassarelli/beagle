@@ -13,6 +13,7 @@
          "error-format.rkt"
          "query.rkt"
          "extensions.rkt"
+         "targets.rkt"
          ;; #33 datum-IR: build straight from fact triples, skipping the text trip
          (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
 
@@ -61,13 +62,14 @@
 
     ;; Extension/header mismatch check
     (define expected-tgt (expected-target-for-extension path))
-    (when (and expected-tgt
-               (not (eq? expected-tgt (program-target prog))))
+    (when (extension-target-mismatch? path (program-target prog))
       (define ext-str
         (car (findf (lambda (pair) (string-suffix? path (car pair)))
                     EXTENSION-TARGET-MAP)))
-      (error (format "extension/header mismatch: ~a expects #lang beagle/~a, found #lang beagle/~a"
-                     ext-str expected-tgt (program-target prog))))
+      (error (format "extension/header mismatch: ~a expects #lang ~a, found #lang ~a"
+                     ext-str
+                     (lang-for-target-id expected-tgt)
+                     (lang-for-target-id (program-target prog)))))
 
     (define ok? #t)
     (type-check-with-locs! prog

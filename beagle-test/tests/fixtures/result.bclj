@@ -1,4 +1,4 @@
-#lang beagle
+#lang beagle/clj
 
 (ns beagle.result)
 (define-mode strict)

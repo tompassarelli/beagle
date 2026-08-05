@@ -617,7 +617,7 @@
             (add-fact! out cid (str "seg" seg-idx) sid))))))
   nil)
 
-(defn- projection-lines [src: String] -> Any
+(defn- projection-lines! [src: String] -> Any
   (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src)) _line-cols (reset! LINE-COLS (build-line-cols src)) lang (rd/parse-lang-line src) newline (str/index-of src "\n") shift (if (some? (get lang "target")) 0 (if (nil? newline) (count src) (+ newline 1))) forms (located-program src) counter (atom 0) out (atom []) root (fresh-id! counter) head (synthetic-leaf "beagle-file" nil)]
     (add-fact! out root "kind" "list")
     (let [head-id (emit-node! head counter out)]
@@ -634,7 +634,7 @@
 (defn emit-edn-file! [path: String] -> Nil
   (let [src (selfhost.rt/slurp-file path)]
     (println (str "@file " path))
-    (doseq [line (projection-lines src)] (println line)))
+    (doseq [line (projection-lines! src)] (println line)))
   nil)
 
 ;; --- EDN facts -> reader datum ---------------------------------------------
@@ -1326,7 +1326,7 @@
     (str lead-text (datum-pretty (build-datum props id) 0) trail-text)))
 
 (defn render-edn! [path: String] -> Nil
-  (let [props (triples-props (read-triples path)) root (root-id props) children (ordered-children props root) wrapped? (and (> (count children) 0) (= (get (get props (nth children 0)) "v") "beagle-file")) form-ids (if wrapped? (subvec children 1) [root]) first-datum (if (> (count form-ids) 0) (build-datum props (nth form-ids 0)) []) lang? (and (datum-list? first-datum) (> (count first-datum) 1) (= (nth first-datum 0) "define-target")) lang-line (if lang? (str "#lang beagle/" (nth first-datum 1)) nil) body-ids (if lang? (subvec form-ids 1) form-ids) file-comments (if wrapped? (node-comments props root) []) header (mapv (fn [c: Any] -> String (nth c 1)) (comments-with file-comments "leading")) footer (mapv (fn [c: Any] -> String (nth c 1)) (comments-with file-comments "trailing")) blocks (mapv (fn [id: Any] -> String (rendered-block props id)) body-ids) rendered (str/join "\n\n" (into (into header blocks) footer))]
+  (let [props (triples-props (read-triples path)) root (root-id props) children (ordered-children props root) wrapped? (and (> (count children) 0) (= (get (get props (nth children 0)) "v") "beagle-file")) form-ids (if wrapped? (subvec children 1) [root]) first-datum (if (> (count form-ids) 0) (build-datum props (nth form-ids 0)) []) lang? (and (datum-list? first-datum) (> (count first-datum) 1) (= (nth first-datum 0) "define-target")) lang-line (if lang? (rd/target-lang-line (nth first-datum 1)) nil) body-ids (if (some? lang-line) (subvec form-ids 1) form-ids) file-comments (if wrapped? (node-comments props root) []) header (mapv (fn [c: Any] -> String (nth c 1)) (comments-with file-comments "leading")) footer (mapv (fn [c: Any] -> String (nth c 1)) (comments-with file-comments "trailing")) blocks (mapv (fn [id: Any] -> String (rendered-block props id)) body-ids) rendered (str/join "\n\n" (into (into header blocks) footer))]
     (if (some? lang-line)
       (print (str lang-line "\n\n" rendered "\n"))
       (print (str rendered "\n"))))

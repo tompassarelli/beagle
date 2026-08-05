@@ -54,6 +54,19 @@
   (check-equal? (parse-path form-str) (lang-path form-str)
                 (format "reader paths diverge on: ~a" form-str)))
 
+(test-case "bare #lang beagle selects the Core profile"
+  (define tmp (make-temporary-file "rpp-core-~a.bgl"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file tmp
+       (lambda (out)
+         (display "#lang beagle\n(ns core.reader)\n(def value: Int 1)\n" out))
+       #:exists 'truncate/replace)
+     (define forms (map syntax->datum (read-beagle-syntax tmp)))
+     (check-equal? (car forms) '(define-target core)))
+   (lambda () (delete-file tmp))))
+
 ;; --- battery: every reader feature, with nesting + combinations -------------
 
 (define BATTERY

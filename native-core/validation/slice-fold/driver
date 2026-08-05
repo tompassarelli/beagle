@@ -15,7 +15,7 @@ mkdir -p "$fold_artifacts" "$fold_tmp/out" "$fold_tmp/clj-config"
   "$fold_repo/native-core/src/native/lower.bgl" \
   "$fold_repo/native-core/src/native/obligations.bgl" \
   "$fold_repo/native-core/src/native/c11.bgl" \
-  "$fold_repo/native-core/src/native/c11_validation_corpus.bgl"
+  "$fold_repo/native-core/src/native/c11_validation_corpus.bclj"
 
 # The Clojure projection still needs imported union classes qualified at runtime.
 sed -i -E 's/\(instance\? ([A-Z][A-Za-z0-9]*)/\(instance? native.core.\1/g' \

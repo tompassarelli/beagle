@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
-# Compile dependency-first Beagle modules through the sealed Native World.
+# Build dependency-first Beagle Core modules through the sealed Native World.
 #
 # Usage:
-#   beagle native-module --out DIR [--entry NS/NAME]... SOURCE...
-#   beagle native-module --out DIR [--entry NS/NAME]... --facts SOURCE_FACTS
+#   beagle build --materializer c17|qbe --out DIR [--entry NS/NAME]... SOURCE.bgl...
 #
-# A successful run writes source.facts, report.txt, module_0.h, module_0.c,
-# module_0.ssa, and the shared native shim into DIR. The command refuses a
-# pending lowering, any failed structural obligation, or either materializer.
+# A successful run always writes the authoritative sealed Native World encoding
+# and digest, plus only the explicitly selected materializer projection. The
+# command accepts canonical `.bgl` / bare `#lang beagle` sources only.
 
 set -euo pipefail
 
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
+source "$BEAGLE_DIR/share/targets.sh"
 
 usage() {
     sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 die() {
-    echo "beagle native-module: $*" >&2
+    echo "beagle build: $*" >&2
     exit 2
 }
 
 out=""
-facts_input=""
+materializer=""
 entries=()
 sources=()
 
@@ -42,15 +42,15 @@ while [[ $# -gt 0 ]]; do
             out="${1#*=}"
             shift
             ;;
-        --facts)
-            [[ $# -ge 2 ]] || die "--facts needs a file"
-            [[ -z "$facts_input" ]] || die "--facts may be specified only once"
-            facts_input="$2"
+        --materializer)
+            [[ $# -ge 2 ]] || die "--materializer needs one of: $BEAGLE_MATERIALIZER_IDS_LIST"
+            [[ -z "$materializer" ]] || die "--materializer may be specified only once"
+            materializer="$2"
             shift 2
             ;;
-        --facts=*)
-            [[ -z "$facts_input" ]] || die "--facts may be specified only once"
-            facts_input="${1#*=}"
+        --materializer=*)
+            [[ -z "$materializer" ]] || die "--materializer may be specified only once"
+            materializer="${1#*=}"
             shift
             ;;
         --entry)
@@ -82,6 +82,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$out" ]] || die "--out DIR is required"
+[[ -n "$materializer" ]] || die "--materializer c17|qbe is required"
+beagle_known_materializer "$materializer" ||
+    die "unknown materializer '$materializer' (expected $BEAGLE_MATERIALIZER_IDS_LIST)"
 for entry in "${entries[@]}"; do
     [[ "$entry" == */* ]] || die "--entry must be qualified as NS/NAME: $entry"
     entry_namespace="${entry%/*}"
@@ -89,41 +92,57 @@ for entry in "${entries[@]}"; do
     [[ -n "$entry_namespace" && -n "$entry_name" && "$entry_namespace" != */* ]] ||
         die "--entry must contain exactly one namespace separator: $entry"
 done
-if [[ -n "$facts_input" ]]; then
-    [[ ${#sources[@]} -eq 0 ]] || die "--facts and source paths are mutually exclusive"
-    [[ -f "$facts_input" ]] || die "facts file not found: $facts_input"
-else
-    [[ ${#sources[@]} -gt 0 ]] || die "provide at least one source path or --facts FILE"
-fi
+[[ ${#sources[@]} -gt 0 ]] || die "provide at least one canonical .bgl source"
 
-for command in bb clojure; do
+for source in "${sources[@]}"; do
+    [[ -f "$source" ]] || die "source file not found: $source"
+    [[ "$source" == *.bgl ]] ||
+        die "Core accepts .bgl only; hosted Clojure stays .bclj with #lang beagle/clj: $source"
+    first_line="$(sed -n '1p' "$source")"
+    [[ "$first_line" =~ ^#lang[[:space:]]+beagle[[:space:]]*$ ]] ||
+        die "$source must begin with bare #lang beagle"
+done
+
+for command in bb clojure sha256sum; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
 
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
-work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-module.XXXXXX")"
+[[ "$out" != "/" ]] || die "--out may not be the filesystem root"
+managed_artifacts=(
+    source.facts
+    report.txt
+    module.native-world
+    module.native-world.sha256
+    module_0.h
+    module_0.c
+    module_0.ssa
+    native_shim.h
+    native_shim.c
+    native_unicode15_data.h
+    UNICODE-LICENSE.txt
+)
+for artifact in "${managed_artifacts[@]}"; do
+    rm -f -- "$out/$artifact"
+done
+work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-core-build.XXXXXX")"
 cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
 mkdir -p "$work/compiled" "$work/artifacts"
 
 facts="$work/source.facts"
-if [[ -n "$facts_input" ]]; then
-    cp "$facts_input" "$facts"
-else
-    projector_args=()
-    source_index=0
-    for source in "${sources[@]}"; do
-        [[ -f "$source" ]] || die "source file not found: $source"
-        ast="$work/source_${source_index}.ast.json"
-        "$BIN/beagle-ast" "$source" >"$ast"
-        logical_path="${source#./}"
-        projector_args+=(--input "$ast=$logical_path")
-        source_index=$((source_index + 1))
-    done
-    bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
-fi
+projector_args=()
+source_index=0
+for source in "${sources[@]}"; do
+    ast="$work/source_${source_index}.ast.json"
+    "$BIN/beagle-ast" "$source" >"$ast"
+    logical_path="${source#./}"
+    projector_args+=(--input "$ast=$logical_path")
+    source_index=$((source_index + 1))
+done
+bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 
 "$BIN/beagle-build-all" \
     "$BEAGLE_DIR/native-core/src/native/core.bgl" \
@@ -156,12 +175,13 @@ for module in worlds lower obligations c11 slice fold_c17 body_c17 body_slice qb
 done
 
 compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-export NATIVE_MODULE_FACTS="$facts"
-export NATIVE_MODULE_ARTIFACTS="$work/artifacts"
-export NATIVE_MODULE_COMMIT="$compiler_commit"
+export BEAGLE_CORE_FACTS="$facts"
+export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
+export BEAGLE_CORE_COMMIT="$compiler_commit"
+export BEAGLE_CORE_MATERIALIZER="$materializer"
 printf '%s\n' "${entries[@]}" >"$work/entries"
-export NATIVE_MODULE_ENTRIES="$work/entries"
-export NATIVE_MODULE_PROJECTED_FACTS="$work/artifacts/source.facts"
+export BEAGLE_CORE_ENTRIES="$work/entries"
+export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
 
 set +e
 clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
@@ -395,62 +415,6 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
   (and (= 7 (count verdicts))
        (every? obligations/obligation-passed? verdicts)))
 
-(defn function-call-targets [function]
-  (vec
-   (for [block (core/functiondef-blocks function)
-         instruction (core/basicblock-instructions block)
-         :when (instance? native.core.CallInstruction instruction)]
-     (core/callinstruction-function-id instruction))))
-
-(defn qbe-supported-functions [world]
-  (let [types (core/nativeworld-types world)
-        layouts (core/nativeworld-layouts world)
-        candidates (filterv #(qbe/function-supported? types layouts %)
-                            (qbe/ordered-functions
-                             (core/nativeworld-functions world)))]
-    (loop [kept candidates]
-      (let [kept-ids (set (map #(core/nativeid-value (core/functiondef-id %)) kept))
-            closed (filterv
-                    (fn [function]
-                      (every? #(contains? kept-ids (core/nativeid-value %))
-                              (function-call-targets function)))
-                    kept)]
-        (if (= (count closed) (count kept)) closed (recur closed))))))
-
-(defn qbe-projected-world [world functions]
-  (core/->NativeWorld
-   (core/nativeworld-id world)
-   (core/nativeworld-parent world)
-   (core/nativeworld-compiler-pass world)
-   (core/nativeworld-types world)
-   (core/nativeworld-effects world)
-   (core/nativeworld-regions world)
-   (core/nativeworld-capabilities world)
-   (core/nativeworld-layouts world)
-   functions
-   (core/nativeworld-allowed-effects world)
-   (core/nativeworld-allowed-regions world)
-   (core/nativeworld-allowed-capabilities world)
-   []
-   []))
-
-(defn qbe-support-report [world supported]
-  (let [ordered (qbe/ordered-functions (core/nativeworld-functions world))
-        supported-ids (set (map #(core/nativeid-value (core/functiondef-id %))
-                                supported))]
-    (str "qbe-scope "
-         (if (= (count supported) (count ordered)) "COMPLETE" "PARTIAL") "\n"
-         "qbe-supported-functions " (count supported) "\n"
-         "qbe-refused-functions " (- (count ordered) (count supported)) "\n"
-         (apply str
-                (for [function ordered]
-                  (str "qbe-function "
-                       (if (contains? supported-ids
-                                      (core/nativeid-value
-                                       (core/functiondef-id function)))
-                         "PASS " "REFUSED ")
-                       (core/functiondef-name function) "\n"))))))
-
 (defn native-report-head [rows entries source program projected]
   (str (apply str (map #(str "source-entry " % "\n") entries))
        "stage source-seal ACCEPTED\n"
@@ -463,13 +427,15 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
        "world-types " (count (core/nativeworld-types program)) "\n"
        "world-functions " (count (core/nativeworld-functions program)) "\n"
        "world-abis " (count (core/nativeworld-abis program)) "\n"
+       "native-world module.native-world\n"
+       "native-world-sha256 module.native-world.sha256\n"
        "projected-types " (count (core/nativeworld-types projected)) "\n"
        (body-slice/function-report (core/nativeworld-functions projected))
        (slice/obligation-report "obligation-projection" projected)
        (body-slice/failing-obligations projected)))
 
-(defn compile-native-module!
-  [facts-path projected-facts-path artifacts-dir compiler-commit entries]
+(defn compile-core!
+  [facts-path projected-facts-path artifacts-dir compiler-commit entries materializer]
   (let [raw-rows (slice/parse-facts (slurp facts-path))
         projection (project-entry-rows raw-rows entries)]
     (if-not (:ok? projection)
@@ -480,7 +446,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
       (let [rows (:rows projection)
             _ (spit projected-facts-path (rows-text rows))
             configuration ["profile=3"]
-            source (slice/source-world rows "native.module" "source.facts")
+            source (slice/source-world rows "beagle.core" "source.facts")
             seal-result (lower/seal-source-world source compiler-commit configuration)]
         (if-not (instance? native.lower.SourceSealAcceptedV0 seal-result)
           {:ok? false
@@ -504,6 +470,9 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                                 (slice/pending-reports (slice/native-pending native-result))
                                 "result FAIL NativeLoweringCompleteV0 required\n")}
                   (let [sealed-native (lower/nativeloweringcompletev0-sealed native-result)
+                        native-encoding (worlds/sealednativeworldv0-encoding sealed-native)
+                        _write-native
+                        (spit (str artifacts-dir "/module.native-world") native-encoding)
                         program (worlds/nativeworldv0-program
                                  (worlds/sealednativeworldv0-world sealed-native))
                         projected (body-slice/projected-world program)
@@ -512,55 +481,65 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                     (if-not (obligation-pass? verdicts)
                       {:ok? false
                        :report (str head "result FAIL seven native obligations required\n")}
-                      (let [qbe-functions (qbe-supported-functions projected)
-                            qbe-world (qbe-projected-world projected qbe-functions)
-                            qbe-report (qbe-support-report projected qbe-functions)
-                            c-result (body/materialize-world projected 0)
-                            qbe-result (qbe/materialize-world qbe-world 0)
-                            c-ok? (body/materialization-ok? c-result)
-                            qbe-ok? (instance? native.qbe.QbeSuccess qbe-result)
-                            materialization-report
-                            (str "materialize-c17 "
-                                 (if c-ok?
-                                   (let [artifact (body/materialization-artifact c-result)]
-                                     (str "OK "
-                                          (body/bodyartifactv0-header-name artifact) " "
-                                          (body/bodyartifactv0-source-name artifact)))
-                                   (str "REFUSED " (body/materialization-detail c-result)))
-                                 "\nmaterialize-qbe "
-                                 (if qbe-ok?
-                                   (let [artifact (qbe/qbesuccess-artifact qbe-result)]
-                                     (str "OK " (qbe/qbeartifact-module-name artifact)))
-                                   (str "REFUSED " (qbe/qbefailure-detail qbe-result)))
-                                 "\n")]
-                        (if-not (and c-ok? qbe-ok?)
-                          {:ok? false
-                           :report (str head qbe-report materialization-report
-                                        "result FAIL materialization\n")}
-                          (let [c-artifact (body/materialization-artifact c-result)
-                                qbe-artifact (qbe/qbesuccess-artifact qbe-result)]
-                            (spit (str artifacts-dir "/"
-                                       (body/bodyartifactv0-header-name c-artifact))
-                                  (body/bodyartifactv0-header-text c-artifact))
-                            (spit (str artifacts-dir "/"
-                                       (body/bodyartifactv0-source-name c-artifact))
-                                  (body/bodyartifactv0-source-text c-artifact))
-                            (spit (str artifacts-dir "/"
-                                       (qbe/qbeartifact-module-name qbe-artifact))
-                                  (qbe/qbeartifact-module-text qbe-artifact))
-                            {:ok? true
-                             :report (str head qbe-report materialization-report
-                                          "result PASS\n")}))))))))))))))
+                      (case materializer
+                        "c17"
+                        (let [result (body/materialize-world projected 0)
+                              ok? (body/materialization-ok? result)
+                              report (str "materialize-c17 "
+                                          (if ok?
+                                            (let [artifact
+                                                  (body/materialization-artifact result)]
+                                              (str "OK "
+                                                   (body/bodyartifactv0-header-name artifact)
+                                                   " "
+                                                   (body/bodyartifactv0-source-name artifact)))
+                                            (str "REFUSED "
+                                                 (body/materialization-detail result)))
+                                          "\n")]
+                          (if-not ok?
+                            {:ok? false
+                             :report (str head report "result FAIL materialization\n")}
+                            (let [artifact (body/materialization-artifact result)]
+                              (spit (str artifacts-dir "/"
+                                         (body/bodyartifactv0-header-name artifact))
+                                    (body/bodyartifactv0-header-text artifact))
+                              (spit (str artifacts-dir "/"
+                                         (body/bodyartifactv0-source-name artifact))
+                                    (body/bodyartifactv0-source-text artifact))
+                              {:ok? true
+                               :report (str head report "result PASS\n")})))
 
-(let [facts-path (System/getenv "NATIVE_MODULE_FACTS")
-      projected-facts-path (System/getenv "NATIVE_MODULE_PROJECTED_FACTS")
-      artifacts-dir (System/getenv "NATIVE_MODULE_ARTIFACTS")
-      compiler-commit (System/getenv "NATIVE_MODULE_COMMIT")
+                        "qbe"
+                        (let [result (qbe/materialize-world projected 0)
+                              ok? (instance? native.qbe.QbeSuccess result)
+                              report (str "materialize-qbe "
+                                          (if ok?
+                                            (let [artifact (qbe/qbesuccess-artifact result)]
+                                              (str "OK "
+                                                   (qbe/qbeartifact-module-name artifact)))
+                                            (str "REFUSED "
+                                                 (qbe/qbefailure-detail result)))
+                                          "\n")]
+                          (if-not ok?
+                            {:ok? false
+                             :report (str head report "result FAIL materialization\n")}
+                            (let [artifact (qbe/qbesuccess-artifact result)]
+                              (spit (str artifacts-dir "/"
+                                         (qbe/qbeartifact-module-name artifact))
+                                    (qbe/qbeartifact-module-text artifact))
+                              {:ok? true
+                               :report (str head report "result PASS\n")})))))))))))))))
+
+(let [facts-path (System/getenv "BEAGLE_CORE_FACTS")
+      projected-facts-path (System/getenv "BEAGLE_CORE_PROJECTED_FACTS")
+      artifacts-dir (System/getenv "BEAGLE_CORE_ARTIFACTS")
+      compiler-commit (System/getenv "BEAGLE_CORE_COMMIT")
+      materializer (System/getenv "BEAGLE_CORE_MATERIALIZER")
       entries (vec (remove str/blank?
                            (str/split-lines
-                            (slurp (System/getenv "NATIVE_MODULE_ENTRIES")))))
-      result (compile-native-module! facts-path projected-facts-path artifacts-dir
-                                     compiler-commit entries)]
+                            (slurp (System/getenv "BEAGLE_CORE_ENTRIES")))))
+      result (compile-core! facts-path projected-facts-path artifacts-dir
+                            compiler-commit entries materializer)]
   (spit (str artifacts-dir "/report.txt") (:report result))
   (print (:report result))
   (flush)
@@ -568,6 +547,11 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 ' >"$work/run.log" 2>&1
 runner_rc=$?
 set -e
+
+if [[ -f "$work/artifacts/module.native-world" ]]; then
+    sha256sum "$work/artifacts/module.native-world" | awk '{print $1}' \
+        >"$work/artifacts/module.native-world.sha256"
+fi
 
 if [[ -f "$work/artifacts/source.facts" ]]; then
     cp "$work/artifacts/source.facts" "$out/source.facts"
@@ -577,6 +561,11 @@ fi
 if [[ -f "$work/artifacts/report.txt" ]]; then
     cp "$work/artifacts/report.txt" "$out/report.txt"
 fi
+for world_artifact in module.native-world module.native-world.sha256; do
+    if [[ -f "$work/artifacts/$world_artifact" ]]; then
+        cp "$work/artifacts/$world_artifact" "$out/$world_artifact"
+    fi
+done
 if [[ $runner_rc -ne 0 ]]; then
     if [[ -f "$out/report.txt" ]]; then
         cat "$out/report.txt" >&2
@@ -586,16 +575,28 @@ if [[ $runner_rc -ne 0 ]]; then
     exit "$runner_rc"
 fi
 
-for artifact in module_0.h module_0.c module_0.ssa report.txt; do
+for artifact in module.native-world module.native-world.sha256 report.txt; do
     [[ -f "$work/artifacts/$artifact" ]] || die "successful runner omitted $artifact"
     cp "$work/artifacts/$artifact" "$out/$artifact"
 done
-cp "$BEAGLE_DIR/native-core/shim/native_shim.c" "$out/native_shim.c"
-cp "$BEAGLE_DIR/native-core/shim/native_shim.h" "$out/native_shim.h"
-cp "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h" \
-    "$out/native_unicode15_data.h"
-cp "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \
-    "$out/UNICODE-LICENSE.txt"
+case "$materializer" in
+    c17)
+        for artifact in module_0.h module_0.c; do
+            [[ -f "$work/artifacts/$artifact" ]] || die "successful C17 projection omitted $artifact"
+            cp "$work/artifacts/$artifact" "$out/$artifact"
+        done
+        cp "$BEAGLE_DIR/native-core/shim/native_shim.c" "$out/native_shim.c"
+        cp "$BEAGLE_DIR/native-core/shim/native_shim.h" "$out/native_shim.h"
+        cp "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h" \
+            "$out/native_unicode15_data.h"
+        cp "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \
+            "$out/UNICODE-LICENSE.txt"
+        ;;
+    qbe)
+        [[ -f "$work/artifacts/module_0.ssa" ]] || die "successful QBE projection omitted module_0.ssa"
+        cp "$work/artifacts/module_0.ssa" "$out/module_0.ssa"
+        ;;
+esac
 
 cat "$out/report.txt"
-printf 'native-module: wrote C17 + QBE artifacts to %s\n' "$out"
+printf 'beagle build: wrote sealed Native World + %s projection to %s\n' "$materializer" "$out"

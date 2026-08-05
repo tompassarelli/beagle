@@ -26,7 +26,8 @@
          (only-in "check.rkt" type-check-with-locs!)
          (only-in "ast.rkt" program-type-table program-src-table
                   src-loc? src-loc-pos src-loc-span)
-         (only-in "types.rkt" type->string))
+         (only-in "types.rkt" type->string)
+         (only-in "targets.rkt" lang-for-target-id))
 
 (provide datum->facts facts->datum datum->src datum->pretty edn-triples->datum read-edn-triples
          datum->edn-lines stx->edn-lines stx->facts edn-triples->syntax
@@ -1037,16 +1038,18 @@
       (apply string-append (map (lambda (c) (string-append " " (cdr c))) (trail cs)))))
   (define file-cs (if wrapped? (comments-of props root) '()))   ; file header/footer comments
   ;; #17: a leading (define-target X) form is how read-beagle-syntax canonicalizes
-  ;; `#lang beagle/X`. Render it BACK as the `#lang` header line (the absolute
-  ;; first line of the file) so the regenerated .bclj is a real #lang module — not
-  ;; a (define-target …)-leading file that `bin/beagle check`'s module loader
-  ;; rejects ("expected a `module' declaration"). Round-trips faithfully:
+  ;; a language selection. Render it BACK as the canonical `#lang` header line
+  ;; (the absolute first line of the file). A (define-target …)-leading source
+  ;; is not a module and `bin/beagle check` rejects it. Round-trips faithfully:
   ;; read-beagle-syntax re-canonicalizes `#lang` → (define-target X), so the form
   ;; set is unchanged through the graph.
   (define first-built (and (pair? form-ids) (build (car form-ids))))
   (define lang-line
-    (and (pair? first-built) (eq? (car first-built) 'define-target) (pair? (cdr first-built))
-         (format "#lang beagle/~a" (cadr first-built))))
+    (and (pair? first-built)
+         (eq? (car first-built) 'define-target)
+         (pair? (cdr first-built))
+         (let ([lang (lang-for-target-id (cadr first-built))])
+           (and lang (format "#lang ~a" lang)))))
   (define body-ids (if lang-line (cdr form-ids) form-ids))
   (define rendered (string-join
                      (append (map cdr (lead file-cs)) (map block body-ids) (map cdr (trail file-cs)))

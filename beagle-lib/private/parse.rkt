@@ -12,6 +12,7 @@
          "types.rkt"
          "macros.rkt"
          "extensions.rkt"
+         "targets.rkt"
          "ast.rkt"
          "module-interface.rkt"
          "parse-jst.rkt"
@@ -180,6 +181,7 @@
     [(regexp-match? #rx"beagle/nix"    lang-line) 'nix]
     [(regexp-match? #rx"beagle/clj"    lang-line) 'clj]
     [(regexp-match? #rx"beagle/js"     lang-line) 'js]
+    [(regexp-match? #rx"^#lang[ ]+beagle[ ]*$" lang-line) 'core]
     [else #f]))
 
 (define (read-beagle-syntax path)
@@ -229,7 +231,7 @@
                    (cons (datum->syntax #f (list 'define-target ext-tgt)) forms))]
              [else
               (error 'beagle
-                     "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/nix, or add (define-target <target>)"
+                     "~a: unknown Beagle language header — use #lang beagle for Core or an explicit hosted language such as #lang beagle/clj"
                      (path->string src))])]
           [else forms])))))
 
@@ -1941,9 +1943,9 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-      (unless (memq t '(clj js nix py rkt))
+      (unless (memq t (source-profile-ids))
         (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, js, nix, py, or rkt)" t))
+                            "unknown target: ~a (expected core, clj, js, or nix)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -2075,7 +2077,7 @@
                           "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
       [(cons 'define-target _)
        (raise-parse-error 'bad-meta-value
-                          "malformed define-target — expected (define-target clj|js|nix|py|rkt), got: ~v" d)]
+                          "malformed define-target — expected (define-target core|clj|js|nix), got: ~v" d)]
       [(cons 'define-mode _)
        (raise-parse-error 'bad-meta-value
                           "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]
@@ -2101,7 +2103,7 @@
   ;; correctly — clj/nix/js. Other targets keep use-site resolution until their emitters
   ;; are verified to handle the alias form. When the set is #f, free-ref
   ;; resolution is inert and expansion is unchanged.
-  (define hygiene-capable? (memq target '(clj nix js)))
+  (define hygiene-capable? (memq target '(core clj nix js)))
   (define module-def-name-set
     (and hygiene-capable?
          (for/fold ([acc (hasheq)]) ([d (in-list datums)])

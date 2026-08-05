@@ -1,3 +1,4 @@
+#lang beagle
 (ns provider)
 
 (defrecord Item [value: Int])

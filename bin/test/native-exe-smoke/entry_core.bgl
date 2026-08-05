@@ -1,0 +1,13 @@
+#lang beagle
+(ns native.core-entry)
+
+(define-mode strict)
+
+(def sample-values: (Vec String) ["left" "right"])
+
+(defn global-size [] -> Int
+  (count sample-values))
+
+(defn local-shadow-size [] -> Int
+  (let [sample-values: (Vec Int) [1 2 3]]
+    (count sample-values)))

@@ -31,8 +31,9 @@ Author:
   syntax FILE               Parse-check (--ledger, --repair --emit-patch)
   check [--profile N] [PATH...]  Type-check without emitting
   validate [FILE...]        Parse + check + schema validation
-  build [--target T] PATH   Compile, optionally retargeting portable source
-  native-module --out DIR [--entry NS/NAME]... PATH...  Lower modules to C17 + QBE
+  build [--target T] PATH   Emit an explicit hosted target
+  build --materializer M --out DIR [--entry NS/NAME]... PATH.bgl...
+                            Seal Core as a Native World, then project c17|qbe
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the authoring loop online and working?
@@ -96,7 +97,15 @@ case "$cmd" in
         fi
         ;;
     build)
-        if [[ "${1:-}" == "--target" ]] &&
+        _core_build=false
+        for _a in "$@"; do
+            case "$_a" in
+                --materializer|--materializer=*) _core_build=true ;;
+            esac
+        done
+        if $_core_build; then
+            exec "$BIN/beagle-build-core" "$@"
+        elif [[ "${1:-}" == "--target" ]] &&
            [[ $# -ge 3 && $# -le 4 ]]; then
             exec "$BIN/beagle-build" "$@"
         elif [[ $# -ge 1 ]] && [[ -f "$1" ]] && [[ $# -le 2 ]] && [[ "${2:-}" != --* ]]; then
@@ -104,9 +113,6 @@ case "$cmd" in
         else
             exec "$BIN/beagle-build-all" "$@"
         fi
-        ;;
-    native-module)
-        exec "$BIN/beagle-native-module" "$@"
         ;;
     fix)
         exec "$BIN/beagle-fix" "$@"

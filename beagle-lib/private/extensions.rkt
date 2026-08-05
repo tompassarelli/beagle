@@ -4,9 +4,11 @@
 ;; target table in targets.rkt. Nothing here is hand-enumerated: add a target
 ;; there and every map below picks it up.
 ;;
-;; Every beagle source file declares its target via its extension (`.bnix` →
-;; `#lang beagle/nix`, and so on); `.bgl` is target-neutral and `.rkt` is
-;; legacy/unvalidated. Extension/header mismatch is a hard compile error.
+;; Every authored Beagle source file declares its profile via its extension
+;; (`.bgl` → bare `#lang beagle`, `.bclj` → `#lang beagle/clj`, and so on).
+;; Headerless `.bgl` remains a temporary compatibility seam for the compiler's
+;; hosted Native Core implementation modules; an explicit mismatched header is
+;; always a hard compile error.
 ;; Render the current mapping with `bin/beagle langs --view extensions`.
 
 (require racket/string
@@ -14,7 +16,8 @@
          "targets.rkt")
 
 (define BEAGLE-EXTENSIONS
-  (append (map target-source-ext TARGETS)
+  (append (list (core-profile-source-ext CORE-PROFILE))
+          (map target-source-ext TARGETS)
           (map car NEUTRAL-EXTENSIONS)))
 
 (define (beagle-source-file? path-str)
@@ -22,10 +25,12 @@
          BEAGLE-EXTENSIONS))
 
 (define EXTENSION-TARGET-MAP
-  (append (for/list ([t (in-list TARGETS)])
+  (append (list (cons (core-profile-source-ext CORE-PROFILE)
+                      (core-profile-id CORE-PROFILE)))
+          (for/list ([t (in-list TARGETS)])
             (cons (target-source-ext t) (target-id t)))
-          ;; target-neutral / legacy: recognized as beagle sources, but the
-          ;; extension names no target, so no header check applies.
+          ;; Legacy sources are recognized, but the extension names no profile,
+          ;; so no header check applies.
           (for/list ([p (in-list NEUTRAL-EXTENSIONS)])
             (cons (car p) #f))))
 
@@ -34,6 +39,20 @@
     (findf (lambda (pair) (string-suffix? path-str (car pair)))
            EXTENSION-TARGET-MAP))
   (and match (cdr match)))
+
+(define (source-has-lang-header? path-str)
+  (and (file-exists? path-str)
+       (call-with-input-file path-str
+         (lambda (in)
+           (define line (read-line in 'any))
+           (and (string? line) (regexp-match? #rx"^#lang " line))))))
+
+(define (extension-target-mismatch? path-str actual-target)
+  (define expected-target (expected-target-for-extension path-str))
+  (and expected-target
+       (not (eq? expected-target actual-target))
+       (not (and (eq? expected-target (core-profile-id CORE-PROFILE))
+                 (not (source-has-lang-header? path-str))))))
 
 ;; Regex matching all beagle source extensions (for directory scanning).
 (define BEAGLE-FILE-RX
@@ -48,4 +67,5 @@
          beagle-source-file?
          EXTENSION-TARGET-MAP
          expected-target-for-extension
+         extension-target-mismatch?
          BEAGLE-FILE-RX)

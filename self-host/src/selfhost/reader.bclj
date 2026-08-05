@@ -498,9 +498,21 @@
 
 ;; --- #lang line parser -------------------------------------------------------
 
+;; Mirrors beagle:beagle-lib/private/targets.rkt; the seed cannot load Racket.
 (defn lang-target [lang-text: String] -> Any
-  (let [sp (str/index-of lang-text "/")]
-    (if (nil? sp) nil (subs lang-text (+ sp 1)))))
+  (cond
+    (= lang-text "beagle") "core"
+    (= lang-text "beagle/clj") "clj"
+    (= lang-text "beagle/js") "js"
+    (= lang-text "beagle/nix") "nix"
+    :else nil))
+
+(defn target-lang-line [target: String] -> Any
+  (cond
+    (= target "core") "#lang beagle"
+    (or (= target "clj") (= target "js") (= target "nix"))
+      (str "#lang beagle/" target)
+    :else nil))
 
 (defn parse-lang-line [src: String] -> Any
   (let [len (count src)]
@@ -679,6 +691,8 @@
                                ["str" [CHAR-TAG 65] [CHAR-TAG 32]]))
 
   ;; --- #lang parsing ---
+  (expect! "bare #lang beagle selects Core"
+    (= (get (read-all "#lang beagle\n") "target") "core"))
   (expect! "#lang beagle/clj"
     (= (get (read-all "#lang beagle/clj\n") "target") "clj"))
   (expect! "#lang beagle/js"
@@ -689,6 +703,12 @@
     (let [result (read-all "(ns app)")]
       (and (nil? (get result "target"))
            (= (get result "datums") [["ns" "app"]]))))
+  (expect! "Core renders as bare #lang beagle"
+    (= (target-lang-line "core") "#lang beagle"))
+  (expect! "hosted targets render with explicit language paths"
+    (= (target-lang-line "clj") "#lang beagle/clj"))
+  (expect! "unknown targets have no language path"
+    (nil? (target-lang-line "missing")))
 
   ;; --- realistic forms (canonical: postfix `name: T`, return `-> T`) ---
   (expect! "defn form postfix params"
@@ -784,6 +804,9 @@
        [["ns" "app"] ["def" "x" 1]]))
   (expect! "read-program: clj target injects NO define-target (parser default)"
     (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
+  (expect! "read-program: Core prepends (define-target core)"
+    (= (read-program "#lang beagle\n(def x 1)")
+       [["define-target" "core"] ["def" "x" 1]]))
   (expect! "read-program: nix target prepends (define-target nix)"
     (= (read-program "#lang beagle/nix\n(ns app)")
        [["define-target" "nix"] ["ns" "app"]]))

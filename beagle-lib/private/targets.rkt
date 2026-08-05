@@ -1,6 +1,8 @@
 #lang racket/base
 
-;; THE canonical language-target table — one row per target, nothing else.
+;; THE canonical source-profile table. Hosted targets emit source directly;
+;; Beagle Core lowers to a sealed Native World and only then runs an explicitly
+;; selected materializer.
 ;;
 ;; Every place that used to hand-enumerate targets is now a DERIVED VIEW of
 ;; this list: extensions.rkt's EXTENSION-TARGET-MAP, the `bin/beagle` usage
@@ -9,7 +11,7 @@
 ;; cheatsheet.rkt's preamble, and every doc span wrapped in a
 ;; `<!-- beagle:langs … -->` marker (filled by `bin/beagle doc-fill`).
 ;;
-;; Adding or removing a target is therefore ONE edit here plus
+;; Adding or removing a profile or materializer is therefore ONE edit here plus
 ;; `bin/beagle doc-fill`; the drift test in beagle-test/tests/docfill.rkt
 ;; fails the build if a derived view was not regenerated.
 ;;
@@ -37,9 +39,33 @@
 (struct target (id name source-ext lang out-ext status emitter note idiom domain)
   #:transparent)
 
+;; Native materializers are projections of the authoritative sealed world, not
+;; language targets or source emitters.
+(struct materializer (id name out-ext artifact note) #:transparent)
+
+(define MATERIALIZERS
+  (list
+   (materializer 'c17 "Restricted C17" ".c" "module_0.c"
+                 "bootstrap/reference projection with strict C17 compilation")
+   (materializer 'qbe "QBE IL" ".ssa" "module_0.ssa"
+                 "direct-native projection and anti-C-capture check")))
+
+;; Bare `#lang beagle` is the canonical Core language. Its build product is a
+;; sealed Native World; MATERIALIZERS names the separate projections available
+;; after that world has passed the native obligations.
+(struct core-profile (id name source-ext lang status note domain materializers)
+  #:transparent)
+
+(define CORE-PROFILE
+  (core-profile
+   'core "Beagle Core" ".bgl" "beagle" 'live
+   "sealed Native World; select C17 or QBE separately"
+   "System-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
+   MATERIALIZERS))
+
 (define TARGETS
   (list
-   (target 'clj "Clojure" ".bclj" "beagle" ".clj" 'live "emit-clj.rkt"
+   (target 'clj "Clojure" ".bclj" "beagle/clj" ".clj" 'live "emit-clj.rkt"
            "self-hosted, oracle-certified, fuzz-guarded"
            "eager persistent maps"
            "JVM and babashka Clojure: application code, tooling, and beagle's own self-hosted compiler.")
@@ -53,10 +79,11 @@
            "Nix expressions type-checked against the NixOS option schema: system and package configuration.")
    ))
 
-;; Extensions that are real beagle sources but name no target.
+;; Extensions that are real Beagle sources but name no profile. Headerless
+;; `.bgl` files remain readable only for the compiler's legacy hosted tooling;
+;; authored `.bgl` starts with bare `#lang beagle` and selects CORE-PROFILE.
 (define NEUTRAL-EXTENSIONS
-  '((".bgl" . "target-neutral — declare with `#lang beagle/<target>` or `(define-target …)`")
-    (".rkt" . "legacy — no extension/header validation")))
+  '((".rkt" . "legacy — no extension/header validation")))
 
 ;; Not language targets. A projection consumes the same AST and emits a
 ;; non-program artifact.
@@ -70,18 +97,46 @@
 (define (target-ids) (map target-id TARGETS))
 (define (target-count) (length TARGETS))
 
+(define (source-profile-ids)
+  (cons (core-profile-id CORE-PROFILE) (target-ids)))
+
+(define (source-profile-count)
+  (+ 1 (target-count)))
+
+(define (lang-for-target-id id)
+  (cond
+    [(eq? id (core-profile-id CORE-PROFILE))
+     (core-profile-lang CORE-PROFILE)]
+    [(target-by-id id) => target-lang]
+    [else #f]))
+
 (define (target-by-id id)
   (findf (lambda (t) (eq? (target-id t) id)) TARGETS))
 
 (define (live-targets)
   (filter (lambda (t) (eq? (target-status t) 'live)) TARGETS))
 
+(define (materializer-ids)
+  (map materializer-id MATERIALIZERS))
+
+(define (materializer-by-id id)
+  (findf (lambda (m) (eq? (materializer-id m) id)) MATERIALIZERS))
+
 (provide (struct-out target)
+         (struct-out materializer)
+         (struct-out core-profile)
          (struct-out projection)
+         CORE-PROFILE
+         MATERIALIZERS
          TARGETS
          NEUTRAL-EXTENSIONS
          PROJECTIONS
          target-ids
          target-count
+         source-profile-ids
+         source-profile-count
+         lang-for-target-id
          target-by-id
-         live-targets)
+         live-targets
+         materializer-ids
+         materializer-by-id)

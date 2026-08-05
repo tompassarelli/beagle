@@ -28,7 +28,7 @@ fi
   "$types_root/native-core/src/native/lower.bgl" \
   "$types_root/native-core/src/native/obligations.bgl" \
   "$types_root/native-core/src/native/c11.bgl" \
-  "$types_output/pipeline.bgl" \
+  "$types_output/pipeline.bclj" \
   --out "$types_scratch/out" >"$types_scratch/build.log" 2>&1 || {
     sed -n '1,240p' "$types_scratch/build.log" >&2
     exit 1

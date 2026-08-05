@@ -4,12 +4,12 @@ Targets are removed, not deprecated, when they stop earning their place.
 Reviving one means re-wiring the emitter and proving it against a real consumer,
 not flipping a switch. There is no back-compat shim and no deprecation window.
 
-The canonical target list is `beagle-lib/private/targets.rkt`. Every target
-enumeration in the repository — the `bin/beagle` usage line, `share/targets.sh`,
-`bin/beagle-doctor`'s emitter inventory, the cheatsheet preamble, and every doc
+The canonical source-profile and materializer registry is
+`beagle-lib/private/targets.rkt`. Every inventory in the repository — the
+`bin/beagle` usage line, `share/targets.sh`, `bin/beagle-doctor`, and every doc
 span wrapped in a `<!-- beagle:langs … -->` marker — is a derived view of it,
 refilled by `bin/beagle doc-fill`. `beagle-test/tests/docfill.rkt` fails the
-build when a derived view has drifted, so adding or removing a target is one
+build when a derived view has drifted, so adding or removing a profile is one
 edit plus one fill.
 
 ## Removed targets
@@ -36,6 +36,7 @@ used by code-as-facts; "lossless" means reader-datum identity, not byte
 identity. The two projections share the fact layer, not a fidelity contract, so
 no single sentence describes both.
 
-Beyond the target set, two source extensions name no target:
-`.bgl` (target-neutral — declare with `#lang beagle/<target>` or `(define-target
-…)`) and `.rkt` (legacy — no extension or header validation).
+Bare `#lang beagle` on `.bgl` names the Core profile and lowers to a sealed
+Native World. Hosted profiles use their explicit language paths and extensions,
+such as `#lang beagle/clj` on `.bclj`. Only `.rkt` remains legacy and exempt
+from extension/header validation.

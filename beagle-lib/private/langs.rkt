@@ -34,6 +34,10 @@
 (define (number-word n) (hash-ref NUMBER-WORDS n (lambda () (number->string n))))
 
 (define (id-str t) (symbol->string (target-id t)))
+(define (core-id-str) (symbol->string (core-profile-id CORE-PROFILE)))
+(define (materializer-id-str m) (symbol->string (materializer-id m)))
+(define (profile-names)
+  (cons (core-profile-name CORE-PROFILE) (map target-name TARGETS)))
 
 ;; --- views -----------------------------------------------------------------
 ;; A single-line view splices INLINE inside a marker; a multi-line view is a
@@ -42,22 +46,28 @@
 
 ;; "Clojure, JavaScript, and Nix"
 (define (view-names)
-  (prose-join (map target-name TARGETS)))
+  (prose-join (profile-names)))
 
 ;; "six" — for prose that counts targets ("all six targets").
 (define (view-count)
-  (number-word (target-count)))
+  (number-word (source-profile-count)))
 
 ;; "Nix lazy attrsets, Clojure eager persistent maps, …" — the
 ;; idiomatic-per-target clause.
 (define (view-idioms)
-  (string-join (for/list ([t (in-list TARGETS)])
-                 (string-append (target-name t) " " (target-idiom t)))
+  (string-join (cons
+                (string-append (core-profile-name CORE-PROFILE)
+                               " sealed Native World")
+                (for/list ([t (in-list TARGETS)])
+                  (string-append (target-name t) " " (target-idiom t))))
                ", "))
 
 ;; `beagle-lib/private/emit-{…}.rkt` — the live target emitters.
 (define (view-emitters)
   (string-append
+   "- `native-core/src/native/{worlds,lower,obligations}.bgl` — the Core "
+   "lowering to one sealed Native World; `native-core/src/native/{body_c17,qbe}.bgl` "
+   "are its explicit materializers.\n"
    "- `beagle-lib/private/emit-{"
    (string-join (map id-str TARGETS) ",")
    "}.rkt` — the live target emitters (one row each in\n"
@@ -75,6 +85,15 @@
    (append
     (list (md-row "target" "language" "source" "`#lang`" "output" "status")
           "|---|---|---|---|---|---|")
+    (list
+     (md-row (string-append "`" (core-id-str) "`")
+             (core-profile-name CORE-PROFILE)
+             (string-append "`" (core-profile-source-ext CORE-PROFILE) "`")
+             (string-append "`#lang " (core-profile-lang CORE-PROFILE) "`")
+             "sealed Native World"
+             (format "~a — ~a"
+                     (core-profile-status CORE-PROFILE)
+                     (core-profile-note CORE-PROFILE))))
     (for/list ([t (in-list TARGETS)])
       (md-row (string-append "`" (id-str t) "`")
               (target-name t)
@@ -84,8 +103,11 @@
               (format "~a — ~a" (target-status t) (target-note t))))
     (list ""
           (string-append
-           (string-titlecase (number-word (target-count)))
-           " language targets. `"
+           (string-titlecase (number-word (source-profile-count)))
+           " source profiles. Core produces the authoritative sealed Native World; "
+           "`--materializer "
+           (string-join (map materializer-id-str MATERIALIZERS) "|")
+           "` selects a projection. `"
            (symbol->string (projection-id (car PROJECTIONS)))
            "` is not one of them — it is the "
            (projection-note (car PROJECTIONS))
@@ -96,6 +118,10 @@
   (string-join
    (append
     (list (md-row "extension" "target") "|---|---|")
+    (list
+     (md-row (string-append "`" (core-profile-source-ext CORE-PROFILE) "`")
+             (string-append "`" (core-id-str) "` (`#lang "
+                            (core-profile-lang CORE-PROFILE) "`)")))
     (for/list ([t (in-list TARGETS)])
       (md-row (string-append "`" (target-source-ext t) "`")
               (string-append "`" (id-str t) "` (`#lang " (target-lang t) "`)")))
@@ -105,9 +131,15 @@
 
 (define (view-domains)
   (string-join
-   (for/list ([t (in-list TARGETS)])
-     (format "- **~a** (`~a`, `~a`) — ~a"
-             (target-name t) (id-str t) (target-source-ext t) (target-domain t)))
+   (cons
+    (format "- **~a** (`~a`, `~a`) — ~a"
+            (core-profile-name CORE-PROFILE)
+            (core-id-str)
+            (core-profile-source-ext CORE-PROFILE)
+            (core-profile-domain CORE-PROFILE))
+    (for/list ([t (in-list TARGETS)])
+      (format "- **~a** (`~a`, `~a`) — ~a"
+              (target-name t) (id-str t) (target-source-ext t) (target-domain t))))
    "\n"))
 
 ;; The `parse → check → emit` diagram, fence included: markdown comments cannot
@@ -122,6 +154,10 @@
   (define note-col (max 0 (- caret-col 14)))
   (string-join
    (list "```"
+         (string-append (core-profile-source-ext CORE-PROFILE)
+                        "  ──▶ parse ──▶ check ──▶ seal Native World"
+                        " ──▶ --materializer "
+                        (string-join (map materializer-id-str MATERIALIZERS) "|"))
          flow
          (string-append (make-string caret-col #\space) "▲")
          (string-append (make-string note-col #\space)
@@ -135,38 +171,76 @@
 ;; bin/beagle-init and bin/beagle-doctor so those scripts never hand-list a
 ;; target and never pay a racket startup to ask.
 (define (view-shell)
-  (define (assoc-array name f)
+  (define (assoc-array name core-value f)
     (string-append
      "declare -A " name "=("
-     (string-join (for/list ([t (in-list TARGETS)])
-                    (format "[~a]=~a" (id-str t) (f t)))
-                  " ")
+     (string-join
+      (cons (format "[~a]=~a" (core-id-str) core-value)
+            (for/list ([t (in-list TARGETS)])
+              (format "[~a]=~a" (id-str t) (f t))))
+      " ")
      ")"))
+  (define all-ids (map symbol->string (source-profile-ids)))
+  (define materializer-ids* (map materializer-id-str MATERIALIZERS))
   (string-join
    (list
     "# GENERATED — do not edit. Regenerate with `bin/beagle doc-fill`."
     "# Source of truth: beagle-lib/private/targets.rkt (view: shell)."
     "# Drift is a build failure (beagle-test/tests/docfill.rkt)."
     ""
-    (format "BEAGLE_TARGET_IDS=(~a)" (string-join (map id-str TARGETS) " "))
-    (format "BEAGLE_TARGET_IDS_RE='~a'" (string-join (map id-str TARGETS) "|"))
+    (format "BEAGLE_TARGET_IDS=(~a)" (string-join all-ids " "))
+    (format "BEAGLE_HOSTED_TARGET_IDS=(~a)" (string-join (map id-str TARGETS) " "))
+    (format "BEAGLE_TARGET_IDS_RE='~a'" (string-join all-ids "|"))
     (format "BEAGLE_TARGET_IDS_LIST='~a'"
-            (prose-join (map id-str TARGETS)))
+            (prose-join all-ids))
     (format "BEAGLE_TARGET_NAMES='~a'" (view-names))
-    (format "BEAGLE_TARGET_COUNT=~a" (target-count))
-    (assoc-array "BEAGLE_TARGET_LANG" target-lang)
+    (format "BEAGLE_TARGET_COUNT=~a" (source-profile-count))
+    (assoc-array "BEAGLE_TARGET_LANG" (core-profile-lang CORE-PROFILE) target-lang)
     (assoc-array "BEAGLE_TARGET_SRC_EXT"
+                 (substring (core-profile-source-ext CORE-PROFILE) 1)
                  (lambda (t) (substring (target-source-ext t) 1)))
     (assoc-array "BEAGLE_TARGET_OUT_EXT"
+                 "native-world"
                  (lambda (t) (substring (target-out-ext t) 1)))
     (assoc-array "BEAGLE_TARGET_STATUS"
+                 (symbol->string (core-profile-status CORE-PROFILE))
                  (lambda (t) (symbol->string (target-status t))))
+    (assoc-array "BEAGLE_TARGET_PIPELINE" "native-world"
+                 (lambda (_t) "hosted-emitter"))
+    (format "BEAGLE_MATERIALIZER_IDS=(~a)" (string-join materializer-ids* " "))
+    (format "BEAGLE_MATERIALIZER_IDS_LIST='~a'" (prose-join materializer-ids*))
+    (string-append
+     "declare -A BEAGLE_MATERIALIZER_OUT_EXT=("
+     (string-join
+      (for/list ([m (in-list MATERIALIZERS)])
+        (format "[~a]=~a" (materializer-id-str m)
+                (substring (materializer-out-ext m) 1)))
+      " ")
+     ")")
     ""
     "beagle_known_target() {"
     "    local t=\"$1\""
     "    local k"
     "    for k in \"${BEAGLE_TARGET_IDS[@]}\"; do"
     "        [[ \"$k\" == \"$t\" ]] && return 0"
+    "    done"
+    "    return 1"
+    "}"
+    ""
+    "beagle_known_hosted_target() {"
+    "    local t=\"$1\""
+    "    local k"
+    "    for k in \"${BEAGLE_HOSTED_TARGET_IDS[@]}\"; do"
+    "        [[ \"$k\" == \"$t\" ]] && return 0"
+    "    done"
+    "    return 1"
+    "}"
+    ""
+    "beagle_known_materializer() {"
+    "    local m=\"$1\""
+    "    local k"
+    "    for k in \"${BEAGLE_MATERIALIZER_IDS[@]}\"; do"
+    "        [[ \"$k\" == \"$m\" ]] && return 0"
     "    done"
     "    return 1"
     "}")
@@ -194,12 +268,32 @@
 
 (define (targets-jsexpr)
   (hasheq 'schemaVersion 1
-          'count (target-count)
+          'count (source-profile-count)
+          'coreTarget
+          (hasheq
+           'id (core-id-str)
+           'name (core-profile-name CORE-PROFILE)
+           'sourceExtension (core-profile-source-ext CORE-PROFILE)
+           'lang (core-profile-lang CORE-PROFILE)
+           'pipeline "native-world"
+           'output "sealed Native World"
+           'status (symbol->string (core-profile-status CORE-PROFILE))
+           'note (core-profile-note CORE-PROFILE)
+           'domain (core-profile-domain CORE-PROFILE)
+           'materializers
+           (for/list ([m (in-list MATERIALIZERS)])
+             (hasheq 'id (materializer-id-str m)
+                     'name (materializer-name m)
+                     'outputExtension (materializer-out-ext m)
+                     'artifact (materializer-artifact m)
+                     'note (materializer-note m))))
+          'hostedTargetCount (target-count)
           'targets (for/list ([t (in-list TARGETS)])
                      (hasheq 'id (id-str t)
                              'name (target-name t)
                              'sourceExtension (target-source-ext t)
                              'lang (target-lang t)
+                             'pipeline "hosted-emitter"
                              'outputExtension (target-out-ext t)
                              'status (symbol->string (target-status t))
                              'note (target-note t)

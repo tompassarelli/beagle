@@ -90,8 +90,8 @@
       (apply run-subprocess args)
       (run-inprocess (car args) (cadr args))))
 
-(define (render-roundtrip src-text)
-  (define f (make-temporary-file "crt-~a.bclj"))
+(define (render-roundtrip src-text [extension ".bclj"])
+  (define f (make-temporary-file (string-append "crt-~a" extension)))
   (define edn (make-temporary-file "crt-~a.edn"))
   (dynamic-wind
     void
@@ -115,7 +115,12 @@
 
    (test-case "render reconstructs #lang beagle/nix"
      (define out (render-roundtrip "#lang beagle/nix\n(def x: Int 1)\n"))
-     (check-true (string-prefix? out "#lang beagle/nix") out))))
+     (check-true (string-prefix? out "#lang beagle/nix") out))
+
+   (test-case "render reconstructs bare #lang beagle for Core"
+     (define out
+       (render-roundtrip "#lang beagle\n(def x: Int 1)\n" ".bgl"))
+     (check-true (string-prefix? out "#lang beagle\n") out))))
 
 ;; ---------------------------------------------------------------------------
 ;; EXP-025 (G1–G5): the renderer must INVERT the five Clojure reader-macros the

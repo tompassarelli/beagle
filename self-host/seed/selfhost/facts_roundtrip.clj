@@ -432,7 +432,7 @@
   (add-fact! out cid (str "seg" seg-idx) sid))))))
   nil)
 
-(defn- projection-lines [^String src]
+(defn- projection-lines! [^String src]
   (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src))
    _line-cols (reset! LINE-COLS (build-line-cols src))
    lang (rd/parse-lang-line src)
@@ -459,7 +459,7 @@
 (defn emit-edn-file! [^String path]
   (let [src (selfhost.rt/slurp-file path)]
   (println (str "@file " path))
-  (doseq [line (projection-lines src)]
+  (doseq [line (projection-lines! src)]
   (println line)))
   nil)
 
@@ -892,8 +892,8 @@
    form-ids (if wrapped? (subvec children 1) [root])
    first-datum (if (> (count form-ids) 0) (build-datum props (nth form-ids 0)) [])
    lang? (and (datum-list? first-datum) (> (count first-datum) 1) (= (nth first-datum 0) "define-target"))
-   lang-line (if lang? (str "#lang beagle/" (nth first-datum 1)) nil)
-   body-ids (if lang? (subvec form-ids 1) form-ids)
+   lang-line (if lang? (rd/target-lang-line (nth first-datum 1)) nil)
+   body-ids (if (some? lang-line) (subvec form-ids 1) form-ids)
    file-comments (if wrapped? (node-comments props root) [])
    header (mapv (fn [c] (nth c 1)) (comments-with file-comments "leading"))
    footer (mapv (fn [c] (nth c 1)) (comments-with file-comments "trailing"))

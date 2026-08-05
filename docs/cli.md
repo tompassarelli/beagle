@@ -14,7 +14,9 @@ compiler is the reference, fronted by one CLI.
 beagle syntax FILE          # parse check (+ --ledger, --repair --emit-patch)
 beagle check [PATH...]      # type-check without emitting (--profile N)
 beagle validate [FILE...]   # parse + check + schema validation
-beagle build [--target T] PATH [OUT]
+beagle build [--target T] PATH [OUT]  # explicit hosted source emission
+beagle build --materializer c17|qbe --out DIR [--entry NS/NAME]... PATH.bgl...
+                                      # sealed Native World + one projection
 beagle fix [--dry-run] [PATH...]                # high-confidence auto-fixes
 beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
 beagle doctor [--deep]      # is the authoring loop online and working?
@@ -58,6 +60,12 @@ whole path end to end. `beagle init --hooks` wires the same loop into a project'
 `.claude/` configuration, and is idempotent on an already-initialized repo.
 
 ## Build output paths
+
+Bare `#lang beagle` on `.bgl` is Core. Its build always publishes
+`module.native-world`, `module.native-world.sha256`, `source.facts`, and
+`report.txt`; `--materializer c17` adds `module_0.h`/`module_0.c`, while
+`--materializer qbe` adds `module_0.ssa`. No materializer is implicit, and
+hosted `.bclj` is not accepted by the Core build path.
 
 Without an explicit `OUT` argument, `beagle build` writes to
 `${BEAGLE_OUT:-<beagle-checkout>/.beagle-out}/<ns-path>.<ext>` — that is the

@@ -11,11 +11,14 @@ docs go stale within a day. The compiler is the source of truth: query it
 
 ## Architecture — read this before touching the front end
 
-There are **exactly two compilers**, both ordinary ahead-of-time `parse →
-check → emit`, held byte-identical by gates:
+There are **exactly two hosted front-end compilers**, both ordinary
+ahead-of-time `parse → check → emit`, held byte-identical by gates. Core uses
+the Racket oracle front end, then lowers to a sealed Native World before
+materialization:
 
-1. **Racket (the oracle)** — `beagle-lib/*.rkt`, all <!-- beagle:langs count -->three<!-- /beagle:langs --> targets. Entry
-   points: `beagle-lib/main.rkt` (`#lang beagle`) and
+1. **Racket (the oracle)** — `beagle-lib/*.rkt`, all <!-- beagle:langs count -->four<!-- /beagle:langs --> targets. Entry
+   points: `beagle-lib/main.rkt` (Core `#lang beagle`),
+   `beagle-lib/clj/main.rkt` (hosted `#lang beagle/clj`), and
    `beagle-lib/private/check-all.rkt` (`bin/beagle check/build`). Type checker
    is `check.rkt`. Verify any doubt against the require closure of
    `check-all.rkt` — nothing else runs there.
@@ -26,9 +29,12 @@ check → emit`, held byte-identical by gates:
    compiler. Read `self-host/README.md` before touching it.
 
 The Racket compiler is the conformance oracle (`bin/beagle-certify`, shrink-only
-divergence ledgers); the self-hosted compiler is the language's own. A behavior
-change on one side is incomplete until the gates prove the other side agrees —
-or a ledger entry records why it deliberately doesn't.
+divergence ledgers); the self-hosted compiler is the language's own hosted
+compiler. A hosted behavior change on one side is incomplete until the gates
+prove the other side agrees — or a ledger entry records why it deliberately
+doesn't. Native World lowering is implemented in Beagle and runs from its
+hosted Clojure projection; its separate contract is the sealed world plus the
+seven native obligations.
 
 Form dispatch is the **combiner registry** in `parse.rkt`
 (`register-combiner!`). Built-in special forms register there; user macros are
@@ -44,7 +50,7 @@ The spec is **generative** — three statements determine every surface question
 
 1. **Beagle is Clojure plus types.** Clojure surface, types threaded through.
 2. **Divergence from Clojure must be load-bearing for the type system or a backend, or it dies.** (See "Rules with teeth".)
-3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
+3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Core sealed Native World, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
 
 Run a form through these and one answer falls out. **Do not surface decisions the spec already determines** — fact-finds ("what does bare `{…}` mean?" → match Clojure), unfinished analysis ("N rows ambiguous" → run the load-bearing test: does the divergence buy type precision or a backend anything?), and invisible implementation choices (AST shape, helper placement) are not forks. Pick, execute, report.
 

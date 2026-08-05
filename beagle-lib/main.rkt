@@ -1,6 +1,7 @@
 #lang racket/base
 
-;; The language module for #lang beagle.
+;; The language module for bare #lang beagle: the canonical Beagle Core
+;; profile. Hosted Clojure uses the explicit #lang beagle/clj wrapper.
 ;;
 ;; Pipeline (all expand-time, inside our custom #%module-begin):
 ;;   parse  → check  → emit
@@ -9,10 +10,8 @@
 ;; `#%brackets` tag. main.rkt parses, type-checks (strict mode), emits
 ;; target source, and the runtime `(display)`s it.
 ;;
-;; .bgl files must declare a target explicitly via #lang beagle/<target>
-;; or (define-target <target>). Every other beagle extension sets the target
-;; from the #lang line; the extension->target map is private/extensions.rkt,
-;; itself a view of private/targets.rkt (`bin/beagle langs --view extensions`).
+;; The hosted wrappers prepend their own `(define-target ...)`; when none is
+;; present this module prepends `(define-target core)`.
 
 (require (for-syntax racket/base
                      racket/string
@@ -21,7 +20,8 @@
                      "private/emit.rkt"
                      "private/lint.rkt"
                      "private/error-format.rkt"
-                     "private/extensions.rkt"))
+                     "private/extensions.rkt"
+                     "private/targets.rkt"))
 
 (provide #%datum
          #%app
@@ -54,7 +54,14 @@
            [else
             (raise-syntax-error 'beagle (augment-with-hint (exn-message e)) target)]))
 
-       (define forms (syntax->list #'(form ...)))
+       (define source-forms (syntax->list #'(form ...)))
+       (define forms
+         (if (for/or ([form (in-list source-forms)])
+               (define datum (syntax->datum form))
+               (and (pair? datum) (eq? (car datum) 'define-target)))
+             source-forms
+             (cons (datum->syntax stx '(define-target core) stx stx)
+                   source-forms)))
        ;; Source path of the USER's file. Target wrappers (beagle/clj's
        ;; clj-module-begin etc.) re-template the module-begin form, so
        ;; (syntax-source stx) is the wrapper module (beagle-lib/clj/main.rkt)
@@ -82,23 +89,15 @@
            (define path-str (if (path? src-path) (path->string src-path) src-path))
            (when (string? path-str)
              (define expected-tgt (expected-target-for-extension path-str))
-             (when (and expected-tgt
-                        (not (eq? expected-tgt (program-target prog))))
+             (when (extension-target-mismatch? path-str (program-target prog))
                (define ext-str
                  (car (findf (lambda (pair) (string-suffix? path-str (car pair)))
                              EXTENSION-TARGET-MAP)))
                (raise-syntax-error 'beagle
-                 (format "extension/header mismatch: ~a expects #lang beagle/~a, found #lang beagle/~a"
-                         ext-str expected-tgt (program-target prog))
-                 stx))
-             ;; .bgl files must declare a target explicitly
-             (when (and (not expected-tgt)
-                        (string-suffix? path-str ".bgl")
-                        (not (for/or ([f (in-list forms)])
-                               (define d (syntax->datum f))
-                               (and (pair? d) (eq? (car d) 'define-target)))))
-               (raise-syntax-error 'beagle
-                 "target required — use #lang beagle/js, beagle/clj, beagle/nix, or add (define-target <target>)"
+                 (format "extension/header mismatch: ~a expects #lang ~a, found #lang ~a"
+                         ext-str
+                         (lang-for-target-id expected-tgt)
+                         (lang-for-target-id (program-target prog)))
                  stx)))))
 
        ;; #:capture-types? #t feeds the per-node type table to emit (P3

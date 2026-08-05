@@ -29,7 +29,7 @@ canonicalization, against *which* target.
   enumerate: canonical layout, macros, threading, reader conditionals,
   sourcemap fidelity.
 - [`docs/targets-by-example.md`](docs/targets-by-example.md) — one source body
-  across three backends, and a NixOS module typed against the option schema.
+  across the hosted backends, plus the Core build boundary.
 - [`docs/cli.md`](docs/cli.md) — the CLI and the authoring loop.
 - [`docs/architecture.md`](docs/architecture.md) — pipeline, layout, where to change what.
 - [`docs/self-hosting.md`](docs/self-hosting.md) — how the compiler is held correct.
@@ -47,7 +47,7 @@ requires no database or coordinator:
 
 ```console
 $ cat src/main.bclj
-#lang beagle
+#lang beagle/clj
 (ns main)
 
 (defn greet [name: String] -> String
@@ -69,6 +69,10 @@ hello from Beagle
 
 `beagle init --target TARGET DIR` scaffolds a project for any live target;
 `beagle build FILE OUT` writes the target's source instead of linking a binary.
+For Core, author `.bgl` with bare `#lang beagle` and select the projection
+separately: `beagle build --materializer c17|qbe --out DIR FILE.bgl`. The build
+always writes `module.native-world` and its digest; only the selected C17 or QBE
+artifact is projected beside it.
 Run `beagle doctor --deep` before authoring to verify the complete diagnostic
 path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 --hooks` makes a project invoke it on each edit.
@@ -127,8 +131,9 @@ independent agreement, not by whether a human would maintain the generated C or
 QBE.
 
 Fram's files remain Beagle; they are not rewritten as C or another systems
-language. The current native path is exercised by the `native-core/validation`
-drivers while the general CLI profile is being finished. The generated
+language. The Core path is `beagle build --materializer c17|qbe`: it accepts
+canonical `.bgl`, seals one Native World, and materializes only the selected
+projection. The generated
 [`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
 is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
 bodies lower into one validated Native World and execute through the reference
@@ -147,16 +152,17 @@ target is *for*).
 <!-- beagle:langs table -->
 | target | language | source | `#lang` | output | status |
 |---|---|---|---|---|---|
-| `clj` | Clojure | `.bclj` | `#lang beagle` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
+| `core` | Beagle Core | `.bgl` | `#lang beagle` | sealed Native World | live — sealed Native World; select C17 or QBE separately |
+| `clj` | Clojure | `.bclj` | `#lang beagle/clj` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `js` | JavaScript | `.bjs` | `#lang beagle/js` | `.js` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
 
-Three language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
+Four source profiles. Core produces the authoritative sealed Native World; `--materializer c17|qbe` selects a projection. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
-Native Core is not a seventh row in this table: it is a target-neutral lowering
-profile below the shared parser and checker. Targets are removed rather than
-deprecated when they stop earning their place —
+Core is a source profile, not a direct source emitter; its row names the sealed
+world build product while the materializer remains an explicit build option.
+Profiles are removed rather than deprecated when they stop earning their place —
 [`docs/target-policy.md`](docs/target-policy.md).
 
 ## Real codebases author against Beagle

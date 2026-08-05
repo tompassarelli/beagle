@@ -6,14 +6,14 @@ repo="$(cd "$here/../../.." && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-imported-aliases.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-"$repo/bin/beagle" check --agent "$here/provider.bclj" "$here/consumer.bclj"
-"$repo/bin/beagle" native-module \
+"$repo/bin/beagle" check --agent "$here/provider.bgl" "$here/consumer.bgl"
+"$repo/bin/beagle" build --materializer c17 \
   --out "$scratch/artifacts" \
   --entry consumer/echo-term \
   --entry consumer/echo-term-maybe \
   --entry consumer/imported-label \
-  "$here/provider.bclj" \
-  "$here/consumer.bclj"
+  "$here/provider.bgl" \
+  "$here/consumer.bgl"
 
 rg -q $'\tname\tt\tprovider/Item$' "$scratch/artifacts/source.facts"
 rg -q '^stage source-to-typed ACCEPTED$' "$scratch/artifacts/report.txt"
