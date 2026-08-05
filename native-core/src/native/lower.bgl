@@ -1067,6 +1067,13 @@
       (core/->UnionType
         (union-variants owner [value-type (type-id "Nil")])))))
 
+(defn closed-vector-type-id [element-type: core/NativeId] -> core/NativeId
+  (lower-id "vector-type" [(id-value element-type)]))
+
+(defn closed-vector-type [element-type: core/NativeId] -> core/TypeDef
+  (core/->TypeDef (closed-vector-type-id element-type) "Vector"
+    (core/->VectorType element-type)))
+
 (defn application-resolution
   [source-type: core/NativeId
    constructor: String
@@ -1077,10 +1084,10 @@
         diagnostics: (Vec core/DiagnosticV0) (resolution-diagnostics resolutions)]
     (cond
       (and (= "Vec" constructor) (= 1 (count ids)))
-      (let [id: core/NativeId (lower-id "vector-type" [(id-value (nth ids 0))])]
+      (let [id: core/NativeId (closed-vector-type-id (nth ids 0))]
         (->TypeResolutionV0 id
           (append-type-def definitions
-            (core/->TypeDef id "Vector" (core/->VectorType (nth ids 0))))
+            (closed-vector-type (nth ids 0)))
           diagnostics
           true))
 
@@ -1095,15 +1102,20 @@
           true))
 
       (and (= "Map" constructor) (= 2 (count ids)))
-      (let [id: core/NativeId
+      (let [key-type: core/NativeId (nth ids 0)
+            value-type: core/NativeId (nth ids 1)
+            id: core/NativeId
             (lower-id "map-type-v0"
-              [(id-value (nth ids 0)) (id-value (nth ids 1))])]
+              [(id-value key-type) (id-value value-type)])]
         (->TypeResolutionV0 id
           (append-type-def
-            (append-type-def definitions
-              (nullable-map-value-type (nth ids 1)))
+            (append-type-def
+              (append-type-defs definitions
+                [(closed-vector-type key-type)
+                 (closed-vector-type value-type)])
+              (nullable-map-value-type value-type))
             (core/->TypeDef id "Map"
-              (core/->MapTypeV0 (nth ids 0) (nth ids 1)
+              (core/->MapTypeV0 key-type value-type
                 (core/->InsertionOrderV0 true))))
           diagnostics
           true))
