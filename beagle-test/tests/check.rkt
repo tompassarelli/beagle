@@ -271,6 +271,15 @@
   '(defn box-dyn [value #%: (Dyn String Int)] -> Box
      (->Box value)))
 
+;; `->` in the name is not evidence of construction — a hand-written converter
+;; may dispatch on the value, so it stays subject to the narrowing requirement.
+(check-err/rx "hand-written ->name is not a record constructor"
+  #rx"call to ->thing cannot consume"
+  '(defn ->thing [value #%: Any] -> Int
+     (if (string? value) 1 0))
+  '(defn feed-dyn [value #%: (Dyn String Int)] -> Int
+     (->thing value)))
+
 ;; =============================================================================
 ;; Tests — type narrowing (fixtures)
 ;; =============================================================================

@@ -4190,8 +4190,13 @@
 ;; collects these so callers can refine return types — numeric
 ;; preservation — without re-inferring, which would duplicate
 ;; diagnostics from nested calls).
+
+;; Resolves against RECORD-FIELDS, not the `->X` name shape: build-initial-env
+;; fills the registry for every record, union member, and error member before
+;; any form is checked, so the lookup is total here.
 (define (record-constructor-operation? fn-name)
-  (regexp-match? #rx"(^|/)->[^/]+$" (symbol->string fn-name)))
+  (define m (regexp-match #rx"(?:^|/)->([^/]+)$" (symbol->string fn-name)))
+  (and m (hash-has-key? RECORD-FIELDS (string->symbol (cadr m)))))
 
 (define (dynamic-total-operation? fn-name)
   ;; Runtime type predicates inspect only the stable Dyn tag and are total over
