@@ -295,6 +295,24 @@ fi
 function_index="${entry_rows[0]#fn_}"
 symbol="native_m0_fn_$function_index"
 
+native_cflags=()
+native_libs=()
+native_dependency=""
+if grep -Fqx '/* native-link-requirement icu-uc=72.1 */' \
+    "$module_dir/module_0.c"; then
+    pkg_config="${PKG_CONFIG:-pkg-config}"
+    pkg_config_path="$(command -v -- "$pkg_config" 2>/dev/null || true)"
+    [[ -n "$pkg_config_path" && -x "$pkg_config_path" ]] ||
+        die "native module requires pkg-config for icu-uc=72.1"
+    "$pkg_config_path" --exact-version=72.1 icu-uc ||
+        die "native module requires exact icu-uc version 72.1"
+    read -r -a icu_cflags <<<"$("$pkg_config_path" --cflags icu-uc)"
+    read -r -a icu_libs <<<"$("$pkg_config_path" --libs icu-uc)"
+    native_cflags=(-DNATIVE_UNICODE_ICU "${icu_cflags[@]}")
+    native_libs=("${icu_libs[@]}")
+    native_dependency=" dependency=icu-uc@72.1"
+fi
+
 mapfile -t prototypes < <(grep -E "^[A-Za-z_][A-Za-z0-9_]* ${symbol}\\(.*\\);$" \
     "$module_dir/module_0.h" || true)
 [[ ${#prototypes[@]} -eq 1 ]] ||
@@ -417,10 +435,12 @@ EOF
 linked="$work/native-executable"
 set +e
 "$cc_path" -std=c17 -pedantic -Wall -Wextra -Werror \
+    "${native_cflags[@]}" \
     -I "$module_dir" \
     "$module_dir/module_0.c" \
     "$module_dir/native_shim.c" \
     "$entry_source" \
+    "${native_libs[@]}" \
     -o "$linked" >"$work/native-exe.log" 2>&1
 link_rc=$?
 set -e
@@ -437,7 +457,7 @@ cp -- "$entry_source" "$artifacts/entry.c"
 cp -- "$work/native-exe.log" "$artifacts/native-exe.log"
 
 entry_line="native-exe-entry PASS name=$entry symbol=$symbol return=$entry_return abi=$abi"
-c17_line="native-exe-c17 PASS compiler=$cc_path output=$out"
+c17_line="native-exe-c17 PASS compiler=$cc_path output=$out$native_dependency"
 printf '%s\n%s\n' "$entry_line" "$c17_line" >"$artifacts/native-exe.report.txt"
 mv -f -- "$linked" "$out"
 success=1

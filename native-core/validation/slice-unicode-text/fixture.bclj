@@ -1,0 +1,14 @@
+#lang beagle/clj
+(ns native.unicode-text)
+(define-mode strict)
+
+(require clojure.string :as str)
+
+(defn lower-root [value: String] -> String
+  (str/lower-case value))
+
+(defn letter-decimal-runs [value: String] -> (Vec String)
+  (re-seq #"[\p{L}\p{Nd}]+" value))
+
+(defn native-entry [] -> Int
+  (if (= "abc" (lower-root "ABC")) 0 1))

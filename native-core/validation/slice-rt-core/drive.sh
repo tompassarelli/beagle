@@ -20,7 +20,7 @@ die() {
   exit 1
 }
 
-for command in awk bb clojure cmp cut gcc rg sed sha256sum sort; do
+for command in awk bb clojure cmp cut gcc pkg-config rg sed sha256sum sort; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -196,8 +196,20 @@ if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
     "$generated/function_map.h" "$here/main.c" "$build/"
   cp "$native_shim/native_shim.c" "$native_shim/native_shim.h" "$build/"
 
-  (cd "$build" && gcc "${strict[@]}" -o probe_gcc \
-    module_0.c native_shim.c main.c)
+  unicode_cflags=()
+  unicode_libs=()
+  if rg -Fxq '/* native-link-requirement icu-uc=72.1 */' \
+      "$generated/module_0.c"; then
+    pkg-config --exact-version=72.1 icu-uc \
+      || die "generated C17 requires exact icu-uc version 72.1"
+    read -r -a icu_cflags <<<"$(pkg-config --cflags icu-uc)"
+    read -r -a icu_libs <<<"$(pkg-config --libs icu-uc)"
+    unicode_cflags=(-DNATIVE_UNICODE_ICU "${icu_cflags[@]}")
+    unicode_libs=("${icu_libs[@]}")
+  fi
+
+  (cd "$build" && gcc "${strict[@]}" "${unicode_cflags[@]}" -o probe_gcc \
+    module_0.c native_shim.c main.c "${unicode_libs[@]}")
   "$build/probe_gcc" >"$scratch/gcc.out"
   clang_bin="$(command -v clang || true)"
   if [[ -z "$clang_bin" ]]; then
@@ -205,8 +217,8 @@ if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
       | sort -V | tail -1 || true)"
   fi
   [[ -n "$clang_bin" ]] || die "Clang is required for the second C17 frontend"
-  (cd "$build" && "$clang_bin" "${strict[@]}" -o probe_clang \
-    module_0.c native_shim.c main.c)
+  (cd "$build" && "$clang_bin" "${strict[@]}" "${unicode_cflags[@]}" \
+    -o probe_clang module_0.c native_shim.c main.c "${unicode_libs[@]}")
   "$build/probe_clang" >"$scratch/clang.out"
   cmp -s "$scratch/gcc.out" "$generated/lowered-managed.out" \
     || die "GCC C17 probe differs from the lowered managed oracle"
