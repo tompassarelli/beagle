@@ -6946,7 +6946,7 @@
   (let [index: SourceIndexV0 (bodyenvv0-index env)
         spelling: String (fact-text index pattern "name")
         resolved: ResolvedSourceNameV0
-        (resolve-source-name index (body-owner-module env owner) spelling)
+        (resolve-source-name index (source-module-name index pattern) spelling)
         candidate: core/NativeId (source-type-id (resolved-source-key resolved))
         definition: (U core/TypeDef Nil)
         (if (resolvedsourcenamev0-visible resolved)
