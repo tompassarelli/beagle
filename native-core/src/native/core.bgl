@@ -456,6 +456,14 @@
     [result: SsaValueV0
      source-id: NativeId
      index-id: NativeId])
+  ;; Indexed assoc preserves the source vector: it copies the header and
+  ;; element storage into the arena, then replaces one in-range element.
+  (VecAssocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     index-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId])
   ;; Push is LINEAR once storage exists and doubles capacity; a reusable empty
   ;; value yields a fresh header so independent [] seeds never alias.
   (VecPushInstruction
@@ -915,6 +923,8 @@
      (ssavaluev0-id result)]
     [(VecLengthInstruction result source-id) (ssavaluev0-id result)]
     [(VecGetInstruction result source-id index-id) (ssavaluev0-id result)]
+    [(VecAssocInstructionV0 result source-id index-id value-id arena-id)
+     (ssavaluev0-id result)]
     [(VecPushInstruction result source-id value-id arena-id)
      (ssavaluev0-id result)]
     [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
@@ -1455,6 +1465,7 @@
      (id-in? known-owned variant-id)]
     [(VecLengthInstruction result source-id) true]
     [(VecGetInstruction result source-id index-id) true]
+    [(VecAssocInstructionV0 result source-id index-id value-id arena-id) true]
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
@@ -1689,6 +1700,8 @@
     [(UnionExtractInstruction result source-id variant-id) [source-id]]
     [(VecLengthInstruction result source-id) [source-id]]
     [(VecGetInstruction result source-id index-id) [source-id index-id]]
+    [(VecAssocInstructionV0 result source-id index-id value-id arena-id)
+     [arena-id source-id index-id value-id]]
     [(VecPushInstruction result source-id value-id arena-id)
      [arena-id source-id value-id]]
     [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
@@ -1828,6 +1841,7 @@
     [(UnionExtractInstruction result source-id variant-id) true]
     [(VecLengthInstruction result source-id) true]
     [(VecGetInstruction result source-id index-id) true]
+    [(VecAssocInstructionV0 result source-id index-id value-id arena-id) true]
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]

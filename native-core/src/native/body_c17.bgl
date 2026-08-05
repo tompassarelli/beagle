@@ -185,6 +185,7 @@
     (instance? native.core.UnionExtractInstruction instruction) true
     (instance? native.core.VecLengthInstruction instruction) true
     (instance? native.core.VecGetInstruction instruction) true
+    (instance? native.core.VecAssocInstructionV0 instruction) true
     (instance? native.core.VecPushInstruction instruction) true
     (instance? native.core.VecEmptyInstruction instruction) true
     (instance? native.core.VecConcatInstruction instruction) true
@@ -2195,6 +2196,24 @@
           (value-name function slots
             (core/vecgetinstruction-index-id instruction))
           ", INT64_C(" stride "));\n"))
+
+      (instance? native.core.VecAssocInstructionV0 instruction)
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/vecassocinstructionv0-arena-id instruction)))]
+        (str "  " target " = native_vec_assoc(" arena ", "
+          (value-name function slots
+            (core/vecassocinstructionv0-source-id instruction))
+          ", "
+          (value-name function slots
+            (core/vecassocinstructionv0-index-id instruction))
+          ", &"
+          (value-name function slots
+            (core/vecassocinstructionv0-value-id instruction))
+          ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
+          (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecPushInstruction instruction)
       (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)

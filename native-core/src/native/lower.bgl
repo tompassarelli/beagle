@@ -3864,7 +3864,8 @@
           (recur (+ position 1)))))))
 
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
-  (or (instance? native.core.VecPushInstruction instruction)
+  (or (instance? native.core.VecAssocInstructionV0 instruction)
+      (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
       (instance? native.core.VecSliceInstructionV0 instruction)
@@ -4136,11 +4137,17 @@
           (or (= "get" callee) (= "assoc" callee)))
         (map-value-of types receiver)
 
-        (and (= position 1) (set-type? types receiver)
+        (and (>= position 1) (set-type? types receiver)
           (or (= "contains?" callee) (= "conj" callee) (= "disj" callee)))
         (set-element-of types receiver)
 
-        (and (= position 1) (vector-type? types receiver) (= "conj" callee))
+        (and (= position 1) (vector-type? types receiver) (= "assoc" callee))
+        (int-type-id)
+
+        (and (= position 2) (vector-type? types receiver) (= "assoc" callee))
+        (vector-element-of types receiver)
+
+        (and (>= position 1) (vector-type? types receiver) (= "conj" callee))
         (vector-element-of types receiver)
 
         (and (= position 1) (vector-type? types receiver) (= "into" callee))
@@ -9623,7 +9630,8 @@
               "TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading")
 
             (and (= "assoc" callee) (> (count args) 0)
-              (source-ref-record? env state (nth args 0)))
+              (or (source-ref-record? env state (nth args 0))
+                  (and (some? expected) (record-type? types expected))))
             (if (or (< (count args) 3) (= 0 (mod (count args) 2)))
               (fail-result state
                 "TODO-NATIVE-RECORD-ASSOC-ARITY: assoc takes a record and one or more key/value pairs")
@@ -11100,6 +11108,34 @@
                   "TODO-NATIVE-CONTAINS-OPERANDS: contains? lowers a closed map key or set element")
 
                 (and (= "assoc" callee) (= 3 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (let [vector-type: core/NativeId (nth value-types 0)
+                      element-type: core/NativeId
+                      (vector-element-of types vector-type)]
+                  (if (not (same-id? (int-type-id) (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-ASSOC-INDEX: vector assoc index must be an Int")
+                    (let [coerced: ExprResultV0
+                          (lower-boundary-coerce types owner current
+                            (nth values 2) (nth value-types 2) element-type)
+                          settled: BodyStateV0 (exprresultv0-state coerced)]
+                      (if (or (state-blocked? settled)
+                              (not (same-id? element-type
+                                (exprresultv0-type-id coerced))))
+                        (fail-result settled
+                          "TODO-NATIVE-ASSOC-VALUE: vector assoc value does not match its element type")
+                        (let [result-id: core/NativeId
+                              (state-id settled owner "vec-assoc")]
+                          (->ExprResultV0
+                            (state-emit (state-bump settled)
+                              (core/->VecAssocInstructionV0
+                                (core/->SsaValueV0 result-id vector-type)
+                                (nth values 0) (nth values 1)
+                                (exprresultv0-value-id coerced)
+                                (arena-value-id owner)))
+                            result-id vector-type false))))))
+
+                (and (= "assoc" callee) (= 3 (count values))
                   (map-type? types (nth value-types 0)))
                 (let [map-type: core/NativeId (nth value-types 0)
                       key-type: core/NativeId (map-key-of types map-type)
@@ -11236,45 +11272,57 @@
                           (nth values 0) (nth values 1)))
                       result-id element false)))
 
-                (and (= "conj" callee) (= 2 (count values))
+                (and (= "conj" callee) (> (count values) 0)
                   (vector-type? types (nth value-types 0)))
                 (let [vector-type: core/NativeId (nth value-types 0)
                       element: core/NativeId (vector-element-of types vector-type)]
-                  (if (not (same-id? element (nth value-types 1)))
-                    (fail-result current
-                      "TODO-NATIVE-CONJ-ELEMENT: the pushed value is not the vector's element type")
-                    (let [result-id: core/NativeId (state-id current owner "vec-push")]
-                      (->ExprResultV0
-                        (state-emit (state-bump current)
-                          (core/->VecPushInstruction
-                            (core/->SsaValueV0 result-id vector-type)
-                            (nth values 0) (nth values 1)
-                            (arena-value-id owner)))
-                        result-id vector-type false))))
+                  (loop [position: Int 1
+                         settled: BodyStateV0 current
+                         holder: core/NativeId (nth values 0)]
+                    (if (>= position (count values))
+                      (->ExprResultV0 settled holder vector-type false)
+                      (if (not (same-id? element (nth value-types position)))
+                        (fail-result settled
+                          "TODO-NATIVE-CONJ-ELEMENT: a pushed value is not the vector's element type")
+                        (let [result-id: core/NativeId
+                              (state-id settled owner "vec-push")]
+                          (recur (+ position 1)
+                            (state-emit (state-bump settled)
+                              (core/->VecPushInstruction
+                                (core/->SsaValueV0 result-id vector-type)
+                                holder (nth values position)
+                                (arena-value-id owner)))
+                            result-id))))))
 
-                (and (= "conj" callee) (= 2 (count values))
+                (and (= "conj" callee) (> (count values) 0)
                   (set-type? types (nth value-types 0)))
                 (let [set-type: core/NativeId (nth value-types 0)
                       element-type: core/NativeId (set-element-of types set-type)
                       equality: (U core/ConcreteEqualityV0 Nil)
                       (concrete-equality-for element-type)]
-                  (cond
-                    (not (same-id? element-type (nth value-types 1)))
-                    (fail-result current
-                      "TODO-NATIVE-CONJ-ELEMENT: the value is not the set's element type")
-                    (nil? equality)
-                    (fail-result current
-                      "TODO-NATIVE-SET-ELEMENT-EQUALITY: conj needs closed concrete element equality")
-                    :else
-                    (let [result-id: core/NativeId
-                          (state-id current owner "set-conj")]
-                      (->ExprResultV0
-                        (state-emit (state-bump current)
-                          (core/->SetConjInstructionV0
-                            (core/->SsaValueV0 result-id set-type)
-                            (nth values 0) (nth values 1)
-                            (arena-value-id owner) equality))
-                        result-id set-type false))))
+                  (if (= 1 (count values))
+                    (->ExprResultV0 current (nth values 0) set-type false)
+                    (if (nil? equality)
+                      (fail-result current
+                        "TODO-NATIVE-SET-ELEMENT-EQUALITY: conj needs closed concrete element equality")
+                      (loop [position: Int 1
+                             settled: BodyStateV0 current
+                             holder: core/NativeId (nth values 0)]
+                        (if (>= position (count values))
+                          (->ExprResultV0 settled holder set-type false)
+                          (if (not (same-id? element-type
+                                    (nth value-types position)))
+                            (fail-result settled
+                              "TODO-NATIVE-CONJ-ELEMENT: a value is not the set's element type")
+                            (let [result-id: core/NativeId
+                                  (state-id settled owner "set-conj")]
+                              (recur (+ position 1)
+                                (state-emit (state-bump settled)
+                                  (core/->SetConjInstructionV0
+                                    (core/->SsaValueV0 result-id set-type)
+                                    holder (nth values position)
+                                    (arena-value-id owner) equality))
+                                result-id))))))))
 
                 (= "conj" callee)
                 (fail-result current
@@ -14001,6 +14049,14 @@
       [(encode-ssa-value (core/vecgetinstruction-result instruction))
        (id-value (core/vecgetinstruction-source-id instruction))
        (id-value (core/vecgetinstruction-index-id instruction))])
+
+    (instance? native.core.VecAssocInstructionV0 instruction)
+    (worlds/canonical-record "vec-assoc-instruction-v0"
+      [(encode-ssa-value (core/vecassocinstructionv0-result instruction))
+       (id-value (core/vecassocinstructionv0-source-id instruction))
+       (id-value (core/vecassocinstructionv0-index-id instruction))
+       (id-value (core/vecassocinstructionv0-value-id instruction))
+       (id-value (core/vecassocinstructionv0-arena-id instruction))])
 
     (instance? native.core.VecPushInstruction instruction)
     (worlds/canonical-record "vec-push-instruction"

@@ -193,6 +193,27 @@ const void *native_vec_at(const native_vec *vector, int64_t index, int64_t strid
   return (const void *)((const uint8_t *)vector->elements + (size_t)(index * stride));
 }
 
+native_vec *native_vec_assoc(native_arena *arena, const native_vec *vector,
+                             int64_t index, const void *value, int64_t stride,
+                             size_t alignment) {
+  native_vec *result;
+  if ((vector == NULL) || (value == NULL) || (stride <= INT64_C(0)) ||
+      (vector->length < INT64_C(0)) || (vector->length > vector->capacity) ||
+      ((vector->length > INT64_C(0)) && (vector->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((index < INT64_C(0)) || (index >= vector->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  result = native_vec_new(arena, vector->length, stride, alignment);
+  memcpy(result->elements, vector->elements,
+         native_vec_bytes(vector->length, stride));
+  memcpy((uint8_t *)result->elements + (size_t)(index * stride), value,
+         (size_t)stride);
+  result->length = vector->length;
+  return result;
+}
+
 native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void *value,
                             int64_t stride, size_t alignment) {
   if ((vector == NULL) || (value == NULL) || (stride <= INT64_C(0))) {

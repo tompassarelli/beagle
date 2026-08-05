@@ -267,6 +267,8 @@
      (core/unionextractinstruction-result instruction)]
     [(VecLengthInstruction value) (core/veclengthinstruction-result instruction)]
     [(VecGetInstruction value) (core/vecgetinstruction-result instruction)]
+    [(VecAssocInstructionV0 value)
+     (core/vecassocinstructionv0-result instruction)]
     [(VecPushInstruction value) (core/vecpushinstruction-result instruction)]
     [(VecEmptyInstruction value) (core/vecemptyinstruction-result instruction)]
     [(VecConcatInstruction value) (core/vecconcatinstruction-result instruction)]
@@ -1018,6 +1020,7 @@
     [(UnionExtractInstruction value) false]
     [(VecLengthInstruction value) false]
     [(VecGetInstruction value) false]
+    [(VecAssocInstructionV0 value) false]
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) false]
@@ -1421,6 +1424,7 @@
       [(UnionExtractInstruction value) ""]
       [(VecLengthInstruction value) ""]
       [(VecGetInstruction value) ""]
+      [(VecAssocInstructionV0 value) ""]
       [(VecPushInstruction value) ""]
       [(VecEmptyInstruction value) ""]
       [(VecConcatInstruction value)
@@ -1874,6 +1878,7 @@
     [(UnionExtractInstruction value) false]
     [(VecLengthInstruction value) false]
     [(VecGetInstruction value) false]
+    [(VecAssocInstructionV0 value) false]
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) true]

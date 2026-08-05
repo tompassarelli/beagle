@@ -193,6 +193,9 @@ native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride
 int64_t native_vec_length(const native_vec *vector);
 /* Traps NATIVE_TRAP_OUT_OF_RANGE unless 0 <= index < length. */
 const void *native_vec_at(const native_vec *vector, int64_t index, int64_t stride);
+native_vec *native_vec_assoc(native_arena *arena, const native_vec *vector,
+                             int64_t index, const void *value, int64_t stride,
+                             size_t alignment);
 /* Push is linear once storage exists. A reusable zero-capacity value produces
    a fresh header; subsequent growth moves that owned header and doubles. */
 native_vec *native_vec_push(native_arena *arena, native_vec *vector,
