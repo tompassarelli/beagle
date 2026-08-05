@@ -3033,6 +3033,38 @@
           (conj coerced-values (exprresultv0-value-id coerced))
           (conj coerced-types (exprresultv0-type-id coerced)))))))
 
+(defn build-vector-literal
+  [owner: core/NativeId
+   state: BodyStateV0
+   vector-type: core/NativeId
+   values: (Vec core/NativeId)] -> ExprResultV0
+  (let [capacity-id: core/NativeId (state-id state owner "vec-cap")
+        empty-id: core/NativeId
+        (state-id (state-bump state) owner "vec-lit")
+        seeded: BodyStateV0
+        (state-emit
+          (state-emit (state-bump (state-bump state))
+            (core/->AtomInstruction
+              (core/->SsaValueV0 capacity-id (int-type-id))
+              (core/->I64Atom (count values))))
+          (core/->VecEmptyInstruction
+            (core/->SsaValueV0 empty-id vector-type)
+            capacity-id (arena-value-id owner)))]
+    (loop [position: Int 0
+           built: BodyStateV0 seeded
+           holder: core/NativeId empty-id]
+      (if (>= position (count values))
+        (->ExprResultV0 built holder vector-type false)
+        (let [push-id: core/NativeId
+              (state-id built owner "vec-lit-push")]
+          (recur (+ position 1)
+            (state-emit (state-bump built)
+              (core/->VecPushInstruction
+                (core/->SsaValueV0 push-id vector-type)
+                holder (nth values position)
+                (arena-value-id owner)))
+            push-id))))))
+
 (defn vector-type?
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> Bool
@@ -3600,6 +3632,78 @@
       (lower-empty-set env owner state expected)
 
       :else nil)))
+
+;; A nonempty literal normally derives its element type from its members. At a
+;; declared vector-of-union boundary, that boundary instead owns the carrier.
+(defn lower-contextual-vector
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expression: core/NativeId
+   expected: (U core/NativeId Nil)
+   lower-item: [BodyStateV0 core/NativeId -> ExprResultV0]] -> (U ExprResultV0 Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        items-node: (U core/NativeId Nil)
+        (index-first-object index expression "items")
+        items: (Vec core/NativeId)
+        (if (nil? items-node) [] (index-sequence-items index items-node))]
+    (if (or (not (= "vec" (fact-text index expression "form-kind")))
+            (nil? expected)
+            (not (vector-type? types expected))
+            (= 0 (count items)))
+      nil
+      (let [element-type: core/NativeId (vector-element-of types expected)]
+        (if (= 0 (count (union-variants-of types element-type)))
+          nil
+          (let [lowered: ArgsResultV0
+                (loop [position: Int 0
+                       current: BodyStateV0 state
+                       values: (Vec core/NativeId) []
+                       value-types: (Vec core/NativeId) []]
+                  (if (or (>= position (count items))
+                          (state-blocked? current))
+                    (->ArgsResultV0 current values value-types false)
+                    (let [item: ExprResultV0
+                          (lower-item current (nth items position))]
+                      (if (exprresultv0-terminated item)
+                        (->ArgsResultV0 (exprresultv0-state item) values
+                          value-types true)
+                        (recur (+ position 1) (exprresultv0-state item)
+                          (conj values (exprresultv0-value-id item))
+                          (conj value-types (exprresultv0-type-id item)))))))
+                current: BodyStateV0 (argsresultv0-state lowered)]
+            (cond
+              (argsresultv0-terminated lowered)
+              (->ExprResultV0 current (lower-id "body" ["unreachable"])
+                (type-id "LowerFailure") true)
+
+              (state-blocked? current) (dead-result current)
+
+              :else
+              (let [coerced: ArgsResultV0
+                    (coerce-values-to-type types owner current
+                      (argsresultv0-values lowered)
+                      (argsresultv0-value-types lowered)
+                      element-type)
+                    settled: BodyStateV0 (argsresultv0-state coerced)]
+                (if (state-blocked? settled)
+                  (dead-result settled)
+                  (build-vector-literal owner settled expected
+                    (argsresultv0-values coerced)))))))))))
+
+(defn lower-contextual-value
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expression: core/NativeId
+   expected: (U core/NativeId Nil)
+   lower-item: [BodyStateV0 core/NativeId -> ExprResultV0]] -> (U ExprResultV0 Nil)
+  (let [empty: (U ExprResultV0 Nil)
+        (lower-contextual-empty env owner state expression expected)]
+    (if (some? empty)
+      empty
+      (lower-contextual-vector env owner state expression expected lower-item))))
 
 (defn text-type-id [] -> core/NativeId (type-id "String"))
 
@@ -5565,7 +5669,12 @@
                       (let [expected: (U core/NativeId Nil)
                             (annotation-native-type index annotation)
                             contextual: (U ExprResultV0 Nil)
-                            (lower-contextual-empty env owner current value-node expected)
+                            (lower-contextual-value env owner current value-node
+                              expected
+                              (fn
+                                [item-state: BodyStateV0
+                                 item-node: core/NativeId] -> ExprResultV0
+                                (lower-expr env owner item-state item-node)))
                             raw: ExprResultV0
                             (if (nil? contextual)
                               (lower-expr env owner current value-node)
@@ -5890,7 +5999,12 @@
                                 expected: (U core/NativeId Nil)
                                 (annotation-native-type index annotation)
                                 contextual: (U ExprResultV0 Nil)
-                                (lower-contextual-empty env owner current value-node expected)
+                                (lower-contextual-value env owner current value-node
+                                  expected
+                                  (fn
+                                    [item-state: BodyStateV0
+                                     item-node: core/NativeId] -> ExprResultV0
+                                    (lower-expr env owner item-state item-node)))
                                 raw: ExprResultV0
                                 (if (nil? contextual)
                                   (lower-expr env owner current value-node)
@@ -6097,34 +6211,7 @@
                   "TODO-NATIVE-VECTOR-LITERAL-TYPE: the module declares no vector of this element type")
 
                 :else
-                (let [capacity-id: core/NativeId (state-id current owner "vec-cap")
-                      empty-id: core/NativeId
-                      (state-id (state-bump current) owner "vec-lit")
-                      seeded: BodyStateV0
-                      (state-emit
-                        (state-emit (state-bump (state-bump current))
-                          (core/->AtomInstruction
-                            (core/->SsaValueV0 capacity-id (int-type-id))
-                            (core/->I64Atom (count values))))
-                        (core/->VecEmptyInstruction
-                          (core/->SsaValueV0 empty-id vector-type)
-                          capacity-id (arena-value-id owner)))
-                      filled: ExprResultV0
-                      (loop [position: Int 0
-                             built: BodyStateV0 seeded
-                             holder: core/NativeId empty-id]
-                        (if (>= position (count values))
-                          (->ExprResultV0 built holder vector-type false)
-                          (let [push-id: core/NativeId
-                                (state-id built owner "vec-lit-push")]
-                            (recur (+ position 1)
-                              (state-emit (state-bump built)
-                                (core/->VecPushInstruction
-                                  (core/->SsaValueV0 push-id vector-type)
-                                  holder (nth values position)
-                                  (arena-value-id owner)))
-                              push-id))))]
-                  filled)))))
+                (build-vector-literal owner current vector-type values)))))
 
         (= "set" kind)
         (let [items-node: (U core/NativeId Nil) (index-first-object index expr "items")
@@ -7122,8 +7209,12 @@
                             (if (some? declared-expected)
                               declared-expected receiver-expected)
                             contextual: (U ExprResultV0 Nil)
-                            (lower-contextual-empty env owner current
-                              argument-node expected)
+                            (lower-contextual-value env owner current
+                              argument-node expected
+                              (fn
+                                [item-state: BodyStateV0
+                                 item-node: core/NativeId] -> ExprResultV0
+                                (lower-expr env owner item-state item-node)))
                             argument: ExprResultV0
                             (if (nil? contextual)
                               (lower-expr env owner current argument-node)
@@ -8537,8 +8628,12 @@
             expected: (U core/NativeId Nil)
             (annotation-native-type (bodyenvv0-index env) annotation)
             contextual: (U ExprResultV0 Nil)
-            (lower-contextual-empty env owner current
-              (globalbindingv0-value global) expected)
+            (lower-contextual-value env owner current
+              (globalbindingv0-value global) expected
+              (fn
+                [item-state: BodyStateV0
+                 item-node: core/NativeId] -> ExprResultV0
+                (lower-expr env owner item-state item-node)))
             raw: ExprResultV0
             (if (nil? contextual)
               (lower-expr env owner current (globalbindingv0-value global))
@@ -8708,7 +8803,11 @@
             expected: (U core/NativeId Nil)
             (annotation-native-type index return-annotation)
             contextual: (U ExprResultV0 Nil)
-            (lower-contextual-empty env id initialized body-node expected)
+            (lower-contextual-value env id initialized body-node expected
+              (fn
+                [item-state: BodyStateV0
+                 item-node: core/NativeId] -> ExprResultV0
+                (lower-expr env id item-state item-node)))
             result: ExprResultV0
             (if (nil? contextual)
               (lower-expr env id initialized body-node)
