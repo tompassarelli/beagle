@@ -6718,22 +6718,45 @@
    state: BodyStateV0
    values: (Vec core/NativeId)
    value-types: (Vec core/NativeId)] -> ExprResultV0
-  (if (not (and (= 1 (count values))
-             (vector-type? types (nth value-types 0))))
+  (if (not (= 1 (count values)))
     (fail-result state
-      "TODO-NATIVE-SORT-OPERAND: sort takes one closed native vector")
-    (let [vector-type: core/NativeId (nth value-types 0)
-          element-type: core/NativeId (vector-element-of types vector-type)]
-      (if (not (comparable-type? types element-type))
+      "TODO-NATIVE-SORT-OPERAND: sort takes one closed native collection")
+    (let [source-type: core/NativeId (nth value-types 0)]
+      (cond
+        (vector-type? types source-type)
+        (let [element-type: core/NativeId
+              (vector-element-of types source-type)]
+          (if (not (comparable-type? types element-type))
+            (fail-result state
+              "TODO-NATIVE-SORT-ELEMENT: sort needs sealed comparable element semantics")
+            (let [result-id: core/NativeId (state-id state owner "vec-sort")]
+              (->ExprResultV0
+                (state-emit (state-bump state)
+                  (core/->VecSortInstructionV0
+                    (core/->SsaValueV0 result-id source-type)
+                    (nth values 0) (arena-value-id owner) element-type))
+                result-id source-type false))))
+
+        (insertion-order-set-type? types source-type)
+        (let [element-type: core/NativeId (set-element-of types source-type)
+              vector-type: (U core/NativeId Nil)
+              (vector-type-of types element-type)]
+          (if (nil? vector-type)
+            (fail-result state
+              "TODO-NATIVE-SORT-VECTOR-TYPE: the Set element has no declared Vec carrier")
+            (let [vector-id: core/NativeId
+                  (state-id state owner "sort-set-vector")
+                  converted: BodyStateV0
+                  (state-emit (state-bump state)
+                    (core/->SetVectorInstructionV0
+                      (core/->SsaValueV0 vector-id vector-type)
+                      (nth values 0) (arena-value-id owner)))]
+              (lower-vector-sort types owner converted
+                [vector-id] [vector-type]))))
+
+        :else
         (fail-result state
-          "TODO-NATIVE-SORT-ELEMENT: sort needs sealed comparable element semantics")
-        (let [result-id: core/NativeId (state-id state owner "vec-sort")]
-          (->ExprResultV0
-            (state-emit (state-bump state)
-              (core/->VecSortInstructionV0
-                (core/->SsaValueV0 result-id vector-type)
-                (nth values 0) (arena-value-id owner) element-type))
-            result-id vector-type false))))))
+          "TODO-NATIVE-SORT-OPERAND: sort needs a closed Vec or insertion-order Set")))))
 
 ;; A repeated immutable lookup is keyed by its receiver SSA and sealed field/key
 ;; identity. Map keyword access and generated record accessors share that proof.
