@@ -14,11 +14,11 @@ trap cleanup EXIT
 
 mkdir -p "$work/src/native"
 for name in core worlds lower obligations; do
-  { printf '#lang beagle\n'; cat "$repo/native-core/src/native/$name.bgl"; } \
+  { printf '#lang beagle/clj\n'; cat "$repo/native-core/src/native/$name.bgl"; } \
     > "$work/src/native/$name.bclj"
 done
 
-BEAGLE_OUT="$work/out" "$repo/bin/beagle" build --target clj "$work"/src/native/*.bclj \
+BEAGLE_OUT="$work/out" "$repo/bin/beagle" build "$work"/src/native/*.bclj \
   > "$work/build.log" 2>&1 || { cat "$work/build.log" >&2; exit 1; }
 
 # See native-core/validation/slice-fold/drive.sh: cross-module `match` on an
