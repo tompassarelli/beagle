@@ -13249,17 +13249,19 @@
         (if settled current (recur (+ round 1) next))))))
 
 (defn settle-effects [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
-  (settle-effect
+  (let [pure-settled: (Vec TypedFunctionV0)
+        (settle-effect functions (pure-effect-id))]
     (settle-effect
       (settle-effect
         (settle-effect
           (settle-effect
-            (settle-effect functions (allocate-effect-id))
-            (atom-state-effect-id))
-          (host-environment-effect-id))
-        (host-stdout-effect-id))
-      (host-socket-effect-id))
-    (host-clock-effect-id)))
+            (settle-effect
+              (settle-effect pure-settled (allocate-effect-id))
+              (atom-state-effect-id))
+            (host-environment-effect-id))
+          (host-stdout-effect-id))
+        (host-socket-effect-id))
+      (host-clock-effect-id))))
 
 (defn slice-regions [] -> (Vec core/RegionDef)
   [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)
