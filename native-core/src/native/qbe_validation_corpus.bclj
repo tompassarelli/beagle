@@ -1143,7 +1143,7 @@
 
 (defn explicitly-refused? [(world : core/NativeWorld)] -> Bool
   (and (core/validationreport-passed (core/validate-world world))
-    (match (qbe/materialize-world world 3)
+    (match (qbe/materialize-world world 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "native world uses a shape outside the QBE materializer's slice"
@@ -1170,7 +1170,7 @@
 (def refusal-value-equal-proven?: Bool
   (and (core/validationreport-passed
          (core/validate-world refusal-value-equal-world))
-    (match (qbe/materialize-world refusal-value-equal-world 3)
+    (match (qbe/materialize-world refusal-value-equal-world 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: equal" value)])))
@@ -1178,7 +1178,7 @@
 (def refusal-value-hash-proven?: Bool
   (and (core/validationreport-passed
          (core/validate-world refusal-value-hash-world))
-    (match (qbe/materialize-world refusal-value-hash-world 3)
+    (match (qbe/materialize-world refusal-value-hash-world 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: hash" value)])))
@@ -1186,7 +1186,7 @@
 (def refusal-value-compare-proven?: Bool
   (and (core/validationreport-passed
          (core/validate-world refusal-value-compare-world))
-    (match (qbe/materialize-world refusal-value-compare-world 3)
+    (match (qbe/materialize-world refusal-value-compare-world 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: compare" value)])))
@@ -1194,7 +1194,7 @@
 (def refusal-value-to-text-proven?: Bool
   (and (core/validationreport-passed
          (core/validate-world refusal-value-to-text-world))
-    (match (qbe/materialize-world refusal-value-to-text-world 3)
+    (match (qbe/materialize-world refusal-value-to-text-world 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: to-text" value)])))
@@ -1203,22 +1203,22 @@
   (explicitly-refused? atom-world))
 
 (def fixture-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world fixture-world 0)))
+  (require-artifact (qbe/materialize-world fixture-world 0 "lp64")))
 
 (def fixture-permuted-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world fixture-world-permuted 0)))
+  (require-artifact (qbe/materialize-world fixture-world-permuted 0 "lp64")))
 
 (def slice-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world slice-world 1)))
+  (require-artifact (qbe/materialize-world slice-world 1 "lp64")))
 
 (def slice-permuted-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world slice-world-permuted 1)))
+  (require-artifact (qbe/materialize-world slice-world-permuted 1 "lp64")))
 
 (def concat-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world concat-world 2)))
+  (require-artifact (qbe/materialize-world concat-world 2 "lp64")))
 
 (def concat-permuted-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world concat-world-permuted 2)))
+  (require-artifact (qbe/materialize-world concat-world-permuted 2 "lp64")))
 
 (def fixture-deterministic?: Bool
   (and refusal-index-proven?
