@@ -94,26 +94,27 @@ the complete signature fits within 80 columns:
 
 ```clojure
 (defn zero [] -> Int 0)
-(defn increment [x: Int] -> Int (+ x 1))
-(defn add [x: Int y: Int] -> Int (+ x y))
+(defn increment [(x : Int)] -> Int (+ x 1))
+(defn add [(x : Int) (y : Int)] -> Int (+ x y))
 ```
 
 Three or more entries always put the vector on the following line. An
 over-width zero-, one-, or two-entry signature does too. A wrapped vector has
 one logical entry per line and is never partially packed. Binding names start
-in the same column; `:` attaches to the name and has exactly one following
-space. Names and types are never padded into columns:
+in the same column; a typed entry is parenthesized `(name : Type)` with one
+space on each side of `:`. Names and types are never padded into columns:
 
 ```clojure
 (defn clamp
-  [long-name: Int
-   minimum: Int
-   maximum: Int] -> Int
+  [(long-name : Int)
+   (minimum : Int)
+   (maximum : Int)] -> Int
   ...)
 ```
 
-The reader accepts either physical layout. `beagle fmt --write .` performs the
-token-aware mechanical rewrite; `beagle fmt --check .` gives people, CI, and
+The reader accepts either physical layout, and a flat `name: Type` entry still
+parses. `beagle fmt --write .` performs the token-aware mechanical rewrite,
+including folding a flat entry into `(name : Type)`; `beagle fmt --check .` gives people, CI, and
 agents the same answer without making whitespace part of language validity.
 
 ## Two compilation paths
