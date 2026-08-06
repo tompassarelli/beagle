@@ -30,6 +30,7 @@ FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
 # Fram engine (resolve.clj). beagle's tooling RENTS it. CHARTROOM remains the legacy override.
 CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
+source "$BIN/_beagle-racket"
 source "$BIN/_fram-resolver"
 RES="$(find_fram_resolver)" || exit 3
 
@@ -44,7 +45,7 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # so cross-module calls resolve), then resolve + emit the call graph in chartroom.
 EDNS=(); i=0
 while IFS= read -r f; do
-    racket "$RT" --emit-edn "$f" > "$WORK/$i.edn" 2>/dev/null
+    "$RACKET" "$RT" --emit-edn "$f" > "$WORK/$i.edn" 2>/dev/null
     EDNS+=("$WORK/$i.edn"); i=$((i+1))
 done < <(find "$DIR" -type f \( -name '*.bclj' -o -name '*.bjs' -o -name '*.bnix' -o -name '*.bgl' \) | sort)
 

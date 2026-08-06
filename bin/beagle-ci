@@ -32,9 +32,10 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+source "$(dirname "${BASH_SOURCE[0]}")/_beagle-racket"
 
 echo "=== 1/5: raco test beagle-test/tests/ ==="
-raco test beagle-test/tests/ 2>&1 | tail -5
+"$RACO" test beagle-test/tests/ 2>&1 | tail -5
 
 echo
 echo "=== 2/5: bin/beagle-test-nix ==="
@@ -43,7 +44,7 @@ bin/beagle-test-nix 2>&1 | tail -3
 echo
 echo "=== 3/5: nix-instantiate smoke test on all fixtures ==="
 if command -v nix-instantiate >/dev/null; then
-    BEAGLE_NIX_EVAL_CHECK=1 raco test beagle-test/tests/nix-property.rkt 2>&1 | tail -3
+    BEAGLE_NIX_EVAL_CHECK=1 "$RACO" test beagle-test/tests/nix-property.rkt 2>&1 | tail -3
 else
     echo "  (skipped — nix-instantiate not on PATH)"
 fi

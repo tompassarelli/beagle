@@ -14,6 +14,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+source "$(dirname "${BASH_SOURCE[0]}")/_beagle-racket"
 
 NIX_FILES=(
   beagle-test/tests/nix-roundtrip.rkt
@@ -33,7 +34,7 @@ mode="${1:-fast}"
 
 case "$mode" in
   --full)
-    raco test "${NIX_FILES[@]}" "${CROSS_FILES[@]}"
+    "$RACO" test "${NIX_FILES[@]}" "${CROSS_FILES[@]}"
     ;;
   --watch)
     if ! command -v entr >/dev/null; then
@@ -41,10 +42,10 @@ case "$mode" in
       exit 2
     fi
     find beagle-lib beagle-test/tests -name "*.rkt" -o -name "*.bnix" \
-      | entr -c raco test "${NIX_FILES[@]}"
+      | entr -c "$RACO" test "${NIX_FILES[@]}"
     ;;
   fast|"")
-    raco test "${NIX_FILES[@]}"
+    "$RACO" test "${NIX_FILES[@]}"
     ;;
   *)
     echo "usage: beagle-test-nix [--full|--watch]" >&2

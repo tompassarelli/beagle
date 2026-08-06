@@ -73,45 +73,91 @@ if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT
     unset _bscope
 fi
 
-# --- Bytecode version gate ---------------------------------------------------
-# Racket refuses to load a .zo compiled by a different Racket, and the death is
-# opaque: "body of /nix/store/…/raco.rkt" with no mention of bytecode. Every
-# flake bump of the pinned Racket therefore bricks every bin/* script until
-# someone hand-runs `raco make`, and the error names neither the cause nor the
-# cure. Recompile automatically instead: stamp the racket that produced the
-# current .zo files, and rebuild when the resolved racket no longer matches.
-#
-# Cost when current is one file read; `raco make` (~0.5s, or minutes cold) runs
-# only on an actual version change. Failure here is never fatal — falling
-# through to the original error beats masking it with a build failure.
-# Gated on _BEAGLE_RACKET, not RACO: an unresolved pinned racket means RACO is
-# the ambient one, and compiling with it would bake in the very skew this fixes.
-if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" && -z "${_BEAGLE_ZO_CHECKED:-}" ]]; then
-    export _BEAGLE_ZO_CHECKED=1
-    _zo_stamp="$BEAGLE_ROOT/.beagle/zo-racket"
-    _zo_want="$_BEAGLE_RACKET"
-    if [[ "$(cat "$_zo_stamp" 2>/dev/null || true)" != "$_zo_want" ]]; then
-        # mkdir is the atomic test-and-set: concurrent bin/* invocations race
-        # here constantly (hooks, daemon, agents), and two raco makes writing the
-        # same compiled/ dir corrupt each other. Loser skips rather than waits —
-        # it would only reach the same stale bytecode the winner is fixing, and
-        # blocking every script behind one cold compile is worse than one
-        # confusing failure.
-        if mkdir "$BEAGLE_ROOT/.beagle/zo-lock" 2>/dev/null; then
-            trap 'rmdir "$BEAGLE_ROOT/.beagle/zo-lock" 2>/dev/null || true' EXIT
-            echo "beagle: racket changed; recompiling bytecode (once)…" >&2
-            if "$RACO" make -j "$(nproc 2>/dev/null || echo 4)" \
-                   "$BEAGLE_ROOT/beagle-lib/main.rkt" \
-                   "$BEAGLE_ROOT/beagle-lib/private/check-all.rkt" \
-                   "$BEAGLE_ROOT/beagle-lib/private/daemon.rkt" >&2; then
-                printf '%s' "$_zo_want" > "$_zo_stamp"
-                echo "beagle: bytecode current." >&2
-            else
-                echo "beagle: bytecode recompile FAILED — expect stale-.zo errors." >&2
-            fi
-            rmdir "$BEAGLE_ROOT/.beagle/zo-lock" 2>/dev/null || true
-            trap - EXIT
+# --- Compiled-closure freshness gate -----------------------------------------
+# Racket's loader checks .zo freshness per file by timestamp and never
+# transitively, so an unchanged dependent keeps loading bytecode built against
+# an old dependency. `raco make` is the only transitive check (SHA-1 in
+# compiled/*.dep), so it runs here, at the seam every bin/* entrypoint sources.
+# The resolved racket path is part of the stamp: .zo is version-specific too.
+# Escape hatch: BEAGLE_NO_ZO_GATE=1.
+if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
+      && "${BEAGLE_NO_ZO_GATE:-0}" == 0 && "${_BEAGLE_ZO_GATE_PID:-}" != "$$" ]]; then
+    # An exec chain (bin/beagle -> bin/beagle-check) keeps the SAME pid and
+    # re-sources this file; a real subprocess never inherits its parent's pid,
+    # so this dedupes the exec hop WITHOUT ever skipping a fresh invocation.
+    export _BEAGLE_ZO_GATE_PID=$$
+
+    _zo_stamp="$BEAGLE_ROOT/.beagle/zo-fresh"
+    _zo_lock="$BEAGLE_ROOT/.beagle/zo-gate.lock"
+    # Every tree holding tracked .rkt; a new one must be added here. Not
+    # repo-wide: in-tree scratch output from a test run would trip it constantly.
+    _zo_scan=()
+    for _d in beagle-lib beagle beagle-test contrib tools; do
+        [[ -d "$BEAGLE_ROOT/$_d" ]] && _zo_scan+=("$BEAGLE_ROOT/$_d") || true
+    done
+
+    # Directory mtimes count too: a deleted .rkt leaves a still-loadable orphan
+    # .zo. Wrong verdicts here can only cost an extra rebuild, never a skip.
+    _beagle_zo_stale() {
+        [[ -f "$_zo_stamp" ]] || return 0
+        [[ "$(cat "$_zo_stamp" 2>/dev/null || true)" == "$_BEAGLE_RACKET" ]] || return 0
+        [[ -n "$(find "${_zo_scan[@]}" -name compiled -prune -o \
+                      \( -name '*.rkt' -o -type d \) -newer "$_zo_stamp" \
+                      -print -quit 2>/dev/null)" ]]
+    }
+
+    _beagle_zo_rebuild() {
+        _beagle_zo_stale || return 0          # a lock holder already fixed it
+        # The stamp inherits this file's mtime, so its precision is the
+        # filesystem's own: a source touched from here on reads as newer.
+        local ref="$_zo_stamp.start" f
+        : > "$ref" || return 1
+        local roots=()
+        while IFS= read -r -d '' f; do
+            [[ "$f" == bin/* ]] && continue              # shebang scripts, no .zo
+            [[ -f "$BEAGLE_ROOT/$f" ]] && roots+=("$BEAGLE_ROOT/$f") || true
+        done < <(git -C "$BEAGLE_ROOT" ls-files -z -- '*.rkt' 2>/dev/null)
+        if [[ ${#roots[@]} -eq 0 ]]; then                # no git / not a checkout
+            while IFS= read -r -d '' f; do roots+=("$f"); done \
+                < <(find "${_zo_scan[@]}" -name compiled -prune -o -name '*.rkt' -print0)
+        fi
+        [[ ${#roots[@]} -gt 0 ]] || return 1
+        echo "beagle: source changed; recompiling bytecode (${#roots[@]} modules)…" >&2
+        "$RACO" make -j "$(nproc 2>/dev/null || echo 4)" "${roots[@]}" >&2 || return 1
+        printf '%s' "$_BEAGLE_RACKET" > "$_zo_stamp" || return 1
+        touch -r "$ref" "$_zo_stamp" || return 1
+        rm -f "$ref"
+        echo "beagle: bytecode current." >&2
+    }
+
+    _zo_ok=1
+    if _beagle_zo_stale; then
+        mkdir -p "$BEAGLE_ROOT/.beagle" 2>/dev/null || true
+        # Concurrent bin/* invocations race constantly (hooks, daemon, agents)
+        # and two raco makes on one compiled/ dir corrupt each other. The loser
+        # WAITS: skipping would run it against the very bytecode the winner is
+        # fixing. An unwritable lock degrades to building unlocked, not to
+        # running stale.
+        if : >>"$_zo_lock" 2>/dev/null; then
+            ( flock 9 || true; _beagle_zo_rebuild ) 9>>"$_zo_lock" || _zo_ok=0
+        else
+            _beagle_zo_rebuild || _zo_ok=0
         fi
     fi
-    unset _zo_stamp _zo_want
+
+    unset -f _beagle_zo_stale _beagle_zo_rebuild
+    unset _zo_stamp _zo_lock _zo_scan _d
+    if [[ "$_zo_ok" != 1 ]]; then
+        unset _zo_ok
+        # Never fall through to a broken or stale closure — that is the same
+        # phantom-bug class this gate exists to end.
+        echo "beagle: bytecode recompile FAILED (see the raco make errors above)." >&2
+        echo "beagle: refusing to run against a stale/broken compiled closure." >&2
+        echo "beagle: fix the compile error, or bypass with BEAGLE_NO_ZO_GATE=1." >&2
+        case "$-" in
+            *i*) return 1 ;;
+            *)   exit 1 ;;
+        esac
+    fi
+    unset _zo_ok
 fi
