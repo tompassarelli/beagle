@@ -34,15 +34,15 @@
    ;; --- types ---------------------------------------------------------------
    (cheat "defrecord" "Types"
           "Product type with typed fields; generates a constructor and accessors."
-          "(defrecord Point [x: Int y: Int])")
+          "(defrecord Point [(x : Int) (y : Int)])")
 
    (cheat "defunion + match" "Types"
           "Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the authoring loop can auto-fill the clauses)."
           (string-append
-           "(defrecord Circle [r: Int])\n"
-           "(defrecord Square [side: Int])\n"
+           "(defrecord Circle [(r : Int)])\n"
+           "(defrecord Square [(side : Int)])\n"
            "(defunion Shape Circle Square)\n"
-           "(defn area [s: Shape] -> Int\n"
+           "(defn area [(s : Shape)] -> Int\n"
            "  (match s [(Circle r) r] [(Square side) side]))"))
 
    (cheat "defscalar :where" "Types / contracts"
@@ -56,8 +56,8 @@
           "(defenum Color Red Green Blue)")
 
    (cheat "postfix : annotations" "Types"
-          "Types attach postfix: `name: Type` on params, defs, fields and let bindings; `-> Ret` for returns. (`(name: T)` pairs also parse.)"
-          "(defn clamp [n: Int] -> Int (if (> n 100) 100 n))")
+          "Types attach postfix. Params and typed fields are canonically parenthesized — `(name : Type)`; `def`/`defonce` and let bindings stay flat `name: Type`; returns are `-> Ret`. Flat `name: Type` still parses in a param vector, and `beagle fmt --write` rewrites it to the parenthesized form."
+          "(defn clamp [(n : Int)] -> Int (if (> n 100) 100 n))")
 
    ;; --- bindings & functions ------------------------------------------------
    (cheat "def / defonce" "Bindings"
@@ -67,13 +67,13 @@
    (cheat "defn" "Functions"
           "Function with typed params and return. Params are a bracket vector."
           (string-append
-           "(defn add [x: Int y: Int] -> Int\n"
+           "(defn add [(x : Int) (y : Int)] -> Int\n"
            "  (+ x y))"))
 
    (cheat "let / loop / recur / cond" "Control flow"
           "Standard control flow; bindings use bracket vectors."
           (string-append
-           "(defn sum-to [n: Int] -> Int\n"
+           "(defn sum-to [(n : Int)] -> Int\n"
            "  (loop [i 0 acc 0]\n"
            "    (cond [(> i n) acc]\n"
            "          [:else (recur (+ i 1) (+ acc i))])))"))

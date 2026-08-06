@@ -26,22 +26,84 @@
 (test-case "one or two parameters stay inline when the complete signature fits"
   (define-values (actual edits)
     (formatted
-     "(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))\n"))
+     "(defn add\n  [(x : Int)\n   (y : Int)] -> Int\n  (+ x y))\n"))
   (check-equal? actual
-                "(defn add [x: Int y: Int] -> Int\n  (+ x y))\n")
+                "(defn add [(x : Int) (y : Int)] -> Int\n  (+ x y))\n")
   (check-equal? (length edits) 1))
 
 (test-case "three logical parameters are always vertical"
   (define-values (actual edits)
-    (formatted "(defn clamp [value: Int minimum: Int maximum: Int] -> Int value)\n"))
+    (formatted
+     "(defn clamp [(value : Int) (minimum : Int) (maximum : Int)] -> Int value)\n"))
   (check-equal?
    actual
    (string-append
     "(defn clamp\n"
-    "  [value: Int\n"
-    "   minimum: Int\n"
-    "   maximum: Int] -> Int value)\n"))
+    "  [(value : Int)\n"
+    "   (minimum : Int)\n"
+    "   (maximum : Int)] -> Int value)\n"))
   (check-equal? (length edits) 1))
+
+(test-case "a flat typed binding is drift; the canonical form is parenthesized"
+  (define-values (actual edits)
+    (formatted "(defn add [x: Int y: Int] -> Int\n  (+ x y))\n"))
+  (check-equal? actual "(defn add [(x : Int) (y : Int)] -> Int\n  (+ x y))\n")
+  (check-equal? (length edits) 1)
+  (check-equal? (layout-edit-role (car edits)) "parameter"))
+
+(test-case "the canonical parenthesized form is silent"
+  (define source
+    (string-append
+     "(defn add [(x : Int) (y : Int)] -> Int (+ x y))\n"
+     "(defrecord Point [(x : Int) (y : Int)])\n"
+     "(defn destr [([a b] : Point)] -> Int a)\n"
+     "(defn kdestr [({:keys [a]} : Point)] -> Int a)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual source)
+  (check-equal? edits '()))
+
+(test-case "marker spacing inside an already-wrapped entry is normalized"
+  (define-values (actual edits)
+    (formatted
+     (string-append
+      "(defn f [(x: Int)] -> Int x)\n"
+      "(defn g [([a b]: Point)] -> Int a)\n")))
+  (check-equal?
+   actual
+   (string-append
+    "(defn f [(x : Int)] -> Int x)\n"
+    "(defn g [([a b] : Point)] -> Int a)\n"))
+  (check-equal? (length edits) 2))
+
+(test-case "a typed rest parameter is wrapped inside the & pair"
+  (define-values (actual edits)
+    (formatted "(defn collect [a: Int & more: (Vec Int)] -> Int a)\n"))
+  (check-equal? actual "(defn collect [(a : Int) & (more : (Vec Int))] -> Int a)\n")
+  (check-equal? (length edits) 1))
+
+(test-case "wrapping counts toward the 80-column signature width"
+  ;; `(defn <60 f> [x: Int] -> Int x)` is 79 columns flat and 81 wrapped, so the
+  ;; canonical text — not the source text — decides the break.
+  (define source (format "(defn ~a [x: Int] -> Int x)\n" (make-string 60 #\f)))
+  (define-values (actual edits) (formatted source))
+  (check-equal?
+   actual
+   (format "(defn ~a\n  [(x : Int)] -> Int x)\n" (make-string 60 #\f)))
+  (check-equal? (length edits) 1))
+
+(test-case "defmacro params have no typed-binding grammar, so they are never wrapped"
+  ;; `[x: Any]` is three macro params, not one typed entry — wrapping it would
+  ;; change the macro's arity.
+  (define-values (actual edits)
+    (formatted "(defmacro m [x: Any] `(do ~x))\n"))
+  (check-equal? actual "(defmacro m [x: Any] `(do ~x))\n")
+  (check-equal? edits '()))
+
+(test-case "the legacy :- marker is left alone by the polarity rewrite"
+  (define-values (actual edits)
+    (formatted "(defn add [x :- Int y :- Int] :- Int (+ x y))\n"))
+  (check-equal? actual "(defn add [x :- Int y :- Int] :- Int (+ x y))\n")
+  (check-equal? edits '()))
 
 (test-case "zero through two entries break when the complete signature exceeds 80"
   (define long-name (make-string 68 #\f))
@@ -91,9 +153,9 @@
   (define-values (actual edits) (formatted source))
   (check-true (string-contains? actual "(def data [x y z])"))
   (check-true (string-contains? actual "(fn [x y]"))
-  (check-true (string-contains? actual "(defrecord Pair [left: Int right: Int])"))
+  (check-true (string-contains? actual "(defrecord Pair [(left : Int) (right : Int)])"))
   (check-true (string-contains? actual "(m [this x] -> Int)"))
-  (check-true (string-contains? actual "(Pair [left: Int right: Int])"))
+  (check-true (string-contains? actual "(Pair [(left : Int) (right : Int)])"))
   (check-equal? (length edits) 4))
 
 (test-case "line-comment reach makes a rewrite diagnostic-only"

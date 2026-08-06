@@ -85,57 +85,66 @@ two-entry signature does the same. A vertical vector has its first entry beside
 The `[` is exactly two columns past the owning form's opening parenthesis; `]`
 remains after the final entry and is followed by exactly one space before any
 `-> RET`. Never partially wrap a vector. Binding names are left-aligned at that
-shared entry-start column. In a typed entry, `:` immediately follows the name
-and exactly one space follows `:`; never pad names, colons, or types into
+shared entry-start column. A typed entry is parenthesized `(NAME : TYPE)` with
+exactly one space on each side of `:`; never pad names, colons, or types into
 columns:
 
 ```clojure
-(defn add [left: Int r: Int] -> Int
+(defn add [(left : Int) (r : Int)] -> Int
   (+ left r))
 
-(defrecord Point [x: Int y: Int])
+(defrecord Point [(x : Int) (y : Int)])
 ```
 
-Thus `[abc: Int b: String bc: (Vec Int)]` lays out as:
+Thus `[(abc : Int) (b : String) (bc : (Vec Int))]` lays out as:
 
 ```clojure
-[abc: Int
- b: String
- bc: (Vec Int)]
+[(abc : Int)
+ (b : String)
+ (bc : (Vec Int))]
 ```
 
 Do not pad the type column:
 
 ```clojure
-[abc: Int
- b:   String
- bc:  (Vec Int)]
+[(abc : Int)
+ (b   : String)
+ (bc  : (Vec Int))]
 ```
 
 Do not indent shorter names to align the colons:
 
 ```clojure
-[abc: Int
-   b: String
-  bc: (Vec Int)]
+[(abc : Int)
+   (b : String)
+  (bc : (Vec Int))]
 ```
 
-A typed `name: Type`, destructuring form, or `& rest` pair is one logical
+A typed `(name : Type)`, destructuring form, or `& rest` pair is one logical
 entry. The same rule covers `defn`/`defn-`/`fn`, multi-arity clauses, `letfn`,
 protocol and implementation methods, `defmacro`, and typed record/union/error
 fields. It does not apply to data vectors or let-style value-binding vectors.
 The reader accepts physical layout; `beagle fmt --check` owns canonical style
-and `beagle fmt --write` applies the same token-aware source-range rewrite.
-Comment-bearing ranges that cannot move safely are reported without a lossy
-rewrite. Source-less macro-produced datums have no physical-layout obligation.
+and `beagle fmt --write` applies the same token-aware source-range rewrite —
+including rewriting a flat `name: Type` entry into `(name : Type)`. A `defmacro`
+param vector has no typed-binding grammar, so it keeps layout rules and is never
+wrapped. Comment-bearing ranges that cannot move safely are reported without a
+lossy rewrite. Source-less macro-produced datums have no physical-layout
+obligation.
 
 **This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
 parser actually does** (`postfix-annotation-parse.rkt` is the contract):
-- `x: Int` / `-> Ret` — canonical, silent.
+- `(x : Int)` in a binding vector / `-> Ret` — canonical, silent.
+- `x: Int` in a binding vector — ACCEPTED (~20k live sites), but `fmt --check`
+  reports it as drift and `fmt --write` rewrites it to `(x : Int)`. Acceptance
+  is NOT deprecated; only the canonical spelling moved.
+- `x: Int` outside a binding vector (`def`, `defonce`, `let`) — canonical.
 - `x :- Int` / `:- Ret` — legacy, still PARSES with one
-  `legacy-annotation-marker` warning per source. Not yet an error.
-- `x : Int` (space before the colon) — indistinguishable from `x: Int` at the
-  reader, so it is ACCEPTED in binding position. Spacing is not enforced.
+  `legacy-annotation-marker` warning per source. Not yet an error, and the
+  formatter leaves it alone.
+- `x : Int` (space before the colon, unwrapped) — indistinguishable from
+  `x: Int` at the reader, so it is ACCEPTED in binding position; `fmt` folds it
+  into the canonical `(x : Int)`.
 - `: Ret` in RETURN position — REJECTED, pointing at `-> Ret`. This is the one
   structural difference between the two positions.
 - `[x : Int]` in binding position — REJECTED, pointing at `(x : Int)`. `[...]`

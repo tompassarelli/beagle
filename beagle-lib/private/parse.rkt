@@ -328,16 +328,29 @@
             #f]
            [else (loop (cdr rest) (cons (car rest) acc))]))))
 
-(define (typed-binding-marker-pairs vector-stx)
+;; wrap-start/wrap-end are set only for a flat `NAME: Type` triple, which the
+;; canonical form parenthesizes; an already-wrapped entry leaves them #f.
+(struct typed-annot (marker wrap-start wrap-end) #:transparent)
+
+;; wrap? is #f where the grammar has no typed binding (defmacro params), so a
+;; `NAME: Type` triple there is three params and wrapping would change arity.
+(define (typed-entry-annots vector-stx tokens wrap?)
   (define subs (stx-subs vector-stx))
   (define items (and subs (cdr subs)))
-  (define (wrapped-pair item)
+  (define (wrapped-annot item)
     (define parts (stx-subs item))
     (and parts
          (= (length parts) 3)
-         (symbol? (->datum (car parts)))
          (eq? (->datum (cadr parts)) ANN-MARKER)
-         (cons (car parts) (cadr parts))))
+         (let ([marker (syntax-start-offset (cadr parts))])
+           (and marker (typed-annot marker #f #f)))))
+  ;; No annot at all when the wrapping range is unavailable: leaving the flat
+  ;; spelling alone is the only non-lossy option.
+  (define (flat-annot name-stx marker-stx type-stx)
+    (define marker (syntax-start-offset marker-stx))
+    (define start (syntax-start-offset name-stx))
+    (define end (syntax-end-offset type-stx tokens))
+    (and wrap? marker start end (typed-annot marker start end)))
   (if (not items)
       '()
       (let loop ([rest items] [acc '()])
@@ -346,23 +359,20 @@
           [(and (>= (length rest) 3)
                 (symbol? (->datum (car rest)))
                 (eq? (->datum (cadr rest)) ANN-MARKER))
-           (loop (cdddr rest) (cons (cons (car rest) (cadr rest)) acc))]
+           (define annot (flat-annot (car rest) (cadr rest) (caddr rest)))
+           (loop (cdddr rest) (if annot (cons annot acc) acc))]
           [else
-           (define pair (wrapped-pair (car rest)))
-           (loop (cdr rest) (if pair (cons pair acc) acc))]))))
+           (define annot (wrapped-annot (car rest)))
+           (loop (cdr rest) (if annot (cons annot acc) acc))]))))
 
-(define (fragment->inline tokens start end [marker-offsets '()])
+(define (fragment->inline tokens start end [annots '()])
   (define out (open-output-string))
   (define pending-space? #f)
   (define previous-type #f)
   (define wrote? #f)
-  (define (marker-token? tok)
-    (for/or ([offset (in-list marker-offsets)])
-      (and (<= (token-offset tok) offset)
-           (< offset (token-end tok)))))
-  (define (write-token! tok text type)
+  (define (emit! text type)
     (when (and pending-space? wrote?
-               (not (closer? tok))
+               (not (memq type '(close-paren close-bracket close-brace)))
                (not (memq previous-type
                           '(open-paren open-bracket open-brace hash-open-brace))))
       (display " " out))
@@ -370,6 +380,13 @@
     (set! wrote? #t)
     (set! pending-space? #f)
     (set! previous-type type))
+  (define (marker-annot tok)
+    (for/first ([annot (in-list annots)]
+                #:when (and (<= (token-offset tok) (typed-annot-marker annot))
+                            (< (typed-annot-marker annot) (token-end tok))))
+      annot))
+  (define (boundary? tok accessor offset)
+    (for/or ([annot (in-list annots)]) (eqv? (accessor annot) offset)))
   (for ([tok (in-list tokens)]
         #:when (and (>= (token-offset tok) start)
                     (<= (token-end tok) end)))
@@ -377,14 +394,26 @@
       [(memq (token-type tok) '(whitespace newline))
        (set! pending-space? #t)]
       [(eq? (token-type tok) 'line-comment)
-       (write-token! tok (token-text tok) 'line-comment)
+       (emit! (token-text tok) 'line-comment)
        (set! pending-space? #t)]
-      [(marker-token? tok)
-       (when (string=? (token-text tok) ":")
-         (set! pending-space? #f))
-       (write-token! tok (token-text tok) (token-type tok))
-       (set! pending-space? #t)]
-      [else (write-token! tok (token-text tok) (token-type tok))]))
+      [else
+       (when (boundary? tok typed-annot-wrap-start (token-offset tok))
+         (emit! "(" 'open-paren))
+       (define annot (marker-annot tok))
+       (cond
+         [annot
+          ;; The tokenizer keeps `name:` in one atom while the reader splits it
+          ;; there, so the marker half is re-emitted with a space on each side.
+          (define text (token-text tok))
+          (define split (- (typed-annot-marker annot) (token-offset tok)))
+          (define name (substring text 0 split))
+          (unless (string=? name "") (emit! name (token-type tok)))
+          (set! pending-space? #t)
+          (emit! (substring text split) (token-type tok))
+          (set! pending-space? #t)]
+         [else (emit! (token-text tok) (token-type tok))])
+       (when (boundary? tok typed-annot-wrap-end (token-end tok))
+         (emit! ")" 'close-paren))]))
   (string-trim (get-output-string out)))
 
 (define (line-comment-in-range? tokens start end)
@@ -406,19 +435,19 @@
     tok))
 
 (define (canonical-vector-text tokens open close entries continuation-col
-                               marker-offsets vertical?)
+                               annots vertical?)
   (define open-end (token-end open))
   (define close-start (token-offset close))
   (define starts (map syntax-start-offset entries))
   (cond
     [(or (not vertical?) (null? starts) (null? (cdr starts)))
-     (string-append "[" (fragment->inline tokens open-end close-start marker-offsets) "]")]
+     (string-append "[" (fragment->inline tokens open-end close-start annots) "]")]
     [else
      (define boundaries (append (cdr starts) (list close-start)))
      (define fragments
        (for/list ([start (in-list (cons open-end (cdr starts)))]
                   [end (in-list boundaries)])
-         (fragment->inline tokens start end marker-offsets)))
+         (fragment->inline tokens start end annots)))
      (string-append
       "["
       (car fragments)
@@ -444,7 +473,7 @@
      (or (expression-end-offset tokens return-type) (token-end after-close))]
     [else (token-end close)]))
 
-(define (inline-signature-fits? tokens form-stx open close placement marker-offsets)
+(define (inline-signature-fits? tokens form-stx open close placement annots)
   (define start
     (if (eq? placement 'bare)
         (token-offset open)
@@ -457,13 +486,15 @@
   (and start end
        (<= (+ start-col
               (string-length
-               (fragment->inline tokens start end marker-offsets)))
+               (fragment->inline tokens start end annots)))
            SIGNATURE-LINE-WIDTH)))
 
-(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role)
+(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role
+                              [wrap-annotations? #t])
   (define start (syntax-start-offset vector-stx))
   (define entries (and start (logical-entry-stxs vector-stx)))
-  (define marker-pairs (and start (typed-binding-marker-pairs vector-stx)))
+  (define annots
+    (if start (typed-entry-annots vector-stx tokens wrap-annotations?) '()))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
   (define close (and open (matching-token tokens open)))
   (when (and entries open close anchor (syntax-start-offset anchor))
@@ -481,14 +512,11 @@
       (and (eq? placement 'owner)
            (fragment->inline tokens anchor-end (token-offset open))))
     (define form-col (or (physical-syntax-column form-stx tokens) 0))
-    (define marker-offsets
-      (filter values
-              (map (lambda (pair) (syntax-start-offset (cdr pair))) marker-pairs)))
     (define entry-count (length entries))
     (define vertical?
       (or (>= entry-count 3)
           (not (inline-signature-fits? tokens form-stx open close placement
-                                       marker-offsets))))
+                                       annots))))
     (define vector-col
       (case placement
         [(owner) (if vertical? (+ form-col 2) (token-col open))]
@@ -496,7 +524,7 @@
         [else (token-col open)]))
     (define vector-text
       (canonical-vector-text tokens open close entries (add1 vector-col)
-                             marker-offsets vertical?))
+                             annots vertical?))
     (define prefix-text
       (cond
         [(not (eq? placement 'owner)) ""]
@@ -524,12 +552,14 @@
   (and (syntax? stx) (bracketed? (->datum stx))))
 
 (define (inspect-named-form-vector! source tokens form-stx vector-index
-                                    [anchor-index 0] [role "parameter"])
+                                    [anchor-index 0] [role "parameter"]
+                                    [wrap-annotations? #t])
   (define subs (stx-subs form-stx))
   (define vector-stx (stx-ref subs vector-index))
   (define anchor (stx-ref subs anchor-index))
   (when (and (vector-stx? vector-stx) anchor)
-    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role)))
+    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role
+                          wrap-annotations?)))
 
 (define (inspect-method-form! source tokens method-stx [role "method parameter"])
   (define subs (stx-subs method-stx))
@@ -592,7 +622,8 @@
     (case head
       [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
       [(fn) (inspect-fn-layout! source tokens form-stx)]
-      [(defmacro) (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter")]
+      [(defmacro)
+       (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter" #f)]
       [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
       [(letfn)
        (define fns (stx-ref subs 1))
