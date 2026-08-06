@@ -5,8 +5,11 @@
 # The emitted _Static_assert wall is the per-target enforcement instrument.
 # slice-union carries the value descriptor channel (native_value_equal/hash/
 # compare over an Any whose Pair variant is a reference), which traps in the
-# shim when a descriptor size disagrees with sizeof(void *).
-# Toolchain: BEAGLE_WASI_CC (or WASI_CC) and WASMTIME; absence is a hard failure.
+# shim when a descriptor size disagrees with sizeof(void *). It stands in for
+# slice-rt-core, which cannot run here without per-ABI goldens and a wasm
+# managed-oracle comparison.
+# Toolchain: BEAGLE_WASI_CC (or WASI_CC), WASMTIME, and wasm-ld on PATH (the
+# clang wrapper spawns it by bare name); absence is a hard failure.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -15,8 +15,10 @@ beagle syntax FILE          # parse check (+ --ledger, --repair --emit-patch)
 beagle check [PATH...]      # type-check without emitting (--profile N)
 beagle validate [FILE...]   # parse + check + schema validation
 beagle build [--target T] PATH [OUT]  # explicit hosted source emission
-beagle build --materializer c17|qbe --out DIR [--entry NS/NAME]... PATH.bgl...
-                                      # sealed Native World + one projection
+beagle build --materializer c17|qbe --out DIR [--abi lp64|wasm32]
+             [--entry NS/NAME]... PATH.bgl...
+                                      # sealed Native World + one projection;
+                                      #  --abi picks the layout profile (lp64)
 beagle fix [--dry-run] [PATH...]                # high-confidence auto-fixes
 beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
 beagle doctor [--deep]      # is the authoring loop online and working?
