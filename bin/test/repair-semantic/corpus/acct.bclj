@@ -6,11 +6,7 @@
 ;;   total=      : a VALID beagle name with '=' (outside the prose regex's char
 ;;                 class). The regex matches up to `total`, fails on `=`, and
 ;;                 SILENTLY DROPS the whole suspicion. The structured path keeps it.
-(defn grand-total
-  [a: Int
-   b: Int] -> Int
+(defn grand-total [(a : Int) (b : Int)] -> Int
   (- a b))
-(defn total=
-  [a: Int
-   b: Int] -> Int
+(defn total= [(a : Int) (b : Int)] -> Int
   (- a b))

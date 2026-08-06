@@ -5,125 +5,117 @@
 
 (def sample-values: (Vec String) ["left" "right"])
 
-(defn text-equal?
-  [left: String
-   right: String] -> Bool (= left right))
+(defn text-equal? [(left : String) (right : String)] -> Bool (= left right))
 
-(defn text-length [value: String] -> Int (count value))
+(defn text-length [(value : String)] -> Int (count value))
 
 (defn text-slice
-  [value: String
-   start: Int
-   end: Int] -> String
+  [(value : String)
+   (start : Int)
+   (end : Int)] -> String
   (subs value start end))
 
-(defn text-tail
-  [value: String
-   start: Int] -> String (subs value start))
+(defn text-tail [(value : String) (start : Int)] -> String (subs value start))
 
-(defn text-join
-  [left: String
-   right: String] -> String (str left right))
+(defn text-join [(left : String) (right : String)] -> String (str left right))
 
-(defn labelled
-  [name: String
-   ordinal: Int] -> String (str name "=" ordinal))
+(defn labelled [(name : String) (ordinal : Int)] -> String (str name "=" ordinal))
 
-(defn keyword-equal?
-  [left: Keyword
-   right: Keyword] -> Bool (= left right))
+(defn keyword-equal? [(left : Keyword) (right : Keyword)] -> Bool (= left right))
 
-(defn assert-action? [action: Keyword] -> Bool (= action :assert))
+(defn assert-action? [(action : Keyword)] -> Bool (= action :assert))
 
-(defn retract-action? [action: Keyword] -> Bool (= action :retract))
+(defn retract-action? [(action : Keyword)] -> Bool (= action :retract))
 
 ;; The two operands reach memcmp from different handles: one is a constant-pool
 ;; blob, the other an arena copy made by subs.
 (defn prefix-is?
-  [value: String
-   limit: Int
-   expected: String] -> Bool
+  [(value : String)
+   (limit : Int)
+   (expected : String)] -> Bool
   (= (subs value 0 limit) expected))
 
-(defn tagged [value: String] -> String (str "<" value ">"))
+(defn tagged [(value : String)] -> String (str "<" value ">"))
 
-(defn strip-at [value: String] -> String
+(defn strip-at [(value : String)] -> String
   (if (= "@" (subs value 0 1)) (subs value 1) value))
 
 (defn any-three?
-  [first: Bool
-   second: Bool
-   third: Bool] -> Bool
+  [(first : Bool)
+   (second : Bool)
+   (third : Bool)] -> Bool
   (or first second third))
 
 (defn all-three?
-  [first: Bool
-   second: Bool
-   third: Bool] -> Bool
+  [(first : Bool)
+   (second : Bool)
+   (third : Bool)] -> Bool
   (and first second third))
 
 (defn any-none? [] -> Bool (or))
 
 (defn all-none? [] -> Bool (and))
 
-(defn any-one? [value: Bool] -> Bool (or value))
+(defn any-one? [(value : Bool)] -> Bool (or value))
 
-(defn all-one? [value: Bool] -> Bool (and value))
+(defn all-one? [(value : Bool)] -> Bool (and value))
 
-(defn any-short-circuits? [value: String] -> Bool
+(defn any-short-circuits? [(value : String)] -> Bool
   (or false true (= (subs value 0 999) value)))
 
-(defn all-short-circuits? [value: String] -> Bool
+(defn all-short-circuits? [(value : String)] -> Bool
   (and true false (= (subs value 0 999) value)))
 
-(defn trim-byte? [character: String] -> Bool
+(defn trim-byte? [(character : String)] -> Bool
   (or (= character " ") (= character "\t") (= character "\r")))
 
 (defn global-size [] -> Int (count sample-values))
 
-(defn parameter-shadow-size [sample-values: String] -> Int
+(defn parameter-shadow-size [(sample-values : String)] -> Int
   (count sample-values))
 
 (defn local-shadow-size [] -> Int
   (let [sample-values: String "abc"] (count sample-values)))
 
-(defn render-float [value: Float] -> String (str value))
+(defn render-float [(value : Float)] -> String (str value))
 
-(defn print-float [value: Float] -> String (pr-str value))
+(defn print-float [(value : Float)] -> String (pr-str value))
 
-(defn render-bool [value: Bool] -> String (str value))
+(defn render-bool [(value : Bool)] -> String (str value))
 
-(defn print-text [value: String] -> String (pr-str value))
+(defn print-text [(value : String)] -> String (pr-str value))
 
-(defn print-int [value: Int] -> String (pr-str value))
+(defn print-int [(value : Int)] -> String (pr-str value))
 
-(defn render-keyword [value: Keyword] -> String (str value))
+(defn render-keyword [(value : Keyword)] -> String (str value))
 
 (defn render-nil [] -> String (str nil))
 
 (defn print-nil [] -> String (pr-str nil))
 
-(defn render-text-vector [values: (Vec String)] -> String (str values))
+(defn render-text-vector [(values : (Vec String))] -> String (str values))
 
-(defn print-text-vector [values: (Vec String)] -> String (pr-str values))
+(defn print-text-vector [(values : (Vec String))] -> String (pr-str values))
 
-(defn render-text-map [values: (Map Keyword String)] -> String (str values))
+(defn render-text-map [(values : (Map Keyword String))] -> String (str values))
 
-(defn print-text-map [values: (Map Keyword String)] -> String (pr-str values))
+(defn print-text-map [(values : (Map Keyword String))] -> String (pr-str values))
 
-(defn render-printable [value: (U String Int Float Bool Keyword Nil (Vec String))] -> String
+(defn render-printable
+  [(value : (U String Int Float Bool Keyword Nil (Vec String)))] -> String
   (str value))
 
-(defn print-printable [value: (U String Int Float Bool Keyword Nil (Vec String))] -> String
+(defn print-printable
+  [(value : (U String Int Float Bool Keyword Nil (Vec String)))] -> String
   (pr-str value))
 
 (defn render-framed-printable
-  [prefix: String
-   value: (U String Int Float Bool Keyword Nil (Vec String))
-   suffix: Int] -> String
+  [(prefix : String)
+   (value : (U String Int Float Bool Keyword Nil (Vec String)))
+   (suffix : Int)] -> String
   (str prefix value suffix))
 
-(defn dynamic-keyword [value: String] -> Keyword (keyword value))
+(defn dynamic-keyword [(value : String)] -> Keyword (keyword value))
 
 (defn literal-assert [] -> Keyword :assert)
 

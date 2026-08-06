@@ -17,9 +17,7 @@
 (declare-extern fram.rt/edn-unquote [String -> String])
 
 ;; --- split a file into [fact-head, prose-body] on the first `---` line -------
-(defrecord Doc
-  [head :- String
-   body :- String])
+(defrecord Doc [head :- String body :- String])
 
 (defn- split-doc [content :- String] :- Doc
   (let [lines (fram.rt/split-on content "\n")
@@ -47,9 +45,7 @@
 ;; --- a file -> its facts (subject from the leading @line; body -> a fact) ---
 ;; `path` is carried only to name the file in warnings (#16: a head with no
 ;; @subject line). It does not affect the parse.
-(defn- file->facts
-  [path :- String
-   content :- String] :- (Vec k/Fact)
+(defn- file->facts [path :- String content :- String] :- (Vec k/Fact)
   (let [doc (split-doc content)
         lines (fram.rt/split-on (:head doc) "\n")
         n (count lines)
@@ -103,9 +99,7 @@
 
 (defn load-corpus [threads-dir :- String] :- (Vec fold/FactOp)
   (let [files (fram.rt/list-md threads-dir)
-        facts (reduce (fn
-                        [acc :- (Vec k/Fact)
-                         path :- String] :- (Vec k/Fact)
+        facts (reduce (fn [acc :- (Vec k/Fact) path :- String] :- (Vec k/Fact)
                          (vec (concat acc (safe-file->facts path))))
                        []
                        files)]

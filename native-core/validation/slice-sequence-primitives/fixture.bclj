@@ -4,41 +4,35 @@
 
 (define-mode strict)
 
-(defn first-value [values: (Vec Int)] -> Int
+(defn first-value [(values : (Vec Int))] -> Int
   (first values))
 
-(defn last-value [values: (Vec Int)] -> Int
+(defn last-value [(values : (Vec Int))] -> Int
   (last values))
 
-(defn peek-value [values: (Vec Int)] -> Int
+(defn peek-value [(values : (Vec Int))] -> Int
   (peek values))
 
-(defn take-values
-  [amount: Int
-   values: (Vec Int)] -> (Vec Int)
+(defn take-values [(amount : Int) (values : (Vec Int))] -> (Vec Int)
   (take amount values))
 
-(defn drop-values
-  [amount: Int
-   values: (Vec Int)] -> (Vec Int)
+(defn drop-values [(amount : Int) (values : (Vec Int))] -> (Vec Int)
   (drop amount values))
 
-(defn sort-values [values: (Vec Int)] -> (Vec Int)
+(defn sort-values [(values : (Vec Int))] -> (Vec Int)
   (sort values))
 
-(defn sort-texts [values: (Vec String)] -> (Vec String)
+(defn sort-texts [(values : (Vec String))] -> (Vec String)
   (sort values))
 
-(defn rest-values [values: (Vec Int)] -> (Vec Int)
+(defn rest-values [(values : (Vec Int))] -> (Vec Int)
   (rest values))
 
-(defn range-end [end: Int] -> (Vec Int)
+(defn range-end [(end : Int)] -> (Vec Int)
   (range end))
 
-(defn range-bounds
-  [start: Int
-   end: Int] -> (Vec Int)
+(defn range-bounds [(start : Int) (end : Int)] -> (Vec Int)
   (range start end))
 
-(defn pop-values [values: (Vec Int)] -> (Vec Int)
+(defn pop-values [(values : (Vec Int))] -> (Vec Int)
   (pop values))

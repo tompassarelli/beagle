@@ -3,7 +3,7 @@
 ;; Two match-using js modules built in ONE invocation: each must reset its match
 ;; temp counter to _match_0. A module-level (non-parameterized) box would leak,
 ;; making the SECOND module start at _match_1 — a per-process build-nondeterminism.
-(defunion Shape (Circle [r: Float]) (Square [s: Float]))
-(defn mk [n: Float] -> Shape (Circle n))
-(defn area [n: Float] -> Float
+(defunion Shape (Circle [(r : Float)]) (Square [(s : Float)]))
+(defn mk [(n : Float)] -> Shape (Circle n))
+(defn area [(n : Float)] -> Float
   (match (mk n) [(Circle r) (* r r)] [(Square s) (* s s)]))

@@ -3,9 +3,9 @@
 (define-mode strict)
 
 (defn codec-word
-  [value: Int
-   distance: Int
-   first-mask: Int
-   second-mask: Int] -> Int
+  [(value : Int)
+   (distance : Int)
+   (first-mask : Int)
+   (second-mask : Int)] -> Int
   (bit-or first-mask second-mask
     (unsigned-bit-shift-right value distance)))

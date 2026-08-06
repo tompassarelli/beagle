@@ -51,12 +51,8 @@
             :upsert-form :set-body :rename-def :insert-after :replace-in-body)
 
 ;; row-result records (one per read arm; each producing lambda is homogeneous)
-(defrecord PredVal
-  [pred :- String
-   value :- String])
-(defrecord ThreadViolation
-  [thread :- String
-   violation :- String])
+(defrecord PredVal [pred :- String value :- String])
+(defrecord ThreadViolation [thread :- String violation :- String])
 
 ;; tool-spec records — a catalog entry + its params
 (defrecord Param
@@ -84,9 +80,7 @@
 ;; `ref-value` below) — no hardcoded ref-pred list, so the engine stays
 ;; domain-neutral. (A value already starting with @ is kept as-is; `at` never
 ;; double-prefixes.)
-(defn- all-ref?
-  [facts :- (Vec k/Fact)
-   pred :- String] :- Bool
+(defn- all-ref? [facts :- (Vec k/Fact) pred :- String] :- Bool
   (loop [cs facts seen false]
     (if (empty? cs)
       seen
@@ -201,9 +195,7 @@
                  :replace-in-body "")]))
 
 ;; --- dispatch ---------------------------------------------------------------
-(defn- spec-by-name
-  [cat :- (Vec ToolSpec)
-   name :- String] :- ToolSpec?
+(defn- spec-by-name [cat :- (Vec ToolSpec) name :- String] :- ToolSpec?
   (loop [cs cat]
     (if (empty? cs)
       nil
@@ -211,9 +203,7 @@
 
 ;; required params by op — server-side enforcement (the "can't emit a broken call"
 ;; guarantee, not just an advisory schema): a missing required param is rejected.
-(defn- missing-req
-  [op :- Op
-   args :- (Map Keyword Any)] :- (Vec String)
+(defn- missing-req [op :- Op args :- (Map Keyword Any)] :- (Vec String)
   (let [need-spo (or (= op :tell) (= op :retract))
         ;; graph-edit ops: module scope is always required; the rest by op.
         need-module (or (= op :upsert-form) (or (= op :set-body) (or (= op :rename-def) (or (= op :insert-after) (= op :replace-in-body)))))

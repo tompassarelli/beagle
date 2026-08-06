@@ -5,17 +5,15 @@
 
 ;; Inline fields, non-parametric — the shape the importer used to drop entirely.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect
-    [width: Int
-     height: String]))
+  (Circle [(radius : Int)])
+  (Rect [(width : Int) (height : String)]))
 
 ;; Members without fields (pre-declared / bare) still import.
 (defunion Flag On Off)
 
 ;; Parametric — field types must survive the boundary as the union's type params.
 (defunion (Result T E)
-  (Ok [value: T])
-  (Err [error: E]))
+  (Ok [(value : T)])
+  (Err [(error : E)]))
 
-(defn make-circle [r: Int] -> Shape (->Circle r))
+(defn make-circle [(r : Int)] -> Shape (->Circle r))

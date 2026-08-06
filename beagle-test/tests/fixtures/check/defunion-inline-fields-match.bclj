@@ -2,13 +2,13 @@
 ;; variant pattern's binding to the FIELD, exactly as an inline PARAMETRIC
 ;; union and a pre-declared-record union already do.
 (defunion Shape
-  (Circle [(radius: Int)])
-  (Square [(side: Int)]))
+  (Circle [(radius : Int)])
+  (Square [(side : Int)]))
 
-(defn shape-size [(s: Shape)] -> Int
+(defn shape-size [(s : Shape)] -> Int
   (match s
     [(Circle radius) radius]
     [(Square side) side]))
 
-(defn circle-size [(c: Circle)] -> Int
+(defn circle-size [(c : Circle)] -> Int
   (circle-radius c))

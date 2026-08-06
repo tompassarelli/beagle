@@ -61,16 +61,12 @@
 (defn- fact-sig [c :- k/Fact] :- String (str (:l c) "|" (:p c) "|" (:r c)))
 (defn- sig-set [facts :- (Vec k/Fact)] :- (Vec String) (vec (sort (mapv fact-sig facts))))
 (defn- sig-member-map [facts :- (Vec k/Fact)] :- (Map String Bool)
-  (reduce (fn
-            [m :- (Map String Bool)
-             c :- k/Fact] :- (Map String Bool)
+  (reduce (fn [m :- (Map String Bool) c :- k/Fact] :- (Map String Bool)
             (assoc m (fact-sig c) true))
           {} facts))
 ;; count of CURRENT coordinator/agent-written facts (by frame) absent from the
 ;; files — i.e. pending writes an import would clobber.
-(defn- pending-coord-count
-  [log :- String
-   file-sigs :- (Map String Bool)] :- Int
+(defn- pending-coord-count [log :- String file-sigs :- (Map String Bool)] :- Int
   (count (filterv (fn [v :- fold/Latest] :- Bool
                     (and (or (= (:frame v) "coord") (= (:frame v) "agent") (= (:frame v) "cli"))
                          (nil? (get file-sigs (str (:l v) "|" (:p v) "|" (:r v))))))
@@ -135,12 +131,8 @@
 (defn cmd-validate [log :- String] :- Nil
   (let [idx (k/build-index (:facts (fold/fold (fram.rt/read-log log))))
         problems (reduce
-                  (fn
-                    [acc :- (Vec String)
-                     te :- String] :- (Vec String)
-                    (reduce (fn
-                              [a :- (Vec String)
-                               v :- String] :- (Vec String)
+                  (fn [acc :- (Vec String) te :- String] :- (Vec String)
+                    (reduce (fn [a :- (Vec String) v :- String] :- (Vec String)
                               (conj a (str (short-id te) ": " v)))
                             acc (k/violations-i idx te)))
                   []
@@ -165,9 +157,7 @@
 ;; :by by fram.rt/read-log) — key every current fact by its (l|p|r) triple so
 ;; cmd-show can look up "who wrote this" without changing what a Fact is.
 (defn- by-map-for [log :- String] :- (Map String String)
-  (reduce (fn
-            [m :- (Map String String)
-             v :- fold/Latest] :- (Map String String)
+  (reduce (fn [m :- (Map String String) v :- fold/Latest] :- (Map String String)
             (assoc m (fact-sig3 (:l v) (:p v) (:r v)) (:frame v)))
           {}
           (fold/fold-latest (fram.rt/read-log log))))
@@ -223,9 +213,7 @@
   [facts :- (Vec k/Fact)
    te :- String] :- (Map String String)
   (reduce
-   (fn
-     [m :- (Map String String)
-      c :- k/Fact] :- (Map String String)
+   (fn [m :- (Map String String) c :- k/Fact] :- (Map String String)
      (if (or (not (= (:p c) "run_bar_evidence")) (not (str/includes? (:r c) te)))
        m
        (let [rec (try (ajson/decode-strict (:r c)) (catch Throwable _ nil))
@@ -252,9 +240,7 @@
 ;;   run records disagree     -> "· by <writer> · reporter ambiguous (see run subjects)"
 ;;   no run record at all     -> "· by <writer>", unchanged: a true statement
 ;;                               about the append, no claim about the observer
-(defn- provenance-marker
-  [reporter :- Any
-   writer :- Any] :- String
+(defn- provenance-marker [reporter :- Any writer :- Any] :- String
   (cond
     [(nil? reporter) (if (some? writer) (by-marker writer) "")]
     [(= reporter ambiguous-reporter)
@@ -302,9 +288,7 @@
         ;; one subject's facts, each marked with its true provenance: the
         ;; reporter named by the run record when this thread has one, else the
         ;; log writer. The reporter map is built ONCE per shown subject.
-        render (fn
-                 [subj :- String
-                  cs :- (Vec k/Fact)] :- Nil
+        render (fn [subj :- String cs :- (Vec k/Fact)] :- Nil
                  (let [rmap (reporter-map-for facts subj)]
                    (doseq [c cs]
                      (let [want? (or provenance? (evidence-pred? (:p c)))
@@ -514,9 +498,7 @@
 ;; route a tool's write-intent {:op :l :p :r} through the coordinator (reuses the
 ;; same serialized, rule-checked path as `tell`). `w` is the open keyword-map write
 ;; value from call's result envelope (a record would not = the test's map literal).
-(defn- route-write
-  [log :- String
-   w :- (Map Keyword Any)] :- Nil
+(defn- route-write [log :- String w :- (Map Keyword Any)] :- Nil
   (let [resp (tell-retry (fram.rt/coord-port) log (:op w) (:l w) (:p w) (:r w) 5)]
     (cond
       [(= resp "nodaemon") (println (str "no coordinator on 127.0.0.1:" (fram.rt/coord-port) " — start it with bin/fram-up"))]
@@ -544,9 +526,7 @@
           [(some? (:ok res))    (print-rows (:ok res))]
           [:else                (print-rows (:rows res))])))))
 
-(defn cmd-query
-  [log :- String
-   edn :- String] :- Nil
+(defn cmd-query [log :- String edn :- String] :- Nil
   (let [qd (fram.rt/parse-edn edn)]
     (if (nil? qd)
       (println (str "bad EDN query: " edn))

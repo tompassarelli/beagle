@@ -3,22 +3,22 @@
 ;; (g) The same-module twins, across a module boundary.
 (require prov :as p)
 
-(defn area [s: p/Shape] -> Int
+(defn area [(s : p/Shape)] -> Int
   (match s
     [(Circle r) (p/circle-radius s)]
     [(Rect w h) (p/rect-width s)]))
 
-(defn height-of [s: p/Shape] -> String
+(defn height-of [(s : p/Shape)] -> String
   (match s
     [(Circle r) "none"]
     [(Rect w h) (:height s)]))
 
-(defn area-guarded [s: p/Shape] -> Int
+(defn area-guarded [(s : p/Shape)] -> Int
   (if (instance? prov.Circle s)
     (p/circle-radius s)
     (p/rect-width s)))
 
-(defn get-it [r: (p/Result Int String)] -> Int
+(defn get-it [(r : (p/Result Int String))] -> Int
   (match r
     [(Ok v) (p/ok-value r)]
     [(Err e) 0]))

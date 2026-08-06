@@ -9,14 +9,14 @@
 ;; (cond->/some-> temp advancement + surface preservation live in
 ;; threading.bclj; hygiene-rename interleave lives in user-macros.bclj.)
 
-(defn first-int [xs: (Vec Int)] -> Any
+(defn first-int [(xs : (Vec Int))] -> Any
   (if (> (count xs) 0) (nth xs 0) nil))
 
-(defn bound-if [xs: (Vec Int)] -> Int
+(defn bound-if [(xs : (Vec Int))] -> Int
   (if-let [v: Int (first-int xs)]
     (+ v 1)
     0))
 
-(defn bound-when [xs: (Vec Int)] -> Any
+(defn bound-when [(xs : (Vec Int))] -> Any
   (when-let [w: Int (first-int xs)]
     (* w 2)))

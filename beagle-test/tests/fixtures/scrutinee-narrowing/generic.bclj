@@ -4,21 +4,21 @@
 ;; (Result Int String) through Ok gives an Ok<Int> view, so `ok-value` on the
 ;; scrutinee is Int and `err-error` is String.
 (defunion (Result T E)
-  (Ok [value: T])
-  (Err [error: E]))
+  (Ok [(value : T)])
+  (Err [(error : E)]))
 
-(defn get-it [r: (Result Int String)] -> Int
+(defn get-it [(r : (Result Int String))] -> Int
   (match r
     [(Ok v) (ok-value r)]
     [(Err e) 0]))
 
-(defn get-err [r: (Result Int String)] -> String
+(defn get-err [(r : (Result Int String))] -> String
   (match r
     [(Ok v) "ok"]
     [(Err e) (err-error r)]))
 
 ;; Typed projection through the member view substitutes too.
-(defn get-via-kw [r: (Result Int String)] -> Int
+(defn get-via-kw [(r : (Result Int String))] -> Int
   (match r
     [(Ok v) (:value r)]
     [(Err e) 0]))

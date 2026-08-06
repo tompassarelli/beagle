@@ -34,9 +34,7 @@
 ;; supersede). superseded_by is the supersession trigger; it is multi/ref.
 ;; identity lives in the graph (interned values + facts), NOT in store fields:
 ;; those don't survive dump/replay, so all reads resolve preds via value-id.
-(defn setup!
-  [ctx :- (Atom t/Store)
-   tx :- Int] :- (Atom t/Store)
+(defn setup! [ctx :- (Atom t/Store) tx :- Int] :- (Atom t/Store)
   (let [name-p (c/value! ctx "name") sup-p (c/value! ctx "store-supersedes") card-p (c/value! ctx "cardinality") kind-p (c/value! ctx "value_kind")]
     (c/set-supersedes-pred! ctx sup-p)
     (c/fact! ctx name-p card-p (c/value! ctx "single") tx)
@@ -45,9 +43,7 @@
     (c/fact! ctx sup-p card-p (c/value! ctx "multi") tx)
     ctx))
 
-(defn cardinality
-  [ctx :- (Atom t/Store)
-   pname :- String] :- String
+(defn cardinality [ctx :- (Atom t/Store) pname :- String] :- String
   (let [pid (c/value-id ctx pname) card-pid (c/value-id ctx "cardinality") cs (if (and (some? pid) (some? card-pid)) (c/by-lp ctx pid card-pid) [])]
     (if (empty? cs) "multi" (c/literal ctx (:r (c/fact-of ctx (first cs)))))))
 
@@ -127,12 +123,8 @@
    tx :- Int] :- Int
   (assert! ctx subj "name" nm tx))
 
-(defn name-of
-  [ctx :- (Atom t/Store)
-   subj :- Int] :- String?
+(defn name-of [ctx :- (Atom t/Store) subj :- Int] :- String?
   (lookup ctx subj "name"))
 
-(defn resolve-name
-  [ctx :- (Atom t/Store)
-   nm :- String] :- Int?
+(defn resolve-name [ctx :- (Atom t/Store) nm :- String] :- Int?
   (let [ls (find-by ctx "name" nm)] (if (empty? ls) nil (first ls))))

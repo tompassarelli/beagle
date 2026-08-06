@@ -17,9 +17,9 @@
 (defn tail [] -> String (second pair))
 
 ;; (HVec Int String) <: (Vec Any) — every position fits Any.
-(defn width [v: (Vec Any)] -> Int (count v))
+(defn width [(v : (Vec Any))] -> Int (count v))
 (defn use-width [] -> Int (width pair))
 
 ;; Atom element invariance: same element type is accepted.
-(defn sink [a: (Atom Int)] -> Nil nil)
-(defn use-atom [b: (Atom Int)] -> Nil (sink b))
+(defn sink [(a : (Atom Int))] -> Nil nil)
+(defn use-atom [(b : (Atom Int))] -> Nil (sink b))

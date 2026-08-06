@@ -3,29 +3,27 @@
 ;; (a) `(instance? Member x)` guards: member access in the true branch, and the
 ;; ordered cond inherits each prior clause's false-branch exclusion.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect
-    [width: Int
-     height: String]))
+  (Circle [(radius : Int)])
+  (Rect [(width : Int) (height : String)]))
 
-(defn area [s: Shape] -> Int
+(defn area [(s : Shape)] -> Int
   (if (instance? Circle s)
     (circle-radius s)
     (rect-width s)))
 
-(defn area-cond [s: Shape] -> Int
+(defn area-cond [(s : Shape)] -> Int
   (cond
     (instance? Circle s) (circle-radius s)
     :else (rect-width s)))
 
 ;; `not` swaps the branches.
-(defn area-not [s: Shape] -> Int
+(defn area-not [(s : Shape)] -> Int
   (if (not (instance? Circle s))
     (rect-width s)
     (circle-radius s)))
 
 ;; From Any the true branch is the member.
-(defn area-any [s: Any] -> Int
+(defn area-any [(s : Any)] -> Int
   (if (instance? Circle s)
     (circle-radius s)
     0))

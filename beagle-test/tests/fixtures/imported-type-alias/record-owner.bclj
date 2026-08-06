@@ -2,5 +2,5 @@
 
 (define-mode strict)
 
-(defrecord Item [value: Int])
+(defrecord Item [(value : Int)])
 (defalias Term (Dyn String Item))

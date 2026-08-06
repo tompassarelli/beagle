@@ -3,10 +3,10 @@
 ;; (e) The view is Ok<Int>, NOT raw Ok (whose accessor would erase to Any and
 ;; silently accept any return type).
 (defunion (Result T E)
-  (Ok [value: T])
-  (Err [error: E]))
+  (Ok [(value : T)])
+  (Err [(error : E)]))
 
-(defn get-it [r: (Result Int String)] -> String
+(defn get-it [(r : (Result Int String))] -> String
   (match r
     [(Ok v) (ok-value r)]
     [(Err e) e]))

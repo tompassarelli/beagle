@@ -12,19 +12,19 @@
 (require native.body-c17 :as body)
 (require native.qbe :as qbe)
 
-(defn host-function? [function: core/FunctionDef] -> Bool
+(defn host-function? [(function : core/FunctionDef)] -> Bool
   (or (= "getenv" (core/functiondef-name function))
       (= "getenv-present?" (core/functiondef-name function))
       (= "getenv-length" (core/functiondef-name function))
       (= "monotonic-now" (core/functiondef-name function))))
 
-(defn host-world [world: core/NativeWorld] -> core/NativeWorld
+(defn host-world [(world : core/NativeWorld)] -> core/NativeWorld
   (let [functions: (Vec core/FunctionDef)
         (filterv host-function? (core/nativeworld-functions world))
         function-ids: (Vec core/NativeId) (core/function-ids functions)
         abis: (Vec core/AbiDeclV0)
         (filterv
-          (fn [abi: core/AbiDeclV0] -> Bool
+          (fn [(abi : core/AbiDeclV0)] -> Bool
             (or (instance? native.core.AbiImportV0
                   (core/abideclv0-direction abi))
               (core/id-in? function-ids (core/abideclv0-function-id abi))))
@@ -45,15 +45,15 @@
       abis
       (core/nativeworld-observations world))))
 
-(defn qbe-report [result: qbe/QbeMaterialization] -> String
+(defn qbe-report [(result : qbe/QbeMaterialization)] -> String
   (if (instance? native.qbe.QbeSuccess result)
     "qbe UNEXPECTED-SUCCESS\n"
     (str "qbe REFUSED " (qbe/qbefailure-detail result) "\n")))
 
 (defn emit-slice!
-  [facts-path: String
-   artifacts-dir: String
-   compiler-commit: String] -> String
+  [(facts-path : String)
+   (artifacts-dir : String)
+   (compiler-commit : String)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0

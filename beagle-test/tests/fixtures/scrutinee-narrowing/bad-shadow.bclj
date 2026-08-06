@@ -3,12 +3,10 @@
 ;; (b) A binder that SHADOWS the scrutinee name wins: inside the arm `s` is the
 ;; field, not the member.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect
-    [width: Int
-     height: String]))
+  (Circle [(radius : Int)])
+  (Rect [(width : Int) (height : String)]))
 
-(defn area [s: Shape] -> Int
+(defn area [(s : Shape)] -> Int
   (match s
     [(Circle s) (circle-radius s)]
     [(Rect w h) w]))

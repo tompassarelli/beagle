@@ -10,10 +10,10 @@
   `(let [tmp ~e]
      (+ tmp tmp)))
 
-(defn use-macro [x: Int]
+(defn use-macro [(x : Int)]
   (twice (+ x 1)))
 
-(defn threaded [x: Int]
+(defn threaded [(x : Int)]
   (cond-> x
     (pos? x) (+ 1)
     (neg? x) (- 1)))

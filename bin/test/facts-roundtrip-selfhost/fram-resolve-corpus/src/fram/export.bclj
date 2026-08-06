@@ -27,17 +27,13 @@
    "created_by" "lead" "driver" "proposed_by"])
 
 (defn- distinct-s [xs :- (Vec String)] :- (Vec String)
-  (reduce (fn
-            [acc :- (Vec String)
-             x :- String] :- (Vec String)
+  (reduce (fn [acc :- (Vec String) x :- String] :- (Vec String)
             (if (k/vec-contains? acc x) acc (conj acc x)))
           [] xs))
 
 ;; a ref-pred's value renders as its @id bare; a literal is EDN-quoted whenever
 ;; bare would be ambiguous — whitespace, NEWLINE, empty, or a leading @/".
-(defn- render-obj
-  [p :- String
-   v :- String] :- String
+(defn- render-obj [p :- String v :- String] :- String
   (if (k/vec-contains? ref-preds p)
     v
     (if (or (str/blank? v)
@@ -47,18 +43,14 @@
       (fram.rt/edn-quote v)
       v)))
 
-(defn thread-md
-  [facts :- (Vec k/Fact)
-   te :- String] :- String
+(defn thread-md [facts :- (Vec k/Fact) te :- String] :- String
   (let [present (distinct-s (mapv (fn [c :- k/Fact] :- String (:p c)) (k/q-by-l facts te)))
         ordered (filterv (fn [p :- String] :- Bool (k/vec-contains? present p)) order)
         extra (vec (sort (filterv (fn [p :- String] :- Bool
                                     (and (not (k/vec-contains? order p)) (not (= p "body"))))
                                   present)))
         preds (vec (concat ordered extra))
-        lines (reduce (fn
-                        [acc :- (Vec String)
-                         p :- String] :- (Vec String)
+        lines (reduce (fn [acc :- (Vec String) p :- String] :- (Vec String)
                         (vec (concat acc
                                      (mapv (fn [v :- String] :- String (str p "  " (render-obj p v)))
                                            (k/many facts te p)))))

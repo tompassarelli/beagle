@@ -2,7 +2,7 @@
 (ns native.keyword-provider)
 (define-mode strict)
 
-(defrecord Pair [value: String])
+(defrecord Pair [(value : String)])
 
-(defn pair? [value: Any] -> Bool
+(defn pair? [(value : Any)] -> Bool
   (instance? Pair value))

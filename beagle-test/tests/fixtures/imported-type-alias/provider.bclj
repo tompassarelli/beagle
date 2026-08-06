@@ -4,5 +4,5 @@
 
 (defalias StoreValue (Dyn String Int Bool Keyword (Vec Int)))
 
-(defn accepts? [value: StoreValue] -> Bool
+(defn accepts? [(value : StoreValue)] -> Bool
   (string? value))

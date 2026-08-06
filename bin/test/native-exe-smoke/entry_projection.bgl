@@ -5,9 +5,9 @@
 
 (def seed: Int 2)
 
-(defrecord Box [value: Int])
+(defrecord Box [(value : Int)])
 
-(defn box-value [box: Box] -> Int
+(defn box-value [(box : Box)] -> Int
   (:value box))
 
 (defn helper [] -> Int
@@ -20,7 +20,7 @@
   (+ (helper) 1))
 
 (defn unreachable [] -> Int
-  ((fn [value: Int] -> Int value) 0))
+  ((fn [(value : Int)] -> Int value) 0))
 
 (defn bad-entry [] -> Int
   (unreachable))

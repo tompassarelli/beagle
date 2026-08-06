@@ -60,14 +60,10 @@
 
 ;; --- rule/term constructors (rules are plain data) --------------------------
 (defn v [name :- Keyword] :- (Map Keyword Any) {:var name})                 ; a logic variable (name is a keyword id, e.g. :x)
-(defn lit
-  [rel :- String
-   args :- (Vec Any)] :- (Map Keyword Any) {:rel rel :args args :neg false})
+(defn lit [rel :- String args :- (Vec Any)] :- (Map Keyword Any) {:rel rel :args args :neg false})
 ;; a NEGATED body literal (negation-as-failure): succeeds iff the ground tuple is
 ;; absent. Range-restricted — all its vars must be bound by earlier positive lits.
-(defn nlit
-  [rel :- String
-   args :- (Vec Any)] :- (Map Keyword Any) {:rel rel :args args :neg true})
+(defn nlit [rel :- String args :- (Vec Any)] :- (Map Keyword Any) {:rel rel :args args :neg true})
 (defn rule
   [hrel :- String
    hargs :- (Vec Any)
@@ -140,8 +136,10 @@
             [db :- (Map String (Set (Vec Any)))
              cid :- Int] :- (Map String (Set (Vec Any)))
             (let [cl (c/fact-of ctx cid) l (:l cl) p (:p cl) r (:r cl)
-                  db1 (update db "triple" (fn [s :- (Set (Vec Any))] :- (Set (Vec Any)) (conj (or s #{}) [l p r])))]
-              (update db1 "fact-id" (fn [s :- (Set (Vec Any))] :- (Set (Vec Any)) (conj (or s #{}) [cid l p r])))))
+                  db1 (update db "triple" (fn
+                                            [s :- (Set (Vec Any))] :- (Set (Vec Any)) (conj (or s #{}) [l p r])))]
+              (update db1 "fact-id" (fn
+                                      [s :- (Set (Vec Any))] :- (Set (Vec Any)) (conj (or s #{}) [cid l p r])))))
           {} (c/current-facts ctx)))
 
 ;; --- unification (positional, substitution = var-name -> value) -------------
@@ -169,9 +167,7 @@
         [(empty? a) s]
         [:else (recur (rest a) (rest t) (unify (first a) (first t) s))]))))
 
-(defn- ground
-  [args :- (Vec Any)
-   subst :- (Map String Any)] :- (Vec Any)
+(defn- ground [args :- (Vec Any) subst :- (Map String Any)] :- (Vec Any)
   (mapv (fn [t :- Any] :- Any (if (var? t) (get subst (:var t)) t)) args))
 
 ;; numeric coercion for ordering predicates: a ground operand (a String from the
@@ -186,9 +182,7 @@
 ;; evaluate a comparison predicate on a substitution. :eq/:ne are raw-string (never
 ;; parsed) equality/disequality; :lt/:le/:gt/:ge parse both operands numerically and
 ;; are FALSE (row dropped, never a query error) when either operand is non-numeric.
-(defn- eval-pred
-  [litt :- (Map Keyword Any)
-   subst :- (Map String Any)] :- Bool
+(defn- eval-pred [litt :- (Map Keyword Any) subst :- (Map String Any)] :- Bool
   (let [op (:pred litt)
         g (ground (:args litt) subst)
         a (nth g 0)
@@ -300,9 +294,7 @@
    delta :- (Map String (Set (Vec Any)))
    r :- (Map Keyword Any)] :- (Set (Vec Any))
   (let [head (:head r) body (:body r)]
-    (reduce (fn
-              [acc :- (Set (Vec Any))
-               pin :- Int] :- (Set (Vec Any))
+    (reduce (fn [acc :- (Set (Vec Any)) pin :- Int] :- (Set (Vec Any))
               (reduce (fn
                         [a :- (Set (Vec Any))
                          s :- (Map String Any)] :- (Set (Vec Any)) (conj a (ground (:args head) s)))
@@ -310,9 +302,7 @@
             #{} (positive-positions body))))
 
 (defn- rule-head-rels [rules :- (Vec (Map Keyword Any))] :- (Vec String)
-  (vec (reduce (fn
-                 [acc :- (Set String)
-                  r :- (Map Keyword Any)] :- (Set String) (conj acc (:rel (:head r)))) #{} rules)))
+  (vec (reduce (fn [acc :- (Set String) r :- (Map Keyword Any)] :- (Set String) (conj acc (:rel (:head r)))) #{} rules)))
 
 (defn- new-only
   [cand :- (Map String (Set (Vec Any)))
@@ -361,7 +351,8 @@
                        [acc :- (Map String (Set (Vec Any)))
                         r :- (Map Keyword Any)] :- (Map String (Set (Vec Any)))
                        (let [rel (:rel (:head r)) hs (derive-rule-delta db delta r)]
-                         (update acc rel (fn [s :- (Set (Vec Any))] :- (Set (Vec Any))
+                         (update acc rel (fn
+                                           [s :- (Set (Vec Any))] :- (Set (Vec Any))
                                            (reduce (fn
                                                      [a :- (Set (Vec Any))
                                                       h :- (Vec Any)] :- (Set (Vec Any)) (conj a h)) (or s #{}) hs)))))
@@ -385,7 +376,8 @@
                          [d :- (Map String (Set (Vec Any)))
                           r :- (Map Keyword Any)] :- (Map String (Set (Vec Any)))
                          (let [rel (:rel (:head r)) heads (derive-rule db0 r)]
-                           (update d rel (fn [s :- (Set (Vec Any))] :- (Set (Vec Any))
+                           (update d rel (fn
+                                           [s :- (Set (Vec Any))] :- (Set (Vec Any))
                                            (reduce (fn
                                                      [a :- (Set (Vec Any))
                                                       h :- (Vec Any)] :- (Set (Vec Any)) (conj a h)) (or s #{}) heads)))))
@@ -453,7 +445,8 @@
           idx tuples))
 
 ;; build a full index from a db (Map rel (Set tuple)) — O(arity x tuples)
-(defn- build-index [db :- (Map String (Set (Vec Any)))] :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
+(defn- build-index
+  [db :- (Map String (Set (Vec Any)))] :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
   (reduce (fn
             [acc :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
              rel :- String] :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
@@ -579,9 +572,7 @@
    delta-idx :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
    r :- (Map Keyword Any)] :- (Set (Vec Any))
   (let [head (:head r) body (:body r)]
-    (reduce (fn
-              [acc :- (Set (Vec Any))
-               pin :- Int] :- (Set (Vec Any))
+    (reduce (fn [acc :- (Set (Vec Any)) pin :- Int] :- (Set (Vec Any))
               (reduce (fn
                         [a :- (Set (Vec Any))
                          s :- (Map String Any)] :- (Set (Vec Any)) (conj a (ground (:args head) s)))
@@ -599,7 +590,8 @@
                        [acc :- (Map String (Set (Vec Any)))
                         r :- (Map Keyword Any)] :- (Map String (Set (Vec Any)))
                        (let [rel (:rel (:head r)) hs (derive-rule-delta-idx db idx delta delta-idx r)]
-                         (update acc rel (fn [s :- (Set (Vec Any))] :- (Set (Vec Any))
+                         (update acc rel (fn
+                                           [s :- (Set (Vec Any))] :- (Set (Vec Any))
                                            (reduce (fn
                                                      [a :- (Set (Vec Any))
                                                       h :- (Vec Any)] :- (Set (Vec Any)) (conj a h)) (or s #{}) hs)))))
@@ -614,7 +606,8 @@
 ;; ("fact"/"fact-id") are never rule heads (validation forbids it), so their
 ;; tuples are invariant across an entire stratified evaluation — the shared
 ;; index stays correct for every stratum's db0.
-(defn base-index [db0 :- (Map String (Set (Vec Any)))] :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
+(defn base-index
+  [db0 :- (Map String (Set (Vec Any)))] :- (Map String (Map Int (Map Any (Vec (Vec Any)))))
   (build-index db0))
 
 ;; Index db0 REUSING a prebuilt base-idx: relations base-idx already covers are
@@ -645,7 +638,8 @@
                          [d :- (Map String (Set (Vec Any)))
                           r :- (Map Keyword Any)] :- (Map String (Set (Vec Any)))
                          (let [rel (:rel (:head r)) heads (derive-rule-idx db0 idx0 r)]
-                           (update d rel (fn [s :- (Set (Vec Any))] :- (Set (Vec Any))
+                           (update d rel (fn
+                                           [s :- (Set (Vec Any))] :- (Set (Vec Any))
                                            (reduce (fn
                                                      [a :- (Set (Vec Any))
                                                       h :- (Vec Any)] :- (Set (Vec Any)) (conj a h)) (or s #{}) heads)))))
@@ -700,7 +694,8 @@
 ;;       logically inconsistent answers (e.g. q(@b) asserted because ¬p(@b) held at
 ;;       derivation time, yet p(@b) is then derived in the same stratum).
 ;; Returns a list of violations ([] = stratifiable).
-(defn strata-violations [strata :- (Vec (Vec (Map Keyword Any)))] :- (Vec String)
+(defn strata-violations
+  [strata :- (Vec (Vec (Map Keyword Any)))] :- (Vec String)
   (loop [i 0 lower #{} probs []]
     (if (>= i (count strata))
       probs
@@ -725,9 +720,7 @@
                                          (str "stratum " i ": negated '" (:rel nl) "' is also derived in the SAME stratum (recursion through negation — not stratifiable)"))
                                        bad-self))))]
         (recur (+ i 1)
-               (reduce (fn
-                         [acc :- (Set String)
-                          rel :- String] :- (Set String) (conj acc rel)) lower this-rels)
+               (reduce (fn [acc :- (Set String) rel :- String] :- (Set String) (conj acc rel)) lower this-rels)
                probs2)))))
 
 ;; the derived tuples of a relation (as a vector)

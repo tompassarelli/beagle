@@ -1,9 +1,5 @@
-(defrecord Dog
-  [(name: String)
-   (breed: String)])
-(defrecord Cat
-  [(name: String)
-   (indoor: Bool)])
+(defrecord Dog [(name : String) (breed : String)])
+(defrecord Cat [(name : String) (indoor : Bool)])
 (defunion Pet Dog Cat)
 
 (declare-extern get-name (forall [(T <: Pet)] [T -> String]))

@@ -3,14 +3,10 @@
 ;; (d) A nested match on the same scrutinee intersects with the arm's
 ;; refinement; leaving the inner match restores it.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect
-    [width: Int
-     height: String]))
+  (Circle [(radius : Int)])
+  (Rect [(width : Int) (height : String)]))
 
-(defn area
-  [s: Shape
-   other: Shape] -> Int
+(defn area [(s : Shape) (other : Shape)] -> Int
   (match s
     [(Circle r)
      (+ (match other
@@ -21,7 +17,7 @@
     [(Rect a b) a]))
 
 ;; Re-matching the same scrutinee intersects to the same member.
-(defn area-renested [s: Shape] -> Int
+(defn area-renested [(s : Shape)] -> Int
   (match s
     [(Circle r)
      (match s

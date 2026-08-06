@@ -2,16 +2,16 @@
 (ns native.match-fixture)
 (define-mode strict)
 
-(defrecord LeftValue [(value: Int)])
-(defrecord RightValue [(value: Int)])
+(defrecord LeftValue [(value : Int)])
+(defrecord RightValue [(value : Int)])
 
-(defn classify-tag [(tag: Keyword?)] -> Int
+(defn classify-tag [(tag : Keyword?)] -> Int
   (match tag
     [:query/one 1]
     [:query/two 2]
     [_ 0]))
 
-(defn unpack-value [(wrapped: (U LeftValue RightValue))] -> Int
+(defn unpack-value [(wrapped : (U LeftValue RightValue))] -> Int
   (match wrapped
     [(LeftValue value) value]
     [(RightValue value) (+ value 1)]))
