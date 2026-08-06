@@ -2,7 +2,8 @@
 # Build dependency-first Beagle Core modules through the sealed Native World.
 #
 # Usage:
-#   beagle build --materializer c17 [--materializer qbe] --out DIR [--entry NS/NAME]... SOURCE.bgl...
+#   beagle build --materializer c17 [--materializer qbe] --out DIR
+#     [--abi lp64|wasm32] [--entry NS/NAME]... SOURCE.bgl...
 #
 # A successful run always writes the authoritative sealed Native World encoding
 # and digest, plus every explicitly selected materializer projection. The
@@ -25,6 +26,7 @@ die() {
 }
 
 out=""
+abi="lp64"
 materializers=()
 entries=()
 sources=()
@@ -40,6 +42,15 @@ while [[ $# -gt 0 ]]; do
         --out=*)
             [[ -z "$out" ]] || die "--out may be specified only once"
             out="${1#*=}"
+            shift
+            ;;
+        --abi)
+            [[ $# -ge 2 ]] || die "--abi needs a profile id"
+            abi="$2"
+            shift 2
+            ;;
+        --abi=*)
+            abi="${1#*=}"
             shift
             ;;
         --materializer)
@@ -182,6 +193,7 @@ compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse HEAD 2>/dev/null || echo unkno
 export BEAGLE_CORE_FACTS="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
+export BEAGLE_CORE_ABI="$abi"
 export BEAGLE_CORE_REPORT="$out/report.txt"
 printf '%s\n' "${entries[@]}" >"$work/entries"
 export BEAGLE_CORE_ENTRIES="$work/entries"
@@ -511,7 +523,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
   (and (= 7 (count verdicts))
        (every? obligations/obligation-passed? verdicts)))
 
-(defn native-report-head [rows entries source program projected]
+(defn native-report-head [rows entries source program projected abi]
   (str (apply str (map #(str "source-entry " % "\n") entries))
        "stage source-seal ACCEPTED\n"
        "stage source-to-typed ACCEPTED\n"
@@ -527,8 +539,8 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
        "native-world-sha256 module.native-world.sha256\n"
        "projected-types " (count (core/nativeworld-types projected)) "\n"
        (body-slice/function-report (core/nativeworld-functions projected))
-       (slice/obligation-report "obligation-projection" projected)
-       (body-slice/failing-obligations projected)))
+       (slice/obligation-report "obligation-projection" projected abi)
+       (body-slice/failing-obligations projected abi)))
 
 (defn materialize-c17! [projected artifacts-dir]
   (start-stage! "materialization-c17")
@@ -556,9 +568,9 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
         {:ok? true
          :report report}))))
 
-(defn materialize-qbe! [projected artifacts-dir]
+(defn materialize-qbe! [projected artifacts-dir abi-id]
   (start-stage! "materialization-qbe")
-  (let [result (qbe/materialize-world projected 0)
+  (let [result (qbe/materialize-world projected 0 abi-id)
         ok? (instance? native.qbe.QbeSuccess result)
         report (str "materialize-qbe "
                     (if ok?
@@ -578,14 +590,14 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
         {:ok? true
          :report report}))))
 
-(defn materialize-worlds! [projected artifacts-dir materializers]
+(defn materialize-worlds! [projected artifacts-dir materializers abi-id]
   (loop [remaining materializers reports []]
     (if (empty? remaining)
       {:ok? true :report (str (apply str reports) "result PASS\n")}
       (let [materializer (first remaining)
             result (case materializer
                      "c17" (materialize-c17! projected artifacts-dir)
-                     "qbe" (materialize-qbe! projected artifacts-dir))
+                     "qbe" (materialize-qbe! projected artifacts-dir abi-id))
             next-reports (conj reports (:report result))]
         (if (:ok? result)
           (recur (rest remaining) next-reports)
@@ -594,7 +606,8 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                         "result FAIL materialization\n")})))))
 
 (defn compile-core!
-  [facts-path projected-facts-path artifacts-dir compiler-commit entries materializers]
+  [facts-path projected-facts-path artifacts-dir compiler-commit entries
+   materializers abi-id abi]
   (start-stage! "source-projection")
   (let [raw-rows (slice/parse-facts (slurp facts-path))
         projection (project-entry-rows raw-rows entries)]
@@ -607,7 +620,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                       "result FAIL entry projection\n")})
       (let [rows (:rows projection)
             _ (spit projected-facts-path (rows-text rows))
-            configuration ["profile=3"]
+            configuration ["profile=3" (str "abi=" abi-id)]
             _finish-projection (finish-stage! "source-projection" "ACCEPTED")
             _start-seal (start-stage! "source-seal")
             source (slice/source-world rows "beagle.core" "source.facts")
@@ -633,7 +646,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                     typed-slice (lower/typingacceptedv0-slice typing-result)
                     _start-lowering (start-stage! "typed-to-native")
                     native-result (lower/lower-native-world sealed-typed typed-slice
-                                    compiler-commit configuration)]
+                                    compiler-commit configuration abi)]
                 (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
                   (do
                     (finish-stage! "typed-to-native" "PENDING")
@@ -652,8 +665,9 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                                  (worlds/sealednativeworldv0-world sealed-native))
                         projected (body-slice/projected-world program)
                         _start-obligations (start-stage! "native-obligations")
-                        verdicts (obligations/validate-native-world projected)
-                        head (native-report-head rows entries source program projected)]
+                        verdicts (obligations/validate-native-world projected abi)
+                        head (native-report-head rows entries source program projected
+                                                 abi)]
                     (if-not (obligation-pass? verdicts)
                       (do
                         (finish-stage! "native-obligations" "FAIL")
@@ -663,7 +677,8 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                       (do
                         (finish-stage! "native-obligations" "PASS")
                         (let [materialization
-                              (materialize-worlds! projected artifacts-dir materializers)]
+                              (materialize-worlds! projected artifacts-dir materializers
+                                                   abi-id)]
                           (assoc materialization
                                  :report (str head (:report materialization))))))))))))))))
 
@@ -679,8 +694,14 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
         entries (vec (remove str/blank?
                              (str/split-lines
                               (slurp (System/getenv "BEAGLE_CORE_ENTRIES")))))
-        result (compile-core! facts-path projected-facts-path artifacts-dir
-                              compiler-commit entries materializers)
+        abi-id (or (System/getenv "BEAGLE_CORE_ABI") "lp64")
+        abi (core/abi-profile-for abi-id)
+        result (if (nil? abi)
+                 {:ok? false
+                  :report (str "abi-error unknown abi profile " abi-id "\n"
+                               "result FAIL unknown abi profile\n")}
+                 (compile-core! facts-path projected-facts-path artifacts-dir
+                                compiler-commit entries materializers abi-id abi))
         final-report (report-with-stage-progress (:report result))]
     (durable-write! report-path final-report)
     (spit (str artifacts-dir "/report.txt") final-report)

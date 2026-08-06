@@ -392,9 +392,12 @@
   ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
    "legal-abi" "discharged-tokens" "bounded-effects"])
 
-(defn obligation-report [(label : String) (world : core/NativeWorld)] -> String
+(defn obligation-report
+  [(label : String)
+   (world : core/NativeWorld)
+   (abi : core/AbiProfileV0)] -> String
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
-        (obligations/validate-native-world world)
+        (obligations/validate-native-world world abi)
         names: (Vec String) (obligation-names)]
     (loop [index: Int 0 report: String ""]
       (if (>= index (count verdicts))
@@ -434,12 +437,13 @@
 
 ;; Writes the C set into artifacts-dir and returns the run report; every stage
 ;; that refuses returns its own report rather than throwing.
-(defn emit-slice!
+(defn emit-slice-for-abi!
   [(facts-path : String)
    (module-name : String)
    (relative-path : String)
    (artifacts-dir : String)
-   (compiler-commit : String)] -> String
+   (compiler-commit : String)
+   (abi : core/AbiProfileV0)] -> String
   (let [rows: (Vec SliceFactV0) (parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         world: worlds/SourceProgramWorldV0
@@ -458,7 +462,8 @@
                 (lower/typingacceptedv0-sealed typing-result)
                 slice: lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
                 native-result: lower/NativeLoweringResultV0
-                (lower/lower-native-world sealed-typed slice compiler-commit configuration)
+                (lower/lower-native-world sealed-typed slice compiler-commit
+                  configuration abi)
                 sealed-native: worlds/SealedNativeWorldV0 (native-sealed native-result)
                 program: core/NativeWorld
                 (worlds/nativeworldv0-program
@@ -481,8 +486,8 @@
                   "world-abis " (str (count (core/nativeworld-abis program))) "\n"
                   "projected-types " (str (count (sliceworldv0-types projection))) "\n"
                   (type-names (sliceworldv0-types projection))
-                  (obligation-report "obligation-world" program)
-                  (obligation-report "obligation-projection" projected)
+                  (obligation-report "obligation-world" program abi)
+                  (obligation-report "obligation-projection" projected abi)
                   (pending-reports (native-pending native-result)))]
             (match result
               [(SliceRefusedV0 detail) (str head "materialize REFUSED " detail "\n")]
@@ -495,3 +500,16 @@
                  (str head "materialize OK "
                    (c11/c11artifact-header-name artifact) " "
                    (c11/c11artifact-source-name artifact) "\n"))])))))))
+
+(defn emit-slice!
+  [(facts-path : String)
+   (module-name : String)
+   (relative-path : String)
+   (artifacts-dir : String)
+   (compiler-commit : String)
+   (abi-id : String)] -> String
+  (let [profile: (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
+    (if (nil? profile)
+      (str "stage abi REJECTED unknown abi profile " abi-id "\n")
+      (emit-slice-for-abi! facts-path module-name relative-path artifacts-dir
+        compiler-commit profile))))

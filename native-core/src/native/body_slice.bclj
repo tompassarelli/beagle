@@ -203,9 +203,11 @@
             (str report "obligation-detail " (nth names position) " "
               (verdict-subject (nth verdicts position)) "\n")))))))
 
-(defn failing-obligations [(world : core/NativeWorld)] -> String
+(defn failing-obligations
+  [(world : core/NativeWorld)
+   (abi : core/AbiProfileV0)] -> String
   (failing-obligation-verdicts
-    (obligations/validate-native-world world)))
+    (obligations/validate-native-world world abi)))
 
 (defn function-report [(functions : (Vec core/FunctionDef))] -> String
   (let [ordered: (Vec core/FunctionDef) (c17/ordered-functions functions)]
@@ -263,7 +265,8 @@
   [(program : core/NativeWorld)
    (function-name : String)
    (artifacts-dir : String)
-   (module-index : Int)] -> String
+   (module-index : Int)
+   (abi : core/AbiProfileV0)] -> String
   (let [matches: (Vec core/FunctionDef)
         (functions-named (core/nativeworld-functions program) function-name)]
     (if (not= (count matches) 1)
@@ -276,7 +279,7 @@
           (let [projected: core/NativeWorld
                 (projected-world (function-world program selected))
                 verdicts: (Vec obligations/ObligationVerdictV0)
-                (obligations/validate-native-world projected)
+                (obligations/validate-native-world projected abi)
                 head: String
                 (str "qbe-selected-function " function-name "\n"
                   "qbe-world-functions "
@@ -289,7 +292,8 @@
             (if (not (obligations-pass? verdicts))
               (str head "qbe-materialize REFUSED structural obligations failed\n")
               (let [result: qbe/QbeMaterialization
-                    (qbe/materialize-world projected module-index)]
+                    (qbe/materialize-world projected module-index
+                      (core/abiprofilev0-id abi))]
                 (if (not (qbe/materialization-ok? result))
                   (str head "qbe-materialize REFUSED "
                     (qbe/materialization-detail result) "\n")
@@ -302,12 +306,13 @@
                       (str head "qbe-materialize OK "
                         (qbe/qbeartifact-module-name artifact) "\n"))))))))))))
 
-(defn emit-slice!
+(defn emit-slice-for-abi!
   [(facts-path : String)
    (module-name : String)
    (relative-path : String)
    (artifacts-dir : String)
-   (compiler-commit : String)] -> String
+   (compiler-commit : String)
+   (abi : core/AbiProfileV0)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0
@@ -328,7 +333,7 @@
                 (lower/typingacceptedv0-slice typing-result)
                 native-result: lower/NativeLoweringResultV0
                 (lower/lower-native-world sealed-typed typed-slice compiler-commit
-                  configuration)
+                  configuration abi)
                 sealed-native: worlds/SealedNativeWorldV0
                 (slice/native-sealed native-result)
                 program: core/NativeWorld
@@ -337,7 +342,7 @@
                 projected: core/NativeWorld (projected-world program)
                 result: body/BodyMaterializationV0 (body/materialize-world projected 0)
                 verdicts: (Vec obligations/ObligationVerdictV0)
-                (obligations/validate-native-world projected)
+                (obligations/validate-native-world projected abi)
                 head: String
                 (str "stage source-seal ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
@@ -373,14 +378,28 @@
                     (body/bodyartifactv0-header-name artifact) " "
                     (body/bodyartifactv0-source-name artifact) "\n"))))))))))
 
-(defn emit-dual-slice!
+(defn emit-slice!
+  [(facts-path : String)
+   (module-name : String)
+   (relative-path : String)
+   (artifacts-dir : String)
+   (compiler-commit : String)
+   (abi-id : String)] -> String
+  (let [profile: (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
+    (if (nil? profile)
+      (str "stage abi REJECTED unknown abi profile " abi-id "\n")
+      (emit-slice-for-abi! facts-path module-name relative-path artifacts-dir
+        compiler-commit profile))))
+
+(defn emit-dual-slice-for-abi!
   [(facts-path : String)
    (module-name : String)
    (relative-path : String)
    (artifacts-dir : String)
    (compiler-commit : String)
    (qbe-function-name : String)
-   (qbe-module-index : Int)] -> String
+   (qbe-module-index : Int)
+   (abi : core/AbiProfileV0)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0
@@ -401,7 +420,7 @@
                 (lower/typingacceptedv0-slice typing-result)
                 native-result: lower/NativeLoweringResultV0
                 (lower/lower-native-world sealed-typed typed-slice compiler-commit
-                  configuration)
+                  configuration abi)
                 sealed-native: worlds/SealedNativeWorldV0
                 (slice/native-sealed native-result)
                 program: core/NativeWorld
@@ -411,14 +430,14 @@
                 result: body/BodyMaterializationV0
                 (body/materialize-world projected 0)
                 verdicts: (Vec obligations/ObligationVerdictV0)
-                (obligations/validate-native-world projected)
+                (obligations/validate-native-world projected abi)
                 complete: Bool
                 (instance? native.lower.NativeLoweringCompleteV0 native-result)
                 qbe-report: String
                 (if complete
                   (str "qbe-stage typed-to-native COMPLETE\n"
                     (emit-qbe-function! program qbe-function-name artifacts-dir
-                      qbe-module-index))
+                      qbe-module-index abi))
                   (str "qbe-stage typed-to-native PENDING\n"
                     "qbe-materialize REFUSED native lowering incomplete\n"))
                 head: String
@@ -455,3 +474,18 @@
                     (body/bodyartifactv0-header-name artifact) " "
                     (body/bodyartifactv0-source-name artifact) "\n"
                     qbe-report))))))))))
+
+(defn emit-dual-slice!
+  [(facts-path : String)
+   (module-name : String)
+   (relative-path : String)
+   (artifacts-dir : String)
+   (compiler-commit : String)
+   (qbe-function-name : String)
+   (qbe-module-index : Int)
+   (abi-id : String)] -> String
+  (let [profile: (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
+    (if (nil? profile)
+      (str "stage abi REJECTED unknown abi profile " abi-id "\n")
+      (emit-dual-slice-for-abi! facts-path module-name relative-path artifacts-dir
+        compiler-commit qbe-function-name qbe-module-index profile))))

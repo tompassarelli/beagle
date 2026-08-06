@@ -438,7 +438,7 @@
     (lower/nativeloweringcompletev0-receipt result)
     (lower/nativeloweringpendingv0-receipt result)))
 
-(defn slice-state [] -> SliceStateV0
+(defn slice-state [(abi : core/AbiProfileV0)] -> SliceStateV0
   (let [sealed-result: lower/SourceSealResultV0 (seal-result)
         sealed-accepted: lower/SourceSealAcceptedV0 (require-seal-accepted sealed-result)
         sealed-source: worlds/SealedSourceWorldV0
@@ -451,7 +451,8 @@
           (lower/typingacceptedv0-sealed typed)
           (lower/typingacceptedv0-slice typed)
           compiler-commit
-          configuration)
+          configuration
+          abi)
         sealed-native: worlds/SealedNativeWorldV0 (native-sealed native)]
     (->SliceStateV0
       (lower/sourcesealacceptedv0-receipt sealed-accepted)
@@ -465,9 +466,11 @@
   ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
    "legal-abi" "discharged-tokens" "bounded-effects"])
 
-(defn obligation-report [(program : core/NativeWorld)] -> String
+(defn obligation-report
+  [(program : core/NativeWorld)
+   (abi : core/AbiProfileV0)] -> String
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
-        (obligations/validate-native-world program)]
+        (obligations/validate-native-world program abi)]
     (loop [index: Int 0 lines: (Vec String) []]
       (if (>= index (count verdicts))
         (c17/join-lines lines)
@@ -569,7 +572,9 @@
     "  return 0;\n"
     "}\n"))
 
-(defn slice-report-text [(state : SliceStateV0)] -> String
+(defn slice-report-text
+  [(state : SliceStateV0)
+   (abi : core/AbiProfileV0)] -> String
   (let [program: core/NativeWorld (slicestatev0-program state)]
     (str "fram.fold Native Core slice\n"
       "source: fram:" module-path "\n"
@@ -582,7 +587,7 @@
       "core validator: "
       (if (core/validationreport-passed (core/validate-world program)) "pass" "FAIL") "\n\n"
       "seven structural obligations (native.obligations/validate-native-world):\n"
-      (obligation-report program)
+      (obligation-report program abi)
       "\n"
       (receipt-report "source-seal receipt obligations" (slicestatev0-source-receipt state))
       "\n"
@@ -594,8 +599,10 @@
       "\n"
       (diagnostic-report "typed-to-native diagnostics" (slicestatev0-native-receipt state)))))
 
-(defn emit-slice! [(directory : String)] -> Nil
-  (let [state: SliceStateV0 (slice-state)
+(defn emit-slice-for-abi!
+  [(directory : String)
+   (abi : core/AbiProfileV0)] -> Nil
+  (let [state: SliceStateV0 (slice-state abi)
         program: core/NativeWorld (slicestatev0-program state)
         artifact: c17/C17Artifact (require-artifact (c17/materialize-world program 0))]
     (do
@@ -604,4 +611,10 @@
       (spit (str directory "/" (c17/c17artifact-source-name artifact))
         (c17/c17artifact-source-text artifact))
       (spit (str directory "/main.c") (probe-main-text program))
-      (spit (str directory "/slice-report.txt") (slice-report-text state)))))
+      (spit (str directory "/slice-report.txt") (slice-report-text state abi)))))
+
+(defn emit-slice! [(directory : String) (abi-id : String)] -> Nil
+  (let [profile: (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
+    (if (nil? profile)
+      (throw (ex-info (str "unknown abi profile " abi-id) {}))
+      (emit-slice-for-abi! directory profile))))

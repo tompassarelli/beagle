@@ -176,6 +176,7 @@ invoke_driver() { # invoke_driver <driver> <module> <artifacts> <log>
        NATIVE_SLICE_MODULE="$module" \
        NATIVE_SLICE_REPO="$REPO" \
        NATIVE_SLICE_ARTIFACTS="$art" \
+       NATIVE_SLICE_ABI="${NATIVE_SLICE_ABI:-lp64}" \
        run_bounded "$DRIVER_TIMEOUT" "$log" "${cmd[@]}" )
 }
 
