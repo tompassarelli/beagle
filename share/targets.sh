@@ -10,9 +10,9 @@ BEAGLE_TARGET_NAMES='Beagle Native Core, Clojure, JavaScript, and Nix'
 BEAGLE_TARGET_COUNT=4
 declare -A BEAGLE_TARGET_LANG=([core]=beagle [clj]=beagle/clj [js]=beagle/js [nix]=beagle/nix)
 declare -A BEAGLE_TARGET_SRC_EXT=([core]=bgl [clj]=bclj [js]=bjs [nix]=bnix)
-declare -A BEAGLE_TARGET_OUT_EXT=([core]=native-world [clj]=clj [js]=js [nix]=nix)
+declare -A BEAGLE_TARGET_OUT_EXT=([core]=native-program [clj]=clj [js]=js [nix]=nix)
 declare -A BEAGLE_TARGET_STATUS=([core]=live [clj]=live [js]=live [nix]=live)
-declare -A BEAGLE_TARGET_PIPELINE=([core]=native-world [clj]=hosted-emitter [js]=hosted-emitter [nix]=hosted-emitter)
+declare -A BEAGLE_TARGET_PIPELINE=([core]=native-program [clj]=hosted-emitter [js]=hosted-emitter [nix]=hosted-emitter)
 BEAGLE_MATERIALIZER_IDS=(c17 qbe)
 BEAGLE_MATERIALIZER_IDS_LIST='c17 and qbe'
 declare -A BEAGLE_MATERIALIZER_OUT_EXT=([c17]=c [qbe]=ssa)

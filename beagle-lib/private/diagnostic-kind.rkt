@@ -110,8 +110,6 @@
 ;;                        boundary layout violates the checked value contract.
 ;;   allocation-contract: an allocating expression lacks a declared region or
 ;;                        allocation-failure policy.
-;;   ownership-contract: a borrowed/owned/shared value violates its declared
-;;                        lifetime or transfer policy.
 ;;   error-contract     : a throwing path, payload, propagation, or recovery
 ;;                        site violates its declared typed-error contract.
 (define check-kind-cause-table
@@ -133,7 +131,6 @@
    'dynamic-contract     'type-error
    'collection-contract  'type-error
    'allocation-contract  'type-error
-   'ownership-contract   'type-error
    'error-contract       'type-error
    'missing-export       'type-error
    'purity-leak          'type-error

@@ -11,10 +11,10 @@
          beagle/private/facts-roundtrip
          beagle/private/module-interface
          beagle/private/parse
-         beagle/private/world-check)
+         beagle/private/module-overlay-check)
 
-(define-runtime-path world-cli
-  "../../beagle-lib/private/facts-check-world.rkt")
+(define-runtime-path overlay-cli
+  "../../beagle-lib/private/facts-check-overlay.rkt")
 
 (define (write-text! path text)
   (make-directory* (path-only path))
@@ -25,7 +25,7 @@
 
 (define (source->edn! edn-path source-id source-text)
   (define reader-path
-    (make-temporary-file "beagle-world-reader-~a.bclj"))
+    (make-temporary-file "beagle-overlay-reader-~a.bclj"))
   (dynamic-wind
    void
    (lambda ()
@@ -47,19 +47,19 @@
 
 (define (diagnostic-text result)
   (string-join
-   (map world-diagnostic-message
-        (world-check-result-diagnostics result))
+   (map overlay-diagnostic-message
+        (overlay-check-result-diagnostics result))
    "\n"))
 
-(define (with-world-files thunk)
-  (define root (make-temporary-file "beagle-world-check-~a" 'directory))
+(define (with-overlay-files thunk)
+  (define root (make-temporary-file "beagle-overlay-check-~a" 'directory))
   (dynamic-wind
    void
    (lambda ()
      (define provider-source
-       (build-path root "world" "provider.bclj"))
+       (build-path root "overlay" "provider.bclj"))
      (define consumer-source
-       (build-path root "world" "consumer.bclj"))
+       (build-path root "overlay" "consumer.bclj"))
      (make-directory* (path-only provider-source))
      (thunk root provider-source consumer-source))
    (lambda ()
@@ -108,14 +108,14 @@
             object))))
    #:exists 'truncate/replace))
 
-(define (run-world-cli . args)
+(define (run-overlay-cli . args)
   ;; Stay on the exact runtime driving this test (Fram pins Racket 9.1).  Using
   ;; PATH here can accidentally spawn a newer system Racket and create
   ;; incompatible compiled linklets.
   (define racket-exe
     (build-path (path-only (find-system-path 'exec-file)) "racket"))
   (define-values (process stdout stdin stderr)
-    (apply subprocess #f #f #f racket-exe world-cli args))
+    (apply subprocess #f #f #f racket-exe overlay-cli args))
   (close-output-port stdin)
   (define out (port->string stdout))
   (define err (port->string stderr))
@@ -125,43 +125,43 @@
 (define provider-string-signature
   (string-append
    "#lang beagle/clj\n"
-   "(ns world.provider)\n"
+   "(ns overlay.provider)\n"
    "(defn f [x: String] -> String x)\n"))
 
 (define consumer-string-call
   (string-append
    "#lang beagle/clj\n"
-   "(ns world.consumer (:require [world.provider :as p]))\n"
+   "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
    "(defn use [x: String] -> String (p/f x))\n"))
 
 (define duplicate-a-string
   (string-append
    "#lang beagle/clj\n"
-   "(ns world.duplicate)\n"
+   "(ns overlay.duplicate)\n"
    "(defn f [x: String] -> String x)\n"))
 
 (define duplicate-b-string
   (string-append
    "#lang beagle/clj\n"
-   "(ns world.duplicate)\n"
+   "(ns overlay.duplicate)\n"
    "(defn g [x: String] -> String x)\n"))
 
 (define duplicate-consumer-string
   (string-append
    "#lang beagle/clj\n"
-   "(ns world.consumer (:require [world.duplicate :as duplicate]))\n"
+   "(ns overlay.consumer (:require [overlay.duplicate :as duplicate]))\n"
    "(defn use [x: String] -> String (duplicate/f x))\n"))
 
 (test-case "candidate provider overlays an older provider on disk"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      ;; The filesystem provider has the incompatible old signature.  The
-     ;; candidate world updates provider and consumer coherently.
+     ;; candidate overlay updates provider and consumer coherently.
      (write-text!
       provider-source
       (string-append
        "#lang beagle/clj\n"
-       "(ns world.provider)\n"
+       "(ns overlay.provider)\n"
        "(defn f [x: Int] -> Int x)\n"))
      (write-text! consumer-source consumer-string-call)
      (define provider-edn
@@ -173,25 +173,25 @@
         root "consumer-candidate" consumer-source
         consumer-string-call))
      (define result
-       (check-edn-world (list consumer-edn provider-edn)))
+       (check-edn-overlay (list consumer-edn provider-edn)))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result))
-     (check-equal? (length (world-check-result-modules result)) 2)
+     (check-equal? (length (overlay-check-result-modules result)) 2)
      (check-true
       (andmap string?
-              (map checked-world-module-emitted
-                   (world-check-result-modules result)))))))
+              (map checked-overlay-module-emitted
+                   (overlay-check-result-modules result)))))))
 
-(test-case "candidate worlds accept type-only refers without runtime imports"
-  (with-world-files
+(test-case "candidate overlays accept type-only refers without runtime imports"
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "typed-provider" provider-source
         (string-append
          "#lang beagle/js\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defrecord Person [name: String])\n"
          "(defunion Choice (Chosen [value: Int]))\n"
          "(defscalar Checked Int :where (>= 0))\n")))
@@ -200,35 +200,35 @@
         root "typed-consumer" consumer-source
         (string-append
          "#lang beagle/js\n"
-         "(ns world.consumer\n"
-         "  (:require [world.provider :refer [Person Choice Checked]]))\n"
+         "(ns overlay.consumer\n"
+         "  (:require [overlay.provider :refer [Person Choice Checked]]))\n"
          "(defn keep-person [value: Person] -> Person value)\n"
          "(defn keep-choice [value: Choice] -> Choice value)\n"
          "(defn keep-checked [value: Checked] -> Checked value)\n")))
-     (define result (check-edn-world (list consumer-edn provider-edn)))
-     (check-true (world-check-result-ok? result)
+     (define result (check-edn-overlay (list consumer-edn provider-edn)))
+     (check-true (overlay-check-result-ok? result)
                  (diagnostic-text result))
      (define consumer
-       (for/first ([module (in-list (world-check-result-modules result))]
-                   #:when (eq? (checked-world-module-namespace module)
-                               'world.consumer))
+       (for/first ([module (in-list (overlay-check-result-modules result))]
+                   #:when (eq? (checked-overlay-module-namespace module)
+                               'overlay.consumer))
          module))
      (define provider
-       (for/first ([module (in-list (world-check-result-modules result))]
-                   #:when (eq? (checked-world-module-namespace module)
-                               'world.provider))
+       (for/first ([module (in-list (overlay-check-result-modules result))]
+                   #:when (eq? (checked-overlay-module-namespace module)
+                               'overlay.provider))
          module))
      (check-not-false consumer)
      (check-not-false provider)
      (check-false
       (regexp-match? #rx"import.*(Person|Choice|Checked)"
-                     (checked-world-module-emitted consumer)))
+                     (checked-overlay-module-emitted consumer)))
      (check-false
       (regexp-match? #rx"export function (Person|Chosen)"
-                     (checked-world-module-emitted provider))))))
+                     (checked-overlay-module-emitted provider))))))
 
 (test-case "full overlay can provide context while only an explicit set is checked"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
@@ -239,39 +239,39 @@
         root "consumer-candidate" consumer-source
         consumer-string-call))
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list provider-edn consumer-edn)
-        #:check-namespaces '(world.consumer)))
+        #:check-namespaces '(overlay.consumer)))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result))
      (check-equal?
-      (map checked-world-module-namespace
-           (world-check-result-modules result))
-      '(world.consumer))
+      (map checked-overlay-module-namespace
+           (overlay-check-result-modules result))
+      '(overlay.consumer))
      (check-true
       (string-prefix?
-       (world-check-result-world-digest result)
+       (overlay-check-result-overlay-digest result)
        "sha256:")))))
 
 (test-case "an explicit checked namespace absent from the overlay fails closed"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source _consumer-source)
      (define provider-edn
        (candidate!
         root "provider-candidate" provider-source
         provider-string-signature))
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list provider-edn)
-        #:check-namespaces '(world.missing)))
-     (check-false (world-check-result-ok? result))
+        #:check-namespaces '(overlay.missing)))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
-      #rx"checked namespace world\\.missing is absent"
+      #rx"checked namespace overlay\\.missing is absent"
       (diagnostic-text result)))))
 
 (test-case "duplicate standalone namespaces permit exact source selection"
-  (with-world-files
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define duplicate-a-edn
        (candidate!
@@ -280,19 +280,19 @@
        (candidate!
         root "duplicate-b" "graph.fixture.duplicate-b" duplicate-b-string))
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list duplicate-b-edn duplicate-a-edn)
         #:check-sources '("graph.fixture.duplicate-a")))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result))
      (check-equal?
-      (map checked-world-module-source
-           (world-check-result-modules result))
+      (map checked-overlay-module-source
+           (overlay-check-result-modules result))
       '("graph.fixture.duplicate-a")))))
 
 (test-case "ambiguous namespace selectors fail with sorted candidate sources"
-  (with-world-files
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define duplicate-a-edn
        (candidate!
@@ -301,16 +301,16 @@
        (candidate!
         root "duplicate-b" "graph.fixture.duplicate-b" duplicate-b-string))
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list duplicate-b-edn duplicate-a-edn)
-        #:check-namespaces '(world.duplicate)))
-     (check-false (world-check-result-ok? result))
+        #:check-namespaces '(overlay.duplicate)))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
-      #rx"checked namespace world\\.duplicate is ambiguous across candidate sources: graph\\.fixture\\.duplicate-a, graph\\.fixture\\.duplicate-b"
+      #rx"checked namespace overlay\\.duplicate is ambiguous across candidate sources: graph\\.fixture\\.duplicate-a, graph\\.fixture\\.duplicate-b"
       (diagnostic-text result)))))
 
 (test-case "ambiguous imports name the importer and sorted candidate providers"
-  (with-world-files
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define duplicate-a-edn
        (candidate!
@@ -325,16 +325,16 @@
         "graph.fixture.consumer"
         duplicate-consumer-string))
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list duplicate-b-edn consumer-edn duplicate-a-edn)
         #:check-sources '("graph.fixture.consumer")))
-     (check-false (world-check-result-ok? result))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
-      #rx"ambiguous candidate namespace world\\.duplicate required by graph\\.fixture\\.consumer; providers: graph\\.fixture\\.duplicate-a, graph\\.fixture\\.duplicate-b"
+      #rx"ambiguous candidate namespace overlay\\.duplicate required by graph\\.fixture\\.consumer; providers: graph\\.fixture\\.duplicate-a, graph\\.fixture\\.duplicate-b"
       (diagnostic-text result)))))
 
 (test-case "@file source selectors support namespace-free graph modules"
-  (with-world-files
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define selected-edn (build-path root "selected.edn"))
      (define context-edn (build-path root "context.edn"))
@@ -347,21 +347,21 @@
       "graph.fixture.context"
       "#lang beagle/clj\n(def context: String \"ok\")\n")
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list context-edn selected-edn)
         #:check-sources '("graph.fixture.selected")))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result))
-     (check-equal? (length (world-check-result-modules result)) 1)
-     (define checked (car (world-check-result-modules result)))
-     (check-false (checked-world-module-namespace checked))
+     (check-equal? (length (overlay-check-result-modules result)) 1)
+     (define checked (car (overlay-check-result-modules result)))
+     (check-false (checked-overlay-module-namespace checked))
      (check-equal?
-      (checked-world-module-source checked)
+      (checked-overlay-module-source checked)
       "graph.fixture.selected"))))
 
 (test-case "explicit file wrapper wins over orphaned legacy body lists"
-  (with-world-files
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define selected-edn (build-path root "selected-with-orphans.edn"))
      (source->edn!
@@ -385,15 +385,15 @@
         "[2188 \"v\" \"orphan-b\"]"
         "[2186 \"f0\" 2188]"))
      (define result
-       (check-edn-world
+       (check-edn-overlay
         (list selected-edn)
         #:check-sources '("graph.fixture.selected")))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result)))))
 
-(test-case "an unwrapped candidate remains a malformed world"
-  (with-world-files
+(test-case "an unwrapped candidate remains a malformed overlay"
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define malformed-edn (build-path root "unwrapped.edn"))
      (call-with-output-file
@@ -403,14 +403,14 @@
         (for ([line (in-list (datum->edn-lines '(def answer #%: Int 42)))])
           (displayln line out)))
       #:exists 'truncate/replace)
-     (define result (check-edn-world (list malformed-edn)))
-     (check-false (world-check-result-ok? result))
+     (define result (check-edn-overlay (list malformed-edn)))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
       #rx"EDN root is not a beagle-file wrapper"
       (diagnostic-text result)))))
 
 (test-case "CLI source selector returns one atomic JSON receipt"
-  (with-world-files
+  (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define selected-edn (build-path root "selected.edn"))
      (define context-edn (build-path root "context.edn"))
@@ -423,7 +423,7 @@
       "graph.fixture.context"
       "#lang beagle/clj\n(def context: String \"ok\")\n")
      (define-values (status out err)
-       (run-world-cli
+       (run-overlay-cli
         "--check-source"
         "graph.fixture.selected"
         (path->string context-edn)
@@ -438,150 +438,150 @@
       "graph.fixture.selected"))))
 
 (test-case "removed qualified provider export fails closed instead of typing as Any"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "provider-candidate" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defn replacement [x: String] -> String x)\n")))
      (define consumer-edn
        (candidate!
         root "consumer-candidate" consumer-source
         consumer-string-call))
      (define result
-       (check-edn-world (list provider-edn consumer-edn)))
-     (check-false (world-check-result-ok? result))
+       (check-edn-overlay (list provider-edn consumer-edn)))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
-      #rx"world\\.provider does not export f"
+      #rx"overlay\\.provider does not export f"
       (diagnostic-text result))
      (check-true
       (andmap
        (lambda (module)
-         (not (checked-world-module-emitted module)))
-       (world-check-result-modules result))))))
+         (not (checked-overlay-module-emitted module)))
+       (overlay-check-result-modules result))))))
 
-(test-case "CLI rejection keeps stdout empty so no partial world can publish"
-  (with-world-files
+(test-case "CLI rejection keeps stdout empty so no partial overlay can publish"
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "provider-candidate" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defn replacement [x: String] -> String x)\n")))
      (define consumer-edn
        (candidate!
         root "consumer-candidate" consumer-source
         consumer-string-call))
      (define-values (status out err)
-       (run-world-cli
+       (run-overlay-cli
         "--check"
-        "world.consumer"
+        "overlay.consumer"
         (path->string provider-edn)
         (path->string consumer-edn)))
      (check-equal? status 1)
      (check-equal? out "")
      (check-regexp-match
-      #rx"world\\.provider does not export f"
+      #rx"overlay\\.provider does not export f"
       err)
      (check-regexp-match
       #rx"nothing emitted"
       err))))
 
 (test-case "removed qualified nominal types fail closed in alias and full-ns spellings"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "type-provider" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defrecord Replacement [name: String])\n")))
-     (for ([type-name (in-list '("p/User" "world.provider/User"))]
+     (for ([type-name (in-list '("p/User" "overlay.provider/User"))]
            [stem (in-list '("missing-alias-type" "missing-full-type"))])
        (define consumer-edn
          (candidate!
           root stem consumer-source
           (string-append
            "#lang beagle/clj\n"
-           "(ns world.consumer (:require [world.provider :as p]))\n"
+           "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
            (format
             "(defn keep [x: ~a] -> ~a x)\n"
             type-name
             type-name))))
        (define result
-         (check-edn-world (list provider-edn consumer-edn)))
-       (check-false (world-check-result-ok? result))
+         (check-edn-overlay (list provider-edn consumer-edn)))
+       (check-false (overlay-check-result-ok? result))
        (check-regexp-match
-        #rx"world\\.provider does not export type User"
+        #rx"overlay\\.provider does not export type User"
         (diagnostic-text result)))
      (define cli-consumer
        (candidate!
         root "missing-cli-type" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [x: p/User] -> p/User x)\n")))
      (define-values (status out err)
-       (run-world-cli
+       (run-overlay-cli
         "--check"
-        "world.consumer"
+        "overlay.consumer"
         (path->string provider-edn)
         (path->string cli-consumer)))
      (check-equal? status 1)
      (check-equal? out "")
      (check-regexp-match
-      #rx"world\\.provider does not export type User"
+      #rx"overlay\\.provider does not export type User"
       err)
      (check-regexp-match #rx"nothing emitted" err))))
 
 (test-case "exported qualified nominal type checks through the candidate interface"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "record-provider" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defrecord User [name: String])\n")))
      (define consumer-edn
        (candidate!
         root "record-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [x: p/User] -> p/User x)\n")))
      (define result
-       (check-edn-world (list consumer-edn provider-edn)))
+       (check-edn-overlay (list consumer-edn provider-edn)))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result))
      (define provider
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.provider))
+            (eq? (checked-overlay-module-namespace module) 'overlay.provider))
          module))
      (check-true
        (module-interface-type-export?
-       (checked-world-module-interface provider)
+       (checked-overlay-module-interface provider)
        'User)))))
 
 (test-case "cross-module aliases expand transparently in source order"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "alias-provider" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defalias Text String)\n"
          "(defalias MaybeText (U Text Nil))\n")))
      (define consumer-edn
@@ -589,24 +589,24 @@
         root "alias-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn none [] -> p/MaybeText nil)\n"
-         "(defn full [] -> world.provider/Text \"ok\")\n")))
+         "(defn full [] -> overlay.provider/Text \"ok\")\n")))
      (define result
-       (check-edn-world (list provider-edn consumer-edn)))
+       (check-edn-overlay (list provider-edn consumer-edn)))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result)))))
 
 (test-case "exported alias to provider record keeps provider-qualified identity"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "record-alias-provider" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defrecord User [name: String])\n"
          "(defalias Users (Vec User))\n")))
      (define consumer-edn
@@ -614,27 +614,27 @@
         root "record-alias-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [xs: p/Users] -> p/Users xs)\n")))
      (define result
-       (check-edn-world (list consumer-edn provider-edn)))
-     (check-true (world-check-result-ok? result) (diagnostic-text result))
-     (define expected '(app Vec (prim world.provider/User)))
+       (check-edn-overlay (list consumer-edn provider-edn)))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app Vec (prim overlay.provider/User)))
      (define provider
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.provider))
+            (eq? (checked-overlay-module-namespace module) 'overlay.provider))
          module))
      (define consumer
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.consumer))
+            (eq? (checked-overlay-module-namespace module) 'overlay.consumer))
          module))
      (define users-export
        (module-interface-type-export-ref
-        (checked-world-module-interface provider)
+        (checked-overlay-module-interface provider)
         'Users))
      (check-equal?
       (type->canonical-datum
@@ -645,7 +645,7 @@
            ([form
              (in-list
               (program-forms
-               (checked-world-module-program consumer)))]
+               (checked-overlay-module-program consumer)))]
             #:when
             (and (defn-form? form)
                  (eq? (defn-form-name form) 'keep)))
@@ -659,14 +659,14 @@
       expected))))
 
 (test-case "exported alias to provider parametric type keeps canonical ctor"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "param-alias-provider" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defunion (Box T) (BoxValue [value: T]))\n"
          "(defalias TextBox (Box String))\n")))
      (define consumer-edn
@@ -674,27 +674,27 @@
         root "param-alias-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [box: p/TextBox] -> p/TextBox box)\n")))
      (define result
-       (check-edn-world (list provider-edn consumer-edn)))
-     (check-true (world-check-result-ok? result) (diagnostic-text result))
-     (define expected '(app world.provider/Box (prim String)))
+       (check-edn-overlay (list provider-edn consumer-edn)))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app overlay.provider/Box (prim String)))
      (define provider
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.provider))
+            (eq? (checked-overlay-module-namespace module) 'overlay.provider))
          module))
      (define consumer
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.consumer))
+            (eq? (checked-overlay-module-namespace module) 'overlay.consumer))
          module))
      (define alias-export
        (module-interface-type-export-ref
-        (checked-world-module-interface provider)
+        (checked-overlay-module-interface provider)
         'TextBox))
      (check-equal?
       (type->canonical-datum
@@ -705,7 +705,7 @@
            ([form
              (in-list
               (program-forms
-               (checked-world-module-program consumer)))]
+               (checked-overlay-module-program consumer)))]
             #:when
             (and (defn-form? form)
                  (eq? (defn-form-name form) 'keep)))
@@ -719,49 +719,49 @@
       expected))))
 
 (test-case "record alias re-export preserves the origin provider identity"
-  (with-world-files
+  (with-overlay-files
    (lambda (root origin-source consumer-source)
-     (define bridge-source (build-path root "world" "bridge.bclj"))
+     (define bridge-source (build-path root "overlay" "bridge.bclj"))
      (define origin-edn
        (candidate!
         root "record-origin" origin-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.origin)\n"
+         "(ns overlay.origin)\n"
          "(defrecord User [name: String])\n")))
      (define bridge-edn
        (candidate!
         root "record-bridge" bridge-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.bridge (:require [world.origin :as local]))\n"
+         "(ns overlay.bridge (:require [overlay.origin :as local]))\n"
          "(defalias Users (Vec local/User))\n")))
      (define consumer-edn
        (candidate!
         root "record-reexport-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.bridge :as b]))\n"
+         "(ns overlay.consumer (:require [overlay.bridge :as b]))\n"
          "(defn keep [xs: b/Users] -> b/Users xs)\n")))
      (define result
-       (check-edn-world (list consumer-edn bridge-edn origin-edn)))
-     (check-true (world-check-result-ok? result) (diagnostic-text result))
-     (define expected '(app Vec (prim world.origin/User)))
+       (check-edn-overlay (list consumer-edn bridge-edn origin-edn)))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app Vec (prim overlay.origin/User)))
      (define bridge
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.bridge))
+            (eq? (checked-overlay-module-namespace module) 'overlay.bridge))
          module))
      (define consumer
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.consumer))
+            (eq? (checked-overlay-module-namespace module) 'overlay.consumer))
          module))
      (define users-export
        (module-interface-type-export-ref
-        (checked-world-module-interface bridge)
+        (checked-overlay-module-interface bridge)
         'Users))
      (check-equal?
       (type->canonical-datum
@@ -772,7 +772,7 @@
            ([form
              (in-list
               (program-forms
-               (checked-world-module-program consumer)))]
+               (checked-overlay-module-program consumer)))]
             #:when
             (and (defn-form? form)
                  (eq? (defn-form-name form) 'keep)))
@@ -786,49 +786,49 @@
       expected))))
 
 (test-case "parametric alias re-export preserves the origin provider ctor"
-  (with-world-files
+  (with-overlay-files
    (lambda (root origin-source consumer-source)
-     (define bridge-source (build-path root "world" "bridge.bclj"))
+     (define bridge-source (build-path root "overlay" "bridge.bclj"))
      (define origin-edn
        (candidate!
         root "param-origin" origin-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.origin)\n"
+         "(ns overlay.origin)\n"
          "(defunion (Box T) (BoxValue [value: T]))\n")))
      (define bridge-edn
        (candidate!
         root "param-bridge" bridge-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.bridge (:require [world.origin :as local]))\n"
+         "(ns overlay.bridge (:require [overlay.origin :as local]))\n"
          "(defalias TextBox (local/Box String))\n")))
      (define consumer-edn
        (candidate!
         root "param-reexport-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.bridge :as b]))\n"
+         "(ns overlay.consumer (:require [overlay.bridge :as b]))\n"
          "(defn keep [box: b/TextBox] -> b/TextBox box)\n")))
      (define result
-       (check-edn-world (list bridge-edn origin-edn consumer-edn)))
-     (check-true (world-check-result-ok? result) (diagnostic-text result))
-     (define expected '(app world.origin/Box (prim String)))
+       (check-edn-overlay (list bridge-edn origin-edn consumer-edn)))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app overlay.origin/Box (prim String)))
      (define bridge
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.bridge))
+            (eq? (checked-overlay-module-namespace module) 'overlay.bridge))
          module))
      (define consumer
        (for/first
-           ([module (in-list (world-check-result-modules result))]
+           ([module (in-list (overlay-check-result-modules result))]
             #:when
-            (eq? (checked-world-module-namespace module) 'world.consumer))
+            (eq? (checked-overlay-module-namespace module) 'overlay.consumer))
          module))
      (define alias-export
        (module-interface-type-export-ref
-        (checked-world-module-interface bridge)
+        (checked-overlay-module-interface bridge)
         'TextBox))
      (check-equal?
       (type->canonical-datum
@@ -839,7 +839,7 @@
            ([form
              (in-list
               (program-forms
-               (checked-world-module-program consumer)))]
+               (checked-overlay-module-program consumer)))]
             #:when
             (and (defn-form? form)
                  (eq? (defn-form-name form) 'keep)))
@@ -853,48 +853,48 @@
       expected))))
 
 (test-case "qualified parametric exports prove existence and arity"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
         root "param-provider" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defunion (Box T) (BoxValue [value: T]))\n")))
      (define good-edn
        (candidate!
         root "param-good" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [x: (p/Box String)] -> (p/Box String) x)\n")))
      (define good
-       (check-edn-world (list good-edn provider-edn)))
-     (check-true (world-check-result-ok? good) (diagnostic-text good))
+       (check-edn-overlay (list good-edn provider-edn)))
+     (check-true (overlay-check-result-ok? good) (diagnostic-text good))
      (define missing-edn
        (candidate!
         root "param-missing" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [x: (p/Missing String)] -> String \"no\")\n")))
      (define missing
-       (check-edn-world (list provider-edn missing-edn)))
-     (check-false (world-check-result-ok? missing))
+       (check-edn-overlay (list provider-edn missing-edn)))
+     (check-false (overlay-check-result-ok? missing))
      (check-regexp-match
-      #rx"world\\.provider does not export type Missing"
+      #rx"overlay\\.provider does not export type Missing"
       (diagnostic-text missing))
      (define arity-edn
        (candidate!
         root "param-arity" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [x: (p/Box String Int)] -> String \"no\")\n")))
      (define arity
-       (check-edn-world (list provider-edn arity-edn)))
-     (check-false (world-check-result-ok? arity))
+       (check-edn-overlay (list provider-edn arity-edn)))
+     (check-false (overlay-check-result-ok? arity))
      (check-regexp-match
       #rx"p/Box expects 1 argument, got 2"
       (diagnostic-text arity))
@@ -903,29 +903,29 @@
         root "param-unapplied" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn keep [x: p/Box] -> String \"no\")\n")))
      (define unapplied
-       (check-edn-world (list provider-edn unapplied-edn)))
-     (check-false (world-check-result-ok? unapplied))
+       (check-edn-overlay (list provider-edn unapplied-edn)))
+     (check-false (overlay-check-result-ok? unapplied))
      (check-regexp-match
       #rx"p/Box expects 1 argument, got 0"
       (diagnostic-text unapplied)))))
 
 (test-case "interface v2 rejects stale schemas and malformed export arity"
-  (with-world-files
+  (with-overlay-files
    (lambda (_root provider-source consumer-source)
      (write-text!
       provider-source
       (string-append
        "#lang beagle/clj\n"
-       "(ns world.provider)\n"
+       "(ns overlay.provider)\n"
        "(defunion (Box T) (BoxValue [value: T]))\n"))
      (write-text!
       consumer-source
       (string-append
        "#lang beagle/clj\n"
-       "(ns world.consumer (:require [world.provider :as p]))\n"
+       "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
        "(defn keep [x: (p/Box String)] -> (p/Box String) x)\n"))
      (define provider-stxs (read-beagle-syntax provider-source))
      (define provider-datums (map syntax->datum provider-stxs))
@@ -937,7 +937,7 @@
      (define (parse-consumer interface)
        (define candidate
          (module-source
-          'world.provider
+          'overlay.provider
           (path->string provider-source)
           provider-stxs
           provider-datums
@@ -947,7 +947,7 @@
         #:source-path consumer-source
         #:module-resolver
         (lambda (namespace _importer-source)
-          (and (eq? namespace 'world.provider) candidate))))
+          (and (eq? namespace 'overlay.provider) candidate))))
      (define stale-interface
        (struct-copy
         module-interface
@@ -977,31 +977,31 @@
       (lambda () (parse-consumer malformed-interface))))))
 
 (test-case "type aliases and parametric names cannot leak between parses"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define aliases-edn
        (candidate!
         root "leak-source" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.aliases)\n"
+         "(ns overlay.aliases)\n"
          "(defalias Leaked (U String Nil))\n")))
-     (define first (check-edn-world (list aliases-edn)))
-     (check-true (world-check-result-ok? first) (diagnostic-text first))
+     (define first (check-edn-overlay (list aliases-edn)))
+     (check-true (overlay-check-result-ok? first) (diagnostic-text first))
      (define unrelated-edn
        (candidate!
         root "leak-sink" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.unrelated)\n"
+         "(ns overlay.unrelated)\n"
          "(defn accidental [] -> Leaked nil)\n")))
-     (define second (check-edn-world (list unrelated-edn)))
+     (define second (check-edn-overlay (list unrelated-edn)))
      (check-false
-      (world-check-result-ok? second)
+      (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
 (test-case "interface v2 forbids interface-only consumer pruning"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source _consumer-source)
      (check-equal? INTERFACE-SCHEMA-VERSION 2)
      (check-false INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
@@ -1010,39 +1010,39 @@
         root "plain-dynamic" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(def *setting* \"default\")\n")))
      (define dynamic-edn
        (candidate!
         root "marked-dynamic" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(def ^:dynamic *setting* \"default\")\n")))
      (define (digests edn)
-       (define result (check-edn-world (list edn) #:emit? #f))
-       (check-true (world-check-result-ok? result)
+       (define result (check-edn-overlay (list edn) #:emit? #f))
+       (check-true (overlay-check-result-ok? result)
                    (diagnostic-text result))
        (values
         (module-interface-digest
-         (checked-world-module-interface
-          (car (world-check-result-modules result))))
-        (world-check-result-world-digest result)))
-     (define-values (plain-interface plain-world) (digests plain-edn))
-     (define-values (dynamic-interface dynamic-world) (digests dynamic-edn))
+         (checked-overlay-module-interface
+          (car (overlay-check-result-modules result))))
+        (overlay-check-result-overlay-digest result)))
+     (define-values (plain-interface plain-overlay) (digests plain-edn))
+     (define-values (dynamic-interface dynamic-overlay) (digests dynamic-edn))
      (check-equal?
       plain-interface
       dynamic-interface
       "^:dynamic is not yet an interface-pruning key")
      (check-not-equal?
-      plain-world
-      dynamic-world
-      "the full world receipt must still force reverse-closure checking"))))
+      plain-overlay
+      dynamic-overlay
+      "the full overlay receipt must still force reverse-closure checking"))))
 
 (define raising-provider
   (string-append
    "#lang beagle/clj\n"
-   "(ns world.provider)\n"
+   "(ns overlay.provider)\n"
    "(defunion :throwable RewriteError\n"
    "  (RewriteFailure [message: String path: String refusal: Bool]))\n"
    "(defn classify [path: String] -> String\n"
@@ -1050,7 +1050,7 @@
    "  (throw (ex-info \"missing\" {:path path :refusal true})))\n"))
 
 (test-case "imported :raises remains visible and rejects an unhandled call"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
@@ -1060,17 +1060,17 @@
         root "consumer-candidate" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn use [path: String] -> String (p/classify path))\n")))
      (define result
-       (check-edn-world (list provider-edn consumer-edn)))
-     (check-false (world-check-result-ok? result))
+       (check-edn-overlay (list provider-edn consumer-edn)))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
       #rx"p/classify raises RewriteError and must be wrapped in check or rescue"
       (diagnostic-text result)))))
 
 (test-case "fully-qualified imported :raises is also enforced"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
@@ -1080,18 +1080,18 @@
         root "consumer-candidate" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider]))\n"
+         "(ns overlay.consumer (:require [overlay.provider]))\n"
          "(defn use [path: String] -> String\n"
-         "  (world.provider/classify path))\n")))
+         "  (overlay.provider/classify path))\n")))
      (define result
-       (check-edn-world (list provider-edn consumer-edn)))
-     (check-false (world-check-result-ok? result))
+       (check-edn-overlay (list provider-edn consumer-edn)))
+     (check-false (overlay-check-result-ok? result))
      (check-regexp-match
-      #rx"world\\.provider/classify raises RewriteError"
+      #rx"overlay\\.provider/classify raises RewriteError"
       (diagnostic-text result)))))
 
-(test-case "rescuing an imported raising call makes the coherent world pass"
-  (with-world-files
+(test-case "rescuing an imported raising call makes the coherent overlay pass"
+  (with-overlay-files
    (lambda (root provider-source consumer-source)
      (define provider-edn
        (candidate!
@@ -1101,17 +1101,17 @@
         root "consumer-candidate" consumer-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
          "(defn use [path: String] -> String\n"
          "  (rescue (p/classify path) err (:message err)))\n")))
      (define result
-       (check-edn-world (list provider-edn consumer-edn)))
+       (check-edn-overlay (list provider-edn consumer-edn)))
      (check-true
-      (world-check-result-ok? result)
+      (overlay-check-result-ok? result)
       (diagnostic-text result)))))
 
 (test-case "interface digest ignores bodies but changes with signatures"
-  (with-world-files
+  (with-overlay-files
    (lambda (root provider-source _consumer-source)
      (define same-a
        (candidate!
@@ -1121,62 +1121,62 @@
         root "same-b" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defn f [x: String] -> String (str x))\n")))
      (define changed
        (candidate!
         root "changed" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defn f [x: Int] -> Int x)\n")))
      (define schema-a
        (candidate!
         root "schema-a" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defunion Choice Left Right)\n")))
      (define schema-b
        (candidate!
         root "schema-b" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defunion Choice Left Middle Right)\n")))
      (define macro-a
        (candidate!
         root "macro-a" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defmacro passthrough [x] x)\n")))
      (define macro-b
        (candidate!
         root "macro-b" provider-source
         (string-append
          "#lang beagle/clj\n"
-         "(ns world.provider)\n"
+         "(ns overlay.provider)\n"
          "(defmacro passthrough [x] `(do ~x))\n")))
      (define (digests edn)
-       (define result (check-edn-world (list edn) #:emit? #f))
-       (check-true (world-check-result-ok? result)
+       (define result (check-edn-overlay (list edn) #:emit? #f))
+       (check-true (overlay-check-result-ok? result)
                    (diagnostic-text result))
        (values
         (module-interface-digest
-         (checked-world-module-interface
-          (car (world-check-result-modules result))))
-        (world-check-result-world-digest result)))
-     (define-values (interface-a world-a) (digests same-a))
-     (define-values (interface-b world-b) (digests same-b))
-     (define-values (interface-changed _world-changed) (digests changed))
-     (define-values (interface-schema-a _world-schema-a) (digests schema-a))
-     (define-values (interface-schema-b _world-schema-b) (digests schema-b))
-     (define-values (interface-macro-a _world-macro-a) (digests macro-a))
-     (define-values (interface-macro-b _world-macro-b) (digests macro-b))
+         (checked-overlay-module-interface
+          (car (overlay-check-result-modules result))))
+        (overlay-check-result-overlay-digest result)))
+     (define-values (interface-a overlay-a) (digests same-a))
+     (define-values (interface-b overlay-b) (digests same-b))
+     (define-values (interface-changed _overlay-changed) (digests changed))
+     (define-values (interface-schema-a _overlay-schema-a) (digests schema-a))
+     (define-values (interface-schema-b _overlay-schema-b) (digests schema-b))
+     (define-values (interface-macro-a _overlay-macro-a) (digests macro-a))
+     (define-values (interface-macro-b _overlay-macro-b) (digests macro-b))
      (check-equal? interface-a interface-b)
-     (check-not-equal? world-a world-b
-                       "body-only changes must alter the exact world receipt")
+     (check-not-equal? overlay-a overlay-b
+                       "body-only changes must alter the exact overlay receipt")
      (check-not-equal? interface-a interface-changed)
      (check-not-equal?
       interface-schema-a interface-schema-b

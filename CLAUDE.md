@@ -56,7 +56,7 @@ The spec is **generative** — three statements determine every surface question
 
 1. **Beagle is Clojure plus types.** Clojure surface, types threaded through.
 2. **Divergence from Clojure must be load-bearing for the type system or a backend, or it dies.** (See "Rules with teeth".)
-3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Native Core frozen Native World, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
+3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Native Core frozen native program, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
 
 Run a form through these and one answer falls out. **Do not surface decisions the spec already determines** — fact-finds ("what does bare `{…}` mean?" → match Clojure), unfinished analysis ("N rows ambiguous" → run the load-bearing test: does the divergence buy type precision or a backend anything?), and invisible implementation choices (AST shape, helper placement) are not forks. Pick, execute, report.
 

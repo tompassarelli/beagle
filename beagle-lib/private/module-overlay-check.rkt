@@ -6,7 +6,7 @@
 ;; parse lets modules import candidate datums independent of input order; the
 ;; resulting public interfaces are then installed in a second, authoritative
 ;; parse.  Type checking and emission happen only against that single overlay,
-;; and emitted bytes are returned only when the entire world succeeds.
+;; and emitted bytes are returned only when the entire overlay succeeds.
 
 (require racket/file
          racket/list
@@ -18,12 +18,12 @@
          "module-interface.rkt"
          "parse.rkt")
 
-(struct world-diagnostic (source phase message) #:transparent)
-(struct checked-world-module
+(struct overlay-diagnostic (source phase message) #:transparent)
+(struct checked-overlay-module
   (namespace source program interface emitted)
   #:transparent)
-(struct world-check-result
-  (ok? modules diagnostics world-digest)
+(struct overlay-check-result
+  (ok? modules diagnostics overlay-digest)
   #:transparent)
 
 (define (edn-source-id edn-path)
@@ -38,7 +38,7 @@
   (unless (and children
                (pair? children)
                (eq? (syntax->datum (car children)) 'beagle-file))
-    (error 'check-edn-world
+    (error 'check-edn-overlay
            "~a: EDN root is not a beagle-file wrapper"
            source))
   (cdr children))
@@ -57,7 +57,7 @@
     ;; addressable by @file source id, but cannot satisfy a namespace require.
     [(null? namespaces) #f]
     [(pair? (cdr namespaces))
-     (error 'check-edn-world
+     (error 'check-edn-overlay
             "~a: candidate has multiple ns declarations: ~a"
             source namespaces)]
     [else (car namespaces)]))
@@ -66,7 +66,7 @@
   (define source (edn-source-id edn-path))
   (define triples (read-edn-triples edn-path))
   (when (null? triples)
-    (error 'check-edn-world "~a: candidate EDN contains no triples" edn-path))
+    (error 'check-edn-overlay "~a: candidate EDN contains no triples" edn-path))
   (define wrapper (edn-triples->syntax triples source))
   (define stxs (drop-beagle-file-wrapper wrapper source))
   (module-source
@@ -92,7 +92,7 @@
     (define source-id (module-source-id-string source))
     (when (hash-has-key? by-source source-id)
       (error
-       'check-edn-world
+       'check-edn-overlay
        "duplicate candidate source id ~a"
        source-id))
     (hash-set! by-source source-id source)
@@ -118,7 +118,7 @@
       [(null? (cdr sources)) (car sources)]
       [else
        (error
-        'check-edn-world
+        'check-edn-overlay
         "ambiguous candidate namespace ~a required by ~a; providers: ~a"
         namespace
         importer-source
@@ -131,17 +131,17 @@
    #:module-resolver resolver))
 
 (define (failed-result source phase value)
-  (world-check-result
+  (overlay-check-result
    #f
    '()
    (list
-    (world-diagnostic
+    (overlay-diagnostic
      source
      phase
      (if (exn? value) (exn-message value) (format "~a" value))))
    #f))
 
-(define (check-edn-world edn-paths
+(define (check-edn-overlay edn-paths
                          #:check-profile [check-profile 2]
                          #:check-namespaces [check-namespaces #f]
                          #:check-sources [check-sources #f]
@@ -163,7 +163,7 @@
        (failed-result
         #f 'read
         (make-exn:fail
-         "check-edn-world: expected at least one candidate EDN"
+         "check-edn-overlay: expected at least one candidate EDN"
          (current-continuation-marks)))))
     (define bootstrap-overlay
       (guard #f 'index (lambda () (source-overlay sources))))
@@ -206,7 +206,7 @@
               'index
               (make-exn:fail
                (format
-                "check-edn-world: checked namespace must be a symbol or string, got ~v"
+                "check-edn-overlay: checked namespace must be a symbol or string, got ~v"
                 namespace)
                (current-continuation-marks))))]))))
     (define selected-sources
@@ -224,7 +224,7 @@
               'index
               (make-exn:fail
                (format
-                "check-edn-world: checked source must be a path, string, or symbol, got ~v"
+                "check-edn-overlay: checked source must be a path, string, or symbol, got ~v"
                 source-id)
                (current-continuation-marks))))]))))
     (when (and (or selected-namespaces selected-sources)
@@ -235,7 +235,7 @@
         #f
         'index
         (make-exn:fail
-         "check-edn-world: explicit checked module selector set is empty"
+         "check-edn-overlay: explicit checked module selector set is empty"
          (current-continuation-marks)))))
     (for ([namespace (in-list (or selected-namespaces '()))])
       (define sources
@@ -251,7 +251,7 @@
            'index
            (make-exn:fail
             (format
-             "check-edn-world: checked namespace ~a is absent from the candidate overlay"
+             "check-edn-overlay: checked namespace ~a is absent from the candidate overlay"
              namespace)
             (current-continuation-marks))))]
         [(pair? (cdr sources))
@@ -261,7 +261,7 @@
            'index
            (make-exn:fail
             (format
-             "check-edn-world: checked namespace ~a is ambiguous across candidate sources: ~a"
+             "check-edn-overlay: checked namespace ~a is ambiguous across candidate sources: ~a"
              namespace
              (candidate-source-list sources))
             (current-continuation-marks))))]))
@@ -276,7 +276,7 @@
           'index
           (make-exn:fail
            (format
-            "check-edn-world: checked source ~a is absent from the candidate overlay"
+            "check-edn-overlay: checked source ~a is absent from the candidate overlay"
             source-id)
            (current-continuation-marks))))))
     (define authoritative-resolver
@@ -316,7 +316,7 @@
            (set!
             diagnostics
             (cons
-             (world-diagnostic
+             (overlay-diagnostic
               (module-source-source-id source)
               'check
               (if (exn? error)
@@ -325,29 +325,29 @@
              diagnostics))))))
     (define interfaces
       (map module-source-interface authoritative-sources))
-    (define world-digest
-      (module-interfaces-world-digest interfaces))
+    (define overlay-digest
+      (module-interfaces-overlay-digest interfaces))
     (when (pair? diagnostics)
       (abort
-       (world-check-result
+       (overlay-check-result
         #f
         (for/list ([entry (in-list programs)])
           (define source (car entry))
-          (checked-world-module
+          (checked-overlay-module
            (module-source-namespace source)
            (module-source-source-id source)
            (cdr entry)
            (module-source-interface source)
            #f))
         (reverse diagnostics)
-        world-digest)))
-    ;; Emission is world-atomic: collect into local module results only after
+        overlay-digest)))
+    ;; Emission is overlay-atomic: collect into local module results only after
     ;; every checker has passed.  Any emitter failure returns no partial bytes.
     (define modules
       (for/list ([entry (in-list programs)])
         (define source (car entry))
         (define prog (cdr entry))
-        (checked-world-module
+        (checked-overlay-module
          (module-source-namespace source)
          (module-source-source-id source)
          prog
@@ -357,10 +357,10 @@
                (module-source-source-id source)
                'emit
                (lambda () (emit-program prog)))))))
-    (world-check-result #t modules '() world-digest)))
+    (overlay-check-result #t modules '() overlay-digest)))
 
 (provide
- check-edn-world
- (struct-out world-diagnostic)
- (struct-out checked-world-module)
- (struct-out world-check-result))
+ check-edn-overlay
+ (struct-out overlay-diagnostic)
+ (struct-out checked-overlay-module)
+ (struct-out overlay-check-result))

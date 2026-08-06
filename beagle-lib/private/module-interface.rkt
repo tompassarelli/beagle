@@ -4,7 +4,7 @@
 ;;
 ;; The parser historically re-read a required source file and scraped a subset
 ;; of its datums directly into the consumer's extern table.  That remains the
-;; compatibility path for importing the full legacy surface, but coherent-world
+;; compatibility path for importing the full legacy surface, but coherent-overlay
 ;; checking needs a first-class boundary for facts that must never disappear:
 ;; the exact export set and typed-error effects.  This module owns that boundary
 ;; and its deterministic digest.
@@ -22,7 +22,7 @@
 ;; encode every cross-module semantic contract (notably ^:dynamic status).
 ;; Therefore an unchanged interface digest MUST NOT prune reverse-require
 ;; consumers: Fram must keep selecting the complete reverse closure from the
-;; changed source/world digest until this flag can truthfully become #t.
+;; changed source/overlay digest until this flag can truthfully become #t.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #f)
 (define ANY (type-prim 'Any))
 
@@ -578,9 +578,9 @@
 (define (module-interface-type-export-ref interface name [failure #f])
   (hash-ref (module-interface-type-exports interface) name failure))
 
-(define (module-interfaces-world-digest interfaces)
+(define (module-interfaces-overlay-digest interfaces)
   (sha256-datum
-   `(module-world
+   `(module-overlay
      (interface-schema ,INTERFACE-SCHEMA-VERSION)
      ,@(for/list ([interface
                    (in-list
@@ -609,7 +609,7 @@
  module-interface-binding-ref
  module-interface-type-export?
  module-interface-type-export-ref
- module-interfaces-world-digest
+ module-interfaces-overlay-digest
  (struct-out interface-binding)
  (struct-out interface-error)
  (struct-out interface-type-declaration)

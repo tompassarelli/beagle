@@ -57,7 +57,7 @@
 (define (view-idioms)
   (string-join (cons
                 (string-append (core-profile-name CORE-PROFILE)
-                               " frozen Native World")
+                               " frozen native program")
                 (for/list ([t (in-list TARGETS)])
                   (string-append (target-name t) " " (target-idiom t))))
                ", "))
@@ -66,7 +66,8 @@
 (define (view-emitters)
   (string-append
    "- `native-core/src/native/{worlds,lower,obligations}.bclj` — the hosted "
-   "implementation that lowers Core into one frozen Native World; "
+   "implementation that lowers Core into one immutable validated Native Core "
+   "program; "
    "`native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.\n"
    "- `beagle-lib/private/emit-{"
    (string-join (map id-str TARGETS) ",")
@@ -90,7 +91,7 @@
              (core-profile-name CORE-PROFILE)
              (string-append "`" (core-profile-source-ext CORE-PROFILE) "`")
              (string-append "`#lang " (core-profile-lang CORE-PROFILE) "`")
-             "frozen Native World"
+             "frozen native program"
              (format "~a — ~a"
                      (core-profile-status CORE-PROFILE)
                      (core-profile-note CORE-PROFILE))))
@@ -104,7 +105,7 @@
     (list ""
           (string-append
            (string-titlecase (number-word (source-profile-count)))
-           " source profiles. Core produces the authoritative frozen Native World; "
+           " source profiles. Core produces the authoritative frozen native program; "
            "`--materializer "
            (string-join (map materializer-id-str MATERIALIZERS) "|")
            "` selects a projection. `"
@@ -155,7 +156,7 @@
   (string-join
    (list "```"
          (string-append (core-profile-source-ext CORE-PROFILE)
-                        "  ──▶ parse ──▶ check ──▶ freeze Native World"
+                        "  ──▶ parse ──▶ check ──▶ freeze native program"
                         " ──▶ --materializer "
                         (string-join (map materializer-id-str MATERIALIZERS) "|"))
          flow
@@ -200,12 +201,12 @@
                  (substring (core-profile-source-ext CORE-PROFILE) 1)
                  (lambda (t) (substring (target-source-ext t) 1)))
     (assoc-array "BEAGLE_TARGET_OUT_EXT"
-                 "native-world"
+                 "native-program"
                  (lambda (t) (substring (target-out-ext t) 1)))
     (assoc-array "BEAGLE_TARGET_STATUS"
                  (symbol->string (core-profile-status CORE-PROFILE))
                  (lambda (t) (symbol->string (target-status t))))
-    (assoc-array "BEAGLE_TARGET_PIPELINE" "native-world"
+    (assoc-array "BEAGLE_TARGET_PIPELINE" "native-program"
                  (lambda (_t) "hosted-emitter"))
     (format "BEAGLE_MATERIALIZER_IDS=(~a)" (string-join materializer-ids* " "))
     (format "BEAGLE_MATERIALIZER_IDS_LIST='~a'" (prose-join materializer-ids*))
@@ -275,8 +276,8 @@
            'name (core-profile-name CORE-PROFILE)
            'sourceExtension (core-profile-source-ext CORE-PROFILE)
            'lang (core-profile-lang CORE-PROFILE)
-           'pipeline "native-world"
-           'output "frozen Native World"
+           'pipeline "native-program"
+           'output "frozen native program"
            'status (symbol->string (core-profile-status CORE-PROFILE))
            'note (core-profile-note CORE-PROFILE)
            'domain (core-profile-domain CORE-PROFILE)

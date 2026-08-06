@@ -241,7 +241,7 @@ source "$BEAGLE_ROOT/share/targets.sh"
 for target in "${BEAGLE_TARGET_IDS[@]}"; do
     declared="${BEAGLE_TARGET_STATUS[$target]}"
     pipeline="${BEAGLE_TARGET_PIPELINE[$target]}"
-    if [[ "$pipeline" == "native-world" && -x "$BEAGLE_ROOT/bin/beagle-build-core" ]]; then
+    if [[ "$pipeline" == "native-program" && -x "$BEAGLE_ROOT/bin/beagle-build-core" ]]; then
         TARGETS+=("{\"name\":\"$target\",\"status\":\"$declared\"}")
     elif [[ "$pipeline" == "hosted-emitter" && -f "$BEAGLE_ROOT/beagle-lib/private/emit-${target}.rkt" ]]; then
         TARGETS+=("{\"name\":\"$target\",\"status\":\"$declared\"}")

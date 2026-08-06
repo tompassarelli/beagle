@@ -421,10 +421,10 @@
   (define indexed
     (for/list ([source (in-list (collect-source-paths root-path inputs))])
       (build-indexed-file (car source) (cdr source))))
-  ;; Use the compiler's canonical module/source/world digest boundary while all
+  ;; Use the compiler's canonical module/source/overlay digest boundary while all
   ;; modules are still in memory. JSON v1 intentionally exposes only raw file
   ;; hashes and its own root hash.
-  (module-interfaces-world-digest (map indexed-file-interface indexed))
+  (module-interfaces-overlay-digest (map indexed-file-interface indexed))
   (define entries (map indexed-file-entry indexed))
   (hasheq 'schemaVersion SEMANTIC-INDEX-SCHEMA-VERSION
           'rootHash (root-hash entries)

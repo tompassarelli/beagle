@@ -499,7 +499,6 @@
   (kind key-type value-type equality hashing order layout)
   #:transparent)
 (struct allocation-contract (region failure) #:transparent)
-(struct ownership-contract (storage lifetime transfer) #:transparent)
 (struct error-contract (error-type payload-layout mode) #:transparent)
 (struct error-payload-key-contract (keyword) #:transparent)
 
@@ -597,7 +596,6 @@
  (struct-out dynamic-contract)
  (struct-out collection-contract)
  (struct-out allocation-contract)
- (struct-out ownership-contract)
  (struct-out error-contract)
  (struct-out error-payload-key-contract)
  (struct-out program)

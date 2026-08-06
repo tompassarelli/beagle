@@ -59,7 +59,7 @@
 (define CORE-PROFILE
   (core-profile
    'core "Beagle Native Core" ".bgl" "beagle" 'live
-   "native pipeline: frozen Native World; select C17 or QBE materializer"
+   "native pipeline: frozen native program; select C17 or QBE materializer"
    "Native system-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
    MATERIALIZERS))
 
