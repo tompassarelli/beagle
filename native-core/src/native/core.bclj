@@ -14,7 +14,7 @@
   (I64Kind [token :- Bool])
   (F64Kind [token :- Bool])
   (TextKind [token :- Bool])
-  (BytesKind [token: Bool])
+  (BytesKind [(token : Bool)])
   (KeywordKind [token :- Bool])
   (RefKind [target :- NativeId]))
 
@@ -37,17 +37,17 @@
    payload-type :- (U NativeId Nil)])
 
 (defunion CollectionOrderV0
-  (InsertionOrderV0 [token: Bool]))
+  (InsertionOrderV0 [(token : Bool)]))
 
 ;; Collection lookup equality is either scalar or closed over one sealed native
 ;; type descriptor; Map/Set ops never smuggle a host callback through the ABI.
 (defunion ConcreteEqualityV0
-  (BoolEqualityV0 [token: Bool])
-  (I64EqualityV0 [token: Bool])
-  (F64EqualityV0 [token: Bool])
-  (TextEqualityV0 [token: Bool])
-  (KeywordEqualityV0 [token: Bool])
-  (StructuralEqualityV0 [domain-type: NativeId]))
+  (BoolEqualityV0 [(token : Bool)])
+  (I64EqualityV0 [(token : Bool)])
+  (F64EqualityV0 [(token : Bool)])
+  (TextEqualityV0 [(token : Bool)])
+  (KeywordEqualityV0 [(token : Bool)])
+  (StructuralEqualityV0 [(domain-type : NativeId)]))
 
 (defunion TypeShape
   (AtomType [kind :- AtomKind])
@@ -55,10 +55,10 @@
   (UnionType [variants :- (Vec TypeVariant)])
   (VectorType [element-type :- NativeId])
   (MapTypeV0
-    [key-type: NativeId
-     value-type: NativeId
-     iteration-order: CollectionOrderV0])
-  (SetTypeV0 [element-type: NativeId iteration-order: CollectionOrderV0])
+    [(key-type : NativeId)
+     (value-type : NativeId)
+     (iteration-order : CollectionOrderV0)])
+  (SetTypeV0 [(element-type : NativeId) (iteration-order : CollectionOrderV0)])
   (ReferenceType [target-type :- NativeId])
   ;; An Atom is an opaque identity-bearing cell, never a general reference.
   ;; Its content type fixes the byte layout copied under the state token.
@@ -66,10 +66,10 @@
   ;; A closed callable signature is semantic type information only. Physical
   ;; closure layout and indirect-call ABI remain separate, explicit obligations.
   (FunctionType
-    [parameter-types: (Vec NativeId)
-     rest-type: (U NativeId Nil)
-     return-type: NativeId])
-  (OutcomeType [value-type: NativeId failure-type: NativeId]))
+    [(parameter-types : (Vec NativeId))
+     (rest-type : (U NativeId Nil))
+     (return-type : NativeId)])
+  (OutcomeType [(value-type : NativeId) (failure-type : NativeId)]))
 
 (defrecord TypeDef
   [id :- NativeId
@@ -82,10 +82,10 @@
   (ReadEffect [region :- NativeId])
   (WriteEffect [region :- NativeId])
   (CapabilityEffect [capability :- NativeId])
-  (IoEffect [capability: NativeId])
-  (SocketEffect [capability: NativeId])
-  (ClockEffect [capability: NativeId])
-  (AtomicEffect [region: NativeId capability: NativeId]))
+  (IoEffect [(capability : NativeId)])
+  (SocketEffect [(capability : NativeId)])
+  (ClockEffect [(capability : NativeId)])
+  (AtomicEffect [(region : NativeId) (capability : NativeId)]))
 
 (defrecord EffectDef [id :- NativeId kind :- EffectKind])
 
@@ -112,95 +112,95 @@
    affine :- Bool])
 
 (defunion ScalarReprV0
-  (BoolReprV0 [bit-width: Int])
-  (SignedIntReprV0 [bit-width: Int])
-  (UnsignedIntReprV0 [bit-width: Int])
-  (FloatReprV0 [bit-width: Int]))
+  (BoolReprV0 [(bit-width : Int)])
+  (SignedIntReprV0 [(bit-width : Int)])
+  (UnsignedIntReprV0 [(bit-width : Int)])
+  (FloatReprV0 [(bit-width : Int)]))
 
 (defrecord FieldLayoutV0
-  [field-id: NativeId
-   type-id: NativeId
-   offset-bytes: Int
-   align-bytes: Int])
+  [(field-id : NativeId)
+   (type-id : NativeId)
+   (offset-bytes : Int)
+   (align-bytes : Int)])
 
 (defrecord UnionVariantLayoutV0
-  [variant-id: NativeId
-   tag: Int
-   payload-type: (U NativeId Nil)
-   payload-offset-bytes: Int])
+  [(variant-id : NativeId)
+   (tag : Int)
+   (payload-type : (U NativeId Nil))
+   (payload-offset-bytes : Int)])
 
 (defunion LayoutShapeV0
-  (ScalarShapeV0 [representation: ScalarReprV0])
-  (BytesShapeV0 [token: Bool])
-  (RecordShapeV0 [fields: (Vec FieldLayoutV0)])
+  (ScalarShapeV0 [(representation : ScalarReprV0)])
+  (BytesShapeV0 [(token : Bool)])
+  (RecordShapeV0 [(fields : (Vec FieldLayoutV0))])
   (UnionShapeV0
-    [tag-type: NativeId
-     tag-offset-bytes: Int
-     variants: (Vec UnionVariantLayoutV0)])
+    [(tag-type : NativeId)
+     (tag-offset-bytes : Int)
+     (variants : (Vec UnionVariantLayoutV0))])
   ;; Describes the ELEMENT storage; the vector value itself is a reference-sized
   ;; handle on the header, so a (Vec T) record field is 8 bytes for every T.
   ;; Region-lifetime law applies: that handle may not outlive the header's region.
-  (VectorShapeV0 [element-type: NativeId stride-bytes: Int])
+  (VectorShapeV0 [(element-type : NativeId) (stride-bytes : Int)])
   ;; Map and Set values are arena-owned header handles. Their exact element
   ;; storage ABI and deterministic iteration policy stay in the Native World.
   (MapShapeV0
-    [key-type: NativeId
-     key-stride-bytes: Int
-     key-align-bytes: Int
-     value-type: NativeId
-     value-stride-bytes: Int
-     value-align-bytes: Int
-     iteration-order: CollectionOrderV0])
+    [(key-type : NativeId)
+     (key-stride-bytes : Int)
+     (key-align-bytes : Int)
+     (value-type : NativeId)
+     (value-stride-bytes : Int)
+     (value-align-bytes : Int)
+     (iteration-order : CollectionOrderV0)])
   (SetShapeV0
-    [element-type: NativeId
-     stride-bytes: Int
-     align-bytes: Int
-     iteration-order: CollectionOrderV0])
-  (ReferenceShapeV0 [target-type: NativeId])
-  (AtomCellShapeV0 [content-type: NativeId]))
+    [(element-type : NativeId)
+     (stride-bytes : Int)
+     (align-bytes : Int)
+     (iteration-order : CollectionOrderV0)])
+  (ReferenceShapeV0 [(target-type : NativeId)])
+  (AtomCellShapeV0 [(content-type : NativeId)]))
 
 (defrecord LayoutDef
-  [id: NativeId
-   type-id: NativeId
-   size-bytes: Int
-   align-bytes: Int
-   shape: LayoutShapeV0])
+  [(id : NativeId)
+   (type-id : NativeId)
+   (size-bytes : Int)
+   (align-bytes : Int)
+   (shape : LayoutShapeV0)])
 
 (defrecord Parameter [id :- NativeId type-id :- NativeId])
 
-(defrecord SsaValueV0 [id: NativeId type-id: NativeId])
+(defrecord SsaValueV0 [(id : NativeId) (type-id : NativeId)])
 
 (defunion CheckedOperationV0
-  (CheckedAddI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedSubI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedMulI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedQuotI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedRemI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedModI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedBoundsV0 [index-id: NativeId length-id: NativeId]))
+  (CheckedAddI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (CheckedSubI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (CheckedMulI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (CheckedQuotI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (CheckedRemI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (CheckedModI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (CheckedBoundsV0 [(index-id : NativeId) (length-id : NativeId)]))
 
 ;; I64 bit operations are total over their bit patterns. Shift distance follows
 ;; the portable/Clojure contract by using its low six bits.
 (defunion BitwiseOperationV0
-  (BitAndI64V0 [left-id: NativeId right-id: NativeId])
-  (BitOrI64V0 [left-id: NativeId right-id: NativeId])
-  (BitXorI64V0 [left-id: NativeId right-id: NativeId])
-  (BitShiftLeftI64V0 [value-id: NativeId distance-id: NativeId])
-  (UnsignedBitShiftRightI64V0 [value-id: NativeId distance-id: NativeId]))
+  (BitAndI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (BitOrI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (BitXorI64V0 [(left-id : NativeId) (right-id : NativeId)])
+  (BitShiftLeftI64V0 [(value-id : NativeId) (distance-id : NativeId)])
+  (UnsignedBitShiftRightI64V0 [(value-id : NativeId) (distance-id : NativeId)]))
 
 ;; Total comparisons: every operand pair is defined, so a comparison is never a
 ;; CheckedOperationV0 and never carries an Outcome result.
 ;; CompareEqTextV0 is byte equality over two handles, never handle equality: two
 ;; distinct handles onto equal bytes are equal Text.
 (defunion CompareOpV0
-  (CompareEqI64V0 [token: Bool])
-  (CompareLtI64V0 [token: Bool])
-  (CompareLeI64V0 [token: Bool])
-  (CompareEqF64V0 [token: Bool])
-  (CompareLtF64V0 [token: Bool])
-  (CompareLeF64V0 [token: Bool])
-  (CompareEqBoolV0 [token: Bool])
-  (CompareEqTextV0 [token: Bool]))
+  (CompareEqI64V0 [(token : Bool)])
+  (CompareLtI64V0 [(token : Bool)])
+  (CompareLeI64V0 [(token : Bool)])
+  (CompareEqF64V0 [(token : Bool)])
+  (CompareLtF64V0 [(token : Bool)])
+  (CompareLeF64V0 [(token : Bool)])
+  (CompareEqBoolV0 [(token : Bool)])
+  (CompareEqTextV0 [(token : Bool)]))
 
 ;; Text library operations share one closed instruction family. Allocation is
 ;; explicit in each operation through its arena SSA value; pure comparisons do
@@ -208,38 +208,38 @@
 ;; 15.0 scalars, and token runs are maximal Unicode Letter or DecimalDigit
 ;; sequences.
 (defunion TextBuiltinOpV0
-  (TextCompareV0 [left-id: NativeId right-id: NativeId])
-  (TextEndsWithV0 [source-id: NativeId suffix-id: NativeId])
-  (TextTrimV0 [arena-id: NativeId source-id: NativeId])
-  (TextLowerV0 [arena-id: NativeId source-id: NativeId])
+  (TextCompareV0 [(left-id : NativeId) (right-id : NativeId)])
+  (TextEndsWithV0 [(source-id : NativeId) (suffix-id : NativeId)])
+  (TextTrimV0 [(arena-id : NativeId) (source-id : NativeId)])
+  (TextLowerV0 [(arena-id : NativeId) (source-id : NativeId)])
   (TextLetterDecimalRunsV0
-    [arena-id: NativeId
-     source-id: NativeId
-     pattern-id: NativeId])
+    [(arena-id : NativeId)
+     (source-id : NativeId)
+     (pattern-id : NativeId)])
   (TextRegexReplaceV0
-    [arena-id: NativeId
-     source-id: NativeId
-     pattern-id: NativeId
-     replacement-id: NativeId])
-  (TextRegexMatchesV0 [source-id: NativeId pattern-id: NativeId])
+    [(arena-id : NativeId)
+     (source-id : NativeId)
+     (pattern-id : NativeId)
+     (replacement-id : NativeId)])
+  (TextRegexMatchesV0 [(source-id : NativeId) (pattern-id : NativeId)])
   (TextRegexFindV0
-    [arena-id: NativeId
-     source-id: NativeId
-     pattern-id: NativeId])
+    [(arena-id : NativeId)
+     (source-id : NativeId)
+     (pattern-id : NativeId)])
   (TextSplitV0
-    [arena-id: NativeId
-     source-id: NativeId
-     pattern-id: NativeId])
-  (TextVectorTrimV0 [arena-id: NativeId source-id: NativeId])
-  (TextVectorRemoveBlankV0 [arena-id: NativeId source-id: NativeId])
+    [(arena-id : NativeId)
+     (source-id : NativeId)
+     (pattern-id : NativeId)])
+  (TextVectorTrimV0 [(arena-id : NativeId) (source-id : NativeId)])
+  (TextVectorRemoveBlankV0 [(arena-id : NativeId) (source-id : NativeId)])
   (TextJoinV0
-    [arena-id: NativeId
-     separator-id: NativeId
-     source-id: NativeId])
+    [(arena-id : NativeId)
+     (separator-id : NativeId)
+     (source-id : NativeId)])
   (TextRepeatV0
-    [arena-id: NativeId
-     source-id: NativeId
-     count-id: NativeId]))
+    [(arena-id : NativeId)
+     (source-id : NativeId)
+     (count-id : NativeId)]))
 
 ;; Value semantics are closed over one sealed TypeDef/LayoutDef graph. The
 ;; domain is explicit so materializers never infer dynamic behavior from bytes.
@@ -248,37 +248,37 @@
 ;; their declared fields, tags, and elements.
 (defunion ValueSemanticsOpV0
   (ValueEqualV0
-    [domain-type: NativeId
-     left-id: NativeId
-     right-id: NativeId])
-  (ValueHashV0 [domain-type: NativeId value-id: NativeId])
+    [(domain-type : NativeId)
+     (left-id : NativeId)
+     (right-id : NativeId)])
+  (ValueHashV0 [(domain-type : NativeId) (value-id : NativeId)])
   (ValueCompareV0
-    [domain-type: NativeId
-     left-id: NativeId
-     right-id: NativeId]))
+    [(domain-type : NativeId)
+     (left-id : NativeId)
+     (right-id : NativeId)]))
 
 (defunion ValueTextModeV0
-  (ValueStrV0 [token: Bool])
-  (ValuePrStrV0 [token: Bool]))
+  (ValueStrV0 [(token : Bool)])
+  (ValuePrStrV0 [(token : Bool)]))
 
 ;; Pure target-neutral codec semantics. UTF-8 operations allocate only their
 ;; returned value in the caller's arena; binary64 conversions are bit-level.
 (defunion CodecPrimitiveOpV0
-  (Utf8EncodeV0 [arena-id: NativeId source-id: NativeId])
-  (Utf8DecodeV0 [arena-id: NativeId source-id: NativeId])
-  (Sha256BytesV0 [arena-id: NativeId source-id: NativeId])
-  (FloatToBitsV0 [source-id: NativeId])
-  (FloatFromBitsV0 [source-id: NativeId]))
+  (Utf8EncodeV0 [(arena-id : NativeId) (source-id : NativeId)])
+  (Utf8DecodeV0 [(arena-id : NativeId) (source-id : NativeId)])
+  (Sha256BytesV0 [(arena-id : NativeId) (source-id : NativeId)])
+  (FloatToBitsV0 [(source-id : NativeId)])
+  (FloatFromBitsV0 [(source-id : NativeId)]))
 
 (defunion ResourceTokenKindV0
-  (RegionTokenV0 [region: NativeId])
-  (CapabilityTokenV0 [capability: NativeId]))
+  (RegionTokenV0 [(region : NativeId)])
+  (CapabilityTokenV0 [(capability : NativeId)]))
 
-(defrecord ResourceTokenV0 [id: NativeId kind: ResourceTokenKindV0])
+(defrecord ResourceTokenV0 [(id : NativeId) (kind : ResourceTokenKindV0)])
 
 (defrecord TokenFlowV0
-  [consumed: (Vec NativeId)
-   produced: (Vec ResourceTokenV0)])
+  [(consumed : (Vec NativeId))
+   (produced : (Vec ResourceTokenV0))])
 
 (defunion StoreOp
   (StoreBool
@@ -308,342 +308,344 @@
      capability :- NativeId]))
 
 (defunion Instruction
-  (AtomInstruction [result: SsaValueV0 atom: NativeAtom])
-  (CopyInstruction [result: SsaValueV0 source-id: NativeId])
+  (AtomInstruction [(result : SsaValueV0) (atom : NativeAtom)])
+  (CopyInstruction [(result : SsaValueV0) (source-id : NativeId)])
   (AddF64Instruction
-    [result: SsaValueV0
-     left-id: NativeId
-     right-id: NativeId])
+    [(result : SsaValueV0)
+     (left-id : NativeId)
+     (right-id : NativeId)])
   (SubF64InstructionV0
-    [result: SsaValueV0
-     left-id: NativeId
-     right-id: NativeId])
+    [(result : SsaValueV0)
+     (left-id : NativeId)
+     (right-id : NativeId)])
   (MulF64InstructionV0
-    [result: SsaValueV0
-     left-id: NativeId
-     right-id: NativeId])
+    [(result : SsaValueV0)
+     (left-id : NativeId)
+     (right-id : NativeId)])
   ;; Clojure Float division traps on either signed zero divisor.
   (DivF64InstructionV0
-    [result: SsaValueV0
-     left-id: NativeId
-     right-id: NativeId])
-  (I64ToF64InstructionV0 [result: SsaValueV0 source-id: NativeId])
-  (CheckedInstruction [result: SsaValueV0 operation: CheckedOperationV0])
-  (BitwiseInstructionV0 [result: SsaValueV0 operation: BitwiseOperationV0])
+    [(result : SsaValueV0)
+     (left-id : NativeId)
+     (right-id : NativeId)])
+  (I64ToF64InstructionV0 [(result : SsaValueV0) (source-id : NativeId)])
+  (CheckedInstruction [(result : SsaValueV0) (operation : CheckedOperationV0)])
+  (BitwiseInstructionV0 [(result : SsaValueV0) (operation : BitwiseOperationV0)])
   (StoreInstruction
-    [result: SsaValueV0
-     store: StoreOp
-     tokens: TokenFlowV0])
+    [(result : SsaValueV0)
+     (store : StoreOp)
+     (tokens : TokenFlowV0)])
   (AllocateInstruction
-    [result: SsaValueV0
-     region: NativeId
-     capability: NativeId
-     byte-count-id: NativeId
-     tokens: TokenFlowV0])
+    [(result : SsaValueV0)
+     (region : NativeId)
+     (capability : NativeId)
+     (byte-count-id : NativeId)
+     (tokens : TokenFlowV0)])
   (CallInstruction
-    [result: SsaValueV0
-     function-id: NativeId
-     arguments: (Vec NativeId)
-     tokens: TokenFlowV0])
+    [(result : SsaValueV0)
+     (function-id : NativeId)
+     (arguments : (Vec NativeId))
+     (tokens : TokenFlowV0)])
   ;; The ABI declaration, rather than a source-language callee name, owns the
   ;; physical symbol, effects, capabilities, ownership, and failure contract.
   (ExternCallInstruction
-    [result: SsaValueV0
-     abi-id: NativeId
-     arguments: (Vec NativeId)
-     arena-id: (U NativeId Nil)
-     tokens: TokenFlowV0])
+    [(result : SsaValueV0)
+     (abi-id : NativeId)
+     (arguments : (Vec NativeId))
+     (arena-id : (U NativeId Nil))
+     (tokens : TokenFlowV0)])
   (CompareInstruction
-    [result: SsaValueV0
-     comparison: CompareOpV0
-     left-id: NativeId
-     right-id: NativeId])
+    [(result : SsaValueV0)
+     (comparison : CompareOpV0)
+     (left-id : NativeId)
+     (right-id : NativeId)])
   ;; Record values are held by value, so a field read is an extract and a record
   ;; construct is a value form; neither touches a region or a capability.
   (FieldInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     field-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (field-id : NativeId)])
   ;; Read one alternative's payload out of a tagged value. Sound only where the
   ;; tag is already proved, which is why it is reachable from a switch arm alone.
   (VariantValueInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     variant-id: NativeId])
-  (RecordInstruction [result: SsaValueV0 field-ids: (Vec NativeId)])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (variant-id : NativeId)])
+  (RecordInstruction [(result : SsaValueV0) (field-ids : (Vec NativeId))])
   ;; Immutable record update copies the source into fresh arena storage before
   ;; replacing one statically identified field; the result keeps the by-value
   ;; record ABI while the allocation remains explicit in the world.
   (RecordAssocInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     field-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (field-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)])
   ;; Records enter recursive unions through an arena-owned reference, so the
   ;; reference edge that closes their layout is represented in the world.
   (BoxRecordInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
   ;; Crossing back from a recursive union's reference payload into a direct
   ;; record ABI performs an explicit checked shallow copy.
-  (RecordMaterializeInstructionV0 [result: SsaValueV0 source-id: NativeId])
+  (RecordMaterializeInstructionV0 [(result : SsaValueV0) (source-id : NativeId)])
   ;; Widening into a closed union is a tag inject: the payload is already the
   ;; variant's declared type, so no check can fail and none is emitted.
   (UnionConstructInstruction
-    [result: SsaValueV0
-     variant-id: NativeId
-     payload-id: (U NativeId Nil)])
+    [(result : SsaValueV0)
+     (variant-id : NativeId)
+     (payload-id : (U NativeId Nil))])
   ;; The checked companion to SwitchTerminator: a Switch asks which variant a
   ;; value carries, an extract asserts one. A tag mismatch traps rather than
   ;; reinterpreting the payload bytes as the expected variant.
   (UnionExtractInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     variant-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (variant-id : NativeId)])
   ;; A vector value is a reference to a {elements, length, capacity} header in a
   ;; region: length is a header read and VecGet traps outside [0, length).
-  (VecLengthInstruction [result: SsaValueV0 source-id: NativeId])
+  (VecLengthInstruction [(result : SsaValueV0) (source-id : NativeId)])
   (VecGetInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     index-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (index-id : NativeId)])
   ;; Indexed assoc preserves the source vector: it copies the header and
   ;; element storage into the arena, then replaces one in-range element.
   (VecAssocInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     index-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (index-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)])
   ;; Push is LINEAR once storage exists and doubles capacity; a reusable empty
   ;; value yields a fresh header so independent [] seeds never alias.
   (VecPushInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)])
   (VecEmptyInstruction
-    [result: SsaValueV0
-     capacity-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (capacity-id : NativeId)
+     (arena-id : NativeId)])
   ;; Concat borrows both inputs and copies their elements into a fresh header;
   ;; neither source is moved because source-level concat preserves both values.
   (VecConcatInstruction
-    [result: SsaValueV0
-     left-id: NativeId
-     right-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (left-id : NativeId)
+     (right-id : NativeId)
+     (arena-id : NativeId)])
   ;; Both transforms allocate a fresh header and storage. Source vectors stay
   ;; immutable and may be reused after the operation.
   (VecSliceInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     start-id: NativeId
-     end-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (start-id : NativeId)
+     (end-id : NativeId)
+     (arena-id : NativeId)])
   (VecReverseInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
   ;; Sort borrows the source and orders a fresh vector through the sealed
   ;; element descriptor. No source or runtime comparator crosses this seam.
   (VecSortInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId
-     element-type: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)
+     (element-type : NativeId)])
   (MapLiteralInstructionV0
-    [result: SsaValueV0
-     key-ids: (Vec NativeId)
-     value-ids: (Vec NativeId)
-     arena-id: NativeId
-     key-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (key-ids : (Vec NativeId))
+     (value-ids : (Vec NativeId))
+     (arena-id : NativeId)
+     (key-equality : ConcreteEqualityV0)])
   (SetLiteralInstructionV0
-    [result: SsaValueV0
-     value-ids: (Vec NativeId)
-     arena-id: NativeId
-     element-equality: ConcreteEqualityV0])
-  (MapCountInstructionV0 [result: SsaValueV0 source-id: NativeId])
+    [(result : SsaValueV0)
+     (value-ids : (Vec NativeId))
+     (arena-id : NativeId)
+     (element-equality : ConcreteEqualityV0)])
+  (MapCountInstructionV0 [(result : SsaValueV0) (source-id : NativeId)])
   ;; With a default, result is the map value type. Without one it is either an
   ;; existing nullable value union or a closed value-or-nil union.
   (MapGetInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     key-id: NativeId
-     default-id: (U NativeId Nil)
-     key-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (key-id : NativeId)
+     (default-id : (U NativeId Nil))
+     (key-equality : ConcreteEqualityV0)])
   (MapContainsInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     key-id: NativeId
-     key-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (key-id : NativeId)
+     (key-equality : ConcreteEqualityV0)])
   ;; Assoc/dissoc are persistent linear updates. Replacement keeps its original
   ;; iteration position; deletion compacts without reordering survivors.
   (MapAssocInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     key-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId
-     key-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (key-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)
+     (key-equality : ConcreteEqualityV0)])
   (MapDissocInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     key-id: NativeId
-     arena-id: NativeId
-     key-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (key-id : NativeId)
+     (arena-id : NativeId)
+     (key-equality : ConcreteEqualityV0)])
   (MapKeysInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
   (MapValuesInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
-  (SetCountInstructionV0 [result: SsaValueV0 source-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
+  (SetCountInstructionV0 [(result : SsaValueV0) (source-id : NativeId)])
   (SetContainsInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     value-id: NativeId
-     element-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (value-id : NativeId)
+     (element-equality : ConcreteEqualityV0)])
   (SetConjInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId
-     element-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)
+     (element-equality : ConcreteEqualityV0)])
   (SetDisjInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId
-     element-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)
+     (element-equality : ConcreteEqualityV0)])
   (SetVectorInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
   ;; Transient collections stay in the persistent collection's SSA type. The
   ;; explicit open/close boundary is what permits mutation without exposing a
   ;; backend-specific builder representation.
   (CollectionTransientOpenInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
   (CollectionPersistentCloseInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (arena-id : NativeId)])
   (TransientMapAssocInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     key-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId
-     key-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (key-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)
+     (key-equality : ConcreteEqualityV0)])
   (TransientSetConjInstructionV0
-    [result: SsaValueV0
-     source-id: NativeId
-     value-id: NativeId
-     arena-id: NativeId
-     element-equality: ConcreteEqualityV0])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)
+     (element-equality : ConcreteEqualityV0)])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
   (ArenaInstruction
-    [result: SsaValueV0
-     region: NativeId
-     capability: NativeId
-     tokens: TokenFlowV0])
+    [(result : SsaValueV0)
+     (region : NativeId)
+     (capability : NativeId)
+     (tokens : TokenFlowV0)])
   ;; Acquires the dedicated Atom-state token once at function entry. Atom
   ;; operations must carry this SSA handle, so state cannot be implicit.
   (AtomStateInstruction
-    [result: SsaValueV0
-     region: NativeId
-     capability: NativeId
-     tokens: TokenFlowV0])
+    [(result : SsaValueV0)
+     (region : NativeId)
+     (capability : NativeId)
+     (tokens : TokenFlowV0)])
   (AtomCreateInstruction
-    [result: SsaValueV0
-     initial-id: NativeId
-     arena-id: NativeId
-     state-id: NativeId])
+    [(result : SsaValueV0)
+     (initial-id : NativeId)
+     (arena-id : NativeId)
+     (state-id : NativeId)])
   (AtomDerefInstruction
-    [result: SsaValueV0
-     cell-id: NativeId
-     state-id: NativeId])
+    [(result : SsaValueV0)
+     (cell-id : NativeId)
+     (state-id : NativeId)])
   (AtomResetInstruction
-    [result: SsaValueV0
-     cell-id: NativeId
-     state-id: NativeId
-     value-id: NativeId])
+    [(result : SsaValueV0)
+     (cell-id : NativeId)
+     (state-id : NativeId)
+     (value-id : NativeId)])
   (AtomCompareExchangeInstruction
-    [result: SsaValueV0
-     cell-id: NativeId
-     state-id: NativeId
-     expected-id: NativeId
-     replacement-id: NativeId])
+    [(result : SsaValueV0)
+     (cell-id : NativeId)
+     (state-id : NativeId)
+     (expected-id : NativeId)
+     (replacement-id : NativeId)])
   ;; swap! is deliberately not a general higher-order call: updater-id names a
   ;; statically sealed pure function and arguments excludes the current value.
   (AtomSwapInstruction
-    [result: SsaValueV0
-     cell-id: NativeId
-     state-id: NativeId
-     updater-id: NativeId
-     arguments: (Vec NativeId)])
-  (TextLengthInstruction [result: SsaValueV0 source-id: NativeId])
+    [(result : SsaValueV0)
+     (cell-id : NativeId)
+     (state-id : NativeId)
+     (updater-id : NativeId)
+     (arguments : (Vec NativeId))])
+  (TextLengthInstruction [(result : SsaValueV0) (source-id : NativeId)])
   ;; Search reports a byte offset, or -1 when the needle is absent. Text and
   ;; slicing share byte coordinates, so non-ASCII prefixes remain coherent.
   (TextIndexOfInstruction
-    [result: SsaValueV0
-     source-id: NativeId
-     needle-id: NativeId])
-  (TextBlankInstruction [result: SsaValueV0 source-id: NativeId])
+    [(result : SsaValueV0)
+     (source-id : NativeId)
+     (needle-id : NativeId)])
+  (TextBlankInstruction [(result : SsaValueV0) (source-id : NativeId)])
   ;; The result is a closed Int-or-unit union: malformed or overflowing input
   ;; is absence, not a trap and not a reserved integer sentinel.
-  (TextParseI64Instruction [result: SsaValueV0 source-id: NativeId])
+  (TextParseI64Instruction [(result : SsaValueV0) (source-id : NativeId)])
   ;; The result is a closed Float-or-unit union. Conversion implements the
   ;; managed parse-double grammar and exact IEEE-754 rounding in the shim.
-  (TextParseF64Instruction [result: SsaValueV0 source-id: NativeId])
+  (TextParseF64Instruction [(result : SsaValueV0) (source-id : NativeId)])
   ;; v0 subs copies into the arena: no interior borrow, so the source blob's
   ;; lifetime never constrains the slice.
   (TextSliceInstruction
-    [result: SsaValueV0
-     arena-id: NativeId
-     source-id: NativeId
-     start-id: NativeId
-     end-id: NativeId
-     failure-code: Int])
+    [(result : SsaValueV0)
+     (arena-id : NativeId)
+     (source-id : NativeId)
+     (start-id : NativeId)
+     (end-id : NativeId)
+     (failure-code : Int)])
   (TextConcatInstruction
-    [result: SsaValueV0
-     arena-id: NativeId
-     operand-ids: (Vec NativeId)])
-  (TextBuiltinInstruction [result: SsaValueV0 builtin: TextBuiltinOpV0])
-  (ValueSemanticsInstruction [result: SsaValueV0 operation: ValueSemanticsOpV0])
+    [(result : SsaValueV0)
+     (arena-id : NativeId)
+     (operand-ids : (Vec NativeId))])
+  (TextBuiltinInstruction [(result : SsaValueV0) (builtin : TextBuiltinOpV0)])
+  (ValueSemanticsInstruction
+    [(result : SsaValueV0)
+     (operation : ValueSemanticsOpV0)])
   ;; Stringification stays separate from TextConcat's statically tagged operands.
   (ValueToTextInstructionV0
-    [result: SsaValueV0
-     mode: ValueTextModeV0
-     domain-type: NativeId
-     value-id: NativeId
-     arena-id: NativeId])
+    [(result : SsaValueV0)
+     (mode : ValueTextModeV0)
+     (domain-type : NativeId)
+     (value-id : NativeId)
+     (arena-id : NativeId)])
   (CodecPrimitiveInstructionV0
-    [result: SsaValueV0
-     operation: CodecPrimitiveOpV0]))
+    [(result : SsaValueV0)
+     (operation : CodecPrimitiveOpV0)]))
 
 (defrecord SwitchCaseV0
-  [variant-id: NativeId
-   block-id: NativeId
-   arguments: (Vec NativeId)])
+  [(variant-id : NativeId)
+   (block-id : NativeId)
+   (arguments : (Vec NativeId))])
 
 (defunion Terminator
-  (ReturnTerminator [value: (U NativeId Nil)])
-  (JumpTerminator [block-id: NativeId arguments: (Vec NativeId)])
+  (ReturnTerminator [(value : (U NativeId Nil))])
+  (JumpTerminator [(block-id : NativeId) (arguments : (Vec NativeId))])
   (BranchTerminator
-    [condition: NativeId
-     true-block: NativeId
-     false-block: NativeId])
-  (SwitchTerminator [value-id: NativeId cases: (Vec SwitchCaseV0)])
-  (TrapTerminator [failure-id: NativeId]))
+    [(condition : NativeId)
+     (true-block : NativeId)
+     (false-block : NativeId)])
+  (SwitchTerminator [(value-id : NativeId) (cases : (Vec SwitchCaseV0))])
+  (TrapTerminator [(failure-id : NativeId)]))
 
 (defrecord BasicBlock
   [id :- NativeId
@@ -663,13 +665,13 @@
    capabilities :- (Vec NativeId)])
 
 (defunion ObligationCode
-  (ValidSsaObligation [token: Bool])
-  (ExhaustiveMatchesObligation [token: Bool])
-  (ClosedLayoutsObligation [token: Bool])
-  (CheckedOperationsObligation [token: Bool])
-  (LegalAbiObligation [token: Bool])
-  (DischargedTokensObligation [token: Bool])
-  (BoundedEffectsObligation [token: Bool]))
+  (ValidSsaObligation [(token : Bool)])
+  (ExhaustiveMatchesObligation [(token : Bool)])
+  (ClosedLayoutsObligation [(token : Bool)])
+  (CheckedOperationsObligation [(token : Bool)])
+  (LegalAbiObligation [(token : Bool)])
+  (DischargedTokensObligation [(token : Bool)])
+  (BoundedEffectsObligation [(token : Bool)]))
 
 (defrecord ObligationResult
   [code :- ObligationCode
@@ -686,69 +688,69 @@
      digest :- String
      byte-count :- Int]))
 
-(defrecord DiagnosticV0 [code: String detail: String])
+(defrecord DiagnosticV0 [(code : String) (detail : String)])
 
 (defrecord ReceiptObligationV0
-  [code: ObligationCode
-   version: String
-   subject-digest: String
-   passed: Bool
-   detail: String])
+  [(code : ObligationCode)
+   (version : String)
+   (subject-digest : String)
+   (passed : Bool)
+   (detail : String)])
 
-(defrecord ArtifactHashV0 [name: String digest: String])
+(defrecord ArtifactHashV0 [(name : String) (digest : String)])
 
 (defrecord PassReceiptV0
-  [id: NativeId
-   input-digest: String
-   compiler-commit: String
-   pass-id: String
-   pass-version: String
-   configuration: (Vec String)
-   configuration-digest: String
-   diagnostics: (Vec DiagnosticV0)
-   obligations: (Vec ReceiptObligationV0)
-   output-digest: String
-   backend: String
-   backend-version: String
-   artifacts: (Vec ArtifactHashV0)])
+  [(id : NativeId)
+   (input-digest : String)
+   (compiler-commit : String)
+   (pass-id : String)
+   (pass-version : String)
+   (configuration : (Vec String))
+   (configuration-digest : String)
+   (diagnostics : (Vec DiagnosticV0))
+   (obligations : (Vec ReceiptObligationV0))
+   (output-digest : String)
+   (backend : String)
+   (backend-version : String)
+   (artifacts : (Vec ArtifactHashV0))])
 
 (defunion AbiDirectionV0
-  (AbiImportV0 [token: Bool])
-  (AbiExportV0 [token: Bool]))
+  (AbiImportV0 [(token : Bool)])
+  (AbiExportV0 [(token : Bool)]))
 
 (defunion AbiConventionV0
-  (RestrictedCAbiV0 [token: Bool])
+  (RestrictedCAbiV0 [(token : Bool)])
   ;; A restricted C import returns presence and writes the one non-unit union
   ;; payload through a trailing pointer; the world result stays a closed union.
-  (RestrictedCOptionalOutAbiV0 [token: Bool])
+  (RestrictedCOptionalOutAbiV0 [(token : Bool)])
   ;; Zero means success, -1 means peer-closed, and a positive return is copied
   ;; into `error` as errno; a non-unit `ok` payload is a trailing out pointer.
-  (RestrictedCOutcomeOutAbiV0 [token: Bool]))
+  (RestrictedCOutcomeOutAbiV0 [(token : Bool)]))
 
 (defunion OwnershipRuleV0
-  (BorrowedV0 [token: Bool])
-  (OwnedV0 [token: Bool])
-  (ArenaOwnedV0 [region: NativeId]))
+  (BorrowedV0 [(token : Bool)])
+  (OwnedV0 [(token : Bool)])
+  (ArenaOwnedV0 [(region : NativeId)]))
 
 (defrecord AbiValueV0
-  [name: String
-   type-id: NativeId
-   ownership: OwnershipRuleV0
-   lifetime-region: (U NativeId Nil)])
+  [(name : String)
+   (type-id : NativeId)
+   (ownership : OwnershipRuleV0)
+   (lifetime-region : (U NativeId Nil))])
 
 (defrecord AbiDeclV0
-  [id: NativeId
-   function-id: NativeId
-   symbol: String
-   direction: AbiDirectionV0
-   convention: AbiConventionV0
-   parameters: (Vec AbiValueV0)
-   result: (U AbiValueV0 Nil)
-   failure-type: NativeId
-   required-effects: (Vec NativeId)
-   required-capabilities: (Vec NativeId)
-   version: String
-   layout-digest: String])
+  [(id : NativeId)
+   (function-id : NativeId)
+   (symbol : String)
+   (direction : AbiDirectionV0)
+   (convention : AbiConventionV0)
+   (parameters : (Vec AbiValueV0))
+   (result : (U AbiValueV0 Nil))
+   (failure-type : NativeId)
+   (required-effects : (Vec NativeId))
+   (required-capabilities : (Vec NativeId))
+   (version : String)
+   (layout-digest : String)])
 
 (defrecord NativeWorld
   [id :- NativeId
@@ -763,7 +765,7 @@
    allowed-effects :- (Vec NativeId)
    allowed-regions :- (Vec NativeId)
    allowed-capabilities :- (Vec NativeId)
-   abis: (Vec AbiDeclV0)
+   (abis : (Vec AbiDeclV0))
    observations :- (Vec ExternalObservation)])
 
 (defn native-id= [left :- NativeId right :- NativeId] :- Bool
@@ -958,8 +960,8 @@
     instructions))
 
 (defn type-definition-with-id
-  [types: (Vec TypeDef)
-   target: NativeId] -> (U TypeDef Nil)
+  [(types : (Vec TypeDef))
+   (target : NativeId)] -> (U TypeDef Nil)
   (loop [position: Int 0]
     (if (>= position (count types))
       nil
@@ -969,9 +971,9 @@
           (recur (+ position 1)))))))
 
 (defn record-field-with-id
-  [types: (Vec TypeDef)
-   owner: NativeId
-   target: NativeId] -> (U TypeField Nil)
+  [(types : (Vec TypeDef))
+   (owner : NativeId)
+   (target : NativeId)] -> (U TypeField Nil)
   (let [definition: (U TypeDef Nil) (type-definition-with-id types owner)]
     (if (nil? definition)
       nil
@@ -987,8 +989,8 @@
                   (recur (+ position 1) fields))))))))))
 
 (defn parameters-value-type
-  [parameters: (Vec Parameter)
-   target: NativeId] -> (U NativeId Nil)
+  [(parameters : (Vec Parameter))
+   (target : NativeId)] -> (U NativeId Nil)
   (loop [position: Int 0]
     (if (>= position (count parameters))
       nil
@@ -998,8 +1000,8 @@
           (recur (+ position 1)))))))
 
 (defn instructions-value-type
-  [instructions: (Vec Instruction)
-   target: NativeId] -> (U NativeId Nil)
+  [(instructions : (Vec Instruction))
+   (target : NativeId)] -> (U NativeId Nil)
   (loop [position: Int 0]
     (if (>= position (count instructions))
       nil
@@ -1008,7 +1010,9 @@
           (ssavaluev0-type-id result)
           (recur (+ position 1)))))))
 
-(defn block-value-type [block: BasicBlock target: NativeId] -> (U NativeId Nil)
+(defn block-value-type
+  [(block : BasicBlock)
+   (target : NativeId)] -> (U NativeId Nil)
   (let [parameter-type: (U NativeId Nil)
         (parameters-value-type (basicblock-parameters block) target)]
     (if (nil? parameter-type)
@@ -1016,8 +1020,8 @@
       parameter-type)))
 
 (defn function-value-type
-  [function: FunctionDef
-   target: NativeId] -> (U NativeId Nil)
+  [(function : FunctionDef)
+   (target : NativeId)] -> (U NativeId Nil)
   (let [parameter-type: (U NativeId Nil)
         (parameters-value-type (functiondef-parameters function) target)]
     (if (some? parameter-type)
@@ -1031,7 +1035,7 @@
               (recur (+ position 1) blocks)
               value-type)))))))
 
-(defn block-produces-arena? [block: BasicBlock target: NativeId] -> Bool
+(defn block-produces-arena? [(block : BasicBlock) (target : NativeId)] -> Bool
   (loop [position: Int 0 instructions: (Vec Instruction)
          (basicblock-instructions block)]
     (if (>= position (count instructions))
@@ -1042,7 +1046,9 @@
           true
           (recur (+ position 1) instructions))))))
 
-(defn function-produces-arena? [function: FunctionDef target: NativeId] -> Bool
+(defn function-produces-arena?
+  [(function : FunctionDef)
+   (target : NativeId)] -> Bool
   (loop [position: Int 0 blocks: (Vec BasicBlock) (functiondef-blocks function)]
     (if (>= position (count blocks))
       false
@@ -1051,9 +1057,9 @@
         (recur (+ position 1) blocks)))))
 
 (defn record-assoc-instruction-valid?
-  [types: (Vec TypeDef)
-   function: FunctionDef
-   instruction: Instruction] -> Bool
+  [(types : (Vec TypeDef))
+   (function : FunctionDef)
+   (instruction : Instruction)] -> Bool
   (if (not (instance? native.core.RecordAssocInstructionV0 instruction))
     true
     (let [result: SsaValueV0 (recordassocinstructionv0-result instruction)
@@ -1075,20 +1081,20 @@
             (recordassocinstructionv0-arena-id instruction)))))))
 
 (defn function-record-assocs-valid?
-  [types: (Vec TypeDef)
-   function: FunctionDef] -> Bool
+  [(types : (Vec TypeDef))
+   (function : FunctionDef)] -> Bool
   (every?
-    (fn [block: BasicBlock] -> Bool
+    (fn [(block : BasicBlock)] -> Bool
       (every?
-        (fn [instruction: Instruction] -> Bool
+        (fn [(instruction : Instruction)] -> Bool
           (record-assoc-instruction-valid? types function instruction))
         (basicblock-instructions block)))
     (functiondef-blocks function)))
 
 (defn record-materialize-instruction-valid?
-  [types: (Vec TypeDef)
-   function: FunctionDef
-   instruction: Instruction] -> Bool
+  [(types : (Vec TypeDef))
+   (function : FunctionDef)
+   (instruction : Instruction)] -> Bool
   (if (not (instance? native.core.RecordMaterializeInstructionV0 instruction))
     true
     (let [result: SsaValueV0
@@ -1114,12 +1120,12 @@
               result-type)))))))
 
 (defn function-record-materializations-valid?
-  [types: (Vec TypeDef)
-   function: FunctionDef] -> Bool
+  [(types : (Vec TypeDef))
+   (function : FunctionDef)] -> Bool
   (every?
-    (fn [block: BasicBlock] -> Bool
+    (fn [(block : BasicBlock)] -> Bool
       (every?
-        (fn [instruction: Instruction] -> Bool
+        (fn [(instruction : Instruction)] -> Bool
           (record-materialize-instruction-valid? types function instruction))
         (basicblock-instructions block)))
     (functiondef-blocks function)))
@@ -1382,8 +1388,8 @@
     [(StoreRef address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]))
 
 (defn concrete-equality-refs-closed?
-  [equality: ConcreteEqualityV0
-   known-types: (Vec NativeId)] -> Bool
+  [(equality : ConcreteEqualityV0)
+   (known-types : (Vec NativeId))] -> Bool
   (if (instance? native.core.StructuralEqualityV0 equality)
     (id-in? known-types (structuralequalityv0-domain-type equality))
     true))
@@ -1606,7 +1612,7 @@
     [(CheckedBoundsV0 index-id length-id) [index-id length-id]]))
 
 (defn bitwise-operation-ssa-refs
-  [operation: BitwiseOperationV0] -> (Vec NativeId)
+  [(operation : BitwiseOperationV0)] -> (Vec NativeId)
   (match operation
     [(BitAndI64V0 left-id right-id) [left-id right-id]]
     [(BitOrI64V0 left-id right-id) [left-id right-id]]
@@ -1622,7 +1628,7 @@
       (recur (+ index 1)
         (append-ids ids (switchcasev0-arguments (nth cases index)))))))
 
-(defn text-builtin-ssa-refs [operation: TextBuiltinOpV0] -> (Vec NativeId)
+(defn text-builtin-ssa-refs [(operation : TextBuiltinOpV0)] -> (Vec NativeId)
   (match operation
     [(TextCompareV0 left-id right-id) [left-id right-id]]
     [(TextEndsWithV0 source-id suffix-id) [source-id suffix-id]]
@@ -1644,7 +1650,8 @@
     [(TextRepeatV0 arena-id source-id count-id)
      [arena-id source-id count-id]]))
 
-(defn codec-primitive-ssa-refs [operation: CodecPrimitiveOpV0] -> (Vec NativeId)
+(defn codec-primitive-ssa-refs
+  [(operation : CodecPrimitiveOpV0)] -> (Vec NativeId)
   (match operation
     [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]

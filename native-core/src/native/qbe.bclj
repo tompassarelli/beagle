@@ -12,23 +12,23 @@
 
 (def trap-overflow: Int 2)
 
-(defrecord QbeArtifact [module-name: String module-text: String])
+(defrecord QbeArtifact [(module-name : String) (module-text : String)])
 
 (defunion QbeMaterialization
-  (QbeSuccess [artifact: QbeArtifact])
-  (QbeFailure [detail: String]))
+  (QbeSuccess [(artifact : QbeArtifact)])
+  (QbeFailure [(detail : String)]))
 
-(defn materialization-ok? [result: QbeMaterialization] -> Bool
+(defn materialization-ok? [(result : QbeMaterialization)] -> Bool
   (match result
     [(QbeSuccess artifact) true]
     [(QbeFailure detail) false]))
 
-(defn materialization-detail [result: QbeMaterialization] -> String
+(defn materialization-detail [(result : QbeMaterialization)] -> String
   (match result
     [(QbeSuccess artifact) ""]
     [(QbeFailure detail) (qbefailure-detail result)]))
 
-(defn materialization-artifact [result: QbeMaterialization] -> QbeArtifact
+(defn materialization-artifact [(result : QbeMaterialization)] -> QbeArtifact
   (match result
     [(QbeSuccess artifact) (qbesuccess-artifact result)]
     [(QbeFailure detail) (->QbeArtifact "" "")]))
@@ -36,27 +36,27 @@
 ;; Per-function emission context; every emitter reads canonical orders from
 ;; here so a permuted world produces byte-identical text.
 (defrecord QbeFn
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   functions: (Vec core/FunctionDef)
-   module-index: Int
-   blocks: (Vec core/BasicBlock)
-   value-ids: (Vec core/NativeId)
-   value-types: (Vec core/NativeId)
-   texts: (Vec String)])
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (functions : (Vec core/FunctionDef))
+   (module-index : Int)
+   (blocks : (Vec core/BasicBlock))
+   (value-ids : (Vec core/NativeId))
+   (value-types : (Vec core/NativeId))
+   (texts : (Vec String))])
 
-(defn join-lines [lines: (Vec String)] -> String
+(defn join-lines [(lines : (Vec String))] -> String
   (loop [index: Int 0 result: String ""]
     (if (>= index (count lines))
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))
 
-(defn id-before? [left: core/NativeId right: core/NativeId] -> Bool
+(defn id-before? [(left : core/NativeId) (right : core/NativeId)] -> Bool
   (< (compare (core/nativeid-value left) (core/nativeid-value right)) 0))
 
 (defn insert-type
-  [item: core/TypeDef
-   sorted: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+  [(item : core/TypeDef)
+   (sorted : (Vec core/TypeDef))] -> (Vec core/TypeDef)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/TypeDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -65,15 +65,15 @@
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-types [types: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+(defn ordered-types [(types : (Vec core/TypeDef))] -> (Vec core/TypeDef)
   (loop [index: Int 0 result: (Vec core/TypeDef) []]
     (if (>= index (count types))
       result
       (recur (+ index 1) (insert-type (nth types index) result)))))
 
 (defn insert-layout
-  [item: core/LayoutDef
-   sorted: (Vec core/LayoutDef)] -> (Vec core/LayoutDef)
+  [(item : core/LayoutDef)
+   (sorted : (Vec core/LayoutDef))] -> (Vec core/LayoutDef)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/LayoutDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -82,15 +82,15 @@
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-layouts [layouts: (Vec core/LayoutDef)] -> (Vec core/LayoutDef)
+(defn ordered-layouts [(layouts : (Vec core/LayoutDef))] -> (Vec core/LayoutDef)
   (loop [index: Int 0 result: (Vec core/LayoutDef) []]
     (if (>= index (count layouts))
       result
       (recur (+ index 1) (insert-layout (nth layouts index) result)))))
 
 (defn insert-function
-  [item: core/FunctionDef
-   sorted: (Vec core/FunctionDef)] -> (Vec core/FunctionDef)
+  [(item : core/FunctionDef)
+   (sorted : (Vec core/FunctionDef))] -> (Vec core/FunctionDef)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/FunctionDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -100,15 +100,15 @@
           (recur (+ index 1) inserted (conj result current)))))))
 
 (defn ordered-functions
-  [functions: (Vec core/FunctionDef)] -> (Vec core/FunctionDef)
+  [(functions : (Vec core/FunctionDef))] -> (Vec core/FunctionDef)
   (loop [index: Int 0 result: (Vec core/FunctionDef) []]
     (if (>= index (count functions))
       result
       (recur (+ index 1) (insert-function (nth functions index) result)))))
 
 (defn insert-field-layout
-  [item: core/FieldLayoutV0
-   sorted: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
+  [(item : core/FieldLayoutV0)
+   (sorted : (Vec core/FieldLayoutV0))] -> (Vec core/FieldLayoutV0)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/FieldLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -118,15 +118,15 @@
           (recur (+ index 1) inserted (conj result current)))))))
 
 (defn ordered-field-layouts
-  [fields: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
+  [(fields : (Vec core/FieldLayoutV0))] -> (Vec core/FieldLayoutV0)
   (loop [index: Int 0 result: (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       result
       (recur (+ index 1) (insert-field-layout (nth fields index) result)))))
 
 (defn insert-block
-  [item: core/BasicBlock
-   sorted: (Vec core/BasicBlock)] -> (Vec core/BasicBlock)
+  [(item : core/BasicBlock)
+   (sorted : (Vec core/BasicBlock))] -> (Vec core/BasicBlock)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/BasicBlock) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -137,7 +137,7 @@
 
 ;; QBE takes the first block as the entry, so entry leads and the rest sort
 ;; by identity — canonical without losing the entry contract.
-(defn ordered-blocks [function: core/FunctionDef] -> (Vec core/BasicBlock)
+(defn ordered-blocks [(function : core/FunctionDef)] -> (Vec core/BasicBlock)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
         entry-id: core/NativeId (core/functiondef-entry-block function)
         tail: (Vec core/BasicBlock)
@@ -163,14 +163,14 @@
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
     "abcdefghijklmnopqrstuvwxyz{|}~"))
 
-(defn character-position [alphabet: String character: String] -> Int
+(defn character-position [(alphabet : String) (character : String)] -> Int
   (loop [position: Int 0]
     (cond
       (>= position (count alphabet)) -1
       (= character (subs alphabet position (+ position 1))) position
       :else (recur (+ position 1)))))
 
-(defn text-emittable? [value: String] -> Bool
+(defn text-emittable? [(value : String)] -> Bool
   (loop [position: Int 0]
     (if (>= position (count value))
       true
@@ -182,17 +182,17 @@
           (recur (+ position 1))
           false)))))
 
-(defn text-position [texts: (Vec String) target: String] -> Int
+(defn text-position [(texts : (Vec String)) (target : String)] -> Int
   (loop [position: Int 0]
     (cond
       (>= position (count texts)) -1
       (= target (nth texts position)) position
       :else (recur (+ position 1)))))
 
-(defn conj-text [texts: (Vec String) candidate: String] -> (Vec String)
+(defn conj-text [(texts : (Vec String)) (candidate : String)] -> (Vec String)
   (if (>= (text-position texts candidate) 0) texts (conj texts candidate)))
 
-(defn collect-texts [functions: (Vec core/FunctionDef)] -> (Vec String)
+(defn collect-texts [(functions : (Vec core/FunctionDef))] -> (Vec String)
   (loop [function-position: Int 0 collected: (Vec String) []]
     (if (>= function-position (count functions))
       collected
@@ -222,7 +222,9 @@
                                 :else kept))
                             kept))))))))))))))
 
-(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
+(defn block-index
+  [(blocks : (Vec core/BasicBlock))
+   (target : core/NativeId)] -> Int
   (loop [index: Int 0]
     (if (>= index (count blocks))
       -1
@@ -233,7 +235,7 @@
 ;; Match arms bind no fields: the clj target only destructures same-module
 ;; records, so every body reads through the imported accessor.
 (defn instruction-result-value
-  [instruction: core/Instruction] -> core/SsaValueV0
+  [(instruction : core/Instruction)] -> core/SsaValueV0
   (match instruction
     [(AtomInstruction value) (core/atominstruction-result instruction)]
     [(CopyInstruction value) (core/copyinstruction-result instruction)]
@@ -342,8 +344,8 @@
      (core/codecprimitiveinstructionv0-result instruction)]))
 
 (defn qbe-value-ids
-  [function: core/FunctionDef
-   blocks: (Vec core/BasicBlock)] -> (Vec core/NativeId)
+  [(function : core/FunctionDef)
+   (blocks : (Vec core/BasicBlock))] -> (Vec core/NativeId)
   (loop [block-position: Int 0
          result: (Vec core/NativeId) (core/parameter-ids (core/functiondef-parameters function))]
     (if (>= block-position (count blocks))
@@ -356,19 +358,19 @@
             (core/instruction-result-ids (core/basicblock-instructions block))))))))
 
 (defn parameter-type-ids
-  [parameters: (Vec core/Parameter)] -> (Vec core/NativeId)
-  (mapv (fn [parameter: core/Parameter] -> core/NativeId (core/parameter-type-id parameter))
+  [(parameters : (Vec core/Parameter))] -> (Vec core/NativeId)
+  (mapv (fn [(parameter : core/Parameter)] -> core/NativeId (core/parameter-type-id parameter))
     parameters))
 
 (defn instruction-result-type-ids
-  [instructions: (Vec core/Instruction)] -> (Vec core/NativeId)
-  (mapv (fn [instruction: core/Instruction] -> core/NativeId
+  [(instructions : (Vec core/Instruction))] -> (Vec core/NativeId)
+  (mapv (fn [(instruction : core/Instruction)] -> core/NativeId
           (core/ssavaluev0-type-id (instruction-result-value instruction)))
     instructions))
 
 (defn qbe-value-types
-  [function: core/FunctionDef
-   blocks: (Vec core/BasicBlock)] -> (Vec core/NativeId)
+  [(function : core/FunctionDef)
+   (blocks : (Vec core/BasicBlock))] -> (Vec core/NativeId)
   (loop [block-position: Int 0
          result: (Vec core/NativeId) (parameter-type-ids (core/functiondef-parameters function))]
     (if (>= block-position (count blocks))
@@ -380,7 +382,7 @@
           (core/append-ids with-parameters
             (instruction-result-type-ids (core/basicblock-instructions block))))))))
 
-(defn value-index [ids: (Vec core/NativeId) target: core/NativeId] -> Int
+(defn value-index [(ids : (Vec core/NativeId)) (target : core/NativeId)] -> Int
   (loop [index: Int 0]
     (if (>= index (count ids))
       -1
@@ -388,10 +390,10 @@
         index
         (recur (+ index 1))))))
 
-(defn value-name [context: QbeFn target: core/NativeId] -> String
+(defn value-name [(context : QbeFn) (target : core/NativeId)] -> String
   (str "%v" (value-index (qbefn-value-ids context) target)))
 
-(defn type-index [types: (Vec core/TypeDef) type-id: core/NativeId] -> Int
+(defn type-index [(types : (Vec core/TypeDef)) (type-id : core/NativeId)] -> Int
   (loop [index: Int 0]
     (if (>= index (count types))
       -1
@@ -400,8 +402,8 @@
         (recur (+ index 1))))))
 
 (defn typedef-for-id
-  [types: (Vec core/TypeDef)
-   type-id: core/NativeId] -> (U core/TypeDef Nil)
+  [(types : (Vec core/TypeDef))
+   (type-id : core/NativeId)] -> (U core/TypeDef Nil)
   (loop [index: Int 0]
     (if (>= index (count types))
       nil
@@ -411,8 +413,8 @@
           (recur (+ index 1)))))))
 
 (defn layout-for-type
-  [layouts: (Vec core/LayoutDef)
-   type-id: core/NativeId] -> (U core/LayoutDef Nil)
+  [(layouts : (Vec core/LayoutDef))
+   (type-id : core/NativeId)] -> (U core/LayoutDef Nil)
   (loop [index: Int 0]
     (if (>= index (count layouts))
       nil
@@ -421,16 +423,16 @@
           layout
           (recur (+ index 1)))))))
 
-(defn module-prefix [module-index: Int] -> String
+(defn module-prefix [(module-index : Int)] -> String
   (str "native_m" module-index))
 
-(defn type-name [module-index: Int type-index-value: Int] -> String
+(defn type-name [(module-index : Int) (type-index-value : Int)] -> String
   (str (module-prefix module-index) "_type_" type-index-value))
 
-(defn text-symbol [module-index: Int position: Int] -> String
+(defn text-symbol [(module-index : Int) (position : Int)] -> String
   (str (module-prefix module-index) "_text_" position))
 
-(defn text-byte [character: String] -> Int
+(defn text-byte [(character : String)] -> Int
   (cond
     (= character "\u0001") 1
     (= character "\t") 9
@@ -440,7 +442,7 @@
     (= character "\r") 13
     :else (+ 32 (character-position (printable-ascii) character))))
 
-(defn emit-text-bytes [value: String] -> String
+(defn emit-text-bytes [(value : String)] -> String
   (loop [position: Int 0 result: String ""]
     (if (>= position (count value))
       result
@@ -448,7 +450,7 @@
         (str result (if (= position 0) "" " ")
           (text-byte (subs value position (+ position 1))))))))
 
-(defn emit-text-data [texts: (Vec String) module-index: Int] -> String
+(defn emit-text-data [(texts : (Vec String)) (module-index : Int)] -> String
   (loop [position: Int 0 result: String ""]
     (if (>= position (count texts))
       result
@@ -463,7 +465,7 @@
 ;; QBE base types are the register classes; extended types (b, h) exist only
 ;; inside aggregates and loads/stores.
 
-(defn scalar-letter [kind: core/AtomKind size: Int] -> String
+(defn scalar-letter [(kind : core/AtomKind) (size : Int)] -> String
   (match kind
     [(BoolKind token) "w"]
     [(I64Kind token) (if (= size 8) "l" "w")]
@@ -473,7 +475,7 @@
     [(KeywordKind token) (if (= size 8) "l" "")]
     [(RefKind target) ""]))
 
-(defn member-letter [kind: core/AtomKind size: Int] -> String
+(defn member-letter [(kind : core/AtomKind) (size : Int)] -> String
   (match kind
     [(BoolKind token)
      (cond (= size 1) "b" (= size 2) "h" (= size 4) "w" (= size 8) "l" :else "")]
@@ -485,7 +487,7 @@
     [(KeywordKind token) (if (= size 8) "l" "")]
     [(RefKind target) ""]))
 
-(defn letter-size [letter: String] -> Int
+(defn letter-size [(letter : String)] -> Int
   (cond
     (= letter "b") 1
     (= letter "h") 2
@@ -495,7 +497,7 @@
     (= letter "d") 8
     :else 0))
 
-(defn shape-aggregate? [shape: core/TypeShape] -> Bool
+(defn shape-aggregate? [(shape : core/TypeShape)] -> Bool
   (match shape
     [(AtomType value) false]
     [(RecordType value) true]
@@ -508,7 +510,7 @@
     [(FunctionType value) false]
     [(OutcomeType value) false]))
 
-(defn shape-atom-kind [shape: core/TypeShape] -> (U core/AtomKind Nil)
+(defn shape-atom-kind [(shape : core/TypeShape)] -> (U core/AtomKind Nil)
   (match shape
     [(AtomType value) (core/atomtype-kind shape)]
     [(RecordType value) nil]
@@ -521,7 +523,7 @@
     [(FunctionType value) nil]
     [(OutcomeType value) nil]))
 
-(defn shape-reference-target [shape: core/TypeShape] -> (U core/NativeId Nil)
+(defn shape-reference-target [(shape : core/TypeShape)] -> (U core/NativeId Nil)
   (match shape
     [(AtomType value) nil]
     [(RecordType value) nil]
@@ -536,10 +538,10 @@
 
 ;; Signature position: aggregates name their QBE type, scalars their class.
 (defn abi-type
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   type-id: core/NativeId] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (type-id : core/NativeId)] -> String
   (let [definition: (U core/TypeDef Nil) (typedef-for-id types type-id)
         layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? definition)
@@ -559,9 +561,9 @@
 ;; aggregate temporary is a long. This is a QBE calling-convention fact; the
 ;; world keeps its aggregate type unchanged.
 (defn value-type-letter
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   type-id: core/NativeId] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (type-id : core/NativeId)] -> String
   (let [definition: (U core/TypeDef Nil) (typedef-for-id types type-id)
         layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? definition)
@@ -578,10 +580,10 @@
               (scalar-letter kind (core/layoutdef-size-bytes layout)))))))))
 
 (defn member-type
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   type-id: core/NativeId] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (type-id : core/NativeId)] -> String
   (let [definition: (U core/TypeDef Nil) (typedef-for-id types type-id)
         layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? definition)
@@ -594,20 +596,24 @@
               ""
               (member-letter kind (core/layoutdef-size-bytes layout)))))))))
 
-(defn layout-size [layouts: (Vec core/LayoutDef) type-id: core/NativeId] -> Int
+(defn layout-size
+  [(layouts : (Vec core/LayoutDef))
+   (type-id : core/NativeId)] -> Int
   (let [layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? layout) 0 (core/layoutdef-size-bytes layout))))
 
-(defn layout-align [layouts: (Vec core/LayoutDef) type-id: core/NativeId] -> Int
+(defn layout-align
+  [(layouts : (Vec core/LayoutDef))
+   (type-id : core/NativeId)] -> Int
   (let [layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? layout) 0 (core/layoutdef-align-bytes layout))))
 
 ;; A member is representable when QBE's own model of its size and alignment
 ;; agrees with the layout the world declared.
 (defn member-representable?
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   type-id: core/NativeId] -> Bool
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (type-id : core/NativeId)] -> Bool
   (let [definition: (U core/TypeDef Nil) (typedef-for-id types type-id)
         layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (cond
@@ -620,13 +626,13 @@
           (= (letter-size letter) (core/layoutdef-size-bytes layout))
           (= (letter-size letter) (core/layoutdef-align-bytes layout)))))))
 
-(defn round-up [value: Int alignment: Int] -> Int
+(defn round-up [(value : Int) (alignment : Int)] -> Int
   (if (<= alignment 0)
     value
     (* (quot (+ value (- alignment 1)) alignment) alignment)))
 
 (defn shape-union-variants
-  [shape: core/LayoutShapeV0] -> (Vec core/UnionVariantLayoutV0)
+  [(shape : core/LayoutShapeV0)] -> (Vec core/UnionVariantLayoutV0)
   (match shape
     [(ScalarShapeV0 value) []]
     [(BytesShapeV0 value) []]
@@ -638,7 +644,7 @@
     [(ReferenceShapeV0 value) []]
     [(AtomCellShapeV0 value) []]))
 
-(defn layout-record? [layout: core/LayoutDef] -> Bool
+(defn layout-record? [(layout : core/LayoutDef)] -> Bool
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) false]
@@ -651,7 +657,7 @@
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
-(defn layout-union? [layout: core/LayoutDef] -> Bool
+(defn layout-union? [(layout : core/LayoutDef)] -> Bool
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) false]
@@ -664,7 +670,7 @@
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
-(defn record-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
+(defn record-fields [(layout : core/LayoutDef)] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) []]
@@ -677,7 +683,7 @@
       [(ReferenceShapeV0 value) []]
       [(AtomCellShapeV0 value) []])))
 
-(defn union-tag-type [layout: core/LayoutDef] -> (U core/NativeId Nil)
+(defn union-tag-type [(layout : core/LayoutDef)] -> (U core/NativeId Nil)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) nil]
@@ -690,7 +696,7 @@
       [(ReferenceShapeV0 value) nil]
       [(AtomCellShapeV0 value) nil])))
 
-(defn union-tag-offset [layout: core/LayoutDef] -> Int
+(defn union-tag-offset [(layout : core/LayoutDef)] -> Int
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) -1]
@@ -703,16 +709,17 @@
       [(ReferenceShapeV0 value) -1]
       [(AtomCellShapeV0 value) -1])))
 
-(defn union-variants [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
+(defn union-variants
+  [(layout : core/LayoutDef)] -> (Vec core/UnionVariantLayoutV0)
   (shape-union-variants (core/layoutdef-shape layout)))
 
 ;; QBE computes aggregate offsets from member order; the world states them.
 ;; When the two agree the member form is exact, otherwise the honest QBE
 ;; encoding is an opaque sized type — the world is never re-shaped to fit.
 (defn record-member-form?
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   layout: core/LayoutDef] -> Bool
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (layout : core/LayoutDef)] -> Bool
   (let [fields: (Vec core/FieldLayoutV0) (record-fields layout)]
     (if (= (count fields) 0)
       false
@@ -735,10 +742,10 @@
                 (= field-align (core/fieldlayoutv0-align-bytes field))))))))))
 
 (defn variant-align
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   tag-type: core/NativeId
-   variant: core/UnionVariantLayoutV0] -> Int
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (tag-type : core/NativeId)
+   (variant : core/UnionVariantLayoutV0)] -> Int
   (let [tag-align: Int (layout-align layouts tag-type)
         payload: (U core/NativeId Nil) (core/unionvariantlayoutv0-payload-type variant)]
     (if (nil? payload)
@@ -747,10 +754,10 @@
         (if (> payload-align tag-align) payload-align tag-align)))))
 
 (defn variant-size
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   tag-type: core/NativeId
-   variant: core/UnionVariantLayoutV0] -> Int
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (tag-type : core/NativeId)
+   (variant : core/UnionVariantLayoutV0)] -> Int
   (let [tag-size: Int (layout-size layouts tag-type)
         alignment: Int (variant-align types layouts tag-type variant)
         payload: (U core/NativeId Nil) (core/unionvariantlayoutv0-payload-type variant)]
@@ -760,10 +767,10 @@
         alignment))))
 
 (defn variant-natural?
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   tag-type: core/NativeId
-   variant: core/UnionVariantLayoutV0] -> Bool
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (tag-type : core/NativeId)
+   (variant : core/UnionVariantLayoutV0)] -> Bool
   (let [payload: (U core/NativeId Nil) (core/unionvariantlayoutv0-payload-type variant)]
     (if (nil? payload)
       true
@@ -774,9 +781,9 @@
 ;; Every QBE union case starts at offset zero, so the tag is repeated as the
 ;; first member of each case rather than living outside the cases.
 (defn union-member-form?
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   layout: core/LayoutDef] -> Bool
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (layout : core/LayoutDef)] -> Bool
   (let [tag-type: (U core/NativeId Nil) (union-tag-type layout)
         variants: (Vec core/UnionVariantLayoutV0) (union-variants layout)]
     (if (or (nil? tag-type) (= (count variants) 0) (not= (union-tag-offset layout) 0))
@@ -798,12 +805,12 @@
 
 ;; --- type emission --------------------------------------------------------
 
-(defn type-shape-references [shape: core/TypeShape] -> (Vec core/NativeId)
+(defn type-shape-references [(shape : core/TypeShape)] -> (Vec core/NativeId)
   (match shape
     [(AtomType value) []]
     [(RecordType value)
      (mapv
-       (fn [field: core/TypeField] -> core/NativeId (core/typefield-type-id field))
+       (fn [(field : core/TypeField)] -> core/NativeId (core/typefield-type-id field))
        (core/recordtype-fields shape))]
     [(UnionType value)
      (loop [index: Int 0 references: (Vec core/NativeId) []]
@@ -824,8 +831,8 @@
     [(OutcomeType value) []]))
 
 (defn type-definition-in?
-  [definitions: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+  [(definitions : (Vec core/TypeDef))
+   (target : core/NativeId)] -> Bool
   (loop [index: Int 0]
     (if (>= index (count definitions))
       false
@@ -834,12 +841,12 @@
         (recur (+ index 1))))))
 
 (defn aggregate-dependencies
-  [types: (Vec core/TypeDef)
-   definition: core/TypeDef] -> (Vec core/TypeDef)
+  [(types : (Vec core/TypeDef))
+   (definition : core/TypeDef)] -> (Vec core/TypeDef)
   (let [references: (Vec core/NativeId)
         (type-shape-references (core/typedef-shape definition))]
     (filterv
-      (fn [candidate: core/TypeDef] -> Bool
+      (fn [(candidate : core/TypeDef)] -> Bool
         (and (shape-aggregate? (core/typedef-shape candidate))
           (core/id-in? references (core/typedef-id candidate))))
       types)))
@@ -847,10 +854,10 @@
 ;; QBE resolves aggregate names as it parses. Keep canonical indices for names,
 ;; but place each reachable aggregate after the aggregates its members name.
 (defn append-aggregate-closure
-  [types: (Vec core/TypeDef)
-   visiting: (Vec core/NativeId)
-   emitted: (Vec core/TypeDef)
-   target: core/NativeId] -> (Vec core/TypeDef)
+  [(types : (Vec core/TypeDef))
+   (visiting : (Vec core/NativeId))
+   (emitted : (Vec core/TypeDef))
+   (target : core/NativeId)] -> (Vec core/TypeDef)
   (if (or (core/id-in? visiting target) (type-definition-in? emitted target))
     emitted
     (let [definition: (U core/TypeDef Nil) (typedef-for-id types target)]
@@ -867,14 +874,14 @@
                       (core/typedef-id (nth dependencies index))))))]
           (conj with-dependencies definition))))))
 
-(defn function-type-ids [function: core/FunctionDef] -> (Vec core/NativeId)
+(defn function-type-ids [(function : core/FunctionDef)] -> (Vec core/NativeId)
   (let [return-type: (U core/NativeId Nil) (core/functiondef-return-type function)
         values: (Vec core/NativeId) (qbe-value-types function (ordered-blocks function))]
     (if (nil? return-type) values (conj values return-type))))
 
 (defn reachable-aggregate-types
-  [types: (Vec core/TypeDef)
-   functions: (Vec core/FunctionDef)] -> (Vec core/TypeDef)
+  [(types : (Vec core/TypeDef))
+   (functions : (Vec core/FunctionDef))] -> (Vec core/TypeDef)
   (let [roots: (Vec core/NativeId)
         (loop [index: Int 0 result: (Vec core/NativeId) []]
           (if (>= index (count functions))
@@ -892,10 +899,10 @@
               result)))))))
 
 (defn emit-record-members
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   layout: core/LayoutDef] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (layout : core/LayoutDef)] -> String
   (let [fields: (Vec core/FieldLayoutV0) (record-fields layout)]
     (loop [index: Int 0 result: String ""]
       (if (>= index (count fields))
@@ -906,11 +913,11 @@
               (core/fieldlayoutv0-type-id (nth fields index)))))))))
 
 (defn emit-union-case
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   tag-type: core/NativeId
-   variant: core/UnionVariantLayoutV0] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (tag-type : core/NativeId)
+   (variant : core/UnionVariantLayoutV0)] -> String
   (let [payload: (U core/NativeId Nil) (core/unionvariantlayoutv0-payload-type variant)
         tag-member: String (member-type types layouts module-index tag-type)]
     (if (nil? payload)
@@ -918,11 +925,11 @@
       (str "{ " tag-member ", " (member-type types layouts module-index payload) " }"))))
 
 (defn emit-union-cases
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   tag-type: core/NativeId
-   variants: (Vec core/UnionVariantLayoutV0)] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (tag-type : core/NativeId)
+   (variants : (Vec core/UnionVariantLayoutV0))] -> String
   (loop [index: Int 0 result: String ""]
     (if (>= index (count variants))
       result
@@ -931,11 +938,11 @@
           (emit-union-case types layouts module-index tag-type (nth variants index)))))))
 
 (defn emit-aggregate-type
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   definition: core/TypeDef
-   layout: core/LayoutDef] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (definition : core/TypeDef)
+   (layout : core/LayoutDef)] -> String
   (let [name: String (str ":" (type-name module-index (type-index types (core/typedef-id definition))))
         header: String (str "type " name " = align " (core/layoutdef-align-bytes layout) " { ")
         tag-type: (U core/NativeId Nil) (union-tag-type layout)]
@@ -949,10 +956,10 @@
         header (core/layoutdef-size-bytes layout) " }\n"))))
 
 (defn emit-types
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   functions: (Vec core/FunctionDef)
-   module-index: Int] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (functions : (Vec core/FunctionDef))
+   (module-index : Int)] -> String
   (let [emitted: (Vec core/TypeDef) (reachable-aggregate-types types functions)]
     (loop [index: Int 0 result: String ""]
       (if (>= index (count emitted))
@@ -967,7 +974,7 @@
 
 ;; --- value helpers --------------------------------------------------------
 
-(defn value-letter [context: QbeFn target: core/NativeId] -> String
+(defn value-letter [(context : QbeFn) (target : core/NativeId)] -> String
   (let [position: Int (value-index (qbefn-value-ids context) target)]
     (if (< position 0)
       ""
@@ -975,22 +982,22 @@
         (nth (qbefn-value-types context) position)))))
 
 (defn value-letter-or
-  [context: QbeFn
-   target: core/NativeId
-   fallback: String] -> String
+  [(context : QbeFn)
+   (target : core/NativeId)
+   (fallback : String)] -> String
   (let [letter: String (value-letter context target)]
     (if (= letter "") fallback letter)))
 
 (defn value-type-id
-  [context: QbeFn
-   target: core/NativeId] -> (U core/NativeId Nil)
+  [(context : QbeFn)
+   (target : core/NativeId)] -> (U core/NativeId Nil)
   (let [position: Int (value-index (qbefn-value-ids context) target)]
     (if (< position 0) nil (nth (qbefn-value-types context) position))))
 
-(defn block-label [index: Int] -> String
+(defn block-label [(index : Int)] -> String
   (str "@b" index))
 
-(defn instruction-splits? [instruction: core/Instruction] -> Bool
+(defn instruction-splits? [(instruction : core/Instruction)] -> Bool
   (match instruction
     [(AtomInstruction value) false]
     [(CopyInstruction value) false]
@@ -1062,7 +1069,7 @@
 
 ;; A checked operation becomes a trap/continue diamond, so a world block can
 ;; end in a different QBE label than it started in.
-(defn block-exit-label [index: Int block: core/BasicBlock] -> String
+(defn block-exit-label [(index : Int) (block : core/BasicBlock)] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
     (loop [position: Int 0 label: String (block-label index)]
       (if (>= position (count instructions))
@@ -1072,19 +1079,19 @@
           (recur (+ position 1) label))))))
 
 (defn switch-predecessor-label
-  [index: Int
-   block: core/BasicBlock
-   case-index: Int] -> String
+  [(index : Int)
+   (block : core/BasicBlock)
+   (case-index : Int)] -> String
   (if (= case-index 0)
     (block-exit-label index block)
     (str (block-label index) "_s" case-index)))
 
-(defn target-label [context: QbeFn target: core/NativeId] -> String
+(defn target-label [(context : QbeFn) (target : core/NativeId)] -> String
   (block-label (block-index (qbefn-blocks context) target)))
 
 ;; --- instruction emission -------------------------------------------------
 
-(defn atom-literal [context: QbeFn atom: core/NativeAtom] -> String
+(defn atom-literal [(context : QbeFn) (atom : core/NativeAtom)] -> String
   (match atom
     [(BoolAtom value) (if (core/boolatom-value atom) "1" "0")]
     [(I64Atom value) (str (core/i64atom-value atom))]
@@ -1097,7 +1104,7 @@
        (text-position (qbefn-texts context) (core/keywordatom-value atom))))]
     [(RefAtom value) ""]))
 
-(defn atom-letter [atom: core/NativeAtom] -> String
+(defn atom-letter [(atom : core/NativeAtom)] -> String
   (match atom
     [(BoolAtom value) "w"]
     [(I64Atom value) "l"]
@@ -1106,7 +1113,7 @@
     [(KeywordAtom value) "l"]
     [(RefAtom value) ""]))
 
-(defn store-mnemonic [store: core/StoreOp] -> String
+(defn store-mnemonic [(store : core/StoreOp)] -> String
   (match store
     [(StoreBool value) "storeb"]
     [(StoreI64 value) "storel"]
@@ -1114,7 +1121,7 @@
     [(StoreText value) ""]
     [(StoreRef value) ""]))
 
-(defn store-address [store: core/StoreOp] -> core/NativeId
+(defn store-address [(store : core/StoreOp)] -> core/NativeId
   (match store
     [(StoreBool value) (core/storebool-address store)]
     [(StoreI64 value) (core/storei64-address store)]
@@ -1122,7 +1129,7 @@
     [(StoreText value) (core/storetext-address store)]
     [(StoreRef value) (core/storeref-address store)]))
 
-(defn store-value [store: core/StoreOp] -> core/NativeId
+(defn store-value [(store : core/StoreOp)] -> core/NativeId
   (match store
     [(StoreBool value) (core/storebool-value store)]
     [(StoreI64 value) (core/storei64-value store)]
@@ -1130,7 +1137,7 @@
     [(StoreText value) (core/storetext-value store)]
     [(StoreRef value) (core/storeref-value store)]))
 
-(defn load-mnemonic [letter: String] -> String
+(defn load-mnemonic [(letter : String)] -> String
   (cond
     (= letter "b") "loadub"
     (= letter "h") "loaduh"
@@ -1141,26 +1148,26 @@
     :else ""))
 
 (defn temp-name
-  [block-index-value: Int
-   position: Int
-   slot: Int] -> String
+  [(block-index-value : Int)
+   (position : Int)
+   (slot : Int)] -> String
   (str "%t" block-index-value "_" position "_" slot))
 
 ;; Terminator temps carry their own prefix; an instruction at position 0 owns
 ;; %t<block>_0_* and must not collide with the switch chain.
-(defn switch-temp-name [block-index-value: Int slot: Int] -> String
+(defn switch-temp-name [(block-index-value : Int) (slot : Int)] -> String
   (str "%s" block-index-value "_" slot))
 
-(defn emit-trap-block [label: String code: Int] -> String
+(defn emit-trap-block [(label : String) (code : Int)] -> String
   (str label "\n  call $native_trap(w " code ")\n  hlt\n"))
 
 (defn emit-f64-divide
-  [context: QbeFn
-   block-index-value: Int
-   position: Int
-   result-name: String
-   left-id: core/NativeId
-   right-id: core/NativeId] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (position : Int)
+   (result-name : String)
+   (left-id : core/NativeId)
+   (right-id : core/NativeId)] -> String
   (let [left: String (value-name context left-id)
         right: String (value-name context right-id)
         trap-label: String (str (block-label block-index-value) "_t" position)
@@ -1176,13 +1183,13 @@
 ;; Mirrors the C materializer's overflow predicate; INT64_MIN is built by
 ;; subtraction because QBE's literal grammar cannot spell it directly.
 (defn emit-checked-add
-  [context: QbeFn
-   block-index-value: Int
-   position: Int
-   result-name: String
-   result-letter: String
-   left-id: core/NativeId
-   right-id: core/NativeId] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (position : Int)
+   (result-name : String)
+   (result-letter : String)
+   (left-id : core/NativeId)
+   (right-id : core/NativeId)] -> String
   (let [left: String (value-name context left-id)
         right: String (value-name context right-id)
         trap-label: String (str (block-label block-index-value) "_t" position)
@@ -1204,13 +1211,13 @@
       "  " result-name " =" result-letter " add " left ", " right "\n")))
 
 (defn emit-checked-bounds
-  [context: QbeFn
-   block-index-value: Int
-   position: Int
-   result-name: String
-   result-letter: String
-   index-id: core/NativeId
-   length-id: core/NativeId] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (position : Int)
+   (result-name : String)
+   (result-letter : String)
+   (index-id : core/NativeId)
+   (length-id : core/NativeId)] -> String
   (let [index-value: String (value-name context index-id)
         length-value: String (value-name context length-id)
         trap-label: String (str (block-label block-index-value) "_t" position)
@@ -1222,7 +1229,7 @@
       continue-label "\n"
       "  " result-name " =" result-letter " copy " index-value "\n")))
 
-(defn allocate-alignment [context: QbeFn type-id: core/NativeId] -> Int
+(defn allocate-alignment [(context : QbeFn) (type-id : core/NativeId)] -> Int
   (let [types: (Vec core/TypeDef) (qbefn-types context)
         layouts: (Vec core/LayoutDef) (qbefn-layouts context)
         definition: (U core/TypeDef Nil) (typedef-for-id types type-id)]
@@ -1235,7 +1242,7 @@
 
 ;; The shim copies opaque element bytes; the world layout supplies their
 ;; stride and alignment without exposing the vector header to QBE.
-(defn vector-stride [context: QbeFn vector-type: core/NativeId] -> Int
+(defn vector-stride [(context : QbeFn) (vector-type : core/NativeId)] -> Int
   (let [layout: (U core/LayoutDef Nil)
         (layout-for-type (qbefn-layouts context) vector-type)]
     (if (nil? layout)
@@ -1246,8 +1253,8 @@
           0)))))
 
 (defn vector-element-alignment
-  [context: QbeFn
-   vector-type: core/NativeId] -> Int
+  [(context : QbeFn)
+   (vector-type : core/NativeId)] -> Int
   (let [layout: (U core/LayoutDef Nil)
         (layout-for-type (qbefn-layouts context) vector-type)]
     (if (nil? layout)
@@ -1261,8 +1268,8 @@
             (if (nil? element) 0 (core/layoutdef-align-bytes element))))))))
 
 (defn function-index
-  [functions: (Vec core/FunctionDef)
-   target: core/NativeId] -> Int
+  [(functions : (Vec core/FunctionDef))
+   (target : core/NativeId)] -> Int
   (loop [index: Int 0]
     (if (>= index (count functions))
       -1
@@ -1271,9 +1278,9 @@
         (recur (+ index 1))))))
 
 (defn emit-call-arguments
-  [context: QbeFn
-   callee: core/FunctionDef
-   arguments: (Vec core/NativeId)] -> String
+  [(context : QbeFn)
+   (callee : core/FunctionDef)
+   (arguments : (Vec core/NativeId))] -> String
   (let [parameters: (Vec core/Parameter) (core/functiondef-parameters callee)
         prefix: String
         (str (if (> (count (core/functiondef-regions callee)) 0) "l %arena" "")
@@ -1293,10 +1300,10 @@
               argument-type " " (value-name context (nth arguments index)))))))))
 
 (defn emit-call
-  [context: QbeFn
-   result-name: String
-   function-id: core/NativeId
-   arguments: (Vec core/NativeId)] -> String
+  [(context : QbeFn)
+   (result-name : String)
+   (function-id : core/NativeId)
+   (arguments : (Vec core/NativeId))] -> String
   (let [functions: (Vec core/FunctionDef) (qbefn-functions context)
         position: Int (function-index functions function-id)]
     (if (< position 0)
@@ -1311,7 +1318,7 @@
             (abi-type (qbefn-types context) (qbefn-layouts context) (qbefn-module-index context) return-type)
             " call " symbol-name "(" arguments-text ")\n"))))))
 
-(defn compare-mnemonic [comparison: core/CompareOpV0] -> String
+(defn compare-mnemonic [(comparison : core/CompareOpV0)] -> String
   (cond
     (instance? native.core.CompareEqI64V0 comparison) "ceql"
     (instance? native.core.CompareLtI64V0 comparison) "csltl"
@@ -1323,10 +1330,10 @@
     :else ""))
 
 (defn emit-instruction
-  [context: QbeFn
-   block-index-value: Int
-   position: Int
-   instruction: core/Instruction] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (position : Int)
+   (instruction : core/Instruction)] -> String
   (let [result: core/SsaValueV0 (instruction-result-value instruction)
         result-id: core/NativeId (core/ssavaluev0-id result)
         result-name: String (value-name context result-id)
@@ -1528,9 +1535,9 @@
       [(CodecPrimitiveInstructionV0 value) ""])))
 
 (defn emit-instructions
-  [context: QbeFn
-   block-index-value: Int
-   block: core/BasicBlock] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (block : core/BasicBlock)] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
     (loop [position: Int 0 result: String ""]
       (if (>= position (count instructions))
@@ -1543,8 +1550,8 @@
 ;; carries become phi entries keyed by the predecessor's exit label.
 
 (defn terminator-jump-arguments
-  [terminator: core/Terminator
-   target: core/NativeId] -> (U (Vec core/NativeId) Nil)
+  [(terminator : core/Terminator)
+   (target : core/NativeId)] -> (U (Vec core/NativeId) Nil)
   (match terminator
     [(ReturnTerminator value) nil]
     [(JumpTerminator value)
@@ -1555,7 +1562,8 @@
     [(SwitchTerminator value) nil]
     [(TrapTerminator value) nil]))
 
-(defn terminator-cases [terminator: core/Terminator] -> (Vec core/SwitchCaseV0)
+(defn terminator-cases
+  [(terminator : core/Terminator)] -> (Vec core/SwitchCaseV0)
   (match terminator
     [(ReturnTerminator value) []]
     [(JumpTerminator value) []]
@@ -1563,21 +1571,21 @@
     [(SwitchTerminator value) (core/switchterminator-cases terminator)]
     [(TrapTerminator value) []]))
 
-(defn block-terminator [block: core/BasicBlock] -> (U core/Terminator Nil)
+(defn block-terminator [(block : core/BasicBlock)] -> (U core/Terminator Nil)
   (let [terminators: (Vec core/Terminator) (core/basicblock-terminators block)]
     (if (= (count terminators) 0) nil (nth terminators 0))))
 
 (defn phi-source
-  [context: QbeFn
-   separator: String
-   label: String
-   argument: core/NativeId] -> String
+  [(context : QbeFn)
+   (separator : String)
+   (label : String)
+   (argument : core/NativeId)] -> String
   (str separator label " " (value-name context argument)))
 
 (defn phi-sources
-  [context: QbeFn
-   target: core/NativeId
-   parameter-position: Int] -> String
+  [(context : QbeFn)
+   (target : core/NativeId)
+   (parameter-position : Int)] -> String
   (let [blocks: (Vec core/BasicBlock) (qbefn-blocks context)]
     (loop [index: Int 0 result: String ""]
       (if (>= index (count blocks))
@@ -1611,7 +1619,7 @@
                               (switch-predecessor-label index source case-index)
                               (nth case-arguments parameter-position))))))))))))))))
 
-(defn emit-phis [context: QbeFn block: core/BasicBlock] -> String
+(defn emit-phis [(context : QbeFn) (block : core/BasicBlock)] -> String
   (let [parameters: (Vec core/Parameter) (core/basicblock-parameters block)]
     (loop [index: Int 0 result: String ""]
       (if (>= index (count parameters))
@@ -1625,7 +1633,7 @@
 
 ;; --- terminator emission --------------------------------------------------
 
-(defn switch-tag-letter [context: QbeFn value-id: core/NativeId] -> String
+(defn switch-tag-letter [(context : QbeFn) (value-id : core/NativeId)] -> String
   (let [type-id: (U core/NativeId Nil) (value-type-id context value-id)
         definition: (U core/TypeDef Nil)
         (if (nil? type-id) nil (typedef-for-id (qbefn-types context) type-id))]
@@ -1641,9 +1649,9 @@
 ;; A union scrutinee is a pointer, so the tag is loaded from the aggregate;
 ;; a scalar scrutinee is already the tag.
 (defn emit-switch-tag
-  [context: QbeFn
-   block-index-value: Int
-   value-id: core/NativeId] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (value-id : core/NativeId)] -> String
   (let [tag-letter: String (switch-tag-letter context value-id)]
     (if (= tag-letter "")
       ""
@@ -1652,21 +1660,21 @@
         (value-name context value-id) "\n"))))
 
 (defn switch-tag-name
-  [context: QbeFn
-   block-index-value: Int
-   value-id: core/NativeId] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (value-id : core/NativeId)] -> String
   (if (= (switch-tag-letter context value-id) "")
     (value-name context value-id)
     (switch-temp-name block-index-value 0)))
 
-(defn switch-compare [context: QbeFn value-id: core/NativeId] -> String
+(defn switch-compare [(context : QbeFn) (value-id : core/NativeId)] -> String
   (let [tag-letter: String (switch-tag-letter context value-id)
         letter: String (if (= tag-letter "") (value-letter-or context value-id "l") tag-letter)]
     (if (= letter "l") "ceql" "ceqw")))
 
 (defn variant-tag-value
-  [variants: (Vec core/UnionVariantLayoutV0)
-   variant-id: core/NativeId] -> Int
+  [(variants : (Vec core/UnionVariantLayoutV0))
+   (variant-id : core/NativeId)] -> Int
   (loop [index: Int 0]
     (if (>= index (count variants))
       -1
@@ -1676,8 +1684,8 @@
           (recur (+ index 1)))))))
 
 (defn switch-variants
-  [context: QbeFn
-   value-id: core/NativeId] -> (Vec core/UnionVariantLayoutV0)
+  [(context : QbeFn)
+   (value-id : core/NativeId)] -> (Vec core/UnionVariantLayoutV0)
   (let [type-id: (U core/NativeId Nil) (value-type-id context value-id)
         layout: (U core/LayoutDef Nil)
         (if (nil? type-id) nil (layout-for-type (qbefn-layouts context) type-id))]
@@ -1686,10 +1694,10 @@
 ;; QBE has no switch; a tagged dispatch becomes a compare chain that ends in
 ;; a trap, which keeps the world's exhaustiveness obligation observable.
 (defn emit-switch
-  [context: QbeFn
-   block-index-value: Int
-   value-id: core/NativeId
-   cases: (Vec core/SwitchCaseV0)] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (value-id : core/NativeId)
+   (cases : (Vec core/SwitchCaseV0))] -> String
   (let [tag-load: String (emit-switch-tag context block-index-value value-id)
         tag-name: String (switch-tag-name context block-index-value value-id)
         compare: String (switch-compare context value-id)
@@ -1710,9 +1718,9 @@
               ", " next-label "\n")))))))
 
 (defn emit-terminator
-  [context: QbeFn
-   block-index-value: Int
-   block: core/BasicBlock] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (block : core/BasicBlock)] -> String
   (let [terminator: (U core/Terminator Nil) (block-terminator block)]
     (if (nil? terminator)
       ""
@@ -1733,15 +1741,15 @@
          (str "  call $native_trap(w " trap-invalid-argument ")\n  hlt\n")]))))
 
 (defn emit-block
-  [context: QbeFn
-   block-index-value: Int
-   block: core/BasicBlock] -> String
+  [(context : QbeFn)
+   (block-index-value : Int)
+   (block : core/BasicBlock)] -> String
   (str (block-label block-index-value) "\n"
     (emit-phis context block)
     (emit-instructions context block-index-value block)
     (emit-terminator context block-index-value block)))
 
-(defn emit-blocks [context: QbeFn] -> String
+(defn emit-blocks [(context : QbeFn)] -> String
   (let [blocks: (Vec core/BasicBlock) (qbefn-blocks context)]
     (loop [index: Int 0 result: String ""]
       (if (>= index (count blocks))
@@ -1751,10 +1759,10 @@
 ;; --- function emission ----------------------------------------------------
 
 (defn emit-parameter-list
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   function: core/FunctionDef] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (module-index : Int)
+   (function : core/FunctionDef)] -> String
   (let [parameters: (Vec core/Parameter) (core/functiondef-parameters function)
         arena: Bool (> (count (core/functiondef-regions function)) 0)
         capability: Bool (> (count (core/functiondef-capabilities function)) 0)
@@ -1771,13 +1779,13 @@
               " %v" index)))))))
 
 (defn emit-function
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   functions: (Vec core/FunctionDef)
-   texts: (Vec String)
-   module-index: Int
-   function-position: Int
-   function: core/FunctionDef] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (functions : (Vec core/FunctionDef))
+   (texts : (Vec String))
+   (module-index : Int)
+   (function-position : Int)
+   (function : core/FunctionDef)] -> String
   (let [blocks: (Vec core/BasicBlock) (ordered-blocks function)
         context: QbeFn
         (->QbeFn types layouts functions module-index blocks
@@ -1793,11 +1801,11 @@
       "}\n")))
 
 (defn emit-functions
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   functions: (Vec core/FunctionDef)
-   texts: (Vec String)
-   module-index: Int] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (functions : (Vec core/FunctionDef))
+   (texts : (Vec String))
+   (module-index : Int)] -> String
   (loop [index: Int 0 result: String ""]
     (if (>= index (count functions))
       result
@@ -1808,7 +1816,7 @@
 
 ;; --- support gate ---------------------------------------------------------
 
-(defn atom-kind-supported? [kind: core/AtomKind] -> Bool
+(defn atom-kind-supported? [(kind : core/AtomKind)] -> Bool
   (match kind
     [(BoolKind token) true]
     [(I64Kind token) true]
@@ -1819,9 +1827,9 @@
     [(RefKind target) false]))
 
 (defn type-supported?
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   type-id: core/NativeId] -> Bool
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (type-id : core/NativeId)] -> Bool
   (let [definition: (U core/TypeDef Nil) (typedef-for-id types type-id)
         layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (or (nil? definition) (nil? layout))
@@ -1861,7 +1869,7 @@
           [(FunctionType value) false]
           [(OutcomeType value) false])))))
 
-(defn atom-supported? [atom: core/NativeAtom] -> Bool
+(defn atom-supported? [(atom : core/NativeAtom)] -> Bool
   (match atom
     [(BoolAtom value) true]
     [(I64Atom value) true]
@@ -1870,14 +1878,14 @@
     [(KeywordAtom value) true]
     [(RefAtom target) false]))
 
-(defn store-supported? [store: core/StoreOp] -> Bool
+(defn store-supported? [(store : core/StoreOp)] -> Bool
   (not= (store-mnemonic store) ""))
 
-(defn comparison-supported? [comparison: core/CompareOpV0] -> Bool
+(defn comparison-supported? [(comparison : core/CompareOpV0)] -> Bool
   (or (instance? native.core.CompareEqTextV0 comparison)
     (not= "" (compare-mnemonic comparison))))
 
-(defn instruction-supported? [instruction: core/Instruction] -> Bool
+(defn instruction-supported? [(instruction : core/Instruction)] -> Bool
   (match instruction
     [(AtomInstruction value) (atom-supported? (core/atominstruction-atom instruction))]
     [(CopyInstruction value) true]
@@ -1953,7 +1961,7 @@
     [(CodecPrimitiveInstructionV0 value) false]))
 
 (defn unsupported-checked-division-name
-  [operation: core/CheckedOperationV0] -> (U String Nil)
+  [(operation : core/CheckedOperationV0)] -> (U String Nil)
   (cond
     (instance? native.core.CheckedQuotI64V0 operation) "quot"
     (instance? native.core.CheckedRemI64V0 operation) "rem"
@@ -1961,7 +1969,7 @@
     :else nil))
 
 (defn unsupported-block-checked-division
-  [block: core/BasicBlock] -> (U String Nil)
+  [(block : core/BasicBlock)] -> (U String Nil)
   (let [instructions: (Vec core/Instruction)
         (core/basicblock-instructions block)]
     (loop [position: Int 0]
@@ -1976,7 +1984,7 @@
             (recur (+ position 1))))))))
 
 (defn unsupported-function-checked-division
-  [function: core/FunctionDef] -> (U String Nil)
+  [(function : core/FunctionDef)] -> (U String Nil)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))
@@ -1985,7 +1993,8 @@
               (unsupported-block-checked-division (nth blocks position))]
           (if (nil? name) (recur (+ position 1)) name))))))
 
-(defn unsupported-checked-division [world: core/NativeWorld] -> (U String Nil)
+(defn unsupported-checked-division
+  [(world : core/NativeWorld)] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
     (loop [position: Int 0]
       (if (>= position (count functions))
@@ -1996,7 +2005,7 @@
           (if (nil? name) (recur (+ position 1)) name))))))
 
 (defn codec-primitive-operation-name
-  [operation: core/CodecPrimitiveOpV0] -> String
+  [(operation : core/CodecPrimitiveOpV0)] -> String
   (cond
     (instance? native.core.Utf8EncodeV0 operation) "utf8-encode"
     (instance? native.core.Utf8DecodeV0 operation) "utf8-decode"
@@ -2005,7 +2014,7 @@
     :else "float-from-bits"))
 
 (defn unsupported-block-codec-primitive
-  [block: core/BasicBlock] -> (U String Nil)
+  [(block : core/BasicBlock)] -> (U String Nil)
   (let [instructions: (Vec core/Instruction)
         (core/basicblock-instructions block)]
     (loop [position: Int 0]
@@ -2018,7 +2027,7 @@
             (recur (+ position 1))))))))
 
 (defn unsupported-function-codec-primitive
-  [function: core/FunctionDef] -> (U String Nil)
+  [(function : core/FunctionDef)] -> (U String Nil)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))
@@ -2029,7 +2038,7 @@
             (recur (+ position 1))
             operation))))))
 
-(defn unsupported-codec-primitive [world: core/NativeWorld] -> (U String Nil)
+(defn unsupported-codec-primitive [(world : core/NativeWorld)] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
     (loop [position: Int 0]
       (if (>= position (count functions))
@@ -2041,14 +2050,14 @@
             operation))))))
 
 (defn value-semantics-operation-name
-  [operation: core/ValueSemanticsOpV0] -> String
+  [(operation : core/ValueSemanticsOpV0)] -> String
   (match operation
     [(ValueEqualV0 domain-type left-id right-id) "equal"]
     [(ValueHashV0 domain-type value-id) "hash"]
     [(ValueCompareV0 domain-type left-id right-id) "compare"]))
 
 (defn unsupported-block-value-semantics
-  [block: core/BasicBlock] -> (U String Nil)
+  [(block : core/BasicBlock)] -> (U String Nil)
   (let [instructions: (Vec core/Instruction)
         (core/basicblock-instructions block)]
     (loop [position: Int 0]
@@ -2064,7 +2073,7 @@
             :else (recur (+ position 1))))))))
 
 (defn unsupported-function-value-semantics
-  [function: core/FunctionDef] -> (U String Nil)
+  [(function : core/FunctionDef)] -> (U String Nil)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))
@@ -2075,7 +2084,7 @@
             (recur (+ position 1))
             operation))))))
 
-(defn unsupported-value-semantics [world: core/NativeWorld] -> (U String Nil)
+(defn unsupported-value-semantics [(world : core/NativeWorld)] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
     (loop [position: Int 0]
       (if (>= position (count functions))
@@ -2087,14 +2096,15 @@
             operation))))))
 
 (defn unicode-text-operation-name
-  [operation: core/TextBuiltinOpV0] -> (U String Nil)
+  [(operation : core/TextBuiltinOpV0)] -> (U String Nil)
   (cond
     (instance? native.core.TextLowerV0 operation) "root-lowercase"
     (instance? native.core.TextLetterDecimalRunsV0 operation)
     "letter-decimal-runs"
     :else nil))
 
-(defn unsupported-block-unicode-text [block: core/BasicBlock] -> (U String Nil)
+(defn unsupported-block-unicode-text
+  [(block : core/BasicBlock)] -> (U String Nil)
   (let [instructions: (Vec core/Instruction)
         (core/basicblock-instructions block)]
     (loop [position: Int 0]
@@ -2109,7 +2119,7 @@
             (recur (+ position 1))))))))
 
 (defn unsupported-function-unicode-text
-  [function: core/FunctionDef] -> (U String Nil)
+  [(function : core/FunctionDef)] -> (U String Nil)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))
@@ -2118,7 +2128,7 @@
               (unsupported-block-unicode-text (nth blocks position))]
           (if (nil? operation) (recur (+ position 1)) operation))))))
 
-(defn unsupported-unicode-text [world: core/NativeWorld] -> (U String Nil)
+(defn unsupported-unicode-text [(world : core/NativeWorld)] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
     (loop [position: Int 0]
       (if (>= position (count functions))
@@ -2127,41 +2137,41 @@
               (unsupported-function-unicode-text (nth functions position))]
           (if (nil? operation) (recur (+ position 1)) operation))))))
 
-(defn world-has-vector-sort? [world: core/NativeWorld] -> Bool
+(defn world-has-vector-sort? [(world : core/NativeWorld)] -> Bool
   (some?
     (some
-      (fn [function: core/FunctionDef] -> Bool
+      (fn [(function : core/FunctionDef)] -> Bool
         (some?
           (some
-            (fn [block: core/BasicBlock] -> Bool
+            (fn [(block : core/BasicBlock)] -> Bool
               (some?
                 (some
-                  (fn [instruction: core/Instruction] -> Bool
+                  (fn [(instruction : core/Instruction)] -> Bool
                     (instance? native.core.VecSortInstructionV0 instruction))
                   (core/basicblock-instructions block))))
             (core/functiondef-blocks function))))
       (core/nativeworld-functions world))))
 
 (defn parameterless-target?
-  [blocks: (Vec core/BasicBlock)
-   target: core/NativeId] -> Bool
+  [(blocks : (Vec core/BasicBlock))
+   (target : core/NativeId)] -> Bool
   (let [index: Int (block-index blocks target)]
     (if (< index 0)
       false
       (= 0 (count (core/basicblock-parameters (nth blocks index)))))))
 
 (defn arity-matches?
-  [blocks: (Vec core/BasicBlock)
-   target: core/NativeId
-   arguments: (Vec core/NativeId)] -> Bool
+  [(blocks : (Vec core/BasicBlock))
+   (target : core/NativeId)
+   (arguments : (Vec core/NativeId))] -> Bool
   (let [index: Int (block-index blocks target)]
     (if (< index 0)
       false
       (= (count arguments) (count (core/basicblock-parameters (nth blocks index)))))))
 
 (defn terminator-supported?
-  [blocks: (Vec core/BasicBlock)
-   terminator: core/Terminator] -> Bool
+  [(blocks : (Vec core/BasicBlock))
+   (terminator : core/Terminator)] -> Bool
   (match terminator
     [(ReturnTerminator value) true]
     [(JumpTerminator value)
@@ -2172,52 +2182,52 @@
      (and (parameterless-target? blocks (core/branchterminator-true-block terminator))
        (parameterless-target? blocks (core/branchterminator-false-block terminator)))]
     [(SwitchTerminator value)
-     (every? (fn [switch-case: core/SwitchCaseV0] -> Bool
+     (every? (fn [(switch-case : core/SwitchCaseV0)] -> Bool
                (arity-matches? blocks (core/switchcasev0-block-id switch-case)
                  (core/switchcasev0-arguments switch-case)))
        (core/switchterminator-cases terminator))]
     [(TrapTerminator value) true]))
 
 (defn block-supported?
-  [blocks: (Vec core/BasicBlock)
-   block: core/BasicBlock] -> Bool
+  [(blocks : (Vec core/BasicBlock))
+   (block : core/BasicBlock)] -> Bool
   (and (= 1 (count (core/basicblock-terminators block)))
     (every? instruction-supported? (core/basicblock-instructions block))
-    (every? (fn [terminator: core/Terminator] -> Bool (terminator-supported? blocks terminator))
+    (every? (fn [(terminator : core/Terminator)] -> Bool (terminator-supported? blocks terminator))
       (core/basicblock-terminators block))))
 
 (defn function-supported?
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   function: core/FunctionDef] -> Bool
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (function : core/FunctionDef)] -> Bool
   (let [blocks: (Vec core/BasicBlock) (ordered-blocks function)
         return-type: (U core/NativeId Nil) (core/functiondef-return-type function)]
     (and (> (count blocks) 0)
       (= 0 (count (core/basicblock-parameters (nth blocks 0))))
       (or (nil? return-type) (type-supported? types layouts return-type))
-      (every? (fn [parameter: core/Parameter] -> Bool
+      (every? (fn [(parameter : core/Parameter)] -> Bool
                 (type-supported? types layouts (core/parameter-type-id parameter)))
         (core/functiondef-parameters function))
-      (every? (fn [block: core/BasicBlock] -> Bool (block-supported? blocks block)) blocks))))
+      (every? (fn [(block : core/BasicBlock)] -> Bool (block-supported? blocks block)) blocks))))
 
-(defn world-supported? [world: core/NativeWorld] -> Bool
+(defn world-supported? [(world : core/NativeWorld)] -> Bool
   (let [types: (Vec core/TypeDef) (core/nativeworld-types world)
         layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)]
-    (every? (fn [function: core/FunctionDef] -> Bool (function-supported? types layouts function))
+    (every? (fn [(function : core/FunctionDef)] -> Bool (function-supported? types layouts function))
       (core/nativeworld-functions world))))
 
-(defn world-has-host-extern? [world: core/NativeWorld] -> Bool
+(defn world-has-host-extern? [(world : core/NativeWorld)] -> Bool
   (some?
-    (some (fn [abi: core/AbiDeclV0] -> Bool
+    (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
               (instance? native.core.RestrictedCOptionalOutAbiV0
                 (core/abideclv0-convention abi))))
       (core/nativeworld-abis world))))
 
-(defn world-has-stdout-extern? [world: core/NativeWorld] -> Bool
+(defn world-has-stdout-extern? [(world : core/NativeWorld)] -> Bool
   (some?
-    (some (fn [abi: core/AbiDeclV0] -> Bool
+    (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
               (instance? native.core.RestrictedCAbiV0
@@ -2226,9 +2236,9 @@
                 (core/abideclv0-symbol abi))))
       (core/nativeworld-abis world))))
 
-(defn world-has-clock-extern? [world: core/NativeWorld] -> Bool
+(defn world-has-clock-extern? [(world : core/NativeWorld)] -> Bool
   (some?
-    (some (fn [abi: core/AbiDeclV0] -> Bool
+    (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
               (instance? native.core.RestrictedCAbiV0
@@ -2237,16 +2247,16 @@
                 (core/abideclv0-symbol abi))))
       (core/nativeworld-abis world))))
 
-(defn socket-extern-symbol? [symbol: String] -> Bool
+(defn socket-extern-symbol? [(symbol : String)] -> Bool
   (or (= symbol "native_host_socket_inherited_listener_v0")
       (= symbol "native_host_socket_accept_v0")
       (= symbol "native_host_socket_read_bounded_v0")
       (= symbol "native_host_socket_write_bounded_v0")
       (= symbol "native_host_socket_close_v0")))
 
-(defn world-has-socket-extern? [world: core/NativeWorld] -> Bool
+(defn world-has-socket-extern? [(world : core/NativeWorld)] -> Bool
   (some?
-    (some (fn [abi: core/AbiDeclV0] -> Bool
+    (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
               (instance? native.core.RestrictedCOutcomeOutAbiV0
@@ -2257,11 +2267,11 @@
 ;; --- entry point ----------------------------------------------------------
 
 (defn emit-module
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   functions: (Vec core/FunctionDef)
-   texts: (Vec String)
-   module-index: Int] -> String
+  [(types : (Vec core/TypeDef))
+   (layouts : (Vec core/LayoutDef))
+   (functions : (Vec core/FunctionDef))
+   (texts : (Vec String))
+   (module-index : Int)] -> String
   (let [data-text: String (emit-text-data texts module-index)
         type-text: String (emit-types types layouts functions module-index)]
     (str "# Generated by native.qbe; do not edit.\n"
@@ -2273,8 +2283,8 @@
       (emit-functions types layouts functions texts module-index))))
 
 (defn materialize-world
-  [world: core/NativeWorld
-   module-index: Int] -> QbeMaterialization
+  [(world : core/NativeWorld)
+   (module-index : Int)] -> QbeMaterialization
   (let [validation: core/ValidationReport (core/validate-world world)
         unsupported: (U String Nil) (unsupported-value-semantics world)
         unsupported-codec: (U String Nil) (unsupported-codec-primitive world)

@@ -14,19 +14,19 @@
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
-(defn char-at [s: String i: Int] -> String
+(defn char-at [(s : String) (i : Int)] -> String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
 (defn substring2
-  [s: String
-   a: Int
-   b: Int] -> String
+  [(s : String)
+   (a : Int)
+   (b : Int)] -> String
   (let [n (count s)
         lo (if (< a 0) 0 (if (> a n) n a))
         hi (if (< b lo) lo (if (> b n) n b))]
     (subs s lo hi)))
 
-(defn index-of2 [xs: (Vec Any) v: Any] -> Int
+(defn index-of2 [(xs : (Vec Any)) (v : Any)] -> Int
   (let [n (count xs)]
     (loop [i: Int 0]
       (if (>= i n) -1
@@ -35,9 +35,9 @@
 ;; driftlab: string-keyed object mutation — route through an Any-typed helper
 ;; (module-level atom + swap! replaces JS `aset`/mutable-object-field-set).
 (defn obj-set!
-  [obj: Any
-   k: Any
-   v: Any] -> Any
+  [(obj : Any)
+   (k : Any)
+   (v : Any)] -> Any
   (swap! obj assoc k v))
 
 ;; --- constants ---------------------------------------------------------------
@@ -50,56 +50,56 @@
 
 ;; --- type constructors (same JSON format as ast-json.rkt) --------------------
 
-(defn make-prim [name: String] -> Any
+(defn make-prim [(name : String)] -> Any
   {"kind" "prim" "name" name})
 
 (defn make-fn
-  [params: (Vec Any)
-   rest-type: Any
-   ret: Any] -> Any
+  [(params : (Vec Any))
+   (rest-type : Any)
+   (ret : Any)] -> Any
   {"kind" "fn" "params" params "rest" rest-type "ret" ret})
 
-(defn make-app [ctor: String args: (Vec Any)] -> Any
+(defn make-app [(ctor : String) (args : (Vec Any))] -> Any
   {"kind" "app" "name" ctor "args" args})
 
-(defn make-union [members: (Vec Any)] -> Any
+(defn make-union [(members : (Vec Any))] -> Any
   {"kind" "union" "members" members})
 
-(defn make-var [name: String] -> Any
+(defn make-var [(name : String)] -> Any
   {"kind" "var" "name" name})
 
 (defn make-poly
-  [vars: (Vec String)
-   body: Any
-   bounds: Any] -> Any
+  [(vars : (Vec String))
+   (body : Any)
+   (bounds : Any)] -> Any
   {"kind" "poly" "vars" vars "body" body "bounds" bounds})
 
 ;; --- type predicates ---------------------------------------------------------
 
-(defn prim? [t: Any] -> Bool
+(defn prim? [(t : Any)] -> Bool
   (and (not (nil? t)) (not= (get t "kind") nil) (= (get t "kind") "prim")))
 
-(defn fn-type? [t: Any] -> Bool
+(defn fn-type? [(t : Any)] -> Bool
   (and (not (nil? t)) (= (get t "kind") "fn")))
 
-(defn app-type? [t: Any] -> Bool
+(defn app-type? [(t : Any)] -> Bool
   (and (not (nil? t)) (= (get t "kind") "app")))
 
-(defn union-type? [t: Any] -> Bool
+(defn union-type? [(t : Any)] -> Bool
   (and (not (nil? t)) (= (get t "kind") "union")))
 
-(defn var-type? [t: Any] -> Bool
+(defn var-type? [(t : Any)] -> Bool
   (and (not (nil? t)) (= (get t "kind") "var")))
 
-(defn poly-type? [t: Any] -> Bool
+(defn poly-type? [(t : Any)] -> Bool
   (and (not (nil? t)) (= (get t "kind") "poly")))
 
-(defn any-type? [t: Any] -> Bool
+(defn any-type? [(t : Any)] -> Bool
   (and (prim? t) (= (get t "name") "Any")))
 
 ;; --- type->string (matches Racket type->string) ------------------------------
 
-(defn type->string [t: Any] -> String
+(defn type->string [(t : Any)] -> String
   (cond
     (nil? t) "?"
 
@@ -123,15 +123,15 @@
     (union-type? t)
       (let [members (get t "members")
             all-prim (every? prim? members)
-            names (if all-prim (mapv (fn [m: Any] -> String (get m "name")) members) [])]
+            names (if all-prim (mapv (fn [(m : Any)] -> String (get m "name")) members) [])]
         (cond
           (and all-prim (= (count members) 2)
                (>= (index-of2 names "Int") 0) (>= (index-of2 names "Float") 0))
             "Number"
           (and (= (count members) 2)
-               (some (fn [m: Any] -> Bool
+               (some (fn [(m : Any)] -> Bool
                        (and (prim? m) (= (get m "name") "Nil"))) members))
-            (let [non-nil (first (filter (fn [m: Any] -> Bool
+            (let [non-nil (first (filter (fn [(m : Any)] -> Bool
                                             (not (and (prim? m) (= (get m "name") "Nil")))) members))]
               (str (type->string non-nil) "?"))
           :else
@@ -143,7 +143,7 @@
       (let [vars (get t "vars")
             body (get t "body")
             bounds (get t "bounds")
-            var-strs (mapv (fn [v: String] -> String
+            var-strs (mapv (fn [(v : String)] -> String
                               (let [b (if (nil? bounds) nil (get bounds v))]
                                 (if (nil? b)
                                   v
@@ -155,7 +155,7 @@
 
 ;; --- unqualify-type-name -----------------------------------------------------
 
-(defn unqualify-name [name: String] -> String
+(defn unqualify-name [(name : String)] -> String
   (let [idx (str/index-of name "/")]
     (if (nil? idx)
       name
@@ -165,19 +165,19 @@
 
 ;; Structural equality for INVARIANT positions (the Atom element). Symmetric and
 ;; does NOT treat Any as a wildcard (Any ≡ Any only). Unqualifies prim names.
-(defn type-invariant-equal? [a: Any b: Any] -> Bool
+(defn type-invariant-equal? [(a : Any) (b : Any)] -> Bool
   (cond
     (and (prim? a) (prim? b))
       (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
     (and (app-type? a) (app-type? b))
       (and (= (get a "name") (get b "name"))
            (= (count (get a "args")) (count (get b "args")))
-           (every? (fn [i: Int] -> Bool
+           (every? (fn [(i : Int)] -> Bool
                      (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i)))
                    (range (count (get a "args")))))
     (and (union-type? a) (union-type? b))
       (and (= (count (get a "members")) (count (get b "members")))
-           (every? (fn [i: Int] -> Bool
+           (every? (fn [(i : Int)] -> Bool
                      (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i)))
                    (range (count (get a "members")))))
     (and (var-type? a) (var-type? b))
@@ -186,7 +186,7 @@
 
 ;; --- type-compatible? (matches Racket type-compatible?) ----------------------
 
-(defn type-compatible? [actual: Any expected: Any] -> Bool
+(defn type-compatible? [(actual : Any) (expected : Any)] -> Bool
   (cond
     (or (nil? actual) (nil? expected)) true
     (any-type? actual) true
@@ -200,16 +200,16 @@
       (type-compatible? (get actual "body") expected)
 
     (and (union-type? actual) (union-type? expected))
-      (every? (fn [a-alt: Any] -> Bool
-                (some (fn [e-alt: Any] -> Bool (type-compatible? a-alt e-alt))
+      (every? (fn [(a-alt : Any)] -> Bool
+                (some (fn [(e-alt : Any)] -> Bool (type-compatible? a-alt e-alt))
                       (get expected "members")))
               (get actual "members"))
 
     (union-type? expected)
-      (some (fn [alt: Any] -> Bool (type-compatible? actual alt)) (get expected "members"))
+      (some (fn [(alt : Any)] -> Bool (type-compatible? actual alt)) (get expected "members"))
 
     (union-type? actual)
-      (every? (fn [alt: Any] -> Bool (type-compatible? alt expected)) (get actual "members"))
+      (every? (fn [(alt : Any)] -> Bool (type-compatible? alt expected)) (get actual "members"))
 
     (and (prim? actual) (prim? expected))
       (or (= (get actual "name") (get expected "name"))
@@ -223,7 +223,7 @@
             er (get expected "rest")]
         (and (= (count ap) (count ep))
              (every? identity
-               (map-indexed (fn [i: Int p: Any] -> Bool
+               (map-indexed (fn [(i : Int) (p : Any)] -> Bool
                               (type-compatible? p (nth ep i)))
                             ap))
              (= (nil? ar) (nil? er))
@@ -235,7 +235,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [i: Int] -> Bool
+           (every? (fn [(i : Int)] -> Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
@@ -243,7 +243,7 @@
     (and (app-type? actual) (= (get actual "name") "HVec")
          (app-type? expected) (= (get expected "name") "Vec")
          (= 1 (count (get expected "args"))))
-      (every? (fn [a: Any] -> Bool
+      (every? (fn [(a : Any)] -> Bool
                 (type-compatible? a (nth (get expected "args") 0)))
               (get actual "args"))
 
@@ -251,7 +251,7 @@
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
            (every? identity
-             (map-indexed (fn [i: Int a: Any] -> Bool
+             (map-indexed (fn [(i : Int) (a : Any)] -> Bool
                             (type-compatible? a (nth (get expected "args") i)))
                           (get actual "args"))))
 
@@ -265,7 +265,7 @@
 
 ;; Var-ize: convert prim types whose name is a forall var into type-vars (the
 ;; oracle consults current-type-vars while parsing; this parser var-izes after).
-(defn varize-type [t: Any vars: Any] -> Any
+(defn varize-type [(t : Any) (vars : Any)] -> Any
   (cond
     (nil? t) t
     (and (= (get t "kind") "prim") (>= (index-of2 vars (get t "name")) 0))
@@ -284,13 +284,13 @@
     :else t))
 
 ;; A forall var entry is a bare name (unbounded) or (T <: Bound).
-(defn forall-entry-var [e: Any] -> Any
+(defn forall-entry-var [(e : Any)] -> Any
   (cond
     (string? e) e
     (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (nth e 0)
     :else nil))
 
-(defn parse-fn-type [items: (Vec Any)] -> Any
+(defn parse-fn-type [(items : (Vec Any))] -> Any
   (let [arrow-idx (index-of2 items "->")]
     (if (= arrow-idx -1)
       (make-prim "Any")
@@ -309,7 +309,7 @@
                 nil
                 (parse-type (nth after 0))))))))))
 
-(defn parse-type [t: Any] -> Any
+(defn parse-type [(t : Any)] -> Any
   (cond
     ;; Function type: vector starting with "#%brackets"
     (and (vector? t) (> (count t) 0) (= (nth t 0) "#%brackets"))
@@ -322,9 +322,9 @@
                               (= (nth vars-form 0) "#%brackets"))
                        (subvec vars-form 1)
                        vars-form)
-            vars (vec (filter (fn [x: Any] -> Bool (not (nil? x)))
+            vars (vec (filter (fn [(x : Any)] -> Bool (not (nil? x)))
                               (mapv forall-entry-var raw-vars)))
-            bounds (reduce (fn [acc: Any e: Any] -> Any
+            bounds (reduce (fn [(acc : Any) (e : Any)] -> Any
                              (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:")
                                       (string? (nth e 0)))
                                (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars))
@@ -364,7 +364,7 @@
 
 ;; --- infer-literal-type (from JSON AST literal node) -------------------------
 
-(defn infer-literal-type [e: Any] -> Any
+(defn infer-literal-type [(e : Any)] -> Any
   (let [kind (get e "kind")]
     (cond
       (= kind "string")  (make-prim "String")
@@ -379,9 +379,9 @@
 ;; --- polymorphic inference helpers -------------------------------------------
 
 (defn infer-type-var-bindings!
-  [expected: Any
-   actual: Any
-   bindings: Any] -> Nil
+  [(expected : Any)
+   (actual : Any)
+   (bindings : Any)] -> Nil
   (cond
     (or (nil? expected) (nil? actual)) nil
     (any-type? actual) nil
@@ -412,7 +412,7 @@
 
     :else nil))
 
-(defn apply-type-bindings [t: Any bindings: Any] -> Any
+(defn apply-type-bindings [(t : Any) (bindings : Any)] -> Any
   (cond
     (nil? t) nil
 
@@ -424,17 +424,17 @@
 
     (fn-type? t)
       (make-fn
-        (mapv (fn [p: Any] -> Any (apply-type-bindings p bindings)) (get t "params"))
+        (mapv (fn [(p : Any)] -> Any (apply-type-bindings p bindings)) (get t "params"))
         (if (nil? (get t "rest")) nil (apply-type-bindings (get t "rest") bindings))
         (apply-type-bindings (get t "ret") bindings))
 
     (app-type? t)
       (make-app (get t "name")
-        (mapv (fn [a: Any] -> Any (apply-type-bindings a bindings)) (get t "args")))
+        (mapv (fn [(a : Any)] -> Any (apply-type-bindings a bindings)) (get t "args")))
 
     (union-type? t)
       (make-union
-        (mapv (fn [m: Any] -> Any (apply-type-bindings m bindings)) (get t "members")))
+        (mapv (fn [(m : Any)] -> Any (apply-type-bindings m bindings)) (get t "members")))
 
     (poly-type? t) t
 
@@ -445,7 +445,7 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn- expect! [label: String result: Bool] -> Nil
+(defn- expect! [(label : String) (result : Bool)] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))

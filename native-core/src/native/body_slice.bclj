@@ -18,11 +18,11 @@
 (defn union-tag-type-id [] -> core/NativeId
   (core/typedef-id (lower/union-tag-type)))
 
-(defn type-references [definition: core/TypeDef] -> (Vec core/NativeId)
+(defn type-references [(definition : core/TypeDef)] -> (Vec core/NativeId)
   (let [shape: core/TypeShape (core/typedef-shape definition)]
     (cond
       (instance? native.core.RecordType shape)
-      (mapv (fn [field: core/TypeField] -> core/NativeId
+      (mapv (fn [(field : core/TypeField)] -> core/NativeId
               (core/typefield-type-id field))
         (core/recordtype-fields shape))
 
@@ -64,14 +64,14 @@
 
       :else [])))
 
-(defn instruction-type [instruction: core/Instruction] -> core/NativeId
+(defn instruction-type [(instruction : core/Instruction)] -> core/NativeId
   (core/ssavaluev0-type-id (get instruction :result)))
 
-(defn function-type-seeds [function: core/FunctionDef] -> (Vec core/NativeId)
+(defn function-type-seeds [(function : core/FunctionDef)] -> (Vec core/NativeId)
   (let [return-type: (U core/NativeId Nil) (core/functiondef-return-type function)
         seeds: (Vec core/NativeId)
         (core/append-ids
-          (mapv (fn [parameter: core/Parameter] -> core/NativeId
+          (mapv (fn [(parameter : core/Parameter)] -> core/NativeId
                   (core/parameter-type-id parameter))
             (core/functiondef-parameters function))
           (if (nil? return-type) [] [return-type]))
@@ -82,21 +82,21 @@
         (let [block: core/BasicBlock (nth blocks position)
               with-parameters: (Vec core/NativeId)
               (core/append-ids collected
-                (mapv (fn [parameter: core/Parameter] -> core/NativeId
+                (mapv (fn [(parameter : core/Parameter)] -> core/NativeId
                         (core/parameter-type-id parameter))
                   (core/basicblock-parameters block)))]
           (recur (+ position 1)
             (core/append-ids with-parameters
-              (mapv (fn [instruction: core/Instruction] -> core/NativeId
+              (mapv (fn [(instruction : core/Instruction)] -> core/NativeId
                       (instruction-type instruction))
                 (core/basicblock-instructions block)))))))))
 
 (defn conj-id
-  [ids: (Vec core/NativeId)
-   candidate: core/NativeId] -> (Vec core/NativeId)
+  [(ids : (Vec core/NativeId))
+   (candidate : core/NativeId)] -> (Vec core/NativeId)
   (if (core/id-in? ids candidate) ids (conj ids candidate)))
 
-(defn abi-type-seeds [world: core/NativeWorld] -> (Vec core/NativeId)
+(defn abi-type-seeds [(world : core/NativeWorld)] -> (Vec core/NativeId)
   (loop [position: Int 0
          abis: (Vec core/AbiDeclV0) (core/nativeworld-abis world)
          collected: (Vec core/NativeId) []]
@@ -107,13 +107,13 @@
         (recur (+ position 1) abis
           (core/append-ids
             (core/append-ids collected [(core/abideclv0-failure-type abi)])
-            (mapv (fn [value: core/AbiValueV0] -> core/NativeId
+            (mapv (fn [(value : core/AbiValueV0)] -> core/NativeId
                     (core/abivaluev0-type-id value))
               (if (nil? result)
                 (core/abideclv0-parameters abi)
                 (conj (core/abideclv0-parameters abi) result)))))))))
 
-(defn reachable-type-ids [world: core/NativeWorld] -> (Vec core/NativeId)
+(defn reachable-type-ids [(world : core/NativeWorld)] -> (Vec core/NativeId)
   (let [types: (Vec core/TypeDef) (core/nativeworld-types world)
         seeds: (Vec core/NativeId)
         (loop [position: Int 0
@@ -148,19 +148,19 @@
           grown
           (recur (+ round 1) grown))))))
 
-(defn projected-world [world: core/NativeWorld] -> core/NativeWorld
+(defn projected-world [(world : core/NativeWorld)] -> core/NativeWorld
   (let [kept: (Vec core/NativeId) (reachable-type-ids world)]
     (core/->NativeWorld
       (core/nativeworld-id world)
       (core/nativeworld-parent world)
       (core/nativeworld-compiler-pass world)
-      (filterv (fn [definition: core/TypeDef] -> Bool
+      (filterv (fn [(definition : core/TypeDef)] -> Bool
                  (core/id-in? kept (core/typedef-id definition)))
         (core/nativeworld-types world))
       (core/nativeworld-effects world)
       (core/nativeworld-regions world)
       (core/nativeworld-capabilities world)
-      (filterv (fn [layout: core/LayoutDef] -> Bool
+      (filterv (fn [(layout : core/LayoutDef)] -> Bool
                  (core/id-in? kept (core/layoutdef-type-id layout)))
         (core/nativeworld-layouts world))
       (core/nativeworld-functions world)
@@ -170,16 +170,16 @@
       (core/nativeworld-abis world)
       (core/nativeworld-observations world))))
 
-(defn id-text [candidate: Any] -> String (str (get candidate :value "")))
+(defn id-text [(candidate : Any)] -> String (str (get candidate :value "")))
 
-(defn verdict-subject [verdict: Any] -> String
+(defn verdict-subject [(verdict : Any)] -> String
   (str (id-text (get verdict :type-id nil))
     (id-text (get verdict :function-id nil))
     (id-text (get verdict :abi-id nil))))
 
 (defn obligation-report
-  [label: String
-   verdicts: (Vec obligations/ObligationVerdictV0)] -> String
+  [(label : String)
+   (verdicts : (Vec obligations/ObligationVerdictV0))] -> String
   (let [names: (Vec String) (slice/obligation-names)]
     (loop [position: Int 0 report: String ""]
       (if (>= position (count verdicts))
@@ -192,7 +192,7 @@
             " " (nth names position) "\n"))))))
 
 (defn failing-obligation-verdicts
-  [verdicts: (Vec obligations/ObligationVerdictV0)] -> String
+  [(verdicts : (Vec obligations/ObligationVerdictV0))] -> String
   (let [names: (Vec String) (slice/obligation-names)]
     (loop [position: Int 0 report: String ""]
       (if (>= position (count verdicts))
@@ -203,11 +203,11 @@
             (str report "obligation-detail " (nth names position) " "
               (verdict-subject (nth verdicts position)) "\n")))))))
 
-(defn failing-obligations [world: core/NativeWorld] -> String
+(defn failing-obligations [(world : core/NativeWorld)] -> String
   (failing-obligation-verdicts
     (obligations/validate-native-world world)))
 
-(defn function-report [functions: (Vec core/FunctionDef)] -> String
+(defn function-report [(functions : (Vec core/FunctionDef))] -> String
   (let [ordered: (Vec core/FunctionDef) (c17/ordered-functions functions)]
     (loop [position: Int 0 report: String ""]
       (if (>= position (count ordered))
@@ -219,15 +219,15 @@
             " blocks\n"))))))
 
 (defn functions-named
-  [functions: (Vec core/FunctionDef)
-   name: String] -> (Vec core/FunctionDef)
-  (filterv (fn [function: core/FunctionDef] -> Bool
+  [(functions : (Vec core/FunctionDef))
+   (name : String)] -> (Vec core/FunctionDef)
+  (filterv (fn [(function : core/FunctionDef)] -> Bool
              (= name (core/functiondef-name function)))
     functions))
 
 (defn function-world
-  [world: core/NativeWorld
-   function: core/FunctionDef] -> core/NativeWorld
+  [(world : core/NativeWorld)
+   (function : core/FunctionDef)] -> core/NativeWorld
   (let [function-id: core/NativeId (core/functiondef-id function)]
     (core/->NativeWorld
       (core/nativeworld-id world)
@@ -242,28 +242,28 @@
       (core/nativeworld-allowed-effects world)
       (core/nativeworld-allowed-regions world)
       (core/nativeworld-allowed-capabilities world)
-      (filterv (fn [abi: core/AbiDeclV0] -> Bool
+      (filterv (fn [(abi : core/AbiDeclV0)] -> Bool
                  (core/native-id= function-id (core/abideclv0-function-id abi)))
         (core/nativeworld-abis world))
       (core/nativeworld-observations world))))
 
 (defn obligations-pass?
-  [verdicts: (Vec obligations/ObligationVerdictV0)] -> Bool
+  [(verdicts : (Vec obligations/ObligationVerdictV0))] -> Bool
   (every? obligations/obligation-passed?
     verdicts))
 
-(defn qbe-leaf? [function: core/FunctionDef] -> Bool
-  (every? (fn [block: core/BasicBlock] -> Bool
-            (every? (fn [instruction: core/Instruction] -> Bool
+(defn qbe-leaf? [(function : core/FunctionDef)] -> Bool
+  (every? (fn [(block : core/BasicBlock)] -> Bool
+            (every? (fn [(instruction : core/Instruction)] -> Bool
                       (not (instance? native.core.CallInstruction instruction)))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
 (defn emit-qbe-function!
-  [program: core/NativeWorld
-   function-name: String
-   artifacts-dir: String
-   module-index: Int] -> String
+  [(program : core/NativeWorld)
+   (function-name : String)
+   (artifacts-dir : String)
+   (module-index : Int)] -> String
   (let [matches: (Vec core/FunctionDef)
         (functions-named (core/nativeworld-functions program) function-name)]
     (if (not= (count matches) 1)
@@ -303,11 +303,11 @@
                         (qbe/qbeartifact-module-name artifact) "\n"))))))))))))
 
 (defn emit-slice!
-  [facts-path: String
-   module-name: String
-   relative-path: String
-   artifacts-dir: String
-   compiler-commit: String] -> String
+  [(facts-path : String)
+   (module-name : String)
+   (relative-path : String)
+   (artifacts-dir : String)
+   (compiler-commit : String)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0
@@ -374,13 +374,13 @@
                     (body/bodyartifactv0-source-name artifact) "\n"))))))))))
 
 (defn emit-dual-slice!
-  [facts-path: String
-   module-name: String
-   relative-path: String
-   artifacts-dir: String
-   compiler-commit: String
-   qbe-function-name: String
-   qbe-module-index: Int] -> String
+  [(facts-path : String)
+   (module-name : String)
+   (relative-path : String)
+   (artifacts-dir : String)
+   (compiler-commit : String)
+   (qbe-function-name : String)
+   (qbe-module-index : Int)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0
