@@ -1,8 +1,8 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
-world-types 79
-world-layouts 79
+world-types 86
+world-layouts 86
 world-functions 0
 world-abis 0
 projected-types 5
@@ -101,8 +101,14 @@ pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for set-active-positions
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for apply-operation-state
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for operation-handles!
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-replay-ok
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-replay-error
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-replay-unclassified-error
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for append-valid-transaction!
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for append-transaction-result!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for append-transaction!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for commit-transaction!
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for replay-transaction-result!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for replay-transaction!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for occurrence-at
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for event-at
@@ -125,6 +131,19 @@ pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-dump-operation?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-operation-slice?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-history-rows?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frames-ok
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frames-error
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for operation-handle-error
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-atom-rows?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for history-sequence-error
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for resolve-valid-handle
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for resolve-valid-triple-handle
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-transaction-frame-at
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-transaction-frames-between
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frames-between-result
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rebuild-operation-state
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for term-store-load-ok
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for term-store-load-error
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for load-term-store-result!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for load-term-store!
 materialize OK module_0.h module_0.c
