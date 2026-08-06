@@ -158,6 +158,7 @@
             "sql-schema-cache.rkt"
             ;; opt-in property/exec runners (env-gated)
             "js-exec-oracle.rkt"        ; requires node/bun at runtime
+            "native-wasm32.rkt"         ; BEAGLE_WASI=1 + wasi clang + wasmtime
             "nix-property.rkt")))       ; BEAGLE_NIX_EVAL_CHECK=1
             ;; (The quarantined "operative" checker/evaluator prototype was
             ;; deleted 2026-06-15 — it never ran on the live build path. The
