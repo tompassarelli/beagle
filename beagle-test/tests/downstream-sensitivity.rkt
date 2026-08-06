@@ -144,7 +144,7 @@
 ;; the checked-in diff is applied to THIS copy only. `after-copy` is a seam for
 ;; the control/regression to plant stale bytecode BEFORE the seed. `invalidate?`
 ;; (default #t) drops all copied bytecode so the copy is source-truthful — the
-;; seal that makes every leg deterministic regardless of the live tree's .zo.
+;; invalidation that makes every leg deterministic regardless of the live tree's .zo.
 (define (make-compiler-copy! scratch seeded?
                              #:after-copy [after-copy void]
                              #:invalidate? [invalidate? #t])
@@ -254,7 +254,7 @@
      (check-false (string-contains? stderr TARGET-FORM-PHRASE)
                   "masked seed raises none of the E009 class — the exact vector"))))
 
-;; --- REGRESSION: invalidation defeats the future-dated stale .zo (the seal) --
+;; --- REGRESSION: invalidation defeats the future-dated stale .zo (the invalidation) --
 ;; Identical plant, but through the DEFAULT (invalidate? #t) production path.
 ;; Dropping the copied bytecode forces recompilation of the seed-patched
 ;; check.rkt, so the seeded leg reaches the expected E009 class regardless of

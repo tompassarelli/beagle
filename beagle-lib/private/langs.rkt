@@ -57,7 +57,7 @@
 (define (view-idioms)
   (string-join (cons
                 (string-append (core-profile-name CORE-PROFILE)
-                               " sealed Native World")
+                               " frozen Native World")
                 (for/list ([t (in-list TARGETS)])
                   (string-append (target-name t) " " (target-idiom t))))
                ", "))
@@ -66,7 +66,7 @@
 (define (view-emitters)
   (string-append
    "- `native-core/src/native/{worlds,lower,obligations}.bclj` — the hosted "
-   "implementation that lowers Core into one sealed Native World; "
+   "implementation that lowers Core into one frozen Native World; "
    "`native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.\n"
    "- `beagle-lib/private/emit-{"
    (string-join (map id-str TARGETS) ",")
@@ -90,7 +90,7 @@
              (core-profile-name CORE-PROFILE)
              (string-append "`" (core-profile-source-ext CORE-PROFILE) "`")
              (string-append "`#lang " (core-profile-lang CORE-PROFILE) "`")
-             "sealed Native World"
+             "frozen Native World"
              (format "~a — ~a"
                      (core-profile-status CORE-PROFILE)
                      (core-profile-note CORE-PROFILE))))
@@ -104,7 +104,7 @@
     (list ""
           (string-append
            (string-titlecase (number-word (source-profile-count)))
-           " source profiles. Core produces the authoritative sealed Native World; "
+           " source profiles. Core produces the authoritative frozen Native World; "
            "`--materializer "
            (string-join (map materializer-id-str MATERIALIZERS) "|")
            "` selects a projection. `"
@@ -155,7 +155,7 @@
   (string-join
    (list "```"
          (string-append (core-profile-source-ext CORE-PROFILE)
-                        "  ──▶ parse ──▶ check ──▶ seal Native World"
+                        "  ──▶ parse ──▶ check ──▶ freeze Native World"
                         " ──▶ --materializer "
                         (string-join (map materializer-id-str MATERIALIZERS) "|"))
          flow
@@ -276,7 +276,7 @@
            'sourceExtension (core-profile-source-ext CORE-PROFILE)
            'lang (core-profile-lang CORE-PROFILE)
            'pipeline "native-world"
-           'output "sealed Native World"
+           'output "frozen Native World"
            'status (symbol->string (core-profile-status CORE-PROFILE))
            'note (core-profile-note CORE-PROFILE)
            'domain (core-profile-domain CORE-PROFILE)

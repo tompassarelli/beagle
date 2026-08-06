@@ -24,11 +24,11 @@
      (binding : String)])
   (InvalidSourceModuleV0 [(module-id : core/NativeId) (detail : String)]))
 
-(defunion SourceSealResultV0
-  (SourceSealAcceptedV0
-    [(sealed : worlds/SealedSourceWorldV0)
+(defunion SourceFreezeResultV0
+  (SourceFreezeAcceptedV0
+    [(frozen : worlds/FrozenSourceWorldV0)
      (receipt : core/PassReceiptV0)])
-  (SourceSealRejectedV0
+  (SourceFreezeRejectedV0
     [(failure : LowerFailureV0)
      (receipt : core/PassReceiptV0)]))
 
@@ -561,23 +561,23 @@
     passed
     detail))
 
-(defn seal-source-world
+(defn freeze-source-world
   [(world : worlds/SourceProgramWorldV0)
    (compiler-commit : String)
-   (configuration : (Vec String))] -> SourceSealResultV0
+   (configuration : (Vec String))] -> SourceFreezeResultV0
   (let [encoding: String (worlds/encode-source-world world)
         digest: String (worlds/content-digest encoding)]
     (if (source-world-valid? world)
-      (->SourceSealAcceptedV0
-        (worlds/->SealedSourceWorldV0 world encoding digest)
-        (make-receipt digest compiler-commit "source-seal" configuration []
+      (->SourceFreezeAcceptedV0
+        (worlds/->FrozenSourceWorldV0 world encoding digest)
+        (make-receipt digest compiler-commit "source-freeze" configuration []
           [(source-closure-obligation digest true
              "source Term identities and module roots are closed")]
           digest))
       (let [failure: LowerFailureV0 (source-failure world)]
-        (->SourceSealRejectedV0
+        (->SourceFreezeRejectedV0
           failure
-          (make-receipt digest compiler-commit "source-seal" configuration
+          (make-receipt digest compiler-commit "source-freeze" configuration
             [(core/->DiagnosticV0
                "LOWER-SOURCE-NOT-CLOSED"
                "source Term graph or module roots are not closed")]
@@ -586,7 +586,7 @@
             ""))))))
 
 ;; The records below are a closed hot-loop projection of the authoritative
-;; typed Term graph. They are discarded and rebuilt from the sealed world.
+;; typed Term graph. They are discarded and rebuilt from the frozen world.
 (defunion NativeReadinessV0
   (NativeReadyV0 [(operation : String)])
   (NativeLoweredV0
@@ -647,7 +647,7 @@
 
 (defunion TypingResultV0
   (TypingAcceptedV0
-    [(sealed : worlds/SealedTypedWorldV0)
+    [(frozen : worlds/FrozenTypedWorldV0)
      (slice : TypedSliceV0)
      (receipt : core/PassReceiptV0)])
   (TypingRejectedV0 [(failure : LowerFailureV0) (receipt : core/PassReceiptV0)]))
@@ -1029,7 +1029,7 @@
     (= "String" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
 
-    ;; Regex values stay as their sealed pattern text until a regex operation
+    ;; Regex values stay as their uninterpreted pattern text until a regex operation
     ;; consumes them; compilation belongs to the materializer/runtime boundary.
     (= "Regex" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
@@ -1927,7 +1927,7 @@
    (value-id : core/NativeId)
    (type-id : core/NativeId)])
 
-;; A branch fact is keyed by one immutable map SSA and one sealed keyword
+;; A branch fact is keyed by one immutable map SSA and one fixed keyword
 ;; identity; another map of the same type is never interchangeable.
 (defrecord KeywordFlowRefinementV0
   [(source-id : core/NativeId)
@@ -3048,7 +3048,7 @@
 
 ;; Coercion rule (ratified, North thread 019fbd6c): widen = free tag inject,
 ;; narrow = checked extract trapping to LowerFailure/union-variant-mismatch.
-;; SliceValue is confined to one sealed world, never a cross-world ABI type.
+;; SliceValue is confined to one frozen world, never a cross-world ABI type.
 (defn variant-for-payload
   [(variants : (Vec core/TypeVariant))
    (payload : core/NativeId)] -> (U core/TypeVariant Nil)
@@ -7407,7 +7407,7 @@
         (fail-result state
           "TODO-NATIVE-SORT-OPERAND: sort needs a closed Vec or insertion-order Set")))))
 
-;; A repeated immutable lookup is keyed by its receiver SSA and sealed field/key
+;; A repeated immutable lookup is keyed by its receiver SSA and fixed field/key
 ;; identity. Map keyword access and generated record accessors share that proof.
 (defn keyword-lookup-site
   [(env : BodyEnvV0)
@@ -11888,7 +11888,7 @@
                       (nil? signature)
                       (fail-result cell-state
                         (str "TODO-NATIVE-ATOM-SWAP-UPDATER: " updater-name
-                          " is not a statically sealed native function"))
+                          " is not a statically named native function"))
                       (not (pure-updater-signature? signature content
                              (- (count args) 2)))
                       (fail-result cell-state
@@ -14215,7 +14215,7 @@
                   false)))]
         (if settled current (recur (+ round 1) next))))))
 
-;; Effects admitted by a callee are admitted by every caller before ABI sealing.
+;; Effects admitted by a callee are admitted by every caller before the ABI is frozen.
 (defn settle-effect
   [(functions : (Vec TypedFunctionV0))
    (effect-id : core/NativeId)] -> (Vec TypedFunctionV0)
@@ -14709,12 +14709,12 @@
      "typed Terms contain no raw Any, host exception, host collection, or target syntax")])
 
 (defn lower-typed-world
-  [(sealed-source : worlds/SealedSourceWorldV0)
+  [(frozen-source : worlds/FrozenSourceWorldV0)
    (compiler-commit : String)
    (configuration : (Vec String))] -> TypingResultV0
   (let [source: worlds/SourceProgramWorldV0
-        (worlds/sealedsourceworldv0-world sealed-source)
-        source-digest: String (worlds/sealedsourceworldv0-digest sealed-source)
+        (worlds/frozensourceworldv0-world frozen-source)
+        source-digest: String (worlds/frozensourceworldv0-digest frozen-source)
         graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms source)
         index: SourceIndexV0
         (build-source-index graph (worlds/sourceprogramworldv0-modules source))
@@ -14799,7 +14799,7 @@
                (function-todo-obligations functions digest)))]
     (if valid
       (->TypingAcceptedV0
-        (worlds/->SealedTypedWorldV0 typed-world encoding digest)
+        (worlds/->FrozenTypedWorldV0 typed-world encoding digest)
         (->TypedSliceV0 types functions effects regions capabilities
           [(type-id "LowerFailure")])
         (make-receipt source-digest compiler-commit "source-to-typed"
@@ -14824,10 +14824,10 @@
 
 (defunion NativeLoweringResultV0
   (NativeLoweringCompleteV0
-    [(sealed : worlds/SealedNativeWorldV0)
+    [(frozen : worlds/FrozenNativeWorldV0)
      (receipt : core/PassReceiptV0)])
   (NativeLoweringPendingV0
-    [(sealed : worlds/SealedNativeWorldV0)
+    [(frozen : worlds/FrozenNativeWorldV0)
      (receipt : core/PassReceiptV0)
      (obligations : (Vec core/ReceiptObligationV0))]))
 
@@ -16697,12 +16697,12 @@
                 "typed source functions with unimplemented bodies remain explicit obligations")])))))
 
 (defn lower-native-world
-  [(sealed-typed : worlds/SealedTypedWorldV0)
+  [(frozen-typed : worlds/FrozenTypedWorldV0)
    (slice : TypedSliceV0)
    (compiler-commit : String)
    (configuration : (Vec String))
    (abi : core/AbiProfileV0)] -> NativeLoweringResultV0
-  (let [typed-digest: String (worlds/sealedtypedworldv0-digest sealed-typed)
+  (let [typed-digest: String (worlds/frozentypedworldv0-digest frozen-typed)
         types: (Vec core/TypeDef)
         (append-type-def (typedslicev0-types slice) (union-tag-type))
         layout-resolutions: (Vec LayoutResolutionV0) (resolve-layouts types abi)
@@ -16773,8 +16773,8 @@
         (worlds/->NativeWorldV0 terms typed-digest program obligation-roots)
         encoding: String (worlds/encode-native-world world)
         digest: String (worlds/content-digest encoding)
-        sealed: worlds/SealedNativeWorldV0
-        (worlds/->SealedNativeWorldV0 world encoding digest)
+        frozen: worlds/FrozenNativeWorldV0
+        (worlds/->FrozenNativeWorldV0 world encoding digest)
         pending-layouts: (Vec core/ReceiptObligationV0)
         (layout-pending-obligations layout-resolutions digest)
         pending-functions: (Vec core/ReceiptObligationV0)
@@ -16793,14 +16793,14 @@
         complete: Bool
         (and core-valid closed-layouts functions-ready legal-abi tokens-discharged clean)]
     (if complete
-      (->NativeLoweringCompleteV0 sealed receipt)
-      (->NativeLoweringPendingV0 sealed receipt
+      (->NativeLoweringCompleteV0 frozen receipt)
+      (->NativeLoweringPendingV0 frozen receipt
         (vec (concat pending-layouts pending-functions))))))
 
-(defn native-world-host-erased? [(sealed : worlds/SealedNativeWorldV0)] -> Bool
+(defn native-world-host-erased? [(frozen : worlds/FrozenNativeWorldV0)] -> Bool
   (term-graph-clean?
     (worlds/nativeworldv0-terms
-      (worlds/sealednativeworldv0-world sealed))))
+      (worlds/frozennativeworldv0-world frozen))))
 
 (defn fixture-id [(kind : String) (label : String)] -> core/NativeId
   (lower-id "fixture" [kind label]))
@@ -17161,7 +17161,7 @@
       [])))
 
 (defunion FixturePipelineResultV0
-  (FixturePipelineCompleteV0 [(sealed : worlds/SealedNativeWorldV0)])
+  (FixturePipelineCompleteV0 [(frozen : worlds/FrozenNativeWorldV0)])
   (FixturePipelineFailedV0 [(stage : String) (detail : String)]))
 
 (defn lower-pipeline-fixture
@@ -17169,28 +17169,28 @@
    (compiler-commit : String)] -> FixturePipelineResultV0
   (let [configuration: (Vec String)
         ["profile=3"]
-        source-result: SourceSealResultV0
-        (seal-source-world source-world compiler-commit configuration)]
+        source-result: SourceFreezeResultV0
+        (freeze-source-world source-world compiler-commit configuration)]
     (match source-result
-      [(SourceSealRejectedV0 failure receipt)
-       (->FixturePipelineFailedV0 "source-seal" "fixture source world rejected")]
-      [(SourceSealAcceptedV0 sealed-source source-receipt)
+      [(SourceFreezeRejectedV0 failure receipt)
+       (->FixturePipelineFailedV0 "source-freeze" "fixture source world rejected")]
+      [(SourceFreezeAcceptedV0 frozen-source source-receipt)
        (let [typing-result: TypingResultV0
-             (lower-typed-world sealed-source compiler-commit configuration)]
+             (lower-typed-world frozen-source compiler-commit configuration)]
          (match typing-result
            [(TypingRejectedV0 failure receipt)
             (->FixturePipelineFailedV0 "source-to-typed"
               "fixture annotations did not close")]
-           [(TypingAcceptedV0 sealed-typed slice typed-receipt)
+           [(TypingAcceptedV0 frozen-typed slice typed-receipt)
             (let [native-result: NativeLoweringResultV0
-                  (lower-native-world sealed-typed slice compiler-commit
+                  (lower-native-world frozen-typed slice compiler-commit
                     configuration (core/abi-profile-lp64))]
               (match native-result
-                [(NativeLoweringPendingV0 sealed receipt obligations)
+                [(NativeLoweringPendingV0 frozen receipt obligations)
                  (->FixturePipelineFailedV0 "typed-to-native"
                    "fixture retained a named native obligation")]
-                [(NativeLoweringCompleteV0 sealed receipt)
-                 (->FixturePipelineCompleteV0 sealed)]))]))])))
+                [(NativeLoweringCompleteV0 frozen receipt)
+                 (->FixturePipelineCompleteV0 frozen)]))]))])))
 
 (defn lower-fixture [(compiler-commit : String)] -> FixturePipelineResultV0
   (lower-pipeline-fixture fixture-source-world compiler-commit))
@@ -17200,30 +17200,30 @@
 
 (def fixture-native-complete?: Bool
   (match fixture-result
-    [(FixturePipelineCompleteV0 sealed) true]
+    [(FixturePipelineCompleteV0 frozen) true]
     [(FixturePipelineFailedV0 stage detail) false]))
 
 (def fixture-native-host-erased?: Bool
   (match fixture-result
-    [(FixturePipelineCompleteV0 sealed) (native-world-host-erased? sealed)]
+    [(FixturePipelineCompleteV0 frozen) (native-world-host-erased? frozen)]
     [(FixturePipelineFailedV0 stage detail) false]))
 
 (def fixture-native-valid?: Bool
   (match fixture-result
-    [(FixturePipelineCompleteV0 sealed)
+    [(FixturePipelineCompleteV0 frozen)
      (core/validationreport-passed
        (core/validate-world
          (worlds/nativeworldv0-program
-           (worlds/sealednativeworldv0-world sealed))))]
+           (worlds/frozennativeworldv0-world frozen))))]
     [(FixturePipelineFailedV0 stage detail) false]))
 
 (def fixture-native-has-abi?: Bool
   (match fixture-result
-    [(FixturePipelineCompleteV0 sealed)
+    [(FixturePipelineCompleteV0 frozen)
      (> (count
           (core/nativeworld-abis
             (worlds/nativeworldv0-program
-              (worlds/sealednativeworldv0-world sealed))))
+              (worlds/frozennativeworldv0-world frozen))))
         0)]
     [(FixturePipelineFailedV0 stage detail) false]))
 
@@ -17244,10 +17244,10 @@
 
 (def fold-empty-passes?: Bool
   (match fold-empty-result
-    [(FixturePipelineCompleteV0 sealed)
-     (and (native-world-host-erased? sealed)
+    [(FixturePipelineCompleteV0 frozen)
+     (and (native-world-host-erased? frozen)
        (core/validationreport-passed
          (core/validate-world
            (worlds/nativeworldv0-program
-             (worlds/sealednativeworldv0-world sealed)))))]
+             (worlds/frozennativeworldv0-world frozen)))))]
     [(FixturePipelineFailedV0 stage detail) false]))

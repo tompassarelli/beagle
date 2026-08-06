@@ -1,7 +1,7 @@
 #lang beagle/clj
 ;; Fixture worlds for native.qbe. The module-0 world is byte-for-byte the
 ;; world native.c11-validation-corpus materializes (same id domain, same
-;; constructors), so both backends read one sealed world.
+;; constructors), so both backends read one frozen world.
 (ns native.qbe-validation-corpus
   (:require [native.core :as core]
             [native.qbe :as qbe]))
@@ -872,7 +872,7 @@
 
 ;; --- Atom state world ----------------------------------------------------
 ;; This fixture is materialized by validation/atom through C17. QBE must reject
-;; the same sealed world until it has a lock-aware state calling convention.
+;; the same frozen world until it has a lock-aware state calling convention.
 
 (defn atom-fixture-id [(name : String)] -> core/NativeId
   (core/canonical-id "native-atom-fixture-v0" [name]))

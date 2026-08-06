@@ -150,7 +150,7 @@ typedef struct native_value_variant_descriptor {
   const native_value_descriptor *payload;
 } native_value_variant_descriptor;
 
-/* A sealed Native World emits one immutable descriptor graph. Descriptors are
+/* A frozen Native World emits one immutable descriptor graph. Descriptors are
    world-local ABI metadata: values never carry host function pointers or tags
    not already present in their TypeDef/LayoutDef. */
 struct native_value_descriptor {
@@ -294,7 +294,7 @@ native_set *native_set_disj(native_arena *arena, native_set *set,
 native_vec *native_set_vector(native_arena *arena, const native_set *set,
                               size_t alignment);
 
-/* Value semantics recurse through the sealed descriptor graph. Hash is a
+/* Value semantics recurse through the frozen descriptor graph. Hash is a
    nonnegative 63-bit FNV-1a digest over a kind-separated, low-byte-first
    structural stream. Compare returns only -1, 0, or 1: records and vectors are
    lexicographic, unions compare tag then payload, and Text/Keyword compare

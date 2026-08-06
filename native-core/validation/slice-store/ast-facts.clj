@@ -1,4 +1,4 @@
-;; bin/beagle-ast JSON -> the canonical source-fact projection native.slice seals.
+;; bin/beagle-ast JSON -> the canonical source-fact projection native.slice freezes.
 ;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object.
 ;; Takes several ASTs: store.bgl declares no record, so its annotations only
 ;; close over Native Core types when its declared dependency is projected first.

@@ -74,5 +74,5 @@ echo 'Fram Native Core funding demo'
 echo 'fram.types: COMPLETE, 31 functions, 7/7 obligations, strict C17 gcc+clang run PASS'
 echo 'fram.kernel-classify: COMPLETE, 19 functions, 7/7 obligations, full managed/C17 parity PASS'
 rg --no-line-number '^slice-kernel-classify: delivery-trigger\?' "$work/kernel.log"
-echo 'QBE: delivery-trigger? from the same sealed Native World, assemble+link+run PASS'
+echo 'QBE: delivery-trigger? from the same frozen Native World, assemble+link+run PASS'
 echo 'RESULT: PASS'

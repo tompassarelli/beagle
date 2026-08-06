@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; THE canonical source-profile table. Hosted targets emit source directly;
-;; Beagle Core lowers to a sealed Native World and only then runs an explicitly
+;; Beagle Core lowers to a frozen Native World and only then runs an explicitly
 ;; selected materializer.
 ;;
 ;; Every place that used to hand-enumerate targets is now a DERIVED VIEW of
@@ -39,7 +39,7 @@
 (struct target (id name source-ext lang out-ext status emitter note idiom domain)
   #:transparent)
 
-;; Native materializers are projections of the authoritative sealed world, not
+;; Native materializers are projections of the authoritative frozen world, not
 ;; language targets or source emitters.
 (struct materializer (id name out-ext artifact note) #:transparent)
 
@@ -51,7 +51,7 @@
                  "direct-native projection and anti-C-capture check")))
 
 ;; Bare `#lang beagle` is the canonical Core language. Its build product is a
-;; sealed Native World; MATERIALIZERS names the separate projections available
+;; frozen Native World; MATERIALIZERS names the separate projections available
 ;; after that world has passed the native obligations.
 (struct core-profile (id name source-ext lang status note domain materializers)
   #:transparent)
@@ -59,7 +59,7 @@
 (define CORE-PROFILE
   (core-profile
    'core "Beagle Native Core" ".bgl" "beagle" 'live
-   "native pipeline: sealed Native World; select C17 or QBE materializer"
+   "native pipeline: frozen Native World; select C17 or QBE materializer"
    "Native system-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
    MATERIALIZERS))
 

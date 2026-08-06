@@ -2,7 +2,7 @@
 # Drive fram:src/fram/types.bgl + fram:src/fram/store.bgl BODIES through the
 # native pipeline with the Vec vocabulary live:
 #   beagle-ast -> source facts (signatures + bodies + vector literals)
-#     -> sealed source world -> typed world -> native world -> 7 obligations
+#     -> frozen source world -> typed world -> native world -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 # The pair is projected together because store.bgl declares no record of its
 # own: every (Vec T) in its signatures is a fram.types record vector.

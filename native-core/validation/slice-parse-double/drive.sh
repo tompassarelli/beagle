@@ -70,7 +70,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 
 cat "$scratch/report.txt"
 for line in \
-  'stage source-seal ACCEPTED' \
+  'stage source-freeze ACCEPTED' \
   'stage source-to-typed ACCEPTED' \
   'stage typed-to-native COMPLETE' \
   'materialize OK module_0.h module_0.c' \

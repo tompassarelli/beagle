@@ -1,4 +1,4 @@
-stage source-seal ACCEPTED
+stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 2

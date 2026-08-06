@@ -1,7 +1,4 @@
 #lang beagle/clj
-;; @upstream:text-arm — operator-authorized for Native Stage 2; re-ingest this
-;; module into the graph after landing. Authority: North thread 019fbd6c,
-;; accepted design lane-msch3uwf section 2.
 (ns native.worlds (:require [native.core :as core]))
 
 (define-mode strict)
@@ -44,7 +41,7 @@
    imports :- (Vec core/NativeId)
    locations :- (Vec SourceLocationV0)])
 
-;; Scratch roots never enter sealed source identity; locations are logical paths.
+;; Scratch roots never enter frozen source identity; locations are logical paths.
 (defrecord SourceInputV0
   [scratch-root :- String
    program :- SourceProgramWorldV0])
@@ -95,35 +92,35 @@
    pass-version :- String
    payload :- WorldPayloadV0])
 
-(defrecord SealedSourceWorldV0
+(defrecord FrozenSourceWorldV0
   [world :- SourceProgramWorldV0
    encoding :- String
    digest :- String])
 
-(defrecord SealedTypedWorldV0
+(defrecord FrozenTypedWorldV0
   [world :- TypedEffectWorldV0
    encoding :- String
    digest :- String])
 
-(defrecord SealedNativeWorldV0
+(defrecord FrozenNativeWorldV0
   [world :- NativeWorldV0
    encoding :- String
    digest :- String])
 
-(defrecord SealedArtifactWorldV0
+(defrecord FrozenArtifactWorldV0
   [world :- ArtifactWorldV0
    encoding :- String
    digest :- String])
 
-(defunion SealedWorldV0
-  (SealedSourceV0 [sealed :- SealedSourceWorldV0])
-  (SealedTypedV0 [sealed :- SealedTypedWorldV0])
-  (SealedNativeV0 [sealed :- SealedNativeWorldV0])
-  (SealedArtifactV0 [sealed :- SealedArtifactWorldV0]))
+(defunion FrozenWorldV0
+  (FrozenSourceV0 [frozen :- FrozenSourceWorldV0])
+  (FrozenTypedV0 [frozen :- FrozenTypedWorldV0])
+  (FrozenNativeV0 [frozen :- FrozenNativeWorldV0])
+  (FrozenArtifactV0 [frozen :- FrozenArtifactWorldV0]))
 
-;; The core receipt is external to sealed worlds, avoiding a digest cycle.
+;; The core receipt is external to frozen worlds, avoiding a digest cycle.
 (defrecord PromotedWorldV0
-  [world :- SealedWorldV0
+  [world :- FrozenWorldV0
    receipt :- core/PassReceiptV0])
 
 (defunion PromotionResultV0
@@ -148,25 +145,25 @@
 (defn content-digest [encoding :- String] :- String
   (core/nativeid-value (core/canonical-id "canonical-world-content-v0" [encoding])))
 
-(defn sealed-world-digest [world :- SealedWorldV0] :- String
+(defn frozen-world-digest [world :- FrozenWorldV0] :- String
   (match world
-    [(SealedSourceV0 sealed) (sealedsourceworldv0-digest sealed)]
-    [(SealedTypedV0 sealed) (sealedtypedworldv0-digest sealed)]
-    [(SealedNativeV0 sealed) (sealednativeworldv0-digest sealed)]
-    [(SealedArtifactV0 sealed) (sealedartifactworldv0-digest sealed)]))
+    [(FrozenSourceV0 frozen) (frozensourceworldv0-digest frozen)]
+    [(FrozenTypedV0 frozen) (frozentypedworldv0-digest frozen)]
+    [(FrozenNativeV0 frozen) (frozennativeworldv0-digest frozen)]
+    [(FrozenArtifactV0 frozen) (frozenartifactworldv0-digest frozen)]))
 
 (defn source-draft [world :- SourceProgramWorldV0] :- WorldDraftV0
-  (->WorldDraftV0 nil "source-seal" "v0" (->SourcePayloadV0 world)))
+  (->WorldDraftV0 nil "source-freeze" "v0" (->SourcePayloadV0 world)))
 
 (defn source-input-draft [input :- SourceInputV0] :- WorldDraftV0
   (source-draft (sourceinputv0-program input)))
 
 (defn open-for-derivation
-  [parent :- SealedWorldV0
+  [parent :- FrozenWorldV0
    pass-id :- String
    pass-version :- String
    payload :- WorldPayloadV0] :- WorldDraftV0
-  (->WorldDraftV0 (sealed-world-digest parent) pass-id pass-version payload))
+  (->WorldDraftV0 (frozen-world-digest parent) pass-id pass-version payload))
 
 (defn canonical-vector [tag :- String items :- (Vec String)] :- String
   (canonical-record tag items))
@@ -289,19 +286,19 @@
     [(NativePayloadV0 world) (encode-native-world world)]
     [(ArtifactPayloadV0 world) (encode-artifact-world world)]))
 
-(defn seal [draft :- WorldDraftV0] :- SealedWorldV0
+(defn freeze [draft :- WorldDraftV0] :- FrozenWorldV0
   (let [payload :- WorldPayloadV0 (worlddraftv0-payload draft)
         encoding :- String (encode-world-payload payload)
         digest :- String (content-digest encoding)]
     (match payload
       [(SourcePayloadV0 world)
-       (->SealedSourceV0 (->SealedSourceWorldV0 world encoding digest))]
+       (->FrozenSourceV0 (->FrozenSourceWorldV0 world encoding digest))]
       [(TypedPayloadV0 world)
-       (->SealedTypedV0 (->SealedTypedWorldV0 world encoding digest))]
+       (->FrozenTypedV0 (->FrozenTypedWorldV0 world encoding digest))]
       [(NativePayloadV0 world)
-       (->SealedNativeV0 (->SealedNativeWorldV0 world encoding digest))]
+       (->FrozenNativeV0 (->FrozenNativeWorldV0 world encoding digest))]
       [(ArtifactPayloadV0 world)
-       (->SealedArtifactV0 (->SealedArtifactWorldV0 world encoding digest))])))
+       (->FrozenArtifactV0 (->FrozenArtifactWorldV0 world encoding digest))])))
 
 (defn configuration-digest [configuration :- (Vec String)] :- String
   (content-digest
@@ -317,20 +314,20 @@
 
 (defn promote
   [draft :- WorldDraftV0
-   sealed :- SealedWorldV0
+   frozen :- FrozenWorldV0
    receipt :- core/PassReceiptV0] :- PromotionResultV0
   (let [parent :- (U String Nil) (worlddraftv0-parent-digest draft)
-        recomputed :- SealedWorldV0 (seal draft)
-        output-digest :- String (sealed-world-digest sealed)]
+        recomputed :- FrozenWorldV0 (freeze draft)
+        output-digest :- String (frozen-world-digest frozen)]
     (cond
       (nil? parent)
-      (->PromotionRejectedV0 "source worlds seal directly and have no derivation receipt")
-      (not= output-digest (sealed-world-digest recomputed))
-      (->PromotionRejectedV0 "sealed output does not match the derivation candidate")
+      (->PromotionRejectedV0 "source worlds freeze directly and have no derivation receipt")
+      (not= output-digest (frozen-world-digest recomputed))
+      (->PromotionRejectedV0 "frozen output does not match the derivation candidate")
       (not= parent (core/passreceiptv0-input-digest receipt))
-      (->PromotionRejectedV0 "receipt input digest does not match the sealed parent")
+      (->PromotionRejectedV0 "receipt input digest does not match the frozen parent")
       (not= output-digest (core/passreceiptv0-output-digest receipt))
-      (->PromotionRejectedV0 "receipt output digest does not match the sealed candidate")
+      (->PromotionRejectedV0 "receipt output digest does not match the frozen candidate")
       (not= (worlddraftv0-pass-id draft) (core/passreceiptv0-pass-id receipt))
       (->PromotionRejectedV0 "receipt pass id does not match the derivation")
       (not= (worlddraftv0-pass-version draft) (core/passreceiptv0-pass-version receipt))
@@ -347,7 +344,7 @@
       (not (all-obligations-passed? (core/passreceiptv0-obligations receipt)))
       (->PromotionRejectedV0 "receipt contains an undischarged obligation")
       :else
-      (->PromotionAcceptedV0 (->PromotedWorldV0 sealed receipt)))))
+      (->PromotionAcceptedV0 (->PromotedWorldV0 frozen receipt)))))
 
 (defn promotion-accepted? [result :- PromotionResultV0] :- Bool
   (match result

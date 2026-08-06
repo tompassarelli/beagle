@@ -874,7 +874,7 @@
       (->C17Failure "module index must be nonnegative")
 
       (not (core/validationreport-passed validation))
-      (->C17Failure "native world is not sealed: validation obligations failed")
+      (->C17Failure "native world is not frozen: validation obligations failed")
 
       (not (types-orderable? (core/nativeworld-types world) (core/nativeworld-layouts world)))
       (->C17Failure "value types form a declaration cycle the restricted C17 slice cannot order")

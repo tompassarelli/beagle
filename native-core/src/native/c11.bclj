@@ -690,7 +690,7 @@
       (< module-index 0)
       (->C11Failure "module index must be nonnegative")
       (not (core/validationreport-passed validation))
-      (->C11Failure "native world is not sealed: validation obligations failed")
+      (->C11Failure "native world is not frozen: validation obligations failed")
       (not (world-supported? world))
       (->C11Failure "native world uses a shape outside the restricted C17 reference slice")
       :else

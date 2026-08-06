@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drive fram:src/fram/types.bgl function BODIES through the native pipeline:
-#   beagle-ast -> source facts (signatures + bodies) -> sealed source world
+#   beagle-ast -> source facts (signatures + bodies) -> frozen source world
 #     -> typed world -> native world with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 # Re-runnable: the projection is rebuilt from live fram and must match the

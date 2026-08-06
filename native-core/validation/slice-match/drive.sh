@@ -78,4 +78,4 @@ fi
 
 cat "$report"
 cat "$refused/report.txt"
-echo "slice-match: sealed literals/records, strict C runtime, and named refusals PASS"
+echo "slice-match: closed-union literals/records, strict C runtime, and named refusals PASS"

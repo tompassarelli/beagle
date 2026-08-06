@@ -2,7 +2,7 @@
 # Drive fram:src/fram/types.bgl through the whole native pipeline and emit the
 # C17 projection of its record ABI.
 #
-#   beagle-ast -> source facts -> sealed source world -> typed world
+#   beagle-ast -> source facts -> frozen source world -> typed world
 #     -> native world -> 7 obligations -> native.c11 emitters
 #
 # Re-runnable and byte-stable: every input is regenerated from live fram.

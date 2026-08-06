@@ -2,7 +2,7 @@
 # Drive fram:src/fram/store.bgl through the whole native pipeline and emit the
 # C17 projection of the record ABI its signatures close over.
 #
-#   beagle-ast -> source facts -> sealed source world -> typed world
+#   beagle-ast -> source facts -> frozen source world -> typed world
 #     -> native world -> 7 obligations -> native.c11 emitters
 #
 # store.bgl declares no record of its own: every type in its signatures comes

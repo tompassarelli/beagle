@@ -72,10 +72,10 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
       world (slice/source-world rows \"native.keyword-access\"
               \"native-core/validation/slice-keyword-access/fixture.bclj\")
       configuration [\"profile=3\"]
-      sealed (lower/sourcesealacceptedv0-sealed
-               (lower/seal-source-world world \"native-record-identity-v0\"
+      frozen (lower/sourcefreezeacceptedv0-frozen
+               (lower/freeze-source-world world \"native-record-identity-v0\"
                  configuration))
-      result (lower/lower-typed-world sealed \"native-record-identity-v0\"
+      result (lower/lower-typed-world frozen \"native-record-identity-v0\"
                configuration)]
   (when-not (instance? native.lower.TypingRejectedV0 result)
     (throw (ex-info \"same-module record shape collision was accepted\" {})))

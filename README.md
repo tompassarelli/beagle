@@ -143,13 +143,13 @@ Native Core is the `.bgl` lowering path, not another idiomatic source emitter:
 
 The Native World owns typed operations, effects, regions, layouts, control
 flow, capabilities, and ABI facts. Materializers are deliberately replaceable
-projections of that same sealed program. They are judged by correct binaries and
+projections of that same frozen program. They are judged by correct binaries and
 independent agreement, not by whether a human would maintain the generated C or
 QBE.
 
 Fram's files remain Beagle; they are not rewritten as C or another systems
 language. The Core path is `beagle build --materializer c17|qbe`: it accepts
-canonical `.bgl`, seals one Native World, and materializes only the selected
+canonical `.bgl`, freezes one Native World, and materializes only the selected
 projection. The generated
 [`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
 is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
@@ -169,15 +169,15 @@ target is *for*).
 <!-- beagle:langs table -->
 | target | language | source | `#lang` | output | status |
 |---|---|---|---|---|---|
-| `core` | Beagle Native Core | `.bgl` | `#lang beagle` | sealed Native World | live — native pipeline: sealed Native World; select C17 or QBE materializer |
+| `core` | Beagle Native Core | `.bgl` | `#lang beagle` | frozen Native World | live — native pipeline: frozen Native World; select C17 or QBE materializer |
 | `clj` | Clojure | `.bclj` | `#lang beagle/clj` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `js` | JavaScript | `.bjs` | `#lang beagle/js` | `.js` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
 
-Four source profiles. Core produces the authoritative sealed Native World; `--materializer c17|qbe` selects a projection. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
+Four source profiles. Core produces the authoritative frozen Native World; `--materializer c17|qbe` selects a projection. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
-Core is a source profile, not a direct source emitter; its row names the sealed
+Core is a source profile, not a direct source emitter; its row names the frozen
 world build product while the materializer remains an explicit build option.
 Profiles are removed rather than deprecated when they stop earning their place —
 [`docs/target-policy.md`](docs/target-policy.md).

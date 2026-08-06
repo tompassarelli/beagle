@@ -61,7 +61,7 @@
     (check-true (file-exists? (build-path root "beagle-lib" "private" (target-emitter t)))
                 (format "~a: emitter ~a is missing" where (target-emitter t)))))
 
-(test-case "Core is a sealed-world profile with explicit materializers"
+(test-case "Core is a frozen-world profile with explicit materializers"
   (check-equal? (core-profile-id CORE-PROFILE) 'core)
   (check-equal? (core-profile-source-ext CORE-PROFILE) ".bgl")
   (check-equal? (core-profile-lang CORE-PROFILE) "beagle")

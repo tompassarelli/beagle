@@ -39,7 +39,7 @@ Named gaps
      store.bgl itself contributes -- (Vec T), closed (U T Nil), Text/Keyword
      atoms, map-entry vectors, (Atom T) references -- is outside it, so the
      emitted C is byte-identical to native-core/validation/slice-types-full's.
-     The store-specific evidence in this slice is the sealed world, the typed
+     The store-specific evidence in this slice is the frozen world, the typed
      signature surface, and the obligation ledger, not new C.
   4  main.c is hand-written: the materializer emits types only, so the runtime
      check is the layout claim under ASan/UBSan, never a store body.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Materialize the sealed Atom fixture through C17, prove all Native Core
+# Materialize the frozen Atom fixture through C17, prove all Native Core
 # obligations, prove QBE's explicit refusal, then compile and run the result.
 set -euo pipefail
 

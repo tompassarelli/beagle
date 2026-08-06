@@ -4,7 +4,7 @@
 
 <!-- beagle:langs pipeline -->
 ```
-.bgl  ──▶ parse ──▶ check ──▶ seal Native World ──▶ --materializer c17|qbe
+.bgl  ──▶ parse ──▶ check ──▶ freeze Native World ──▶ --materializer c17|qbe
 .bclj / .bjs / .bnix  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix
                                        ▲
                          macros, schema, stdlib, type narrowing
@@ -14,7 +14,7 @@
 
 `.bgl` is a compilation-path decision: bare `#lang beagle` always enters
 Native Core and produces a Native World. "Backend-neutral" describes that
-sealed world, not the `.bgl` extension. C17 and QBE are the current
+frozen world, not the `.bgl` extension. C17 and QBE are the current
 materializers; Wasm belongs at the same materializer layer. The lowering tool
 may run from hosted `.bclj` during compiler bootstrapping without making `.bgl`
 a hosted or target-neutral source profile.
@@ -33,7 +33,7 @@ position — not a desugared intermediate.
   materializer registry; every inventory in this repo is a rendered view of it
   (`bin/beagle langs`).
 <!-- beagle:langs emitters -->
-- `native-core/src/native/{worlds,lower,obligations}.bclj` — the hosted implementation that lowers Core into one sealed Native World; `native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.
+- `native-core/src/native/{worlds,lower,obligations}.bclj` — the hosted implementation that lowers Core into one frozen Native World; `native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.
 - `beagle-lib/private/emit-{clj,js,nix}.rkt` — the live target emitters (one row each in
   `beagle-lib/private/targets.rkt`, the canonical target table).
 - `beagle-lib/private/emit-facts.rkt` — the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.

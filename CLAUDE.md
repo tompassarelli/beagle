@@ -13,12 +13,12 @@ docs go stale within a day. The compiler is the source of truth: query it
 
 There are **exactly two hosted front-end compilers**, both ordinary
 ahead-of-time `parse → check → emit`, held byte-identical by gates. Core uses
-the Racket oracle front end, then lowers to a sealed Native World before
+the Racket oracle front end, then lowers to a frozen Native World before
 materialization:
 
 The source-profile boundary is absolute: `.bgl` with bare `#lang beagle`
 always selects Core and the native lowering pipeline. The source is not
-target-neutral; the sealed Native World is backend-neutral. Hosted compiler
+target-neutral; the frozen Native World is backend-neutral. Hosted compiler
 machinery may use explicit `.bclj` and `#lang beagle/clj` while bootstrapping
 that pipeline, but `.bclj` itself remains hosted Clojure source.
 
@@ -39,7 +39,7 @@ divergence ledgers); the self-hosted compiler is the language's own hosted
 compiler. A hosted behavior change on one side is incomplete until the gates
 prove the other side agrees — or a ledger entry records why it deliberately
 doesn't. Native World lowering is implemented in Beagle and runs from its
-hosted Clojure projection; its separate contract is the sealed world plus the
+hosted Clojure projection; its separate contract is the frozen world plus the
 seven native obligations.
 
 Form dispatch is the **combiner registry** in `parse.rkt`
@@ -56,7 +56,7 @@ The spec is **generative** — three statements determine every surface question
 
 1. **Beagle is Clojure plus types.** Clojure surface, types threaded through.
 2. **Divergence from Clojure must be load-bearing for the type system or a backend, or it dies.** (See "Rules with teeth".)
-3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Native Core sealed Native World, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
+3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Beagle Native Core frozen Native World, Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
 
 Run a form through these and one answer falls out. **Do not surface decisions the spec already determines** — fact-finds ("what does bare `{…}` mean?" → match Clojure), unfinished analysis ("N rows ambiguous" → run the load-bearing test: does the divergence buy type precision or a backend anything?), and invisible implementation choices (AST shape, helper placement) are not forks. Pick, execute, report.
 

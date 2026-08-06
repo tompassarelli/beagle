@@ -1,4 +1,4 @@
-;; bin/beagle-ast JSON -> the canonical source-fact projection native.slice seals.
+;; bin/beagle-ast JSON -> the canonical source-fact projection native.slice freezes.
 ;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object.
 ;; Node "0" is reserved for the module root; ordinals come from a pre-order walk,
 ;; so the projection is byte-stable for a given source file.

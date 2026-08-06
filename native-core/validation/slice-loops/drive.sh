@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drive loop/recur through the native pipeline: beagle-ast -> source facts ->
-# sealed source world -> typed world -> native world (one SSA header block per
+# frozen source world -> typed world -> native world (one SSA header block per
 # loop, one back-edge Jump per recur) -> 7 obligations -> native.body-c17 ->
 # gcc/clang -std=c17 -> probe main.
 # Two worlds: loops.bclj must pass all seven obligations; counted/ carries the

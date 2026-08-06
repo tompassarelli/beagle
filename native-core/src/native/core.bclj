@@ -39,7 +39,7 @@
 (defunion CollectionOrderV0
   (InsertionOrderV0 [(token : Bool)]))
 
-;; Collection lookup equality is either scalar or closed over one sealed native
+;; Collection lookup equality is either scalar or closed over one native
 ;; type descriptor; Map/Set ops never smuggle a host callback through the ABI.
 (defunion ConcreteEqualityV0
   (BoolEqualityV0 [(token : Bool)])
@@ -168,7 +168,7 @@
 
 ;; The target-ABI numbers layout measurement consumes. Deliberately NOT a
 ;; NativeWorld field and never encoded: a world's LayoutDefs already carry the
-;; ABI in their digested numbers, so one sealed world exists per target ABI.
+;; ABI in their digested numbers, so one frozen world exists per target ABI.
 (defrecord AbiProfileV0
   [(id : String)
    (pointer-bytes : Int)
@@ -280,7 +280,7 @@
      (source-id : NativeId)
      (count-id : NativeId)]))
 
-;; Value semantics are closed over one sealed TypeDef/LayoutDef graph. The
+;; Value semantics are closed over one TypeDef/LayoutDef graph. The
 ;; domain is explicit so materializers never infer dynamic behavior from bytes.
 ;; Hash is deterministic structural content; compare is a three-way total order
 ;; over the same recursive domain, with records, unions, and vectors ordered by
@@ -486,7 +486,7 @@
     [(result : SsaValueV0)
      (source-id : NativeId)
      (arena-id : NativeId)])
-  ;; Sort borrows the source and orders a fresh vector through the sealed
+  ;; Sort borrows the source and orders a fresh vector through the frozen
   ;; element descriptor. No source or runtime comparator crosses this seam.
   (VecSortInstructionV0
     [(result : SsaValueV0)
@@ -622,7 +622,7 @@
      (expected-id : NativeId)
      (replacement-id : NativeId)])
   ;; swap! is deliberately not a general higher-order call: updater-id names a
-  ;; statically sealed pure function and arguments excludes the current value.
+  ;; statically named pure function and arguments excludes the current value.
   (AtomSwapInstruction
     [(result : SsaValueV0)
      (cell-id : NativeId)

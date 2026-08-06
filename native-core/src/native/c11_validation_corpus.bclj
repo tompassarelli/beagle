@@ -157,8 +157,8 @@
   [(result : lower/FixturePipelineResultV0)] -> core/NativeWorld
   (if (instance? native.lower.FixturePipelineCompleteV0 result)
     (worlds/nativeworldv0-program
-      (worlds/sealednativeworldv0-world
-        (lower/fixturepipelinecompletev0-sealed result)))
+      (worlds/frozennativeworldv0-world
+        (lower/fixturepipelinecompletev0-frozen result)))
     (throw (ex-info "fold empty-input specialization did not lower" {}))))
 
 (def fold-lowered-world: core/NativeWorld
@@ -252,7 +252,7 @@
     ["module fram.fold"
      "source ~/code/fram/main/src/fram/fold.bclj"
      "source-sha256 0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
-     "source-seal PASS"
+     "source-freeze PASS"
      "typed-world PASS"
      "native-world PASS"
      "fold-fast-path max-sequence-empty"

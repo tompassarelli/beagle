@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build dependency-first Beagle Core modules through the sealed Native World.
+# Build dependency-first Beagle Core modules through the frozen Native World.
 #
 # Usage:
 #   beagle build --materializer c17 [--materializer qbe] --out DIR
 #     [--abi lp64|wasm32] [--entry NS/NAME]... SOURCE.bgl...
 #
-# A successful run always writes the authoritative sealed Native World encoding
+# A successful run always writes the authoritative frozen Native World encoding
 # and digest, plus every explicitly selected materializer projection. The
 # command accepts canonical `.bgl` / bare `#lang beagle` sources only.
 
@@ -525,7 +525,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 
 (defn native-report-head [rows entries source program projected abi]
   (str (apply str (map #(str "source-entry " % "\n") entries))
-       "stage source-seal ACCEPTED\n"
+       "stage source-freeze ACCEPTED\n"
        "stage source-to-typed ACCEPTED\n"
        "stage typed-to-native COMPLETE\n"
        "native-lowering-result NativeLoweringCompleteV0\n"
@@ -622,47 +622,47 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
             _ (spit projected-facts-path (rows-text rows))
             configuration ["profile=3" (str "abi=" abi-id)]
             _finish-projection (finish-stage! "source-projection" "ACCEPTED")
-            _start-seal (start-stage! "source-seal")
+            _start-freeze (start-stage! "source-freeze")
             source (slice/source-world rows "beagle.core" "source.facts")
-            seal-result (lower/seal-source-world source compiler-commit configuration)]
-        (if-not (instance? native.lower.SourceSealAcceptedV0 seal-result)
+            freeze-result (lower/freeze-source-world source compiler-commit configuration)]
+        (if-not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result)
           (do
-            (finish-stage! "source-seal" "REJECTED")
+            (finish-stage! "source-freeze" "REJECTED")
             {:ok? false
-             :report "stage source-seal REJECTED\nresult FAIL source seal\n"})
-          (let [_finish-seal (finish-stage! "source-seal" "ACCEPTED")
-                sealed-source (lower/sourcesealacceptedv0-sealed seal-result)
+             :report "stage source-freeze REJECTED\nresult FAIL source freeze\n"})
+          (let [_finish-freeze (finish-stage! "source-freeze" "ACCEPTED")
+                frozen-source (lower/sourcefreezeacceptedv0-frozen freeze-result)
                 _start-typing (start-stage! "source-to-typed")
-                typing-result (lower/lower-typed-world sealed-source compiler-commit configuration)]
+                typing-result (lower/lower-typed-world frozen-source compiler-commit configuration)]
             (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
               (do
                 (finish-stage! "source-to-typed" "REJECTED")
                 {:ok? false
-                 :report (str "stage source-seal ACCEPTED\n"
+                 :report (str "stage source-freeze ACCEPTED\n"
                               "stage source-to-typed REJECTED\n"
                               "result FAIL source typing\n")})
               (let [_finish-typing (finish-stage! "source-to-typed" "ACCEPTED")
-                    sealed-typed (lower/typingacceptedv0-sealed typing-result)
+                    frozen-typed (lower/typingacceptedv0-frozen typing-result)
                     typed-slice (lower/typingacceptedv0-slice typing-result)
                     _start-lowering (start-stage! "typed-to-native")
-                    native-result (lower/lower-native-world sealed-typed typed-slice
+                    native-result (lower/lower-native-world frozen-typed typed-slice
                                     compiler-commit configuration abi)]
                 (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
                   (do
                     (finish-stage! "typed-to-native" "PENDING")
                     {:ok? false
-                     :report (str "stage source-seal ACCEPTED\n"
+                     :report (str "stage source-freeze ACCEPTED\n"
                                   "stage source-to-typed ACCEPTED\n"
                                   "stage typed-to-native PENDING\n"
                                   (slice/pending-reports (slice/native-pending native-result))
                                   "result FAIL NativeLoweringCompleteV0 required\n")})
                   (let [_finish-lowering (finish-stage! "typed-to-native" "COMPLETE")
-                        sealed-native (lower/nativeloweringcompletev0-sealed native-result)
-                        native-encoding (worlds/sealednativeworldv0-encoding sealed-native)
+                        frozen-native (lower/nativeloweringcompletev0-frozen native-result)
+                        native-encoding (worlds/frozennativeworldv0-encoding frozen-native)
                         _write-native
                         (spit (str artifacts-dir "/module.native-world") native-encoding)
                         program (worlds/nativeworldv0-program
-                                 (worlds/sealednativeworldv0-world sealed-native))
+                                 (worlds/frozennativeworldv0-world frozen-native))
                         projected (body-slice/projected-world program)
                         _start-obligations (start-stage! "native-obligations")
                         verdicts (obligations/validate-native-world projected abi)
@@ -769,5 +769,5 @@ done
 
 cat "$out/report.txt"
 materializer_list="$(IFS=,; printf '%s' "${materializers[*]}")"
-printf 'beagle build: wrote sealed Native World + %s projections to %s\n' \
+printf 'beagle build: wrote frozen Native World + %s projections to %s\n' \
     "$materializer_list" "$out"

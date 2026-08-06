@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drive the text corpus and a real FRI replay slice through the native pipeline:
-#   beagle-ast -> source facts -> sealed source world -> typed world
+#   beagle-ast -> source facts -> frozen source world -> typed world
 #     -> native world with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 #

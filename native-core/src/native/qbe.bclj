@@ -1,5 +1,5 @@
 #lang beagle/clj
-;; Reads the same sealed core/NativeWorld native.c11 reads; every QBE-shaped
+;; Reads the same frozen core/NativeWorld native.c11 reads; every QBE-shaped
 ;; concession stays inside this file. Authority: North thread 019fbd6c A6.
 (ns native.qbe
   (:require [native.core :as core]))
@@ -1864,7 +1864,7 @@
           [(SetTypeV0 value) false]
           [(ReferenceType value) false]
           ;; QBE has no lock/runtime calling convention for Atom state in this
-          ;; slice; reject the sealed world instead of treating a cell as Ref.
+          ;; slice; reject the frozen world instead of treating a cell as Ref.
           [(AtomCellTypeV0 value) false]
           [(FunctionType value) false]
           [(OutcomeType value) false])))))
@@ -2303,7 +2303,7 @@
       (not= abi-id "lp64")
       (->QbeFailure (str "abi profile " abi-id ": qbe materializes lp64 only"))
       (not (core/validationreport-passed validation))
-      (->QbeFailure "native world is not sealed: validation obligations failed")
+      (->QbeFailure "native world is not frozen: validation obligations failed")
       (world-has-socket-extern? world)
       (->QbeFailure
         "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")

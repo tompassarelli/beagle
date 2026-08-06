@@ -5,7 +5,7 @@
 #   beagle native-exe --out FILE --entry NS/NAME [--cc CC] [--static]
 #                     [--artifacts DIR] SOURCE...
 #
-# The sealed Native World report and C17 projection artifacts are copied to DIR (default:
+# The frozen Native World report and C17 projection artifacts are copied to DIR (default:
 # FILE.artifacts). FILE is published only after the complete C17 projection,
 # entry ABI validation, strict compilation, and link all pass.
 

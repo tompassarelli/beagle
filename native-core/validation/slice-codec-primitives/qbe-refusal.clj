@@ -10,17 +10,17 @@
       configuration ["profile=3"]
       rows (slice/parse-facts (slurp facts-path))
       source (slice/source-world rows module-name relative-path)
-      sealed-source (lower/sourcesealacceptedv0-sealed
-                      (lower/seal-source-world source compiler-commit configuration))
-      typing (lower/lower-typed-world sealed-source compiler-commit configuration)
+      frozen-source (lower/sourcefreezeacceptedv0-frozen
+                      (lower/freeze-source-world source compiler-commit configuration))
+      typing (lower/lower-typed-world frozen-source compiler-commit configuration)
       native-result (lower/lower-native-world
-                     (lower/typingacceptedv0-sealed typing)
+                     (lower/typingacceptedv0-frozen typing)
                      (lower/typingacceptedv0-slice typing)
                      compiler-commit configuration
                      (core/abi-profile-lp64))
-      sealed-native (slice/native-sealed native-result)
+      frozen-native (slice/native-frozen native-result)
       world (worlds/nativeworldv0-program
-             (worlds/sealednativeworldv0-world sealed-native))
+             (worlds/frozennativeworldv0-world frozen-native))
       projected (body-slice/projected-world world)
       result (qbe/materialize-world projected 0 "lp64")
       detail (get result :detail)]

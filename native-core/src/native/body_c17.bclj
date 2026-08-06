@@ -40,7 +40,7 @@
       (= character (subs alphabet position (+ position 1))) true
       :else (recur (+ position 1)))))
 
-;; Generated translation units are sealed UTF-8 artifacts.
+;; Generated translation units are frozen UTF-8 artifacts.
 (defn text-emittable? [(value : String)] -> Bool true)
 
 (defn escape-c-character [(character : String)] -> String
@@ -96,7 +96,7 @@
     pool))
 
 ;; Deterministic: first appearance in the already-ordered function, block and
-;; instruction sequence, so the table is a pure function of the sealed world.
+;; instruction sequence, so the table is a pure function of the frozen world.
 (defn collect-pool [(functions : (Vec core/FunctionDef))] -> ConstantPoolV0
   (loop [position: Int 0 pool: ConstantPoolV0 (->ConstantPoolV0 [] [])]
     (if (>= position (count functions))
@@ -2945,7 +2945,7 @@
       (->BodyFailureV0 "module index must be nonnegative")
 
       (not (core/validationreport-passed validation))
-      (->BodyFailureV0 "native world is not sealed: validation obligations failed")
+      (->BodyFailureV0 "native world is not frozen: validation obligations failed")
 
       (not (world-supported? world))
       (->BodyFailureV0

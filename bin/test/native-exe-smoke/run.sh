@@ -114,11 +114,11 @@ grep -Fqx "materialize-c17 OK module_0.h module_0.c" "$qbe_both/report.txt"
 grep -Fqx "materialize-qbe OK module_0.ssa" "$qbe_both/report.txt"
 grep -Fqx "result PASS" "$qbe_both/report.txt"
 [[ "$(grep -c '^obligation-projection PASS ' "$qbe_both/report.txt")" == "7" ]]
-[[ "$(grep -c '^stage-progress source-seal ' "$qbe_both/report.txt")" == "1" ]]
+[[ "$(grep -c '^stage-progress source-freeze ' "$qbe_both/report.txt")" == "1" ]]
 [[ "$(grep -c '^stage-progress source-to-typed ' "$qbe_both/report.txt")" == "1" ]]
 [[ "$(grep -c '^stage-progress typed-to-native ' "$qbe_both/report.txt")" == "1" ]]
 [[ -f "$qbe_both/module_0.c" && -f "$qbe_both/module_0.ssa" ]]
-printf 'native-exe smoke: one sealed Native World + explicit C17/QBE materializers ok\n'
+printf 'native-exe smoke: one frozen Native World + explicit C17/QBE materializers ok\n'
 
 set +e
 "$repo/bin/beagle" build --materializer c17 \

@@ -36,8 +36,8 @@ pipeline
   ast-facts.clj             beagle-ast JSON -> source facts (signatures, bodies,
                             definitions, namespaces/import aliases, vector
                             literals) for types.bgl + store.bgl + probe; the
-                            sealed Source World contains three SourceModuleV0s
-  native.lower              seal-source-world -> lower-typed-world -> lower-native-world
+                            frozen Source World contains three SourceModuleV0s
+  native.lower              freeze-source-world -> lower-typed-world -> lower-native-world
   native.obligations        validate-native-world (seven structural obligations)
   native.body-c17           restricted C17 body materialization
 

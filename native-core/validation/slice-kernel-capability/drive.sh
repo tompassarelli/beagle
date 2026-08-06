@@ -78,7 +78,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 
 report="$scratch/generated/report.txt"
 for line in \
-  'stage source-seal ACCEPTED' \
+  'stage source-freeze ACCEPTED' \
   'stage source-to-typed ACCEPTED' \
   'stage typed-to-native PENDING' \
   'source-modules 3' \

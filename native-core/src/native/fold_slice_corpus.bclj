@@ -1,6 +1,6 @@
 #lang beagle/clj
 ;; Source-world projection of fram:src/fram/fold.bclj plus the fram.types
-;; declarations its signatures name, driven seal -> typed -> native -> C17.
+;; declarations its signatures name, driven freeze -> typed -> native -> C17.
 (ns native.fold-slice-corpus)
 
 (define-mode strict)
@@ -402,19 +402,19 @@
    (complete : Bool)
    (host-erased : Bool)])
 
-(defn seal-result [(abi : core/AbiProfileV0)] -> lower/SourceSealResultV0
-  (lower/seal-source-world source-world compiler-commit
+(defn freeze-result [(abi : core/AbiProfileV0)] -> lower/SourceFreezeResultV0
+  (lower/freeze-source-world source-world compiler-commit
     (configuration-for abi)))
 
-(defn require-seal-accepted
-  [(result : lower/SourceSealResultV0)] -> lower/SourceSealAcceptedV0
-  (if (instance? native.lower.SourceSealAcceptedV0 result)
+(defn require-freeze-accepted
+  [(result : lower/SourceFreezeResultV0)] -> lower/SourceFreezeAcceptedV0
+  (if (instance? native.lower.SourceFreezeAcceptedV0 result)
     result
-    (throw (ex-info "fram.fold source world was rejected at seal" {}))))
+    (throw (ex-info "fram.fold source world was rejected at freeze" {}))))
 
 (defn typing-result [(abi : core/AbiProfileV0)] -> lower/TypingResultV0
   (lower/lower-typed-world
-    (lower/sourcesealacceptedv0-sealed (require-seal-accepted (seal-result abi)))
+    (lower/sourcefreezeacceptedv0-frozen (require-freeze-accepted (freeze-result abi)))
     compiler-commit (configuration-for abi)))
 
 (defn typing-accepted? [(result : lower/TypingResultV0)] -> Bool
@@ -431,11 +431,11 @@
     result
     (throw (ex-info "fram.fold annotations did not close over Native Core types" {}))))
 
-(defn native-sealed
-  [(result : lower/NativeLoweringResultV0)] -> worlds/SealedNativeWorldV0
+(defn native-frozen
+  [(result : lower/NativeLoweringResultV0)] -> worlds/FrozenNativeWorldV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
-    (lower/nativeloweringcompletev0-sealed result)
-    (lower/nativeloweringpendingv0-sealed result)))
+    (lower/nativeloweringcompletev0-frozen result)
+    (lower/nativeloweringpendingv0-frozen result)))
 
 (defn native-receipt
   [(result : lower/NativeLoweringResultV0)] -> core/PassReceiptV0
@@ -444,29 +444,29 @@
     (lower/nativeloweringpendingv0-receipt result)))
 
 (defn slice-state [(abi : core/AbiProfileV0)] -> SliceStateV0
-  (let [sealed-result: lower/SourceSealResultV0 (seal-result abi)
-        sealed-accepted: lower/SourceSealAcceptedV0 (require-seal-accepted sealed-result)
-        sealed-source: worlds/SealedSourceWorldV0
-        (lower/sourcesealacceptedv0-sealed sealed-accepted)
+  (let [frozen-result: lower/SourceFreezeResultV0 (freeze-result abi)
+        frozen-accepted: lower/SourceFreezeAcceptedV0 (require-freeze-accepted frozen-result)
+        frozen-source: worlds/FrozenSourceWorldV0
+        (lower/sourcefreezeacceptedv0-frozen frozen-accepted)
         typed: lower/TypingAcceptedV0
         (require-typing-accepted
-          (lower/lower-typed-world sealed-source compiler-commit
+          (lower/lower-typed-world frozen-source compiler-commit
             (configuration-for abi)))
         native: lower/NativeLoweringResultV0
         (lower/lower-native-world
-          (lower/typingacceptedv0-sealed typed)
+          (lower/typingacceptedv0-frozen typed)
           (lower/typingacceptedv0-slice typed)
           compiler-commit
           (configuration-for abi)
           abi)
-        sealed-native: worlds/SealedNativeWorldV0 (native-sealed native)]
+        frozen-native: worlds/FrozenNativeWorldV0 (native-frozen native)]
     (->SliceStateV0
-      (lower/sourcesealacceptedv0-receipt sealed-accepted)
+      (lower/sourcefreezeacceptedv0-receipt frozen-accepted)
       (lower/typingacceptedv0-receipt typed)
       (native-receipt native)
-      (worlds/nativeworldv0-program (worlds/sealednativeworldv0-world sealed-native))
+      (worlds/nativeworldv0-program (worlds/frozennativeworldv0-world frozen-native))
       (instance? native.lower.NativeLoweringCompleteV0 native)
-      (lower/native-world-host-erased? sealed-native))))
+      (lower/native-world-host-erased? frozen-native))))
 
 (def obligation-names: (Vec String)
   ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
@@ -595,7 +595,7 @@
       "seven structural obligations (native.obligations/validate-native-world):\n"
       (obligation-report program abi)
       "\n"
-      (receipt-report "source-seal receipt obligations" (slicestatev0-source-receipt state))
+      (receipt-report "source-freeze receipt obligations" (slicestatev0-source-receipt state))
       "\n"
       (receipt-report "source-to-typed receipt obligations" (slicestatev0-typed-receipt state))
       "\n"

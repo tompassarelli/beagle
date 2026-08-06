@@ -17,7 +17,7 @@ legal-abi: pass
 discharged-tokens: pass
 bounded-effects: pass
 
-source-seal receipt obligations:
+source-freeze receipt obligations:
   discharged: source Term identities and module roots are closed
 
 source-to-typed receipt obligations:
