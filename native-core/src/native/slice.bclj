@@ -445,7 +445,8 @@
    (compiler-commit : String)
    (abi : core/AbiProfileV0)] -> String
   (let [rows: (Vec SliceFactV0) (parse-facts (slurp facts-path))
-        configuration: (Vec String) ["profile=3"]
+        configuration: (Vec String)
+        ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
         world: worlds/SourceProgramWorldV0
         (source-world rows module-name relative-path)
         seal-result: lower/SourceSealResultV0

@@ -314,7 +314,8 @@
    (compiler-commit : String)
    (abi : core/AbiProfileV0)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
-        configuration: (Vec String) ["profile=3"]
+        configuration: (Vec String)
+        ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
         source: worlds/SourceProgramWorldV0
         (slice/source-world rows module-name relative-path)
         seal-result: lower/SourceSealResultV0
@@ -401,7 +402,8 @@
    (qbe-module-index : Int)
    (abi : core/AbiProfileV0)] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
-        configuration: (Vec String) ["profile=3"]
+        configuration: (Vec String)
+        ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
         source: worlds/SourceProgramWorldV0
         (slice/source-world rows module-name relative-path)
         seal-result: lower/SourceSealResultV0

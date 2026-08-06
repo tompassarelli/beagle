@@ -18,6 +18,10 @@
 (def configuration: (Vec String)
   ["profile=3" "target=native-core" "module=fram.fold"])
 
+;; Receipt provenance only; layout numbers, not this string, partition worlds.
+(defn configuration-for [(abi : core/AbiProfileV0)] -> (Vec String)
+  (conj configuration (str "abi=" (core/abiprofilev0-id abi))))
+
 (defn slice-id [(kind : String) (label : String)] -> core/NativeId
   (core/canonical-id "fram-fold-slice-v0" [kind label]))
 
@@ -398,8 +402,9 @@
    (complete : Bool)
    (host-erased : Bool)])
 
-(defn seal-result [] -> lower/SourceSealResultV0
-  (lower/seal-source-world source-world compiler-commit configuration))
+(defn seal-result [(abi : core/AbiProfileV0)] -> lower/SourceSealResultV0
+  (lower/seal-source-world source-world compiler-commit
+    (configuration-for abi)))
 
 (defn require-seal-accepted
   [(result : lower/SourceSealResultV0)] -> lower/SourceSealAcceptedV0
@@ -407,10 +412,10 @@
     result
     (throw (ex-info "fram.fold source world was rejected at seal" {}))))
 
-(defn typing-result [] -> lower/TypingResultV0
+(defn typing-result [(abi : core/AbiProfileV0)] -> lower/TypingResultV0
   (lower/lower-typed-world
-    (lower/sourcesealacceptedv0-sealed (require-seal-accepted (seal-result)))
-    compiler-commit configuration))
+    (lower/sourcesealacceptedv0-sealed (require-seal-accepted (seal-result abi)))
+    compiler-commit (configuration-for abi)))
 
 (defn typing-accepted? [(result : lower/TypingResultV0)] -> Bool
   (instance? native.lower.TypingAcceptedV0 result))
@@ -439,19 +444,20 @@
     (lower/nativeloweringpendingv0-receipt result)))
 
 (defn slice-state [(abi : core/AbiProfileV0)] -> SliceStateV0
-  (let [sealed-result: lower/SourceSealResultV0 (seal-result)
+  (let [sealed-result: lower/SourceSealResultV0 (seal-result abi)
         sealed-accepted: lower/SourceSealAcceptedV0 (require-seal-accepted sealed-result)
         sealed-source: worlds/SealedSourceWorldV0
         (lower/sourcesealacceptedv0-sealed sealed-accepted)
         typed: lower/TypingAcceptedV0
         (require-typing-accepted
-          (lower/lower-typed-world sealed-source compiler-commit configuration))
+          (lower/lower-typed-world sealed-source compiler-commit
+            (configuration-for abi)))
         native: lower/NativeLoweringResultV0
         (lower/lower-native-world
           (lower/typingacceptedv0-sealed typed)
           (lower/typingacceptedv0-slice typed)
           compiler-commit
-          configuration
+          (configuration-for abi)
           abi)
         sealed-native: worlds/SealedNativeWorldV0 (native-sealed native)]
     (->SliceStateV0
