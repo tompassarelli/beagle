@@ -3,10 +3,10 @@ stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 3
 source-imports 2
-world-types 84
-world-functions 74
-world-abis 74
-projected-types 79
+world-types 92
+world-functions 81
+world-abis 81
+projected-types 86
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
 lowered fn_2 instant-shift-seconds 3 blocks
@@ -28,7 +28,7 @@ lowered fn_17 transaction-frame? 4 blocks
 lowered fn_18 term-store-dump? 4 blocks
 lowered fn_19 atom? 49 blocks
 lowered fn_20 term? 14 blocks
-lowered fn_21 triple 4 blocks
+lowered fn_21 triple 28 blocks
 lowered fn_22 transaction-coordinate 7 blocks
 lowered fn_23 transaction-coordinate? 35 blocks
 lowered fn_24 occurrence-coordinate 7 blocks
@@ -57,30 +57,37 @@ lowered fn_46 operation-count 1 blocks
 lowered fn_47 assert-operation 7 blocks
 lowered fn_48 retract-operation 7 blocks
 lowered fn_49 valid-commit-operation? 16 blocks
-lowered fn_50 occurrence-at 1 blocks
-lowered fn_51 dump-term-store 1 blocks
-lowered fn_52 valid-prior-handle? 9 blocks
-lowered fn_53 valid-dump-operation? 31 blocks
-lowered fn_54 bucket-size 1 blocks
-lowered fn_55 bucket-position-at 1 blocks
-lowered fn_56 bucket-with-position 1 blocks
-lowered fn_57 append-position 1 blocks
-lowered fn_58 position-pair 1 blocks
-lowered fn_59 empty-positions 1 blocks
-lowered fn_60 frame-operation-count 1 blocks
-lowered fn_61 frame-operation-at 1 blocks
-lowered fn_62 any-values-equal? 1 blocks
-lowered fn_63 increment-value 3 blocks
-lowered fn_64 decrement-value 3 blocks
-lowered fn_65 mask-values 1 blocks
-lowered fn_66 xor-values 1 blocks
-lowered fn_67 shifted-value 1 blocks
-lowered fn_68 values-differ? 1 blocks
-lowered fn_69 no-positions? 1 blocks
-lowered fn_70 position-slice 1 blocks
-lowered fn_71 position-tail 1 blocks
-lowered fn_72 reversed-positions 1 blocks
-lowered fn_73 append-positions 1 blocks
+lowered fn_50 transaction-replay-ok 1 blocks
+lowered fn_51 transaction-replay-error 1 blocks
+lowered fn_52 transaction-replay-unclassified-error 1 blocks
+lowered fn_53 occurrence-at 1 blocks
+lowered fn_54 dump-term-store 1 blocks
+lowered fn_55 valid-prior-handle? 9 blocks
+lowered fn_56 valid-dump-operation? 31 blocks
+lowered fn_57 transaction-frames-ok 1 blocks
+lowered fn_58 transaction-frames-error 1 blocks
+lowered fn_59 term-store-load-ok 1 blocks
+lowered fn_60 term-store-load-error 1 blocks
+lowered fn_61 bucket-size 1 blocks
+lowered fn_62 bucket-position-at 1 blocks
+lowered fn_63 bucket-with-position 1 blocks
+lowered fn_64 append-position 1 blocks
+lowered fn_65 position-pair 1 blocks
+lowered fn_66 empty-positions 1 blocks
+lowered fn_67 frame-operation-count 1 blocks
+lowered fn_68 frame-operation-at 1 blocks
+lowered fn_69 any-values-equal? 1 blocks
+lowered fn_70 increment-value 3 blocks
+lowered fn_71 decrement-value 3 blocks
+lowered fn_72 mask-values 1 blocks
+lowered fn_73 xor-values 1 blocks
+lowered fn_74 shifted-value 1 blocks
+lowered fn_75 values-differ? 1 blocks
+lowered fn_76 no-positions? 1 blocks
+lowered fn_77 position-slice 1 blocks
+lowered fn_78 position-tail 1 blocks
+lowered fn_79 reversed-positions 1 blocks
+lowered fn_80 append-positions 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -104,7 +111,7 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-UPDATE-UPDATER: update requires a
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-LET-BODY: let form has no body [intern-handle!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-handle calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-triple-handle calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: every? requires an anonymous function literal [known-term-handle]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [known-term-handle]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: intern-term! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [replay-terms!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: every? requires an anonymous function literal [valid-operations?]
@@ -114,8 +121,11 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: active-positions calls a 
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: set-active-positions calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: apply-operation-state calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-REDUCE-CALLBACK: v0 requires an anonymous function literal [operation-handles!]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [append-transaction!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [append-valid-transaction!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [append-transaction-result!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: append-transaction! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: commit-transaction! calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: replay-transaction-result! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: replay-transaction! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: event-at calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [first-transaction-after]
@@ -124,7 +134,7 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: mapv require
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [operation-postings]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [lower-bound-position]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: exact-occurrence-position calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [operation-candidate-positions]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-IF-ARMS: if form needs a condition and both arms [operation-candidate-positions]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: occurrence-tuple-at calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [operation-occurrences]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [withdrawal-triples]
@@ -134,6 +144,15 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native 
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-triple-rows?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-operation-slice?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-history-rows?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [operation-handle-error]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-atom-rows?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [history-sequence-error]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-valid-handle calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-valid-triple-handle calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-transaction-frame-at]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-transaction-frames-between]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [transaction-frames-between-result]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [rebuild-operation-state]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: every? requires an anonymous function literal [load-term-store!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: every? requires an anonymous function literal [load-term-store-result!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: load-term-store! calls a function whose own body is not lowered
 materialize OK module_0.h module_0.c
