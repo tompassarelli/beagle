@@ -14281,7 +14281,9 @@
         (settle-effect
           (settle-effect
             (settle-effect
-              (settle-effect pure-settled (allocate-effect-id))
+              (settle-effect
+                (settle-effect pure-settled (write-effect-id))
+                (allocate-effect-id))
               (atom-state-effect-id))
             (host-environment-effect-id))
           (host-stdout-effect-id))
