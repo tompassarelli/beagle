@@ -40,7 +40,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.validation-corpus 'native.body-c17 'native.qbe)
 (let [world native.validation-corpus/record-assoc-world
       body-result (native.body-c17/materialize-world world 0)
-      qbe-result (native.qbe/materialize-world world 0)
+      qbe-result (native.qbe/materialize-world world 0 \"lp64\")
       qbe-detail \"native world uses a shape outside the QBE materializer's slice\"]
   (when-not native.validation-corpus/record-assoc-corpus-passes?
     (throw (ex-info \"record assoc validation corpus failed\" {})))
