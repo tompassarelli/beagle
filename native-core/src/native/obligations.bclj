@@ -686,13 +686,14 @@
    type-shape :- Any
    layout-shape :- Any
    layouts :- (Vec core/LayoutDef)
-   parent-size :- Int] :- Bool
+   parent-size :- Int
+   abi :- core/AbiProfileV0] :- Bool
   (cond
     (some? (get type-shape :kind nil))
     (let [kind :- Any (get type-shape :kind nil)]
       (if (instance? native.core.BytesKind kind)
         (and (instance? native.core.BytesShapeV0 layout-shape)
-          (= parent-size 16))
+          (= parent-size (core/abi-bytes-span-size abi)))
         (let [representation :- Any (get layout-shape :representation nil)
               bit-width :- Int (get representation :bit-width 0)]
           (and (not (nil? representation))
@@ -742,10 +743,35 @@
           layout-shape layouts parent-size)))
     :else false))
 
+;; Independent attestation of the DECLARED target ABI: every handle-shaped
+;; layout is exactly one pointer, and an owned byte span is {pointer, size_t}.
+;; Measurement derives these; this checker asserts them from the profile alone.
+(defn abi-widths-declared?
+  [abi :- core/AbiProfileV0
+   layout :- core/LayoutDef] :- Bool
+  (let [shape :- core/LayoutShapeV0 (core/layoutdef-shape layout)
+        size :- Int (core/layoutdef-size-bytes layout)
+        alignment :- Int (core/layoutdef-align-bytes layout)]
+    (cond
+      (or (instance? native.core.ReferenceShapeV0 shape)
+        (instance? native.core.AtomCellShapeV0 shape)
+        (instance? native.core.VectorShapeV0 shape)
+        (instance? native.core.MapShapeV0 shape)
+        (instance? native.core.SetShapeV0 shape))
+      (and (= size (core/abiprofilev0-pointer-bytes abi))
+        (= alignment (core/abiprofilev0-pointer-align abi)))
+
+      (instance? native.core.BytesShapeV0 shape)
+      (and (= size (core/abi-bytes-span-size abi))
+        (= alignment (core/abi-bytes-span-align abi)))
+
+      :else true)))
+
 (defn type-layout-closed?
   [types :- (Vec core/TypeDef)
    layouts :- (Vec core/LayoutDef)
-   type-def :- core/TypeDef] :- Bool
+   type-def :- core/TypeDef
+   abi :- core/AbiProfileV0] :- Bool
   (let [type-id :- core/NativeId (core/typedef-id type-def)
         layout :- (U core/LayoutDef Nil) (find-layout layouts type-id)]
     (and (= 1 (layout-count layouts type-id))
@@ -754,17 +780,22 @@
       (> (core/layoutdef-align-bytes layout) 0)
       (= 0 (mod (core/layoutdef-size-bytes layout)
         (core/layoutdef-align-bytes layout)))
+      (abi-widths-declared? abi layout)
       (layout-shape-exact? types (core/typedef-shape type-def)
         (core/layoutdef-shape layout)
         layouts
-        (core/layoutdef-size-bytes layout)))))
+        (core/layoutdef-size-bytes layout)
+        abi))))
 
-(defn closed-layouts [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn closed-layouts
+  [world :- core/NativeWorld
+   abi :- core/AbiProfileV0] :- ObligationVerdictV0
   (loop [index :- Int 0 types :- (Vec core/TypeDef) (core/nativeworld-types world)]
     (if (>= index (count types))
       (->ObligationPassV0 (core/->ClosedLayoutsObligation true))
       (let [type-def :- core/TypeDef (nth types index)]
-        (if (type-layout-closed? types (core/nativeworld-layouts world) type-def)
+        (if (type-layout-closed? types (core/nativeworld-layouts world) type-def
+              abi)
           (recur (+ index 1) types)
           (->ClosedLayoutsDiagnosticV0 (core/typedef-id type-def)))))))
 
@@ -1754,10 +1785,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def closed-layouts-positive :- Bool
-  (obligation-passed? (closed-layouts valid-world)))
+  (obligation-passed? (closed-layouts valid-world (core/abi-profile-lp64))))
 
 (def closed-layouts-negative :- Bool
-  (match (closed-layouts open-layout-world)
+  (match (closed-layouts open-layout-world (core/abi-profile-lp64))
     [(ClosedLayoutsDiagnosticV0 type-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -2119,10 +2150,13 @@
   (= "exhaustive-matches" (verdict-tag (exhaustive-matches unknown-variant-world))))
 
 (def closed-layouts-negative-zero-size :- Bool
-  (= "closed-layouts" (verdict-tag (closed-layouts zero-size-layout-world))))
+  (= "closed-layouts"
+    (verdict-tag (closed-layouts zero-size-layout-world (core/abi-profile-lp64)))))
 
 (def closed-layouts-negative-misaligned-offset :- Bool
-  (= "closed-layouts" (verdict-tag (closed-layouts misaligned-offset-world))))
+  (= "closed-layouts"
+    (verdict-tag
+      (closed-layouts misaligned-offset-world (core/abi-profile-lp64)))))
 
 (def checked-arithmetic-negative-raw-consume :- Bool
   (= "checked-arithmetic" (verdict-tag (checked-arithmetic raw-consume-world))))
@@ -2168,10 +2202,11 @@
   (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
 
 (defn validate-native-world
-  [world :- core/NativeWorld] :- (Vec ObligationVerdictV0)
+  [world :- core/NativeWorld
+   abi :- core/AbiProfileV0] :- (Vec ObligationVerdictV0)
   [(valid-ssa world)
    (exhaustive-matches world)
-   (closed-layouts world)
+   (closed-layouts world abi)
    (checked-arithmetic world)
    (legal-abi world)
    (discharged-tokens world)
@@ -2180,7 +2215,7 @@
 (def valid-fixture-results :- (Vec Bool)
   (mapv (fn [verdict :- ObligationVerdictV0] :- Bool
           (obligation-passed? verdict))
-    (validate-native-world valid-world)))
+    (validate-native-world valid-world (core/abi-profile-lp64))))
 
 (def negative-fixture-results :- (Vec Bool)
   [valid-ssa-negative
