@@ -19,11 +19,11 @@ function valid-edit-batch-envelope? LOWERED fn_14 167 blocks
 function classify-rewrite-crash LOWERED fn_15 54 blocks
 function log-envelope LOWERED fn_16 13 blocks
 function reject-message LOWERED fn_17 1 blocks
-function coord-write-response LOWERED fn_18 50 blocks
-function coord-version-response LOWERED fn_19 15 blocks
-function coord-version-for-log-response LOWERED fn_20 26 blocks
-function coord-status-response LOWERED fn_21 25 blocks
-function coord-status-down LOWERED fn_22 1 blocks
+function server-write-response LOWERED fn_18 50 blocks
+function server-version-response LOWERED fn_19 15 blocks
+function server-version-for-log-response LOWERED fn_20 26 blocks
+function server-status-response LOWERED fn_21 25 blocks
+function server-status-down LOWERED fn_22 1 blocks
 function warm-read-response LOWERED fn_23 12 blocks
 function warm-read-for-log-response LOWERED fn_24 12 blocks
 obligation-projection PASS valid-ssa

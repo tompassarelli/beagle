@@ -3,7 +3,7 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 1
-world-types 52
+world-types 61
 world-functions 25
 world-abis 25
 projected-types 43
@@ -25,11 +25,11 @@ lowered fn_14 valid-edit-batch-envelope? 167 blocks
 lowered fn_15 classify-rewrite-crash 54 blocks
 lowered fn_16 log-envelope 13 blocks
 lowered fn_17 reject-message 1 blocks
-lowered fn_18 coord-write-response 50 blocks
-lowered fn_19 coord-version-response 15 blocks
-lowered fn_20 coord-version-for-log-response 26 blocks
-lowered fn_21 coord-status-response 25 blocks
-lowered fn_22 coord-status-down 1 blocks
+lowered fn_18 server-write-response 50 blocks
+lowered fn_19 server-version-response 15 blocks
+lowered fn_20 server-version-for-log-response 26 blocks
+lowered fn_21 server-status-response 25 blocks
+lowered fn_22 server-status-down 1 blocks
 lowered fn_23 warm-read-response 12 blocks
 lowered fn_24 warm-read-for-log-response 12 blocks
 obligation-projection PASS valid-ssa

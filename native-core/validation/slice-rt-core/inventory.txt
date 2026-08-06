@@ -19,11 +19,11 @@ function valid-edit-batch-envelope?
 function classify-rewrite-crash
 function log-envelope
 function reject-message
-function coord-write-response
-function coord-version-response
-function coord-version-for-log-response
-function coord-status-response
-function coord-status-down
+function server-write-response
+function server-version-response
+function server-version-for-log-response
+function server-status-response
+function server-status-down
 function warm-read-response
 function warm-read-for-log-response
 immutable-definitions 12

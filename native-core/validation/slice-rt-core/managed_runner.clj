@@ -100,48 +100,48 @@
   (rt/reject-message ["left" "right"]) "left; right")
 (pass! "rt-core" "reject-message" "single"
   (rt/reject-message ["conflict"]) "conflict")
-(pass! "rt-core" "coord-write-response" "ok"
-  (rt/coord-write-response {:ok 7}) "ok:7")
-(pass! "rt-core" "coord-write-response" "conflict"
-  (rt/coord-write-response {:reject :conflict}) "conflict")
-(pass! "rt-core" "coord-write-response" "log-mismatch"
-  (rt/coord-write-response
+(pass! "rt-core" "server-write-response" "ok"
+  (rt/server-write-response {:ok 7}) "ok:7")
+(pass! "rt-core" "server-write-response" "conflict"
+  (rt/server-write-response {:reject :conflict}) "conflict")
+(pass! "rt-core" "server-write-response" "log-mismatch"
+  (rt/server-write-response
     {:code :log-mismatch :expected-log "a" :served-log "b"})
-  "log-mismatch: expected a; daemon serves b")
-(pass! "rt-core" "coord-write-response" "incompatible"
-  (rt/coord-write-response {:error "unknown op"}) "protocol-incompatible")
-(pass! "rt-core" "coord-write-response" "rejected"
-  (rt/coord-write-response {:reject ["one" "two"]}) "reject:one; two")
-(pass! "rt-core" "coord-write-response" "error"
-  (rt/coord-write-response {:error "broken"}) "error:{:error \"broken\"}")
-(pass! "rt-core" "coord-version-response" "version"
-  (rt/coord-version-response {:version 19}) 19)
-(pass! "rt-core" "coord-version-response" "missing"
-  (rt/coord-version-response {}) -1)
-(pass! "rt-core" "coord-version-for-log-response" "version"
-  (rt/coord-version-for-log-response {:version 19}) 19)
-(pass! "rt-core" "coord-version-for-log-response" "mismatch"
-  (rt/coord-version-for-log-response {:code :log-mismatch}) -2)
-(pass! "rt-core" "coord-version-for-log-response" "unusable"
-  (rt/coord-version-for-log-response {}) -3)
-(pass! "rt-core" "coord-status-response" "up"
-  (rt/coord-status-response 7788 {:version 19})
-  "coordinator UP on 127.0.0.1:7788 (v19)")
-(pass! "rt-core" "coord-status-response" "wrong-log"
-  (rt/coord-status-response 7788
+  "log-mismatch: expected a; server serves b")
+(pass! "rt-core" "server-write-response" "incompatible"
+  (rt/server-write-response {:error "unknown op"}) "protocol-incompatible")
+(pass! "rt-core" "server-write-response" "rejected"
+  (rt/server-write-response {:reject ["one" "two"]}) "reject:one; two")
+(pass! "rt-core" "server-write-response" "error"
+  (rt/server-write-response {:error "broken"}) "error:{:error \"broken\"}")
+(pass! "rt-core" "server-version-response" "version"
+  (rt/server-version-response {:version 19}) 19)
+(pass! "rt-core" "server-version-response" "missing"
+  (rt/server-version-response {}) -1)
+(pass! "rt-core" "server-version-for-log-response" "version"
+  (rt/server-version-for-log-response {:version 19}) 19)
+(pass! "rt-core" "server-version-for-log-response" "mismatch"
+  (rt/server-version-for-log-response {:code :log-mismatch}) -2)
+(pass! "rt-core" "server-version-for-log-response" "unusable"
+  (rt/server-version-for-log-response {}) -3)
+(pass! "rt-core" "server-status-response" "up"
+  (rt/server-status-response 7788 {:version 19})
+  "server UP on 127.0.0.1:7788 (v19)")
+(pass! "rt-core" "server-status-response" "wrong-log"
+  (rt/server-status-response 7788
     {:code :log-mismatch :expected-log "a" :served-log "b"})
-  (str "coordinator WRONG LOG on 127.0.0.1:7788 — expected a; daemon serves b; "
+  (str "server WRONG LOG on 127.0.0.1:7788 — expected a; server serves b; "
     "refusing fenced reads and writes"))
-(pass! "rt-core" "coord-status-response" "incompatible"
-  (rt/coord-status-response 7788 {:error "unknown op"})
-  (str "coordinator INCOMPATIBLE on 127.0.0.1:7788 — daemon lacks required "
+(pass! "rt-core" "server-status-response" "incompatible"
+  (rt/server-status-response 7788 {:error "unknown op"})
+  (str "server INCOMPATIBLE on 127.0.0.1:7788 — server lacks required "
     "log-fence protocol; restart it with current Fram"))
-(pass! "rt-core" "coord-status-response" "unusable"
-  (rt/coord-status-response 7788 {:error "broken"})
-  "coordinator UNUSABLE on 127.0.0.1:7788 — {:error \"broken\"}")
-(pass! "rt-core" "coord-status-down" "down"
-  (rt/coord-status-down 7788)
-  "coordinator DOWN on 127.0.0.1:7788 — start it with bin/fram-up")
+(pass! "rt-core" "server-status-response" "unusable"
+  (rt/server-status-response 7788 {:error "broken"})
+  "server UNUSABLE on 127.0.0.1:7788 — {:error \"broken\"}")
+(pass! "rt-core" "server-status-down" "down"
+  (rt/server-status-down 7788)
+  "server DOWN on 127.0.0.1:7788 — start it with bin/fram-up")
 (pass! "rt-core" "warm-read-response" "unknown"
   (rt/warm-read-response {:error "unknown op"}) nil)
 (pass! "rt-core" "warm-read-response" "value"

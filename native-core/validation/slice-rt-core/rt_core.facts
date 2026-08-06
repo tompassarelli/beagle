@@ -1583,7 +1583,7 @@
 560	private	t	false
 561	form-kind	t	seq
 562	form-kind	t	param
-562	name	t	coord
+562	name	t	server-path
 563	form-kind	t	type-prim
 563	name	t	String
 562	ann	n	563
@@ -1721,7 +1721,7 @@
 617	value	e	rewrite intent present but\s
 616	f0	n	617
 618	form-kind	t	ref
-618	name	t	coord
+618	name	t	server-path
 616	f1	n	618
 619	form-kind	t	literal
 619	literal-kind	t	string
@@ -1737,7 +1737,7 @@
 623	value	t	path
 622	key	n	623
 624	form-kind	t	ref
-624	name	t	coord
+624	name	t	server-path
 622	value	n	624
 621	f0	n	622
 625	form-kind	t	map-pair
@@ -1903,7 +1903,7 @@
 683	value	e	rewrite intent does not match the live corpus at\s
 682	f0	n	683
 684	form-kind	t	ref
-684	name	t	coord
+684	name	t	server-path
 682	f1	n	684
 685	form-kind	t	literal
 685	literal-kind	t	string
@@ -1919,7 +1919,7 @@
 689	value	t	path
 688	key	n	689
 690	form-kind	t	ref
-690	name	t	coord
+690	name	t	server-path
 688	value	n	690
 687	f0	n	688
 691	form-kind	t	map-pair
@@ -2375,7 +2375,7 @@
 840	else	n	851
 833	body	n	840
 854	form-kind	t	defn
-854	name	t	coord-write-response
+854	name	t	server-write-response
 854	private	t	false
 855	form-kind	t	seq
 856	form-kind	t	param
@@ -2491,7 +2491,7 @@
 893	f1	n	895
 897	form-kind	t	literal
 897	literal-kind	t	string
-897	value	e	; daemon serves\s
+897	value	e	; server serves\s
 893	f2	n	897
 898	form-kind	t	kw-access
 898	keyword	t	served-log
@@ -2576,7 +2576,7 @@
 869	clauses	n	870
 854	body	n	869
 925	form-kind	t	defn
-925	name	t	coord-version-response
+925	name	t	server-version-response
 925	private	t	false
 926	form-kind	t	seq
 927	form-kind	t	param
@@ -2635,7 +2635,7 @@
 936	body	n	941
 925	body	n	936
 947	form-kind	t	defn
-947	name	t	coord-version-for-log-response
+947	name	t	server-version-for-log-response
 947	private	t	false
 948	form-kind	t	seq
 949	form-kind	t	param
@@ -2720,7 +2720,7 @@
 959	clauses	n	960
 947	body	n	959
 978	form-kind	t	defn
-978	name	t	coord-status-response
+978	name	t	server-status-response
 978	private	t	false
 979	form-kind	t	seq
 980	form-kind	t	param
@@ -2857,7 +2857,7 @@
 1030	form-kind	t	seq
 1031	form-kind	t	literal
 1031	literal-kind	t	string
-1031	value	t	coordinator UP on 127.0.0.1:
+1031	value	t	server UP on 127.0.0.1:
 1030	f0	n	1031
 1032	form-kind	t	ref
 1032	name	t	port
@@ -2900,7 +2900,7 @@
 1044	form-kind	t	seq
 1045	form-kind	t	literal
 1045	literal-kind	t	string
-1045	value	t	coordinator WRONG LOG on 127.0.0.1:
+1045	value	t	server WRONG LOG on 127.0.0.1:
 1044	f0	n	1045
 1046	form-kind	t	ref
 1046	name	t	port
@@ -2917,7 +2917,7 @@
 1044	f3	n	1048
 1050	form-kind	t	literal
 1050	literal-kind	t	string
-1050	value	e	; daemon serves\s
+1050	value	e	; server serves\s
 1044	f4	n	1050
 1051	form-kind	t	kw-access
 1051	keyword	t	served-log
@@ -2953,14 +2953,14 @@
 1061	form-kind	t	seq
 1062	form-kind	t	literal
 1062	literal-kind	t	string
-1062	value	t	coordinator INCOMPATIBLE on 127.0.0.1:
+1062	value	t	server INCOMPATIBLE on 127.0.0.1:
 1061	f0	n	1062
 1063	form-kind	t	ref
 1063	name	t	port
 1061	f1	n	1063
 1064	form-kind	t	literal
 1064	literal-kind	t	string
-1064	value	e	\s— daemon lacks required log-fence protocol; restart it with current Fram
+1064	value	e	\s— server lacks required log-fence protocol; restart it with current Fram
 1061	f2	n	1064
 1060	args	n	1061
 1054	body	n	1060
@@ -2974,7 +2974,7 @@
 1068	form-kind	t	seq
 1069	form-kind	t	literal
 1069	literal-kind	t	string
-1069	value	t	coordinator UNUSABLE on 127.0.0.1:
+1069	value	t	server UNUSABLE on 127.0.0.1:
 1068	f0	n	1069
 1070	form-kind	t	ref
 1070	name	t	port
@@ -2997,7 +2997,7 @@
 1022	clauses	n	1023
 978	body	n	1022
 1075	form-kind	t	defn
-1075	name	t	coord-status-down
+1075	name	t	server-status-down
 1075	private	t	false
 1076	form-kind	t	seq
 1077	form-kind	t	param
@@ -3015,7 +3015,7 @@
 1081	form-kind	t	seq
 1082	form-kind	t	literal
 1082	literal-kind	t	string
-1082	value	t	coordinator DOWN on 127.0.0.1:
+1082	value	t	server DOWN on 127.0.0.1:
 1081	f0	n	1082
 1083	form-kind	t	ref
 1083	name	t	port

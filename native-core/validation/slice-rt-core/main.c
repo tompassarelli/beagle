@@ -515,8 +515,8 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_39),
                            _Alignof(native_m0_type_39));
-    result = RT_COORD_WRITE_RESPONSE(&arena, &capability, response);
-    CHECK("coord-write-response", "ok", text_is(result, "ok:7"));
+    result = RT_SERVER_WRITE_RESPONSE(&arena, &capability, response);
+    CHECK("server-write-response", "ok", text_is(result, "ok:7"));
 
     keys[0] = KW_REJECT;
     values[0] = (native_m0_type_39){
@@ -525,8 +525,8 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_39),
                            _Alignof(native_m0_type_39));
-    result = RT_COORD_WRITE_RESPONSE(&arena, &capability, response);
-    CHECK("coord-write-response", "conflict", text_is(result, "conflict"));
+    result = RT_SERVER_WRITE_RESPONSE(&arena, &capability, response);
+    CHECK("server-write-response", "conflict", text_is(result, "conflict"));
 
     keys[0] = KW_CODE;
     keys[1] = KW_EXPECTED_LOG;
@@ -541,9 +541,9 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 3U,
                            (int64_t)sizeof(native_m0_type_39),
                            _Alignof(native_m0_type_39));
-    result = RT_COORD_WRITE_RESPONSE(&arena, &capability, response);
-    CHECK("coord-write-response", "log-mismatch",
-          text_is(result, "log-mismatch: expected a; daemon serves b"));
+    result = RT_SERVER_WRITE_RESPONSE(&arena, &capability, response);
+    CHECK("server-write-response", "log-mismatch",
+          text_is(result, "log-mismatch: expected a; server serves b"));
 
     keys[0] = KW_ERROR;
     values[0] = (native_m0_type_39){
@@ -552,8 +552,8 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_39),
                            _Alignof(native_m0_type_39));
-    result = RT_COORD_WRITE_RESPONSE(&arena, &capability, response);
-    CHECK("coord-write-response", "incompatible",
+    result = RT_SERVER_WRITE_RESPONSE(&arena, &capability, response);
+    CHECK("server-write-response", "incompatible",
           text_is(result, "protocol-incompatible"));
 
     {
@@ -566,8 +566,8 @@ int main(void) {
       response = keyword_map(&arena, keys, values, 1U,
                              (int64_t)sizeof(native_m0_type_39),
                              _Alignof(native_m0_type_39));
-      result = RT_COORD_WRITE_RESPONSE(&arena, &capability, response);
-      CHECK("coord-write-response", "rejected",
+      result = RT_SERVER_WRITE_RESPONSE(&arena, &capability, response);
+      CHECK("server-write-response", "rejected",
             text_is(result, "reject:one; two"));
     }
 
@@ -578,8 +578,8 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_39),
                            _Alignof(native_m0_type_39));
-    result = RT_COORD_WRITE_RESPONSE(&arena, &capability, response);
-    CHECK("coord-write-response", "error",
+    result = RT_SERVER_WRITE_RESPONSE(&arena, &capability, response);
+    CHECK("server-write-response", "error",
           text_is(result, "error:{:error \"broken\"}"));
   }
 
@@ -592,12 +592,12 @@ int main(void) {
         keyword_map(&arena, version_key, version_value, 1U,
                     (int64_t)sizeof(native_m0_type_28),
                     _Alignof(native_m0_type_28));
-    CHECK("coord-version-response", "version",
-          RT_COORD_VERSION_RESPONSE(response) == INT64_C(19));
+    CHECK("server-version-response", "version",
+          RT_SERVER_VERSION_RESPONSE(response) == INT64_C(19));
     response = empty_map(&arena, (int64_t)sizeof(native_m0_type_28),
                          _Alignof(native_m0_type_28));
-    CHECK("coord-version-response", "missing",
-          RT_COORD_VERSION_RESPONSE(response) == INT64_C(-1));
+    CHECK("server-version-response", "missing",
+          RT_SERVER_VERSION_RESPONSE(response) == INT64_C(-1));
   }
   {
     uint64_t key[] = {KW_VERSION};
@@ -607,8 +607,8 @@ int main(void) {
         keyword_map(&arena, key, value, 1U,
                     (int64_t)sizeof(native_m0_type_37),
                     _Alignof(native_m0_type_37));
-    CHECK("coord-version-for-log-response", "version",
-          RT_COORD_VERSION_FOR_LOG_RESPONSE(response) == INT64_C(19));
+    CHECK("server-version-for-log-response", "version",
+          RT_SERVER_VERSION_FOR_LOG_RESPONSE(response) == INT64_C(19));
     key[0] = KW_CODE;
     value[0] = (native_m0_type_37){
         .tag = INT64_C(2),
@@ -616,12 +616,12 @@ int main(void) {
     response = keyword_map(&arena, key, value, 1U,
                            (int64_t)sizeof(native_m0_type_37),
                            _Alignof(native_m0_type_37));
-    CHECK("coord-version-for-log-response", "mismatch",
-          RT_COORD_VERSION_FOR_LOG_RESPONSE(response) == INT64_C(-2));
+    CHECK("server-version-for-log-response", "mismatch",
+          RT_SERVER_VERSION_FOR_LOG_RESPONSE(response) == INT64_C(-2));
     response = empty_map(&arena, (int64_t)sizeof(native_m0_type_37),
                          _Alignof(native_m0_type_37));
-    CHECK("coord-version-for-log-response", "unusable",
-          RT_COORD_VERSION_FOR_LOG_RESPONSE(response) == INT64_C(-3));
+    CHECK("server-version-for-log-response", "unusable",
+          RT_SERVER_VERSION_FOR_LOG_RESPONSE(response) == INT64_C(-3));
   }
 
   native_arena_reset(&arena);
@@ -635,10 +635,10 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_35),
                            _Alignof(native_m0_type_35));
-    result = RT_COORD_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
+    result = RT_SERVER_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
                                       response);
-    CHECK("coord-status-response", "up",
-          text_is(result, "coordinator UP on 127.0.0.1:7788 (v19)"));
+    CHECK("server-status-response", "up",
+          text_is(result, "server UP on 127.0.0.1:7788 (v19)"));
 
     keys[0] = KW_CODE;
     keys[1] = KW_EXPECTED_LOG;
@@ -653,12 +653,12 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 3U,
                            (int64_t)sizeof(native_m0_type_35),
                            _Alignof(native_m0_type_35));
-    result = RT_COORD_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
+    result = RT_SERVER_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
                                       response);
-    CHECK("coord-status-response", "wrong-log",
+    CHECK("server-status-response", "wrong-log",
           text_is(result,
-                  "coordinator WRONG LOG on 127.0.0.1:7788 — expected a; "
-                  "daemon serves b; refusing fenced reads and writes"));
+                  "server WRONG LOG on 127.0.0.1:7788 — expected a; "
+                  "server serves b; refusing fenced reads and writes"));
 
     keys[0] = KW_ERROR;
     values[0] = (native_m0_type_35){
@@ -667,11 +667,11 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_35),
                            _Alignof(native_m0_type_35));
-    result = RT_COORD_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
+    result = RT_SERVER_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
                                       response);
-    CHECK("coord-status-response", "incompatible",
+    CHECK("server-status-response", "incompatible",
           text_is(result,
-                  "coordinator INCOMPATIBLE on 127.0.0.1:7788 — daemon lacks "
+                  "server INCOMPATIBLE on 127.0.0.1:7788 — server lacks "
                   "required log-fence protocol; restart it with current "
                   "Fram"));
 
@@ -681,19 +681,19 @@ int main(void) {
     response = keyword_map(&arena, keys, values, 1U,
                            (int64_t)sizeof(native_m0_type_35),
                            _Alignof(native_m0_type_35));
-    result = RT_COORD_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
+    result = RT_SERVER_STATUS_RESPONSE(&arena, &capability, INT64_C(7788),
                                       response);
-    CHECK("coord-status-response", "unusable",
+    CHECK("server-status-response", "unusable",
           text_is(result,
-                  "coordinator UNUSABLE on 127.0.0.1:7788 — {:error "
+                  "server UNUSABLE on 127.0.0.1:7788 — {:error "
                   "\"broken\"}"));
   }
 
   native_arena_reset(&arena);
-  result = RT_COORD_STATUS_DOWN(&arena, &capability, INT64_C(7788));
-  CHECK("coord-status-down", "down",
+  result = RT_SERVER_STATUS_DOWN(&arena, &capability, INT64_C(7788));
+  CHECK("server-status-down", "down",
         text_is(result,
-                "coordinator DOWN on 127.0.0.1:7788 — start it with bin/fram-up"));
+                "server DOWN on 127.0.0.1:7788 — start it with bin/fram-up"));
 
   native_arena_reset(&arena);
   {

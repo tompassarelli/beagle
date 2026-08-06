@@ -58,8 +58,8 @@ _Static_assert(offsetof(struct native_m0_text_17_blob, bytes) == 8, "text blob i
 struct native_m0_text_18_blob { uint64_t length; uint8_t bytes[sizeof "log-mismatch: expected "]; };
 static const struct native_m0_text_18_blob native_m0_text_18 = { (uint64_t)(sizeof "log-mismatch: expected " - 1U), "log-mismatch: expected " };
 _Static_assert(offsetof(struct native_m0_text_18_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_19_blob { uint64_t length; uint8_t bytes[sizeof "; daemon serves "]; };
-static const struct native_m0_text_19_blob native_m0_text_19 = { (uint64_t)(sizeof "; daemon serves " - 1U), "; daemon serves " };
+struct native_m0_text_19_blob { uint64_t length; uint8_t bytes[sizeof "; server serves "]; };
+static const struct native_m0_text_19_blob native_m0_text_19 = { (uint64_t)(sizeof "; server serves " - 1U), "; server serves " };
 _Static_assert(offsetof(struct native_m0_text_19_blob, bytes) == 8, "text blob is length-prefixed");
 struct native_m0_text_20_blob { uint64_t length; uint8_t bytes[sizeof "unknown op"]; };
 static const struct native_m0_text_20_blob native_m0_text_20 = { (uint64_t)(sizeof "unknown op" - 1U), "unknown op" };
@@ -73,8 +73,8 @@ _Static_assert(offsetof(struct native_m0_text_22_blob, bytes) == 8, "text blob i
 struct native_m0_text_23_blob { uint64_t length; uint8_t bytes[sizeof "error:"]; };
 static const struct native_m0_text_23_blob native_m0_text_23 = { (uint64_t)(sizeof "error:" - 1U), "error:" };
 _Static_assert(offsetof(struct native_m0_text_23_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_24_blob { uint64_t length; uint8_t bytes[sizeof "coordinator UP on 127.0.0.1:"]; };
-static const struct native_m0_text_24_blob native_m0_text_24 = { (uint64_t)(sizeof "coordinator UP on 127.0.0.1:" - 1U), "coordinator UP on 127.0.0.1:" };
+struct native_m0_text_24_blob { uint64_t length; uint8_t bytes[sizeof "server UP on 127.0.0.1:"]; };
+static const struct native_m0_text_24_blob native_m0_text_24 = { (uint64_t)(sizeof "server UP on 127.0.0.1:" - 1U), "server UP on 127.0.0.1:" };
 _Static_assert(offsetof(struct native_m0_text_24_blob, bytes) == 8, "text blob is length-prefixed");
 struct native_m0_text_25_blob { uint64_t length; uint8_t bytes[sizeof " (v"]; };
 static const struct native_m0_text_25_blob native_m0_text_25 = { (uint64_t)(sizeof " (v" - 1U), " (v" };
@@ -82,8 +82,8 @@ _Static_assert(offsetof(struct native_m0_text_25_blob, bytes) == 8, "text blob i
 struct native_m0_text_26_blob { uint64_t length; uint8_t bytes[sizeof ")"]; };
 static const struct native_m0_text_26_blob native_m0_text_26 = { (uint64_t)(sizeof ")" - 1U), ")" };
 _Static_assert(offsetof(struct native_m0_text_26_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_27_blob { uint64_t length; uint8_t bytes[sizeof "coordinator WRONG LOG on 127.0.0.1:"]; };
-static const struct native_m0_text_27_blob native_m0_text_27 = { (uint64_t)(sizeof "coordinator WRONG LOG on 127.0.0.1:" - 1U), "coordinator WRONG LOG on 127.0.0.1:" };
+struct native_m0_text_27_blob { uint64_t length; uint8_t bytes[sizeof "server WRONG LOG on 127.0.0.1:"]; };
+static const struct native_m0_text_27_blob native_m0_text_27 = { (uint64_t)(sizeof "server WRONG LOG on 127.0.0.1:" - 1U), "server WRONG LOG on 127.0.0.1:" };
 _Static_assert(offsetof(struct native_m0_text_27_blob, bytes) == 8, "text blob is length-prefixed");
 struct native_m0_text_28_blob { uint64_t length; uint8_t bytes[sizeof " — expected "]; };
 static const struct native_m0_text_28_blob native_m0_text_28 = { (uint64_t)(sizeof " — expected " - 1U), " — expected " };
@@ -91,20 +91,20 @@ _Static_assert(offsetof(struct native_m0_text_28_blob, bytes) == 8, "text blob i
 struct native_m0_text_29_blob { uint64_t length; uint8_t bytes[sizeof "; refusing fenced reads and writes"]; };
 static const struct native_m0_text_29_blob native_m0_text_29 = { (uint64_t)(sizeof "; refusing fenced reads and writes" - 1U), "; refusing fenced reads and writes" };
 _Static_assert(offsetof(struct native_m0_text_29_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_30_blob { uint64_t length; uint8_t bytes[sizeof "coordinator INCOMPATIBLE on 127.0.0.1:"]; };
-static const struct native_m0_text_30_blob native_m0_text_30 = { (uint64_t)(sizeof "coordinator INCOMPATIBLE on 127.0.0.1:" - 1U), "coordinator INCOMPATIBLE on 127.0.0.1:" };
+struct native_m0_text_30_blob { uint64_t length; uint8_t bytes[sizeof "server INCOMPATIBLE on 127.0.0.1:"]; };
+static const struct native_m0_text_30_blob native_m0_text_30 = { (uint64_t)(sizeof "server INCOMPATIBLE on 127.0.0.1:" - 1U), "server INCOMPATIBLE on 127.0.0.1:" };
 _Static_assert(offsetof(struct native_m0_text_30_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_31_blob { uint64_t length; uint8_t bytes[sizeof " — daemon lacks required log-fence protocol; restart it with current Fram"]; };
-static const struct native_m0_text_31_blob native_m0_text_31 = { (uint64_t)(sizeof " — daemon lacks required log-fence protocol; restart it with current Fram" - 1U), " — daemon lacks required log-fence protocol; restart it with current Fram" };
+struct native_m0_text_31_blob { uint64_t length; uint8_t bytes[sizeof " — server lacks required log-fence protocol; restart it with current Fram"]; };
+static const struct native_m0_text_31_blob native_m0_text_31 = { (uint64_t)(sizeof " — server lacks required log-fence protocol; restart it with current Fram" - 1U), " — server lacks required log-fence protocol; restart it with current Fram" };
 _Static_assert(offsetof(struct native_m0_text_31_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_32_blob { uint64_t length; uint8_t bytes[sizeof "coordinator UNUSABLE on 127.0.0.1:"]; };
-static const struct native_m0_text_32_blob native_m0_text_32 = { (uint64_t)(sizeof "coordinator UNUSABLE on 127.0.0.1:" - 1U), "coordinator UNUSABLE on 127.0.0.1:" };
+struct native_m0_text_32_blob { uint64_t length; uint8_t bytes[sizeof "server UNUSABLE on 127.0.0.1:"]; };
+static const struct native_m0_text_32_blob native_m0_text_32 = { (uint64_t)(sizeof "server UNUSABLE on 127.0.0.1:" - 1U), "server UNUSABLE on 127.0.0.1:" };
 _Static_assert(offsetof(struct native_m0_text_32_blob, bytes) == 8, "text blob is length-prefixed");
 struct native_m0_text_33_blob { uint64_t length; uint8_t bytes[sizeof " — "]; };
 static const struct native_m0_text_33_blob native_m0_text_33 = { (uint64_t)(sizeof " — " - 1U), " — " };
 _Static_assert(offsetof(struct native_m0_text_33_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_34_blob { uint64_t length; uint8_t bytes[sizeof "coordinator DOWN on 127.0.0.1:"]; };
-static const struct native_m0_text_34_blob native_m0_text_34 = { (uint64_t)(sizeof "coordinator DOWN on 127.0.0.1:" - 1U), "coordinator DOWN on 127.0.0.1:" };
+struct native_m0_text_34_blob { uint64_t length; uint8_t bytes[sizeof "server DOWN on 127.0.0.1:"]; };
+static const struct native_m0_text_34_blob native_m0_text_34 = { (uint64_t)(sizeof "server DOWN on 127.0.0.1:" - 1U), "server DOWN on 127.0.0.1:" };
 _Static_assert(offsetof(struct native_m0_text_34_blob, bytes) == 8, "text blob is length-prefixed");
 struct native_m0_text_35_blob { uint64_t length; uint8_t bytes[sizeof " — start it with bin/fram-up"]; };
 static const struct native_m0_text_35_blob native_m0_text_35 = { (uint64_t)(sizeof " — start it with bin/fram-up" - 1U), " — start it with bin/fram-up" };
@@ -3782,16 +3782,17 @@ native_m0_type_15 native_m0_fn_16(native_arena *arena, const native_capability *
   native_m0_type_5 native_s_20;
   native_m0_type_32 native_s_21;
   native_m0_type_8 native_s_22;
-  native_m0_type_32 native_s_23;
-  native_m0_type_23 native_s_24;
-  native_m0_type_32 native_s_25;
-  native_m0_type_25 native_s_26;
-  native_m0_type_32 native_s_27;
-  native_m0_type_17 native_s_28;
-  native_m0_type_32 native_s_29;
+  native_m0_type_8 native_s_23;
+  native_m0_type_32 native_s_24;
+  native_m0_type_23 native_s_25;
+  native_m0_type_32 native_s_26;
+  native_m0_type_25 native_s_27;
+  native_m0_type_32 native_s_28;
+  native_m0_type_17 native_s_29;
   native_m0_type_32 native_s_30;
-  native_m0_type_15 native_s_31;
+  native_m0_type_32 native_s_31;
   native_m0_type_15 native_s_32;
+  native_m0_type_15 native_s_33;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_keyword_19;
@@ -3858,7 +3859,7 @@ native_l16_2: ;
   }
   native_s_14 = native_s_13.payload.variant_0;
   native_s_15 = (native_m0_type_32){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
-  native_s_30 = native_s_15;
+  native_s_31 = native_s_15;
   goto native_l16_10;
 native_l16_3: ;
   if (native_s_13.tag != INT64_C(1)) {
@@ -3866,7 +3867,7 @@ native_l16_3: ;
   }
   native_s_16 = native_s_13.payload.variant_1;
   native_s_17 = (native_m0_type_32){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_16 } };
-  native_s_30 = native_s_17;
+  native_s_31 = native_s_17;
   goto native_l16_10;
 native_l16_4: ;
   if (native_s_13.tag != INT64_C(2)) {
@@ -3874,7 +3875,7 @@ native_l16_4: ;
   }
   native_s_18 = native_s_13.payload.variant_2;
   native_s_19 = (native_m0_type_32){ .tag = INT64_C(2), .payload = { .variant_2 = native_s_18 } };
-  native_s_30 = native_s_19;
+  native_s_31 = native_s_19;
   goto native_l16_10;
 native_l16_5: ;
   if (native_s_13.tag != INT64_C(3)) {
@@ -3882,7 +3883,7 @@ native_l16_5: ;
   }
   native_s_20 = native_s_13.payload.variant_3;
   native_s_21 = (native_m0_type_32){ .tag = INT64_C(3), .payload = { .variant_3 = native_s_20 } };
-  native_s_30 = native_s_21;
+  native_s_31 = native_s_21;
   goto native_l16_10;
 native_l16_6: ;
   if (native_s_13.tag != INT64_C(4)) {
@@ -3890,42 +3891,43 @@ native_l16_6: ;
   }
   native_s_22 = native_s_13.payload.variant_4;
   (void)native_s_22;
-  native_s_23 = (native_m0_type_32){ .tag = INT64_C(4), .payload = { .variant_4 = native_s_22 } };
-  native_s_30 = native_s_23;
+  native_s_23 = (native_m0_type_8){ .tag = INT64_C(0) };
+  native_s_24 = (native_m0_type_32){ .tag = INT64_C(4), .payload = { .variant_4 = native_s_23 } };
+  native_s_31 = native_s_24;
   goto native_l16_10;
 native_l16_7: ;
   if (native_s_13.tag != INT64_C(5)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_24 = native_s_13.payload.variant_5;
-  native_s_25 = (native_m0_type_32){ .tag = INT64_C(5), .payload = { .variant_5 = native_s_24 } };
-  native_s_30 = native_s_25;
+  native_s_25 = native_s_13.payload.variant_5;
+  native_s_26 = (native_m0_type_32){ .tag = INT64_C(5), .payload = { .variant_5 = native_s_25 } };
+  native_s_31 = native_s_26;
   goto native_l16_10;
 native_l16_8: ;
   if (native_s_13.tag != INT64_C(6)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_26 = native_s_13.payload.variant_6;
-  native_s_27 = (native_m0_type_32){ .tag = INT64_C(6), .payload = { .variant_6 = native_s_26 } };
-  native_s_30 = native_s_27;
+  native_s_27 = native_s_13.payload.variant_6;
+  native_s_28 = (native_m0_type_32){ .tag = INT64_C(6), .payload = { .variant_6 = native_s_27 } };
+  native_s_31 = native_s_28;
   goto native_l16_10;
 native_l16_9: ;
   if (native_s_13.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_28 = native_s_13.payload.variant_7;
-  native_s_29 = (native_m0_type_32){ .tag = INT64_C(7), .payload = { .variant_7 = native_s_28 } };
-  native_s_30 = native_s_29;
+  native_s_29 = native_s_13.payload.variant_7;
+  native_s_30 = (native_m0_type_32){ .tag = INT64_C(7), .payload = { .variant_7 = native_s_29 } };
+  native_s_31 = native_s_30;
   goto native_l16_10;
 native_l16_10: ;
-  native_s_31 = native_map_assoc((native_arena *)native_s_0, native_s_8, &native_s_11, &native_s_30, INT64_C(8), (size_t)8, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
-  native_s_32 = native_s_31;
+  native_s_32 = native_map_assoc((native_arena *)native_s_0, native_s_8, &native_s_11, &native_s_31, INT64_C(8), (size_t)8, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  native_s_33 = native_s_32;
   goto native_l16_12;
 native_l16_11: ;
-  native_s_32 = native_s_8;
+  native_s_33 = native_s_8;
   goto native_l16_12;
 native_l16_12: ;
-  return native_s_32;
+  return native_s_33;
 }
 native_m0_type_4 native_m0_fn_17(native_arena *arena, const native_capability *capability, native_m0_type_23 native_v_0) {
   (void)arena;
@@ -5225,10 +5227,11 @@ native_m0_type_42 native_m0_fn_23(native_m0_type_19 native_v_0) {
   native_m0_type_2 native_s_9;
   native_m0_type_8 native_s_10;
   native_m0_type_8 native_s_11;
-  native_m0_type_42 native_s_12;
-  native_m0_type_19 native_s_13;
-  native_m0_type_42 native_s_14;
+  native_m0_type_8 native_s_12;
+  native_m0_type_42 native_s_13;
+  native_m0_type_19 native_s_14;
   native_m0_type_42 native_s_15;
+  native_m0_type_42 native_s_16;
   native_s_0 = true;
   (void)native_s_0;
   if (native_s_0) {
@@ -5302,18 +5305,20 @@ native_l23_7: ;
   native_s_11 = native_s_10;
   goto native_l23_9;
 native_l23_8: ;
-  native_s_13 = native_v_0;
+  native_s_14 = native_v_0;
   goto native_l23_10;
 native_l23_9: ;
-  native_s_12 = (native_m0_type_42){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_11 } };
-  native_s_15 = native_s_12;
+  (void)native_s_11;
+  native_s_12 = (native_m0_type_8){ .tag = INT64_C(0) };
+  native_s_13 = (native_m0_type_42){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_12 } };
+  native_s_16 = native_s_13;
   goto native_l23_11;
 native_l23_10: ;
-  native_s_14 = (native_m0_type_42){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_13 } };
-  native_s_15 = native_s_14;
+  native_s_15 = (native_m0_type_42){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
+  native_s_16 = native_s_15;
   goto native_l23_11;
 native_l23_11: ;
-  return native_s_15;
+  return native_s_16;
 }
 native_m0_type_42 native_m0_fn_24(native_m0_type_19 native_v_0) {
   (void)native_v_0;
@@ -5330,10 +5335,11 @@ native_m0_type_42 native_m0_fn_24(native_m0_type_19 native_v_0) {
   native_m0_type_2 native_s_10;
   native_m0_type_8 native_s_11;
   native_m0_type_8 native_s_12;
-  native_m0_type_42 native_s_13;
-  native_m0_type_19 native_s_14;
-  native_m0_type_42 native_s_15;
+  native_m0_type_8 native_s_13;
+  native_m0_type_42 native_s_14;
+  native_m0_type_19 native_s_15;
   native_m0_type_42 native_s_16;
+  native_m0_type_42 native_s_17;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_20;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_keyword_30;
@@ -5408,16 +5414,18 @@ native_l24_7: ;
   native_s_12 = native_s_11;
   goto native_l24_9;
 native_l24_8: ;
-  native_s_14 = native_v_0;
+  native_s_15 = native_v_0;
   goto native_l24_10;
 native_l24_9: ;
-  native_s_13 = (native_m0_type_42){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_12 } };
-  native_s_16 = native_s_13;
+  (void)native_s_12;
+  native_s_13 = (native_m0_type_8){ .tag = INT64_C(0) };
+  native_s_14 = (native_m0_type_42){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_13 } };
+  native_s_17 = native_s_14;
   goto native_l24_11;
 native_l24_10: ;
-  native_s_15 = (native_m0_type_42){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
-  native_s_16 = native_s_15;
+  native_s_16 = (native_m0_type_42){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_15 } };
+  native_s_17 = native_s_16;
   goto native_l24_11;
 native_l24_11: ;
-  return native_s_16;
+  return native_s_17;
 }

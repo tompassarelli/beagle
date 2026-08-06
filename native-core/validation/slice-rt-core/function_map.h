@@ -21,11 +21,11 @@
 #define RT_CLASSIFY_REWRITE_CRASH native_m0_fn_15
 #define RT_LOG_ENVELOPE native_m0_fn_16
 #define RT_REJECT_MESSAGE native_m0_fn_17
-#define RT_COORD_WRITE_RESPONSE native_m0_fn_18
-#define RT_COORD_VERSION_RESPONSE native_m0_fn_19
-#define RT_COORD_VERSION_FOR_LOG_RESPONSE native_m0_fn_20
-#define RT_COORD_STATUS_RESPONSE native_m0_fn_21
-#define RT_COORD_STATUS_DOWN native_m0_fn_22
+#define RT_SERVER_WRITE_RESPONSE native_m0_fn_18
+#define RT_SERVER_VERSION_RESPONSE native_m0_fn_19
+#define RT_SERVER_VERSION_FOR_LOG_RESPONSE native_m0_fn_20
+#define RT_SERVER_STATUS_RESPONSE native_m0_fn_21
+#define RT_SERVER_STATUS_DOWN native_m0_fn_22
 #define RT_WARM_READ_RESPONSE native_m0_fn_23
 #define RT_WARM_READ_FOR_LOG_RESPONSE native_m0_fn_24
 
