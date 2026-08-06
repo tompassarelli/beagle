@@ -215,7 +215,7 @@
 (def fold-obligation-verdicts: (Vec obligations/ObligationVerdictV0)
   [(obligations/valid-ssa fold-world)
    (obligations/exhaustive-matches fold-world)
-   (obligations/closed-layouts fold-world)
+   (obligations/closed-layouts fold-world (core/abi-profile-lp64))
    (obligations/checked-arithmetic fold-world)
    (obligations/legal-abi fold-world)
    (obligations/discharged-tokens fold-world)

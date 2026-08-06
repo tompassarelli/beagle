@@ -93,11 +93,11 @@ rg -q 'TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure nat
 
 mkdir -p "$scratch/c"
 clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
-(require 'native.body-c17 'native.obligations 'native.qbe-validation-corpus)
+(require 'native.body-c17 'native.core 'native.obligations 'native.qbe-validation-corpus)
 (let [world native.qbe-validation-corpus/atom-world
       verdicts [(native.obligations/valid-ssa world)
                 (native.obligations/exhaustive-matches world)
-                (native.obligations/closed-layouts world)
+                (native.obligations/closed-layouts world (native.core/abi-profile-lp64))
                 (native.obligations/checked-arithmetic world)
                 (native.obligations/legal-abi world)
                 (native.obligations/discharged-tokens world)

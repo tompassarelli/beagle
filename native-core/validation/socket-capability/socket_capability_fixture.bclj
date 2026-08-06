@@ -139,7 +139,7 @@
           (obligations/exhaustive-matches world))) "\n"
         "layouts "
         (str (obligations/obligation-passed?
-          (obligations/closed-layouts world))) "\n"
+          (obligations/closed-layouts world (core/abi-profile-lp64)))) "\n"
         "checked "
         (str (obligations/obligation-passed?
           (obligations/checked-arithmetic world))) "\n"
