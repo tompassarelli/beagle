@@ -1,5 +1,6 @@
 (require '[clojure.string :as str]
          '[native.body-slice :as body-slice]
+         '[native.core :as core]
          '[native.lower :as lower]
          '[native.qbe :as qbe]
          '[native.slice :as slice]
@@ -15,12 +16,13 @@
       native-result (lower/lower-native-world
                      (lower/typingacceptedv0-sealed typing)
                      (lower/typingacceptedv0-slice typing)
-                     compiler-commit configuration)
+                     compiler-commit configuration
+                     (core/abi-profile-lp64))
       sealed-native (slice/native-sealed native-result)
       world (worlds/nativeworldv0-program
              (worlds/sealednativeworldv0-world sealed-native))
       projected (body-slice/projected-world world)
-      result (qbe/materialize-world projected 0)
+      result (qbe/materialize-world projected 0 "lp64")
       detail (get result :detail)]
   (if (and (string? detail)
            (str/starts-with? detail "QBE codec primitive is unsupported: "))

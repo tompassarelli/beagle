@@ -118,7 +118,7 @@
 
 (defn obligations-pass? [(world : core/NativeWorld)] -> Bool
   (every? obligations/obligation-passed?
-    (obligations/validate-native-world world)))
+    (obligations/validate-native-world world (core/abi-profile-lp64))))
 
 (defn qbe-detail [(result : qbe/QbeMaterialization)] -> String
   (if (instance? native.qbe.QbeFailure result)
@@ -128,7 +128,7 @@
 (defn emit-fixture! [(artifacts-dir : String)] -> String
   (let [world: core/NativeWorld (fixture-world)
         c-result: body/BodyMaterializationV0 (body/materialize-world world 0)
-        qbe-result: qbe/QbeMaterialization (qbe/materialize-world world 0)]
+        qbe-result: qbe/QbeMaterialization (qbe/materialize-world world 0 "lp64")]
     (if (or (not (obligations-pass? world))
             (not (body/materialization-ok? c-result)))
       (str "fixture REFUSED " (body/materialization-detail c-result) "\n"

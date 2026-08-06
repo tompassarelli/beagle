@@ -11,6 +11,8 @@
 #      NATIVE_SLICE_COMMITTED_FACTS.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
@@ -57,7 +59,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
   (native.slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"
-    \"fram:src/fram/types.bgl\" \"$art\" \"native-slice-types-full-v0\"))"
+    \"fram:src/fram/types.bgl\" \"$art\" \"native-slice-types-full-v0\" \"$abi\"))"
 
 if [[ -n "$banner" ]]; then
   sed -i "1i $banner" "$art/report.txt"

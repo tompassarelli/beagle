@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
@@ -54,7 +56,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-slice! \"$art/fixture.facts\"
     \"native.codec-primitives\"
     \"beagle:native-core/validation/slice-codec-primitives/fixture.bclj\"
-    \"$art\" \"native-slice-codec-primitives-v0\"))"
+    \"$art\" \"native-slice-codec-primitives-v0\" \"$abi\"))"
 cat "$art/report.txt"
 grep -q '^materialize OK ' "$art/report.txt"
 if grep -q '^obligation-projection FAIL' "$art/report.txt"; then

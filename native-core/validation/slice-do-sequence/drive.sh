@@ -2,6 +2,8 @@
 # Exercises ordered non-looping expression bodies through Native World and C17.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-do-sequence.XXXXXX")"
@@ -67,7 +69,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-slice! \"$scratch/sequence.facts\"
     \"native.do-sequence-validation\"
     \"beagle:native-core/validation/slice-do-sequence/sequence.ast.json\"
-    \"$scratch\" \"native-do-sequence-v0\"))"
+    \"$scratch\" \"native-do-sequence-v0\" \"$abi\"))"
 
 report="$scratch/report.txt"
 cat "$report"

@@ -276,7 +276,7 @@
 
 (defn obligation-lines [(world : core/NativeWorld)] -> (Vec String)
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
-        (obligations/validate-native-world world)]
+        (obligations/validate-native-world world (core/abi-profile-lp64))]
     (loop [index: Int 0 lines: (Vec String) []]
       (if (>= index (count verdicts))
         lines
@@ -373,7 +373,8 @@
         typed-seal: worlds/SealedTypedWorldV0 (require-typing typing-result)
         typed-slice: lower/TypedSliceV0 (require-slice typing-result)
         native-result: lower/NativeLoweringResultV0
-        (lower/lower-native-world typed-seal typed-slice "e50f806" configuration)
+        (lower/lower-native-world typed-seal typed-slice "e50f806" configuration
+          (core/abi-profile-lp64))
         native-seal: worlds/SealedNativeWorldV0 (require-native-seal native-result)
         lowered-world: core/NativeWorld
         (worlds/nativeworldv0-program

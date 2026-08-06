@@ -2,6 +2,8 @@
 # Exercises the restricted closed-Vec doseq slice through Native World and C17.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-doseq.XXXXXX")"
@@ -73,7 +75,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-slice! \"$scratch/doseq.facts\"
     \"native.doseq\"
     \"beagle:native-core/validation/slice-doseq/doseq.bclj\"
-    \"$scratch/art\" \"native-doseq-v0\"))"
+    \"$scratch/art\" \"native-doseq-v0\" \"$abi\"))"
 
 report="$scratch/report.txt"
 cat "$report"

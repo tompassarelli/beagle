@@ -1,4 +1,5 @@
 (require '[native.body-slice :as body-slice]
+         '[native.core :as core]
          '[native.lower :as lower]
          '[native.qbe :as qbe]
          '[native.slice :as slice]
@@ -21,12 +22,13 @@
           (let [sealed-typed (lower/typingacceptedv0-sealed typing-result)
                 typed-slice (lower/typingacceptedv0-slice typing-result)
                 native-result (lower/lower-native-world
-                                sealed-typed typed-slice compiler-commit configuration)
+                                sealed-typed typed-slice compiler-commit configuration
+                                (core/abi-profile-lp64))
                 sealed-native (slice/native-sealed native-result)
                 program (worlds/nativeworldv0-program
                           (worlds/sealednativeworldv0-world sealed-native))
                 projected (body-slice/projected-world program)
-                result (qbe/materialize-world projected 0)]
+                result (qbe/materialize-world projected 0 "lp64")]
             (if (instance? native.qbe.QbeSuccess result)
               (let [artifact (qbe/qbesuccess-artifact result)
                     name (qbe/qbeartifact-module-name artifact)]
@@ -40,8 +42,10 @@
   (when (some nil? [facts-path artifacts-dir compiler-commit report-path])
     (throw (ex-info
       "usage: native_runner.clj FACTS ARTIFACTS COMPILER-COMMIT REPORT" {})))
-  (let [c-report (body-slice/emit-slice! facts-path "fram.rt-core"
-                   "fram:src/fram/rt_core.bclj" artifacts-dir compiler-commit)
+  (let [abi-id (or (System/getenv "NATIVE_SLICE_ABI") "lp64")
+        c-report (body-slice/emit-slice! facts-path "fram.rt-core"
+                   "fram:src/fram/rt_core.bclj" artifacts-dir compiler-commit
+                   abi-id)
         backend-report (try
                          (qbe-report facts-path artifacts-dir compiler-commit)
                          (catch Throwable error

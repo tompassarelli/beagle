@@ -1,0 +1,7 @@
+export func _start
+export memory memory
+import func wasi_snapshot_preview1.fd_close
+import func wasi_snapshot_preview1.fd_fdstat_get
+import func wasi_snapshot_preview1.fd_seek
+import func wasi_snapshot_preview1.fd_write
+import func wasi_snapshot_preview1.proc_exit

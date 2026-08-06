@@ -7,6 +7,8 @@
 # fram counted shapes and refuses checked-arithmetic on its interim add-i64.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-loops.XXXXXX")"
@@ -54,7 +56,7 @@ emit_slice() {
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/loops.facts\" \"$module\"
-    \"beagle:${src#"$repo"/}\" \"$art\" \"native-slice-loops-v0\"))"
+    \"beagle:${src#"$repo"/}\" \"$art\" \"native-slice-loops-v0\" \"$abi\"))"
   cat "$art/report.txt"
   if [ -z "$pending" ] && grep -q '^pending ' "$art/report.txt"; then
     echo "drive.sh: a loop fixture function did not lower" >&2

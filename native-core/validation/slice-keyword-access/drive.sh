@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
@@ -59,7 +61,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-slice! \"$scratch/fixture.facts\"
     \"native.keyword-access\"
     \"native-core/validation/slice-keyword-access/fixture.bclj\"
-    \"$art\" \"native-slice-keyword-access-v0\"))"
+    \"$art\" \"native-slice-keyword-access-v0\" \"$abi\"))"
 cat "$art/report.txt"
 
 clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "

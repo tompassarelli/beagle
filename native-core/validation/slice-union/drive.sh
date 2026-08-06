@@ -7,6 +7,8 @@
 # the trap; the projection reuses slice-bodies' AST-to-facts step unchanged.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
@@ -56,7 +58,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (spit \"$art/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\" \"fixture.union\"
     \"native-core/validation/slice-union/fixture.bclj\" \"$art\"
-    \"native-slice-union-v0\" \"numeric-int-double-less?\" 2))"
+    \"native-slice-union-v0\" \"numeric-int-double-less?\" 2 \"$abi\"))"
 
 cat "$art/report.txt"
 grep -Fq "lowered fn_44 vector-value? " "$art/report.txt"

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-int-division.XXXXXX")"
@@ -94,17 +96,17 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.int-division\"
     \"beagle:native-core/validation/slice-int-division/fixture.bclj\"
-    \"$scratch\" \"native-int-division-v0\" \"float-arithmetic\" 0))
+    \"$scratch\" \"native-int-division-v0\" \"float-arithmetic\" 0 \"$abi\"))
 (spit \"$scratch/integer-qbe-report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.int-division\"
     \"beagle:native-core/validation/slice-int-division/fixture.bclj\"
-    \"$scratch/integer-qbe\" \"native-int-division-v0\" \"quot-int\" 0))
+    \"$scratch/integer-qbe\" \"native-int-division-v0\" \"quot-int\" 0 \"$abi\"))
 (spit \"$scratch/ratio-report.txt\"
   (native.body-slice/emit-slice! \"$scratch/ratio.facts\"
     \"native.ratio-refusal\"
     \"beagle:native-core/validation/slice-int-division/ratio_refusal.bclj\"
-    \"$scratch/ratio\" \"native-int-division-v0\"))"
+    \"$scratch/ratio\" \"native-int-division-v0\" \"$abi\"))"
 
 cat "$scratch/report.txt"
 rg -q '^stage typed-to-native COMPLETE$' "$scratch/report.txt"

@@ -2,6 +2,8 @@
 # Exercises eager inline callbacks, lexical captures, and function-boundary refusals.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-inline-callbacks.XXXXXX")"
@@ -81,13 +83,13 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"native.inline-callbacks\"
     \"beagle:native-core/validation/slice-inline-callbacks/inline_callbacks.bclj\"
     \"$scratch/art\" \"native-inline-callbacks-v0\"
-    \"captured-reduce\" 0))
+    \"captured-reduce\" 0 \"$abi\"))
 (spit \"$scratch/refusal-report.txt\"
   (native.body-slice/emit-slice!
     \"$scratch/inline_callback_refusals.facts\"
     \"native.inline-callback-refusals\"
     \"beagle:native-core/validation/slice-inline-callbacks/inline_callback_refusals.bclj\"
-    \"$scratch/refusal-art\" \"native-inline-callback-refusals-v0\"))"
+    \"$scratch/refusal-art\" \"native-inline-callback-refusals-v0\" \"$abi\"))"
 
 report="$scratch/report.txt"
 refusal_report="$scratch/refusal-report.txt"

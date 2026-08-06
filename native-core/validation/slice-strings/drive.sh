@@ -10,6 +10,8 @@
 # fail on drift.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
@@ -98,11 +100,11 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$art/text_ops.facts\" \"native.text-ops\"
     \"native-core/validation/slice-strings/text_ops.bclj\" \"$art\"
-    \"native-slice-strings-v0\"))
+    \"native-slice-strings-v0\" \"$abi\"))
 (spit \"$art/replay-report.txt\"
   (native.body-slice/emit-slice! \"$art/replay_text.facts\" \"fram.fri-replay\"
     \"fram:src/fram/fri_replay.bclj\" \"$replay_art\"
-    \"native-slice-strings-v0\"))"
+    \"native-slice-strings-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
 echo "-- fram.fri-replay native slice --"

@@ -3,6 +3,8 @@
 # obligations, prove QBE's explicit refusal, then compile and run the result.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_ATOM_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-atom.XXXXXX")"
@@ -66,13 +68,13 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"$scratch/atom_mutations.facts\"
     \"native.atom-mutations\"
     \"beagle:native-core/validation/atom/atom_mutations.bclj\"
-    \"$scratch/source-art\" \"native-atom-mutations-v0\"))
+    \"$scratch/source-art\" \"native-atom-mutations-v0\" \"$abi\"))
 (spit \"$scratch/refusal-report.txt\"
   (native.body-slice/emit-slice!
     \"$scratch/atom_mutation_refusals.facts\"
     \"native.atom-mutation-refusals\"
     \"beagle:native-core/validation/atom/atom_mutation_refusals.bclj\"
-    \"$scratch/refusal-art\" \"native-atom-mutation-refusals-v0\"))"
+    \"$scratch/refusal-art\" \"native-atom-mutation-refusals-v0\" \"$abi\"))"
 
 for name in direct-update make-counter-cell make-vector-cell reset-counter! \
     update-counter! assoc-counter! assoc-counter-map! append-value! \

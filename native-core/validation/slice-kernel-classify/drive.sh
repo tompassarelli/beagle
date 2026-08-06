@@ -3,6 +3,8 @@
 # oracle through full C17 and a direct QBE projection of delivery-trigger?.
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
@@ -85,7 +87,8 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"$scratch/generated\"
     \"native-kernel-classify-v0\"
     \"delivery-trigger?\"
-    1))"
+    1
+    \"$abi\"))"
 
 report="$scratch/generated/report.txt"
 for line in \

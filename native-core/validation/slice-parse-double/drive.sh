@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-parse-double.XXXXXX")"
@@ -64,7 +66,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.parse-double\"
     \"beagle:native-core/validation/slice-parse-double/fixture.bclj\"
-    \"$scratch\" \"native-slice-parse-double-v0\" \"parse-value\" 1))"
+    \"$scratch\" \"native-slice-parse-double-v0\" \"parse-value\" 1 \"$abi\"))"
 
 cat "$scratch/report.txt"
 for line in \

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 sequence_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sequence_repo="${NATIVE_SLICE_REPO:-$(cd "$sequence_here/../../.." && pwd)}"
 sequence_scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-sequence-primitives.XXXXXX")"
@@ -54,7 +56,8 @@ for pass in one two; do
     \"$artifacts\"
     \"sequence-primitives-v0\"
     \"sort-texts\"
-    0))"
+    0
+    \"$abi\"))"
 done
 
 report="$sequence_scratch/artifacts-one/report.txt"

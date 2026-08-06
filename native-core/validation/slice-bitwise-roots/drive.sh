@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-bitwise-roots.XXXXXX")"
@@ -69,7 +71,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.bitwise-roots\"
     \"beagle:native-core/validation/slice-bitwise-roots/fixture.bclj\"
-    \"$scratch\" \"native-bitwise-roots-v0\" \"codec-word\" 1))"
+    \"$scratch\" \"native-bitwise-roots-v0\" \"codec-word\" 1 \"$abi\"))"
 
 report="$scratch/report.txt"
 for line in \

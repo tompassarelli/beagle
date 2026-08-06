@@ -7,6 +7,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 artifacts="${NATIVE_SLICE_ARTIFACTS:-$here}"
 module="${NATIVE_SLICE_MODULE:-fold}"
+abi="${NATIVE_SLICE_ABI:-lp64}"
 
 if [ "$module" != "fold" ]; then
   echo "drive.sh: this driver only serves NATIVE_SLICE_MODULE=fold (got: $module)" >&2
@@ -30,7 +31,7 @@ BEAGLE_OUT="$work/out" "$repo/bin/beagle" build --target clj "$work"/src/native/
   > "$work/build.log" 2>&1 || { cat "$work/build.log" >&2; exit 1; }
 
 bb -cp "$work/out" -e \
-  "(require (quote native.fold-slice-corpus)) (native.fold-slice-corpus/emit-slice! \"$artifacts\")"
+  "(require (quote native.fold-slice-corpus)) (native.fold-slice-corpus/emit-slice! \"$artifacts\" \"$abi\")"
 
 echo "drive.sh: materialized $artifacts/module_0.h $artifacts/module_0.c $artifacts/main.c"
 

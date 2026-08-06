@@ -41,7 +41,7 @@
                 (lower/typingacceptedv0-slice typing-result)
                 native-result: lower/NativeLoweringResultV0
                 (lower/lower-native-world sealed-typed typed-slice compiler-commit
-                  configuration)
+                  configuration (core/abi-profile-lp64))
                 sealed-native: worlds/SealedNativeWorldV0
                 (slice/native-sealed native-result)
                 full: core/NativeWorld
@@ -51,7 +51,7 @@
                 c-result: body/BodyMaterializationV0
                 (body/materialize-world selected 0)
                 qbe-result: qbe/QbeMaterialization
-                (qbe/materialize-world selected 0)
+                (qbe/materialize-world selected 0 "lp64")
                 head: String
                 (str "stage source-seal ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
@@ -68,8 +68,9 @@
                   (str (count (core/nativeworld-abis selected))) "\n"
                   (body-slice/function-report
                     (core/nativeworld-functions selected))
-                  (slice/obligation-report "obligation-main" selected)
-                  (body-slice/failing-obligations selected)
+                  (slice/obligation-report "obligation-main" selected
+                    (core/abi-profile-lp64))
+                  (body-slice/failing-obligations selected (core/abi-profile-lp64))
                   (slice/pending-reports (slice/native-pending native-result)))]
             (if (not (body/materialization-ok? c-result))
               (str head "materialize REFUSED "

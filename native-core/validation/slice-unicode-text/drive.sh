@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+abi="${NATIVE_SLICE_ABI:-lp64}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-unicode-text.XXXXXX")"
@@ -95,7 +97,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.unicode-text\"
     \"beagle:native-core/validation/slice-unicode-text/fixture.bclj\"
-    \"$scratch\" \"native-unicode-text-v0\" \"letter-decimal-runs\" 0))"
+    \"$scratch\" \"native-unicode-text-v0\" \"letter-decimal-runs\" 0 \"$abi\"))"
 
 cat "$scratch/report.txt"
 rg -q '^stage typed-to-native COMPLETE$' "$scratch/report.txt"
