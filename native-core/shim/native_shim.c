@@ -3671,8 +3671,22 @@ size_t native_arena_reserved_bytes(const native_arena *arena) {
   return total;
 }
 
+uint32_t native_last_trap_code = UINT32_C(0);
+
+static native_trap_reporter native_registered_trap_reporter = NULL;
+
+void native_set_trap_reporter(native_trap_reporter reporter) {
+  native_registered_trap_reporter = reporter;
+}
+
 _Noreturn void native_trap(uint32_t code) {
-  (void)code;
+  native_trap_reporter reporter = native_registered_trap_reporter;
+
+  native_last_trap_code = code;
+  native_registered_trap_reporter = NULL;
+  if (reporter != NULL) {
+    reporter(code);
+  }
   abort();
 }
 

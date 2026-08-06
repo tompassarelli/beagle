@@ -186,6 +186,15 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment);
 void native_arena_reset(native_arena *arena);
 void native_arena_destroy(native_arena *arena);
 size_t native_arena_reserved_bytes(const native_arena *arena);
+/* Report-only: a trap still aborts, and nothing here resumes a trapped world. */
+extern uint32_t native_last_trap_code;
+
+typedef void (*native_trap_reporter)(uint32_t code);
+
+/* NULL clears. The reporter is deregistered before it runs, so one that itself
+   traps cannot recurse. */
+void native_set_trap_reporter(native_trap_reporter reporter);
+
 _Noreturn void native_trap(uint32_t code);
 
 native_atom *native_atom_new(native_arena *arena,
