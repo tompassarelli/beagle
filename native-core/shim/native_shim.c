@@ -8062,6 +8062,9 @@ int32_t native_host_socket_inherited_listener_v0(
   if (fcntl(descriptor, F_GETFD) == -1) {
     return native_host_socket_errno();
   }
+  // wasip1 defines no SO_ACCEPTCONN, so there the host preopen is the listener
+  // claim and a non-listening descriptor fails at accept instead.
+#ifndef __wasi__
   if (getsockopt(descriptor, SOL_SOCKET, SO_ACCEPTCONN, &accepting,
                  &accepting_size) == -1) {
     return native_host_socket_errno();
@@ -8069,6 +8072,10 @@ int32_t native_host_socket_inherited_listener_v0(
   if (accepting == 0) {
     return EINVAL;
   }
+#else
+  (void)accepting;
+  (void)accepting_size;
+#endif
   *out = fd;
   return NATIVE_HOST_SOCKET_OK;
 }
