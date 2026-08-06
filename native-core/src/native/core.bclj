@@ -166,6 +166,45 @@
    (align-bytes : Int)
    (shape : LayoutShapeV0)])
 
+;; The target-ABI numbers layout measurement consumes. Deliberately NOT a
+;; NativeWorld field and never encoded: a world's LayoutDefs already carry the
+;; ABI in their digested numbers, so one sealed world exists per target ABI.
+(defrecord AbiProfileV0
+  [(id : String)
+   (pointer-bytes : Int)
+   (pointer-align : Int)
+   (size-t-bytes : Int)
+   (size-t-align : Int)])
+
+(defn abi-profile-lp64 [] -> AbiProfileV0
+  (->AbiProfileV0 "lp64" 8 8 8 8))
+
+(defn abi-profile-wasm32 [] -> AbiProfileV0
+  (->AbiProfileV0 "wasm32" 4 4 4 4))
+
+(defn abi-profile-for [(id : String)] -> (U AbiProfileV0 Nil)
+  (cond
+    (= id "lp64") (abi-profile-lp64)
+    (= id "wasm32") (abi-profile-wasm32)
+    :else nil))
+
+(defn abi-align-up [(offset : Int) (alignment : Int)] -> Int
+  (if (<= alignment 1)
+    offset
+    (* alignment (quot (+ offset (- alignment 1)) alignment))))
+
+;; An owned byte span is {pointer, size_t}: the pointer first, the length at the
+;; next size_t-aligned offset.
+(defn abi-bytes-span-size [(abi : AbiProfileV0)] -> Int
+  (+ (abi-align-up (abiprofilev0-pointer-bytes abi)
+       (abiprofilev0-size-t-align abi))
+    (abiprofilev0-size-t-bytes abi)))
+
+(defn abi-bytes-span-align [(abi : AbiProfileV0)] -> Int
+  (let [pointer-align: Int (abiprofilev0-pointer-align abi)
+        size-t-align: Int (abiprofilev0-size-t-align abi)]
+    (if (> pointer-align size-t-align) pointer-align size-t-align)))
+
 (defrecord Parameter [id :- NativeId type-id :- NativeId])
 
 (defrecord SsaValueV0 [(id : NativeId) (type-id : NativeId)])

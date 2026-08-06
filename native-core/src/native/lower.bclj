@@ -14862,144 +14862,163 @@
       (core/uniontype-variants shape)
       [])))
 
+;; Every width the target ABI owns enters layout measurement here; scalar bit
+;; widths and the i64 union tag are target-neutral and stay literal.
 (defn measure-type
   [(types : (Vec core/TypeDef))
    (target : core/NativeId)
-   (depth : Int)] -> LayoutMeasureV0
-  (if (> depth 32)
-    (->LayoutMeasureV0 8 8 false
-      (str "recursive value layout requires an explicit reference edge: "
-        (id-value target)))
-    (let [definition: (U core/TypeDef Nil) (find-type-def types target)]
-      (if (nil? definition)
-        (->LayoutMeasureV0 8 8 false
-          (str "layout target has no TypeDef: " (id-value target)))
-        (let [shape: core/TypeShape (core/typedef-shape definition)]
-          (cond
-            (instance? native.core.AtomType shape)
-            (let [kind: core/AtomKind (core/atomtype-kind shape)]
-              (cond
-                (instance? native.core.BoolKind kind) (->LayoutMeasureV0 1 1 true "bool")
-                (instance? native.core.I64Kind kind) (->LayoutMeasureV0 8 8 true "i64")
-                (instance? native.core.F64Kind kind) (->LayoutMeasureV0 8 8 true "f64")
-                (instance? native.core.TextKind kind)
-                (->LayoutMeasureV0 8 8 true "text handle")
-                (instance? native.core.BytesKind kind)
-                (->LayoutMeasureV0 16 8 true "owned byte span")
-                (instance? native.core.KeywordKind kind)
-                (->LayoutMeasureV0 8 8 true "keyword handle")
-                :else (->LayoutMeasureV0 8 8 true "reference-sized atom")))
+   (depth : Int)
+   (abi : core/AbiProfileV0)] -> LayoutMeasureV0
+  (let [pointer-bytes: Int (core/abiprofilev0-pointer-bytes abi)
+        pointer-align: Int (core/abiprofilev0-pointer-align abi)]
+    (if (> depth 32)
+      (->LayoutMeasureV0 pointer-bytes pointer-align false
+        (str "recursive value layout requires an explicit reference edge: "
+          (id-value target)))
+      (let [definition: (U core/TypeDef Nil) (find-type-def types target)]
+        (if (nil? definition)
+          (->LayoutMeasureV0 pointer-bytes pointer-align false
+            (str "layout target has no TypeDef: " (id-value target)))
+          (let [shape: core/TypeShape (core/typedef-shape definition)]
+            (cond
+              (instance? native.core.AtomType shape)
+              (let [kind: core/AtomKind (core/atomtype-kind shape)]
+                (cond
+                  (instance? native.core.BoolKind kind)
+                  (->LayoutMeasureV0 1 1 true "bool")
+                  (instance? native.core.I64Kind kind)
+                  (->LayoutMeasureV0 8 8 true "i64")
+                  (instance? native.core.F64Kind kind)
+                  (->LayoutMeasureV0 8 8 true "f64")
+                  (instance? native.core.TextKind kind)
+                  (->LayoutMeasureV0 8 8 true "text handle")
+                  (instance? native.core.BytesKind kind)
+                  (->LayoutMeasureV0 (core/abi-bytes-span-size abi)
+                    (core/abi-bytes-span-align abi) true "owned byte span")
+                  (instance? native.core.KeywordKind kind)
+                  (->LayoutMeasureV0 8 8 true "keyword handle")
+                  :else
+                  (->LayoutMeasureV0 pointer-bytes pointer-align true
+                    "reference-sized atom")))
 
-            (instance? native.core.ReferenceType shape)
-            (->LayoutMeasureV0 8 8 true "reference")
+              (instance? native.core.ReferenceType shape)
+              (->LayoutMeasureV0 pointer-bytes pointer-align true "reference")
 
-            (instance? native.core.AtomCellTypeV0 shape)
-            (->LayoutMeasureV0 8 8 true "atom cell handle")
+              (instance? native.core.AtomCellTypeV0 shape)
+              (->LayoutMeasureV0 pointer-bytes pointer-align true
+                "atom cell handle")
 
-            ;; A vector value is a reference to its {elements, length, capacity}
-            ;; header, so its size never depends on the element type — that is
-            ;; what closes the layout of a record with a (Vec Record) field.
-            (instance? native.core.VectorType shape)
-            (->LayoutMeasureV0 8 8 true "vector header reference")
+              ;; A vector value is a reference to its {elements, length, capacity}
+              ;; header, so its size never depends on the element type — that is
+              ;; what closes the layout of a record with a (Vec Record) field.
+              (instance? native.core.VectorType shape)
+              (->LayoutMeasureV0 pointer-bytes pointer-align true
+                "vector header reference")
 
-            (instance? native.core.FunctionType shape)
-            (->LayoutMeasureV0 8 8 false
-              "TODO-NATIVE-FUNCTION-LAYOUT: callable signatures have no closure layout or indirect-call ABI")
+              (instance? native.core.FunctionType shape)
+              (->LayoutMeasureV0 pointer-bytes pointer-align false
+                "TODO-NATIVE-FUNCTION-LAYOUT: callable signatures have no closure layout or indirect-call ABI")
 
-            (instance? native.core.MapTypeV0 shape)
-            (->LayoutMeasureV0 8 8 true "map header reference")
+              (instance? native.core.MapTypeV0 shape)
+              (->LayoutMeasureV0 pointer-bytes pointer-align true
+                "map header reference")
 
-            (instance? native.core.SetTypeV0 shape)
-            (->LayoutMeasureV0 8 8 true "set header reference")
+              (instance? native.core.SetTypeV0 shape)
+              (->LayoutMeasureV0 pointer-bytes pointer-align true
+                "set header reference")
 
-            (instance? native.core.RecordType shape)
-            (let [fields: (Vec core/TypeField) (core/recordtype-fields shape)]
-              (loop [index: Int 0 offset: Int 0 alignment: Int 1 closed: Bool true]
-                (if (>= index (count fields))
-                  (->LayoutMeasureV0 (align-up offset alignment) alignment closed
-                    (if closed "record" "record contains an unclosed field layout"))
-                  (let [field: core/TypeField (nth fields index)
-                        measure: LayoutMeasureV0
-                        (measure-type types (core/typefield-type-id field) (+ depth 1))
-                        field-align: Int (layoutmeasurev0-align-bytes measure)
-                        field-offset: Int (align-up offset field-align)]
-                    (recur (+ index 1)
-                      (+ field-offset (layoutmeasurev0-size-bytes measure))
-                      (max-int alignment field-align)
-                      (and closed (layoutmeasurev0-closed measure)))))))
+              (instance? native.core.RecordType shape)
+              (let [fields: (Vec core/TypeField) (core/recordtype-fields shape)]
+                (loop [index: Int 0 offset: Int 0 alignment: Int 1 closed: Bool true]
+                  (if (>= index (count fields))
+                    (->LayoutMeasureV0 (align-up offset alignment) alignment closed
+                      (if closed "record" "record contains an unclosed field layout"))
+                    (let [field: core/TypeField (nth fields index)
+                          measure: LayoutMeasureV0
+                          (measure-type types (core/typefield-type-id field)
+                            (+ depth 1) abi)
+                          field-align: Int (layoutmeasurev0-align-bytes measure)
+                          field-offset: Int (align-up offset field-align)]
+                      (recur (+ index 1)
+                        (+ field-offset (layoutmeasurev0-size-bytes measure))
+                        (max-int alignment field-align)
+                        (and closed (layoutmeasurev0-closed measure)))))))
 
-            (instance? native.core.UnionType shape)
-            (let [variants: (Vec core/TypeVariant) (core/uniontype-variants shape)]
-              (loop [index: Int 0 payload-size: Int 0 payload-align: Int 1 closed: Bool true]
-                (if (>= index (count variants))
-                  (let [alignment: Int (max-int 8 payload-align)
-                        payload-offset: Int (align-up 8 payload-align)]
-                    (->LayoutMeasureV0
-                      (align-up (+ payload-offset payload-size) alignment)
-                      alignment
-                      closed
-                      (if closed "closed union" "union contains an unclosed payload layout")))
-                  (let [variant: core/TypeVariant (nth variants index)
-                        payload: (U core/NativeId Nil)
-                        (core/typevariant-payload-type variant)]
-                    (if (nil? payload)
-                      (recur (+ index 1) payload-size payload-align closed)
-                      (let [measure: LayoutMeasureV0
-                            (measure-type types payload (+ depth 1))]
-                        (recur (+ index 1)
-                          (max-int payload-size (layoutmeasurev0-size-bytes measure))
-                          (max-int payload-align (layoutmeasurev0-align-bytes measure))
-                          (and closed (layoutmeasurev0-closed measure)))))))))
+              (instance? native.core.UnionType shape)
+              (let [variants: (Vec core/TypeVariant) (core/uniontype-variants shape)]
+                (loop [index: Int 0 payload-size: Int 0 payload-align: Int 1 closed: Bool true]
+                  (if (>= index (count variants))
+                    (let [alignment: Int (max-int 8 payload-align)
+                          payload-offset: Int (align-up 8 payload-align)]
+                      (->LayoutMeasureV0
+                        (align-up (+ payload-offset payload-size) alignment)
+                        alignment
+                        closed
+                        (if closed "closed union" "union contains an unclosed payload layout")))
+                    (let [variant: core/TypeVariant (nth variants index)
+                          payload: (U core/NativeId Nil)
+                          (core/typevariant-payload-type variant)]
+                      (if (nil? payload)
+                        (recur (+ index 1) payload-size payload-align closed)
+                        (let [measure: LayoutMeasureV0
+                              (measure-type types payload (+ depth 1) abi)]
+                          (recur (+ index 1)
+                            (max-int payload-size (layoutmeasurev0-size-bytes measure))
+                            (max-int payload-align (layoutmeasurev0-align-bytes measure))
+                            (and closed (layoutmeasurev0-closed measure)))))))))
 
-            ;; Measured over the failure union's payloads, not its boxed size:
-            ;; layout-shape-for flattens those alternatives into the Outcome.
-            (instance? native.core.OutcomeType shape)
-            (let [value-measure: LayoutMeasureV0
-                  (measure-type types (core/outcometype-value-type shape) (+ depth 1))
-                  variants: (Vec core/TypeVariant)
-                  (outcome-variants types (core/outcometype-failure-type shape))
-                  payloads: LayoutMeasureV0
-                  (loop [index: Int 0 size: Int 0 alignment: Int 1 closed: Bool true]
-                    (if (>= index (count variants))
-                      (->LayoutMeasureV0 size alignment closed "outcome payloads")
-                      (let [payload: (U core/NativeId Nil)
-                            (core/typevariant-payload-type (nth variants index))]
-                        (if (nil? payload)
-                          (recur (+ index 1) size alignment closed)
-                          (let [measure: LayoutMeasureV0
-                                (measure-type types payload (+ depth 1))]
-                            (recur (+ index 1)
-                              (max-int size (layoutmeasurev0-size-bytes measure))
-                              (max-int alignment
-                                (layoutmeasurev0-align-bytes measure))
-                              (and closed (layoutmeasurev0-closed measure))))))))
-                  payload-align: Int
-                  (max-int (layoutmeasurev0-align-bytes value-measure)
-                    (layoutmeasurev0-align-bytes payloads))
-                  payload-size: Int
-                  (max-int (layoutmeasurev0-size-bytes value-measure)
-                    (layoutmeasurev0-size-bytes payloads))
-                  alignment: Int (max-int 8 payload-align)
-                  payload-offset: Int (align-up 8 payload-align)]
-              (->LayoutMeasureV0
-                (align-up (+ payload-offset payload-size) alignment)
-                alignment
-                (and (layoutmeasurev0-closed value-measure)
-                     (layoutmeasurev0-closed payloads))
-                "outcome"))
+              ;; Measured over the failure union's payloads, not its boxed size:
+              ;; layout-shape-for flattens those alternatives into the Outcome.
+              (instance? native.core.OutcomeType shape)
+              (let [value-measure: LayoutMeasureV0
+                    (measure-type types (core/outcometype-value-type shape)
+                      (+ depth 1) abi)
+                    variants: (Vec core/TypeVariant)
+                    (outcome-variants types (core/outcometype-failure-type shape))
+                    payloads: LayoutMeasureV0
+                    (loop [index: Int 0 size: Int 0 alignment: Int 1 closed: Bool true]
+                      (if (>= index (count variants))
+                        (->LayoutMeasureV0 size alignment closed "outcome payloads")
+                        (let [payload: (U core/NativeId Nil)
+                              (core/typevariant-payload-type (nth variants index))]
+                          (if (nil? payload)
+                            (recur (+ index 1) size alignment closed)
+                            (let [measure: LayoutMeasureV0
+                                  (measure-type types payload (+ depth 1) abi)]
+                              (recur (+ index 1)
+                                (max-int size (layoutmeasurev0-size-bytes measure))
+                                (max-int alignment
+                                  (layoutmeasurev0-align-bytes measure))
+                                (and closed (layoutmeasurev0-closed measure))))))))
+                    payload-align: Int
+                    (max-int (layoutmeasurev0-align-bytes value-measure)
+                      (layoutmeasurev0-align-bytes payloads))
+                    payload-size: Int
+                    (max-int (layoutmeasurev0-size-bytes value-measure)
+                      (layoutmeasurev0-size-bytes payloads))
+                    alignment: Int (max-int 8 payload-align)
+                    payload-offset: Int (align-up 8 payload-align)]
+                (->LayoutMeasureV0
+                  (align-up (+ payload-offset payload-size) alignment)
+                  alignment
+                  (and (layoutmeasurev0-closed value-measure)
+                       (layoutmeasurev0-closed payloads))
+                  "outcome"))
 
-            :else
-            (->LayoutMeasureV0 8 8 false "unknown native type shape")))))))
+              :else
+              (->LayoutMeasureV0 pointer-bytes pointer-align false
+                "unknown native type shape"))))))))
 
 (defn field-layouts
   [(types : (Vec core/TypeDef))
-   (fields : (Vec core/TypeField))] -> (Vec core/FieldLayoutV0)
+   (fields : (Vec core/TypeField))
+   (abi : core/AbiProfileV0)] -> (Vec core/FieldLayoutV0)
   (loop [index: Int 0 offset: Int 0 layouts: (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       layouts
       (let [field: core/TypeField (nth fields index)
             measure: LayoutMeasureV0
-            (measure-type types (core/typefield-type-id field) 0)
+            (measure-type types (core/typefield-type-id field) 0 abi)
             field-offset: Int (align-up offset (layoutmeasurev0-align-bytes measure))]
         (recur (+ index 1)
           (+ field-offset (layoutmeasurev0-size-bytes measure))
@@ -15012,7 +15031,8 @@
 
 (defn variant-layouts
   [(types : (Vec core/TypeDef))
-   (variants : (Vec core/TypeVariant))] -> (Vec core/UnionVariantLayoutV0)
+   (variants : (Vec core/TypeVariant))
+   (abi : core/AbiProfileV0)] -> (Vec core/UnionVariantLayoutV0)
   (loop [index: Int 0 layouts: (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count variants))
       layouts
@@ -15021,7 +15041,7 @@
             payload-align: Int
             (if (nil? payload)
               1
-              (layoutmeasurev0-align-bytes (measure-type types payload 0)))]
+              (layoutmeasurev0-align-bytes (measure-type types payload 0 abi)))]
         (recur (+ index 1)
           (conj layouts
             (core/->UnionVariantLayoutV0
@@ -15032,7 +15052,8 @@
 
 (defn layout-shape-for
   [(types : (Vec core/TypeDef))
-   (definition : core/TypeDef)] -> core/LayoutShapeV0
+   (definition : core/TypeDef)
+   (abi : core/AbiProfileV0)] -> core/LayoutShapeV0
   (let [shape: core/TypeShape (core/typedef-shape definition)]
     (cond
       (instance? native.core.AtomType shape)
@@ -15052,24 +15073,25 @@
           :else (core/->ReferenceShapeV0 (core/typedef-id definition))))
 
       (instance? native.core.RecordType shape)
-      (core/->RecordShapeV0 (field-layouts types (core/recordtype-fields shape)))
+      (core/->RecordShapeV0
+        (field-layouts types (core/recordtype-fields shape) abi))
 
       (instance? native.core.UnionType shape)
       (core/->UnionShapeV0
         (type-id "UnionTag")
         0
-        (variant-layouts types (core/uniontype-variants shape)))
+        (variant-layouts types (core/uniontype-variants shape) abi))
 
       (instance? native.core.VectorType shape)
       (let [element: core/NativeId (core/vectortype-element-type shape)
-            measure: LayoutMeasureV0 (measure-type types element 0)]
+            measure: LayoutMeasureV0 (measure-type types element 0 abi)]
         (core/->VectorShapeV0 element (layoutmeasurev0-size-bytes measure)))
 
       (instance? native.core.MapTypeV0 shape)
       (let [key-type: core/NativeId (core/maptypev0-key-type shape)
             value-type: core/NativeId (core/maptypev0-value-type shape)
-            key-measure: LayoutMeasureV0 (measure-type types key-type 0)
-            value-measure: LayoutMeasureV0 (measure-type types value-type 0)]
+            key-measure: LayoutMeasureV0 (measure-type types key-type 0 abi)
+            value-measure: LayoutMeasureV0 (measure-type types value-type 0 abi)]
         (core/->MapShapeV0
           key-type
           (layoutmeasurev0-size-bytes key-measure)
@@ -15081,7 +15103,7 @@
 
       (instance? native.core.SetTypeV0 shape)
       (let [element: core/NativeId (core/settypev0-element-type shape)
-            measure: LayoutMeasureV0 (measure-type types element 0)]
+            measure: LayoutMeasureV0 (measure-type types element 0 abi)]
         (core/->SetShapeV0 element
           (layoutmeasurev0-size-bytes measure)
           (layoutmeasurev0-align-bytes measure)
@@ -15103,30 +15125,33 @@
         (type-id "UnionTag")
         0
         (variant-layouts types
-          (outcome-variants types (core/outcometype-failure-type shape))))
+          (outcome-variants types (core/outcometype-failure-type shape)) abi))
 
       :else
       (core/->ReferenceShapeV0 (core/typedef-id definition)))))
 
 (defn resolve-layout
   [(types : (Vec core/TypeDef))
-   (definition : core/TypeDef)] -> LayoutResolutionV0
+   (definition : core/TypeDef)
+   (abi : core/AbiProfileV0)] -> LayoutResolutionV0
   (let [measure: LayoutMeasureV0
-        (measure-type types (core/typedef-id definition) 0)]
+        (measure-type types (core/typedef-id definition) 0 abi)]
     (->LayoutResolutionV0
       (core/->LayoutDef
         (lower-id "layout" [(id-value (core/typedef-id definition))])
         (core/typedef-id definition)
         (layoutmeasurev0-size-bytes measure)
         (layoutmeasurev0-align-bytes measure)
-        (layout-shape-for types definition))
+        (layout-shape-for types definition abi))
       (layoutmeasurev0-closed measure)
       (layoutmeasurev0-detail measure))))
 
-(defn resolve-layouts [(types : (Vec core/TypeDef))] -> (Vec LayoutResolutionV0)
+(defn resolve-layouts
+  [(types : (Vec core/TypeDef))
+   (abi : core/AbiProfileV0)] -> (Vec LayoutResolutionV0)
   (mapv
     (fn [(definition : core/TypeDef)] -> LayoutResolutionV0
-      (resolve-layout types definition))
+      (resolve-layout types definition abi))
     types))
 
 (defn collect-layouts
@@ -16675,11 +16700,12 @@
   [(sealed-typed : worlds/SealedTypedWorldV0)
    (slice : TypedSliceV0)
    (compiler-commit : String)
-   (configuration : (Vec String))] -> NativeLoweringResultV0
+   (configuration : (Vec String))
+   (abi : core/AbiProfileV0)] -> NativeLoweringResultV0
   (let [typed-digest: String (worlds/sealedtypedworldv0-digest sealed-typed)
         types: (Vec core/TypeDef)
         (append-type-def (typedslicev0-types slice) (union-tag-type))
-        layout-resolutions: (Vec LayoutResolutionV0) (resolve-layouts types)
+        layout-resolutions: (Vec LayoutResolutionV0) (resolve-layouts types abi)
         layouts: (Vec core/LayoutDef) (collect-layouts layout-resolutions)
         typed-functions: (Vec TypedFunctionV0) (typedslicev0-functions slice)
         functions: (Vec core/FunctionDef) (lower-ready-functions typed-functions)
@@ -17157,7 +17183,8 @@
               "fixture annotations did not close")]
            [(TypingAcceptedV0 sealed-typed slice typed-receipt)
             (let [native-result: NativeLoweringResultV0
-                  (lower-native-world sealed-typed slice compiler-commit configuration)]
+                  (lower-native-world sealed-typed slice compiler-commit
+                    configuration (core/abi-profile-lp64))]
               (match native-result
                 [(NativeLoweringPendingV0 sealed receipt obligations)
                  (->FixturePipelineFailedV0 "typed-to-native"
