@@ -1,10 +1,11 @@
-Source: `~/code/fram/main` revision `64720a6f850a3271e9b775082c18ec0f78998690`
-(checked 2026-07-27).
+Source: `~/code/fram/main` revision `d633a2840faabebfc4d1eb1f45b01e75fb876e5e`
+(checked 2026-08-07).
 
-This is the exact 14-module plus 12-fixture input corpus declared by
+This is the exact 7-module plus 12-fixture input corpus declared by
 `~/code/fram/main/tests/resolve_golden.sh`. It is vendored here so Beagle's
 facts-roundtrip parity certification is hermetic and catches every source shape
-consumed by Fram's resolve golden gate.
+consumed by Fram's resolve golden gate. Fram's remaining engine modules are
+`.bgl` Native Core and are not that gate's input, so they are not vendored.
 
 Fram and its codegraph directory are licensed `MIT OR Apache-2.0`; the
 corresponding license texts are included beside this file.

@@ -1,20 +1,27 @@
 #lang beagle/clj
 
+;; ============================================================================
 ;; fram.claims — assertion under verification. A claim is an ORDINARY FACT that
 ;; participates in a verification discipline expressed as MORE FACTS: a
 ;; predicate vocabulary, a few Datalog rules, and the views mechanics the engine
 ;; already has. No claim atom, no marker predicate, no engine change. Every
 ;; public name here READS; none writes (docs/claims-design.md).
+;;
+;; A claim is identified by the ASSERTION OCCURRENCE COORDINATE its write
+;; returned (the store has no fact-object cid any more), and `co` is an open
+;; handle {:schema <fram.schema Session> :writers <occurrence -> agent>}. Agent
+;; attribution is the server's, not the store's: the Term store records no
+;; writer, so :writers is the seam the server port fills.
 ;; ============================================================================
 (ns fram.claims)
 
-(require fram.store :as c)
+(require fram.types :as t)
 
 (require fram.schema :as s)
 
-(require fram.datalog :as d)
+(require fram.rotation :as rot)
 
-(require fram.world :as w)
+(require fram.datalog :as d)
 
 (require fram.rt)
 
@@ -22,58 +29,65 @@
 
 (declare-extern fram.rt/parse-edn [String -> Any])
 
-(def evidence-pred :- String "claim.evidence")
+(def evidence-pred: String "claim.evidence")
 
-(def reason-pred :- String "claim.reason")
+(def reason-pred: String "claim.reason")
 
-(def source-pred :- String "evidence.source")
+(def source-pred: String "evidence.source")
 
-(def region-pred :- String "evidence.region")
+(def region-pred: String "evidence.region")
 
-(def fingerprint-pred :- String "evidence.fingerprint")
+(def fingerprint-pred: String "evidence.fingerprint")
 
-(def world-pred :- String "evidence.world")
+(def world-pred: String "evidence.world")
 
-(def verified-view :- String "@view:claim.verified")
+(def verified-view: String "@view:claim.verified")
 
-(def rejected-view :- String "@view:claim.rejected")
+(def rejected-view: String "@view:claim.rejected")
 
-(def select-pred :- String "selects")
+(def select-pred: String "selects")
 
-(def world-record-pred :- String "world.record")
+(def world-record-pred: String "world.record")
 
-(def version-prefix :- String "world.version:")
+(def version-prefix: String "world.version:")
 
-(def reverification-relation :- String "claim.reverification")
+(def reverification-relation: String "claim.reverification")
 
-(def changed-slot-relation :- String "claim.changed-slot")
+(def changed-slot-relation: String "claim.changed-slot")
 
-(def verdict-view-relation :- String "claim.verdict-view")
+(def verdict-view-relation: String "claim.verdict-view")
 
-(def default-views :- Any {:verified verified-view :rejected rejected-view})
+(def default-views: Any {:verified verified-view :rejected rejected-view})
 
-(defn scoped-view [root :- String agent :- String] :- String
+(defn scoped-view [root: String agent: String] -> String
   (str root ":" agent))
 
-(defn- sto [co :- Any] :- Any (get co :store))
+(defn- sess [co: Any] -> Any (get co :schema))
 
-(defn- family? [root :- String nm :- Any] :- Bool
+(defn- vw [co: Any] -> Any (s/view (sess co)))
+
+(defn- pid [co: Any spelling: String] -> Any
+  (s/resolve-predicate (sess co) spelling))
+
+(defn- family? [root: String nm: Any] -> Bool
   (if (nil? nm)
     false
     (or (= nm root) (str/starts-with? (str nm) (str root ":")))))
 
-(defn- writer-of [co :- Any cid :- Int] :- Any
-  (let [m (deref (sto co))]
-    (get (get (get m :txs) (get (get m :tx-of) cid)) :agent)))
+;; The Term store records no writer, so attribution rides the server handle.
+(defn- writer-of [co: Any occurrence: Any] -> Any
+  (get (get co :writers) occurrence))
 
-(defn evidence-nodes [co :- Any claim-cid :- Int] :- Any
-  (let [st (sto co) pid (c/value-id st evidence-pred)]
-    (if (nil? pid)
+;; Occurrence order IS ascending order, so the legacy cid-ascending sort is the
+;; identity here — and Terms have no total order to sort by.
+(defn evidence-nodes [co: Any claim: Any] -> Any
+  (let [p (pid co evidence-pred)]
+    (if (nil? p)
       []
-      (vec (sort (vec (distinct (mapv (fn [cid :- Int] :- Any (get (c/fact-of st cid) :r)) (c/by-lp st claim-cid pid)))))))))
+      (vec (distinct (rot/values (rot/by-t12 (vw co) claim p)))))))
 
-(defn evidence [co :- Any node :- Int] :- Any
-  (let [st (sto co)]
+(defn evidence [co: Any node: Any] -> Any
+  (let [st (sess co)]
     {:node
      node
      :source
@@ -85,126 +99,183 @@
      :world
      (s/lookup st node world-pred)}))
 
-(defn provenance [co :- Any claim-cid :- Int] :- Any
-  (mapv (fn [n :- Int] :- Any (evidence co n)) (evidence-nodes co claim-cid)))
+(defn provenance [co: Any claim: Any] -> Any
+  (mapv (fn [n: Any] -> Any (evidence co n)) (evidence-nodes co claim)))
 
-(defn- selections-of [co :- Any claim-cid :- Int] :- Any
-  (let [st (sto co) selp (c/value-id st select-pred)]
-    (if (nil? selp) [] (c/by-pr st selp claim-cid))))
+(defn- selections-of [co: Any claim: Any] -> Any
+  (let [p (pid co select-pred)]
+    (if (nil? p) [] (rot/by-t23 (vw co) p claim))))
 
 (defn- verdict-of
-  [co :- Any
-   views :- Any
-   sel :- Int] :- Any
-  (let [st (sto co) nm (s/name-of st (get (c/fact-of st sel) :l))]
+  [co: Any
+   views: Any
+   selection: Any] -> Any
+  (let [occurrence (rot/occurrence-of selection) nm (s/name-of (sess co) (t/triple-t1 (rot/proposition-of selection)))]
     (cond
       [(family? (get views :verified) nm)
-       {:verdict :verified :view nm :by (writer-of co sel) :cid sel}]
+       {:verdict
+        :verified
+        :view
+        nm
+        :by
+        (writer-of co occurrence)
+        :cid
+        occurrence}]
       [(family? (get views :rejected) nm)
-       {:verdict :rejected :view nm :by (writer-of co sel) :cid sel}]
+       {:verdict
+        :rejected
+        :view
+        nm
+        :by
+        (writer-of co occurrence)
+        :cid
+        occurrence}]
       [:else nil])))
 
-(defn verdict ([co :- Any claim-cid :- Int] :- Any (verdict co default-views claim-cid))
-  ([co :- Any
-    views :- Any
-    claim-cid :- Int] :-
+(defn verdict ([co: Any claim: Any] -> Any (verdict co default-views claim))
+  ([co: Any
+    views: Any
+    claim: Any] :-
    Any
-   (reduce (fn [best :- Any sel :- Int] :- Any (let [v (verdict-of co views sel)] (cond [(nil? v) best] [(nil? best) v] [(> (get v :cid) (get best :cid)) v] [:else best])))
+   (reduce (fn [best: Any selection: Any] -> Any (let [v (verdict-of co views selection)] (cond [(nil? v) best] [(nil? best) v] [(t/occurrence-before? (get best :cid) (get v :cid)) v] [:else best])))
      nil
-     (selections-of co claim-cid))))
+     (selections-of co claim))))
 
-(defn verifier [co :- Any claim-cid :- Int] :- Any
-  (let [v (verdict co claim-cid)]
+(defn verifier [co: Any claim: Any] -> Any
+  (let [v (verdict co claim)]
     (if (and (some? v) (= :verified (get v :verdict))) (get v :by) nil)))
 
-(defn rejection [co :- Any claim-cid :- Int] :- Any
-  (let [v (verdict co claim-cid)]
+(defn rejection [co: Any claim: Any] -> Any
+  (let [v (verdict co claim)]
     (if (and (some? v) (= :rejected (get v :verdict)))
       {:reason
-       (s/lookup (sto co) claim-cid reason-pred)
+       (s/lookup (sess co) claim reason-pred)
        :by
        (get v :by)
        :cid
        (get v :cid)}
       nil)))
 
-(defn status ([co :- Any claim-cid :- Int] :- Any (status co default-views claim-cid))
-  ([co :- Any
-    views :- Any
-    claim-cid :- Int] :-
+(defn status ([co: Any claim: Any] -> Any (status co default-views claim))
+  ([co: Any
+    views: Any
+    claim: Any] :-
    Any
-   (if (not (c/live? (sto co) claim-cid))
+   (if (not (rot/live-occurrence? (vw co) claim))
      :superseded
-     (let [v (verdict co views claim-cid)]
+     (let [v (verdict co views claim)]
        (cond
          [(some? v) (get v :verdict)]
-         [(not (empty? (evidence-nodes co claim-cid))) :pending]
+         [(not (empty? (evidence-nodes co claim))) :pending]
          [:else nil])))))
 
-(defn- version-record-of [st :- Any vid :- Any] :- Any
-  (let [e (s/resolve-name st (str version-prefix vid))]
+(defn- version-record-of [co: Any vid: Any] -> Any
+  (let [e (s/resolve-name (sess co) (str version-prefix vid))]
     (if (nil? e)
       nil
-      (let [t (s/lookup st e world-record-pred)]
+      (let [t (s/lookup (sess co) e world-record-pred)]
         (if (nil? t) nil (fram.rt/parse-edn (str t)))))))
 
-(defn- version-chain [st :- Any vid :- Any] :- Any
+(defn- version-chain [co: Any vid: Any] -> Any
   (loop [v vid acc {}]
     (if (or (nil? v) (contains? acc v))
       acc
-      (let [r (version-record-of st v)]
+      (let [r (version-record-of co v)]
         (if (nil? r) acc (recur (get r :base) (assoc acc v r)))))))
 
-(defn- slot-blobs [st :- Any vid :- Any] :- Any
-  (reduce (fn [m :- Any e :- Any] :- Any (assoc m (get e :slot) (get e :blob-id)))
-    {}
-    (w/manifest (version-chain st vid) vid)))
+;; A version record's overlay is authoritative for the slots it names; every
+;; other slot, and every :inherit entry, defers to the record's :base.
+(defn- resolve-slot
+  [versions: Any
+   version: Any
+   slot: Any] -> Any
+  (loop [vid version]
+    (if (nil? vid)
+      nil
+      (let [record (get versions vid)]
+        (if (nil? record)
+          nil
+          (let [hits (filterv (fn [e: Any] -> Bool (= (get e :slot) slot))
+                       (vec (get record :overlay)))
+                e (if (empty? hits) nil (first hits))]
+            (cond
+              [(nil? e) (recur (get record :base))]
+              [(= (get e :op) :inherit) (recur (get record :base))]
+              [(= (get e :op) :delete) nil]
+              [:else {:blob-id (get e :blob-id)}])))))))
+
+(defn- chain-slots [versions: Any version: Any] -> Any
+  (loop [vid version acc []]
+    (if (nil? vid)
+      (vec (distinct acc))
+      (let [record (get versions vid)]
+        (if (nil? record)
+          (vec (distinct acc))
+          (recur (get record :base)
+            (vec (concat acc
+                   (mapv (fn [e: Any] -> Any (get e :slot))
+                     (vec (get record :overlay)))))))))))
+
+(defn- slot-blobs [co: Any vid: Any] -> Any
+  (let [versions (version-chain co vid)]
+    (reduce (fn [m: Any s: Any] -> Any (let [r (resolve-slot versions vid s)] (if (nil? r) m (assoc m s (get r :blob-id)))))
+      {}
+      (chain-slots versions vid))))
 
 (defn- changed-slots
-  [st :- Any
-   from :- Any
-   to :- Any] :- Any
-  (let [a (slot-blobs st from) b (slot-blobs st to)]
-    (vec (filterv (fn [k :- Any] :- Bool (not (= (get a k) (get b k)))) (vec (sort (vec (keys a))))))))
+  [co: Any
+   from: Any
+   to: Any] -> Any
+  (let [a (slot-blobs co from) b (slot-blobs co to)]
+    (vec (filterv (fn [k: Any] -> Bool (not (= (get a k) (get b k)))) (vec (sort (vec (keys a))))))))
 
-(defn- verdict-view-ids [co :- Any views :- Any] :- Any
-  (let [st (sto co) selp (c/value-id st select-pred)]
-    (if (nil? selp)
+(defn- verdict-view-ids [co: Any views: Any] -> Any
+  (let [p (pid co select-pred)]
+    (if (nil? p)
       []
-      (vec (sort (vec (distinct (reduce (fn [acc :- Any cid :- Int] :- Any (let [l (get (c/fact-of st cid) :l)] (if (family? (get views :verified) (s/name-of st l)) (conj acc l) acc))) [] (c/by-p st selp)))))))))
+      (vec (distinct (reduce (fn [acc: Any selection: Any] -> Any (let [l (t/triple-t1 (rot/proposition-of selection))] (if (family? (get views :verified) (s/name-of (sess co) l)) (conj acc l) acc))) [] (rot/by-t2 (vw co) p)))))))
 
-(defn reverification-rules ([co :- Any
-                             from :- Any
-                             to :- Any] :- Any (reverification-rules co default-views from to))
-  ([co :- Any
-    views :- Any
-    from :- Any
-    to :- Any] :-
+;; `occurrence` keeps the head restricted to LIVE assertions — the successor of
+;; the retired fact-id literal, which typed ?x as a fact object.
+(defn reverification-rules ([co: Any
+                             from: Any
+                             to: Any] -> Any (reverification-rules co default-views from to))
+  ([co: Any
+    views: Any
+    from: Any
+    to: Any] :-
    Any
-   (let [st (sto co) evp (c/value-id st evidence-pred) srp (c/value-id st source-pred) wlp (c/value-id st world-pred) selp (c/value-id st select-pred) fromv (if (nil? from) nil (c/value-id st from)) slots (if (nil? from) [] (filterv (fn
-                                                                                                                                                                                                                                           [i :- Any] :- Bool (some? i)) (mapv (fn
-                                                                                                                                                                                                                                                                                 [k :- Any] :- Any (c/value-id st k)) (changed-slots st from to)))) vids (verdict-view-ids co views)]
-     (if (or (nil? evp) (or (nil? srp) (or (nil? wlp) (or (nil? selp) (or (nil? fromv) (or (empty? slots) (empty? vids)))))))
+   (let [evp (pid co evidence-pred) srp (pid co source-pred) wlp (pid co world-pred) selp (pid co select-pred) slots (if (nil? from) [] (changed-slots co from to)) vids (verdict-view-ids co views)]
+     (if (or (nil? evp) (or (nil? srp) (or (nil? wlp) (or (nil? selp) (or (nil? from) (or (empty? slots) (empty? vids)))))))
        [[] []]
-       [(vec (concat (mapv (fn [sid :- Any] :- Any (d/rule changed-slot-relation [sid] [])) slots) (mapv (fn
-                                                                                                           [v :- Any] :- Any (d/rule verdict-view-relation [v] [])) vids)))
+       [(vec (concat (mapv (fn [sid: Any] -> Any (d/rule changed-slot-relation [(d/constant sid)] [])) slots) (mapv (fn
+                                                                                                                      [v: Any] -> Any (d/rule verdict-view-relation [(d/constant v)] [])) vids)))
         [(d/rule reverification-relation
-           [(d/v :x)]
-           [(d/lit "triple" [(d/v :e) wlp fromv])
-            (d/lit "triple" [(d/v :e) srp (d/v :s)])
-            (d/lit changed-slot-relation [(d/v :s)])
-            (d/lit "triple" [(d/v :x) evp (d/v :e)])
-            (d/lit "fact-id" [(d/v :x) (d/v :l) (d/v :p) (d/v :r)])
-            (d/lit "triple" [(d/v :view) selp (d/v :x)])
-            (d/lit verdict-view-relation [(d/v :view)])])]]))))
+           [(d/variable "x")]
+           [(d/relation-literal d/triple-relation
+              [(d/variable "e") (d/constant wlp) (d/constant from)])
+            (d/relation-literal d/triple-relation
+              [(d/variable "e") (d/constant srp) (d/variable "s")])
+            (d/relation-literal changed-slot-relation [(d/variable "s")])
+            (d/relation-literal d/triple-relation
+              [(d/variable "x") (d/constant evp) (d/variable "e")])
+            (d/relation-literal d/occurrence-relation
+              [(d/variable "x") (d/constant t/asserts) (d/variable "p")])
+            (d/relation-literal d/triple-relation
+              [(d/variable "view") (d/constant selp) (d/variable "x")])
+            (d/relation-literal verdict-view-relation [(d/variable "view")])])]]))))
 
-(defn needs-reverification ([co :- Any
-                             from :- Any
-                             to :- Any] :- Any (needs-reverification co default-views from to))
-  ([co :- Any
-    views :- Any
-    from :- Any
-    to :- Any] :-
+(defn- live-db [co: Any] -> Any
+  (let [events (rot/all-occurrences (vw co))]
+    (d/edb-with-occurrences (rot/propositions events) events)))
+
+(defn needs-reverification ([co: Any
+                             from: Any
+                             to: Any] -> Any (needs-reverification co default-views from to))
+  ([co: Any
+    views: Any
+    from: Any
+    to: Any] :-
    Any
-   (let [db (d/run-strata (sto co) (reverification-rules co views from to))]
-     (set (mapv (fn [t :- Any] :- Any (get t 0)) (d/facts db reverification-relation))))))
+   (let [db (d/run-strata-db! (live-db co) (reverification-rules co views from to))]
+     (set (mapv (fn [t: Any] -> Any (get t 0)) (d/facts db reverification-relation))))))

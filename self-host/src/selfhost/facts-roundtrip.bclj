@@ -379,9 +379,7 @@
   (let [lang (rd/parse-lang-line src) target (get lang "target") start (get lang "pos") forms (loop [p: Any (rd/skip-ws src start) out: Any []] (if (>= p (count src)) out (let [node (scan-datum src p)] (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next")))))) target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
     (if (some? target)
       (into target-form forms)
-      (let [newline (str/index-of src "\n") shift-units (if (nil? newline) (count src) (+ newline 1)) shift (codepoint-offset src shift-units) shifted (mapv (fn
-                                                                                                                                                               [node: Any] -> Any (shift-node-location node shift)) forms)]
-        shifted))))
+      forms)))
 
 ;; --- located datum -> EDN facts --------------------------------------------
 (defn- hex-digit [n: Int] -> String
@@ -564,7 +562,7 @@
   nil)
 
 (defn- projection-lines! [src: String] -> Any
-  (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src)) _line-cols (reset! LINE-COLS (build-line-cols src)) lang (rd/parse-lang-line src) newline (str/index-of src "\n") shift (if (some? (get lang "target")) 0 (if (nil? newline) (count src) (+ newline 1))) forms (located-program src) counter (atom 0) out (atom []) root (fresh-id! counter) head (synthetic-leaf "beagle-file" nil)]
+  (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src)) _line-cols (reset! LINE-COLS (build-line-cols src)) shift 0 forms (located-program src) counter (atom 0) out (atom []) root (fresh-id! counter) head (synthetic-leaf "beagle-file" nil)]
     (add-fact! out root "kind" "list")
     (let [head-id (emit-node! head counter out)]
       (add-fact! out root "f0" head-id)

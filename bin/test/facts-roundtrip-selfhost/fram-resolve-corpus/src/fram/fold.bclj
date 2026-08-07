@@ -1,163 +1,46 @@
 #lang beagle/clj
-(ns fram.fold
-  "Replay the append-only fact-op log into the current fact set + version.
-  Pure projection over fact-ops; the log bytes are read via fram.rt.")
+;; Pure projection of ordered transaction frames through the authoritative
+;; recursive TermStore history.
+(ns fram.fold)
+(define-mode strict)
+(require fram.store :as store)
+(require fram.types :as t)
 
-(require fram.kernel :as k)
-(require clojure.string :as str)
+(defrecord Fold
+  [space-id: String
+   history: (Vec t/Triple)
+   live-occurrences: (Vec t/Triple)
+   live-propositions: (Vec t/Triple)
+   version: Int
+   dump: t/TermStoreDump])
 
-(defrecord FactOp
-  [tx :- Int
-   op :- String
-   l :- String
-   p :- String
-   r :- String
-   frame :- String])
+(defn transaction-frame
+  [sequence: Int
+   operations: (Vec t/CommitOperation)] -> t/TransactionFrame
+  (store/transaction-frame sequence operations))
 
-(defrecord Fold [facts :- (Vec k/Fact) version :- Int])
-
-;; :tx is DECLARED Int, but read-log passes (:tx m) straight through with no
-;; coercion (fram.rt/read-log), so an EDN-valid line lacking :tx (hand-edited,
-;; legacy, or partially-written) yields an FactOp whose :tx is nil at runtime.
-;; tx-of defaults a missing/non-int :tx to 0 — the SAME guard the coordinator
-;; uses on the flat log (`(or (:tx %) 0)`, coord_daemon.clj) — so a bad line
-;; is counted as tx 0 (oldest), never crashing the version high-water scan.
-(defn- tx-of [a :- FactOp] :- Int
-  (let [t :- Any (:tx a)]
-    (if (int? t) t 0)))
-
-;; PUBLIC: the cold write path (main/cmd-set) re-reads the log and uses
-;; (max-tx + 1) as the new line's tx, computed from the FRESHEST read right
-;; before append — so a later cold `set` observes an earlier one's line and
-;; strictly bumps past it. This removes the silent lost-update where two cold
-;; sets land the SAME tx on one single-valued key and the fold's >-tie-break
-;; just keeps whichever was appended last (finding #17). The fold tie-break
-;; itself stays strict-> (deterministic latest-wins); uniqueness is enforced
-;; at write time, which is where the collision was actually minted.
-(defn max-tx [ops :- (Vec FactOp)] :- Int
-  (reduce (fn [m :- Int a :- FactOp] :- Int (let [t (tx-of a)] (if (> t m) t m))) 0 ops))
-
-;; --- SCHEMA-AS-FACTS cardinality: PASS 1 ------------------------------------
-;; Predicate cardinality is DATA in the log: a fact `@<pred> cardinality single|multi`
-;; declares it (the subject is the pred entity `@<predname>`; strip the leading @ to get
-;; the pred name). The fold is TWO-PASS: pass 1 scans the fact-ops for these facts and
-;; builds a cardinality map (predname -> is-single); pass 2 keys the fold by it via
-;; k/single-eff? (fact > env > fallback — see fram.kernel). Deriving cardinality from the
-;; log is what lets a daemon and a CLI folding the same log classify IDENTICALLY without
-;; both booting with the same FRAM_SINGLE_VALUED (the finding #23 divergence vector).
-(defrecord Card
-  [tx :- Int
-   single :- Bool
-   live :- Bool])
-
-;; The META predicates are single-valued by their own nature (mirrors fram.schema/setup!:
-;; name/cardinality/value_kind are single). Seeded so a `@<pred> cardinality X` fact is
-;; itself replaced (not accumulated) on re-declaration even when the log doesn't declare
-;; the meta-preds' own cardinality; a real fact on any of them still overrides the seed.
-(def meta-single-seed :- (Map String Bool)
-  {"cardinality" true "value_kind" true "name" true "acyclic" true})
-
-(defn- strip-at [s :- String] :- String
-  (if (str/starts-with? s "@") (subs s 1) s))
-
-;; Latest-tx-wins per declared predicate; a retracted declaration falls back to single?.
-;; Returns predname -> is-single, meta-preds seeded then overlaid by live declarations.
-(defn card-map [ops :- (Vec FactOp)] :- (Map String Bool)
-  (let [latest (reduce
-                (fn [m :- (Map String Card) a :- FactOp] :- (Map String Card)
-                  (if (not (= (:p a) "cardinality"))
-                    m
-                    (let [pn (strip-at (:l a))
-                          atx (tx-of a)
-                          prev (get m pn)]
-                      (if (and (some? prev) (> (:tx prev) atx))
-                        m
-                        (assoc m pn (->Card atx (= (:r a) "single") (= (:op a) "assert")))))))
-                {}
-                ops)]
-    (reduce (fn [acc :- (Map String Bool) e :- (Vec Any)] :- (Map String Bool)
-              (let [pn :- String (nth e 0) c :- Card (nth e 1)]
-                (if (:live c) (assoc acc pn (:single c)) acc)))
-            meta-single-seed
-            (vec (seq latest)))))
-
-;; --- PASS 2 ------------------------------------------------------------------
-;; O(n) fold: collapse to the latest fact-op per key in one pass (a hash map),
-;; then emit facts. Single-valued predicates key on (l,p) — latest tx wins;
-;; multi-valued key on (l,p,r) — latest op (assert/retract) per triple wins.
-;; Cardinality is the EFFECTIVE map from pass 1 (fact > env > fallback).
-;; (l/p, and multi-valued r's, are clean refs that never contain the separator.)
-(defrecord Latest
-  [tx :- Int
-   op :- String
-   l :- String
-   p :- String
-   r :- String
-   frame :- String])
-
-(defn- key-of [cmap :- (Map String Bool) a :- FactOp] :- String
-  (if (k/single-eff? cmap (:p a))
-    (str (:l a) "" (:p a))
-    (str (:l a) "" (:p a) "" (:r a))))
-
-(defn- keyed-latest
-  [cmap :- (Map String Bool)
-   ops :- (Vec FactOp)] :- (Map String Latest)
+(defn max-sequence [frames: (Vec t/TransactionFrame)] -> Int
   (reduce
-   (fn [m :- (Map String Latest) a :- FactOp] :- (Map String Latest)
-     (let [k (key-of cmap a)
-           prev (get m k)
-           atx (tx-of a)]
-       (if (and (some? prev) (> (:tx prev) atx))
-         m
-         (assoc m k (->Latest atx (:op a) (:l a) (:p a) (:r a) (:frame a))))))
-   {}
-   ops))
+   (fn [maximum: Int frame: t/TransactionFrame] -> Int
+     (let [sequence (t/transactionframe-sequence frame)]
+       (if (> sequence maximum) sequence maximum)))
+   0
+   frames))
 
-(defn fold [ops :- (Vec FactOp)] :- Fold
-  ;; Drop torn/partial lines (missing l/p/r) BEFORE keying — the log is appended
-  ;; without fsync, so a read caught mid-write can yield an EDN-valid but incomplete
-  ;; fact-op, and key-of calls single-eff? on :p. An incomplete line is an unfinished
-  ;; write that must not become a fact. max-tx still counts ALL :tx (version
-  ;; high-water mark, kept consistent with the coordinator's seq seeding).
-  (let [valid (filterv (fn [a :- FactOp] :- Bool
-                         (and (some? (:l a)) (and (some? (:p a)) (some? (:r a))))) ops)
-        cmap (card-map valid)
-        keyed (keyed-latest cmap valid)
-        facts (reduce
-                (fn [acc :- (Vec k/Fact) v :- Latest] :- (Vec k/Fact)
-                  (if (= (:op v) "assert")
-                    (conj acc (k/->Fact (:l v) (:p v) (:r v)))
-                    acc))
-                []
-                (vec (vals keyed)))]
-    (->Fold facts (max-tx ops))))
+(defn- project [ctx: (Atom t/TermStore)] -> Fold
+  (->Fold (store/space-id ctx)
+          (store/semantic-history ctx)
+          (store/live-occurrences ctx)
+          (store/live-propositions ctx)
+          (store/current-sequence ctx)
+          (store/dump-term-store ctx)))
 
-;; Current facts as Latest records (assert-op only) — carries `frame`, so a
-;; reader can tell coordinator/agent writes from import-derived values.
-(defn fold-latest [ops :- (Vec FactOp)] :- (Vec Latest)
-  (filterv (fn [v :- Latest] :- Bool (= (:op v) "assert"))
-           (vec (vals (keyed-latest (card-map ops) ops)))))
+(defn fold! [space-id: String frames: (Vec t/TransactionFrame)] -> Fold
+  (let [ctx (store/new-term-store space-id)]
+    (doseq [frame frames] (store/replay-transaction! ctx frame))
+    (project ctx)))
 
-;; Reconstruct fold's emission ORDER from a set-equal live view. The coordinator's
-;; :facts op serves its warm store through this (cached per version), so the CLI's
-;; daemon-first read path renders byte-identically to the cold fold. fold emits
-;; (vals keyed-latest) — hash-map iteration order over the key-of strings — and
-;; downstream output order (build-index subjects, every projection listing)
-;; inherits it. Re-keying a set-equal fact vec through the SAME key-of yields the
-;; same relative order: an entry's position in a persistent hash map is a function
-;; of its own key hash, not of insertion order; the cold map's extra retract-latest
-;; keys (skipped when fold emits facts) don't reorder the surviving entries; and
-;; bb + the JVM share clojure.lang.PersistentHashMap, so daemon-computed order ==
-;; CLI-computed order. (The synthetic FactOp exists only to reuse key-of
-;; verbatim — same \001 separator bytes.)
-(defn refold-order [facts :- (Vec k/Fact)] :- (Vec k/Fact)
-  (let [cmap (card-map (mapv (fn [c :- k/Fact] :- FactOp
-                               (->FactOp 0 "assert" (:l c) (:p c) (:r c) "live")) facts))]
-    (vec (vals (reduce
-                (fn
-                  [m :- (Map String k/Fact)
-                   c :- k/Fact] :- (Map String k/Fact)
-                  (assoc m (key-of cmap (->FactOp 0 "assert" (:l c) (:p c) (:r c) "live")) c))
-                {}
-                facts)))))
+(defn refold! [space-id: String dump: Any] -> Fold
+  (let [ctx (store/new-term-store space-id)]
+    (store/load-term-store! ctx dump)
+    (project ctx)))

@@ -262,11 +262,7 @@
   (if (>= p (count src)) out (let [node (scan-datum src p)]
   (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next"))))))
    target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
-  (if (some? target) (into target-form forms) (let [newline (str/index-of src "\n")
-   shift-units (if (nil? newline) (count src) (+ newline 1))
-   shift (codepoint-offset src shift-units)
-   shifted (mapv (fn [node] (shift-node-location node shift)) forms)]
-  shifted))))
+  (if (some? target) (into target-form forms) forms)))
 
 (defn- ^String hex-digit [n]
   (nth ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "a" "b" "c" "d" "e" "f"] n))
@@ -435,9 +431,7 @@
 (defn- projection-lines! [^String src]
   (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src))
    _line-cols (reset! LINE-COLS (build-line-cols src))
-   lang (rd/parse-lang-line src)
-   newline (str/index-of src "\n")
-   shift (if (some? (get lang "target")) 0 (if (nil? newline) (count src) (+ newline 1)))
+   shift 0
    forms (located-program src)
    counter (atom 0)
    out (atom [])

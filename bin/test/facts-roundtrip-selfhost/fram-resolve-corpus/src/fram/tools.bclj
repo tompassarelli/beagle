@@ -1,201 +1,229 @@
 #lang beagle/clj
+
 (ns fram.tools
-  "The AI-facing TOOL CATALOG — CLOSED and O(1). Exactly ten tools, never minted
-  per-predicate from the vocabulary: `tell`, `retract`, `show`, `ask`, `validate`,
-  and the five graph-AST edit verbs (`add-def`, `set-body`, `rename-def`,
-  `insert-after`, `replace-in-body`). Vocabulary is DATA, not tools — a predicate
-  is an entity, so `show <pred>` reveals its cardinality/value_kind facts and `ask`
-  enumerates the vocabulary; the engine never generates a `set-owner`/`owner-of` per
-  fact (that catalog was a per-session context tax buying no safety the coordinator
-  doesn't already give). `tell` = assert subsumes the old set-P/add-P with identical
-  semantics (single-valued predicates replace their (l,p) group, multi-valued
-  accumulate); `retract` removes one fact (the verb `untell` is accepted as an
-  alias in dispatch, mirroring `query`->`ask`); `ask` is the structured Datalog
-  escape hatch (fram.query) — its op key stays `:query` and the name `query` is
-  accepted as an alias in dispatch. `threads` and `dependents-of` are NOT in this catalog: threads
-  are a NORTH concept (north serves them), and a reverse edge is answerable via `ask`.
+  "The closed AI-facing data and graph-authoring catalog. Reads use one
+  TermStore snapshot; writes return commit-sequencer intents and never mutate the
+  store here. Query results and write/edit/error envelopes remain open maps
+  because callers discriminate them by key presence.")
 
-  Reads dispatch here (pure, over the fold); WRITES return an intent
-  {:write {:op :l :p :r}} the host routes through the coordinator (serialized,
-  rule-checked) — fram.tools never writes the log itself.
+(require fram.types :as t)
 
-  TYPES: a tool's op is the `Op` enum (constrains the dispatch + missing-req).
-  Catalog specs are `ToolSpec` records (params are `Param` records); row results
-  are per-arm records (`PredVal`/`ThreadViolation`) — every consumer reads these by
-  field, so the record holds. The write-intent VALUE stays a (Map Keyword String)
-  map literal (NOT a record): tools_test asserts (= {:op .. :l .. :p .. :r ..}
-  (:write …)) and a record is not = a map literal in Clojure; main + fram_mcp read
-  it by field, gaining nothing from a record. The `call` return stays Any: the
-  result envelope ({:rows ..} | {:write ..} | {:edit ..} | {:ok ..} | {:error ..}) is
-  a tagged heterogeneous open-map discriminated by key-presence in main/fram_mcp, which
-  a record (all keys always present) would defeat — the open-map gap. {:edit ..} is the
-  GRAPH-AST authoring envelope: unlike {:write} (one coordinator triple), it carries a
-  whole-form/body datum the host applies OUT-OF-BAND via the engine's resolve.clj verbs
-  (mint/supersede many facts), recompile-gated and fail-closed.")
+(require fram.store :as store)
+
+(require fram.schema :as schema)
+
+(require fram.rotation :as rotation)
 
 (require fram.kernel :as k)
+
 (require fram.query :as q)
+
 (require clojure.string :as str)
 
 ;; The op of a tool — constrains dispatch (cond/:else) and missing-req. `:tell`/`:retract`
 ;; are the single-triple KB writes (assert/retract of ANY predicate); `:query` backs
-;; `ask`; `:show`/`:validate` are the reads. The trailing five are GRAPH-AST EDIT ops:
-;; they modify a projected Beagle module by minting/superseding kind/v/fN facts via
-;; the engine's resolve.clj verbs (NOT a single coordinator triple), so they return a
+;; `ask`; `:show`/`:validate` are the reads. The trailing seven are GRAPH-AST EDIT ops:
+;; they author a graph-upstream Beagle module by minting/superseding kind/v/fN facts via
+;; the engine's resolve.clj verbs (NOT a single commit-sequencer triple), so they return a
 ;; distinct {:edit ...} envelope the host runs out-of-band, recompile-gated and fail-closed.
 ;; :insert-after is the CRDT insert-anywhere (commute) op — insert a NEW top-level def
 ;; AFTER an anchor def, at a (path,tie) order-key strictly between the anchor and its
 ;; next sibling (the internal verb is "insert-form"; two concurrent inserts after the
 ;; same anchor both land at distinct ties -> commute, the thing append-only could not do).
-(defenum Op :tell :retract :show :query :validate
-            :upsert-form :set-body :rename-def :insert-after :replace-in-body)
+(defenum Op
+  :tell
+  :retract
+  :show
+  :query
+  :validate
+  :upsert-form
+  :set-body
+  :rename-def
+  :insert-after
+  :insert-before
+  :replace-in-body
+  :edit-transaction)
 
 ;; row-result records (one per read arm; each producing lambda is homogeneous)
-(defrecord PredVal [pred :- String value :- String])
-(defrecord ThreadViolation [thread :- String violation :- String])
+(defrecord PredVal [pred: Any value: Any])
+
+(defrecord ProfileViolation [proposition: Any rule: Any])
 
 ;; tool-spec records — a catalog entry + its params
 (defrecord Param
-  [name :- String
-   type :- String
-   required :- Bool])
+  [name: String
+   type: String
+   required: Bool])
+
 (defrecord ToolSpec
-  [name :- String
-   desc :- String
-   params :- (Vec Param)
-   op :- Op
-   pred :- String])
+  [name: String
+   desc: String
+   params: (Vec Param)
+   op: Op
+   pred: String])
 
 ;; --- write-value normalization ----------------------------------------------
 ;; GAP: id is an EDN arg value (string id OR other literal) -> Any.
-(defn- at [id :- Any] :- Any
+(defn- at [id: Any] -> Any
   (if (string? id) (if (str/starts-with? id "@") id (str "@" id)) id))
 
-;; ALL values are @-entities (and there is at least one) -> a pure reference
-;; predicate, so a bare write value is auto-@-prefixed. A MIXED predicate is NOT
-;; pure-ref, so its literal values are stored verbatim (no spurious @-prefix that
-;; would make an untell silently miss the real fact).
-;; This value-driven normalization is the single write convention for both the
-;; tool/MCP surface AND the `tell`/`set` CLI verbs (main.bclj routes through
-;; `ref-value` below) — no hardcoded ref-pred list, so the engine stays
-;; domain-neutral. (A value already starting with @ is kept as-is; `at` never
-;; double-prefixes.)
-(defn- all-ref? [facts :- (Vec k/Fact) pred :- String] :- Bool
-  (loop [cs facts seen false]
-    (if (empty? cs)
-      seen
-      (let [c (first cs)]
-        (if (= (:p c) pred)
-          (if (and (string? (:r c)) (str/starts-with? (:r c) "@"))
-            (recur (rest cs) true)
-            false)
-          (recur (rest cs) seen))))))
+;; Resolve every public predicate spelling through the store's schema view. The
+;; write intent still carries a string predicate, but aliases are normalized to
+;; the canonical display name before the commit sequencer sees the intent.
+(defn canonical-predicate [session: schema/Session pred: String] -> String
+  (let [pid (schema/resolve-predicate session pred)]
+    (if (some? pid) (schema/predicate-name session pid) pred)))
 
-;; the shared write-value normalization: @-prefix a bare value for a pure-reference
-;; predicate, store verbatim otherwise (`at` keeps an already-@ value as-is). Used by
-;; tool writes AND the CLI tell/set verbs so both surfaces agree.
+;; Shared write-value normalization for tool/MCP and CLI writes. value_kind is
+;; the sole classifier: explicit schema facts override fallback behavior,
+;; including the negative `literal` declaration. A value already starting with
+;; @ is kept as-is.
 ;; GAP: value is an EDN write-value -> Any (the engine interns arbitrary EDN).
-(defn ref-value
-  [facts :- (Vec k/Fact)
-   pred :- String
-   value :- Any] :- Any
-  (if (all-ref? facts pred) (at value) value))
+(def ref-kind-fallback: (Vec String)
+  ["depends_on" "part_of" "relates_to" "clarifies" "amends"])
 
-;; --- catalog: the CLOSED, O(1) surface (exactly ten tools) -------------------
-(defn catalog [facts :- (Vec k/Fact)] :- (Vec ToolSpec)
-  (let [subj-param :- (Vec Param) [(->Param "subject" "string" true)]
-        spo-params :- (Vec Param) [(->Param "subject" "string" true)
-                                   (->Param "predicate" "string" true)
-                                   (->Param "object" "string" true)]]
+(defn- fallback-ref? [pred: String] -> Bool
+  (loop [remaining ref-kind-fallback]
+    (if (empty? remaining)
+      false
+      (if (= pred (first remaining)) true (recur (rest remaining))))))
+
+(defn ref-value
+  [session: schema/Session
+   pred: String
+   value: Any] -> Any
+  (let [canonical (canonical-predicate session pred)
+        pid (schema/resolve-predicate session canonical)
+        declared (if (nil? pid) nil (schema/lookup session pid schema/value-kind-predicate))
+        kind (if (string? declared) declared (if (fallback-ref? canonical) "ref" "literal"))]
+    (if (= "ref" kind) (at value) value)))
+
+;; --- catalog: the CLOSED, O(1) surface (exactly twelve tools) ----------------
+(defn catalog [_propositions: (Vec t/Triple)] -> (Vec ToolSpec)
+  (let [subj-param: (Vec Param) [(->Param "subject" "string" true)] spo-params: (Vec Param) [(->Param "subject" "string" true) (->Param "predicate" "string" true) (->Param "object" "string" true)]]
     [(->ToolSpec "tell"
-                 (str "Assert the fact (subject, predicate, object). A single-valued "
-                      "predicate replaces its current value; a multi-valued one accumulates "
-                      "across repeated tells. A bare id for a reference predicate is auto-@-"
-                      "prefixed. Asserts ANY predicate, including one not yet in the vocabulary "
-                      "(predicate cardinality itself is a fact: `tell <pred> cardinality "
-                      "single|multi`).")
-                 spo-params :tell "")
+       (str "Assert the fact (subject, predicate, object). A single-valued "
+         "predicate replaces its current value; a multi-valued one accumulates "
+         "across repeated tells. A bare id for a reference predicate is auto-@-"
+         "prefixed. Asserts ANY predicate, including one not yet in the vocabulary "
+         "(predicate cardinality itself is a fact: `tell <pred> cardinality "
+         "single|multi`).")
+       spo-params
+       :tell
+       "")
      (->ToolSpec "retract"
-                 "Retract the exact fact (subject, predicate, object). The verb `untell` is an accepted alias."
-                 spo-params :retract "")
+       "Retract the exact fact (subject, predicate, object). The verb `untell` is an accepted alias."
+       spo-params
+       :retract
+       "")
      (->ToolSpec "show"
-                 (str "All facts about <subject>. Predicates are entities too: "
-                      "`show <pred>` reveals its cardinality/value_kind/acyclic facts.")
-                 subj-param :show "")
+       (str "All facts about <subject>. Predicates are entities too: "
+         "`show <pred>` reveals its cardinality/value_kind/acyclic facts.")
+       subj-param
+       :show
+       "")
      (->ToolSpec "ask"
-                 (str "Ad-hoc recursive query for multi-hop questions and vocabulary "
-                      "enumeration. Pass a structured Datalog-shaped object: "
-                      "{:find <rel> :rules [{:head {:rel R :args [terms]} :body [{:rel r :args [terms] :neg <bool>}]}]}. "
-                      "A term is {:var \"x\"} or a constant; base relations are fact(l,p,r) and fact-id(cid,l,p,r) "
-                      "(the pre-rename names triple/fact are accepted as aliases). "
-                      "Recursion and stratified negation are supported; the query is validated before it runs.")
-                 [(->Param "query" "object" true)] :query "")
+       (str "Ad-hoc recursive query for multi-hop questions and vocabulary "
+         "enumeration. Pass a structured JSON query object. For an ordinary query, "
+         "`find` is a relation-name string (not a rule-head map); rules carry "
+         "`head` and `body` objects. Aggregate queries instead use a `find` object "
+         "with `rel`, `group`, and `agg`. "
+         "A term is {:var \"x\"} or a constant; base relations are fact(l,p,r), "
+         "fact-id(cid,l,p,r), and predicate(pid,spelling,canonical,cardinality,value-kind) "
+         "(the pre-rename names triple/fact are accepted as aliases). "
+         "Recursion and stratified negation are supported; the query is validated before it runs.")
+       [(->Param "query" "object" true)]
+       :query
+       "")
      (->ToolSpec "validate"
-                 "Structural integrity violations (cycles, dangling refs) across all threads."
-                 [] :validate "")
-     ;; --- GRAPH-AST EDIT verbs --------------------------------------------
-     ;; These modify a Beagle source MODULE as a FACT operation on its lossless
-     ;; AST projection, not a text splice: the agent emits the new form/body as an
-     ;; EDN datum STRING (read by resolve.clj), it is minted into the module's
-     ;; fact graph (kind/v/fN facts), scope-resolved via refers_to, regenerated
-     ;; byte-stable, and recompile-gated — committed only if it builds. `module`
-     ;; is the source-file scope (substring naming exactly one .bclj). The op is
-     ;; carried out OUT-OF-BAND by the host (route-edit), NOT through the single-
-     ;; triple coordinator, so it returns the {:edit ...} envelope.
+       "Violations of the relational profile declared by this TermStore."
+       []
+       :validate
+       "")
      (->ToolSpec "add-def"
-                 (str "Apply a structured graph edit to a Beagle module: add a NEW top-level def, or "
-                      "REPLACE an existing one by name (upsert by the def name). `form` is the "
-                      "whole top-level form as an EDN datum string, e.g. "
-                      "\"(defn add-two [x :- Int] :- Int (base (+ x 2)))\". Recompile-gated + fail-closed.")
-                 [(->Param "module" "string" true) (->Param "form" "string" true)]
-                 :upsert-form "")
+       (str "Author a graph-upstream Beagle module: add a NEW top-level def, or "
+         "REPLACE an existing one by name (upsert by the def name). `form` is the "
+         "whole top-level form as an EDN datum string, e.g. "
+         "\"(defn add-two [x: Int] -> Int (base (+ x 2)))\". Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true) (->Param "form" "string" true)]
+       :upsert-form
+       "")
      (->ToolSpec "set-body"
-                 (str "Apply a structured graph edit to a Beagle module: replace the BODY of an existing "
-                      "defn named <name>. `body` is the new body as an EDN datum string, e.g. "
-                      "\"(* x 10)\" (params + return type are preserved). Recompile-gated + fail-closed.")
-                 [(->Param "module" "string" true) (->Param "name" "string" true) (->Param "body" "string" true)]
-                 :set-body "")
+       (str "Author a graph-upstream Beagle module: replace the BODY of an existing "
+         "defn named <name>. `body` is the new body as an EDN datum string, e.g. "
+         "\"(* x 10)\" (params + return type are preserved). Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true)
+        (->Param "name" "string" true)
+        (->Param "body" "string" true)]
+       :set-body
+       "")
      (->ToolSpec "rename-def"
-                 (str "Apply a structured graph edit to a Beagle module: rename a top-level def from <name> "
-                      "to <new-name> (O(1), scope-correct via refers_to, shadow-safe; references "
-                      "follow by identity). Recompile-gated + fail-closed.")
-                 [(->Param "module" "string" true) (->Param "name" "string" true) (->Param "new-name" "string" true)]
-                 :rename-def "")
+       (str "Author a graph-upstream Beagle module: rename a top-level def from <name> "
+         "to <new-name> (O(1), scope-correct via refers_to, shadow-safe; references "
+         "follow by identity). Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true)
+        (->Param "name" "string" true)
+        (->Param "new-name" "string" true)]
+       :rename-def
+       "")
      (->ToolSpec "insert-after"
-                 (str "Apply a structured graph edit to a Beagle module: insert a NEW top-level def AFTER an "
-                      "anchor def named <after>, at a CRDT (path,tie) order-key strictly between the "
-                      "anchor and its next sibling. `form` is the whole top-level form as an EDN datum "
-                      "string, e.g. \"(defn add-two [x :- Int] :- Int (base (+ x 2)))\". Two concurrent "
-                      "inserts after the same anchor COMMUTE (both land at distinct ties). "
-                      "Recompile-gated + fail-closed.")
-                 [(->Param "module" "string" true) (->Param "after" "string" true) (->Param "form" "string" true)]
-                 :insert-after "")
-     ;; SUB-DEF surgical edit — the mega-def floor kill. Replace ONE interior form
-     ;; inside def <name>, addressed by the OLD form (anchor-match, like Edit-tool
-     ;; old_string but on the AST: structural, whitespace-insensitive, unique-match
-     ;; required), with the NEW form — WITHOUT re-emitting the whole def. Changing one
-     ;; case in a 1,768-line def costs ONE fN-edge swap, not a whole-def re-mint; and
-     ;; every sibling form + comment is preserved (no set-body comment-fidelity loss).
+       (str "Author a graph-upstream Beagle module: insert a NEW top-level def AFTER an "
+         "anchor def named <after>, at a CRDT (path,tie) order-key strictly between the "
+         "anchor and its next sibling. `form` is the whole top-level form as an EDN datum "
+         "string, e.g. \"(defn add-two [x: Int] -> Int (base (+ x 2)))\". Two concurrent "
+         "inserts after the same anchor COMMUTE (both land at distinct ties). "
+         "Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true)
+        (->Param "after" "string" true)
+        (->Param "form" "string" true)]
+       :insert-after
+       "")
+     (->ToolSpec "insert-before"
+       (str "Author a graph-upstream Beagle module: insert an arbitrary valid "
+         "top-level form BEFORE the named definition anchor <before>. `form` is "
+         "a whole EDN datum string, e.g. \"(declare register-predicate!)\". The "
+         "form is minted as graph facts and attached through a CRDT ordered-wrapper "
+         "edge immediately before the anchor. Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true)
+        (->Param "before" "string" true)
+        (->Param "form" "string" true)]
+       :insert-before
+       "")
      (->ToolSpec "replace-in-body"
-                 (str "Apply a structured graph edit to a Beagle module: replace ONE interior form inside def "
-                      "<name>, WITHOUT re-emitting the whole def (the sub-def surgical edit). `old` is "
-                      "the existing interior form as an EDN datum string (the anchor — matched "
-                      "STRUCTURALLY, like an Edit old_string on the AST; must match exactly one interior "
-                      "form, else rejected). `new` is its replacement as an EDN datum string. e.g. old "
-                      "\"(when done (finish))\" new \"(when done (cleanup) (finish))\". If `old` is "
-                      "AMBIGUOUS (>1 match), the rejection lists candidates with breadcrumbs + a "
-                      "copy-pastable enclosing form for each; pass one as the OPTIONAL `within` (an "
-                      "enclosing-form EDN datum string) to narrow the search — `old` must then match "
-                      "exactly one form INSIDE `within` (structural, survives concurrent edits; prefer "
-                      "it to an occurrence index). Preserves all sibling forms + comments. "
-                      "Recompile-gated + fail-closed.")
-                 [(->Param "module" "string" true) (->Param "name" "string" true)
-                  (->Param "old" "string" true) (->Param "new" "string" true)
-                  (->Param "within" "string" false)]
-                 :replace-in-body "")]))
+       (str "Author a graph-upstream Beagle module: replace ONE interior form inside def "
+         "<name>, WITHOUT re-emitting the whole def (the sub-def surgical edit). `old` is "
+         "the existing interior form as an EDN datum string (the anchor — matched "
+         "STRUCTURALLY, like an Edit old_string on the AST; must match exactly one interior "
+         "form, else rejected). `new` is its replacement as an EDN datum string. e.g. old "
+         "\"(when done (finish))\" new \"(when done (cleanup) (finish))\". If `old` is "
+         "AMBIGUOUS (>1 match), the rejection lists candidates with breadcrumbs + a "
+         "copy-pastable enclosing form for each; pass one as the OPTIONAL `within` (an "
+         "enclosing-form EDN datum string) to narrow the search — `old` must then match "
+         "exactly one form INSIDE `within` (structural, survives concurrent edits; prefer "
+         "it to an occurrence index). Preserves all sibling forms + comments. "
+         "Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true)
+        (->Param "name" "string" true)
+        (->Param "old" "string" true)
+        (->Param "new" "string" true)
+        (->Param "within" "string" false)]
+       :replace-in-body
+       "")
+     (->ToolSpec "edit-transaction"
+       (str "Atomically author two or more DISTINCT module-qualified definitions as one coherent graph overlay. "
+         "`module` is the default module; any edit may carry its own `module` override. `edits` contains "
+         "set-body, replace-in-body, or upsert-form objects; upsert identity is derived from its whole form "
+         "and an optional `name` is only an assertion. Fram stages every edit across all touched modules, "
+         "derives the dependency check scope from the graph, renders and type-checks only the FINAL OVERLAY, "
+         "and rejects surviving references to removed bindings, variants, members, or record accessors. "
+         "Success is one sealed canonical graph batch; failure emits and records nothing. "
+         "Recompile-gated + fail-closed.")
+       [(->Param "module" "string" true) (->Param "edits" "array" true)]
+       :edit-transaction
+       "")]))
 
 ;; --- dispatch ---------------------------------------------------------------
-(defn- spec-by-name [cat :- (Vec ToolSpec) name :- String] :- ToolSpec?
+(defn- spec-by-name [cat: (Vec ToolSpec) name: String] -> ToolSpec?
   (loop [cs cat]
     (if (empty? cs)
       nil
@@ -203,76 +231,128 @@
 
 ;; required params by op — server-side enforcement (the "can't emit a broken call"
 ;; guarantee, not just an advisory schema): a missing required param is rejected.
-(defn- missing-req [op :- Op args :- (Map Keyword Any)] :- (Vec String)
-  (let [need-spo (or (= op :tell) (= op :retract))
-        ;; graph-edit ops: module scope is always required; the rest by op.
-        need-module (or (= op :upsert-form) (or (= op :set-body) (or (= op :rename-def) (or (= op :insert-after) (= op :replace-in-body)))))
-        e1 (if (and need-spo (or (nil? (:subject args)) (or (nil? (:predicate args)) (nil? (:object args)))))
-             ["missing required param 'subject' and/or 'predicate' and/or 'object'"] [])
-        e2 (if (and (= op :show) (nil? (:subject args))) ["missing required param 'subject'"] [])
-        e3 (if (and (= op :query) (nil? (:query args))) ["missing required param 'query'"] [])
-        e4 (if (and need-module (nil? (:module args))) ["missing required param 'module'"] [])
-        e5 (if (and (= op :upsert-form) (nil? (:form args))) ["missing required param 'form'"] [])
-        e6 (if (and (= op :set-body) (or (nil? (:name args)) (nil? (:body args))))
-             ["missing required param 'name' and/or 'body'"] [])
-        e7 (if (and (= op :rename-def) (or (nil? (:name args)) (nil? (:new-name args))))
-             ["missing required param 'name' and/or 'new-name'"] [])
-        e8 (if (and (= op :insert-after) (or (nil? (:after args)) (nil? (:form args))))
-             ["missing required param 'after' and/or 'form'"] [])
-        e9 (if (and (= op :replace-in-body) (or (nil? (:name args)) (or (nil? (:old args)) (nil? (:new args)))))
-             ["missing required param 'name' and/or 'old' and/or 'new'"] [])]
-    (vec (concat e1 (concat e2 (concat e3 (concat e4 (concat e5 (concat e6 (concat e7 (concat e8 e9)))))))))))
+(defn- missing-req [op: Op args: (Map Keyword Any)] -> (Vec String)
+  (let [need-spo (or (= op :tell) (= op :retract)) need-module (or (= op :upsert-form) (or (= op :set-body) (or (= op :rename-def) (or (= op :insert-after) (or (= op :insert-before) (or (= op :replace-in-body) (= op :edit-transaction))))))) e1 (if (and need-spo (or (nil? (:subject args)) (or (nil? (:predicate args)) (nil? (:object args))))) ["missing required param 'subject' and/or 'predicate' and/or 'object'"] []) e2 (if (and (= op :show) (nil? (:subject args))) ["missing required param 'subject'"] []) e3 (if (and (= op :query) (nil? (:query args))) ["missing required param 'query'"] []) e4 (if (and need-module (nil? (:module args))) ["missing required param 'module'"] []) e5 (if (and (= op :upsert-form) (nil? (:form args))) ["missing required param 'form'"] []) e6 (if (and (= op :set-body) (or (nil? (:name args)) (nil? (:body args)))) ["missing required param 'name' and/or 'body'"] []) e7 (if (and (= op :rename-def) (or (nil? (:name args)) (nil? (:new-name args)))) ["missing required param 'name' and/or 'new-name'"] []) e8 (if (and (= op :insert-after) (or (nil? (:after args)) (nil? (:form args)))) ["missing required param 'after' and/or 'form'"] []) e9 (if (and (= op :insert-before) (or (nil? (:before args)) (nil? (:form args)))) ["missing required param 'before' and/or 'form'"] []) e10 (if (and (= op :replace-in-body) (or (nil? (:name args)) (or (nil? (:old args)) (nil? (:new args))))) ["missing required param 'name' and/or 'old' and/or 'new'"] []) e11 (if (and (= op :edit-transaction) (nil? (:edits args))) ["missing required param 'edits'"] [])]
+    (vec (concat e1 (concat e2 (concat e3 (concat e4 (concat e5 (concat e6 (concat e7 (concat e8 (concat e9 (concat e10 e11)))))))))))))
 
 ;; READ -> {:rows [...]}.  WRITE (tell/retract) -> {:write {:op :l :p :r}} (host routes it
-;; through the coordinator).  ask/query -> fram.query/run result.  bad/unknown -> {:error}.
+;; through the commit sequencer).  ask/query -> run result.  bad/unknown -> {:error}.
 ;; args is a (Map Keyword Any): keyword keys -> arbitrary EDN values. The return is the
 ;; tagged result envelope (Any — open-map key-presence gap, see ns doc). The name `query`
 ;; is accepted as an alias for `ask` (same :query op) so the structured escape hatch keeps
 ;; both spellings on every surface. `untell` is likewise accepted as an alias for
 ;; `retract` (same :retract op) so the retract verb keeps both spellings everywhere.
-(defn call
-  [facts :- (Vec k/Fact)
-   idx :- k/Index
-   cat :- (Vec ToolSpec)
-   tool :- String
-   args :- (Map Keyword Any)] :- Any
-  (let [tool (if (= tool "query") "ask" (if (= tool "untell") "retract" tool))
-        spec :- ToolSpec? (spec-by-name cat tool)]
+(defn call!
+  [ctx: (Atom t/TermStore)
+   cat: (Vec ToolSpec)
+   tool-name: String
+   args: (Map Keyword Any)] -> Any
+  (let [tool (if (= tool-name "query") "ask" (if (= tool-name "untell") "retract" tool-name)) spec: ToolSpec? (spec-by-name cat tool) session: schema/Session (schema/session ctx) propositions: (Vec t/Triple) (rotation/propositions (rotation/all-occurrences (schema/view session)))]
     (if (nil? spec)
       {:error [(str "unknown tool '" tool "' — call `tools` for the catalog")]}
-      (let [op :- Op (:op spec)
-            miss (missing-req op args)]
+      (let [op: Op (:op spec) miss (missing-req op args)]
         (if (not (empty? miss))
           {:error miss}
           (let [subj (:subject args)
-                pred :- String (str (:predicate args))
+                pred: String (canonical-predicate session (str (:predicate args)))
                 te (at subj)]
             (cond
-              [(= op :tell)       {:write {:op "assert" :l te :p pred :r (ref-value facts pred (:object args))}}]
-              [(= op :retract)    {:write {:op "retract" :l te :p pred :r (ref-value facts pred (:object args))}}]
-              [(= op :show)       {:rows (mapv (fn [c :- k/Fact] :- PredVal (->PredVal (:p c) (:r c)))
-                                               (k/q-by-l facts te))}]
-              [(= op :query)      (q/run facts (:query args))]
-              [(= op :validate)   {:rows (reduce (fn [acc :- (Vec ThreadViolation) t :- String] :- (Vec ThreadViolation)
-                                                   (vec (concat acc (mapv (fn [v :- String] :- ThreadViolation (->ThreadViolation t v))
-                                                                          (k/violations-i idx t)))))
-                                                 [] (k/thread-ids-i idx))}]
-              ;; GRAPH-AST EDIT envelopes — distinct from {:write} (single-triple). The
-              ;; host (route-edit) runs the resolve.clj verb out-of-band, recompile-gated.
-              ;; Param VALUES stay strings (the EDN datum / names as text), exactly how the
-              ;; gate passes spec/body files and resolve.clj reads (edn/read-string).
-              [(= op :upsert-form) {:edit {:op "upsert-form" :module (:module args) :form (:form args)}}]
-              [(= op :set-body)    {:edit {:op "set-body" :module (:module args)
-                                           :name (:name args) :body (:body args)}}]
-              [(= op :rename-def)  {:edit {:op "rename" :module (:module args)
-                                           :name (:name args) :new-name (:new-name args)}}]
-              ;; CRDT insert-anywhere (commute). MCP tool name is "insert-after"; the
-              ;; INTERNAL verb op stays "insert-form" (the resolve.clj / daemon vocabulary).
-              [(= op :insert-after) {:edit {:op "insert-form" :module (:module args)
-                                            :after (:after args) :form (:form args)}}]
-              ;; SUB-DEF surgical edit — carry the anchor (:old) + replacement (:new) EDN
-              ;; datum strings; the host applies the resolve.clj replace-in-body verb out-of-band.
-              [(= op :replace-in-body) {:edit {:op "replace-in-body" :module (:module args)
-                                               :name (:name args) :old (:old args) :new (:new args)
-                                               :within (:within args)}}]
-              [:else              {:error [(str "unhandled op for tool '" tool "'")]}])))))))
+              [(= op :tell)
+               {:write
+                {:op
+                 "assert"
+                 :l
+                 te
+                 :p
+                 pred
+                 :r
+                 (ref-value session pred (:object args))}}]
+              [(= op :retract)
+               {:write
+                {:op
+                 "retract"
+                 :l
+                 te
+                 :p
+                 pred
+                 :r
+                 (ref-value session pred (:object args))}}]
+              [(= op :show)
+               {:rows
+                (mapv (fn [value: t/Triple] -> PredVal (->PredVal (t/triple-t2 value) (t/triple-t3 value)))
+                  (k/by-t1 propositions te))}]
+              [(= op :query)
+               (let [result: q/QueryResult (q/run-syntax! propositions (:query args))]
+                 (if (q/result-ok? result)
+                   {:ok (q/result-rows result)}
+                   {:error (mapv q/error-message (q/result-errors result))}))]
+              [(= op :validate)
+               {:rows
+                (mapv (fn [value: t/Triple] -> ProfileViolation (->ProfileViolation (t/triple-t1 value) (t/triple-t3 value)))
+                  (k/lint-declared-profile propositions (store/space-id ctx)))}]
+              [(= op :upsert-form)
+               {:edit
+                {:op "upsert-form" :module (:module args) :form (:form args)}}]
+              [(= op :set-body)
+               {:edit
+                {:op
+                 "set-body"
+                 :module
+                 (:module args)
+                 :name
+                 (:name args)
+                 :body
+                 (:body args)}}]
+              [(= op :rename-def)
+               {:edit
+                {:op
+                 "rename"
+                 :module
+                 (:module args)
+                 :name
+                 (:name args)
+                 :new-name
+                 (:new-name args)}}]
+              [(= op :insert-after)
+               {:edit
+                {:op
+                 "insert-form"
+                 :module
+                 (:module args)
+                 :after
+                 (:after args)
+                 :form
+                 (:form args)}}]
+              [(= op :insert-before)
+               {:edit
+                {:op
+                 "insert-before"
+                 :module
+                 (:module args)
+                 :before
+                 (:before args)
+                 :form
+                 (:form args)}}]
+              [(= op :replace-in-body)
+               {:edit
+                {:op
+                 "replace-in-body"
+                 :module
+                 (:module args)
+                 :name
+                 (:name args)
+                 :old
+                 (:old args)
+                 :new
+                 (:new args)
+                 :within
+                 (:within args)}}]
+              [(= op :edit-transaction)
+               {:edit
+                {:op
+                 "edit-transaction"
+                 :module
+                 (:module args)
+                 :edits
+                 (:edits args)}}]
+              [:else {:error [(str "unhandled op for tool '" tool "'")]}])))))))

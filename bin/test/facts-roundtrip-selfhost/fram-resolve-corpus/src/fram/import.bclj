@@ -1,11 +1,13 @@
 #lang beagle/clj
 (ns fram.import
-  "Import thread files into the fact-op log. A file is a block of
-  `@subject predicate object` lines, then `---`, then a prose body. Every line
-  IS a fact, so this is GENERIC — no per-field knowledge, no schema. Objects are
-  either refs (`@id`) or EDN literals. Host IO via fram.rt externs.")
+  "Import thread Markdown into occurrence-history transaction frames. A file
+  is a block of `@subject predicate object` lines, then `---`, then a prose
+  body. Every line is a projected Triple; host IO lives behind fram.rt
+  externs.")
+(define-mode strict)
 
-(require fram.kernel :as k)
+(require fram.types :as t)
+(require fram.store :as store)
 (require fram.fold :as fold)
 (require clojure.string :as str)
 (require fram.rt)
@@ -16,10 +18,33 @@
 (declare-extern fram.rt/split-kv [String -> (Vec String)])
 (declare-extern fram.rt/edn-unquote [String -> String])
 
-;; --- split a file into [fact-head, prose-body] on the first `---` line -------
-(defrecord Doc [head :- String body :- String])
+(defrecord Doc [head: String body: String])
 
-(defn- split-doc [content :- String] :- Doc
+(defrecord PredicateRegistry
+  [by-name: (Map String String)
+   canonical: (Map String String)])
+
+(def ref-predicates: (Vec String)
+  ["depends_on" "part_of" "relates_to" "clarifies" "amends"])
+
+;; Triple fields are recursive Terms in the kernel ABI. This projection accepts
+;; only its documented string vocabulary and rejects any wider Term explicitly.
+(defn- string-term [value: Any] -> String
+  (if (string? value)
+    value
+    (throw (ex-info "thread projection requires string Triple terms"
+                    {:type :invalid-thread-triple}))))
+
+(defn- triple-left [value: t/Triple] -> String
+  (string-term (t/triple-t1 value)))
+
+(defn- triple-predicate [value: t/Triple] -> String
+  (string-term (t/triple-t2 value)))
+
+(defn- triple-right [value: t/Triple] -> String
+  (string-term (t/triple-t3 value)))
+
+(defn- split-doc [content: String] -> Doc
   (let [lines (fram.rt/split-on content "\n")
         n (count lines)]
     (loop [i 0]
@@ -30,77 +55,186 @@
                 (str/join "\n" (subvec (vec lines) (+ i 1) n)))]
         [:else (recur (+ i 1))]))))
 
-;; --- one object token: @ref kept as-is; "quoted" via EDN; else bare literal ---
-(defn- parse-obj [tok :- String] :- String
+(defn- parse-obj [token: String] -> String
   (cond
-    [(str/starts-with? tok "@") tok]
-    [(str/starts-with? tok "\"") (fram.rt/edn-unquote tok)]
-    [:else tok]))
+    [(str/starts-with? token "@") token]
+    [(str/starts-with? token "\"") (fram.rt/edn-unquote token)]
+    [:else token]))
 
-;; stderr warning — import runs as a CLI; a skipped/dropped thread must be
-;; VISIBLE, never silent (the crash-vs-skip asymmetry the log read already has).
-(defn- warn [msg :- String] :- Nil
-  (binding [*out* *err*] (println (str "WARN import: " msg))))
+(defn- identity-predicate? [predicate: String] -> Bool
+  (or (= predicate "predicate_name") (= predicate "predicate_alias")))
 
-;; --- a file -> its facts (subject from the leading @line; body -> a fact) ---
-;; `path` is carried only to name the file in warnings (#16: a head with no
-;; @subject line). It does not affect the parse.
-(defn- file->facts [path :- String content :- String] :- (Vec k/Fact)
+(defn- identity-triple? [value: t/Triple] -> Bool
+  (identity-predicate? (triple-predicate value)))
+
+(defn- bind-predicate-spelling
+  [spellings: (Map String String)
+   spelling: String
+   identity: String] -> (Map String String)
+  (let [prior: String? (get spellings spelling)]
+    (if (and (some? prior) (not (= prior identity)))
+      (throw (ex-info (str "predicate spelling collision: " spelling
+                           " resolves to both " prior " and " identity)
+                      {:predicate spelling :left prior :right identity}))
+      (assoc spellings spelling identity))))
+
+(defn- predicate-registry [triples: (Vec t/Triple)] -> PredicateRegistry
+  (let [registry-triples: (Vec t/Triple) (filterv identity-triple? triples)
+        canonical: (Map String String)
+        (reduce
+         (fn [names: (Map String String) value: t/Triple] -> (Map String String)
+           (if (= "predicate_name" (triple-predicate value))
+             (assoc names (triple-left value) (triple-right value))
+             names))
+         {}
+         registry-triples)
+        by-name: (Map String String)
+        (reduce
+         (fn
+           [spellings: (Map String String)
+            value: t/Triple] -> (Map String String)
+           (bind-predicate-spelling spellings
+                                    (triple-right value)
+                                    (triple-left value)))
+         {}
+         registry-triples)]
+    (->PredicateRegistry by-name canonical)))
+
+(defn- strip-at [spelling: String] -> String
+  (if (str/starts-with? spelling "@") (subs spelling 1) spelling))
+
+(defn- predicate-id [registry: PredicateRegistry spelling: String] -> String
+  (if (str/starts-with? spelling "@")
+    spelling
+    (let [identity: String?
+          (get (predicateregistry-by-name registry) spelling)]
+      (if (some? identity) identity (str "@" spelling)))))
+
+(defn- predicate-name [registry: PredicateRegistry spelling: String] -> String
+  (let [identity (predicate-id registry spelling)
+        canonical: String?
+        (get (predicateregistry-canonical registry) identity)]
+    (if (some? canonical) canonical (strip-at identity))))
+
+(defn- predicate-property-value
+  [registry: PredicateRegistry
+   triples: (Vec t/Triple)
+   predicate: String
+   property: String] -> String?
+  (let [identity (predicate-id registry predicate)
+        property-id (predicate-id registry property)]
+    (reduce
+     (fn [found: String? value: t/Triple] -> String?
+       (if (and (= identity (predicate-id registry (triple-left value)))
+                (= property-id
+                   (predicate-id registry (triple-predicate value))))
+         (triple-right value)
+         found))
+     nil
+     triples)))
+
+(defn- fallback-ref? [registry: PredicateRegistry predicate: String] -> Bool
+  (let [identity (predicate-id registry predicate)]
+    (loop [remaining ref-predicates]
+      (if (empty? remaining)
+        false
+        (if (= identity (predicate-id registry (first remaining)))
+          true
+          (recur (rest remaining)))))))
+
+(defn- value-kind-of
+  [registry: PredicateRegistry
+   triples: (Vec t/Triple)
+   predicate: String] -> String
+  (let [explicit: String?
+        (predicate-property-value registry triples predicate "value_kind")]
+    (if (some? explicit)
+      explicit
+      (if (fallback-ref? registry predicate) "ref" "literal"))))
+
+(defn- normalize-predicate-triples [triples: (Vec t/Triple)] -> (Vec t/Triple)
+  (let [registry (predicate-registry triples)
+        normalized: (Vec t/Triple)
+        (mapv
+         (fn [value: t/Triple] -> t/Triple
+           (let [predicate (predicate-name registry (triple-predicate value))
+                 right (triple-right value)
+                 normalized-right
+                 (if (and (= "ref" (value-kind-of registry triples predicate))
+                          (not (str/starts-with? right "@")))
+                   (str "@" right)
+                   right)]
+             (t/triple (triple-left value) predicate normalized-right)))
+         triples)]
+    ;; Streaming consumers must see identity declarations before aliases are
+    ;; used, even though the occurrence fold itself accepts either order.
+    (vec (concat (filterv identity-triple? normalized)
+                 (filterv (fn [value: t/Triple] -> Bool
+                            (not (identity-triple? value)))
+                          normalized)))))
+
+(defn- warn [message: String] -> Nil
+  (binding [*out* *err*] (println (str "WARN import: " message))))
+
+(defn- file->triples [path: String content: String] -> (Vec t/Triple)
   (let [doc (split-doc content)
-        lines (fram.rt/split-on (:head doc) "\n")
+        lines (fram.rt/split-on (doc-head doc) "\n")
         n (count lines)
-        si (loop [i 0]
-             (cond
-               [(>= i n) (- 0 1)]
-               [(str/starts-with? (str/trim (nth lines i)) "@") i]
-               [:else (recur (+ i 1))]))]
-    (if (< si 0)
-      ;; No @subject line — the WHOLE thread (title/owner/body/edges) would be
-      ;; dropped. Warn loudly instead of silently importing zero facts, unless
-      ;; the head is genuinely empty (a blank/body-only file is not an error).
+        subject-index
+        (loop [i 0]
+          (cond
+            [(>= i n) -1]
+            [(str/starts-with? (str/trim (nth lines i)) "@") i]
+            [:else (recur (+ i 1))]))]
+    (if (< subject-index 0)
       (do
-        (if (str/blank? (:head doc))
+        (if (str/blank? (doc-head doc))
           nil
           (warn (str path " — no @subject line found in head; dropping " n
-                     " head line(s) (a corrupted/hand-edited first line, or a stray BOM/whitespace before @?)")))
+                     " head line(s)")))
         [])
-      (let [subj (str/trim (nth lines si))
-            facts (loop [i (+ si 1) acc []]
-                     (if (>= i n)
-                       acc
-                       (let [t (str/trim (nth lines i))]
-                         (if (str/blank? t)
-                           (recur (+ i 1) acc)
-                           (let [kv (fram.rt/split-kv t)]
-                             (recur (+ i 1)
-                                    (conj acc (k/->Fact subj (nth kv 0) (parse-obj (nth kv 1))))))))))
-            body (:body doc)]
-        (if (str/blank? body) facts (conj facts (k/->Fact subj "body" body)))))))
+      (let [subject (str/trim (nth lines subject-index))
+            triples: (Vec t/Triple)
+            (loop [i (+ subject-index 1) acc: (Vec t/Triple) []]
+              (if (>= i n)
+                acc
+                (let [line (str/trim (nth lines i))]
+                  (if (str/blank? line)
+                    (recur (+ i 1) acc)
+                    (let [pair (fram.rt/split-kv line)]
+                      (recur (+ i 1)
+                             (conj acc
+                                   (t/triple subject
+                                             (nth pair 0)
+                                             (parse-obj (nth pair 1))))))))))
+            body (doc-body doc)]
+        (if (str/blank? body)
+          triples
+          (conj triples (t/triple subject "body" body)))))))
 
-;; --- corpus -> numbered fact-ops (frame "import") --------------------------
-(defn- number-fact-ops [facts :- (Vec k/Fact)] :- (Vec fold/FactOp)
-  (loop [cs facts i 1 acc []]
-    (if (empty? cs)
-      acc
-      (let [c (first cs)]
-        (recur (rest cs) (+ i 1)
-               (conj acc (fold/->FactOp i "assert" (:l c) (:p c) (:r c) "import")))))))
+(defn- safe-file->triples [path: String] -> (Vec t/Triple)
+  (try
+    (file->triples path (fram.rt/slurp path))
+    (catch Exception error
+      (warn (str path " — skipped (could not parse): " (.getMessage error)))
+      [])))
 
-;; Parse ONE file into facts, isolating any failure to that file. A single
-;; malformed line (e.g. an unterminated quoted literal -> fram.rt/edn-unquote
-;; throws "EOF while reading string") must skip THAT file with a warning, not
-;; abort the whole corpus import — the same crash-vs-skip discipline read-log
-;; already applies per log line.
-(defn- safe-file->facts [path :- String] :- (Vec k/Fact)
-  (try (file->facts path (fram.rt/slurp path))
-       (catch Exception e
-         (warn (str path " — skipped (could not parse): " (.getMessage e)))
-         [])))
+(defn- number-frames [triples: (Vec t/Triple)] -> (Vec t/TransactionFrame)
+  (loop [position 0 frames: (Vec t/TransactionFrame) []]
+    (if (>= position (count triples))
+      frames
+      (recur (+ position 1)
+             (conj frames
+                   (fold/transaction-frame
+                    (+ position 1)
+                    [(store/assert-operation (nth triples position))]))))))
 
-(defn load-corpus [threads-dir :- String] :- (Vec fold/FactOp)
+(defn load-corpus [threads-dir: String] -> (Vec t/TransactionFrame)
   (let [files (fram.rt/list-md threads-dir)
-        facts (reduce (fn [acc :- (Vec k/Fact) path :- String] :- (Vec k/Fact)
-                         (vec (concat acc (safe-file->facts path))))
-                       []
-                       files)]
-    (number-fact-ops facts)))
+        triples: (Vec t/Triple)
+        (reduce
+         (fn [acc: (Vec t/Triple) path: String] -> (Vec t/Triple)
+           (vec (concat acc (safe-file->triples path))))
+         []
+         files)]
+    (number-frames (normalize-predicate-triples triples))))

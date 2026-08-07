@@ -100,31 +100,18 @@
   :path "bin/test/code-as-facts/shadow-corpus/mod.bclj"}
 
  ;; Fram resolve_golden.sh's complete source corpus, vendored so this
- ;; certification remains hermetic and worktree-stable.
- {:name "fram-types"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/types.bclj"}
- {:name "fram-store"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/store.bclj"}
- {:name "fram-schema"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/schema.bclj"}
- {:name "fram-datalog"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/datalog.bclj"}
- {:name "fram-kernel"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/kernel.bclj"}
+ ;; certification remains hermetic and worktree-stable. The .bgl Native
+ ;; Core modules are not that gate's input, so they are not vendored here.
  {:name "fram-fold"
   :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/fold.bclj"}
  {:name "fram-import"
   :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/import.bclj"}
  {:name "fram-export"
   :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/export.bclj"}
- {:name "fram-query"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/query.bclj"}
  {:name "fram-tools"
   :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/tools.bclj"}
  {:name "fram-authority"
   :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/authority.bclj"}
- {:name "fram-world"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/world.bclj"}
  {:name "fram-claims"
   :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/claims.bclj"}
  {:name "fram-main"
