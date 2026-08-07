@@ -38,13 +38,13 @@
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
-(defn char-at [(s : String) (i : Int)] -> String
+(defn char-at [s: String i: Int] -> String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
 (defn substring2
-  [(s : String)
-   (a : Int)
-   (b : Int)] -> String
+  [s: String
+   a: Int
+   b: Int] -> String
   (let [n (count s)
         lo (if (< a 0) 0 (if (> a n) n a))
         hi (if (< b lo) lo (if (> b n) n b))]
@@ -54,21 +54,21 @@
 
 ;; `,` is Clojure whitespace (reader-impl.rkt maps #\, to #\space) — NOT
 ;; unquote; unquote is `~` / `~@`.
-(defn whitespace? [(ch : String)] -> Bool
+(defn whitespace? [ch: String] -> Bool
   (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t") (= ch ",")))
 
-(defn newline? [(ch : String)] -> Bool
+(defn newline? [ch: String] -> Bool
   (or (= ch "\n") (= ch "\r")))
 
 ;; digit?/hex-val classify a 1-char string by lexicographic compare — for
 ;; single chars (compare "5" "0") == the char-code difference (== 5), so
 ;; contiguous ranges 0-9 / a-f / A-F map straight to their numeric value.
-(defn digit? [(ch : String)] -> Bool
+(defn digit? [ch: String] -> Bool
   (and (= (count ch) 1)
        (>= (compare ch "0") 0)
        (<= (compare ch "9") 0)))
 
-(defn delimiter? [(ch : String)] -> Bool
+(defn delimiter? [ch: String] -> Bool
   (or (whitespace? ch)
       (= ch "(") (= ch ")") (= ch "[") (= ch "]")
       (= ch "{") (= ch "}") (= ch "\"") (= ch ";")
@@ -78,24 +78,24 @@
 ;; `:` terminates a PLAIN token (`x:` -> `x` + ANN-MARKER) but is NOT a
 ;; delimiter inside a keyword or char-literal token, so `::kw` and `\:` read
 ;; unchanged. Mirrors reader-impl.rkt base-token-delimiter? / dot-token-delimiter?.
-(defn token-delimiter? [(ch : String)] -> Bool
+(defn token-delimiter? [ch: String] -> Bool
   (or (delimiter? ch) (= ch ":")))
 
 ;; --- result helper -----------------------------------------------------------
 
-(defn make-result [(value : Any) (pos : Int)] -> Any
+(defn make-result [value: Any pos: Int] -> Any
   {"value" value "pos" pos})
 
 ;; --- whitespace and comment skipping -----------------------------------------
 
-(defn skip-line-comment [(src : String) (pos : Int)] -> Int
+(defn skip-line-comment [src: String pos: Int] -> Int
   (let [len (count src)]
     (loop [j pos]
       (if (or (>= j len) (newline? (char-at src j)))
         (if (and (< j len) (= (char-at src j) "\n")) (+ j 1) j)
         (recur (+ j 1))))))
 
-(defn skip-ws [(src : String) (pos : Int)] -> Int
+(defn skip-ws [src: String pos: Int] -> Int
   (let [len (count src)]
     (loop [i pos]
       (if (>= i len) i
@@ -107,7 +107,7 @@
 
 ;; --- string literal reader ---------------------------------------------------
 
-(defn decode-escape [(ch : String)] -> String
+(defn decode-escape [ch: String] -> String
   (cond
     (= ch "n") "\n"
     (= ch "t") "\t"
@@ -122,7 +122,7 @@
     ;; documented gaps, not decoded.
     :else ch))
 
-(defn hex-val [(c : String)] -> Int
+(defn hex-val [c: String] -> Int
   (cond
     (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
     (and (>= (compare c "a") 0) (<= (compare c "f") 0)) (+ 10 (compare c "a"))
@@ -130,7 +130,7 @@
     :else 0))
 
 ;; \uXXXX -> the char. i points at the first hex digit.
-(defn decode-u4 [(src : String) (i : Int)] -> Int
+(defn decode-u4 [src: String i: Int] -> Int
   (+ (* 4096 (hex-val (char-at src i)))
      (* 256 (hex-val (char-at src (+ i 1))))
      (* 16 (hex-val (char-at src (+ i 2))))
@@ -142,7 +142,7 @@
 ;;   \uXXXX       — 4-hex-digit Unicode escape (suffix starts with "u", length 5)
 ;;   single char  — any single-character suffix (its code point)
 ;;   unknown      — 65533 (replacement character U+FFFD)
-(defn decode-char-lit [(suffix : String)] -> Int
+(defn decode-char-lit [suffix: String] -> Int
   (cond
     (= suffix "space")     32
     (= suffix "tab")       9
@@ -156,7 +156,7 @@
       (int (.charAt suffix 0))
     :else 65533))
 
-(defn read-string-literal [(src : String) (pos : Int)] -> Any
+(defn read-string-literal [src: String pos: Int] -> Any
   (let [len (count src)]
     (loop [i (+ pos 1) buf: (Vec String) []]
       (cond
@@ -176,7 +176,7 @@
 ;; --- regex reader (#"...") — preserves backslash escapes ---------------------
 ;; Unlike a string, a regex keeps `\d` as `\d` (matches Racket's
 ;; read-regex-pattern). pos points at the opening ".
-(defn read-regex-literal [(src : String) (pos : Int)] -> Any
+(defn read-regex-literal [src: String pos: Int] -> Any
   (let [len (count src)]
     (loop [i (+ pos 1) buf: (Vec String) []]
       (cond
@@ -192,17 +192,17 @@
 
 ;; --- raw string reader (#r"..." / #r#"..."# / #r##"..."## ) ------------------
 
-(defn count-hashes [(src : String) (pos : Int)] -> Int
+(defn count-hashes [src: String pos: Int] -> Int
   (loop [i pos n 0]
     (if (and (< i (count src)) (= (char-at src i) "#"))
       (recur (+ i 1) (+ n 1))
       n)))
 
-(defn hashes-str [(n : Int)] -> String
+(defn hashes-str [n: Int] -> String
   (loop [k n acc ""]
     (if (<= k 0) acc (recur (- k 1) (str acc "#")))))
 
-(defn read-raw-string [(src : String) (pos : Int)] -> Any
+(defn read-raw-string [src: String pos: Int] -> Any
   (let [hc (count-hashes src pos)
         open-pos (+ pos hc)
         len (count src)]
@@ -225,16 +225,16 @@
 ;; and exponent forms (1e5, 1.5e-3), parse in one pass.
 
 (defn num-value
-  [(src : String)
-   (start : Int)
-   (end : Int)
-   (is-float : Bool)] -> Any
+  [src: String
+   start: Int
+   end: Int
+   is-float: Bool] -> Any
   (let [text (subs src start end)]
     (if is-float
       (let [n (parse-double text)] (if (nil? n) 0.0 n))
       (let [n (parse-long text)] (if (nil? n) 0 n)))))
 
-(defn read-number [(src : String) (pos : Int)] -> Any
+(defn read-number [src: String pos: Int] -> Any
   (let [len (count src)
         start (if (= (char-at src pos) "-") (+ pos 1) pos)]
     (loop [i start has-dot false has-exp false]
@@ -262,7 +262,7 @@
 
 ;; --- symbol reader -----------------------------------------------------------
 
-(defn read-symbol-text [(src : String) (pos : Int)] -> Any
+(defn read-symbol-text [src: String pos: Int] -> Any
   (let [len (count src)]
     (loop [i pos]
       (if (>= i len)
@@ -273,7 +273,7 @@
 
 ;; Plain-token text: like read-symbol-text but `:` also ends the token, which is
 ;; what makes the postfix `x: Int` split into three datums.
-(defn read-token-text [(src : String) (pos : Int)] -> Any
+(defn read-token-text [src: String pos: Int] -> Any
   (let [len (count src)]
     (loop [i pos]
       (if (>= i len)
@@ -285,14 +285,14 @@
 ;; `<:` (forall subtype bound) stays ONE symbol: glue a colon only when it
 ;; follows a leading `<` and ENDS the token, so `<`/`<=`/`<-`/`a<b` are
 ;; untouched. Mirrors reader-impl.rkt lt-reader.
-(defn read-lt-token [(src : String) (pos : Int)] -> Any
+(defn read-lt-token [src: String pos: Int] -> Any
   (let [len (count src)]
     (if (and (= (char-at src (+ pos 1)) ":")
              (or (>= (+ pos 2) len) (delimiter? (char-at src (+ pos 2)))))
       (make-result "<:" (+ pos 2))
       (read-token-text src pos))))
 
-(defn classify-atom [(text : String)] -> Any
+(defn classify-atom [text: String] -> Any
   (cond
     (= text "true") true
     (= text "false") false
@@ -305,9 +305,9 @@
 (declare read-datum)
 
 (defn read-delimited
-  [(src : String)
-   (pos : Int)
-   (close : String)] -> Any
+  [src: String
+   pos: Int
+   close: String] -> Any
   (let [len (count src)]
     (loop [p (skip-ws src pos) items: (Vec Any) []]
       (cond
@@ -326,7 +326,7 @@
 
 ;; --- hash dispatch (#{ #" #r etc.) -------------------------------------------
 
-(defn read-hash-dispatch [(src : String) (pos : Int)] -> Any
+(defn read-hash-dispatch [src: String pos: Int] -> Any
   (let [len (count src)]
     (if (>= (+ pos 1) len)
       (make-result "#" (+ pos 1))
@@ -346,7 +346,7 @@
 
 ;; --- main datum reader -------------------------------------------------------
 
-(defn read-datum [(src : String) (pos : Int)] -> Any
+(defn read-datum [src: String pos: Int] -> Any
   (let [p (skip-ws src pos)
         len (count src)]
     (if (>= p len) nil
@@ -469,7 +469,7 @@
 ;; --- #lang line parser -------------------------------------------------------
 
 ;; Mirrors beagle:beagle-lib/private/targets.rkt; the seed cannot load Racket.
-(defn lang-target [(lang-text : String)] -> Any
+(defn lang-target [lang-text: String] -> Any
   (cond
     (= lang-text "beagle") "core"
     (= lang-text "beagle/clj") "clj"
@@ -477,14 +477,14 @@
     (= lang-text "beagle/nix") "nix"
     :else nil))
 
-(defn target-lang-line [(target : String)] -> Any
+(defn target-lang-line [target: String] -> Any
   (cond
     (= target "core") "#lang beagle"
     (or (= target "clj") (= target "js") (= target "nix"))
       (str "#lang beagle/" target)
     :else nil))
 
-(defn parse-lang-line [(src : String)] -> Any
+(defn parse-lang-line [src: String] -> Any
   (let [len (count src)]
     (if (str/starts-with? src "#lang")
       (loop [i 5]
@@ -497,7 +497,7 @@
 ;; --- top-level entry points --------------------------------------------------
 
 ;; read-all: whole-file read, keeping the #lang target (used by tests).
-(defn read-all [(src : String)] -> Any
+(defn read-all [src: String] -> Any
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")]
@@ -511,7 +511,7 @@
                    (conj datums (get result "value")))))))))
 
 ;; Does the datum stream already carry an explicit (define-target ...) form?
-(defn- has-define-target? [(datums : Any)] -> Bool
+(defn- has-define-target? [datums: Any] -> Bool
   (loop [i 0]
     (if (>= i (count datums)) false
       (let [d (nth datums i)]
@@ -525,7 +525,7 @@
 ;; target by prepending a synthetic define-target for non-clj languages that
 ;; lack an explicit one. clj is the parser default (and the reader tests pin no
 ;; injection for it); an explicit define-target already present wins.
-(defn read-program [(src : String)] -> Any
+(defn read-program [src: String] -> Any
   (let [all (read-all src)
         target (get all "target")
         datums (get all "datums")]
@@ -539,15 +539,15 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn- expect! [(label : String) (result : Bool)] -> Nil
+(defn- expect! [label: String result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
 
-(defn- rd [(src : String)] -> Any
+(defn- rd [src: String] -> Any
   (get (read-all src) "datums"))
 
-(defn- rd1 [(src : String)] -> Any
+(defn- rd1 [src: String] -> Any
   (nth (rd src) 0))
 
 (defn run-tests! [] -> Int

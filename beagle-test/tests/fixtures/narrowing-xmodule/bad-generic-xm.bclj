@@ -4,7 +4,7 @@
 ;; (p/Result Int String) through Ok is Ok<Int>, so String must fail.
 (require prov :as p)
 
-(defn get-it [(r : (p/Result Int String))] -> String
+(defn get-it [r: (p/Result Int String)] -> String
   (match r
     [(Ok v) (p/ok-value r)]
     [(Err e) e]))

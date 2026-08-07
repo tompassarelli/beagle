@@ -8,7 +8,7 @@
 
 (define-mode strict)
 
-(defn fixture-id [(name : String)] -> core/NativeId
+(defn fixture-id [name: String] -> core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))
 
 (def fixture-i64-type: core/TypeDef
@@ -91,7 +91,7 @@
 ;; union aggregates, multi-block control flow, block parameters, arena
 ;; allocation, stores, and an intra-module call.
 
-(defn slice-id [(name : String)] -> core/NativeId
+(defn slice-id [name: String] -> core/NativeId
   (core/canonical-id "native-qbe-fixture-v0" [name]))
 
 (def slice-i64-type: core/TypeDef
@@ -874,7 +874,7 @@
 ;; This fixture is materialized by validation/atom through C17. QBE must reject
 ;; the same frozen program until it has a lock-aware state calling convention.
 
-(defn atom-fixture-id [(name : String)] -> core/NativeId
+(defn atom-fixture-id [name: String] -> core/NativeId
   (core/canonical-id "native-atom-fixture-v0" [name]))
 
 (def atom-i64-type: core/TypeDef
@@ -1136,12 +1136,12 @@
 
 ;; --- materialization ------------------------------------------------------
 
-(defn require-artifact [(result : qbe/QbeMaterialization)] -> qbe/QbeArtifact
+(defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
   (match result
     [(QbeSuccess value) (qbe/qbesuccess-artifact result)]
     [(QbeFailure value) (throw (ex-info (qbe/qbefailure-detail result) {}))]))
 
-(defn explicitly-refused? [(program : core/NativeCoreProgram)] -> Bool
+(defn explicitly-refused? [program: core/NativeCoreProgram] -> Bool
   (and (core/validationreport-passed (core/validate-program program))
     (match (qbe/materialize-program program 3 "lp64")
       [(QbeSuccess value) false]
@@ -1301,7 +1301,7 @@
     "  return 0;\n"
     "}\n"))
 
-(defn emit-fixture! [(directory : String)] -> Nil
+(defn emit-fixture! [directory: String] -> Nil
   (if fixture-deterministic?
     (do
       (spit (str directory "/" (qbe/qbeartifact-module-name fixture-artifact))

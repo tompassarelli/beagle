@@ -2,5 +2,5 @@
 (ns native.codec-primitives-managed)
 (define-mode strict)
 
-(defn digest-bytes [(value : (Vec Int))] -> String
+(defn digest-bytes [value: (Vec Int)] -> String
   (sha256-bytes value))

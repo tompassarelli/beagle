@@ -7,7 +7,7 @@
 (defn build [] -> Int
   (circle-radius (->Circle 3)))
 
-(defn area [(s : Shape)] -> Int
+(defn area [s: Shape] -> Int
   (match s
     [(Circle r) r]
     [(Rect w h) w]))

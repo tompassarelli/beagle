@@ -10,5 +10,5 @@
 ;; diagnostic class.
 (ns fixture.downstream-sensitivity)
 
-(defn bump! [(obj : Any)] -> Any
+(defn bump! [obj: Any] -> Any
   (set! (.-count obj) (+ (.-count obj) 1)))

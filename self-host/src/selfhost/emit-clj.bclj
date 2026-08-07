@@ -33,7 +33,7 @@
 ;; fn: helpers defined BEFORE emit-expr! call it via emit-expr*.
 (def emit-expr-ref: Any (atom nil))
 
-(defn emit-expr* [(e : Any)] -> String
+(defn emit-expr* [e: Any] -> String
   (let [f: [Any -> String] (deref emit-expr-ref)]
     (f e)))
 
@@ -44,12 +44,12 @@
 
 (def HEX-DIGITS: String "0123456789ABCDEF")
 
-(defn hex4 [(code : Int)] -> String
+(defn hex4 [code: Int] -> String
   ;; codes here are < 256 (ASCII control range + DEL), so two leading zeros
   (str "00" (subs HEX-DIGITS (quot code 16) (+ (quot code 16) 1))
        (subs HEX-DIGITS (mod code 16) (+ (mod code 16) 1))))
 
-(defn escape-char [(c : String)] -> String
+(defn escape-char [c: String] -> String
   (let [cs: Any c
         code (int (first cs))]
     (cond
@@ -66,7 +66,7 @@
       (or (< code 32) (= code 127)) (str "\\u" (hex4 code))
       :else c)))
 
-(defn write-clj-string [(s : String)] -> String
+(defn write-clj-string [s: String] -> String
   (let [n (count s)]
     (loop [i 0
            acc: (Vec String) ["\""]]
@@ -76,7 +76,7 @@
 
 ;; --- number emission ----------------------------------------------------------
 
-(defn emit-float [(v : Any)] -> String
+(defn emit-float [v: Any] -> String
   (let [s (str v)]
     (if (or (str/includes? s ".") (str/includes? s "E") (str/includes? s "e"))
       s
@@ -84,7 +84,7 @@
 
 ;; --- type-hint helpers (emit-clj.rkt clj-tag-for-type) ------------------------
 
-(defn clj-tag-for-type [(t : Any)] -> Any
+(defn clj-tag-for-type [t: Any] -> Any
   (if (or (nil? t) (not (= (get t "kind") "prim")))
     nil
     (let [n (get t "name")]
@@ -98,13 +98,13 @@
         (= n "Any") nil
         :else (if (contains? (deref record-fields) n) n nil)))))
 
-(defn clj-tag-prefix [(t : Any)] -> String
+(defn clj-tag-prefix [t: Any] -> String
   (let [tag (clj-tag-for-type t)]
     (if (nil? tag) "" (str "^" tag " "))))
 
 ;; --- params / binding names ----------------------------------------------------
 
-(defn emit-param [(p : Any)] -> String
+(defn emit-param [p: Any] -> String
   (let [t (get p "type")]
     (cond
       (= t "param") (get p "name")
@@ -122,15 +122,15 @@
             (str "[" names "]")))
       :else "_")))
 
-(defn emit-param-tagged [(p : Any)] -> String
+(defn emit-param-tagged [p: Any] -> String
   (if (= (get p "type") "param")
     (str (clj-tag-prefix (get p "ann")) (get p "name"))
     (emit-param p)))
 
-(defn emit-params [(params : Any)] -> String
+(defn emit-params [params: Any] -> String
   (str/join " " (mapv emit-param params)))
 
-(defn emit-params-with-rest [(params : Any) (rest-p : Any)] -> String
+(defn emit-params-with-rest [params: Any rest-p: Any] -> String
   (let [fixed (emit-params params)]
     (if rest-p
       (if (= fixed "")
@@ -138,7 +138,7 @@
         (str fixed " & " (emit-param rest-p)))
       fixed)))
 
-(defn emit-params-with-rest-tagged [(params : Any) (rest-p : Any)] -> String
+(defn emit-params-with-rest-tagged [params: Any rest-p: Any] -> String
   (let [fixed (str/join " " (mapv emit-param-tagged params))]
     (if rest-p
       (if (= fixed "")
@@ -152,20 +152,20 @@
 ;; node (map with a "type" of map-/seq-destructure). emit-param already renders
 ;; both pattern shapes; strings pass through. One target-emitter for every
 ;; binding context (let / loop / binding / with-open / for :let).
-(defn emit-binding-target [(target : Any)] -> String
+(defn emit-binding-target [target: Any] -> String
   (if (string? target)
     target
     (emit-param target)))
 
-(defn emit-let-bindings [(bindings : Any)] -> String
+(defn emit-let-bindings [bindings: Any] -> String
   (str/join "\n   "
-    (mapv (fn [(b : Any)] -> String
+    (mapv (fn [b: Any] -> String
             (str (emit-binding-target (get b "name")) " " (emit-expr* (get b "value"))))
           bindings)))
 
-(defn emit-for-clauses [(clauses : Any)] -> String
+(defn emit-for-clauses [clauses: Any] -> String
   (str/join "\n   "
-    (mapv (fn [(c : Any)] -> String
+    (mapv (fn [c: Any] -> String
             (let [t (get c "type")]
               (cond
                 (= t "binding") (str (get c "name") " " (emit-expr* (get c "expr")))
@@ -174,17 +174,17 @@
                 :else "")))
           clauses)))
 
-(defn emit-body [(exprs : Any) (indent : String)] -> String
+(defn emit-body [exprs: Any indent: String] -> String
   (str/join (str "\n" indent) (mapv emit-expr* exprs)))
 
-(defn emit-args [(args : Any)] -> String
+(defn emit-args [args: Any] -> String
   (if (= (count args) 0)
     ""
     (str " " (str/join " " (mapv emit-expr* args)))))
 
 ;; --- quoted datums (emit-clj.rkt datum->clj) -----------------------------------
 
-(defn datum-clj [(d : Any)] -> String
+(defn datum-clj [d: Any] -> String
   (cond
     (string? d) (write-clj-string d)
     (boolean? d) (if d "true" "false")
@@ -203,7 +203,7 @@
     (nil? d) "nil"
     :else (str d)))
 
-(defn emit-quoted-top [(d : Any)] -> String
+(defn emit-quoted-top [d: Any] -> String
   (if (and (vector? d) (> (count d) 0)
            (or (= (nth d 0) "#%brackets") (= (nth d 0) "#%map") (= (nth d 0) "#%set")))
     (datum-clj d)
@@ -211,11 +211,11 @@
 
 ;; --- ns emission (emit-clj.rkt emit-ns) -----------------------------------------
 
-(defn last-dot-segment [(s : String)] -> String
+(defn last-dot-segment [s: String] -> String
   (let [idx (str/last-index-of s ".")]
     (if (nil? idx) s (subs s (+ idx 1)))))
 
-(defn emit-require [(r : Any)] -> String
+(defn emit-require [r: Any] -> String
   (let [ns-name (get r "ns")
         refer (get r "refer")
         alias0 (get r "alias")
@@ -229,10 +229,10 @@
            "")
          "]")))
 
-(defn has-clojure-string? [(rs : Any)] -> Bool
-  (> (count (filterv (fn [(r : Any)] -> Bool (= "clojure.string" (get r "ns"))) rs)) 0))
+(defn has-clojure-string? [rs: Any] -> Bool
+  (> (count (filterv (fn [r: Any] -> Bool (= "clojure.string" (get r "ns"))) rs)) 0))
 
-(defn emit-ns-form [(prog : Any) (body : String)] -> String
+(defn emit-ns-form [prog: Any body: String] -> String
   (let [needs (some? (re-find #"[( \t\n]str/" body))
         rs0 (vec (get prog "requires"))
         rs (if (and needs (not (has-clojure-string? rs0)))
@@ -252,26 +252,26 @@
 
 ;; --- records / enums / unions ----------------------------------------------------
 
-(defn field-names-of [(fields : Any)] -> (Vec String)
-  (mapv (fn [(f : Any)] -> String (get f "name")) fields))
+(defn field-names-of [fields: Any] -> (Vec String)
+  (mapv (fn [f: Any] -> String (get f "name")) fields))
 
-(defn emit-record-form [(e : Any)] -> String
+(defn emit-record-form [e: Any] -> String
   (let [name (get e "name")
         fnames (field-names-of (get e "fields"))
         name-lower (str/lower-case name)
         record-line (str "(defrecord " name " [" (str/join " " fnames) "])")
-        accessors (mapv (fn [(fname : String)] -> String
+        accessors (mapv (fn [fname: String] -> String
                           (str "(defn " name-lower "-" fname " [r] (:" fname " r))"))
                         fnames)]
     (str/join "\n\n" (into [record-line] accessors))))
 
-(defn emit-defenum [(e : Any)] -> String
-  (let [vals-str (str/join " " (mapv (fn [(v : Any)] -> String (str ":" v)) (get e "values")))]
+(defn emit-defenum [e: Any] -> String
+  (let [vals-str (str/join " " (mapv (fn [v: Any] -> String (str ":" v)) (get e "values")))]
     (str "(def " (get e "name") "-values #{" vals-str "})")))
 
 ;; Accessors are mandatory: check.rkt registers `circle-radius` for every
 ;; variant field, so a bare defrecord emits calls to an undefined symbol.
-(defn emit-variant-defrecord [(m : String) (fields : Any)] -> String
+(defn emit-variant-defrecord [m: String fields: Any] -> String
   (let [fnames (field-names-of fields)
         m-lower (str/lower-case m)
         record-line (str "(defrecord " m " [" (str/join " " fnames) "])")]
@@ -279,29 +279,29 @@
       record-line
       (str/join "\n\n"
         (into [record-line]
-          (mapv (fn [(fname : String)] -> String
+          (mapv (fn [fname: String] -> String
                   (str "(defn " m-lower "-" fname " [r] (:" fname " r))"))
                 fnames))))))
 
-(defn emit-defunion [(e : Any)] -> String
+(defn emit-defunion [e: Any] -> String
   (let [comment (str ";; " (get e "name") " = " (str/join " | " (get e "members")))
         mf (get e "member-fields")]
     (if (nil? mf)
       comment
       (str comment "\n"
            (str/join "\n"
-             (mapv (fn [(m : String)] -> String
+             (mapv (fn [m: String] -> String
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
 
-(defn emit-deferror [(e : Any)] -> String
+(defn emit-deferror [e: Any] -> String
   (let [comment (str ";; error " (get e "name") " = " (str/join " | " (get e "members")))
         mf (get e "member-fields")]
     (if (nil? mf)
       comment
       (str comment "\n"
            (str/join "\n"
-             (mapv (fn [(m : String)] -> String
+             (mapv (fn [m: String] -> String
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
 
@@ -312,18 +312,18 @@
     (swap! match-counter inc)
     (str "match__" n)))
 
-(defn case-foldable-pattern? [(pat : Any)] -> Bool
+(defn case-foldable-pattern? [pat: Any] -> Bool
   (let [t (get pat "type")]
     (cond
       (= t "literal") true
       (= t "or")
-        (= 0 (count (filterv (fn [(alt : Any)] -> Bool
+        (= 0 (count (filterv (fn [alt: Any] -> Bool
                                (let [at (get alt "type")]
                                  (not (or (= at "literal") (= at "wildcard")))))
                              (get pat "alternatives"))))
       :else false)))
 
-(defn case-foldable-match? [(clauses : Any)] -> Bool
+(defn case-foldable-match? [clauses: Any] -> Bool
   (let [n (count clauses)]
     (if (= n 0)
       false
@@ -331,13 +331,13 @@
             non-tail (subvec cs 0 (- n 1))
             tail-pat (get (nth cs (- n 1)) "pattern")
             tt (get tail-pat "type")
-            bad (count (filterv (fn [(c : Any)] -> Bool
+            bad (count (filterv (fn [c: Any] -> Bool
                                   (not (case-foldable-pattern? (get c "pattern"))))
                                 non-tail))]
         (and (= bad 0)
              (or (case-foldable-pattern? tail-pat) (= tt "wildcard") (= tt "var")))))))
 
-(defn emit-pat-literal-value [(pat : Any)] -> String
+(defn emit-pat-literal-value [pat: Any] -> String
   (let [val (get pat "value")]
     (cond
       (and (map? val) (= (get val "type") "symbol"))
@@ -349,7 +349,7 @@
       (number? val) (if (double? val) (emit-float val) (str val))
       :else (str val))))
 
-(defn emit-pat-literal-test [(pat : Any) (target-sym : String)] -> String
+(defn emit-pat-literal-test [pat: Any target-sym: String] -> String
   (let [val (get pat "value")]
     (cond
       (and (map? val) (= (get val "type") "symbol"))
@@ -366,9 +366,9 @@
       :else (str "(= " target-sym " " val ")"))))
 
 (defn emit-case-folded-match
-  [(clauses : Any)
-   (target-sym : String)
-   (target-str : String)] -> String
+  [clauses: Any
+   target-sym: String
+   target-str: String] -> String
   (let [cs (vec clauses)
         n (count cs)
         tail (nth cs (- n 1))
@@ -377,7 +377,7 @@
         has-default (or (= tt "wildcard") (= tt "var"))
         dispatch (if has-default (subvec cs 0 (- n 1)) cs)
         clause-strs
-          (mapv (fn [(c : Any)] -> String
+          (mapv (fn [c: Any] -> String
                   (let [pat (get c "pattern")
                         body-str (emit-body (get c "body") "      ")
                         key-str (if (= (get pat "type") "literal")
@@ -385,7 +385,7 @@
                                   (str "("
                                        (str/join " "
                                          (mapv emit-pat-literal-value
-                                           (filterv (fn [(alt : Any)] -> Bool
+                                           (filterv (fn [alt: Any] -> Bool
                                                       (= (get alt "type") "literal"))
                                                     (get pat "alternatives"))))
                                        ")"))]
@@ -401,7 +401,7 @@
                        (emit-body (get tail "body") "      ") ")"))]
     (str "(case " target-str "\n    " (str/join "\n    " clause-strs) default-str ")")))
 
-(defn emit-match-arm [(clause : Any) (target-sym : String)] -> String
+(defn emit-match-arm [clause: Any target-sym: String] -> String
   (let [pat (get clause "pattern")
         body-str (emit-body (get clause "body") "      ")
         pt (get pat "type")]
@@ -413,7 +413,7 @@
       (= pt "literal")
         (str (emit-pat-literal-test pat target-sym) " " body-str)
       (= pt "or")
-        (let [tests (mapv (fn [(alt : Any)] -> String
+        (let [tests (mapv (fn [alt: Any] -> String
                             (if (= (get alt "type") "wildcard")
                               "true"
                               (emit-pat-literal-test alt target-sym)))
@@ -436,16 +436,16 @@
               (str test " (let [" (str/join " " pairs) "] " body-str ")"))))
       (= pt "map")
         (let [entries (vec (get pat "entries"))
-              key-of (fn [(en : Any)] -> String
+              key-of (fn [en: Any] -> String
                        (let [k (get en "key")]
                          (if (map? k) (get k "value") (str k))))
-              tests (mapv (fn [(en : Any)] -> String
+              tests (mapv (fn [en: Any] -> String
                             (str "(some? (" (key-of en) " " target-sym "))"))
                           entries)
               test (if (= 1 (count tests))
                      (nth tests 0)
                      (str "(and " (str/join " " tests) ")"))
-              binds (mapv (fn [(en : Any)] -> String
+              binds (mapv (fn [en: Any] -> String
                             (str (get en "name") " (" (key-of en) " " target-sym ")"))
                           entries)]
           (if (= 0 (count binds))
@@ -454,25 +454,25 @@
       :else
         (str ":else " body-str))))
 
-(defn emit-match! [(e : Any)] -> String
+(defn emit-match! [e: Any] -> String
   (let [target-str (emit-expr* (get e "target"))
         clauses (get e "clauses")]
     (if (case-foldable-match? clauses)
       (let [target-sym (fresh-match-sym!)]
         (emit-case-folded-match clauses target-sym target-str))
       (let [target-sym (fresh-match-sym!)
-            cond-pairs (mapv (fn [(c : Any)] -> String (emit-match-arm c target-sym)) clauses)]
+            cond-pairs (mapv (fn [c: Any] -> String (emit-match-arm c target-sym)) clauses)]
         (str "(let [" target-sym " " target-str "]\n  (cond\n    "
              (str/join "\n    " cond-pairs) "))")))))
 
 ;; --- the expression dispatcher ---------------------------------------------------
 
-(defn absent? [(x : Any)] -> Bool
+(defn absent? [x: Any] -> Bool
   ;; ast-json guards optional slots with (and x (serialize x)) — an absent
   ;; slot arrives as JSON false, not null.
   (or (nil? x) (false? x)))
 
-(defn else-less-if? [(els : Any)] -> Bool
+(defn else-less-if? [els: Any] -> Bool
   ;; ast-json encodes an absent else branch as expr->json(#f) = literal false.
   ;; Racket's emitter reads the struct slot directly and emits 2-arity for
   ;; both absent AND source-`false` else — match that exactly.
@@ -487,7 +487,7 @@
 ;;   named chars (space/tab/newline/return/formfeed/backspace) → \name
 ;;   printable ASCII 33–126 → \X
 ;;   everything else → \uNNNN (zero-padded 4-digit lowercase hex)
-(defn emit-char-lit [(n : Int)] -> String
+(defn emit-char-lit [n: Int] -> String
   (cond
     (= n 32) "\\space"
     (= n 9)  "\\tab"
@@ -500,7 +500,7 @@
     :else
       (str "\\u" (format "%04x" n))))
 
-(defn emit-expr! [(e : Any)] -> String
+(defn emit-expr! [e: Any] -> String
   (let [node (get e "node")]
     (cond
       (= node "literal")
@@ -542,7 +542,7 @@
       (= node "defn-multi")
         (let [kw (if (get e "private") "defn-" "defn")
               name (get e "name")
-              arity-strs (mapv (fn [(a : Any)] -> String
+              arity-strs (mapv (fn [a: Any] -> String
                                  (str "  ([" (emit-params-with-rest (get a "params") (get a "rest"))
                                       "]\n    " (emit-body (get a "body") "    ") ")"))
                                (get e "arities"))]
@@ -607,7 +607,7 @@
         (str "(do\n  " (emit-body (get e "body") "  ") ")")
 
       (= node "cond")
-        (let [pairs (mapv (fn [(c : Any)] -> String
+        (let [pairs (mapv (fn [c: Any] -> String
                             (let [test (get c "test")
                                   test-str (cond
                                              (and (= (get test "node") "literal")
@@ -651,7 +651,7 @@
         (str "[" (str/join " " (mapv emit-expr* (get e "items"))) "]")
 
       (= node "map")
-        (let [strs (mapv (fn [(p : Any)] -> String
+        (let [strs (mapv (fn [p: Any] -> String
                            (str (emit-expr* (get p "key")) " " (emit-expr* (get p "val"))))
                          (get e "pairs"))]
           (str "{" (str/join " " strs) "}"))
@@ -696,7 +696,7 @@
 
       (= node "try")
         (let [body-str (emit-body (get e "body") "  ")
-              catch-strs (mapv (fn [(c : Any)] -> String
+              catch-strs (mapv (fn [c: Any] -> String
                                  (str "\n  (catch " (get c "type") " " (get c "name")
                                       "\n    " (emit-body (get c "body") "    ") ")"))
                                (get e "catches"))
@@ -709,7 +709,7 @@
       (= node "condp")
         (let [pred (emit-expr* (get e "pred"))
               test-val (emit-expr* (get e "test"))
-              clause-strs (mapv (fn [(c : Any)] -> String
+              clause-strs (mapv (fn [c: Any] -> String
                                   (str (emit-expr* (get c "test")) " "
                                        (emit-expr* (get c "body"))))
                                 (get e "clauses"))
@@ -723,7 +723,7 @@
         (emit-match! e)
 
       (= node "with")
-        (let [update-strs (mapv (fn [(u : Any)] -> String
+        (let [update-strs (mapv (fn [u: Any] -> String
                                   (str (get u "field") " " (emit-expr* (get u "value"))))
                                 (get e "updates"))]
           (str "(assoc " (emit-expr* (get e "target")) " " (str/join " " update-strs) ")"))
@@ -750,7 +750,7 @@
             (str "(set! " (emit-expr* target) " " val ")")))
 
       (= node "letfn")
-        (let [fn-strs (mapv (fn [(f : Any)] -> String
+        (let [fn-strs (mapv (fn [f: Any] -> String
                               (str "(" (get f "name") " ["
                                    (emit-params-with-rest (get f "params") (get f "rest"))
                                    "] " (emit-body (get f "body") "    ") ")"))
@@ -761,8 +761,8 @@
       (= node "target-case")
         (let [cases (vec (get e "cases"))
               want (deref emit-target)
-              pick (fn [(t : String)] -> Any
-                     (first (filterv (fn [(c : Any)] -> Bool (= (get c "target") t)) cases)))
+              pick (fn [t: String] -> Any
+                     (first (filterv (fn [c: Any] -> Bool (= (get c "target") t)) cases)))
               branch0 (pick want)
               branch (if (nil? branch0) (pick "clj") branch0)]
           (if (nil? branch) "nil" (emit-expr* (get branch "body"))))
@@ -794,7 +794,7 @@
 
 ;; --- program entry point -----------------------------------------------------
 
-(defn register-tables! [(forms : Any)] -> Nil
+(defn register-tables! [forms: Any] -> Nil
   (doseq [f forms]
     (let [node (get f "node")]
       (cond
@@ -812,7 +812,7 @@
         :else nil)))
   nil)
 
-(defn emit-program! [(prog : Any)] -> String
+(defn emit-program! [prog: Any] -> String
   (reset! emit-expr-ref emit-expr!)
   (reset! record-fields {})
   (reset! scalar-fns {})
@@ -827,7 +827,7 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn expect! [(label : String) (result : Bool)] -> Nil
+(defn expect! [label: String result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil))

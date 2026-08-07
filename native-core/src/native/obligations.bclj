@@ -21,8 +21,8 @@
    type-id :- core/NativeId])
 
 (defrecord SsaValidationIndexV0
-  [(definitions : (Map String DefSiteV0))
-   (paths-avoiding : (Map String Bool))])
+  [definitions: (Map String DefSiteV0)
+   paths-avoiding: (Map String Bool)])
 
 (defrecord CheckedUseScanV0 [handled :- Bool legal :- Bool])
 
@@ -64,20 +64,20 @@
   (->DefSiteV0 false false (obligation-id "missing-block") -1
     (obligation-id "missing-type")))
 
-(defn native-id-key [(id : core/NativeId)] -> String
+(defn native-id-key [id: core/NativeId] -> String
   (core/nativeid-value id))
 
 (defn avoiding-path-key
-  [(avoided : core/NativeId)
-   (target : core/NativeId)] -> String
+  [avoided: core/NativeId
+   target: core/NativeId] -> String
   (let [avoided-value: String (native-id-key avoided)]
     (str (count avoided-value) ":" avoided-value (native-id-key target))))
 
 (defn index-parameter-sites
-  [(definitions : (Map String DefSiteV0))
-   (parameters : (Vec core/Parameter))
-   (function-parameter : Bool)
-   (block-id : core/NativeId)] -> (Map String DefSiteV0)
+  [definitions: (Map String DefSiteV0)
+   parameters: (Vec core/Parameter)
+   function-parameter: Bool
+   block-id: core/NativeId] -> (Map String DefSiteV0)
   (loop [index: Int 0 current: (Map String DefSiteV0) definitions]
     (if (>= index (count parameters))
       current
@@ -89,8 +89,8 @@
               (core/parameter-type-id parameter))))))))
 
 (defn index-instruction-sites
-  [(definitions : (Map String DefSiteV0))
-   (block : core/BasicBlock)] -> (Map String DefSiteV0)
+  [definitions: (Map String DefSiteV0)
+   block: core/BasicBlock] -> (Map String DefSiteV0)
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
     (loop [index: Int 0 current: (Map String DefSiteV0) definitions]
       (if (>= index (count instructions))
@@ -102,7 +102,7 @@
               (->DefSiteV0 true false (core/basicblock-id block) index
                 (core/ssavaluev0-type-id result)))))))))
 
-(defn definition-index [(function : core/FunctionDef)] -> (Map String DefSiteV0)
+(defn definition-index [function: core/FunctionDef] -> (Map String DefSiteV0)
   (let [with-function-parameters: (Map String DefSiteV0)
         (index-parameter-sites {}
           (core/functiondef-parameters function)
@@ -122,7 +122,7 @@
             (index-instruction-sites with-block-parameters block)))))))
 
 (defn block-index
-  [(blocks : (Vec core/BasicBlock))] -> (Map String core/BasicBlock)
+  [blocks: (Vec core/BasicBlock)] -> (Map String core/BasicBlock)
   (loop [index: Int 0 current: (Map String core/BasicBlock) {}]
     (if (>= index (count blocks))
       current
@@ -217,9 +217,9 @@
     []))
 
 (defn reachable-blocks-avoiding
-  [(blocks : (Map String core/BasicBlock))
-   (entry : core/NativeId)
-   (avoided : core/NativeId)] -> (Map String Bool)
+  [blocks: (Map String core/BasicBlock)
+   entry: core/NativeId
+   avoided: core/NativeId] -> (Map String Bool)
   (loop [position: Int 0
          pending: (Vec core/NativeId) [entry]
          seen: (Map String Bool) {}]
@@ -242,7 +242,7 @@
                   (core/append-ids pending (block-successors block)))]
             (recur (+ position 1) next-pending (assoc seen current-key true))))))))
 
-(defn paths-avoiding-index [(function : core/FunctionDef)] -> (Map String Bool)
+(defn paths-avoiding-index [function: core/FunctionDef] -> (Map String Bool)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
         blocks-by-id: (Map String core/BasicBlock) (block-index blocks)
         entry: core/NativeId (core/functiondef-entry-block function)]
@@ -268,24 +268,24 @@
               (recur (+ avoided-position 1) next-paths))))))))
 
 (defn ssa-validation-index
-  [(function : core/FunctionDef)] -> SsaValidationIndexV0
+  [function: core/FunctionDef] -> SsaValidationIndexV0
   (->SsaValidationIndexV0
     (definition-index function)
     (paths-avoiding-index function)))
 
 (defn indexed-def-site
-  [(index : SsaValidationIndexV0)
-   (value-id : core/NativeId)] -> DefSiteV0
+  [index: SsaValidationIndexV0
+   value-id: core/NativeId] -> DefSiteV0
   (let [site: (U DefSiteV0 Nil)
         (get (ssavalidationindexv0-definitions index) (native-id-key value-id))]
     (if (nil? site) (missing-def-site) site)))
 
 (defn value-dominates-use?
-  [(index : SsaValidationIndexV0)
-   (function : core/FunctionDef)
-   (use-block : core/NativeId)
-   (use-position : Int)
-   (value-id : core/NativeId)] -> Bool
+  [index: SsaValidationIndexV0
+   function: core/FunctionDef
+   use-block: core/NativeId
+   use-position: Int
+   value-id: core/NativeId] -> Bool
   (let [site: DefSiteV0 (indexed-def-site index value-id)]
     (cond
       (not (defsitev0-found site)) false
@@ -300,11 +300,11 @@
           (avoiding-path-key (defsitev0-block-id site) use-block)))))))
 
 (defn refs-dominate?
-  [(validation-index : SsaValidationIndexV0)
-   (function : core/FunctionDef)
-   (block-id : core/NativeId)
-   (position : Int)
-   (refs : (Vec core/NativeId))] -> Bool
+  [validation-index: SsaValidationIndexV0
+   function: core/FunctionDef
+   block-id: core/NativeId
+   position: Int
+   refs: (Vec core/NativeId)] -> Bool
   (loop [ref-position: Int 0]
     (if (>= ref-position (count refs))
       true
@@ -314,9 +314,9 @@
         false))))
 
 (defn block-uses-dominated?
-  [(validation-index : SsaValidationIndexV0)
-   (function : core/FunctionDef)
-   (block : core/BasicBlock)] -> Bool
+  [validation-index: SsaValidationIndexV0
+   function: core/FunctionDef
+   block: core/BasicBlock] -> Bool
   (let [instructions :- (Vec core/Instruction) (core/basicblock-instructions block)
         block-id :- core/NativeId (core/basicblock-id block)]
     (and
@@ -333,10 +333,10 @@
         (core/basicblock-terminators block)))))
 
 (defn arguments-match-parameters?
-  [(validation-index : SsaValidationIndexV0)
-   (function : core/FunctionDef)
-   (target-id : core/NativeId)
-   (arguments : (Vec core/NativeId))] -> Bool
+  [validation-index: SsaValidationIndexV0
+   function: core/FunctionDef
+   target-id: core/NativeId
+   arguments: (Vec core/NativeId)] -> Bool
   (let [target :- (U core/BasicBlock Nil)
         (find-block (core/functiondef-blocks function) target-id)]
     (if (nil? target)
@@ -357,9 +357,9 @@
                   false)))))))))
 
 (defn terminator-arguments-valid?
-  [(index : SsaValidationIndexV0)
-   (function : core/FunctionDef)
-   (terminator : core/Terminator)] -> Bool
+  [index: SsaValidationIndexV0
+   function: core/FunctionDef
+   terminator: core/Terminator] -> Bool
   (cond
     (instance? native.core.ReturnTerminator terminator) true
     (instance? native.core.JumpTerminator terminator)
@@ -373,7 +373,7 @@
       (arguments-match-parameters? index function
         (core/branchterminator-false-block terminator) []))
     (instance? native.core.SwitchTerminator terminator)
-    (every? (fn [(switch-case : core/SwitchCaseV0)] -> Bool
+    (every? (fn [switch-case: core/SwitchCaseV0] -> Bool
               (arguments-match-parameters? index function
                 (core/switchcasev0-block-id switch-case)
                 (core/switchcasev0-arguments switch-case)))
@@ -384,9 +384,9 @@
   (if (not (core/unique-ids? (core/function-value-ids function)))
     false
     (let [index: SsaValidationIndexV0 (ssa-validation-index function)]
-      (every? (fn [(block : core/BasicBlock)] -> Bool
+      (every? (fn [block: core/BasicBlock] -> Bool
                 (and (block-uses-dominated? index function block)
-                  (every? (fn [(terminator : core/Terminator)] -> Bool
+                  (every? (fn [terminator: core/Terminator] -> Bool
                             (terminator-arguments-valid? index function terminator))
                     (core/basicblock-terminators block))))
         (core/functiondef-blocks function)))))
@@ -461,9 +461,9 @@
           (core/ids-in? variant-ids case-ids))))))
 
 (defn terminator-exhaustive?
-  [(types : (Vec core/TypeDef))
-   (function : core/FunctionDef)
-   (terminator : core/Terminator)] -> Bool
+  [types: (Vec core/TypeDef)
+   function: core/FunctionDef
+   terminator: core/Terminator] -> Bool
   (if (instance? native.core.SwitchTerminator terminator)
     (switch-exhaustive? types function
       (core/switchterminator-value-id terminator)
@@ -1252,9 +1252,9 @@
    seen :- (Vec core/NativeId)])
 
 (defrecord TokenWorkV0
-  [(block-id : core/NativeId)
-   (state : TokenStateV0)
-   (path : (Vec TokenVisitV0))])
+  [block-id: core/NativeId
+   state: TokenStateV0
+   path: (Vec TokenVisitV0)])
 
 (defn token-visit
   [visited :- (Vec TokenVisitV0)
@@ -1272,15 +1272,15 @@
   (and (= (count left) (count right)) (core/ids-in? left right)))
 
 (defn token-visit-matches?
-  [(visit : TokenVisitV0)
-   (state : TokenStateV0)] -> Bool
+  [visit: TokenVisitV0
+   state: TokenStateV0] -> Bool
   (and (token-sets-equal? (tokenvisitv0-live visit) (tokenstatev0-live state))
     (token-sets-equal? (tokenvisitv0-seen visit) (tokenstatev0-seen state))))
 
 (defn token-state-visited?
-  [(visited : (Vec TokenVisitV0))
-   (block-id : core/NativeId)
-   (state : TokenStateV0)] -> Bool
+  [visited: (Vec TokenVisitV0)
+   block-id: core/NativeId
+   state: TokenStateV0] -> Bool
   (loop [index: Int 0]
     (cond
       (>= index (count visited)) false
@@ -1333,7 +1333,7 @@
                     :else
                     (let [next-work: (Vec TokenWorkV0)
                           (mapv
-                            (fn [(successor : core/NativeId)] -> TokenWorkV0
+                            (fn [successor: core/NativeId] -> TokenWorkV0
                               (->TokenWorkV0 successor next-state next-path))
                             successors)]
                       (recur (+ position 1) (vec (concat work next-work))

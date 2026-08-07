@@ -6,21 +6,21 @@
 (ns native.loops-counted)
 (define-mode strict)
 
-(defrecord Tally [(hits : Int) (misses : Int)])
+(defrecord Tally [hits: Int misses: Int])
 
 ;; the driver marks this native-op checked-add-i64; the body is only its
 ;; reference semantics, never the lowered code
-(defn add-i64 [(left : Int) (right : Int)] -> Int (+ left right))
+(defn add-i64 [left: Int right: Int] -> Int (+ left right))
 
 ;; fram.fri-replay/count-triples : index and total, exit on the bound
-(defn sum-below [(limit : Int)] -> Int
+(defn sum-below [limit: Int] -> Int
   (loop [index: Int 0 total: Int 0]
     (if (>= index limit)
       total
       (recur (add-i64 index 1) (add-i64 total index)))))
 
 ;; fram.fri-replay/index-of : one accumulator, early exit, -1 sentinel
-(defn first-at-least [(limit : Int) (threshold : Int)] -> Int
+(defn first-at-least [limit: Int threshold: Int] -> Int
   (loop [index: Int 0]
     (if (>= index limit)
       -1
@@ -29,7 +29,7 @@
         (recur (add-i64 index 1))))))
 
 ;; native.body-slice/reachable-type-ids : nested loop in the outer recur argument
-(defn triangle [(rows : Int)] -> Int
+(defn triangle [rows: Int] -> Int
   (loop [row: Int 0 total: Int 0]
     (if (>= row rows)
       total
@@ -40,7 +40,7 @@
                  (recur (add-i64 column 1) (add-i64 inner 1))))))))
 
 ;; fram.fri-replay/replay-lines : six accumulators of three native types
-(defn scan-six [(limit : Int) (threshold : Int)] -> Tally
+(defn scan-six [limit: Int threshold: Int] -> Tally
   (loop [index: Int 0
          hits: Int 0
          misses: Int 0

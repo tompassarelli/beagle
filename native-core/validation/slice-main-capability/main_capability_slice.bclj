@@ -12,15 +12,15 @@
 (require native.body-c17 :as body)
 (require native.qbe :as qbe)
 
-(defn qbe-report [(result : qbe/QbeMaterialization)] -> String
+(defn qbe-report [result: qbe/QbeMaterialization] -> String
   (if (instance? native.qbe.QbeSuccess result)
     "qbe UNEXPECTED-SUCCESS\n"
     (str "qbe REFUSED " (qbe/qbefailure-detail result) "\n")))
 
 (defn emit-slice!
-  [(facts-path : String)
-   (artifacts-dir : String)
-   (compiler-commit : String)] -> String
+  [facts-path: String
+   artifacts-dir: String
+   compiler-commit: String] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: stages/SourceStageV0

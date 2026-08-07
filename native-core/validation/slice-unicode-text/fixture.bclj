@@ -5,10 +5,10 @@
 (declare-extern java.util.Locale/ROOT Any)
 (declare-extern .toLowerCase [String Any -> String])
 
-(defn lower-root [(value : String)] -> String
+(defn lower-root [value: String] -> String
   (.toLowerCase value java.util.Locale/ROOT))
 
-(defn letter-decimal-runs [(value : String)] -> (Vec String)
+(defn letter-decimal-runs [value: String] -> (Vec String)
   (re-seq #"[\p{L}\p{Nd}]+" value))
 
 (defn native-entry [] -> Int

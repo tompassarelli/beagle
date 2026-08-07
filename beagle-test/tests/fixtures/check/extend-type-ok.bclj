@@ -1,3 +1,3 @@
 (extend-type String
   Showable
-  (show [(self : String)] (str self)))
+  (show [self: String] (str self)))

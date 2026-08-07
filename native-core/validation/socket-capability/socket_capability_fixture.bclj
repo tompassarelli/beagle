@@ -9,7 +9,7 @@
 (require native.body-c17 :as body)
 (require native.qbe :as qbe)
 
-(defn fixture-id [(name : String)] -> core/NativeId
+(defn fixture-id [name: String] -> core/NativeId
   (core/canonical-id "native-socket-capability-fixture-v0" [name]))
 
 (defn fixture-types [] -> (Vec core/TypeDef)
@@ -116,16 +116,16 @@
       (lower/host-socket-abis (lower/layout-digest layouts))
       [])))
 
-(defn obligations-pass? [(program : core/NativeCoreProgram)] -> Bool
+(defn obligations-pass? [program: core/NativeCoreProgram] -> Bool
   (every? obligations/obligation-passed?
     (obligations/validate-native-core-program program (core/abi-profile-lp64))))
 
-(defn qbe-detail [(result : qbe/QbeMaterialization)] -> String
+(defn qbe-detail [result: qbe/QbeMaterialization] -> String
   (if (instance? native.qbe.QbeFailure result)
     (qbe/qbefailure-detail result)
     "unexpected success"))
 
-(defn emit-fixture! [(artifacts-dir : String)] -> String
+(defn emit-fixture! [artifacts-dir: String] -> String
   (let [program: core/NativeCoreProgram (fixture-program)
         c-result: body/BodyMaterializationV0 (body/materialize-program program 0)
         qbe-result: qbe/QbeMaterialization (qbe/materialize-program program 0 "lp64")]

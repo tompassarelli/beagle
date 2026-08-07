@@ -2,43 +2,43 @@
 (ns native.int-division)
 (define-mode strict)
 
-(defn quot-int [(left : Int) (right : Int)] -> Int
+(defn quot-int [left: Int right: Int] -> Int
   (quot left right))
 
-(defn rem-int [(left : Int) (right : Int)] -> Int
+(defn rem-int [left: Int right: Int] -> Int
   (rem left right))
 
-(defn mod-int [(left : Int) (right : Int)] -> Int
+(defn mod-int [left: Int right: Int] -> Int
   (mod left right))
 
-(defn float-add [(left : Float) (right : Float)] -> Float
+(defn float-add [left: Float right: Float] -> Float
   (+ left right))
 
-(defn float-subtract [(left : Float) (right : Float)] -> Float
+(defn float-subtract [left: Float right: Float] -> Float
   (- left right))
 
-(defn float-multiply [(left : Float) (right : Float)] -> Float
+(defn float-multiply [left: Float right: Float] -> Float
   (* left right))
 
-(defn float-divide [(left : Float) (right : Float)] -> Float
+(defn float-divide [left: Float right: Float] -> Float
   (/ left right))
 
-(defn float-arithmetic [(left : Float) (right : Float)] -> Float
+(defn float-arithmetic [left: Float right: Float] -> Float
   (/ (* (- (+ left right) right) right) right))
 
 (defn variadic-add
-  [(first : Int)
-   (second : Int)
-   (third : Int)] -> Int
+  [first: Int
+   second: Int
+   third: Int] -> Int
   (+ first second third))
 
 (defn variadic-multiply
-  [(first : Int)
-   (second : Int)
-   (third : Int)] -> Int
+  [first: Int
+   second: Int
+   third: Int] -> Int
   (* first second third))
 
-(defn unary-negate [(value : Int)] -> Int
+(defn unary-negate [value: Int] -> Int
   (- value))
 
 (defn literal-keyword-equal? [] -> Bool

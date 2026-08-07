@@ -1,5 +1,5 @@
-(defrecord Cat [(name : String)])
-(defrecord Dog [(name : String)])
+(defrecord Cat [name: String])
+(defrecord Dog [name: String])
 
 (declare-extern get-pet [-> (U Cat Dog)])
 

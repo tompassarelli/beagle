@@ -4,40 +4,40 @@
 
 ;; The body reads through the bound element. A second element equal to the Vec
 ;; length proves the back edge ran by taking VecGet's bounds trap.
-(defn ordered-indexes [(values : (Vec Int))] -> Int
+(defn ordered-indexes [values: (Vec Int)] -> Int
   (do
     (doseq [index: Int values]
       (nth values index))
     42))
 
-(defn drive [(trap : Bool)] -> Int
+(defn drive [trap: Bool] -> Int
   (ordered-indexes [0 (if trap 2 1)]))
 
-(defn dynamic-source [(value : Any)] -> Nil
+(defn dynamic-source [value: Any] -> Nil
   (doseq [item value]
     item))
 
-(defn dynamic-binding [(values : (Vec Int))] -> Nil
+(defn dynamic-binding [values: (Vec Int)] -> Nil
   (doseq [item: Any values]
     item))
 
-(defn destructured-binding [(values : (Vec (Vec Int)))] -> Nil
+(defn destructured-binding [values: (Vec (Vec Int))] -> Nil
   (doseq [[left right] values]
     left))
 
-(defn mismatched-binding [(values : (Vec Int))] -> Nil
+(defn mismatched-binding [values: (Vec Int)] -> Nil
   (doseq [item: String values]
     item))
 
-(defn two-bindings [(values : (Vec Int))] -> Nil
+(defn two-bindings [values: (Vec Int)] -> Nil
   (doseq [left values right values]
     left))
 
-(defn guarded [(values : (Vec Int))] -> Nil
+(defn guarded [values: (Vec Int)] -> Nil
   (doseq [item values :when true]
     item))
 
-(defn two-body-forms [(values : (Vec Int))] -> Nil
+(defn two-body-forms [values: (Vec Int)] -> Nil
   (doseq [item values]
     item
     item))

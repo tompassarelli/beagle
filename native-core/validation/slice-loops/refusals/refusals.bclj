@@ -4,34 +4,34 @@
 (ns native.loops-refusals)
 (define-mode strict)
 
-(defn non-tail [(n : Int)] -> Int
+(defn non-tail [n: Int] -> Int
   (loop [a: Int 0]
     (if (>= a n) a (+ 1 (recur a)))))
 
-(defn outside-loop [(n : Int)] -> Int
+(defn outside-loop [n: Int] -> Int
   (recur n))
 
-(defn wrong-arity [(n : Int)] -> Int
+(defn wrong-arity [n: Int] -> Int
   (loop [a: Int 0]
     (if (>= a n) a (recur a a))))
 
-(defn wrong-types [(n : Int)] -> Int
+(defn wrong-types [n: Int] -> Int
   (loop [a: Int 0]
     (if (>= a n) a (recur true))))
 
-(defn non-tail-do [(n : Int)] -> Int
+(defn non-tail-do [n: Int] -> Int
   (loop [a: Int 0]
     (do
       (recur a)
       n)))
 
-(defn non-tail-cond-test [(n : Int)] -> Int
+(defn non-tail-cond-test [n: Int] -> Int
   (loop [a: Int 0]
     (cond
       (recur a) n
       :else a)))
 
-(defn through-try [(n : Int)] -> Int
+(defn through-try [n: Int] -> Int
   (loop [a: Int 0]
     (try
       (recur a)
@@ -39,13 +39,13 @@
 
 ;; Nested loop init forms still belong to the outer control context, but are
 ;; not tail positions of it.
-(defn nested-init [(n : Int)] -> Int
+(defn nested-init [n: Int] -> Int
   (loop [outer: Int 0]
     (loop [inner: Int (recur outer)]
       n)))
 
 ;; A nested body belongs to its own loop header, which must diagnose its arity.
-(defn nested-wrong-target [(n : Int)] -> Int
+(defn nested-wrong-target [n: Int] -> Int
   (loop [outer: Int 0]
     (loop [inner: Int outer]
       (recur inner n))))

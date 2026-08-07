@@ -14,21 +14,21 @@
 ;; source nodes by ordinal; kind "t" carries literal text and "e" its escaped
 ;; delimiter-safe spelling.
 (defrecord SliceFactV0
-  [(subject : String)
-   (predicate : String)
-   (kind : String)
-   (object : String)])
+  [subject: String
+   predicate: String
+   kind: String
+   object: String])
 
-(defrecord UniqueStringsV0 [(values : (Vec String)) (seen : (Map String Bool))])
+(defrecord UniqueStringsV0 [values: (Vec String) seen: (Map String Bool)])
 
 (defrecord SliceProjectionV0
-  [(types : (Vec core/TypeDef))
-   (layouts : (Vec core/LayoutDef))])
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)])
 
-(defn char-at [(text : String) (index : Int)] -> String
+(defn char-at [text: String index: Int] -> String
   (subs text index (+ index 1)))
 
-(defn split-on [(text : String) (separator : String)] -> (Vec String)
+(defn split-on [text: String separator: String] -> (Vec String)
   (loop [index: Int 0 start: Int 0 parts: (Vec String) []]
     (if (>= index (count text))
       (conj parts (subs text start index))
@@ -36,7 +36,7 @@
         (recur (+ index 1) (+ index 1) (conj parts (subs text start index)))
         (recur (+ index 1) start parts)))))
 
-(defn escaped-text [(value : String)] -> String
+(defn escaped-text [value: String] -> String
   (loop [index: Int 0 decoded: String ""]
     (if (>= index (count value))
       decoded
@@ -57,21 +57,21 @@
                     :else (str "\\" escape))))))
           (recur (+ index 1) (str decoded character)))))))
 
-(defn text-row? [(row : SliceFactV0)] -> Bool
+(defn text-row? [row: SliceFactV0] -> Bool
   (or (= "t" (slicefactv0-kind row)) (= "e" (slicefactv0-kind row))))
 
-(defn row-text [(row : SliceFactV0)] -> String
+(defn row-text [row: SliceFactV0] -> String
   (if (= "e" (slicefactv0-kind row))
     (escaped-text (slicefactv0-object row))
     (slicefactv0-object row)))
 
-(defn parse-row [(line : String)] -> (Vec SliceFactV0)
+(defn parse-row [line: String] -> (Vec SliceFactV0)
   (let [cells: (Vec String) (split-on line "\t")]
     (if (= 4 (count cells))
       [(->SliceFactV0 (nth cells 0) (nth cells 1) (nth cells 2) (nth cells 3))]
       [])))
 
-(defn parse-facts [(text : String)] -> (Vec SliceFactV0)
+(defn parse-facts [text: String] -> (Vec SliceFactV0)
   (let [lines: (Vec String) (split-on text "\n")]
     (loop [index: Int 0 rows: (Vec SliceFactV0) []]
       (if (>= index (count lines))
@@ -81,15 +81,15 @@
             (if (= 0 (count parsed)) rows (conj rows (nth parsed 0)))))))))
 
 (defn add-unique-string
-  [(unique : UniqueStringsV0)
-   (candidate : String)] -> UniqueStringsV0
+  [unique: UniqueStringsV0
+   candidate: String] -> UniqueStringsV0
   (if (= true (get (uniquestringsv0-seen unique) candidate))
     unique
     (->UniqueStringsV0
       (conj (uniquestringsv0-values unique) candidate)
       (assoc (uniquestringsv0-seen unique) candidate true))))
 
-(defn node-names [(rows : (Vec SliceFactV0))] -> (Vec String)
+(defn node-names [rows: (Vec SliceFactV0)] -> (Vec String)
   (loop [index: Int 0 unique: UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
       (uniquestringsv0-values unique)
@@ -101,7 +101,7 @@
             with-subject
             (add-unique-string with-subject (slicefactv0-object row))))))))
 
-(defn text-values [(rows : (Vec SliceFactV0))] -> (Vec String)
+(defn text-values [rows: (Vec SliceFactV0)] -> (Vec String)
   (loop [index: Int 0 unique: UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
       (uniquestringsv0-values unique)
@@ -113,26 +113,26 @@
             (add-unique-string with-predicate (row-text row))
             with-predicate))))))
 
-(defn slice-id [(domain : String) (parts : (Vec String))] -> core/NativeId
+(defn slice-id [domain: String parts: (Vec String)] -> core/NativeId
   (core/canonical-id (str "native-slice-v0/" domain) parts))
 
-(defn node-id [(name : String)] -> core/NativeId (slice-id "node" [name]))
+(defn node-id [name: String] -> core/NativeId (slice-id "node" [name]))
 
-(defn text-id [(value : String)] -> core/NativeId (slice-id "text" [value]))
+(defn text-id [value: String] -> core/NativeId (slice-id "text" [value]))
 
-(defn marker-nodes [(names : (Vec String))] -> (Vec stages/TermNodeV0)
+(defn marker-nodes [names: (Vec String)] -> (Vec stages/TermNodeV0)
   (mapv
-    (fn [(name : String)] -> stages/TermNodeV0
+    (fn [name: String] -> stages/TermNodeV0
       (stages/->TermNodeV0 (node-id name) (stages/->TextTermV0 "source-node-v0")))
     names))
 
-(defn text-nodes [(values : (Vec String))] -> (Vec stages/TermNodeV0)
+(defn text-nodes [values: (Vec String)] -> (Vec stages/TermNodeV0)
   (mapv
-    (fn [(value : String)] -> stages/TermNodeV0
+    (fn [value: String] -> stages/TermNodeV0
       (stages/->TermNodeV0 (text-id value) (stages/->TextTermV0 value)))
     values))
 
-(defn fact-nodes [(rows : (Vec SliceFactV0))] -> (Vec stages/TermNodeV0)
+(defn fact-nodes [rows: (Vec SliceFactV0)] -> (Vec stages/TermNodeV0)
   (loop [index: Int 0 nodes: (Vec stages/TermNodeV0) []]
     (if (>= index (count rows))
       nodes
@@ -151,9 +151,9 @@
                 object))))))))
 
 (defn row-first-text
-  [(rows : (Vec SliceFactV0))
-   (subject : String)
-   (predicate : String)] -> (U String Nil)
+  [rows: (Vec SliceFactV0)
+   subject: String
+   predicate: String] -> (U String Nil)
   (loop [position: Int 0]
     (if (>= position (count rows))
       nil
@@ -165,8 +165,8 @@
           (recur (+ position 1)))))))
 
 (defn form-node-names
-  [(rows : (Vec SliceFactV0))
-   (kind : String)] -> (Vec String)
+  [rows: (Vec SliceFactV0)
+   kind: String] -> (Vec String)
   (loop [position: Int 0 selected: (Vec String) []]
     (if (>= position (count rows))
       selected
@@ -179,10 +179,10 @@
             selected))))))
 
 (defn source-module
-  [(rows : (Vec SliceFactV0))
-   (root-name : String)
-   (fallback-name : String)
-   (fallback-path : String)] -> stages/SourceModuleV0
+  [rows: (Vec SliceFactV0)
+   root-name: String
+   fallback-name: String
+   fallback-path: String] -> stages/SourceModuleV0
   (let [declared-name: (U String Nil) (row-first-text rows root-name "namespace")
         declared-path: (U String Nil) (row-first-text rows root-name "relative-path")
         module-name: String
@@ -200,28 +200,28 @@
       (node-id root-name))))
 
 (defn source-modules
-  [(rows : (Vec SliceFactV0))
-   (fallback-name : String)
-   (fallback-path : String)] -> (Vec stages/SourceModuleV0)
+  [rows: (Vec SliceFactV0)
+   fallback-name: String
+   fallback-path: String] -> (Vec stages/SourceModuleV0)
   (let [roots: (Vec String) (form-node-names rows "module-root")]
     (if (= 0 (count roots))
       [(source-module rows "0" fallback-name fallback-path)]
       (mapv
-        (fn [(root-name : String)] -> stages/SourceModuleV0
+        (fn [root-name: String] -> stages/SourceModuleV0
           (source-module rows root-name fallback-name fallback-path))
         roots))))
 
-(defn source-imports [(rows : (Vec SliceFactV0))] -> (Vec core/NativeId)
+(defn source-imports [rows: (Vec SliceFactV0)] -> (Vec core/NativeId)
   (mapv
-    (fn [(node-name : String)] -> core/NativeId (node-id node-name))
+    (fn [node-name: String] -> core/NativeId (node-id node-name))
     (form-node-names rows "import")))
 
 ;; Node "0" is the program root. New projections carry one module root per AST;
 ;; old facts without module metadata remain a single-module source program.
 (defn source-program
-  [(rows : (Vec SliceFactV0))
-   (module-name : String)
-   (relative-path : String)] -> stages/SourceStageV0
+  [rows: (Vec SliceFactV0)
+   module-name: String
+   relative-path: String] -> stages/SourceStageV0
   (let [root: core/NativeId (node-id "0")
         nodes: (Vec stages/TermNodeV0)
         (vec (concat (marker-nodes (node-names rows))
@@ -233,20 +233,20 @@
       (source-imports rows)
       [])))
 
-(defn type-field-refs [(definition : core/TypeDef)] -> (Vec core/NativeId)
+(defn type-field-refs [definition: core/TypeDef] -> (Vec core/NativeId)
   (let [shape: core/TypeShape (core/typedef-shape definition)]
     (if (instance? native.core.RecordType shape)
       (mapv
-        (fn [(field : core/TypeField)] -> core/NativeId (core/typefield-type-id field))
+        (fn [field: core/TypeField] -> core/NativeId (core/typefield-type-id field))
         (core/recordtype-fields shape))
       [])))
 
-(defn record-type? [(definition : core/TypeDef)] -> Bool
+(defn record-type? [definition: core/TypeDef] -> Bool
   (instance? native.core.RecordType (core/typedef-shape definition)))
 
 (defn find-type
-  [(types : (Vec core/TypeDef))
-   (target : core/NativeId)] -> (U core/TypeDef Nil)
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/TypeDef Nil)
   (loop [index: Int 0]
     (if (>= index (count types))
       nil
@@ -255,12 +255,12 @@
           definition
           (recur (+ index 1)))))))
 
-(defn type-id-in? [(ids : (Vec core/NativeId)) (target : core/NativeId)] -> Bool
+(defn type-id-in? [ids: (Vec core/NativeId) target: core/NativeId] -> Bool
   (core/id-in? ids target))
 
 (defn supported-record-ids
-  [(types : (Vec core/TypeDef))
-   (layouts : (Vec core/LayoutDef))] -> (Vec core/NativeId)
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> (Vec core/NativeId)
   (loop [index: Int 0 ids: (Vec core/NativeId) []]
     (if (>= index (count types))
       ids
@@ -274,17 +274,17 @@
 ;; A record survives only when every field type also survives, so the kept set
 ;; shrinks to a fixpoint before the scalars it reaches are pulled in.
 (defn closed-record-ids
-  [(types : (Vec core/TypeDef))
-   (layouts : (Vec core/LayoutDef))
-   (candidates : (Vec core/NativeId))] -> (Vec core/NativeId)
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   candidates: (Vec core/NativeId)] -> (Vec core/NativeId)
   (let [next: (Vec core/NativeId)
         (filterv
-          (fn [(candidate : core/NativeId)] -> Bool
+          (fn [candidate: core/NativeId] -> Bool
             (let [definition: (U core/TypeDef Nil) (find-type types candidate)]
               (if (nil? definition)
                 false
                 (every?
-                  (fn [(reference : core/NativeId)] -> Bool
+                  (fn [reference: core/NativeId] -> Bool
                     (let [referenced: (U core/TypeDef Nil) (find-type types reference)]
                       (if (nil? referenced)
                         false
@@ -298,8 +298,8 @@
       (closed-record-ids types layouts next))))
 
 (defn scalar-ids-for
-  [(types : (Vec core/TypeDef))
-   (records : (Vec core/NativeId))] -> (Vec core/NativeId)
+  [types: (Vec core/TypeDef)
+   records: (Vec core/NativeId)] -> (Vec core/NativeId)
   (loop [index: Int 0 ids: (Vec core/NativeId) []]
     (if (>= index (count records))
       ids
@@ -321,27 +321,27 @@
 ;; program: it keeps the source record ABI and the scalars those records reach,
 ;; and drops every shape the restricted materializer cannot spell.
 (defn c17-projection
-  [(types : (Vec core/TypeDef))
-   (layouts : (Vec core/LayoutDef))] -> SliceProjectionV0
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> SliceProjectionV0
   (let [records: (Vec core/NativeId)
         (closed-record-ids types layouts (supported-record-ids types layouts))
         scalars: (Vec core/NativeId) (scalar-ids-for types records)
         kept: (Vec core/NativeId) (vec (concat records scalars))
         kept-types: (Vec core/TypeDef)
         (filterv
-          (fn [(definition : core/TypeDef)] -> Bool
+          (fn [definition: core/TypeDef] -> Bool
             (type-id-in? kept (core/typedef-id definition)))
           types)
         kept-layouts: (Vec core/LayoutDef)
         (filterv
-          (fn [(layout : core/LayoutDef)] -> Bool
+          (fn [layout: core/LayoutDef] -> Bool
             (type-id-in? kept (core/layoutdef-type-id layout)))
           layouts)]
     (->SliceProjectionV0 kept-types kept-layouts)))
 
 (defn projected-program
-  [(program : core/NativeCoreProgram)
-   (projection : SliceProjectionV0)] -> core/NativeCoreProgram
+  [program: core/NativeCoreProgram
+   projection: SliceProjectionV0] -> core/NativeCoreProgram
   (core/->NativeCoreProgram
     (core/nativecoreprogram-id program)
     (core/nativecoreprogram-parent program)
@@ -359,12 +359,12 @@
     (core/nativecoreprogram-observations program)))
 
 (defunion SliceMaterializationV0
-  (SliceMaterializedV0 [(artifact : c11/C11Artifact)])
-  (SliceRefusedV0 [(detail : String)]))
+  (SliceMaterializedV0 [artifact: c11/C11Artifact])
+  (SliceRefusedV0 [detail: String]))
 
 (defn materialize
-  [(program : core/NativeCoreProgram)
-   (module-index : Int)] -> SliceMaterializationV0
+  [program: core/NativeCoreProgram
+   module-index: Int] -> SliceMaterializationV0
   (let [validation: core/ValidationReport (core/validate-program program)]
     (cond
       (not (core/validationreport-passed validation))
@@ -393,9 +393,9 @@
    "legal-abi" "discharged-tokens" "bounded-effects"])
 
 (defn obligation-report
-  [(label : String)
-   (program : core/NativeCoreProgram)
-   (abi : core/AbiProfileV0)] -> String
+  [label: String
+   program: core/NativeCoreProgram
+   abi: core/AbiProfileV0] -> String
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
         (obligations/validate-native-core-program program abi)
         names: (Vec String) (obligation-names)]
@@ -407,30 +407,30 @@
             (if (obligations/obligation-passed? (nth verdicts index)) "PASS" "FAIL")
             " " (nth names index) "\n"))))))
 
-(defn type-names [(types : (Vec core/TypeDef))] -> String
+(defn type-names [types: (Vec core/TypeDef)] -> String
   (loop [index: Int 0 report: String ""]
     (if (>= index (count types))
       report
       (recur (+ index 1)
         (str report "type " (core/typedef-name (nth types index)) "\n")))))
 
-(defn pending-report [(obligation : core/ReceiptObligationV0)] -> String
+(defn pending-report [obligation: core/ReceiptObligationV0] -> String
   (str "pending " (core/receiptobligationv0-detail obligation) "\n"))
 
-(defn pending-reports [(items : (Vec core/ReceiptObligationV0))] -> String
+(defn pending-reports [items: (Vec core/ReceiptObligationV0)] -> String
   (loop [index: Int 0 report: String ""]
     (if (>= index (count items))
       report
       (recur (+ index 1) (str report (pending-report (nth items index)))))))
 
 (defn native-frozen
-  [(result : lower/NativeLoweringResultV0)] -> stages/FrozenNativeStageV0
+  [result: lower/NativeLoweringResultV0] -> stages/FrozenNativeStageV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-frozen result)
     (lower/nativeloweringpendingv0-frozen result)))
 
 (defn native-pending
-  [(result : lower/NativeLoweringResultV0)] -> (Vec core/ReceiptObligationV0)
+  [result: lower/NativeLoweringResultV0] -> (Vec core/ReceiptObligationV0)
   (if (instance? native.lower.NativeLoweringPendingV0 result)
     (lower/nativeloweringpendingv0-obligations result)
     []))
@@ -438,12 +438,12 @@
 ;; Writes the C set into artifacts-dir and returns the run report; every stage
 ;; that refuses returns its own report rather than throwing.
 (defn emit-slice-for-abi!
-  [(facts-path : String)
-   (module-name : String)
-   (relative-path : String)
-   (artifacts-dir : String)
-   (compiler-commit : String)
-   (abi : core/AbiProfileV0)] -> String
+  [facts-path: String
+   module-name: String
+   relative-path: String
+   artifacts-dir: String
+   compiler-commit: String
+   abi: core/AbiProfileV0] -> String
   (let [rows: (Vec SliceFactV0) (parse-facts (slurp facts-path))
         configuration: (Vec String)
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
@@ -503,12 +503,12 @@
                    (c11/c11artifact-source-name artifact) "\n"))])))))))
 
 (defn emit-slice!
-  [(facts-path : String)
-   (module-name : String)
-   (relative-path : String)
-   (artifacts-dir : String)
-   (compiler-commit : String)
-   (abi-id : String)] -> String
+  [facts-path: String
+   module-name: String
+   relative-path: String
+   artifacts-dir: String
+   compiler-commit: String
+   abi-id: String] -> String
   (let [profile: (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
     (if (nil? profile)
       (str "stage abi REJECTED unknown abi profile " abi-id "\n")

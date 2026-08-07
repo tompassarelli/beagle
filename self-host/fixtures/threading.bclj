@@ -11,35 +11,35 @@
 ;;     the desugared datum re-parses — nested binder mints number identically
 ;; Run: self-host/verify-selfhost.sh self-host/fixtures/threading.bclj
 
-(defn first-int [(xs : (Vec Int))] -> Any
+(defn first-int [xs: (Vec Int)] -> Any
   (if (> (count xs) 0) (nth xs 0) nil))
 
-(defn pipeline [(x : Int)] -> Int
+(defn pipeline [x: Int] -> Int
   (-> x (+ 1) (* 2)))
 
-(defn pipeline-last [(x : Int)] -> Int
+(defn pipeline-last [x: Int] -> Int
   (->> x (+ 1) (* 2)))
 
-(defn selective [(n : Int)] -> Int
+(defn selective [n: Int] -> Int
   (cond-> n
     (> n 0) (+ 5)
     (> n 10) (* 2)))
 
-(defn selective-last [(n : Int)] -> Int
+(defn selective-last [n: Int] -> Int
   (cond->> n
     (> n 0) (- 100)))
 
-(defn shortcut [(xs : (Vec Int))] -> Any
+(defn shortcut [xs: (Vec Int)] -> Any
   (some-> (first-int xs) (+ 1)))
 
-(defn shortcut-last [(xs : (Vec Int))] -> Any
+(defn shortcut-last [xs: (Vec Int)] -> Any
   (some->> (first-int xs) (- 100)))
 
-(defn renamed [(n : Int)] -> Int
+(defn renamed [n: Int] -> Int
   (as-> n v (+ v 1) (* v 2)))
 
 ;; a binder-minting form INSIDE a threading step: the orig-args parse mints
 ;; bind__N first, the desugared re-parse mints again — order pinned
-(defn nested-mint [(xs : (Vec Int))] -> Int
+(defn nested-mint [xs: (Vec Int)] -> Int
   (-> (if-let [v: Int (first-int xs)] v 0)
       (+ 1)))

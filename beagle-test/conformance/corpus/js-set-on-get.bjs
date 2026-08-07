@@ -10,7 +10,7 @@
 (ns conformance.js-set-on-get)
 
 (defn put-key!
-  [(m : Any)
-   (k : String)
-   (v : Any)] -> Any
+  [m: Any
+   k: String
+   v: Any] -> Any
   (set! (get m k) v))

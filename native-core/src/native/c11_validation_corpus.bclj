@@ -9,7 +9,7 @@
 (require native.obligations :as obligations)
 (require native.stages :as stages)
 
-(defn fixture-id [(name : String)] -> core/NativeId
+(defn fixture-id [name: String] -> core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))
 
 (def fixture-i64-type: core/TypeDef
@@ -87,7 +87,7 @@
     [:types [fixture-i64-type fixture-pair-type]
      :layouts [fixture-i64-layout fixture-pair-layout]]))
 
-(defn require-artifact [(result : c11/C11Materialization)] -> c11/C11Artifact
+(defn require-artifact [result: c11/C11Materialization] -> c11/C11Artifact
   (match result
     [(C11Success value) (c11/c11success-artifact result)]
     [(C11Failure value) (throw (ex-info (c11/c11failure-detail result) {}))]))
@@ -143,7 +143,7 @@
     "  return 0;\n"
     "}\n"))
 
-(defn emit-fixture! [(directory : String)] -> Nil
+(defn emit-fixture! [directory: String] -> Nil
   (if fixture-deterministic?
     (do
       (spit (str directory "/" (c11/c11artifact-header-name fixture-artifact))
@@ -154,7 +154,7 @@
     (throw (ex-info "permuted fixture program changed materialization" {}))))
 
 (defn require-fold-lowered-program
-  [(result : lower/FixturePipelineResultV0)] -> core/NativeCoreProgram
+  [result: lower/FixturePipelineResultV0] -> core/NativeCoreProgram
   (if (instance? native.lower.FixturePipelineCompleteV0 result)
     (stages/nativestagev0-program
       (stages/frozennativestagev0-stage
@@ -164,7 +164,7 @@
 (def fold-lowered-program: core/NativeCoreProgram
   (require-fold-lowered-program lower/fold-empty-result))
 
-(defn fold-reachable-type? [(definition : core/TypeDef)] -> Bool
+(defn fold-reachable-type? [definition: core/TypeDef] -> Bool
   (or (= "I64" (core/typedef-name definition))
     (= "Unit" (core/typedef-name definition))
     (= "UnionTag" (core/typedef-name definition))
@@ -175,10 +175,10 @@
 
 (def fold-layouts: (Vec core/LayoutDef)
   (filterv
-    (fn [(layout : core/LayoutDef)] -> Bool
+    (fn [layout: core/LayoutDef] -> Bool
       (some?
         (some
-          (fn [(definition : core/TypeDef)] -> Bool
+          (fn [definition: core/TypeDef] -> Bool
             (core/native-id=
               (core/layoutdef-type-id layout)
               (core/typedef-id definition)))
@@ -190,7 +190,7 @@
 
 (def fold-effects: (Vec core/EffectDef)
   (filterv
-    (fn [(effect : core/EffectDef)] -> Bool
+    (fn [effect: core/EffectDef] -> Bool
       (core/id-in? (core/functiondef-effects fold-function)
         (core/effectdef-id effect)))
     (core/nativecoreprogram-effects fold-lowered-program)))
@@ -259,7 +259,7 @@
      "semantic-differential DEFERRED-STAGE-6"
      "c17-materialization PASS"]))
 
-(defn emit-fold-fixture! [(directory : String)] -> Nil
+(defn emit-fold-fixture! [directory: String] -> Nil
   (if (and lower/fold-empty-passes? fold-obligations-pass?)
     (do
       (spit (str directory "/" (c11/c11artifact-header-name fold-artifact))

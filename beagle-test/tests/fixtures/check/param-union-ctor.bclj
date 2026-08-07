@@ -1,6 +1,6 @@
 (defunion (Result T E)
-  (Ok [(value : T)])
-  (Err [(error : E)]))
+  (Ok [value: T])
+  (Err [error: E]))
 
 (def x (->Ok 42))
 (def y (->Err "something failed"))

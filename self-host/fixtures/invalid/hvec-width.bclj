@@ -3,7 +3,7 @@
 
 ;; (HVec A B ..) <: (Vec T) ONLY when every position fits T. Here position 1
 ;; is String, which does not fit (Vec Int) — both compilers reject.
-(defn want-vec [(v : (Vec Int))] -> Int (count v))
+(defn want-vec [v: (Vec Int)] -> Int (count v))
 
-(defn run [(p : (HVec Int String))] -> Int
+(defn run [p: (HVec Int String)] -> Int
   (want-vec p))

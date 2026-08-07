@@ -7,99 +7,99 @@
 
 (require clojure.string :as str)
 
-(defrecord Pair [(left : Int) (right : Int)])
+(defrecord Pair [left: Int right: Int])
 
-(defn pair? [(v : Any)] -> Bool (instance? Pair v))
+(defn pair? [v: Any] -> Bool (instance? Pair v))
 
 ;; Widening: the declared return closes to the Any union, so the body's Int is
 ;; injected under the i64 tag. Nothing can fail.
-(defn wrap-int [(v : Int)] -> Any v)
+(defn wrap-int [v: Int] -> Any v)
 
 ;; Narrowing: the accessor's operand is statically the union and the expected
 ;; variant is known, so this is a direct checked extract. A value carrying any
 ;; other tag traps instead of reading the payload as a Pair reference.
-(defn pair-left-of [(v : Any)] -> Int (pair-left v))
+(defn pair-left-of [v: Any] -> Int (pair-left v))
 
-(defn pair-right-of [(v : Any)] -> Int (pair-right v))
+(defn pair-right-of [v: Any] -> Int (pair-right v))
 
 ;; Same-domain Any equality follows the union closure: tags first, then
 ;; the selected scalar payload or the boxed record's fields.
-(defn any-equal? [(left : Any) (right : Any)] -> Bool
+(defn any-equal? [left: Any right: Any] -> Bool
   (= left right))
 
-(defn any-hash [(value : Any)] -> Int
+(defn any-hash [value: Any] -> Int
   (hash value))
 
-(defn any-compare [(left : Any) (right : Any)] -> Int
+(defn any-compare [left: Any right: Any] -> Int
   (compare left right))
 
 ;; A narrowed record crosses a by-value return boundary. The native program
 ;; extracts its reference payload, then materializes a checked shallow copy.
-(defn pair-copy-of [(value : Any)] -> Pair
+(defn pair-copy-of [value: Any] -> Pair
   (if (pair? value)
     value
     (throw (ex-info "expected Pair" {}))))
 
-(defn logic-and [(left : Any) (right : Any)] -> Any
+(defn logic-and [left: Any right: Any] -> Any
   (and left right))
 
-(defn logic-or [(left : Any) (right : Any)] -> Any
+(defn logic-or [left: Any right: Any] -> Any
   (or left right))
 
 (defn logic-three-and
-  [(left : Any)
-   (middle : Any)
-   (right : Any)] -> Any
+  [left: Any
+   middle: Any
+   right: Any] -> Any
   (and left middle right))
 
 (defn logic-three-or
-  [(left : Any)
-   (middle : Any)
-   (right : Any)] -> Any
+  [left: Any
+   middle: Any
+   right: Any] -> Any
   (or left middle right))
 
-(defn logic-false-or-int [(value : Int)] -> Any
+(defn logic-false-or-int [value: Int] -> Any
   (or false value))
 
-(defn logic-true-and-int [(value : Int)] -> Any
+(defn logic-true-and-int [value: Int] -> Any
   (and true value))
 
 (defn logic-empty-and [] -> Bool (and))
 
 (defn logic-empty-or [] -> Nil (or))
 
-(defn logic-single-and [(value : Any)] -> Any (and value))
+(defn logic-single-and [value: Any] -> Any (and value))
 
-(defn logic-single-or [(value : Any)] -> Any (or value))
+(defn logic-single-or [value: Any] -> Any (or value))
 
-(defn logic-or-skips [(value : Any)] -> Any
+(defn logic-or-skips [value: Any] -> Any
   (or value (throw nil)))
 
-(defn logic-and-skips [(value : Any)] -> Any
+(defn logic-and-skips [value: Any] -> Any
   (and value (throw nil)))
 
-(defn cond-mixed [(selector : Int)] -> Any
+(defn cond-mixed [selector: Int] -> Any
   (cond
     (= selector 0) "zero"
     (= selector 1) selector
     :else nil))
 
-(defn fail-any [(message : String)] -> Any
+(defn fail-any [message: String] -> Any
   (throw message))
 
-(defn vector-or-fail [(available : Bool) (values : (Vec Any))] -> (Vec Any)
+(defn vector-or-fail [available: Bool values: (Vec Any)] -> (Vec Any)
   (if available values (fail-any "unavailable")))
 
 (defrecord ValueRow
-  [(kind : Keyword)
-   (text-value : String?)
-   (int-value : Int?)
-   (float-value : Float?)
-   (bool-value : Bool?)
-   (keyword-value : Keyword?)
-   (pair-value : Pair?)])
+  [kind: Keyword
+   text-value: String?
+   int-value: Int?
+   float-value: Float?
+   bool-value: Bool?
+   keyword-value: Keyword?
+   pair-value: Pair?])
 
-(defn classify-value [(value : Any)] -> ValueRow
+(defn classify-value [value: Any] -> ValueRow
   (cond
     (string? value) (->ValueRow :string value nil nil nil nil nil)
     (integer? value) (->ValueRow :int nil value nil nil nil nil)
@@ -109,79 +109,79 @@
     (pair? value) (->ValueRow :pair nil nil nil nil nil value)
     :else (throw nil)))
 
-(defrecord TaggedValue [(tag : Any)])
+(defrecord TaggedValue [tag: Any])
 
-(defn tagged-value? [(value : Any)] -> Bool
+(defn tagged-value? [value: Any] -> Bool
   (instance? TaggedValue value))
 
-(defn tagged-keyword [(value : Any)] -> Keyword?
+(defn tagged-keyword [value: Any] -> Keyword?
   (if (and (tagged-value? value)
            (keyword? (taggedvalue-tag value)))
     (taggedvalue-tag value)
     nil))
-(defn false-bool? [(value : Bool)] -> Bool (false? value))
+(defn false-bool? [value: Bool] -> Bool (false? value))
 
-(defn true-bool? [(value : Bool)] -> Bool (true? value))
+(defn true-bool? [value: Bool] -> Bool (true? value))
 
-(defn false-any? [(value : Any)] -> Bool (false? value))
+(defn false-any? [value: Any] -> Bool (false? value))
 
-(defn true-any? [(value : Any)] -> Bool (true? value))
+(defn true-any? [value: Any] -> Bool (true? value))
 
-(defn false-int? [(value : Int)] -> Bool (false? value))
+(defn false-int? [value: Int] -> Bool (false? value))
 
-(defn true-int? [(value : Int)] -> Bool (true? value))
+(defn true-int? [value: Int] -> Bool (true? value))
 
 (defn numeric-literal [] -> Float 1.5)
 
-(defn numeric-int-to-double [(value : Int)] -> Float
+(defn numeric-int-to-double [value: Int] -> Float
   (double value))
 
-(defn numeric-float-to-double [(value : Float)] -> Float
+(defn numeric-float-to-double [value: Float] -> Float
   (double value))
 
-(defn numeric-any-to-double [(value : Any)] -> Float
+(defn numeric-any-to-double [value: Any] -> Float
   (double value))
 
-(defn numeric-float-equal? [(left : Float) (right : Float)] -> Bool
+(defn numeric-float-equal? [left: Float right: Float] -> Bool
   (= left right))
 
-(defn numeric-float-less? [(left : Float) (right : Float)] -> Bool
+(defn numeric-float-less? [left: Float right: Float] -> Bool
   (< left right))
 
-(defn numeric-float-less-or-equal? [(left : Float) (right : Float)] -> Bool
+(defn numeric-float-less-or-equal? [left: Float right: Float] -> Bool
   (<= left right))
 
-(defn numeric-float-greater? [(left : Float) (right : Float)] -> Bool
+(defn numeric-float-greater? [left: Float right: Float] -> Bool
   (> left right))
 
-(defn numeric-float-greater-or-equal? [(left : Float) (right : Float)] -> Bool
+(defn numeric-float-greater-or-equal? [left: Float right: Float] -> Bool
   (>= left right))
 
-(defn numeric-parse-long [(value : String)] -> Int
+(defn numeric-parse-long [value: String] -> Int
   (or (parse-long value) -1))
 
-(defn numeric-parse-long-any [(value : Any)] -> Int
+(defn numeric-parse-long-any [value: Any] -> Int
   (if (string? value)
     (or (parse-long value) -1)
     -2))
 
-(defn numeric-int-double-less? [(left : Int) (right : Int)] -> Bool
+(defn numeric-int-double-less? [left: Int right: Int] -> Bool
   (< (double left) (double right)))
 
-(defn vector-value? [(value : (U (Vec Int) Int))] -> Bool
+(defn vector-value? [value: (U (Vec Int) Int)] -> Bool
   (vector? value))
 
-(defn vector-probe [(values : (Vec Int))] -> Bool
+(defn vector-probe [values: (Vec Int)] -> Bool
   (vector-value? values))
 
-(defn int-vector? [(value : Int)] -> Bool
+(defn int-vector? [value: Int] -> Bool
   (vector-value? value))
 
-(defn text-ends-with? [(value : String) (suffix : String)] -> Bool
+(defn text-ends-with? [value: String suffix: String] -> Bool
   (str/ends-with? value suffix))
 
-(defn maybe-int-if [(available : Bool)] -> Int?
+(defn maybe-int-if [available: Bool] -> Int?
   (if available 7))
 
-(defn maybe-int-when [(available : Bool)] -> Int?
+(defn maybe-int-when [available: Bool] -> Int?
   (when available 9))

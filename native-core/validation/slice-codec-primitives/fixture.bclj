@@ -2,17 +2,17 @@
 (ns native.codec-primitives)
 (define-mode strict)
 
-(defn encode-utf8 [(value : String)] -> (Vec Int)
+(defn encode-utf8 [value: String] -> (Vec Int)
   (utf8-encode value))
 
-(defn decode-utf8 [(value : (Vec Int))] -> String
+(defn decode-utf8 [value: (Vec Int)] -> String
   (utf8-decode value))
 
-(defn encode-float [(value : Float)] -> Int
+(defn encode-float [value: Float] -> Int
   (float-to-bits value))
 
-(defn decode-float [(value : Int)] -> Float
+(defn decode-float [value: Int] -> Float
   (float-from-bits value))
 
-(defn digest-bytes [(value : (Vec Int))] -> String
+(defn digest-bytes [value: (Vec Int)] -> String
   (sha256-bytes value))
