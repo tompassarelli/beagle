@@ -8,6 +8,7 @@
          racket/port
          beagle/private/parse
          beagle/private/check
+         beagle/private/emit
          beagle/private/query)
 
 (define-runtime-path fixtures-dir "fixtures/export-xmodule")
@@ -26,6 +27,15 @@
 (test-case "a bad call through an :as alias is rejected too"
   (check-exn #rx"arg 1 expected Float, got String"
              (lambda () (check-file "aliased.bjs"))))
+
+;; Making the exported name KNOWN to the consumer changed which emission path it
+;; took: the bound-name early-out returned the raw `p/scale` spelling, emitting
+;; the syntactically invalid `p/scale(x, 2.0)`.
+(test-case "a qualified call to an imported export emits a member access"
+  (define src (build-path fixtures-dir "consumer.bjs"))
+  (define js (emit-program (parse-program (read-beagle-syntax src) #:source-path src)))
+  (check-regexp-match #rx"p[.]scale\\(" js)
+  (check-false (regexp-match? #rx"p/scale" js)))
 
 (test-case "js/export'd definitions reach the query surface"
   (define out

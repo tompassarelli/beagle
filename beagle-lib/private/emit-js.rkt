@@ -2189,7 +2189,10 @@
         (define qualified
           (let ([mod-prefix (hash-ref (current-js-symbol-ns) fn-sym #f)])
             (cond
-              [(js-bound? fn-sym) mangled]
+              ;; A local binding never carries a namespace prefix, so a
+              ;; slash-bearing name must still be dotted even when the imported
+              ;; interface makes it known.
+              [(and (js-bound? fn-sym) (not (string-contains? mangled "/"))) mangled]
               [(and mod-prefix (not (string-contains? mangled "/")))
                (string-append (mangle-name mod-prefix) "." mangled)]
               [(string-contains? mangled "/")

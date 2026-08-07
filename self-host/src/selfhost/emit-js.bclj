@@ -500,7 +500,9 @@
 (defn emit-ref-name [name: String] -> String
   (cond
     (= name "nil") "null"
-    (bound? name) (mangle-name name)
+    ;; A local binding never carries a namespace prefix, so a slash-bearing name
+    ;; must still be dotted even when the imported interface makes it known.
+    (and (bound? name) (not (str/includes? name "/"))) (mangle-name name)
     (contains? JS-VALUE-WRAPPERS name) (get JS-VALUE-WRAPPERS name)
     :else
       (let [m (mangle-name name)]
