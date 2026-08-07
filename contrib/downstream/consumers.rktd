@@ -17,6 +17,8 @@
 ;;                 `template` ({} = element). Drift if the array is gone.
 ;;   bash-for-list parse `for VAR in ... ; do` from `source`, map via `template`.
 ;;                 Drift if the loop is gone.
+;;   tsv-manifest  glob `manifest-root/*.manifest-ext`, take the `source`
+;;                 column of rows whose `kind` is in `include-kinds`.
 ;;   find-exclude  replicate firn-build's `find`-based emit sweep for the
 ;;                 membership rule (collect `ext`, drop the find `-not -path`
 ;;                 dirs, the case-excluded relpath prefixes, and the excluded
@@ -35,7 +37,7 @@
  (consumer
   (name "gjoa")
   (repo-env "GJOA_REPO")
-  (repo-default "~/code/gjoa")
+  (repo-default "~/code/gjoa/main")
   (target "js")
   (enumerators
    ((enumerator
@@ -52,7 +54,7 @@
  (consumer
   (name "wake")
   (repo-env "WAKE_REPO")
-  (repo-default "~/code/wake")
+  (repo-default "~/code/wake/main")
   (target "js")
   (enumerators
    ((enumerator
@@ -82,11 +84,13 @@
   (target "clj")
   (enumerators
    ((enumerator
-     (kind bash-for-list)
+     (kind tsv-manifest)
      (source "build.sh")
-     (loop-var "m")
-     (template "src/fram/{}.bclj")
-     (shape-markers ("for m in"))))))
+     (manifest-root "build/generated-targets.d")
+     (manifest-ext ".tsv")
+     (include-kinds ("beagle" "beagle-core"))
+     (shape-markers ("MANIFEST_DIR=\"$HERE/build/generated-targets.d\""
+                     "fragments=(\"$MANIFEST_DIR\"/*.tsv)"))))))
 
  (consumer
   (name "nixos-config")

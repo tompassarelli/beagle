@@ -126,6 +126,7 @@
     [(glob)          (values (derive-glob repo enum) '())]
     [(bash-array)    (values (derive-bash-array repo enum) '())]
     [(bash-for-list) (values (derive-bash-for-list repo enum) '())]
+    [(tsv-manifest)  (values (derive-tsv-manifest repo enum) '())]
     [(find-exclude)  (derive-find-exclude repo enum)]
     [else (error 'derive-enumerator "unknown kind ~a" (spec-ref enum 'kind))]))
 
@@ -194,6 +195,46 @@
   (when (null? elems)
     (drift-error "bash-for-list ~a: loop over ~a is empty" source var))
   (elems->paths repo enum elems))
+
+;; membership = `source` column of every `manifest-root/*.ext` row whose `kind` is in include-kinds.
+(define (derive-tsv-manifest repo enum)
+  (define source (spec-ref enum 'source #f))
+  (define markers (spec-ref enum 'shape-markers '()))
+  (when source
+    (assert-shape-markers (read-enumerator-source repo source) markers
+                          (format "tsv-manifest ~a" source)))
+  (define manifest-root-rel (spec-ref enum 'manifest-root))
+  (define manifest-root (build-path repo manifest-root-rel))
+  (unless (directory-exists? manifest-root)
+    (drift-error "tsv-manifest root ~a is missing under ~a" manifest-root-rel repo))
+  (define ext (spec-ref enum 'manifest-ext ".tsv"))
+  (define fragments (walk-ext manifest-root ext #:recursive? #f))
+  (when (null? fragments)
+    (drift-error "tsv-manifest ~a: no fragment files with extension ~a" manifest-root-rel ext))
+  (define include-kinds (spec-ref enum 'include-kinds '()))
+  (define rows
+    (append*
+     (for/list ([f (in-list fragments)])
+       (define text (call-with-input-file f port->string))
+       (for*/list ([line (in-list (string-split text "\n"))]
+                   [trimmed (in-value (string-trim line))]
+                   #:when (non-empty-string? trimmed)
+                   #:unless (string-prefix? trimmed "#"))
+         (string-split line "\t")))))
+  (define srcs
+    (remove-duplicates
+     (for/list ([row (in-list rows)]
+                #:when (and (>= (length row) 2) (member (car row) include-kinds)))
+       (cadr row))))
+  (when (null? srcs)
+    (drift-error "tsv-manifest ~a: no rows matched include-kinds ~a" manifest-root-rel include-kinds))
+  (sort
+   (for/list ([rel (in-list srcs)])
+     (define full (build-path repo rel))
+     (unless (file-exists? full)
+       (drift-error "tsv-manifest enumerated source ~a does not exist (stale manifest)" rel))
+     rel)
+   string<?))
 
 (define (elems->paths repo enum elems)
   (define template (spec-ref enum 'template))
