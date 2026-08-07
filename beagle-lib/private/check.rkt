@@ -1906,8 +1906,7 @@
 
 (define (param-or-destr-type p)
   (cond
-    [(map-destructure? p) (or (map-destructure-type p) ANY)]
-    [(seq-destructure? p) (or (seq-destructure-type p) ANY)]
+    [(or (map-destructure? p) (seq-destructure? p)) ANY]
     [else (or (param-type p) ANY)]))
 
 ;; --- check a top-level form ------------------------------------------------
@@ -3138,11 +3137,9 @@
      (define else-type (infer-expr (if-some-form-else-body e) env))
      (merge-types then-type else-type)]
     [(with-open-form? e)
-     (define body-env (mut-copy env))
-     (for ([b (in-list (with-open-form-bindings e))])
-       (define t (infer-expr (let-binding-value b) body-env))
-       (when (symbol? (let-binding-name b))
-         (hash-set! body-env (let-binding-name b) t)))
+     ;; Same binding grammar as `let` (parse-let-bindings), so the same
+     ;; enforcement — a declared type here is not weaker than in a `let`.
+     (define body-env (extend-with-let-bindings env (with-open-form-bindings e)))
      (last-expr-type (with-open-form-body e) body-env)]
     [(binding-form? e)
      ;; Each target must be a `^:dynamic` var; rebinding a non-dynamic var
@@ -3332,11 +3329,9 @@
               ANY))
           (hash-set! body-env (for-binding-name c) (or (for-binding-type c) elem-type))]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]
+         ;; `:let` takes let's own binding grammar, so it gets let's enforcement.
          [(for-let? c)
-          (for ([b (in-list (for-let-bindings c))])
-            (define t (infer-expr (let-binding-value b) body-env))
-            (when (symbol? (let-binding-name b))
-              (hash-set! body-env (let-binding-name b) t)))]))
+          (set! body-env (extend-with-let-bindings body-env (for-let-bindings c)))]))
      (define body-type (last-expr-type (for-form-body e) body-env))
      (if (any-type? body-type)
        (type-app 'Vec (list ANY))
@@ -3516,11 +3511,9 @@
               ANY))
           (hash-set! body-env (for-binding-name c) (or (for-binding-type c) elem-type))]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]
+         ;; `:let` takes let's own binding grammar, so it gets let's enforcement.
          [(for-let? c)
-          (for ([b (in-list (for-let-bindings c))])
-            (define t (infer-expr (let-binding-value b) body-env))
-            (when (symbol? (let-binding-name b))
-              (hash-set! body-env (let-binding-name b) t)))]))
+          (set! body-env (extend-with-let-bindings body-env (for-let-bindings c)))]))
      (last-expr-type (doseq-form-body e) body-env)
      ANY]
     [(match-form? e)

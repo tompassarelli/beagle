@@ -328,44 +328,9 @@
             #f]
            [else (loop (cdr rest) (cons (car rest) acc))]))))
 
-;; wrap-start/wrap-end are set only for a flat `NAME: Type` triple, which the
-;; canonical form parenthesizes; an already-wrapped entry leaves them #f.
-(struct typed-annot (marker wrap-start wrap-end) #:transparent)
-
-;; wrap? is #f where the grammar has no typed binding (defmacro params), so a
-;; `NAME: Type` triple there is three params and wrapping would change arity.
-(define (typed-entry-annots vector-stx tokens wrap?)
-  (define subs (stx-subs vector-stx))
-  (define items (and subs (cdr subs)))
-  (define (wrapped-annot item)
-    (define parts (stx-subs item))
-    (and parts
-         (= (length parts) 3)
-         (eq? (->datum (cadr parts)) ANN-MARKER)
-         (let ([marker (syntax-start-offset (cadr parts))])
-           (and marker (typed-annot marker #f #f)))))
-  ;; No annot at all when the wrapping range is unavailable: leaving the flat
-  ;; spelling alone is the only non-lossy option.
-  (define (flat-annot name-stx marker-stx type-stx)
-    (define marker (syntax-start-offset marker-stx))
-    (define start (syntax-start-offset name-stx))
-    (define end (syntax-end-offset type-stx tokens))
-    (and wrap? marker start end (typed-annot marker start end)))
-  (if (not items)
-      '()
-      (let loop ([rest items] [acc '()])
-        (cond
-          [(null? rest) (reverse acc)]
-          [(and (>= (length rest) 3)
-                (symbol? (->datum (car rest)))
-                (eq? (->datum (cadr rest)) ANN-MARKER))
-           (define annot (flat-annot (car rest) (cadr rest) (caddr rest)))
-           (loop (cdddr rest) (if annot (cons annot acc) acc))]
-          [else
-           (define annot (wrapped-annot (car rest)))
-           (loop (cdr rest) (if annot (cons annot acc) acc))]))))
-
-(define (fragment->inline tokens start end [annots '()])
+;; Flat `NAME: Type` is the only annotation spelling, so a signature's canonical
+;; text is its own token text — layout is all the formatter decides.
+(define (fragment->inline tokens start end)
   (define out (open-output-string))
   (define pending-space? #f)
   (define previous-type #f)
@@ -380,13 +345,6 @@
     (set! wrote? #t)
     (set! pending-space? #f)
     (set! previous-type type))
-  (define (marker-annot tok)
-    (for/first ([annot (in-list annots)]
-                #:when (and (<= (token-offset tok) (typed-annot-marker annot))
-                            (< (typed-annot-marker annot) (token-end tok))))
-      annot))
-  (define (boundary? tok accessor offset)
-    (for/or ([annot (in-list annots)]) (eqv? (accessor annot) offset)))
   (for ([tok (in-list tokens)]
         #:when (and (>= (token-offset tok) start)
                     (<= (token-end tok) end)))
@@ -396,24 +354,7 @@
       [(eq? (token-type tok) 'line-comment)
        (emit! (token-text tok) 'line-comment)
        (set! pending-space? #t)]
-      [else
-       (when (boundary? tok typed-annot-wrap-start (token-offset tok))
-         (emit! "(" 'open-paren))
-       (define annot (marker-annot tok))
-       (cond
-         [annot
-          ;; The tokenizer keeps `name:` in one atom while the reader splits it
-          ;; there, so the marker half is re-emitted with a space on each side.
-          (define text (token-text tok))
-          (define split (- (typed-annot-marker annot) (token-offset tok)))
-          (define name (substring text 0 split))
-          (unless (string=? name "") (emit! name (token-type tok)))
-          (set! pending-space? #t)
-          (emit! (substring text split) (token-type tok))
-          (set! pending-space? #t)]
-         [else (emit! (token-text tok) (token-type tok))])
-       (when (boundary? tok typed-annot-wrap-end (token-end tok))
-         (emit! ")" 'close-paren))]))
+      [else (emit! (token-text tok) (token-type tok))]))
   (string-trim (get-output-string out)))
 
 (define (line-comment-in-range? tokens start end)
@@ -435,19 +376,19 @@
     tok))
 
 (define (canonical-vector-text tokens open close entries continuation-col
-                               annots vertical?)
+                               vertical?)
   (define open-end (token-end open))
   (define close-start (token-offset close))
   (define starts (map syntax-start-offset entries))
   (cond
     [(or (not vertical?) (null? starts) (null? (cdr starts)))
-     (string-append "[" (fragment->inline tokens open-end close-start annots) "]")]
+     (string-append "[" (fragment->inline tokens open-end close-start) "]")]
     [else
      (define boundaries (append (cdr starts) (list close-start)))
      (define fragments
        (for/list ([start (in-list (cons open-end (cdr starts)))]
                   [end (in-list boundaries)])
-         (fragment->inline tokens start end annots)))
+         (fragment->inline tokens start end)))
      (string-append
       "["
       (car fragments)
@@ -473,7 +414,7 @@
      (or (expression-end-offset tokens return-type) (token-end after-close))]
     [else (token-end close)]))
 
-(define (inline-signature-fits? tokens form-stx open close placement annots)
+(define (inline-signature-fits? tokens form-stx open close placement)
   (define start
     (if (eq? placement 'bare)
         (token-offset open)
@@ -486,15 +427,12 @@
   (and start end
        (<= (+ start-col
               (string-length
-               (fragment->inline tokens start end annots)))
+               (fragment->inline tokens start end)))
            SIGNATURE-LINE-WIDTH)))
 
-(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role
-                              [wrap-annotations? #t])
+(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role)
   (define start (syntax-start-offset vector-stx))
   (define entries (and start (logical-entry-stxs vector-stx)))
-  (define annots
-    (if start (typed-entry-annots vector-stx tokens wrap-annotations?) '()))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
   (define close (and open (matching-token tokens open)))
   (when (and entries open close anchor (syntax-start-offset anchor))
@@ -515,8 +453,7 @@
     (define entry-count (length entries))
     (define vertical?
       (or (>= entry-count 3)
-          (not (inline-signature-fits? tokens form-stx open close placement
-                                       annots))))
+          (not (inline-signature-fits? tokens form-stx open close placement))))
     (define vector-col
       (case placement
         [(owner) (if vertical? (+ form-col 2) (token-col open))]
@@ -524,7 +461,7 @@
         [else (token-col open)]))
     (define vector-text
       (canonical-vector-text tokens open close entries (add1 vector-col)
-                             annots vertical?))
+                             vertical?))
     (define prefix-text
       (cond
         [(not (eq? placement 'owner)) ""]
@@ -552,14 +489,12 @@
   (and (syntax? stx) (bracketed? (->datum stx))))
 
 (define (inspect-named-form-vector! source tokens form-stx vector-index
-                                    [anchor-index 0] [role "parameter"]
-                                    [wrap-annotations? #t])
+                                    [anchor-index 0] [role "parameter"])
   (define subs (stx-subs form-stx))
   (define vector-stx (stx-ref subs vector-index))
   (define anchor (stx-ref subs anchor-index))
   (when (and (vector-stx? vector-stx) anchor)
-    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role
-                          wrap-annotations?)))
+    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role)))
 
 (define (inspect-method-form! source tokens method-stx [role "method parameter"])
   (define subs (stx-subs method-stx))
@@ -623,7 +558,7 @@
       [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
       [(fn) (inspect-fn-layout! source tokens form-stx)]
       [(defmacro)
-       (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter" #f)]
+       (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter")]
       [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
       [(letfn)
        (define fns (stx-ref subs 1))
@@ -1990,17 +1925,22 @@
            [(list? typed-params)      typed-params]
            [else (raise-parse-error 'bad-meta-value
                                     "macro ~a: parameters must be a list" name)]))
+       ;; Flat `name: Contract` triples, same as every other binding vector; a
+       ;; bare name defaults to the Syntax contract.
        (define-values (param-names input-contracts)
-         (for/lists (names contracts)
-                    ([p (in-list raw-params)])
+         (let loop ([rest raw-params] [names '()] [contracts '()])
            (cond
-             [(and (list? p) (= (length p) 3) (symbol? (car p)) (annotation-marker? (cadr p)))
-              (values (car p) (caddr p))]
-             [(symbol? p)
-              (values p 'Syntax)]
+             [(null? rest) (values (reverse names) (reverse contracts))]
+             [(and (symbol? (car rest)) (pair? (cdr rest))
+                   (annotation-marker? (cadr rest)) (pair? (cddr rest)))
+              (loop (cdddr rest) (cons (car rest) names) (cons (caddr rest) contracts))]
+             [(paren-annotation? (car rest))
+              (raise-paren-annotation (car rest))]
+             [(symbol? (car rest))
+              (loop (cdr rest) (cons (car rest) names) (cons 'Syntax contracts))]
              [else
               (raise-parse-error 'bad-meta-value
-                                 "macro ~a: bad typed parameter: ~v" name p)])))
+                                 "macro ~a: bad typed parameter: ~v" name (car rest))])))
        (if (eq? macro-kind 'beagle)
            (register-beagle-macro! registry name param-names input-contracts ret-type body)
            (register-proc-macro! registry name param-names input-contracts ret-type body))]
@@ -2340,8 +2280,7 @@
 ;; Type-annotation markers. Two POSITIONS, each with its own marker:
 ;;
 ;;   binding  — `NAME: TYPE` (the reader's ANN-MARKER). Params, let/loop/for
-;;              bindings, def/defonce, record/union/error fields, wrapped
-;;              `(NAME: TYPE)` pairs.
+;;              bindings, def/defonce, record/union/error fields.
 ;;   return   — `-> RET`. defn/defn-/fn/letfn/arity clauses, protocol and
 ;;              impl methods, jst methods.
 ;;
@@ -2395,6 +2334,88 @@
   (raise-parse-error 'inline-type-annotation
                      "`:` is not the return-type marker in ~a — write `-> RET`:\n  (~a [params...] -> RET body...)"
                      where where))
+
+;; `(PATTERN : Type)` — the retired parenthesized spelling. Recognized ONLY to
+;; be rejected: parens in binding position are no longer part of the grammar.
+(define (paren-annotation? item)
+  (and (list? item)
+       (= (length item) 3)
+       (not (bracketed? item))
+       (not (map-tagged? item))
+       (annotation-marker? (cadr item))))
+
+(define (raise-paren-annotation item)
+  (define pat (car item))
+  (define ty (binding-datum->src (caddr item)))
+  (if (symbol? pat)
+      (raise-parse-error
+       'inline-type-annotation
+       "`~a` is not a typed binding — annotations attach to names — write `~a: ~a`"
+       (binding-datum->src item) pat ty)
+      (raise-parse-error
+       'inline-type-annotation
+       "`~a` is not a typed binding — destructuring patterns cannot be annotated — bind a name (`p: ~a`) and destructure in the body"
+       (binding-datum->src item) ty)))
+
+;; A pattern has no name to attach a type to, so it cannot participate in a
+;; vector that annotates its bindings.
+(define (raise-pattern-in-typed-vector item)
+  (raise-parse-error
+   'inline-type-annotation
+   "`~a` in a typed binding vector — destructuring patterns cannot be annotated — bind a name (`p: Type`) and destructure in the body"
+   (binding-datum->src item)))
+
+(define (raise-mixed-binding-vector name)
+  (raise-parse-error
+   'inline-type-annotation
+   "binding vector mixes typed and untyped bindings — annotate every binding (use `~a: Any` if the type is not yet known) or annotate none"
+   name))
+
+;; All-or-nothing per binding vector. `slots` is source-ordered `(kind . datum)`
+;; with kind in 'typed / 'bare / 'pattern; `&` rest is split off before this runs.
+(define (enforce-binding-uniformity! slots)
+  (when (for/or ([s (in-list slots)]) (eq? (car s) 'typed))
+    (for ([s (in-list slots)])
+      (case (car s)
+        [(pattern) (raise-pattern-in-typed-vector (cdr s))]
+        [(bare) (raise-mixed-binding-vector (cdr s))]
+        [else (void)]))))
+
+(define (param-binding-slots items)
+  (let loop ([rest items] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [(and (symbol? (car rest)) (pair? (cdr rest))
+            (annotation-marker? (cadr rest)) (pair? (cddr rest)))
+       (loop (cdddr rest) (cons (cons 'typed (car rest)) acc))]
+      [(or (bracketed? (car rest)) (map-tagged? (car rest)))
+       (loop (cdr rest) (cons (cons 'pattern (car rest)) acc))]
+      [(symbol? (car rest))
+       (loop (cdr rest) (cons (cons 'bare (car rest)) acc))]
+      [else (loop (cdr rest) acc)])))
+
+(define (let-binding-slots items)
+  (let loop ([rest items] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [(and (pair? (car rest)) (memq (car (car rest)) '(inherit inherit-from)))
+       (loop (cdr rest) acc)]
+      [(and (>= (length rest) 4) (symbol? (car rest)) (annotation-marker? (cadr rest)))
+       (loop (list-tail rest 4) (cons (cons 'typed (car rest)) acc))]
+      [(< (length rest) 2) (reverse acc)]
+      [(or (bracketed? (car rest)) (map-tagged? (car rest)))
+       (loop (cddr rest) (cons (cons 'pattern (car rest)) acc))]
+      [(symbol? (car rest))
+       (loop (cddr rest) (cons (cons 'bare (car rest)) acc))]
+      [else (loop (cddr rest) acc)])))
+
+;; `[x Int]` with the colon dropped binds a variable named `Int`. Warn per site;
+;; annotating the binding (`Int: Any` if that really is the name) silences it.
+(define (note-capitalized-binding! name where)
+  (define s (symbol->string name))
+  (when (and (> (string-length s) 0) (char-upper-case? (string-ref s 0)))
+    (eprintf "warning [capitalized-binding-name] `~a` bound as a ~a name — possible dropped colon?\n"
+             name where)))
 
 ;; Legacy `:-` migration diagnostic. One notice per source; the removal task
 ;; flips the default mode to 'error and deletes LEGACY-MARKER from the
@@ -4843,20 +4864,14 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
-;; Param lists support four intermixable shapes:
-;;   1. bare name (untyped):              x
-;;   2. wrapped + annotation:             (x: T)
-;;   3. postfix annotation (alternation): x: T
-;;   4. map destructure:                  {:keys [a b c]} or {:keys [a b c] :as m}
-;;
-;; `parse-typed-params` walks left-to-right — when the item after a bare-symbol
-;; name is the annotation marker, the next item is consumed as that name's type;
-;; otherwise the name is untyped.
-;;
-;; Example: `[a: Int b c: String]` → a:Int, b:inferred, c:String.
+;; A param item is a bare name, a `name: Type` triple, or a destructure
+;; (`[a b]` / `{:keys [...]}`). One vector may not mix typed and untyped —
+;; enforce-binding-uniformity! — and `& rest` is exempt from that.
 (define (parse-params p)
   (define d (->datum p))
   (define items (unwrap-items d "parameter list"))
+  ;; after-amp stays the raw item LIST: unwrapping a singleton would make
+  ;; `& more: Int` and the rejected `& (more : Int)` the same datum.
   (define-values (before-amp after-amp)
     (let loop ([remaining items] [acc '()])
       (cond
@@ -4865,29 +4880,28 @@
          (let ([rest-items (cdr remaining)])
            (when (null? rest-items)
              (error 'beagle "& must be followed by a rest parameter"))
-           (values (reverse acc)
-                   (if (= (length rest-items) 1)
-                       (car rest-items)
-                       rest-items)))]
+           (values (reverse acc) rest-items))]
         [else (loop (cdr remaining) (cons (car remaining) acc))])))
   (define fixed (parse-typed-params before-amp))
+  (enforce-binding-uniformity! (param-binding-slots before-amp))
   (define rest-p
     (and after-amp
          (cond
-           [(and (list? after-amp)
-                 (= (length after-amp) 3)
+           [(and (= (length after-amp) 3)
                  (symbol? (car after-amp))
                  (annotation-marker? (cadr after-amp)))
             (param (car after-amp) (parse-type (caddr after-amp)))]
-           [(symbol? after-amp)
-            (param after-amp #f)]
+           [(and (= (length after-amp) 1) (symbol? (car after-amp)))
+            (param (car after-amp) #f)]
+           [(and (= (length after-amp) 1) (paren-annotation? (car after-amp)))
+            (raise-paren-annotation (car after-amp))]
            [else
-            (error 'beagle "bad rest parameter after &: ~v" after-amp)])))
+            (error 'beagle "bad rest parameter after &: ~v"
+                   (if (= (length after-amp) 1) (car after-amp) after-amp))])))
   (values fixed rest-p))
 
 ;; Walks param items left-to-right, recognizing postfix `NAME: TYPE` triples and
-;; bare `NAME` as alternation. Wrapped `(name: T)`, bracket destructures, and map
-;; destructures are accepted as single items.
+;; bare `NAME` as alternation. Bracket and map destructures are single items.
 (define (parse-typed-params items)
   (let loop ([rest items] [acc '()])
     (cond
@@ -4908,7 +4922,7 @@
       ;; `[a :Int]` — the colon glued to the type; params are never keywords.
       [(and (symbol? (car rest)) (pair? (cdr rest)) (keyword-sym? (cadr rest)))
        (raise-keyword-annotation-confusion (car rest) (cadr rest))]
-      ;; Single-item parameter (bracket, map-destructure, wrapped, or bare).
+      ;; Single-item parameter (bracket, map-destructure, or bare).
       [else
        (define item (car rest))
        (define parsed
@@ -4917,40 +4931,17 @@
             (parse-seq-destructure item)]
            [(map-destructure-form? item)
             (parse-map-destructure item)]
-           [(wrapped-annotation? item)
-            (parse-wrapped-annotation item "parameter")]
+           [(paren-annotation? item)
+            (raise-paren-annotation item)]
            [(symbol? item)
             (validate-identifier! item "parameter")
+            (note-capitalized-binding! item "parameter")
             (param item #f)]
            [else
             (error 'beagle
-                   "bad parameter: ~v~nexpected name, (name: Type), name: Type, ([a b] : Type), or {:keys [...]}"
+                   "bad parameter: ~v~nexpected name, name: Type, [a b], or {:keys [...]}"
                    item)]))
        (loop (cdr rest) (cons parsed acc))])))
-
-;; `(PATTERN : Type)` — the parenthesized typed binding. Parens are the only
-;; delimiter free in binding position, so PATTERN may be anything an
-;; unannotated slot accepts: a name, `[a b]`, or `{:keys [...]}`.
-(define (wrapped-annotation? item)
-  (and (list? item)
-       (= (length item) 3)
-       (not (bracketed? item))
-       (not (map-tagged? item))
-       (annotation-marker? (cadr item))))
-
-(define (parse-wrapped-annotation item where)
-  (define pat (car item))
-  (define ty (parse-type (caddr item)))
-  (cond
-    [(bracketed? pat) (parse-seq-destructure pat ty)]
-    [(map-destructure-form? pat) (parse-map-destructure pat ty)]
-    [(symbol? pat)
-     (validate-identifier! pat where)
-     (param pat ty)]
-    [else
-     (error 'beagle
-            "bad ~a: ~v~nthe annotated form is (name : Type), ([a b] : Type), or ({:keys [...]} : Type)"
-            where item)]))
 
 (define (map-destructure-form? item)
   (and (map-tagged? item)
@@ -4962,7 +4953,7 @@
 ;; Map destructure: {:keys [a b] :or {b 2} :as m}. All real-Clojure options
 ;; are either supported (:keys/:or/:as) or pointedly rejected (:strs/:syms,
 ;; {alias :key}) — never silently dropped (the :or bug class, 2026-06-12).
-(define (parse-map-destructure item [ty #f])
+(define (parse-map-destructure item)
   (define d (->datum item))
   (define body (map-body d))
   (unless (and (>= (length body) 2)
@@ -4976,7 +4967,7 @@
   (let loop ([rest (cddr body)] [as-name #f] [or-defaults '()])
     (cond
       [(null? rest)
-       (map-destructure key-names as-name or-defaults ty)]
+       (map-destructure key-names as-name or-defaults)]
       [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
        (loop (cddr rest) (cadr rest) or-defaults)]
       [(and (eq? (car rest) ':or) (pair? (cdr rest)) (map-tagged? (cadr rest)))
@@ -5009,7 +5000,10 @@
   (define psubs (stx-subs b))
   (define items (unwrap-items d "let bindings"))
   (define item-stxs (unwrap-stxs psubs d))
-  (let loop ([rest items] [stxs item-stxs] [acc '()])
+  ;; Uniformity runs after the structural walk so a malformed vector still
+  ;; reports its own pointed shape error first.
+  (define parsed
+   (let loop ([rest items] [stxs item-stxs] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
       ;; Singleton (inherit ...) or (inherit-from src ...) binding.
@@ -5020,18 +5014,8 @@
        (loop (cdr rest)
              (and stxs (cdr stxs))
              (cons (let-binding #f #f (parse-expr (car (or (and stxs (list (car stxs))) (list (car rest)))))) acc))]
-      [(and (>= (length rest) 2)
-            (list? (car rest))
-            (= (length (car rest)) 3)
-            (symbol? (car (car rest)))
-            (annotation-marker? (cadr (car rest))))
-       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
-       (loop (cddr rest)
-             (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (let-binding (car (car rest))
-                                (parse-type (caddr (car rest)))
-                                (parse-expr (or val-stx (cadr rest))))
-                   acc))]
+      [(paren-annotation? (car rest))
+       (raise-paren-annotation (car rest))]
       [(and (>= (length rest) 2)
             (map-destructure-form? (car rest)))
        (define destr (parse-map-destructure (car rest)))
@@ -5071,11 +5055,14 @@
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
+       (note-capitalized-binding! (car rest) "let binding")
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (let-binding (car rest) #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
+  (enforce-binding-uniformity! (let-binding-slots items))
+  parsed)
 
 (define (parse-parametric-defunion name type-vars member-defs subs)
   (define tvars (map ->datum type-vars))
@@ -5135,9 +5122,8 @@
   (target-case-form cases))
 
 ;; Record fields use the same annotation grammar as param vectors: flat
-;; `name: Type` triples (canonical) or wrapped `(name: Type)`. Field
-;; types are required — records are typed boundaries; there is no inference
-;; across a record's surface.
+;; `name: Type` triples. Field types are required — records are typed
+;; boundaries; there is no inference across a record's surface.
 (define (parse-record-fields f)
   (define d (->datum f))
   (define items (unwrap-items d "record fields"))
@@ -5157,13 +5143,8 @@
       ;; `[a :Int]` — colon glued to the type; fields are always typed.
       [(and (symbol? (car rest)) (pair? (cdr rest)) (keyword-sym? (cadr rest)))
        (raise-keyword-annotation-confusion (car rest) (cadr rest))]
-      ;; Wrapped: (name: Type).
-      [(and (list? (car rest))
-            (= (length (car rest)) 3)
-            (symbol? (caar rest))
-            (annotation-marker? (cadr (car rest))))
-       (loop (cdr rest)
-             (cons (param (caar rest) (parse-type (caddr (car rest)))) acc))]
+      [(paren-annotation? (car rest))
+       (raise-paren-annotation (car rest))]
       [else
        (error 'beagle
               "defrecord field needs a type annotation — use [name: Type name2: Type2 ...], got: ~v"
@@ -5232,14 +5213,14 @@
                "Type"))
   (raise-parse-error
    'inline-type-annotation
-   "`[~a]` is not a typed binding — `[...]` in binding position is sequential destructuring. Write the parenthesized form: `(~a : ~a)`"
+   "`[~a]` is not a typed binding — `[...]` in binding position is sequential destructuring — write `~a: ~a`"
    (string-join (map binding-datum->src body) " ")
    name ty))
 
 ;; Sequential destructure: [a b], [a [b c]], [{:keys [x]} y], [a & rest].
 ;; Nested patterns recurse (real Clojure); entries other than symbols and
 ;; nested patterns are rejected pointedly.
-(define (parse-seq-destructure item [ty #f])
+(define (parse-seq-destructure item)
   (define d (->datum item))
   (define body (bracket-body d))
   (when (ormap (lambda (e) (or (eq? e ANN-MARKER) (eq? e LEGACY-MARKER))) body)
@@ -5262,7 +5243,7 @@
          (error 'beagle
                 "sequential destructure: expected a symbol, nested [..] pattern, or {:keys [..]} pattern, got: ~v"
                 (car items))])))
-  (seq-destructure names rest-name ty))
+  (seq-destructure names rest-name))
 
 (define (parse-for-clauses b)
   (define d (->datum b))

@@ -3,20 +3,20 @@
 ;; Procedural macro: generates a record + constructor + accessors from a spec.
 ;; 5 lines of macro → expands to ~15 lines of typed code.
 (define-macro proc defentity
-  [(name: Symbol) (fields: (Vec Syntax))] -> (Vec Form)
+  [name: Symbol fields: (Vec Syntax)] -> (Vec Form)
   (let ((field-names (map car fields)))
     (append
      (list
       ;; defrecord with typed fields
       (cons 'defrecord (cons name (list (cons '#%brackets
-                                              (map (lambda (f) (ann (car f) (caddr f)))
-                                                   fields))))))
+                                              (append-map (lambda (f) (ann (car f) (caddr f)))
+                                                          fields))))))
      ;; generate a getter for each field
      (map (lambda (f)
             (let ((fname (car f))
                   (ftype (caddr f)))
               `(defn ~(string->symbol (format "~a-~a" name fname))
-                 ((obj: ~name)) -> ~ftype
+                 [obj: ~name] -> ~ftype
                  (get obj ~(sym->kw fname)))))
           fields))))
 

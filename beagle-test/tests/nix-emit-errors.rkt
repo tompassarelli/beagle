@@ -83,7 +83,7 @@
 ;; --- loop with recur actually recurses --------------------------------------
 
 (test-case "loop body recur emits self-call, not null comment"
-  (define out (nix-emit "(def f (fn [(n: Int)] (loop [i n] (if (<= i 0) 0 (recur (- i 1))))))"))
+  (define out (nix-emit "(def f (fn [n: Int] (loop [i n] (if (<= i 0) 0 (recur (- i 1))))))"))
   (check-true (string-contains? out "__loop"))
   (check-false (string-contains? out "/* recur outside loop */")))
 

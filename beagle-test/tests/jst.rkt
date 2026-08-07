@@ -49,7 +49,7 @@
 
      (check-jst-parse-ok "js/class"
        '(js/class Animal
-          (constructor [(name #%: String)]
+          (constructor [name #%: String]
             (set! (.-name this) name))
           (speak []
             (js/return (.-name this)))))
@@ -162,13 +162,13 @@
      (check-jst-emit "js/class declaration"
        "class Animal {"
        '(js/class Animal
-          (constructor [(name #%: String)]
+          (constructor [name #%: String]
             (set! (.-name this) name))))
 
      (check-jst-emit "class constructor"
        "constructor(name)"
        '(js/class Animal
-          (constructor [(name #%: String)]
+          (constructor [name #%: String]
             (set! (.-name this) name))))
 
      (check-jst-emit "class with extends"
@@ -199,9 +199,9 @@
      (check-jst-emit "class with static method"
        "static create"
        '(js/class Config
-          (constructor [(data #%: Any)]
+          (constructor [data #%: Any]
             (set! (.-data this) data))
-          (static create [(path #%: String)]
+          (static create [path #%: String]
             (js/return (Config. (JSON/parse path))))))
 
    ) ;; end complex suite

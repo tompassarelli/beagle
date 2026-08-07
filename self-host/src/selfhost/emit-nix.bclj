@@ -29,7 +29,7 @@
 
 ;; --- indentation --------------------------------------------------------------
 (defn indent [n: Int] -> String
-  (loop [i 0 acc: String ""]
+  (loop [i: Int 0 acc: String ""]
     (if (>= i (* 2 n)) acc (recur (+ i 1) (str acc " ")))))
 
 ;; --- identifier mangling (emit-nix.rkt mangle-name) --------------------------
@@ -198,7 +198,7 @@
 (defn emit-multiline-string [lines: Any depth: Int] -> String
   (let [ind (indent (+ depth 1)) body (str/join "\n" (mapv (fn
                                                              [line: Any] -> String (let [lt (get line "type")] (cond (= lt "text") (escape-nix-ml (get line "value")) (= lt "interp") (emit-interp-string-inline (get line "parts") depth) :else (str "${" (emit-expr* (get line "value") depth) "}")))) lines)) phys (str/split body #"\n" -1) indented (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                                    [l: Any] -> String (if (= l "") "" (str ind l))) phys)]
+                                                                                                                                                                                                                                                                                                                                                                 [l: Any] -> String (if (= l "") "" (str ind l))) phys)]
     (str "''\n" (str/join "\n" indented) "\n" (indent depth) "''")))
 
 (defn emit-indented-string [text: String depth: Int] -> String
@@ -215,7 +215,7 @@
       (= n 1)
       (emit-expr* (nth exprs 0) depth)
       :else
-      (let [last-expr (nth exprs (- n 1)) stmts (subvec (vec exprs) 0 (- n 1)) ind (indent (+ depth 1)) binds (loop [i 0 acc: (Vec String) []] (if (>= i (count stmts)) acc (recur (+ i 1) (conj acc (str ind "__s" i " = " (emit-expr* (nth stmts i) (+ depth 1)) ";")))))]
+      (let [last-expr (nth exprs (- n 1)) stmts (subvec (vec exprs) 0 (- n 1)) ind (indent (+ depth 1)) binds (loop [i: Int 0 acc: (Vec String) []] (if (>= i (count stmts)) acc (recur (+ i 1) (conj acc (str ind "__s" i " = " (emit-expr* (nth stmts i) (+ depth 1)) ";")))))]
         (str "let\n"
           (str/join "\n" binds)
           "\n"
@@ -262,7 +262,7 @@
    pairs: Any
    depth: Int] -> (Vec String)
   (let [ind (indent (+ depth 1))]
-    (loop [i 0 acc: (Vec String) []]
+    (loop [i: Int 0 acc: (Vec String) []]
       (if (>= i (count pairs))
         acc
         (let [pair (nth pairs i) key (get pair "key") val (get pair "val") key-str (emit-key key depth) full-key (str prefix "." key-str)]
@@ -275,7 +275,7 @@
 (defn emit-nix-attrs [pairs: Any depth: Int] -> String
   (if (= 0 (count pairs))
     "{ }"
-    (let [ind (indent (+ depth 1)) entries (loop [i 0 acc: (Vec String) []] (if (>= i (count pairs)) acc (let [pair (nth pairs i) key (get pair "key") val (get pair "val") key-node (get key "node") sentinel? (and (= (get val "node") "literal") (= (get val "kind") "bool") (= (get val "value") false))] (recur (+ i 1) (cond (and sentinel? (= key-node "nix-inherit")) (conj acc (str ind "inherit " (str/join " " (get key "names")) ";")) (and sentinel? (= key-node "nix-inherit-from")) (conj acc (str ind "inherit (" (emit-expr* (get key "ns-expr") (+ depth 1)) ") " (str/join " " (get key "names")) ";")) :else (let [key-str (emit-key key depth)] (if (and (map-node? val) (str/includes? key-str ".") (= 1 (count (map-pairs val)))) (into acc (flatten-dot-path key-str (map-pairs val) depth)) (conj acc (str ind key-str " = " (emit-expr* val (+ depth 1)) ";")))))))))]
+    (let [ind (indent (+ depth 1)) entries (loop [i: Int 0 acc: (Vec String) []] (if (>= i (count pairs)) acc (let [pair (nth pairs i) key (get pair "key") val (get pair "val") key-node (get key "node") sentinel? (and (= (get val "node") "literal") (= (get val "kind") "bool") (= (get val "value") false))] (recur (+ i 1) (cond (and sentinel? (= key-node "nix-inherit")) (conj acc (str ind "inherit " (str/join " " (get key "names")) ";")) (and sentinel? (= key-node "nix-inherit-from")) (conj acc (str ind "inherit (" (emit-expr* (get key "ns-expr") (+ depth 1)) ") " (str/join " " (get key "names")) ";")) :else (let [key-str (emit-key key depth)] (if (and (map-node? val) (str/includes? key-str ".") (= 1 (count (map-pairs val)))) (into acc (flatten-dot-path key-str (map-pairs val) depth)) (conj acc (str ind key-str " = " (emit-expr* val (+ depth 1)) ";")))))))))]
       (str "{\n" (str/join "\n" entries) "\n" (indent depth) "}"))))
 
 ;; --- nix list ----------------------------------------------------------------
@@ -463,7 +463,7 @@
 (defn emit-loop! [e: Any depth: Int] -> String
   (let [bindings (get e "bindings") body (get e "body") param-names (mapv (fn
                                                                             [b: Any] -> String (mangle-name (get b "name"))) bindings) init-vals (mapv (fn
-                                                                                                                                                            [b: Any] -> String (emit-expr* (get b "value") depth)) bindings) param-str (str/join " " param-names) prev (deref recur-name-ref)]
+                                                                                                                                                         [b: Any] -> String (emit-expr* (get b "value") depth)) bindings) param-str (str/join " " param-names) prev (deref recur-name-ref)]
     (reset! recur-name-ref "__loop")
     (let [body-str (emit-body body depth)]
       (reset! recur-name-ref prev)
@@ -480,9 +480,9 @@
   (and (= (get key-arg "node") "literal") (= (get key-arg "kind") "keyword")))
 
 (defn emit-call [e: Any depth: Int] -> String
-  (let [fn-expr (get e "fn") args (vec (get e "args")) n (count args) fname (call-fn-name e) pw (fn
-                                                                                                  [a: Any] -> String (paren-wrap (emit-expr* a depth) a)) E (fn
-                                                                                                                                                                 [a: Any] -> String (emit-expr* a depth))]
+  (let [fn-expr: Any (get e "fn") args: Any (vec (get e "args")) n: Int (count args) fname: Any (call-fn-name e) pw: Any (fn
+                                                                                                                           [a: Any] -> String (paren-wrap (emit-expr* a depth) a)) E: Any (fn
+                                                                                                                                                                                            [a: Any] -> String (emit-expr* a depth))]
     (cond
       (and (some? fname) (= fname "not") (= n 1))
       (str "!" (pw (nth args 0)))
@@ -841,8 +841,8 @@
 (defn emit-record-defs [e: Any depth: Int] -> String
   (let [ind (indent depth) name (get e "name") fields (get e "fields") tag (str/lower-case name) ctor-name (mangle-name (str "->" name)) fnames (field-names-of fields) param-str (str/join " " (mapv (fn
                                                                                                                                                                                                         [fn0: String] -> String (str (mangle-name fn0) ":")) fnames)) body-entries (into [(str ind "  _tag = \"" (escape-nix tag) "\";")] (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                     [fn0: String] -> String (str ind "  " (mangle-name fn0) " = " (mangle-name fn0) ";")) fnames)) ctor (str ind ctor-name " = " param-str " {\n" (str/join "\n" body-entries) "\n" ind "};") accessors (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    [fn0: String] -> String (let [acc-name (mangle-name (str (str/lower-case name) "-" fn0))] (str ind acc-name " = r: r." (mangle-name fn0) ";"))) fnames)]
+                                                                                                                                                                                                                                                                                                                                                  [fn0: String] -> String (str ind "  " (mangle-name fn0) " = " (mangle-name fn0) ";")) fnames)) ctor (str ind ctor-name " = " param-str " {\n" (str/join "\n" body-entries) "\n" ind "};") accessors (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              [fn0: String] -> String (let [acc-name (mangle-name (str (str/lower-case name) "-" fn0))] (str ind acc-name " = r: r." (mangle-name fn0) ";"))) fnames)]
     (str/join "\n" (into [ctor] accessors))))
 
 (defn emit-top-defenum [e: Any depth: Int] -> String
@@ -853,8 +853,8 @@
 (defn emit-top-deferror [e: Any depth: Int] -> String
   (let [ind (indent depth) name (mangle-name (get e "name")) members (get e "members") mf (get e "member-fields") ctors (mapv (fn
                                                                                                                                 [m: String] -> String (let [fields (if (and mf (get mf m)) (vec (get mf m)) []) m-str (mangle-name m)] (if (= 0 (count fields)) (str ind m-str " = { __tag = \"" m "\"; };") (let [param-names (mapv (fn
-                                                                                                                                                                                                                                                                                                                                          [p: Any] -> String (mangle-name (get p "name"))) fields) params-str (str/join ": " param-names)] (str ind m-str " = " params-str ": { __tag = \"" m "\"; " (str/join " " (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              [nm: String] -> String (str nm " = " nm ";")) param-names)) " };"))))) members)]
+                                                                                                                                                                                                                                                                                                                                       [p: Any] -> String (mangle-name (get p "name"))) fields) params-str (str/join ": " param-names)] (str ind m-str " = " params-str ": { __tag = \"" m "\"; " (str/join " " (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        [nm: String] -> String (str nm " = " nm ";")) param-names)) " };"))))) members)]
     (str ind "# error " name "\n" (str/join "\n" ctors))))
 
 ;; --- top-level def emission --------------------------------------------------
@@ -1008,7 +1008,7 @@
         ")")
       (= node "target-case")
       (let [cases (vec (get e "cases")) pick (fn [t: String] -> Any (first (filterv (fn
-                                                                                         [c: Any] -> Bool (= (get c "target") t)) cases))) branch (pick "nix")]
+                                                                                      [c: Any] -> Bool (= (get c "target") t)) cases))) branch (pick "nix")]
         (if (nil? branch)
           (throw (ex-info "target-case: no branch for target nix" {}))
           (emit-expr* (get branch "body") depth)))
@@ -1115,8 +1115,8 @@
   (reset! recur-name-ref nil)
   (let [forms (vec (get prog "forms")) requires (vec (get prog "requires")) defs (filterv top-def-form? forms) body-exprs (filterv (fn
                                                                                                                                      [f: Any] -> Bool (not (top-def-form? f))) forms) import-str (if (= 0 (count requires)) "" (str (str/join "\n" (mapv (fn
-                                                                                                                                                                                                                                                              [r: Any] -> String (let [ns0 (get r "ns") alias0 (get r "alias") alias (if (or (nil? alias0) (false? alias0)) (let [parts (str/split ns0 #"\.")] (nth parts (- (count parts) 1))) alias0)] (str "  " (mangle-name alias) " = import ./" (str/replace ns0 "." "/") ".nix;"))) requires)) "\n")) def-strs (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 [d: Any] -> String (emit-top-def d 1)) defs) body-str (cond (= 0 (count body-exprs)) "null" (= 1 (count body-exprs)) (emit-expr! (nth body-exprs 0) 0) :else (emit-expr! (nth body-exprs (- (count body-exprs) 1)) 0))]
+                                                                                                                                                                                                                                                           [r: Any] -> String (let [ns0 (get r "ns") alias0 (get r "alias") alias (if (or (nil? alias0) (false? alias0)) (let [parts (str/split ns0 #"\.")] (nth parts (- (count parts) 1))) alias0)] (str "  " (mangle-name alias) " = import ./" (str/replace ns0 "." "/") ".nix;"))) requires)) "\n")) def-strs (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           [d: Any] -> String (emit-top-def d 1)) defs) body-str (cond (= 0 (count body-exprs)) "null" (= 1 (count body-exprs)) (emit-expr! (nth body-exprs 0) 0) :else (emit-expr! (nth body-exprs (- (count body-exprs) 1)) 0))]
     (if (and (= 0 (count defs)) (= 0 (count requires)))
       (str body-str "\n")
       (str "let\n"

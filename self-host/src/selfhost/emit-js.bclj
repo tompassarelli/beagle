@@ -157,7 +157,7 @@
 
 (defn js-escape-char [c: String] -> String
   (let [cs: Any c
-        code (int (first cs))]
+        code: Any (int (first cs))]
     (cond
       (= c "\"") "\\\""
       (= c "\\") "\\\\"
@@ -172,7 +172,7 @@
 
 (defn js-string-lit [s: String] -> String
   (let [n (count s)]
-    (loop [i 0 acc: (Vec String) ["\""]]
+    (loop [i: Int 0 acc: (Vec String) ["\""]]
       (if (>= i n)
         (str/join "" (conj acc "\""))
         (recur (+ i 1) (conj acc (js-escape-char (subs s i (+ i 1)))))))))
@@ -428,9 +428,7 @@
                        (js-string-lit member-name)
                        (if (= 0 (count field-params)) ""
                          (str ", " (str/join ", " (map-indexed
-                                            (fn
-                                              [i: Int
-                                               prop: String] -> String
+                                            (fn [i: Int prop: String] -> String
                                               (str prop ": " (nth field-params i)))
                                             field-props))))
                        " }); }")
@@ -665,7 +663,7 @@
               test (str tmp "._tag === " (js-string-lit rec-name))]
           (if (or (= 0 (count bindings)) (nil? fields))
             (str "if (" test ") { " (emit-match-body body []) " } else")
-            (let [let-strs (loop [i 0 acc: (Vec String) []]
+            (let [let-strs (loop [i: Int 0 acc: (Vec String) []]
                              (if (or (>= i (count bindings)) (>= i (count fields))) acc
                                (recur (+ i 1)
                                       (conj acc (str "const " (mangle-name (get (nth bindings i) "name"))
@@ -994,10 +992,10 @@
 
 (defn emit-recur-stmts [e: Any bind-names: Any] -> String
   (let [args (get e "args")
-        temps (loop [i 0 acc: (Vec String) []]
+        temps (loop [i: Int 0 acc: (Vec String) []]
                 (if (>= i (count args)) acc
                   (recur (+ i 1) (conj acc (str "const _recur_" i " = " (emit-expr* (nth args i)) ";")))))
-        assigns (loop [i 0 acc: (Vec String) []]
+        assigns (loop [i: Int 0 acc: (Vec String) []]
                   (if (>= i (count bind-names)) acc
                     (recur (+ i 1) (conj acc (str (nth bind-names i) " = _recur_" i ";")))))]
     (str (str/join " " (into temps assigns)) " continue;")))
@@ -1220,7 +1218,7 @@
 (defn emit-eq-pairs [args: Any] -> String
   (let [n (count args)]
     (str/join " && "
-      (loop [i 0 acc: (Vec String) []]
+      (loop [i: Int 0 acc: (Vec String) []]
         (if (>= i (- n 1)) acc
           (recur (+ i 1) (conj acc (str "$$bc$equiv(" (emit-expr* (nth args i)) ", "
                                         (emit-expr* (nth args (+ i 1))) ")"))))))))
@@ -1331,12 +1329,11 @@
                                        (await-async-iife (emit-expr* (get b "value"))) ";")) bindings)]
             (with-bound-types lnames (binding-type-entries bindings)
               (fn [] -> String
-                (let [body-str (str/join "\n    " (mapv (fn
-                                                          [x: Any] -> String (emit-loop-stmt x bind-names)) body))
+                (let [body-str (str/join "\n    " (mapv (fn [x: Any] -> String (emit-loop-stmt x bind-names)) body))
                       prefix (if has-await "async " "")]
                   (str "(" prefix "() => { " (str/join " " bind-strs) " while (true) {\n    " body-str "\n  } })()")))))
         (= node "recur")
-          (str (str/join "; " (loop [i 0 acc: (Vec String) []]
+          (str (str/join "; " (loop [i: Int 0 acc: (Vec String) []]
                                 (if (>= i (count (get e "args"))) acc
                                   (recur (+ i 1) (conj acc (str "_recur_" i " = " (emit-expr* (nth (get e "args") i))))))))
                "; continue")
@@ -1468,7 +1465,7 @@
               async? (> (count (filterv (fn [a: Any] -> Bool (contains-await? (get a "body"))) arities)) 0)
               branches (mapv (fn [a: Any] -> String
                                (let [ps (get a "params") np (count ps) rest? (get a "rest")
-                                     dstrs (loop [i 0 acc: (Vec String) []]
+                                     dstrs (loop [i: Int 0 acc: (Vec String) []]
                                              (if (>= i np) acc
                                                (recur (+ i 1) (conj acc (str "const " (emit-js-param (nth ps i)) " = _args[" i "];")))))
                                      rest-str (if (absent? rest?) [] [(str "const " (emit-js-param rest?) " = _args.slice(" np ");")])

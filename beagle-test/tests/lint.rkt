@@ -49,22 +49,22 @@
 ;; warning that now fires.
 
 (test-case "let shadowing fn param warns"
-  (define out (lint-prog '(defn foo [(x #%: Int)]
+  (define out (lint-prog '(defn foo [x #%: Int]
                             (let [x 2] x))))
   (check-true (regexp-match? #rx"let binding x shadows" out)))
 
 (test-case "nested fn param shadowing outer param warns"
-  (define out (lint-prog '(defn outer [(x #%: Int)]
+  (define out (lint-prog '(defn outer [x #%: Int]
                             (let [f (fn [x] x)] (f 1)))))
   (check-true (regexp-match? #rx"parameter x shadows" out)))
 
 (test-case "no shadow warning for distinct names"
-  (define out (lint-prog '(defn foo [(x #%: Int)]
+  (define out (lint-prog '(defn foo [x #%: Int]
                             (let [y 2] (+ x y)))))
   (check-false (regexp-match? #rx"shadows" out)))
 
 (test-case "nested let shadowing warns"
-  (define out (lint-prog '(defn bar [(a #%: Int)]
+  (define out (lint-prog '(defn bar [a #%: Int]
                             (let [x 1]
                               (let [x 2] x)))))
   (check-true (regexp-match? #rx"let binding x shadows" out)))
@@ -98,7 +98,7 @@
 ;; --- with and defenum lint traversal -----------------------------------------
 
 (test-case "with form does not crash lint"
-  (define out (lint-prog `(defrecord P ,(list '#%brackets '(x #%: Int)))
+  (define out (lint-prog `(defrecord P ,(list '#%brackets 'x '#%: 'Int))
                          `(def p (->P 1))
                          `(def q (with p ,(list '#%brackets ':x 2)))))
   (check-true (string? out)))

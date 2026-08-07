@@ -442,8 +442,7 @@
 ;; or-defaults: alist of (key-sym . default-AST) from {:keys [...] :or {...}};
 ;; '() when absent. keys/as-name as before. seq-destructure names may contain
 ;; nested map-destructure/seq-destructure structs (Clojure nested binding).
-;; type: declared type from `(PATTERN : Type)`, #f unannotated (never nested).
-(struct map-destructure (keys as-name or-defaults type)     #:transparent)
+(struct map-destructure (keys as-name or-defaults)          #:transparent)
 
 ;; All symbols bound by a destructure pattern, flattened through nesting.
 ;; The canonical walk for scope/binding consumers (check, lint, emit-scope).
@@ -475,7 +474,7 @@
             (for/list ([n (in-list (seq-destructure-names p))])
               (if (symbol? n) '() (destructure-or-default-exprs n))))]
     [else '()]))
-(struct seq-destructure (names rest-name type)               #:transparent)
+(struct seq-destructure (names rest-name)                    #:transparent)
 ;; deftype surface removed (2026-05). The canonical decomposition is defrecord
 ;; (data shape) + extend-type (protocol impls); parse.rkt rejects deftype at the
 ;; surface.

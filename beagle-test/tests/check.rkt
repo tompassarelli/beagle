@@ -174,8 +174,8 @@
   #rx"(return.*type|def-type|expected.*String|got.*Int)"
   '(defn bad [a #%: Int] -> String a))
 
-(check-ok "(defn mixed [a: Int b] (* a b)) — untyped param inferred from body"
-  '(defn mixed [a #%: Int b] (* a b)))
+(check-ok "(defn mixed [a: Int b: Any] (* a b)) — `Any` param inferred from body"
+  '(defn mixed [a #%: Int b #%: Any] (* a b)))
 
 ;; =============================================================================
 ;; Tests — negatives
@@ -188,7 +188,7 @@
   '(defn s [] -> String 42))
 
 (check-err "let binding with wrong literal type errors"
-  '(def y (let [(x #%: Int) "hi"] x)))
+  '(def y (let [x #%: Int "hi"] x)))
 
 (check-err "call to typed builtin with wrong arg type errors"
   '(def x #%: Bool (zero? "not a number")))   ; zero? expects Int, not String
@@ -267,7 +267,7 @@
 ;; Only `Dyn` is a dynamic type here — a `U` union would pass without the
 ;; record-constructor totality rule and so could not guard it.
 (check-ok "record Any field accepts a closed dynamic union"
-  '(defrecord Box [(value #%: Any)])
+  '(defrecord Box [value #%: Any])
   '(defn box-dyn [value #%: (Dyn String Int)] -> Box
      (->Box value)))
 
@@ -574,13 +574,13 @@
 ;; separate gap — exercised via the "Any fallback" tests below.
 
 (check-ok "(:keyword target) with claimed record type — resolves to field type"
-  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(defrecord Point [x #%: Int y #%: Int])
   '(def p #%: Point (->Point 1 2))
   '(def n #%: Int (:x p)))
 
 (check-err/rx "(:keyword target) — wrong field-type binding caught (Int → String)"
   #rx"(def-type|expected.*String|got.*Int)"
-  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(defrecord Point [x #%: Int y #%: Int])
   '(def p #%: Point (->Point 1 2))
   '(def n #%: String (:x p)))
 
@@ -592,7 +592,7 @@
   ;; lookup-kw-field-type returns ANY for missing fields rather than a
   ;; type-error, matching the existing kw-access semantics. Surfaced
   ;; precision gap — documented, not closed by this re-adoption.
-  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(defrecord Point [x #%: Int y #%: Int])
   '(def p #%: Point (->Point 1 2))
   '(def z #%: Any (:z p)))
 
@@ -600,7 +600,7 @@
   ;; Closed the asymmetry: literal-key (get p :x) now canonicalizes to
   ;; kw-access at parse-time, so the field type flows through. Previously
   ;; degraded to Any via stdlib's (Any Any -> Any) get.
-  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(defrecord Point [x #%: Int y #%: Int])
   '(def p #%: Point (->Point 1 2))
   '(def a #%: Int (get p :x)))
 
@@ -608,7 +608,7 @@
   ;; Discriminating: under the old (get : Any Any -> Any) typing, a String
   ;; claim would have accepted the result. Now the field type (Int)
   ;; conflicts with the String claim, surfacing the bug at compile time.
-  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(defrecord Point [x #%: Int y #%: Int])
   '(def p #%: Point (->Point 1 2))
   '(def s #%: String (get p :x)))
 
@@ -616,7 +616,7 @@
   ;; 3-arity literal-key get on a typed record where the field is known:
   ;; the default expression is unreachable, so the result type is the
   ;; field type, not (U FieldType DefaultType).
-  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(defrecord Point [x #%: Int y #%: Int])
   '(def p #%: Point (->Point 1 2))
   '(def a #%: Int (get p :x 0)))
 
@@ -900,7 +900,7 @@
 (test-case "match with or-pattern of literals type-checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(defn classify [(x #%: Int)] -> String
+     (check-prog `(defn classify [x #%: Int] -> String
                     (match x
                       ,(br '(or 1 2 3) "low")
                       ,(br '(or 4 5 6) "mid")
@@ -909,7 +909,7 @@
 (test-case "or-pattern with keyword literals type-checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(defn name [(k #%: Keyword)] -> String
+     (check-prog `(defn name [k #%: Keyword] -> String
                     (match k
                       ,(br '(or :a :b) "first")
                       ,(br '(or :c :d) "second")
@@ -977,14 +977,14 @@
    (lambda ()
      (check-prog/source result-fixture-source
                         '(require result)
-                        `(defn handle ,(br '(r #%: (Result String String))) -> String
+                        `(defn handle ,(br 'r '#%: '(Result String String)) -> String
                            (match r
                              ,(br '(Ok v) "ok")
                              ,(br '(Err e) 'e)))))))
 
 (check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
   '(require result)
-  `(defn handle ,(br '(r #%: (Result String String))) -> String
+  `(defn handle ,(br 'r '#%: '(Result String String)) -> String
      (match r
        ,(br '(Ok v) "ok"))))
 
@@ -1085,12 +1085,12 @@
 (test-case "let + if (interim nullable-narrow pattern) type checks"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn f [(x #%: Int?)] -> Nil (let [v x] (if v (println v) nil)))))))
+     (check-prog '(defn f [x #%: Int?] -> Nil (let [v x] (if v (println v) nil)))))))
 
 (test-case "with-open type checks"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn f [(p #%: String)] -> Any (with-open [r (slurp p)] r))))))
+     (check-prog '(defn f [p #%: String] -> Any (with-open [r (slurp p)] r))))))
 
 (check-ok "doto type checks target"
   '(def x #%: Any (doto (atom 1) (reset! 2))))
@@ -1114,7 +1114,7 @@
 (test-case "condp type checks with default"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn f [(x #%: Keyword)] -> String (condp = x :a "alpha" :b "beta" "other"))))))
+     (check-prog '(defn f [x #%: Keyword] -> String (condp = x :a "alpha" :b "beta" "other"))))))
 
 ;; --- defonce ---
 
@@ -1161,7 +1161,7 @@
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-                    '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url)))))))
+                    '(defn f [url #%: String] -> (Promise String) (js/await (fetch-data url)))))))
 
 (test-case "Promise return with unwrapped body type accepted"
   (check-not-exn
@@ -1173,7 +1173,7 @@
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-name ,(br 'Int '-> '(Promise String)))
-                    '(defn f [(id #%: Int)] -> (Promise String)
+                    '(defn f [id #%: Int] -> (Promise String)
                        (let [name (js/await (fetch-name id))]
                          (str "Hello " name)))))))
 
@@ -1188,12 +1188,12 @@
 (check-err/rx "await rejected in beagle/clj"
   #rx"js/await is only supported in beagle/js"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url))))
+  '(defn f [url #%: String] -> (Promise String) (js/await (fetch-data url))))
 
 (check-nix-err/rx "await rejected in beagle/nix"
   #rx"js/await is only supported in beagle/js"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url))))
+  '(defn f [url #%: String] -> (Promise String) (js/await (fetch-data url))))
 
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"
@@ -1252,8 +1252,8 @@
 
 (check-ok "defunion :throwable with fielded variants passes type check"
   `(defunion :throwable ApiError
-     (NotFound ,(br '(id #%: Int)))
-     (RateLimit ,(br '(retry-after #%: Int)))))
+     (NotFound ,(br 'id '#%: 'Int))
+     (RateLimit ,(br 'retry-after '#%: 'Int))))
 
 ;; DELETED test "defn with :raises passes type check": the inline `:raises ERR`
 ;; surface on defn was removed alongside inline `:` return-type annotations.

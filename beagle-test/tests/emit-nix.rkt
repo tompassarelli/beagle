@@ -46,13 +46,13 @@
   (check-true (string-contains? out "let")))
 
 (test-case "defn emits curried function"
-  (define out (nix-emit "(define-target nix) (defn add [(a: Int) (b: Int)] (+ a b))"))
+  (define out (nix-emit "(define-target nix) (defn add [a: Int b: Int] (+ a b))"))
   (check-true (string-contains? out "add = a: b:"))
   (check-true (string-contains? out "a + b")))
 
 (test-case "fn emits lambda"
   ;; Drop inline `: Any` / `: Int` — typed params on the inner fn are kept.
-  (define out (nix-emit "(define-target nix) (def f (fn [(x: Int)] (+ x 1)))"))
+  (define out (nix-emit "(define-target nix) (def f (fn [x: Int] (+ x 1)))"))
   (check-true (string-contains? out "x:"))
   (check-true (string-contains? out "x + 1")))
 
@@ -93,7 +93,7 @@
 ;; --- records ---------------------------------------------------------------
 
 (test-case "defrecord emits constructor + accessors"
-  (define out (nix-emit "(define-target nix) (defrecord Point [(x: Int) (y: Int)])"))
+  (define out (nix-emit "(define-target nix) (defrecord Point [x: Int y: Int])"))
   (check-true (string-contains? out "mkPoint = x: y:"))
   (check-true (string-contains? out "_tag = \"point\""))
   (check-true (string-contains? out "point-x = r: r.x;"))
@@ -114,12 +114,12 @@
 
 (test-case "map fn emits builtins.map"
   (define out (nix-emit-forms '(define-target nix)
-    `(map (fn ,(br '(x #%: Int)) (+ x 1)) ,(br 1 2 3))))
+    `(map (fn ,(br 'x '#%: 'Int) (+ x 1)) ,(br 1 2 3))))
   (check-true (string-contains? out "builtins.map")))
 
 (test-case "filter fn emits builtins.filter"
   (define out (nix-emit-forms '(define-target nix)
-    `(filter (fn ,(br '(x #%: Int)) (> x 0)) ,(br 1 -1 2))))
+    `(filter (fn ,(br 'x '#%: 'Int) (> x 0)) ,(br 1 -1 2))))
   (check-true (string-contains? out "builtins.filter")))
 
 (test-case "nil? emits null check"
@@ -202,7 +202,7 @@
 ;; --- with (record update) --------------------------------------------------
 
 (test-case "with emits attrset merge"
-  (define out (nix-emit "(define-target nix) (defrecord Foo [(a: Int)]) (with (->Foo 1) [:a 2])"))
+  (define out (nix-emit "(define-target nix) (defrecord Foo [a: Int]) (with (->Foo 1) [:a 2])"))
   (check-true (string-contains? out "//")))
 
 ;; --- string ops ------------------------------------------------------------

@@ -37,15 +37,15 @@
 (ns test.shapes)
 (define-mode strict)
 (define-target clj)
-(defrecord Circle [(r: Int)])
-(defrecord Square [(side: Int)])
-(defrecord Triangle [(base: Int) (height: Int)])
+(defrecord Circle [r: Int])
+(defrecord Square [side: Int])
+(defrecord Triangle [base: Int height: Int])
 (defunion Shape Circle Square Triangle)
 ")
 
 (define SRC-MISSING-ONE
   (string-append PRELUDE "
-(defn describe [(s: Shape)] -> Int
+(defn describe [s: Shape] -> Int
   (match s
     [(Circle r) r]
     [(Square side) side]))
@@ -53,14 +53,14 @@
 
 (define SRC-MISSING-MULTI
   (string-append PRELUDE "
-(defn describe [(s: Shape)] -> Int
+(defn describe [s: Shape] -> Int
   (match s
     [(Circle r) r]))
 "))
 
 (define SRC-EXHAUSTIVE
   (string-append PRELUDE "
-(defn describe [(s: Shape)] -> Int
+(defn describe [s: Shape] -> Int
   (match s
     [(Circle r) r]
     [(Square side) side]

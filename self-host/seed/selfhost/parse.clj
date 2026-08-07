@@ -140,6 +140,42 @@
 (defn- raise-return-marker-confusion [^String where]
   (err! (str "`:` is not the return-type marker in " where " — write `-> RET`:\n  (" where " [params...] -> RET body...)")))
 
+(defn- ^String binding-datum->src [d]
+  (cond
+  (bracketed? d) (str "[" (str/join " " (mapv binding-datum->src (bracket-body d))) "]")
+  (map-tagged? d) (str "{" (str/join " " (mapv binding-datum->src (map-body d))) "}")
+  (= d ANN-MARKER) ":"
+  (string-literal-datum? d) (extract-string d)
+  (vector? d) (str "(" (str/join " " (mapv binding-datum->src d)) ")")
+  :else (str d)))
+
+(defn- ^Boolean bracketed-annotation? [body]
+  (let [n (count body)]
+  (loop [i 0]
+  (cond
+  (>= i n) false
+  (def-annotation-marker? (nth body i)) true
+  :else (recur (+ i 1))))))
+
+(defn- raise-bracketed-annotation [body]
+  (let [n (count body)
+   idx (loop [i 0]
+  (cond
+  (>= i n) -1
+  (def-annotation-marker? (nth body i)) i
+  :else (recur (+ i 1))))
+   nm (if (> idx 0) (binding-datum->src (nth body (- idx 1))) "name")
+   ty (if (< (+ idx 1) n) (binding-datum->src (nth body (+ idx 1))) "Type")]
+  (err! (str "`[" (str/join " " (mapv binding-datum->src body)) "]` is not a typed binding — `[...]` in binding position is sequential destructuring — write `" nm ": " ty "`"))))
+
+(defn ^Boolean paren-annotation? [item]
+  (and (vector? item) (= (count item) 3) (not (bracketed? item)) (not (map-tagged? item)) (annotation-marker? (nth item 1))))
+
+(defn- raise-paren-annotation [item]
+  (let [pat (nth item 0)
+   ty (binding-datum->src (nth item 2))]
+  (if (string? pat) (err! (str "`" (binding-datum->src item) "` is not a typed binding — annotations attach to names — write `" pat ": " ty "`")) (err! (str "`" (binding-datum->src item) "` is not a typed binding — destructuring patterns cannot be annotated — bind a name (`p: " ty "`) and destructure in the body")))))
+
 (def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
@@ -437,6 +473,8 @@
 (defn parse-seq-destructure [item]
   (let [body (bracket-body item)
    n (count body)]
+  (if (bracketed-annotation? body) (do
+  (raise-bracketed-annotation body)))
   (loop [i 0
    names []
    rest-name nil]
@@ -446,13 +484,10 @@
   (string? (nth body i)) (recur (+ i 1) (conj names (nth body i)) rest-name)
   :else (make-seq-destructure names rest-name)))))
 
-(defn- ^Boolean wrapped-annotated? [item]
-  (and (vector? item) (not (bracketed? item)) (= (count item) 3) (string? (nth item 0)) (annotation-marker? (nth item 1))))
-
 (defn- parse-rest-param! [after]
   (cond
   (and (= (count after) 1) (string? (nth after 0))) (make-param (nth after 0) nil)
-  (and (= (count after) 1) (wrapped-annotated? (nth after 0))) (make-param (nth (nth after 0) 0) (parse-type (nth (nth after 0) 2)))
+  (and (= (count after) 1) (paren-annotation? (nth after 0))) (raise-paren-annotation (nth after 0))
   (and (= (count after) 3) (string? (nth after 0)) (annotation-marker? (nth after 1))) (make-param (nth after 0) (parse-type (nth after 2)))
   :else (do
   (err! (str "bad rest parameter after &: " (str after)))
@@ -483,10 +518,12 @@
   (cond
   (bracketed? item) (recur (+ i 1) (conj fixed (parse-seq-destructure item)) rest-param)
   (map-destructure-form? item) (recur (+ i 1) (conj fixed (parse-map-destructure item)) rest-param)
-  (wrapped-annotated? item) (recur (+ i 1) (conj fixed (make-param (nth item 0) (parse-type (nth item 2)))) rest-param)
+  (paren-annotation? item) (do
+  (raise-paren-annotation item)
+  (recur (+ i 1) fixed rest-param))
   (string? item) (recur (+ i 1) (conj fixed (make-param item nil)) rest-param)
   :else (do
-  (err! (str "bad parameter: " (str item) " — expected name, name: Type, (name: Type), [seq...], or {:keys [...]}"))
+  (err! (str "bad parameter: " (str item) " — expected name, name: Type, [a b], or {:keys [...]}"))
   (recur (+ i 1) fixed rest-param))))))))
 
 (defn parse-let-bindings! [b]
@@ -496,7 +533,9 @@
    acc []]
   (cond
   (>= i n) acc
-  (and (< (+ i 1) n) (wrapped-annotated? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (nth (nth items i) 0) (parse-type (nth (nth items i) 2)) (parse-expr* (nth items (+ i 1))))))
+  (paren-annotation? (nth items i)) (do
+  (raise-paren-annotation (nth items i))
+  (recur (+ i 2) acc))
   (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-map-destructure (nth items i)) nil (parse-expr* (nth items (+ i 1))))))
   (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-seq-destructure (nth items i)) nil (parse-expr* (nth items (+ i 1))))))
   (and (< (+ i 3) (+ n 0)) (string? (nth items i)) (annotation-marker? (nth items (+ i 1)))) (recur (+ i 4) (conj acc (make-let-binding (nth items i) (parse-type (nth items (+ i 2))) (parse-expr* (nth items (+ i 3))))))
@@ -528,7 +567,9 @@
   (and (string? (nth items i)) (< (+ i 1) n) (string? (nth items (+ i 1))) (keyword-sym? (nth items (+ i 1)))) (do
   (raise-keyword-annotation-confusion (nth items i) (nth items (+ i 1)))
   (recur (+ i 2) acc))
-  (wrapped-annotated? (nth items i)) (recur (+ i 1) (conj acc {"name" (nth (nth items i) 0) "ann" (parse-type (nth (nth items i) 2))}))
+  (paren-annotation? (nth items i)) (do
+  (raise-paren-annotation (nth items i))
+  (recur (+ i 1) acc))
   :else (do
   (err! (str "defrecord field needs a type annotation — use [name: Type name2: Type2 ...], got: " (str (nth items i))))
   (recur (+ i 1) acc))))))
@@ -1548,8 +1589,26 @@
   (> (count (parse-errors)) 0)))
   (expect! "defn flat typed params + return type" (let [node (parse-expr* ["defn" "foo" [BRACKET-TAG "x" ":-" "Int"] ":-" "String" ["str" "x"]])]
   (and (= (get node "node") "defn") (= (get node "name") "foo") (= (count (get node "params")) 1) (= (get (nth (get node "params") 0) "name") "x") (= (get (get (nth (get node "params") 0) "ann") "name") "Int") (= (get node "ret") {"kind" "prim" "name" "String"}) (= (get node "private") false) (= (get node "rest") false))))
-  (expect! "defn wrapped params still accepted" (let [node (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" ":-" "Int"]] ":-" "String" ["str" "x"]])]
-  (and (= (get node "node") "defn") (= (get (get (nth (get node "params") 0) "ann") "name") "Int"))))
+  (expect! "defn paren-wrapped param rejected — annotations attach to names" (do
+  (reset-errors!)
+  (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" ANN-MARKER "Int"]] "->" "String" ["str" "x"]])
+  (> (count (parse-errors)) 0)))
+  (expect! "defn paren-wrapped PATTERN rejected — bind a name instead" (do
+  (reset-errors!)
+  (parse-params! [BRACKET-TAG [[BRACKET-TAG "a" "b"] ANN-MARKER "Point"]])
+  (> (count (parse-errors)) 0)))
+  (expect! "bracketed annotation [x : Int] rejected in a param slot" (do
+  (reset-errors!)
+  (parse-params! [BRACKET-TAG [BRACKET-TAG "x" ANN-MARKER "Int"]])
+  (> (count (parse-errors)) 0)))
+  (expect! "paren-wrapped let binding rejected" (do
+  (reset-errors!)
+  (parse-let-bindings! [BRACKET-TAG ["n" ANN-MARKER "Int"] 1])
+  (> (count (parse-errors)) 0)))
+  (expect! "paren-wrapped record field rejected" (do
+  (reset-errors!)
+  (parse-record-fields! [BRACKET-TAG ["x" ANN-MARKER "Int"]])
+  (> (count (parse-errors)) 0)))
   (expect! "defn without return type" (let [node (parse-expr* ["defn" "bar" [BRACKET-TAG "x"] ["+" "x" 1]])]
   (and (= (get node "node") "defn") (nil? (get node "ret")))))
   (expect! "defn mixed param vector, legacy [a :- Int b c :- String]" (let [node (parse-expr* ["defn" "f" [BRACKET-TAG "a" ":-" "Int" "b" "c" ":-" "String"] "a"])]
@@ -1598,8 +1657,10 @@
   (and (= (get node "node") "try") (= (count (get node "body")) 1) (= (count (get node "catches")) 1) (= (get (nth (get node "catches") 0) "name") "e") (= (get node "finally") false))))
   (expect! "defrecord flat fields" (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG "tx" ":-" "Int" "op" ":-" "String"]])]
   (and (= (get node "node") "record") (= (get node "name") "Assertion") (= (count (get node "fields")) 2) (= (nth (get node "fields") 0) {"name" "tx" "ann" {"kind" "prim" "name" "Int"}}) (nil? (get node "private")))))
-  (expect! "defrecord wrapped fields still accepted" (let [node (parse-expr* ["defrecord" "Point" [BRACKET-TAG ["x" ":-" "Float"] ["y" ":-" "Float"]]])]
-  (and (= (get node "node") "record") (= (count (get node "fields")) 2))))
+  (expect! "defrecord paren-wrapped fields rejected" (do
+  (reset-errors!)
+  (parse-expr* ["defrecord" "Point" [BRACKET-TAG ["x" ANN-MARKER "Float"] ["y" ANN-MARKER "Float"]]])
+  (> (count (parse-errors)) 0)))
   (expect! "defunion simple" (let [node (parse-expr* ["defunion" "Shape" "Circle" "Rect"])]
   (and (= (get node "node") "defunion") (= (get node "name") "Shape") (= (count (get node "members")) 2) (nil? (get node "type-params")))))
   (expect! "defunion throwable" (let [node (parse-expr* ["defunion" ":throwable" "RewriteError" ["RewriteCrash" [BRACKET-TAG "message" ":-" "String"]]])]

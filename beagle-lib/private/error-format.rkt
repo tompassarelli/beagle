@@ -67,13 +67,13 @@
     [(regexp-match? #rx"unknown type" msg)
      "primitives: String Int Float Bool Keyword Symbol Nil Any; or [A B -> R], (Vec T), (U A B)"]
     [(regexp-match? #rx"bad field spec" msg)
-     "field spec must be [name : Type]"]
+     "field spec must be [name: Type]"]
     [(regexp-match? #rx"bad binding spec" msg)
      "binding spec must be [name value]"]
     [(regexp-match? #rx"bad let bindings" msg)
-     "let bindings: [name value], [name : Type value], or [(name : Type) value]"]
+     "let bindings: [name value] or [name: Type value]"]
     [(regexp-match? #rx"bad parameter" msg)
-     "parameter must be: name, (name : Type), or inline name : Type"]
+     "parameter must be: name, name: Type, [a b], or {:keys [...]}"]
     [(regexp-match? #rx"expected ~a, got|expected (\\w+), got" msg)
      "either change the annotation or change the value type"]
     [(regexp-match? #rx"expected at least .* arg" msg)

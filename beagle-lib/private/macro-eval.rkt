@@ -75,12 +75,12 @@
                [e env])
       (cond
         [(null? rest) e]
-        ;; typed: (name: Type) value ...
-        [(and (pair? (car rest)) (>= (length (car rest)) 3)
-              (memq (cadr (car rest)) (list ANN-MARKER ':-)))
-         (define name (caar rest))
-         (define val (macro-eval (cadr rest) e))
-         (loop (cddr rest) (hash-set e name val))]
+        ;; typed: name: Type value ...
+        [(and (>= (length rest) 4) (symbol? (car rest))
+              (memq (cadr rest) (list ANN-MARKER ':-)))
+         (define name (car rest))
+         (define val (macro-eval (cadddr rest) e))
+         (loop (list-tail rest 4) (hash-set e name val))]
         ;; simple: name value ...
         [(symbol? (car rest))
          (define name (car rest))
@@ -183,7 +183,7 @@
   (cond
     [(and (pair? s) (>= (length s) 3) (memq (cadr s) (list ANN-MARKER ':-)))
      (caddr s)]
-    [else (error 'syntax-type "expected (name: Type), got: ~v" s)]))
+    [else (error 'syntax-type "expected a (name MARKER Type) triple datum, got: ~v" s)]))
 
 (define (make-param-form name type) (ann name type))
 

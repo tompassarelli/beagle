@@ -51,7 +51,7 @@
 
 (defn escape-char [c: String] -> String
   (let [cs: Any c
-        code (int (first cs))]
+        code: Any (int (first cs))]
     (cond
       (= c "\"") "\\\""
       (= c "\\") "\\\\"
@@ -68,7 +68,7 @@
 
 (defn write-clj-string [s: String] -> String
   (let [n (count s)]
-    (loop [i 0
+    (loop [i: Int 0
            acc: (Vec String) ["\""]]
       (if (>= i n)
         (str/join "" (conj acc "\""))
@@ -426,7 +426,7 @@
               test (str "(instance? " rec-name " " target-sym ")")]
           (if (or (= 0 (count bindings)) (nil? fields))
             (str test " " body-str)
-            (let [pairs (loop [i 0
+            (let [pairs (loop [i: Int 0
                                acc: (Vec String) []]
                           (if (or (>= i (count bindings)) (>= i (count fields)))
                             acc

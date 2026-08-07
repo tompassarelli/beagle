@@ -90,7 +90,7 @@
 
 (define ANN-CTOR-SRC
   (string-append
-   "(define-macro proc mk-field [(name: Symbol) (ty: Symbol)] -> Form\n"
+   "(define-macro proc mk-field [name: Symbol ty: Symbol] -> Form\n"
    "  (list 'defn name (br) '-> ty 0))\n"
    "(mk-field zero Int)\n"))
 
@@ -99,7 +99,7 @@
   ;; template is the sanctioned programmatic construction path.
   (define src
     (string-append
-     "(define-macro proc mk-id [(name: Symbol) (ty: Symbol)] -> Form\n"
+     "(define-macro proc mk-id [name: Symbol ty: Symbol] -> Form\n"
      "  (list 'defn name (br 'x ANN-MARKER ty) '-> ty 'x))\n"
      "(mk-id ident2 Int)\n"))
   (define f (car (program-forms (parse-src src))))
@@ -110,7 +110,7 @@
 (test-case "the `ann` helper produces the same triple as ANN-MARKER by hand"
   (define src
     (string-append
-     "(define-macro proc mk-id3 [(name: Symbol) (ty: Symbol)] -> Form\n"
+     "(define-macro proc mk-id3 [name: Symbol ty: Symbol] -> Form\n"
      "  (list 'defn name (apply br (ann 'x ty)) '-> ty 'x))\n"
      "(mk-id3 ident3 Int)\n"))
   (define f (car (program-forms (parse-src src))))

@@ -35,7 +35,7 @@
       (and (>= hi 55296) (<= hi 56319) (>= lo 56320) (<= lo 57343)))))
 
 (defn- build-codepoint-offsets [src: String] -> Any
-  (loop [i 0 codepoints 0 out: Any [0]]
+  (loop [i: Int 0 codepoints: Int 0 out: Any [0]]
     (if (>= i (count src))
       out
       (let [next-count (+ codepoints 1)]
@@ -44,7 +44,7 @@
           (recur (+ i 1) next-count (conj out next-count)))))))
 
 (defn- build-line-cols [src: String] -> Any
-  (loop [i 0 line 1 col 0 out: Any [[1 0]]]
+  (loop [i: Int 0 line: Int 1 col: Int 0 out: Any [[1 0]]]
     (if (>= i (count src))
       out
       (if (= (rd/char-at src i) "\n")
@@ -113,7 +113,7 @@
   (make-node "symbol" value loc nil))
 
 (defn- child-values [children: Any] -> Any
-  (loop [i 0 out: Any []]
+  (loop [i: Int 0 out: Any []]
     (if (>= i (count children))
       out
       (recur (+ i 1) (conj out (get (nth children i) "value"))))))
@@ -188,7 +188,7 @@
   [src: String
    pos: Int
    close: String] -> Any
-  (loop [p (rd/skip-ws src pos) out: Any []]
+  (loop [p: Any (rd/skip-ws src pos) out: Any []]
     (cond
       (>= p (count src))
       {"nodes" out "pos" p}
@@ -291,7 +291,7 @@
   [max-index: Int
    rest?: Bool
    loc: Any] -> Any
-  (let [positional (loop [i 1 out: Any []] (if (> i max-index) out (recur (+ i 1) (conj out (synthetic-leaf (str "%" i) loc)))))]
+  (let [positional (loop [i: Int 1 out: Any []] (if (> i max-index) out (recur (+ i 1) (conj out (synthetic-leaf (str "%" i) loc)))))]
     (if rest?
       (into positional [(synthetic-leaf "&" loc) (synthetic-leaf "%&" loc)])
       positional)))
@@ -376,7 +376,7 @@
         nil))))
 
 (defn- located-program [src: String] -> Any
-  (let [lang (rd/parse-lang-line src) target (get lang "target") start (get lang "pos") forms (loop [p (rd/skip-ws src start) out: Any []] (if (>= p (count src)) out (let [node (scan-datum src p)] (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next")))))) target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
+  (let [lang (rd/parse-lang-line src) target (get lang "target") start (get lang "pos") forms (loop [p: Any (rd/skip-ws src start) out: Any []] (if (>= p (count src)) out (let [node (scan-datum src p)] (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next")))))) target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
     (if (some? target)
       (into target-form forms)
       (let [newline (str/index-of src "\n") shift-units (if (nil? newline) (count src) (+ newline 1)) shift (codepoint-offset src shift-units) shifted (mapv (fn
@@ -460,7 +460,7 @@
     id))
 
 (defn- form-spans [forms: Any shift: Int] -> Any
-  (loop [i 0 out: Any []]
+  (loop [i: Int 0 out: Any []]
     (if (>= i (count forms))
       out
       (let [loc (get (nth forms i) "loc") pos (get loc "pos") span (get loc "span") source-start (get loc "source-start") source-end (get loc "source-end")]
@@ -483,7 +483,7 @@
           (recur (+ i 1)))))))
 
 (defn- source-lines [src: String] -> Any
-  (loop [i 0 start 0 out: Any []]
+  (loop [i: Int 0 start: Int 0 out: Any []]
     (cond
       (>= i (count src))
       (conj out [start (subs src start i)])
@@ -500,7 +500,7 @@
 (defn- line-number [src: String off: Int] -> Int (nth (line-col src off) 0))
 
 (defn- nearest-preceding [off: Int spans: Any] -> Any
-  (loop [i 0 best: Any nil]
+  (loop [i: Int 0 best: Any nil]
     (if (>= i (count spans))
       best
       (let [span (nth spans i)]
@@ -510,7 +510,7 @@
             best))))))
 
 (defn- nearest-following [off: Int spans: Any] -> Any
-  (loop [i 0 best: Any nil]
+  (loop [i: Int 0 best: Any nil]
     (if (>= i (count spans))
       best
       (let [span (nth spans i)]
@@ -527,7 +527,7 @@
   (some? (re-matches #"[\p{L}\p{N}_\-*+!?<>=/.&%$]" ch)))
 
 (defn- raw-comment-segments [text: String] -> Any
-  (loop [i 0 out: Any []]
+  (loop [i: Int 0 out: Any []]
     (if (>= i (count text))
       out
       (if (symbol-char? (rd/char-at text i))
@@ -569,7 +569,7 @@
     (let [head-id (emit-node! head counter out)]
       (add-fact! out root "f0" head-id)
       (add-fact! out root "child" head-id))
-    (let [form-ids (loop [i 0 ids: Any []] (if (>= i (count forms)) ids (let [id (emit-node! (nth forms i) counter out)] (add-fact! out root (str "f" (+ i 1)) id) (add-fact! out root "child" id) (recur (+ i 1) (conj ids id)))))]
+    (let [form-ids (loop [i: Int 0 ids: Any []] (if (>= i (count forms)) ids (let [id (emit-node! (nth forms i) counter out)] (add-fact! out root (str "f" (+ i 1)) id) (add-fact! out root "child" id) (recur (+ i 1) (conj ids id)))))]
       (emit-comments! (classify-comments src (form-spans forms shift))
         form-ids
         root
@@ -626,12 +626,12 @@
 
 (defn- root-id [props: Any] -> Any
   (let [refs (reduce (fn [out: Any subject-entry: Any] -> Any (reduce (fn
-                                                                              [inner: Any
-                                                                               entry: Any] -> Any (let [predicate (nth entry 0) object (nth entry 1)] (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props) candidates (reduce (fn
-                                                                                                                                                                                                                                                                                                             [out: Any
-                                                                                                                                                                                                                                                                                                              entry: Any] -> Any (let [id (nth entry 0)] (if (= true (get refs id)) out (conj out id)))) [] props) wrappers (filterv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                          [id: Any] -> Bool (let [head (get (get props id {}) "f0")] (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates) structural (filterv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 [id: Any] -> Bool (let [kind (get (get props id {}) "kind")] (or (= kind "list") (= kind "vector")))) candidates)]
+                                                                        [inner: Any
+                                                                         entry: Any] -> Any (let [predicate (nth entry 0) object (nth entry 1)] (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props) candidates (reduce (fn
+                                                                                                                                                                                                                                                                                                    [out: Any
+                                                                                                                                                                                                                                                                                                     entry: Any] -> Any (let [id (nth entry 0)] (if (= true (get refs id)) out (conj out id)))) [] props) wrappers (filterv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                              [id: Any] -> Bool (let [head (get (get props id {}) "f0")] (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates) structural (filterv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  [id: Any] -> Bool (let [kind (get (get props id {}) "kind")] (or (= kind "list") (= kind "vector")))) candidates)]
     (if (> (count wrappers) 0)
       (nth wrappers 0)
       (if (> (count structural) 0)
@@ -790,7 +790,7 @@
 
 (defn- group-anns [items: Any] -> Any
   (let [n (count items)]
-    (loop [i 0 out: Any []]
+    (loop [i: Int 0 out: Any []]
       (cond
         (>= i n)
         out
@@ -885,7 +885,7 @@
 ;; `& rest` is one logical parameter even though the reader exposes two datums.
 (defn- logical-vector-items [datum: Any] -> Any
   (let [items (bracket-items datum)]
-    (loop [i 0 out: Any []]
+    (loop [i: Int 0 out: Any []]
       (cond
         (>= i (count items))
         out
@@ -1229,7 +1229,7 @@
       (if (nil? sid) out (recur (+ i 1) (str out (get (get props sid) "v")))))))
 
 (defn- node-comments [props: Any id: Int] -> Any
-  (loop [i 0 out: Any []]
+  (loop [i: Int 0 out: Any []]
     (let [cid (get (get props id {}) (str "comment" i))]
       (if (nil? cid)
         out
@@ -1244,15 +1244,15 @@
   (let [comments (node-comments props id) leading (comments-with comments "leading") trailing (comments-with comments "trailing") lead-text (reduce (fn
                                                                                                                                                       [out: String
                                                                                                                                                        c: Any] -> String (str out (nth c 1) "\n")) "" leading) trail-text (reduce (fn
-                                                                                                                                                                                                                                       [out: String
-                                                                                                                                                                                                                                        c: Any] -> String (str out " " (nth c 1))) "" trailing)]
+                                                                                                                                                                                                                                    [out: String
+                                                                                                                                                                                                                                     c: Any] -> String (str out " " (nth c 1))) "" trailing)]
     (str lead-text (datum-pretty (build-datum props id) 0) trail-text)))
 
 (defn render-edn! [path: String] -> Nil
   (let [props (triples-props (read-triples path)) root (root-id props) children (ordered-children props root) wrapped? (and (> (count children) 0) (= (get (get props (nth children 0)) "v") "beagle-file")) form-ids (if wrapped? (subvec children 1) [root]) first-datum (if (> (count form-ids) 0) (build-datum props (nth form-ids 0)) []) lang? (and (datum-list? first-datum) (> (count first-datum) 1) (= (nth first-datum 0) "define-target")) lang-line (if lang? (rd/target-lang-line (nth first-datum 1)) nil) body-ids (if (some? lang-line) (subvec form-ids 1) form-ids) file-comments (if wrapped? (node-comments props root) []) header (mapv (fn
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 [c: Any] -> String (nth c 1)) (comments-with file-comments "leading")) footer (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         [c: Any] -> String (nth c 1)) (comments-with file-comments "trailing")) blocks (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   [id: Any] -> String (rendered-block props id)) body-ids) rendered (str/join "\n\n" (into (into header blocks) footer))]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      [c: Any] -> String (nth c 1)) (comments-with file-comments "trailing")) blocks (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             [id: Any] -> String (rendered-block props id)) body-ids) rendered (str/join "\n\n" (into (into header blocks) footer))]
     (if (some? lang-line)
       (print (str lang-line "\n\n" rendered "\n"))
       (print (str rendered "\n"))))

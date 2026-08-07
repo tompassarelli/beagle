@@ -140,13 +140,13 @@
    ;;      union / heterogeneous), with polymorphic $$bc reads for Any-typed colls ----
    (test-case "record-key map literal -> hamtMap (record emits as object -> collides native)"
      (define-values (js tbl prog)
-       (emit+types (list `(defrecord K ((x #%: Int)))
+       (emit+types (list `(defrecord K (x #%: Int))
                          `(def m #%: Any ,(mt `(->K 1) ':a)))))
      (check-true (string-contains? js "hamtMap(")
                  (format "record-key map must route to HAMT, got:\n~a" js)))
    (test-case "Any-typed key assoc -> hamtMapAssoc (Any not provably scalar)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f ((k #%: Any) (v #%: Any)) -> Any (assoc ,(mt) k v)))))
+       (emit+types (list `(defn f (k #%: Any v #%: Any) -> Any (assoc ,(mt) k v)))))
      (check-true (string-contains? js "hamtMapAssoc(")
                  (format "Any-typed key assoc must route to HAMT, got:\n~a" js)))
    (test-case "heterogeneous-key literal (scalar + compound) -> hamtMap"
@@ -156,7 +156,7 @@
                  (format "heterogeneous-key literal must route to HAMT, got:\n~a" js)))
    (test-case "read through an Any-typed param routes to polymorphic $$bc$get"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f ((m #%: Any)) -> Any (get m ,(mt ':k 1))))))
+       (emit+types (list `(defn f (m #%: Any) -> Any (get m ,(mt ':k 1))))))
      (check-true (string-contains? js "$$bc$get(")
                  (format "Any-typed coll read must be polymorphic $$bc$get (a native scalar map can flow into an Any read), got:\n~a" js)))
 
@@ -213,7 +213,7 @@
                   (format "must NOT emit native dot-access m.a on a HAMT:\n~a" js)))
    (test-case "scalar keyword read on an Any-typed param -> polymorphic $$bc$get"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f ((m #%: (Map Any Int))) -> Int (get m :a)))))
+       (emit+types (list `(defn f (m #%: (Map Any Int)) -> Int (get m :a)))))
      (check-true (string-contains? js "$$bc$get(m,")
                  (format "scalar-key read on an Any-typed map must be $$bc$get, got:\n~a" js)))
 

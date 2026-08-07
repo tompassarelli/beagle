@@ -41,7 +41,7 @@
   [".bclj" ".bjs" ".bnix" ".bgl" ".rkt"])
 
 (defn- split-dots [s: String] -> Any
-  (loop [i 0 start 0 acc: Any []]
+  (loop [i: Int 0 start: Int 0 acc: Any []]
     (cond
       (>= i (count s)) (conj acc (subs s start i))
       (= (subs s i (+ i 1)) ".") (recur (+ i 1) (+ i 1) (conj acc (subs s start i)))
@@ -101,7 +101,7 @@
             (if (or (= parent "") (= parent cur)) nil (recur parent))))))))
 
 (defn- dedup-externs [xs: Any] -> Any
-  (loop [i 0 seen: Any {} acc: Any []]
+  (loop [i: Int 0 seen: Any {} acc: Any []]
     (if (>= i (count xs))
       acc
       (let [e (nth xs i) nm (get e "name")]
@@ -142,9 +142,9 @@
                      datums)) 0))
 
 (defn- parse-file-target! [path: String target: String] -> Any
-  (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
-        datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
-        prog (resolve-imports! (p/parse-program! datums) path)
+  (let [datums0: Any (rd/read-program (selfhost.rt/slurp-file path))
+        datums: Any (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
+        prog: Any (resolve-imports! (p/parse-program! datums) path)
         perrs: Any (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
     ;; parser collects + eprints, so the driver must fail explicitly: any parse

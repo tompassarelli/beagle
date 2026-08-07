@@ -158,7 +158,7 @@
 
 (defn read-string-literal [src: String pos: Int] -> Any
   (let [len (count src)]
-    (loop [i (+ pos 1) buf: (Vec String) []]
+    (loop [i: Any (+ pos 1) buf: (Vec String) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated string\n")
@@ -178,7 +178,7 @@
 ;; read-regex-pattern). pos points at the opening ".
 (defn read-regex-literal [src: String pos: Int] -> Any
   (let [len (count src)]
-    (loop [i (+ pos 1) buf: (Vec String) []]
+    (loop [i: Any (+ pos 1) buf: (Vec String) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated regex literal\n")
@@ -209,7 +209,7 @@
     (if (or (>= open-pos len) (not= (char-at src open-pos) "\""))
       (do (selfhost.rt/eprint "beagle reader: expected '\"' after #r hashes\n")
           (make-result "" open-pos))
-      (loop [i (+ open-pos 1) buf: (Vec String) []]
+      (loop [i: Any (+ open-pos 1) buf: (Vec String) []]
         (if (>= i len)
           (make-result [STRING-TAG (str/join "" buf)] i)
           (if (= (char-at src i) "\"")
@@ -309,7 +309,7 @@
    pos: Int
    close: String] -> Any
   (let [len (count src)]
-    (loop [p (skip-ws src pos) items: (Vec Any) []]
+    (loop [p: Any (skip-ws src pos) items: (Vec Any) []]
       (cond
         (>= p len)
           (do (selfhost.rt/eprint
@@ -501,7 +501,7 @@
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")]
-    (loop [p (skip-ws src start-pos) datums: (Vec Any) []]
+    (loop [p: Any (skip-ws src start-pos) datums: (Vec Any) []]
       (if (>= p (count src))
         {"target" target "datums" datums}
         (let [result (read-datum src p)]

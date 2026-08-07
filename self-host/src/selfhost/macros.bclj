@@ -286,7 +286,7 @@
   [form: Any
    macro-params: (Vec String)] -> (Vec String)
   (let [items (unwrap-brackets form) n (count items) mp (set macro-params)]
-    (loop [i 0 acc: (Vec String) []]
+    (loop [i: Int 0 acc: (Vec String) []]
       (cond
         (>= i n) acc
         (and (string? (nth items i))
@@ -311,9 +311,7 @@
           (recur (+ i 1) (conj acc (nth (nth items i) 0)))
         :else (recur (+ i 1) acc)))))
 
-(defn collect-let-binders
-  [form: Any
-   macro-params: (Vec String)] -> (Vec String)
+(defn collect-let-binders [form: Any macro-params: (Vec String)] -> (Vec String)
   (let [items (unwrap-brackets form)]
     (reduce (fn [acc: (Vec String) i: Int] -> (Vec String)
               (if (and (= (mod i 2) 0) (< (+ i 1) (count items)))

@@ -9,4 +9,4 @@
   (.map xs (fn [g: Any] -> Any {:k (.-name g) :v (.-v g)})))
 
 (defn empties [xs: Any] -> Any
-  (.map xs (fn [(_x : Any)] -> Any {})))
+  (.map xs (fn [_x: Any] -> Any {})))

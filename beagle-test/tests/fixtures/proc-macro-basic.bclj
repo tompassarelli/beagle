@@ -1,7 +1,7 @@
 #lang beagle/clj
 
 (define-macro proc make-const
-  [(name: Symbol) (val: Expr)] -> Form
+  [name: Symbol val: Expr] -> Form
   (append (list 'def) (ann name 'Int) (list val)))
 
 (make-const answer 42)

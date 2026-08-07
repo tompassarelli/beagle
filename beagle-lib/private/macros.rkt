@@ -8,9 +8,9 @@
 ;;
 ;; Procedural macros (Beagle-native bodies):
 ;;   (define-macro beagle defentity
-;;     [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
+;;     [name: Symbol fields: (Vec Syntax)] -> (Vec Form)
 ;;     (let [record (make-defrecord name
-;;                    (map (fn [(f : Syntax)]
+;;                    (map (fn [f: Syntax]
 ;;                      (make-field (syntax-name f) (syntax-type f)))
 ;;                      fields))]
 ;;       (list record)))

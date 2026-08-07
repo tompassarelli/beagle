@@ -2,9 +2,9 @@
 
 ;; Procedural macro: generates a typed getter function from a record + field name.
 (define-macro proc gen-getter
-  [(rec: Symbol) (field: Symbol)] -> Form
+  [rec: Symbol field: Symbol] -> Form
   `(defn ~(string->symbol (format "get-~a" field))
-     ((obj: ~rec)) -> Any
+     [obj: ~rec] -> Any
      (get obj ~(sym->kw field))))
 
 (defrecord Point [x: Int y: Int])
