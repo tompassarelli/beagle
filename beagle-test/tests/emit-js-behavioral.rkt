@@ -823,4 +823,28 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
       if (y !== -Infinity) throw new Error('expected -Infinity');
       if (!Number.isNaN(z)) throw new Error('expected NaN');")
 
+   ;; --- host-object equality --------------------------------------------------
+   ;; No DOM under bun; the runtime discriminates on prototype alone, so a class
+   ;; instance stands in for a DOM node.
+
+   (check-js-output "= is structural on plain objects, identity on host objects"
+     (list '(defn host-eq [a #%: Any b #%: Any] -> Bool (= a b)))
+     (string-append
+      "class HostNode {}\n"
+      "const n1 = new HostNode(), n2 = new HostNode();\n"
+      "const h1 = Object.create({kind: 'host'}), h2 = Object.create({kind: 'host'});\n"
+      "const d1 = new Date(0), d2 = new Date(0);\n"
+      "console.log(JSON.stringify(["
+      "host_eq({a: 1, b: [2, 3]}, {a: 1, b: [2, 3]}),"   ; distinct plain, equal contents
+      "host_eq(n1, n2),"                                 ; distinct host objects
+      "host_eq(h1, h2),"
+      "host_eq(d1, d2),"
+      "host_eq(n1, n1),"                                 ; same object
+      "host_eq(h1, h1),"
+      "host_eq({row: n1}, {row: n1}),"                   ; host at a nested leaf
+      "host_eq({row: n1}, {row: n2}),"
+      "host_eq([n1, {k: n2}], [n1, {k: n2}]),"
+      "host_eq([n1], [n2])]));")
+     "[true,false,false,false,true,true,true,false,true,false]")
+
  )))

@@ -303,6 +303,13 @@ function hamtHash(x) {
   return mix(7, acc);
 }
 
+// A beagle map/record rep, as opposed to a DOM node / class instance / other host
+// object. Cross-realm plain objects (iframe, vm context) read as host here.
+function isPlainObject(x) {
+  const p = Object.getPrototypeOf(x);
+  return p === Object.prototype || p === null;
+}
+
 // Native structural value-equality (arrays / sets / plain objects+records),
 // PARAMETERIZED by the recursive equiv to thread. Written ONCE so the lite and
 // HAMT-aware variants share it and can't drift; the only difference between them
@@ -334,6 +341,10 @@ function equivNative(a, b, rec) {
     }
     return true;
   }
+
+  // Only plain objects carry beagle value semantics (maps + records); a host
+  // object has no own enumerable keys, so key-set comparison would equate any two.
+  if (!isPlainObject(a) || !isPlainObject(b)) return a === b;
 
   // plain objects: maps AND records (a record's tag is just another key) —
   // same own enumerable keys, recursive equiv on values.
