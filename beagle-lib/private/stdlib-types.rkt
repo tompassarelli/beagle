@@ -11,10 +11,6 @@
          ;; Target-specific stdlib catalogs are live.
          "stdlib-clj.rkt"
          "stdlib-bb.rkt"
-         ;; GENERATED fram API catalog — `fram bin/fram-primer --beagle-catalog`. Lets
-         ;; .bclj that rents fram (require fram.cnf/datalog/schema) type as the real fram
-         ;; types instead of Any. bb/clj-only.
-         "stdlib-fram.rkt"
          "stdlib-js.rkt")
 
 (define (merge-hashes . hs)
@@ -26,7 +22,7 @@
   ;; STDLIB-BB: babashka-runtime entries (fs/process/http/json/yaml/cli +
   ;; java.time). bb IS the clj runtime here; JVM-only-clj consumers don't
   ;; exist (zero-users rule).
-  (merge-hashes STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB STDLIB-FRAM))
+  (merge-hashes STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB))
 
 (define stdlib-js-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-JS))
