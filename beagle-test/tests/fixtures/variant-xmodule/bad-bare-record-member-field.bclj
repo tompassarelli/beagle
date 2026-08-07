@@ -1,0 +1,11 @@
+#lang beagle/clj
+
+;; A bare-record member's variant pattern binds the FIELD, so returning the
+;; String field as Int must fail — it silently passed while the import dropped
+;; the member's field map.
+(require prov :as p)
+
+(defn tag [n: p/Node] -> Int
+  (match n
+    [(Elem t k) t]
+    [(Guard pr k) pr]))

@@ -36,3 +36,12 @@
 (test-case "an imported parametric union substitutes its type params"
   (check-exn #rx"expected return String"
              (lambda () (check-file "bad-parametric.bclj"))))
+
+;; A bare member NAMES a sibling record rather than declaring a nullary variant;
+;; the import must not overwrite that record's ctor arity or field map.
+(test-case "imported union over bare record names keeps each member's arity"
+  (check-not-exn (lambda () (check-file "ok-bare-record-members.bclj"))))
+
+(test-case "an imported bare-record member's pattern binds the FIELD"
+  (check-exn #rx"expected return Int, got String"
+             (lambda () (check-file "bad-bare-record-member-field.bclj"))))

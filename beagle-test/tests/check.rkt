@@ -943,6 +943,9 @@
   #rx"circle-radius: arg 1 expected Circle, got Int"
   "defunion-inline-fields-instance-binding.bclj")
 
+(check-fixture-ok "defunion mixing inline and bare members keeps the bare member's record arity"
+  "defunion-mixed-bare-member-arity.bclj")
+
 ;; =============================================================================
 ;; Tests — Result convention (defunion Ok/Err)
 ;; =============================================================================

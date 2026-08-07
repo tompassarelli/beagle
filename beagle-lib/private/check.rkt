@@ -1871,7 +1871,10 @@
 ;; matching every emitter. Skip it and the arm silently takes the
 ;; single-binding instance fallback instead.
 (define (register-union-member-fields! members member-fields type-params env)
-  (for ([m (in-list members)])
+  (for ([m (in-list members)]
+        ;; No entry = a bare member naming an already-declared record; registering
+        ;; it here would erase that record's arity. `(Name [])` has an entry.
+        #:when (hash-ref member-fields m #f))
     (define fields (hash-ref member-fields m '()))
     (define m-type (type-prim m))
     (define m-str (symbol->string m))

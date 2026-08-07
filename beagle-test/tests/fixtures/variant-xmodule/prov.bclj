@@ -17,3 +17,14 @@
   (Err [error: E]))
 
 (defn make-circle [r: Int] -> Shape (->Circle r))
+
+;; Bare members naming SIBLING RECORDS — the union references those declarations
+;; instead of redeclaring them, so their field arity must cross the boundary.
+(defrecord Elem [tag: String kids: Int])
+(defrecord Guard [prop: String kids: Int])
+(defunion Node Elem Guard)
+
+;; Same shape with the union declared FIRST: registration is order-insensitive.
+(defunion Stmt Emit Skip)
+(defrecord Emit [text: String])
+(defrecord Skip [reason: String])

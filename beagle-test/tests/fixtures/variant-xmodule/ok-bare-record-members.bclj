@@ -1,0 +1,20 @@
+#lang beagle/clj
+
+;; A union over BARE sibling-record names must import each member at its full
+;; field arity — the importer used to re-register bare members as nullary and
+;; erase the record's fields.
+(require prov :as p)
+
+(defn build [] -> p/Node
+  (p/->Elem "div" 2))
+
+(defn build-late [] -> p/Stmt
+  (p/->Emit "hi"))
+
+(defn tag [n: p/Node] -> String
+  (match n
+    [(Elem t k) t]
+    [(Guard pr k) pr]))
+
+(defn accessor [] -> String
+  (p/elem-tag (p/->Elem "span" 0)))

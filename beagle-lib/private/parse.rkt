@@ -947,6 +947,15 @@
       (hash-set! table name value)
       (hash-set! table (qualify-name prefix name) value)
       (hash-set! table (qualify-name mod-ns name) value)))
+  ;; A bare member NAMES an already-declared type; registering its nullary
+  ;; surface is deferred past the datum scan so it can never overwrite a
+  ;; sibling defrecord's fields, in either source order.
+  (define deferred-bare-members '())
+  (define (declared-fielded-type? name)
+    (hash-has-key? externs
+                   (qualify-name prefix
+                                 (string->symbol
+                                  (string-append "->" (symbol->string name))))))
   ;; Returns member NAMES (never the raw `(Name [fields])` datum — exhaustiveness
   ;; compares them against pattern heads) plus their parsed field map.
   (define (reg-union-members! member-defs type-vars)
@@ -967,7 +976,10 @@
                 (parse-record-fields fields-datum))
               '()))
         (hash-set! mf-hash mname fields)
-        (reg-fielded-type! mname fields type-vars)
+        (if (pair? m)
+            (reg-fielded-type! mname fields type-vars)
+            (set! deferred-bare-members
+                  (cons (cons mname type-vars) deferred-bare-members)))
         mname))
     (values mnames mf-hash))
   (parameterize ([current-type-aliases import-aliases])
@@ -1140,7 +1152,10 @@
       [(list* 'defenum (? symbol? name) _variants)
        (note-type! name)
        (when imp-enums (hash-set! imp-enums name #t))]
-        [_ (void)])))))
+        [_ (void)])))
+    (for ([entry (in-list (reverse deferred-bare-members))])
+      (unless (declared-fielded-type? (car entry))
+        (reg-fielded-type! (car entry) '() (cdr entry))))))
 
 ;; --- reader-conditional resolution ----------------------------------------
 ;;
