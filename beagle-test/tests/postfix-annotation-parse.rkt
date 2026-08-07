@@ -285,6 +285,41 @@
 (test-case "an ordinary lowercase vector is silent"
   (check-equal? (warnings-of "(defn f [x y] -> Int 1)") ""))
 
+;; --- a let-style declaration is enforced at every site that shares the grammar
+;; A let has no call site, so the declaration is checked against the bound
+;; expression. with-open and a for/doseq `:let` reuse parse-let-bindings, so
+;; they get the same enforcement instead of ignoring the declared type.
+
+(ok "with-open typed binding"  "(defn f [p: String] -> Any (with-open [r: Any (slurp p)] r))")
+(ok "for :let typed binding"
+    "(defn f [xs: (Vec Int)] -> (Vec Int) (for [x: Int xs :let [y: Int x]] y))")
+(ok "doseq :let typed binding"
+    "(defn f [xs: (Vec Int)] -> Nil (doseq [x: Int xs :let [y: Int x]] (println y)))")
+
+(test-case "a wrong let binding type is rejected"
+  (check-exn #rx"let binding x: expected Int, got String"
+             (lambda () (check-src "(defn f [] -> Any (let [x: Int \"str\"] x))"))))
+
+(test-case "a wrong loop binding type is rejected"
+  (check-exn #rx"let binding i: expected Int, got String"
+             (lambda () (check-src "(defn f [] -> Any (loop [i: Int \"str\"] i))"))))
+
+(test-case "a wrong with-open binding type is rejected"
+  (check-exn #rx"let binding r: expected Int, got String"
+             (lambda () (check-src "(defn f [] -> Any (with-open [r: Int \"s\"] r))"))))
+
+(test-case "a wrong for :let binding type is rejected"
+  (check-exn #rx"let binding y: expected Int, got String"
+             (lambda ()
+               (check-src
+                "(defn f [xs: (Vec Int)] -> Any (for [x: Int xs :let [y: Int \"s\"]] y))"))))
+
+(test-case "a wrong doseq :let binding type is rejected"
+  (check-exn #rx"let binding y: expected Int, got String"
+             (lambda ()
+               (check-src
+                "(defn f [xs: (Vec Int)] -> Nil (doseq [x: Int xs :let [y: Int \"s\"]] (println y)))"))))
+
 ;; --- the `:-` migration diagnostic ------------------------------------------
 
 (test-case "legacy `:-` warns once per source in the default 'warn mode"
