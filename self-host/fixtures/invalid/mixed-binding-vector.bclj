@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns mixed-binding-vector.test)
+
+;; All-or-nothing per binding vector: a vector that annotates any binding must
+;; annotate every one. Both compilers reject with the same pointed message.
+(defn run [a: Int b] -> Int a)

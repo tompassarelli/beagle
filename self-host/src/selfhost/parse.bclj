@@ -257,6 +257,90 @@
       (err! (str "`" (binding-datum->src item) "` is not a typed binding — annotations attach to names — write `" pat ": " ty "`"))
       (err! (str "`" (binding-datum->src item) "` is not a typed binding — destructuring patterns cannot be annotated — bind a name (`p: " ty "`) and destructure in the body")))))
 
+(defn- raise-mixed-binding-vector [name: Any] -> Any
+  (err! (str "binding vector mixes typed and untyped bindings — annotate every binding (use `"
+          (str name)
+          ": Any` if the type is not yet known) or annotate none")))
+
+;; A pattern has no name to attach a type to, so it cannot participate in a
+;; vector that annotates its bindings.
+(defn- raise-pattern-in-typed-vector [item: Any] -> Any
+  (err! (str "`"
+          (binding-datum->src item)
+          "` in a typed binding vector — destructuring patterns cannot be annotated — bind a name (`p: Type`) and destructure in the body")))
+
+;; All-or-nothing per binding vector. `slots` is source-ordered `[kind datum]`
+;; with kind "typed" / "bare" / "pattern"; `& rest` is split off before this runs.
+(defn- enforce-binding-uniformity! [slots: Any] -> Nil
+  (let [n: Int (count slots)
+        typed?: Bool (loop [i: Int 0]
+                       (cond
+                         (>= i n) false
+                         (= (nth (nth slots i) 0) "typed") true
+                         :else (recur (+ i 1))))]
+    (when typed?
+      (loop [i: Int 0]
+        (when (< i n)
+          (let [s (nth slots i)]
+            (when (= (nth s 0) "pattern") (raise-pattern-in-typed-vector (nth s 1)))
+            (when (= (nth s 0) "bare") (raise-mixed-binding-vector (nth s 1))))
+          (recur (+ i 1))))))
+  nil)
+
+(defn- param-binding-slots [items: Any] -> Any
+  (let [n: Int (count items)]
+    (loop [i: Int 0 acc: Any []]
+      (cond
+        (>= i n)
+        acc
+        (and (string? (nth items i))
+          (< (+ i 2) n)
+          (annotation-marker? (nth items (+ i 1))))
+        (recur (+ i 3) (conj acc ["typed" (nth items i)]))
+        (or (bracketed? (nth items i)) (map-tagged? (nth items i)))
+        (recur (+ i 1) (conj acc ["pattern" (nth items i)]))
+        (string? (nth items i))
+        (recur (+ i 1) (conj acc ["bare" (nth items i)]))
+        :else
+        (recur (+ i 1) acc)))))
+
+(defn- let-binding-slots [items: Any] -> Any
+  (let [n: Int (count items)]
+    (loop [i: Int 0 acc: Any []]
+      (cond
+        (>= i n)
+        acc
+        (let [item (nth items i)]
+          (and (vector? item)
+            (> (count item) 0)
+            (or (= (nth item 0) "inherit") (= (nth item 0) "inherit-from"))))
+        (recur (+ i 1) acc)
+        (and (>= (- n i) 4)
+          (string? (nth items i))
+          (annotation-marker? (nth items (+ i 1))))
+        (recur (+ i 4) (conj acc ["typed" (nth items i)]))
+        (< (- n i) 2)
+        acc
+        (or (bracketed? (nth items i)) (map-tagged? (nth items i)))
+        (recur (+ i 2) (conj acc ["pattern" (nth items i)]))
+        (string? (nth items i))
+        (recur (+ i 2) (conj acc ["bare" (nth items i)]))
+        :else
+        (recur (+ i 2) acc)))))
+
+;; `[x Int]` with the colon dropped binds a variable named `Int`. Warn per site;
+;; annotating the binding (`Int: Any` if that really is the name) silences it.
+(defn- note-capitalized-binding! [name: Any where: String] -> Nil
+  (when (string? name)
+    (let [head: String (subs (str name) 0 (min 1 (count (str name))))]
+      (when (and (> (count head) 0) (not (= head (str/lower-case head))))
+        (selfhost.rt/eprint (str "warning [capitalized-binding-name] `"
+                              (str name)
+                              "` bound as a "
+                              where
+                              " name — possible dropped colon?\n")))))
+  nil)
+
 ;; --- type constructors ---------------------------------------------------------
 (def PARAMETRIC-CTORS: (Vec String)
   ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
@@ -848,9 +932,12 @@
 ;; Grammar: flat postfix `name: TYPE` triples, wrapped `(name: T)`,
 ;; destructures, bare names. A dangling or type-glued colon is rejected.
 (defn parse-params! [params-form: Any] -> Any
-  (let [items (unwrap-items params-form) n (count items)]
-    (loop [i: Int 0 fixed: Any [] rest-param: Any nil]
-      (cond
+  (let [items: Any (unwrap-items params-form)
+        n: Int (count items)
+        amp: Int (index-of-item items "&")
+        before-amp: Any (if (>= amp 0) (subvec items 0 amp) items)
+        parsed: Any (loop [i: Int 0 fixed: Any [] rest-param: Any nil]
+    (cond
         (>= i n)
         {"params" fixed "rest-param" rest-param}
         (= (nth items i) "&")
@@ -895,19 +982,24 @@
             (paren-annotation? item)
             (do (raise-paren-annotation item) (recur (+ i 1) fixed rest-param))
             (string? item)
-            (recur (+ i 1) (conj fixed (make-param item nil)) rest-param)
+            (do
+              (note-capitalized-binding! item "parameter")
+              (recur (+ i 1) (conj fixed (make-param item nil)) rest-param))
             :else
             (do
               (err! (str "bad parameter: " (str item) " — expected name, name: Type, [a b], or {:keys [...]}"))
-              (recur (+ i 1) fixed rest-param))))))))
+              (recur (+ i 1) fixed rest-param))))))]
+    (enforce-binding-uniformity! (param-binding-slots before-amp))
+    parsed))
 
 ;; --- parse-let-bindings! ------------------------------------------------------
 ;; Arm order mirrors parse.rkt: retired paren spelling, map/seq destructure
 ;; pairs, flat 4-item `name: TYPE value`, dangling/glued-colon rejection, bare pair.
 (defn parse-let-bindings! [b: Any] -> Any
-  (let [items (unwrap-items b) n (count items)]
-    (loop [i: Int 0 acc: Any []]
-      (cond
+  (let [items (unwrap-items b)
+        n (count items)
+        parsed (loop [i: Int 0 acc: Any []]
+    (cond
         (>= i n)
         acc
         (paren-annotation? (nth items i))
@@ -949,13 +1041,17 @@
           (raise-keyword-annotation-confusion (nth items i) (nth items (+ i 1)))
           (recur (+ i 2) acc))
         (and (< (+ i 1) n) (string? (nth items i)))
-        (recur (+ i 2)
-          (conj acc
-            (make-let-binding (nth items i)
-              nil
-              (parse-expr* (nth items (+ i 1))))))
+        (do
+          (note-capitalized-binding! (nth items i) "let binding")
+          (recur (+ i 2)
+            (conj acc
+              (make-let-binding (nth items i)
+                nil
+                (parse-expr* (nth items (+ i 1)))))))
         :else
-        (do (err! (str "bad let bindings at: " (str (nth items i)))) acc)))))
+        (do (err! (str "bad let bindings at: " (str (nth items i)))) acc)))]
+    (enforce-binding-uniformity! (let-binding-slots items))
+    parsed))
 
 ;; --- parse-record-fields! -----------------------------------------------------
 ;; Flat `name: Type` triples (canonical) or wrapped (name: Type).

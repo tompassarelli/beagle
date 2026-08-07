@@ -176,6 +176,62 @@
    ty (binding-datum->src (nth item 2))]
   (if (string? pat) (err! (str "`" (binding-datum->src item) "` is not a typed binding — annotations attach to names — write `" pat ": " ty "`")) (err! (str "`" (binding-datum->src item) "` is not a typed binding — destructuring patterns cannot be annotated — bind a name (`p: " ty "`) and destructure in the body")))))
 
+(defn- raise-mixed-binding-vector [name]
+  (err! (str "binding vector mixes typed and untyped bindings — annotate every binding (use `" (str name) ": Any` if the type is not yet known) or annotate none")))
+
+(defn- raise-pattern-in-typed-vector [item]
+  (err! (str "`" (binding-datum->src item) "` in a typed binding vector — destructuring patterns cannot be annotated — bind a name (`p: Type`) and destructure in the body")))
+
+(defn- enforce-binding-uniformity! [slots]
+  (let [n (count slots)
+   typed? (loop [i 0]
+  (cond
+  (>= i n) false
+  (= (nth (nth slots i) 0) "typed") true
+  :else (recur (+ i 1))))]
+  (if typed? (do
+  (loop [i 0]
+  (if (< i n) (do
+  (let [s (nth slots i)]
+  (if (= (nth s 0) "pattern") (do
+  (raise-pattern-in-typed-vector (nth s 1))))
+  (if (= (nth s 0) "bare") (do
+  (raise-mixed-binding-vector (nth s 1)))))
+  (recur (+ i 1))))))))
+  nil)
+
+(defn- param-binding-slots [items]
+  (let [n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (and (string? (nth items i)) (< (+ i 2) n) (annotation-marker? (nth items (+ i 1)))) (recur (+ i 3) (conj acc ["typed" (nth items i)]))
+  (or (bracketed? (nth items i)) (map-tagged? (nth items i))) (recur (+ i 1) (conj acc ["pattern" (nth items i)]))
+  (string? (nth items i)) (recur (+ i 1) (conj acc ["bare" (nth items i)]))
+  :else (recur (+ i 1) acc)))))
+
+(defn- let-binding-slots [items]
+  (let [n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (let [item (nth items i)]
+  (and (vector? item) (> (count item) 0) (or (= (nth item 0) "inherit") (= (nth item 0) "inherit-from")))) (recur (+ i 1) acc)
+  (and (>= (- n i) 4) (string? (nth items i)) (annotation-marker? (nth items (+ i 1)))) (recur (+ i 4) (conj acc ["typed" (nth items i)]))
+  (< (- n i) 2) acc
+  (or (bracketed? (nth items i)) (map-tagged? (nth items i))) (recur (+ i 2) (conj acc ["pattern" (nth items i)]))
+  (string? (nth items i)) (recur (+ i 2) (conj acc ["bare" (nth items i)]))
+  :else (recur (+ i 2) acc)))))
+
+(defn- note-capitalized-binding! [name ^String where]
+  (if (string? name) (do
+  (let [head (subs (str name) 0 (min 1 (count (str name))))]
+  (if (and (> (count head) 0) (not (= head (str/lower-case head)))) (do
+  (selfhost.rt/eprint (str "warning [capitalized-binding-name] `" (str name) "` bound as a " where " name — possible dropped colon?\n")))))))
+  nil)
+
 (def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
@@ -495,8 +551,10 @@
 
 (defn parse-params! [params-form]
   (let [items (unwrap-items params-form)
-   n (count items)]
-  (loop [i 0
+   n (count items)
+   amp (index-of-item items "&")
+   before-amp (if (>= amp 0) (subvec items 0 amp) items)
+   parsed (loop [i 0
    fixed []
    rest-param nil]
   (cond
@@ -521,15 +579,19 @@
   (paren-annotation? item) (do
   (raise-paren-annotation item)
   (recur (+ i 1) fixed rest-param))
-  (string? item) (recur (+ i 1) (conj fixed (make-param item nil)) rest-param)
+  (string? item) (do
+  (note-capitalized-binding! item "parameter")
+  (recur (+ i 1) (conj fixed (make-param item nil)) rest-param))
   :else (do
   (err! (str "bad parameter: " (str item) " — expected name, name: Type, [a b], or {:keys [...]}"))
-  (recur (+ i 1) fixed rest-param))))))))
+  (recur (+ i 1) fixed rest-param))))))]
+  (enforce-binding-uniformity! (param-binding-slots before-amp))
+  parsed))
 
 (defn parse-let-bindings! [b]
   (let [items (unwrap-items b)
-   n (count items)]
-  (loop [i 0
+   n (count items)
+   parsed (loop [i 0
    acc []]
   (cond
   (>= i n) acc
@@ -548,10 +610,14 @@
   (and (= (mod (- n i) 2) 1) (>= (- n i) 3) (string? (nth items i)) (string? (nth items (+ i 1))) (keyword-sym? (nth items (+ i 1)))) (do
   (raise-keyword-annotation-confusion (nth items i) (nth items (+ i 1)))
   (recur (+ i 2) acc))
-  (and (< (+ i 1) n) (string? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (nth items i) nil (parse-expr* (nth items (+ i 1))))))
+  (and (< (+ i 1) n) (string? (nth items i))) (do
+  (note-capitalized-binding! (nth items i) "let binding")
+  (recur (+ i 2) (conj acc (make-let-binding (nth items i) nil (parse-expr* (nth items (+ i 1)))))))
   :else (do
   (err! (str "bad let bindings at: " (str (nth items i))))
-  acc)))))
+  acc)))]
+  (enforce-binding-uniformity! (let-binding-slots items))
+  parsed))
 
 (defn parse-record-fields! [f]
   (let [items (unwrap-items f)

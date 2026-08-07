@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns pattern-in-typed-vector.test)
+
+;; A destructuring pattern has no name to attach a type to, so it cannot sit in
+;; a vector that annotates its bindings.
+(defn run [a: Int [b c]] -> Int a)
