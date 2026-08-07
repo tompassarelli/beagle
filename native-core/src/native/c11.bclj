@@ -79,9 +79,7 @@
       [(FunctionType value) []]
       [(OutcomeType value) []])))
 
-(defn type-emitted?
-  [emitted: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn type-emitted? [emitted: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count emitted))
       false
@@ -89,9 +87,7 @@
         true
         (recur (+ index 1))))))
 
-(defn ready-type?
-  [emitted: (Vec core/TypeDef)
-   definition: core/TypeDef] -> Bool
+(defn ready-type? [emitted: (Vec core/TypeDef) definition: core/TypeDef] -> Bool
   (every?
     (fn [reference: core/NativeId] -> Bool (type-emitted? emitted reference))
     (type-field-refs definition)))
@@ -225,8 +221,7 @@
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
-(defn record-layout-fields
-  [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
+(defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) []]
@@ -265,8 +260,7 @@
     [(KeywordAtom value) false]
     [(RefAtom target) false]))
 
-(defn checked-operation-supported?
-  [operation: core/CheckedOperationV0] -> Bool
+(defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
   (match operation
     [(CheckedAddI64V0 value) true]
     [(CheckedSubI64V0 value) false]

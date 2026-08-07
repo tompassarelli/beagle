@@ -110,9 +110,7 @@
         index
         (recur (+ index 1))))))
 
-(defn type-emitted?
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
+(defn type-emitted? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (>= (type-index types target) 0))
 
 (defn type-def-for
@@ -166,8 +164,7 @@
 (defn layout-atom-cell? [layout: core/LayoutDef] -> Bool
   (instance? native.core.AtomCellShapeV0 (core/layoutdef-shape layout)))
 
-(defn record-layout-fields
-  [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
+(defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (if (instance? native.core.RecordShapeV0 shape)
       (ordered-field-layouts (core/recordshapev0-fields shape))
@@ -260,9 +257,7 @@
         index
         (recur (+ index 1))))))
 
-(defn drop-index
-  [items: (Vec core/TypeDef)
-   position: Int] -> (Vec core/TypeDef)
+(defn drop-index [items: (Vec core/TypeDef) position: Int] -> (Vec core/TypeDef)
   (loop [index: Int 0 result: (Vec core/TypeDef) []]
     (if (>= index (count items))
       result
@@ -359,8 +354,7 @@
     (and (instance? native.core.AtomType shape)
       (instance? native.core.KeywordKind (core/atomtype-kind shape)))))
 
-(defn checked-operation-supported?
-  [operation: core/CheckedOperationV0] -> Bool
+(defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
   (instance? native.core.CheckedAddI64V0 operation))
 
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
@@ -429,9 +423,7 @@
             (str "_Static_assert(offsetof(" type-name-value ", field_" index ") == "
               (core/fieldlayoutv0-offset-bytes field) ", \"field offset\");")))))))
 
-(defn emit-atom-type
-  [type-name-value: String
-   layout: core/LayoutDef] -> String
+(defn emit-atom-type [type-name-value: String layout: core/LayoutDef] -> String
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
         backing: String
         (if (instance? native.core.ScalarShapeV0 shape)
@@ -440,9 +432,7 @@
     (str "typedef " backing " " type-name-value ";\n"
       (join-lines (size-align-assertions type-name-value layout)))))
 
-(defn emit-bytes-type
-  [type-name-value: String
-   layout: core/LayoutDef] -> String
+(defn emit-bytes-type [type-name-value: String layout: core/LayoutDef] -> String
   (str "typedef native_bytes " type-name-value ";\n"
     (join-lines (size-align-assertions type-name-value layout))))
 

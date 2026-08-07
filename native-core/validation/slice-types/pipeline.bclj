@@ -133,9 +133,7 @@
                 (child-reference? facts subject object))))
           (recur (+ index 1) selected))))))
 
-(defn node-in?
-  [nodes: (Vec stages/TermNodeV0)
-   identity: core/NativeId] -> Bool
+(defn node-in? [nodes: (Vec stages/TermNodeV0) identity: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count nodes))
       false
@@ -307,8 +305,7 @@
     (lower/sourcefreezeacceptedv0-frozen result)
     (throw (ex-info "source program freezing failed" {}))))
 
-(defn require-typing
-  [result: lower/TypingResultV0] -> stages/FrozenTypedStageV0
+(defn require-typing [result: lower/TypingResultV0] -> stages/FrozenTypedStageV0
   (if (instance? native.lower.TypingAcceptedV0 result)
     (lower/typingacceptedv0-frozen result)
     (throw (ex-info "source-to-typed lowering failed" {}))))

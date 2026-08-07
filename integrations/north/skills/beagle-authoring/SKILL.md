@@ -94,13 +94,14 @@ when the complete signature fits 80 columns:
 
 - Type boundaries: `def`, `defonce`, `defn` parameters and return, and
   required `defrecord` fields. Infer interiors.
-- In a parameter or typed-field vector write `(name : Type)`, one space on each
-  side of `:`. Elsewhere (`def`, `defonce`, `let`) write flat `name: Type`.
-  Returns are `-> Return`.
-- Flat `name: Type` inside a binding vector still parses, but `fmt --check`
-  reports it and `fmt --write` rewrites it to `(name : Type)`.
+- Types attach to NAMES: flat `name: Type` everywhere — parameter and typed-field
+  vectors, `def`, `defonce`, `let`, `loop`. Returns are `-> Return`.
+- One binding vector annotates every binding or none; `& rest` is exempt and
+  `x: Any` satisfies the rule when the type is not yet known.
+- Destructuring patterns are never annotated — bind a name and destructure in
+  the body.
 - Legacy `:-` is accepted only with a migration warning.
-- `[name : Type]` is rejected; `[...]` is destructuring, so the wrap is parens.
+- `[name : Type]`, `(name : Type)`, and `([a b] : Type)` are all rejected.
 - `: Return` is rejected; return annotations use `-> Return`.
 
 For zero to two logical parameters/fields, keep the vector inline only when the
@@ -110,8 +111,7 @@ columns past the owning form's opening parenthesis. Use one aligned logical
 entry per line; never partially wrap. Keep exactly one space between `]` and
 `-> Return`. Do not align colons or pad names. Typed bindings, destructures,
 and `& rest` each count as one entry. A `defmacro` param vector obeys the
-layout rules but is never annotation-wrapped — that grammar has no typed
-binding. This covers function/method/macro vectors
+layout rules. This covers function/method/macro vectors
 and typed record/union/error fields, not ordinary data or `let` binding
 vectors. The reader accepts either physical layout; run `beagle fmt --write .`
 instead of formatting by hand, and use `beagle fmt --check .` in CI/review.

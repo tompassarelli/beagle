@@ -15,9 +15,7 @@
 (defn bucket-position-at [bucket: t/TermBucket position: Int] -> Int
   (nth (t/termbucket-positions bucket) position))
 
-(defn bucket-with-position
-  [bucket: t/TermBucket
-   position: Int] -> t/TermBucket
+(defn bucket-with-position [bucket: t/TermBucket position: Int] -> t/TermBucket
   (t/->TermBucket (t/termbucket-key bucket)
                   (conj (t/termbucket-positions bucket) position)))
 

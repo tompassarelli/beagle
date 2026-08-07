@@ -26,13 +26,10 @@
     (integer? (:code entries)) (:code entries)
     :else -1))
 
-(defn map-code-value-equal
-  [entries: (Map Keyword Int)
-   expected: Int] -> Int
+(defn map-code-value-equal [entries: (Map Keyword Int) expected: Int] -> Int
   (if (= expected (:code entries)) (:code entries) -1))
 
-(defn map-version-value
-  [response: (Map Keyword (U String Int Keyword))] -> Int
+(defn map-version-value [response: (Map Keyword (U String Int Keyword))] -> Int
   (cond
     (integer? (:version response)) (:version response)
     :else -3))

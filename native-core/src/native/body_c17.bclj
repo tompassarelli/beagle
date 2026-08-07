@@ -135,16 +135,14 @@
     [(BodySuccessV0 artifact) ""]
     [(BodyFailureV0 detail) detail]))
 
-(defn materialization-artifact
-  [result: BodyMaterializationV0] -> BodyArtifactV0
+(defn materialization-artifact [result: BodyMaterializationV0] -> BodyArtifactV0
   (match result
     [(BodySuccessV0 artifact) artifact]
     [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
 
 ;; Bounds checks have no i64 Outcome shape here, so only the three arithmetic
 ;; operations materialize; anything else is refused rather than approximated.
-(defn checked-operation-supported?
-  [operation: core/CheckedOperationV0] -> Bool
+(defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
   (or (instance? native.core.CheckedAddI64V0 operation)
       (instance? native.core.CheckedSubI64V0 operation)
       (instance? native.core.CheckedMulI64V0 operation)
@@ -279,9 +277,7 @@
         (core/nativecoreprogram-abis program))
       (every? function-supported? (core/nativecoreprogram-functions program)))))
 
-(defn block-index
-  [blocks: (Vec core/BasicBlock)
-   target: core/NativeId] -> Int
+(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count blocks))
       -1
@@ -421,9 +417,7 @@
       "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
       " \"text blob is length-prefixed\");\n")))
 
-(defn emit-keyword-pool
-  [module-index: Int
-   keywords: (Vec String)] -> String
+(defn emit-keyword-pool [module-index: Int keywords: (Vec String)] -> String
   (if (= 0 (count keywords))
     ""
     (loop [position: Int 0 result: String ""]
@@ -1301,9 +1295,7 @@
       (core/setshapev0-element-type shape)
       set-type)))
 
-(defn set-stride
-  [layouts: (Vec core/LayoutDef)
-   set-type: core/NativeId] -> Int
+(defn set-stride [layouts: (Vec core/LayoutDef) set-type: core/NativeId] -> Int
   (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
     (if (instance? native.core.SetShapeV0 shape)
       (core/setshapev0-stride-bytes shape)
@@ -1355,9 +1347,7 @@
    result-id: core/NativeId] -> String
   (str "native_" prefix "_" (slot-index slots result-id)))
 
-(defn parts-symbol
-  [slots: (Vec ValueSlotV0)
-   result-id: core/NativeId] -> String
+(defn parts-symbol [slots: (Vec ValueSlotV0) result-id: core/NativeId] -> String
   (str "native_parts_" (slot-index slots result-id)))
 
 (defn text-operand-expression
@@ -2821,9 +2811,7 @@
       (core/switchterminator-cases terminator))
     :else []))
 
-(defn block-targeted?
-  [function: core/FunctionDef
-   target: core/NativeId] -> Bool
+(defn block-targeted? [function: core/FunctionDef target: core/NativeId] -> Bool
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))

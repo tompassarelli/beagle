@@ -658,9 +658,7 @@
      arena-id: NativeId
      operand-ids: (Vec NativeId)])
   (TextBuiltinInstruction [result: SsaValueV0 builtin: TextBuiltinOpV0])
-  (ValueSemanticsInstruction
-    [result: SsaValueV0
-     operation: ValueSemanticsOpV0])
+  (ValueSemanticsInstruction [result: SsaValueV0 operation: ValueSemanticsOpV0])
   ;; Stringification stays separate from TextConcat's statically tagged operands.
   (ValueToTextInstructionV0
     [result: SsaValueV0
@@ -1050,9 +1048,7 @@
           (ssavaluev0-type-id result)
           (recur (+ position 1)))))))
 
-(defn block-value-type
-  [block: BasicBlock
-   target: NativeId] -> (U NativeId Nil)
+(defn block-value-type [block: BasicBlock target: NativeId] -> (U NativeId Nil)
   (let [parameter-type: (U NativeId Nil)
         (parameters-value-type (basicblock-parameters block) target)]
     (if (nil? parameter-type)
@@ -1086,9 +1082,7 @@
           true
           (recur (+ position 1) instructions))))))
 
-(defn function-produces-arena?
-  [function: FunctionDef
-   target: NativeId] -> Bool
+(defn function-produces-arena? [function: FunctionDef target: NativeId] -> Bool
   (loop [position: Int 0 blocks: (Vec BasicBlock) (functiondef-blocks function)]
     (if (>= position (count blocks))
       false
@@ -1690,8 +1684,7 @@
     [(TextRepeatV0 arena-id source-id count-id)
      [arena-id source-id count-id]]))
 
-(defn codec-primitive-ssa-refs
-  [operation: CodecPrimitiveOpV0] -> (Vec NativeId)
+(defn codec-primitive-ssa-refs [operation: CodecPrimitiveOpV0] -> (Vec NativeId)
   (match operation
     [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]

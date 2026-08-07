@@ -164,9 +164,7 @@
           (row-text row)
           (recur (+ position 1)))))))
 
-(defn form-node-names
-  [rows: (Vec SliceFactV0)
-   kind: String] -> (Vec String)
+(defn form-node-names [rows: (Vec SliceFactV0) kind: String] -> (Vec String)
   (loop [position: Int 0 selected: (Vec String) []]
     (if (>= position (count rows))
       selected

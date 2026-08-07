@@ -113,7 +113,8 @@
                 (core/abideclv0-parameters abi)
                 (conj (core/abideclv0-parameters abi) result)))))))))
 
-(defn reachable-type-ids [program: core/NativeCoreProgram] -> (Vec core/NativeId)
+(defn reachable-type-ids
+  [program: core/NativeCoreProgram] -> (Vec core/NativeId)
   (let [types: (Vec core/TypeDef) (core/nativecoreprogram-types program)
         seeds: (Vec core/NativeId)
         (loop [position: Int 0
@@ -148,7 +149,8 @@
           grown
           (recur (+ round 1) grown))))))
 
-(defn projected-program [program: core/NativeCoreProgram] -> core/NativeCoreProgram
+(defn projected-program
+  [program: core/NativeCoreProgram] -> core/NativeCoreProgram
   (let [kept: (Vec core/NativeId) (reachable-type-ids program)]
     (core/->NativeCoreProgram
       (core/nativecoreprogram-id program)

@@ -222,9 +222,7 @@
                                 :else kept))
                             kept))))))))))))))
 
-(defn block-index
-  [blocks: (Vec core/BasicBlock)
-   target: core/NativeId] -> Int
+(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
   (loop [index: Int 0]
     (if (>= index (count blocks))
       -1
@@ -596,15 +594,11 @@
               ""
               (member-letter kind (core/layoutdef-size-bytes layout)))))))))
 
-(defn layout-size
-  [layouts: (Vec core/LayoutDef)
-   type-id: core/NativeId] -> Int
+(defn layout-size [layouts: (Vec core/LayoutDef) type-id: core/NativeId] -> Int
   (let [layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? layout) 0 (core/layoutdef-size-bytes layout))))
 
-(defn layout-align
-  [layouts: (Vec core/LayoutDef)
-   type-id: core/NativeId] -> Int
+(defn layout-align [layouts: (Vec core/LayoutDef) type-id: core/NativeId] -> Int
   (let [layout: (U core/LayoutDef Nil) (layout-for-type layouts type-id)]
     (if (nil? layout) 0 (core/layoutdef-align-bytes layout))))
 
@@ -709,8 +703,7 @@
       [(ReferenceShapeV0 value) -1]
       [(AtomCellShapeV0 value) -1])))
 
-(defn union-variants
-  [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
+(defn union-variants [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
   (shape-union-variants (core/layoutdef-shape layout)))
 
 ;; QBE computes aggregate offsets from member order; the program states them.
@@ -1562,8 +1555,7 @@
     [(SwitchTerminator value) nil]
     [(TrapTerminator value) nil]))
 
-(defn terminator-cases
-  [terminator: core/Terminator] -> (Vec core/SwitchCaseV0)
+(defn terminator-cases [terminator: core/Terminator] -> (Vec core/SwitchCaseV0)
   (match terminator
     [(ReturnTerminator value) []]
     [(JumpTerminator value) []]
@@ -2038,7 +2030,8 @@
             (recur (+ position 1))
             operation))))))
 
-(defn unsupported-codec-primitive [program: core/NativeCoreProgram] -> (U String Nil)
+(defn unsupported-codec-primitive
+  [program: core/NativeCoreProgram] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))
@@ -2084,7 +2077,8 @@
             (recur (+ position 1))
             operation))))))
 
-(defn unsupported-value-semantics [program: core/NativeCoreProgram] -> (U String Nil)
+(defn unsupported-value-semantics
+  [program: core/NativeCoreProgram] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))
@@ -2103,8 +2097,7 @@
     "letter-decimal-runs"
     :else nil))
 
-(defn unsupported-block-unicode-text
-  [block: core/BasicBlock] -> (U String Nil)
+(defn unsupported-block-unicode-text [block: core/BasicBlock] -> (U String Nil)
   (let [instructions: (Vec core/Instruction)
         (core/basicblock-instructions block)]
     (loop [position: Int 0]
@@ -2128,7 +2121,8 @@
               (unsupported-block-unicode-text (nth blocks position))]
           (if (nil? operation) (recur (+ position 1)) operation))))))
 
-(defn unsupported-unicode-text [program: core/NativeCoreProgram] -> (U String Nil)
+(defn unsupported-unicode-text
+  [program: core/NativeCoreProgram] -> (U String Nil)
   (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))

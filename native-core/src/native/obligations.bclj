@@ -67,9 +67,7 @@
 (defn native-id-key [id: core/NativeId] -> String
   (core/nativeid-value id))
 
-(defn avoiding-path-key
-  [avoided: core/NativeId
-   target: core/NativeId] -> String
+(defn avoiding-path-key [avoided: core/NativeId target: core/NativeId] -> String
   (let [avoided-value: String (native-id-key avoided)]
     (str (count avoided-value) ":" avoided-value (native-id-key target))))
 
@@ -267,8 +265,7 @@
                             current)))))]
               (recur (+ avoided-position 1) next-paths))))))))
 
-(defn ssa-validation-index
-  [function: core/FunctionDef] -> SsaValidationIndexV0
+(defn ssa-validation-index [function: core/FunctionDef] -> SsaValidationIndexV0
   (->SsaValidationIndexV0
     (definition-index function)
     (paths-avoiding-index function)))
@@ -479,7 +476,8 @@
               (core/basicblock-terminators block)))
     (core/functiondef-blocks function)))
 
-(defn exhaustive-matches [program :- core/NativeCoreProgram] :- ObligationVerdictV0
+(defn exhaustive-matches
+  [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
@@ -887,7 +885,8 @@
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
-(defn checked-arithmetic [program :- core/NativeCoreProgram] :- ObligationVerdictV0
+(defn checked-arithmetic
+  [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
@@ -1053,7 +1052,9 @@
                       (optional-i64-type? types
                         (core/typevariant-payload-type error)))))))))))))
 
-(defn abi-decl-legal? [program :- core/NativeCoreProgram abi :- core/AbiDeclV0] :- Bool
+(defn abi-decl-legal?
+  [program :- core/NativeCoreProgram
+   abi :- core/AbiDeclV0] :- Bool
   (let [function :- (U core/FunctionDef Nil)
         (find-function (core/nativecoreprogram-functions program) (get abi :function-id))
         types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)
@@ -1271,9 +1272,7 @@
    right :- (Vec core/NativeId)] :- Bool
   (and (= (count left) (count right)) (core/ids-in? left right)))
 
-(defn token-visit-matches?
-  [visit: TokenVisitV0
-   state: TokenStateV0] -> Bool
+(defn token-visit-matches? [visit: TokenVisitV0 state: TokenStateV0] -> Bool
   (and (token-sets-equal? (tokenvisitv0-live visit) (tokenstatev0-live state))
     (token-sets-equal? (tokenvisitv0-seen visit) (tokenstatev0-seen state))))
 
@@ -1371,7 +1370,8 @@
       (token-paths-valid? function (core/functiondef-entry-block function)
         (->TokenStateV0 initial initial true) []))))
 
-(defn discharged-tokens [program :- core/NativeCoreProgram] :- ObligationVerdictV0
+(defn discharged-tokens
+  [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))

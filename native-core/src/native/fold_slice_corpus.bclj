@@ -64,9 +64,7 @@
    parameters: (Vec FieldSpecV0)
    result: String])
 
-(defn sequence-facts
-  [label: String
-   items: (Vec String)] -> (Vec FactSpecV0)
+(defn sequence-facts [label: String items: (Vec String)] -> (Vec FactSpecV0)
   (loop [index: Int 0 facts: (Vec FactSpecV0) [(tf label "form-kind" "seq")]]
     (if (>= index (count items))
       facts
@@ -102,16 +100,12 @@
      (tf label "name" (fieldspecv0-name spec))
      (nf label "ann" (fieldspecv0-annotation spec))]))
 
-(defn binding-labels
-  [owner: String
-   specs: (Vec FieldSpecV0)] -> (Vec String)
+(defn binding-labels [owner: String specs: (Vec FieldSpecV0)] -> (Vec String)
   (mapv (fn [spec: FieldSpecV0] -> String
           (binding-label owner (fieldspecv0-name spec)))
     specs))
 
-(defn binding-block
-  [owner: String
-   specs: (Vec FieldSpecV0)] -> (Vec FactSpecV0)
+(defn binding-block [owner: String specs: (Vec FieldSpecV0)] -> (Vec FactSpecV0)
   (loop [index: Int 0 facts: (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
@@ -485,8 +479,7 @@
             (str (nth obligation-names index) ": "
               (if (obligations/obligation-passed? (nth verdicts index)) "pass" "FAIL"))))))))
 
-(defn receipt-obligation-line
-  [obligation: core/ReceiptObligationV0] -> String
+(defn receipt-obligation-line [obligation: core/ReceiptObligationV0] -> String
   (str "  " (if (core/receiptobligationv0-passed obligation) "discharged" "PENDING")
     ": " (core/receiptobligationv0-detail obligation)))
 
@@ -499,9 +492,7 @@
         (recur (+ index 1)
           (conj lines (receipt-obligation-line (nth obligations-list index))))))))
 
-(defn diagnostic-report
-  [label: String
-   receipt: core/PassReceiptV0] -> String
+(defn diagnostic-report [label: String receipt: core/PassReceiptV0] -> String
   (let [diagnostics: (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics receipt)]
     (loop [index: Int 0 lines: (Vec String) [(str label ":")]]
       (if (>= index (count diagnostics))
@@ -578,9 +569,7 @@
     "  return 0;\n"
     "}\n"))
 
-(defn slice-report-text
-  [state: SliceStateV0
-   abi: core/AbiProfileV0] -> String
+(defn slice-report-text [state: SliceStateV0 abi: core/AbiProfileV0] -> String
   (let [program: core/NativeCoreProgram (slicestatev0-program state)]
     (str "fram.fold Native Core slice\n"
       "source: fram:" module-path "\n"
@@ -605,9 +594,7 @@
       "\n"
       (diagnostic-report "typed-to-native diagnostics" (slicestatev0-native-receipt state)))))
 
-(defn emit-slice-for-abi!
-  [directory: String
-   abi: core/AbiProfileV0] -> Nil
+(defn emit-slice-for-abi! [directory: String abi: core/AbiProfileV0] -> Nil
   (let [state: SliceStateV0 (slice-state abi)
         program: core/NativeCoreProgram (slicestatev0-program state)
         artifact: c17/C17Artifact (require-artifact (c17/materialize-program program 0))]
