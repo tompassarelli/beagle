@@ -65,7 +65,7 @@
 ;; `beagle-lib/private/emit-{…}.rkt` — the live target emitters.
 (define (view-emitters)
   (string-append
-   "- `native-core/src/native/{worlds,lower,obligations}.bclj` — the hosted "
+   "- `native-core/src/native/{stages,lower,obligations}.bclj` — the hosted "
    "implementation that lowers Core into one immutable validated Native Core "
    "program; "
    "`native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.\n"

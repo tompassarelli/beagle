@@ -41,11 +41,6 @@
    imports :- (Vec core/NativeId)
    locations :- (Vec SourceLocationV0)])
 
-;; Scratch roots never enter frozen source identity; locations are logical paths.
-(defrecord SourceInputV0
-  [scratch-root :- String
-   program :- SourceStageV0])
-
 (defrecord TypedStageV0
   [terms :- TermGraphV0
    source-digest :- String

@@ -13,12 +13,12 @@ docs go stale within a day. The compiler is the source of truth: query it
 
 There are **exactly two hosted front-end compilers**, both ordinary
 ahead-of-time `parse → check → emit`, held byte-identical by gates. Core uses
-the Racket oracle front end, then lowers to a frozen Native World before
-materialization:
+the Racket oracle front end, then lowers through source → typed → native stages
+to a frozen native program before materialization:
 
 The source-profile boundary is absolute: `.bgl` with bare `#lang beagle`
 always selects Core and the native lowering pipeline. The source is not
-target-neutral; the frozen Native World is backend-neutral. Hosted compiler
+target-neutral; the frozen native program is backend-neutral. Hosted compiler
 machinery may use explicit `.bclj` and `#lang beagle/clj` while bootstrapping
 that pipeline, but `.bclj` itself remains hosted Clojure source.
 
@@ -38,9 +38,9 @@ The Racket compiler is the conformance oracle (`bin/beagle-certify`, shrink-only
 divergence ledgers); the self-hosted compiler is the language's own hosted
 compiler. A hosted behavior change on one side is incomplete until the gates
 prove the other side agrees — or a ledger entry records why it deliberately
-doesn't. Native World lowering is implemented in Beagle and runs from its
-hosted Clojure projection; its separate contract is the frozen world plus the
-seven native obligations.
+doesn't. Native Core lowering is implemented in Beagle and runs from its
+hosted Clojure projection; its separate contract is the frozen native program
+plus the seven native obligations.
 
 Form dispatch is the **combiner registry** in `parse.rkt`
 (`register-combiner!`). Built-in special forms register there; user macros are
@@ -62,7 +62,7 @@ Run a form through these and one answer falls out. **Do not surface decisions th
 
 **Default mode is apply-and-report, not present-and-ratify.** No "your call" sentences or option-A/B/C menus — that is the failure mode this rule prevents. Escalate only a genuine conflict between two clauses; the ordering pre-resolves most: **types > idiom-matching > aesthetic preference**. On a real conflict, name it "real conflict: X vs Y", propose the resolution, ask one specific question — don't reopen the board.
 
-## Surface lock — typed Clojure + inference, postfix `:`/`->` inline
+## Surface lock — typed Clojure + inference, inline `:` ascription + `->`
 
 Typed Clojure plus inference. No type-fact form, no `claim`, no spec
 registry, no `s/` namespace, no validation runtime. Type info rides ordinary
@@ -133,7 +133,10 @@ lossy rewrite. Source-less macro-produced datums have no physical-layout
 obligation.
 
 **This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
-parser actually does** (`postfix-annotation-parse.rkt` is the contract):
+parser actually does** (the accept/reject logic is in
+`beagle-lib/private/parse.rkt` — the annotation-marker predicates and
+`legacy-annotation-marker-mode`; `beagle-test/tests/postfix-annotation-parse.rkt`
+is its regression suite):
 - `(x : Int)` in a binding vector / `-> Ret` — canonical, silent.
 - `x: Int` in a binding vector — ACCEPTED (~20k live sites), but `fmt --check`
   reports it as drift and `fmt --write` rewrites it to `(x : Int)`. Acceptance
@@ -341,7 +344,7 @@ surface change breaks them you **must** migrate them, not leave them alone.
 
 ### Type-system gating policies
 
-The canonical typed-binding surface is postfix `NAME: TYPE` / `[params] -> RET`. The one spelling HARD-REJECTED today is a `:`-marked RETURN (`(defn add [x: Int] : Int ...)`), which points at `-> Int`; legacy `:-` is still accepted with a warning during the dual-accept cut. See the "Surface lock" anchor for the full accept/reject matrix — it is the only place that describes it accurately. A second type-producing glyph is an ambiguity surface ML/Rust-trained models will wander into, which is why `:-` is on a removal path rather than a permanent alias.
+The canonical typed-binding surface is inline `:` ascription: wrapped `(NAME : TYPE)` entries inside binding vectors, flat `NAME: TYPE` at `def`/`defonce`/`let`, and `[params] -> RET` for returns. The one spelling HARD-REJECTED today is a `:`-marked RETURN (`(defn add [x: Int] : Int ...)`), which points at `-> Int`; legacy `:-` is still accepted with a warning during the dual-accept cut. See the "Surface lock" anchor for the full accept/reject matrix — it is the only place that describes it accurately. A second type-producing glyph is an ambiguity surface ML/Rust-trained models will wander into, which is why `:-` is on a removal path rather than a permanent alias.
 
 Deferred type-system work (refinement annotations, bidirectional Layer 2 synthesis, sourcemap fidelity, types-as-view delaborator) is tracked in contrast-doc thread `20260530180000` and `20260614120025` — not here.
 

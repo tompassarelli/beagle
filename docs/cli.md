@@ -17,7 +17,7 @@ beagle validate [FILE...]   # parse + check + schema validation
 beagle build [--target T] PATH [OUT]  # explicit hosted source emission
 beagle build --materializer c17|qbe --out DIR [--abi lp64|wasm32]
              [--entry NS/NAME]... PATH.bgl...
-                                      # frozen Native World + one projection;
+                                      # frozen native program + one projection;
                                       #  --abi picks the layout profile (lp64)
 beagle fix [--dry-run] [PATH...]                # high-confidence auto-fixes
 beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
@@ -65,7 +65,7 @@ whole path end to end. `beagle init --hooks` wires the same loop into a project'
 
 Bare `#lang beagle` on `.bgl` is Native Core, never a target-neutral or
 unselected source profile. Its build always publishes
-`module.native-world`, `module.native-world.sha256`, `source.facts`, and
+`module.native-program`, `module.native-program.sha256`, `source.facts`, and
 `report.txt`; `--materializer c17` adds `module_0.h`/`module_0.c`, while
 `--materializer qbe` adds `module_0.ssa`. No materializer is implicit, and
 hosted `.bclj` is not accepted by the Core build path.

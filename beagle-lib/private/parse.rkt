@@ -1146,7 +1146,7 @@
        (reg! name (type-union (map (lambda (m) (type-prim m)) mnames)))
        (reg-union-table! imp-union-members name mnames)]
       [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
-       ;; The bootstrap candidate-world pass has provider datums but not yet a
+       ;; The bootstrap candidate-overlay pass has provider datums but not yet a
        ;; canonical interface.  Admit the exact qualified spellings here so a
        ;; consumer annotation such as (api/Result String) can reach the
        ;; authoritative second pass, where the interface resolver proves the
@@ -1352,7 +1352,7 @@
 
 ;; --- entry point -----------------------------------------------------------
 
-;; Authoritative candidate-world type namespaces.  Values are installed from a
+;; Authoritative candidate-overlay type namespaces.  Values are installed from a
 ;; module-interface during require registration, then consulted indirectly by
 ;; types.rkt's current-qualified-type-resolver at every annotation position.
 ;; External/non-overlay namespaces are deliberately absent and retain the
@@ -1486,7 +1486,7 @@
          [(module-interface? provider)
           (raise-parse-error
            'missing-type-export
-           "required Beagle module ~a does not export type ~a (referenced as ~a); update the provider and consumer in the same candidate world, or fix the annotation"
+           "required Beagle module ~a does not export type ~a (referenced as ~a); update the provider and consumer in the same candidate overlay, or fix the annotation"
            (module-interface-namespace provider)
            (qualified-type-member name)
            name)]
@@ -1518,7 +1518,7 @@
   (parameterize ([lowering-counter (box 0)]
                  ;; Type aliases and parametric declaration names are
                  ;; program-local.  Freshening them here prevents one module
-                 ;; parsed by a long-lived daemon/world gate from licensing an
+                 ;; parsed by a long-lived daemon/overlay gate from licensing an
                  ;; otherwise unknown type in the next module.
                  [current-user-parametric (set)]
                  [current-type-aliases (hasheq)]
@@ -1727,7 +1727,7 @@
     ;; resolve-module-path and skip the import cleanly.
     (cond
       [candidate
-       ;; Candidate-world modules are authoritative and fail closed.  Their
+       ;; Candidate-overlay modules are authoritative and fail closed.  Their
        ;; source datums win over any old provider still present on disk.
        ;; Make the qualifier visible during the bootstrap parse.  The namespace
        ;; symbol is a deliberate provisional marker; the authoritative pass

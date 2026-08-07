@@ -186,7 +186,7 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment);
 void native_arena_reset(native_arena *arena);
 void native_arena_destroy(native_arena *arena);
 size_t native_arena_reserved_bytes(const native_arena *arena);
-/* Report-only: a trap still aborts, and nothing here resumes a trapped world. */
+/* Report-only: a trap still aborts, and nothing here resumes a trapped program. */
 extern uint32_t native_last_trap_code;
 
 typedef void (*native_trap_reporter)(uint32_t code);

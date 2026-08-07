@@ -2,9 +2,9 @@
 
 Bare `#lang beagle` on `.bgl` selects Native Core; `.bgl` is not a neutral
 container for a later target choice. `beagle build --materializer c17|qbe
---out DIR FILE.bgl` first freezes `module.native-world`, then writes only the
-selected projection. The world is backend-neutral even though its source
-profile is native. Hosted Clojure is explicit `#lang beagle/clj` on `.bclj`;
+--out DIR FILE.bgl` first freezes `module.native-program`, then writes only the
+selected projection. That frozen native program is backend-neutral even though
+its source profile is native. Hosted Clojure is explicit `#lang beagle/clj` on `.bclj`;
 JavaScript and Nix keep their explicit language paths below.
 
 ## One source, many hosted back-ends

@@ -71,11 +71,11 @@
 ;; Aliases erase to their expansion at parse-type; there is no alias type node, so
 ;; emit + the rest of the checker never see an alias (purely a front-end convenience).
 (define current-type-aliases (make-parameter (hasheq)))
-;; Candidate-world module interfaces install a resolver for slash-qualified
+;; Candidate-overlay module interfaces install a resolver for slash-qualified
 ;; type datums.  Keeping the callback here avoids a types.rkt ->
 ;; module-interface.rkt dependency cycle while ensuring every annotation
 ;; position passes through one fail-closed choke point.  The resolver returns a
-;; fully parsed type or #f when the qualifier is outside the candidate world;
+;; fully parsed type or #f when the qualifier is outside the candidate overlay;
 ;; it raises a pointed parse error for a known provider with no such type.
 (define current-qualified-type-resolver
   (make-parameter (lambda (_type-datum) #f)))
@@ -148,7 +148,7 @@
        (error 'beagle "empty union type: ~v" t))
      (type-union (map parse-type (cdr t)))]
 
-    ;; Candidate-world qualified applications, e.g. (api/Result String).
+    ;; Candidate-overlay qualified applications, e.g. (api/Result String).
     ;; The resolver proves the provider exports a parametric type, validates
     ;; its arity, and recursively parses its arguments.
     [(and (pair? t)
@@ -190,7 +190,7 @@
     [(and (symbol? t) (hash-ref (current-type-aliases) t #f))
      => (lambda (ty) ty)]
 
-    ;; Candidate-world qualified nominals and transparent aliases.  Unknown
+    ;; Candidate-overlay qualified nominals and transparent aliases.  Unknown
     ;; external qualifiers return #f and retain the legacy uppercase/JVM
     ;; admission below; a qualifier backed by a candidate interface is
     ;; authoritative and therefore fails closed on a missing export.

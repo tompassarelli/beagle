@@ -12,11 +12,11 @@ answer. A backend stays only when a real consumer makes its semantics testable.
 
 There are two deliberate compilation paths. The source profile chooses between
 them: `.bgl` with bare `#lang beagle` always targets Native Core and lowers to
-an immutable Native World. The `.bgl` source is not target-neutral and does not
-mean "no target selected"; the resulting Native World is backend-neutral so it
-can be materialized as native code. C17 and QBE are the current materializers;
-Wasm belongs at that same materializer layer rather than becoming another
-source profile.
+an immutable validated Native Core program. The `.bgl` source is not
+target-neutral and does not mean "no target selected"; the resulting frozen
+native program is backend-neutral so it can be materialized as native code.
+C17 and QBE are the current materializers; Wasm belongs at that same
+materializer layer rather than becoming another source profile.
 
 Hosted profiles emit source for a runtime or evaluator that remains part of the
 system: `.bclj`, `.bjs`, and `.bnix` select Clojure, JavaScript, and Nix
@@ -81,7 +81,7 @@ hello from Beagle
 `beagle build FILE OUT` writes the target's source instead of linking a binary.
 For Core, author `.bgl` with bare `#lang beagle` and select the projection
 separately: `beagle build --materializer c17|qbe --out DIR FILE.bgl`. The build
-always writes `module.native-world` and its digest; only the selected C17 or QBE
+always writes `module.native-program` and its digest; only the selected C17 or QBE
 artifact is projected beside it.
 Run `beagle doctor --deep` before authoring to verify the complete diagnostic
 path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
@@ -135,26 +135,26 @@ assigning a `String` to `services.openssh.enable` fails before
 Native Core is the `.bgl` lowering path, not another idiomatic source emitter:
 
 ```text
-.bgl + #lang beagle  →  source world  →  typed world  →  Native World
-                                                              ├─→ restricted C reference
-                                                              ├─→ QBE IL → native object
-                                                              └─→ Wasm (materializer)
+.bgl + #lang beagle  →  source stage  →  typed stage  →  frozen native program
+                                                                   ├─→ restricted C reference
+                                                                   ├─→ QBE IL → native object
+                                                                   └─→ Wasm (materializer)
 ```
 
-The Native World owns typed operations, effects, regions, layouts, control
-flow, capabilities, and ABI facts. Materializers are deliberately replaceable
+The frozen native program owns typed operations, effects, regions, layouts,
+control flow, capabilities, and ABI facts. Materializers are deliberately replaceable
 projections of that same frozen program. They are judged by correct binaries and
 independent agreement, not by whether a human would maintain the generated C or
 QBE.
 
 Fram's files remain Beagle; they are not rewritten as C or another systems
 language. The Core path is `beagle build --materializer c17|qbe`: it accepts
-canonical `.bgl`, freezes one Native World, and materializes only the selected
+canonical `.bgl`, freezes one native program, and materializes only the selected
 projection. The generated
 [`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
 is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
-bodies lower into one validated Native World and execute through the reference
-materializer.
+bodies lower into one validated Native Core program and execute through the
+reference materializer.
 
 ## Targets
 
@@ -178,7 +178,8 @@ Four source profiles. Core produces the authoritative frozen native program; `--
 <!-- /beagle:langs -->
 
 Core is a source profile, not a direct source emitter; its row names the frozen
-world build product while the materializer remains an explicit build option.
+native program build product while the materializer remains an explicit build
+option.
 Profiles are removed rather than deprecated when they stop earning their place —
 [`docs/target-policy.md`](docs/target-policy.md).
 
@@ -211,8 +212,8 @@ on an empty exemption list — [`docs/self-hosting.md`](docs/self-hosting.md).
 - **Not a new Lisp in spirit** — a strict typed subset of Clojure; divergence
   from Clojure must serve the type system or a backend, or it dies.
 - **Not a universal idiomatic-native transpiler** — hosted emitters exist where
-  generated source is a real interface; native code comes from one Native World
-  and replaceable materializers.
+  generated source is a real interface; native code comes from one frozen
+  native program and replaceable materializers.
 - **Not stable.** Pre-1.0, the surface still moves, and removals are hard breaks:
   there is no deprecation path.
 - **Not benchmarked.** The repository gates correctness, not speed, and publishes

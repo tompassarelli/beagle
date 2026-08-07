@@ -1017,7 +1017,7 @@
   ;; Imported Beagle bindings inhabit program-externs as typed call
   ;; boundaries, but they are not host/runtime externs.  Their concrete
   ;; collection layout is owned by the provider emitted in the same candidate
-  ;; world, so the host-ABI record rule must not reject an unused imported
+  ;; overlay, so the host-ABI record rule must not reject an unused imported
   ;; Map/Set signature.
   (define imported-bindings (imported-interface-binding-names prog))
   (define (walk-type! t owner [extern-name #f])
@@ -1335,7 +1335,7 @@
       (values (deferror-form-name form) form)))
   (define contracts (make-hasheq))
   (define definitions (make-hasheq))
-  ;; Imported throwable definitions are part of the consumer's checking world.
+  ;; Imported throwable definitions are part of the consumer's checking scope.
   ;; Populate them before local definitions so a local declaration remains the
   ;; authoritative spelling on a same-name collision.
   (for ([import (in-list (program-imported-module-interfaces prog))])
@@ -5402,7 +5402,7 @@
       (raise-diag
        'missing-export
        (format
-        "required Beagle module export~a missing:\n~a\nUpdate the provider and consumer in the same candidate world, or fix the reference."
+        "required Beagle module export~a missing:\n~a\nUpdate the provider and consumer in the same candidate overlay, or fix the reference."
         (if (> (length ordered) 1) "s are" " is")
         (string-join lines "\n"))
        (hasheq
