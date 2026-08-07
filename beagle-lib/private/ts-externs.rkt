@@ -292,18 +292,22 @@
   (define classes '())
   (define reexports '())
 
-  (for ([m (in-list (regexp-match* #rx"(export[ \t]+\\*|export[ \t]*\\{[^}]*\\})[ \t]*from[ \t]*[\"']([^\"']+)[\"']"
+  ;; `export type { X } from` still leads to a real class file, but the export
+  ;; has no runtime binding: the edge is followed, marked type-only.
+  (for ([m (in-list (regexp-match* #rx"export([ \t]+type)?[ \t]*(\\*|\\{[^}]*\\})[ \t]*from[ \t]*[\"']([^\"']+)[\"']"
                                    src #:match-select values))])
-    (set! reexports (cons (caddr m) reexports)))
+    (set! reexports (cons (cons (cadddr m) (and (cadr m) #t)) reexports)))
 
-  ;; `export declare class X<T> extends Base<T> implements I {`
+  ;; `export declare class X<T> extends Base<T> implements I {` and the
+  ;; default-export form `export default class X {` (how three's per-class
+  ;; declaration files are written, re-exported by name from the barrel).
   (let loop ([pos 0])
     (define m (regexp-match-positions
-               #rx"(^|[\n;}])[ \t]*(export[ \t]+)?(declare[ \t]+)?(abstract[ \t]+)?class[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)"
+               #rx"(^|[\n;}])[ \t]*(export[ \t]+)?(default[ \t]+)?(declare[ \t]+)?(abstract[ \t]+)?class[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)"
                src pos))
     (when m
       (define head-end (cdar m))
-      (define name (let ([r (list-ref m 5)]) (substring src (car r) (cdr r))))
+      (define name (let ([r (list-ref m 6)]) (substring src (car r) (cdr r))))
       (define-values (open close) (brace-range src head-end))
       (when (and open close)
         (define header (substring src head-end open))
@@ -319,22 +323,29 @@
 
 ;; Walk the export graph from `entry`, collecting classes by name.
 (define (collect-package entry)
-  (define seen (make-hash))
+  (define seen (make-hash))        ; file -> 'runtime | 'type (runtime wins)
   (define classes (make-hash))
+  (define runtime-names (make-hash)) ; class -> reached through a runtime path?
   (define order '())
-  (let walk ([file (path->complete-path entry)])
+  ;; A file first reached type-only is revisited if a runtime path finds it
+  ;; later, upgrading its classes to runtime-exported.
+  (let walk ([file (path->complete-path entry)] [runtime? #t])
     (define key (path->string (simplify-path file #f)))
-    (unless (hash-has-key? seen key)
-      (hash-set! seen key #t)
+    (define prior (hash-ref seen key #f))
+    (unless (or (eq? prior 'runtime) (and prior (not runtime?)))
+      (hash-set! seen key (if runtime? 'runtime 'type))
       (define-values (found reexports) (parse-declarations file))
       (for ([c (in-list found)])
         (unless (hash-has-key? classes (ts-class-name c))
           (hash-set! classes (ts-class-name c) c)
-          (set! order (cons (ts-class-name c) order))))
-      (for ([spec (in-list reexports)])
-        (define resolved (resolve-spec spec file))
-        (when resolved (walk resolved)))))
-  (values classes (reverse order)))
+          (set! order (cons (ts-class-name c) order)))
+        (when runtime?
+          (hash-set! runtime-names (ts-class-name c) #t)))
+      (for ([edge (in-list reexports)])
+        (define resolved (resolve-spec (car edge) file))
+        (when resolved (walk resolved (and runtime? (not (cdr edge))))))))
+  (values classes (reverse order)
+          (lambda (name) (hash-ref runtime-names name #f))))
 
 ;; --- emission ----------------------------------------------------------------
 
@@ -436,7 +447,7 @@
     (hash-update! groups (ts-member-name m) (lambda (xs) (append xs (list m))) '()))
   (for/list ([name (in-list (reverse order))]) (cons name (hash-ref groups name))))
 
-(define (emit-class c taken)
+(define (emit-class c taken runtime?)
   (define cname (ts-class-name c))
   (define prefix (kebab cname))
   (define out (open-output-string))
@@ -453,18 +464,19 @@
     (write-string (emit-clauses final clauses) out))
 
   (define ctors (filter (lambda (m) (eq? (ts-member-kind m) 'constructor)) (ts-class-members c)))
-  ;; A class with no declared constructor still constructs with zero arguments.
-  (emit! (format "make-~a" prefix)
-         (if (null? ctors)
-             (list (list '() "Any" (format "(~a.)" cname)))
-             (member-clauses ctors
-                             values
-                             (lambda (params m)
-                               (if (null? params)
-                                   (format "(~a.)" cname)
-                                   (format "(~a. ~a)" cname (arg-refs params)))))))
-  ;; The declared return of a constructor is the instance, not `this`-as-Nil.
-  (void)
+  ;; A type-only export has no runtime binding, so nothing that references the
+  ;; class name (constructor, statics) can be emitted for it.
+  (when runtime?
+    ;; A class with no declared constructor still constructs with zero arguments.
+    (emit! (format "make-~a" prefix)
+           (if (null? ctors)
+               (list (list '() "Any" (format "(~a.)" cname)))
+               (member-clauses ctors
+                               values
+                               (lambda (params m)
+                                 (if (null? params)
+                                     (format "(~a.)" cname)
+                                     (format "(~a. ~a)" cname (arg-refs params))))))))
 
   (for ([group (in-list (group-members (ts-class-members c) 'method))])
     (define name (car group))
@@ -476,7 +488,7 @@
                                  (format "(.~a self)" name)
                                  (format "(.~a self ~a)" name (arg-refs params)))))))
 
-  (for ([group (in-list (group-members (ts-class-members c) 'static-method))])
+  (for ([group (in-list (if runtime? (group-members (ts-class-members c) 'static-method) '()))])
     (define name (car group))
     (emit! (format "~a-~a" prefix (kebab name))
            (member-clauses (cdr group)
@@ -505,25 +517,31 @@
                            (format "(do (set! (.-~a self) value) nil)" (ts-member-name m))))))))
   (values (get-output-string out) (unbox emitted-any?)))
 
-(define (emit-module namespace module-spec classes names)
+(define (emit-module namespace module-spec classes names runtime-exported?)
   (define taken (make-hash))
   (define bodies '())
-  (define used '())
+  (define imported '())
   (for ([name (in-list names)])
     (define c (hash-ref classes name))
-    (define-values (body any?) (emit-class c taken))
+    (define runtime? (runtime-exported? name))
+    (define-values (body any?) (emit-class c taken runtime?))
     (when any?
-      (set! used (cons name used))
+      ;; Only runtime-exported classes appear in the import: a type-only class
+      ;; contributes instance wrappers that never reference its name.
+      (when runtime? (set! imported (cons name imported)))
       (set! bodies (cons (format ";; --- ~a ---\n\n~a" name body) bodies))))
-  (define used-names (reverse used))
+  (define used-names (reverse imported))
   (string-append
    "#lang beagle/js\n"
    ";; GENERATED by `beagle ts-externs` — do not edit.\n"
-   (format ";; ~a classes, mapped from TypeScript declarations.\n" (length used-names))
+   (format ";; ~a classes, mapped from TypeScript declarations.\n" (length bodies))
    ";; Unmappable TS shapes degrade to Any; a method lives on the class that\n"
    ";; declares it, so a subclass instance is passed to its base class wrapper.\n\n"
-   (format "(ns ~a\n  (:require [~a :refer [~a]]))\n\n"
-           namespace module-spec (string-join used-names " "))
+   ;; A module of only type-only classes imports nothing.
+   (if (null? used-names)
+       (format "(ns ~a)\n\n" namespace)
+       (format "(ns ~a\n  (:require [~a :refer [~a]]))\n\n"
+               namespace module-spec (string-join used-names " ")))
    (string-join (reverse bodies) "\n")))
 
 ;; --- CLI ---------------------------------------------------------------------
@@ -591,7 +609,7 @@
       [(list* "--list" more) (set-box! list-only? #t) (loop more)]
       [_ (usage)]))
 
-  (define-values (classes order) (collect-package entry))
+  (define-values (classes order runtime-exported?) (collect-package entry))
   (when (unbox list-only?)
     (for ([name (in-list order)])
       (define c (hash-ref classes name))
@@ -616,7 +634,7 @@
                    (die "cannot infer the runtime package; pass --module SPEC")))
   (define ns (or (unbox namespace)
                  (format "~a.api" (regexp-replace* #rx"[@/]" (regexp-replace* #rx"^@" spec "") "."))))
-  (define text (emit-module ns spec classes selected))
+  (define text (emit-module ns spec classes selected runtime-exported?))
   (cond
     [(unbox out-file)
      (make-parent-directory* (unbox out-file))

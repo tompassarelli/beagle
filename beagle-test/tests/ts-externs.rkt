@@ -47,6 +47,15 @@
   (check-not-false (member "scale" names) "overloaded method is present")
   (check-false (member "hidden" names) "a private member is dropped"))
 
+(test-case "export default class parses; type-only re-export edges are marked"
+  (define-values (classes _re) (parse-declarations (build-path fixtures-dir "ghost.d.ts")))
+  (define ghost (findf (lambda (c) (string=? (ts-class-name c) "Ghost")) classes))
+  (check-true (ts-class? ghost))
+  (check-not-false (member "fade" (map ts-member-name (ts-class-members ghost))))
+  (define-values (_cs reexports) (parse-declarations (build-path fixtures-dir "index.d.ts")))
+  (check-equal? reexports
+                '(("./shapes.js" . #f) ("./other.js" . #f) ("./ghost.js" . #t))))
+
 (test-case "generated module parses and type-checks"
   (define out (make-temporary-file "beagle-ts-externs-~a.bjs"))
   (dynamic-wind
@@ -74,6 +83,17 @@
       ;; A readonly property gets a reader only.
       (check-regexp-match #rx"defn box-is-box" text)
       (check-false (regexp-match? #rx"set-box-is-box!" text))
+      ;; A type-only re-export keeps its instance wrappers but nothing that
+      ;; names the class at runtime: no import, no constructor, no statics.
+      (check-regexp-match #rx"defn ghost-fade" text)
+      (check-regexp-match #rx"defn ghost-opacity" text)
+      (check-regexp-match #rx"defn set-ghost-opacity!" text)
+      (check-false (regexp-match? #rx"make-ghost" text))
+      (check-false (regexp-match? #rx"ghost-conjure" text))
+      (let ([refer (string-split (cadr (regexp-match #rx":refer \\[([^]]*)\\]" text)))])
+        (check-not-false (member "Box" refer))
+        (check-not-false (member "Thing" refer))
+        (check-false (member "Ghost" refer)))
       (check-not-exn
        (lambda () (type-check! (parse-program (read-beagle-syntax out) #:source-path out)))))
     (lambda () (delete-file out))))
