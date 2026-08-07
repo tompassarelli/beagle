@@ -386,14 +386,14 @@
   (and (= 1 (count (core/functiondef-blocks function)))
     (every? block-supported? (core/functiondef-blocks function))))
 
-(defn world-supported? [(world : core/NativeWorld)] -> Bool
-  (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
-        types: (Vec core/TypeDef) (core/nativeworld-types world)]
+(defn program-supported? [(program : core/NativeCoreProgram)] -> Bool
+  (let [layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
+        types: (Vec core/TypeDef) (core/nativecoreprogram-types program)]
     (and (every? (fn [(type-def : core/TypeDef)] -> Bool
                    (type-supported? type-def types layouts))
            types)
       (types-orderable? types layouts)
-      (every? function-supported? (core/nativeworld-functions world)))))
+      (every? function-supported? (core/nativecoreprogram-functions program)))))
 
 (defn module-prefix [(module-index : Int)] -> String
   (str "native_m" module-index))
@@ -865,28 +865,28 @@
     "#include \"" header-name "\"\n\n"
     (emit-functions types module-index functions)))
 
-(defn materialize-world
-  [(world : core/NativeWorld)
+(defn materialize-program
+  [(program : core/NativeCoreProgram)
    (module-index : Int)] -> C17Materialization
-  (let [validation: core/ValidationReport (core/validate-world world)]
+  (let [validation: core/ValidationReport (core/validate-program program)]
     (cond
       (< module-index 0)
       (->C17Failure "module index must be nonnegative")
 
       (not (core/validationreport-passed validation))
-      (->C17Failure "native world is not frozen: validation obligations failed")
+      (->C17Failure "native program is not frozen: validation obligations failed")
 
-      (not (types-orderable? (core/nativeworld-types world) (core/nativeworld-layouts world)))
+      (not (types-orderable? (core/nativecoreprogram-types program) (core/nativecoreprogram-layouts program)))
       (->C17Failure "value types form a declaration cycle the restricted C17 slice cannot order")
 
-      (not (world-supported? world))
-      (->C17Failure "native world uses a shape outside the restricted C17 reference slice")
+      (not (program-supported? program))
+      (->C17Failure "native program uses a shape outside the restricted C17 reference slice")
 
       :else
-      (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
+      (let [layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
             types: (Vec core/TypeDef)
-            (dependency-ordered-types (core/nativeworld-types world) layouts)
-            functions: (Vec core/FunctionDef) (ordered-functions (core/nativeworld-functions world))
+            (dependency-ordered-types (core/nativecoreprogram-types program) layouts)
+            functions: (Vec core/FunctionDef) (ordered-functions (core/nativecoreprogram-functions program))
             header-name: String (str "module_" module-index ".h")
             source-name: String (str "module_" module-index ".c")]
         (->C17Success

@@ -150,8 +150,8 @@ typedef struct native_value_variant_descriptor {
   const native_value_descriptor *payload;
 } native_value_variant_descriptor;
 
-/* A frozen Native World emits one immutable descriptor graph. Descriptors are
-   world-local ABI metadata: values never carry host function pointers or tags
+/* A frozen native program emits one immutable descriptor graph. Descriptors are
+   program-local ABI metadata: values never carry host function pointers or tags
    not already present in their TypeDef/LayoutDef. */
 struct native_value_descriptor {
   uint32_t abi_version;
@@ -177,7 +177,7 @@ extern uint64_t native_vec_storage_allocations;
 
 /* Text and Keyword handles are addresses of length-prefixed strict-UTF-8 blobs:
    an 8-byte native-endian uint64_t length, then exactly that many bytes.
-   Handles are world-local addresses and never cross a world boundary. */
+   Handles are program-local addresses and never cross a program boundary. */
 #define NATIVE_TEXT_HEADER_BYTES ((uint64_t)sizeof(uint64_t))
 
 void native_arena_init(native_arena *arena, uint8_t *storage, size_t capacity);

@@ -1,6 +1,6 @@
 slice          store
 source         fram:src/fram/store.bgl
-dependency     fram:src/fram/types.bgl  (projected into the same source world)
+dependency     fram:src/fram/types.bgl  (projected into the same source program)
 driver         native-core/validation/slice-store/drive.sh
 pipeline       beagle-ast -> ast-facts.clj -> native.slice -> native.lower -> native.c11
 bar            native-core/bin/native-slice --module store  =>  3/5, blocked on
@@ -20,26 +20,26 @@ The committed projection is stale
   is NATIVE_SLICE_COMMITTED_FACTS=1 and stamps a MODE line into report.txt.
   Clearing the drift is a cross-repo evidence refresh, not a driver change.
 
-Why the dependency is in the world
+Why the dependency is in the program
   store.bgl declares no record; every type in its signatures is a fram.types
-  record. Projected alone, its typed world fails types-refs-closed? and the
-  source-to-typed pass rejects. The source world therefore carries both ASTs
+  record. Projected alone, its typed program fails types-refs-closed? and the
+  source-to-typed pass rejects. The source program therefore carries both ASTs
   and names fram.store as its module.
 
 Named gaps
-  1  Bodies are not in the source world. The fact projection carries record
+  1  Bodies are not in the source program. The fact projection carries record
      and defn DECLARATIONS only, so no store body was ever presented to the
      lowering. Every one of the 71 store functions is a standing
-     TODO-NATIVE-FUNCTION-BODY obligation; world-functions and world-abis are
+     TODO-NATIVE-FUNCTION-BODY obligation; program-functions and program-abis are
      both 0 and typed-to-native is PENDING, not COMPLETE.
-  2  obligation-world closed-layouts FAILs on the full world: shapes that need
+  2  obligation-program closed-layouts FAILs on the full program: shapes that need
      an explicit reference edge stay unclosed. The C17 projection restores the
      obligation by excluding them, which is why obligation-projection passes.
-  3  The restricted C17 vocabulary admits 5 of 57 world types. Every shape
+  3  The restricted C17 vocabulary admits 5 of 57 program types. Every shape
      store.bgl itself contributes -- (Vec T), closed (U T Nil), Text/Keyword
      atoms, map-entry vectors, (Atom T) references -- is outside it, so the
      emitted C is byte-identical to native-core/validation/slice-types-full's.
-     The store-specific evidence in this slice is the frozen world, the typed
+     The store-specific evidence in this slice is the frozen program, the typed
      signature surface, and the obligation ledger, not new C.
   4  main.c is hand-written: the materializer emits types only, so the runtime
      check is the layout claim under ASan/UBSan, never a store body.

@@ -87,7 +87,7 @@ for expected in \
     "source-entry native.entry-projection/entry" \
     "source-entry native.entry-projection/second" \
     "source-definitions 6" \
-    "world-functions 4" \
+    "program-functions 4" \
     "lowered fn_0 box-value 1 blocks" \
     "lowered fn_1 helper 1 blocks" \
     "lowered fn_2 entry 1 blocks" \
@@ -118,7 +118,7 @@ grep -Fqx "result PASS" "$qbe_both/report.txt"
 [[ "$(grep -c '^stage-progress source-to-typed ' "$qbe_both/report.txt")" == "1" ]]
 [[ "$(grep -c '^stage-progress typed-to-native ' "$qbe_both/report.txt")" == "1" ]]
 [[ -f "$qbe_both/module_0.c" && -f "$qbe_both/module_0.ssa" ]]
-printf 'native-exe smoke: one frozen Native World + explicit C17/QBE materializers ok\n'
+printf 'native-exe smoke: one frozen native program + explicit C17/QBE materializers ok\n'
 
 set +e
 "$repo/bin/beagle" build --materializer c17 \

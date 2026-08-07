@@ -85,8 +85,8 @@
     [(corpus-id "region-arena")]
     [(corpus-id "capability-write")]))
 
-(def valid-world :- core/NativeWorld
-  (core/->NativeWorld (corpus-id "world-valid")
+(def valid-program :- core/NativeCoreProgram
+  (core/->NativeCoreProgram (corpus-id "program-valid")
     nil
     "native-core-v0"
     [corpus-i64-type corpus-f64-type]
@@ -103,8 +103,8 @@
        "sha256:0123456789abcdef"
        128)]))
 
-(def duplicate-id-world :- core/NativeWorld
-  (with valid-world
+(def duplicate-id-program :- core/NativeCoreProgram
+  (with valid-program
     [:layouts
      [corpus-i64-layout
       (core/->LayoutDef (corpus-id "layout-i64")
@@ -113,14 +113,14 @@
         8
         (core/->ScalarShapeV0 (core/->FloatReprV0 64)))]]))
 
-(def disallowed-world :- core/NativeWorld
-  (with valid-world [:allowed-capabilities []]))
+(def disallowed-program :- core/NativeCoreProgram
+  (with valid-program [:allowed-capabilities []]))
 
 (def dangling-function :- core/FunctionDef
   (with corpus-function [:return-type (corpus-id "type-missing")]))
 
-(def dangling-world :- core/NativeWorld
-  (with valid-world [:functions [dangling-function]]))
+(def dangling-program :- core/NativeCoreProgram
+  (with valid-program [:functions [dangling-function]]))
 
 (def missing-terminator-block :- core/BasicBlock
   (with corpus-entry-block [:terminators []]))
@@ -128,8 +128,8 @@
 (def missing-terminator-function :- core/FunctionDef
   (with corpus-function [:blocks [missing-terminator-block]]))
 
-(def missing-terminator-world :- core/NativeWorld
-  (with valid-world [:functions [missing-terminator-function]]))
+(def missing-terminator-program :- core/NativeCoreProgram
+  (with valid-program [:functions [missing-terminator-function]]))
 
 (def double-terminator-block :- core/BasicBlock
   (with corpus-entry-block
@@ -138,8 +138,8 @@
 (def double-terminator-function :- core/FunctionDef
   (with corpus-function [:blocks [double-terminator-block]]))
 
-(def double-terminator-world :- core/NativeWorld
-  (with valid-world [:functions [double-terminator-function]]))
+(def double-terminator-program :- core/NativeCoreProgram
+  (with valid-program [:functions [double-terminator-function]]))
 
 (def dangling-ssa-block :- core/BasicBlock
   (with corpus-entry-block
@@ -151,8 +151,8 @@
 (def dangling-ssa-function :- core/FunctionDef
   (with corpus-function [:blocks [dangling-ssa-block]]))
 
-(def dangling-ssa-world :- core/NativeWorld
-  (with valid-world [:functions [dangling-ssa-function]]))
+(def dangling-ssa-program :- core/NativeCoreProgram
+  (with valid-program [:functions [dangling-ssa-function]]))
 
 ;; Closed record-assoc corpus: the valid case fixes source/result ownership,
 ;; field membership, replacement type, and a real ArenaInstruction producer.
@@ -251,8 +251,8 @@
     [(corpus-id "assoc-region")]
     [(corpus-id "assoc-capability")]))
 
-(def record-assoc-world :- core/NativeWorld
-  (core/->NativeWorld (corpus-id "assoc-world") nil "native-core-v0-record-assoc"
+(def record-assoc-program :- core/NativeCoreProgram
+  (core/->NativeCoreProgram (corpus-id "assoc-program") nil "native-core-v0-record-assoc"
     [assoc-pair-type assoc-foreign-type assoc-arena-type
      corpus-i64-type corpus-f64-type]
     [assoc-effect]
@@ -277,8 +277,8 @@
 (def assoc-bad-field-function :- core/FunctionDef
   (with assoc-function [:blocks [assoc-bad-field-block]]))
 
-(def record-assoc-bad-field-world :- core/NativeWorld
-  (with record-assoc-world [:functions [assoc-bad-field-function]]))
+(def record-assoc-bad-field-program :- core/NativeCoreProgram
+  (with record-assoc-program [:functions [assoc-bad-field-function]]))
 
 (def assoc-bad-value-parameter :- core/Parameter
   (core/->Parameter (corpus-id "assoc-ssa-value") (corpus-id "type-f64")))
@@ -290,8 +290,8 @@
         (corpus-id "assoc-type-pair"))
       assoc-bad-value-parameter]]))
 
-(def record-assoc-bad-type-world :- core/NativeWorld
-  (with record-assoc-world [:functions [assoc-bad-type-function]]))
+(def record-assoc-bad-type-program :- core/NativeCoreProgram
+  (with record-assoc-program [:functions [assoc-bad-type-function]]))
 
 (def assoc-bad-arena-instruction :- core/Instruction
   (with assoc-instruction [:arena-id (corpus-id "assoc-ssa-source")]))
@@ -303,8 +303,8 @@
 (def assoc-bad-arena-function :- core/FunctionDef
   (with assoc-function [:blocks [assoc-bad-arena-block]]))
 
-(def record-assoc-bad-arena-world :- core/NativeWorld
-  (with record-assoc-world [:functions [assoc-bad-arena-function]]))
+(def record-assoc-bad-arena-program :- core/NativeCoreProgram
+  (with record-assoc-program [:functions [assoc-bad-arena-function]]))
 
 (def assoc-bad-source-parameter :- core/Parameter
   (core/->Parameter (corpus-id "assoc-ssa-source")
@@ -317,29 +317,29 @@
       (core/->Parameter (corpus-id "assoc-ssa-value")
         (corpus-id "type-i64"))]]))
 
-(def record-assoc-bad-source-world :- core/NativeWorld
-  (with record-assoc-world [:functions [assoc-bad-source-function]]))
+(def record-assoc-bad-source-program :- core/NativeCoreProgram
+  (with record-assoc-program [:functions [assoc-bad-source-function]]))
 
 (def record-assoc-corpus-passes? :- Bool
   (and
-    (core/validationreport-passed (core/validate-world record-assoc-world))
+    (core/validationreport-passed (core/validate-program record-assoc-program))
     (not (core/validationreport-passed
-      (core/validate-world record-assoc-bad-field-world)))
+      (core/validate-program record-assoc-bad-field-program)))
     (not (core/validationreport-passed
-      (core/validate-world record-assoc-bad-type-world)))
+      (core/validate-program record-assoc-bad-type-program)))
     (not (core/validationreport-passed
-      (core/validate-world record-assoc-bad-arena-world)))
+      (core/validate-program record-assoc-bad-arena-program)))
     (not (core/validationreport-passed
-      (core/validate-world record-assoc-bad-source-world)))))
+      (core/validate-program record-assoc-bad-source-program)))))
 
 (def corpus-result :- CorpusResult
-  (->CorpusResult (core/validationreport-passed (core/validate-world valid-world))
-    (not (core/validationreport-passed (core/validate-world duplicate-id-world)))
-    (not (core/validationreport-passed (core/validate-world disallowed-world)))
-    (not (core/validationreport-passed (core/validate-world dangling-world)))
-    (not (core/validationreport-passed (core/validate-world missing-terminator-world)))
-    (not (core/validationreport-passed (core/validate-world double-terminator-world)))
-    (not (core/validationreport-passed (core/validate-world dangling-ssa-world)))
+  (->CorpusResult (core/validationreport-passed (core/validate-program valid-program))
+    (not (core/validationreport-passed (core/validate-program duplicate-id-program)))
+    (not (core/validationreport-passed (core/validate-program disallowed-program)))
+    (not (core/validationreport-passed (core/validate-program dangling-program)))
+    (not (core/validationreport-passed (core/validate-program missing-terminator-program)))
+    (not (core/validationreport-passed (core/validate-program double-terminator-program)))
+    (not (core/validationreport-passed (core/validate-program dangling-ssa-program)))
     (core/native-id= (core/canonical-id "scope" ["ab" "c"])
       (core/canonical-id "scope" ["ab" "c"]))
     (not (core/native-id= (core/canonical-id "scope" ["ab" "c"]) (core/canonical-id "scope" ["a" "bc"])))

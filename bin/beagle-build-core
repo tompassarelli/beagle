@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build dependency-first Beagle Core modules through the frozen Native World.
+# Build dependency-first Beagle Core modules through the frozen native program.
 #
 # Usage:
 #   beagle build --materializer c17 [--materializer qbe] --out DIR
 #     [--abi lp64|wasm32] [--entry NS/NAME]... SOURCE.bgl...
 #
-# A successful run always writes the authoritative frozen Native World encoding
+# A successful run always writes the authoritative frozen native program encoding
 # and digest, plus every explicitly selected materializer projection. The
 # command accepts canonical `.bgl` / bare `#lang beagle` sources only.
 
@@ -129,8 +129,8 @@ out="$(cd "$out" && pwd)"
 managed_artifacts=(
     source.facts
     report.txt
-    module.native-world
-    module.native-world.sha256
+    module.native-program
+    module.native-program.sha256
     module_0.h
     module_0.c
     module_0.ssa
@@ -161,7 +161,7 @@ bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 
 "$BIN/beagle-build-all" \
     "$BEAGLE_DIR/native-core/src/native/core.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/worlds.bclj" \
+    "$BEAGLE_DIR/native-core/src/native/stages.bclj" \
     "$BEAGLE_DIR/native-core/src/native/lower.bclj" \
     "$BEAGLE_DIR/native-core/src/native/obligations.bclj" \
     "$BEAGLE_DIR/native-core/src/native/c11.bclj" \
@@ -179,7 +179,7 @@ bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 # emitter qualifies cross-module union patterns itself.
 core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
     "$work/compiled/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
     generated="$work/compiled/native/$module.clj"
     [[ -f "$generated" ]] || continue
     sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
@@ -204,7 +204,7 @@ export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
 set +e
 clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 (require (quote [native.core :as core])
-         (quote [native.worlds :as worlds])
+         (quote [native.stages :as stages])
          (quote [native.lower :as lower])
          (quote [native.obligations :as obligations])
          (quote [native.slice :as slice])
@@ -502,10 +502,10 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 (defn project-entry-rows [rows entries]
   (if (empty? entries)
     {:ok? true :rows rows}
-    (let [source (slice/source-world rows "native.module" "source.facts")
+    (let [source (slice/source-program rows "native.module" "source.facts")
           index (lower/build-source-index
-                 (worlds/sourceprogramworldv0-terms source)
-                 (worlds/sourceprogramworldv0-modules source))
+                 (stages/sourcestagev0-terms source)
+                 (stages/sourcestagev0-modules source))
           definitions (definitions-by-key index)
           seeds (entry-seeds definitions index entries)]
       (if-not (:ok? seeds)
@@ -529,22 +529,22 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
        "stage source-to-typed ACCEPTED\n"
        "stage typed-to-native COMPLETE\n"
        "native-lowering-result NativeLoweringCompleteV0\n"
-       "source-modules " (count (worlds/sourceprogramworldv0-modules source)) "\n"
-       "source-imports " (count (worlds/sourceprogramworldv0-imports source)) "\n"
+       "source-modules " (count (stages/sourcestagev0-modules source)) "\n"
+       "source-imports " (count (stages/sourcestagev0-imports source)) "\n"
        "source-definitions " (source-definition-count rows) "\n"
-       "world-types " (count (core/nativeworld-types program)) "\n"
-       "world-functions " (count (core/nativeworld-functions program)) "\n"
-       "world-abis " (count (core/nativeworld-abis program)) "\n"
-       "native-world module.native-world\n"
-       "native-world-sha256 module.native-world.sha256\n"
-       "projected-types " (count (core/nativeworld-types projected)) "\n"
-       (body-slice/function-report (core/nativeworld-functions projected))
+       "program-types " (count (core/nativecoreprogram-types program)) "\n"
+       "program-functions " (count (core/nativecoreprogram-functions program)) "\n"
+       "program-abis " (count (core/nativecoreprogram-abis program)) "\n"
+       "native-program module.native-program\n"
+       "native-program-sha256 module.native-program.sha256\n"
+       "projected-types " (count (core/nativecoreprogram-types projected)) "\n"
+       (body-slice/function-report (core/nativecoreprogram-functions projected))
        (slice/obligation-report "obligation-projection" projected abi)
        (body-slice/failing-obligations projected abi)))
 
 (defn materialize-c17! [projected artifacts-dir]
   (start-stage! "materialization-c17")
-  (let [result (body/materialize-world projected 0)
+  (let [result (body/materialize-program projected 0)
         ok? (body/materialization-ok? result)
         report (str "materialize-c17 "
                     (if ok?
@@ -570,7 +570,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 
 (defn materialize-qbe! [projected artifacts-dir abi-id]
   (start-stage! "materialization-qbe")
-  (let [result (qbe/materialize-world projected 0 abi-id)
+  (let [result (qbe/materialize-program projected 0 abi-id)
         ok? (instance? native.qbe.QbeSuccess result)
         report (str "materialize-qbe "
                     (if ok?
@@ -590,7 +590,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
         {:ok? true
          :report report}))))
 
-(defn materialize-worlds! [projected artifacts-dir materializers abi-id]
+(defn materialize-programs! [projected artifacts-dir materializers abi-id]
   (loop [remaining materializers reports []]
     (if (empty? remaining)
       {:ok? true :report (str (apply str reports) "result PASS\n")}
@@ -623,8 +623,8 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
             configuration ["profile=3" (str "abi=" abi-id)]
             _finish-projection (finish-stage! "source-projection" "ACCEPTED")
             _start-freeze (start-stage! "source-freeze")
-            source (slice/source-world rows "beagle.core" "source.facts")
-            freeze-result (lower/freeze-source-world source compiler-commit configuration)]
+            source (slice/source-program rows "beagle.core" "source.facts")
+            freeze-result (lower/freeze-source-stage source compiler-commit configuration)]
         (if-not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result)
           (do
             (finish-stage! "source-freeze" "REJECTED")
@@ -633,7 +633,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
           (let [_finish-freeze (finish-stage! "source-freeze" "ACCEPTED")
                 frozen-source (lower/sourcefreezeacceptedv0-frozen freeze-result)
                 _start-typing (start-stage! "source-to-typed")
-                typing-result (lower/lower-typed-world frozen-source compiler-commit configuration)]
+                typing-result (lower/lower-typed-stage frozen-source compiler-commit configuration)]
             (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
               (do
                 (finish-stage! "source-to-typed" "REJECTED")
@@ -645,7 +645,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                     frozen-typed (lower/typingacceptedv0-frozen typing-result)
                     typed-slice (lower/typingacceptedv0-slice typing-result)
                     _start-lowering (start-stage! "typed-to-native")
-                    native-result (lower/lower-native-world frozen-typed typed-slice
+                    native-result (lower/lower-native-stage frozen-typed typed-slice
                                     compiler-commit configuration abi)]
                 (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
                   (do
@@ -658,14 +658,14 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                                   "result FAIL NativeLoweringCompleteV0 required\n")})
                   (let [_finish-lowering (finish-stage! "typed-to-native" "COMPLETE")
                         frozen-native (lower/nativeloweringcompletev0-frozen native-result)
-                        native-encoding (worlds/frozennativeworldv0-encoding frozen-native)
+                        native-encoding (stages/frozennativestagev0-encoding frozen-native)
                         _write-native
-                        (spit (str artifacts-dir "/module.native-world") native-encoding)
-                        program (worlds/nativeworldv0-program
-                                 (worlds/frozennativeworldv0-world frozen-native))
-                        projected (body-slice/projected-world program)
+                        (spit (str artifacts-dir "/module.native-program") native-encoding)
+                        program (stages/nativestagev0-program
+                                 (stages/frozennativestagev0-stage frozen-native))
+                        projected (body-slice/projected-program program)
                         _start-obligations (start-stage! "native-obligations")
-                        verdicts (obligations/validate-native-world projected abi)
+                        verdicts (obligations/validate-native-core-program projected abi)
                         head (native-report-head rows entries source program projected
                                                  abi)]
                     (if-not (obligation-pass? verdicts)
@@ -677,7 +677,7 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                       (do
                         (finish-stage! "native-obligations" "PASS")
                         (let [materialization
-                              (materialize-worlds! projected artifacts-dir materializers
+                              (materialize-programs! projected artifacts-dir materializers
                                                    abi-id)]
                           (assoc materialization
                                  :report (str head (:report materialization))))))))))))))))
@@ -715,9 +715,9 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 runner_rc=$?
 set -e
 
-if [[ -f "$work/artifacts/module.native-world" ]]; then
-    sha256sum "$work/artifacts/module.native-world" | awk '{print $1}' \
-        >"$work/artifacts/module.native-world.sha256"
+if [[ -f "$work/artifacts/module.native-program" ]]; then
+    sha256sum "$work/artifacts/module.native-program" | awk '{print $1}' \
+        >"$work/artifacts/module.native-program.sha256"
 fi
 
 if [[ -f "$work/artifacts/source.facts" ]]; then
@@ -728,9 +728,9 @@ fi
 if [[ -f "$work/artifacts/report.txt" ]]; then
     cp "$work/artifacts/report.txt" "$out/report.txt"
 fi
-for world_artifact in module.native-world module.native-world.sha256; do
-    if [[ -f "$work/artifacts/$world_artifact" ]]; then
-        cp "$work/artifacts/$world_artifact" "$out/$world_artifact"
+for program_artifact in module.native-program module.native-program.sha256; do
+    if [[ -f "$work/artifacts/$program_artifact" ]]; then
+        cp "$work/artifacts/$program_artifact" "$out/$program_artifact"
     fi
 done
 if [[ $runner_rc -ne 0 ]]; then
@@ -742,7 +742,7 @@ if [[ $runner_rc -ne 0 ]]; then
     exit "$runner_rc"
 fi
 
-for artifact in module.native-world module.native-world.sha256 report.txt; do
+for artifact in module.native-program module.native-program.sha256 report.txt; do
     [[ -f "$work/artifacts/$artifact" ]] || die "successful runner omitted $artifact"
     cp "$work/artifacts/$artifact" "$out/$artifact"
 done
@@ -769,5 +769,5 @@ done
 
 cat "$out/report.txt"
 materializer_list="$(IFS=,; printf '%s' "${materializers[*]}")"
-printf 'beagle build: wrote frozen Native World + %s projections to %s\n' \
+printf 'beagle build: wrote frozen native program + %s projections to %s\n' \
     "$materializer_list" "$out"

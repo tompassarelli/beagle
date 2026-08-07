@@ -3,9 +3,9 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 2
-world-types 47
-world-functions 34
-world-abis 34
+program-types 47
+program-functions 34
+program-abis 34
 projected-types 28
 lowered fn_0 char-at 3 blocks
 lowered fn_1 split-on 13 blocks

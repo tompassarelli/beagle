@@ -1,23 +1,23 @@
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
-world-types 71
-world-layouts 71
-world-functions 0
-world-abis 0
+program-types 71
+program-layouts 71
+program-functions 0
+program-abis 0
 projected-types 5
 type I64
 type Instant
 type TermCodecMeasure
 type TripleRow
 type TransactionRow
-obligation-world PASS valid-ssa
-obligation-world PASS exhaustive-matches
-obligation-world PASS closed-layouts
-obligation-world PASS checked-arithmetic
-obligation-world PASS legal-abi
-obligation-world PASS discharged-tokens
-obligation-world PASS bounded-effects
+obligation-program PASS valid-ssa
+obligation-program PASS exhaustive-matches
+obligation-program PASS closed-layouts
+obligation-program PASS checked-arithmetic
+obligation-program PASS legal-abi
+obligation-program PASS discharged-tokens
+obligation-program PASS bounded-effects
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

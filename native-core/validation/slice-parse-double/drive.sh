@@ -34,7 +34,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -50,7 +50,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   target="$scratch/out/native/$module.clj"
   [[ -f "$target" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$target"
@@ -76,7 +76,7 @@ for line in \
   'materialize OK module_0.h module_0.c' \
   'qbe-stage typed-to-native COMPLETE' \
   'qbe-selected-function parse-value' \
-  "qbe-materialize REFUSED native world uses a shape outside the QBE materializer's slice"; do
+  "qbe-materialize REFUSED native program uses a shape outside the QBE materializer's slice"; do
   rg -Fx "$line" "$scratch/report.txt" >/dev/null \
     || die "report is missing: $line"
 done

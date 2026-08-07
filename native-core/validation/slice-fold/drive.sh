@@ -23,7 +23,7 @@ trap cleanup EXIT
 mkdir -p "$work/src/native" "$artifacts"
 
 # Native compiler modules are hosted Clojure Beagle sources.
-for name in core worlds obligations lower fold_c17 fold_slice_corpus; do
+for name in core stages obligations lower fold_c17 fold_slice_corpus; do
   cp "$repo/native-core/src/native/$name.bclj" "$work/src/native/$name.bclj"
 done
 

@@ -2,11 +2,11 @@
 # Drive fram:src/fram/store.bgl through the whole native pipeline and emit the
 # C17 projection of the record ABI its signatures close over.
 #
-#   beagle-ast -> source facts -> frozen source world -> typed world
-#     -> native world -> 7 obligations -> native.c11 emitters
+#   beagle-ast -> source facts -> frozen source program -> typed program
+#     -> native program -> 7 obligations -> native.c11 emitters
 #
 # store.bgl declares no record of its own: every type in its signatures comes
-# from fram.types, so both ASTs are projected into one source world.
+# from fram.types, so both ASTs are projected into one source program.
 #
 # Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_STORE, FRAM_TYPES,
 #      NATIVE_SLICE_COMMITTED_FACTS.
@@ -52,7 +52,7 @@ fi
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -63,10 +63,10 @@ fi
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations c11 slice; do
+for m in stages lower obligations c11 slice; do
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
 done
-for m in worlds lower obligations c11 slice; do
+for m in stages lower obligations c11 slice; do
   awk -v imp="(import '[native.core $records])" \
     '!seen && /^$/ { print imp; seen = 1 } { print }' \
     "$scratch/out/native/$m.clj" >"$scratch/out/native/$m.clj.tmp"

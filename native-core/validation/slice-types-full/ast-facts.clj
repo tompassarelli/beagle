@@ -2,7 +2,7 @@
 ;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object.
 ;; Node "0" is reserved for the module root; ordinals come from a pre-order walk,
 ;; so the projection is byte-stable for a given source file.
-;; Only the JSON decode lives here: the source world, its identity, and every
+;; Only the JSON decode lives here: the source program, its identity, and every
 ;; pass downstream are native.slice / native.lower.
 (require '[cheshire.core :as json])
 

@@ -1,12 +1,12 @@
 #lang beagle/clj
-;; Source-world projection of fram:src/fram/fold.bclj plus the fram.types
+;; Source-program projection of fram:src/fram/fold.bclj plus the fram.types
 ;; declarations its signatures name, driven freeze -> typed -> native -> C17.
 (ns native.fold-slice-corpus)
 
 (define-mode strict)
 
 (require native.core :as core)
-(require native.worlds :as worlds)
+(require native.stages :as stages)
 (require native.lower :as lower)
 (require native.obligations :as obligations)
 (require native.fold-c17 :as c17)
@@ -18,7 +18,7 @@
 (def configuration: (Vec String)
   ["profile=3" "target=native-core" "module=fram.fold"])
 
-;; Receipt provenance only; layout numbers, not this string, partition worlds.
+;; Receipt provenance only; layout numbers, not this string, partition programs.
 (defn configuration-for [(abi : core/AbiProfileV0)] -> (Vec String)
   (conj configuration (str "abi=" (core/abiprofilev0-id abi))))
 
@@ -350,39 +350,39 @@
             (add-once with-predicate (factspecv0-object fact))
             with-predicate))))))
 
-(def marker-nodes: (Vec worlds/TermNodeV0)
+(def marker-nodes: (Vec stages/TermNodeV0)
   (mapv
-    (fn [(label : String)] -> worlds/TermNodeV0
-      (worlds/->TermNodeV0 (node-id label) (worlds/->TextTermV0 "source-node-v0")))
+    (fn [(label : String)] -> stages/TermNodeV0
+      (stages/->TermNodeV0 (node-id label) (stages/->TextTermV0 "source-node-v0")))
     node-labels))
 
-(def text-nodes: (Vec worlds/TermNodeV0)
+(def text-nodes: (Vec stages/TermNodeV0)
   (mapv
-    (fn [(value : String)] -> worlds/TermNodeV0
-      (worlds/->TermNodeV0 (text-id value) (worlds/->TextTermV0 value)))
+    (fn [(value : String)] -> stages/TermNodeV0
+      (stages/->TermNodeV0 (text-id value) (stages/->TextTermV0 value)))
     text-values))
 
-(def fact-nodes: (Vec worlds/TermNodeV0)
-  (loop [index: Int 0 nodes: (Vec worlds/TermNodeV0) []]
+(def fact-nodes: (Vec stages/TermNodeV0)
+  (loop [index: Int 0 nodes: (Vec stages/TermNodeV0) []]
     (if (>= index (count slice-facts))
       nodes
       (let [fact: FactSpecV0 (nth slice-facts index)]
         (recur (+ index 1)
           (conj nodes
-            (worlds/->TermNodeV0
+            (stages/->TermNodeV0
               (slice-id "fact" (str index))
-              (worlds/->TripleTermV0
+              (stages/->TripleTermV0
                 (node-id (factspecv0-subject fact))
                 (text-id (factspecv0-predicate fact))
                 (if (factspecv0-text-object fact)
                   (text-id (factspecv0-object fact))
                   (node-id (factspecv0-object fact)))))))))))
 
-(def source-world: worlds/SourceProgramWorldV0
-  (worlds/->SourceProgramWorldV0
-    (worlds/->TermGraphV0 (node-id module-name)
+(def source-program: stages/SourceStageV0
+  (stages/->SourceStageV0
+    (stages/->TermGraphV0 (node-id module-name)
       (vec (concat marker-nodes text-nodes fact-nodes)))
-    [(worlds/->SourceModuleV0
+    [(stages/->SourceModuleV0
        (slice-id "module" module-name)
        module-name
        module-path
@@ -398,22 +398,22 @@
   [(source-receipt : core/PassReceiptV0)
    (typed-receipt : core/PassReceiptV0)
    (native-receipt : core/PassReceiptV0)
-   (program : core/NativeWorld)
+   (program : core/NativeCoreProgram)
    (complete : Bool)
    (host-erased : Bool)])
 
 (defn freeze-result [(abi : core/AbiProfileV0)] -> lower/SourceFreezeResultV0
-  (lower/freeze-source-world source-world compiler-commit
+  (lower/freeze-source-stage source-program compiler-commit
     (configuration-for abi)))
 
 (defn require-freeze-accepted
   [(result : lower/SourceFreezeResultV0)] -> lower/SourceFreezeAcceptedV0
   (if (instance? native.lower.SourceFreezeAcceptedV0 result)
     result
-    (throw (ex-info "fram.fold source world was rejected at freeze" {}))))
+    (throw (ex-info "fram.fold source program was rejected at freeze" {}))))
 
 (defn typing-result [(abi : core/AbiProfileV0)] -> lower/TypingResultV0
-  (lower/lower-typed-world
+  (lower/lower-typed-stage
     (lower/sourcefreezeacceptedv0-frozen (require-freeze-accepted (freeze-result abi)))
     compiler-commit (configuration-for abi)))
 
@@ -432,7 +432,7 @@
     (throw (ex-info "fram.fold annotations did not close over Native Core types" {}))))
 
 (defn native-frozen
-  [(result : lower/NativeLoweringResultV0)] -> worlds/FrozenNativeWorldV0
+  [(result : lower/NativeLoweringResultV0)] -> stages/FrozenNativeStageV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-frozen result)
     (lower/nativeloweringpendingv0-frozen result)))
@@ -446,37 +446,37 @@
 (defn slice-state [(abi : core/AbiProfileV0)] -> SliceStateV0
   (let [frozen-result: lower/SourceFreezeResultV0 (freeze-result abi)
         frozen-accepted: lower/SourceFreezeAcceptedV0 (require-freeze-accepted frozen-result)
-        frozen-source: worlds/FrozenSourceWorldV0
+        frozen-source: stages/FrozenSourceStageV0
         (lower/sourcefreezeacceptedv0-frozen frozen-accepted)
         typed: lower/TypingAcceptedV0
         (require-typing-accepted
-          (lower/lower-typed-world frozen-source compiler-commit
+          (lower/lower-typed-stage frozen-source compiler-commit
             (configuration-for abi)))
         native: lower/NativeLoweringResultV0
-        (lower/lower-native-world
+        (lower/lower-native-stage
           (lower/typingacceptedv0-frozen typed)
           (lower/typingacceptedv0-slice typed)
           compiler-commit
           (configuration-for abi)
           abi)
-        frozen-native: worlds/FrozenNativeWorldV0 (native-frozen native)]
+        frozen-native: stages/FrozenNativeStageV0 (native-frozen native)]
     (->SliceStateV0
       (lower/sourcefreezeacceptedv0-receipt frozen-accepted)
       (lower/typingacceptedv0-receipt typed)
       (native-receipt native)
-      (worlds/nativeworldv0-program (worlds/frozennativeworldv0-world frozen-native))
+      (stages/nativestagev0-program (stages/frozennativestagev0-stage frozen-native))
       (instance? native.lower.NativeLoweringCompleteV0 native)
-      (lower/native-world-host-erased? frozen-native))))
+      (lower/native-program-host-erased? frozen-native))))
 
 (def obligation-names: (Vec String)
   ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
    "legal-abi" "discharged-tokens" "bounded-effects"])
 
 (defn obligation-report
-  [(program : core/NativeWorld)
+  [(program : core/NativeCoreProgram)
    (abi : core/AbiProfileV0)] -> String
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
-        (obligations/validate-native-world program abi)]
+        (obligations/validate-native-core-program program abi)]
     (loop [index: Int 0 lines: (Vec String) []]
       (if (>= index (count verdicts))
         (c17/join-lines lines)
@@ -517,18 +517,18 @@
     (c17/c17success-artifact result)
     (throw (ex-info (c17/c17failure-detail result) {}))))
 
-(defn emitted-types [(program : core/NativeWorld)] -> (Vec core/TypeDef)
+(defn emitted-types [(program : core/NativeCoreProgram)] -> (Vec core/TypeDef)
   (c17/dependency-ordered-types
-    (core/nativeworld-types program)
-    (core/nativeworld-layouts program)))
+    (core/nativecoreprogram-types program)
+    (core/nativecoreprogram-layouts program)))
 
-(defn probe-arena-bytes [(program : core/NativeWorld)] -> Int
+(defn probe-arena-bytes [(program : core/NativeCoreProgram)] -> Int
   (let [types: (Vec core/TypeDef) (emitted-types program)]
     (loop [index: Int 0 total: Int 64]
       (if (>= index (count types))
         total
         (let [layout: (U core/LayoutDef Nil)
-              (c17/layout-for-type (core/nativeworld-layouts program)
+              (c17/layout-for-type (core/nativecoreprogram-layouts program)
                 (core/typedef-id (nth types index)))]
           (recur (+ index 1)
             (if (nil? layout)
@@ -536,7 +536,7 @@
               (+ total (+ (core/layoutdef-size-bytes layout)
                           (core/layoutdef-align-bytes layout))))))))))
 
-(defn probe-call-lines [(program : core/NativeWorld)] -> String
+(defn probe-call-lines [(program : core/NativeCoreProgram)] -> String
   (let [types: (Vec core/TypeDef) (emitted-types program)]
     (loop [index: Int 0 lines: (Vec String) []]
       (if (>= index (count types))
@@ -548,7 +548,7 @@
                 "    return " (+ index 1) ";\n"
                 "  }"))))))))
 
-(defn probe-main-text [(program : core/NativeWorld)] -> String
+(defn probe-main-text [(program : core/NativeCoreProgram)] -> String
   (str "/* Generated by native.fold-slice-corpus; do not edit. */\n"
     "#include \"module_0.h\"\n\n"
     "static int probe_type(native_arena *arena, size_t size, size_t align) {\n"
@@ -581,18 +581,18 @@
 (defn slice-report-text
   [(state : SliceStateV0)
    (abi : core/AbiProfileV0)] -> String
-  (let [program: core/NativeWorld (slicestatev0-program state)]
+  (let [program: core/NativeCoreProgram (slicestatev0-program state)]
     (str "fram.fold Native Core slice\n"
       "source: fram:" module-path "\n"
-      "types: " (count (core/nativeworld-types program)) "\n"
-      "layouts: " (count (core/nativeworld-layouts program)) "\n"
-      "functions: " (count (core/nativeworld-functions program)) "\n"
-      "abis: " (count (core/nativeworld-abis program)) "\n"
+      "types: " (count (core/nativecoreprogram-types program)) "\n"
+      "layouts: " (count (core/nativecoreprogram-layouts program)) "\n"
+      "functions: " (count (core/nativecoreprogram-functions program)) "\n"
+      "abis: " (count (core/nativecoreprogram-abis program)) "\n"
       "native lowering complete: " (if (slicestatev0-complete state) "yes" "no") "\n"
       "native terms host-erased: " (if (slicestatev0-host-erased state) "yes" "no") "\n"
       "core validator: "
-      (if (core/validationreport-passed (core/validate-world program)) "pass" "FAIL") "\n\n"
-      "seven structural obligations (native.obligations/validate-native-world):\n"
+      (if (core/validationreport-passed (core/validate-program program)) "pass" "FAIL") "\n\n"
+      "seven structural obligations (native.obligations/validate-native-core-program):\n"
       (obligation-report program abi)
       "\n"
       (receipt-report "source-freeze receipt obligations" (slicestatev0-source-receipt state))
@@ -609,8 +609,8 @@
   [(directory : String)
    (abi : core/AbiProfileV0)] -> Nil
   (let [state: SliceStateV0 (slice-state abi)
-        program: core/NativeWorld (slicestatev0-program state)
-        artifact: c17/C17Artifact (require-artifact (c17/materialize-world program 0))]
+        program: core/NativeCoreProgram (slicestatev0-program state)
+        artifact: c17/C17Artifact (require-artifact (c17/materialize-program program 0))]
     (do
       (spit (str directory "/" (c17/c17artifact-header-name artifact))
         (c17/c17artifact-header-text artifact))

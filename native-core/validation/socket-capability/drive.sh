@@ -18,7 +18,7 @@ mkdir -p "$scratch/out" "$scratch/generated"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -32,7 +32,7 @@ mkdir -p "$scratch/out" "$scratch/generated"
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations fold_c17 body_c17 qbe socket_capability_fixture; do
+for module in stages lower obligations fold_c17 body_c17 qbe socket_capability_fixture; do
   generated="$scratch/out/native/$module.clj"
   [[ -f "$generated" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
@@ -52,7 +52,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 report="$scratch/generated/report.txt"
 rg -Fx 'fixture PASS' "$report" >/dev/null || {
   cat "$report" >&2
-  die "Native World fixture failed"
+  die "native program fixture failed"
 }
 rg -Fx 'abis 5' "$report" >/dev/null || die "socket imports were not closed"
 rg -Fx \

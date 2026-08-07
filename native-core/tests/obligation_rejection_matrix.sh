@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Evaluates every obligations.bclj fixture (positive + all negatives) via a
-# bb-hosted clj build and reports each corrupt world's rejection tag.
+# bb-hosted clj build and reports each corrupt program's rejection tag.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,7 +13,7 @@ cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
 
 mkdir -p "$work/src/native"
-for name in core worlds lower obligations; do
+for name in core stages lower obligations; do
   cp "$repo/native-core/src/native/$name.bclj" "$work/src/native/$name.bclj"
 done
 
@@ -24,7 +24,7 @@ BEAGLE_OUT="$work/out" "$repo/bin/beagle" build "$work"/src/native/*.bclj \
 # imported union emits an unqualified variant name, so each consumer module
 # re-exports native.core's records under :refer :all as a standing workaround.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$work/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations; do
+for m in stages lower obligations; do
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$work/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \
     '!seen && /^$/ { print imp; seen = 1 } { print }' \

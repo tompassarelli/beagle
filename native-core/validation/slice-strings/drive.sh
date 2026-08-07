@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drive the text corpus and a real FRI replay slice through the native pipeline:
-#   beagle-ast -> source facts -> frozen source world -> typed world
-#     -> native world with lowered blocks -> 7 obligations
+#   beagle-ast -> source facts -> frozen source program -> typed program
+#     -> native program with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 #
 # Two projections: text_ops.facts (this directory's corpus) and
@@ -70,7 +70,7 @@ fi
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -86,7 +86,7 @@ fi
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \

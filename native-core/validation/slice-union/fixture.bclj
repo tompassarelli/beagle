@@ -33,7 +33,7 @@
 (defn any-compare [(left : Any) (right : Any)] -> Int
   (compare left right))
 
-;; A narrowed record crosses a by-value return boundary. The native world
+;; A narrowed record crosses a by-value return boundary. The native program
 ;; extracts its reference payload, then materializes a checked shallow copy.
 (defn pair-copy-of [(value : Any)] -> Pair
   (if (pair? value)

@@ -1,7 +1,7 @@
 #lang beagle/clj
 (ns native.lower
   (:require [native.core :as core]
-            [native.worlds :as worlds]))
+            [native.stages :as stages]))
 
 (define-mode strict)
 
@@ -26,7 +26,7 @@
 
 (defunion SourceFreezeResultV0
   (SourceFreezeAcceptedV0
-    [(frozen : worlds/FrozenSourceWorldV0)
+    [(frozen : stages/FrozenSourceStageV0)
      (receipt : core/PassReceiptV0)])
   (SourceFreezeRejectedV0
     [(failure : LowerFailureV0)
@@ -42,57 +42,57 @@
   (core/native-id= left right))
 
 (defn find-node
-  [(graph : worlds/TermGraphV0)
-   (target : core/NativeId)] -> (U worlds/TermNodeV0 Nil)
-  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+  [(graph : stages/TermGraphV0)
+   (target : core/NativeId)] -> (U stages/TermNodeV0 Nil)
+  (let [nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)]
     (loop [index: Int 0]
       (if (>= index (count nodes))
         nil
-        (let [node: worlds/TermNodeV0 (nth nodes index)]
-          (if (same-id? target (worlds/termnodev0-identity node))
+        (let [node: stages/TermNodeV0 (nth nodes index)]
+          (if (same-id? target (stages/termnodev0-identity node))
             node
             (recur (+ index 1))))))))
 
 (defn term-at
-  [(graph : worlds/TermGraphV0)
-   (target : core/NativeId)] -> (U worlds/TermV0 Nil)
-  (let [node: (U worlds/TermNodeV0 Nil) (find-node graph target)]
-    (if (nil? node) nil (worlds/termnodev0-term node))))
+  [(graph : stages/TermGraphV0)
+   (target : core/NativeId)] -> (U stages/TermV0 Nil)
+  (let [node: (U stages/TermNodeV0 Nil) (find-node graph target)]
+    (if (nil? node) nil (stages/termnodev0-term node))))
 
 (defn text-at
-  [(graph : worlds/TermGraphV0)
+  [(graph : stages/TermGraphV0)
    (target : core/NativeId)] -> (U String Nil)
-  (let [term: (U worlds/TermV0 Nil) (term-at graph target)]
+  (let [term: (U stages/TermV0 Nil) (term-at graph target)]
     (if (nil? term)
       nil
-      (if (instance? native.worlds.TextTermV0 term) (worlds/texttermv0-value term) nil))))
+      (if (instance? native.stages.TextTermV0 term) (stages/texttermv0-value term) nil))))
 
-(defn term-references [(term : worlds/TermV0)] -> (Vec core/NativeId)
+(defn term-references [(term : stages/TermV0)] -> (Vec core/NativeId)
   (cond
-    (instance? native.worlds.RefTermV0 term)
-    [(worlds/reftermv0-target term)]
+    (instance? native.stages.RefTermV0 term)
+    [(stages/reftermv0-target term)]
 
-    (instance? native.worlds.TripleTermV0 term)
-    [(worlds/tripletermv0-subject term)
-     (worlds/tripletermv0-predicate term)
-     (worlds/tripletermv0-object term)]
+    (instance? native.stages.TripleTermV0 term)
+    [(stages/tripletermv0-subject term)
+     (stages/tripletermv0-predicate term)
+     (stages/tripletermv0-object term)]
 
     :else []))
 
-(defn graph-identities [(graph : worlds/TermGraphV0)] -> (Vec core/NativeId)
+(defn graph-identities [(graph : stages/TermGraphV0)] -> (Vec core/NativeId)
   (mapv
-    (fn [(node : worlds/TermNodeV0)] -> core/NativeId
-      (worlds/termnodev0-identity node))
-    (worlds/termgraphv0-nodes graph)))
+    (fn [(node : stages/TermNodeV0)] -> core/NativeId
+      (stages/termnodev0-identity node))
+    (stages/termgraphv0-nodes graph)))
 
-(defn graph-identity-index [(graph : worlds/TermGraphV0)] -> (Map String Bool)
-  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+(defn graph-identity-index [(graph : stages/TermGraphV0)] -> (Map String Bool)
+  (let [nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)]
     (loop [index: Int 0 identities: (Map String Bool) {}]
       (if (>= index (count nodes))
         identities
         (recur (+ index 1)
           (assoc identities
-            (id-value (worlds/termnodev0-identity (nth nodes index))) true))))))
+            (id-value (stages/termnodev0-identity (nth nodes index))) true))))))
 
 (defn refs-resolve-in?
   [(identities : (Map String Bool))
@@ -105,36 +105,36 @@
         (recur (+ index 1))))))
 
 (defn graph-reference-closed-in?
-  [(graph : worlds/TermGraphV0)
+  [(graph : stages/TermGraphV0)
    (identities : (Map String Bool))] -> Bool
-  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+  (let [nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)]
     (loop [index: Int 0]
       (if (>= index (count nodes))
         true
-        (let [node: worlds/TermNodeV0 (nth nodes index)]
+        (let [node: stages/TermNodeV0 (nth nodes index)]
           (if (refs-resolve-in? identities
-                (term-references (worlds/termnodev0-term node)))
+                (term-references (stages/termnodev0-term node)))
             (recur (+ index 1))
             false))))))
 
-(defn graph-reference-closed? [(graph : worlds/TermGraphV0)] -> Bool
+(defn graph-reference-closed? [(graph : stages/TermGraphV0)] -> Bool
   (graph-reference-closed-in? graph (graph-identity-index graph)))
 
-(defn source-facts [(graph : worlds/TermGraphV0)] -> (Vec SourceFactV0)
-  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+(defn source-facts [(graph : stages/TermGraphV0)] -> (Vec SourceFactV0)
+  (let [nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)]
     (loop [index: Int 0 facts: (Vec SourceFactV0) []]
       (if (>= index (count nodes))
         facts
-        (let [node: worlds/TermNodeV0 (nth nodes index)
-              term: worlds/TermV0 (worlds/termnodev0-term node)]
-          (if (instance? native.worlds.TripleTermV0 term)
+        (let [node: stages/TermNodeV0 (nth nodes index)
+              term: stages/TermV0 (stages/termnodev0-term node)]
+          (if (instance? native.stages.TripleTermV0 term)
             (recur (+ index 1)
               (conj facts
                 (->SourceFactV0
-                  (worlds/termnodev0-identity node)
-                  (worlds/tripletermv0-subject term)
-                  (worlds/tripletermv0-predicate term)
-                  (worlds/tripletermv0-object term))))
+                  (stages/termnodev0-identity node)
+                  (stages/tripletermv0-subject term)
+                  (stages/tripletermv0-predicate term)
+                  (stages/tripletermv0-object term))))
             (recur (+ index 1) facts)))))))
 
 ;; Lookup maps preserve first-fact semantics while resolving graph text once.
@@ -150,18 +150,18 @@
    (module-roots : (Map String core/NativeId))
    (record-keys : (Vec String))])
 
-(defn graph-text-index [(graph : worlds/TermGraphV0)] -> (Map String String)
-  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+(defn graph-text-index [(graph : stages/TermGraphV0)] -> (Map String String)
+  (let [nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)]
     (loop [position: Int 0 texts: (Map String String) {}]
       (if (>= position (count nodes))
         texts
-        (let [node: worlds/TermNodeV0 (nth nodes position)
-              term: worlds/TermV0 (worlds/termnodev0-term node)]
+        (let [node: stages/TermNodeV0 (nth nodes position)
+              term: stages/TermV0 (stages/termnodev0-term node)]
           (recur (+ position 1)
-            (if (instance? native.worlds.TextTermV0 term)
+            (if (instance? native.stages.TextTermV0 term)
               (assoc texts
-                (id-value (worlds/termnodev0-identity node))
-                (worlds/texttermv0-value term))
+                (id-value (stages/termnodev0-identity node))
+                (stages/texttermv0-value term))
               texts)))))))
 
 (defn graph-text-or-empty
@@ -326,20 +326,20 @@
               (assoc module-roots module-name root))))))))
 
 ;; The module table, not the term graph, is authoritative for a module's root
-;; and name; a projection that spells neither is still a named module world.
+;; and name; a projection that spells neither is still a named module.
 (defn seed-module-table
   [(index : SourceIndexV0)
-   (modules : (Vec worlds/SourceModuleV0))] -> SourceIndexV0
+   (modules : (Vec stages/SourceModuleV0))] -> SourceIndexV0
   (loop [position: Int 0 seeded: SourceIndexV0 index]
     (if (>= position (count modules))
       seeded
-      (let [module: worlds/SourceModuleV0 (nth modules position)
-            root: core/NativeId (worlds/sourcemodulev0-root-term module)
+      (let [module: stages/SourceModuleV0 (nth modules position)
+            root: core/NativeId (stages/sourcemodulev0-root-term module)
             texts: (Map String String)
             (if (nil? (index-first-text seeded root "namespace"))
               (assoc (sourceindexv0-first-texts seeded)
                 (source-index-key root "namespace")
-                (worlds/sourcemodulev0-name module))
+                (stages/sourcemodulev0-name module))
               (sourceindexv0-first-texts seeded))
             roots: (Vec core/NativeId) (index-form-ids seeded "module-root")
             listed: (Vec core/NativeId)
@@ -350,8 +350,8 @@
              (assoc (sourceindexv0-form-ids seeded) "module-root" listed)]))))))
 
 (defn build-source-index
-  [(graph : worlds/TermGraphV0)
-   (modules : (Vec worlds/SourceModuleV0))] -> SourceIndexV0
+  [(graph : stages/TermGraphV0)
+   (modules : (Vec stages/SourceModuleV0))] -> SourceIndexV0
   (let [facts: (Vec SourceFactV0) (source-facts graph)
         graph-texts: (Map String String) (graph-text-index graph)
         partial: SourceIndexV0
@@ -422,94 +422,26 @@
                   (conj collected key))))))]
     (with indexed [:record-keys keys])))
 
-(defn encode-term [(term : worlds/TermV0)] -> String
-  (cond
-    (instance? native.worlds.NilTermV0 term)
-    (worlds/canonical-record "nil"
-      [(worlds/encode-bool (worlds/niltermv0-token term))])
-
-    (instance? native.worlds.BoolTermV0 term)
-    (worlds/canonical-record "bool"
-      [(worlds/encode-bool (worlds/booltermv0-value term))])
-
-    (instance? native.worlds.I64TermV0 term)
-    (worlds/canonical-record "i64" [(str (worlds/i64termv0-value term))])
-
-    (instance? native.worlds.F64TermV0 term)
-    (worlds/canonical-record "f64"
-      [(worlds/f64termv0-canonical-value term)])
-
-    (instance? native.worlds.TextTermV0 term)
-    (worlds/canonical-record "text" [(worlds/texttermv0-value term)])
-
-    (instance? native.worlds.RefTermV0 term)
-    (worlds/canonical-record "ref"
-      [(id-value (worlds/reftermv0-target term))])
-
-    :else
-    (worlds/canonical-record "triple"
-      [(id-value (worlds/tripletermv0-subject term))
-       (id-value (worlds/tripletermv0-predicate term))
-       (id-value (worlds/tripletermv0-object term))])))
-
-(defn encode-node [(node : worlds/TermNodeV0)] -> String
-  (worlds/canonical-record "node"
-    [(id-value (worlds/termnodev0-identity node))
-     (encode-term (worlds/termnodev0-term node))]))
-
-(defn encode-term-graph [(graph : worlds/TermGraphV0)] -> String
-  (let [encoded-nodes: (Vec String)
-        (mapv
-          (fn [(node : worlds/TermNodeV0)] -> String (encode-node node))
-          (worlds/termgraphv0-nodes graph))]
-    (worlds/canonical-record "term-graph-v0"
-      [(id-value (worlds/termgraphv0-root graph))
-       (worlds/canonical-set "nodes" encoded-nodes)])))
-
-(defn encode-source-module [(module : worlds/SourceModuleV0)] -> String
-  (worlds/canonical-record "source-module-v0"
-    [(id-value (worlds/sourcemodulev0-id module))
-     (worlds/sourcemodulev0-name module)
-     (worlds/sourcemodulev0-relative-path module)
-     (worlds/sourcemodulev0-source-digest module)
-     (worlds/sourcemodulev0-interface-digest module)
-     (id-value (worlds/sourcemodulev0-root-term module))]))
-
-(defn encode-source-world [(world : worlds/SourceProgramWorldV0)] -> String
-  (let [modules: (Vec String)
-        (mapv
-          (fn [(module : worlds/SourceModuleV0)] -> String
-            (encode-source-module module))
-          (worlds/sourceprogramworldv0-modules world))
-        imports: (Vec String)
-        (mapv
-          (fn [(id : core/NativeId)] -> String (id-value id))
-          (worlds/sourceprogramworldv0-imports world))]
-    (worlds/canonical-record "source-program-world-v0"
-      [(encode-term-graph (worlds/sourceprogramworldv0-terms world))
-       (worlds/canonical-set "modules" modules)
-       (worlds/canonical-set "imports" imports)])))
-
-(defn source-world-valid? [(world : worlds/SourceProgramWorldV0)] -> Bool
-  (let [graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms world)
-        nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)
+(defn source-stage-valid? [(stage : stages/SourceStageV0)] -> Bool
+  (let [graph: stages/TermGraphV0 (stages/sourcestagev0-terms stage)
+        nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)
         identities: (Map String Bool) (graph-identity-index graph)
-        modules: (Vec worlds/SourceModuleV0)
-        (worlds/sourceprogramworldv0-modules world)]
-    (and (= true (get identities (id-value (worlds/termgraphv0-root graph))))
+        modules: (Vec stages/SourceModuleV0)
+        (stages/sourcestagev0-modules stage)]
+    (and (= true (get identities (id-value (stages/termgraphv0-root graph))))
          (= (count nodes) (count identities))
          (graph-reference-closed-in? graph identities)
          (every?
-           (fn [(module : worlds/SourceModuleV0)] -> Bool
+           (fn [(module : stages/SourceModuleV0)] -> Bool
              (= true
                (get identities
-                 (id-value (worlds/sourcemodulev0-root-term module)))))
+                 (id-value (stages/sourcemodulev0-root-term module)))))
            modules))))
 
-(defn source-failure [(world : worlds/SourceProgramWorldV0)] -> LowerFailureV0
-  (let [graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms world)
-        root: core/NativeId (worlds/termgraphv0-root graph)
-        nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)
+(defn source-failure [(stage : stages/SourceStageV0)] -> LowerFailureV0
+  (let [graph: stages/TermGraphV0 (stages/sourcestagev0-terms stage)
+        root: core/NativeId (stages/termgraphv0-root graph)
+        nodes: (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)
         identities: (Map String Bool) (graph-identity-index graph)]
     (cond
       (not (= true (get identities (id-value root))))
@@ -525,7 +457,7 @@
       (->InvalidSourceModuleV0 root "a module root is absent from the source Term graph"))))
 
 (defn encode-configuration [(configuration : (Vec String))] -> String
-  (worlds/canonical-set "configuration" configuration))
+  (stages/canonical-set "configuration" configuration))
 
 (defn make-receipt
   [(input-digest : String)
@@ -542,7 +474,7 @@
     pass-id
     "v0"
     configuration
-    (worlds/configuration-digest configuration)
+    (stages/configuration-digest configuration)
     diagnostics
     obligations
     output-digest
@@ -561,20 +493,20 @@
     passed
     detail))
 
-(defn freeze-source-world
-  [(world : worlds/SourceProgramWorldV0)
+(defn freeze-source-stage
+  [(stage : stages/SourceStageV0)
    (compiler-commit : String)
    (configuration : (Vec String))] -> SourceFreezeResultV0
-  (let [encoding: String (worlds/encode-source-world world)
-        digest: String (worlds/content-digest encoding)]
-    (if (source-world-valid? world)
+  (let [encoding: String (stages/encode-source-stage stage)
+        digest: String (stages/content-digest encoding)]
+    (if (source-stage-valid? stage)
       (->SourceFreezeAcceptedV0
-        (worlds/->FrozenSourceWorldV0 world encoding digest)
+        (stages/->FrozenSourceStageV0 stage encoding digest)
         (make-receipt digest compiler-commit "source-freeze" configuration []
           [(source-closure-obligation digest true
              "source Term identities and module roots are closed")]
           digest))
-      (let [failure: LowerFailureV0 (source-failure world)]
+      (let [failure: LowerFailureV0 (source-failure stage)]
         (->SourceFreezeRejectedV0
           failure
           (make-receipt digest compiler-commit "source-freeze" configuration
@@ -586,7 +518,7 @@
             ""))))))
 
 ;; The records below are a closed hot-loop projection of the authoritative
-;; typed Term graph. They are discarded and rebuilt from the frozen world.
+;; typed Term graph. They are discarded and rebuilt from the frozen stage.
 (defunion NativeReadinessV0
   (NativeReadyV0 [(operation : String)])
   (NativeLoweredV0
@@ -647,7 +579,7 @@
 
 (defunion TypingResultV0
   (TypingAcceptedV0
-    [(frozen : worlds/FrozenTypedWorldV0)
+    [(frozen : stages/FrozenTypedStageV0)
      (slice : TypedSliceV0)
      (receipt : core/PassReceiptV0)])
   (TypingRejectedV0 [(failure : LowerFailureV0) (receipt : core/PassReceiptV0)]))
@@ -680,7 +612,7 @@
         (recur (+ position 1))))))
 
 ;; A projection with one module root and no import table is a closed
-;; single-module world, so an alias-qualified spelling can only name that module.
+;; single-module program, so an alias-qualified spelling can only name that module.
 (defn sole-module-name
   [(index : SourceIndexV0)
    (module-name : String)] -> (U String Nil)
@@ -766,7 +698,7 @@
     (core/->AtomType (core/->KeywordKind true))))
 
 ;; The arena handle a body acquires before it allocates. Self-referential by
-;; construction: an opaque pointer has no closed pointee in the native world.
+;; construction: an opaque pointer has no closed pointee in native code.
 (defn arena-handle-type-id [] -> core/NativeId (type-id "ArenaHandle"))
 
 (defn arena-handle-type [] -> core/TypeDef
@@ -1710,7 +1642,7 @@
   (if (ends-with? name "!") [(write-effect-id)] [(pure-effect-id)]))
 
 (defn encode-parameter [(parameter : core/Parameter)] -> String
-  (worlds/canonical-record "parameter"
+  (stages/canonical-record "parameter"
     [(id-value (core/parameter-id parameter))
      (id-value (core/parameter-type-id parameter))]))
 
@@ -1723,18 +1655,18 @@
    (failure-type : core/NativeId)
    (effects : (Vec core/NativeId))
    (readiness-code : String)] -> String
-  (worlds/canonical-record "typed-function-v0"
+  (stages/canonical-record "typed-function-v0"
     [(id-value id)
      name
      abi-symbol
-     (worlds/canonical-record "parameters"
+     (stages/canonical-record "parameters"
        (mapv
          (fn [(parameter : core/Parameter)] -> String
            (encode-parameter parameter))
          parameters))
      (id-value return-type)
      (id-value failure-type)
-     (worlds/canonical-record "effects"
+     (stages/canonical-record "effects"
        (mapv (fn [(effect : core/NativeId)] -> String (id-value effect)) effects))
      readiness-code]))
 
@@ -1833,7 +1765,7 @@
 
 ;; Local annotations participate in body typing just as signatures and globals
 ;; do. Collect them before lowering so a body's first nullable value already
-;; names a closed world type instead of minting one after the fact.
+;; names a closed program type instead of minting one after the fact.
 (defn binding-type-definitions [(index : SourceIndexV0)] -> (Vec core/TypeDef)
   (let [bindings: (Vec core/NativeId) (index-form-ids index "binding")]
     (loop [position: Int 0 definitions: (Vec core/TypeDef) []]
@@ -3048,7 +2980,7 @@
 
 ;; Coercion rule (ratified, North thread 019fbd6c): widen = free tag inject,
 ;; narrow = checked extract trapping to LowerFailure/union-variant-mismatch.
-;; SliceValue is confined to one frozen world, never a cross-world ABI type.
+;; SliceValue is confined to one frozen program, never a cross-program ABI type.
 (defn variant-for-payload
   [(variants : (Vec core/TypeVariant))
    (payload : core/NativeId)] -> (U core/TypeVariant Nil)
@@ -3413,7 +3345,7 @@
               join-parameter to false)))))))
 
 ;; A narrowed reference borrows from the union value it came out of; it must not
-;; outlive that value's region. Vacuous while every payload is world-confined.
+;; outlive that value's region. Vacuous while every payload is program-confined.
 (defrecord NarrowHitV0
   [(found : Bool)
    (variant-id : core/NativeId)
@@ -3734,7 +3666,7 @@
           (variantpathv0-variants nested))
         :else
         ;; Widening runs first, so every program that already lowers keeps its
-        ;; world; only a refused widen is reconsidered as a narrowing.
+        ;; program; only a refused widen is reconsidered as a narrowing.
         (let [widened: ExprResultV0
               (lower-widen types owner state value-id from to (widen-budget))]
           (if (or (not (state-blocked? (exprresultv0-state widened)))
@@ -4777,7 +4709,7 @@
       nil)))
 
 ;; Empty literals carry no member evidence. Only an exact closed type supplied
-;; by a surrounding boundary may choose their Native World shape.
+;; by a surrounding boundary may choose their native program shape.
 (defn lower-empty-vector
   [(env : BodyEnvV0)
    (owner : core/NativeId)
@@ -5722,7 +5654,7 @@
         (optional-scalar-type-of types (int-type-id))]
     (if (nil? optional)
       (fail-result state
-        "TODO-NATIVE-TEXT-INDEX-TYPE: the source world declares no nullable Int")
+        "TODO-NATIVE-TEXT-INDEX-TYPE: the source program declares no nullable Int")
       (let [result-id: core/NativeId (state-id state owner "text-index")]
         (->ExprResultV0
           (state-emit (state-bump state)
@@ -6319,7 +6251,7 @@
     (cond
       (nil? set-type)
       (fail-result state
-        "TODO-NATIVE-SET-VECTOR-TYPE: the world declares no set of the vector element type")
+        "TODO-NATIVE-SET-VECTOR-TYPE: the program declares no set of the vector element type")
 
       (nil? equality)
       (fail-result state
@@ -6424,7 +6356,7 @@
     (cond
       (nil? vector-type)
       (fail-result state
-        "TODO-NATIVE-SET-EQUALITY-TYPE: the world declares no vector of the set element type")
+        "TODO-NATIVE-SET-EQUALITY-TYPE: the program declares no vector of the set element type")
 
       (nil? equality)
       (fail-result state
@@ -6622,7 +6554,7 @@
                 candidate))))))))
 
 ;; A join with no computable arm type falls back to the declared type the arms
-;; are being produced for; a computable join keeps its existing world.
+;; are being produced for; a computable join keeps its existing type.
 (defn bridge-join-arms
   [(types : (Vec core/TypeDef))
    (owner : core/NativeId)
@@ -9210,11 +9142,11 @@
 
                       (nil? key-vector-type)
                       (fail-result source-state
-                        "TODO-NATIVE-REDUCE-KV-KEY-VECTOR: the world declares no Vec carrier for map keys")
+                        "TODO-NATIVE-REDUCE-KV-KEY-VECTOR: the program declares no Vec carrier for map keys")
 
                       (nil? value-vector-type)
                       (fail-result source-state
-                        "TODO-NATIVE-REDUCE-KV-VALUE-VECTOR: the world declares no Vec carrier for map values")
+                        "TODO-NATIVE-REDUCE-KV-VALUE-VECTOR: the program declares no Vec carrier for map values")
 
                       :else
                       (let [key-vector-id: core/NativeId
@@ -9374,7 +9306,7 @@
           (state-blocked? target-state) (dead-result target-state)
           (nil? (lookup-type types (exprresultv0-type-id target)))
           (fail-result target-state
-            "TODO-NATIVE-MATCH-TARGET: target type is not closed in the Native World")
+            "TODO-NATIVE-MATCH-TARGET: target type is not closed in the native program")
           :else
           (let [failure: String
                 (match-structure-failure env owner
@@ -12646,7 +12578,7 @@
                     (state-blocked? settled) (dead-result settled)
                     (nil? optional)
                     (fail-result settled
-                      "TODO-NATIVE-PARSE-I64-TYPE: parse-long needs a nullable Int in the source world")
+                      "TODO-NATIVE-PARSE-I64-TYPE: parse-long needs a nullable Int in the source program")
                     :else
                     (let [result-id: core/NativeId
                           (state-id settled owner "parse-i64")]
@@ -12672,7 +12604,7 @@
                     (state-blocked? settled) (dead-result settled)
                     (nil? optional)
                     (fail-result settled
-                      "TODO-NATIVE-PARSE-F64-TYPE: parse-double needs a nullable Float in the source world")
+                      "TODO-NATIVE-PARSE-F64-TYPE: parse-double needs a nullable Float in the source program")
                     :else
                     (let [result-id: core/NativeId
                           (state-id settled owner "parse-f64")]
@@ -12988,7 +12920,7 @@
                       (vector-type-of types element)]
                   (if (nil? vector-type)
                     (fail-result current
-                      "TODO-NATIVE-MAP-KEYS-TYPE: the world declares no vector of the map key type")
+                      "TODO-NATIVE-MAP-KEYS-TYPE: the program declares no vector of the map key type")
                     (let [result-id: core/NativeId
                           (state-id current owner "map-keys")]
                       (->ExprResultV0
@@ -13010,7 +12942,7 @@
                       (vector-type-of types element)]
                   (if (nil? vector-type)
                     (fail-result current
-                      "TODO-NATIVE-MAP-VALUES-TYPE: the world declares no vector of the map value type")
+                      "TODO-NATIVE-MAP-VALUES-TYPE: the program declares no vector of the map value type")
                     (let [result-id: core/NativeId
                           (state-id current owner "map-values")]
                       (->ExprResultV0
@@ -13213,7 +13145,7 @@
                       (vector-type-of types element)]
                   (if (nil? vector-type)
                     (fail-result current
-                      "TODO-NATIVE-SET-VECTOR-TYPE: the world declares no vector of the set element type")
+                      "TODO-NATIVE-SET-VECTOR-TYPE: the program declares no vector of the set element type")
                     (let [result-id: core/NativeId
                           (state-id current owner "set-vector")]
                       (->ExprResultV0
@@ -13994,7 +13926,7 @@
             (core/basicblock-instructions block))))
       blocks)))
 
-;; Checked-arithmetic types enter the world only where a body lowered a checked
+;; Checked-arithmetic types enter the program only where a body lowered a checked
 ;; operation, so a slice without arithmetic keeps its type set — and the C type
 ;; indices its committed artifacts already name.
 (defn readiness-uses-checked? [(readiness : NativeReadinessV0)] -> Bool
@@ -14177,7 +14109,7 @@
                   (recur (+ inner 1)
                     (if (nil? callee) collected (conj collected callee))))))))))))
 
-;; A CallInstruction must name a function the world actually carries, so a
+;; A CallInstruction must name a function the program actually carries, so a
 ;; caller is only ready once every callee it reaches is ready too.
 (defn settle-readiness
   [(functions : (Vec TypedFunctionV0))] -> (Vec TypedFunctionV0)
@@ -14443,18 +14375,18 @@
     (instance? native.core.TextKind kind) "text"
     (instance? native.core.BytesKind kind) "bytes"
     (instance? native.core.KeywordKind kind) "keyword"
-    :else (worlds/canonical-record "reference-kind"
+    :else (stages/canonical-record "reference-kind"
             [(id-value (core/refkind-target kind))])))
 
 (defn encode-type-field [(field : core/TypeField)] -> String
-  (worlds/canonical-record "field"
+  (stages/canonical-record "field"
     [(id-value (core/typefield-id field))
      (core/typefield-name field)
      (id-value (core/typefield-type-id field))]))
 
 (defn encode-type-variant [(variant : core/TypeVariant)] -> String
   (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
-    (worlds/canonical-record "variant"
+    (stages/canonical-record "variant"
       [(id-value (core/typevariant-id variant))
        (core/typevariant-name variant)
        (if (nil? payload) "unit" (id-value payload))])))
@@ -14462,43 +14394,43 @@
 (defn encode-type-shape [(shape : core/TypeShape)] -> String
   (cond
     (instance? native.core.AtomType shape)
-    (worlds/canonical-record "atom"
+    (stages/canonical-record "atom"
       [(encode-atom-kind (core/atomtype-kind shape))])
 
     (instance? native.core.RecordType shape)
-    (worlds/canonical-record "record"
+    (stages/canonical-record "record"
       (mapv
         (fn [(field : core/TypeField)] -> String (encode-type-field field))
         (core/recordtype-fields shape)))
 
     (instance? native.core.UnionType shape)
-    (worlds/canonical-record "closed-union"
+    (stages/canonical-record "closed-union"
       (mapv
         (fn [(variant : core/TypeVariant)] -> String (encode-type-variant variant))
         (core/uniontype-variants shape)))
 
     (instance? native.core.VectorType shape)
-    (worlds/canonical-record "vector"
+    (stages/canonical-record "vector"
       [(id-value (core/vectortype-element-type shape))])
 
     (instance? native.core.MapTypeV0 shape)
-    (worlds/canonical-record "map-v0"
+    (stages/canonical-record "map-v0"
       [(id-value (core/maptypev0-key-type shape))
        (id-value (core/maptypev0-value-type shape))
        "insertion-order-v0"])
 
     (instance? native.core.SetTypeV0 shape)
-    (worlds/canonical-record "set-v0"
+    (stages/canonical-record "set-v0"
       [(id-value (core/settypev0-element-type shape))
        "insertion-order-v0"])
 
     (instance? native.core.ReferenceType shape)
-    (worlds/canonical-record "reference"
+    (stages/canonical-record "reference"
       [(id-value (core/referencetype-target-type shape))])
 
     (instance? native.core.FunctionType shape)
-    (worlds/canonical-record "function"
-      [(worlds/canonical-record "parameters"
+    (stages/canonical-record "function"
+      [(stages/canonical-record "parameters"
          (mapv
            (fn [(parameter : core/NativeId)] -> String (id-value parameter))
            (core/functiontype-parameter-types shape)))
@@ -14508,18 +14440,18 @@
        (id-value (core/functiontype-return-type shape))])
 
     (instance? native.core.AtomCellTypeV0 shape)
-    (worlds/canonical-record "atom-cell"
+    (stages/canonical-record "atom-cell"
       [(id-value (core/atomcelltypev0-content-type shape))])
 
     (instance? native.core.OutcomeType shape)
-    (worlds/canonical-record "outcome"
+    (stages/canonical-record "outcome"
       [(id-value (core/outcometype-value-type shape))
        (id-value (core/outcometype-failure-type shape))])
 
     :else "invalid-type-shape"))
 
 (defn encode-type-def [(definition : core/TypeDef)] -> String
-  (worlds/canonical-record "closed-type-v0"
+  (stages/canonical-record "closed-type-v0"
     [(id-value (core/typedef-id definition))
      (core/typedef-name definition)
      (encode-type-shape (core/typedef-shape definition))]))
@@ -14530,31 +14462,31 @@
         (cond
           (instance? native.core.PureEffect kind) "pure"
           (instance? native.core.AllocateEffect kind)
-          (worlds/canonical-record "allocate"
+          (stages/canonical-record "allocate"
             [(id-value (core/allocateeffect-region kind))])
           (instance? native.core.ReadEffect kind)
-          (worlds/canonical-record "read"
+          (stages/canonical-record "read"
             [(id-value (core/readeffect-region kind))])
           (instance? native.core.WriteEffect kind)
-          (worlds/canonical-record "write"
+          (stages/canonical-record "write"
             [(id-value (core/writeeffect-region kind))])
           (instance? native.core.CapabilityEffect kind)
-          (worlds/canonical-record "capability"
+          (stages/canonical-record "capability"
             [(id-value (core/capabilityeffect-capability kind))])
           (instance? native.core.IoEffect kind)
-          (worlds/canonical-record "io"
+          (stages/canonical-record "io"
             [(id-value (core/ioeffect-capability kind))])
           (instance? native.core.SocketEffect kind)
-          (worlds/canonical-record "socket"
+          (stages/canonical-record "socket"
             [(id-value (core/socketeffect-capability kind))])
           (instance? native.core.ClockEffect kind)
-          (worlds/canonical-record "clock"
+          (stages/canonical-record "clock"
             [(id-value (core/clockeffect-capability kind))])
           :else
-          (worlds/canonical-record "atomic"
+          (stages/canonical-record "atomic"
             [(id-value (core/atomiceffect-region kind))
              (id-value (core/atomiceffect-capability kind))]))]
-    (worlds/canonical-record "effect-v0"
+    (stages/canonical-record "effect-v0"
       [(id-value (core/effectdef-id effect)) kind-encoding])))
 
 (defn typed-term-nodes
@@ -14564,72 +14496,72 @@
    (include-environment : Bool)
    (include-stdout : Bool)
    (include-socket : Bool)
-   (include-clock : Bool)] -> (Vec worlds/TermNodeV0)
-  (let [type-nodes: (Vec worlds/TermNodeV0)
+   (include-clock : Bool)] -> (Vec stages/TermNodeV0)
+  (let [type-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(definition : core/TypeDef)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0
+          (fn [(definition : core/TypeDef)] -> stages/TermNodeV0
+            (stages/->TermNodeV0
               (core/typedef-id definition)
-              (worlds/->TextTermV0 (encode-type-def definition))))
+              (stages/->TextTermV0 (encode-type-def definition))))
           types)
-        function-nodes: (Vec worlds/TermNodeV0)
+        function-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(function : TypedFunctionV0)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0
+          (fn [(function : TypedFunctionV0)] -> stages/TermNodeV0
+            (stages/->TermNodeV0
               (typedfunctionv0-id function)
-              (worlds/->TextTermV0 (typedfunctionv0-encoding function))))
+              (stages/->TextTermV0 (typedfunctionv0-encoding function))))
           functions)
-        effect-nodes: (Vec worlds/TermNodeV0)
+        effect-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(effect : core/EffectDef)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0
+          (fn [(effect : core/EffectDef)] -> stages/TermNodeV0
+            (stages/->TermNodeV0
               (core/effectdef-id effect)
-              (worlds/->TextTermV0 (encode-effect effect))))
+              (stages/->TextTermV0 (encode-effect effect))))
           effects)
-        region-node: worlds/TermNodeV0
-        (worlds/->TermNodeV0 (arena-region-id)
-          (worlds/->TextTermV0
-            (worlds/canonical-record "region-v0"
+        region-node: stages/TermNodeV0
+        (stages/->TermNodeV0 (arena-region-id)
+          (stages/->TextTermV0
+            (stages/canonical-record "region-v0"
               [(id-value (arena-region-id)) "arena"])))
-        capability-node: worlds/TermNodeV0
-        (worlds/->TermNodeV0 (write-capability-id)
-          (worlds/->TextTermV0
-            (worlds/canonical-record "capability-v0"
+        capability-node: stages/TermNodeV0
+        (stages/->TermNodeV0 (write-capability-id)
+          (stages/->TextTermV0
+            (stages/canonical-record "capability-v0"
               [(id-value (write-capability-id))
                (id-value (arena-region-id))
                "affine-write"])))
-        environment-capability-nodes: (Vec worlds/TermNodeV0)
+        environment-capability-nodes: (Vec stages/TermNodeV0)
         (if include-environment
-          [(worlds/->TermNodeV0 (host-environment-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-environment-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-environment-capability-id))
                   "host-environment"
                   "non-affine"])))]
           [])
-        stdout-capability-nodes: (Vec worlds/TermNodeV0)
+        stdout-capability-nodes: (Vec stages/TermNodeV0)
         (if include-stdout
-          [(worlds/->TermNodeV0 (host-stdout-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-stdout-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-stdout-capability-id))
                   "host-stdout"
                   "non-affine"])))]
           [])
-        socket-capability-nodes: (Vec worlds/TermNodeV0)
+        socket-capability-nodes: (Vec stages/TermNodeV0)
         (if include-socket
-          [(worlds/->TermNodeV0 (host-socket-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-socket-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-socket-capability-id))
                   "host-socket-peer-lifecycle-v0"
                   "non-affine"])))]
           [])
-        clock-capability-nodes: (Vec worlds/TermNodeV0)
+        clock-capability-nodes: (Vec stages/TermNodeV0)
         (if include-clock
-          [(worlds/->TermNodeV0 (host-clock-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-clock-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-clock-capability-id))
                   "host-monotonic-clock-v0"
                   "non-affine"])))]
@@ -14639,7 +14571,7 @@
            stdout-capability-nodes socket-capability-nodes
            clock-capability-nodes))))
 
-(defn forbidden-world-text? [(value : String)] -> Bool
+(defn hosted-only-text? [(value : String)] -> Bool
   (or (= value "Any")
       (= value "Atom")
       (= value "Map")
@@ -14651,33 +14583,20 @@
       (= value "js")
       (= value "nix")))
 
-(defn term-is-clean? [(term : worlds/TermV0)] -> Bool
-  (if (instance? native.worlds.TextTermV0 term)
-    (not (forbidden-world-text? (worlds/texttermv0-value term)))
+(defn term-is-clean? [(term : stages/TermV0)] -> Bool
+  (if (instance? native.stages.TextTermV0 term)
+    (not (hosted-only-text? (stages/texttermv0-value term)))
     true))
 
-(defn term-graph-clean? [(graph : worlds/TermGraphV0)] -> Bool
+(defn term-graph-clean? [(graph : stages/TermGraphV0)] -> Bool
   (every?
-    (fn [(node : worlds/TermNodeV0)] -> Bool
-      (term-is-clean? (worlds/termnodev0-term node)))
-    (worlds/termgraphv0-nodes graph)))
+    (fn [(node : stages/TermNodeV0)] -> Bool
+      (term-is-clean? (stages/termnodev0-term node)))
+    (stages/termgraphv0-nodes graph)))
 
 (defn encode-id-roots [(tag : String) (roots : (Vec core/NativeId))] -> String
-  (worlds/canonical-set tag
+  (stages/canonical-set tag
     (mapv (fn [(id : core/NativeId)] -> String (id-value id)) roots)))
-
-(defn encode-typed-world [(world : worlds/TypedEffectWorldV0)] -> String
-  (worlds/canonical-record "typed-effect-world-v0"
-    [(encode-term-graph (worlds/typedeffectworldv0-terms world))
-     (worlds/typedeffectworldv0-source-digest world)
-     (encode-id-roots "types" (worlds/typedeffectworldv0-type-roots world))
-     (encode-id-roots "functions" (worlds/typedeffectworldv0-function-roots world))
-     (encode-id-roots "effects" (worlds/typedeffectworldv0-effect-roots world))
-     (encode-id-roots "regions" (worlds/typedeffectworldv0-region-roots world))
-     (encode-id-roots "capabilities"
-       (worlds/typedeffectworldv0-capability-token-roots world))
-     (encode-id-roots "refinements"
-       (worlds/typedeffectworldv0-refinement-roots world))]))
 
 (defn function-todo-obligations
   [(functions : (Vec TypedFunctionV0))
@@ -14708,16 +14627,16 @@
      (core/->BoundedEffectsObligation true) "v0" digest clean
      "typed Terms contain no raw Any, host exception, host collection, or target syntax")])
 
-(defn lower-typed-world
-  [(frozen-source : worlds/FrozenSourceWorldV0)
+(defn lower-typed-stage
+  [(frozen-source : stages/FrozenSourceStageV0)
    (compiler-commit : String)
    (configuration : (Vec String))] -> TypingResultV0
-  (let [source: worlds/SourceProgramWorldV0
-        (worlds/frozensourceworldv0-world frozen-source)
-        source-digest: String (worlds/frozensourceworldv0-digest frozen-source)
-        graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms source)
+  (let [source: stages/SourceStageV0
+        (stages/frozensourcestagev0-stage frozen-source)
+        source-digest: String (stages/frozensourcestagev0-digest frozen-source)
+        graph: stages/TermGraphV0 (stages/sourcestagev0-terms source)
         index: SourceIndexV0
-        (build-source-index graph (worlds/sourceprogramworldv0-modules source))
+        (build-source-index graph (stages/sourcestagev0-modules source))
         record-keys: (Vec String) (sourceindexv0-record-keys index)
         record-resolutions: (Vec RecordResolutionV0) (resolve-records index)
         function-sources: (Vec core/NativeId) (index-form-ids index "defn")
@@ -14747,7 +14666,7 @@
         sockets: Bool (any-function-uses-host-socket? functions)
         clock: Bool (any-function-uses-host-clock? functions)
         ;; Bodies contribute types of their own (checked arithmetic answers an
-        ;; Outcome), so the world's type set closes only after they lower.
+        ;; Outcome), so the program's type set closes only after they lower.
         body-types: (Vec core/TypeDef)
         (collect-function-types source-types function-resolutions)
         arena-types: (Vec core/TypeDef)
@@ -14763,17 +14682,17 @@
         regions: (Vec core/RegionDef) (slice-regions)
         capabilities: (Vec core/CapabilityDef)
         (slice-capabilities uses-environment uses-stdout sockets clock)
-        root: core/NativeId (lower-id "typed-world" [source-digest])
-        nodes: (Vec worlds/TermNodeV0)
+        root: core/NativeId (lower-id "typed-stage" [source-digest])
+        nodes: (Vec stages/TermNodeV0)
         (typed-term-nodes types functions effects uses-environment uses-stdout
           sockets clock)
-        terms: worlds/TermGraphV0
-        (worlds/->TermGraphV0 root
+        terms: stages/TermGraphV0
+        (stages/->TermGraphV0 root
           (conj nodes
-            (worlds/->TermNodeV0 root
-              (worlds/->TextTermV0 "typed-effect-world-v0"))))
-        typed-world: worlds/TypedEffectWorldV0
-        (worlds/->TypedEffectWorldV0
+            (stages/->TermNodeV0 root
+              (stages/->TextTermV0 "typed-stage-v0"))))
+        typed-stage: stages/TypedStageV0
+        (stages/->TypedStageV0
           terms
           source-digest
           (mapv (fn [(definition : core/TypeDef)] -> core/NativeId
@@ -14785,8 +14704,8 @@
           [(arena-region-id) (atom-state-region-id)]
           (slice-capability-ids uses-environment uses-stdout sockets clock)
           [(type-id "LowerFailure")])
-        encoding: String (worlds/encode-typed-world typed-world)
-        digest: String (worlds/content-digest encoding)
+        encoding: String (stages/encode-typed-stage typed-stage)
+        digest: String (stages/content-digest encoding)
         resolutions-valid: Bool
         (typing-resolutions-valid? record-resolutions function-resolutions)
         types-closed: Bool (core/types-refs-closed? types)
@@ -14799,14 +14718,14 @@
                (function-todo-obligations functions digest)))]
     (if valid
       (->TypingAcceptedV0
-        (worlds/->FrozenTypedWorldV0 typed-world encoding digest)
+        (stages/->FrozenTypedStageV0 typed-stage encoding digest)
         (->TypedSliceV0 types functions effects regions capabilities
           [(type-id "LowerFailure")])
         (make-receipt source-digest compiler-commit "source-to-typed"
           configuration diagnostics obligations digest))
       (->TypingRejectedV0
         (->UnresolvedSourceTypeV0
-          (worlds/termgraphv0-root graph)
+          (stages/termgraphv0-root graph)
           "one or more source annotations do not close over Native Core types")
         (make-receipt source-digest compiler-commit "source-to-typed"
           configuration diagnostics obligations "")))))
@@ -14824,10 +14743,10 @@
 
 (defunion NativeLoweringResultV0
   (NativeLoweringCompleteV0
-    [(frozen : worlds/FrozenNativeWorldV0)
+    [(frozen : stages/FrozenNativeStageV0)
      (receipt : core/PassReceiptV0)])
   (NativeLoweringPendingV0
-    [(frozen : worlds/FrozenNativeWorldV0)
+    [(frozen : stages/FrozenNativeStageV0)
      (receipt : core/PassReceiptV0)
      (obligations : (Vec core/ReceiptObligationV0))]))
 
@@ -15387,11 +15306,11 @@
       (core/ids-in? consumed required))))
 
 (defn layout-digest [(layouts : (Vec core/LayoutDef))] -> String
-  (worlds/content-digest
-    (worlds/canonical-set "layout-set-v0"
+  (stages/content-digest
+    (stages/canonical-set "layout-set-v0"
       (mapv
         (fn [(layout : core/LayoutDef)] -> String
-          (worlds/canonical-record "layout"
+          (stages/canonical-record "layout"
             [(id-value (core/layoutdef-id layout))
              (id-value (core/layoutdef-type-id layout))
              (str (core/layoutdef-size-bytes layout))
@@ -15598,19 +15517,19 @@
 (defn encode-scalar-repr [(representation : core/ScalarReprV0)] -> String
   (cond
     (instance? native.core.BoolReprV0 representation)
-    (worlds/canonical-record "bool" [(str (core/boolreprv0-bit-width representation))])
+    (stages/canonical-record "bool" [(str (core/boolreprv0-bit-width representation))])
     (instance? native.core.SignedIntReprV0 representation)
-    (worlds/canonical-record "signed-int"
+    (stages/canonical-record "signed-int"
       [(str (core/signedintreprv0-bit-width representation))])
     (instance? native.core.UnsignedIntReprV0 representation)
-    (worlds/canonical-record "unsigned-int"
+    (stages/canonical-record "unsigned-int"
       [(str (core/unsignedintreprv0-bit-width representation))])
     :else
-    (worlds/canonical-record "float"
+    (stages/canonical-record "float"
       [(str (core/floatreprv0-bit-width representation))])))
 
 (defn encode-field-layout [(field : core/FieldLayoutV0)] -> String
-  (worlds/canonical-record "field-layout-v0"
+  (stages/canonical-record "field-layout-v0"
     [(id-value (core/fieldlayoutv0-field-id field))
      (id-value (core/fieldlayoutv0-type-id field))
      (str (core/fieldlayoutv0-offset-bytes field))
@@ -15619,7 +15538,7 @@
 (defn encode-variant-layout [(variant : core/UnionVariantLayoutV0)] -> String
   (let [payload: (U core/NativeId Nil)
         (core/unionvariantlayoutv0-payload-type variant)]
-    (worlds/canonical-record "variant-layout-v0"
+    (stages/canonical-record "variant-layout-v0"
       [(id-value (core/unionvariantlayoutv0-variant-id variant))
        (str (core/unionvariantlayoutv0-tag variant))
        (if (nil? payload) "unit" (id-value payload))
@@ -15628,36 +15547,36 @@
 (defn encode-layout-shape [(shape : core/LayoutShapeV0)] -> String
   (cond
     (instance? native.core.ScalarShapeV0 shape)
-    (worlds/canonical-record "scalar-layout"
+    (stages/canonical-record "scalar-layout"
       [(encode-scalar-repr (core/scalarshapev0-representation shape))])
 
     (instance? native.core.BytesShapeV0 shape)
     "native-bytes-layout-v0"
 
     (instance? native.core.RecordShapeV0 shape)
-    (worlds/canonical-record "record-layout"
+    (stages/canonical-record "record-layout"
       (mapv
         (fn [(field : core/FieldLayoutV0)] -> String
           (encode-field-layout field))
         (core/recordshapev0-fields shape)))
 
     (instance? native.core.UnionShapeV0 shape)
-    (worlds/canonical-record "union-layout"
+    (stages/canonical-record "union-layout"
       [(id-value (core/unionshapev0-tag-type shape))
        (str (core/unionshapev0-tag-offset-bytes shape))
-       (worlds/canonical-record "variants"
+       (stages/canonical-record "variants"
          (mapv
            (fn [(variant : core/UnionVariantLayoutV0)] -> String
              (encode-variant-layout variant))
            (core/unionshapev0-variants shape)))])
 
     (instance? native.core.VectorShapeV0 shape)
-    (worlds/canonical-record "vector-layout"
+    (stages/canonical-record "vector-layout"
       [(id-value (core/vectorshapev0-element-type shape))
        (str (core/vectorshapev0-stride-bytes shape))])
 
     (instance? native.core.MapShapeV0 shape)
-    (worlds/canonical-record "map-layout-v0"
+    (stages/canonical-record "map-layout-v0"
       [(id-value (core/mapshapev0-key-type shape))
        (str (core/mapshapev0-key-stride-bytes shape))
        (str (core/mapshapev0-key-align-bytes shape))
@@ -15667,22 +15586,22 @@
        "insertion-order-v0"])
 
     (instance? native.core.SetShapeV0 shape)
-    (worlds/canonical-record "set-layout-v0"
+    (stages/canonical-record "set-layout-v0"
       [(id-value (core/setshapev0-element-type shape))
        (str (core/setshapev0-stride-bytes shape))
        (str (core/setshapev0-align-bytes shape))
        "insertion-order-v0"])
 
     (instance? native.core.AtomCellShapeV0 shape)
-    (worlds/canonical-record "atom-cell-layout"
+    (stages/canonical-record "atom-cell-layout"
       [(id-value (core/atomcellshapev0-content-type shape))])
 
     :else
-    (worlds/canonical-record "reference-layout"
+    (stages/canonical-record "reference-layout"
       [(id-value (core/referenceshapev0-target-type shape))])))
 
 (defn encode-layout-def [(layout : core/LayoutDef)] -> String
-  (worlds/canonical-record "exact-layout-v0"
+  (stages/canonical-record "exact-layout-v0"
     [(id-value (core/layoutdef-id layout))
      (id-value (core/layoutdef-type-id layout))
      (str (core/layoutdef-size-bytes layout))
@@ -15690,7 +15609,7 @@
      (encode-layout-shape (core/layoutdef-shape layout))]))
 
 (defn encode-ssa-value [(value : core/SsaValueV0)] -> String
-  (worlds/canonical-record "ssa-value"
+  (stages/canonical-record "ssa-value"
     [(id-value (core/ssavaluev0-id value))
      (id-value (core/ssavaluev0-type-id value))]))
 
@@ -15698,61 +15617,61 @@
   [(operation : core/TextBuiltinOpV0)] -> String
   (cond
     (instance? native.core.TextCompareV0 operation)
-    (worlds/canonical-record "text-compare"
+    (stages/canonical-record "text-compare"
       [(id-value (core/textcomparev0-left-id operation))
        (id-value (core/textcomparev0-right-id operation))])
     (instance? native.core.TextEndsWithV0 operation)
-    (worlds/canonical-record "text-ends-with"
+    (stages/canonical-record "text-ends-with"
       [(id-value (core/textendswithv0-source-id operation))
        (id-value (core/textendswithv0-suffix-id operation))])
     (instance? native.core.TextTrimV0 operation)
-    (worlds/canonical-record "text-trim"
+    (stages/canonical-record "text-trim"
       [(id-value (core/texttrimv0-arena-id operation))
        (id-value (core/texttrimv0-source-id operation))])
     (instance? native.core.TextLowerV0 operation)
-    (worlds/canonical-record "text-lower"
+    (stages/canonical-record "text-lower"
       [(id-value (core/textlowerv0-arena-id operation))
        (id-value (core/textlowerv0-source-id operation))])
     (instance? native.core.TextLetterDecimalRunsV0 operation)
-    (worlds/canonical-record "text-letter-decimal-runs"
+    (stages/canonical-record "text-letter-decimal-runs"
       [(id-value (core/textletterdecimalrunsv0-arena-id operation))
        (id-value (core/textletterdecimalrunsv0-source-id operation))
        (id-value (core/textletterdecimalrunsv0-pattern-id operation))])
     (instance? native.core.TextRegexReplaceV0 operation)
-    (worlds/canonical-record "text-regex-replace"
+    (stages/canonical-record "text-regex-replace"
       [(id-value (core/textregexreplacev0-arena-id operation))
        (id-value (core/textregexreplacev0-source-id operation))
        (id-value (core/textregexreplacev0-pattern-id operation))
        (id-value (core/textregexreplacev0-replacement-id operation))])
     (instance? native.core.TextRegexMatchesV0 operation)
-    (worlds/canonical-record "text-regex-matches"
+    (stages/canonical-record "text-regex-matches"
       [(id-value (core/textregexmatchesv0-source-id operation))
        (id-value (core/textregexmatchesv0-pattern-id operation))])
     (instance? native.core.TextRegexFindV0 operation)
-    (worlds/canonical-record "text-regex-find"
+    (stages/canonical-record "text-regex-find"
       [(id-value (core/textregexfindv0-arena-id operation))
        (id-value (core/textregexfindv0-source-id operation))
        (id-value (core/textregexfindv0-pattern-id operation))])
     (instance? native.core.TextSplitV0 operation)
-    (worlds/canonical-record "text-split"
+    (stages/canonical-record "text-split"
       [(id-value (core/textsplitv0-arena-id operation))
        (id-value (core/textsplitv0-source-id operation))
        (id-value (core/textsplitv0-pattern-id operation))])
     (instance? native.core.TextVectorTrimV0 operation)
-    (worlds/canonical-record "text-vector-trim"
+    (stages/canonical-record "text-vector-trim"
       [(id-value (core/textvectortrimv0-arena-id operation))
        (id-value (core/textvectortrimv0-source-id operation))])
     (instance? native.core.TextVectorRemoveBlankV0 operation)
-    (worlds/canonical-record "text-vector-remove-blank"
+    (stages/canonical-record "text-vector-remove-blank"
       [(id-value (core/textvectorremoveblankv0-arena-id operation))
        (id-value (core/textvectorremoveblankv0-source-id operation))])
     (instance? native.core.TextJoinV0 operation)
-    (worlds/canonical-record "text-join"
+    (stages/canonical-record "text-join"
       [(id-value (core/textjoinv0-arena-id operation))
        (id-value (core/textjoinv0-separator-id operation))
        (id-value (core/textjoinv0-source-id operation))])
     :else
-    (worlds/canonical-record "text-repeat"
+    (stages/canonical-record "text-repeat"
       [(id-value (core/textrepeatv0-arena-id operation))
        (id-value (core/textrepeatv0-source-id operation))
        (id-value (core/textrepeatv0-count-id operation))])))
@@ -15765,94 +15684,94 @@
     (instance? native.core.TextEqualityV0 equality) "text-equality-v0"
     (instance? native.core.KeywordEqualityV0 equality) "keyword-equality-v0"
     :else
-    (worlds/canonical-record "structural-equality-v0"
+    (stages/canonical-record "structural-equality-v0"
       [(id-value (core/structuralequalityv0-domain-type equality))])))
 
 (defn encode-value-semantics-operation
   [(operation : core/ValueSemanticsOpV0)] -> String
   (match operation
     [(ValueEqualV0 domain-type left-id right-id)
-     (worlds/canonical-record "value-equal-v0"
+     (stages/canonical-record "value-equal-v0"
        [(id-value domain-type) (id-value left-id) (id-value right-id)])]
     [(ValueHashV0 domain-type value-id)
-     (worlds/canonical-record "value-hash-v0"
+     (stages/canonical-record "value-hash-v0"
        [(id-value domain-type) (id-value value-id)])]
     [(ValueCompareV0 domain-type left-id right-id)
-     (worlds/canonical-record "value-compare-v0"
+     (stages/canonical-record "value-compare-v0"
        [(id-value domain-type) (id-value left-id) (id-value right-id)])]))
 
 (defn encode-codec-primitive-operation
   [(operation : core/CodecPrimitiveOpV0)] -> String
   (match operation
     [(Utf8EncodeV0 arena-id source-id)
-     (worlds/canonical-record "utf8-encode-v0"
+     (stages/canonical-record "utf8-encode-v0"
        [(id-value arena-id) (id-value source-id)])]
     [(Utf8DecodeV0 arena-id source-id)
-     (worlds/canonical-record "utf8-decode-v0"
+     (stages/canonical-record "utf8-decode-v0"
        [(id-value arena-id) (id-value source-id)])]
     [(Sha256BytesV0 arena-id source-id)
-     (worlds/canonical-record "sha256-bytes-v0"
+     (stages/canonical-record "sha256-bytes-v0"
        [(id-value arena-id) (id-value source-id)])]
     [(FloatToBitsV0 source-id)
-     (worlds/canonical-record "float-to-bits-v0" [(id-value source-id)])]
+     (stages/canonical-record "float-to-bits-v0" [(id-value source-id)])]
     [(FloatFromBitsV0 source-id)
-     (worlds/canonical-record "float-from-bits-v0" [(id-value source-id)])]))
+     (stages/canonical-record "float-from-bits-v0" [(id-value source-id)])]))
 
 (defn encode-bitwise-operation [(operation : core/BitwiseOperationV0)] -> String
   (match operation
     [(BitAndI64V0 left-id right-id)
-     (worlds/canonical-record "bit-and-i64-v0"
+     (stages/canonical-record "bit-and-i64-v0"
        [(id-value left-id) (id-value right-id)])]
     [(BitOrI64V0 left-id right-id)
-     (worlds/canonical-record "bit-or-i64-v0"
+     (stages/canonical-record "bit-or-i64-v0"
        [(id-value left-id) (id-value right-id)])]
     [(BitXorI64V0 left-id right-id)
-     (worlds/canonical-record "bit-xor-i64-v0"
+     (stages/canonical-record "bit-xor-i64-v0"
        [(id-value left-id) (id-value right-id)])]
     [(BitShiftLeftI64V0 value-id distance-id)
-     (worlds/canonical-record "bit-shift-left-i64-v0"
+     (stages/canonical-record "bit-shift-left-i64-v0"
        [(id-value value-id) (id-value distance-id)])]
     [(UnsignedBitShiftRightI64V0 value-id distance-id)
-     (worlds/canonical-record "unsigned-bit-shift-right-i64-v0"
+     (stages/canonical-record "unsigned-bit-shift-right-i64-v0"
        [(id-value value-id) (id-value distance-id)])]))
 
 (defn encode-instruction [(instruction : core/Instruction)] -> String
   (cond
     (instance? native.core.AtomInstruction instruction)
-    (worlds/canonical-record "atom-instruction"
+    (stages/canonical-record "atom-instruction"
       [(encode-ssa-value (core/atominstruction-result instruction))])
 
     (instance? native.core.CopyInstruction instruction)
-    (worlds/canonical-record "copy-instruction"
+    (stages/canonical-record "copy-instruction"
       [(encode-ssa-value (core/copyinstruction-result instruction))
        (id-value (core/copyinstruction-source-id instruction))])
 
     (instance? native.core.AddF64Instruction instruction)
-    (worlds/canonical-record "add-f64-instruction"
+    (stages/canonical-record "add-f64-instruction"
       [(encode-ssa-value (core/addf64instruction-result instruction))
        (id-value (core/addf64instruction-left-id instruction))
        (id-value (core/addf64instruction-right-id instruction))])
 
     (instance? native.core.SubF64InstructionV0 instruction)
-    (worlds/canonical-record "sub-f64-instruction-v0"
+    (stages/canonical-record "sub-f64-instruction-v0"
       [(encode-ssa-value (core/subf64instructionv0-result instruction))
        (id-value (core/subf64instructionv0-left-id instruction))
        (id-value (core/subf64instructionv0-right-id instruction))])
 
     (instance? native.core.MulF64InstructionV0 instruction)
-    (worlds/canonical-record "mul-f64-instruction-v0"
+    (stages/canonical-record "mul-f64-instruction-v0"
       [(encode-ssa-value (core/mulf64instructionv0-result instruction))
        (id-value (core/mulf64instructionv0-left-id instruction))
        (id-value (core/mulf64instructionv0-right-id instruction))])
 
     (instance? native.core.DivF64InstructionV0 instruction)
-    (worlds/canonical-record "div-f64-instruction-v0"
+    (stages/canonical-record "div-f64-instruction-v0"
       [(encode-ssa-value (core/divf64instructionv0-result instruction))
        (id-value (core/divf64instructionv0-left-id instruction))
        (id-value (core/divf64instructionv0-right-id instruction))])
 
     (instance? native.core.I64ToF64InstructionV0 instruction)
-    (worlds/canonical-record "i64-to-f64-instruction-v0"
+    (stages/canonical-record "i64-to-f64-instruction-v0"
       [(encode-ssa-value (core/i64tof64instructionv0-result instruction))
        (id-value (core/i64tof64instructionv0-source-id instruction))])
 
@@ -15863,49 +15782,49 @@
           (encode-ssa-value (core/checkedinstruction-result instruction))]
       (cond
         (instance? native.core.CheckedAddI64V0 operation)
-        (worlds/canonical-record "checked-add-i64-instruction"
+        (stages/canonical-record "checked-add-i64-instruction"
           [result
            (id-value (core/checkedaddi64v0-left-id operation))
            (id-value (core/checkedaddi64v0-right-id operation))])
 
         (instance? native.core.CheckedSubI64V0 operation)
-        (worlds/canonical-record "checked-sub-i64-instruction"
+        (stages/canonical-record "checked-sub-i64-instruction"
           [result
            (id-value (core/checkedsubi64v0-left-id operation))
            (id-value (core/checkedsubi64v0-right-id operation))])
 
         (instance? native.core.CheckedMulI64V0 operation)
-        (worlds/canonical-record "checked-mul-i64-instruction"
+        (stages/canonical-record "checked-mul-i64-instruction"
           [result
            (id-value (core/checkedmuli64v0-left-id operation))
            (id-value (core/checkedmuli64v0-right-id operation))])
 
         (instance? native.core.CheckedQuotI64V0 operation)
-        (worlds/canonical-record "checked-quot-i64-instruction"
+        (stages/canonical-record "checked-quot-i64-instruction"
           [result
            (id-value (core/checkedquoti64v0-left-id operation))
            (id-value (core/checkedquoti64v0-right-id operation))])
 
         (instance? native.core.CheckedRemI64V0 operation)
-        (worlds/canonical-record "checked-rem-i64-instruction"
+        (stages/canonical-record "checked-rem-i64-instruction"
           [result
            (id-value (core/checkedremi64v0-left-id operation))
            (id-value (core/checkedremi64v0-right-id operation))])
 
         (instance? native.core.CheckedModI64V0 operation)
-        (worlds/canonical-record "checked-mod-i64-instruction"
+        (stages/canonical-record "checked-mod-i64-instruction"
           [result
            (id-value (core/checkedmodi64v0-left-id operation))
            (id-value (core/checkedmodi64v0-right-id operation))])
 
         :else
-        (worlds/canonical-record "checked-bounds-instruction"
+        (stages/canonical-record "checked-bounds-instruction"
           [result
            (id-value (core/checkedboundsv0-index-id operation))
            (id-value (core/checkedboundsv0-length-id operation))])))
 
     (instance? native.core.BitwiseInstructionV0 instruction)
-    (worlds/canonical-record "bitwise-instruction-v0"
+    (stages/canonical-record "bitwise-instruction-v0"
       [(encode-ssa-value (core/bitwiseinstructionv0-result instruction))
        (encode-bitwise-operation
          (core/bitwiseinstructionv0-operation instruction))])
@@ -15923,30 +15842,30 @@
             (instance? native.core.CompareLeF64V0 comparison) "compare-le-f64-instruction"
             (instance? native.core.CompareEqBoolV0 comparison) "compare-eq-bool-instruction"
             :else "compare-eq-text-instruction")]
-      (worlds/canonical-record label
+      (stages/canonical-record label
         [(encode-ssa-value (core/compareinstruction-result instruction))
          (id-value (core/compareinstruction-left-id instruction))
          (id-value (core/compareinstruction-right-id instruction))]))
 
     (instance? native.core.FieldInstruction instruction)
-    (worlds/canonical-record "field-instruction"
+    (stages/canonical-record "field-instruction"
       [(encode-ssa-value (core/fieldinstruction-result instruction))
        (id-value (core/fieldinstruction-source-id instruction))
        (id-value (core/fieldinstruction-field-id instruction))])
 
     (instance? native.core.VariantValueInstruction instruction)
-    (worlds/canonical-record "variant-value-instruction"
+    (stages/canonical-record "variant-value-instruction"
       [(encode-ssa-value (core/variantvalueinstruction-result instruction))
        (id-value (core/variantvalueinstruction-source-id instruction))
        (id-value (core/variantvalueinstruction-variant-id instruction))])
 
     (instance? native.core.RecordInstruction instruction)
-    (worlds/canonical-record "record-instruction"
+    (stages/canonical-record "record-instruction"
       [(encode-ssa-value (core/recordinstruction-result instruction))
        (encode-id-roots "fields" (core/recordinstruction-field-ids instruction))])
 
     (instance? native.core.RecordAssocInstructionV0 instruction)
-    (worlds/canonical-record "record-assoc-instruction-v0"
+    (stages/canonical-record "record-assoc-instruction-v0"
       [(encode-ssa-value (core/recordassocinstructionv0-result instruction))
        (id-value (core/recordassocinstructionv0-source-id instruction))
        (id-value (core/recordassocinstructionv0-field-id instruction))
@@ -15954,13 +15873,13 @@
        (id-value (core/recordassocinstructionv0-arena-id instruction))])
 
     (instance? native.core.BoxRecordInstruction instruction)
-    (worlds/canonical-record "box-record-instruction"
+    (stages/canonical-record "box-record-instruction"
       [(encode-ssa-value (core/boxrecordinstruction-result instruction))
        (id-value (core/boxrecordinstruction-source-id instruction))
        (id-value (core/boxrecordinstruction-arena-id instruction))])
 
     (instance? native.core.RecordMaterializeInstructionV0 instruction)
-    (worlds/canonical-record "record-materialize-instruction-v0"
+    (stages/canonical-record "record-materialize-instruction-v0"
       [(encode-ssa-value
          (core/recordmaterializeinstructionv0-result instruction))
        (id-value
@@ -15969,40 +15888,40 @@
     (instance? native.core.UnionConstructInstruction instruction)
     (let [payload: (U core/NativeId Nil)
           (core/unionconstructinstruction-payload-id instruction)]
-      (worlds/canonical-record "union-construct-instruction"
+      (stages/canonical-record "union-construct-instruction"
         [(encode-ssa-value (core/unionconstructinstruction-result instruction))
          (id-value (core/unionconstructinstruction-variant-id instruction))
          (if (nil? payload) "unit" (id-value payload))]))
 
     (instance? native.core.UnionExtractInstruction instruction)
-    (worlds/canonical-record "union-extract-instruction"
+    (stages/canonical-record "union-extract-instruction"
       [(encode-ssa-value (core/unionextractinstruction-result instruction))
        (id-value (core/unionextractinstruction-source-id instruction))
        (id-value (core/unionextractinstruction-variant-id instruction))])
 
     (instance? native.core.StoreInstruction instruction)
-    (worlds/canonical-record "store-instruction"
+    (stages/canonical-record "store-instruction"
       [(encode-ssa-value (core/storeinstruction-result instruction))])
 
     (instance? native.core.AllocateInstruction instruction)
-    (worlds/canonical-record "allocate-instruction"
+    (stages/canonical-record "allocate-instruction"
       [(encode-ssa-value (core/allocateinstruction-result instruction))
        (id-value (core/allocateinstruction-region instruction))
        (id-value (core/allocateinstruction-capability instruction))])
 
     (instance? native.core.VecLengthInstruction instruction)
-    (worlds/canonical-record "vec-length-instruction"
+    (stages/canonical-record "vec-length-instruction"
       [(encode-ssa-value (core/veclengthinstruction-result instruction))
        (id-value (core/veclengthinstruction-source-id instruction))])
 
     (instance? native.core.VecGetInstruction instruction)
-    (worlds/canonical-record "vec-get-instruction"
+    (stages/canonical-record "vec-get-instruction"
       [(encode-ssa-value (core/vecgetinstruction-result instruction))
        (id-value (core/vecgetinstruction-source-id instruction))
        (id-value (core/vecgetinstruction-index-id instruction))])
 
     (instance? native.core.VecAssocInstructionV0 instruction)
-    (worlds/canonical-record "vec-assoc-instruction-v0"
+    (stages/canonical-record "vec-assoc-instruction-v0"
       [(encode-ssa-value (core/vecassocinstructionv0-result instruction))
        (id-value (core/vecassocinstructionv0-source-id instruction))
        (id-value (core/vecassocinstructionv0-index-id instruction))
@@ -16010,27 +15929,27 @@
        (id-value (core/vecassocinstructionv0-arena-id instruction))])
 
     (instance? native.core.VecPushInstruction instruction)
-    (worlds/canonical-record "vec-push-instruction"
+    (stages/canonical-record "vec-push-instruction"
       [(encode-ssa-value (core/vecpushinstruction-result instruction))
        (id-value (core/vecpushinstruction-source-id instruction))
        (id-value (core/vecpushinstruction-value-id instruction))
        (id-value (core/vecpushinstruction-arena-id instruction))])
 
     (instance? native.core.VecEmptyInstruction instruction)
-    (worlds/canonical-record "vec-empty-instruction"
+    (stages/canonical-record "vec-empty-instruction"
       [(encode-ssa-value (core/vecemptyinstruction-result instruction))
        (id-value (core/vecemptyinstruction-capacity-id instruction))
        (id-value (core/vecemptyinstruction-arena-id instruction))])
 
     (instance? native.core.VecConcatInstruction instruction)
-    (worlds/canonical-record "vec-concat-instruction"
+    (stages/canonical-record "vec-concat-instruction"
       [(encode-ssa-value (core/vecconcatinstruction-result instruction))
        (id-value (core/vecconcatinstruction-left-id instruction))
        (id-value (core/vecconcatinstruction-right-id instruction))
        (id-value (core/vecconcatinstruction-arena-id instruction))])
 
     (instance? native.core.VecSliceInstructionV0 instruction)
-    (worlds/canonical-record "vec-slice-instruction-v0"
+    (stages/canonical-record "vec-slice-instruction-v0"
       [(encode-ssa-value (core/vecsliceinstructionv0-result instruction))
        (id-value (core/vecsliceinstructionv0-source-id instruction))
        (id-value (core/vecsliceinstructionv0-start-id instruction))
@@ -16038,20 +15957,20 @@
        (id-value (core/vecsliceinstructionv0-arena-id instruction))])
 
     (instance? native.core.VecReverseInstructionV0 instruction)
-    (worlds/canonical-record "vec-reverse-instruction-v0"
+    (stages/canonical-record "vec-reverse-instruction-v0"
       [(encode-ssa-value (core/vecreverseinstructionv0-result instruction))
        (id-value (core/vecreverseinstructionv0-source-id instruction))
        (id-value (core/vecreverseinstructionv0-arena-id instruction))])
 
     (instance? native.core.VecSortInstructionV0 instruction)
-    (worlds/canonical-record "vec-sort-instruction-v0"
+    (stages/canonical-record "vec-sort-instruction-v0"
       [(encode-ssa-value (core/vecsortinstructionv0-result instruction))
        (id-value (core/vecsortinstructionv0-source-id instruction))
        (id-value (core/vecsortinstructionv0-arena-id instruction))
        (id-value (core/vecsortinstructionv0-element-type instruction))])
 
     (instance? native.core.MapLiteralInstructionV0 instruction)
-    (worlds/canonical-record "map-literal-instruction-v0"
+    (stages/canonical-record "map-literal-instruction-v0"
       [(encode-ssa-value (core/mapliteralinstructionv0-result instruction))
        (encode-id-roots "keys"
          (core/mapliteralinstructionv0-key-ids instruction))
@@ -16062,7 +15981,7 @@
          (core/mapliteralinstructionv0-key-equality instruction))])
 
     (instance? native.core.SetLiteralInstructionV0 instruction)
-    (worlds/canonical-record "set-literal-instruction-v0"
+    (stages/canonical-record "set-literal-instruction-v0"
       [(encode-ssa-value (core/setliteralinstructionv0-result instruction))
        (encode-id-roots "values"
          (core/setliteralinstructionv0-value-ids instruction))
@@ -16071,14 +15990,14 @@
          (core/setliteralinstructionv0-element-equality instruction))])
 
     (instance? native.core.MapCountInstructionV0 instruction)
-    (worlds/canonical-record "map-count-instruction-v0"
+    (stages/canonical-record "map-count-instruction-v0"
       [(encode-ssa-value (core/mapcountinstructionv0-result instruction))
        (id-value (core/mapcountinstructionv0-source-id instruction))])
 
     (instance? native.core.MapGetInstructionV0 instruction)
     (let [default: (U core/NativeId Nil)
           (core/mapgetinstructionv0-default-id instruction)]
-      (worlds/canonical-record "map-get-instruction-v0"
+      (stages/canonical-record "map-get-instruction-v0"
         [(encode-ssa-value (core/mapgetinstructionv0-result instruction))
          (id-value (core/mapgetinstructionv0-source-id instruction))
          (id-value (core/mapgetinstructionv0-key-id instruction))
@@ -16087,7 +16006,7 @@
            (core/mapgetinstructionv0-key-equality instruction))]))
 
     (instance? native.core.MapContainsInstructionV0 instruction)
-    (worlds/canonical-record "map-contains-instruction-v0"
+    (stages/canonical-record "map-contains-instruction-v0"
       [(encode-ssa-value (core/mapcontainsinstructionv0-result instruction))
        (id-value (core/mapcontainsinstructionv0-source-id instruction))
        (id-value (core/mapcontainsinstructionv0-key-id instruction))
@@ -16095,7 +16014,7 @@
          (core/mapcontainsinstructionv0-key-equality instruction))])
 
     (instance? native.core.MapAssocInstructionV0 instruction)
-    (worlds/canonical-record "map-assoc-instruction-v0"
+    (stages/canonical-record "map-assoc-instruction-v0"
       [(encode-ssa-value (core/mapassocinstructionv0-result instruction))
        (id-value (core/mapassocinstructionv0-source-id instruction))
        (id-value (core/mapassocinstructionv0-key-id instruction))
@@ -16105,7 +16024,7 @@
          (core/mapassocinstructionv0-key-equality instruction))])
 
     (instance? native.core.MapDissocInstructionV0 instruction)
-    (worlds/canonical-record "map-dissoc-instruction-v0"
+    (stages/canonical-record "map-dissoc-instruction-v0"
       [(encode-ssa-value (core/mapdissocinstructionv0-result instruction))
        (id-value (core/mapdissocinstructionv0-source-id instruction))
        (id-value (core/mapdissocinstructionv0-key-id instruction))
@@ -16114,24 +16033,24 @@
          (core/mapdissocinstructionv0-key-equality instruction))])
 
     (instance? native.core.MapKeysInstructionV0 instruction)
-    (worlds/canonical-record "map-keys-instruction-v0"
+    (stages/canonical-record "map-keys-instruction-v0"
       [(encode-ssa-value (core/mapkeysinstructionv0-result instruction))
        (id-value (core/mapkeysinstructionv0-source-id instruction))
        (id-value (core/mapkeysinstructionv0-arena-id instruction))])
 
     (instance? native.core.MapValuesInstructionV0 instruction)
-    (worlds/canonical-record "map-values-instruction-v0"
+    (stages/canonical-record "map-values-instruction-v0"
       [(encode-ssa-value (core/mapvaluesinstructionv0-result instruction))
        (id-value (core/mapvaluesinstructionv0-source-id instruction))
        (id-value (core/mapvaluesinstructionv0-arena-id instruction))])
 
     (instance? native.core.SetCountInstructionV0 instruction)
-    (worlds/canonical-record "set-count-instruction-v0"
+    (stages/canonical-record "set-count-instruction-v0"
       [(encode-ssa-value (core/setcountinstructionv0-result instruction))
        (id-value (core/setcountinstructionv0-source-id instruction))])
 
     (instance? native.core.SetContainsInstructionV0 instruction)
-    (worlds/canonical-record "set-contains-instruction-v0"
+    (stages/canonical-record "set-contains-instruction-v0"
       [(encode-ssa-value (core/setcontainsinstructionv0-result instruction))
        (id-value (core/setcontainsinstructionv0-source-id instruction))
        (id-value (core/setcontainsinstructionv0-value-id instruction))
@@ -16139,7 +16058,7 @@
          (core/setcontainsinstructionv0-element-equality instruction))])
 
     (instance? native.core.SetConjInstructionV0 instruction)
-    (worlds/canonical-record "set-conj-instruction-v0"
+    (stages/canonical-record "set-conj-instruction-v0"
       [(encode-ssa-value (core/setconjinstructionv0-result instruction))
        (id-value (core/setconjinstructionv0-source-id instruction))
        (id-value (core/setconjinstructionv0-value-id instruction))
@@ -16148,7 +16067,7 @@
          (core/setconjinstructionv0-element-equality instruction))])
 
     (instance? native.core.SetDisjInstructionV0 instruction)
-    (worlds/canonical-record "set-disj-instruction-v0"
+    (stages/canonical-record "set-disj-instruction-v0"
       [(encode-ssa-value (core/setdisjinstructionv0-result instruction))
        (id-value (core/setdisjinstructionv0-source-id instruction))
        (id-value (core/setdisjinstructionv0-value-id instruction))
@@ -16157,13 +16076,13 @@
          (core/setdisjinstructionv0-element-equality instruction))])
 
     (instance? native.core.SetVectorInstructionV0 instruction)
-    (worlds/canonical-record "set-vector-instruction-v0"
+    (stages/canonical-record "set-vector-instruction-v0"
       [(encode-ssa-value (core/setvectorinstructionv0-result instruction))
        (id-value (core/setvectorinstructionv0-source-id instruction))
        (id-value (core/setvectorinstructionv0-arena-id instruction))])
 
     (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
-    (worlds/canonical-record "collection-transient-open-instruction-v0"
+    (stages/canonical-record "collection-transient-open-instruction-v0"
       [(encode-ssa-value
          (core/collectiontransientopeninstructionv0-result instruction))
        (id-value
@@ -16172,7 +16091,7 @@
          (core/collectiontransientopeninstructionv0-arena-id instruction))])
 
     (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
-    (worlds/canonical-record "collection-persistent-close-instruction-v0"
+    (stages/canonical-record "collection-persistent-close-instruction-v0"
       [(encode-ssa-value
          (core/collectionpersistentcloseinstructionv0-result instruction))
        (id-value
@@ -16181,7 +16100,7 @@
          (core/collectionpersistentcloseinstructionv0-arena-id instruction))])
 
     (instance? native.core.TransientMapAssocInstructionV0 instruction)
-    (worlds/canonical-record "transient-map-assoc-instruction-v0"
+    (stages/canonical-record "transient-map-assoc-instruction-v0"
       [(encode-ssa-value
          (core/transientmapassocinstructionv0-result instruction))
        (id-value
@@ -16193,7 +16112,7 @@
          (core/transientmapassocinstructionv0-key-equality instruction))])
 
     (instance? native.core.TransientSetConjInstructionV0 instruction)
-    (worlds/canonical-record "transient-set-conj-instruction-v0"
+    (stages/canonical-record "transient-set-conj-instruction-v0"
       [(encode-ssa-value
          (core/transientsetconjinstructionv0-result instruction))
        (id-value
@@ -16204,39 +16123,39 @@
          (core/transientsetconjinstructionv0-element-equality instruction))])
 
     (instance? native.core.ArenaInstruction instruction)
-    (worlds/canonical-record "arena-instruction"
+    (stages/canonical-record "arena-instruction"
       [(encode-ssa-value (core/arenainstruction-result instruction))
        (id-value (core/arenainstruction-region instruction))
        (id-value (core/arenainstruction-capability instruction))])
 
     (instance? native.core.AtomStateInstruction instruction)
-    (worlds/canonical-record "atom-state-instruction"
+    (stages/canonical-record "atom-state-instruction"
       [(encode-ssa-value (core/atomstateinstruction-result instruction))
        (id-value (core/atomstateinstruction-region instruction))
        (id-value (core/atomstateinstruction-capability instruction))])
 
     (instance? native.core.AtomCreateInstruction instruction)
-    (worlds/canonical-record "atom-create-instruction"
+    (stages/canonical-record "atom-create-instruction"
       [(encode-ssa-value (core/atomcreateinstruction-result instruction))
        (id-value (core/atomcreateinstruction-initial-id instruction))
        (id-value (core/atomcreateinstruction-arena-id instruction))
        (id-value (core/atomcreateinstruction-state-id instruction))])
 
     (instance? native.core.AtomDerefInstruction instruction)
-    (worlds/canonical-record "atom-deref-instruction"
+    (stages/canonical-record "atom-deref-instruction"
       [(encode-ssa-value (core/atomderefinstruction-result instruction))
        (id-value (core/atomderefinstruction-cell-id instruction))
        (id-value (core/atomderefinstruction-state-id instruction))])
 
     (instance? native.core.AtomResetInstruction instruction)
-    (worlds/canonical-record "atom-reset-instruction"
+    (stages/canonical-record "atom-reset-instruction"
       [(encode-ssa-value (core/atomresetinstruction-result instruction))
        (id-value (core/atomresetinstruction-cell-id instruction))
        (id-value (core/atomresetinstruction-state-id instruction))
        (id-value (core/atomresetinstruction-value-id instruction))])
 
     (instance? native.core.AtomCompareExchangeInstruction instruction)
-    (worlds/canonical-record "atom-compare-exchange-instruction"
+    (stages/canonical-record "atom-compare-exchange-instruction"
       [(encode-ssa-value
          (core/atomcompareexchangeinstruction-result instruction))
        (id-value (core/atomcompareexchangeinstruction-cell-id instruction))
@@ -16246,7 +16165,7 @@
          (core/atomcompareexchangeinstruction-replacement-id instruction))])
 
     (instance? native.core.AtomSwapInstruction instruction)
-    (worlds/canonical-record "atom-swap-instruction"
+    (stages/canonical-record "atom-swap-instruction"
       [(encode-ssa-value (core/atomswapinstruction-result instruction))
        (id-value (core/atomswapinstruction-cell-id instruction))
        (id-value (core/atomswapinstruction-state-id instruction))
@@ -16255,33 +16174,33 @@
          (core/atomswapinstruction-arguments instruction))])
 
     (instance? native.core.TextLengthInstruction instruction)
-    (worlds/canonical-record "text-length-instruction"
+    (stages/canonical-record "text-length-instruction"
       [(encode-ssa-value (core/textlengthinstruction-result instruction))
        (id-value (core/textlengthinstruction-source-id instruction))])
 
     (instance? native.core.TextIndexOfInstruction instruction)
-    (worlds/canonical-record "text-index-of-instruction"
+    (stages/canonical-record "text-index-of-instruction"
       [(encode-ssa-value (core/textindexofinstruction-result instruction))
        (id-value (core/textindexofinstruction-source-id instruction))
        (id-value (core/textindexofinstruction-needle-id instruction))])
 
     (instance? native.core.TextBlankInstruction instruction)
-    (worlds/canonical-record "text-blank-instruction"
+    (stages/canonical-record "text-blank-instruction"
       [(encode-ssa-value (core/textblankinstruction-result instruction))
        (id-value (core/textblankinstruction-source-id instruction))])
 
     (instance? native.core.TextParseI64Instruction instruction)
-    (worlds/canonical-record "text-parse-i64-instruction"
+    (stages/canonical-record "text-parse-i64-instruction"
       [(encode-ssa-value (core/textparsei64instruction-result instruction))
        (id-value (core/textparsei64instruction-source-id instruction))])
 
     (instance? native.core.TextParseF64Instruction instruction)
-    (worlds/canonical-record "text-parse-f64-instruction"
+    (stages/canonical-record "text-parse-f64-instruction"
       [(encode-ssa-value (core/textparsef64instruction-result instruction))
        (id-value (core/textparsef64instruction-source-id instruction))])
 
     (instance? native.core.TextSliceInstruction instruction)
-    (worlds/canonical-record "text-slice-instruction"
+    (stages/canonical-record "text-slice-instruction"
       [(encode-ssa-value (core/textsliceinstruction-result instruction))
        (id-value (core/textsliceinstruction-arena-id instruction))
        (id-value (core/textsliceinstruction-source-id instruction))
@@ -16290,27 +16209,27 @@
        (str (core/textsliceinstruction-failure-code instruction))])
 
     (instance? native.core.TextConcatInstruction instruction)
-    (worlds/canonical-record "text-concat-instruction"
+    (stages/canonical-record "text-concat-instruction"
       [(encode-ssa-value (core/textconcatinstruction-result instruction))
        (id-value (core/textconcatinstruction-arena-id instruction))
        (encode-id-roots "operands"
          (core/textconcatinstruction-operand-ids instruction))])
 
     (instance? native.core.TextBuiltinInstruction instruction)
-    (worlds/canonical-record "text-builtin-instruction"
+    (stages/canonical-record "text-builtin-instruction"
       [(encode-ssa-value (core/textbuiltininstruction-result instruction))
        (encode-text-builtin-operation
          (core/textbuiltininstruction-builtin instruction))])
 
     (instance? native.core.ValueSemanticsInstruction instruction)
-    (worlds/canonical-record "value-semantics-instruction"
+    (stages/canonical-record "value-semantics-instruction"
       [(encode-ssa-value
          (core/valuesemanticsinstruction-result instruction))
        (encode-value-semantics-operation
          (core/valuesemanticsinstruction-operation instruction))])
 
     (instance? native.core.ValueToTextInstructionV0 instruction)
-    (worlds/canonical-record "value-to-text-instruction-v0"
+    (stages/canonical-record "value-to-text-instruction-v0"
       [(encode-ssa-value
          (core/valuetotextinstructionv0-result instruction))
        (if (instance? native.core.ValuePrStrV0
@@ -16322,14 +16241,14 @@
        (id-value (core/valuetotextinstructionv0-arena-id instruction))])
 
     (instance? native.core.CodecPrimitiveInstructionV0 instruction)
-    (worlds/canonical-record "codec-primitive-instruction-v0"
+    (stages/canonical-record "codec-primitive-instruction-v0"
       [(encode-ssa-value
          (core/codecprimitiveinstructionv0-result instruction))
        (encode-codec-primitive-operation
          (core/codecprimitiveinstructionv0-operation instruction))])
 
     (instance? native.core.CallInstruction instruction)
-    (worlds/canonical-record "call-instruction"
+    (stages/canonical-record "call-instruction"
       [(encode-ssa-value (core/callinstruction-result instruction))
        (id-value (core/callinstruction-function-id instruction))
        (encode-id-roots "arguments" (core/callinstruction-arguments instruction))])
@@ -16337,7 +16256,7 @@
     (instance? native.core.ExternCallInstruction instruction)
     (let [arena: (U core/NativeId Nil)
           (core/externcallinstruction-arena-id instruction)]
-      (worlds/canonical-record "extern-call-instruction"
+      (stages/canonical-record "extern-call-instruction"
         [(encode-ssa-value (core/externcallinstruction-result instruction))
          (id-value (core/externcallinstruction-abi-id instruction))
          (encode-id-roots "arguments"
@@ -16350,55 +16269,55 @@
   (cond
     (instance? native.core.ReturnTerminator terminator)
     (let [value: (U core/NativeId Nil) (core/returnterminator-value terminator)]
-      (worlds/canonical-record "return"
+      (stages/canonical-record "return"
         [(if (nil? value) "unit" (id-value value))]))
 
     (instance? native.core.JumpTerminator terminator)
-    (worlds/canonical-record "jump"
+    (stages/canonical-record "jump"
       [(id-value (core/jumpterminator-block-id terminator))
        (encode-id-roots "arguments" (core/jumpterminator-arguments terminator))])
 
     (instance? native.core.BranchTerminator terminator)
-    (worlds/canonical-record "branch"
+    (stages/canonical-record "branch"
       [(id-value (core/branchterminator-condition terminator))
        (id-value (core/branchterminator-true-block terminator))
        (id-value (core/branchterminator-false-block terminator))])
 
     (instance? native.core.SwitchTerminator terminator)
-    (worlds/canonical-record "switch"
+    (stages/canonical-record "switch"
       [(id-value (core/switchterminator-value-id terminator))])
 
     :else
-    (worlds/canonical-record "trap"
+    (stages/canonical-record "trap"
       [(id-value (core/trapterminator-failure-id terminator))])))
 
 (defn encode-basic-block [(block : core/BasicBlock)] -> String
-  (worlds/canonical-record "basic-block-v0"
+  (stages/canonical-record "basic-block-v0"
     [(id-value (core/basicblock-id block))
-     (worlds/canonical-record "parameters"
+     (stages/canonical-record "parameters"
        (mapv
          (fn [(parameter : core/Parameter)] -> String (encode-parameter parameter))
          (core/basicblock-parameters block)))
-     (worlds/canonical-record "instructions"
+     (stages/canonical-record "instructions"
        (mapv
          (fn [(instruction : core/Instruction)] -> String
            (encode-instruction instruction))
          (core/basicblock-instructions block)))
-     (worlds/canonical-record "terminators"
+     (stages/canonical-record "terminators"
        (mapv
          (fn [(terminator : core/Terminator)] -> String
            (encode-terminator terminator))
          (core/basicblock-terminators block)))]))
 
 (defn encode-native-function [(function : core/FunctionDef)] -> String
-  (worlds/canonical-record "native-function-v0"
+  (stages/canonical-record "native-function-v0"
     [(id-value (core/functiondef-id function))
      (core/functiondef-name function)
-     (worlds/canonical-record "parameters"
+     (stages/canonical-record "parameters"
        (mapv
          (fn [(parameter : core/Parameter)] -> String (encode-parameter parameter))
          (core/functiondef-parameters function)))
-     (worlds/canonical-record "blocks"
+     (stages/canonical-record "blocks"
        (mapv
          (fn [(block : core/BasicBlock)] -> String (encode-basic-block block))
          (core/functiondef-blocks function)))
@@ -16410,7 +16329,7 @@
      (encode-id-roots "capabilities" (core/functiondef-capabilities function))]))
 
 (defn encode-abi-value [(value : core/AbiValueV0)] -> String
-  (worlds/canonical-record "abi-value-v0"
+  (stages/canonical-record "abi-value-v0"
     [(core/abivaluev0-name value)
      (id-value (core/abivaluev0-type-id value))]))
 
@@ -16419,13 +16338,13 @@
     (instance? native.core.BorrowedV0 ownership) "borrowed"
     (instance? native.core.OwnedV0 ownership) "owned"
     :else
-    (worlds/canonical-record "arena-owned"
+    (stages/canonical-record "arena-owned"
       [(id-value (core/arenaownedv0-region ownership))])))
 
 (defn encode-import-abi-value [(value : core/AbiValueV0)] -> String
   (let [lifetime: (U core/NativeId Nil)
         (core/abivaluev0-lifetime-region value)]
-    (worlds/canonical-record "import-abi-value-v0"
+    (stages/canonical-record "import-abi-value-v0"
       [(core/abivaluev0-name value)
        (id-value (core/abivaluev0-type-id value))
        (encode-ownership (core/abivaluev0-ownership value))
@@ -16434,7 +16353,7 @@
 (defn encode-abi [(abi : core/AbiDeclV0)] -> String
   (let [result: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
     (if (instance? native.core.AbiImportV0 (core/abideclv0-direction abi))
-      (worlds/canonical-record "abi-import-declaration-v0"
+      (stages/canonical-record "abi-import-declaration-v0"
         [(id-value (core/abideclv0-id abi))
          (id-value (core/abideclv0-function-id abi))
          (core/abideclv0-symbol abi)
@@ -16446,7 +16365,7 @@
              (core/abideclv0-convention abi))
            "restricted-c-outcome-out-v0"
            :else "restricted-c-v0")
-         (worlds/canonical-record "parameters"
+         (stages/canonical-record "parameters"
            (mapv
              (fn [(value : core/AbiValueV0)] -> String
                (encode-import-abi-value value))
@@ -16458,11 +16377,11 @@
            (core/abideclv0-required-capabilities abi))
          (core/abideclv0-version abi)
          (core/abideclv0-layout-digest abi)])
-      (worlds/canonical-record "abi-declaration-v0"
+      (stages/canonical-record "abi-declaration-v0"
         [(id-value (core/abideclv0-id abi))
          (id-value (core/abideclv0-function-id abi))
          (core/abideclv0-symbol abi)
-         (worlds/canonical-record "parameters"
+         (stages/canonical-record "parameters"
            (mapv
              (fn [(value : core/AbiValueV0)] -> String (encode-abi-value value))
              (core/abideclv0-parameters abi)))
@@ -16481,85 +16400,85 @@
    (layouts : (Vec core/LayoutDef))
    (functions : (Vec core/FunctionDef))
    (abis : (Vec core/AbiDeclV0))
-   (obligation-results : (Vec core/ObligationResult))] -> (Vec worlds/TermNodeV0)
-  (let [type-nodes: (Vec worlds/TermNodeV0)
+   (obligation-results : (Vec core/ObligationResult))] -> (Vec stages/TermNodeV0)
+  (let [type-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(definition : core/TypeDef)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0 (core/typedef-id definition)
-              (worlds/->TextTermV0 (encode-type-def definition))))
+          (fn [(definition : core/TypeDef)] -> stages/TermNodeV0
+            (stages/->TermNodeV0 (core/typedef-id definition)
+              (stages/->TextTermV0 (encode-type-def definition))))
           types)
-        effect-nodes: (Vec worlds/TermNodeV0)
+        effect-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(effect : core/EffectDef)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0 (core/effectdef-id effect)
-              (worlds/->TextTermV0 (encode-effect effect))))
+          (fn [(effect : core/EffectDef)] -> stages/TermNodeV0
+            (stages/->TermNodeV0 (core/effectdef-id effect)
+              (stages/->TextTermV0 (encode-effect effect))))
           effects)
-        layout-nodes: (Vec worlds/TermNodeV0)
+        layout-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(layout : core/LayoutDef)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0 (core/layoutdef-id layout)
-              (worlds/->TextTermV0 (encode-layout-def layout))))
+          (fn [(layout : core/LayoutDef)] -> stages/TermNodeV0
+            (stages/->TermNodeV0 (core/layoutdef-id layout)
+              (stages/->TextTermV0 (encode-layout-def layout))))
           layouts)
-        function-nodes: (Vec worlds/TermNodeV0)
+        function-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(function : core/FunctionDef)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0 (core/functiondef-id function)
-              (worlds/->TextTermV0 (encode-native-function function))))
+          (fn [(function : core/FunctionDef)] -> stages/TermNodeV0
+            (stages/->TermNodeV0 (core/functiondef-id function)
+              (stages/->TextTermV0 (encode-native-function function))))
           functions)
-        abi-nodes: (Vec worlds/TermNodeV0)
+        abi-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(abi : core/AbiDeclV0)] -> worlds/TermNodeV0
-            (worlds/->TermNodeV0 (core/abideclv0-id abi)
-              (worlds/->TextTermV0 (encode-abi abi))))
+          (fn [(abi : core/AbiDeclV0)] -> stages/TermNodeV0
+            (stages/->TermNodeV0 (core/abideclv0-id abi)
+              (stages/->TextTermV0 (encode-abi abi))))
           abis)
-        obligation-nodes: (Vec worlds/TermNodeV0)
+        obligation-nodes: (Vec stages/TermNodeV0)
         (mapv
-          (fn [(result : core/ObligationResult)] -> worlds/TermNodeV0
+          (fn [(result : core/ObligationResult)] -> stages/TermNodeV0
             (let [id: core/NativeId
                   (lower-id "obligation"
                     [(core/obligationresult-detail result)])]
-              (worlds/->TermNodeV0 id
-                (worlds/->TextTermV0
-                  (worlds/canonical-record "native-obligation-v0"
+              (stages/->TermNodeV0 id
+                (stages/->TextTermV0
+                  (stages/canonical-record "native-obligation-v0"
                     [(if (core/obligationresult-passed result) "pass" "fail")
                      (core/obligationresult-detail result)])))))
           obligation-results)
-        environment-capability-nodes: (Vec worlds/TermNodeV0)
+        environment-capability-nodes: (Vec stages/TermNodeV0)
         (if (core/id-in? (core/capability-ids capabilities)
               (host-environment-capability-id))
-          [(worlds/->TermNodeV0 (host-environment-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-environment-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-environment-capability-id))
                   "host-environment"
                   "non-affine"])))]
           [])
-        stdout-capability-nodes: (Vec worlds/TermNodeV0)
+        stdout-capability-nodes: (Vec stages/TermNodeV0)
         (if (core/id-in? (core/capability-ids capabilities)
               (host-stdout-capability-id))
-          [(worlds/->TermNodeV0 (host-stdout-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-stdout-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-stdout-capability-id))
                   "host-stdout"
                   "non-affine"])))]
           [])
-        socket-capability-nodes: (Vec worlds/TermNodeV0)
+        socket-capability-nodes: (Vec stages/TermNodeV0)
         (if (core/id-in? (core/capability-ids capabilities)
               (host-socket-capability-id))
-          [(worlds/->TermNodeV0 (host-socket-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-socket-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-socket-capability-id))
                   "host-socket-peer-lifecycle-v0"
                   "non-affine"])))]
           [])
-        clock-capability-nodes: (Vec worlds/TermNodeV0)
+        clock-capability-nodes: (Vec stages/TermNodeV0)
         (if (core/id-in? (core/capability-ids capabilities)
               (host-clock-capability-id))
-          [(worlds/->TermNodeV0 (host-clock-capability-id)
-             (worlds/->TextTermV0
-               (worlds/canonical-record "capability-v0"
+          [(stages/->TermNodeV0 (host-clock-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
                  [(id-value (host-clock-capability-id))
                   "host-monotonic-clock-v0"
                   "non-affine"])))]
@@ -16568,13 +16487,13 @@
            obligation-nodes environment-capability-nodes
            stdout-capability-nodes socket-capability-nodes
            clock-capability-nodes
-           [(worlds/->TermNodeV0 (arena-region-id)
-              (worlds/->TextTermV0
-                (worlds/canonical-record "region-v0"
+           [(stages/->TermNodeV0 (arena-region-id)
+              (stages/->TextTermV0
+                (stages/canonical-record "region-v0"
                   [(id-value (arena-region-id)) "arena"])))
-            (worlds/->TermNodeV0 (write-capability-id)
-              (worlds/->TextTermV0
-                (worlds/canonical-record "capability-v0"
+            (stages/->TermNodeV0 (write-capability-id)
+              (stages/->TextTermV0
+                (stages/canonical-record "capability-v0"
                   [(id-value (write-capability-id)) "affine-write"])))]))))
 
 (defn native-obligation-results
@@ -16598,20 +16517,12 @@
    (core/->ObligationResult (core/->DischargedTokensObligation true) tokens-discharged
      "affine region and capability tokens are discharged")
    (core/->ObligationResult (core/->BoundedEffectsObligation true) effects-bounded
-     "function effects stay inside the declared world capability sets")])
+     "function effects stay inside the declared program capability sets")])
 
 (defn encode-obligation-result [(result : core/ObligationResult)] -> String
-  (worlds/canonical-record "native-obligation-v0"
+  (stages/canonical-record "native-obligation-v0"
     [(if (core/obligationresult-passed result) "pass" "fail")
      (core/obligationresult-detail result)]))
-
-(defn encode-native-world [(world : worlds/NativeWorldV0)] -> String
-  (worlds/canonical-record "native-world-v0"
-    [(encode-term-graph (worlds/nativeworldv0-terms world))
-     (worlds/nativeworldv0-typed-digest world)
-     (id-value (core/nativeworld-id (worlds/nativeworldv0-program world)))
-     (encode-id-roots "obligations"
-       (worlds/nativeworldv0-obligation-roots world))]))
 
 (defn layout-pending-obligations
   [(resolutions : (Vec LayoutResolutionV0))
@@ -16663,7 +16574,7 @@
      "implemented functions do not leak an affine capability token")
    (core/->ReceiptObligationV0
      (core/->BoundedEffectsObligation true) "v0" digest core-valid
-     "implemented function effects stay inside world declarations")
+     "implemented function effects stay inside program declarations")
    (core/->ReceiptObligationV0
      (core/->ValidSsaObligation true) "v0" digest clean
      "native Terms contain no raw Any, host exception, host collection, or target syntax")])
@@ -16696,13 +16607,13 @@
                 "TODO-NATIVE-SLICE-BODIES"
                 "typed source functions with unimplemented bodies remain explicit obligations")])))))
 
-(defn lower-native-world
-  [(frozen-typed : worlds/FrozenTypedWorldV0)
+(defn lower-native-stage
+  [(frozen-typed : stages/FrozenTypedStageV0)
    (slice : TypedSliceV0)
    (compiler-commit : String)
    (configuration : (Vec String))
    (abi : core/AbiProfileV0)] -> NativeLoweringResultV0
-  (let [typed-digest: String (worlds/frozentypedworldv0-digest frozen-typed)
+  (let [typed-digest: String (stages/frozentypedstagev0-digest frozen-typed)
         types: (Vec core/TypeDef)
         (append-type-def (typedslicev0-types slice) (union-tag-type))
         layout-resolutions: (Vec LayoutResolutionV0) (resolve-layouts types abi)
@@ -16714,11 +16625,11 @@
         effects: (Vec core/EffectDef) (typedslicev0-effects slice)
         regions: (Vec core/RegionDef) (typedslicev0-regions slice)
         capabilities: (Vec core/CapabilityDef) (typedslicev0-capabilities slice)
-        program-id: core/NativeId (lower-id "native-world" [typed-digest])
-        program: core/NativeWorld
-        (core/->NativeWorld
+        program-id: core/NativeId (lower-id "native-program" [typed-digest])
+        program: core/NativeCoreProgram
+        (core/->NativeCoreProgram
           program-id
-          (lower-id "typed-world" [typed-digest])
+          (lower-id "typed-stage" [typed-digest])
           "typed-to-native-v0"
           types
           effects
@@ -16734,7 +16645,7 @@
                   (core/capabilitydef-id capability)) capabilities)
           abis
           [])
-        validation: core/ValidationReport (core/validate-world program)
+        validation: core/ValidationReport (core/validate-program program)
         core-valid: Bool (core/validationreport-passed validation)
         closed-layouts: Bool (layouts-closed? layout-resolutions)
         functions-ready: Bool (all-functions-ready? typed-functions)
@@ -16760,21 +16671,21 @@
           (fn [(result : core/ObligationResult)] -> core/NativeId
             (lower-id "obligation" [(core/obligationresult-detail result)]))
           obligation-results)
-        nodes: (Vec worlds/TermNodeV0)
+        nodes: (Vec stages/TermNodeV0)
         (native-term-nodes types effects capabilities layouts functions abis
           obligation-results)
-        terms: worlds/TermGraphV0
-        (worlds/->TermGraphV0 root
+        terms: stages/TermGraphV0
+        (stages/->TermGraphV0 root
           (conj nodes
-            (worlds/->TermNodeV0 root
-              (worlds/->TextTermV0 "native-world-v0"))))
+            (stages/->TermNodeV0 root
+              (stages/->TextTermV0 "native-stage-v0"))))
         clean: Bool (term-graph-clean? terms)
-        world: worlds/NativeWorldV0
-        (worlds/->NativeWorldV0 terms typed-digest program obligation-roots)
-        encoding: String (worlds/encode-native-world world)
-        digest: String (worlds/content-digest encoding)
-        frozen: worlds/FrozenNativeWorldV0
-        (worlds/->FrozenNativeWorldV0 world encoding digest)
+        stage: stages/NativeStageV0
+        (stages/->NativeStageV0 terms typed-digest program obligation-roots)
+        encoding: String (stages/encode-native-stage stage)
+        digest: String (stages/content-digest encoding)
+        frozen: stages/FrozenNativeStageV0
+        (stages/->FrozenNativeStageV0 stage encoding digest)
         pending-layouts: (Vec core/ReceiptObligationV0)
         (layout-pending-obligations layout-resolutions digest)
         pending-functions: (Vec core/ReceiptObligationV0)
@@ -16797,10 +16708,10 @@
       (->NativeLoweringPendingV0 frozen receipt
         (vec (concat pending-layouts pending-functions))))))
 
-(defn native-world-host-erased? [(frozen : worlds/FrozenNativeWorldV0)] -> Bool
+(defn native-program-host-erased? [(frozen : stages/FrozenNativeStageV0)] -> Bool
   (term-graph-clean?
-    (worlds/nativeworldv0-terms
-      (worlds/frozennativeworldv0-world frozen))))
+    (stages/nativestagev0-terms
+      (stages/frozennativestagev0-stage frozen))))
 
 (defn fixture-id [(kind : String) (label : String)] -> core/NativeId
   (lower-id "fixture" [kind label]))
@@ -16811,22 +16722,22 @@
 (defn fixture-marker-id [(value : String)] -> core/NativeId
   (fixture-id "marker" value))
 
-(defn fixture-text-node [(value : String)] -> worlds/TermNodeV0
-  (worlds/->TermNodeV0 (fixture-text-id value) (worlds/->TextTermV0 value)))
+(defn fixture-text-node [(value : String)] -> stages/TermNodeV0
+  (stages/->TermNodeV0 (fixture-text-id value) (stages/->TextTermV0 value)))
 
-(defn fixture-marker-node [(value : String)] -> worlds/TermNodeV0
-  (worlds/->TermNodeV0
+(defn fixture-marker-node [(value : String)] -> stages/TermNodeV0
+  (stages/->TermNodeV0
     (fixture-marker-id value)
-    (worlds/->TextTermV0 "source-node-v0")))
+    (stages/->TextTermV0 "source-node-v0")))
 
 (defn fixture-fact-node
   [(ordinal : Int)
    (subject : core/NativeId)
    (predicate : String)
-   (object : core/NativeId)] -> worlds/TermNodeV0
-  (worlds/->TermNodeV0
+   (object : core/NativeId)] -> stages/TermNodeV0
+  (stages/->TermNodeV0
     (fixture-id "fact" (str ordinal))
-    (worlds/->TripleTermV0 subject (fixture-text-id predicate) object)))
+    (stages/->TripleTermV0 subject (fixture-text-id predicate) object)))
 
 (defn empty-context-id [(label : String)] -> core/NativeId
   (lower-id "empty-context-corpus" [label]))
@@ -17044,7 +16955,7 @@
     (emptycollectioncontextcorpusv0-wrong-arity-uncontextual
       empty-collection-context-corpus)))
 
-(def fixture-source-world: worlds/SourceProgramWorldV0
+(def fixture-source-program: stages/SourceStageV0
   (let [root: core/NativeId (fixture-marker-id "root")
         record: core/NativeId (fixture-marker-id "record")
         fields: core/NativeId (fixture-marker-id "fields")
@@ -17058,14 +16969,14 @@
          "native-op" "abi-symbol" "record" "seq" "param" "type-prim"
          "defn" "FixtureBox" "value" "Int" "fixture-probe-identity"
          "identity" "fixture_probe_identity"]
-        text-nodes: (Vec worlds/TermNodeV0)
-        (mapv (fn [(value : String)] -> worlds/TermNodeV0 (fixture-text-node value))
+        text-nodes: (Vec stages/TermNodeV0)
+        (mapv (fn [(value : String)] -> stages/TermNodeV0 (fixture-text-node value))
           text-values)
-        marker-nodes: (Vec worlds/TermNodeV0)
-        (mapv (fn [(value : String)] -> worlds/TermNodeV0 (fixture-marker-node value))
+        marker-nodes: (Vec stages/TermNodeV0)
+        (mapv (fn [(value : String)] -> stages/TermNodeV0 (fixture-marker-node value))
           ["root" "record" "fields" "field" "int-type" "function"
            "parameters" "parameter"])
-        facts: (Vec worlds/TermNodeV0)
+        facts: (Vec stages/TermNodeV0)
         [(fixture-fact-node 0 record "form-kind" (fixture-text-id "record"))
          (fixture-fact-node 1 record "name" (fixture-text-id "FixtureBox"))
          (fixture-fact-node 2 record "fields" fields)
@@ -17089,11 +17000,11 @@
          (fixture-fact-node 18 parameter "form-kind" (fixture-text-id "param"))
          (fixture-fact-node 19 parameter "f0" (fixture-text-id "value"))
          (fixture-fact-node 20 parameter "f1" int-type)]
-        nodes: (Vec worlds/TermNodeV0)
+        nodes: (Vec stages/TermNodeV0)
         (vec (concat marker-nodes text-nodes facts))]
-    (worlds/->SourceProgramWorldV0
-      (worlds/->TermGraphV0 root nodes)
-      [(worlds/->SourceModuleV0
+    (stages/->SourceStageV0
+      (stages/->TermGraphV0 root nodes)
+      [(stages/->SourceModuleV0
          (fixture-id "module" "fixture")
          "native.lower.fixture"
          "native-core/fixtures/lower-fixture.bgl"
@@ -17103,9 +17014,9 @@
       []
       [])))
 
-;; This fold-only insurance world is the empty-input specialization of
+;; This fold-only insurance program is the empty-input specialization of
 ;; fram.fold/max-sequence; the full vector loop remains outside the v0 C17 subset.
-(def fold-empty-source-world: worlds/SourceProgramWorldV0
+(def fold-empty-source-program: stages/SourceStageV0
   (let [root: core/NativeId (fixture-id "fold" "root")
         function: core/NativeId (fixture-id "fold" "max-sequence")
         parameters: core/NativeId (fixture-id "fold" "parameters")
@@ -17114,29 +17025,29 @@
         ["form-kind" "name" "params" "ret" "native-op" "abi-symbol" "f0"
          "source-node-v0" "defn" "seq" "type-prim" "Int"
          "max-sequence" "const-zero-i64" "fram_fold_max_sequence_empty"]
-        text-nodes: (Vec worlds/TermNodeV0)
-        (mapv (fn [(value : String)] -> worlds/TermNodeV0
-                (worlds/->TermNodeV0
+        text-nodes: (Vec stages/TermNodeV0)
+        (mapv (fn [(value : String)] -> stages/TermNodeV0
+                (stages/->TermNodeV0
                   (fixture-id "fold-text" value)
-                  (worlds/->TextTermV0 value)))
+                  (stages/->TextTermV0 value)))
           text-values)
-        marker-nodes: (Vec worlds/TermNodeV0)
-        [(worlds/->TermNodeV0 root (worlds/->TextTermV0 "source-node-v0"))
-         (worlds/->TermNodeV0 function (worlds/->TextTermV0 "source-node-v0"))
-         (worlds/->TermNodeV0 parameters (worlds/->TextTermV0 "source-node-v0"))
-         (worlds/->TermNodeV0 int-type (worlds/->TextTermV0 "source-node-v0"))]
+        marker-nodes: (Vec stages/TermNodeV0)
+        [(stages/->TermNodeV0 root (stages/->TextTermV0 "source-node-v0"))
+         (stages/->TermNodeV0 function (stages/->TextTermV0 "source-node-v0"))
+         (stages/->TermNodeV0 parameters (stages/->TextTermV0 "source-node-v0"))
+         (stages/->TermNodeV0 int-type (stages/->TextTermV0 "source-node-v0"))]
         text-id: [String -> core/NativeId]
         (fn [(value : String)] -> core/NativeId (fixture-id "fold-text" value))
-        fact: [Int core/NativeId String core/NativeId -> worlds/TermNodeV0]
+        fact: [Int core/NativeId String core/NativeId -> stages/TermNodeV0]
         (fn
           [(ordinal : Int)
            (subject : core/NativeId)
            (predicate : String)
-           (object : core/NativeId)] -> worlds/TermNodeV0
-          (worlds/->TermNodeV0
+           (object : core/NativeId)] -> stages/TermNodeV0
+          (stages/->TermNodeV0
             (fixture-id "fold-fact" (str ordinal))
-            (worlds/->TripleTermV0 subject (text-id predicate) object)))
-        facts: (Vec worlds/TermNodeV0)
+            (stages/->TripleTermV0 subject (text-id predicate) object)))
+        facts: (Vec stages/TermNodeV0)
         [(fact 0 function "form-kind" (text-id "defn"))
          (fact 1 function "name" (text-id "max-sequence"))
          (fact 2 function "params" parameters)
@@ -17146,11 +17057,11 @@
          (fact 6 parameters "form-kind" (text-id "seq"))
          (fact 7 int-type "form-kind" (text-id "type-prim"))
          (fact 8 int-type "f0" (text-id "Int"))]
-        nodes: (Vec worlds/TermNodeV0)
+        nodes: (Vec stages/TermNodeV0)
         (vec (concat marker-nodes text-nodes facts))]
-    (worlds/->SourceProgramWorldV0
-      (worlds/->TermGraphV0 root nodes)
-      [(worlds/->SourceModuleV0
+    (stages/->SourceStageV0
+      (stages/->TermGraphV0 root nodes)
+      [(stages/->SourceModuleV0
          (fixture-id "fold" "module")
          "fram.fold"
          "src/fram/fold.bclj"
@@ -17161,29 +17072,29 @@
       [])))
 
 (defunion FixturePipelineResultV0
-  (FixturePipelineCompleteV0 [(frozen : worlds/FrozenNativeWorldV0)])
+  (FixturePipelineCompleteV0 [(frozen : stages/FrozenNativeStageV0)])
   (FixturePipelineFailedV0 [(stage : String) (detail : String)]))
 
 (defn lower-pipeline-fixture
-  [(source-world : worlds/SourceProgramWorldV0)
+  [(source-program : stages/SourceStageV0)
    (compiler-commit : String)] -> FixturePipelineResultV0
   (let [configuration: (Vec String)
         ["profile=3"]
         source-result: SourceFreezeResultV0
-        (freeze-source-world source-world compiler-commit configuration)]
+        (freeze-source-stage source-program compiler-commit configuration)]
     (match source-result
       [(SourceFreezeRejectedV0 failure receipt)
-       (->FixturePipelineFailedV0 "source-freeze" "fixture source world rejected")]
+       (->FixturePipelineFailedV0 "source-freeze" "fixture source program rejected")]
       [(SourceFreezeAcceptedV0 frozen-source source-receipt)
        (let [typing-result: TypingResultV0
-             (lower-typed-world frozen-source compiler-commit configuration)]
+             (lower-typed-stage frozen-source compiler-commit configuration)]
          (match typing-result
            [(TypingRejectedV0 failure receipt)
             (->FixturePipelineFailedV0 "source-to-typed"
               "fixture annotations did not close")]
            [(TypingAcceptedV0 frozen-typed slice typed-receipt)
             (let [native-result: NativeLoweringResultV0
-                  (lower-native-world frozen-typed slice compiler-commit
+                  (lower-native-stage frozen-typed slice compiler-commit
                     configuration (core/abi-profile-lp64))]
               (match native-result
                 [(NativeLoweringPendingV0 frozen receipt obligations)
@@ -17193,7 +17104,7 @@
                  (->FixturePipelineCompleteV0 frozen)]))]))])))
 
 (defn lower-fixture [(compiler-commit : String)] -> FixturePipelineResultV0
-  (lower-pipeline-fixture fixture-source-world compiler-commit))
+  (lower-pipeline-fixture fixture-source-program compiler-commit))
 
 (def fixture-result: FixturePipelineResultV0
   (lower-fixture "fixture-compiler-commit"))
@@ -17205,25 +17116,25 @@
 
 (def fixture-native-host-erased?: Bool
   (match fixture-result
-    [(FixturePipelineCompleteV0 frozen) (native-world-host-erased? frozen)]
+    [(FixturePipelineCompleteV0 frozen) (native-program-host-erased? frozen)]
     [(FixturePipelineFailedV0 stage detail) false]))
 
 (def fixture-native-valid?: Bool
   (match fixture-result
     [(FixturePipelineCompleteV0 frozen)
      (core/validationreport-passed
-       (core/validate-world
-         (worlds/nativeworldv0-program
-           (worlds/frozennativeworldv0-world frozen))))]
+       (core/validate-program
+         (stages/nativestagev0-program
+           (stages/frozennativestagev0-stage frozen))))]
     [(FixturePipelineFailedV0 stage detail) false]))
 
 (def fixture-native-has-abi?: Bool
   (match fixture-result
     [(FixturePipelineCompleteV0 frozen)
      (> (count
-          (core/nativeworld-abis
-            (worlds/nativeworldv0-program
-              (worlds/frozennativeworldv0-world frozen))))
+          (core/nativecoreprogram-abis
+            (stages/nativestagev0-program
+              (stages/frozennativestagev0-stage frozen))))
         0)]
     [(FixturePipelineFailedV0 stage detail) false]))
 
@@ -17240,14 +17151,14 @@
        (nil? (parse-int-text "9223372036854775808"))))
 
 (def fold-empty-result: FixturePipelineResultV0
-  (lower-pipeline-fixture fold-empty-source-world "fold-insurance-v0"))
+  (lower-pipeline-fixture fold-empty-source-program "fold-insurance-v0"))
 
 (def fold-empty-passes?: Bool
   (match fold-empty-result
     [(FixturePipelineCompleteV0 frozen)
-     (and (native-world-host-erased? frozen)
+     (and (native-program-host-erased? frozen)
        (core/validationreport-passed
-         (core/validate-world
-           (worlds/nativeworldv0-program
-             (worlds/frozennativeworldv0-world frozen)))))]
+         (core/validate-program
+           (stages/nativestagev0-program
+             (stages/frozennativestagev0-stage frozen)))))]
     [(FixturePipelineFailedV0 stage detail) false]))

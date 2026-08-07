@@ -5,7 +5,7 @@
 #   beagle native-exe --out FILE --entry NS/NAME [--cc CC] [--static]
 #                     [--artifacts DIR] SOURCE...
 #
-# The frozen Native World report and C17 projection artifacts are copied to DIR (default:
+# The frozen native program report and C17 projection artifacts are copied to DIR (default:
 # FILE.artifacts). FILE is published only after the complete C17 projection,
 # entry ABI validation, strict compilation, and link all pass.
 
@@ -125,8 +125,8 @@ artifacts="$(cd "$artifacts" && pwd)"
 published_names=(
     source.facts
     report.txt
-    module.native-world
-    module.native-world.sha256
+    module.native-program
+    module.native-program.sha256
     module_0.h
     module_0.c
     module_0.ssa
@@ -266,7 +266,7 @@ if [[ $module_rc -ne 0 ]]; then
     exit "$module_rc"
 fi
 
-for name in source.facts report.txt module.native-world module.native-world.sha256 \
+for name in source.facts report.txt module.native-program module.native-program.sha256 \
     module_0.h module_0.c native_shim.h native_shim.c \
     native_unicode15_data.h UNICODE-LICENSE.txt; do
     [[ -f "$module_dir/$name" ]] || die "Core build omitted required artifact: $name"
@@ -286,12 +286,12 @@ obligation_count="$(grep -c '^obligation-projection PASS ' "$report" || true)"
 [[ "$obligation_count" == "7" ]] ||
     die "Core build report has $obligation_count/7 passing obligations"
 
-mapfile -t world_counts < <(awk '$1 == "world-functions" && NF == 2 { print $2 }' "$report")
-[[ ${#world_counts[@]} -eq 1 && "${world_counts[0]}" =~ ^[0-9]+$ ]] ||
-    die "Core build report has no unique world-functions count"
+mapfile -t program_counts < <(awk '$1 == "program-functions" && NF == 2 { print $2 }' "$report")
+[[ ${#program_counts[@]} -eq 1 && "${program_counts[0]}" =~ ^[0-9]+$ ]] ||
+    die "Core build report has no unique program-functions count"
 lowered_count="$(grep -c '^lowered fn_[0-9][0-9]* ' "$report" || true)"
-[[ "$lowered_count" == "${world_counts[0]}" ]] ||
-    die "C17 projection is incomplete: lowered $lowered_count/${world_counts[0]} functions"
+[[ "$lowered_count" == "${program_counts[0]}" ]] ||
+    die "C17 projection is incomplete: lowered $lowered_count/${program_counts[0]} functions"
 
 mapfile -t entry_rows < <(
     awk -v name="$entry_name" \
@@ -446,7 +446,7 @@ if [[ $link_rc -ne 0 ]]; then
 fi
 [[ -x "$linked" ]] || die "C17 compiler reported success without an executable"
 
-for name in source.facts report.txt module.native-world module.native-world.sha256 \
+for name in source.facts report.txt module.native-program module.native-program.sha256 \
     module_0.h module_0.c native_shim.h native_shim.c \
     native_unicode15_data.h UNICODE-LICENSE.txt; do
     cp -- "$module_dir/$name" "$artifacts/$name"

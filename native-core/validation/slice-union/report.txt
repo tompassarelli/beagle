@@ -3,9 +3,9 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 1
-world-types 25
-world-functions 50
-world-abis 50
+program-types 25
+program-functions 50
+program-abis 50
 projected-types 25
 lowered fn_0 pair? 4 blocks
 lowered fn_1 wrap-int 1 blocks
@@ -67,8 +67,8 @@ obligation-projection PASS bounded-effects
 materialize OK module_0.h module_0.c
 qbe-stage typed-to-native COMPLETE
 qbe-selected-function numeric-int-double-less?
-qbe-world-functions 1
-qbe-world-abis 1
+qbe-program-functions 1
+qbe-program-abis 1
 qbe-projected-types 5
 qbe-obligation PASS valid-ssa
 qbe-obligation PASS exhaustive-matches

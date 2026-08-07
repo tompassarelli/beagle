@@ -3,7 +3,7 @@
 ;; module into the graph after landing. Authority: North thread 019fbd6c.
 (ns native.slice
   (:require [native.core :as core]
-            [native.worlds :as worlds]
+            [native.stages :as stages]
             [native.lower :as lower]
             [native.obligations :as obligations]
             [native.c11 :as c11]))
@@ -21,7 +21,7 @@
 
 (defrecord UniqueStringsV0 [(values : (Vec String)) (seen : (Map String Bool))])
 
-(defrecord SliceWorldV0
+(defrecord SliceProjectionV0
   [(types : (Vec core/TypeDef))
    (layouts : (Vec core/LayoutDef))])
 
@@ -120,20 +120,20 @@
 
 (defn text-id [(value : String)] -> core/NativeId (slice-id "text" [value]))
 
-(defn marker-nodes [(names : (Vec String))] -> (Vec worlds/TermNodeV0)
+(defn marker-nodes [(names : (Vec String))] -> (Vec stages/TermNodeV0)
   (mapv
-    (fn [(name : String)] -> worlds/TermNodeV0
-      (worlds/->TermNodeV0 (node-id name) (worlds/->TextTermV0 "source-node-v0")))
+    (fn [(name : String)] -> stages/TermNodeV0
+      (stages/->TermNodeV0 (node-id name) (stages/->TextTermV0 "source-node-v0")))
     names))
 
-(defn text-nodes [(values : (Vec String))] -> (Vec worlds/TermNodeV0)
+(defn text-nodes [(values : (Vec String))] -> (Vec stages/TermNodeV0)
   (mapv
-    (fn [(value : String)] -> worlds/TermNodeV0
-      (worlds/->TermNodeV0 (text-id value) (worlds/->TextTermV0 value)))
+    (fn [(value : String)] -> stages/TermNodeV0
+      (stages/->TermNodeV0 (text-id value) (stages/->TextTermV0 value)))
     values))
 
-(defn fact-nodes [(rows : (Vec SliceFactV0))] -> (Vec worlds/TermNodeV0)
-  (loop [index: Int 0 nodes: (Vec worlds/TermNodeV0) []]
+(defn fact-nodes [(rows : (Vec SliceFactV0))] -> (Vec stages/TermNodeV0)
+  (loop [index: Int 0 nodes: (Vec stages/TermNodeV0) []]
     (if (>= index (count rows))
       nodes
       (let [row: SliceFactV0 (nth rows index)
@@ -143,9 +143,9 @@
               (node-id (slicefactv0-object row)))]
         (recur (+ index 1)
           (conj nodes
-            (worlds/->TermNodeV0
+            (stages/->TermNodeV0
               (slice-id "fact" [(str index)])
-              (worlds/->TripleTermV0
+              (stages/->TripleTermV0
                 (node-id (slicefactv0-subject row))
                 (text-id (slicefactv0-predicate row))
                 object))))))))
@@ -182,32 +182,32 @@
   [(rows : (Vec SliceFactV0))
    (root-name : String)
    (fallback-name : String)
-   (fallback-path : String)] -> worlds/SourceModuleV0
+   (fallback-path : String)] -> stages/SourceModuleV0
   (let [declared-name: (U String Nil) (row-first-text rows root-name "namespace")
         declared-path: (U String Nil) (row-first-text rows root-name "relative-path")
         module-name: String
         (if (or (nil? declared-name) (= "" declared-name)) fallback-name declared-name)
         relative-path: String
         (if (or (nil? declared-path) (= "" declared-path)) fallback-path declared-path)]
-    (worlds/->SourceModuleV0
+    (stages/->SourceModuleV0
       (slice-id "module" [module-name relative-path])
       module-name
       relative-path
-      (worlds/content-digest
+      (stages/content-digest
         (str "slice-source-v0/" module-name "/" relative-path "/" root-name))
-      (worlds/content-digest
+      (stages/content-digest
         (str "slice-interface-v0/" module-name "/" root-name))
       (node-id root-name))))
 
 (defn source-modules
   [(rows : (Vec SliceFactV0))
    (fallback-name : String)
-   (fallback-path : String)] -> (Vec worlds/SourceModuleV0)
+   (fallback-path : String)] -> (Vec stages/SourceModuleV0)
   (let [roots: (Vec String) (form-node-names rows "module-root")]
     (if (= 0 (count roots))
       [(source-module rows "0" fallback-name fallback-path)]
       (mapv
-        (fn [(root-name : String)] -> worlds/SourceModuleV0
+        (fn [(root-name : String)] -> stages/SourceModuleV0
           (source-module rows root-name fallback-name fallback-path))
         roots))))
 
@@ -217,18 +217,18 @@
     (form-node-names rows "import")))
 
 ;; Node "0" is the program root. New projections carry one module root per AST;
-;; old facts without module metadata remain a single-module source world.
-(defn source-world
+;; old facts without module metadata remain a single-module source program.
+(defn source-program
   [(rows : (Vec SliceFactV0))
    (module-name : String)
-   (relative-path : String)] -> worlds/SourceProgramWorldV0
+   (relative-path : String)] -> stages/SourceStageV0
   (let [root: core/NativeId (node-id "0")
-        nodes: (Vec worlds/TermNodeV0)
+        nodes: (Vec stages/TermNodeV0)
         (vec (concat (marker-nodes (node-names rows))
                (text-nodes (text-values rows))
                (fact-nodes rows)))]
-    (worlds/->SourceProgramWorldV0
-      (worlds/->TermGraphV0 root nodes)
+    (stages/->SourceStageV0
+      (stages/->TermGraphV0 root nodes)
       (source-modules rows module-name relative-path)
       (source-imports rows)
       [])))
@@ -318,11 +318,11 @@
                     (conj collected reference)))))))))))
 
 ;; The C17 reference slice is a projection, never a claim about the whole
-;; world: it keeps the source record ABI and the scalars those records reach,
+;; program: it keeps the source record ABI and the scalars those records reach,
 ;; and drops every shape the restricted materializer cannot spell.
 (defn c17-projection
   [(types : (Vec core/TypeDef))
-   (layouts : (Vec core/LayoutDef))] -> SliceWorldV0
+   (layouts : (Vec core/LayoutDef))] -> SliceProjectionV0
   (let [records: (Vec core/NativeId)
         (closed-record-ids types layouts (supported-record-ids types layouts))
         scalars: (Vec core/NativeId) (scalar-ids-for types records)
@@ -337,49 +337,49 @@
           (fn [(layout : core/LayoutDef)] -> Bool
             (type-id-in? kept (core/layoutdef-type-id layout)))
           layouts)]
-    (->SliceWorldV0 kept-types kept-layouts)))
+    (->SliceProjectionV0 kept-types kept-layouts)))
 
-(defn projected-world
-  [(world : core/NativeWorld)
-   (projection : SliceWorldV0)] -> core/NativeWorld
-  (core/->NativeWorld
-    (core/nativeworld-id world)
-    (core/nativeworld-parent world)
-    (core/nativeworld-compiler-pass world)
-    (sliceworldv0-types projection)
-    (core/nativeworld-effects world)
-    (core/nativeworld-regions world)
-    (core/nativeworld-capabilities world)
-    (sliceworldv0-layouts projection)
-    (core/nativeworld-functions world)
-    (core/nativeworld-allowed-effects world)
-    (core/nativeworld-allowed-regions world)
-    (core/nativeworld-allowed-capabilities world)
-    (core/nativeworld-abis world)
-    (core/nativeworld-observations world)))
+(defn projected-program
+  [(program : core/NativeCoreProgram)
+   (projection : SliceProjectionV0)] -> core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (core/nativecoreprogram-id program)
+    (core/nativecoreprogram-parent program)
+    (core/nativecoreprogram-compiler-pass program)
+    (sliceprojectionv0-types projection)
+    (core/nativecoreprogram-effects program)
+    (core/nativecoreprogram-regions program)
+    (core/nativecoreprogram-capabilities program)
+    (sliceprojectionv0-layouts projection)
+    (core/nativecoreprogram-functions program)
+    (core/nativecoreprogram-allowed-effects program)
+    (core/nativecoreprogram-allowed-regions program)
+    (core/nativecoreprogram-allowed-capabilities program)
+    (core/nativecoreprogram-abis program)
+    (core/nativecoreprogram-observations program)))
 
 (defunion SliceMaterializationV0
   (SliceMaterializedV0 [(artifact : c11/C11Artifact)])
   (SliceRefusedV0 [(detail : String)]))
 
 (defn materialize
-  [(world : core/NativeWorld)
+  [(program : core/NativeCoreProgram)
    (module-index : Int)] -> SliceMaterializationV0
-  (let [validation: core/ValidationReport (core/validate-world world)]
+  (let [validation: core/ValidationReport (core/validate-program program)]
     (cond
       (not (core/validationreport-passed validation))
-      (->SliceRefusedV0 "projected world failed Native Core validation")
+      (->SliceRefusedV0 "projected program failed Native Core validation")
 
-      (not (c11/world-supported? world))
-      (->SliceRefusedV0 "projected world leaves the restricted C17 reference slice")
+      (not (c11/program-supported? program))
+      (->SliceRefusedV0 "projected program leaves the restricted C17 reference slice")
 
       :else
       (let [types: (Vec core/TypeDef)
-            (c11/ordered-types (core/nativeworld-types world))
+            (c11/ordered-types (core/nativecoreprogram-types program))
             layouts: (Vec core/LayoutDef)
-            (c11/ordered-layouts (core/nativeworld-layouts world))
+            (c11/ordered-layouts (core/nativecoreprogram-layouts program))
             functions: (Vec core/FunctionDef)
-            (c11/ordered-functions (core/nativeworld-functions world))
+            (c11/ordered-functions (core/nativecoreprogram-functions program))
             header-name: String (str "module_" module-index ".h")]
         (->SliceMaterializedV0
           (c11/->C11Artifact
@@ -394,10 +394,10 @@
 
 (defn obligation-report
   [(label : String)
-   (world : core/NativeWorld)
+   (program : core/NativeCoreProgram)
    (abi : core/AbiProfileV0)] -> String
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
-        (obligations/validate-native-world world abi)
+        (obligations/validate-native-core-program program abi)
         names: (Vec String) (obligation-names)]
     (loop [index: Int 0 report: String ""]
       (if (>= index (count verdicts))
@@ -424,7 +424,7 @@
       (recur (+ index 1) (str report (pending-report (nth items index)))))))
 
 (defn native-frozen
-  [(result : lower/NativeLoweringResultV0)] -> worlds/FrozenNativeWorldV0
+  [(result : lower/NativeLoweringResultV0)] -> stages/FrozenNativeStageV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-frozen result)
     (lower/nativeloweringpendingv0-frozen result)))
@@ -447,32 +447,32 @@
   (let [rows: (Vec SliceFactV0) (parse-facts (slurp facts-path))
         configuration: (Vec String)
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        world: worlds/SourceProgramWorldV0
-        (source-world rows module-name relative-path)
+        program: stages/SourceStageV0
+        (source-program rows module-name relative-path)
         freeze-result: lower/SourceFreezeResultV0
-        (lower/freeze-source-world world compiler-commit configuration)]
+        (lower/freeze-source-stage program compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [frozen-source: worlds/FrozenSourceWorldV0
+      (let [frozen-source: stages/FrozenSourceStageV0
             (lower/sourcefreezeacceptedv0-frozen freeze-result)
             typing-result: lower/TypingResultV0
-            (lower/lower-typed-world frozen-source compiler-commit configuration)]
+            (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"
-          (let [frozen-typed: worlds/FrozenTypedWorldV0
+          (let [frozen-typed: stages/FrozenTypedStageV0
                 (lower/typingacceptedv0-frozen typing-result)
                 slice: lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
                 native-result: lower/NativeLoweringResultV0
-                (lower/lower-native-world frozen-typed slice compiler-commit
+                (lower/lower-native-stage frozen-typed slice compiler-commit
                   configuration abi)
-                frozen-native: worlds/FrozenNativeWorldV0 (native-frozen native-result)
-                program: core/NativeWorld
-                (worlds/nativeworldv0-program
-                  (worlds/frozennativeworldv0-world frozen-native))
-                projection: SliceWorldV0
-                (c17-projection (core/nativeworld-types program)
-                  (core/nativeworld-layouts program))
-                projected: core/NativeWorld (projected-world program projection)
+                frozen-native: stages/FrozenNativeStageV0 (native-frozen native-result)
+                program: core/NativeCoreProgram
+                (stages/nativestagev0-program
+                  (stages/frozennativestagev0-stage frozen-native))
+                projection: SliceProjectionV0
+                (c17-projection (core/nativecoreprogram-types program)
+                  (core/nativecoreprogram-layouts program))
+                projected: core/NativeCoreProgram (projected-program program projection)
                 result: SliceMaterializationV0 (materialize projected 0)
                 head: String
                 (str "stage source-freeze ACCEPTED\n"
@@ -481,13 +481,13 @@
                   (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
                     "COMPLETE" "PENDING")
                   "\n"
-                  "world-types " (str (count (core/nativeworld-types program))) "\n"
-                  "world-layouts " (str (count (core/nativeworld-layouts program))) "\n"
-                  "world-functions " (str (count (core/nativeworld-functions program))) "\n"
-                  "world-abis " (str (count (core/nativeworld-abis program))) "\n"
-                  "projected-types " (str (count (sliceworldv0-types projection))) "\n"
-                  (type-names (sliceworldv0-types projection))
-                  (obligation-report "obligation-world" program abi)
+                  "program-types " (str (count (core/nativecoreprogram-types program))) "\n"
+                  "program-layouts " (str (count (core/nativecoreprogram-layouts program))) "\n"
+                  "program-functions " (str (count (core/nativecoreprogram-functions program))) "\n"
+                  "program-abis " (str (count (core/nativecoreprogram-abis program))) "\n"
+                  "projected-types " (str (count (sliceprojectionv0-types projection))) "\n"
+                  (type-names (sliceprojectionv0-types projection))
+                  (obligation-report "obligation-program" program abi)
                   (obligation-report "obligation-projection" projected abi)
                   (pending-reports (native-pending native-result)))]
             (match result

@@ -391,9 +391,9 @@
                     (core/basicblock-terminators block))))
         (core/functiondef-blocks function)))))
 
-(defn valid-ssa [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn valid-ssa [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
-         (core/nativeworld-functions world)]
+         (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->ValidSsaObligation true))
       (let [function :- core/FunctionDef (nth functions index)]
@@ -479,13 +479,13 @@
               (core/basicblock-terminators block)))
     (core/functiondef-blocks function)))
 
-(defn exhaustive-matches [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn exhaustive-matches [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
-         (core/nativeworld-functions world)]
+         (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->ExhaustiveMatchesObligation true))
       (let [function :- core/FunctionDef (nth functions index)]
-        (if (function-exhaustive? (core/nativeworld-types world) function)
+        (if (function-exhaustive? (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
           (->ExhaustiveMatchesDiagnosticV0
             (core/functiondef-id function)))))))
@@ -788,13 +788,13 @@
         abi))))
 
 (defn closed-layouts
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    abi :- core/AbiProfileV0] :- ObligationVerdictV0
-  (loop [index :- Int 0 types :- (Vec core/TypeDef) (core/nativeworld-types world)]
+  (loop [index :- Int 0 types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)]
     (if (>= index (count types))
       (->ObligationPassV0 (core/->ClosedLayoutsObligation true))
       (let [type-def :- core/TypeDef (nth types index)]
-        (if (type-layout-closed? types (core/nativeworld-layouts world) type-def
+        (if (type-layout-closed? types (core/nativecoreprogram-layouts program) type-def
               abi)
           (recur (+ index 1) types)
           (->ClosedLayoutsDiagnosticV0 (core/typedef-id type-def)))))))
@@ -887,13 +887,13 @@
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
-(defn checked-arithmetic [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn checked-arithmetic [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
-         (core/nativeworld-functions world)]
+         (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->CheckedOperationsObligation true))
       (let [function :- core/FunctionDef (nth functions index)]
-        (if (function-checked-arithmetic? (core/nativeworld-types world) function)
+        (if (function-checked-arithmetic? (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
           (->CheckedArithmeticDiagnosticV0
             (core/functiondef-id function)))))))
@@ -979,7 +979,7 @@
     (> (count (variant-ids-for-type types failure-type)) 0)))
 
 (defn import-abi-value-legal?
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    types :- (Vec core/TypeDef)
    layouts :- (Vec core/LayoutDef)
    value :- core/AbiValueV0] :- Bool
@@ -990,9 +990,9 @@
     (and (> (count (core/abivaluev0-name value)) 0)
       (abi-type-legal? types layouts (core/abivaluev0-type-id value))
       (or (nil? arena-region)
-        (core/id-in? (core/nativeworld-allowed-regions world) arena-region))
+        (core/id-in? (core/nativecoreprogram-allowed-regions program) arena-region))
       (or (nil? lifetime)
-        (core/id-in? (core/nativeworld-allowed-regions world) lifetime)))))
+        (core/id-in? (core/nativecoreprogram-allowed-regions program) lifetime)))))
 
 (defn named-variant
   [variants :- (Vec core/TypeVariant)
@@ -1053,11 +1053,11 @@
                       (optional-i64-type? types
                         (core/typevariant-payload-type error)))))))))))))
 
-(defn abi-decl-legal? [world :- core/NativeWorld abi :- core/AbiDeclV0] :- Bool
+(defn abi-decl-legal? [program :- core/NativeCoreProgram abi :- core/AbiDeclV0] :- Bool
   (let [function :- (U core/FunctionDef Nil)
-        (find-function (core/nativeworld-functions world) (get abi :function-id))
-        types :- (Vec core/TypeDef) (core/nativeworld-types world)
-        layouts :- (Vec core/LayoutDef) (core/nativeworld-layouts world)]
+        (find-function (core/nativecoreprogram-functions program) (get abi :function-id))
+        types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)
+        layouts :- (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)]
     (and (> (count (get abi :symbol "")) 0)
       (> (count (get abi :version "")) 0)
       (> (count (get abi :layout-digest "")) 0)
@@ -1074,7 +1074,7 @@
             (instance? native.core.RestrictedCOutcomeOutAbiV0
               (core/abideclv0-convention abi)))
           (every? (fn [value :- core/AbiValueV0] :- Bool
-                    (import-abi-value-legal? world types layouts value))
+                    (import-abi-value-legal? program types layouts value))
             (core/abideclv0-parameters abi))
           (cond
             (instance? native.core.RestrictedCOptionalOutAbiV0
@@ -1082,21 +1082,21 @@
             (and (not (nil? result))
               (instance? native.core.ArenaOwnedV0
                 (core/abivaluev0-ownership result))
-              (import-abi-value-legal? world types layouts result))
+              (import-abi-value-legal? program types layouts result))
 
             (instance? native.core.RestrictedCOutcomeOutAbiV0
               (core/abideclv0-convention abi))
             (and (not (nil? result))
-              (import-abi-value-legal? world types layouts result)
+              (import-abi-value-legal? program types layouts result)
               (socket-outcome-result-legal? types result))
 
             :else
             (or (nil? result)
-              (import-abi-value-legal? world types layouts result)))
+              (import-abi-value-legal? program types layouts result)))
           (core/ids-in? (core/abideclv0-required-effects abi)
-            (core/nativeworld-allowed-effects world))
+            (core/nativecoreprogram-allowed-effects program))
           (core/ids-in? (core/abideclv0-required-capabilities abi)
-            (core/nativeworld-allowed-capabilities world))))
+            (core/nativecoreprogram-allowed-capabilities program))))
         (and (not (nil? function))
           (abi-parameters-match? types layouts function
             (get abi :parameters []))
@@ -1107,13 +1107,13 @@
             (core/functiondef-capabilities function)))))))
 
 (defn extern-call-legal?
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    function :- core/FunctionDef
    instruction :- core/Instruction] :- Bool
   (if (not (instance? native.core.ExternCallInstruction instruction))
     true
     (let [abi :- (U core/AbiDeclV0 Nil)
-          (find-abi (core/nativeworld-abis world)
+          (find-abi (core/nativecoreprogram-abis program)
             (core/externcallinstruction-abi-id instruction))]
       (if (nil? abi)
         false
@@ -1121,7 +1121,7 @@
               (core/externcallinstruction-arguments instruction)
               parameters :- (Vec core/AbiValueV0)
               (core/abideclv0-parameters abi)
-              types :- (Vec core/TypeDef) (core/nativeworld-types world)
+              types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)
               result :- (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
               arena :- (U core/NativeId Nil)
               (core/externcallinstruction-arena-id instruction)]
@@ -1163,24 +1163,24 @@
             (core/ids-in? (core/abideclv0-required-capabilities abi)
               (core/functiondef-capabilities function))))))))
 
-(defn extern-calls-legal? [world :- core/NativeWorld] :- Bool
+(defn extern-calls-legal? [program :- core/NativeCoreProgram] :- Bool
   (every? (fn [function :- core/FunctionDef] :- Bool
             (every? (fn [block :- core/BasicBlock] :- Bool
                       (every? (fn [instruction :- core/Instruction] :- Bool
-                                (extern-call-legal? world function instruction))
+                                (extern-call-legal? program function instruction))
                         (core/basicblock-instructions block)))
               (core/functiondef-blocks function)))
-    (core/nativeworld-functions world)))
+    (core/nativecoreprogram-functions program)))
 
-(defn legal-abi [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn legal-abi [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 abis :- (Vec core/AbiDeclV0)
-         (core/nativeworld-abis world)]
+         (core/nativecoreprogram-abis program)]
     (if (>= index (count abis))
-      (if (extern-calls-legal? world)
+      (if (extern-calls-legal? program)
         (->ObligationPassV0 (core/->LegalAbiObligation true))
         (->LegalAbiDiagnosticV0 (obligation-id "extern-call")))
       (let [abi :- core/AbiDeclV0 (nth abis index)]
-        (if (abi-decl-legal? world abi)
+        (if (abi-decl-legal? program abi)
           (recur (+ index 1) abis)
           (->LegalAbiDiagnosticV0 (get abi :id)))))))
 
@@ -1351,33 +1351,33 @@
       :else (recur (+ index 1)))))
 
 (defn affine-function-capabilities
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    function :- core/FunctionDef] :- (Vec core/NativeId)
   (filterv (fn [capability-id :- core/NativeId] :- Bool
              (let [capability :- (U core/CapabilityDef Nil)
-                   (find-capability (core/nativeworld-capabilities world)
+                   (find-capability (core/nativecoreprogram-capabilities program)
                      capability-id)]
                (and (not (nil? capability))
                  (get capability :affine false))))
     (core/functiondef-capabilities function)))
 
 (defn function-tokens-discharged?
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    function :- core/FunctionDef] :- Bool
   (let [initial :- (Vec core/NativeId)
         (core/append-ids (core/functiondef-regions function)
-          (affine-function-capabilities world function))]
+          (affine-function-capabilities program function))]
     (and (core/unique-ids? initial)
       (token-paths-valid? function (core/functiondef-entry-block function)
         (->TokenStateV0 initial initial true) []))))
 
-(defn discharged-tokens [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn discharged-tokens [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
-         (core/nativeworld-functions world)]
+         (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->DischargedTokensObligation true))
       (let [function :- core/FunctionDef (nth functions index)]
-        (if (function-tokens-discharged? world function)
+        (if (function-tokens-discharged? program function)
           (recur (+ index 1) functions)
           (->DischargedTokensDiagnosticV0
             (core/functiondef-id function)))))))
@@ -1409,14 +1409,14 @@
   (= kind (core/->AtomicEffect region capability)))
 
 (defn declared-effect-covers?
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    function :- core/FunctionDef
    region :- core/NativeId
    capability :- core/NativeId
    allocation :- Bool] :- Bool
   (some? (some (fn [effect-id :- core/NativeId] :- Bool
                  (let [effect :- (U core/EffectDef Nil)
-                       (find-effect (core/nativeworld-effects world) effect-id)]
+                       (find-effect (core/nativecoreprogram-effects program) effect-id)]
                    (and (not (nil? effect))
                      (if allocation
                        (effect-covers-allocation? (core/effectdef-kind effect) region)
@@ -1428,7 +1428,7 @@
   [(get store :region) (get store :capability)])
 
 (defn instruction-effects-bounded?
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    function :- core/FunctionDef
    instruction :- core/Instruction] :- Bool
   (let [store :- Any (get instruction :store nil)
@@ -1448,14 +1448,14 @@
             (some
               (fn [effect-id :- core/NativeId] :- Bool
                 (let [effect :- (U core/EffectDef Nil)
-                      (find-effect (core/nativeworld-effects world) effect-id)]
+                      (find-effect (core/nativecoreprogram-effects program) effect-id)]
                   (and (not (nil? effect))
                     (effect-covers-atom-state? (core/effectdef-kind effect)
                       region capability))))
               (core/functiondef-effects function)))))
       (instance? native.core.AtomSwapInstruction instruction)
       (let [updater :- (U core/FunctionDef Nil)
-            (find-function (core/nativeworld-functions world)
+            (find-function (core/nativecoreprogram-functions program)
               (core/atomswapinstruction-updater-id instruction))]
         (and (not (nil? updater))
           (= 0 (count (core/functiondef-regions updater)))
@@ -1463,7 +1463,7 @@
           (every?
             (fn [effect-id :- core/NativeId] :- Bool
               (let [effect :- (U core/EffectDef Nil)
-                    (find-effect (core/nativeworld-effects world) effect-id)]
+                    (find-effect (core/nativecoreprogram-effects program) effect-id)]
                 (and (not (nil? effect))
                   (instance? native.core.PureEffect
                     (core/effectdef-kind effect)))))
@@ -1474,7 +1474,7 @@
             capability :- core/NativeId (nth resources 1)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
-          (declared-effect-covers? world function region capability false)))
+          (declared-effect-covers? program function region capability false)))
       ;; A non-allocating writer acquires the arena under the write capability,
       ;; so the acquire is covered by a write effect as well as an allocate one.
       (instance? native.core.ArenaInstruction instruction)
@@ -1483,17 +1483,17 @@
             (core/arenainstruction-capability instruction)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
-          (or (declared-effect-covers? world function region capability true)
-            (declared-effect-covers? world function region capability false))))
+          (or (declared-effect-covers? program function region capability true)
+            (declared-effect-covers? program function region capability false))))
       (and (not (nil? allocation-region)) (not (nil? allocation-capability)))
       (and (core/id-in? (core/functiondef-regions function) allocation-region)
         (core/id-in? (core/functiondef-capabilities function)
           allocation-capability)
-        (declared-effect-covers? world function allocation-region
+        (declared-effect-covers? program function allocation-region
           allocation-capability true))
       (not (nil? abi-id))
       (let [abi :- (U core/AbiDeclV0 Nil)
-            (find-abi (core/nativeworld-abis world) abi-id)]
+            (find-abi (core/nativecoreprogram-abis program) abi-id)]
         (and (not (nil? abi))
           (instance? native.core.AbiImportV0
             (core/abideclv0-direction abi))
@@ -1503,7 +1503,7 @@
             (core/functiondef-capabilities function))))
       (not (nil? callee-id))
       (let [callee :- (U core/FunctionDef Nil)
-            (find-function (core/nativeworld-functions world) callee-id)]
+            (find-function (core/nativecoreprogram-functions program) callee-id)]
         (and (not (nil? callee))
           (core/ids-in? (core/functiondef-effects callee)
             (core/functiondef-effects function))
@@ -1512,21 +1512,21 @@
       :else true)))
 
 (defn function-effects-bounded?
-  [world :- core/NativeWorld
+  [program :- core/NativeCoreProgram
    function :- core/FunctionDef] :- Bool
   (every? (fn [block :- core/BasicBlock] :- Bool
             (every? (fn [instruction :- core/Instruction] :- Bool
-                      (instruction-effects-bounded? world function instruction))
+                      (instruction-effects-bounded? program function instruction))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
-(defn bounded-effects [world :- core/NativeWorld] :- ObligationVerdictV0
+(defn bounded-effects [program :- core/NativeCoreProgram] :- ObligationVerdictV0
   (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
-         (core/nativeworld-functions world)]
+         (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->BoundedEffectsObligation true))
       (let [function :- core/FunctionDef (nth functions index)]
-        (if (function-effects-bounded? world function)
+        (if (function-effects-bounded? program function)
           (recur (+ index 1) functions)
           (->BoundedEffectsDiagnosticV0
             (core/functiondef-id function)))))))
@@ -1638,9 +1638,9 @@
     [(obligation-id "region-fixture")]
     [(obligation-id "capability-write")]))
 
-(def valid-world :- core/NativeWorld
-  (apply core/->NativeWorld
-    [(obligation-id "world-valid") nil "obligations-v0"
+(def valid-program :- core/NativeCoreProgram
+  (apply core/->NativeCoreProgram
+    [(obligation-id "program-valid") nil "obligations-v0"
      [fixture-i64-type fixture-union-type fixture-outcome-type]
      [fixture-write-effect] [fixture-region] [fixture-capability]
      [fixture-i64-layout fixture-union-layout fixture-outcome-layout]
@@ -1664,8 +1664,8 @@
            (core/->I64Atom 1))]
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def invalid-ssa-world :- core/NativeWorld
-  (with valid-world [:functions [invalid-ssa-function]]))
+(def invalid-ssa-program :- core/NativeCoreProgram
+  (with valid-program [:functions [invalid-ssa-function]]))
 
 (def nonexhaustive-function :- core/FunctionDef
   (with fixture-function
@@ -1684,14 +1684,14 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def nonexhaustive-world :- core/NativeWorld
-  (with valid-world [:functions [nonexhaustive-function]]))
+(def nonexhaustive-program :- core/NativeCoreProgram
+  (with valid-program [:functions [nonexhaustive-function]]))
 
 (def undersized-i64-layout :- core/LayoutDef
   (with fixture-i64-layout [:size-bytes 4]))
 
-(def open-layout-world :- core/NativeWorld
-  (with valid-world
+(def open-layout-program :- core/NativeCoreProgram
+  (with valid-program
     [:layouts [undersized-i64-layout fixture-union-layout fixture-outcome-layout]]))
 
 (def unchecked-result-function :- core/FunctionDef
@@ -1713,8 +1713,8 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator nil)])]]))
 
-(def unchecked-arithmetic-world :- core/NativeWorld
-  (with valid-world [:functions [unchecked-result-function]]))
+(def unchecked-arithmetic-program :- core/NativeCoreProgram
+  (with valid-program [:functions [unchecked-result-function]]))
 
 (def invalid-abi :- core/AbiDeclV0
   (with fixture-abi
@@ -1724,8 +1724,8 @@
       (core/->AbiValueV0 "choice" (obligation-id "type-choice")
         (core/->BorrowedV0 true) nil)]]))
 
-(def illegal-abi-world :- core/NativeWorld
-  (with valid-world [:abis [invalid-abi]]))
+(def illegal-abi-program :- core/NativeCoreProgram
+  (with valid-program [:abis [invalid-abi]]))
 
 (def double-consume-token-function :- core/FunctionDef
   (with fixture-token-function
@@ -1745,22 +1745,22 @@
              []))]
         [(core/->ReturnTerminator nil)])]]))
 
-(def undischarged-token-world :- core/NativeWorld
-  (with valid-world
+(def undischarged-token-program :- core/NativeCoreProgram
+  (with valid-program
     [:functions [fixture-function double-consume-token-function]]))
 
 (def unbounded-effect-function :- core/FunctionDef
   (with fixture-token-function [:effects []]))
 
-(def unbounded-effect-world :- core/NativeWorld
-  (with valid-world
+(def unbounded-effect-program :- core/NativeCoreProgram
+  (with valid-program
     [:functions [fixture-function unbounded-effect-function]]))
 
 (def valid-ssa-positive :- Bool
-  (obligation-passed? (valid-ssa valid-world)))
+  (obligation-passed? (valid-ssa valid-program)))
 
 (def valid-ssa-negative :- Bool
-  (match (valid-ssa invalid-ssa-world)
+  (match (valid-ssa invalid-ssa-program)
     [(ValidSsaDiagnosticV0 function-id) true]
     [(ObligationPassV0 code) false]
     [(ExhaustiveMatchesDiagnosticV0 function-id) false]
@@ -1771,10 +1771,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def exhaustive-matches-positive :- Bool
-  (obligation-passed? (exhaustive-matches valid-world)))
+  (obligation-passed? (exhaustive-matches valid-program)))
 
 (def exhaustive-matches-negative :- Bool
-  (match (exhaustive-matches nonexhaustive-world)
+  (match (exhaustive-matches nonexhaustive-program)
     [(ExhaustiveMatchesDiagnosticV0 function-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -1785,10 +1785,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def closed-layouts-positive :- Bool
-  (obligation-passed? (closed-layouts valid-world (core/abi-profile-lp64))))
+  (obligation-passed? (closed-layouts valid-program (core/abi-profile-lp64))))
 
 (def closed-layouts-negative :- Bool
-  (match (closed-layouts open-layout-world (core/abi-profile-lp64))
+  (match (closed-layouts open-layout-program (core/abi-profile-lp64))
     [(ClosedLayoutsDiagnosticV0 type-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -1799,10 +1799,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def checked-arithmetic-positive :- Bool
-  (obligation-passed? (checked-arithmetic valid-world)))
+  (obligation-passed? (checked-arithmetic valid-program)))
 
 (def checked-arithmetic-negative :- Bool
-  (match (checked-arithmetic unchecked-arithmetic-world)
+  (match (checked-arithmetic unchecked-arithmetic-program)
     [(CheckedArithmeticDiagnosticV0 function-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -1813,10 +1813,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def legal-abi-positive :- Bool
-  (obligation-passed? (legal-abi valid-world)))
+  (obligation-passed? (legal-abi valid-program)))
 
 (def legal-abi-negative :- Bool
-  (match (legal-abi illegal-abi-world)
+  (match (legal-abi illegal-abi-program)
     [(LegalAbiDiagnosticV0 abi-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -1827,10 +1827,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def discharged-tokens-positive :- Bool
-  (obligation-passed? (discharged-tokens valid-world)))
+  (obligation-passed? (discharged-tokens valid-program)))
 
 (def discharged-tokens-negative :- Bool
-  (match (discharged-tokens undischarged-token-world)
+  (match (discharged-tokens undischarged-token-program)
     [(DischargedTokensDiagnosticV0 function-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -1841,10 +1841,10 @@
     [(BoundedEffectsDiagnosticV0 function-id) false]))
 
 (def bounded-effects-positive :- Bool
-  (obligation-passed? (bounded-effects valid-world)))
+  (obligation-passed? (bounded-effects valid-program)))
 
 (def bounded-effects-negative :- Bool
-  (match (bounded-effects unbounded-effect-world)
+  (match (bounded-effects unbounded-effect-program)
     [(BoundedEffectsDiagnosticV0 function-id) true]
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -1868,7 +1868,7 @@
     [(DischargedTokensDiagnosticV0 function-id) "discharged-tokens"]
     [(BoundedEffectsDiagnosticV0 function-id) "bounded-effects"]))
 
-;; --- Rejection-depth corpus: two additional corrupt-world fixtures per
+;; --- Rejection-depth corpus: two additional corrupt-program fixtures per
 ;; obligation beyond the one landed above, each a distinct corruption vector.
 
 ;; valid-ssa #2: a value defined only in one switch arm, used from the
@@ -1893,8 +1893,8 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-sibling-only"))])]]))
 
-(def sibling-block-use-world :- core/NativeWorld
-  (with valid-world [:functions [sibling-block-use-function]]))
+(def sibling-block-use-program :- core/NativeCoreProgram
+  (with valid-program [:functions [sibling-block-use-function]]))
 
 ;; valid-ssa #3: a jump terminator passes a different number of arguments
 ;; than the target block declares parameters.
@@ -1911,8 +1911,8 @@
     nil
     [] [] []))
 
-(def jump-mismatch-world :- core/NativeWorld
-  (with valid-world [:functions [jump-mismatch-function]]))
+(def jump-mismatch-program :- core/NativeCoreProgram
+  (with valid-program [:functions [jump-mismatch-function]]))
 
 ;; exhaustive-matches #2: a switch that cases the same variant twice
 ;; instead of covering the union's two distinct variants.
@@ -1935,8 +1935,8 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def duplicate-case-world :- core/NativeWorld
-  (with valid-world [:functions [duplicate-case-function]]))
+(def duplicate-case-program :- core/NativeCoreProgram
+  (with valid-program [:functions [duplicate-case-function]]))
 
 ;; exhaustive-matches #3: a switch that cases an unknown variant id in
 ;; place of one of the union's real variants.
@@ -1959,15 +1959,15 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def unknown-variant-world :- core/NativeWorld
-  (with valid-world [:functions [unknown-variant-function]]))
+(def unknown-variant-program :- core/NativeCoreProgram
+  (with valid-program [:functions [unknown-variant-function]]))
 
 ;; closed-layouts #2: a layout whose size is zero (missing size).
 (def zero-size-i64-layout :- core/LayoutDef
   (with fixture-i64-layout [:size-bytes 0]))
 
-(def zero-size-layout-world :- core/NativeWorld
-  (with valid-world
+(def zero-size-layout-program :- core/NativeCoreProgram
+  (with valid-program
     [:layouts [zero-size-i64-layout fixture-union-layout fixture-outcome-layout]]))
 
 ;; closed-layouts #3: a union layout whose tag offset is not aligned to
@@ -1978,8 +1978,8 @@
               [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
                (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])]))
 
-(def misaligned-offset-world :- core/NativeWorld
-  (with valid-world
+(def misaligned-offset-program :- core/NativeCoreProgram
+  (with valid-program
     [:layouts [fixture-i64-layout misaligned-union-layout fixture-outcome-layout]]))
 
 ;; checked-arithmetic #2: a checked result consumed directly by an
@@ -2003,8 +2003,8 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator nil)])]]))
 
-(def raw-consume-world :- core/NativeWorld
-  (with valid-world [:functions [raw-consume-function]]))
+(def raw-consume-program :- core/NativeCoreProgram
+  (with valid-program [:functions [raw-consume-function]]))
 
 ;; checked-arithmetic #3: a checked operation whose result is typed as a
 ;; plain value instead of an Outcome type.
@@ -2027,8 +2027,8 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def non-outcome-result-world :- core/NativeWorld
-  (with valid-world [:functions [non-outcome-result-function]]))
+(def non-outcome-result-program :- core/NativeCoreProgram
+  (with valid-program [:functions [non-outcome-result-function]]))
 
 ;; legal-abi #2: the ABI result type does not match the function's own
 ;; declared return type.
@@ -2037,16 +2037,16 @@
     [:result (core/->AbiValueV0 "result" (obligation-id "type-i64")
                (core/->OwnedV0 true) nil)]))
 
-(def result-type-mismatch-world :- core/NativeWorld
-  (with valid-world [:abis [result-type-mismatch-abi]]))
+(def result-type-mismatch-program :- core/NativeCoreProgram
+  (with valid-program [:abis [result-type-mismatch-abi]]))
 
 ;; legal-abi #3: the ABI requires a capability the function never declares.
 (def missing-capability-abi :- core/AbiDeclV0
   (with fixture-abi
     [:required-capabilities [(obligation-id "capability-write")]]))
 
-(def missing-capability-abi-world :- core/NativeWorld
-  (with valid-world [:abis [missing-capability-abi]]))
+(def missing-capability-abi-program :- core/NativeCoreProgram
+  (with valid-program [:abis [missing-capability-abi]]))
 
 ;; discharged-tokens #2: one branch of a two-way split never consumes the
 ;; tokens live at entry, so they leak on that path.
@@ -2075,8 +2075,8 @@
         [(core/->ReturnTerminator nil)])]]
     [:entry-block (obligation-id "block-token-entry")]))
 
-(def leak-token-world :- core/NativeWorld
-  (with valid-world
+(def leak-token-program :- core/NativeCoreProgram
+  (with valid-program
     [:functions [fixture-function leak-token-function]]))
 
 ;; discharged-tokens #3: a consume names a token id that was never
@@ -2100,8 +2100,8 @@
              []))]
         [(core/->ReturnTerminator nil)])]]))
 
-(def phantom-consume-token-world :- core/NativeWorld
-  (with valid-world
+(def phantom-consume-token-program :- core/NativeCoreProgram
+  (with valid-program
     [:functions [fixture-function phantom-consume-token-function]]))
 
 ;; bounded-effects #2: a store references a region absent from the
@@ -2110,8 +2110,8 @@
 (def undeclared-region-function :- core/FunctionDef
   (with fixture-token-function [:regions []]))
 
-(def undeclared-region-world :- core/NativeWorld
-  (with valid-world
+(def undeclared-region-program :- core/NativeCoreProgram
+  (with valid-program
     [:functions [fixture-function undeclared-region-function]]))
 
 ;; bounded-effects #3: a call to a callee whose declared effects and
@@ -2133,54 +2133,54 @@
     nil
     [] [] []))
 
-(def unbounded-call-world :- core/NativeWorld
-  (with valid-world
+(def unbounded-call-program :- core/NativeCoreProgram
+  (with valid-program
     [:functions [fixture-function fixture-token-function unbounded-call-function]]))
 
 (def valid-ssa-negative-sibling :- Bool
-  (= "valid-ssa" (verdict-tag (valid-ssa sibling-block-use-world))))
+  (= "valid-ssa" (verdict-tag (valid-ssa sibling-block-use-program))))
 
 (def valid-ssa-negative-jump-mismatch :- Bool
-  (= "valid-ssa" (verdict-tag (valid-ssa jump-mismatch-world))))
+  (= "valid-ssa" (verdict-tag (valid-ssa jump-mismatch-program))))
 
 (def exhaustive-matches-negative-duplicate :- Bool
-  (= "exhaustive-matches" (verdict-tag (exhaustive-matches duplicate-case-world))))
+  (= "exhaustive-matches" (verdict-tag (exhaustive-matches duplicate-case-program))))
 
 (def exhaustive-matches-negative-unknown-variant :- Bool
-  (= "exhaustive-matches" (verdict-tag (exhaustive-matches unknown-variant-world))))
+  (= "exhaustive-matches" (verdict-tag (exhaustive-matches unknown-variant-program))))
 
 (def closed-layouts-negative-zero-size :- Bool
   (= "closed-layouts"
-    (verdict-tag (closed-layouts zero-size-layout-world (core/abi-profile-lp64)))))
+    (verdict-tag (closed-layouts zero-size-layout-program (core/abi-profile-lp64)))))
 
 (def closed-layouts-negative-misaligned-offset :- Bool
   (= "closed-layouts"
     (verdict-tag
-      (closed-layouts misaligned-offset-world (core/abi-profile-lp64)))))
+      (closed-layouts misaligned-offset-program (core/abi-profile-lp64)))))
 
 (def checked-arithmetic-negative-raw-consume :- Bool
-  (= "checked-arithmetic" (verdict-tag (checked-arithmetic raw-consume-world))))
+  (= "checked-arithmetic" (verdict-tag (checked-arithmetic raw-consume-program))))
 
 (def checked-arithmetic-negative-non-outcome :- Bool
-  (= "checked-arithmetic" (verdict-tag (checked-arithmetic non-outcome-result-world))))
+  (= "checked-arithmetic" (verdict-tag (checked-arithmetic non-outcome-result-program))))
 
 (def legal-abi-negative-result-mismatch :- Bool
-  (= "legal-abi" (verdict-tag (legal-abi result-type-mismatch-world))))
+  (= "legal-abi" (verdict-tag (legal-abi result-type-mismatch-program))))
 
 (def legal-abi-negative-missing-capability :- Bool
-  (= "legal-abi" (verdict-tag (legal-abi missing-capability-abi-world))))
+  (= "legal-abi" (verdict-tag (legal-abi missing-capability-abi-program))))
 
 (def discharged-tokens-negative-leak :- Bool
-  (= "discharged-tokens" (verdict-tag (discharged-tokens leak-token-world))))
+  (= "discharged-tokens" (verdict-tag (discharged-tokens leak-token-program))))
 
 (def discharged-tokens-negative-phantom-consume :- Bool
-  (= "discharged-tokens" (verdict-tag (discharged-tokens phantom-consume-token-world))))
+  (= "discharged-tokens" (verdict-tag (discharged-tokens phantom-consume-token-program))))
 
 (def bounded-effects-negative-undeclared-region :- Bool
-  (= "bounded-effects" (verdict-tag (bounded-effects undeclared-region-world))))
+  (= "bounded-effects" (verdict-tag (bounded-effects undeclared-region-program))))
 
 (def bounded-effects-negative-unbounded-call :- Bool
-  (= "bounded-effects" (verdict-tag (bounded-effects unbounded-call-world))))
+  (= "bounded-effects" (verdict-tag (bounded-effects unbounded-call-program))))
 
 (def rejection-depth-results :- (Vec Bool)
   [valid-ssa-negative-sibling
@@ -2201,21 +2201,21 @@
 (def fourteen-rejection-depth-fixtures-named? :- Bool
   (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
 
-(defn validate-native-world
-  [world :- core/NativeWorld
+(defn validate-native-core-program
+  [program :- core/NativeCoreProgram
    abi :- core/AbiProfileV0] :- (Vec ObligationVerdictV0)
-  [(valid-ssa world)
-   (exhaustive-matches world)
-   (closed-layouts world abi)
-   (checked-arithmetic world)
-   (legal-abi world)
-   (discharged-tokens world)
-   (bounded-effects world)])
+  [(valid-ssa program)
+   (exhaustive-matches program)
+   (closed-layouts program abi)
+   (checked-arithmetic program)
+   (legal-abi program)
+   (discharged-tokens program)
+   (bounded-effects program)])
 
 (def valid-fixture-results :- (Vec Bool)
   (mapv (fn [verdict :- ObligationVerdictV0] :- Bool
           (obligation-passed? verdict))
-    (validate-native-world valid-world (core/abi-profile-lp64))))
+    (validate-native-core-program valid-program (core/abi-profile-lp64))))
 
 (def negative-fixture-results :- (Vec Bool)
   [valid-ssa-negative

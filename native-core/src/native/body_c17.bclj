@@ -96,7 +96,7 @@
     pool))
 
 ;; Deterministic: first appearance in the already-ordered function, block and
-;; instruction sequence, so the table is a pure function of the frozen world.
+;; instruction sequence, so the table is a pure function of the frozen native program.
 (defn collect-pool [(functions : (Vec core/FunctionDef))] -> ConstantPoolV0
   (loop [position: Int 0 pool: ConstantPoolV0 (->ConstantPoolV0 [] [])]
     (if (>= position (count functions))
@@ -255,9 +255,9 @@
   (or (= symbol "native_host_stdout_write_line_v0")
       (= symbol "native_host_clock_monotonic_nanoseconds_v0")))
 
-(defn world-supported? [(world : core/NativeWorld)] -> Bool
-  (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
-        types: (Vec core/TypeDef) (core/nativeworld-types world)]
+(defn program-supported? [(program : core/NativeCoreProgram)] -> Bool
+  (let [layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
+        types: (Vec core/TypeDef) (core/nativecoreprogram-types program)]
     (and (every? (fn [(type-def : core/TypeDef)] -> Bool
                    (c17/type-supported? type-def types layouts))
            types)
@@ -276,8 +276,8 @@
             (and (instance? native.core.RestrictedCOutcomeOutAbiV0
                    (core/abideclv0-convention abi))
               (host-socket-symbol? (core/abideclv0-symbol abi)))))
-        (core/nativeworld-abis world))
-      (every? function-supported? (core/nativeworld-functions world)))))
+        (core/nativecoreprogram-abis program))
+      (every? function-supported? (core/nativecoreprogram-functions program)))))
 
 (defn block-index
   [(blocks : (Vec core/BasicBlock))
@@ -2936,32 +2936,32 @@
     (emit-value-descriptors types layouts functions module-index)
     (emit-functions types layouts functions abis module-index pool)))
 
-(defn materialize-world
-  [(world : core/NativeWorld)
+(defn materialize-program
+  [(program : core/NativeCoreProgram)
    (module-index : Int)] -> BodyMaterializationV0
-  (let [validation: core/ValidationReport (core/validate-world world)]
+  (let [validation: core/ValidationReport (core/validate-program program)]
     (cond
       (< module-index 0)
       (->BodyFailureV0 "module index must be nonnegative")
 
       (not (core/validationreport-passed validation))
-      (->BodyFailureV0 "native world is not frozen: validation obligations failed")
+      (->BodyFailureV0 "native program is not frozen: validation obligations failed")
 
-      (not (world-supported? world))
+      (not (program-supported? program))
       (->BodyFailureV0
-        "native world uses a shape outside the restricted C17 body slice")
+        "native program uses a shape outside the restricted C17 body slice")
 
-      (not (pool-emittable? (collect-pool (core/nativeworld-functions world))))
+      (not (pool-emittable? (collect-pool (core/nativecoreprogram-functions program))))
       (->BodyFailureV0
         "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
 
       :else
-      (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
+      (let [layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
             types: (Vec core/TypeDef)
-            (c17/dependency-ordered-types (core/nativeworld-types world) layouts)
+            (c17/dependency-ordered-types (core/nativecoreprogram-types program) layouts)
             functions: (Vec core/FunctionDef)
-            (c17/ordered-functions (core/nativeworld-functions world))
-            abis: (Vec core/AbiDeclV0) (core/nativeworld-abis world)
+            (c17/ordered-functions (core/nativecoreprogram-functions program))
+            abis: (Vec core/AbiDeclV0) (core/nativecoreprogram-abis program)
             pool: ConstantPoolV0 (collect-pool functions)
             header-name: String (str "module_" module-index ".h")]
         (->BodySuccessV0

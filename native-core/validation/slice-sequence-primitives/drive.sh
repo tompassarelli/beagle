@@ -16,7 +16,7 @@ bb "$sequence_repo/native-core/validation/slice-vec/ast-facts.clj" \
 
 "$sequence_repo/bin/beagle-build-all" \
   "$sequence_repo/native-core/src/native/core.bclj" \
-  "$sequence_repo/native-core/src/native/worlds.bclj" \
+  "$sequence_repo/native-core/src/native/stages.bclj" \
   "$sequence_repo/native-core/src/native/lower.bclj" \
   "$sequence_repo/native-core/src/native/obligations.bclj" \
   "$sequence_repo/native-core/src/native/c11.bclj" \
@@ -32,7 +32,7 @@ bb "$sequence_repo/native-core/validation/slice-vec/ast-facts.clj" \
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$sequence_scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   module_path="$sequence_scratch/out/native/$module.clj"
   test -f "$module_path" || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \

@@ -1,7 +1,7 @@
 #lang beagle/clj
-;; Fixture worlds for native.qbe. The module-0 world is byte-for-byte the
-;; world native.c11-validation-corpus materializes (same id domain, same
-;; constructors), so both backends read one frozen world.
+;; Fixture programs for native.qbe. The module-0 program is byte-for-byte the
+;; program native.c11-validation-corpus materializes (same id domain, same
+;; constructors), so both backends read one frozen program.
 (ns native.qbe-validation-corpus
   (:require [native.core :as core]
             [native.qbe :as qbe]))
@@ -67,8 +67,8 @@
     [(fixture-id "region-arena")]
     [(fixture-id "capability-allocate")]))
 
-(def fixture-world: core/NativeWorld
-  (core/->NativeWorld (fixture-id "world") nil "native-c11-fixture-v0"
+(def fixture-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (fixture-id "program") nil "native-c11-fixture-v0"
     [fixture-pair-type fixture-i64-type]
     [fixture-effect]
     [fixture-region]
@@ -81,12 +81,12 @@
     []
     []))
 
-(def fixture-world-permuted: core/NativeWorld
-  (with fixture-world
+(def fixture-program-permuted: core/NativeCoreProgram
+  (with fixture-program
     [:types [fixture-i64-type fixture-pair-type]
      :layouts [fixture-i64-layout fixture-pair-layout]]))
 
-;; --- slice-ready world ----------------------------------------------------
+;; --- slice-ready program ----------------------------------------------------
 ;; Widens past the module-0 fixture into the shapes a real slice needs:
 ;; union aggregates, multi-block control flow, block parameters, arena
 ;; allocation, stores, and an intra-module call.
@@ -326,8 +326,8 @@
     []
     []))
 
-(def slice-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "qbe-slice-world") nil "native-qbe-fixture-v0"
+(def slice-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "qbe-slice-program") nil "native-qbe-fixture-v0"
     slice-types
     [slice-alloc-effect slice-write-effect]
     [slice-region]
@@ -349,8 +349,8 @@
   (with slice-switch-function
     [:blocks [slice-switch-some-block slice-switch-none-block slice-switch-entry-block]]))
 
-(def slice-world-permuted: core/NativeWorld
-  (with slice-world
+(def slice-program-permuted: core/NativeCoreProgram
+  (with slice-program
     [:types [slice-ref-type slice-shape-type slice-pair-type slice-bool-type
              slice-tag-type slice-i64-type]
      :layouts [slice-ref-layout slice-shape-layout slice-pair-layout
@@ -358,7 +358,7 @@
      :functions [slice-bitwise-function slice-switch-function-permuted
                  slice-function-permuted slice-add-function]]))
 
-;; --- vector concat world --------------------------------------------------
+;; --- vector concat program --------------------------------------------------
 
 (def concat-vector-type: core/TypeDef
   (core/->TypeDef (slice-id "vec-typ-i64") "I64Vector"
@@ -460,8 +460,8 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def concat-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "qbe-concat-world") nil "native-qbe-fixture-v0"
+(def concat-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "qbe-concat-program") nil "native-qbe-fixture-v0"
     [slice-i64-type concat-vector-type concat-arena-type]
     [slice-alloc-effect]
     [slice-region]
@@ -474,8 +474,8 @@
     []
     []))
 
-(def concat-world-permuted: core/NativeWorld
-  (with concat-world
+(def concat-program-permuted: core/NativeCoreProgram
+  (with concat-program
     [:types [concat-arena-type concat-vector-type slice-i64-type]
      :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]
      :functions [slice-vector-function concat-function reverse-function]]))
@@ -483,7 +483,7 @@
 ;; --- explicit instruction refusals ---------------------------------------
 ;; Core v0 validates SSA/reference closure independently of operand semantics.
 ;; Scalar function carriers isolate these gates from QBE's separate rejection
-;; of unsupported parameter and return shapes, so each world has one cause.
+;; of unsupported parameter and return shapes, so each program has one cause.
 
 (def refusal-index-block: core/BasicBlock
   (core/->BasicBlock (slice-id "ref-idx-blk")
@@ -505,8 +505,8 @@
     []
     []))
 
-(def refusal-index-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-idx-wld") nil "native-qbe-fixture-v0"
+(def refusal-index-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-idx-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type]
     []
     []
@@ -537,8 +537,8 @@
     []
     []))
 
-(def refusal-blank-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-bln-wld") nil "native-qbe-fixture-v0"
+(def refusal-blank-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-bln-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-bool-type]
     []
     []
@@ -569,8 +569,8 @@
     []
     []))
 
-(def refusal-parse-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-prs-wld") nil "native-qbe-fixture-v0"
+(def refusal-parse-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-prs-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type]
     []
     []
@@ -603,8 +603,8 @@
     []
     []))
 
-(def refusal-text-builtin-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-txt-wld") nil "native-qbe-fixture-v0"
+(def refusal-text-builtin-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-txt-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type]
     []
     []
@@ -655,8 +655,8 @@
     []
     []))
 
-(def refusal-map-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-map-wld") nil "native-qbe-fixture-v0"
+(def refusal-map-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-map-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type refusal-map-type]
     []
     []
@@ -703,8 +703,8 @@
     []
     []))
 
-(def refusal-set-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-set-wld") nil "native-qbe-fixture-v0"
+(def refusal-set-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-set-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type refusal-set-type]
     []
     []
@@ -737,8 +737,8 @@
     []
     []))
 
-(def refusal-value-equal-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-val-eq-wld") nil "native-qbe-fixture-v0"
+(def refusal-value-equal-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-val-eq-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-bool-type slice-pair-type]
     []
     []
@@ -770,8 +770,8 @@
     []
     []))
 
-(def refusal-value-hash-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-val-hsh-wld") nil "native-qbe-fixture-v0"
+(def refusal-value-hash-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-val-hsh-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-pair-type]
     []
     []
@@ -804,8 +804,8 @@
     []
     []))
 
-(def refusal-value-compare-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-val-cmp-wld") nil "native-qbe-fixture-v0"
+(def refusal-value-compare-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-val-cmp-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-pair-type]
     []
     []
@@ -856,8 +856,8 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def refusal-value-to-text-world: core/NativeWorld
-  (core/->NativeWorld (slice-id "ref-val-txt-wld") nil "native-qbe-fixture-v0"
+(def refusal-value-to-text-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-val-txt-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type refusal-value-text-type concat-arena-type]
     [slice-alloc-effect]
     [slice-region]
@@ -870,9 +870,9 @@
     []
     []))
 
-;; --- Atom state world ----------------------------------------------------
+;; --- Atom state program ----------------------------------------------------
 ;; This fixture is materialized by validation/atom through C17. QBE must reject
-;; the same frozen world until it has a lock-aware state calling convention.
+;; the same frozen program until it has a lock-aware state calling convention.
 
 (defn atom-fixture-id [(name : String)] -> core/NativeId
   (core/canonical-id "native-atom-fixture-v0" [name]))
@@ -1117,8 +1117,8 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
-(def atom-world: core/NativeWorld
-  (core/->NativeWorld (atom-fixture-id "world") nil "native-atom-fixture-v0"
+(def atom-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (atom-fixture-id "program") nil "native-atom-fixture-v0"
     [atom-i64-type atom-bool-type atom-cell-type atom-state-type atom-arena-type]
     [atom-pure-effect atom-allocate-effect atom-state-effect]
     [atom-arena-region atom-state-region]
@@ -1141,84 +1141,84 @@
     [(QbeSuccess value) (qbe/qbesuccess-artifact result)]
     [(QbeFailure value) (throw (ex-info (qbe/qbefailure-detail result) {}))]))
 
-(defn explicitly-refused? [(world : core/NativeWorld)] -> Bool
-  (and (core/validationreport-passed (core/validate-world world))
-    (match (qbe/materialize-world world 3 "lp64")
+(defn explicitly-refused? [(program : core/NativeCoreProgram)] -> Bool
+  (and (core/validationreport-passed (core/validate-program program))
+    (match (qbe/materialize-program program 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
-       (= "native world uses a shape outside the QBE materializer's slice"
+       (= "native program uses a shape outside the QBE materializer's slice"
          value)])))
 
 (def refusal-index-proven?: Bool
-  (explicitly-refused? refusal-index-world))
+  (explicitly-refused? refusal-index-program))
 
 (def refusal-blank-proven?: Bool
-  (explicitly-refused? refusal-blank-world))
+  (explicitly-refused? refusal-blank-program))
 
 (def refusal-parse-proven?: Bool
-  (explicitly-refused? refusal-parse-world))
+  (explicitly-refused? refusal-parse-program))
 
 (def refusal-text-builtin-proven?: Bool
-  (explicitly-refused? refusal-text-builtin-world))
+  (explicitly-refused? refusal-text-builtin-program))
 
 (def refusal-map-proven?: Bool
-  (explicitly-refused? refusal-map-world))
+  (explicitly-refused? refusal-map-program))
 
 (def refusal-set-proven?: Bool
-  (explicitly-refused? refusal-set-world))
+  (explicitly-refused? refusal-set-program))
 
 (def refusal-value-equal-proven?: Bool
   (and (core/validationreport-passed
-         (core/validate-world refusal-value-equal-world))
-    (match (qbe/materialize-world refusal-value-equal-world 3 "lp64")
+         (core/validate-program refusal-value-equal-program))
+    (match (qbe/materialize-program refusal-value-equal-program 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: equal" value)])))
 
 (def refusal-value-hash-proven?: Bool
   (and (core/validationreport-passed
-         (core/validate-world refusal-value-hash-world))
-    (match (qbe/materialize-world refusal-value-hash-world 3 "lp64")
+         (core/validate-program refusal-value-hash-program))
+    (match (qbe/materialize-program refusal-value-hash-program 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: hash" value)])))
 
 (def refusal-value-compare-proven?: Bool
   (and (core/validationreport-passed
-         (core/validate-world refusal-value-compare-world))
-    (match (qbe/materialize-world refusal-value-compare-world 3 "lp64")
+         (core/validate-program refusal-value-compare-program))
+    (match (qbe/materialize-program refusal-value-compare-program 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: compare" value)])))
 
 (def refusal-value-to-text-proven?: Bool
   (and (core/validationreport-passed
-         (core/validate-world refusal-value-to-text-world))
-    (match (qbe/materialize-world refusal-value-to-text-world 3 "lp64")
+         (core/validate-program refusal-value-to-text-program))
+    (match (qbe/materialize-program refusal-value-to-text-program 3 "lp64")
       [(QbeSuccess value) false]
       [(QbeFailure value)
        (= "unsupported native value-semantics op: to-text" value)])))
 
 (def atom-refusal-proven?: Bool
-  (explicitly-refused? atom-world))
+  (explicitly-refused? atom-program))
 
 (def fixture-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world fixture-world 0 "lp64")))
+  (require-artifact (qbe/materialize-program fixture-program 0 "lp64")))
 
 (def fixture-permuted-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world fixture-world-permuted 0 "lp64")))
+  (require-artifact (qbe/materialize-program fixture-program-permuted 0 "lp64")))
 
 (def slice-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world slice-world 1 "lp64")))
+  (require-artifact (qbe/materialize-program slice-program 1 "lp64")))
 
 (def slice-permuted-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world slice-world-permuted 1 "lp64")))
+  (require-artifact (qbe/materialize-program slice-program-permuted 1 "lp64")))
 
 (def concat-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world concat-world 2 "lp64")))
+  (require-artifact (qbe/materialize-program concat-program 2 "lp64")))
 
 (def concat-permuted-artifact: qbe/QbeArtifact
-  (require-artifact (qbe/materialize-world concat-world-permuted 2 "lp64")))
+  (require-artifact (qbe/materialize-program concat-program-permuted 2 "lp64")))
 
 (def fixture-deterministic?: Bool
   (and refusal-index-proven?
@@ -1311,4 +1311,4 @@
       (spit (str directory "/" (qbe/qbeartifact-module-name concat-artifact))
         (qbe/qbeartifact-module-text concat-artifact))
       (spit (str directory "/qbe_main.c") fixture-main-text))
-    (throw (ex-info "permuted world changed QBE materialization" {}))))
+    (throw (ex-info "permuted program changed QBE materialization" {}))))

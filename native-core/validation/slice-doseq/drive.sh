@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercises the restricted closed-Vec doseq slice through Native World and C17.
+# Exercises the restricted closed-Vec doseq slice through native program and C17.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -42,7 +42,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -58,7 +58,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   generated="$scratch/out/native/$module.clj"
   [[ -f "$generated" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \

@@ -1,0 +1,266 @@
+#lang beagle/clj
+(ns native.stages (:require [native.core :as core]))
+
+(define-mode strict)
+
+;; Recursive terms refer to one another by stable identity so every stage kind
+;; shares the same finite, canonical graph representation.
+(defunion TermV0
+  (NilTermV0 [token :- Bool])
+  (BoolTermV0 [value :- Bool])
+  (I64TermV0 [value :- Int])
+  (F64TermV0 [canonical-value :- String])
+  (TextTermV0 [value :- String])
+  (RefTermV0 [target :- core/NativeId])
+  (TripleTermV0
+    [subject :- core/NativeId
+     predicate :- core/NativeId
+     object :- core/NativeId]))
+
+(defrecord TermNodeV0 [identity :- core/NativeId term :- TermV0])
+
+(defrecord TermGraphV0 [root :- core/NativeId nodes :- (Vec TermNodeV0)])
+
+(defrecord SourceLocationV0
+  [module-id :- core/NativeId
+   relative-path :- String
+   line :- Int
+   column :- Int])
+
+(defrecord SourceModuleV0
+  [id :- core/NativeId
+   name :- String
+   relative-path :- String
+   source-digest :- String
+   interface-digest :- String
+   root-term :- core/NativeId])
+
+(defrecord SourceStageV0
+  [terms :- TermGraphV0
+   modules :- (Vec SourceModuleV0)
+   imports :- (Vec core/NativeId)
+   locations :- (Vec SourceLocationV0)])
+
+;; Scratch roots never enter frozen source identity; locations are logical paths.
+(defrecord SourceInputV0
+  [scratch-root :- String
+   program :- SourceStageV0])
+
+(defrecord TypedStageV0
+  [terms :- TermGraphV0
+   source-digest :- String
+   type-roots :- (Vec core/NativeId)
+   function-roots :- (Vec core/NativeId)
+   effect-roots :- (Vec core/NativeId)
+   region-roots :- (Vec core/NativeId)
+   capability-token-roots :- (Vec core/NativeId)
+   refinement-roots :- (Vec core/NativeId)])
+
+;; Core NativeCoreProgram is the typed view; the canonical term graph owns its
+;; content identity.
+(defrecord NativeStageV0
+  [terms :- TermGraphV0
+   typed-digest :- String
+   program :- core/NativeCoreProgram
+   obligation-roots :- (Vec core/NativeId)])
+
+(defrecord FrozenSourceStageV0
+  [stage :- SourceStageV0
+   encoding :- String
+   digest :- String])
+
+(defrecord FrozenTypedStageV0
+  [stage :- TypedStageV0
+   encoding :- String
+   digest :- String])
+
+(defrecord FrozenNativeStageV0
+  [stage :- NativeStageV0
+   encoding :- String
+   digest :- String])
+
+(defn canonical-record [tag :- String fields :- (Vec String)] :- String
+  (str (count tag) ":" tag ":" (core/canonical-parts fields)))
+
+(defn canonical-set [tag :- String items :- (Vec String)] :- String
+  (canonical-record tag (sort items)))
+
+(defn encode-bool [value :- Bool] :- String
+  (if value "1" "0"))
+
+(defn encode-optional-string [value :- (U String Nil)] :- String
+  (if (nil? value) (canonical-record "none" []) (canonical-record "some" [value])))
+
+(defn encode-id [id :- core/NativeId] :- String
+  (canonical-record "id" [(core/nativeid-value id)]))
+
+(defn utf8-append [bytes :- (Vec Int) point :- Int] :- (Vec Int)
+  (cond
+    (< point 128)
+    (conj bytes point)
+    (< point 2048)
+    (conj (conj bytes (+ 192 (quot point 64))) (+ 128 (mod point 64)))
+    (< point 65536)
+    (conj (conj (conj bytes (+ 224 (quot point 4096)))
+            (+ 128 (mod (quot point 64) 64)))
+      (+ 128 (mod point 64)))
+    :else
+    (conj (conj (conj (conj bytes (+ 240 (quot point 262144)))
+                  (+ 128 (mod (quot point 4096) 64)))
+            (+ 128 (mod (quot point 64) 64)))
+      (+ 128 (mod point 64)))))
+
+;; stdlib utf8-encode has no hosted clj lowering, so the digest encodes its own
+;; bytes; a surrogate pair recombines into one code point first.
+(defn utf8-bytes [text :- String] :- (Vec Int)
+  (let [units :- (Vec Any) (vec text)
+        size :- Int (count units)]
+    (loop [index :- Int 0 bytes :- (Vec Int) []]
+      (if (>= index size)
+        bytes
+        (let [unit :- Int (int (nth units index))
+              paired :- Bool
+              (and (>= unit 55296) (< unit 56320) (< (+ index 1) size))
+              point :- Int
+              (if paired
+                (+ 65536
+                  (+ (* (- unit 55296) 1024)
+                    (- (int (nth units (+ index 1))) 56320)))
+                unit)]
+          (recur (+ index (if paired 2 1)) (utf8-append bytes point)))))))
+
+;; Every encoding handed here is already tagged by its own canonical record, so
+;; the digest needs no separate domain prefix.
+(defn content-digest [encoding :- String] :- String
+  (str "sha256:" (sha256-bytes (utf8-bytes encoding))))
+
+(defn canonical-vector [tag :- String items :- (Vec String)] :- String
+  (canonical-record tag items))
+
+(defn encode-int [value :- Int] :- String
+  (canonical-record "int" [(str value)]))
+
+(defn encode-string [value :- String] :- String
+  (canonical-record "string" [value]))
+
+(defn encode-optional-id [value :- (U core/NativeId Nil)] :- String
+  (if (nil? value)
+    (canonical-record "none" [])
+    (canonical-record "some" [(encode-id value)])))
+
+(defn encode-ids [tag :- String ids :- (Vec core/NativeId)] :- String
+  (canonical-set tag (mapv (fn [id :- core/NativeId] :- String (encode-id id)) ids)))
+
+(defn encode-term [term :- TermV0] :- String
+  (match term
+    [(NilTermV0 token) (canonical-record "term-nil-v0" [(encode-bool token)])]
+    [(BoolTermV0 value) (canonical-record "term-bool-v0" [(encode-bool value)])]
+    [(I64TermV0 value) (canonical-record "term-i64-v0" [(encode-int value)])]
+    [(F64TermV0 canonical-value) (canonical-record "term-f64-v0" [canonical-value])]
+    [(TextTermV0 value) (canonical-record "term-text-v0" [value])]
+    [(RefTermV0 target) (canonical-record "term-ref-v0" [(encode-id target)])]
+    [(TripleTermV0 subject predicate object)
+     (canonical-record "term-triple-v0"
+       [(encode-id subject) (encode-id predicate) (encode-id object)])]))
+
+(defn encode-term-node [node :- TermNodeV0] :- String
+  (canonical-record "term-node-v0"
+    [(encode-id (termnodev0-identity node)) (encode-term (termnodev0-term node))]))
+
+(defn encode-term-graph [graph :- TermGraphV0] :- String
+  (canonical-record "term-graph-v0"
+    [(encode-id (termgraphv0-root graph))
+     (canonical-set "nodes"
+       (mapv (fn [node :- TermNodeV0] :- String (encode-term-node node))
+         (termgraphv0-nodes graph)))]))
+
+(defn encode-source-location [location :- SourceLocationV0] :- String
+  (canonical-record "source-location-v0"
+    [(encode-id (sourcelocationv0-module-id location))
+     (encode-string (sourcelocationv0-relative-path location))
+     (encode-int (sourcelocationv0-line location))
+     (encode-int (sourcelocationv0-column location))]))
+
+(defn encode-source-module [module :- SourceModuleV0] :- String
+  (canonical-record "source-module-v0"
+    [(encode-id (sourcemodulev0-id module))
+     (encode-string (sourcemodulev0-name module))
+     (encode-string (sourcemodulev0-relative-path module))
+     (encode-string (sourcemodulev0-source-digest module))
+     (encode-string (sourcemodulev0-interface-digest module))
+     (encode-id (sourcemodulev0-root-term module))]))
+
+(defn encode-source-stage [stage :- SourceStageV0] :- String
+  (canonical-record "source-stage-v0"
+    [(encode-term-graph (sourcestagev0-terms stage))
+     (canonical-set "modules"
+       (mapv (fn [module :- SourceModuleV0] :- String (encode-source-module module))
+         (sourcestagev0-modules stage)))
+     (encode-ids "imports" (sourcestagev0-imports stage))
+     (canonical-set "locations"
+       (mapv (fn [location :- SourceLocationV0] :- String (encode-source-location location))
+         (sourcestagev0-locations stage)))]))
+
+(defn encode-typed-stage [stage :- TypedStageV0] :- String
+  (canonical-record "typed-stage-v0"
+    [(encode-term-graph (typedstagev0-terms stage))
+     (encode-string (typedstagev0-source-digest stage))
+     (encode-ids "type-roots" (typedstagev0-type-roots stage))
+     (encode-ids "function-roots" (typedstagev0-function-roots stage))
+     (encode-ids "effect-roots" (typedstagev0-effect-roots stage))
+     (encode-ids "region-roots" (typedstagev0-region-roots stage))
+     (encode-ids "capability-token-roots" (typedstagev0-capability-token-roots stage))
+     (encode-ids "refinement-roots" (typedstagev0-refinement-roots stage))]))
+
+(defn encode-region-kind [kind :- core/RegionKind] :- String
+  (cond
+    (instance? native.core.StackRegion kind)
+    (canonical-record "region-stack-v0" [(encode-bool (core/stackregion-token kind))])
+    (instance? native.core.ArenaRegion kind)
+    (canonical-record "region-arena-v0" [(encode-bool (core/arenaregion-token kind))])
+    :else
+    (canonical-record "region-external-v0" [])))
+
+(defn encode-region [region :- core/RegionDef] :- String
+  (canonical-record "region-def-v0"
+    [(encode-id (core/regiondef-id region))
+     (encode-region-kind (core/regiondef-kind region))
+     (encode-optional-id (core/regiondef-parent region))]))
+
+(defn encode-observation [observation :- core/ExternalObservation] :- String
+  (if (instance? native.core.Fri2Observation observation)
+    (canonical-record "observation-fri2-v0"
+      [(encode-id (core/fri2observation-artifact-id observation))
+       (encode-string (core/fri2observation-digest observation))
+       (encode-int (core/fri2observation-byte-count observation))])
+    (canonical-record "observation-unknown-v0" [])))
+
+(defn encode-native-core-program [program :- core/NativeCoreProgram] :- String
+  (canonical-record "native-core-program-v0"
+    [(encode-id (core/nativecoreprogram-id program))
+     (encode-optional-id (core/nativecoreprogram-parent program))
+     (encode-string (core/nativecoreprogram-compiler-pass program))
+     (encode-ids "allowed-effects" (core/nativecoreprogram-allowed-effects program))
+     (encode-ids "allowed-regions" (core/nativecoreprogram-allowed-regions program))
+     (encode-ids "allowed-capabilities"
+       (core/nativecoreprogram-allowed-capabilities program))
+     (canonical-set "regions"
+       (mapv (fn [region :- core/RegionDef] :- String (encode-region region))
+         (core/nativecoreprogram-regions program)))
+     (canonical-set "observations"
+       (mapv (fn [observation :- core/ExternalObservation] :- String
+               (encode-observation observation))
+         (core/nativecoreprogram-observations program)))]))
+
+(defn encode-native-stage [stage :- NativeStageV0] :- String
+  (canonical-record "native-stage-v0"
+    [(encode-term-graph (nativestagev0-terms stage))
+     (encode-string (nativestagev0-typed-digest stage))
+     (encode-native-core-program (nativestagev0-program stage))
+     (encode-ids "obligation-roots" (nativestagev0-obligation-roots stage))]))
+
+(defn configuration-digest [configuration :- (Vec String)] :- String
+  (content-digest
+    (canonical-set "configuration-v0"
+      (mapv (fn [entry :- String] :- String (encode-string entry))
+        configuration))))

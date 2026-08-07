@@ -1,5 +1,5 @@
 #lang beagle/clj
-;; Reads the same frozen core/NativeWorld native.c11 reads; every QBE-shaped
+;; Reads the same frozen core/NativeCoreProgram native.c11 reads; every QBE-shaped
 ;; concession stays inside this file. Authority: North thread 019fbd6c A6.
 (ns native.qbe
   (:require [native.core :as core]))
@@ -34,7 +34,7 @@
     [(QbeFailure detail) (->QbeArtifact "" "")]))
 
 ;; Per-function emission context; every emitter reads canonical orders from
-;; here so a permuted world produces byte-identical text.
+;; here so a permuted program produces byte-identical text.
 (defrecord QbeFn
   [(types : (Vec core/TypeDef))
    (layouts : (Vec core/LayoutDef))
@@ -559,7 +559,7 @@
 
 ;; Body position: QBE hands an aggregate to the body as a pointer, so every
 ;; aggregate temporary is a long. This is a QBE calling-convention fact; the
-;; world keeps its aggregate type unchanged.
+;; program keeps its aggregate type unchanged.
 (defn value-type-letter
   [(types : (Vec core/TypeDef))
    (layouts : (Vec core/LayoutDef))
@@ -609,7 +609,7 @@
     (if (nil? layout) 0 (core/layoutdef-align-bytes layout))))
 
 ;; A member is representable when QBE's own model of its size and alignment
-;; agrees with the layout the world declared.
+;; agrees with the layout the program declared.
 (defn member-representable?
   [(types : (Vec core/TypeDef))
    (layouts : (Vec core/LayoutDef))
@@ -713,9 +713,9 @@
   [(layout : core/LayoutDef)] -> (Vec core/UnionVariantLayoutV0)
   (shape-union-variants (core/layoutdef-shape layout)))
 
-;; QBE computes aggregate offsets from member order; the world states them.
+;; QBE computes aggregate offsets from member order; the program states them.
 ;; When the two agree the member form is exact, otherwise the honest QBE
-;; encoding is an opaque sized type — the world is never re-shaped to fit.
+;; encoding is an opaque sized type — the program is never re-shaped to fit.
 (defn record-member-form?
   [(types : (Vec core/TypeDef))
    (layouts : (Vec core/LayoutDef))
@@ -1067,7 +1067,7 @@
     [(ValueToTextInstructionV0 value) false]
     [(CodecPrimitiveInstructionV0 value) false]))
 
-;; A checked operation becomes a trap/continue diamond, so a world block can
+;; A checked operation becomes a trap/continue diamond, so a program block can
 ;; end in a different QBE label than it started in.
 (defn block-exit-label [(index : Int) (block : core/BasicBlock)] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
@@ -1240,7 +1240,7 @@
             alignment: Int (layout-align layouts resolved)]
         (if (<= alignment 0) 8 alignment)))))
 
-;; The shim copies opaque element bytes; the world layout supplies their
+;; The shim copies opaque element bytes; the program layout supplies their
 ;; stride and alignment without exposing the vector header to QBE.
 (defn vector-stride [(context : QbeFn) (vector-type : core/NativeId)] -> Int
   (let [layout: (U core/LayoutDef Nil)
@@ -1419,8 +1419,8 @@
                 (core/unsignedbitshiftrighti64v0-distance-id operation))
               ")\n")]))]
       [(StoreInstruction value)
-       ;; A world store carries an SSA result; QBE stores are valueless, so
-       ;; the result materializes as the unit token the world already means.
+       ;; A program store carries an SSA result; QBE stores are valueless, so
+       ;; the result materializes as the unit token the program already means.
        (let [store: core/StoreOp (core/storeinstruction-store instruction)]
          (str "  " (store-mnemonic store) " " (value-name context (store-value store))
            ", " (value-name context (store-address store)) "\n"
@@ -1546,7 +1546,7 @@
           (str result (emit-instruction context block-index-value position (nth instructions position))))))))
 
 ;; --- phi emission ---------------------------------------------------------
-;; World blocks take parameters; QBE blocks do not. The arguments a jump
+;; Program blocks take parameters; QBE blocks do not. The arguments a jump
 ;; carries become phi entries keyed by the predecessor's exit label.
 
 (defn terminator-jump-arguments
@@ -1692,7 +1692,7 @@
     (if (nil? layout) [] (union-variants layout))))
 
 ;; QBE has no switch; a tagged dispatch becomes a compare chain that ends in
-;; a trap, which keeps the world's exhaustiveness obligation observable.
+;; a trap, which keeps the program's exhaustiveness obligation observable.
 (defn emit-switch
   [(context : QbeFn)
    (block-index-value : Int)
@@ -1864,7 +1864,7 @@
           [(SetTypeV0 value) false]
           [(ReferenceType value) false]
           ;; QBE has no lock/runtime calling convention for Atom state in this
-          ;; slice; reject the frozen world instead of treating a cell as Ref.
+          ;; slice; reject the frozen program instead of treating a cell as Ref.
           [(AtomCellTypeV0 value) false]
           [(FunctionType value) false]
           [(OutcomeType value) false])))))
@@ -1994,8 +1994,8 @@
           (if (nil? name) (recur (+ position 1)) name))))))
 
 (defn unsupported-checked-division
-  [(world : core/NativeWorld)] -> (U String Nil)
-  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+  [(program : core/NativeCoreProgram)] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))
         nil
@@ -2038,8 +2038,8 @@
             (recur (+ position 1))
             operation))))))
 
-(defn unsupported-codec-primitive [(world : core/NativeWorld)] -> (U String Nil)
-  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+(defn unsupported-codec-primitive [(program : core/NativeCoreProgram)] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))
         nil
@@ -2084,8 +2084,8 @@
             (recur (+ position 1))
             operation))))))
 
-(defn unsupported-value-semantics [(world : core/NativeWorld)] -> (U String Nil)
-  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+(defn unsupported-value-semantics [(program : core/NativeCoreProgram)] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))
         nil
@@ -2128,8 +2128,8 @@
               (unsupported-block-unicode-text (nth blocks position))]
           (if (nil? operation) (recur (+ position 1)) operation))))))
 
-(defn unsupported-unicode-text [(world : core/NativeWorld)] -> (U String Nil)
-  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+(defn unsupported-unicode-text [(program : core/NativeCoreProgram)] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (loop [position: Int 0]
       (if (>= position (count functions))
         nil
@@ -2137,7 +2137,7 @@
               (unsupported-function-unicode-text (nth functions position))]
           (if (nil? operation) (recur (+ position 1)) operation))))))
 
-(defn world-has-vector-sort? [(world : core/NativeWorld)] -> Bool
+(defn program-has-vector-sort? [(program : core/NativeCoreProgram)] -> Bool
   (some?
     (some
       (fn [(function : core/FunctionDef)] -> Bool
@@ -2150,7 +2150,7 @@
                     (instance? native.core.VecSortInstructionV0 instruction))
                   (core/basicblock-instructions block))))
             (core/functiondef-blocks function))))
-      (core/nativeworld-functions world))))
+      (core/nativecoreprogram-functions program))))
 
 (defn parameterless-target?
   [(blocks : (Vec core/BasicBlock))
@@ -2178,7 +2178,7 @@
      (arity-matches? blocks (core/jumpterminator-block-id terminator)
        (core/jumpterminator-arguments terminator))]
     [(BranchTerminator value)
-     ;; The world's branch carries no arguments, so its targets take none.
+     ;; The program's branch carries no arguments, so its targets take none.
      (and (parameterless-target? blocks (core/branchterminator-true-block terminator))
        (parameterless-target? blocks (core/branchterminator-false-block terminator)))]
     [(SwitchTerminator value)
@@ -2210,22 +2210,22 @@
         (core/functiondef-parameters function))
       (every? (fn [(block : core/BasicBlock)] -> Bool (block-supported? blocks block)) blocks))))
 
-(defn world-supported? [(world : core/NativeWorld)] -> Bool
-  (let [types: (Vec core/TypeDef) (core/nativeworld-types world)
-        layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)]
+(defn program-supported? [(program : core/NativeCoreProgram)] -> Bool
+  (let [types: (Vec core/TypeDef) (core/nativecoreprogram-types program)
+        layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)]
     (every? (fn [(function : core/FunctionDef)] -> Bool (function-supported? types layouts function))
-      (core/nativeworld-functions world))))
+      (core/nativecoreprogram-functions program))))
 
-(defn world-has-host-extern? [(world : core/NativeWorld)] -> Bool
+(defn program-has-host-extern? [(program : core/NativeCoreProgram)] -> Bool
   (some?
     (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
               (instance? native.core.RestrictedCOptionalOutAbiV0
                 (core/abideclv0-convention abi))))
-      (core/nativeworld-abis world))))
+      (core/nativecoreprogram-abis program))))
 
-(defn world-has-stdout-extern? [(world : core/NativeWorld)] -> Bool
+(defn program-has-stdout-extern? [(program : core/NativeCoreProgram)] -> Bool
   (some?
     (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
@@ -2234,9 +2234,9 @@
                 (core/abideclv0-convention abi))
               (= "native_host_stdout_write_line_v0"
                 (core/abideclv0-symbol abi))))
-      (core/nativeworld-abis world))))
+      (core/nativecoreprogram-abis program))))
 
-(defn world-has-clock-extern? [(world : core/NativeWorld)] -> Bool
+(defn program-has-clock-extern? [(program : core/NativeCoreProgram)] -> Bool
   (some?
     (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
@@ -2245,7 +2245,7 @@
                 (core/abideclv0-convention abi))
               (= "native_host_clock_monotonic_nanoseconds_v0"
                 (core/abideclv0-symbol abi))))
-      (core/nativeworld-abis world))))
+      (core/nativecoreprogram-abis program))))
 
 (defn socket-extern-symbol? [(symbol : String)] -> Bool
   (or (= symbol "native_host_socket_inherited_listener_v0")
@@ -2254,7 +2254,7 @@
       (= symbol "native_host_socket_write_bounded_v0")
       (= symbol "native_host_socket_close_v0")))
 
-(defn world-has-socket-extern? [(world : core/NativeWorld)] -> Bool
+(defn program-has-socket-extern? [(program : core/NativeCoreProgram)] -> Bool
   (some?
     (some (fn [(abi : core/AbiDeclV0)] -> Bool
             (and (instance? native.core.AbiImportV0
@@ -2262,7 +2262,7 @@
               (instance? native.core.RestrictedCOutcomeOutAbiV0
                 (core/abideclv0-convention abi))
               (socket-extern-symbol? (core/abideclv0-symbol abi))))
-      (core/nativeworld-abis world))))
+      (core/nativecoreprogram-abis program))))
 
 ;; --- entry point ----------------------------------------------------------
 
@@ -2282,41 +2282,41 @@
       (if (= (count type-text) 0) "" "\n")
       (emit-functions types layouts functions texts module-index))))
 
-(defn materialize-world
-  [(world : core/NativeWorld)
+(defn materialize-program
+  [(program : core/NativeCoreProgram)
    (module-index : Int)
    (abi-id : String)] -> QbeMaterialization
-  (let [validation: core/ValidationReport (core/validate-world world)
-        unsupported: (U String Nil) (unsupported-value-semantics world)
-        unsupported-codec: (U String Nil) (unsupported-codec-primitive world)
-        unsupported-unicode: (U String Nil) (unsupported-unicode-text world)
+  (let [validation: core/ValidationReport (core/validate-program program)
+        unsupported: (U String Nil) (unsupported-value-semantics program)
+        unsupported-codec: (U String Nil) (unsupported-codec-primitive program)
+        unsupported-unicode: (U String Nil) (unsupported-unicode-text program)
         unsupported-division: (U String Nil)
-        (unsupported-checked-division world)
+        (unsupported-checked-division program)
         functions: (Vec core/FunctionDef)
-        (ordered-functions (core/nativeworld-functions world))
+        (ordered-functions (core/nativecoreprogram-functions program))
         texts: (Vec String) (collect-texts functions)]
     (cond
       (< module-index 0)
       (->QbeFailure "module index must be nonnegative")
-      ;; QBE's letter sizes and register classes are pinned to LP64; a world
+      ;; QBE's letter sizes and register classes are pinned to LP64; a program
       ;; measured for another ABI is refused by name, never silently emitted.
       (not= abi-id "lp64")
       (->QbeFailure (str "abi profile " abi-id ": qbe materializes lp64 only"))
       (not (core/validationreport-passed validation))
-      (->QbeFailure "native world is not frozen: validation obligations failed")
-      (world-has-socket-extern? world)
+      (->QbeFailure "native program is not frozen: validation obligations failed")
+      (program-has-socket-extern? program)
       (->QbeFailure
         "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")
-      (world-has-clock-extern? world)
+      (program-has-clock-extern? program)
       (->QbeFailure
         "QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation")
-      (world-has-stdout-extern? world)
+      (program-has-stdout-extern? program)
       (->QbeFailure
         "QBE stdout extern ABI is unsupported: Text handles have no QBE call representation")
-      (world-has-host-extern? world)
+      (program-has-host-extern? program)
       (->QbeFailure
         "QBE host extern ABI is unsupported: optional Text handles have no QBE representation")
-      (world-has-vector-sort? world)
+      (program-has-vector-sort? program)
       (->QbeFailure
         "QBE vector sort is unsupported: sealed value descriptors have no QBE data representation")
       (some? unsupported)
@@ -2335,12 +2335,12 @@
           unsupported-division))
       (not (every? text-emittable? texts))
       (->QbeFailure
-        "native world contains a Text or Keyword literal outside the QBE literal slice")
-      (not (world-supported? world))
-      (->QbeFailure "native world uses a shape outside the QBE materializer's slice")
+        "native program contains a Text or Keyword literal outside the QBE literal slice")
+      (not (program-supported? program))
+      (->QbeFailure "native program uses a shape outside the QBE materializer's slice")
       :else
-      (let [types: (Vec core/TypeDef) (ordered-types (core/nativeworld-types world))
-            layouts: (Vec core/LayoutDef) (ordered-layouts (core/nativeworld-layouts world))
+      (let [types: (Vec core/TypeDef) (ordered-types (core/nativecoreprogram-types program))
+            layouts: (Vec core/LayoutDef) (ordered-layouts (core/nativecoreprogram-layouts program))
             module-name: String (str "module_" module-index ".ssa")
             module-text: String (emit-module types layouts functions texts module-index)]
         (->QbeSuccess (->QbeArtifact module-name module-text))))))

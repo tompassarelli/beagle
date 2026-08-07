@@ -2,8 +2,8 @@
 # Drive fram:src/fram/types.bgl through the whole native pipeline and emit the
 # C17 projection of its record ABI.
 #
-#   beagle-ast -> source facts -> frozen source world -> typed world
-#     -> native world -> 7 obligations -> native.c11 emitters
+#   beagle-ast -> source facts -> frozen source program -> typed program
+#     -> native program -> 7 obligations -> native.c11 emitters
 #
 # Re-runnable and byte-stable: every input is regenerated from live fram.
 #
@@ -46,7 +46,7 @@ fi
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \

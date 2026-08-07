@@ -48,7 +48,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -64,7 +64,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   generated="$scratch/out/native/$module.clj"
   [[ -f "$generated" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
@@ -118,7 +118,7 @@ done
 rg -q '^stage typed-to-native COMPLETE$' "$report"
 rg -q '^materialize OK module_0.h module_0.c$' "$report"
 rg -q '^qbe-selected-function captured-reduce$' "$report"
-rg -Fq "qbe-materialize REFUSED native world uses a shape outside the QBE materializer's slice" \
+rg -Fq "qbe-materialize REFUSED native program uses a shape outside the QBE materializer's slice" \
   "$report"
 rg -q 'TODO-NATIVE-VECTOR-HOF-CALLBACK: mapv requires an anonymous function literal' \
   "$refusal_report"

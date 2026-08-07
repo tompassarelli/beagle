@@ -1,8 +1,8 @@
-beagle-profile-3 PASS   (native-core/src/native/*.bclj, 15 files, 0 errors)
+beagle-profile-3 PASS   (native-core/src/native/*.bclj, 14 files, 0 errors)
 obligations 7/7 PASS    (valid-ssa exhaustive-matches closed-layouts
                          checked-arithmetic legal-abi discharged-tokens
                          bounded-effects; a (Vec Int) and a (Vec CommitOperation)
-                         record field are live in the projected world)
+                         record field are live in the projected program)
 gcc-15.2.0-strict-c17 PASS    -std=c17 -pedantic -Wall -Wextra -Werror
 clang-21.1.8-strict-c17 PASS  -std=c17 -Werror
 determinism PASS        two materializations byte-identical

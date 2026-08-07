@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One closed Native World exercises immutable record assoc end to end: core
+# One closed native program exercises immutable record assoc end to end: core
 # validation negatives, C17 arena-copy emission, QBE refusal, and two C fronts.
 set -euo pipefail
 
@@ -38,10 +38,10 @@ done
 
 clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.validation-corpus 'native.body-c17 'native.qbe)
-(let [world native.validation-corpus/record-assoc-world
-      body-result (native.body-c17/materialize-world world 0)
-      qbe-result (native.qbe/materialize-world world 0 \"lp64\")
-      qbe-detail \"native world uses a shape outside the QBE materializer's slice\"]
+(let [program native.validation-corpus/record-assoc-program
+      body-result (native.body-c17/materialize-program program 0)
+      qbe-result (native.qbe/materialize-program program 0 \"lp64\")
+      qbe-detail \"native program uses a shape outside the QBE materializer's slice\"]
   (when-not native.validation-corpus/record-assoc-corpus-passes?
     (throw (ex-info \"record assoc validation corpus failed\" {})))
   (when-not (native.body-c17/materialization-ok? body-result)

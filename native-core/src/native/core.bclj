@@ -142,7 +142,7 @@
   ;; Region-lifetime law applies: that handle may not outlive the header's region.
   (VectorShapeV0 [(element-type : NativeId) (stride-bytes : Int)])
   ;; Map and Set values are arena-owned header handles. Their exact element
-  ;; storage ABI and deterministic iteration policy stay in the Native World.
+  ;; storage ABI and deterministic iteration policy stay in the native program.
   (MapShapeV0
     [(key-type : NativeId)
      (key-stride-bytes : Int)
@@ -167,8 +167,9 @@
    (shape : LayoutShapeV0)])
 
 ;; The target-ABI numbers layout measurement consumes. Deliberately NOT a
-;; NativeWorld field and never encoded: a world's LayoutDefs already carry the
-;; ABI in their digested numbers, so one frozen world exists per target ABI.
+;; NativeCoreProgram field and never encoded: a program's LayoutDefs already
+;; carry the ABI in their digested numbers, so one frozen program exists per
+;; target ABI.
 (defrecord AbiProfileV0
   [(id : String)
    (pointer-bytes : Int)
@@ -412,7 +413,7 @@
   (RecordInstruction [(result : SsaValueV0) (field-ids : (Vec NativeId))])
   ;; Immutable record update copies the source into fresh arena storage before
   ;; replacing one statically identified field; the result keeps the by-value
-  ;; record ABI while the allocation remains explicit in the world.
+  ;; record ABI while the allocation remains explicit in the program.
   (RecordAssocInstructionV0
     [(result : SsaValueV0)
      (source-id : NativeId)
@@ -420,7 +421,7 @@
      (value-id : NativeId)
      (arena-id : NativeId)])
   ;; Records enter recursive unions through an arena-owned reference, so the
-  ;; reference edge that closes their layout is represented in the world.
+  ;; reference edge that closes their layout is represented in the program.
   (BoxRecordInstruction
     [(result : SsaValueV0)
      (source-id : NativeId)
@@ -760,7 +761,7 @@
 (defunion AbiConventionV0
   (RestrictedCAbiV0 [(token : Bool)])
   ;; A restricted C import returns presence and writes the one non-unit union
-  ;; payload through a trailing pointer; the world result stays a closed union.
+  ;; payload through a trailing pointer; the program result stays a closed union.
   (RestrictedCOptionalOutAbiV0 [(token : Bool)])
   ;; Zero means success, -1 means peer-closed, and a positive return is copied
   ;; into `error` as errno; a non-unit `ok` payload is a trailing out pointer.
@@ -791,7 +792,7 @@
    (version : String)
    (layout-digest : String)])
 
-(defrecord NativeWorld
+(defrecord NativeCoreProgram
   [id :- NativeId
    parent :- (U NativeId Nil)
    compiler-pass :- String
@@ -1240,11 +1241,11 @@
 (defn abi-ids [abis :- (Vec AbiDeclV0)] :- (Vec NativeId)
   (mapv (fn [abi :- AbiDeclV0] :- NativeId (abideclv0-id abi)) abis))
 
-(defn world-owned-ids [world :- NativeWorld] :- (Vec NativeId)
-  (let [owned0 :- (Vec NativeId) [(nativeworld-id world)] owned1 :- (Vec NativeId) (append-ids owned0 (all-type-owned-ids (nativeworld-types world))) owned2 :- (Vec NativeId) (append-ids owned1 (effect-ids (nativeworld-effects world))) owned3 :- (Vec NativeId) (append-ids owned2 (region-ids (nativeworld-regions world))) owned4 :- (Vec NativeId) (append-ids owned3 (capability-ids (nativeworld-capabilities world))) owned5 :- (Vec NativeId) (append-ids owned4 (layout-ids (nativeworld-layouts world)))]
+(defn program-owned-ids [program :- NativeCoreProgram] :- (Vec NativeId)
+  (let [owned0 :- (Vec NativeId) [(nativecoreprogram-id program)] owned1 :- (Vec NativeId) (append-ids owned0 (all-type-owned-ids (nativecoreprogram-types program))) owned2 :- (Vec NativeId) (append-ids owned1 (effect-ids (nativecoreprogram-effects program))) owned3 :- (Vec NativeId) (append-ids owned2 (region-ids (nativecoreprogram-regions program))) owned4 :- (Vec NativeId) (append-ids owned3 (capability-ids (nativecoreprogram-capabilities program))) owned5 :- (Vec NativeId) (append-ids owned4 (layout-ids (nativecoreprogram-layouts program)))]
     (append-ids
-      (append-ids owned5 (all-function-owned-ids (nativeworld-functions world)))
-      (abi-ids (nativeworld-abis world)))))
+      (append-ids owned5 (all-function-owned-ids (nativecoreprogram-functions program)))
+      (abi-ids (nativecoreprogram-abis program)))))
 
 (defn type-member-ids [types :- (Vec TypeDef)] :- (Vec NativeId)
   (loop [index :- Int 0 ids :- (Vec NativeId) []]
@@ -1615,14 +1616,14 @@
     (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function types known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
       functions)))
 
-(defn world-reference-closed? [world :- NativeWorld] :- Bool
-  (let [types :- (Vec TypeDef) (nativeworld-types world) effects :- (Vec EffectDef) (nativeworld-effects world) regions :- (Vec RegionDef) (nativeworld-regions world) capabilities :- (Vec CapabilityDef) (nativeworld-capabilities world) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-abis :- (Vec NativeId) (abi-ids (nativeworld-abis world)) known-owned :- (Vec NativeId) (world-owned-ids world)]
+(defn program-reference-closed? [program :- NativeCoreProgram] :- Bool
+  (let [types :- (Vec TypeDef) (nativecoreprogram-types program) effects :- (Vec EffectDef) (nativecoreprogram-effects program) regions :- (Vec RegionDef) (nativecoreprogram-regions program) capabilities :- (Vec CapabilityDef) (nativecoreprogram-capabilities program) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-abis :- (Vec NativeId) (abi-ids (nativecoreprogram-abis program)) known-owned :- (Vec NativeId) (program-owned-ids program)]
     (and (types-refs-closed? types)
       (effects-refs-closed? effects known-regions known-capabilities)
       (regions-refs-closed? regions)
       (capabilities-refs-closed? capabilities known-regions)
-      (layouts-refs-closed? (nativeworld-layouts world) types)
-      (functions-reference-closed? (nativeworld-functions world)
+      (layouts-refs-closed? (nativecoreprogram-layouts program) types)
+      (functions-reference-closed? (nativecoreprogram-functions program)
         types
         known-types
         known-effects
@@ -1845,9 +1846,9 @@
       (every? (fn [block :- BasicBlock] :- Bool (block-ssa-closed? block known-values))
         (functiondef-blocks function)))))
 
-(defn world-ssa-closed? [world :- NativeWorld] :- Bool
+(defn program-ssa-closed? [program :- NativeCoreProgram] :- Bool
   (every? (fn [function :- FunctionDef] :- Bool (function-ssa-closed? function))
-    (nativeworld-functions world)))
+    (nativecoreprogram-functions program)))
 
 (defn functions-single-terminator? [functions :- (Vec FunctionDef)] :- Bool
   (every? (fn [function :- FunctionDef] :- Bool (every? (fn
@@ -1957,23 +1958,23 @@
     (every? (fn [block :- BasicBlock] :- Bool (block-resources-allowed? block allowed-regions allowed-capabilities))
       (functiondef-blocks function))))
 
-(defn world-allowed-sets-valid? [world :- NativeWorld] :- Bool
-  (let [allowed-effects :- (Vec NativeId) (nativeworld-allowed-effects world) allowed-regions :- (Vec NativeId) (nativeworld-allowed-regions world) allowed-capabilities :- (Vec NativeId) (nativeworld-allowed-capabilities world)]
+(defn program-allowed-sets-valid? [program :- NativeCoreProgram] :- Bool
+  (let [allowed-effects :- (Vec NativeId) (nativecoreprogram-allowed-effects program) allowed-regions :- (Vec NativeId) (nativecoreprogram-allowed-regions program) allowed-capabilities :- (Vec NativeId) (nativecoreprogram-allowed-capabilities program)]
     (and (unique-ids? allowed-effects)
       (unique-ids? allowed-regions)
       (unique-ids? allowed-capabilities)
-      (ids-in? allowed-effects (effect-ids (nativeworld-effects world)))
-      (ids-in? allowed-regions (region-ids (nativeworld-regions world)))
+      (ids-in? allowed-effects (effect-ids (nativecoreprogram-effects program)))
+      (ids-in? allowed-regions (region-ids (nativecoreprogram-regions program)))
       (ids-in? allowed-capabilities
-        (capability-ids (nativeworld-capabilities world)))
+        (capability-ids (nativecoreprogram-capabilities program)))
       (every? (fn [function :- FunctionDef] :- Bool (function-uses-allowed? function allowed-effects allowed-regions allowed-capabilities))
-        (nativeworld-functions world)))))
+        (nativecoreprogram-functions program)))))
 
-(defn world-unique-ids? [world :- NativeWorld] :- Bool
-  (unique-ids? (world-owned-ids world)))
+(defn program-unique-ids? [program :- NativeCoreProgram] :- Bool
+  (unique-ids? (program-owned-ids program)))
 
-(defn validate-world [world :- NativeWorld] :- ValidationReport
-  (let [unique-pass :- Bool (world-unique-ids? world) allowed-pass :- Bool (world-allowed-sets-valid? world) reference-pass :- Bool (world-reference-closed? world) terminator-pass :- Bool (functions-single-terminator? (nativeworld-functions world)) ssa-pass :- Bool (world-ssa-closed? world) valid-ssa-pass :- Bool (and unique-pass reference-pass terminator-pass ssa-pass) results :- (Vec ObligationResult) [(->ObligationResult (->ValidSsaObligation true) valid-ssa-pass "IDs, references, terminators, and SSA uses form a closed function graph") (->ObligationResult (->BoundedEffectsObligation true) allowed-pass "declared resource use stays inside closed allowed sets")]]
+(defn validate-program [program :- NativeCoreProgram] :- ValidationReport
+  (let [unique-pass :- Bool (program-unique-ids? program) allowed-pass :- Bool (program-allowed-sets-valid? program) reference-pass :- Bool (program-reference-closed? program) terminator-pass :- Bool (functions-single-terminator? (nativecoreprogram-functions program)) ssa-pass :- Bool (program-ssa-closed? program) valid-ssa-pass :- Bool (and unique-pass reference-pass terminator-pass ssa-pass) results :- (Vec ObligationResult) [(->ObligationResult (->ValidSsaObligation true) valid-ssa-pass "IDs, references, terminators, and SSA uses form a closed function graph") (->ObligationResult (->BoundedEffectsObligation true) allowed-pass "declared resource use stays inside closed allowed sets")]]
     (->ValidationReport (and unique-pass allowed-pass reference-pass terminator-pass ssa-pass)
       results)))
 

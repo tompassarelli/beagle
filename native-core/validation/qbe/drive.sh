@@ -56,12 +56,12 @@ done
 
 ( cd "$artifacts" && sha256sum module_0.ssa module_1.ssa module_2.ssa > determinism.txt )
 cat > "$artifacts/provenance.txt" <<'PROV'
-module_0.ssa  native.qbe over the native.c11-validation-corpus fixture world (module 0)
-module_1.ssa  native.qbe over the native.qbe-validation-corpus control-flow and bitwise world (module 1)
-module_2.ssa  native.qbe over the native.qbe-validation-corpus immutable vector transform world (module 2)
+module_0.ssa  native.qbe over the native.c11-validation-corpus fixture program (module 0)
+module_1.ssa  native.qbe over the native.qbe-validation-corpus control-flow and bitwise program (module 1)
+module_2.ssa  native.qbe over the native.qbe-validation-corpus immutable vector transform program (module 2)
 qbe_main.c    C driver for modules 0 and 2; links by the native_shim ABI only
 determinism   two independent emitter runs compared byte-for-byte, plus a
-              permuted-world equality assertion inside the corpus
+              permuted-program equality assertion inside the corpus
 PROV
 echo "drive.sh: emitted $artifacts/module_0.ssa $artifacts/module_1.ssa $artifacts/module_2.ssa (two runs, byte-identical)"
 cat "$artifacts/determinism.txt"

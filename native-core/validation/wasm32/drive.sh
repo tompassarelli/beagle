@@ -98,8 +98,8 @@ build_and_run slice_union "$work/union-a" \
 refusal='qbe-materialize REFUSED abi profile wasm32: qbe materializes lp64 only'
 grep -Fqx "$refusal" "$work/union-a/report.txt" \
   || { grep -F 'qbe-materialize' "$work/union-a/report.txt" >&2 || true
-       die "the wasm32 world did not draw the named QBE refusal"; }
-echo "wasm32/drive.sh: QBE refused the wasm32 world by name"
+       die "the wasm32 program did not draw the named QBE refusal"; }
+echo "wasm32/drive.sh: QBE refused the wasm32 program by name"
 
 # ---- committed seam ledger + determinism digests --------------------------
 mkdir -p "$artifacts"

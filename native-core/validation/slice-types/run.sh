@@ -32,7 +32,7 @@ fi
 
 "$types_root/bin/beagle-build-all" \
   "$types_root/native-core/src/native/core.bclj" \
-  "$types_root/native-core/src/native/worlds.bclj" \
+  "$types_root/native-core/src/native/stages.bclj" \
   "$types_root/native-core/src/native/lower.bclj" \
   "$types_root/native-core/src/native/obligations.bclj" \
   "$types_root/native-core/src/native/c11.bclj" \

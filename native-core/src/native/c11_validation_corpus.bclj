@@ -7,7 +7,7 @@
 (require native.c11 :as c11)
 (require native.lower :as lower)
 (require native.obligations :as obligations)
-(require native.worlds :as worlds)
+(require native.stages :as stages)
 
 (defn fixture-id [(name : String)] -> core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))
@@ -68,8 +68,8 @@
     [(fixture-id "region-arena")]
     [(fixture-id "capability-allocate")]))
 
-(def fixture-world: core/NativeWorld
-  (core/->NativeWorld (fixture-id "world") nil "native-c11-fixture-v0"
+(def fixture-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram (fixture-id "program") nil "native-c11-fixture-v0"
     [fixture-pair-type fixture-i64-type]
     [fixture-effect]
     [fixture-region]
@@ -82,8 +82,8 @@
     []
     []))
 
-(def fixture-world-permuted: core/NativeWorld
-  (with fixture-world
+(def fixture-program-permuted: core/NativeCoreProgram
+  (with fixture-program
     [:types [fixture-i64-type fixture-pair-type]
      :layouts [fixture-i64-layout fixture-pair-layout]]))
 
@@ -93,10 +93,10 @@
     [(C11Failure value) (throw (ex-info (c11/c11failure-detail result) {}))]))
 
 (def fixture-artifact: c11/C11Artifact
-  (require-artifact (c11/materialize-world fixture-world 0)))
+  (require-artifact (c11/materialize-program fixture-program 0)))
 
 (def fixture-permuted-artifact: c11/C11Artifact
-  (require-artifact (c11/materialize-world fixture-world-permuted 0)))
+  (require-artifact (c11/materialize-program fixture-program-permuted 0)))
 
 (def fixture-deterministic?: Bool
   (and (= (c11/c11artifact-header-text fixture-artifact)
@@ -151,18 +151,18 @@
       (spit (str directory "/" (c11/c11artifact-source-name fixture-artifact))
         (c11/c11artifact-source-text fixture-artifact))
       (spit (str directory "/main.c") fixture-main-text))
-    (throw (ex-info "permuted fixture world changed materialization" {}))))
+    (throw (ex-info "permuted fixture program changed materialization" {}))))
 
-(defn require-fold-lowered-world
-  [(result : lower/FixturePipelineResultV0)] -> core/NativeWorld
+(defn require-fold-lowered-program
+  [(result : lower/FixturePipelineResultV0)] -> core/NativeCoreProgram
   (if (instance? native.lower.FixturePipelineCompleteV0 result)
-    (worlds/nativeworldv0-program
-      (worlds/frozennativeworldv0-world
+    (stages/nativestagev0-program
+      (stages/frozennativestagev0-stage
         (lower/fixturepipelinecompletev0-frozen result)))
     (throw (ex-info "fold empty-input specialization did not lower" {}))))
 
-(def fold-lowered-world: core/NativeWorld
-  (require-fold-lowered-world lower/fold-empty-result))
+(def fold-lowered-program: core/NativeCoreProgram
+  (require-fold-lowered-program lower/fold-empty-result))
 
 (defn fold-reachable-type? [(definition : core/TypeDef)] -> Bool
   (or (= "I64" (core/typedef-name definition))
@@ -171,7 +171,7 @@
     (= "LowerFailure" (core/typedef-name definition))))
 
 (def fold-types: (Vec core/TypeDef)
-  (filterv fold-reachable-type? (core/nativeworld-types fold-lowered-world)))
+  (filterv fold-reachable-type? (core/nativecoreprogram-types fold-lowered-program)))
 
 (def fold-layouts: (Vec core/LayoutDef)
   (filterv
@@ -183,21 +183,21 @@
               (core/layoutdef-type-id layout)
               (core/typedef-id definition)))
           fold-types)))
-    (core/nativeworld-layouts fold-lowered-world)))
+    (core/nativecoreprogram-layouts fold-lowered-program)))
 
 (def fold-function: core/FunctionDef
-  (nth (core/nativeworld-functions fold-lowered-world) 0))
+  (nth (core/nativecoreprogram-functions fold-lowered-program) 0))
 
 (def fold-effects: (Vec core/EffectDef)
   (filterv
     (fn [(effect : core/EffectDef)] -> Bool
       (core/id-in? (core/functiondef-effects fold-function)
         (core/effectdef-id effect)))
-    (core/nativeworld-effects fold-lowered-world)))
+    (core/nativecoreprogram-effects fold-lowered-program)))
 
-(def fold-world: core/NativeWorld
-  (core/->NativeWorld
-    (fixture-id "fold-world-reachable")
+(def fold-program: core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (fixture-id "fold-program-reachable")
     nil
     "fold-reachable-fast-path-v0"
     fold-types
@@ -209,23 +209,23 @@
     (core/functiondef-effects fold-function)
     []
     []
-    (core/nativeworld-abis fold-lowered-world)
+    (core/nativecoreprogram-abis fold-lowered-program)
     []))
 
 (def fold-obligation-verdicts: (Vec obligations/ObligationVerdictV0)
-  [(obligations/valid-ssa fold-world)
-   (obligations/exhaustive-matches fold-world)
-   (obligations/closed-layouts fold-world (core/abi-profile-lp64))
-   (obligations/checked-arithmetic fold-world)
-   (obligations/legal-abi fold-world)
-   (obligations/discharged-tokens fold-world)
-   (obligations/bounded-effects fold-world)])
+  [(obligations/valid-ssa fold-program)
+   (obligations/exhaustive-matches fold-program)
+   (obligations/closed-layouts fold-program (core/abi-profile-lp64))
+   (obligations/checked-arithmetic fold-program)
+   (obligations/legal-abi fold-program)
+   (obligations/discharged-tokens fold-program)
+   (obligations/bounded-effects fold-program)])
 
 (def fold-obligations-pass?: Bool
   (every? obligations/obligation-passed? fold-obligation-verdicts))
 
 (def fold-artifact: c11/C11Artifact
-  (require-artifact (c11/materialize-world fold-world 7)))
+  (require-artifact (c11/materialize-program fold-program 7)))
 
 (def fold-main-text: String
   (str "/* Generated by native.c11-validation-corpus; do not edit. */\n"
@@ -253,8 +253,8 @@
      "source ~/code/fram/main/src/fram/fold.bclj"
      "source-sha256 0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
      "source-freeze PASS"
-     "typed-world PASS"
-     "native-world PASS"
+     "typed-program PASS"
+     "native-program PASS"
      "fold-fast-path max-sequence-empty"
      "semantic-differential DEFERRED-STAGE-6"
      "c17-materialization PASS"]))

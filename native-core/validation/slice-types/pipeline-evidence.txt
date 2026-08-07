@@ -10,5 +10,5 @@ native-host-erased=true
 typed-to-native-status=frozen-types-only-pending-no-function-abi
 materialized-types=2
 materialized-layouts=2
-materializer=native.c11/materialize-world
+materializer=native.c11/materialize-program
 c-standard=c17

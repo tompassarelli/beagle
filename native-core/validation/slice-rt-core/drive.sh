@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Projects the complete fram.rt-core module through the Native World pipeline.
+# Projects the complete fram.rt-core module through the native program pipeline.
 # Pending semantics remain a named frontier; the normal gate accepts only all
 # 25 functions, all seven obligations, and an executable C17 materialization.
 set -euo pipefail
@@ -35,7 +35,7 @@ done
   || die "native shim is unavailable: $native_shim"
 mkdir -p "$generated" "$artifacts"
 
-modules=(core worlds lower obligations c11 slice fold_c17 body_c17 body_slice qbe)
+modules=(core stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe)
 native_sources=()
 for module in "${modules[@]}"; do
   source="$native_repo/native-core/src/native/$module.bclj"
@@ -67,7 +67,7 @@ bb "$here/inventory.clj" "$scratch/rt_core.ast.json" "$generated/inventory.txt"
 # patterns are emitted with their defining namespace.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
   target="$scratch/out/native/$module.clj"
   [[ -f "$target" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$target"
@@ -182,8 +182,8 @@ done
 complete=1
 rg -Fx 'stage typed-to-native COMPLETE' "$generated/report.txt" >/dev/null \
   || complete=0
-rg -Fx 'world-functions 25' "$generated/report.txt" >/dev/null || complete=0
-rg -Fx 'world-abis 25' "$generated/report.txt" >/dev/null || complete=0
+rg -Fx 'program-functions 25' "$generated/report.txt" >/dev/null || complete=0
+rg -Fx 'program-abis 25' "$generated/report.txt" >/dev/null || complete=0
 [[ "$(rg -c '^obligation-projection PASS ' "$generated/report.txt")" -eq 7 ]] \
   || complete=0
 if rg -n '^pending ' "$generated/report.txt" >/dev/null; then
@@ -220,9 +220,9 @@ if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
 fi
 
 if rg -q '^qbe-materialize OK module_0.ssa$' "$generated/report.txt"; then
-  command -v qbe >/dev/null 2>&1 || die "QBE accepted the world but qbe is unavailable"
+  command -v qbe >/dev/null 2>&1 || die "QBE accepted the program but qbe is unavailable"
   [[ -f "$here/qbe_main.c" ]] \
-    || die "QBE accepted the world but qbe_main.c is unavailable"
+    || die "QBE accepted the program but qbe_main.c is unavailable"
   qbe "$generated/module_0.ssa" >"$scratch/module_0.s"
   gcc "${strict[@]}" -o "$scratch/qbe_probe" "$scratch/module_0.s" \
     "$native_shim/native_shim.c" "$here/qbe_main.c"
@@ -246,7 +246,7 @@ if [[ "$complete" -ne 1 ]]; then
     echo "slice-rt-core: pending frontier recorded (ALLOW_PENDING=1)"
     exit 0
   fi
-  die "full rt_core Native World is not complete"
+  die "full rt_core native program is not complete"
 fi
 
 cat "$generated/report.txt"

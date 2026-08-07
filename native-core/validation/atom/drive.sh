@@ -24,7 +24,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -46,7 +46,7 @@ core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
 qbe_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/qbe.clj" | tr '\n' ' ')"
 
-for name in worlds lower obligations c11 slice qbe fold_c17 body_c17 body_slice \
+for name in stages lower obligations c11 slice qbe fold_c17 body_c17 body_slice \
     qbe_validation_corpus; do
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$name.clj"
@@ -94,15 +94,15 @@ rg -q 'TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure nat
 mkdir -p "$scratch/c"
 clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
 (require 'native.body-c17 'native.core 'native.obligations 'native.qbe-validation-corpus)
-(let [world native.qbe-validation-corpus/atom-world
-      verdicts [(native.obligations/valid-ssa world)
-                (native.obligations/exhaustive-matches world)
-                (native.obligations/closed-layouts world (native.core/abi-profile-lp64))
-                (native.obligations/checked-arithmetic world)
-                (native.obligations/legal-abi world)
-                (native.obligations/discharged-tokens world)
-                (native.obligations/bounded-effects world)]
-      result (native.body-c17/materialize-world world 4)]
+(let [program native.qbe-validation-corpus/atom-program
+      verdicts [(native.obligations/valid-ssa program)
+                (native.obligations/exhaustive-matches program)
+                (native.obligations/closed-layouts program (native.core/abi-profile-lp64))
+                (native.obligations/checked-arithmetic program)
+                (native.obligations/legal-abi program)
+                (native.obligations/discharged-tokens program)
+                (native.obligations/bounded-effects program)]
+      result (native.body-c17/materialize-program program 4)]
   (when-not (every? native.obligations/obligation-passed? verdicts)
     (throw (ex-info \"Atom fixture failed a Native Core obligation\"
              {:verdicts verdicts})))

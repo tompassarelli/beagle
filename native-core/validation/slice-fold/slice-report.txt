@@ -8,7 +8,7 @@ native lowering complete: no
 native terms host-erased: yes
 core validator: pass
 
-seven structural obligations (native.obligations/validate-native-world):
+seven structural obligations (native.obligations/validate-native-core-program):
 valid-ssa: pass
 exhaustive-matches: pass
 closed-layouts: pass
@@ -47,7 +47,7 @@ typed-to-native receipt obligations:
   discharged: the implemented integer operation lowers to CheckedOperationV0
   PENDING: every implemented probe function carries an explicit ABI declaration
   discharged: implemented functions do not leak an affine capability token
-  discharged: implemented function effects stay inside world declarations
+  discharged: implemented function effects stay inside program declarations
   discharged: native Terms contain no raw Any, host exception, host collection, or target syntax
   PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frame
   PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for max-sequence

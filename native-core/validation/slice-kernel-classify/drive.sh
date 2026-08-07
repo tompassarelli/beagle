@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves the complete fram.kernel-classify Native World against its managed
+# Proves the complete fram.kernel-classify native program against its managed
 # oracle through full C17 and a direct QBE projection of delivery-trigger?.
 set -euo pipefail
 
@@ -50,7 +50,7 @@ dual_runner_digest="$(sha256sum "$here/dual_main.c" | cut -d' ' -f1)"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -67,7 +67,7 @@ dual_runner_digest="$(sha256sum "$here/dual_main.c" | cut -d' ' -f1)"
 # Imported record patterns need the provider classes referred and imported in
 # the generated Clojure until the emitter qualifies cross-module patterns.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   [[ -f "$scratch/out/native/$module.clj" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$module.clj"
@@ -97,13 +97,13 @@ for line in \
   'stage typed-to-native COMPLETE' \
   'source-modules 2' \
   'source-imports 2' \
-  'world-functions 19' \
-  'world-abis 19' \
+  'program-functions 19' \
+  'program-abis 19' \
   'materialize OK module_0.h module_0.c' \
   'qbe-stage typed-to-native COMPLETE' \
   'qbe-selected-function delivery-trigger?' \
-  'qbe-world-functions 1' \
-  'qbe-world-abis 1' \
+  'qbe-program-functions 1' \
+  'qbe-program-abis 1' \
   'qbe-materialize OK module_1.ssa'; do
   rg -Fx "$line" "$report" >/dev/null || die "report is missing: $line"
 done

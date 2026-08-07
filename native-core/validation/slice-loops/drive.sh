@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Drive loop/recur through the native pipeline: beagle-ast -> source facts ->
-# frozen source world -> typed world -> native world (one SSA header block per
+# frozen source program -> typed program -> native program (one SSA header block per
 # loop, one back-edge Jump per recur) -> 7 obligations -> native.body-c17 ->
 # gcc/clang -std=c17 -> probe main.
-# Two worlds: loops.bclj must pass all seven obligations; counted/ carries the
+# Two programs: loops.bclj must pass all seven obligations; counted/ carries the
 # fram counted shapes and refuses checked-arithmetic on its interim add-i64.
 set -euo pipefail
 
@@ -16,7 +16,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -31,7 +31,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \
@@ -117,7 +117,7 @@ for expected in \
   grep -q "$expected" "$here/refusals/report.txt" ||
     { echo "drive.sh: refusals/ omitted expected evidence: $expected" >&2; exit 1; }
 done
-# every function refused, so the refusal world materializes nothing worth keeping
+# every function refused, so the refusal program materializes nothing worth keeping
 rm -f "$here/refusals/module_0.c" "$here/refusals/module_0.h"
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then

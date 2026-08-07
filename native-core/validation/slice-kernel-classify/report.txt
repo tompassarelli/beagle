@@ -3,9 +3,9 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 2
 source-imports 2
-world-types 16
-world-functions 19
-world-abis 19
+program-types 16
+program-functions 19
+program-abis 19
 projected-types 12
 lowered fn_0 strip-at 7 blocks
 lowered fn_1 has-whitespace? 26 blocks
@@ -36,8 +36,8 @@ obligation-projection PASS bounded-effects
 materialize OK module_0.h module_0.c
 qbe-stage typed-to-native COMPLETE
 qbe-selected-function delivery-trigger?
-qbe-world-functions 1
-qbe-world-abis 1
+qbe-program-functions 1
+qbe-program-abis 1
 qbe-projected-types 4
 qbe-obligation PASS valid-ssa
 qbe-obligation PASS exhaustive-matches

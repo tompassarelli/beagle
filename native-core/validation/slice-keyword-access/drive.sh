@@ -33,7 +33,7 @@ sha256sum "$src" "$provider" | sed "s#  $here/#  #" >"$art/source.sha256"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/worlds.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
@@ -45,7 +45,7 @@ sha256sum "$src" "$provider" | sed "s#  $here/#  #" >"$art/source.sha256"
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || { sed -n '1,200p' "$scratch/build.log" >&2; exit 1; }
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in worlds lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
   [[ -f "$scratch/out/native/$module.clj" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$module.clj"
@@ -69,13 +69,13 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
          '[native.lower :as lower]
          '[native.slice :as slice])
 (let [rows (slice/parse-facts (slurp \"$scratch/collision.facts\"))
-      world (slice/source-world rows \"native.keyword-access\"
+      program (slice/source-program rows \"native.keyword-access\"
               \"native-core/validation/slice-keyword-access/fixture.bclj\")
       configuration [\"profile=3\"]
       frozen (lower/sourcefreezeacceptedv0-frozen
-               (lower/freeze-source-world world \"native-record-identity-v0\"
+               (lower/freeze-source-stage program \"native-record-identity-v0\"
                  configuration))
-      result (lower/lower-typed-world frozen \"native-record-identity-v0\"
+      result (lower/lower-typed-stage frozen \"native-record-identity-v0\"
                configuration)]
   (when-not (instance? native.lower.TypingRejectedV0 result)
     (throw (ex-info \"same-module record shape collision was accepted\" {})))

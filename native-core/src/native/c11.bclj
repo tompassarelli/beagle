@@ -332,10 +332,10 @@
     (and parameters-supported
       (or (nil? result) (type-id-supported? types layouts result)))))
 
-(defn world-supported? [(world : core/NativeWorld)] -> Bool
-  (let [types: (Vec core/TypeDef) (core/nativeworld-types world)
-        layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
-        functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+(defn program-supported? [(program : core/NativeCoreProgram)] -> Bool
+  (let [types: (Vec core/TypeDef) (core/nativecoreprogram-types program)
+        layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
+        functions: (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
     (and (every? function-supported? functions)
       (every?
         (fn [(function : core/FunctionDef)] -> Bool
@@ -682,21 +682,21 @@
     "#include \"" header-name "\"\n\n"
     (emit-functions types module-index functions)))
 
-(defn materialize-world
-  [(world : core/NativeWorld)
+(defn materialize-program
+  [(program : core/NativeCoreProgram)
    (module-index : Int)] -> C11Materialization
-  (let [validation: core/ValidationReport (core/validate-world world)]
+  (let [validation: core/ValidationReport (core/validate-program program)]
     (cond
       (< module-index 0)
       (->C11Failure "module index must be nonnegative")
       (not (core/validationreport-passed validation))
-      (->C11Failure "native world is not frozen: validation obligations failed")
-      (not (world-supported? world))
-      (->C11Failure "native world uses a shape outside the restricted C17 reference slice")
+      (->C11Failure "native program is not frozen: validation obligations failed")
+      (not (program-supported? program))
+      (->C11Failure "native program uses a shape outside the restricted C17 reference slice")
       :else
-      (let [types: (Vec core/TypeDef) (ordered-types (core/nativeworld-types world))
-            layouts: (Vec core/LayoutDef) (ordered-layouts (core/nativeworld-layouts world))
-            functions: (Vec core/FunctionDef) (ordered-functions (core/nativeworld-functions world))
+      (let [types: (Vec core/TypeDef) (ordered-types (core/nativecoreprogram-types program))
+            layouts: (Vec core/LayoutDef) (ordered-layouts (core/nativecoreprogram-layouts program))
+            functions: (Vec core/FunctionDef) (ordered-functions (core/nativecoreprogram-functions program))
             header-name: String (str "module_" module-index ".h")
             source-name: String (str "module_" module-index ".c")
             header-text: String (emit-header types layouts functions module-index)

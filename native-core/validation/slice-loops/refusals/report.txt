@@ -3,9 +3,9 @@ stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 1
 source-imports 0
-world-types 9
-world-functions 0
-world-abis 0
+program-types 9
+program-functions 0
+program-abis 0
 projected-types 0
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches

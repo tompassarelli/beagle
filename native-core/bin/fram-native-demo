@@ -30,8 +30,8 @@ fi
 types_report="$work/types/report.txt"
 for line in \
   'stage typed-to-native COMPLETE' \
-  'world-functions 31' \
-  'world-abis 31' \
+  'program-functions 31' \
+  'program-abis 31' \
   'materialize OK module_0.h module_0.c'; do
   rg -Fx "$line" "$types_report" >/dev/null \
     || die "fram.types report is missing: $line"
@@ -56,8 +56,8 @@ fi
 
 for line in \
   'stage typed-to-native COMPLETE' \
-  'world-functions 19' \
-  'world-abis 19' \
+  'program-functions 19' \
+  'program-abis 19' \
   'materialize OK module_0.h module_0.c' \
   'qbe-stage typed-to-native COMPLETE' \
   'qbe-selected-function delivery-trigger?' \
@@ -74,5 +74,5 @@ echo 'Fram Native Core funding demo'
 echo 'fram.types: COMPLETE, 31 functions, 7/7 obligations, strict C17 gcc+clang run PASS'
 echo 'fram.kernel-classify: COMPLETE, 19 functions, 7/7 obligations, full managed/C17 parity PASS'
 rg --no-line-number '^slice-kernel-classify: delivery-trigger\?' "$work/kernel.log"
-echo 'QBE: delivery-trigger? from the same frozen Native World, assemble+link+run PASS'
+echo 'QBE: delivery-trigger? from the same frozen native program, assemble+link+run PASS'
 echo 'RESULT: PASS'

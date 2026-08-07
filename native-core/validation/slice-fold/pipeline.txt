@@ -2,8 +2,8 @@ module fram.fold
 source ~/code/fram/main/src/fram/fold.bclj
 source-sha256 0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2
 source-freeze PASS
-typed-world PASS
-native-world PASS
+typed-program PASS
+native-program PASS
 fold-fast-path max-sequence-empty
 semantic-differential DEFERRED-STAGE-6
 c17-materialization PASS

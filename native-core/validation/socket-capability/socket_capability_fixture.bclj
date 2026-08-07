@@ -99,15 +99,15 @@
       [(lower/arena-region-id)]
       [(lower/allocate-capability-id) (lower/host-socket-capability-id)])))
 
-(defn fixture-world [] -> core/NativeWorld
+(defn fixture-program [] -> core/NativeCoreProgram
   (let [types: (Vec core/TypeDef) (fixture-types)
         layouts: (Vec core/LayoutDef)
         (lower/collect-layouts (lower/resolve-layouts types))
         effects: (Vec core/EffectDef) (fixture-effects)
         regions: (Vec core/RegionDef) (fixture-regions)
         capabilities: (Vec core/CapabilityDef) (fixture-capabilities)]
-    (core/->NativeWorld
-      (fixture-id "world") nil "socket-capability-fixture-v0"
+    (core/->NativeCoreProgram
+      (fixture-id "program") nil "socket-capability-fixture-v0"
       types effects regions capabilities layouts
       [(fixture-function)]
       [(lower/allocate-effect-id) (lower/host-socket-effect-id)]
@@ -116,9 +116,9 @@
       (lower/host-socket-abis (lower/layout-digest layouts))
       [])))
 
-(defn obligations-pass? [(world : core/NativeWorld)] -> Bool
+(defn obligations-pass? [(program : core/NativeCoreProgram)] -> Bool
   (every? obligations/obligation-passed?
-    (obligations/validate-native-world world (core/abi-profile-lp64))))
+    (obligations/validate-native-core-program program (core/abi-profile-lp64))))
 
 (defn qbe-detail [(result : qbe/QbeMaterialization)] -> String
   (if (instance? native.qbe.QbeFailure result)
@@ -126,31 +126,31 @@
     "unexpected success"))
 
 (defn emit-fixture! [(artifacts-dir : String)] -> String
-  (let [world: core/NativeWorld (fixture-world)
-        c-result: body/BodyMaterializationV0 (body/materialize-world world 0)
-        qbe-result: qbe/QbeMaterialization (qbe/materialize-world world 0 "lp64")]
-    (if (or (not (obligations-pass? world))
+  (let [program: core/NativeCoreProgram (fixture-program)
+        c-result: body/BodyMaterializationV0 (body/materialize-program program 0)
+        qbe-result: qbe/QbeMaterialization (qbe/materialize-program program 0 "lp64")]
+    (if (or (not (obligations-pass? program))
             (not (body/materialization-ok? c-result)))
       (str "fixture REFUSED " (body/materialization-detail c-result) "\n"
         "valid-ssa "
-        (str (obligations/obligation-passed? (obligations/valid-ssa world))) "\n"
+        (str (obligations/obligation-passed? (obligations/valid-ssa program))) "\n"
         "exhaustive "
         (str (obligations/obligation-passed?
-          (obligations/exhaustive-matches world))) "\n"
+          (obligations/exhaustive-matches program))) "\n"
         "layouts "
         (str (obligations/obligation-passed?
-          (obligations/closed-layouts world (core/abi-profile-lp64)))) "\n"
+          (obligations/closed-layouts program (core/abi-profile-lp64)))) "\n"
         "checked "
         (str (obligations/obligation-passed?
-          (obligations/checked-arithmetic world))) "\n"
+          (obligations/checked-arithmetic program))) "\n"
         "abi "
-        (str (obligations/obligation-passed? (obligations/legal-abi world))) "\n"
+        (str (obligations/obligation-passed? (obligations/legal-abi program))) "\n"
         "tokens "
         (str (obligations/obligation-passed?
-          (obligations/discharged-tokens world))) "\n"
+          (obligations/discharged-tokens program))) "\n"
         "effects "
         (str (obligations/obligation-passed?
-          (obligations/bounded-effects world))) "\n")
+          (obligations/bounded-effects program))) "\n")
       (let [artifact: body/BodyArtifactV0
             (body/materialization-artifact c-result)]
         (do
@@ -159,5 +159,5 @@
           (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
             (body/bodyartifactv0-source-text artifact))
           (str "fixture PASS\n"
-            "abis " (str (count (core/nativeworld-abis world))) "\n"
+            "abis " (str (count (core/nativecoreprogram-abis program))) "\n"
             "qbe REFUSED " (qbe-detail qbe-result) "\n"))))))

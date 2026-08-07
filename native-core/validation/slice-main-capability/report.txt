@@ -3,8 +3,8 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
-world-functions 1
-world-abis 2
+program-functions 1
+program-abis 2
 lowered fn_0 -main 1 blocks
 obligation-main PASS valid-ssa
 obligation-main PASS exhaustive-matches
