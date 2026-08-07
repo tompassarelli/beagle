@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Parser half of the postfix type-annotation surface: every annotatable
+;; Parser half of the flat type-annotation surface: every annotatable
 ;; position parses AND type-checks, plus the rejection family.
 ;;
 ;; Flat `name: Type` is the ONLY annotation spelling, in every binding
@@ -24,7 +24,7 @@
   (parameterize ([current-readtable beagle-readtable])
     (define in (open-input-string str))
     (let loop ()
-      (define stx (read-syntax 'postfix-test in))
+      (define stx (read-syntax 'annotation-test in))
       (if (eof-object? stx) '() (cons stx (loop))))))
 
 (define (parse-src str) (parse-program (read-forms (string-append PRELUDE str))))
@@ -77,7 +77,7 @@
 
 ;; --- annotations actually populate the type slots ---------------------------
 
-(test-case "postfix annotation populates param/return/def/let type slots"
+(test-case "flat annotation populates param/return/def/let type slots"
   (define p (parse-src "(def answer: Int 42)\n(defn add [x: Int] -> String (let [n: Int x] \"s\"))"))
   (define forms (program-forms p))
   (define d (car forms))
@@ -88,7 +88,7 @@
   (define lb (car (let-form-bindings (car (defn-form-body f)))))
   (check-eq? (type-prim-name (let-binding-type lb)) 'Int))
 
-(test-case "type errors still fire through the postfix annotation"
+(test-case "type errors still fire through the flat annotation"
   (check-exn exn:fail? (lambda () (check-src "(def answer: Int \"nope\")"))))
 
 ;; --- diagnostics ------------------------------------------------------------

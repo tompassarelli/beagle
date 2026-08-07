@@ -62,109 +62,165 @@ Run a form through these and one answer falls out. **Do not surface decisions th
 
 **Default mode is apply-and-report, not present-and-ratify.** No "your call" sentences or option-A/B/C menus — that is the failure mode this rule prevents. Escalate only a genuine conflict between two clauses; the ordering pre-resolves most: **types > idiom-matching > aesthetic preference**. On a real conflict, name it "real conflict: X vs Y", propose the resolution, ask one specific question — don't reopen the board.
 
-## Surface lock — typed Clojure + inference, inline `:` ascription + `->`
+## Surface lock — typed Clojure + inference, flat `name: Type` + `->`
 
 Typed Clojure plus inference. No type-fact form, no `claim`, no spec
-registry, no `s/` namespace, no validation runtime. Type info rides ordinary
-bindings via inline postfix annotations at boundaries; interiors and
-`let`-locals are inferred. The annotation is annotation only (not
-Schema/Spec) — never build a spec registry, `s/def`, conform/explain, or
-validation runtime behind it.
+registry, no `s/` namespace, no validation runtime. The annotation is
+annotation only (not Schema/Spec) — never build a spec registry, `s/def`,
+conform/explain, or validation runtime behind it.
 
-`NAME: TYPE` is the canonical typed-binding marker; return types use
-`[params] -> RET` after the param vector. Together these annotate the four
-boundaries `def` / `defonce` / `defn` (params + return) / `defrecord`
-(fields required). Parameter vectors may mix typed and inferred entries.
+**Types attach to names. Typing is opt-in per binding vector, not per
+binding** — a vector is either fully annotated or fully bare. Every rule
+below is a consequence of those two sentences; this is the only annotation
+grammar in the language, locked 2026-08-07.
 
-Parameter and typed-field vectors have one canonical physical layout. A vector
-with zero, one, or two logical entries stays inline when the complete owner
-signature through any `-> RET` fits within 80 columns. Three or more entries
-always put the vector on the following line; an over-width zero-, one-, or
-two-entry signature does the same. A vertical vector has its first entry beside
-`[` and every later logical entry starting once per line at the same column.
-The `[` is exactly two columns past the owning form's opening parenthesis; `]`
-remains after the final entry and is followed by exactly one space before any
-`-> RET`. Never partially wrap a vector. Binding names are left-aligned at that
-shared entry-start column. A typed entry is parenthesized `(NAME : TYPE)` with
-exactly one space on each side of `:`; never pad names, colons, or types into
-columns:
+### Canonical spelling
+
+`name: Type` is the only annotation spelling, in every position:
 
 ```clojure
-(defn add [(left : Int) (r : Int)] -> Int
-  (+ left r))
-
-(defrecord Point [(x : Int) (y : Int)])
+(defn f [x: Int y: String] -> Int ...)
+(def port: Int 7978)
+(let [acc: Int 0] ...)
+(defrecord User [name: String age: Int])
 ```
 
-Thus `[(abc : Int) (b : String) (bc : (Vec Int))]` lays out as:
+One spelling, all positions: `fn`/`defn`/`defn-`, multi-arity clauses,
+`letfn`, protocol and implementation methods, `defmacro` params (which have
+no typed-binding grammar but share the physical layout rule), `def`,
+`defonce`, `let`, `loop`, and typed `defrecord`/`defunion`/error fields.
+Return annotation is `-> Ret` after the parameter vector; `: Ret` in return
+position is REJECTED, pointing at `-> Ret` (glyph ambiguity — the one
+structural difference between param and return position). Untyped code is
+unchanged, forever: `(fn [acc item] ...)`, `[a b]` destructuring, `& rest`,
+`{:keys [...]}`.
+
+Parameter and typed-field vectors have one canonical physical layout. A
+vector with zero, one, or two logical entries stays inline when the
+complete owner signature through any `-> RET` fits within 80 columns; three
+or more entries — or any over-width zero/one/two-entry signature — always
+puts the vector on the following line, one logical entry per line at a
+shared column, never partially wrapped:
 
 ```clojure
-[(abc : Int)
- (b : String)
- (bc : (Vec Int))]
-```
+(defn add [x: Int y: Int] -> Int
+  (+ x y))
 
-Do not pad the type column:
+(defrecord Point [x: Int y: Int])
+```
 
 ```clojure
-[(abc : Int)
- (b   : String)
- (bc  : (Vec Int))]
+(defn clamp
+  [long-name: Int
+   minimum: Int
+   maximum: Int] -> Int
+  ...)
 ```
 
-Do not indent shorter names to align the colons:
+A flat `name: Type` entry, a destructuring form, or an `& rest` pair is one
+logical entry; names and types are never padded into columns. The reader
+accepts any physical layout — `beagle fmt --check` owns canonical style and
+`beagle fmt --write` applies the same token-aware source-range rewrite over
+the flat spelling; it never emits a wrapped form. Comment-bearing ranges
+that cannot move safely are reported without a lossy rewrite; source-less
+macro-produced datums have no physical-layout obligation.
+
+### Destructuring is never annotated
+
+A destructuring pattern has no name, and types attach to names. To type a
+destructured parameter, bind a name and destructure in the body:
 
 ```clojure
-[(abc : Int)
-   (b : String)
-  (bc : (Vec Int))]
+(defn distance [p1: Point p2: Point] -> Float
+  (let [[x1 y1] p1
+        [x2 y2] p2]
+    ...))
 ```
 
-A typed `(name : Type)`, destructuring form, or `& rest` pair is one logical
-entry. The same rule covers `defn`/`defn-`/`fn`, multi-arity clauses, `letfn`,
-protocol and implementation methods, `defmacro`, and typed record/union/error
-fields. It does not apply to data vectors or let-style value-binding vectors.
-The reader accepts physical layout; `beagle fmt --check` owns canonical style
-and `beagle fmt --write` applies the same token-aware source-range rewrite —
-including rewriting a flat `name: Type` entry into `(name : Type)`. A `defmacro`
-param vector has no typed-binding grammar, so it keeps layout rules and is never
-wrapped. Comment-bearing ranges that cannot move safely are reported without a
-lossy rewrite. Source-less macro-produced datums have no physical-layout
-obligation.
+Enforcement is unaffected — the checker enforces `p1: Point` at every call
+site; enforcement always lived on the named binding, never on a wrapper.
+No exception clause: nothing for an agent to see once and generalize
+wrongly.
 
-**This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
-parser actually does** (the accept/reject logic is in
-`beagle-lib/private/parse.rkt` — the annotation-marker predicates and
-`legacy-annotation-marker-mode`; `beagle-test/tests/postfix-annotation-parse.rkt`
-is its regression suite):
-- `(x : Int)` in a binding vector / `-> Ret` — canonical, silent.
-- `x: Int` in a binding vector — ACCEPTED (~20k live sites), but `fmt --check`
-  reports it as drift and `fmt --write` rewrites it to `(x : Int)`. Acceptance
-  is NOT deprecated; only the canonical spelling moved.
-- `x: Int` outside a binding vector (`def`, `defonce`, `let`) — canonical.
-- `x :- Int` / `:- Ret` — legacy, still PARSES with one
-  `legacy-annotation-marker` warning per source. Not yet an error, and the
-  formatter leaves it alone.
-- `x : Int` (space before the colon, unwrapped) — indistinguishable from
-  `x: Int` at the reader, so it is ACCEPTED in binding position; `fmt` folds it
-  into the canonical `(x : Int)`.
-- `: Ret` in RETURN position — REJECTED, pointing at `-> Ret`. This is the one
-  structural difference between the two positions.
-- `[x : Int]` in binding position — REJECTED, pointing at `(x : Int)`. `[...]`
-  is sequential destructuring at every binding site, so a bracketed annotation
-  is a collision, not a spelling; the wrapped form uses parens.
-- `(PATTERN : Type)` in a PARAM slot — the pattern may be a name, `[a b]`, or
-  `{:keys [...]}`; the declared type is what callers are checked against.
-  `let`/`loop` still take a name only in the wrapped form.
+### All-or-nothing per binding vector
 
-The removal cut flips `legacy-annotation-marker-mode` to `'error` and drops
-`LEGACY-MARKER` from the marker predicates in `parse.rkt`; it is blocked on the
-vendored `bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/` (~750 legacy
-sites) and the self-host dual-accept tests.
+Within one binding vector, either every binding is annotated or none is.
+Mixing is a parse error:
+
+```
+(defn f [x: Int y String] ...)
+;; error: binding vector mixes typed and untyped bindings — annotate
+;; every binding (use `y: Any` if the type is not yet known) or annotate
+;; none
+```
+
+- "Don't care" is spelled explicitly: `y: Any`.
+- A destructuring pattern inside an otherwise-typed vector errors pointing
+  at the bind-a-name rule above.
+- `& rest` is exempt (structurally distinguished by `&`; typed rest stays
+  flat inside the pair, e.g. `[a: Int & more: (Vec Int)]`).
+- **`defrecord`/`defunion` fields are stricter than the vector rule above**:
+  every field is always required to carry a type — there is no "all bare"
+  option. A bare field errors: `defrecord field needs a type annotation —
+  use [name: Type name2: Type2 ...], got: ...`.
+- **`for`/`doseq` binding CLAUSE vectors are exempt from the vector-wide
+  rule** — a clause interleaves names, collections, `:when`, `:let`, so
+  each `name: Type` / `coll` pair may be typed or bare independently of its
+  neighbors. The nested `:let` sub-vector is an ordinary let-binding vector
+  and enforces all-or-nothing on itself.
+
+### One error family for every non-flat spelling
+
+Every wrapped or bracketed annotation form is a hard parse error with a
+targeted fix-it — no dual-accept, no liberal parsing of retired forms:
+
+```
+[x : Int]        ;; `[...]` in binding position is sequential
+                  ;; destructuring — write `x: Int`
+
+(x : Int)         ;; annotations attach to names — write `x: Int`
+
+([a b] : Point)   ;; destructuring patterns cannot be annotated —
+                  ;; bind a name (`p: Point`) and destructure in the body
+```
+
+A wrong spelling that parses is a wrong spelling an agent learns works;
+every non-flat spelling errors loudly and names the flat fix.
+
+### The lint
+
+A bare capitalized symbol in binding position raises a warning, not an
+error:
+
+```
+(defn f [x Int] ...)
+;; warning [capitalized-binding-name]: `Int` bound as a parameter name —
+;; possible dropped colon?
+```
+
+Capitalized parameter names are legal; they are also almost always a typo
+for a type. Suppress per-site by annotating the binding (`Int: Any` if
+`Int` really is the intended name) — an annotated binding is no longer
+bare, so the lint's scan skips it and the all-or-nothing rule takes over
+instead.
+
+### `:-` — legacy, still parses, removal still blocked
+
+`x :- Int` / `:- Ret` still parses with one `legacy-annotation-marker`
+warning per source (`legacy-annotation-marker-mode` is `'warn`, not
+`'error`, in `beagle-lib/private/parse.rkt`); the formatter leaves it
+alone. The removal cut (flip the mode to `'error`, drop `LEGACY-MARKER`
+from the marker predicates) is blocked on exactly **52 vendored legacy
+`:-` sites** in `bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/`:
+48 across the 12 vendored `codegraph/test/*.bjs` fixtures, 4 in vendored
+`src/fram/claims.bclj` return positions — plus the self-host dual-accept
+tests. (Not "~750" — that estimate was stale; the corpus has since been
+re-vendored at this smaller, exact count.)
 
 **Locked decisions — do not reopen:**
 - `(claim NAME TYPE)` is not a form; the parser hard-rejects it pointing at inline `NAME: TYPE`.
 - Removed forms `unless` / `fmt` / `has` are rejected pointing at `when-not` / `str`,`format` / `contains?`.
+- Typed destructuring (a second annotated-pattern surface, briefly landed and reverted same-day) does not come back short of a new ledgered failure class — an actual miscompile, corruption, or enforcement gap — that the bind-a-name rule alone cannot close.
 
 For exact grammar, nil-narrowing, qualified-call resolution, and stdlib
 nullability: ask the compiler (`parse.rkt`/`check.rkt`), which reports
@@ -227,8 +283,8 @@ No `unsafe-*` (nix/js/clj), no `nix-ident`, no raw verbatim-string-to-target for
 
 ### Beagle is Clojure plus types, nothing else
 
-Two sanctioned divergences from Clojure: the type layer (postfix
-`NAME: TYPE` / `-> RET` annotations + checker — see "Surface lock") and multi-backend targeting
+Two sanctioned divergences from Clojure: the type layer (flat
+`name: Type` / `-> RET` annotations + checker — see "Surface lock") and multi-backend targeting
 (`target-case` + per-language prefixes — see below). Every other surface
 form is plain Clojure. (Why this matters → README "What it isn't" /
 "Design discipline".)
@@ -344,7 +400,7 @@ surface change breaks them you **must** migrate them, not leave them alone.
 
 ### Type-system gating policies
 
-The canonical typed-binding surface is inline `:` ascription: wrapped `(NAME : TYPE)` entries inside binding vectors, flat `NAME: TYPE` at `def`/`defonce`/`let`, and `[params] -> RET` for returns. The one spelling HARD-REJECTED today is a `:`-marked RETURN (`(defn add [x: Int] : Int ...)`), which points at `-> Int`; legacy `:-` is still accepted with a warning during the dual-accept cut. See the "Surface lock" anchor for the full accept/reject matrix — it is the only place that describes it accurately. A second type-producing glyph is an ambiguity surface ML/Rust-trained models will wander into, which is why `:-` is on a removal path rather than a permanent alias.
+The canonical typed-binding surface is flat `name: Type` everywhere — `fn`/`defn` param vectors, `def`, `defonce`, `let`, `loop`, `defrecord`/`defunion` fields — with `[params] -> RET` for returns. Every non-flat spelling (`(x : Int)`, `[x : Int]`, `([a b] : Point)`, and a `:`-marked return `(defn add [x: Int] : Int ...)`) is HARD-REJECTED with a fix-it pointing at the flat form; legacy `:-` is still accepted with a warning (its removal is blocked, not scheduled — see "Surface lock"). See the "Surface lock" anchor for the full accept/reject matrix — it is the only place that describes it accurately. A second type-producing glyph is an ambiguity surface ML/Rust-trained models will wander into, which is why `:-` is on a removal path rather than a permanent alias.
 
 Deferred type-system work (refinement annotations, bidirectional Layer 2 synthesis, sourcemap fidelity, types-as-view delaborator) is tracked in contrast-doc thread `20260530180000` and `20260614120025` — not here.
 

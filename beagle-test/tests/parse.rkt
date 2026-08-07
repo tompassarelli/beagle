@@ -70,10 +70,10 @@
 
 ;; --- def -------------------------------------------------------------------
 
-;; Annotations are postfix `NAME: TYPE` (reader marker `#%:`) with `-> RET` for
+;; Annotations are flat `NAME: TYPE` (reader marker `#%:`) with `-> RET` for
 ;; returns. These datums are built structurally, so they spell the marker as
 ;; the reader tag; the legacy `:-` half lives in
-;; beagle-test/tests/postfix-annotation-parse.rkt.
+;; beagle-test/tests/annotation-parse.rkt.
 
 (test-case "def without type annotation"
   (define f (car (parse-one '(def x 42))))

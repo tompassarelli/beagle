@@ -83,7 +83,7 @@ Beagle is Clojure plus types. Any divergence must be load-bearing for the type
 system or a backend. Bare names must behave as their Clojure namesake; qualify
 every target-specific meaning, such as `nix/assert`.
 
-Canonical annotations are postfix. Keep up to two logical parameters inline
+Canonical annotations are flat `name: Type`. Keep up to two logical parameters inline
 when the complete signature fits 80 columns:
 
 ```clojure

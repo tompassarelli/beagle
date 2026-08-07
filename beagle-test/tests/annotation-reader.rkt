@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Reader half of the postfix type-annotation surface.
+;; Reader half of the flat type-annotation surface.
 ;;
 ;; `:` is a TERMINATING macro registered inside beagle-readtable itself (not a
 ;; layer on top — the bracket/quasiquote/unquote/meta readers re-parameterize to
