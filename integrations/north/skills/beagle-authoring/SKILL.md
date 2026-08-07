@@ -11,6 +11,23 @@ description: >-
 
 # Beagle authoring
 
+## Re-ground at the source head
+
+Before relying on a remembered form, target, or command, query the checkout you
+are editing. `README.md`, `docs/cli.md`, and the compiler are current; generated
+tables and this skill are routing aids, not language inventories:
+
+```text
+beagle doctor --deep
+beagle langs --json
+beagle help
+```
+
+If a source file's profile is unclear, read its `#lang` and extension, then ask
+`beagle langs --view extensions`. For signatures, fields, callers, or impact,
+use the compiler queries below instead of copying an old example. Re-ground
+again after a compiler or surface change.
+
 ## Gate the authoring loop
 
 Before writing Beagle, run:
