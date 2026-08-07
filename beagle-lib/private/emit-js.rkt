@@ -2025,8 +2025,10 @@
     [(new-form? e)
      (define raw (symbol->string (new-form-class-name e)))
      (define cls (if (string-suffix? raw ".") (substring raw 0 (sub1 (string-length raw))) raw))
+     ;; An alias-qualified class (`(THREE/Scene.)`) is a member access on the
+     ;; imported namespace object, so each segment mangles on its own.
      (format "new ~a(~a)"
-             (mangle-str cls)
+             (string-join (map mangle-str (string-split cls "/")) ".")
              (string-join (map emit-expr (new-form-args e)) ", "))]
 
     [(kw-access? e)

@@ -52,7 +52,7 @@
   (define cached (hash-ref datum-cache path #f))
   (if (and cached (= (car cached) mtime))
       (cadr cached)
-      (let ([datums (read-beagle-datums path)])
+      (let ([datums (map strip-target-export (read-beagle-datums path))])
         (hash-set! datum-cache path (list mtime datums))
         datums)))
 

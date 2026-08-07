@@ -649,7 +649,7 @@
   (hash-clear! table)
   (define bindings (make-hasheq))
   (for ([raw-form (in-list (program-forms prog))])
-    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (define form (unwrap-definition-form raw-form))
     (define-values (name declared-type value)
       (cond
         [(def-form? form)
@@ -924,7 +924,7 @@
     (record! #f ty))
   (for ([raw-form (in-list (program-forms prog))])
     (walk-ast! raw-form raw-form)
-    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (define form (unwrap-definition-form raw-form))
     (match form
       [(def-form _ t _ _ _) (record! form t)]
       [(defonce-form _ t _ _) (record! form t)]
@@ -1059,7 +1059,7 @@
       [else (void)]))
   (for ([raw-form (in-list (program-forms prog))])
     (walk-ast! raw-form raw-form)
-    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (define form (unwrap-definition-form raw-form))
     (match form
       [(def-form _ t _ _ _) (when t (walk-type! t form))]
       [(defonce-form _ t _ _) (when t (walk-type! t form))]
@@ -1169,10 +1169,7 @@
                  fn)))]))
   (define defns
     (for/list ([raw-form (in-list (program-forms prog))]
-               #:do [(define form
-                        (if (with-meta? raw-form)
-                            (with-meta-expr raw-form)
-                            raw-form))]
+               #:do [(define form (unwrap-definition-form raw-form))]
                #:when (defn-form? form))
       form))
   (define local-names
@@ -1330,8 +1327,9 @@
 (define (prepare-error-contracts! prog)
   (define table (program-semantic-contracts prog))
   (define local-definitions
-    (for/hasheq ([form (in-list (program-forms prog))]
-                 #:when (deferror-form? form))
+    (for*/hasheq ([raw-form (in-list (program-forms prog))]
+                  [form (in-value (unwrap-definition-form raw-form))]
+                  #:when (deferror-form? form))
       (values (deferror-form-name form) form)))
   (define contracts (make-hasheq))
   (define definitions (make-hasheq))
@@ -1392,8 +1390,9 @@
          contract)
         (when (and refer (memq name refer))
           (hash-set! raising-functions name contract)))))
-  (for ([form (in-list (program-forms prog))]
-        #:when (defn-form? form))
+  (for* ([raw-form (in-list (program-forms prog))]
+         [form (in-value (unwrap-definition-form raw-form))]
+         #:when (defn-form? form))
     (define contract
       (declared-error-contract
        (defn-form-raises form) contracts form))
@@ -1717,7 +1716,7 @@
 
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([raw-form (in-list (program-forms prog))])
-    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (define form (unwrap-definition-form raw-form))
     (match form
       [(def-form name (? type? t) _ _ dyn?) (hash-set! env name t) (when dyn? (set-add! dyn-vars name))]
       [(def-form name #f _ _ dyn?) (when dyn? (set-add! dyn-vars name))]

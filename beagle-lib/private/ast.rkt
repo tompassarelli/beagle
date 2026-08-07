@@ -437,6 +437,17 @@
 (struct jst-export-default (form)                                 #:transparent)
 (struct jst-import-meta ()                                        #:transparent)
 
+;; Metadata and export markers wrap a definition without changing what it
+;; defines: any pass dispatching on definition shape must unwrap first, or a
+;; wrapped definition silently leaves that pass's table.
+(define (unwrap-definition-form form)
+  (cond
+    [(with-meta? form) (unwrap-definition-form (with-meta-expr form))]
+    [(jst-export? form) (unwrap-definition-form (jst-export-form form))]
+    [(jst-export-default? form)
+     (unwrap-definition-form (jst-export-default-form form))]
+    [else form]))
+
 ;; --- Shared utility structs ------------------------------------------------
 (struct param       (name type)                             #:transparent)
 ;; or-defaults: alist of (key-sym . default-AST) from {:keys [...] :or {...}};
@@ -627,4 +638,5 @@
  (struct-out jst-dot) (struct-out jst-spread) (struct-out jst-typeof)
  (struct-out jst-template) (struct-out jst-binary) (struct-out jst-unary)
  (struct-out jst-export) (struct-out jst-export-default)
- (struct-out jst-import-meta))
+ (struct-out jst-import-meta)
+ unwrap-definition-form)

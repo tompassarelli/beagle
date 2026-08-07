@@ -6,6 +6,18 @@ Format: loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Entrie
 
 This file begins at v0.16.0. Prior history lives in git tags (v0.7.1 → v0.15.3).
 
+## [Unreleased]
+
+### Fixed
+
+- **An exported definition keeps its signature.** `js/export` parses to a struct wrapping the definition, and the passes that dispatch on definition shape matched the wrapper instead of looking through it: the top-level type environment, the datum-level cross-module importer, and the query commands all skipped exported definitions. A module's public API was therefore precisely the part with no types — `(exported-fn "string")` where a `Float` was declared passed `check` clean, in-module and across modules, and `beagle provides` reported nothing for a module whose every definition was exported. `unwrap-definition-form` (ast.rkt) is now the one place that sees through `with-meta` / `jst-export` / `jst-export-default`, and every such pass routes through it.
+- **A multi-arity definition is importable.** The raw-source importer matched only single-arity `defn` shapes, so a consumer's call to an imported multi-arity function resolved to nothing and went unchecked. Imported as the union of its clause types, matching `ast-interface-bindings`, so a call resolves against the clause with its arity.
+- **An alias-qualified constructor emits valid JS.** `(THREE/Scene.)` mangled the whole spelling and emitted `new THREE/Scene()` — a syntax error in the bundle. Each segment now mangles on its own: `new THREE.Scene()`.
+
+### Added
+
+- **`beagle ts-externs ENTRY.d.ts`** — typed beagle wrappers generated from a package's TypeScript declarations. Beagle could not read `.d.ts`, so every npm dependency was hand-declared as `Any` and unchecked; the declaration corpus that already describes those packages was unreachable. The mapping is lossy by design and degrades rather than guesses: primitives, arrays, and promises map; classes, generics, tuples, and function types become `Any`. Optional parameters become clauses of one multi-arity `defn`, TS overloads collapse into the same name, variadic signatures become a rest param forwarded with `js/spread`, and primitive-typed properties get a reader and a writer. What survives is what beagle can enforce: arity, primitive argument types, and whether the member exists at all.
+
 ## [0.17.1] — 2026-06-16
 
 A patch release of JS-target hardening, driven entirely by authoring a real downstream app (the gjoa Firefox fork) in `#lang beagle/js`. Each item is a silent miscompile or footgun the port hit — now an emit fix or a loud compile-time guard. Active suite 1377/1377.

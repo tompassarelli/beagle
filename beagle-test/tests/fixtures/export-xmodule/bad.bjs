@@ -1,0 +1,5 @@
+#lang beagle/js
+(ns export-xmodule.bad (:require [export-xmodule.provider :refer [scale]]))
+
+(js/export
+  (defn go [] -> Float (scale "nope" 2.0)))

@@ -470,6 +470,13 @@
      '(require inventory.core)
      '(defn f [] -> Any (core/init)))
 
+   ;; An alias-qualified class is a member access on the imported namespace
+   ;; object; mangling the whole spelling emitted `new THREE/Scene()`.
+   (check-js-contains "alias-qualified constructor -> new alias.Class()"
+     "new THREE.Scene()"
+     '(require three :as THREE)
+     '(defn f [] -> Any (THREE/Scene.)))
+
    ;; --- additional stdlib translations ----------------------------------------
 
    (check-js-contains "take-last -> .slice(-n)"

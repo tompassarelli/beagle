@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# beagle-ts-externs: generate typed beagle wrappers from a package's TypeScript
+# declarations. See `beagle ts-externs` (no args) for usage.
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+exec "$RACKET" -e "(require beagle/private/ts-externs) (run-ts-externs (vector->list (current-command-line-arguments)))" -- "$@"

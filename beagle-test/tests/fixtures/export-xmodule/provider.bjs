@@ -1,0 +1,10 @@
+#lang beagle/js
+(ns export-xmodule.provider)
+
+(js/export
+  (defn scale [x: Float k: Float] -> Float (* x k)))
+
+(js/export
+  (defrecord Pos [x: Float z: Float]))
+
+(defn internal [x: Float] -> Float (+ x 1.0))

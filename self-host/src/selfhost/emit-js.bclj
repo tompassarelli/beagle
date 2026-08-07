@@ -485,6 +485,9 @@
 
 ;; --- call-name resolution + core-call -----------------------------------------
 
+(defn mangle-dotted-path [s: String] -> String
+  (str/join "." (mapv mangle-str (str/split s #"/"))))
+
 (defn static-dotted [s: String] -> String
   (let [slash (str/index-of s "/")]
     (cond
@@ -1366,8 +1369,10 @@
               (= name "js/export") (str "export " (emit-form* (nth (get e "args") 0)))
               :else (str (static-dotted name) "(" (emit-args-list (get e "args")) ")")))
         (= node "new")
+          ;; An alias-qualified class ((THREE/Scene.)) is a member access on the
+          ;; imported namespace object, so each segment mangles on its own.
           (let [raw (get e "class") cls (if (str/ends-with? raw ".") (subs raw 0 (- (count raw) 1)) raw)]
-            (str "new " (mangle-str cls) "(" (emit-args-list (get e "args")) ")"))
+            (str "new " (mangle-dotted-path cls) "(" (emit-args-list (get e "args")) ")"))
         (= node "kw-access")
           (let [target-str (emit-expr* (get e "target")) prop (kw->prop (get e "kw")) dflt (get e "default")]
             (if (= (classify-rep (get e "target")) "poly")

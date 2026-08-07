@@ -1,0 +1,5 @@
+#lang beagle/js
+(ns export-xmodule.aliased (:require [export-xmodule.provider :as p]))
+
+(js/export
+  (defn go [] -> Float (p/scale "nope" 2.0)))

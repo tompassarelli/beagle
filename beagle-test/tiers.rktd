@@ -56,6 +56,8 @@
              "docfill.rkt"              ; every compiler-owned doc span vs beagle-lib/private/targets.rkt (fix: bin/beagle doc-fill)
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
+             "export-xmodule.rkt"       ; a js/export'd definition keeps its signature across modules + on the query surface
+             "ts-externs.rkt"           ; TypeScript declarations -> typed beagle wrappers (beagle ts-externs)
              "variant-xmodule.rkt"      ; an imported defunion's ctor/accessor/field/exhaustiveness surface == same-module
              "scrutinee-narrowing.rkt"  ; match/instance? narrow a stable scrutinee to the proven member; binders still bind fields
              "module-overlay-check.rkt"  ; coherent multi-EDN candidate overlay + cross-module interfaces

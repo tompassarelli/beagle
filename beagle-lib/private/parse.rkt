@@ -154,6 +154,16 @@
   (string->symbol
    (string-append (symbol->string prefix-sym) "/" (symbol->string name-sym))))
 
+;; Every datum-level reader of another module's surface must see through the
+;; export marker, or a module's public API is exactly the part with no signature.
+(define (multi-arity-clause? d)
+  (and (pair? d) (bracketed? (car d))))
+
+(define (strip-target-export d)
+  (match d
+    [(list (or 'js/export 'js/export-default) inner) (strip-target-export inner)]
+    [_ d]))
+
 (define (read-beagle-datums path)
   (with-input-from-file path
     (lambda ()
@@ -819,7 +829,11 @@
       [(list (and head (or 'def 'defonce)) (? symbol? name) (? string? _) value)
        (list head name value)]
       [_ d]))
-  (define datums (map strip-doc raw-datums))
+  ;; Export markers come off before docstrings: the wrapper hides the head the
+  ;; docstring normalizer and every match arm below dispatch on.
+  (define datums
+    (for/list ([d (in-list raw-datums)])
+      (strip-doc (strip-target-export d))))
   (define refer-set (and refer-syms (list->set refer-syms)))
   (define source-path
     (simplify-path (path->complete-path mod-path)))
@@ -1131,6 +1145,24 @@
       [(list 'def (list '#%meta mv (? symbol? name)) _)
        (reg! name (type-prim 'Any))
        (when (meta-dynamic? mv) (note-dyn! name))]
+      ;; Multi-arity: every clause is `([params] -> RET body ...)`. Imported as
+      ;; the union of its clause types, matching ast-interface-bindings, so a
+      ;; consumer's call resolves against the clause with its arity.
+      [(list* 'defn (? symbol? name) (and clauses (list (? multi-arity-clause?) ...)))
+       #:when (pair? clauses)
+       (define alternatives
+         (for/list ([clause (in-list clauses)])
+           (define-values (parsed rest-p) (parse-params (car clause)))
+           (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
+           (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
+           (define ret
+             (match (cdr clause)
+               [(list* (? return-marker? _) return-type _) (parse-type return-type)]
+               [_ (type-prim 'Any)]))
+           (type-fn ptypes rtype ret)))
+       (defn-reg! name (if (= (length alternatives) 1)
+                           (car alternatives)
+                           (type-union alternatives)))]
       [(list 'defn (? symbol? name) params-form (? return-marker? _) return-type _ ...)
        (define-values (parsed rest-p) (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
@@ -5328,6 +5360,7 @@
  parse-program
  read-beagle-datums
  read-beagle-syntax
+ strip-target-export
  (struct-out layout-edit)
  signature-layout-edits
  apply-signature-layout-edits

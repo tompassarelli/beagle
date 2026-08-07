@@ -83,13 +83,7 @@
       (type-fn (list record-type) #f (param-interface-type field))
       #f))))
 
-(define (unwrap-public-form form)
-  (cond
-    [(with-meta? form) (unwrap-public-form (with-meta-expr form))]
-    [(jst-export? form) (unwrap-public-form (jst-export-form form))]
-    [(jst-export-default? form)
-     (unwrap-public-form (jst-export-default-form form))]
-    [else form]))
+(define unwrap-public-form unwrap-definition-form)
 
 (define (ast-interface-bindings forms target)
   (define out (make-hasheq))

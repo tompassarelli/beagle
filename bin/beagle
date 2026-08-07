@@ -44,6 +44,7 @@ Query (the compiler is the source of truth):
   fields <record> <path>    Record fields, types, accessors
   callers <fn> <path...>    Call sites
   provides <file>           Exports
+  ts-externs ENTRY.d.ts     Typed beagle wrappers from TypeScript declarations
   impact <fn> <path...>     Change-impact
   expand <file>             Macro-expanded source
   explain <CODE>            Diagnostic explanation (E001, …)
@@ -143,6 +144,7 @@ case "$cmd" in
     doctor)          exec "$BIN/beagle-doctor" "$@" ;;
     callers)         exec "$BIN/beagle-callers" "$@" ;;
     provides)        exec "$BIN/beagle-provides" "$@" ;;
+    ts-externs)      exec "$BIN/beagle-ts-externs" "$@" ;;
     impact)          exec "$BIN/beagle-impact" "$@" ;;
     explain)         exec "$BIN/beagle-explain" "$@" ;;
     explain-type)    exec "$BIN/beagle-explain-type" "$@" ;;

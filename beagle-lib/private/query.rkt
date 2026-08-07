@@ -9,8 +9,9 @@
          "expand-tool.rkt")
 
 (define (read-expanded-datums f)
-  (with-handlers ([exn:fail? (lambda (e) (read-beagle-datums f))])
-    (expand-datums f)))
+  (map strip-target-export
+       (with-handlers ([exn:fail? (lambda (e) (read-beagle-datums f))])
+         (expand-datums f))))
 
 (define (str-downcase s)
   (list->string (map char-downcase (string->list s))))
