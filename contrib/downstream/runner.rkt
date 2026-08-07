@@ -169,15 +169,27 @@
   (define out-dir (build-path scratch "out" name))
   (make-directory* out-dir)
   (define map-file (stage-consumer! name repo scratch consumers))
-  (define abs-files
-    (for/list ([rel (in-list relpaths)])
-      (if map-file (map-file rel) (build-path repo rel))))
+  (define (abs-of rel) (if map-file (map-file rel) (build-path repo rel)))
+  (define abs-files (for/list ([rel (in-list relpaths)]) (abs-of rel)))
   (define t0 (current-inexact-milliseconds))
-  ;; emit pass (all consumers)
+  ;; emit pass — grouped by per-file target override (registry file-targets),
+  ;; each group a separate BUILD-EVAL invocation under its own `--target`.
+  (define file-targets (consumer-result-file-targets derived))
+  (define (target-of rel) (cond [(assoc rel file-targets) => cdr] [else #f]))
+  (define groups (make-hash))
+  (for ([rel (in-list relpaths)])
+    (hash-update! groups (target-of rel) (lambda (l) (cons (abs-of rel) l)) '()))
+  (define group-keys
+    (sort (hash-keys groups) string<?
+          #:key (lambda (k) (if k (symbol->string k) ""))))
   (define-values (status stderr timed-out?)
     (if (null? abs-files)
         (values 0 "" #f)
-        (run-racket BUILD-EVAL abs-files '() out-dir '() timeout-secs)))
+        (for/fold ([status 0] [stderr ""] [timed-out? #f])
+                  ([k (in-list group-keys)])
+          (define extra (if k (list "--target" (symbol->string k)) '()))
+          (define-values (s e t?) (run-racket BUILD-EVAL (hash-ref groups k) extra out-dir '() timeout-secs))
+          (values (if (equal? status 0) s status) (string-append stderr e) (or timed-out? t?)))))
   ;; gjoa: additionally its own stricter gate — purity check, profile 3
   (define-values (status* stderr*)
     (if (and (string=? name "gjoa") (equal? status 0))

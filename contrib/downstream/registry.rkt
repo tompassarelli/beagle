@@ -121,13 +121,16 @@
 ;; accountable non-membership files (only find-exclude classifies excludes;
 ;; the others return '()). Raises exn:fail:drift when the enumerator's shape
 ;; no longer matches or accounting fails closed.
+;; Third value is an alist of (relpath . target-symbol) compile-target
+;; overrides — only tsv-manifest rows carry one (via `target-overrides`),
+;; every other kind returns '().
 (define (derive-enumerator repo enum)
   (case (spec-ref enum 'kind)
-    [(glob)          (values (derive-glob repo enum) '())]
-    [(bash-array)    (values (derive-bash-array repo enum) '())]
-    [(bash-for-list) (values (derive-bash-for-list repo enum) '())]
-    [(tsv-manifest)  (values (derive-tsv-manifest repo enum) '())]
-    [(find-exclude)  (derive-find-exclude repo enum)]
+    [(glob)          (values (derive-glob repo enum) '() '())]
+    [(bash-array)    (values (derive-bash-array repo enum) '() '())]
+    [(bash-for-list) (values (derive-bash-for-list repo enum) '() '())]
+    [(tsv-manifest)  (derive-tsv-manifest repo enum)]
+    [(find-exclude)  (let-values ([(m e) (derive-find-exclude repo enum)]) (values m e '()))]
     [else (error 'derive-enumerator "unknown kind ~a" (spec-ref enum 'kind))]))
 
 (define (derive-glob repo enum)
@@ -197,6 +200,8 @@
   (elems->paths repo enum elems))
 
 ;; membership = `source` column of every `manifest-root/*.ext` row whose `kind` is in include-kinds.
+;; `target-overrides` (optional alist "row-kind" -> "target") maps a row's own
+;; kind to a compile-target override. Returns (values sorted-srcs '() overrides-alist).
 (define (derive-tsv-manifest repo enum)
   (define source (spec-ref enum 'source #f))
   (define markers (spec-ref enum 'shape-markers '()))
@@ -212,6 +217,7 @@
   (when (null? fragments)
     (drift-error "tsv-manifest ~a: no fragment files with extension ~a" manifest-root-rel ext))
   (define include-kinds (spec-ref enum 'include-kinds '()))
+  (define target-overrides (spec-ref enum 'target-overrides '()))
   (define rows
     (append*
      (for/list ([f (in-list fragments)])
@@ -221,20 +227,30 @@
                    #:when (non-empty-string? trimmed)
                    #:unless (string-prefix? trimmed "#"))
          (string-split line "\t")))))
-  (define srcs
-    (remove-duplicates
-     (for/list ([row (in-list rows)]
-                #:when (and (>= (length row) 2) (member (car row) include-kinds)))
-       (cadr row))))
+  ;; kind-of: relpath -> its own row's kind (first occurrence wins).
+  (define kind-of (make-hash))
+  (for ([row (in-list rows)]
+        #:when (and (>= (length row) 2) (member (car row) include-kinds)))
+    (unless (hash-has-key? kind-of (cadr row))
+      (hash-set! kind-of (cadr row) (car row))))
+  (define srcs (hash-keys kind-of))
   (when (null? srcs)
     (drift-error "tsv-manifest ~a: no rows matched include-kinds ~a" manifest-root-rel include-kinds))
-  (sort
-   (for/list ([rel (in-list srcs)])
-     (define full (build-path repo rel))
-     (unless (file-exists? full)
-       (drift-error "tsv-manifest enumerated source ~a does not exist (stale manifest)" rel))
-     rel)
-   string<?))
+  (define overrides
+    (for*/list ([rel (in-list srcs)]
+                [pair (in-value (assoc (hash-ref kind-of rel) target-overrides))]
+                #:when pair)
+      (cons rel (string->symbol (cdr pair)))))
+  (values
+   (sort
+    (for/list ([rel (in-list srcs)])
+      (define full (build-path repo rel))
+      (unless (file-exists? full)
+        (drift-error "tsv-manifest enumerated source ~a does not exist (stale manifest)" rel))
+      rel)
+    string<?)
+   '()
+   overrides))
 
 (define (elems->paths repo enum elems)
   (define template (spec-ref enum 'template))
@@ -337,10 +353,10 @@
   (values membership (sort classified-alist string<? #:key car)))
 
 ;; --- consumer-level derivation -----------------------------------------------
-;; `excluded` is an alist of (relpath . class-symbol): the accountable
-;; non-membership files a find-exclude enumerator classified. Empty for every
-;; other enumerator kind.
-(struct consumer-result (name repo rev target relpaths count sha256 enumerators excluded)
+;; `excluded`: alist (relpath . class-symbol), find-exclude only, else '().
+;; `file-targets`: alist (relpath . target-symbol) per-file compile-target
+;; override, tsv-manifest `target-overrides` only, else '().
+(struct consumer-result (name repo rev target relpaths count sha256 enumerators excluded file-targets)
   #:transparent)
 
 ;; enumerators here is a list of (source . count) provenance pairs.
@@ -351,13 +367,15 @@
   (define enums (spec-ref c 'enumerators))
   (define provenance '())
   (define excluded '())
+  (define file-targets '())
   (define all
     (append*
      (for/list ([enum (in-list enums)])
-       (define-values (paths exc) (derive-enumerator repo enum))
+       (define-values (paths exc ovr) (derive-enumerator repo enum))
        (set! provenance
              (cons (cons (spec-ref enum 'source #f) (length paths)) provenance))
        (set! excluded (append excluded exc))
+       (set! file-targets (append file-targets ovr))
        paths)))
   (define relpaths (sort (remove-duplicates all) string<?))
   (consumer-result
@@ -369,7 +387,8 @@
    (length relpaths)
    (sha256-of-string (string-join relpaths "\n"))
    (reverse provenance)
-   (sort excluded string<? #:key car)))
+   (sort excluded string<? #:key car)
+   (sort file-targets string<? #:key car)))
 
 (define (load-consumers [path (registry-path)])
   (call-with-input-file path read))

@@ -23,7 +23,7 @@
 ;; through the same reader → parse → check → emit stages without rewriting it
 ;; on disk.
 
-(provide compile-source)
+(provide compile-source compile-source-for-target)
 
 (require "parse.rkt"
          "check.rkt"

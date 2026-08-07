@@ -89,6 +89,8 @@
      (manifest-root "build/generated-targets.d")
      (manifest-ext ".tsv")
      (include-kinds ("beagle" "beagle-core"))
+     ;; mirrors build.sh's kind=beagle-core `--target clj` projection.
+     (target-overrides (("beagle-core" . "clj")))
      (shape-markers ("MANIFEST_DIR=\"$HERE/build/generated-targets.d\""
                      "fragments=(\"$MANIFEST_DIR\"/*.tsv)"))))))
 

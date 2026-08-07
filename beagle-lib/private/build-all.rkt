@@ -14,6 +14,7 @@
          "query.rkt"
          "extensions.rkt"
          "targets.rkt"
+         (only-in "batch-compile.rkt" compile-source-for-target)
          ;; #33 datum-IR: build straight from fact triples, skipping the text trip
          (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
 
@@ -128,6 +129,25 @@
     (build-from-stxs
      (read-beagle-syntax path) path out-dir json? warn? in-place? export-plan)))
 
+;; Retargeted text front-end: force `target` through compile-source-for-target
+;; instead of trusting the source's own #lang, mirroring `beagle-build --target`
+;; for a batch (a whole invocation compiles under ONE forced target). Output
+;; naming here is scratch-only (basename + target ext) — never a real ns path.
+(define (build-one-file-target path out-dir json? target)
+  (with-handlers
+    ([exn:fail? (lambda (e)
+                  (if json? (write-json-error (exn-message e) #f)
+                      (eprintf "  ~a: ~a\n" path (exn-message e)))
+                  #f)])
+    (define source (compile-source-for-target path target))
+    (define base (regexp-replace #rx"\\.b[a-z]+$"
+                                 (path->string (file-name-from-path path)) ""))
+    (define out-path (build-path (or out-dir ".") (string-append base (extension-for-target target))))
+    (when out-dir (make-directory* out-dir))
+    (with-output-to-file out-path #:exists 'replace (lambda () (display source)))
+    (eprintf "  ~a -> ~a\n" path (path->string out-path))
+    #t))
+
 ;; The `@file <path>` header line an --emit-edn dump carries (the original source
 ;; path) — used as #:source-path so cross-module requires still resolve.
 (define (edn-file-source triples-path)
@@ -214,6 +234,7 @@
   (define warn? #f)
   (define in-place? #f)
   (define build-edn? #f)   ; #33: treat file-args as --emit-edn triple dumps
+  (define target-override #f)   ; --target: force every file through this target
   (define file-args '())
 
   (let loop ([rest args])
@@ -234,12 +255,22 @@
       [(string=? (car rest) "--build-edn")
        (set! build-edn? #t)
        (loop (cdr rest))]
+      [(string=? (car rest) "--target")
+       (when (null? (cdr rest))
+         (eprintf "beagle-build-all: --target requires a target argument\n")
+         (exit 2))
+       (set! target-override (string->symbol (cadr rest)))
+       (loop (cddr rest))]
       [else
        (set! file-args (append file-args (list (car rest))))
        (loop (cdr rest))]))
 
   (when (and out-dir in-place?)
     (eprintf "beagle-build-all: --out and --in-place are mutually exclusive\n")
+    (exit 2))
+
+  (when (and target-override build-edn?)
+    (eprintf "beagle-build-all: --target and --build-edn are mutually exclusive\n")
     (exit 2))
 
   (when (null? file-args)
@@ -262,11 +293,14 @@
 
   (for ([f (in-list files)])
     (define ok?
-      (if build-edn?
-          (build-one-edn f out-dir json? export-plan
-                         #:warn? warn? #:in-place? in-place?)
-          (build-one-file f out-dir json? export-plan
-                          #:warn? warn? #:in-place? in-place?)))
+      (cond
+        [build-edn?
+         (build-one-edn f out-dir json? export-plan
+                        #:warn? warn? #:in-place? in-place?)]
+        [target-override (build-one-file-target f out-dir json? target-override)]
+        [else
+         (build-one-file f out-dir json? export-plan
+                         #:warn? warn? #:in-place? in-place?)]))
     (if ok? (set! built (+ built 1)) (set! errors (+ errors 1))))
 
   (unless json?
