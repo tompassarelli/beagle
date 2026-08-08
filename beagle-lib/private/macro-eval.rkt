@@ -55,7 +55,35 @@
        [(eq? head 'fn)    (eval-fn (cdr expr) env)]
        [(eq? head 'do)    (eval-body (cdr expr) env)]
        [(eq? head 'quote) (cadr expr)]
+       [(eq? head 'quasiquote) (eval-quasiquote (cadr expr) env)]
+       [(eq? head 'unquote)
+        (error 'macro-eval "unquote (`~~`) outside a quasiquote template")]
+       [(eq? head 'unquote-splicing)
+        (error 'macro-eval "unquote-splicing (`~~@`) outside a quasiquote template")]
        [else              (eval-call head (cdr expr) env)])]))
+
+;; Quasiquote builds a datum: everything is literal except `~expr` (evaluated in
+;; place) and `~@expr` (evaluated, then spliced into the surrounding list).
+(define (eval-quasiquote template env)
+  (cond
+    [(not (pair? template)) template]
+    [(eq? (car template) 'unquote) (macro-eval (cadr template) env)]
+    [(eq? (car template) 'unquote-splicing)
+     (error 'macro-eval "unquote-splicing (`~~@`) has no surrounding list to splice into")]
+    [else
+     (let loop ([items template])
+       (cond
+         [(null? items) '()]
+         ;; A dotted tail is itself a template, not an element.
+         [(not (pair? items)) (eval-quasiquote items env)]
+         [(and (pair? (car items)) (eq? (caar items) 'unquote-splicing))
+          (define spliced (macro-eval (cadr (car items)) env))
+          (unless (list? spliced)
+            (error 'macro-eval "unquote-splicing (`~~@`) expected a list, got: ~v" spliced))
+          (append spliced (loop (cdr items)))]
+         ;; `(a . ~b)` — the reader leaves an unquote in tail position.
+         [(eq? (car items) 'unquote) (macro-eval (cadr items) env)]
+         [else (cons (eval-quasiquote (car items) env) (loop (cdr items)))]))]))
 
 (define (macro-eval-body body env)
   (cond
@@ -185,9 +213,17 @@
      (caddr s)]
     [else (error 'syntax-type "expected a (name MARKER Type) triple datum, got: ~v" s)]))
 
+;; A typed binding is FLAT in its vector — `[v: Float]` is three items, not a
+;; nested triple. `vec` splices these, so (vec (make-param 'v 'Float)) is right.
 (define (make-param-form name type) (ann name type))
 
 (define (make-field name type) (ann name type))
+
+(define (annotation-triple? v)
+  (and (list? v) (= (length v) 3) (eq? (cadr v) ANN-MARKER)))
+
+(define (make-vec . items)
+  (append* (map (lambda (v) (if (annotation-triple? v) v (list v))) items)))
 
 (define (make-defrecord name fields)
   (list 'defrecord name fields))
@@ -222,7 +258,7 @@
   (hasheq
    'cons cons
    'list list
-   'vec list
+   'vec make-vec
    'append append
    'first car
    'second cadr
