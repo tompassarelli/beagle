@@ -1,0 +1,23 @@
+#lang beagle
+(ns native.record-with-entry)
+
+(define-mode strict)
+
+(defrecord Fighter
+  [name: String
+   health: Int
+   power: Int])
+
+(defn entry [] -> Int
+  (let [original: Fighter (->Fighter "Mara" 40 7)
+        updated: Fighter
+        (with original
+          [:health 35]
+          [:power 9])]
+    (if (and (= (:name updated) "Mara")
+             (= (:health updated) 35)
+             (= (:power updated) 9)
+             (= (:health original) 40)
+             (= (:power original) 7))
+      0
+      1)))

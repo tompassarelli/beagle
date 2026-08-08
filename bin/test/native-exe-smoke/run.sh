@@ -11,6 +11,9 @@ projection_source="$repo/bin/test/native-exe-smoke/entry_projection.bgl"
 qbe_source="$repo/bin/test/native-exe-smoke/entry_qbe.bgl"
 fixed_width_source="$repo/bin/test/native-exe-smoke/entry_fixed_width.bgl"
 threading_source="$repo/bin/test/native-exe-smoke/entry_threading.bgl"
+record_with_source="$repo/bin/test/native-exe-smoke/entry_record_with.bgl"
+record_with_unknown_field="$repo/bin/test/native-exe-smoke/entry_record_with_unknown_field.bgl"
+record_with_wrong_type="$repo/bin/test/native-exe-smoke/entry_record_with_wrong_type.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-exe-smoke.XXXXXX")"
 cleanup() { rm -rf "${scratch:?}"; }
 trap cleanup EXIT
@@ -171,6 +174,50 @@ threading_rc=$?
 set -e
 [[ $threading_rc -eq 0 ]]
 printf 'native-exe smoke: canonical threading desugars before native lowering\n'
+
+record_with_c17="$scratch/record-with-c17"
+record_with_executable="$record_with_c17/bin/record-with"
+mkdir -p "$record_with_c17/bin"
+"$repo/bin/beagle" native-exe \
+    --out "$record_with_executable" \
+    --entry native.record-with-entry/entry \
+    --cc "$gcc_bin" \
+    --artifacts "$record_with_c17" \
+    "$record_with_source" >"$scratch/record-with-c17.log"
+if grep -Fq 'unsupported-with' "$record_with_c17/source.facts"; then
+    echo "native-exe smoke: record with escaped source canonicalization" >&2
+    exit 1
+fi
+grep -Fq $'\tcallee\tt\tassoc' "$record_with_c17/source.facts"
+grep -Fq 'record-assoc-instruction-v0' "$record_with_c17/module.native-program"
+set +e
+env -i "$record_with_executable"
+record_with_rc=$?
+set -e
+[[ $record_with_rc -eq 0 ]]
+
+set +e
+"$repo/bin/beagle" build --materializer c17 \
+    --out "$scratch/record-with-unknown-field" \
+    --entry native.record-with-unknown-field/entry \
+    "$record_with_unknown_field" \
+    >"$scratch/record-with-unknown-field.stdout" \
+    2>"$scratch/record-with-unknown-field.stderr"
+unknown_field_rc=$?
+"$repo/bin/beagle" build --materializer c17 \
+    --out "$scratch/record-with-wrong-type" \
+    --entry native.record-with-wrong-type/entry \
+    "$record_with_wrong_type" \
+    >"$scratch/record-with-wrong-type.stdout" \
+    2>"$scratch/record-with-wrong-type.stderr"
+wrong_type_rc=$?
+set -e
+[[ $unknown_field_rc -ne 0 && $wrong_type_rc -ne 0 ]]
+grep -Fq 'with Fighter: no field :mana' \
+    "$scratch/record-with-unknown-field.stderr"
+grep -Fq 'with Fighter: field :health expected Int, got String' \
+    "$scratch/record-with-wrong-type.stderr"
+printf 'native-exe smoke: typed record with canonicalizes to immutable record assoc\n'
 
 set +e
 "$repo/bin/beagle" build --materializer c17 \

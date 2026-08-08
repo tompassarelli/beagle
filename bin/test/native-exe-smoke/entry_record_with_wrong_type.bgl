@@ -1,0 +1,9 @@
+#lang beagle
+(ns native.record-with-wrong-type)
+
+(define-mode strict)
+
+(defrecord Fighter [health: Int])
+
+(defn entry [] -> Fighter
+  (with (->Fighter 40) [:health "hurt"]))

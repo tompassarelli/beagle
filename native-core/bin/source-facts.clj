@@ -119,6 +119,23 @@
     (row! n "value" "n" (emit-expr (get pair "val")))
     n))
 
+(defn emit-keyword-literal [spelling]
+  (let [n (nid)
+        value (if (clojure.string/starts-with? spelling ":")
+                (subs spelling 1)
+                spelling)]
+    (row! n "form-kind" "t" "literal")
+    (row! n "literal-kind" "t" "keyword")
+    (row! n "value" "t" value)
+    n))
+
+(defn emit-with-arguments [e]
+  (into [(emit-expr (get e "target"))]
+        (mapcat (fn [update]
+                  [(emit-keyword-literal (get update "field"))
+                   (emit-expr (get update "value"))])
+                (get e "updates"))))
+
 (defn emit-catch-clause [clause]
   (let [n (nid)]
     (row! n "form-kind" "t" "catch-clause")
@@ -271,6 +288,9 @@
                     (row! n "items" "n" (emit-seq (get e "items") emit-expr)))
       "map"     (do (row! n "form-kind" "t" "map")
                     (row! n "pairs" "n" (emit-seq (get e "pairs") emit-map-pair)))
+      "with"    (do (row! n "form-kind" "t" "call")
+                    (row! n "callee" "t" "assoc")
+                    (row! n "args" "n" (emit-node-seq (emit-with-arguments e))))
       "cond"    (do (row! n "form-kind" "t" "cond")
                     (row! n "clauses" "n"
                           (emit-seq (get e "clauses") emit-cond-clause)))

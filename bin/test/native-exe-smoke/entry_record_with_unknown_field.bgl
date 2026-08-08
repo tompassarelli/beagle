@@ -1,0 +1,9 @@
+#lang beagle
+(ns native.record-with-unknown-field)
+
+(define-mode strict)
+
+(defrecord Fighter [health: Int])
+
+(defn entry [] -> Fighter
+  (with (->Fighter 40) [:mana 12]))
