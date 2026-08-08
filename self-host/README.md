@@ -121,7 +121,7 @@ absolute checkout paths and remain byte-stable across machines.
   externs parity). Externs are compared as a SET: `ast-json.rkt` serializes
   the oracle's externs in hash order, so byte order is not reproducible.
   Remaining sub-gaps (none exercised by any current corpus): cross-module
-  MACRO import (qualified `defmacro`/`define-macro` — surfaced to the macro
+  MACRO import (qualified `defmacro` — surfaced to the macro
   registry by the oracle, not ported here; ast-json externs carry none),
   keyword field access on an imported record (needs the oracle's
   per-record field table, not the flat externs), and parametric-union

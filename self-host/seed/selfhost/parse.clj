@@ -1516,8 +1516,12 @@
   (let [reg (deref CURRENT-REGISTRY-CELL)
    from-macro (mac/macro-application? reg d)
    expanded (if from-macro (mac/expand-fully! reg d 0 nil) d)]
-  (if (and (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "#%splice-forms")) (doseq [f (subvec expanded 1)]
-  (swap! forms conj (parse-expr* f))) (swap! forms conj (parse-expr* expanded)))))))
+  (cond
+  (and from-macro (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "do")) (doseq [f (subvec expanded 1)]
+  (swap! forms conj (parse-expr* f)))
+  (and (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "#%splice-forms")) (doseq [f (subvec expanded 1)]
+  (swap! forms conj (parse-expr* f)))
+  :else (swap! forms conj (parse-expr* expanded)))))))
   (let [aliases (mac/hygiene-aliases)]
   (if (> (count aliases) 0) (do
   (reset! forms (reduce (fn [acc f] (let [node (get f "node")
@@ -1864,6 +1868,10 @@
   (expect! "parse-type clj alias Long" (= (parse-type "Long") {"kind" "prim" "name" "Int"}))
   (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-mode" "strict"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
   (and (= (get prog "namespace") "my.app") (= (get prog "mode") "strict") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "parse-program! rejects legacy define-macro" (do
+  (reset-errors!)
+  (parse-program! [["define-macro" "safe" "old" [BRACKET-TAG "x"] "x"]])
+  (> (count (parse-errors)) 0)))
   (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "fram.fold"] ["require" "fram.kernel" ":as" "k"]])]
   (= (get prog "requires") [{"ns" "fram.kernel" "alias" "k" "refer" false}])))
   (expect! "parse-program! ns docstring dropped" (let [prog (parse-program! [["ns" "fram.fold" ["#%string" "Replay the log."]]])]

@@ -21,6 +21,21 @@
   `(let [s (scale ~v)]
      (do ~@body)))
 
+(defmacro field-count [fields]
+  (cond
+    [(empty? fields) 0]
+    [:else (count (partition 3 fields))]))
+
+(defmacro define-pair [left right]
+  (list 'do
+    (cons 'def (append (ann left 'Int) (list 1)))
+    (cons 'def (append (ann right 'Int) (list 2)))))
+
+(define-pair alpha beta)
+
+(def FIELD-COUNT: Int
+  (field-count [x: Int y: String]))
+
 ;; bind__0 mints here (before the macro use-site advances the counter)
 (defn bound-before [xs: (Vec Int)] -> Int
   (if-let [b: Int (first-int xs)]
