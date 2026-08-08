@@ -319,6 +319,9 @@
   (nil? d) "[]"
   :else (str d)))
 
+(defn ^String mangle-dotted-path [^String s]
+  (str/join "." (mapv mangle-str (str/split s #"/"))))
+
 (defn ^String static-dotted [^String s]
   (let [slash (str/index-of s "/")]
   (cond
@@ -330,7 +333,7 @@
 (defn ^String emit-ref-name [^String name]
   (cond
   (= name "nil") "null"
-  (bound? name) (mangle-name name)
+  (and (bound? name) (not (str/includes? name "/"))) (mangle-name name)
   (contains? JS-VALUE-WRAPPERS name) (get JS-VALUE-WRAPPERS name)
   :else (let [m (mangle-name name)]
   (cond
@@ -927,7 +930,7 @@
    body-str (if (= 1 (count body)) (emit-expr* (nth body 0)) (emit-body-return* body ""))]
   (if (else? c) body-str (str "(" (emit-expr* (get c "test")) ") ? " body-str)))) clauses)
    complete (if (and (> (count clauses) 0) (else? (nth clauses (- (count clauses) 1)))) parts (conj parts "null"))]
-  (str/join " : " complete))
+  (str "(" (str/join " : " complete) ")"))
   (= node "let") (let [bindings (get e "bindings")
    body (get e "body")
    has-await (or (contains-await? (mapv (fn [b] (get b "value")) bindings)) (contains-await? body))
@@ -968,7 +971,7 @@
   :else (str (static-dotted name) "(" (emit-args-list (get e "args")) ")")))
   (= node "new") (let [raw (get e "class")
    cls (if (str/ends-with? raw ".") (subs raw 0 (- (count raw) 1)) raw)]
-  (str "new " (mangle-str cls) "(" (emit-args-list (get e "args")) ")"))
+  (str "new " (mangle-dotted-path cls) "(" (emit-args-list (get e "args")) ")"))
   (= node "kw-access") (let [target-str (emit-expr* (get e "target"))
    prop (kw->prop (get e "kw"))
    dflt (get e "default")]

@@ -1785,7 +1785,7 @@
        (if (and (pair? clauses) (else-clause? (last clauses)))
          parts
          (append parts (list "null"))))
-     (string-join complete-parts " : ")]
+     (format "(~a)" (string-join complete-parts " : "))]
 
     [(let-form? e)
      (define bindings (let-form-bindings e))

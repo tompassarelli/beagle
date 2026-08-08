@@ -185,6 +185,11 @@
      '(defn f [x #%: Int] -> String
        (cond (< x 0) "neg" (= x 0) "zero" :else "pos")))
 
+   (check-js-contains "cond stays grouped inside an infix expression"
+     "a && ((b) ? true : false)"
+     '(defn f [a #%: Bool b #%: Bool] -> Bool
+       (and a (cond b true :else false))))
+
    (check-js-contains "match record -> _tag check"
      "_tag ==="
      '(defrecord Circle [radius #%: Int])
