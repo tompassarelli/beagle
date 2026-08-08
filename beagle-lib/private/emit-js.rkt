@@ -351,7 +351,8 @@
     [(take) (if (= n 2) (format "~a.slice(0, ~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(drop) (if (= n 2) (format "~a.slice(~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(some) (if (= n 2)
-             (format "~a.find(~a) ?? null" (emit-expr (cadr args)) (emit-expr (car args)))
+             (format "((_pred, _coll) => { if (_coll == null) return null; for (const _item of _coll) { const _value = _pred(_item); if (_value !== false && _value != null) return _value; } return null; })(~a, ~a)"
+                     (emit-expr (car args)) (emit-expr (cadr args)))
              #f)]
     [(distinct) (if (= n 1)
                     (begin

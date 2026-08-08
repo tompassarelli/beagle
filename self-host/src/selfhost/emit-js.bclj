@@ -589,6 +589,11 @@
       (= fn-sym "mapv") (if (= n 2) (str a1 ".map(" a0 ")") nil)
       (= fn-sym "filter") (if (= n 2) (str a1 ".filter(" a0 ")") nil)
       (= fn-sym "filterv") (if (= n 2) (str a1 ".filter(" a0 ")") nil)
+      (= fn-sym "some")
+        (if (= n 2)
+          (str "((_pred, _coll) => { if (_coll == null) return null; for (const _item of _coll) { const _value = _pred(_item); if (_value !== false && _value != null) return _value; } return null; })("
+               a0 ", " a1 ")")
+          nil)
       (= fn-sym "reduce")
         (cond (= n 2) (str a1 ".reduce(" a0 ")")
               (= n 3) (str a2 ".reduce(" a0 ", " a1 ")")

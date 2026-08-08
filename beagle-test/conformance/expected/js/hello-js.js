@@ -40,7 +40,7 @@ function process_order(p) {
 }
 
 function classify(p) {
-  return ((product_price(p) < 10)) ? "budget" : ((product_price(p) < 50)) ? "mid-range" : "premium";
+  return (((product_price(p) < 10)) ? "budget" : ((product_price(p) < 50)) ? "mid-range" : "premium");
 }
 
 function safe_lookup(products, idx) {

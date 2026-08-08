@@ -622,6 +622,54 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
 
    ;; --- additional stdlib -----------------------------------------------------
 
+   (check-js-output "some returns the first Clojure-truthy predicate value"
+     (list '(def evaluation-order #%: Any (atom ""))
+           '(def predicate-builds #%: Any (atom 0))
+           '(def collection-builds #%: Any (atom 0))
+           '(def callback-count #%: Any (atom 0))
+           '(defn zero-element [] -> Any
+              (some (fn [x #%: Int] -> Any (if (= x 0) true false))
+                    (range -1 1)))
+           '(defn string-result [] -> Any
+              (some (fn [x #%: Int] -> Any
+                      (cond (= x 0) false
+                            (= x 1) nil
+                            (= x 2) "matched"
+                            :else "late"))
+                    (range 0 4)))
+           '(defn number-result [] -> Any
+              (some (fn [x #%: Int] -> Any (if (= x 2) 73 nil))
+                    (range 0 4)))
+           '(defn falsey-number-result [] -> Any
+              (some (fn [x #%: Int] -> Any (if (= x 2) 0 nil))
+                    (range 0 4)))
+           '(defn no-match [] -> Any
+              (some (fn [x #%: Int] -> Any (if (> x 9) x nil))
+                    (range 0 4)))
+           '(defn nil-collection [] -> Any
+              (some identity nil))
+           '(defn make-predicate! [] -> Any
+              (do (swap! evaluation-order str "p")
+                  (swap! predicate-builds inc)
+                  (fn [x #%: Int] -> Any
+                    (do (swap! callback-count inc)
+                        (cond (= x 1) false
+                              (= x 2) nil
+                              (= x 3) "hit"
+                              :else "late")))))
+           '(defn make-collection! [] -> Any
+              (do (swap! evaluation-order str "c")
+                  (swap! collection-builds inc)
+                  (range 1 5)))
+           '(defn effect-result! [] -> Any
+              (some (make-predicate!) (make-collection!))))
+     (string-append
+      "console.log(JSON.stringify(["
+      "zero_element(),string_result(),number_result(),falsey_number_result(),"
+      "no_match(),nil_collection(),effect_result_bang(),evaluation_order.value,predicate_builds.value,"
+      "collection_builds.value,callback_count.value]));")
+     "[true,\"matched\",73,0,null,null,\"hit\",\"pc\",1,1,3]")
+
    (check-js-output "take-last"
      (list '(defn f [xs #%: (Vec Int)] -> Any (take-last 2 xs)))
      "console.log(JSON.stringify(f([1,2,3,4,5])));"

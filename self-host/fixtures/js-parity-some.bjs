@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns fixture.js-parity-some)
+
+(defn first-present [xs: (Vec Any)] -> Any
+  (some (fn [x: Any] -> Any (if (some? x) x nil)) xs))
+
+(println (first-present [nil 0 "late"]))
