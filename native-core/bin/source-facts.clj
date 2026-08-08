@@ -202,7 +202,9 @@
     n))
 
 (defn emit-expr [e]
-  (let [n (nid)]
+  (if (= "threading" (get e "node"))
+    (emit-expr (get e "desugared"))
+    (let [n (nid)]
     (case (get e "node")
       "literal" (do (row! n "form-kind" "t" "literal")
                     (row! n "literal-kind" "t" (str (get e "kind")))
@@ -287,7 +289,7 @@
           (row! n "keyword" "t" (subs (get e "kw") 1))
           (row! n "target" "n" (emit-expr (get e "target"))))
       (row! n "form-kind" "t" (str "unsupported-" (get e "node"))))
-    n))
+      n)))
 
 ;; `<fn>=<native-op>` arguments name the functions whose Beagle body is only the
 ;; reference semantics of a native primitive the lowering already carries.

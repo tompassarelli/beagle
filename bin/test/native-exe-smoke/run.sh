@@ -10,6 +10,7 @@ source_file="$repo/bin/test/native-exe-smoke/entry_core.bgl"
 projection_source="$repo/bin/test/native-exe-smoke/entry_projection.bgl"
 qbe_source="$repo/bin/test/native-exe-smoke/entry_qbe.bgl"
 fixed_width_source="$repo/bin/test/native-exe-smoke/entry_fixed_width.bgl"
+threading_source="$repo/bin/test/native-exe-smoke/entry_threading.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-exe-smoke.XXXXXX")"
 cleanup() { rm -rf "${scratch:?}"; }
 trap cleanup EXIT
@@ -150,6 +151,26 @@ grep -Fqx 'materialize-qbe OK module_0.ssa' "$fixed_width_qbe/report.txt"
 grep -Fq 'extsw' "$fixed_width_qbe/module_0.ssa"
 grep -Fq 'extuw' "$fixed_width_qbe/module_0.ssa"
 printf 'native-exe smoke: fixed-width C17 layouts + QBE extensions ok\n'
+
+threading_c17="$scratch/threading-c17"
+threading_executable="$threading_c17/bin/threading"
+mkdir -p "$threading_c17/bin"
+"$repo/bin/beagle" native-exe \
+    --out "$threading_executable" \
+    --entry native.threading-entry/entry \
+    --cc "$gcc_bin" \
+    --artifacts "$threading_c17" \
+    "$threading_source" >"$scratch/threading-c17.log"
+if grep -Fq 'unsupported-threading' "$threading_c17/source.facts"; then
+    echo "native-exe smoke: threading marker escaped source projection" >&2
+    exit 1
+fi
+set +e
+env -i "$threading_executable"
+threading_rc=$?
+set -e
+[[ $threading_rc -eq 0 ]]
+printf 'native-exe smoke: canonical threading desugars before native lowering\n'
 
 set +e
 "$repo/bin/beagle" build --materializer c17 \
