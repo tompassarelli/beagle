@@ -27,7 +27,11 @@
 
 (define (ns->path ns-sym target)
   (define s (symbol->string ns-sym))
-  (string-append (regexp-replace* #rx"\\." (regexp-replace* #rx"-" s "_") "/")
+  (define file-ns
+    (if (eq? target 'clj)
+        (regexp-replace* #rx"-" s "_")
+        s))
+  (string-append (regexp-replace* #rx"\\." file-ns "/")
                  (extension-for-target target)))
 
 ;; Compile a syntax list to a target file. Shared by the text path

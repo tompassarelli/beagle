@@ -31,7 +31,7 @@ fi
 echo "================ build reproducibility — js match temps reset per program ================"
 "$ROOT/bin/beagle-build-all" "$HERE/match-js-a.bjs" "$HERE/match-js-b.bjs" --out "$W/j1" >/dev/null 2>&1
 "$ROOT/bin/beagle-build-all" "$HERE/match-js-a.bjs" "$HERE/match-js-b.bjs" --out "$W/j2" >/dev/null 2>&1
-ja="$(find "$W/j1" -name 'match_js_a.js')"; jb="$(find "$W/j1" -name 'match_js_b.js')"
+ja="$(find "$W/j1" -name 'match-js-a.js')"; jb="$(find "$W/j1" -name 'match-js-b.js')"
 if [ -z "$ja" ] || [ -z "$jb" ]; then echo "  FAIL  js fixtures did not build"; fail=1; else
   ta="$(grep -oE '_match_[0-9]+' "$ja" | sort -u | tr '\n' ' ')"
   tb="$(grep -oE '_match_[0-9]+' "$jb" | sort -u | tr '\n' ' ')"

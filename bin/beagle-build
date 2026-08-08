@@ -85,7 +85,11 @@ else
           sed -E 's/^\(ns[[:space:]]+([a-zA-Z0-9._-]+).*/\1/' | \
           tr -d '[:space:]')"
     [[ -z "$ns" ]] && ns="beagle.user"
-    rel_path="$(echo "$ns" | tr '.-' '//_')"
+    if [[ "$ext" == "clj" ]]; then
+        rel_path="$(printf '%s\n' "$ns" | tr '.-' '/_')"
+    else
+        rel_path="${ns//./\/}"
+    fi
     out="${BEAGLE_OUT:-$beagle_root/.beagle-out}/$rel_path.$ext"
 fi
 

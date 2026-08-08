@@ -1,6 +1,6 @@
 #lang beagle/js
 (ns match-js-b)
 (defunion Box (Big [w: Float]) (Small [h: Float]))
-(defn mk [n: Float] -> Box (Big n))
+(defn mk [n: Float] -> Box (->Big n))
 (defn vol [n: Float] -> Float
   (match (mk n) [(Big w) (* w w)] [(Small h) (* h h)]))

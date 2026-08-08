@@ -230,7 +230,7 @@
                  "unseeded gate reports zero diagnostics")
      (check-false (string-contains? stderr TARGET-FORM-PHRASE)
                   "unseeded gate raises none of the seeded diagnostic class")
-     (check-true (file-exists? (build-path out-dir "fixture" "downstream_sensitivity.js"))
+     (check-true (file-exists? (build-path out-dir "fixture" "downstream-sensitivity.js"))
                  "unseeded compile actually emitted the target file"))))
 
 ;; --- CONTROL: the stale-bytecode vector is REAL (load-bearing pre-fix proof) -

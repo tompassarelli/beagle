@@ -547,7 +547,11 @@
 
 (define (ns->out-path ns-sym target)
   (define s (symbol->string ns-sym))
-  (string-append (regexp-replace* #rx"\\." (regexp-replace* #rx"-" s "_") "/")
+  (define file-ns
+    (if (eq? target 'clj)
+        (regexp-replace* #rx"-" s "_")
+        s))
+  (string-append (regexp-replace* #rx"\\." file-ns "/")
                  (target-extension target)))
 
 (define (handle-build args)
