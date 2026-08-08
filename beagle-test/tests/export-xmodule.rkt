@@ -55,3 +55,19 @@
   (define js (emit-program (parse-program (read-beagle-syntax src) #:source-path src)))
   (check-regexp-match #rx"p[.]cell[.]value" js)
   (check-false (regexp-match? #rx"p/cell" js)))
+
+;; `js/export` prefixes the string "export " onto what the inner form emits, so
+;; on a record — which emits a factory AND one accessor per field — it reached
+;; only the factory. The ctor also mangled to `__gtPos` at call sites because
+;; build-known-fns! never unwrapped the marker to see the record at all.
+(test-case "an exported record exports its constructor and every accessor"
+  (define src (build-path fixtures-dir "exported-record.bjs"))
+  (define prog (parse-program (read-beagle-syntax src) #:source-path src))
+  (check-not-exn (lambda () (type-check! prog)))
+  (define js (emit-program prog))
+  (check-regexp-match #rx"export function Pos\\(" js)
+  (check-regexp-match #rx"export function pos_x\\(" js)
+  (check-regexp-match #rx"export function pos_z\\(" js)
+  ;; The constructor is called by the name it is defined under.
+  (check-regexp-match #rx"return Pos\\(0[.]0, 0[.]0\\)" js)
+  (check-false (regexp-match? #rx"__gtPos" js)))

@@ -195,9 +195,10 @@
 
 (struct target (name ext wrap run) #:transparent)
 
-;; CLJ target: header `#lang beagle`, run via bb, print via pr-str.
+;; CLJ target: header `#lang beagle/clj`, run via bb, print via pr-str. Bare
+;; `#lang beagle` is Native Core and a `.bclj` file rejects it.
 (define (clj-wrap expr ret)
-  (string-append "#lang beagle\n(ns conf)\n"
+  (string-append "#lang beagle/clj\n(ns conf)\n"
                  "(defn result [] -> " ret " " expr ")\n"))
 
 (define (clj-run out-path)

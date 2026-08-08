@@ -32,6 +32,8 @@
       (format "err__exception.data.~a" prop)))
 
 (define current-js-export-names (make-parameter #f))
+;; Set while emitting a js/export-marked definition that emits several bindings.
+(define current-js-export-marked? (make-parameter #f))
 
 (define (js-defn-signature form #:async? async? #:name name #:params params)
   (format "~afunction ~a(~a)" (if async? "async " "") name params))
@@ -1047,7 +1049,8 @@
 
 (define (build-record-field-table prog)
   (define local
-    (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (for/fold ([h (hasheq)]) ([raw (in-list (program-forms prog))])
+      (define f (unwrap-definition-form raw))
       (cond
         [(record-form? f)
          (hash-set h (record-form-name f)
@@ -1118,7 +1121,8 @@
 
 (define (build-record-constructor-set prog)
   (define local
-    (for/fold ([constructors (set)]) ([form (in-list (program-forms prog))])
+    (for/fold ([constructors (set)]) ([raw (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw))
       (define names
         (cond
           [(record-form? form) (list (record-form-name form))]
@@ -1176,12 +1180,14 @@
 
 (define (build-scalar-fns prog)
   (define predicated
-    (for/fold ([h (hash)]) ([f (in-list (program-forms prog))])
+    (for/fold ([h (hash)]) ([raw (in-list (program-forms prog))])
+      (define f (unwrap-definition-form raw))
       (if (and (defscalar-form? f) (not (null? (defscalar-form-predicates f))))
           (hash-set h (defscalar-form-name f) #t)
           h)))
   (define local
-    (for/fold ([s (set)]) ([f (in-list (program-forms prog))])
+    (for/fold ([s (set)]) ([raw (in-list (program-forms prog))])
+      (define f (unwrap-definition-form raw))
       (if (defscalar-form? f)
           (let* ([name (defscalar-form-name f)]
                  [name-str (symbol->string name)]
@@ -1208,7 +1214,8 @@
 
 (define (collect-top-level-names prog)
   (define from-forms
-    (for/fold ([s (set)]) ([f (in-list (program-forms prog))])
+    (for/fold ([s (set)]) ([raw (in-list (program-forms prog))])
+      (define f (unwrap-definition-form raw))
       (cond
         [(def-form? f)      (set-add s (def-form-name f))]
         [(defonce-form? f)  (set-add s (defonce-form-name f))]
@@ -1245,6 +1252,12 @@
 ;; Relative/resolvable prefix is tree-shake-neutral under esbuild (headline holds).
 (define js-runtime-prefix
   (or (getenv "BEAGLE_JS_RUNTIME_PREFIX") "beagle/"))
+
+;; Forms that emit more than one top-level binding: one "export " prefix on the
+;; emitted string would reach only the first.
+(define (multi-binding-form? f0)
+  (define f (unwrap-definition-form f0))
+  (or (record-form? f) (defunion-form? f) (deferror-form? f) (defscalar-form? f)))
 
 (define (js-emit-program prog)
   (validate-js-target! prog)
@@ -1552,7 +1565,11 @@
 
     ;; --- Typed JS target forms (jst-*) ----------------------------------------
     [(jst-class? f)    (emit-jst-class f)]
-    [(jst-export? f)   (string-append "export " (emit-form (jst-export-form f)))]
+    [(jst-export? f)
+     (define inner (jst-export-form f))
+     (if (multi-binding-form? inner)
+         (parameterize ([current-js-export-marked? #t]) (emit-form inner))
+         (string-append "export " (emit-form inner)))]
     [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
     [(jst-return? f)   (emit-jst-return f)]
 
@@ -1662,7 +1679,11 @@
     [(jst-unary? e)    (emit-jst-unary e)]
     [(jst-class? e)    (emit-jst-class e)]
     [(jst-return? e)   (emit-jst-return e)]
-    [(jst-export? e)   (string-append "export " (emit-form (jst-export-form e)))]
+    [(jst-export? e)
+     (define inner (jst-export-form e))
+     (if (multi-binding-form? inner)
+         (parameterize ([current-js-export-marked? #t]) (emit-form inner))
+         (string-append "export " (emit-form inner)))]
     [(jst-export-default? e) (string-append "export default " (emit-form (jst-export-default-form e)))]
 
     [(if-form? e)
@@ -2236,7 +2257,7 @@
   (define field-props (map (compose mangle-prop symbol->string param-name) fields))
   (define factory
     (format "~afunction ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
-            (if (exported-binding? constructor-name)
+            (if (or (current-js-export-marked?) (exported-binding? constructor-name))
                 "export "
                 "")
             m-str
@@ -2257,7 +2278,7 @@
                  (string-downcase (symbol->string member-name))
                  field-name)))
       (format "~afunction ~a(r) { return r.~a; }"
-              (if (exported-binding? accessor-name) "export " "")
+              (if (or (current-js-export-marked?) (exported-binding? accessor-name)) "export " "")
               (mangle-name accessor-name)
               prop)))
   (string-join (cons factory accessors) "\n\n"))
@@ -2284,7 +2305,7 @@
     (string->symbol (string-append "->" name-str)))
   (define factory
     (format "~afunction ~a(~a) {\n  return Object.freeze({_tag: ~v, ~a});\n}"
-            (if (exported-binding? constructor-name)
+            (if (or (current-js-export-marked?) (exported-binding? constructor-name))
                 "export "
                 "")
             name-mangled
@@ -2297,7 +2318,7 @@
       (define accessor-name
         (string->symbol (format "~a-~a" (string-downcase name-str) field-name)))
       (format "~afunction ~a(r) { return r.~a; }"
-              (if (exported-binding? accessor-name) "export " "")
+              (if (or (current-js-export-marked?) (exported-binding? accessor-name)) "export " "")
               (mangle-name accessor-name)
               prop)))
   (string-join (cons factory accessors) "\n\n"))

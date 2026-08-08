@@ -1,0 +1,15 @@
+#lang beagle/js
+(ns export-xmodule.exported-record)
+
+;; An exported record's whole surface crosses the boundary: a consumer that can
+;; construct one but not read it has half a type.
+(js/export
+  (defrecord Pos
+    [x: Float
+     z: Float]))
+
+(js/export
+  (defn origin [] -> Pos (->Pos 0.0 0.0)))
+
+(js/export
+  (defn sum [p: Pos] -> Float (+ (pos-x p) (pos-z p))))

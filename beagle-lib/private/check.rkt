@@ -4491,8 +4491,10 @@
   (for ([(k _) (in-hash (builtin-env-for-target (program-target prog)))]) (hash-set! KNOWN-FNS k #t))
   ;; externs
   (for ([(k _) (in-hash (program-externs prog))]) (hash-set! KNOWN-FNS k #t))
-  ;; local forms
-  (for ([form (in-list (program-forms prog))])
+  ;; local forms — every branch below dispatches on the definition, so the
+  ;; export marker wrapping it comes off first.
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (unwrap-definition-form raw-form))
     (cond
       [(defn-form? form) (hash-set! KNOWN-FNS (defn-form-name form) #t)]
       [(defn-multi? form) (hash-set! KNOWN-FNS (defn-multi-name form) #t)]
