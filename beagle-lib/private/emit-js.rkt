@@ -2234,18 +2234,13 @@
                 qualified
                 (string-join (map emit-expr args) ", "))])]
 
-    ;; A `defmacro` template is one EXPRESSION, so wrapping definitions in a
-    ;; `do` leaves them in expression position. Generating definitions needs a
-    ;; macro whose return type is (Vec Form) — those splice at top level.
+    ;; A definition cannot be emitted from expression position. Procedural
+    ;; macros return top-level definitions inside one generated `(do ...)`.
     [(defn-form? e)
      (error 'beagle-js
             (string-append
              "a definition cannot appear where an expression is expected: ~a\n"
-             "  a `defmacro` template is a single expression — `(do (defn ...) (defn ...))`\n"
-             "  does not splice at top level.\n"
-             "  to generate definitions, use:\n"
-             "    (define-macro beagle NAME [arg: Syntax] -> (Vec Form)\n"
-             "      (list `(defn ...) `(defn ...)))")
+             "  to generate definitions, return a top-level `(do ...)` from `defmacro`")
             (defn-form-name e))]
     [else (error 'beagle-js "don't know how to emit: ~v" e)]))
 

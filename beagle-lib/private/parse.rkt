@@ -4502,7 +4502,7 @@
     ;; The reader produces these from `` ` ``, `,`, `,@` prefixes. They are
     ;; macro-template syntax only — beagle has no general data-construction
     ;; backquote (yet). Inside a `(defmacro …)` body they are handled by
-    ;; the qq-eval pass during expansion, so they never reach parse-list-form.
+    ;; the compile-time evaluator, so they never reach parse-list-form.
     ;; If we see them here, the user wrote `,x` or `` `(…) `` outside a
     ;; defmacro body.
     ;; `unquote` / `unquote-splicing` / `quasiquote` migrated to the

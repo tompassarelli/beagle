@@ -202,10 +202,6 @@
   PAREN-NAME
   "(defrecord P [(x : Int)])")
 
-(err/rx "paren-wrapped name in a defmacro-proc param vector"
-  #rx"`\\(n : Symbol\\)` is not a typed binding — annotations attach to names — write `n: Symbol`"
-  "(define-macro proc mk [(n : Symbol)] -> Form (list 'def))")
-
 (define BIND-A-NAME
   #rx"destructuring patterns cannot be annotated — bind a name \\(`p: Point`\\) and destructure in the body")
 

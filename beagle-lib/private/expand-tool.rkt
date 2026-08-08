@@ -20,11 +20,17 @@
 
 ;; --- entry ----------------------------------------------------------------
 
+(define (reject-legacy-macro d)
+  (when (and (pair? d) (eq? (car d) 'define-macro))
+    (error 'beagle-expand
+           "`define-macro` is not supported; use `(defmacro NAME [params] body)`")))
+
 (define (expand-file path)
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
   ;; First pass: register canonical macros.
   (for ([d (in-list datums)])
+    (reject-legacy-macro d)
     (match d
       [(list 'defmacro (? symbol? name) params template)
        (define ps (cond
@@ -35,7 +41,7 @@
       [_ (void)]))
   ;; Second pass: expand each non-meta form, splice (Vec Form) output
   (for ([d (in-list datums)])
-    (unless (and (pair? d) (memq (car d) '(define-macro defmacro import)))
+    (unless (and (pair? d) (memq (car d) '(defmacro import)))
       (define expanded (expand-fully registry d))
       (cond
         [(and (pair? expanded) (eq? (car expanded) 'do))
@@ -137,6 +143,7 @@
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
   (for ([d (in-list datums)])
+    (reject-legacy-macro d)
     (match d
       [(list 'defmacro (? symbol? name) params template)
        (define ps (cond
@@ -147,7 +154,7 @@
       [_ (void)]))
   (apply append
     (for/list ([d (in-list datums)])
-      (if (and (pair? d) (memq (car d) '(define-macro defmacro import)))
+      (if (and (pair? d) (memq (car d) '(defmacro import)))
         '()
         (let ([expanded (expand-fully registry d)])
           (cond

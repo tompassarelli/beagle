@@ -207,10 +207,9 @@
 ;; =============================================================================
 ;; Tests — macros
 ;; =============================================================================
-;; The 'unsafe macro kind was removed (no escape hatches). All macros are 'safe
-;; and their expansions are type-checked end-to-end.
+;; Macro expansions are type-checked end-to-end.
 
-(check-err "safe macro: expansion is type-checked"
+(check-err "procedural macro expansion is type-checked"
   `(defmacro id1 ,(br 'x) x)
   '(def y #%: Int (id1 "string not Int")))
 

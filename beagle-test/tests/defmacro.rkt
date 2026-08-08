@@ -264,8 +264,8 @@
 
 (test-case "defmacro: splice in map preserves map tag"
   ;; (defmacro map-it [pairs] `{:a 1 ,@pairs :z 99})
-  ;; The reader emits `{…}` as (#%map …). qq-walk-list walks any pair head,
-  ;; including #%map, so splicing inside a map literal is supported. The
+  ;; The reader emits `{…}` as (#%map …). The evaluator preserves that tag,
+  ;; so splicing inside a map literal is supported. The
   ;; key/value pairing inside the map remains the user's responsibility.
   (define reg (make-macro-registry))
   (register-macro! reg 'map-it 'defmacro '(pairs)
@@ -280,9 +280,9 @@
 
 (test-case "defmacro: unquote in map key position"
   ;; (defmacro keyed [k v] `{,k ,v})
-  ;; qq-walk treats map elements as a flat list — both key and value
+  ;; Quasiquote treats map elements as a flat list, so both key and value
   ;; positions are unquotable. The keyword-key constraint is a downstream
-  ;; (parse-time) check on the post-expansion map literal, not a QQ-eval
+  ;; (parse-time) check on the post-expansion map literal, not an evaluator
   ;; concern: macro expansion produces (#%map :foo 42); parse-map-literal
   ;; then validates :foo as a keyword key.
   (define reg (make-macro-registry))

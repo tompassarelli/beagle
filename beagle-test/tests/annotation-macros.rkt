@@ -86,32 +86,30 @@
   (check-equal? (length (defn-form-params f)) 1
                 "the marker must not be collected as a third binder"))
 
-;; --- (2) canonical constructor: ~@(ann n t) in a proc macro ----------------
+;; --- (2) canonical constructor: ann in a procedural defmacro ----------------
 
 (define ANN-CTOR-SRC
   (string-append
-   "(define-macro proc mk-field [name: Symbol ty: Symbol] -> Form\n"
-   "  (list 'defn name (br) '-> ty 0))\n"
+   "(defmacro mk-field [name ty]\n"
+   "  (list 'defn name (vec) '-> ty 0))\n"
    "(mk-field zero Int)\n"))
 
-(test-case "proc-macro namespace exposes ANN-MARKER + the `ann` constructor"
-  ;; `(ann n t)` builds the flat triple; `~@`-splicing it into a bracket
-  ;; template is the sanctioned programmatic construction path.
+(test-case "defmacro exposes the typed-binding constructor"
   (define src
     (string-append
-     "(define-macro proc mk-id [name: Symbol ty: Symbol] -> Form\n"
-     "  (list 'defn name (br 'x ANN-MARKER ty) '-> ty 'x))\n"
+     "(defmacro mk-id [name ty]\n"
+     "  (list 'defn name (vec (ann 'x ty)) '-> ty 'x))\n"
      "(mk-id ident2 Int)\n"))
   (define f (car (program-forms (parse-src src))))
   (check-true (defn-form? f))
   (check-eq? (defn-form-name f) 'ident2)
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int))
 
-(test-case "the `ann` helper produces the same triple as ANN-MARKER by hand"
+(test-case "the `ann` helper composes inside a generated parameter vector"
   (define src
     (string-append
-     "(define-macro proc mk-id3 [name: Symbol ty: Symbol] -> Form\n"
-     "  (list 'defn name (apply br (ann 'x ty)) '-> ty 'x))\n"
+     "(defmacro mk-id3 [name ty]\n"
+     "  (list 'defn name (vec (ann 'x ty)) '-> ty 'x))\n"
      "(mk-id3 ident3 Int)\n"))
   (define f (car (program-forms (parse-src src))))
   (check-true (defn-form? f))

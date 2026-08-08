@@ -85,57 +85,6 @@
   (define-values (fixed rest-name) (parse-macro-params params))
   (hash-set! reg name (macro-def kind fixed rest-name template)))
 
-;; --- AST contracts ----------------------------------------------------------
-
-(define (check-datum-contract datum contract macro-name position)
-  (cond
-    [(eq? contract 'Syntax) (void)]
-    [(eq? contract 'Symbol)
-     (unless (symbol? datum)
-       (error 'beagle
-              "macro ~a: ~a: expected Symbol, got ~v"
-              macro-name position datum))]
-    [(eq? contract 'String)
-     (unless (string? datum)
-       (error 'beagle
-              "macro ~a: ~a: expected String, got ~v"
-              macro-name position datum))]
-    [(eq? contract 'Int)
-     (unless (exact-integer? datum)
-       (error 'beagle
-              "macro ~a: ~a: expected Int, got ~v"
-              macro-name position datum))]
-    [(eq? contract 'Bool)
-     (unless (boolean? datum)
-       (error 'beagle
-              "macro ~a: ~a: expected Bool, got ~v"
-              macro-name position datum))]
-    [(eq? contract 'Keyword)
-     (unless (keyword? datum)
-       (error 'beagle
-              "macro ~a: ~a: expected Keyword, got ~v"
-              macro-name position datum))]
-    [(eq? contract 'Expr)
-     (unless (or (symbol? datum) (string? datum) (number? datum)
-                 (boolean? datum) (keyword? datum) (pair? datum))
-       (error 'beagle
-              "macro ~a: ~a: expected Expr, got ~v"
-              macro-name position datum))]
-    [(eq? contract 'Form)
-     (unless (and (pair? datum) (symbol? (car datum)))
-       (error 'beagle
-              "macro ~a: ~a: expected Form (a list starting with a symbol), got ~v"
-              macro-name position datum))]
-    [(and (pair? contract) (eq? (car contract) 'Vec) (= (length contract) 2))
-     (unless (list? datum)
-       (error 'beagle
-              "macro ~a: ~a: expected (Vec ~a), got non-list ~v"
-              macro-name position (cadr contract) datum))
-     (for ([item (in-list datum)] [i (in-naturals)])
-       (check-datum-contract item (cadr contract) macro-name
-                             (format "~a[~a]" position i)))]
-    [else (void)]))
-
 (define (lookup-macro reg name)
   (hash-ref reg name #f))
 
@@ -193,112 +142,6 @@
      (define bindings
        (make-bindings fixed fixed-args rest-name rest-args))
      (substitute template bindings rest-name)]))
-
-;; --- quasi-quote evaluator (defmacro bodies) -------------------------------
-;;
-;; Walks a datum tree honoring quasiquote / unquote / unquote-splicing
-;; level semantics:
-;;   - (quasiquote D)        opens a level; recur on D with depth+1
-;;   - (unquote X)           at depth 1, replace with X; deeper, recur
-;;   - (unquote-splicing X)  list-context only; at depth 1 splice elements
-;;     of X into surrounding list (strip #%brackets tag if X is a vec)
-;;
-;; Outside any quasiquote (depth 0) we pass through unchanged — defmacro
-;; bodies that don't use quasiquote (or use it inside-out) behave like
-;; regular safe-template bodies.
-;;
-;; Mirrors Racket's standard semantics: only the OUTERMOST unquote at the
-;; right level fires; deeper levels stay as data.
-
-(define (qq-eval datum)
-  (qq-walk datum 0))
-
-(define (qq-walk datum depth)
-  (cond
-    [(and (pair? datum) (eq? (car datum) 'quasiquote)
-          (pair? (cdr datum)) (null? (cddr datum)))
-     (cond
-       [(zero? depth)
-        ;; Top-level quasiquote: enter, return raw payload (don't re-wrap).
-        (qq-walk (cadr datum) (+ depth 1))]
-       [else
-        ;; Nested quasiquote inside an outer quasiquote: keep as data
-        ;; but recur into payload at depth+1.
-        (list 'quasiquote (qq-walk (cadr datum) (+ depth 1)))])]
-    [(and (pair? datum) (eq? (car datum) 'unquote)
-          (pair? (cdr datum)) (null? (cddr datum)))
-     (cond
-       [(zero? depth)
-        ;; Stray unquote at top level — pass through (no error; user might
-        ;; want (unquote x) as data in a non-QQ body).
-        (list 'unquote (qq-walk (cadr datum) depth))]
-       [(= depth 1)
-        ;; Fire: return payload as data.
-        (cadr datum)]
-       [else
-        ;; Nested: stay as (unquote ...) but recur with depth-1.
-        (list 'unquote (qq-walk (cadr datum) (- depth 1)))])]
-    [(and (pair? datum) (eq? (car datum) 'unquote-splicing)
-          (pair? (cdr datum)) (null? (cddr datum)))
-     ;; At top level, an unquote-splicing outside a list context is an
-     ;; error; otherwise, walking is done by qq-walk-list below. We hit
-     ;; this case only via direct recursion (not list-walk), so pass
-     ;; through respecting depth.
-     (cond
-       [(zero? depth)
-        (list 'unquote-splicing (qq-walk (cadr datum) depth))]
-       [(= depth 1)
-        (error 'beagle
-               "unquote-splicing not in list context: ~v"
-               datum)]
-       [else
-        (list 'unquote-splicing (qq-walk (cadr datum) (- depth 1)))])]
-    [(pair? datum)
-     (cond
-       [(zero? depth)
-        ;; Outside any quasiquote: walk children looking for quasiquote
-        ;; openings.
-        (cons (qq-walk (car datum) depth) (qq-walk (cdr datum) depth))]
-       [else
-        ;; Inside a quasiquote: walk as a list, allowing splice.
-        (qq-walk-list datum depth)])]
-    [else datum]))
-
-;; Walks a list inside a quasiquote at the given depth, handling
-;; unquote-splicing inline. If the list head is `#%brackets`, preserves
-;; the tag so the surrounding bracketed-vec semantics survive.
-(define (qq-walk-list datum depth)
-  (cond
-    [(null? datum) '()]
-    [(not (pair? datum))
-     ;; improper tail
-     (qq-walk datum depth)]
-    [else
-     (define head (car datum))
-     (define rest (cdr datum))
-     (cond
-       [(and (pair? head) (eq? (car head) 'unquote-splicing)
-             (pair? (cdr head)) (null? (cddr head)))
-        (cond
-          [(= depth 1)
-           (define spliced-source (cadr head))
-           (define splice-elems (qq-splice-elements spliced-source))
-           (append splice-elems (qq-walk-list rest depth))]
-          [else
-           (cons (list 'unquote-splicing (qq-walk (cadr head) (- depth 1)))
-                 (qq-walk-list rest depth))])]
-       [else
-        (cons (qq-walk head depth) (qq-walk-list rest depth))])]))
-
-;; Extract the elements of a splice source. Bracketed vecs splice their
-;; elements (strip #%brackets tag); plain lists splice as-is.
-(define (qq-splice-elements v)
-  (cond
-    [(and (pair? v) (eq? (car v) BRACKET-TAG)) (cdr v)]
-    [(list? v) v]
-    [else
-     (error 'beagle
-            "unquote-splicing: expected list or vec, got ~v" v)]))
 
 (define (make-bindings fixed-params fixed-args rest-name rest-args)
   (define h (make-hash))
@@ -694,5 +537,4 @@
  program-macro-derived-table
  make-root-ctx
  push-ctx
- format-expansion-chain
- check-datum-contract)
+ format-expansion-chain)

@@ -16,6 +16,7 @@
 
 (require rackunit
          racket/file
+         (only-in racket/list count)
          (only-in beagle/lang/reader-impl beagle-read)
          (only-in beagle/private/expand-tool
                   read-file-datums datum->beagle-src expand-datums))
@@ -105,8 +106,9 @@
        #:exists 'truncate/replace)
      (define out (expand-datums tmp))
      ;; the macro use expanded
-     (check-true (and (member '(do (f 1) (f 1)) out) #t)
+     (check-true (and (member '(f 1) out) #t)
                  (format "twice did not expand as expected; got: ~s" out))
+     (check-equal? (count (lambda (form) (equal? form '(f 1))) out) 2)
      ;; the regex + reader-conditional neighbours are preserved as tags
      (check-true (and (member '(def r (#%regex "a.*b")) out) #t))
      ;; every expanded form renders to re-readable surface
@@ -114,4 +116,17 @@
        (define rendered (datum->beagle-src form))
        (check-not-exn (lambda () (beagle-read (open-input-string rendered)))
                       (format "expanded form did not re-read: ~a" rendered))))
+   (lambda () (delete-file tmp))))
+
+(test-case "expand-datums rejects the removed macro definition surface"
+  (define tmp (make-temporary-file "exp-legacy-macro-~a.bclj"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file tmp
+       (lambda (o)
+         (display "#lang beagle/clj\n(define-macro proc old [x] x)\n" o))
+       #:exists 'truncate/replace)
+     (check-exn #rx"define-macro.*defmacro"
+                (lambda () (expand-datums tmp))))
    (lambda () (delete-file tmp))))

@@ -533,9 +533,10 @@
 
 ;; --- macros ----------------------------------------------------------------
 
-(test-case "safe macro expansion"
+(test-case "procedural macro expansion"
   (define p (parse-prog
-             `(defmacro inc1 ,(br 'x) (+ x 1))
+             `(defmacro inc1 ,(br 'x)
+                (quasiquote (+ (unquote x) 1)))
              '(def y (inc1 5))))
   (define f (car (program-forms p)))
   (check-true (def-form? f))
@@ -590,7 +591,8 @@
 
 (test-case "macro with &rest expands binding remaining args as a list"
   (define p (parse-prog
-             `(defmacro debug ,(br '& 'xs) (println xs))
+             `(defmacro debug ,(br '& 'xs)
+                (list (quote println) (apply vec xs)))
              '(def y (debug 1 2 3))))
   (define f (car (program-forms p)))
   (check-true (def-form? f))
@@ -601,7 +603,7 @@
 
 (test-case "macro &rest with splice inlines elements"
   (define p (parse-prog
-             `(defmacro call-it ,(br 'f '& 'args) (f (splice args)))
+             `(defmacro call-it ,(br 'f '& 'args) (apply list f args))
              '(def y (call-it + 1 2 3))))
   (define f (car (program-forms p)))
   (define value (def-form-value f))
@@ -616,120 +618,40 @@
 
 ;; --- macro hygiene --------------------------------------------------------
 
-(test-case "safe macro: let binder is renamed to prevent capture"
+(test-case "procedural macro: let binder is renamed to prevent capture"
   (define p (parse-prog
-             `(defmacro with-temp ,(br 'val 'body) (let ,(br 'x 'val) body))
+             `(defmacro with-temp ,(br 'val 'body)
+                ,(list 'quasiquote
+                       (list 'let
+                             (br 'x (list 'unquote 'val))
+                             (list 'unquote 'body))))
              '(def y (with-temp 1 42))))
   (define f (car (program-forms p)))
   (define val (def-form-value f))
   (check-true (let-form? val))
   (check-false (eq? (let-binding-name (car (let-form-bindings val))) 'x)))
 
-(test-case "safe macro: fn param is renamed"
+(test-case "procedural macro: fn param is renamed"
   (define p (parse-prog
-             `(defmacro make-fn ,(br 'body) (fn ,(br 'x) body))
+             `(defmacro make-fn ,(br 'body)
+                ,(list 'quasiquote
+                       (list 'fn (br 'x) (list 'unquote 'body))))
              '(def f (make-fn 42))))
   (define f (car (program-forms p)))
   (define val (def-form-value f))
   (check-true (fn-form? val))
   (check-false (eq? (param-name (car (fn-form-params val))) 'x)))
 
-(test-case "safe macro: no binders means no rename"
+(test-case "procedural macro: no binders means no rename"
   (define p (parse-prog
-             `(defmacro inc1 ,(br 'x) (+ x 1))
+             `(defmacro inc1 ,(br 'x)
+                (quasiquote (+ (unquote x) 1)))
              '(def y (inc1 5))))
   (define f (car (program-forms p)))
   (define val (def-form-value f))
   (check-true (call-form? val))
   (check-eq? (call-form-fn val) '+)
   (check-equal? (call-form-args val) '(5 1)))
-
-;; --- procedural macros ------------------------------------------------------
-
-(test-case "proc macro: basic expansion"
-  (define p (parse-prog
-             `(define-macro proc make-const
-                ,(br 'name '#%: 'Symbol 'val '#%: 'Expr) -> Form
-                (list 'def name val))
-             '(make-const x 42)))
-  (define f (car (program-forms p)))
-  (check-true (def-form? f))
-  (check-eq? (def-form-name f) 'x)
-  (check-equal? (def-form-value f) 42))
-
-(test-case "proc macro: quasiquote in body"
-  (define p (parse-prog
-             `(define-macro proc make-def
-                ,(br 'name '#%: 'Symbol 'val '#%: 'Expr) -> Form
-                (quasiquote (def (unquote name) (+ (unquote val) 1))))
-             '(make-def y 10)))
-  (define f (car (program-forms p)))
-  (check-true (def-form? f))
-  (check-eq? (def-form-name f) 'y)
-  (define value (def-form-value f))
-  (check-true (call-form? value))
-  (check-eq? (call-form-fn value) '+)
-  (check-equal? (call-form-args value) '(10 1)))
-
-(test-case "proc macro: generate multiple forms via (Vec Form) splices top-level"
-  (define p (parse-prog
-             `(define-macro proc gen-pair
-                ,(br 'a '#%: 'Symbol 'b '#%: 'Symbol) -> (Vec Form)
-                (list (list 'def a 1) (list 'def b 2)))
-             '(gen-pair x y)))
-  (define forms (program-forms p))
-  (check-equal? (length forms) 2)
-  (check-true (def-form? (car forms)))
-  (check-eq? (def-form-name (car forms)) 'x)
-  (check-true (def-form? (cadr forms)))
-  (check-eq? (def-form-name (cadr forms)) 'y))
-
-(test-case "proc macro: input contract rejects bad arg type"
-  (check-exn #rx"expected Symbol"
-    (lambda ()
-      (parse-prog
-       `(define-macro proc needs-sym
-          ,(br 'name '#%: 'Symbol) -> Form
-          (list 'def name 1))
-       '(needs-sym 42)))))
-
-(test-case "proc macro: output contract rejects bad output"
-  (check-exn #rx"expected Form"
-    (lambda ()
-      (parse-prog
-       `(define-macro proc bad-output
-          ,(br 'name '#%: 'Symbol) -> Form
-          42)
-       '(bad-output x)))))
-
-(test-case "proc macro: body error gives clear message"
-  (check-exn #rx"macro bad-body: body raised an error"
-    (lambda ()
-      (parse-prog
-       `(define-macro proc bad-body
-          ,(br 'x '#%: 'Symbol) -> Form
-          (error "boom"))
-       '(bad-body y)))))
-
-(test-case "proc macro: nested expansion error shows both macro names"
-  (check-exn #rx"macro inner:.*body raised an error"
-    (lambda ()
-      (parse-prog
-       `(define-macro proc inner
-          ,(br 'x '#%: 'Symbol) -> Form
-          (error "inner boom"))
-       `(define-macro proc outer
-          ,(br 'x '#%: 'Symbol) -> Form
-          (list 'inner x))
-       '(outer y)))))
-
-;; The previous "proc macro: expansion goes through type checker" test
-;; emitted `(def name : Int val)` from a macro body and asserted the
-;; expanded form carried a parsed type. Inline `: T` on def is rejected
-;; at parse time; the canonical postfix marker is `NAME: TYPE`. The claim form
-;; that briefly carried out-of-band types has been deleted entirely. To
-;; restore this test, emit `(def z: Int 99)` from the macro body and
-;; assert the sig-registry binds z to Int.
 
 (test-case "trace handler captures nested macro expansion steps"
   (define reg (make-macro-registry))

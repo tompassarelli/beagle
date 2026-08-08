@@ -248,10 +248,7 @@
 ;; --- 5. stray (unquote …) outside (quasiquote …) --------------------------
 ;;
 ;; A defmacro body like `(defmacro bad [x] (unquote x))` has unquote OUTSIDE
-;; any quasiquote. The qq-eval pass treats stray unquote at depth 0 as
-;; "pass-through, don't fire", so the expansion produces a residual
-;; (unquote ARG) form. That form is then handed to the parser, which
-;; rejects it with a clear actionable error pointing at quasiquote.
+;; any quasiquote. The compile-time evaluator rejects it directly.
 ;;
 ;; The check below confirms (a) registration succeeds silently (lazy),
 ;; (b) the first expansion through the parser surfaces the error, and
@@ -268,9 +265,9 @@
      (list 'defmacro 'bad (br 'x) bad-body)))
   (check-true (program? p1)
               "stray unquote alone in a defmacro body should register without error")
-  ;; First expansion surfaces the actionable parser error.
+  ;; First expansion surfaces the actionable evaluator error.
   (check-exn
-    #rx"unquote.*outside quasiquote"
+    #rx"unquote.*outside.*quasiquote"
     (lambda ()
       (parse-prog
        (list 'defmacro 'bad (br 'x) bad-body)
@@ -279,16 +276,15 @@
 ;; --- bonus: stray (unquote-splicing …) at expansion site ------------------
 ;;
 ;; The companion case: a defmacro that emits a stray unquote-splicing
-;; outside any list context. qq-walk routes this through the
-;; unquote-splicing branch with the "not in list context" guard.
+;; outside any list context.
 
-(test-case "hygiene: (unquote-splicing …) at top of body errors during qq-eval"
+(test-case "hygiene: (unquote-splicing …) at top of body errors during evaluation"
   (define reg (make-macro-registry))
   ;; (defmacro splat [xs] `,@xs) — quasiquote then immediate splice at level 1,
-  ;; not in a list context. Should error during qq-eval.
+  ;; not in a list context. Evaluation rejects it.
   (register-macro! reg 'splat 'defmacro '(xs)
                    (list 'quasiquote
                          (list 'unquote-splicing 'xs)))
   (check-exn
-    #rx"unquote-splicing not in list context"
+    #rx"unquote-splicing.*(surrounding list|list context)"
     (lambda () (expand-fully reg `(splat ,(br 1 2 3))))))

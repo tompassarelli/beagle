@@ -108,9 +108,10 @@
 
 ;; --- macro expansion shows up in emitted code ------------------------------
 
-(test-case "safe macro expansion emits as direct Clojure"
+(test-case "procedural macro expansion emits as direct Clojure"
   (define out (compile
-               `(defmacro inc1 ,(br 'x) (+ x 1))
+               `(defmacro inc1 ,(br 'x)
+                  (quasiquote (+ (unquote x) 1)))
                '(defn use [n] (inc1 n))))
   (check-true (matches? #rx"\\(\\+ n 1\\)" out)))
 
@@ -178,7 +179,7 @@
 
 (test-case "macro &rest with splice emits as expected Clojure call"
   (define out (compile
-               `(defmacro call-it ,(br 'f '& 'args) (f (splice args)))
+               `(defmacro call-it ,(br 'f '& 'args) (apply list f args))
                '(defn use [] (call-it + 1 2 3))))
   (check-true (matches? #rx"\\(\\+ 1 2 3\\)" out)))
 
@@ -209,9 +210,13 @@
 
 ;; --- macro hygiene in emitted code ----------------------------------------
 
-(test-case "safe macro hygiene: emitted let doesn't shadow outer binding"
+(test-case "procedural macro hygiene: emitted let doesn't shadow outer binding"
   (define out (compile
-               `(defmacro with-temp ,(br 'val 'body) (let ,(br 'x 'val) body))
+               `(defmacro with-temp ,(br 'val 'body)
+                  ,(list 'quasiquote
+                         (list 'let
+                               (br 'x (list 'unquote 'val))
+                               (list 'unquote 'body))))
                '(def y (let [x 42] (with-temp 1 x)))))
   (check-true (matches? #rx"\\(let \\[x 42\\]" out))
   (check-false (matches? #rx"\\(let \\[x 1\\]" out)))

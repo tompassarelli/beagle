@@ -153,7 +153,7 @@
   (check-true (string-contains? out "url = \"github:NixOS/nixpkgs/nixos-unstable\";"))
   (check-false (string-contains? out "(flake ")))
 
-(test-case "nix-macro round-trip — safe macro expansion in nix"
+(test-case "nix-macro round-trip — procedural macro expansion in nix"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-macro.bnix")))
   (check-true (string-contains? out "lib.mkEnableOption \"Example service\""))
   (check-true (string-contains? out "lib.mkIf cfg.enable"))
