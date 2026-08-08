@@ -123,27 +123,6 @@
 (defn lookup-macro [reg ^String name]
   (get (deref reg) name))
 
-(defn ^Boolean check-datum-contract [datum ^String contract ^String macro-name ^String position]
-  (cond
-  (= contract "Syntax") true
-  (= contract "Symbol") (if (string? datum) true (do
-  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Symbol\n"))
-  false))
-  (= contract "String") (if (string? datum) true (do
-  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected String\n"))
-  false))
-  (= contract "Int") (if (number? datum) true (do
-  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Int\n"))
-  false))
-  (= contract "Bool") (if (boolean? datum) true (do
-  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Bool\n"))
-  false))
-  (= contract "Expr") true
-  (= contract "Form") (if (and (datum-pair? datum) (string? (datum-car datum))) true (do
-  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Form\n"))
-  false))
-  :else true))
-
 (defn make-bindings [fixed-params fixed-args rest-name rest-args]
   (let [base (reduce (fn [acc i] (assoc acc (nth fixed-params i) (nth fixed-args i))) {} (range (count fixed-params)))]
   (if (not (nil? rest-name)) (assoc base rest-name rest-args) base)))
@@ -561,35 +540,6 @@
   (datum-pair? template) (mapv (fn [item] (rename-in-template item renames)) template)
   :else template))
 
-(defn ^Boolean qq-form? [d ^String tag]
-  (and (datum-pair? d) (= (count d) 2) (= (datum-car d) tag)))
-
-(defn qq-splice-elements [v]
-  (cond
-  (and (datum-pair? v) (= (datum-car v) BRACKET-TAG)) (datum-cdr v)
-  (vector? v) v
-  :else (do
-  (selfhost.rt/eprint "beagle: unquote-splicing: expected list or vec\n")
-  [])))
-
-(defn qq-eval [datum]
-  (letfn [(walk [d depth] (cond
-  (qq-form? d "quasiquote") (if (= depth 0) (walk (nth d 1) (+ depth 1)) ["quasiquote" (walk (nth d 1) (+ depth 1))])
-  (qq-form? d "unquote") (cond
-  (= depth 0) ["unquote" (walk (nth d 1) depth)]
-  (= depth 1) (nth d 1)
-  :else ["unquote" (walk (nth d 1) (- depth 1))])
-  (qq-form? d "unquote-splicing") (cond
-  (= depth 0) ["unquote-splicing" (walk (nth d 1) depth)]
-  (= depth 1) (do
-  (selfhost.rt/eprint "beagle: unquote-splicing not in list context\n")
-  d)
-  :else ["unquote-splicing" (walk (nth d 1) (- depth 1))])
-  (datum-pair? d) (if (= depth 0) (mapv (fn [item] (walk item depth)) d) (walk-list d depth))
-  :else d))
-          (walk-list [d depth] (reduce (fn [acc item] (if (and (qq-form? item "unquote-splicing") (= depth 1)) (into acc (qq-splice-elements (nth item 1))) (conj acc (walk item depth)))) [] d))]
-  (walk datum 0)))
-
 (defn hygienize-template! [template fixed-params rest-param reg]
   (let [macro-params (if (nil? rest-param) fixed-params (into [rest-param] fixed-params))
    binders (collect-template-binders template macro-params)
@@ -710,12 +660,6 @@
   (register-macro! reg "inc1" "safe" ["x"] ["+" "x" 1])
   (let [result (expand-fully! reg ["println" ["inc1" 5]] 0 nil)]
   (expect! "expand-fully!: non-macro forms preserved" (= result ["println" ["+" 5 1]]))))
-  (expect! "qq: quasiquote unwraps at depth 1" (= (qq-eval ["quasiquote" ["f" "x"]]) ["f" "x"]))
-  (expect! "qq: unquote fires at depth 1" (= (qq-eval ["quasiquote" ["f" ["unquote" 42]]]) ["f" 42]))
-  (expect! "qq: unquote-splicing splices plain list" (= (qq-eval ["quasiquote" ["f" ["unquote-splicing" [1 2]] "y"]]) ["f" 1 2 "y"]))
-  (expect! "qq: unquote-splicing strips bracket tag" (= (qq-eval ["quasiquote" ["f" ["unquote-splicing" [BRACKET-TAG 1 2]]]]) ["f" 1 2]))
-  (expect! "qq: nested quasiquote stays data" (= (qq-eval ["quasiquote" ["quasiquote" ["unquote" "x"]]]) ["quasiquote" ["unquote" "x"]]))
-  (expect! "qq: depth-0 passthrough (no quasiquote in body)" (= (qq-eval ["let" ["x" 1] "x"]) ["let" ["x" 1] "x"]))
   (let [reg (make-macro-registry)]
   (reset-lowering-counter!)
   (register-macro! reg "my-when" "defmacro" ["test" "&" "body"] ["quasiquote" ["if" ["unquote" "test"] ["do" ["unquote-splicing" "body"]] "nil"]])
@@ -743,11 +687,6 @@
   (expect! "free ref to module def rewritten to __hyg alias" (= result ["helper__hyg" 5]))
   (expect! "alias table records helper -> helper__hyg" (= (hygiene-aliases) {"helper" "helper__hyg"})))
   (set-hygiene-context! nil))
-  (expect! "contract: Symbol accepts string" (check-datum-contract "x" "Symbol" "test" "arg"))
-  (expect! "contract: Symbol rejects number" (not (check-datum-contract 42 "Symbol" "test" "arg")))
-  (expect! "contract: Form accepts list with symbol head" (check-datum-contract ["defn" "foo"] "Form" "test" "arg"))
-  (expect! "contract: Form rejects non-list" (not (check-datum-contract 42 "Form" "test" "arg")))
-  (expect! "contract: Syntax accepts anything" (check-datum-contract 42 "Syntax" "test" "arg"))
   (expect! "strip: bracket tag removed" (= (strip-reader-tags [BRACKET-TAG "a" "b"]) ["a" "b"]))
   (expect! "strip: map tag -> hash" (= (strip-reader-tags [MAP-TAG "k" "v"]) ["hash" "k" "v"]))
   (expect! "strip: set tag -> set" (= (strip-reader-tags [SET-TAG "a"]) ["set" "a"]))

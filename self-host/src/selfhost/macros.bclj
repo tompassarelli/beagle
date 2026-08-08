@@ -183,43 +183,6 @@
 (defn lookup-macro [reg: Any name: String] -> Any
   (get (deref reg) name))
 
-;; --- contract checking -------------------------------------------------------
-
-(defn check-datum-contract
-  [datum: Any
-   contract: String
-   macro-name: String
-   position: String] -> Bool
-  (cond
-    (= contract "Syntax") true
-    (= contract "Symbol")
-      (if (string? datum) true
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " macro-name ": " position ": expected Symbol\n"))
-            false))
-    (= contract "String")
-      (if (string? datum) true
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " macro-name ": " position ": expected String\n"))
-            false))
-    (= contract "Int")
-      (if (number? datum) true
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " macro-name ": " position ": expected Int\n"))
-            false))
-    (= contract "Bool")
-      (if (boolean? datum) true
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " macro-name ": " position ": expected Bool\n"))
-            false))
-    (= contract "Expr") true
-    (= contract "Form")
-      (if (and (datum-pair? datum) (string? (datum-car datum))) true
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " macro-name ": " position ": expected Form\n"))
-            false))
-    :else true))
-
 ;; --- bindings ----------------------------------------------------------------
 
 (defn make-bindings
@@ -1033,60 +996,6 @@
       (mapv (fn [item: Any] -> Any (rename-in-template item renames)) template)
     :else template))
 
-;; --- quasi-quote evaluator (defmacro bodies) — macros.rkt qq-eval -------------
-;; Walks a datum tree honoring quasiquote / unquote / unquote-splicing level
-;; semantics; only the OUTERMOST unquote at the right level fires. Outside any
-;; quasiquote (depth 0), pass through unchanged.
-
-(defn qq-form? [d: Any tag: String] -> Bool
-  (and (datum-pair? d) (= (count d) 2) (= (datum-car d) tag)))
-
-;; Bracketed vecs splice their elements (strip the tag); plain lists as-is.
-(defn qq-splice-elements [v: Any] -> Any
-  (cond
-    (and (datum-pair? v) (= (datum-car v) BRACKET-TAG)) (datum-cdr v)
-    (vector? v) v
-    :else (do (selfhost.rt/eprint
-                "beagle: unquote-splicing: expected list or vec\n")
-              [])))
-
-(defn qq-eval [datum: Any] -> Any
-  (letfn [(walk [d: Any depth: Int] -> Any
-            (cond
-              (qq-form? d "quasiquote")
-                (if (= depth 0)
-                  ;; Top-level quasiquote: enter, return raw payload.
-                  (walk (nth d 1) (+ depth 1))
-                  ;; Nested: keep as data, recur at depth+1.
-                  ["quasiquote" (walk (nth d 1) (+ depth 1))])
-              (qq-form? d "unquote")
-                (cond
-                  (= depth 0) ["unquote" (walk (nth d 1) depth)]
-                  (= depth 1) (nth d 1)
-                  :else ["unquote" (walk (nth d 1) (- depth 1))])
-              (qq-form? d "unquote-splicing")
-                (cond
-                  (= depth 0) ["unquote-splicing" (walk (nth d 1) depth)]
-                  (= depth 1)
-                    (do (selfhost.rt/eprint
-                          "beagle: unquote-splicing not in list context\n")
-                        d)
-                  :else ["unquote-splicing" (walk (nth d 1) (- depth 1))])
-              (datum-pair? d)
-                (if (= depth 0)
-                  (mapv (fn [item: Any] -> Any (walk item depth)) d)
-                  (walk-list d depth))
-              :else d))
-          ;; List inside a quasiquote: handle unquote-splicing inline (a
-          ;; BRACKET-TAG head is just an element, so vec semantics survive).
-          (walk-list [d: Any depth: Int] -> Any
-            (reduce (fn [acc: Any item: Any] -> Any
-                      (if (and (qq-form? item "unquote-splicing") (= depth 1))
-                        (into acc (qq-splice-elements (nth item 1)))
-                        (conj acc (walk item depth))))
-                    [] d))]
-    (walk datum 0)))
-
 ;; macros.rkt hygienize-template. Binders rename to fresh-lowered-sym! temps;
 ;; free refs to module defs rename to memoized __hyg aliases (inert unless
 ;; parse set the hygiene context). Racket's collectors cons (reverse-discovery
@@ -1326,23 +1235,6 @@
       (expect! "expand-fully!: non-macro forms preserved"
         (= result ["println" ["+" 5 1]]))))
 
-  ;; --- test: qq-eval (defmacro quasiquote semantics) ---
-  (expect! "qq: quasiquote unwraps at depth 1"
-    (= (qq-eval ["quasiquote" ["f" "x"]]) ["f" "x"]))
-  (expect! "qq: unquote fires at depth 1"
-    (= (qq-eval ["quasiquote" ["f" ["unquote" 42]]]) ["f" 42]))
-  (expect! "qq: unquote-splicing splices plain list"
-    (= (qq-eval ["quasiquote" ["f" ["unquote-splicing" [1 2]] "y"]])
-       ["f" 1 2 "y"]))
-  (expect! "qq: unquote-splicing strips bracket tag"
-    (= (qq-eval ["quasiquote" ["f" ["unquote-splicing" [BRACKET-TAG 1 2]]]])
-       ["f" 1 2]))
-  (expect! "qq: nested quasiquote stays data"
-    (= (qq-eval ["quasiquote" ["quasiquote" ["unquote" "x"]]])
-       ["quasiquote" ["unquote" "x"]]))
-  (expect! "qq: depth-0 passthrough (no quasiquote in body)"
-    (= (qq-eval ["let" ["x" 1] "x"]) ["let" ["x" 1] "x"]))
-
   ;; --- test: defmacro end-to-end (hygiene + qq) ---
   (let [reg (make-macro-registry)]
     (reset-lowering-counter!)
@@ -1427,18 +1319,6 @@
       (expect! "alias table records helper -> helper__hyg"
         (= (hygiene-aliases) {"helper" "helper__hyg"})))
     (set-hygiene-context! nil))
-
-  ;; --- test: contract checking ---
-  (expect! "contract: Symbol accepts string"
-    (check-datum-contract "x" "Symbol" "test" "arg"))
-  (expect! "contract: Symbol rejects number"
-    (not (check-datum-contract 42 "Symbol" "test" "arg")))
-  (expect! "contract: Form accepts list with symbol head"
-    (check-datum-contract ["defn" "foo"] "Form" "test" "arg"))
-  (expect! "contract: Form rejects non-list"
-    (not (check-datum-contract 42 "Form" "test" "arg")))
-  (expect! "contract: Syntax accepts anything"
-    (check-datum-contract 42 "Syntax" "test" "arg"))
 
   ;; --- test: strip-reader-tags ---
   (expect! "strip: bracket tag removed"
