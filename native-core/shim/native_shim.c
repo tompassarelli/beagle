@@ -5691,6 +5691,58 @@ native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
   return result;
 }
 
+static native_byte_source *native_byte_source_header(native_arena *arena,
+                                                     const uint8_t *data,
+                                                     int64_t length) {
+  native_byte_source *header = (native_byte_source *)native_arena_alloc(
+      arena, sizeof(native_byte_source), _Alignof(native_byte_source));
+  header->data = data;
+  header->length = length;
+  return header;
+}
+
+native_byte_source *native_byte_source_borrow(native_arena *arena,
+                                              const uint8_t *data,
+                                              int64_t length) {
+  if ((length < INT64_C(0)) || ((length > INT64_C(0)) && (data == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return native_byte_source_header(arena, data, length);
+}
+
+int64_t native_byte_source_length(const native_byte_source *source) {
+  if (source == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return source->length;
+}
+
+int64_t native_byte_source_at(const native_byte_source *source, int64_t index) {
+  if (source == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((index < INT64_C(0)) || (index >= source->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  /* Zero extension, not sign extension: an octet >= 0x80 must read as a
+     positive value or every CRC and length field decodes wrong. */
+  return (int64_t)(uint64_t)source->data[index];
+}
+
+native_byte_source *native_byte_source_slice(native_arena *arena,
+                                             const native_byte_source *source,
+                                             int64_t start, int64_t end) {
+  if (source == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((start < INT64_C(0)) || (end < start) || (end > source->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  return native_byte_source_header(
+      arena, source->data == NULL ? NULL : source->data + (size_t)start,
+      end - start);
+}
+
 #define NATIVE_VALUE_TEXT_MAX_DEPTH 128U
 #define NATIVE_VALUE_FLOAT_BUFFER 64U
 
@@ -8106,6 +8158,24 @@ uint64_t native_utf8_decode(native_arena *arena, const native_vec *source) {
   result = native_text_alloc(arena, (uint64_t)source->length, &destination);
   for (index = INT64_C(0); index < source->length; index++) {
     destination[index] = native_vector_byte(source, index);
+  }
+  if (!native_utf8_valid(destination, (uint64_t)source->length)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return result;
+}
+
+uint64_t native_utf8_decode_source(native_arena *arena,
+                                   const native_byte_source *source) {
+  uint8_t *destination;
+  uint64_t result;
+  int64_t index;
+  if ((source == NULL) || (source->length < INT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_text_alloc(arena, (uint64_t)source->length, &destination);
+  for (index = INT64_C(0); index < source->length; index++) {
+    destination[index] = source->data[index];
   }
   if (!native_utf8_valid(destination, (uint64_t)source->length)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);

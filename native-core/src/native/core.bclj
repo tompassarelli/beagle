@@ -306,6 +306,9 @@
 (defunion CodecPrimitiveOpV0
   (Utf8EncodeV0 [arena-id: NativeId source-id: NativeId])
   (Utf8DecodeV0 [arena-id: NativeId source-id: NativeId])
+  ;; Same semantics as Utf8DecodeV0 over a borrowed byte source: the octets are
+  ;; read in place, so only the returned Text is allocated.
+  (Utf8DecodeSourceV0 [arena-id: NativeId source-id: NativeId])
   (Sha256BytesV0 [arena-id: NativeId source-id: NativeId])
   (FloatToBitsV0 [source-id: NativeId])
   (FloatFromBitsV0 [source-id: NativeId]))
@@ -486,6 +489,20 @@
   (VecReverseInstructionV0
     [result: SsaValueV0
      source-id: NativeId
+     arena-id: NativeId])
+  ;; A byte source is a borrowed read-only octet range: one handle, no owned
+  ;; storage. Length is a header read, get zero-extends one octet to I64, and
+  ;; slice aliases the same octets behind a fresh handle.
+  (ByteSourceLengthInstructionV0 [result: SsaValueV0 source-id: NativeId])
+  (ByteSourceGetInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     index-id: NativeId])
+  (ByteSourceSliceInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     start-id: NativeId
+     end-id: NativeId
      arena-id: NativeId])
   ;; Sort borrows the source and orders a fresh vector through the frozen
   ;; element descriptor. No source or runtime comparator crosses this seam.
@@ -928,6 +945,11 @@
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id)
      (ssavaluev0-id result)]
     [(VecReverseInstructionV0 result source-id arena-id)
+     (ssavaluev0-id result)]
+    [(ByteSourceLengthInstructionV0 result source-id) (ssavaluev0-id result)]
+    [(ByteSourceGetInstructionV0 result source-id index-id)
+     (ssavaluev0-id result)]
+    [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)
      (ssavaluev0-id result)]
     [(VecSortInstructionV0 result source-id arena-id element-type)
      (ssavaluev0-id result)]
@@ -1476,6 +1498,10 @@
     [(VecConcatInstruction result left-id right-id arena-id) true]
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
     [(VecReverseInstructionV0 result source-id arena-id) true]
+    [(ByteSourceLengthInstructionV0 result source-id) true]
+    [(ByteSourceGetInstructionV0 result source-id index-id) true]
+    [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)
+     true]
     [(VecSortInstructionV0 result source-id arena-id element-type)
      (id-in? known-types element-type)]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
@@ -1688,6 +1714,7 @@
   (match operation
     [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]
+    [(Utf8DecodeSourceV0 arena-id source-id) [arena-id source-id]]
     [(Sha256BytesV0 arena-id source-id) [arena-id source-id]]
     [(FloatToBitsV0 source-id) [source-id]]
     [(FloatFromBitsV0 source-id) [source-id]]))
@@ -1734,6 +1761,11 @@
      [arena-id source-id start-id end-id]]
     [(VecReverseInstructionV0 result source-id arena-id)
      [arena-id source-id]]
+    [(ByteSourceLengthInstructionV0 result source-id) [source-id]]
+    [(ByteSourceGetInstructionV0 result source-id index-id)
+     [source-id index-id]]
+    [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)
+     [arena-id source-id start-id end-id]]
     [(VecSortInstructionV0 result source-id arena-id element-type)
      [arena-id source-id]]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
@@ -1886,6 +1918,10 @@
     [(VecConcatInstruction result left-id right-id arena-id) true]
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
     [(VecReverseInstructionV0 result source-id arena-id) true]
+    [(ByteSourceLengthInstructionV0 result source-id) true]
+    [(ByteSourceGetInstructionV0 result source-id index-id) true]
+    [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)
+     true]
     [(VecSortInstructionV0 result source-id arena-id element-type) true]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality) true]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]

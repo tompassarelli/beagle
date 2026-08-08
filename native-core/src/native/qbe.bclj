@@ -277,6 +277,12 @@
     [(VecConcatInstruction value) (core/vecconcatinstruction-result instruction)]
     [(VecSliceInstructionV0 value)
      (core/vecsliceinstructionv0-result instruction)]
+    [(ByteSourceLengthInstructionV0 value)
+     (core/bytesourcelengthinstructionv0-result instruction)]
+    [(ByteSourceGetInstructionV0 value)
+     (core/bytesourcegetinstructionv0-result instruction)]
+    [(ByteSourceSliceInstructionV0 value)
+     (core/bytesourcesliceinstructionv0-result instruction)]
     [(VecReverseInstructionV0 value)
      (core/vecreverseinstructionv0-result instruction)]
     [(VecSortInstructionV0 value)
@@ -1021,6 +1027,9 @@
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) false]
     [(VecSliceInstructionV0 value) false]
+    [(ByteSourceLengthInstructionV0 value) false]
+    [(ByteSourceGetInstructionV0 value) false]
+    [(ByteSourceSliceInstructionV0 value) false]
     [(VecReverseInstructionV0 value) false]
     [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
@@ -1488,6 +1497,9 @@
              (core/vecreverseinstructionv0-source-id instruction))
            ", l " (vector-stride context vector-type)
            ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(ByteSourceLengthInstructionV0 value) ""]
+      [(ByteSourceGetInstructionV0 value) ""]
+      [(ByteSourceSliceInstructionV0 value) ""]
       [(VecSortInstructionV0 value) ""]
       [(MapLiteralInstructionV0 value) ""]
       [(SetLiteralInstructionV0 value) ""]
@@ -1913,6 +1925,9 @@
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) true]
     [(VecSliceInstructionV0 value) true]
+    [(ByteSourceLengthInstructionV0 value) false]
+    [(ByteSourceGetInstructionV0 value) false]
+    [(ByteSourceSliceInstructionV0 value) false]
     [(VecReverseInstructionV0 value) true]
     [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
@@ -2001,6 +2016,7 @@
   (cond
     (instance? native.core.Utf8EncodeV0 operation) "utf8-encode"
     (instance? native.core.Utf8DecodeV0 operation) "utf8-decode"
+    (instance? native.core.Utf8DecodeSourceV0 operation) "utf8-decode-source"
     (instance? native.core.Sha256BytesV0 operation) "sha256-bytes"
     (instance? native.core.FloatToBitsV0 operation) "float-to-bits"
     :else "float-from-bits"))

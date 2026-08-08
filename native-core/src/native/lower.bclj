@@ -693,6 +693,14 @@
   (core/->TypeDef (arena-handle-type-id) "ArenaHandle"
     (core/->ReferenceType (arena-handle-type-id))))
 
+;; Borrowed octets a host handed in. Reference-shaped like the arena handle so
+;; the whole value is one pointer: nothing here owns, copies, or widens storage.
+(defn byte-source-type-id [] -> core/NativeId (type-id "ByteSource"))
+
+(defn byte-source-type [] -> core/TypeDef
+  (core/->TypeDef (byte-source-type-id) "ByteSource"
+    (core/->ReferenceType (byte-source-type-id))))
+
 (defn atom-state-handle-type-id [] -> core/NativeId
   (type-id "AtomStateHandle"))
 
@@ -952,6 +960,9 @@
 
     (= "SpaceId" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
+
+    (= "ByteSource" spelling)
+    (->TypeResolutionV0 (byte-source-type-id) [(byte-source-type)] [] true)
 
     (= "Keyword" spelling)
     (->TypeResolutionV0 (type-id "Keyword") [(keyword-type)] [] true)
@@ -4146,6 +4157,7 @@
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
       (instance? native.core.VecSliceInstructionV0 instruction)
+      (instance? native.core.ByteSourceSliceInstructionV0 instruction)
       (instance? native.core.VecReverseInstructionV0 instruction)
       (instance? native.core.VecSortInstructionV0 instruction)
       (instance? native.core.MapLiteralInstructionV0 instruction)
@@ -4173,6 +4185,7 @@
               (core/codecprimitiveinstructionv0-operation instruction)]
           (or (instance? native.core.Utf8EncodeV0 operation)
             (instance? native.core.Utf8DecodeV0 operation)
+            (instance? native.core.Utf8DecodeSourceV0 operation)
             (instance? native.core.Sha256BytesV0 operation))))
       (and (instance? native.core.ExternCallInstruction instruction)
         (some? (core/externcallinstruction-arena-id instruction)))
@@ -6932,9 +6945,16 @@
             (core/->SsaValueV0 result-id (int-type-id)) value-id))
         result-id (int-type-id) false)
 
+      (same-id? value-type (byte-source-type-id))
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ByteSourceLengthInstructionV0
+            (core/->SsaValueV0 result-id (int-type-id)) value-id))
+        result-id (int-type-id) false)
+
       :else
       (fail-result state
-        "TODO-NATIVE-EMPTY-OPERAND: empty? needs a native vector, map, set, or Text"))))
+        "TODO-NATIVE-EMPTY-OPERAND: empty? needs a native vector, map, set, Text, or ByteSource"))))
 
 (defn lower-empty-predicate
   [types: (Vec core/TypeDef)
@@ -6961,14 +6981,57 @@
               (exprresultv0-value-id measured) zero-id))
           result-id (bool-type-id) false)))))
 
+(defn lower-byte-source-slice
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (let [open-ended: Bool (= 2 (count values))
+        bounds: (Vec core/NativeId)
+        (if open-ended [(nth values 1)] [(nth values 1) (nth values 2)])
+        bound-types: (Vec core/NativeId)
+        (if open-ended [(nth value-types 1)]
+          [(nth value-types 1) (nth value-types 2)])
+        coerced: ArgsResultV0
+        (coerce-values-to-type types owner state bounds bound-types
+          (int-type-id))
+        settled: BodyStateV0 (argsresultv0-state coerced)]
+    (if (state-blocked? settled)
+      (fail-result settled
+        "TODO-NATIVE-SUBVEC-OPERANDS: subvec bounds are not safely narrowable to Int")
+      (let [length-id: core/NativeId (state-id settled owner "byte-subvec-end")
+            measured: BodyStateV0
+            (if open-ended
+              (state-emit (state-bump settled)
+                (core/->ByteSourceLengthInstructionV0
+                  (core/->SsaValueV0 length-id (int-type-id))
+                  (nth values 0)))
+              settled)
+            end-id: core/NativeId
+            (if open-ended length-id (nth (argsresultv0-values coerced) 1))
+            result-id: core/NativeId (state-id measured owner "byte-subvec")]
+        (->ExprResultV0
+          (state-emit (state-bump measured)
+            (core/->ByteSourceSliceInstructionV0
+              (core/->SsaValueV0 result-id (byte-source-type-id))
+              (nth values 0)
+              (nth (argsresultv0-values coerced) 0)
+              end-id
+              (arena-value-id owner)))
+          result-id (byte-source-type-id) false)))))
+
 (defn lower-vector-slice
   [types: (Vec core/TypeDef)
    owner: core/NativeId
    state: BodyStateV0
    values: (Vec core/NativeId)
    value-types: (Vec core/NativeId)] -> ExprResultV0
-  (if (not (and (or (= 2 (count values)) (= 3 (count values)))
-             (vector-type? types (nth value-types 0))))
+  (if (and (or (= 2 (count values)) (= 3 (count values)))
+        (same-id? (nth value-types 0) (byte-source-type-id)))
+    (lower-byte-source-slice types owner state values value-types)
+    (if (not (and (or (= 2 (count values)) (= 3 (count values)))
+               (vector-type? types (nth value-types 0))))
     (fail-result state
       "TODO-NATIVE-SUBVEC-OPERANDS: subvec takes a native vector and one or two Int bounds")
     (let [open-ended: Bool (= 2 (count values))
@@ -7003,7 +7066,7 @@
                 (nth (argsresultv0-values coerced) 0)
                 end-id
                 (arena-value-id owner)))
-            result-id (nth value-types 0) false))))))
+            result-id (nth value-types 0) false)))))))
 
 (defn lower-vector-edge
   [types: (Vec core/TypeDef)
@@ -11983,9 +12046,21 @@
                           (nth values 0))))
                     result-id (text-type-id) false))
 
+                (and (= "utf8-decode" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (byte-source-type-id)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "utf8-decode-source")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CodecPrimitiveInstructionV0
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->Utf8DecodeSourceV0 (arena-value-id owner)
+                          (nth values 0))))
+                    result-id (text-type-id) false))
+
                 (= "utf8-decode" callee)
                 (fail-result current
-                  "TODO-NATIVE-UTF8-DECODE-OPERAND: utf8-decode takes one native Vec Int value")
+                  "TODO-NATIVE-UTF8-DECODE-OPERAND: utf8-decode takes one native Vec Int or ByteSource value")
 
                 (and (= "sha256-bytes" callee) (= 1 (count values))
                   (int-vector-value? types (nth value-types 0)))
@@ -12652,6 +12727,17 @@
                     result-id (int-type-id) false))
 
                 (and (= "count" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (byte-source-type-id)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "byte-source-length")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ByteSourceLengthInstructionV0
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (nth values 0)))
+                    result-id (int-type-id) false))
+
+                (and (= "count" callee) (= 1 (count values))
                   (map-type? types (nth value-types 0)))
                 (let [result-id: core/NativeId (state-id current owner "map-count")]
                   (->ExprResultV0
@@ -12924,6 +13010,20 @@
 
                 (or (= "first" callee) (= "last" callee) (= "peek" callee))
                 (lower-vector-edge types owner current callee values value-types)
+
+                (and (= "nth" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (byte-source-type-id)))
+                (if (not (same-id? (nth value-types 1) (int-type-id)))
+                  (fail-result current
+                    "TODO-NATIVE-NTH-INDEX: the index operand is not a native Int")
+                  (let [result-id: core/NativeId
+                        (state-id current owner "byte-source-get")]
+                    (->ExprResultV0
+                      (state-emit (state-bump current)
+                        (core/->ByteSourceGetInstructionV0
+                          (core/->SsaValueV0 result-id (int-type-id))
+                          (nth values 0) (nth values 1)))
+                      result-id (int-type-id) false)))
 
                 (and (= "nth" callee) (= 2 (count values))
                   (vector-type? types (nth value-types 0)))
@@ -15661,6 +15761,9 @@
     [(Utf8DecodeV0 arena-id source-id)
      (stages/canonical-record "utf8-decode-v0"
        [(id-value arena-id) (id-value source-id)])]
+    [(Utf8DecodeSourceV0 arena-id source-id)
+     (stages/canonical-record "utf8-decode-source-v0"
+       [(id-value arena-id) (id-value source-id)])]
     [(Sha256BytesV0 arena-id source-id)
      (stages/canonical-record "sha256-bytes-v0"
        [(id-value arena-id) (id-value source-id)])]
@@ -15907,6 +16010,26 @@
        (id-value (core/vecsliceinstructionv0-start-id instruction))
        (id-value (core/vecsliceinstructionv0-end-id instruction))
        (id-value (core/vecsliceinstructionv0-arena-id instruction))])
+
+    (instance? native.core.ByteSourceLengthInstructionV0 instruction)
+    (stages/canonical-record "byte-source-length-instruction-v0"
+      [(encode-ssa-value
+         (core/bytesourcelengthinstructionv0-result instruction))
+       (id-value (core/bytesourcelengthinstructionv0-source-id instruction))])
+
+    (instance? native.core.ByteSourceGetInstructionV0 instruction)
+    (stages/canonical-record "byte-source-get-instruction-v0"
+      [(encode-ssa-value (core/bytesourcegetinstructionv0-result instruction))
+       (id-value (core/bytesourcegetinstructionv0-source-id instruction))
+       (id-value (core/bytesourcegetinstructionv0-index-id instruction))])
+
+    (instance? native.core.ByteSourceSliceInstructionV0 instruction)
+    (stages/canonical-record "byte-source-slice-instruction-v0"
+      [(encode-ssa-value (core/bytesourcesliceinstructionv0-result instruction))
+       (id-value (core/bytesourcesliceinstructionv0-source-id instruction))
+       (id-value (core/bytesourcesliceinstructionv0-start-id instruction))
+       (id-value (core/bytesourcesliceinstructionv0-end-id instruction))
+       (id-value (core/bytesourcesliceinstructionv0-arena-id instruction))])
 
     (instance? native.core.VecReverseInstructionV0 instruction)
     (stages/canonical-record "vec-reverse-instruction-v0"

@@ -64,6 +64,14 @@ typedef struct native_vec {
   int64_t *watermark;
 } native_vec;
 
+/* Borrowed octets. Distinct from native_bytes because nothing here owns or may
+   free `data`, and distinct from a Text handle because the octets are arbitrary
+   binary with no encoding obligation. */
+typedef struct native_byte_source {
+  const uint8_t *data;
+  int64_t length;
+} native_byte_source;
+
 typedef struct native_value_descriptor native_value_descriptor;
 
 typedef enum native_collection_equality_kind {
@@ -255,6 +263,20 @@ native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
 native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
                             const native_value_descriptor *element,
                             int64_t stride, size_t alignment);
+
+/* A read-only alias of octets this shim did not allocate: one header, never a
+   copy of the data. The caller keeps `data` live and unmodified for as long as
+   any handle derived from it is reachable. */
+native_byte_source *native_byte_source_borrow(native_arena *arena,
+                                              const uint8_t *data,
+                                              int64_t length);
+int64_t native_byte_source_length(const native_byte_source *source);
+/* Zero-extends: every octet reads back in [0, 255]. Traps
+   NATIVE_TRAP_OUT_OF_RANGE unless 0 <= index < length. */
+int64_t native_byte_source_at(const native_byte_source *source, int64_t index);
+native_byte_source *native_byte_source_slice(native_arena *arena,
+                                             const native_byte_source *source,
+                                             int64_t start, int64_t end);
 int64_t native_bit_and_i64(int64_t left, int64_t right);
 int64_t native_bit_or_i64(int64_t left, int64_t right);
 int64_t native_bit_xor_i64(int64_t left, int64_t right);
@@ -375,6 +397,8 @@ uint64_t native_text_repeat(native_arena *arena, uint64_t source,
                             int64_t count);
 native_vec *native_utf8_encode(native_arena *arena, uint64_t source);
 uint64_t native_utf8_decode(native_arena *arena, const native_vec *source);
+uint64_t native_utf8_decode_source(native_arena *arena,
+                                   const native_byte_source *source);
 uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source);
 int64_t native_float_to_bits(double source);
 double native_float_from_bits(int64_t source);
