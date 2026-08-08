@@ -19,18 +19,17 @@ layout rule — a vector value is a REFERENCE to its header
   Consequences:
     - a (Vec T) record field is 8 bytes at 8-byte alignment for every T, so
       closed-layouts closes for (Vec Record) without measuring the element;
-      t/TermStore, with eight vector fields, is 96 bytes and every field a
-      reference (it was a 24-byte inline descriptor per field before).
+      t/TermStore, with ten vector-shaped fields, is 104 bytes and every such
+      field is a reference (it was a 24-byte inline descriptor per field before).
     - the C projection is 'typedef native_vec *native_m0_type_N;'.
     - region-lifetime law (thread 019fbd6c ratification) applies unchanged: the
       handle may not outlive the region holding the header and its elements.
       Vacuous under the single slice arena; load-bearing once regions nest.
-    - conj is LINEAR in v0 once element storage exists: native_vec_push moves
-      the argument header rather than copying it, which makes an accumulate
-      loop O(1) amortized instead of the O(n) arena copy a persistent conj would
-      need. A zero-capacity value is the exception: it is reusable and its first
-      push returns a fresh header, so shared immutable [] seeds stay independent.
-      Reading a nonempty pre-conj vector after the push is outside the v0 slice.
+    - conj is persistent under arbitrary one-thread aliasing: native_vec_push
+      writes only at the shared storage watermark and returns a fresh header.
+      A sibling append after the watermark advances copies before writing, as
+      do full or foreign buffers. A linear accumulation path remains amortized
+      O(1); concurrent appends over shared storage require an external lock.
 
 pipeline
   ast-facts.clj             beagle-ast JSON -> source facts (signatures, bodies,
@@ -56,16 +55,13 @@ token discipline
   leaking a token.
 
 real-function evidence (report.txt)
-  fram.store/operation-range-bounds and fram.store/valid-handle? — both read
-  (Vec Record) fields of t/TermStore through count/nth, and
-  operation-range-bounds returns the vector literal [start end]. Both lower
-  their own bodies with ZERO vocabulary TODOs; their single remaining pending
-  line is TODO-NATIVE-CALLEE. Under the merged loop+arith+union base those two
-  callee gates are named exactly: first-transaction-after uses a loop form the
-  landed loop tier does not cover, and handle-position needs the integer
-  division v0 refuses by name (TODO-NATIVE-DIVISION). No real fram
-  count/nth/conj site is a leaf in this vocabulary, which is why the C-callable
-  entry points live in vec_probe.bclj over the same fram.types records.
+  fram.store/valid-handle? reads (Vec Record) fields of t/TermStore through
+  count and lowers to nine blocks. operation-range-bounds reads the transaction
+  and operation vectors through count/nth and returns [start end]; its remaining
+  TODO-NATIVE-CALLEE is first-transaction-after, whose loop is outside this
+  slice. No real fram count/nth/conj site is a C-callable leaf in this
+  vocabulary, which is why the C-callable entry points live in vec_probe.bclj
+  over the same fram.types records.
 
 named gaps
   1 an empty vector literal outside a let binding is refused
@@ -74,4 +70,3 @@ named gaps
     loop tier will need the same hook for its seed bindings.
   2 count on a String still refuses (TODO-NATIVE-CALL-count): Text is an
     interned 64-bit handle, so its length is not recoverable from the value.
-  3 conj is linear, not persistent (see the layout rule above).

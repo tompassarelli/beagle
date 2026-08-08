@@ -4,8 +4,8 @@
 #   beagle-ast -> source facts (signatures + bodies + vector literals)
 #     -> frozen source program -> typed program -> native program -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
-# The pair is projected together because store.bgl declares no record of its
-# own: every (Vec T) in its signatures is a fram.types record vector.
+# The pair is projected together because store.bgl signatures and bodies use
+# the fram.types record vectors that give this slice its concrete layouts.
 # Re-runnable: the projection is rebuilt from live fram and must match the
 # committed vec.facts byte for byte.
 set -euo pipefail

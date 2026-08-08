@@ -9,15 +9,17 @@
 
 (require fram.types :as t)
 
-(defn bucket-size [bucket: t/TermBucket] -> Int
-  (count (t/termbucket-positions bucket)))
+(defn bucket-size [bucket: t/ActiveBucket] -> Int
+  (count (t/activebucket-positions bucket)))
 
-(defn bucket-position-at [bucket: t/TermBucket position: Int] -> Int
-  (nth (t/termbucket-positions bucket) position))
+(defn bucket-position-at [bucket: t/ActiveBucket position: Int] -> Int
+  (nth (t/activebucket-positions bucket) position))
 
-(defn bucket-with-position [bucket: t/TermBucket position: Int] -> t/TermBucket
-  (t/->TermBucket (t/termbucket-key bucket)
-                  (conj (t/termbucket-positions bucket) position)))
+(defn bucket-with-position
+  [bucket: t/ActiveBucket
+   position: Int] -> t/ActiveBucket
+  (t/->ActiveBucket (t/activebucket-triple-handle bucket)
+                    (conj (t/activebucket-positions bucket) position)))
 
 (defn append-position [positions: (Vec Int) position: Int] -> (Vec Int)
   (conj positions position))

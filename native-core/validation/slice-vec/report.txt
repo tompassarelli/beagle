@@ -2,11 +2,11 @@ stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 3
-source-imports 2
+source-imports 4
 program-types 92
-program-functions 81
-program-abis 81
-projected-types 86
+program-functions 79
+program-abis 79
+projected-types 84
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
 lowered fn_2 instant-shift-seconds 3 blocks
@@ -39,55 +39,53 @@ lowered fn_28 withdrawal 7 blocks
 lowered fn_29 recorded-at 7 blocks
 lowered fn_30 occurrence-before? 20 blocks
 lowered fn_31 valid-space-id? 9 blocks
-lowered fn_32 term-slot 3 blocks
-lowered fn_33 term-slot-add 1 blocks
-lowered fn_34 space-id 1 blocks
-lowered fn_35 next-sequence 1 blocks
-lowered fn_36 current-sequence 3 blocks
-lowered fn_37 atom-handle 3 blocks
-lowered fn_38 triple-handle 5 blocks
-lowered fn_39 atom-handle? 3 blocks
-lowered fn_40 handle-position 3 blocks
-lowered fn_41 valid-handle? 9 blocks
-lowered fn_42 atom-term-count 1 blocks
-lowered fn_43 triple-term-count 1 blocks
-lowered fn_44 term-count 3 blocks
-lowered fn_45 transaction-count 1 blocks
-lowered fn_46 operation-count 1 blocks
-lowered fn_47 assert-operation 7 blocks
-lowered fn_48 retract-operation 7 blocks
-lowered fn_49 valid-commit-operation? 16 blocks
-lowered fn_50 transaction-replay-ok 1 blocks
-lowered fn_51 transaction-replay-error 1 blocks
-lowered fn_52 transaction-replay-unclassified-error 1 blocks
-lowered fn_53 occurrence-at 1 blocks
-lowered fn_54 dump-term-store 1 blocks
-lowered fn_55 valid-prior-handle? 9 blocks
-lowered fn_56 valid-dump-operation? 31 blocks
-lowered fn_57 transaction-frames-ok 1 blocks
-lowered fn_58 transaction-frames-error 1 blocks
-lowered fn_59 term-store-load-ok 1 blocks
-lowered fn_60 term-store-load-error 1 blocks
-lowered fn_61 bucket-size 1 blocks
-lowered fn_62 bucket-position-at 1 blocks
-lowered fn_63 bucket-with-position 1 blocks
-lowered fn_64 append-position 1 blocks
-lowered fn_65 position-pair 1 blocks
-lowered fn_66 empty-positions 1 blocks
-lowered fn_67 frame-operation-count 1 blocks
-lowered fn_68 frame-operation-at 1 blocks
-lowered fn_69 any-values-equal? 1 blocks
-lowered fn_70 increment-value 3 blocks
-lowered fn_71 decrement-value 3 blocks
-lowered fn_72 mask-values 1 blocks
-lowered fn_73 xor-values 1 blocks
-lowered fn_74 shifted-value 1 blocks
-lowered fn_75 values-differ? 1 blocks
-lowered fn_76 no-positions? 1 blocks
-lowered fn_77 position-slice 1 blocks
-lowered fn_78 position-tail 1 blocks
-lowered fn_79 reversed-positions 1 blocks
-lowered fn_80 append-positions 1 blocks
+lowered fn_32 space-id 1 blocks
+lowered fn_33 next-sequence 1 blocks
+lowered fn_34 current-sequence 3 blocks
+lowered fn_35 atom-handle 3 blocks
+lowered fn_36 triple-handle 5 blocks
+lowered fn_37 atom-handle? 3 blocks
+lowered fn_38 handle-position 3 blocks
+lowered fn_39 valid-handle? 9 blocks
+lowered fn_40 atom-term-count 1 blocks
+lowered fn_41 triple-term-count 1 blocks
+lowered fn_42 term-count 3 blocks
+lowered fn_43 transaction-count 1 blocks
+lowered fn_44 operation-count 1 blocks
+lowered fn_45 assert-operation 7 blocks
+lowered fn_46 retract-operation 7 blocks
+lowered fn_47 valid-commit-operation? 16 blocks
+lowered fn_48 transaction-replay-ok 1 blocks
+lowered fn_49 transaction-replay-error 1 blocks
+lowered fn_50 transaction-replay-unclassified-error 1 blocks
+lowered fn_51 occurrence-at 1 blocks
+lowered fn_52 dump-term-store 1 blocks
+lowered fn_53 valid-prior-handle? 9 blocks
+lowered fn_54 valid-dump-operation? 31 blocks
+lowered fn_55 transaction-frames-ok 1 blocks
+lowered fn_56 transaction-frames-error 1 blocks
+lowered fn_57 term-store-load-ok 1 blocks
+lowered fn_58 term-store-load-error 1 blocks
+lowered fn_59 bucket-size 1 blocks
+lowered fn_60 bucket-position-at 1 blocks
+lowered fn_61 bucket-with-position 1 blocks
+lowered fn_62 append-position 1 blocks
+lowered fn_63 position-pair 1 blocks
+lowered fn_64 empty-positions 1 blocks
+lowered fn_65 frame-operation-count 1 blocks
+lowered fn_66 frame-operation-at 1 blocks
+lowered fn_67 any-values-equal? 1 blocks
+lowered fn_68 increment-value 3 blocks
+lowered fn_69 decrement-value 3 blocks
+lowered fn_70 mask-values 1 blocks
+lowered fn_71 xor-values 1 blocks
+lowered fn_72 shifted-value 1 blocks
+lowered fn_73 values-differ? 1 blocks
+lowered fn_74 no-positions? 1 blocks
+lowered fn_75 position-slice 1 blocks
+lowered fn_76 position-tail 1 blocks
+lowered fn_77 reversed-positions 1 blocks
+lowered fn_78 append-positions 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -95,19 +93,18 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [fresh-term-slots]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [term-slots-width-for]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-atom-term-slots]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-triple-term-slots]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-active-slots]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: new-term-store calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-atom-term-slots!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-triple-term-slots!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-active-slots!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/fresh-slots: no native lowering for this callee [new-term-store]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [atom-row]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [atom-row-value]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: valid-atom-row? calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [find-atom-position]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [find-triple-position]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-UPDATE-UPDATER: update requires an inline statically known function literal [index-atom-term!]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-UPDATE-UPDATER: update requires an inline statically known function literal [index-triple-term!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/slot-of: no native lowering for this callee [find-atom-position]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/slot-of: no native lowering for this callee [find-triple-position]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/slot-of: no native lowering for this callee [index-atom-term!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/slot-of: no native lowering for this callee [index-triple-term!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-LET-BODY: let form has no body [intern-handle!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-handle calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-triple-handle calls a function whose own body is not lowered
@@ -116,10 +113,14 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: intern-term! calls a func
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [replay-terms!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: every? requires an anonymous function literal [valid-operations?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: transaction-frame calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [find-active-bucket-position]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/slot-of: no native lowering for this callee [find-active-bucket-position]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: active-positions calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: set-active-positions calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: apply-operation-state calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [set-active-positions!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [open-fold-state]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [close-fold-state]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [open-fold!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [close-fold!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: apply-operation-state! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-REDUCE-CALLBACK: v0 requires an anonymous function literal [operation-handles!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [append-valid-transaction!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [append-transaction-result!]
@@ -139,6 +140,7 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: occurrence-tuple-at calls
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [operation-occurrences]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [withdrawal-triples]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [semantic-history]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [operation-live-cells]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [live-occurrences]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [live-propositions]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-triple-rows?]
@@ -152,7 +154,7 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-valid-triple-hand
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-transaction-frame-at]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-transaction-frames-between]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [transaction-frames-between-result]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [rebuild-operation-state]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/fresh-slots: no native lowering for this callee [rebuild-operation-state!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VECTOR-HOF-CALLBACK: every? requires an anonymous function literal [load-term-store-result!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: load-term-store! calls a function whose own body is not lowered
 materialize OK module_0.h module_0.c
