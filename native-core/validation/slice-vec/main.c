@@ -14,7 +14,7 @@
 
 #define ARENA_BYTES ((size_t)65536)
 #define PUSH_COUNT INT64_C(100)
-/* 100 pushes from capacity 0 double as 4,8,16,32,64,128: six storage claims.
+/* 100 pushes from capacity 0 double as 4,8,16,32,64,128: six allocations.
    The bar is O(log n), so the assertion allows slack over the exact count. */
 #define PUSH_ALLOCATION_BOUND UINT64_C(8)
 

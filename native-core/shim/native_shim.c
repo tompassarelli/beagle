@@ -3511,7 +3511,7 @@ struct native_arena_chunk {
 
 uint64_t native_vec_storage_allocations = UINT64_C(0);
 
-/* Smallest capacity a first push claims; every later growth doubles, which is
+/* Smallest capacity a first push takes; every later growth doubles, which is
    what keeps a run of n pushes at O(log n) storage allocations. */
 #define NATIVE_VEC_MIN_CAPACITY INT64_C(4)
 
@@ -3779,27 +3779,29 @@ static size_t native_vec_bytes(int64_t capacity, int64_t stride) {
   return (size_t)(capacity * stride);
 }
 
-/* A second header over storage that is already claimed: the source header keeps
-   its own length, so both stay readable and neither can rewrite the other's
+/* A second header over storage already handed out: the source header keeps its
+   own length, so both stay readable and neither can rewrite the other's
    elements. */
 static native_vec *native_vec_header(native_arena *arena, void *elements,
                                      int64_t length, int64_t capacity,
-                                     int64_t *claim) {
+                                     int64_t *watermark) {
   native_vec *header = (native_vec *)native_arena_alloc(
       arena, sizeof(native_vec), _Alignof(native_vec));
   header->elements = elements;
   header->length = length;
   header->capacity = capacity;
-  header->claim = claim;
+  header->watermark = watermark;
   return header;
 }
 
-/* A vector's length is also its claim on the storage: everything below it is
-   frozen, and only the slot at the length may ever be written. */
+/* A vector's length is also the storage watermark: everything below it is
+   frozen, and only the slot at the length may ever be written. Callers may only
+   pass a vector they just allocated and have not published, because lowering a
+   shared watermark unfreezes elements another header already holds. */
 static void native_vec_set_length(native_vec *vector, int64_t length) {
   vector->length = length;
-  if (vector->claim != NULL) {
-    *vector->claim = length;
+  if (vector->watermark != NULL) {
+    *vector->watermark = length;
   }
 }
 
@@ -3811,12 +3813,12 @@ native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride
   header->elements = (bytes == 0U) ? NULL : native_arena_alloc(arena, bytes, alignment);
   header->length = INT64_C(0);
   header->capacity = capacity;
-  header->claim = NULL;
+  header->watermark = NULL;
   if (bytes != 0U) {
     native_vec_storage_allocations += UINT64_C(1);
-    header->claim = (int64_t *)native_arena_alloc(arena, sizeof(int64_t),
-                                                  _Alignof(int64_t));
-    *header->claim = INT64_C(0);
+    header->watermark = (int64_t *)native_arena_alloc(
+        arena, sizeof(int64_t), _Alignof(int64_t));
+    *header->watermark = INT64_C(0);
   }
   return header;
 }
@@ -3868,16 +3870,16 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void 
       ((vector->length > INT64_C(0)) && (vector->elements == NULL))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  if ((vector->claim != NULL) && (vector->length < vector->capacity) &&
-      (*vector->claim == vector->length)) {
+  if ((vector->watermark != NULL) && (vector->length < vector->capacity) &&
+      (*vector->watermark == vector->length)) {
     memcpy((uint8_t *)vector->elements + (size_t)(vector->length * stride), value,
            (size_t)stride);
-    *vector->claim = vector->length + INT64_C(1);
+    *vector->watermark = vector->length + INT64_C(1);
     return native_vec_header(arena, vector->elements,
                              vector->length + INT64_C(1), vector->capacity,
-                             vector->claim);
+                             vector->watermark);
   }
-  /* Someone else already claimed the tip, the storage is full, or it is not
+  /* Someone else already took the tip, the storage is full, or it is not
      ours: the append only stays persistent on a private copy. */
   if (vector->length > (INT64_MAX / INT64_C(2))) {
     native_trap(NATIVE_TRAP_OVERFLOW);
@@ -4120,9 +4122,20 @@ static uint64_t native_map_hash_mix(uint64_t hash) {
   return hash;
 }
 
-/* Hashes exactly what native_collection_equal compares: equal keys always land
-   on one hash. A false return means the key has no hash the equality agrees
-   with, and the caller must stay on the scan. */
+/* The kind half of native_map_hash_key, decidable without a key: an index path
+   must refuse a structural map before it allocates a slot table, or every
+   operation past the minimum length pays a table it is about to discard. */
+static bool native_map_kind_hashable(native_collection_equality_kind kind) {
+  return kind != NATIVE_COLLECTION_EQ_KIND_STRUCTURAL;
+}
+
+/* Hashes what native_collection_equal compares over readable keys: equal keys
+   always land on one hash. A false return means the key has no hash the
+   equality agrees with, and the caller must stay on the scan. Text and keyword
+   equality answers handle identity without reading either side, so parity holds
+   only for handles this shim can read: the null handle is refused below, and a
+   nonzero handle that points at no text traps here where equality would have
+   said yes. */
 static bool native_map_hash_key(const void *key,
                                 native_collection_equality equality,
                                 uint64_t *hash) {
@@ -4237,7 +4250,10 @@ static void native_map_index_place(native_map_index *index, uint64_t hash,
 
 /* Rebuilds from the map's own entries, sized for `reserve` future entries. Any
    key that cannot be hashed leaves the map unindexed, which is always correct
-   because an absent index means every lookup scans. */
+   because an absent index means every lookup scans. A kind that can never hash
+   is refused before the table is allocated: this is the only bound on the
+   arena, because every caller reaches this on every operation once the map is
+   past the minimum length and the table it would strand is never freed. */
 static void native_map_index_rebuild(native_arena *arena, native_map *map,
                                      native_collection_equality equality,
                                      int64_t reserve) {
@@ -4248,7 +4264,8 @@ static void native_map_index_rebuild(native_arena *arena, native_map *map,
     reserve = map->length;
   }
   if ((reserve < NATIVE_MAP_INDEX_MIN_LENGTH) ||
-      (reserve > NATIVE_MAP_INDEX_MAX_ENTRIES)) {
+      (reserve > NATIVE_MAP_INDEX_MAX_ENTRIES) ||
+      !native_map_kind_hashable(equality.kind)) {
     return;
   }
   index = native_map_index_alloc(arena, native_map_index_slot_count(reserve),
@@ -4315,13 +4332,15 @@ static void native_map_index_adopt(native_arena *arena, native_map *result,
     result->index = source->index;
     return;
   }
+  /* Hashed before the copy is allocated: an unhashable key strands the whole
+     table otherwise, once per assoc. */
+  if (!native_map_hash_key(key, equality, &hash)) {
+    return;
+  }
   copy = native_map_index_alloc(arena, parent->slot_count, equality);
   memcpy(copy->slots, parent->slots,
          native_collection_bytes(parent->slot_count, (int64_t)sizeof(int32_t)));
   copy->entries = parent->entries;
-  if (!native_map_hash_key(key, equality, &hash)) {
-    return;
-  }
   native_map_index_place(copy, hash, appended);
   result->index = copy;
 }
@@ -5640,7 +5659,7 @@ native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
       ((source->capacity > INT64_C(0)) && (source->elements == NULL))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  /* The one place a claimed slot is rewritten: the slice result is storage this
+  /* The one place a frozen slot is rewritten: the slice result is storage this
      call just allocated and has not published, so no other header aliases it. */
   result = native_vec_slice(arena, source, INT64_C(0), source->length,
                             stride, alignment);
