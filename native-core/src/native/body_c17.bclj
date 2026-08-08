@@ -460,14 +460,22 @@
   (str (c17/module-prefix module-index) "_value_"
     (c17/type-index types target)))
 
-(defn descriptor-kind [definition: core/TypeDef] -> String
-  (let [shape: core/TypeShape (core/typedef-shape definition)]
+(defn descriptor-kind
+  [definition: core/TypeDef
+   layout: core/LayoutDef] -> String
+  (let [shape: core/TypeShape (core/typedef-shape definition)
+        layout-shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (cond
       (instance? native.core.AtomType shape)
       (let [kind: core/AtomKind (core/atomtype-kind shape)]
         (cond
           (instance? native.core.BoolKind kind) "NATIVE_VALUE_BOOL"
-          (instance? native.core.I64Kind kind) "NATIVE_VALUE_SIGNED"
+          (instance? native.core.I64Kind kind)
+          (if (and (instance? native.core.ScalarShapeV0 layout-shape)
+                (instance? native.core.UnsignedIntReprV0
+                  (core/scalarshapev0-representation layout-shape)))
+            "NATIVE_VALUE_UNSIGNED"
+            "NATIVE_VALUE_SIGNED")
           (instance? native.core.F64Kind kind) "NATIVE_VALUE_FLOAT"
           (instance? native.core.TextKind kind) "NATIVE_VALUE_TEXT"
           (instance? native.core.BytesKind kind) "NATIVE_VALUE_BYTES"
@@ -608,7 +616,7 @@
         (str "const native_value_descriptor "
           (descriptor-symbol types module-index target) " = {\n"
           "  .abi_version = NATIVE_VALUE_ABI_VERSION,\n"
-          "  .kind = " (descriptor-kind definition) ",\n"
+          "  .kind = " (descriptor-kind definition layout) ",\n"
           "  .size = (size_t)" (core/layoutdef-size-bytes layout) ",\n"
           "  .alignment = (size_t)" (core/layoutdef-align-bytes layout) ",\n"
           "  .tag_offset = (size_t)" (descriptor-tag-offset layout) ",\n"

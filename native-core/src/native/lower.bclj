@@ -658,6 +658,31 @@
   (core/->TypeDef (type-id "Int") "I64"
     (core/->AtomType (core/->I64Kind true))))
 
+(defn fixed-integer-bit-width [name: String] -> Int
+  (cond
+    (or (= name "I8") (= name "U8")) 8
+    (or (= name "I16") (= name "U16")) 16
+    (or (= name "I32") (= name "U32")) 32
+    (= name "U64") 64
+    :else 0))
+
+(defn fixed-integer-name? [name: String] -> Bool
+  (> (fixed-integer-bit-width name) 0))
+
+(defn fixed-integer-unsigned? [name: String] -> Bool
+  (or (= name "U8") (= name "U16") (= name "U32") (= name "U64")))
+
+(defn fixed-integer-type [name: String] -> core/TypeDef
+  (core/->TypeDef (type-id name) name
+    (core/->AtomType (core/->I64Kind true))))
+
+(defn integer-type-id? [target: core/NativeId] -> Bool
+  (or (same-id? target (type-id "Int"))
+    (some?
+      (some
+        (fn [name: String] -> Bool (same-id? target (type-id name)))
+        ["I8" "I16" "I32" "U8" "U16" "U32" "U64"]))))
+
 (defn f64-type [] -> core/TypeDef
   (core/->TypeDef (type-id "Float") "F64"
     (core/->AtomType (core/->F64Kind true))))
@@ -946,6 +971,9 @@
 
     (= "Int" spelling)
     (->TypeResolutionV0 (type-id "Int") [(i64-type)] [] true)
+
+    (fixed-integer-name? spelling)
+    (->TypeResolutionV0 (type-id spelling) [(fixed-integer-type spelling)] [] true)
 
     (= "Float" spelling)
     (->TypeResolutionV0 (type-id "Float") [(f64-type)] [] true)
@@ -3614,7 +3642,14 @@
    to: core/NativeId] -> ExprResultV0
   (if (same-id? from to)
     (->ExprResultV0 state value-id to false)
-    (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
+    (if (and (integer-type-id? from) (integer-type-id? to))
+      (let [result-id: core/NativeId (state-id state owner "integer-coerce")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->CopyInstruction
+              (core/->SsaValueV0 result-id to) value-id))
+          result-id to false))
+      (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
           scalar: (U core/TypeVariant Nil) (variant-for-payload source-variants to)
           record: NarrowHitV0 (reference-variant-for types from to)
           nested: VariantPathV0 (variant-path-to-payload types from to)
@@ -3669,7 +3704,7 @@
                   (= 0 (count (union-variants-of types to))))
             widened
             (lower-union-narrow types owner state value-id from to
-              widened)))))))
+              widened))))))))
 
 (defn coerce-arguments
   [types: (Vec core/TypeDef)
@@ -13335,8 +13370,8 @@
                   (let [left-type: core/NativeId (nth value-types 0)
                         right-type: core/NativeId (nth value-types 1)
                         both-int: Bool
-                        (and (same-id? left-type (int-type-id))
-                             (same-id? right-type (int-type-id)))
+                        (and (integer-type-id? left-type)
+                             (integer-type-id? right-type))
                         both-float: Bool
                         (and (same-id? left-type (float-type-id))
                              (same-id? right-type (float-type-id)))
@@ -13355,12 +13390,23 @@
                         result-id: core/NativeId (state-id current owner "compare")]
                     (cond
                       both-int
-                      (->ExprResultV0
-                        (state-emit (state-bump current)
-                          (core/->CompareInstruction
-                            (core/->SsaValueV0 result-id (bool-type-id))
-                            comparison left-id right-id))
-                        result-id (bool-type-id) false)
+                      (let [coerced: ArgsResultV0
+                            (coerce-values-to-type types owner current
+                              [left-id right-id]
+                              [(nth value-types (if swap 1 0))
+                               (nth value-types (if swap 0 1))]
+                              (int-type-id))
+                            settled: BodyStateV0 (argsresultv0-state coerced)
+                            operands: (Vec core/NativeId)
+                            (argsresultv0-values coerced)]
+                        (if (state-blocked? settled)
+                          (dead-result settled)
+                          (->ExprResultV0
+                            (state-emit (state-bump settled)
+                              (core/->CompareInstruction
+                                (core/->SsaValueV0 result-id (bool-type-id))
+                                comparison (nth operands 0) (nth operands 1)))
+                            result-id (bool-type-id) false)))
 
                       both-float
                       (->ExprResultV0
@@ -14890,7 +14936,11 @@
                   (instance? native.core.BoolKind kind)
                   (->LayoutMeasureV0 1 1 true "bool")
                   (instance? native.core.I64Kind kind)
-                  (->LayoutMeasureV0 8 8 true "i64")
+                  (let [name: String (core/typedef-name definition)
+                        width: Int (fixed-integer-bit-width name)
+                        bytes: Int (if (> width 0) (quot width 8) 8)]
+                    (->LayoutMeasureV0 bytes bytes true
+                      (if (> width 0) name "i64")))
                   (instance? native.core.F64Kind kind)
                   (->LayoutMeasureV0 8 8 true "f64")
                   (instance? native.core.TextKind kind)
@@ -15063,7 +15113,14 @@
       (let [kind: core/AtomKind (core/atomtype-kind shape)]
         (cond
           (instance? native.core.BoolKind kind) (core/->ScalarShapeV0 (core/->BoolReprV0 8))
-          (instance? native.core.I64Kind kind) (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))
+          (instance? native.core.I64Kind kind)
+          (let [name: String (core/typedef-name definition)
+                width: Int (fixed-integer-bit-width name)
+                bits: Int (if (> width 0) width 64)]
+            (core/->ScalarShapeV0
+              (if (fixed-integer-unsigned? name)
+                (core/->UnsignedIntReprV0 bits)
+                (core/->SignedIntReprV0 bits))))
           (instance? native.core.F64Kind kind) (core/->ScalarShapeV0 (core/->FloatReprV0 64))
           ;; Text and Keyword are handles: the bytes live outside the value, so
           ;; the value itself is an exact 64-bit scalar.

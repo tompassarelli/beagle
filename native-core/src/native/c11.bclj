@@ -372,15 +372,20 @@
    kind: core/AtomKind
    layout: core/LayoutDef] -> String
   (let [size: Int (core/layoutdef-size-bytes layout)
+        shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
+        representation: (U core/ScalarReprV0 Nil)
+        (if (instance? native.core.ScalarShapeV0 shape)
+          (core/scalarshapev0-representation shape)
+          nil)
         backing: String
         (match kind
           [(BoolKind token) "bool"]
           [(I64Kind token)
-           (cond
-             (= size 1) "int8_t"
-             (= size 2) "int16_t"
-             (= size 4) "int32_t"
-             :else "int64_t")]
+           (let [prefix: String
+                 (if (and (some? representation)
+                       (instance? native.core.UnsignedIntReprV0 representation))
+                   "uint" "int")]
+             (str prefix (* size 8) "_t"))]
           [(F64Kind token) (if (= size 4) "float" "double")]
           [(TextKind token) "native_bytes"]
           [(BytesKind token) "native_bytes"]

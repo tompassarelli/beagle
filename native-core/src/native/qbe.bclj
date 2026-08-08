@@ -993,6 +993,29 @@
   (let [position: Int (value-index (qbefn-value-ids context) target)]
     (if (< position 0) nil (nth (qbefn-value-types context) position))))
 
+(defn value-unsigned-integer? [context: QbeFn target: core/NativeId] -> Bool
+  (let [type-id: (U core/NativeId Nil) (value-type-id context target)
+        layout: (U core/LayoutDef Nil)
+        (if (nil? type-id)
+          nil
+          (layout-for-type (qbefn-layouts context) type-id))]
+    (if (nil? layout)
+      false
+      (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+        (and (instance? native.core.ScalarShapeV0 shape)
+          (instance? native.core.UnsignedIntReprV0
+            (core/scalarshapev0-representation shape)))))))
+
+(defn copy-operation
+  [context: QbeFn
+   result-id: core/NativeId
+   source-id: core/NativeId] -> String
+  (let [result-letter: String (value-letter-or context result-id "l")
+        source-letter: String (value-letter-or context source-id "l")]
+    (if (and (= result-letter "l") (= source-letter "w"))
+      (if (value-unsigned-integer? context source-id) "extuw" "extsw")
+      "copy")))
+
 (defn block-label [index: Int] -> String
   (str "@b" index))
 
@@ -1346,8 +1369,11 @@
          (str "  " result-name " =" (value-letter-or context result-id (atom-letter atom))
            " copy " (atom-literal context atom) "\n"))]
       [(CopyInstruction value)
-       (str "  " result-name " =" result-letter " copy "
-         (value-name context (core/copyinstruction-source-id instruction)) "\n")]
+       (let [source-id: core/NativeId
+             (core/copyinstruction-source-id instruction)]
+         (str "  " result-name " =" result-letter " "
+           (copy-operation context result-id source-id) " "
+           (value-name context source-id) "\n"))]
       [(AddF64Instruction value)
        (str "  " result-name " =" (value-letter-or context result-id "d") " add "
          (value-name context (core/addf64instruction-left-id instruction)) ", "

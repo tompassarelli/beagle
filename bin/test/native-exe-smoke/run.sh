@@ -9,6 +9,7 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source_file="$repo/bin/test/native-exe-smoke/entry_core.bgl"
 projection_source="$repo/bin/test/native-exe-smoke/entry_projection.bgl"
 qbe_source="$repo/bin/test/native-exe-smoke/entry_qbe.bgl"
+fixed_width_source="$repo/bin/test/native-exe-smoke/entry_fixed_width.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-exe-smoke.XXXXXX")"
 cleanup() { rm -rf "${scratch:?}"; }
 trap cleanup EXIT
@@ -119,6 +120,36 @@ grep -Fqx "result PASS" "$qbe_both/report.txt"
 [[ "$(grep -c '^stage-progress typed-to-native ' "$qbe_both/report.txt")" == "1" ]]
 [[ -f "$qbe_both/module_0.c" && -f "$qbe_both/module_0.ssa" ]]
 printf 'native-exe smoke: one frozen native program + explicit C17/QBE materializers ok\n'
+
+fixed_width_c17="$scratch/fixed-width-c17"
+fixed_width_executable="$fixed_width_c17/bin/fixed-width"
+mkdir -p "$fixed_width_c17/bin"
+"$repo/bin/beagle" native-exe \
+    --out "$fixed_width_executable" \
+    --entry native.fixed-width-entry/layout-entry \
+    --cc "$gcc_bin" \
+    --artifacts "$fixed_width_c17" \
+    "$fixed_width_source" >"$scratch/fixed-width-c17.log"
+for backing in int32_t uint32_t int16_t uint8_t; do
+    grep -Eq "^typedef $backing native_m0_type_[0-9]+;$" \
+        "$fixed_width_c17/module_0.h"
+done
+grep -Fq '.kind = NATIVE_VALUE_UNSIGNED,' "$fixed_width_c17/module_0.c"
+set +e
+env -i "$fixed_width_executable"
+fixed_width_rc=$?
+set -e
+[[ $fixed_width_rc -eq 0 ]]
+
+fixed_width_qbe="$scratch/fixed-width-qbe"
+"$repo/bin/beagle" build --materializer qbe \
+    --out "$fixed_width_qbe" \
+    --entry native.fixed-width-entry/qbe-entry \
+    "$fixed_width_source" >"$scratch/fixed-width-qbe.log"
+grep -Fqx 'materialize-qbe OK module_0.ssa' "$fixed_width_qbe/report.txt"
+grep -Fq 'extsw' "$fixed_width_qbe/module_0.ssa"
+grep -Fq 'extuw' "$fixed_width_qbe/module_0.ssa"
+printf 'native-exe smoke: fixed-width C17 layouts + QBE extensions ok\n'
 
 set +e
 "$repo/bin/beagle" build --materializer c17 \
