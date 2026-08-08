@@ -89,6 +89,11 @@ typedef enum native_collection_state {
   NATIVE_COLLECTION_RETIRED = 3
 } native_collection_state;
 
+/* Insertion order stays the map's identity: the index is a side table from key
+   hash to entry position, never a reordering of the parallel arrays. It is
+   absent (NULL) whenever a scan is the faster or the only correct answer. */
+typedef struct native_map_index native_map_index;
+
 /* Map/Set headers own parallel insertion-order storage in the arena. The
    headers are opaque to generated modules; descriptor code reads through the
    checked address accessors below. */
@@ -101,6 +106,7 @@ typedef struct native_map {
   int64_t value_stride;
   native_collection_state state;
   native_arena *edit_arena;
+  native_map_index *index;
 } native_map;
 
 typedef struct native_set {

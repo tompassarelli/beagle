@@ -4048,6 +4048,255 @@ static bool native_collection_equal(const void *left, const void *right,
   }
 }
 
+#define NATIVE_VALUE_HASH_OFFSET UINT64_C(14695981039346656037)
+#define NATIVE_VALUE_HASH_PRIME UINT64_C(1099511628211)
+
+static void native_value_hash_byte(uint64_t *state, uint8_t value) {
+  *state ^= (uint64_t)value;
+  *state *= NATIVE_VALUE_HASH_PRIME;
+}
+
+/* Canonical low-byte-first encoding makes the hash independent of host byte
+   order while retaining the full fixed-width semantic value. */
+static void native_value_hash_u64(uint64_t *state, uint64_t value) {
+  uint32_t shift;
+  for (shift = UINT32_C(0); shift < UINT32_C(64); shift += UINT32_C(8)) {
+    native_value_hash_byte(state, (uint8_t)(value >> shift));
+  }
+}
+
+/* Below this length a scan of the contiguous key array beats a hash probe, so
+   the index is not built at all and small maps keep their current cost. */
+#define NATIVE_MAP_INDEX_MIN_LENGTH INT64_C(16)
+#define NATIVE_MAP_INDEX_MIN_SLOTS INT64_C(32)
+/* A slot holds entry+1 in an int32_t so that 0 reads as empty and the table
+   costs four bytes per slot in the bump arena. */
+#define NATIVE_MAP_INDEX_MAX_ENTRIES INT64_C(0x40000000)
+
+struct native_map_index {
+  int32_t *slots;
+  int64_t slot_count;
+  int64_t entries;
+  native_collection_equality_kind kind;
+};
+
+/* FNV-1a only propagates entropy upward, so the low bits a power-of-two table
+   masks off depend on the low bits of the input alone. Avalanche them first. */
+static uint64_t native_map_hash_mix(uint64_t hash) {
+  hash ^= hash >> 33;
+  hash *= UINT64_C(0xff51afd7ed558ccd);
+  hash ^= hash >> 29;
+  hash *= UINT64_C(0xc4ceb9fe1a85ec53);
+  hash ^= hash >> 32;
+  return hash;
+}
+
+/* Hashes exactly what native_collection_equal compares: equal keys always land
+   on one hash. A false return means the key has no hash the equality agrees
+   with, and the caller must stay on the scan. */
+static bool native_map_hash_key(const void *key,
+                                native_collection_equality equality,
+                                uint64_t *hash) {
+  uint64_t state = NATIVE_VALUE_HASH_OFFSET;
+  native_collection_check_equality(equality);
+  switch (equality.kind) {
+  case NATIVE_COLLECTION_EQ_KIND_BOOL: {
+    bool value;
+    memcpy(&value, key, sizeof value);
+    native_value_hash_u64(&state, value ? UINT64_C(1) : UINT64_C(0));
+    break;
+  }
+  case NATIVE_COLLECTION_EQ_KIND_I64: {
+    int64_t value;
+    memcpy(&value, key, sizeof value);
+    native_value_hash_u64(&state, (uint64_t)value);
+    break;
+  }
+  case NATIVE_COLLECTION_EQ_KIND_F64: {
+    double value;
+    uint64_t bits;
+    memcpy(&value, key, sizeof value);
+    memcpy(&bits, key, sizeof bits);
+    /* -0.0 == 0.0 must hash alike; NaN is never equal to itself, so its slot
+       only has to be stable. */
+    if (value == 0.0) {
+      bits = UINT64_C(0);
+    } else if (value != value) {
+      bits = UINT64_C(0x7ff8000000000000);
+    }
+    native_value_hash_u64(&state, bits);
+    break;
+  }
+  case NATIVE_COLLECTION_EQ_KIND_TEXT:
+  case NATIVE_COLLECTION_EQ_KIND_KEYWORD: {
+    uint64_t handle;
+    uint64_t length;
+    const uint8_t *bytes;
+    uint64_t offset;
+    memcpy(&handle, key, sizeof handle);
+    /* native_text_eq calls identical handles equal without reading them, so a
+       null handle compares but cannot be hashed. */
+    if (handle == UINT64_C(0)) {
+      return false;
+    }
+    length = native_text_length(handle);
+    bytes = native_text_bytes(handle);
+    native_value_hash_u64(&state, length);
+    for (offset = UINT64_C(0); offset < length; offset++) {
+      native_value_hash_byte(&state, bytes[offset]);
+    }
+    break;
+  }
+  case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
+    /* native_value_hash traps on values native_value_equal accepts (a null text
+       handle on both sides, a pointer-identical malformed vector), so hashing a
+       structural key could turn a working lookup into a trap. Structural keys
+       stay on the scan until that parity is proven. */
+    return false;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  *hash = native_map_hash_mix(state);
+  return true;
+}
+
+static bool native_map_index_usable(const native_map *map,
+                                    native_collection_equality equality) {
+  const native_map_index *index = map->index;
+  return (index != NULL) && (index->slots != NULL) &&
+         (index->kind == equality.kind) &&
+         (index->entries == map->length) && (index->slot_count > map->length);
+}
+
+static int64_t native_map_index_slot_count(int64_t length) {
+  int64_t slots = NATIVE_MAP_INDEX_MIN_SLOTS;
+  while (((slots / INT64_C(4)) * INT64_C(3)) < length) {
+    if (slots > (INT64_MAX / INT64_C(2))) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    slots *= INT64_C(2);
+  }
+  return slots;
+}
+
+static native_map_index *native_map_index_alloc(
+    native_arena *arena, int64_t slot_count,
+    native_collection_equality equality) {
+  native_map_index *index = (native_map_index *)native_arena_alloc(
+      arena, sizeof(native_map_index), _Alignof(native_map_index));
+  size_t bytes = native_collection_bytes(slot_count, (int64_t)sizeof(int32_t));
+  index->slots = (int32_t *)native_arena_alloc(arena, bytes, _Alignof(int32_t));
+  memset(index->slots, 0, bytes);
+  index->slot_count = slot_count;
+  index->entries = INT64_C(0);
+  index->kind = equality.kind;
+  return index;
+}
+
+/* Linear probing over a table kept at three-quarter load, so the walk always
+   reaches an empty slot. The caller guarantees the key is absent. */
+static void native_map_index_place(native_map_index *index, uint64_t hash,
+                                   int64_t entry) {
+  int64_t mask = index->slot_count - INT64_C(1);
+  int64_t probe = (int64_t)(hash & (uint64_t)mask);
+  while (index->slots[probe] != INT32_C(0)) {
+    probe = (probe + INT64_C(1)) & mask;
+  }
+  index->slots[probe] = (int32_t)(entry + INT64_C(1));
+  index->entries += INT64_C(1);
+}
+
+/* Rebuilds from the map's own entries, sized for `reserve` future entries. Any
+   key that cannot be hashed leaves the map unindexed, which is always correct
+   because an absent index means every lookup scans. */
+static void native_map_index_rebuild(native_arena *arena, native_map *map,
+                                     native_collection_equality equality,
+                                     int64_t reserve) {
+  native_map_index *index;
+  int64_t entry;
+  map->index = NULL;
+  if (reserve < map->length) {
+    reserve = map->length;
+  }
+  if ((reserve < NATIVE_MAP_INDEX_MIN_LENGTH) ||
+      (reserve > NATIVE_MAP_INDEX_MAX_ENTRIES)) {
+    return;
+  }
+  index = native_map_index_alloc(arena, native_map_index_slot_count(reserve),
+                                 equality);
+  for (entry = INT64_C(0); entry < map->length; entry++) {
+    uint64_t hash;
+    if (!native_map_hash_key(native_map_key_at(map, entry), equality, &hash)) {
+      return;
+    }
+    native_map_index_place(index, hash, entry);
+  }
+  map->index = index;
+}
+
+/* Registers the entry just appended at map->length - 1. */
+static void native_map_index_append(native_arena *arena, native_map *map,
+                                    native_collection_equality equality,
+                                    const void *key) {
+  uint64_t hash;
+  if ((map->index == NULL) &&
+      (map->length < NATIVE_MAP_INDEX_MIN_LENGTH)) {
+    return;
+  }
+  if ((map->index == NULL) ||
+      (map->index->kind != equality.kind) ||
+      (map->index->entries != (map->length - INT64_C(1))) ||
+      (map->length > NATIVE_MAP_INDEX_MAX_ENTRIES) ||
+      ((map->length * INT64_C(4)) > (map->index->slot_count * INT64_C(3)))) {
+    native_map_index_rebuild(arena, map, equality, map->length);
+    return;
+  }
+  if (!native_map_hash_key(key, equality, &hash)) {
+    map->index = NULL;
+    return;
+  }
+  native_map_index_place(map->index, hash, map->length - INT64_C(1));
+}
+
+/* A fresh persistent map inherits its parent's slot table whenever the table
+   still fits, so an assoc chain copies the table instead of rehashing every
+   key. `appended` is the new entry's position, or -1 when the assoc replaced a
+   value and left every key in place. */
+static void native_map_index_adopt(native_arena *arena, native_map *result,
+                                   const native_map *source,
+                                   native_collection_equality equality,
+                                   const void *key, int64_t appended) {
+  const native_map_index *parent = source->index;
+  native_map_index *copy;
+  uint64_t hash;
+  if ((result->length < NATIVE_MAP_INDEX_MIN_LENGTH) ||
+      (result->length > NATIVE_MAP_INDEX_MAX_ENTRIES)) {
+    return;
+  }
+  if ((parent == NULL) || (parent->slots == NULL) ||
+      (parent->kind != equality.kind) ||
+      (parent->entries != source->length) ||
+      ((result->length * INT64_C(4)) > (parent->slot_count * INT64_C(3)))) {
+    native_map_index_rebuild(arena, result, equality, result->length);
+    return;
+  }
+  if (appended < INT64_C(0)) {
+    /* Replacing a value leaves every key at its position, and a persistent
+       map's table is never written again, so parent and result share it. */
+    result->index = source->index;
+    return;
+  }
+  copy = native_map_index_alloc(arena, parent->slot_count, equality);
+  memcpy(copy->slots, parent->slots,
+         native_collection_bytes(parent->slot_count, (int64_t)sizeof(int32_t)));
+  copy->entries = parent->entries;
+  if (!native_map_hash_key(key, equality, &hash)) {
+    return;
+  }
+  native_map_index_place(copy, hash, appended);
+  result->index = copy;
+}
+
 static native_map *native_map_new(native_arena *arena, int64_t capacity,
                                   int64_t key_stride, size_t key_alignment,
                                   int64_t value_stride,
@@ -4069,6 +4318,7 @@ static native_map *native_map_new(native_arena *arena, int64_t capacity,
   map->value_stride = value_stride;
   map->state = NATIVE_COLLECTION_PERSISTENT;
   map->edit_arena = NULL;
+  map->index = NULL;
   return map;
 }
 
@@ -4157,6 +4407,37 @@ const void *native_map_value_at(const native_map *map, int64_t index) {
          native_collection_bytes(index, map->value_stride);
 }
 
+/* Out of line so an unindexed map pays one null test before its scan, not the
+   probe's code size. False means the caller must scan. */
+static bool native_map_index_lookup(const native_map *map, const void *key,
+                                    native_collection_equality equality,
+                                    int64_t *found) {
+  uint64_t hash;
+  int64_t mask;
+  int64_t probe;
+  if (!native_map_index_usable(map, equality) ||
+      !native_map_hash_key(key, equality, &hash)) {
+    return false;
+  }
+  mask = map->index->slot_count - INT64_C(1);
+  probe = (int64_t)(hash & (uint64_t)mask);
+  for (;;) {
+    int32_t slot = map->index->slots[probe];
+    int64_t index;
+    if (slot == INT32_C(0)) {
+      *found = INT64_C(-1);
+      return true;
+    }
+    index = (int64_t)slot - INT64_C(1);
+    if ((index < map->length) &&
+        native_collection_equal(native_map_key_at(map, index), key, equality)) {
+      *found = index;
+      return true;
+    }
+    probe = (probe + INT64_C(1)) & mask;
+  }
+}
+
 static int64_t native_map_find(const native_map *map, const void *key,
                                native_collection_equality equality) {
   int64_t index;
@@ -4165,6 +4446,12 @@ static int64_t native_map_find(const native_map *map, const void *key,
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_collection_check_equality(equality);
+  if (map->index != NULL) {
+    int64_t found;
+    if (native_map_index_lookup(map, key, equality, &found)) {
+      return found;
+    }
+  }
   for (index = INT64_C(0); index < map->length; index++) {
     if (native_collection_equal(native_map_key_at(map, index), key, equality)) {
       return index;
@@ -4196,6 +4483,7 @@ native_map *native_map_from_arrays(
   }
   map = native_map_new(arena, count, key_stride, key_alignment, value_stride,
                        value_alignment);
+  native_map_index_rebuild(arena, map, equality, count);
   for (index = INT64_C(0); index < count; index++) {
     const void *key = (const uint8_t *)keys +
                       native_collection_bytes(index, key_stride);
@@ -4214,6 +4502,7 @@ native_map *native_map_from_arrays(
                  native_collection_bytes(map->length, value_stride),
              value, (size_t)value_stride);
       map->length += INT64_C(1);
+      native_map_index_append(arena, map, equality, key);
     }
   }
   return map;
@@ -4286,6 +4575,8 @@ native_map *native_map_assoc(
                native_collection_bytes(map->length, value_stride),
            value, (size_t)value_stride);
   }
+  native_map_index_adopt(arena, result, map, equality, key,
+                         (prior >= INT64_C(0)) ? INT64_C(-1) : map->length);
   return result;
 }
 
@@ -4332,6 +4623,7 @@ native_map *native_map_assoc_transient(
              native_collection_bytes(map->length, value_stride),
          value, (size_t)value_stride);
   map->length += INT64_C(1);
+  native_map_index_append(arena, map, equality, key);
   return map;
 }
 
@@ -4360,6 +4652,9 @@ native_map *native_map_dissoc(
       result->length += INT64_C(1);
     }
   }
+  /* Removing an entry shifts every later position, so the surviving keys need
+     fresh slots rather than the parent's table. */
+  native_map_index_rebuild(arena, result, equality, result->length);
   return result;
 }
 
@@ -4822,9 +5117,6 @@ bool native_value_equal(const native_value_descriptor *descriptor,
   return native_value_equal_inner(descriptor, left, right);
 }
 
-#define NATIVE_VALUE_HASH_OFFSET UINT64_C(14695981039346656037)
-#define NATIVE_VALUE_HASH_PRIME UINT64_C(1099511628211)
-
 static uint64_t native_value_semantic_unsigned(const void *value, size_t size) {
   if (size == sizeof(uint8_t)) {
     uint8_t result;
@@ -4871,20 +5163,6 @@ static int64_t native_value_semantic_signed(const void *value, size_t size) {
     return result;
   }
   native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-}
-
-static void native_value_hash_byte(uint64_t *state, uint8_t value) {
-  *state ^= (uint64_t)value;
-  *state *= NATIVE_VALUE_HASH_PRIME;
-}
-
-/* Canonical low-byte-first encoding makes the hash independent of host byte
-   order while retaining the full fixed-width semantic value. */
-static void native_value_hash_u64(uint64_t *state, uint64_t value) {
-  uint32_t shift;
-  for (shift = UINT32_C(0); shift < UINT32_C(64); shift += UINT32_C(8)) {
-    native_value_hash_byte(state, (uint8_t)(value >> shift));
-  }
 }
 
 static void native_value_hash_float(
