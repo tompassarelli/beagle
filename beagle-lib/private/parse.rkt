@@ -1010,28 +1010,6 @@
          (reg! name (parse-type type-expr)))]
       [(list 'declare-extern (? symbol? name) type-expr)
        (reg! name (parse-type type-expr))]
-      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params (? nested-return-marker? _) ret-type body)
-       (define macro-kind (cadr d))
-       (define raw-params
-         (cond
-           [(bracketed? typed-params) (bracket-body typed-params)]
-           [(list? typed-params)      typed-params]
-           [else '()]))
-       (define-values (pnames icontracts)
-         (for/lists (ns cs)
-                    ([p (in-list raw-params)])
-           (cond
-             [(and (list? p) (= (length p) 3) (symbol? (car p)) (annotation-marker? (cadr p)))
-              (values (car p) (caddr p))]
-             [else (values (if (symbol? p) p (fresh-lowered-sym 'p)) 'Syntax)])))
-       (define qname (qualify-name prefix name))
-       (if (eq? macro-kind 'beagle)
-           (register-beagle-macro! registry qname pnames icontracts ret-type body)
-           (register-proc-macro! registry qname pnames icontracts ret-type body))
-       (when (and (referred? name) (not (hash-has-key? registry name)))
-         (if (eq? macro-kind 'beagle)
-             (register-beagle-macro! registry name pnames icontracts ret-type body)
-             (register-proc-macro! registry name pnames icontracts ret-type body)))]
       [(cons 'define-macro _)
        (raise-parse-error 'legacy-macro-form
         "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
@@ -1963,35 +1941,6 @@
             (raise-parse-error 'bad-meta-value
                                "(ns ~a ...): unsupported ns clause ~v — supported: docstring, (:require libspec ...), (:import spec ...)" n clause)]))]
 
-      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params (? nested-return-marker? _) ret-type body)
-       (validate-identifier! name "macro")
-       (define macro-kind (cadr d))
-       (define raw-params
-         (cond
-           [(bracketed? typed-params) (bracket-body typed-params)]
-           [(list? typed-params)      typed-params]
-           [else (raise-parse-error 'bad-meta-value
-                                    "macro ~a: parameters must be a list" name)]))
-       ;; Flat `name: Contract` triples, same as every other binding vector; a
-       ;; bare name defaults to the Syntax contract.
-       (define-values (param-names input-contracts)
-         (let loop ([rest raw-params] [names '()] [contracts '()])
-           (cond
-             [(null? rest) (values (reverse names) (reverse contracts))]
-             [(and (symbol? (car rest)) (pair? (cdr rest))
-                   (annotation-marker? (cadr rest)) (pair? (cddr rest)))
-              (loop (cdddr rest) (cons (car rest) names) (cons (caddr rest) contracts))]
-             [(paren-annotation? (car rest))
-              (raise-paren-annotation (car rest))]
-             [(symbol? (car rest))
-              (loop (cdr rest) (cons (car rest) names) (cons 'Syntax contracts))]
-             [else
-              (raise-parse-error 'bad-meta-value
-                                 "macro ~a: bad typed parameter: ~v" name (car rest))])))
-       (if (eq? macro-kind 'beagle)
-           (register-beagle-macro! registry name param-names input-contracts ret-type body)
-           (register-proc-macro! registry name param-names input-contracts ret-type body))]
-
       [(cons 'define-macro _)
        (raise-parse-error 'legacy-macro-form
         "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
@@ -2141,6 +2090,9 @@
             (mark-macro-derived! parsed-node ctx)
             parsed-node)
           (cond
+            [(and from-macro? (pair? expanded) (eq? (car expanded) 'do))
+             (for/list ([form-datum (in-list (cdr expanded))])
+               (cons (parse-macro-output form-datum) s))]
             [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
              (for/list ([form-datum (in-list (cdr expanded))])
                (cons (parse-macro-output form-datum) s))]

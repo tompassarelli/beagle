@@ -39,6 +39,46 @@
   (check-eq? (call-form-fn value) '+)
   (check-equal? (call-form-args value) '(5 1)))
 
+(test-case "defmacro: body is evaluated in the pure compile-time environment"
+  (define p (parse-prog
+             `(defmacro inc-built ,(br 'x)
+                (list (quote +) x 1))
+             '(def y (inc-built 5))))
+  (define value (def-form-value (car (program-forms p))))
+  (check-true (call-form? value))
+  (check-eq? (call-form-fn value) '+)
+  (check-equal? (call-form-args value) '(5 1)))
+
+(test-case "defmacro: top-level do output flattens into definitions"
+  (define p
+    (parse-prog
+     `(defmacro define-pair ,(br 'left 'right)
+        (quasiquote
+         (do (def (unquote left) 1)
+             (def (unquote right) 2))))
+     '(define-pair alpha beta)))
+  (check-equal? (map def-form-name (program-forms p)) '(alpha beta)))
+
+(test-case "defmacro: expression-position do remains an expression"
+  (define p
+    (parse-prog
+     `(defmacro two-values ,(br)
+        (quasiquote (do 1 2)))
+     '(def value (two-values))))
+  (define value (def-form-value (car (program-forms p))))
+  (check-true (do-form? value))
+  (check-equal? (do-form-body value) '(1 2)))
+
+(test-case "defmacro: compile-time error keeps macro name and message"
+  (check-exn (lambda (e)
+               (and (regexp-match? #rx"macro reject: body raised an error"
+                                   (exn-message e))
+                    (regexp-match? #rx"schema needs fields" (exn-message e))))
+    (lambda ()
+      (parse-prog
+       `(defmacro reject ,(br 'x) (error "schema needs fields"))
+       '(reject value)))))
+
 ;; --- (b) unquote of a vector binding --------------------------------------
 
 (test-case "defmacro: my-let unquotes a bracketed binding"

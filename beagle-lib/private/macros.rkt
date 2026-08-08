@@ -2,18 +2,9 @@
 
 ;; Beagle's macro layer.
 ;;
-;; Template macros (safe/unsafe):
-;;   (define-macro safe   inc1 (x) (+ x 1))
-;;   (define-macro safe my-when (cond body) (if cond body nil))
-;;
-;; Procedural macros (Beagle-native bodies):
-;;   (define-macro beagle defentity
-;;     [name: Symbol fields: (Vec Syntax)] -> (Vec Form)
-;;     (let [record (make-defrecord name
-;;                    (map (fn [f: Syntax]
-;;                      (make-field (syntax-name f) (syntax-type f)))
-;;                      fields))]
-;;       (list record)))
+;; `(defmacro name [params] body)` evaluates BODY in the pure compile-time
+;; evaluator with raw call forms bound to PARAMS. Quasiquote constructs output;
+;; runtime calls used as generated syntax are data, never host evaluation.
 
 (require racket/match
          racket/string
@@ -23,12 +14,10 @@
          (only-in "ast.rkt" current-registry))
 
 (struct macro-def (kind fixed-params rest-param template) #:transparent)
-;; kind: 'safe or 'proc
+;; kind: 'safe (internal fixture) or 'defmacro (the authoring surface)
 ;; fixed-params: list of symbols (positional)
 ;; rest-param: symbol or #f (variadic catchall)
-;; template: datum tree (safe/unsafe) or #f (proc)
-
-(struct proc-macro-def macro-def (proc input-contracts output-contract) #:transparent)
+;; template: datum tree or procedural defmacro body
 
 ;; Expansion provenance: tracks macro name chain through recursive expansion.
 (struct expansion-ctx (macro-name depth parent) #:transparent)
@@ -65,13 +54,6 @@
   (if (> (string-length s) max-len)
     (string-append (substring s 0 (- max-len 3)) "...")
     s))
-;; proc: Racket procedure (lambda over raw datums)
-;; input-contracts: list of contract type symbols (Symbol, Expr, Form, Syntax, ...)
-;; output-contract: contract type symbol or (Vec Form) etc.
-
-(struct beagle-macro-def macro-def (param-names input-contracts output-contract body-datum) #:transparent)
-;; body-datum: stripped Beagle datum (evaluated by macro-eval at expansion time)
-
 (define (make-macro-registry) (make-hash))
 
 (define (parse-macro-params params)
@@ -102,72 +84,6 @@
     (error 'beagle "macro ~a: parameters must be a list, got ~v" name params))
   (define-values (fixed rest-name) (parse-macro-params params))
   (hash-set! reg name (macro-def kind fixed rest-name template)))
-
-;; --- procedural macros ------------------------------------------------------
-
-(define (strip-reader-tags datum)
-  (cond
-    [(and (pair? datum) (eq? (car datum) 'quote))
-     datum]
-    [(and (pair? datum) (eq? (car datum) BRACKET-TAG))
-     (map strip-reader-tags (cdr datum))]
-    [(and (pair? datum) (eq? (car datum) MAP-TAG))
-     (cons 'hash (map strip-reader-tags (cdr datum)))]
-    [(and (pair? datum) (eq? (car datum) SET-TAG))
-     (cons 'set (map strip-reader-tags (cdr datum)))]
-    [(pair? datum)
-     (cons (strip-reader-tags (car datum))
-           (strip-reader-tags (cdr datum)))]
-    [else datum]))
-
-(define proc-macro-ns #f)
-
-(define (get-proc-macro-namespace)
-  (unless proc-macro-ns
-    (set! proc-macro-ns (make-base-namespace))
-    (parameterize ([current-namespace proc-macro-ns])
-      (namespace-require 'racket/list)
-      (namespace-require 'racket/string)
-      (namespace-require 'racket/format)
-      (eval `(define BRACKET-TAG ',BRACKET-TAG) proc-macro-ns)
-      (eval `(define MAP-TAG ',MAP-TAG) proc-macro-ns)
-      (eval `(define SET-TAG ',SET-TAG) proc-macro-ns)
-      (eval `(define ANN-MARKER ',ANN-MARKER) proc-macro-ns)
-      (eval '(define (br . xs) (cons BRACKET-TAG xs)) proc-macro-ns)
-      (eval '(define (mp . xs) (cons MAP-TAG xs)) proc-macro-ns)
-      (eval '(define (st . xs) (cons SET-TAG xs)) proc-macro-ns)
-      ;; canonical annotation constructor — splice it: `[~@(ann n t)]
-      (eval '(define (ann n t) (list n ANN-MARKER t)) proc-macro-ns)
-      (eval '(define (sym->kw s)
-               (string->symbol (string-append ":" (symbol->string s)))) proc-macro-ns)))
-  proc-macro-ns)
-
-(define (compile-proc-body name param-names body-datum)
-  (define clean-body (strip-reader-tags body-datum))
-  (define lambda-expr `(lambda ,param-names ,clean-body))
-  (with-handlers
-    ([exn:fail?
-      (lambda (e)
-        (error 'beagle
-               "macro ~a: body failed to compile:\n  ~a"
-               name (exn-message e)))])
-    (eval lambda-expr (get-proc-macro-namespace))))
-
-(define (register-proc-macro! reg name param-names input-contracts output-contract body-datum)
-  (when (hash-has-key? reg name)
-    (error 'beagle "duplicate macro definition: ~a" name))
-  (define proc (compile-proc-body name param-names body-datum))
-  (hash-set! reg name
-    (proc-macro-def 'proc param-names #f #f
-                    proc input-contracts output-contract)))
-
-(define (register-beagle-macro! reg name param-names input-contracts output-contract body-datum)
-  (when (hash-has-key? reg name)
-    (error 'beagle "duplicate macro definition: ~a" name))
-  (define clean-body (strip-reader-tags body-datum))
-  (hash-set! reg name
-    (beagle-macro-def 'beagle param-names #f #f
-                      param-names input-contracts output-contract clean-body)))
 
 ;; --- AST contracts ----------------------------------------------------------
 
@@ -228,83 +144,14 @@
 (define SPLICE-MARKER 'splice)
 
 ;; Expand a single macro application. `args` are raw datums.
-;; Safe macros get hygienic renaming of template-introduced binders.
-;; Proc macros call a Racket lambda and validate the output contract.
+;; Macro bodies never execute through the host language.
 (define (expand-macro reg name args [ctx #f])
   (define m (lookup-macro reg name))
   (unless m
     (error 'beagle "no macro named ~a" name))
-  (cond
-    [(beagle-macro-def? m)
-     (expand-beagle-macro m name args ctx)]
-    [(proc-macro-def? m)
-     (expand-proc-macro m name args ctx)]
-    [else
-     (expand-template-macro m name args)]))
+  (expand-template-macro m name args ctx))
 
-(define (expand-proc-macro m name args [ctx #f])
-  (define params (macro-def-fixed-params m))
-  (define input-contracts (proc-macro-def-input-contracts m))
-  (define output-contract (proc-macro-def-output-contract m))
-  (unless (= (length args) (length params))
-    (error 'beagle
-           "macro ~a: expected ~a arg(s), got ~a"
-           name (length params) (length args)))
-  (define clean-args (map strip-reader-tags args))
-  (for ([arg (in-list clean-args)]
-        [contract (in-list input-contracts)]
-        [pname (in-list params)])
-    (check-datum-contract arg contract name (format "arg ~a" pname)))
-  (define result
-    (with-handlers
-      ([exn:fail?
-        (lambda (e)
-          (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
-          (error 'beagle
-                 "macro ~a: body raised an error:\n  ~a\n  input: ~a~a"
-                 name (exn-message e) (truncate-datum (cons name args)) chain))])
-      (apply (proc-macro-def-proc m) clean-args)))
-  (check-datum-contract result output-contract name "output")
-  (cond
-    [(and (pair? output-contract) (eq? (car output-contract) 'Vec))
-     (cons '#%splice-forms result)]
-    [else result]))
-
-(define (expand-beagle-macro m name args [ctx #f])
-  (define param-names (beagle-macro-def-param-names m))
-  (define input-contracts (beagle-macro-def-input-contracts m))
-  (define output-contract (beagle-macro-def-output-contract m))
-  (define body-datum (beagle-macro-def-body-datum m))
-  (unless (= (length args) (length param-names))
-    (error 'beagle
-           "macro ~a: expected ~a arg(s), got ~a"
-           name (length param-names) (length args)))
-  (define clean-args (map strip-reader-tags args))
-  (for ([arg (in-list clean-args)]
-        [contract (in-list input-contracts)]
-        [pname (in-list param-names)])
-    (check-datum-contract arg contract name (format "arg ~a" pname)))
-  (define env
-    (for/fold ([e (make-macro-env)])
-              ([pname (in-list param-names)]
-               [arg (in-list clean-args)])
-      (hash-set e pname arg)))
-  (define result
-    (with-handlers
-      ([exn:fail?
-        (lambda (e)
-          (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
-          (error 'beagle
-                 "macro ~a: body raised an error:\n  ~a\n  input: ~a~a"
-                 name (exn-message e) (truncate-datum (cons name args)) chain))])
-      (macro-eval body-datum env)))
-  (check-datum-contract result output-contract name "output")
-  (cond
-    [(and (pair? output-contract) (eq? (car output-contract) 'Vec))
-     (cons '#%splice-forms result)]
-    [else result]))
-
-(define (expand-template-macro m name args)
+(define (expand-template-macro m name args [ctx #f])
   (define fixed (macro-def-fixed-params m))
   (define rest-name (macro-def-rest-param m))
   (define kind (macro-def-kind m))
@@ -313,27 +160,39 @@
     (if hygienic?
       (hygienize-template (macro-def-template m) fixed rest-name)
       (macro-def-template m)))
-  (define substituted
+  (define-values (fixed-args rest-args)
     (cond
       [rest-name
        (when (< (length args) (length fixed))
          (error 'beagle
                 "macro ~a: expected at least ~a arg(s), got ~a"
                 name (length fixed) (length args)))
-       (define fixed-args (take args (length fixed)))
-       (define rest-args  (drop args (length fixed)))
-       (define bindings (make-bindings fixed fixed-args rest-name rest-args))
-       (substitute template bindings rest-name)]
+       (values (take args (length fixed)) (drop args (length fixed)))]
       [else
        (unless (= (length args) (length fixed))
          (error 'beagle
                 "macro ~a: expected ~a arg(s), got ~a"
                 name (length fixed) (length args)))
-       (define bindings (make-bindings fixed args #f '()))
-       (substitute template bindings #f)]))
+       (values args '())]))
   (cond
-    [(eq? kind 'defmacro) (qq-eval substituted)]
-    [else substituted]))
+    [(eq? kind 'defmacro)
+     (define env
+       (for/fold ([e (make-macro-env)])
+                 ([pname (in-list fixed)] [arg (in-list fixed-args)])
+         (hash-set e pname arg)))
+     (define env+rest (if rest-name (hash-set env rest-name rest-args) env))
+     (with-handlers
+       ([exn:fail?
+         (lambda (e)
+           (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
+           (error 'beagle
+                  "macro ~a: body raised an error:\n  ~a\n  input: ~a~a"
+                  name (exn-message e) (truncate-datum (cons name args)) chain))])
+       (macro-eval template env+rest))]
+    [else
+     (define bindings
+       (make-bindings fixed fixed-args rest-name rest-args))
+     (substitute template bindings rest-name)]))
 
 ;; --- quasi-quote evaluator (defmacro bodies) -------------------------------
 ;;
@@ -802,14 +661,9 @@
 
 (provide
  (struct-out macro-def)
- (struct-out proc-macro-def)
- (struct-out beagle-macro-def)
  (struct-out expansion-ctx)
  make-macro-registry
  register-macro!
- register-proc-macro!
- register-beagle-macro!
- compile-proc-body
  lookup-macro
  macro-application?
  expand-macro
@@ -829,5 +683,4 @@
  make-root-ctx
  push-ctx
  format-expansion-chain
- check-datum-contract
- strip-reader-tags)
+ check-datum-contract)

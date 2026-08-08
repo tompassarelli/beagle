@@ -23,34 +23,9 @@
 (define (expand-file path)
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
-  ;; First pass: register macros (template + proc + beagle)
+  ;; First pass: register canonical macros.
   (for ([d (in-list datums)])
     (match d
-      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
-       (define macro-kind (cadr d))
-       (define raw-params
-         (cond
-           [(bracketed? typed-params) (bracket-body typed-params)]
-           [(list? typed-params)      typed-params]
-           [else '()]))
-       (define-values (param-names input-contracts)
-         (for/lists (names contracts)
-                    ([p (in-list raw-params)])
-           (cond
-             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
-              (values (car p) (caddr p))]
-             [(symbol? p)
-              (values p 'Syntax)]
-             [else (values (gensym) 'Syntax)])))
-       (if (eq? macro-kind 'beagle)
-           (register-beagle-macro! registry name param-names input-contracts ret-type body)
-           (register-proc-macro! registry name param-names input-contracts ret-type body))]
-      [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
-       (define ps (cond
-                    [(bracketed? params) (bracket-body params)]
-                    [(list? params) params]
-                    [else '()]))
-       (register-macro! registry name kind ps template)]
       [(list 'defmacro (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -63,6 +38,10 @@
     (unless (and (pair? d) (memq (car d) '(define-macro defmacro import)))
       (define expanded (expand-fully registry d))
       (cond
+        [(and (pair? expanded) (eq? (car expanded) 'do))
+         (for ([form (in-list (cdr expanded))])
+           (displayln (datum->beagle-src form))
+           (newline))]
         [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
          (for ([form (in-list (cdr expanded))])
            (displayln (datum->beagle-src form))
@@ -159,31 +138,6 @@
   (define registry (make-macro-registry))
   (for ([d (in-list datums)])
     (match d
-      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
-       (define macro-kind (cadr d))
-       (define raw-params
-         (cond
-           [(bracketed? typed-params) (bracket-body typed-params)]
-           [(list? typed-params)      typed-params]
-           [else '()]))
-       (define-values (param-names input-contracts)
-         (for/lists (names contracts)
-                    ([p (in-list raw-params)])
-           (cond
-             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
-              (values (car p) (caddr p))]
-             [(symbol? p)
-              (values p 'Syntax)]
-             [else (values (gensym) 'Syntax)])))
-       (if (eq? macro-kind 'beagle)
-           (register-beagle-macro! registry name param-names input-contracts ret-type body)
-           (register-proc-macro! registry name param-names input-contracts ret-type body))]
-      [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
-       (define ps (cond
-                    [(bracketed? params) (bracket-body params)]
-                    [(list? params) params]
-                    [else '()]))
-       (register-macro! registry name kind ps template)]
       [(list 'defmacro (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -196,9 +150,11 @@
       (if (and (pair? d) (memq (car d) '(define-macro defmacro import)))
         '()
         (let ([expanded (expand-fully registry d)])
-          (if (and (pair? expanded) (eq? (car expanded) '#%splice-forms))
-            (cdr expanded)
-            (list expanded)))))))
+          (cond
+            [(and (pair? expanded) (eq? (car expanded) 'do)) (cdr expanded)]
+            [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
+             (cdr expanded)]
+            [else (list expanded)]))))))
 
 ;; --- traced expansion -------------------------------------------------------
 

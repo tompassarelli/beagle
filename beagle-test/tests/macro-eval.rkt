@@ -128,3 +128,30 @@
 
 (test-case "count is the Clojure spelling of length"
   (check-equal? (ev '(count (list 1 2 3))) 3))
+
+(test-case "collection operators see a raw bracketed vec as its elements"
+  (check-equal?
+   (ev-let `((fields . (,BRACKET-TAG x ,ANN-MARKER Int y ,ANN-MARKER String)))
+           '(partition 3 fields))
+   `((x ,ANN-MARKER Int) (y ,ANN-MARKER String))))
+
+(test-case "reduce preserves Clojure accumulator-item order"
+  (check-equal? (ev '(reduce (fn [acc item] (- acc item)) 10 (list 1 2 3))) 4)
+  (check-exn #rx"non-empty collection"
+             (lambda () (ev '(reduce (fn [acc item] (+ acc item)) (list))))))
+
+(test-case "nested quasiquote tracks depth and tagged vec splice strips its tag"
+  (check-equal?
+   (ev-let '((x . 9))
+           '(quasiquote (quasiquote (a (unquote (unquote x))))))
+   '(quasiquote (a (unquote 9))))
+  (check-equal?
+   (ev-let `((xs . (,BRACKET-TAG 1 2)))
+           '(quasiquote (f (unquote-splicing xs) 3)))
+   '(f 1 2 3)))
+
+(test-case "cond uses canonical flat Clojure pairs"
+  (check-equal? (ev '(cond false 1 (= 2 2) 2 :else 3)) 2)
+  (check-equal? (ev '(cond false 1 :else 3)) 3)
+  (check-exn #rx"cond needs an expression"
+             (lambda () (ev '(cond true)))))

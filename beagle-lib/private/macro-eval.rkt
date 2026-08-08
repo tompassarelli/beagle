@@ -6,21 +6,14 @@
 ;; No target emitter involved — this is the compile-time runtime.
 ;;
 ;; Supported forms: let, if, cond, fn, do, function application,
-;; literals, symbols, quote. Built-in env provides list ops, string ops,
-;; comparison, and typed syntax constructors.
-;;
-;; HOLD-WHY: Currently 0 corpus usages of `(define-macro beagle ...)`
-;; in the Racket-hosted beagle. This file *looks* deletable based on usage.
-;; It is NOT deletable — it's load-bearing infrastructure for the eventual
-;; Cyclone self-host. The `proc` macro kind is Racket-evaluated; when
-;; beagle's compiler runs on Cyclone, `proc` macros lose their runtime.
-;; The path-of-least-resistance answer is to make procedural macros
-;; *beagle-evaluated* — which is what `define-macro beagle` + this file
-;; provide. Deleting this file means re-doing the work when Cyclone lands.
+;; literals, symbols, quote, and quasiquote. Built-ins are pure,
+;; deterministic, and target-neutral; there is no host eval or I/O.
 
 (require racket/list
+         racket/match
          racket/string
-         (only-in "tags.rkt" ANN-MARKER BRACKET-TAG ann))
+         (only-in "tags.rkt"
+                  ANN-MARKER BRACKET-TAG MAP-TAG SET-TAG ann))
 
 (provide macro-eval
          macro-eval-body
@@ -55,7 +48,16 @@
        [(eq? head 'fn)    (eval-fn (cdr expr) env)]
        [(eq? head 'do)    (eval-body (cdr expr) env)]
        [(eq? head 'quote) (cadr expr)]
-       [(eq? head 'quasiquote) (eval-quasiquote (cadr expr) env)]
+       [(eq? head 'quasiquote) (eval-quasiquote (cadr expr) env 1)]
+       [(eq? head BRACKET-TAG)
+        (cons BRACKET-TAG
+              (map (lambda (item) (macro-eval item env)) (cdr expr)))]
+       [(eq? head MAP-TAG)
+        (cons MAP-TAG
+              (map (lambda (item) (macro-eval item env)) (cdr expr)))]
+       [(eq? head SET-TAG)
+        (cons SET-TAG
+              (map (lambda (item) (macro-eval item env)) (cdr expr)))]
        [(eq? head 'unquote)
         (error 'macro-eval "unquote (`~~`) outside a quasiquote template")]
        [(eq? head 'unquote-splicing)
@@ -64,26 +66,40 @@
 
 ;; Quasiquote builds a datum: everything is literal except `~expr` (evaluated in
 ;; place) and `~@expr` (evaluated, then spliced into the surrounding list).
-(define (eval-quasiquote template env)
+(define (eval-quasiquote template env depth)
   (cond
     [(not (pair? template)) template]
-    [(eq? (car template) 'unquote) (macro-eval (cadr template) env)]
+    [(eq? (car template) 'quasiquote)
+     (list 'quasiquote
+           (eval-quasiquote (cadr template) env (+ depth 1)))]
+    [(eq? (car template) 'unquote)
+     (if (= depth 1)
+         (macro-eval (cadr template) env)
+         (list 'unquote
+               (eval-quasiquote (cadr template) env (- depth 1))))]
     [(eq? (car template) 'unquote-splicing)
-     (error 'macro-eval "unquote-splicing (`~~@`) has no surrounding list to splice into")]
+     (if (= depth 1)
+         (error 'macro-eval "unquote-splicing (`~~@`) has no surrounding list to splice into")
+         (list 'unquote-splicing
+               (eval-quasiquote (cadr template) env (- depth 1))))]
     [else
      (let loop ([items template])
        (cond
          [(null? items) '()]
          ;; A dotted tail is itself a template, not an element.
-         [(not (pair? items)) (eval-quasiquote items env)]
-         [(and (pair? (car items)) (eq? (caar items) 'unquote-splicing))
-          (define spliced (macro-eval (cadr (car items)) env))
-          (unless (list? spliced)
-            (error 'macro-eval "unquote-splicing (`~~@`) expected a list, got: ~v" spliced))
+         [(not (pair? items)) (eval-quasiquote items env depth)]
+         [(and (pair? (car items))
+               (eq? (caar items) 'unquote-splicing)
+               (= depth 1))
+          (define spliced (macro-seq (macro-eval (cadr (car items)) env)
+                                     "unquote-splicing (`~~@`)"))
           (append spliced (loop (cdr items)))]
          ;; `(a . ~b)` — the reader leaves an unquote in tail position.
-         [(eq? (car items) 'unquote) (macro-eval (cadr items) env)]
-         [else (cons (eval-quasiquote (car items) env) (loop (cdr items)))]))]))
+         [(and (eq? (car items) 'unquote) (= depth 1))
+          (macro-eval (cadr items) env)]
+         [else
+          (cons (eval-quasiquote (car items) env depth)
+                (loop (cdr items)))]))]))
 
 (define (macro-eval-body body env)
   (cond
@@ -93,13 +109,23 @@
      (macro-eval (car body) env)
      (macro-eval-body (cdr body) env)]))
 
+(define (macro-seq? value)
+  (or (list? value)
+      (and (pair? value) (eq? (car value) BRACKET-TAG))))
+
+(define (macro-seq value who)
+  (cond
+    [(and (pair? value) (eq? (car value) BRACKET-TAG)) (cdr value)]
+    [(list? value) value]
+    [else (error 'macro-eval "~a expected a list or vec, got: ~v" who value)]))
+
 ;; --- let ---------------------------------------------------------------------
 
 (define (eval-let parts env)
   (define bindings-form (car parts))
   (define body (cdr parts))
   (define new-env
-    (let loop ([rest (if (list? bindings-form) bindings-form '())]
+    (let loop ([rest (macro-seq bindings-form "let bindings")]
                [e env])
       (cond
         [(null? rest) e]
@@ -132,16 +158,14 @@
 (define (eval-cond clauses env)
   (cond
     [(null? clauses) (void)]
+    [(null? (cdr clauses))
+     (error 'macro-eval "cond needs an expression after test: ~v" (car clauses))]
     [else
-     (define c (car clauses))
-     (cond
-       [(and (pair? c) (eq? (car c) 'else))
-        (eval-body (cdr c) env)]
-       [(pair? c)
-        (if (macro-eval (car c) env)
-            (eval-body (cdr c) env)
-            (eval-cond (cdr clauses) env))]
-       [else (error 'macro-eval "bad cond clause: ~v" c)])]))
+     (define test (car clauses))
+     (define result (cadr clauses))
+     (if (or (eq? test ':else) (macro-eval test env))
+         (macro-eval result env)
+         (eval-cond (cddr clauses) env))]))
 
 ;; --- fn ----------------------------------------------------------------------
 
@@ -159,7 +183,7 @@
              [(symbol? p) p]
              [(and (pair? p) (symbol? (car p))) (car p)]
              [else (error 'macro-eval "bad fn param: ~v" p)]))
-         (if (list? raw-params) raw-params (list raw-params))))
+         (macro-seq raw-params "fn params")))
   (macro-closure param-names body env))
 
 ;; --- function application ----------------------------------------------------
@@ -194,10 +218,22 @@
     [else (error 'macro-eval "not a function: ~v" f)]))
 
 (define (macro-map f . lsts)
-  (apply map (callable f) lsts))
+  (apply map (callable f) (map (lambda (xs) (macro-seq xs "map")) lsts)))
 
 (define (macro-filter f lst)
-  (filter (callable f) lst))
+  (filter (callable f) (macro-seq lst "filter")))
+
+(define (macro-reduce f . args)
+  (define g (callable f))
+  (match args
+    [(list xs)
+     (define items (macro-seq xs "reduce"))
+     (when (null? items)
+       (error 'macro-eval "reduce without an initial value needs a non-empty collection"))
+     (foldl (lambda (item acc) (g acc item)) (car items) (cdr items))]
+    [(list init xs)
+     (foldl (lambda (item acc) (g acc item)) init (macro-seq xs "reduce"))]
+    [_ (error 'macro-eval "reduce expected (reduce f coll) or (reduce f init coll)")]))
 
 ;; A macro body has no named recursion, so the primitives it gets must be
 ;; enough to build a form from a field list without one.
@@ -205,25 +241,26 @@
   (when (null? args)
     (error 'macro-eval "apply: expected a function and a final list argument"))
   (define tail (last args))
-  (unless (list? tail)
-    (error 'macro-eval "apply: the final argument must be a list, got: ~v" tail))
-  (apply (callable f) (append (drop-right args 1) tail)))
+  (unless (macro-seq? tail)
+    (error 'macro-eval "apply: the final argument must be a list or vec, got: ~v" tail))
+  (define tail-items (macro-seq tail "apply: final argument"))
+  (apply (callable f) (append (drop-right args 1) tail-items)))
 
 (define (macro-mapcat f . lsts)
-  (define parts (apply map (callable f) lsts))
+  (define parts
+    (apply map (callable f)
+           (map (lambda (xs) (macro-seq xs "mapcat")) lsts)))
   (for ([p (in-list parts)])
-    (unless (list? p)
-      (error 'macro-eval "mapcat: the function must return a list, got: ~v" p)))
-  (apply append parts))
+    (unless (macro-seq? p)
+      (error 'macro-eval "mapcat: the function must return a list or vec, got: ~v" p)))
+  (apply append (map (lambda (p) (macro-seq p "mapcat: function result")) parts)))
 
 ;; `[x: Float z: Float]` reaches a macro flat, so walking it by field means
 ;; regrouping it: (partition 3 fields) pairs each name with its type.
 (define (macro-partition n lst)
   (unless (and (exact-integer? n) (positive? n))
     (error 'macro-eval "partition: size must be a positive integer, got: ~v" n))
-  (unless (list? lst)
-    (error 'macro-eval "partition: expected a list, got: ~v" lst))
-  (let loop ([items lst])
+  (let loop ([items (macro-seq lst "partition")])
     (cond
       [(< (length items) n) '()]
       [else (cons (take items n) (loop (drop items n)))])))
@@ -231,10 +268,10 @@
 ;; Positional codegen — a wire slot, an argument index — needs the position of
 ;; each field, which plain `map` cannot supply.
 (define (macro-map-indexed f lst)
-  (unless (list? lst)
-    (error 'macro-eval "map-indexed: expected a list, got: ~v" lst))
   (define g (callable f))
-  (for/list ([item (in-list lst)] [i (in-naturals)]) (g i item)))
+  (for/list ([item (in-list (macro-seq lst "map-indexed"))]
+             [i (in-naturals)])
+    (g i item)))
 
 (define (macro-range n)
   (unless (and (exact-integer? n) (>= n 0))
@@ -242,11 +279,25 @@
   (build-list n values))
 
 (define (macro-nth lst i)
-  (unless (list? lst)
-    (error 'macro-eval "nth: expected a list, got: ~v" lst))
-  (unless (and (exact-integer? i) (>= i 0) (< i (length lst)))
-    (error 'macro-eval "nth: index ~v out of range for a list of ~a" i (length lst)))
-  (list-ref lst i))
+  (define items (macro-seq lst "nth"))
+  (unless (and (exact-integer? i) (>= i 0) (< i (length items)))
+    (error 'macro-eval "nth: index ~v out of range for a list of ~a" i (length items)))
+  (list-ref items i))
+
+(define (macro-first xs) (car (macro-seq xs "first")))
+(define (macro-second xs) (cadr (macro-seq xs "second")))
+(define (macro-third xs) (caddr (macro-seq xs "third")))
+(define (macro-rest xs) (cdr (macro-seq xs "rest")))
+(define (macro-count xs) (length (macro-seq xs "count")))
+(define (macro-reverse xs) (reverse (macro-seq xs "reverse")))
+(define (macro-append . xss)
+  (apply append (map (lambda (xs) (macro-seq xs "append")) xss)))
+(define (macro-distinct xs) (remove-duplicates (macro-seq xs "distinct") equal?))
+(define (macro-distinct? . xs) (= (length xs) (length (remove-duplicates xs equal?))))
+(define (macro-every? pred xs)
+  (andmap (callable pred) (macro-seq xs "every?")))
+(define (macro-error . parts)
+  (error 'macro-eval "~a" (apply beagle-str parts)))
 
 ;; --- Syntax constructors -----------------------------------------------------
 
@@ -311,24 +362,30 @@
    'cons cons
    'list list
    'vec make-vec
-   'append append
-   'first car
-   'second cadr
-   'third caddr
-   'rest cdr
+   'append macro-append
+   'concat macro-append
+   'first macro-first
+   'second macro-second
+   'third macro-third
+   'rest macro-rest
    'null? null?
    'pair? pair?
-   'length length
+   'empty? (lambda (xs) (null? (macro-seq xs "empty?")))
+   'length macro-count
+   'count macro-count
    'map macro-map
    'map-indexed macro-map-indexed
    'mapcat macro-mapcat
+   'reduce macro-reduce
    'range macro-range
    'filter macro-filter
+   'every? macro-every?
    'apply macro-apply
    'partition macro-partition
    'nth macro-nth
-   'count length
-   'reverse reverse
+   'reverse macro-reverse
+   'distinct macro-distinct
+   'distinct? macro-distinct?
 
    'str beagle-str
    ;; A record's accessors are `<downcased-name>-<field>`, so a macro that
@@ -341,6 +398,7 @@
    'format-symbol format-symbol
 
    '= equal?
+   'not= (lambda (a b) (not (equal? a b)))
    'not not
    '< <
    '> >
@@ -348,6 +406,9 @@
    '>= >=
    '+ +
    '- -
+   '* *
+   'quot quotient
+   'mod modulo
 
    'true #t
    'false #f
@@ -360,4 +421,6 @@
    'make-defrecord make-defrecord
    'make-defn make-defn
    'make-get make-get
-   'make-keyword make-keyword))
+   'make-keyword make-keyword
+   'ann ann
+   'error macro-error))

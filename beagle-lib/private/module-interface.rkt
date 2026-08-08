@@ -183,9 +183,6 @@
       [(list 'defmacro (? symbol? name) _ _)
        (hash-set out name
                  (interface-binding name 'macro ANY #f))]
-      [(list 'define-macro _ (? symbol? name) _ ': _ _)
-       (hash-set out name
-                 (interface-binding name 'macro ANY #f))]
       [(list 'declare-extern (? symbol? name) type-expression)
        (hash-set out name
                  (interface-binding
@@ -215,8 +212,6 @@
             ([datum (in-list datums)])
     (match datum
       [(list 'defmacro (? symbol? name) _ _)
-       (hash-set fingerprints name (sha256-datum datum))]
-      [(list 'define-macro _ (? symbol? name) _ ': _ _)
        (hash-set fingerprints name (sha256-datum datum))]
       [_ fingerprints])))
 
