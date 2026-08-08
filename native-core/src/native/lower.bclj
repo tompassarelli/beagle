@@ -2177,15 +2177,12 @@
           direct
           (find-local (bodystatev0-locals state) canonical))))))
 
-(defn find-signature
+(defn signature-position-at
   [env: BodyEnvV0
-   source: core/NativeId
-   spelling: String] -> (U TypedFunctionV0 Nil)
+   resolved: ResolvedSourceNameV0] -> (U Int Nil)
   (let [index: SourceIndexV0 (bodyenvv0-index env)
         signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
-        sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)
-        resolved: ResolvedSourceNameV0
-        (resolve-source-name index (source-module-name index source) spelling)]
+        sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)]
     (if (not (resolvedsourcenamev0-visible resolved))
       nil
       (loop [position: Int 0]
@@ -2198,32 +2195,76 @@
                     (typedfunctionv0-name signature))
                   (= (resolvedsourcenamev0-module-name resolved)
                     (source-module-name index source)))
-              signature
+              position
               (recur (+ position 1)))))))))
+
+(defn global-at
+  [env: BodyEnvV0
+   resolved: ResolvedSourceNameV0] -> (U GlobalBindingV0 Nil)
+  (let [globals: (Vec GlobalBindingV0) (bodyenvv0-globals env)]
+    (if (not (resolvedsourcenamev0-visible resolved))
+      nil
+      (loop [position: Int 0]
+        (if (>= position (count globals))
+          nil
+          (let [global: GlobalBindingV0 (nth globals position)]
+            (if (and
+                  (= (resolvedsourcenamev0-module-name resolved)
+                    (globalbindingv0-module-name global))
+                  (= (resolvedsourcenamev0-local-name resolved)
+                    (globalbindingv0-name global)))
+              global
+              (recur (+ position 1)))))))))
+
+;; Immutable top-level refs are transparent function aliases. Resolve them
+;; before body lowering so every call still targets the canonical FunctionDef.
+(defn function-signature-position
+  [env: BodyEnvV0
+   source: core/NativeId
+   spelling: String] -> (U Int Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        globals: (Vec GlobalBindingV0) (bodyenvv0-globals env)
+        initial: ResolvedSourceNameV0
+        (resolve-source-name index (source-module-name index source) spelling)]
+    (loop [resolved: ResolvedSourceNameV0 initial
+           fuel: Int (+ 1 (count globals))]
+      (let [position: (U Int Nil) (signature-position-at env resolved)]
+        (cond
+          (some? position) position
+          (<= fuel 0) nil
+          :else
+          (let [global: (U GlobalBindingV0 Nil) (global-at env resolved)]
+            (if (nil? global)
+              nil
+              (let [value: core/NativeId (globalbindingv0-value global)
+                    target: String (fact-text index value "name")]
+                (if (or (not (= "ref" (fact-text index value "form-kind")))
+                        (= "" target))
+                  nil
+                  (recur
+                    (resolve-source-name index
+                      (globalbindingv0-module-name global) target)
+                    (- fuel 1)))))))))))
+
+(defn find-signature
+  [env: BodyEnvV0
+   source: core/NativeId
+   spelling: String] -> (U TypedFunctionV0 Nil)
+  (let [position: (U Int Nil)
+        (function-signature-position env source spelling)]
+    (if (nil? position)
+      nil
+      (nth (bodyenvv0-signatures env) position))))
 
 (defn find-signature-source
   [env: BodyEnvV0
    source: core/NativeId
    spelling: String] -> (U core/NativeId Nil)
-  (let [index: SourceIndexV0 (bodyenvv0-index env)
-        signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
-        sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)
-        resolved: ResolvedSourceNameV0
-        (resolve-source-name index (source-module-name index source) spelling)]
-    (if (not (resolvedsourcenamev0-visible resolved))
+  (let [position: (U Int Nil)
+        (function-signature-position env source spelling)]
+    (if (nil? position)
       nil
-      (loop [position: Int 0]
-        (if (or (>= position (count signatures)) (>= position (count sources)))
-          nil
-          (let [signature: TypedFunctionV0 (nth signatures position)
-                source: core/NativeId (nth sources position)]
-            (if (and
-                  (= (resolvedsourcenamev0-local-name resolved)
-                    (typedfunctionv0-name signature))
-                  (= (resolvedsourcenamev0-module-name resolved)
-                    (source-module-name index source)))
-              source
-              (recur (+ position 1)))))))))
+      (nth (bodyenvv0-signature-sources env) position))))
 
 (defn signature-traps? [env: BodyEnvV0 signature: TypedFunctionV0] -> Bool
   (let [signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)

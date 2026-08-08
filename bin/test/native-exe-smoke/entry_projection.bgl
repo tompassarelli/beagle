@@ -13,11 +13,16 @@
 (defn helper [] -> Int
   (box-value (->Box seed)))
 
+(def helper-alias helper)
+
 (defn entry [] -> Int
   (helper))
 
 (defn second [] -> Int
   (+ (helper) 1))
+
+(defn alias-entry [] -> Int
+  (helper-alias))
 
 (defn unreachable [] -> Int
   ((fn [value: Int] -> Int value) 0))

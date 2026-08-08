@@ -163,8 +163,18 @@
            '(quasiquote (f (unquote-splicing xs) 3)))
    '(f 1 2 3)))
 
-(test-case "cond uses canonical flat Clojure pairs"
+(test-case "cond evaluates canonical bracket clauses"
+  (check-equal?
+   (ev `(cond (,BRACKET-TAG false 1)
+              (,BRACKET-TAG (= 2 2) 2)
+              (,BRACKET-TAG :else 3)))
+   2)
+  (check-equal? (ev `(cond (,BRACKET-TAG false 1) (,BRACKET-TAG else 3))) 3))
+
+(test-case "cond retains flat-pair compatibility and rejects mixed clauses"
   (check-equal? (ev '(cond false 1 (= 2 2) 2 :else 3)) 2)
   (check-equal? (ev '(cond false 1 :else 3)) 3)
   (check-exn #rx"cond needs an expression"
-             (lambda () (ev '(cond true)))))
+             (lambda () (ev '(cond true))))
+  (check-exn #rx"all bracketed or all flat"
+             (lambda () (ev `(cond (,BRACKET-TAG true 1) :else 2)))))

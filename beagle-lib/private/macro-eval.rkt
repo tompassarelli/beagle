@@ -155,7 +155,7 @@
 
 ;; --- cond --------------------------------------------------------------------
 
-(define (eval-cond clauses env)
+(define (eval-flat-cond clauses env)
   (cond
     [(null? clauses) (void)]
     [(null? (cdr clauses))
@@ -165,7 +165,30 @@
      (define result (cadr clauses))
      (if (or (eq? test ':else) (macro-eval test env))
          (macro-eval result env)
-         (eval-cond (cddr clauses) env))]))
+         (eval-flat-cond (cddr clauses) env))]))
+
+(define (bracket-clause? clause)
+  (and (pair? clause) (eq? (car clause) BRACKET-TAG)))
+
+(define (eval-bracket-cond clauses env)
+  (cond
+    [(null? clauses) (void)]
+    [else
+     (define items (macro-seq (car clauses) "cond clause"))
+     (when (< (length items) 2)
+       (error 'macro-eval "cond clause needs a test and body: ~v" (car clauses)))
+     (define test (car items))
+     (if (or (eq? test ':else) (eq? test 'else) (macro-eval test env))
+         (eval-body (cdr items) env)
+         (eval-bracket-cond (cdr clauses) env))]))
+
+(define (eval-cond clauses env)
+  (define bracketed (filter bracket-clause? clauses))
+  (cond
+    [(null? bracketed) (eval-flat-cond clauses env)]
+    [(= (length bracketed) (length clauses)) (eval-bracket-cond clauses env)]
+    [else
+     (error 'macro-eval "cond clauses must be all bracketed or all flat pairs")]))
 
 ;; --- fn ----------------------------------------------------------------------
 
