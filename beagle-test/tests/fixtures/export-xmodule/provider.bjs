@@ -8,3 +8,5 @@
   (defrecord Pos [x: Float z: Float]))
 
 (defn internal [x: Float] -> Float (+ x 1.0))
+
+(js/export (def cell: Any (atom nil)))

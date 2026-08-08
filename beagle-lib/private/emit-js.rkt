@@ -1584,7 +1584,9 @@
      (cond
        [(eq? e 'nil) "null"]
        [(keyword-symbol? e) (~v (kw->prop e))]
-       [(js-bound? e) (resolved-name e)]
+       ;; Slash-bearing names dot even when bound — JS parses `m/x` as division.
+       [(and (js-bound? e) (not (string-contains? (resolved-name e) "/")))
+        (resolved-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else
         (let ([m (mangle-name e)])

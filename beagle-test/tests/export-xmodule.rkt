@@ -46,3 +46,12 @@
   ;; Internal definitions are listed as before: the wrapper is an export marker,
   ;; not a visibility boundary for the query surface.
   (check-regexp-match #rx"internal" out))
+
+;; The call path was fixed in c3a803e0; the REFERENCE path kept the same
+;; early-out. `p/cell` is not a syntax error in JS — it parses as division — so
+;; this emitted silently wrong code rather than failing the build.
+(test-case "a qualified reference to an imported export emits a member access"
+  (define src (build-path fixtures-dir "refconsumer.bjs"))
+  (define js (emit-program (parse-program (read-beagle-syntax src) #:source-path src)))
+  (check-regexp-match #rx"p[.]cell[.]value" js)
+  (check-false (regexp-match? #rx"p/cell" js)))
