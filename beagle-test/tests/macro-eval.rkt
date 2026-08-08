@@ -5,7 +5,7 @@
 ;; must produce exactly the shapes the parser accepts.
 
 (require rackunit
-         (only-in beagle/private/tags ANN-MARKER)
+         (only-in beagle/private/tags ANN-MARKER BRACKET-TAG)
          beagle/private/macro-eval)
 
 (define (ev expr) (macro-eval expr (make-macro-env)))
@@ -59,26 +59,72 @@
   ;; `[v: Float]` is three items in the vector, never a nested triple:
   ;; a nested `(v #%: Float)` is the retired parenthesized spelling.
   (check-equal? (ev '(vec (make-param (quote v) (quote Float))))
-                (list 'v ANN-MARKER 'Float)))
+                (list BRACKET-TAG 'v ANN-MARKER 'Float)))
 
 (test-case "vec splices several params, staying flat"
   (check-equal? (ev '(vec (make-param (quote a) (quote Float))
                           (make-param (quote b) (quote Int))))
-                (list 'a ANN-MARKER 'Float 'b ANN-MARKER 'Int)))
+                (list BRACKET-TAG 'a ANN-MARKER 'Float 'b ANN-MARKER 'Int)))
 
 (test-case "vec splices record fields the same way"
   (check-equal? (ev '(vec (make-field (quote x) (quote Float))))
-                (list 'x ANN-MARKER 'Float)))
+                (list BRACKET-TAG 'x ANN-MARKER 'Float)))
 
 (test-case "vec leaves ordinary values alone"
-  (check-equal? (ev '(vec 1 2 3)) '(1 2 3)))
+  (check-equal? (ev '(vec 1 2 3)) (list BRACKET-TAG 1 2 3)))
 
 (test-case "vec does not splice a same-shaped list that is not an annotation"
-  (check-equal? (ev '(vec (list 1 2 3))) '((1 2 3))))
+  (check-equal? (ev '(vec (list 1 2 3))) (list BRACKET-TAG '(1 2 3))))
 
 (test-case "make-defn with a spliced param vector parses as a typed signature"
   (check-equal? (ev '(make-defn (quote f)
                                 (vec (make-param (quote v) (quote Float)))
                                 (quote Float)
                                 (quote v)))
-                (list 'defn 'f (list 'v ANN-MARKER 'Float) '-> 'Float 'v)))
+                (list 'defn 'f (list BRACKET-TAG 'v ANN-MARKER 'Float) '-> 'Float 'v)))
+
+;; --- codegen primitives ------------------------------------------------------
+;; A macro body has no named recursion, so these must be enough on their own to
+;; turn a field list into a form.
+
+(test-case "partition regroups a flat typed vector into fields"
+  (check-equal? (ev (list 'partition 3 (list 'quote (list 'x ANN-MARKER 'Float 'z ANN-MARKER 'Float))))
+                (list (list 'x ANN-MARKER 'Float) (list 'z ANN-MARKER 'Float))))
+
+(test-case "partition drops a trailing remainder rather than emitting a short group"
+  (check-equal? (ev '(partition 2 (list 1 2 3))) '((1 2))))
+
+(test-case "partition rejects a non-positive size"
+  (check-exn #rx"positive integer" (lambda () (ev '(partition 0 (list 1 2))))))
+
+(test-case "apply spreads a computed list into a variadic builtin"
+  (check-equal? (ev '(apply list (list 1 2 3))) '(1 2 3))
+  (check-equal? (ev '(apply list 0 (list 1 2))) '(0 1 2)))
+
+(test-case "apply rejects a non-list final argument"
+  (check-exn #rx"must be a list" (lambda () (ev '(apply list 7)))))
+
+(test-case "mapcat flattens one level, which map cannot"
+  (check-equal? (ev '(mapcat (fn [x] (list x x)) (list 1 2))) '(1 1 2 2)))
+
+(test-case "mapcat rejects a function that does not return a list"
+  (check-exn #rx"must return a list" (lambda () (ev '(mapcat (fn [x] x) (list 1 2))))))
+
+(test-case "map-indexed supplies the position a wire slot needs"
+  (check-equal? (ev '(map-indexed (fn [i x] (list i x)) (list (quote a) (quote b))))
+                '((0 a) (1 b))))
+
+(test-case "range builds the index list"
+  (check-equal? (ev '(range 3)) '(0 1 2))
+  (check-equal? (ev '(range 0)) '()))
+
+(test-case "nth reads a positional slot and refuses to run off the end"
+  (check-equal? (ev '(nth (list 10 20 30) 1)) 20)
+  (check-exn #rx"out of range" (lambda () (ev '(nth (list 1) 5)))))
+
+(test-case "lower-case names a record's accessors from its type name"
+  (check-equal? (ev '(lower-case (quote Move))) "move")
+  (check-equal? (ev '(format-symbol "~a-~a" (lower-case (quote Move)) (quote x))) 'move-x))
+
+(test-case "count is the Clojure spelling of length"
+  (check-equal? (ev '(count (list 1 2 3))) 3))

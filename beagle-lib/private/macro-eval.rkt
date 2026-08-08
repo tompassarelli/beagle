@@ -20,7 +20,7 @@
 
 (require racket/list
          racket/string
-         (only-in "tags.rkt" ANN-MARKER ann))
+         (only-in "tags.rkt" ANN-MARKER BRACKET-TAG ann))
 
 (provide macro-eval
          macro-eval-body
@@ -199,6 +199,55 @@
 (define (macro-filter f lst)
   (filter (callable f) lst))
 
+;; A macro body has no named recursion, so the primitives it gets must be
+;; enough to build a form from a field list without one.
+(define (macro-apply f . args)
+  (when (null? args)
+    (error 'macro-eval "apply: expected a function and a final list argument"))
+  (define tail (last args))
+  (unless (list? tail)
+    (error 'macro-eval "apply: the final argument must be a list, got: ~v" tail))
+  (apply (callable f) (append (drop-right args 1) tail)))
+
+(define (macro-mapcat f . lsts)
+  (define parts (apply map (callable f) lsts))
+  (for ([p (in-list parts)])
+    (unless (list? p)
+      (error 'macro-eval "mapcat: the function must return a list, got: ~v" p)))
+  (apply append parts))
+
+;; `[x: Float z: Float]` reaches a macro flat, so walking it by field means
+;; regrouping it: (partition 3 fields) pairs each name with its type.
+(define (macro-partition n lst)
+  (unless (and (exact-integer? n) (positive? n))
+    (error 'macro-eval "partition: size must be a positive integer, got: ~v" n))
+  (unless (list? lst)
+    (error 'macro-eval "partition: expected a list, got: ~v" lst))
+  (let loop ([items lst])
+    (cond
+      [(< (length items) n) '()]
+      [else (cons (take items n) (loop (drop items n)))])))
+
+;; Positional codegen — a wire slot, an argument index — needs the position of
+;; each field, which plain `map` cannot supply.
+(define (macro-map-indexed f lst)
+  (unless (list? lst)
+    (error 'macro-eval "map-indexed: expected a list, got: ~v" lst))
+  (define g (callable f))
+  (for/list ([item (in-list lst)] [i (in-naturals)]) (g i item)))
+
+(define (macro-range n)
+  (unless (and (exact-integer? n) (>= n 0))
+    (error 'macro-eval "range: expected a non-negative integer, got: ~v" n))
+  (build-list n values))
+
+(define (macro-nth lst i)
+  (unless (list? lst)
+    (error 'macro-eval "nth: expected a list, got: ~v" lst))
+  (unless (and (exact-integer? i) (>= i 0) (< i (length lst)))
+    (error 'macro-eval "nth: index ~v out of range for a list of ~a" i (length lst)))
+  (list-ref lst i))
+
 ;; --- Syntax constructors -----------------------------------------------------
 
 (define (syntax-name s)
@@ -222,8 +271,11 @@
 (define (annotation-triple? v)
   (and (list? v) (= (length v) 3) (eq? (cadr v) ANN-MARKER)))
 
+;; Tagged like the reader's own `[...]`, so the result is a vector in every
+;; position — a binding vector AND an expression literal.
 (define (make-vec . items)
-  (append* (map (lambda (v) (if (annotation-triple? v) v (list v))) items)))
+  (cons BRACKET-TAG
+        (append* (map (lambda (v) (if (annotation-triple? v) v (list v))) items))))
 
 (define (make-defrecord name fields)
   (list 'defrecord name fields))
@@ -268,10 +320,21 @@
    'pair? pair?
    'length length
    'map macro-map
+   'map-indexed macro-map-indexed
+   'mapcat macro-mapcat
+   'range macro-range
    'filter macro-filter
+   'apply macro-apply
+   'partition macro-partition
+   'nth macro-nth
+   'count length
    'reverse reverse
 
    'str beagle-str
+   ;; A record's accessors are `<downcased-name>-<field>`, so a macro that
+   ;; generates calls to them has to be able to downcase.
+   'lower-case (lambda (s) (string-downcase (if (symbol? s) (symbol->string s) s)))
+   'upper-case (lambda (s) (string-upcase (if (symbol? s) (symbol->string s) s)))
    'string->symbol string->symbol
    'symbol->string symbol->string
    'format format
