@@ -324,6 +324,7 @@
     [(collection-contract) "E023"]
     [(allocation-contract) "E024"]
     [(missing-export)      "E026"]
+    [(unresolved-call)     "E027"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -1703,10 +1704,10 @@
   ;; once and seed `env` from those slots so callers can resolve typed
   ;; references in either direction (forward or backward).
   ;;
-  ;; Untyped bindings stay out of env at this stage; check-form falls through
-  ;; to inference. Untyped params bind as ANY in the body env (see
-  ;; extend-with-params), which propagates through subsequent operations
-  ;; until a concrete type unifies with them.
+  ;; Untyped bindings enter the environment as ANY: they still carry no type
+  ;; precision, but their names are resolved for strict target scope checks.
+  ;; Untyped params likewise bind as ANY in the body env (see
+  ;; extend-with-params).
 
   ;; Names of `^:dynamic` vars — consulted by `binding` to reject rebinding a
   ;; non-dynamic var at compile time (the runtime "Can't dynamically bind
@@ -1719,9 +1720,11 @@
     (define form (unwrap-definition-form raw-form))
     (match form
       [(def-form name (? type? t) _ _ dyn?) (hash-set! env name t) (when dyn? (set-add! dyn-vars name))]
-      [(def-form name #f _ _ dyn?) (when dyn? (set-add! dyn-vars name))]
+      [(def-form name #f _ _ dyn?)
+       (hash-set! env name ANY)
+       (when dyn? (set-add! dyn-vars name))]
       [(defonce-form name (? type? t) _ _) (hash-set! env name t)]
-      [(defonce-form name #f _ _) (void)]
+      [(defonce-form name #f _ _) (hash-set! env name ANY)]
       [(defn-form name params rest-p (? type? ret) _ _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
@@ -3698,6 +3701,21 @@
     [(call-form? e)
      (warn-target-exclude (call-form-fn e) e)
      (check-collection-order-use! e env)
+     (define fn (call-form-fn e))
+     (when (and (eq? (current-check-target) 'js)
+                (symbol? fn)
+                (not (hash-has-key? env fn))
+                (not (string-contains? (symbol->string fn) "/")))
+       (define suggestion (call-name-suggestion fn env))
+       (raise-diag
+        'unresolved-call
+        (format
+         "unresolved function `~a` on the js target; it would emit a free JavaScript reference~a. Define or import it, declare an intentional host binding with declare-extern, or fix the name."
+         fn
+         (if suggestion (format "; did you mean `~a`" suggestion) ""))
+        (hasheq 'function (symbol->string fn)
+                'suggestion (and suggestion (symbol->string suggestion)))
+        #:src (src-for e)))
      (define raw-type (hash-ref env (call-form-fn e) ANY))
      (define fn-type
        (if (type-poly? raw-type)
@@ -3740,6 +3758,22 @@
         (for ([a (in-list (call-form-args e))]) (infer-expr a env))
         ANY])]
     [else ANY]))
+
+(define (call-name-suggestion authored env)
+  (define authored-str (symbol->string authored))
+  (define best
+    (for/fold ([best #f]) ([(candidate type) (in-hash env)]
+                            #:when (and (symbol? candidate)
+                                        (or (type-fn? type)
+                                            (type-poly? type))))
+      (define distance
+        (levenshtein authored-str (symbol->string candidate)))
+      (if (or (not best) (< distance (car best)))
+          (cons distance candidate)
+          best)))
+  (and best
+       (<= (car best) (max 2 (quotient (string-length authored-str) 4)))
+       (cdr best)))
 
 ;; Traverse a JS AST node and type-check all beagle splice expressions.
 (define (infer-js-ast-splices node env)
@@ -5218,11 +5252,10 @@
                          (vector-ref d 2)
                          effectful-defs))))
 
-;; --- qualified-call resolution (clj) ----------------------------------------
+;; --- qualified-call resolution (hosted targets) -----------------------------
 ;;
-;; Qualified symbols (alias/name) were previously exempt from every
-;; undefined-symbol check, so a typo'd alias or missing require was
-;; silent until bb crashed at load. Three-tier resolution (2026-06-12):
+;; Clj and JS require every evaluated alias/name prefix to resolve through an
+;; explicit require. Clj adds two advisory tiers from its typed stdlib catalog:
 ;;
 ;;   1. prefix not required at all          → ERROR (statically certain
 ;;      to crash at bb load); suggests the require line when the alias
@@ -5234,9 +5267,9 @@
 ;;      beagle module) → one NOTE per namespace: calls are unchecked.
 ;;      This doubles as the demand-driven to-type queue.
 ;;
-;; Exempt: capitalized prefixes (Java statics), `clojure.*` (bb
-;; auto-loads), `str` (the emit-clj auto-inject), quoted data
-;; (the walker never descends into `quoted`), keywords, dot-methods.
+;; Clj exempts capitalized prefixes (Java statics), `clojure.*` (bb auto-loads),
+;; and `str` (the emit-clj auto-inject). The walker never descends into quoted
+;; data, keywords, or dot-method names.
 
 (define (walk-exprs-for-syms form src-table visit!)
   ;; Visit every evaluated symbol with the nearest enclosing srcloc.
@@ -5411,32 +5444,42 @@
        #:src (cadddr (car ordered))))))
 
 (define (check-qualified-resolution! prog env)
-  (when (and (eq? (program-target prog) 'clj)
+  (define target (program-target prog))
+  (define clj-target? (eq? target 'clj))
+  (when (and (memq target '(clj js))
              (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
     (define src-table (program-src-table prog))
-    ;; alias/full-ns → ns-sym; `str` rides the emit auto-inject.
+    ;; alias/full-ns → ns-sym.
     (define required (make-hash))
-    (hash-set! required "str" 'clojure.string)
+    (when clj-target?
+      (hash-set! required "str" 'clojure.string))
     (for ([r (in-list (program-requires prog))])
       (define ns (require-entry-ns r))
       (hash-set! required (symbol->string ns) ns)
-      (when (require-entry-alias r)
-        (hash-set! required (symbol->string (require-entry-alias r)) ns)))
+      (cond
+        [(require-entry-alias r)
+         => (lambda (alias)
+              (hash-set! required (symbol->string alias) ns))]
+        [(eq? target 'js)
+         (hash-set! required
+                    (last (string-split (symbol->string ns) "."))
+                    ns)]))
     ;; catalog: ns-string → member-strings, from qualified stdlib keys.
     (define catalog (make-hash))
-    (for ([(k _) (in-hash (builtin-env-for-target (program-target prog)))])
-      (define s (symbol->string k))
-      (define idx (let loop ([i 0])
-                    (cond [(= i (string-length s)) #f]
-                          [(char=? (string-ref s i) #\/) i]
-                          [else (loop (+ i 1))])))
-      (when (and idx (> idx 0)
-                 (char-alphabetic? (string-ref s 0))
-                 (char-lower-case? (string-ref s 0)))
-        (hash-update! catalog (substring s 0 idx)
-                      (lambda (ms) (cons (substring s (+ idx 1)) ms))
-                      '())))
+    (when clj-target?
+      (for ([(k _) (in-hash (builtin-env-for-target target))])
+        (define s (symbol->string k))
+        (define idx (let loop ([i 0])
+                      (cond [(= i (string-length s)) #f]
+                            [(char=? (string-ref s i) #\/) i]
+                            [else (loop (+ i 1))])))
+        (when (and idx (> idx 0)
+                   (char-alphabetic? (string-ref s 0))
+                   (char-lower-case? (string-ref s 0)))
+          (hash-update! catalog (substring s 0 idx)
+                        (lambda (ms) (cons (substring s (+ idx 1)) ms))
+                        '()))))
     ;; sibling beagle modules register under their alias prefix.
     (define module-prefixes
       (for/set ([(_ p) (in-hash (program-imported-symbol-ns prog))])
@@ -5451,38 +5494,41 @@
                           [else (loop (+ i 1))])))
       (when (and idx (> idx 0) (< idx (sub1 (string-length s)))
                  (char-alphabetic? (string-ref s 0))
-                 (char-lower-case? (string-ref s 0))
-                 (not (string-prefix? s "clojure."))
+                 (or (not clj-target?)
+                     (char-lower-case? (string-ref s 0)))
+                 (or (not clj-target?)
+                     (not (string-prefix? s "clojure.")))
                  (not (hash-has-key? env sym)))
         (define p (substring s 0 idx))
         (define member (substring s (+ idx 1)))
         (define ns (hash-ref required p #f))
         (cond
           [ns
-           (define ns-str (symbol->string ns))
-           (cond
-             [(hash-ref catalog ns-str #f)
-              => (lambda (members)
-                   (define best
-                     (let ([scored (sort (for/list ([m (in-list members)])
-                                           (cons (levenshtein member m) m))
-                                         < #:key car)])
-                       (and (pair? scored)
-                            (<= (caar scored)
-                                (max 2 (quotient (string-length member) 3)))
-                            (cdar scored))))
-                   (fprintf (current-error-port)
-                            "note: ~a is not in the typed catalog for ~a — call is unchecked (Any)~a~a\n"
-                            s ns-str
-                            (if best (format "\n  did you mean: ~a/~a?" p best) "")
-                            (format "\n  (a one-line entry in stdlib-bb.rkt types it)")))]
-             [(set-member? module-prefixes p) (void)]
-             [else
-              (unless (set-member? noted-ns ns)
-                (set-add! noted-ns ns)
-                (fprintf (current-error-port)
-                         "note: ~a has no typed catalog entries — its calls type as Any (unchecked)\n  (add entries to stdlib-bb.rkt when worth checking)\n"
-                         ns-str))])]
+           (when clj-target?
+             (define ns-str (symbol->string ns))
+             (cond
+               [(hash-ref catalog ns-str #f)
+                => (lambda (members)
+                     (define best
+                       (let ([scored (sort (for/list ([m (in-list members)])
+                                             (cons (levenshtein member m) m))
+                                           < #:key car)])
+                         (and (pair? scored)
+                              (<= (caar scored)
+                                  (max 2 (quotient (string-length member) 3)))
+                              (cdar scored))))
+                     (fprintf (current-error-port)
+                              "note: ~a is not in the typed catalog for ~a — call is unchecked (Any)~a~a\n"
+                              s ns-str
+                              (if best (format "\n  did you mean: ~a/~a?" p best) "")
+                              (format "\n  (a one-line entry in stdlib-bb.rkt types it)")))]
+               [(set-member? module-prefixes p) (void)]
+               [else
+                (unless (set-member? noted-ns ns)
+                  (set-add! noted-ns ns)
+                  (fprintf (current-error-port)
+                           "note: ~a has no typed catalog entries — its calls type as Any (unchecked)\n  (add entries to stdlib-bb.rkt when worth checking)\n"
+                           ns-str))]))]
           [else
            (set! violations (cons (list sym p loc) violations))])))
     (for ([form (in-list (program-forms prog))])

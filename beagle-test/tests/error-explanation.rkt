@@ -24,7 +24,7 @@
   '(arity type-mismatch return-type def-type let-binding exhaustive-match
     scalar-predicate type-bound target-form sql-group-by sql-table
     sql-column sql-type nixos-unknown-option nixos-type-mismatch
-    template-splice macro-expansion-type-error unresolved-alias))
+    template-splice macro-expansion-type-error unresolved-alias unresolved-call))
 
 (test-case "every code raise-diag can stamp has a registry entry"
   ;; The unknown-kind fallback (E000) must also be covered.

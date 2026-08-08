@@ -1414,6 +1414,18 @@
   '(define-target clj)
   '(def x (fs/exists? "/tmp")))
 
+(check-err/rx "qualified: unresolved alias is an error for js"
+  #rx"tgt/keep-target.*alias `tgt` is not required"
+  '(define-target js)
+  '(def x (tgt/keep-target "" true true)))
+
+(check-err/rx "js: unresolved record accessor points at the canonical name"
+  #rx"unresolved function `pointer-gesture-pointer-id`.*did you mean `pointergesture-pointer-id`"
+  '(define-target js)
+  '(defrecord PointerGesture [pointer-id #%: Float])
+  '(defn read-pointer [gesture #%: PointerGesture] -> Float
+     (pointer-gesture-pointer-id gesture)))
+
 (check-ok "qualified: required alias resolves"
   '(define-target clj)
   '(require babashka.fs :as fs)

@@ -133,6 +133,7 @@
    'allocation-contract  'type-error
    'error-contract       'type-error
    'missing-export       'type-error
+   'unresolved-call      'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 

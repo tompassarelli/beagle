@@ -152,6 +152,14 @@
       "(defn save! [box v] (reset! box v))"
       "Rename the function to end in `!` (save → save!), or remove the effect so the body is pure. Off by default; gated by BEAGLE_PURITY (off/warn/error) and the check profile (warn below 3, error at >= 3)."
       #:severity 'warning
+      #:since "0.17")
+
+   (E "E027" "Unresolved JavaScript function"
+      "A strict JavaScript module calls a name that has no local, imported, built-in, or declared external binding."
+      "A misspelled function or generated accessor otherwise emits as a free JavaScript reference and fails only at runtime."
+      "(pointer-gesture-pointer-id gesture)  ;; ERROR: no such generated accessor"
+      "(pointergesture-pointer-id gesture)"
+      "Use the pointed suggestion, import or define the function, or declare an intentional host binding with declare-extern."
       #:since "0.17")))
 
 (define CODE->EXPL

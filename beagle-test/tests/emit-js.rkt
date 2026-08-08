@@ -75,6 +75,44 @@
      "function point_x(r)"
      '(defrecord Point [x #%: Int y #%: Int]))
 
+   (test-case "multiword record accessor definition matches canonical calls"
+     (define result
+       (js-emit
+        (list '(ns test.app)
+              '(define-mode strict)
+              '(define-target js)
+              '(js/export
+                (defrecord PointerGesture [pointer-id #%: Float]))
+              '(defn read-pointer [gesture #%: PointerGesture] -> Float
+                 (pointergesture-pointer-id gesture)))))
+     (check-true (string-contains? result
+                                   "export function pointergesture_pointer_id(r)"))
+     (check-true (string-contains? result
+                                   "return pointergesture_pointer_id(gesture);"))
+     (check-false (string-contains? result "pointer_gesture_pointer_id")))
+
+   (test-case "unresolved multiword record accessor stops before JS emission"
+     (define result #f)
+     (check-exn
+      (lambda (e)
+        (and (beagle-diagnostic? e)
+             (eq? (beagle-diagnostic-kind e) 'unresolved-call)
+             (equal? (hash-ref (beagle-diagnostic-details e)
+                               'error-code
+                               #f)
+                     "E027")
+             (regexp-match? #rx"pointergesture-pointer-id" (exn-message e))))
+      (lambda ()
+        (set! result
+              (js-emit
+               (list '(ns test.app)
+                     '(define-mode strict)
+                     '(define-target js)
+                     '(defrecord PointerGesture [pointer-id #%: Float])
+                     '(defn read-pointer [gesture #%: PointerGesture] -> Float
+                        (pointer-gesture-pointer-id gesture)))))))
+     (check-false result "type failure must prevent an emitted JS result"))
+
    (check-js-contains "defunion variants emit field accessors"
      "function circle_radius(r)"
      `(defunion Shape
@@ -179,6 +217,28 @@
      "import * as"
      '(require inventory :as inv)
      '(def x #%: Int (inv/count-items)))
+
+   (test-case "unresolved qualified alias stops before JS emission"
+     (define result #f)
+     (check-exn
+      (lambda (e)
+        (and (beagle-diagnostic? e)
+             (eq? (beagle-diagnostic-kind e) 'unresolved-alias)
+             (equal? (hash-ref (beagle-diagnostic-details e)
+                               'error-code
+                               #f)
+                     "E018")
+             (regexp-match? #rx"tgt/keep-target" (exn-message e))
+             (regexp-match? #rx"alias `tgt` is not required" (exn-message e))))
+      (lambda ()
+        (set! result
+              (js-emit
+               (list '(ns test.app)
+                     '(define-mode strict)
+                     '(define-target js)
+                     '(defn retain [] -> Any
+                        (tgt/keep-target "" true true)))))))
+     (check-false result "type failure must prevent an emitted JS result"))
 
    (check-js-contains "kebab -> underscore mangling"
      "my_func"
@@ -490,6 +550,7 @@
 
    (check-js-contains "static call Module/->Ctor strips -> prefix"
      "ir.IrProgram("
+     '(require ir :as ir)
      '(defn f [] -> Any (ir/->IrProgram "test")))
 
    (check-js-contains "to-array -> Array.from"
