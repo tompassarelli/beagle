@@ -1,5 +1,6 @@
 1	form-kind	t	defn
 1	name	t	-main
+1	private	t	false
 2	form-kind	t	seq
 1	params	n	2
 3	form-kind	t	type-prim

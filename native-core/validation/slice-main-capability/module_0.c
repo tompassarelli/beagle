@@ -10,6 +10,7 @@ native_m0_type_3 native_m0_fn_0(const native_capability *capability) {
   native_m0_type_0 native_s_0;
   native_m0_type_3 native_s_1;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_0;
+  (void)native_s_0;
   native_host_stdout_write_line_v0(capability, native_s_0);
   memset(&native_s_1, 0, sizeof native_s_1);
   return native_s_1;
