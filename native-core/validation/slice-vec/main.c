@@ -72,10 +72,20 @@ int main(int argc, char **argv) {
   }
 
   native_m0_type_20 grown = native_m0_fn_63(&arena, &capability, bucket, INT64_C(4242));
+  /* conj is persistent: the bucket the conj read must still hold PUSH_COUNT */
   if ((grown.field_0 != INT64_C(7))
       || (native_m0_fn_61(grown) != (PUSH_COUNT + INT64_C(1)))
-      || (native_m0_fn_62(grown, PUSH_COUNT) != INT64_C(4242))) {
+      || (native_m0_fn_62(grown, PUSH_COUNT) != INT64_C(4242))
+      || (native_m0_fn_61(bucket) != PUSH_COUNT)) {
     return 4;
+  }
+  /* and a second conj off the same base is a fork, not a second append */
+  native_m0_type_20 forked = native_m0_fn_63(&arena, &capability, bucket, INT64_C(99));
+  if ((native_m0_fn_61(forked) != (PUSH_COUNT + INT64_C(1)))
+      || (native_m0_fn_62(forked, PUSH_COUNT) != INT64_C(99))
+      || (native_m0_fn_62(grown, PUSH_COUNT) != INT64_C(4242))
+      || (native_m0_fn_61(bucket) != PUSH_COUNT)) {
+    return 14;
   }
 
   native_vec_storage_allocations = UINT64_C(0);

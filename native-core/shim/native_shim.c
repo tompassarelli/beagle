@@ -3779,6 +3779,30 @@ static size_t native_vec_bytes(int64_t capacity, int64_t stride) {
   return (size_t)(capacity * stride);
 }
 
+/* A second header over storage that is already claimed: the source header keeps
+   its own length, so both stay readable and neither can rewrite the other's
+   elements. */
+static native_vec *native_vec_header(native_arena *arena, void *elements,
+                                     int64_t length, int64_t capacity,
+                                     int64_t *claim) {
+  native_vec *header = (native_vec *)native_arena_alloc(
+      arena, sizeof(native_vec), _Alignof(native_vec));
+  header->elements = elements;
+  header->length = length;
+  header->capacity = capacity;
+  header->claim = claim;
+  return header;
+}
+
+/* A vector's length is also its claim on the storage: everything below it is
+   frozen, and only the slot at the length may ever be written. */
+static void native_vec_set_length(native_vec *vector, int64_t length) {
+  vector->length = length;
+  if (vector->claim != NULL) {
+    *vector->claim = length;
+  }
+}
+
 native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride,
                            size_t alignment) {
   native_vec *header =
@@ -3787,8 +3811,12 @@ native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride
   header->elements = (bytes == 0U) ? NULL : native_arena_alloc(arena, bytes, alignment);
   header->length = INT64_C(0);
   header->capacity = capacity;
+  header->claim = NULL;
   if (bytes != 0U) {
     native_vec_storage_allocations += UINT64_C(1);
+    header->claim = (int64_t *)native_arena_alloc(arena, sizeof(int64_t),
+                                                  _Alignof(int64_t));
+    *header->claim = INT64_C(0);
   }
   return header;
 }
@@ -3827,44 +3855,45 @@ native_vec *native_vec_assoc(native_arena *arena, const native_vec *vector,
          native_vec_bytes(vector->length, stride));
   memcpy((uint8_t *)result->elements + (size_t)(index * stride), value,
          (size_t)stride);
-  result->length = vector->length;
+  native_vec_set_length(result, vector->length);
   return result;
 }
 
 native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void *value,
                             int64_t stride, size_t alignment) {
-  if ((vector == NULL) || (value == NULL) || (stride <= INT64_C(0))) {
+  native_vec *fresh;
+  int64_t grown;
+  if ((vector == NULL) || (value == NULL) || (stride <= INT64_C(0)) ||
+      (vector->length < INT64_C(0)) || (vector->length > vector->capacity) ||
+      ((vector->length > INT64_C(0)) && (vector->elements == NULL))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  if (vector->capacity == INT64_C(0)) {
-    native_vec *fresh;
-    if (vector->length != INT64_C(0)) {
-      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-    }
-    fresh = native_vec_new(arena, NATIVE_VEC_MIN_CAPACITY, stride, alignment);
-    memcpy(fresh->elements, value, (size_t)stride);
-    fresh->length = INT64_C(1);
-    return fresh;
+  if ((vector->claim != NULL) && (vector->length < vector->capacity) &&
+      (*vector->claim == vector->length)) {
+    memcpy((uint8_t *)vector->elements + (size_t)(vector->length * stride), value,
+           (size_t)stride);
+    *vector->claim = vector->length + INT64_C(1);
+    return native_vec_header(arena, vector->elements,
+                             vector->length + INT64_C(1), vector->capacity,
+                             vector->claim);
   }
-  if (vector->length == vector->capacity) {
-    int64_t grown = (vector->capacity <= INT64_C(0))
-                        ? NATIVE_VEC_MIN_CAPACITY
-                        : (vector->capacity * INT64_C(2));
-    if (vector->capacity > (INT64_MAX / INT64_C(2))) {
-      native_trap(NATIVE_TRAP_OVERFLOW);
-    }
-    void *storage = native_arena_alloc(arena, native_vec_bytes(grown, stride), alignment);
-    native_vec_storage_allocations += UINT64_C(1);
-    if (vector->length > INT64_C(0)) {
-      memcpy(storage, vector->elements, (size_t)(vector->length * stride));
-    }
-    vector->elements = storage;
-    vector->capacity = grown;
+  /* Someone else already claimed the tip, the storage is full, or it is not
+     ours: the append only stays persistent on a private copy. */
+  if (vector->length > (INT64_MAX / INT64_C(2))) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
   }
-  memcpy((uint8_t *)vector->elements + (size_t)(vector->length * stride), value,
+  grown = vector->length * INT64_C(2);
+  if (grown < NATIVE_VEC_MIN_CAPACITY) {
+    grown = NATIVE_VEC_MIN_CAPACITY;
+  }
+  fresh = native_vec_new(arena, grown, stride, alignment);
+  if (vector->length > INT64_C(0)) {
+    memcpy(fresh->elements, vector->elements, (size_t)(vector->length * stride));
+  }
+  memcpy((uint8_t *)fresh->elements + (size_t)(vector->length * stride), value,
          (size_t)stride);
-  vector->length += INT64_C(1);
-  return vector;
+  native_vec_set_length(fresh, vector->length + INT64_C(1));
+  return fresh;
 }
 
 native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
@@ -3889,7 +3918,7 @@ native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
     memcpy((uint8_t *)result->elements + (size_t)(left->length * stride),
            right->elements, (size_t)(right->length * stride));
   }
-  result->length = length;
+  native_vec_set_length(result, length);
   return result;
 }
 
@@ -3915,7 +3944,7 @@ native_vec *native_vec_slice(native_arena *arena, const native_vec *source,
     memcpy(result->elements,
            (const uint8_t *)source->elements + source_offset, byte_count);
   }
-  result->length = length;
+  native_vec_set_length(result, length);
   return result;
 }
 
@@ -3935,7 +3964,7 @@ native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
                native_vec_bytes(source_position, stride),
            (size_t)stride);
   }
-  result->length = source->length;
+  native_vec_set_length(result, source->length);
   return result;
 }
 
@@ -4667,7 +4696,7 @@ native_vec *native_map_keys(native_arena *arena, const native_map *map,
     memcpy(result->elements, map->keys,
            native_collection_bytes(map->length, map->key_stride));
   }
-  result->length = map->length;
+  native_vec_set_length(result, map->length);
   return result;
 }
 
@@ -4681,7 +4710,7 @@ native_vec *native_map_values(native_arena *arena, const native_map *map,
     memcpy(result->elements, map->values,
            native_collection_bytes(map->length, map->value_stride));
   }
-  result->length = map->length;
+  native_vec_set_length(result, map->length);
   return result;
 }
 
@@ -4918,7 +4947,7 @@ native_vec *native_set_vector(native_arena *arena, const native_set *set,
     memcpy(result->elements, set->elements,
            native_collection_bytes(set->length, set->stride));
   }
-  result->length = set->length;
+  native_vec_set_length(result, set->length);
   return result;
 }
 
@@ -5611,6 +5640,8 @@ native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
       ((source->capacity > INT64_C(0)) && (source->elements == NULL))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  /* The one place a claimed slot is rewritten: the slice result is storage this
+     call just allocated and has not published, so no other header aliases it. */
   result = native_vec_slice(arena, source, INT64_C(0), source->length,
                             stride, alignment);
   if (result->length < INT64_C(2)) {
@@ -8016,7 +8047,7 @@ native_vec *native_utf8_encode(native_arena *arena, uint64_t source) {
     memcpy((uint8_t *)result->elements + (size_t)(index * UINT64_C(8)),
            &value, sizeof value);
   }
-  result->length = (int64_t)length;
+  native_vec_set_length(result, (int64_t)length);
   return result;
 }
 

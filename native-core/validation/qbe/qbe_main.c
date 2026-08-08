@@ -24,8 +24,8 @@ int main(void) {
   int64_t right_items[] = { INT64_C(8), INT64_C(13), INT64_C(21) };
   const int64_t expected[] = { INT64_C(3), INT64_C(5), INT64_C(8),
                                INT64_C(13), INT64_C(21) };
-  native_vec left = { left_items, INT64_C(2), INT64_C(2) };
-  native_vec right = { right_items, INT64_C(3), INT64_C(3) };
+  native_vec left = { left_items, INT64_C(2), INT64_C(2), NULL };
+  native_vec right = { right_items, INT64_C(3), INT64_C(3), NULL };
   native_vec *joined = native_m2_fn_0(&arena, &capability, &left, &right);
   if ((joined == &left) || (joined == &right) ||
       (joined->length != INT64_C(5)) || (joined->capacity != INT64_C(5))) {

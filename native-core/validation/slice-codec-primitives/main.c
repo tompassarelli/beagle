@@ -52,9 +52,9 @@ int main(int argc, char **argv) {
     return 6;
   }
   {
-    native_vec empty = {NULL, INT64_C(0), INT64_C(0)};
+    native_vec empty = {NULL, INT64_C(0), INT64_C(0), NULL};
     int64_t abc_values[] = {INT64_C(97), INT64_C(98), INT64_C(99)};
-    native_vec abc = {abc_values, INT64_C(3), INT64_C(3)};
+    native_vec abc = {abc_values, INT64_C(3), INT64_C(3), NULL};
     if (!text_equals(
             native_m0_fn_4(&arena, &capability, &empty),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")) {
@@ -70,12 +70,12 @@ int main(int argc, char **argv) {
   if (argc > 1) {
     if (strcmp(argv[1], "invalid-sha") == 0) {
       int64_t invalid_sha_bytes[] = {INT64_C(256)};
-      native_vec invalid_sha = {invalid_sha_bytes, INT64_C(1), INT64_C(1)};
+      native_vec invalid_sha = {invalid_sha_bytes, INT64_C(1), INT64_C(1), NULL};
       (void)native_m0_fn_4(&arena, &capability, &invalid_sha);
       return 9;
     } else {
       int64_t invalid_utf8_bytes[] = {INT64_C(0xc0), INT64_C(0x80)};
-      native_vec invalid_utf8 = {invalid_utf8_bytes, INT64_C(2), INT64_C(2)};
+      native_vec invalid_utf8 = {invalid_utf8_bytes, INT64_C(2), INT64_C(2), NULL};
       (void)native_m0_fn_1(&arena, &capability, &invalid_utf8);
       return 10;
     }

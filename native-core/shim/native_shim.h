@@ -46,11 +46,19 @@ typedef struct native_bytes {
 /* The native representation of a (Vec T) value is a POINTER to this header,
    never the header by value: a vector-valued record field is therefore one
    8-byte reference, and the element storage lives in the arena beside it.
-   `elements` is NULL exactly when capacity is 0. */
+   `elements` is NULL exactly when capacity is 0.
+
+   `claim` is the single count of element slots ever handed out from
+   `elements`, shared by every header over that storage. A push may write into
+   existing storage only at index *claim, and *claim only increases, so no
+   index below any live header's length is ever written again: conj is
+   persistent under arbitrary aliasing. `claim == NULL` means foreign storage
+   this shim did not allocate, and a push over it always copies. */
 typedef struct native_vec {
   void *elements;
   int64_t length;
   int64_t capacity;
+  int64_t *claim;
 } native_vec;
 
 typedef struct native_value_descriptor native_value_descriptor;
