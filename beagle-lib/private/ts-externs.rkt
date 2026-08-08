@@ -127,6 +127,86 @@
               [else (scan (add1 i) depth)])])))
      (values open close)]))
 
+(define (skip-space s from)
+  (let loop ([i from])
+    (if (and (< i (string-length s)) (char-whitespace? (string-ref s i)))
+        (loop (add1 i))
+        i)))
+
+;; Return the first index after a balanced `<...>` type-parameter list.
+(define (type-parameters-end s open)
+  (define len (string-length s))
+  (let scan ([i open] [depth 0])
+    (cond
+      [(>= i len) #f]
+      [else
+       (define c (string-ref s i))
+       (cond
+         [(or (char=? c #\") (char=? c #\') (char=? c #\`))
+          (define end (let quoted ([j (add1 i)])
+                        (cond [(>= j len) len]
+                              [(char=? (string-ref s j) #\\) (quoted (+ j 2))]
+                              [(char=? (string-ref s j) c) (add1 j)]
+                              [else (quoted (add1 j))])))
+          (scan end depth)]
+         [(char=? c #\<) (scan (add1 i) (add1 depth))]
+         [(char=? c #\>)
+          ;; `=>` inside a constraint/default is not a type-list delimiter.
+          (cond
+            [(and (> i 0) (char=? (string-ref s (sub1 i)) #\=))
+             (scan (add1 i) depth)]
+            [(= depth 1) (add1 i)]
+            [else (scan (add1 i) (sub1 depth))])]
+         [else (scan (add1 i) depth)])])))
+
+;; A class body starts at the first `{` outside heritage type arguments/calls.
+(define (class-body-open s from)
+  (define len (string-length s))
+  (let scan ([i from] [angle 0] [paren 0] [bracket 0])
+    (cond
+      [(>= i len) #f]
+      [else
+       (define c (string-ref s i))
+       (cond
+         [(or (char=? c #\") (char=? c #\') (char=? c #\`))
+          (define end (let quoted ([j (add1 i)])
+                        (cond [(>= j len) len]
+                              [(char=? (string-ref s j) #\\) (quoted (+ j 2))]
+                              [(char=? (string-ref s j) c) (add1 j)]
+                              [else (quoted (add1 j))])))
+          (scan end angle paren bracket)]
+         [(char=? c #\<) (scan (add1 i) (add1 angle) paren bracket)]
+         [(char=? c #\>)
+          (scan (add1 i)
+                (if (and (> i 0) (char=? (string-ref s (sub1 i)) #\=))
+                    angle
+                    (max 0 (sub1 angle)))
+                paren bracket)]
+         [(char=? c #\() (scan (add1 i) angle (add1 paren) bracket)]
+         [(char=? c #\)) (scan (add1 i) angle (max 0 (sub1 paren)) bracket)]
+         [(char=? c #\[) (scan (add1 i) angle paren (add1 bracket))]
+         [(char=? c #\]) (scan (add1 i) angle paren (max 0 (sub1 bracket)))]
+         [(and (char=? c #\{) (= angle 0) (= paren 0) (= bracket 0)) i]
+         [else (scan (add1 i) angle paren bracket)])])))
+
+;; The heritage clause begins after the class's own type parameters, so a
+;; parameter constraint named `extends` cannot masquerade as the base class.
+(define (class-ranges s name-end)
+  (define after-name (skip-space s name-end))
+  (define heritage-start
+    (if (and (< after-name (string-length s))
+             (char=? (string-ref s after-name) #\<))
+        (type-parameters-end s after-name)
+        after-name))
+  (cond
+    [(not heritage-start) (values #f #f #f)]
+    [else
+     (define open (class-body-open s heritage-start))
+     (if open
+         (let-values ([(actual-open close) (brace-range s open)])
+           (values heritage-start actual-open close))
+         (values heritage-start #f #f))]))
+
 ;; --- type mapping ------------------------------------------------------------
 
 (define (strip-parens t)
@@ -308,11 +388,11 @@
     (when m
       (define head-end (cdar m))
       (define name (let ([r (list-ref m 6)]) (substring src (car r) (cdr r))))
-      (define-values (open close) (brace-range src head-end))
+      (define-values (heritage-start open close) (class-ranges src head-end))
       (when (and open close)
-        (define header (substring src head-end open))
+        (define header (substring src heritage-start open))
         (define base
-          (let ([bm (regexp-match #rx"extends[ \t]+([A-Za-z_$][A-Za-z0-9_$.]*)" header)])
+          (let ([bm (regexp-match #px"\\bextends\\s+([A-Za-z_$][A-Za-z0-9_$.]*)" header)])
             (and bm (cadr bm))))
         (define members
           (filter values (map parse-member (split-top-level (substring src (add1 open) close) #\;))))

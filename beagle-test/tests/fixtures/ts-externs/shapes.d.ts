@@ -3,7 +3,9 @@ import { Thing } from "./other.js";
 /**
  * A doc comment that mentions class Decoy { and a brace.
  */
-export class Box<T = unknown> extends Thing<T> {
+export class Box<
+    T extends { weight: number } = { weight: number },
+> extends Thing<T> {
     readonly isBox: boolean;
     width: number;
     label: string;
