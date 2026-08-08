@@ -2,7 +2,7 @@ stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 3
-source-imports 2
+source-imports 3
 full-program-functions 64
 full-program-abis 66
 host-program-functions 4

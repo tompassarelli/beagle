@@ -82,7 +82,7 @@ for line in \
   'stage source-to-typed ACCEPTED' \
   'stage typed-to-native PENDING' \
   'source-modules 3' \
-  'source-imports 2' \
+  'source-imports 3' \
   'host-program-functions 4' \
   'host-program-abis 6' \
   'materialize OK module_0.h module_0.c' \
