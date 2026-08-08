@@ -48,6 +48,13 @@
   (set-box! b (add1 n))
   n)
 
+(define logical-counter (make-parameter (box 0)))
+(define (next-logical-id!)
+  (define b (logical-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  n)
+
 ;; --- special float values ---------------------------------------------------
 
 (define (emit-js-number n)
@@ -1266,6 +1273,7 @@
   (parameterize ([current-js-export-names requested-exports]
                  [current-js-context 'stmt]
                  [match-counter (box 0)]
+                 [logical-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
                  [current-js-record-ns (program-imported-record-ns prog)]
                  [current-js-record-constructors
@@ -2745,6 +2753,9 @@
 (define (expr-contains-recur? e)
   (cond
     [(recur-form? e) #t]
+    [(logical-call? e)
+     (for/or ([a (in-list (call-form-args e))])
+       (expr-contains-recur? a))]
     [(if-form? e)
      (or (expr-contains-recur? (if-form-then-expr e))
          (and (if-form-else-expr e) (expr-contains-recur? (if-form-else-expr e))))]
@@ -2778,18 +2789,56 @@
       (format "~a = _recur_~a;" name i)))
   (string-append (string-join (append temps assigns) " ") " continue;"))
 
-(define (emit-loop-stmt e bind-names)
+(define (logical-call? e)
+  (and (call-form? e)
+       (symbol? (call-form-fn e))
+       (memq (call-form-fn e) '(and or))))
+
+(define (clj-truthy-test value-str)
+  (format "~a !== false && ~a != null" value-str value-str))
+
+;; Logical loop tails lower as statements because recur never has a JS value.
+(define (emit-logical-loop-stmt e bind-names emit-value)
+  (define op (call-form-fn e))
+  (define identity-value (if (eq? op 'and) "true" "null"))
+  (define (walk args)
+    (cond
+      [(null? args) (emit-value identity-value)]
+      [(null? (cdr args))
+       (emit-loop-stmt (car args) bind-names emit-value)]
+      [else
+       (emit-loop-stmt
+        (car args)
+        bind-names
+        (lambda (value-str)
+          (define temp (format "_logical_~a" (next-logical-id!)))
+          (define truthy (clj-truthy-test temp))
+          (define next-str (walk (cdr args)))
+          (define short-str (emit-value temp))
+          (if (eq? op 'and)
+              (format "const ~a = ~a; if (~a) { ~a } else { ~a }"
+                      temp value-str truthy next-str short-str)
+              (format "const ~a = ~a; if (~a) { ~a } else { ~a }"
+                      temp value-str truthy short-str next-str))))]))
+  (walk (call-form-args e)))
+
+(define (emit-loop-stmt e bind-names
+                        [emit-value (lambda (value-str)
+                                      (format "return ~a;" value-str))])
   (cond
+    [(logical-call? e)
+     (emit-logical-loop-stmt e bind-names emit-value)]
     [(and (if-form? e) (expr-contains-recur? e))
      (define cond-str (emit-expr (if-form-cond-expr e)))
-     (define then-str (emit-loop-stmt (if-form-then-expr e) bind-names))
+     (define then-str (emit-loop-stmt (if-form-then-expr e) bind-names emit-value))
      (if (if-form-else-expr e)
-       (let ([else-str (emit-loop-stmt (if-form-else-expr e) bind-names)])
+       (let ([else-str (emit-loop-stmt (if-form-else-expr e) bind-names emit-value)])
          (format "if (~a) { ~a } else { ~a }" cond-str then-str else-str))
        ;; No else (e.g. from `when`): falling through the condition means no
        ;; recur fired, so the loop is done — return nil. Without this the
        ;; enclosing `while (true)` spins forever when the condition goes false.
-       (format "if (~a) { ~a } else { return null; }" cond-str then-str))]
+       (format "if (~a) { ~a } else { ~a }" cond-str then-str
+               (emit-value "null")))]
     [(and (let-form? e) (body-contains-recur? (let-form-body e)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
      (define mutated-syms
@@ -2810,7 +2859,7 @@
            (string-append
              (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
              (if (> (length forms) 1) " " "")
-             (emit-loop-stmt (last forms) bind-names)))
+             (emit-loop-stmt (last forms) bind-names emit-value)))
          (string-append (string-join binding-strs " ") " " body-str)))]
     [(and (cond-form? e) (for/or ([c (in-list (cond-form-clauses e))]) (body-contains-recur? (cond-clause-body c))))
      (define (else-clause? c)
@@ -2819,7 +2868,7 @@
        (string-append
          (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
          (if (> (length forms) 1) " " "")
-         (emit-loop-stmt (last forms) bind-names)))
+         (emit-loop-stmt (last forms) bind-names emit-value)))
      (define parts
        (for/list ([c (in-list (cond-form-clauses e))])
          (define test (cond-clause-test c))
@@ -2831,17 +2880,19 @@
      ;; than spinning the enclosing while(true).
      (define has-else? (for/or ([c (in-list (cond-form-clauses e))]) (else-clause? c)))
      (string-append (string-join parts " else ")
-                    (if has-else? "" " else { return null; }"))]
+                    (if has-else? ""
+                        (format " else { ~a }" (emit-value "null"))))]
     [(and (do-form? e) (body-contains-recur? (do-form-body e)))
      (define exprs (do-form-body e))
      (define stmts (drop-right exprs 1))
      (define last-e (last exprs))
      (define side-strs (map emit-expr-stmt stmts))
-     (format "~a ~a" (string-join side-strs " ") (emit-loop-stmt last-e bind-names))]
+     (format "~a ~a" (string-join side-strs " ")
+             (emit-loop-stmt last-e bind-names emit-value))]
     [(recur-form? e)
      (emit-recur-stmts e bind-names)]
     [else
-     (format "return ~a;" (emit-expr e))]))
+     (emit-value (emit-expr e))]))
 
 ;; Emit a single expression as the last (returned) thing in a function body.
 ;; Inlines let/do/when/when-let/if-let/if to avoid unnecessary IIFEs.

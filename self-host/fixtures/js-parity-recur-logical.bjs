@@ -1,0 +1,22 @@
+#lang beagle/js
+(ns selfhost.fixtures.js-parity-recur-logical)
+(define-mode strict)
+
+(defn exact [limit: Int] -> Any
+  (loop [at: Int 0]
+    (and (< at limit)
+         (recur (+ at 1)))))
+
+(defn nested [limit: Int] -> Any
+  (loop [at: Int 0 prior: Int -1]
+    (or (and (= at limit) prior)
+        (and (< at limit)
+             (recur (+ at 1) at)))))
+
+(defn false-stop [] -> Any
+  (loop [at: Int 0]
+    (and false (recur (+ at 1)))))
+
+(defn nil-stop [] -> Any
+  (loop [at: Int 0]
+    (and nil (recur (+ at 1)))))

@@ -124,6 +124,44 @@
      "main();"
      "true\nfalse")
 
+   (check-js-output "logical loop tails preserve recur and Clojure truthiness"
+     (list
+      `(def ordered-events #%: Any ,(br))
+      `(def and-events #%: Any ,(br))
+      `(def or-events #%: Any ,(br))
+      '(defn note! [value #%: Any] -> Any
+         (do (.push ordered-events value) true))
+      '(defn observe-and! [value #%: Any] -> Any
+         (do (.push and-events value) value))
+      '(defn observe-or! [value #%: Any] -> Any
+         (do (.push or-events value) value))
+      '(defn ordered! [limit #%: Int] -> Any
+         (loop [at #%: Int 0 prior #%: Int -1]
+           (or (and (= at limit) prior)
+               (and (note! at)
+                    (< at limit)
+                    (recur (+ at 1) at)))))
+      '(defn and-gate! [gate #%: Any] -> Any
+         (loop [at #%: Int 0]
+           (and gate
+                (observe-and! at)
+                (< at 1)
+                (recur (+ at 1)))))
+      '(defn or-gate! [gate #%: Any] -> Any
+         (loop [at #%: Int 0]
+           (or gate
+               (observe-or! (= at 1))
+               (recur (+ at 1))))))
+     (string-append
+      "console.log(JSON.stringify(["
+      "ordered_bang(3), ordered_events, "
+      "and_gate_bang(0), and_gate_bang(\"\"), and_gate_bang(false), and_gate_bang(null), and_events, "
+      "or_gate_bang(0), or_gate_bang(\"\"), or_gate_bang(false), or_gate_bang(null), or_events"
+      "]));")
+     (string-append
+      "[2,[0,1,2],false,false,false,null,[0,1,0,1],"
+      "0,\"\",true,true,[false,true,false,true]]"))
+
    ;; --- records -------------------------------------------------------------
 
    (check-js-output "record construction and field access"

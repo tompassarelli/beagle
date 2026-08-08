@@ -7,6 +7,8 @@
 
 (def match-counter (atom 0))
 
+(def logical-counter (atom 0))
+
 (def bound-vars (atom {}))
 
 (def type-env (atom {}))
@@ -672,11 +674,16 @@
    last-e (nth exprs (- n 1))]
   (str (str/join (str "\n" indent) (mapv (fn [x] (emit-stmt-inline x indent)) stmts)) "\n" indent (emit-return-position last-e indent)))))
 
+(defn ^Boolean logical-call? [e]
+  (and (map? e) (= (get e "node") "call") (let [f (get e "fn")]
+  (and (map? f) (= (get f "node") "ref") (or (= (get f "name") "and") (= (get f "name") "or"))))))
+
 (defn ^Boolean expr-contains-recur? [e]
   (if (not (map? e)) false (let [node (get e "node")
    anyb (fn [xs] (> (count (filterv (fn [x] (expr-contains-recur? x)) xs)) 0))]
   (cond
   (= node "recur") true
+  (logical-call? e) (anyb (get e "args"))
   (= node "if") (or (expr-contains-recur? (get e "then")) (let [el (get e "else")]
   (if (absent? el) false (expr-contains-recur? el))))
   (= node "let") (anyb (get e "body"))
@@ -700,13 +707,32 @@
   (if (>= i (count bind-names)) acc (recur (+ i 1) (conj acc (str (nth bind-names i) " = _recur_" i ";")))))]
   (str (str/join " " (into temps assigns)) " continue;")))
 
-(defn ^String emit-loop-stmt [e bind-names]
-  (if (not (map? e)) (str "return " (emit-expr* e) ";") (let [node (get e "node")]
+(defn ^String fresh-logical-sym! []
+  (let [n (deref logical-counter)]
+  (swap! logical-counter inc)
+  (str "_logical_" n)))
+
+(defn ^String clj-truthy-test [^String value-str]
+  (str value-str " !== false && " value-str " != null"))
+
+(defn ^String emit-loop-stmt-with [e bind-names emit-value]
+  (if (not (map? e)) (emit-value (emit-expr* e)) (let [node (get e "node")]
   (cond
+  (logical-call? e) (let [op (get (get e "fn") "name")
+   identity-value (if (= op "and") "true" "null")]
+  (letfn [(walk [remaining] (cond
+  (= 0 (count remaining)) (emit-value identity-value)
+  (= 1 (count remaining)) (emit-loop-stmt-with (nth remaining 0) bind-names emit-value)
+  :else (emit-loop-stmt-with (nth remaining 0) bind-names (fn [value-str] (let [temp (fresh-logical-sym!)
+   truthy (clj-truthy-test temp)
+   next-str (walk (subvec remaining 1))
+   short-str (emit-value temp)]
+  (if (= op "and") (str "const " temp " = " value-str "; if (" truthy ") { " next-str " } else { " short-str " }") (str "const " temp " = " value-str "; if (" truthy ") { " short-str " } else { " next-str " }")))))))]
+  (walk (get e "args"))))
   (and (= node "if") (expr-contains-recur? e)) (let [cond-str (emit-expr* (get e "cond"))
-   then-str (emit-loop-stmt (get e "then") bind-names)
+   then-str (emit-loop-stmt-with (get e "then") bind-names emit-value)
    el (get e "else")]
-  (if (else-less-if? el) (str "if (" cond-str ") { " then-str " } else { return null; }") (str "if (" cond-str ") { " then-str " } else { " (emit-loop-stmt el bind-names) " }")))
+  (if (else-less-if? el) (str "if (" cond-str ") { " then-str " } else { " (emit-value "null") " }") (str "if (" cond-str ") { " then-str " } else { " (emit-loop-stmt-with el bind-names emit-value) " }")))
   (and (= node "let") (body-contains-recur? (get e "body"))) (let [bindings (get e "bindings")
    body (get e "body")
    lnames (let-names-of bindings)
@@ -715,7 +741,7 @@
    n (count forms)
    side (subvec forms 0 (- n 1))
    side-str (str/join " " (mapv (fn [x] (emit-expr-stmt x)) side))
-   tail (emit-loop-stmt (nth forms (- n 1)) bind-names)]
+   tail (emit-loop-stmt-with (nth forms (- n 1)) bind-names emit-value)]
   (str (str/join " " binding-strs) " " (if (> n 1) (str side-str " ") "") tail)))))
   (and (= node "cond") (> (count (filterv (fn [c] (body-contains-recur? (get c "body"))) (get e "clauses"))) 0)) (let [clauses (get e "clauses")
    else? (fn [c] (let [t (get c "test")]
@@ -723,17 +749,20 @@
    seq-body (fn [forms] (let [n (count forms)
    side (subvec forms 0 (- n 1))
    side-str (str/join " " (mapv (fn [x] (emit-expr-stmt x)) side))]
-  (str (if (> n 1) (str side-str " ") "") (emit-loop-stmt (nth forms (- n 1)) bind-names))))
+  (str (if (> n 1) (str side-str " ") "") (emit-loop-stmt-with (nth forms (- n 1)) bind-names emit-value))))
    parts (mapv (fn [c] (if (else? c) (str "{ " (seq-body (get c "body")) " }") (str "if (" (emit-expr* (get c "test")) ") { " (seq-body (get c "body")) " }"))) clauses)
    has-else (> (count (filterv else? clauses)) 0)]
-  (str (str/join " else " parts) (if has-else "" " else { return null; }")))
+  (str (str/join " else " parts) (if has-else "" (str " else { " (emit-value "null") " }"))))
   (and (= node "do") (body-contains-recur? (get e "body"))) (let [forms (get e "body")
    n (count forms)
    side (subvec forms 0 (- n 1))
    side-str (str/join " " (mapv (fn [x] (emit-expr-stmt x)) side))]
-  (str side-str " " (emit-loop-stmt (nth forms (- n 1)) bind-names)))
+  (str side-str " " (emit-loop-stmt-with (nth forms (- n 1)) bind-names emit-value)))
   (= node "recur") (emit-recur-stmts e bind-names)
-  :else (str "return " (emit-expr* e) ";")))))
+  :else (emit-value (emit-expr* e))))))
+
+(defn ^String emit-loop-stmt [e bind-names]
+  (emit-loop-stmt-with e bind-names (fn [value-str] (str "return " value-str ";"))))
 
 (defn ^String indent-str [depth]
   (str/join "" (mapv (fn [x] " ") (range (* depth 2)))))
@@ -1139,6 +1168,7 @@
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
+  (reset! logical-counter 0)
   (reset! type-env {})
   (reset! bc-get-used false)
   (reset! inline-scope {})
@@ -1150,7 +1180,8 @@
   (let [body (str/join "\n\n" (mapv (fn [f] (reset! ctx "stmt")
   (emit-form f)) forms))
    header (emit-module-header prog)
-   runtime-import (if (deref bc-get-used) "import { get as $$bc$get } from 'beagle/core.js';\n" "")]
+   runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (if (deref bc-get-used) ["get as $$bc$get"] []))
+   runtime-import (if (= 0 (count runtime-bindings)) "" (str "import { " (str/join ", " runtime-bindings) " } from 'beagle/core.js';\n"))]
   (str header runtime-import "\n" body "\n"))))
 
 (def passes (atom []))
@@ -1170,6 +1201,7 @@
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
+  (reset! logical-counter 0)
   (reset! bound-vars {})
   (reset! type-env {})
   (reset! bc-get-used false)
