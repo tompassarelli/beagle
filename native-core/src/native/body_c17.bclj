@@ -2085,6 +2085,17 @@
             (value-name function slots
               (core/utf8decodesourcev0-source-id operation))
             ");\n")
+          (instance? native.core.NativeBytesFromIntsBoundedV0 operation)
+          (str "  " target " = native_bytes_from_ints_bounded((native_arena *)"
+            (value-name function slots
+              (core/nativebytesfromintsboundedv0-arena-id operation))
+            ", "
+            (value-name function slots
+              (core/nativebytesfromintsboundedv0-source-id operation))
+            ", "
+            (value-name function slots
+              (core/nativebytesfromintsboundedv0-max-bytes-id operation))
+            ");\n")
           (instance? native.core.Sha256BytesV0 operation)
           (str "  " target " = native_sha256_bytes((native_arena *)"
             (value-name function slots (core/sha256bytesv0-arena-id operation))

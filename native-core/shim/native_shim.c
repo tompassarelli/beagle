@@ -8148,6 +8148,31 @@ static uint8_t native_vector_byte(const native_vec *source, int64_t index) {
   return (uint8_t)value;
 }
 
+native_bytes native_bytes_from_ints_bounded(native_arena *arena,
+                                            const native_vec *source,
+                                            int64_t max_bytes) {
+  native_bytes result = {NULL, (size_t)0U};
+  int64_t index;
+
+  native_byte_vector_check(source);
+  if (max_bytes < INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (source->length > max_bytes) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  if (source->length == INT64_C(0)) {
+    return result;
+  }
+  result.length = (size_t)source->length;
+  result.data = (uint8_t *)native_arena_alloc(
+      arena, result.length, _Alignof(uint8_t));
+  for (index = INT64_C(0); index < source->length; index++) {
+    result.data[index] = native_vector_byte(source, index);
+  }
+  return result;
+}
+
 uint64_t native_utf8_decode(native_arena *arena, const native_vec *source) {
   uint8_t *destination;
   uint64_t result;

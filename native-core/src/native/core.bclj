@@ -309,6 +309,10 @@
   ;; Same semantics as Utf8DecodeV0 over a borrowed byte source: the octets are
   ;; read in place, so only the returned Text is allocated.
   (Utf8DecodeSourceV0 [arena-id: NativeId source-id: NativeId])
+  (NativeBytesFromIntsBoundedV0
+    [arena-id: NativeId
+     source-id: NativeId
+     max-bytes-id: NativeId])
   (Sha256BytesV0 [arena-id: NativeId source-id: NativeId])
   (FloatToBitsV0 [source-id: NativeId])
   (FloatFromBitsV0 [source-id: NativeId]))
@@ -1715,6 +1719,8 @@
     [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeSourceV0 arena-id source-id) [arena-id source-id]]
+    [(NativeBytesFromIntsBoundedV0 arena-id source-id max-bytes-id)
+     [arena-id source-id max-bytes-id]]
     [(Sha256BytesV0 arena-id source-id) [arena-id source-id]]
     [(FloatToBitsV0 source-id) [source-id]]
     [(FloatFromBitsV0 source-id) [source-id]]))

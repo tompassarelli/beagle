@@ -102,7 +102,8 @@
 (defn fixture-program [] -> core/NativeCoreProgram
   (let [types: (Vec core/TypeDef) (fixture-types)
         layouts: (Vec core/LayoutDef)
-        (lower/collect-layouts (lower/resolve-layouts types))
+        (lower/collect-layouts
+          (lower/resolve-layouts types (core/abi-profile-lp64)))
         effects: (Vec core/EffectDef) (fixture-effects)
         regions: (Vec core/RegionDef) (fixture-regions)
         capabilities: (Vec core/CapabilityDef) (fixture-capabilities)]

@@ -964,6 +964,9 @@
     (= "ByteSource" spelling)
     (->TypeResolutionV0 (byte-source-type-id) [(byte-source-type)] [] true)
 
+    (= "NativeBytes" spelling)
+    (->TypeResolutionV0 (bytes-type-id) [(bytes-type)] [] true)
+
     (= "Keyword" spelling)
     (->TypeResolutionV0 (type-id "Keyword") [(keyword-type)] [] true)
 
@@ -4186,6 +4189,7 @@
           (or (instance? native.core.Utf8EncodeV0 operation)
             (instance? native.core.Utf8DecodeV0 operation)
             (instance? native.core.Utf8DecodeSourceV0 operation)
+            (instance? native.core.NativeBytesFromIntsBoundedV0 operation)
             (instance? native.core.Sha256BytesV0 operation))))
       (and (instance? native.core.ExternCallInstruction instruction)
         (some? (core/externcallinstruction-arena-id instruction)))
@@ -12013,6 +12017,26 @@
                 (fail-result current
                   "TODO-NATIVE-KEYWORD-CONSTRUCTION: keyword takes one native Text value")
 
+                (and (= "native.bytes/from-ints-bounded" callee)
+                  (= 2 (count values))
+                  (int-vector-value? types (nth value-types 0))
+                  (same-id? (nth value-types 1) (int-type-id)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "native-bytes")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CodecPrimitiveInstructionV0
+                        (core/->SsaValueV0 result-id (bytes-type-id))
+                        (core/->NativeBytesFromIntsBoundedV0
+                          (arena-value-id owner)
+                          (nth values 0)
+                          (nth values 1))))
+                    result-id (bytes-type-id) false))
+
+                (= "native.bytes/from-ints-bounded" callee)
+                (fail-result current
+                  "TODO-NATIVE-BYTES-OPERANDS: native.bytes/from-ints-bounded takes a native Vec Int and an Int byte bound")
+
                 (and (= "utf8-encode" callee) (= 1 (count values))
                   (text-operand? (nth value-types 0)))
                 (let [result-type: (U core/NativeId Nil)
@@ -15764,6 +15788,9 @@
     [(Utf8DecodeSourceV0 arena-id source-id)
      (stages/canonical-record "utf8-decode-source-v0"
        [(id-value arena-id) (id-value source-id)])]
+    [(NativeBytesFromIntsBoundedV0 arena-id source-id max-bytes-id)
+     (stages/canonical-record "native-bytes-from-ints-bounded-v0"
+       [(id-value arena-id) (id-value source-id) (id-value max-bytes-id)])]
     [(Sha256BytesV0 arena-id source-id)
      (stages/canonical-record "sha256-bytes-v0"
        [(id-value arena-id) (id-value source-id)])]

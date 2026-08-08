@@ -7,6 +7,7 @@
 ;; (LSP, REPL, docs-sync).
 
 (require "stdlib-portable.rkt"
+         "stdlib-core.rkt"
          "stdlib-nix.rkt"
          ;; Target-specific stdlib catalogs are live.
          "stdlib-clj.rkt"
@@ -30,9 +31,12 @@
 (define stdlib-nix-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-NIX))
 
+(define stdlib-core-combined
+  (merge-hashes STDLIB-PORTABLE STDLIB-CORE))
+
 (define (stdlib-for-target target)
   (case target
-    [(core) STDLIB-PORTABLE]
+    [(core) stdlib-core-combined]
     [(clj)  stdlib-clj-combined]
     [(js)   stdlib-js-combined]
     [(nix)  stdlib-nix-combined]
@@ -48,6 +52,7 @@
 
 (provide STDLIB-TYPES
          stdlib-for-target target-excludes-for
+         STDLIB-CORE
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT
          STDLIB-NIX)

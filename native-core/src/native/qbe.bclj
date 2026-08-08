@@ -2017,6 +2017,8 @@
     (instance? native.core.Utf8EncodeV0 operation) "utf8-encode"
     (instance? native.core.Utf8DecodeV0 operation) "utf8-decode"
     (instance? native.core.Utf8DecodeSourceV0 operation) "utf8-decode-source"
+    (instance? native.core.NativeBytesFromIntsBoundedV0 operation)
+    "native-bytes-from-ints-bounded"
     (instance? native.core.Sha256BytesV0 operation) "sha256-bytes"
     (instance? native.core.FloatToBitsV0 operation) "float-to-bits"
     :else "float-from-bits"))

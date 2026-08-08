@@ -1,4 +1,5 @@
 #include "native_shim.h"
+#include "module_0.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -17,6 +18,10 @@ static void fail(const char *detail) {
   exit(1);
 }
 
+static void report_trap(uint32_t code) {
+  fprintf(stderr, "socket-capability fixture: native trap %u\n", code);
+}
+
 static void require_status(int32_t actual, int32_t expected,
                            const char *detail) {
   if (actual != expected) {
@@ -28,7 +33,7 @@ static void require_status(int32_t actual, int32_t expected,
 
 int main(void) {
   native_capability capability = {UINT64_C(1)};
-  uint8_t arena_storage[64];
+  uint8_t arena_storage[512];
   native_arena arena;
   struct sockaddr_in address;
   socklen_t address_size = (socklen_t)sizeof address;
@@ -39,6 +44,8 @@ int main(void) {
   native_bytes received = {NULL, (size_t)0U};
   native_bytes reply = {(uint8_t *)"pong", (size_t)4U};
   pid_t child;
+
+  native_set_trap_reporter(report_trap);
 
   if (listener == -1) {
     fail("socket");
@@ -72,7 +79,10 @@ int main(void) {
     fail("fork");
   }
   if (child == 0) {
-    char response[4];
+    const uint8_t expected[] = {UINT8_C(0), UINT8_C(0), UINT8_C(0), UINT8_C(4),
+                                UINT8_C(112), UINT8_C(111), UINT8_C(110),
+                                UINT8_C(103)};
+    uint8_t response[sizeof expected];
     size_t offset = (size_t)0U;
     int client = socket(AF_INET, SOCK_STREAM, 0);
     if ((client == -1) ||
@@ -87,7 +97,7 @@ int main(void) {
       }
       offset += (size_t)count;
     }
-    if (memcmp(response, "pong", sizeof response) != 0) {
+    if (memcmp(response, expected, sizeof response) != 0) {
       _exit(4);
     }
     (void)close(client);
@@ -105,14 +115,12 @@ int main(void) {
     fail("read payload");
   }
   require_status(native_host_socket_write_bounded_v0(
-                     &capability, peer, reply, INT64_C(4), &written),
-                 NATIVE_HOST_SOCKET_OK, "write");
-  if (written != INT64_C(4)) {
-    fail("write count");
-  }
-  require_status(native_host_socket_write_bounded_v0(
                      &capability, peer, reply, INT64_C(3), &written),
                  EMSGSIZE, "write bound");
+  if (native_m0_fn_0(&arena, &capability, (native_m0_type_2)peer) !=
+      (native_m0_type_2)INT64_C(0)) {
+    fail("canonical byte sink result");
+  }
   {
     int child_status = 0;
     if ((waitpid(child, &child_status, 0) != child) ||

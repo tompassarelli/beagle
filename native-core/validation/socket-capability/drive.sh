@@ -14,7 +14,41 @@ die() {
 for command in clojure cc rg; do
   command -v "$command" >/dev/null 2>&1 || die "missing command: $command"
 done
-mkdir -p "$scratch/out" "$scratch/generated"
+mkdir -p "$scratch/out" "$scratch/generated" "$scratch/source-c17" \
+  "$scratch/source-qbe"
+
+"$repo/bin/beagle" check --agent "$here/socket_byte_sink.bgl"
+"$repo/bin/beagle" build --materializer c17 \
+  --out "$scratch/source-c17" \
+  --entry native.socket-byte-sink/write-frame \
+  "$here/socket_byte_sink.bgl" >"$scratch/source-c17.log"
+
+source_report="$scratch/source-c17/report.txt"
+rg -Fx 'stage typed-to-native COMPLETE' "$source_report" >/dev/null \
+  || die "canonical byte sink did not lower"
+[[ "$(rg -c '^obligation-projection PASS ' "$source_report")" == "7" ]] \
+  || die "canonical byte sink failed native obligations"
+rg -Fx 'materialize-c17 OK module_0.h module_0.c' "$source_report" >/dev/null \
+  || die "canonical byte sink did not materialize as C17"
+rg -F 'native_bytes_from_ints_bounded' \
+  "$scratch/source-c17/module_0.c" >/dev/null \
+  || die "C17 lost bounded NativeBytes construction"
+rg -F 'native_host_socket_write_bounded_v0' \
+  "$scratch/source-c17/module_0.c" >/dev/null \
+  || die "C17 lost bounded socket write"
+
+set +e
+"$repo/bin/beagle" build --materializer qbe \
+  --out "$scratch/source-qbe" \
+  --entry native.socket-byte-sink/write-frame \
+  "$here/socket_byte_sink.bgl" >"$scratch/source-qbe.log" 2>&1
+qbe_status=$?
+set -e
+[[ $qbe_status -ne 0 ]] || die "QBE unexpectedly accepted the socket effect"
+rg -Fx \
+  'materialize-qbe REFUSED QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation' \
+  "$scratch/source-qbe/report.txt" >/dev/null \
+  || die "QBE socket refusal changed"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
@@ -75,12 +109,14 @@ cc -std=c17 -Wall -Wextra -Werror -pedantic \
   -I"$repo/native-core/shim" -I"$scratch/generated" \
   -c "$generated_c" -o "$scratch/module_0.o"
 cc -std=c17 -Wall -Wextra -Werror -pedantic \
-  -I"$repo/native-core/shim" \
-  "$here/main.c" "$repo/native-core/shim/native_shim.c" \
+  -I"$repo/native-core/shim" -I"$scratch/source-c17" \
+  "$here/main.c" "$scratch/source-c17/module_0.c" \
+  "$repo/native-core/shim/native_shim.c" \
   -o "$scratch/socket-capability"
 "$scratch/socket-capability" >"$scratch/runtime.out"
 rg -Fx 'socket capability fixture: ok' "$scratch/runtime.out" >/dev/null \
   || die "runtime lifecycle failed"
 
 cat "$report"
+cat "$source_report"
 cat "$scratch/runtime.out"

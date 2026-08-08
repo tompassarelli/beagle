@@ -399,6 +399,11 @@ native_vec *native_utf8_encode(native_arena *arena, uint64_t source);
 uint64_t native_utf8_decode(native_arena *arena, const native_vec *source);
 uint64_t native_utf8_decode_source(native_arena *arena,
                                    const native_byte_source *source);
+/* Copies exactly source->length octets. Traps OUT_OF_RANGE when that length
+   exceeds max_bytes and INVALID_ARGUMENT for a negative bound or non-octet. */
+native_bytes native_bytes_from_ints_bounded(native_arena *arena,
+                                            const native_vec *source,
+                                            int64_t max_bytes);
 uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source);
 int64_t native_float_to_bits(double source);
 double native_float_from_bits(int64_t source);
