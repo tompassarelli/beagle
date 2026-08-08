@@ -293,7 +293,12 @@
 (define (macro-append . xss)
   (apply append (map (lambda (xs) (macro-seq xs "append")) xss)))
 (define (macro-distinct xs) (remove-duplicates (macro-seq xs "distinct") equal?))
-(define (macro-distinct? . xs) (= (length xs) (length (remove-duplicates xs equal?))))
+(define (macro-distinct? . args)
+  (define items
+    (if (and (= (length args) 1) (macro-seq? (car args)))
+        (macro-seq (car args) "distinct?")
+        args))
+  (= (length items) (length (remove-duplicates items equal?))))
 (define (macro-every? pred xs)
   (andmap (callable pred) (macro-seq xs "every?")))
 (define (macro-error . parts)
@@ -302,15 +307,20 @@
 ;; --- Syntax constructors -----------------------------------------------------
 
 (define (syntax-name s)
+  (define datum
+    (if (and (pair? s) (eq? (car s) BRACKET-TAG)) (cdr s) s))
   (cond
-    [(pair? s) (car s)]
-    [(symbol? s) s]
+    [(pair? datum) (car datum)]
+    [(symbol? datum) datum]
     [else (error 'syntax-name "expected syntax, got: ~v" s)]))
 
 (define (syntax-type s)
+  (define datum
+    (if (and (pair? s) (eq? (car s) BRACKET-TAG)) (cdr s) s))
   (cond
-    [(and (pair? s) (>= (length s) 3) (memq (cadr s) (list ANN-MARKER ':-)))
-     (caddr s)]
+    [(and (pair? datum) (>= (length datum) 3)
+          (memq (cadr datum) (list ANN-MARKER ':-)))
+     (caddr datum)]
     [else (error 'syntax-type "expected a (name MARKER Type) triple datum, got: ~v" s)]))
 
 ;; A typed binding is FLAT in its vector — `[v: Float]` is three items, not a

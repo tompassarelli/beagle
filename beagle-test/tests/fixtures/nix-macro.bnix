@@ -3,7 +3,7 @@
 
 ;; Template macro: wrap a description in an mkEnableOption call.
 (defmacro enable-opt [desc]
-  (lib/mkEnableOption desc))
+  `(lib/mkEnableOption ~desc))
 
 (nix/module [config lib pkgs]
   (nix/with-cfg config.myConfig.modules.example

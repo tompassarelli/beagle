@@ -1,8 +1,8 @@
 #lang racket/base
 
-;; `macro-eval` runs a `(define-macro beagle ...)` body at expansion time. Its
-;; job is to BUILD a datum, so quasiquote and the typed-binding constructors
-;; must produce exactly the shapes the parser accepts.
+;; `macro-eval` runs a `defmacro` body at expansion time. Its job is to build a
+;; datum, so quasiquote and the typed-binding constructors must produce exactly
+;; the shapes the parser accepts.
 
 (require rackunit
          (only-in beagle/private/tags ANN-MARKER BRACKET-TAG)
@@ -76,6 +76,12 @@
 (test-case "vec does not splice a same-shaped list that is not an annotation"
   (check-equal? (ev '(vec (list 1 2 3))) (list BRACKET-TAG '(1 2 3))))
 
+(test-case "syntax-name/type read one typed binder from its raw bracketed form"
+  (check-equal?
+   (ev-let `((binding . (,BRACKET-TAG value ,ANN-MARKER sim/Player)))
+           '(list (syntax-name binding) (syntax-type binding)))
+   '(value sim/Player)))
+
 (test-case "make-defn with a spliced param vector parses as a typed signature"
   (check-equal? (ev '(make-defn (quote f)
                                 (vec (make-param (quote v) (quote Float)))
@@ -134,6 +140,13 @@
    (ev-let `((fields . (,BRACKET-TAG x ,ANN-MARKER Int y ,ANN-MARKER String)))
            '(partition 3 fields))
    `((x ,ANN-MARKER Int) (y ,ANN-MARKER String))))
+
+(test-case "distinct? sees duplicate names derived from a raw typed field vec"
+  (check-false
+   (ev-let `((fields . (,BRACKET-TAG id ,ANN-MARKER String id ,ANN-MARKER String)))
+           '(let [parts (partition 3 fields)
+                  field-names (map first parts)]
+              (distinct? field-names)))))
 
 (test-case "reduce preserves Clojure accumulator-item order"
   (check-equal? (ev '(reduce (fn [acc item] (- acc item)) 10 (list 1 2 3))) 4)

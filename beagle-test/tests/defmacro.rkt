@@ -2,11 +2,9 @@
 
 ;; Tests for `defmacro` — the canonical macro definition form.
 ;;
-;; `defmacro` is a thin sugar over `define-macro safe` whose body is
-;; processed by the quasi-quote evaluator at expansion time. The reader
-;; (Phase B) wraps `` `X ``, `,X`, `,@X` as `(quasiquote X)`,
-;; `(unquote X)`, `(unquote-splicing X)`. Phase C wires those forms
-;; through to template substitution + a final QQ-eval pass.
+;; `defmacro` evaluates its body in Beagle's pure compile-time environment.
+;; The reader wraps `` `X ``, `,X`, and `,@X` as `(quasiquote X)`,
+;; `(unquote X)`, and `(unquote-splicing X)` for that evaluator.
 
 (require rackunit
          (for-syntax racket/base)
@@ -168,6 +166,35 @@
   ;; The trailing `tmp` reference is renamed to the SAME gensym
   (define trailing-set! (cadddr expanded))
   (check-eq? (caddr trailing-set!) binder-name))
+
+(test-case "defmacro: computed references follow renamed template binders"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'computed-ref 'defmacro '()
+   (list 'let
+         (br 'body (list 'list (list 'quote '+) (list 'quote 'm) 1))
+         (list 'quasiquote
+               (list 'fn (br 'm) (list 'unquote 'body)))))
+  (define expanded (expand-fully reg '(computed-ref)))
+  (define binder-name (cadr (cadr expanded)))
+  (define body (caddr expanded))
+  (check-false (eq? binder-name 'm))
+  (check-eq? (car body) '+)
+  (check-eq? (cadr body) binder-name))
+
+(test-case "defmacro: typed local hygiene preserves the annotation type"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'typed-local 'defmacro '()
+   (list 'quasiquote
+         (list 'let (br 'shifted ANN-MARKER 'Int 1)
+               (list '+ 'shifted 1))))
+  (define expanded (expand-fully reg '(typed-local)))
+  (define bindings (cadr expanded))
+  (define binder-name (cadr bindings))
+  (check-false (eq? binder-name 'shifted))
+  (check-eq? (cadddr bindings) 'Int)
+  (check-eq? (cadr (caddr expanded)) binder-name))
 
 ;; --- (f) arity error ------------------------------------------------------
 

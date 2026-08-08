@@ -1,11 +1,10 @@
 #lang beagle/clj
 
 ;; Procedural macro: generates a typed getter function from a record + field name.
-(define-macro proc gen-getter
-  [rec: Symbol field: Symbol] -> Form
-  `(defn ~(string->symbol (format "get-~a" field))
+(defmacro gen-getter [rec field]
+  `(defn ~(format-symbol "get-~a" field)
      [obj: ~rec] -> Any
-     (get obj ~(sym->kw field))))
+     (get obj ~(make-keyword field))))
 
 (defrecord Point [x: Int y: Int])
 

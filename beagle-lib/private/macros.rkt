@@ -518,6 +518,12 @@
   (let loop ([rest (unwrap-brackets* form)])
     (cond
       [(or (null? rest) (null? (cdr rest))) (void)]
+      [(and (>= (length rest) 4)
+            (symbol? (car rest))
+            (memq (cadr rest) (list ANN-MARKER ':-)))
+       (unless (memq (car rest) macro-params)
+         (add! (car rest)))
+       (loop (list-tail rest 4))]
       [(and (list? (car rest)) (= (length (car rest)) 3)
             (symbol? (caar rest)) (memq (cadar rest) (list ANN-MARKER ':-))
             (not (memq (caar rest) macro-params)))
@@ -573,6 +579,12 @@
   (cond
     [(and (symbol? template) (hash-has-key? renames template))
      (hash-ref renames template)]
+    [(and (list? template)
+          (= (length template) 2)
+          (eq? (car template) 'quote)
+          (symbol? (cadr template))
+          (hash-has-key? renames (cadr template)))
+     (list 'quote (hash-ref renames (cadr template)))]
     [(and (pair? template) (eq? (car template) 'quote))
      template]
     [(pair? template)
