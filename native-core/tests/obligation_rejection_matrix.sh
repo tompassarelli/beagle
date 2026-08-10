@@ -48,13 +48,16 @@ bb -cp "$work/out" -e "
    'discharged-tokens-negative-leak 'discharged-tokens-negative-phantom-consume
    'bounded-effects-negative-undeclared-region 'bounded-effects-negative-unbounded-call
    'epoch-soundness-negative-return-young 'epoch-soundness-negative-call-young
+   'epoch-soundness-negative-atom-young-store
+   'epoch-soundness-positive-atom-root-store
+   'epoch-soundness-positive-atom-promoted-store
    'leak-freedom-negative-lifo 'leak-freedom-negative-double-close])
 (doseq [n fixtures]
   (println (pr-str [n (deref (ns-resolve ns n))])))
 (println (pr-str ['nine-valid-passes? (deref (ns-resolve ns 'nine-valid-passes?))]))
 (println (pr-str ['nine-negatives-named? (deref (ns-resolve ns 'nine-negatives-named?))]))
-(println (pr-str ['eighteen-rejection-depth-fixtures-named?
-                  (deref (ns-resolve ns 'eighteen-rejection-depth-fixtures-named?))]))
+(println (pr-str ['nineteen-rejection-depth-fixtures-named?
+                  (deref (ns-resolve ns 'nineteen-rejection-depth-fixtures-named?))]))
 " > "$report"
 
 status=0

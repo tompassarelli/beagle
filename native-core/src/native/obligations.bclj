@@ -1732,6 +1732,53 @@
           (recur (+ block-position 1) blocks)
           found)))))
 
+;; Every SSA value that NAMES a region rather than living in one: the arena
+;; handle an ArenaInstruction acquires and the cell-table handle an
+;; AtomStateInstruction acquires. Built once per function so the epoch walk
+;; resolves a destination by lookup instead of rescanning the blocks.
+(defn function-region-handles
+  [function :- core/FunctionDef] :- (Map String core/NativeId)
+  (loop [block-position :- Int 0
+         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)
+         handles :- (Map String core/NativeId) {}]
+    (if (>= block-position (count blocks))
+      handles
+      (let [instructions :- (Vec core/Instruction)
+            (core/basicblock-instructions (nth blocks block-position))]
+        (recur (+ block-position 1) blocks
+          (loop [position :- Int 0
+                 inner :- (Map String core/NativeId) handles]
+            (if (>= position (count instructions))
+              inner
+              (let [instruction :- core/Instruction (nth instructions position)]
+                (recur (+ position 1)
+                  (cond
+                    (instance? native.core.ArenaInstruction instruction)
+                    (assoc inner
+                      (native-id-key (core/instruction-result-id instruction))
+                      (core/arenainstruction-region instruction))
+
+                    (instance? native.core.AtomStateInstruction instruction)
+                    (assoc inner
+                      (native-id-key (core/instruction-result-id instruction))
+                      (core/atomstateinstruction-region instruction))
+
+                    :else inner))))))))))
+
+;; A region handle is a capability, not storage. It carries no value into the
+;; region it names, so it contributes no epoch to anything built from it —
+;; conflating the two is what made an atom deref (cell handle + state handle)
+;; merge two unrelated roots into the incomparable sentinel.
+(defn region-handle?
+  [handles :- (Map String core/NativeId)
+   value-id :- core/NativeId] :- Bool
+  (some? (get handles (native-id-key value-id))))
+
+(defn handle-region
+  [handles :- (Map String core/NativeId)
+   value-id :- core/NativeId] :- (U core/NativeId Nil)
+  (get handles (native-id-key value-id)))
+
 (defn epoch-of
   [epochs :- (Map String core/NativeId)
    value-id :- core/NativeId] :- (U core/NativeId Nil)
@@ -1740,6 +1787,9 @@
 ;; Merge keeps the YOUNGER of two comparable epochs — the conservative
 ;; representative for both ancestor and closed-region checks — and collapses
 ;; incomparable epochs to a sentinel that fails every non-free check.
+;; Distinct ROOTS are not incomparable: a root never closes and carries driver
+;; lifetime, so every check below (write legality, closed-region escape,
+;; root-or-free) answers the same for any of them.
 (defn merge-epochs
   [regions :- (Vec core/RegionDef)
    left :- (U core/NativeId Nil)
@@ -1748,6 +1798,7 @@
     (nil? left) right
     (nil? right) left
     (core/native-id= left right) left
+    (and (root-region? regions left) (root-region? regions right)) left
     (region-on-ancestor-chain? regions left right) right
     (region-on-ancestor-chain? regions right left) left
     :else (epoch-incomparable-id)))
@@ -1767,7 +1818,7 @@
 (defn instruction-epoch
   [regions :- (Vec core/RegionDef)
    types :- (Vec core/TypeDef)
-   function :- core/FunctionDef
+   handles :- (Map String core/NativeId)
    epochs :- (Map String core/NativeId)
    instruction :- core/Instruction] :- (U core/NativeId Nil)
   (cond
@@ -1785,8 +1836,7 @@
 
     (some? (instruction-arena-operand instruction))
     (let [arena :- Any (instruction-arena-operand instruction)
-          region :- (U core/NativeId Nil)
-          (function-arena-region function arena)]
+          region :- (U core/NativeId Nil) (handle-region handles arena)]
       (if (nil? region) (epoch-incomparable-id) region))
 
     :else
@@ -1800,8 +1850,10 @@
           (if (>= position (count refs))
             merged
             (recur (+ position 1) refs
-              (merge-epochs regions merged
-                (epoch-of epochs (nth refs position))))))))))
+              (if (region-handle? handles (nth refs position))
+                merged
+                (merge-epochs regions merged
+                  (epoch-of epochs (nth refs position)))))))))))
 
 (defn block-parameter-epochs
   [regions :- (Vec core/RegionDef)
@@ -1853,6 +1905,7 @@
 (defn function-epoch-map-pass
   [regions :- (Vec core/RegionDef)
    types :- (Vec core/TypeDef)
+   handles :- (Map String core/NativeId)
    function :- core/FunctionDef
    epochs :- (Map String core/NativeId)] :- (Map String core/NativeId)
   (loop [block-position :- Int 0
@@ -1873,7 +1926,7 @@
                   (recur (+ position 1)
                     (merge-epoch-into regions inner
                       (core/ssavaluev0-id result)
-                      (instruction-epoch regions types function inner
+                      (instruction-epoch regions types handles inner
                         instruction))))))
             with-terminators :- (Map String core/NativeId)
             (loop [position :- Int 0
@@ -1898,10 +1951,11 @@
   [regions :- (Vec core/RegionDef)
    types :- (Vec core/TypeDef)
    function :- core/FunctionDef] :- EpochMapResultV0
-  (let [cap :- Int (+ 4 (* 3 (count (core/function-value-ids function))))]
+  (let [cap :- Int (+ 4 (* 3 (count (core/function-value-ids function))))
+        handles :- (Map String core/NativeId) (function-region-handles function)]
     (loop [round :- Int 0 epochs :- (Map String core/NativeId) {}]
       (let [next :- (Map String core/NativeId)
-            (function-epoch-map-pass regions types function epochs)]
+            (function-epoch-map-pass regions types handles function epochs)]
         (cond
           (= next epochs) (->EpochMapResultV0 next true)
           (>= round cap) (->EpochMapResultV0 next false)
@@ -1953,7 +2007,7 @@
 
 (defn instruction-epoch-writes-legal?
   [regions :- (Vec core/RegionDef)
-   function :- core/FunctionDef
+   handles :- (Map String core/NativeId)
    epochs :- (Map String core/NativeId)
    instruction :- core/Instruction] :- Bool
   (let [store :- Any (get instruction :store nil)]
@@ -1968,29 +2022,41 @@
       (instance? native.core.PromoteInstructionV0 instruction)
       true
 
-      ;; Atom cells live in the external atom-state region: writes require
-      ;; driver-lifetime values, and the cell's own storage a root arena.
+      ;; A store into a cell is sound when the stored value's epoch is an
+      ;; ancestor-of-or-equal of the CELL's epoch: the value must outlive the
+      ;; cell, never the reverse. The value's SHAPE is not the question — a
+      ;; root-allocated record owning arena storage is as legal in a root cell
+      ;; as a scalar. Cells stay root-pinned in v0, which is the separate
+      ;; conjunct below.
       (instance? native.core.AtomCreateInstruction instruction)
       (let [cell-region :- (U core/NativeId Nil)
-            (function-arena-region function
+            (handle-region handles
               (core/atomcreateinstruction-arena-id instruction))]
-        (and (root-or-free-epoch? regions epochs
-               (core/atomcreateinstruction-initial-id instruction))
+        (and (epoch-write-legal? regions
+               (epoch-of epochs
+                 (core/atomcreateinstruction-initial-id instruction))
+               cell-region)
           (or (nil? cell-region) (root-region? regions cell-region))))
 
       (instance? native.core.AtomResetInstruction instruction)
-      (root-or-free-epoch? regions epochs
-        (core/atomresetinstruction-value-id instruction))
+      (epoch-write-legal? regions
+        (epoch-of epochs (core/atomresetinstruction-value-id instruction))
+        (epoch-of epochs (core/atomresetinstruction-cell-id instruction)))
 
       (instance? native.core.AtomCompareExchangeInstruction instruction)
-      (root-or-free-epoch? regions epochs
-        (core/atomcompareexchangeinstruction-replacement-id instruction))
+      (epoch-write-legal? regions
+        (epoch-of epochs
+          (core/atomcompareexchangeinstruction-replacement-id instruction))
+        (epoch-of epochs
+          (core/atomcompareexchangeinstruction-cell-id instruction)))
 
       (instance? native.core.AtomSwapInstruction instruction)
-      (every?
-        (fn [argument :- core/NativeId] :- Bool
-          (root-or-free-epoch? regions epochs argument))
-        (core/atomswapinstruction-arguments instruction))
+      (let [cell-epoch :- (U core/NativeId Nil)
+            (epoch-of epochs (core/atomswapinstruction-cell-id instruction))]
+        (every?
+          (fn [argument :- core/NativeId] :- Bool
+            (epoch-write-legal? regions (epoch-of epochs argument) cell-epoch))
+          (core/atomswapinstruction-arguments instruction)))
 
       ;; A missing callee summary means retained (the v2 lesson): arguments
       ;; handed across a call must carry driver lifetime.
@@ -2006,15 +2072,14 @@
           (root-or-free-epoch? regions epochs argument))
         (core/externcallinstruction-arguments instruction))
 
-      ;; Arena-destination operations copy or reference every non-arena
+      ;; Arena-destination operations copy or reference every non-handle
       ;; operand from storage in the destination region.
       (some? (instruction-arena-operand instruction))
       (let [arena :- Any (instruction-arena-operand instruction)
-            destination :- (U core/NativeId Nil)
-            (function-arena-region function arena)]
+            destination :- (U core/NativeId Nil) (handle-region handles arena)]
         (every?
           (fn [operand :- core/NativeId] :- Bool
-            (or (core/native-id= operand arena)
+            (or (region-handle? handles operand)
               (epoch-write-legal? regions
                 (epoch-of epochs operand) destination)))
           (core/instruction-ssa-refs instruction)))
@@ -2048,13 +2113,15 @@
       false
       (let [epochs :- (Map String core/NativeId)
             (epochmapresultv0-epochs result)
+            handles :- (Map String core/NativeId)
+            (function-region-handles function)
             closed :- (Vec core/NativeId) (function-closed-regions function)]
         (every?
           (fn [block :- core/BasicBlock] :- Bool
             (and
               (every?
                 (fn [instruction :- core/Instruction] :- Bool
-                  (instruction-epoch-writes-legal? regions function epochs
+                  (instruction-epoch-writes-legal? regions handles epochs
                     instruction))
                 (core/basicblock-instructions block))
               (every?
@@ -2656,8 +2723,152 @@
 (def branch-close-program :- core/NativeCoreProgram
   (with epoch-sound-program [:functions [branch-close-function]]))
 
+;; --- Atom-cell epoch fixtures. Cells are root-pinned in v0, so the question
+;; a store into one asks is the epoch RELATION — is the stored value's epoch an
+;; ancestor-of-or-equal of the cell's? — and never the stored value's shape. The
+;; trio below pins all three answers: a root value owning arena storage is
+;; legal, the same store from a minted epoch is not, and `promote` is what
+;; makes the second one legal.
+
+(def fixture-atom-state-region :- core/RegionDef
+  (core/->RegionDef (obligation-id "region-atom-state")
+    (core/->ExternalRegion true) nil))
+
+(def fixture-cell-type :- core/TypeDef
+  (core/->TypeDef (obligation-id "type-cell") "AtomCell"
+    (core/->AtomCellTypeV0 (obligation-id "type-text"))))
+
+(defn root-arena-instruction [] :- core/Instruction
+  (core/->ArenaInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-root-arena")
+      (obligation-id "type-arena"))
+    (obligation-id "region-fixture")
+    (obligation-id "capability-write")
+    (core/->TokenFlowV0 [(obligation-id "region-fixture")] [])))
+
+(defn atom-state-instruction [] :- core/Instruction
+  (core/->AtomStateInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-atom-state")
+      (obligation-id "type-arena"))
+    (obligation-id "region-atom-state")
+    (obligation-id "capability-write")
+    (core/->TokenFlowV0 [(obligation-id "region-atom-state")] [])))
+
+(defn root-text-instruction [label :- String] :- core/Instruction
+  (core/->TextConcatInstruction
+    (core/->SsaValueV0 (obligation-id (str "ssa-root-text-" label))
+      (obligation-id "type-text"))
+    (obligation-id "ssa-root-arena")
+    []))
+
+(defn atom-create-instruction [] :- core/Instruction
+  (core/->AtomCreateInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-cell")
+      (obligation-id "type-cell"))
+    (obligation-id "ssa-root-text-initial")
+    (obligation-id "ssa-root-arena")
+    (obligation-id "ssa-atom-state")))
+
+(defn atom-reset-instruction [value-id :- core/NativeId] :- core/Instruction
+  (core/->AtomResetInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-cell-reset")
+      (obligation-id "type-text"))
+    (obligation-id "ssa-cell")
+    (obligation-id "ssa-atom-state")
+    value-id))
+
+;; Epoch-soundness positive #2: a handle-carrying value allocated in the ROOT
+;; arena, stored into a root-pinned cell. No epoch is minted anywhere in this
+;; function — the program is epoch-0 throughout — so there is no old-to-young
+;; edge to refuse, and the store's legality may not turn on the value owning
+;; arena storage. This is the repro trio's `a-vec-loop` at IR level.
+(def atom-root-store-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-atom-root-store")
+    "atom-root-store"
+    [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-atom-root") []
+       [(root-arena-instruction)
+        (atom-state-instruction)
+        (root-text-instruction "initial")
+        (atom-create-instruction)
+        (root-text-instruction "next")
+        (atom-reset-instruction (obligation-id "ssa-root-text-next"))]
+       [(core/->ReturnTerminator (obligation-id "ssa-input"))])]
+    (obligation-id "block-atom-root")
+    (obligation-id "type-i64")
+    [] [(obligation-id "region-fixture") (obligation-id "region-atom-state")]
+    [(obligation-id "capability-write")]))
+
+(def atom-epoch-program :- core/NativeCoreProgram
+  (with valid-program
+    [:types [fixture-i64-type fixture-union-type fixture-outcome-type
+             fixture-text-type fixture-arena-type fixture-cell-type]]
+    [:regions [fixture-region fixture-epoch-region fixture-epoch-inner-region
+               fixture-atom-state-region]]
+    [:functions [atom-root-store-function]]))
+
+;; Epoch-soundness negative #4: the true old-to-young store into a cell — the
+;; value is allocated in a MINTED epoch that closes inside the function, and
+;; the root-pinned cell would outlive it.
+(def atom-young-store-function :- core/FunctionDef
+  (with atom-root-store-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-atom-young") []
+        [(root-arena-instruction)
+         (atom-state-instruction)
+         (root-text-instruction "initial")
+         (atom-create-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (atom-reset-instruction (obligation-id "ssa-young-text"))
+         (epoch-close-instruction "atom")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]
+    [:entry-block (obligation-id "block-atom-young")]
+    [:regions [(obligation-id "region-fixture")
+               (obligation-id "region-atom-state")
+               (obligation-id "region-epoch")]]))
+
+(def atom-young-store-program :- core/NativeCoreProgram
+  (with atom-epoch-program [:functions [atom-young-store-function]]))
+
+;; Epoch-soundness positive #3: the same store, with the young value copied
+;; into the root arena first. `promote` is the admission the negative above is
+;; missing, and nothing else about the program changes.
+(defn promote-instruction [] :- core/Instruction
+  (core/->PromoteInstructionV0
+    (core/->SsaValueV0 (obligation-id "ssa-promoted-text")
+      (obligation-id "type-text"))
+    (obligation-id "ssa-young-text")
+    (obligation-id "type-text")
+    (obligation-id "ssa-root-arena")))
+
+(def atom-promoted-store-function :- core/FunctionDef
+  (with atom-young-store-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-atom-promoted") []
+        [(root-arena-instruction)
+         (atom-state-instruction)
+         (root-text-instruction "initial")
+         (atom-create-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (promote-instruction)
+         (atom-reset-instruction (obligation-id "ssa-promoted-text"))
+         (epoch-close-instruction "atom")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]
+    [:entry-block (obligation-id "block-atom-promoted")]))
+
+(def atom-promoted-store-program :- core/NativeCoreProgram
+  (with atom-epoch-program [:functions [atom-promoted-store-function]]))
+
 (def epoch-soundness-positive :- Bool
   (obligation-passed? (epoch-soundness epoch-sound-program)))
+
+(def epoch-soundness-positive-atom-root-store :- Bool
+  (obligation-passed? (epoch-soundness atom-epoch-program)))
+
+(def epoch-soundness-positive-atom-promoted-store :- Bool
+  (obligation-passed? (epoch-soundness atom-promoted-store-program)))
 
 (def epoch-soundness-negative :- Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness old-young-store-program))))
@@ -3063,6 +3274,9 @@
 (def epoch-soundness-negative-call-young :- Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness call-young-program))))
 
+(def epoch-soundness-negative-atom-young-store :- Bool
+  (= "epoch-soundness" (verdict-tag (epoch-soundness atom-young-store-program))))
+
 (def leak-freedom-negative-lifo :- Bool
   (= "leak-freedom" (verdict-tag (leak-freedom lifo-violation-program))))
 
@@ -3086,10 +3300,11 @@
    bounded-effects-negative-unbounded-call
    epoch-soundness-negative-return-young
    epoch-soundness-negative-call-young
+   epoch-soundness-negative-atom-young-store
    leak-freedom-negative-lifo
    leak-freedom-negative-double-close])
 
-(def eighteen-rejection-depth-fixtures-named? :- Bool
+(def nineteen-rejection-depth-fixtures-named? :- Bool
   (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
 
 (defn validate-native-core-program
@@ -3124,6 +3339,8 @@
 (def nine-valid-passes? :- Bool
   (and (every? (fn [passed :- Bool] :- Bool passed) valid-fixture-results)
     epoch-soundness-positive
+    epoch-soundness-positive-atom-root-store
+    epoch-soundness-positive-atom-promoted-store
     leak-freedom-positive))
 
 (def nine-negatives-named? :- Bool
