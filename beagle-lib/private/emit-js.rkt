@@ -1359,6 +1359,13 @@
              [path (string-append (string-join parts "/") ".js")])
         (if (string-prefix? path "..") path (string-append "./" path))))))
 
+;; Beagle namespaces are dotted. A slash instead marks a bare npm package
+;; subpath, whose filename and extension are already the exact ESM specifier.
+(define (bare-js-module-specifier? ns-str)
+  (or (string-prefix? ns-str "@")
+      (string-contains? ns-str "/")
+      (not (string-contains? ns-str "."))))
+
 (define (emit-module-header prog)
   (define importer-ns (symbol->string (program-namespace prog)))
   (define rs (program-requires prog))
@@ -1422,10 +1429,9 @@
        (define ns-str (symbol->string (require-entry-ns r)))
        (define refer (require-entry-refer r))
        (define module-path
-         (cond
-           [(string-prefix? ns-str "@") ns-str]
-           [(not (string-contains? ns-str ".")) ns-str]
-           [else (relative-js-module-path importer-ns ns-str)]))
+         (if (bare-js-module-specifier? ns-str)
+             ns-str
+             (relative-js-module-path importer-ns ns-str)))
        (if refer
          (let ([runtime-refer
                 (remove-duplicates

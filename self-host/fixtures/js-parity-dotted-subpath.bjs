@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns selfhost.fixtures.js-parity-dotted-subpath
+  (:require [three/addons/loaders/GLTFLoader.js :as loader]))
+
+(declare-extern loader/GLTFLoader Any)
+
+(def exported: Any loader/GLTFLoader)

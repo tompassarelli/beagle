@@ -1106,13 +1106,13 @@
    path (str (str/join "/" parts) ".js")]
   (if (str/starts-with? path "..") path (str "./" path)))))))
 
+(defn ^Boolean bare-js-module-specifier? [^String ns-str]
+  (or (str/starts-with? ns-str "@") (str/includes? ns-str "/") (not (str/includes? ns-str "."))))
+
 (defn ^String emit-require-line [^String importer r macros]
   (let [ns-str (get r "ns")
    refer (get r "refer")
-   module-path (cond
-  (str/starts-with? ns-str "@") ns-str
-  (not (str/includes? ns-str ".")) ns-str
-  :else (relative-js-path importer ns-str))]
+   module-path (if (bare-js-module-specifier? ns-str) ns-str (relative-js-path importer ns-str))]
   (if (and refer (not (false? refer))) (let [runtime-refer (filterv (fn [nm] (not (contains? macros nm))) refer)]
   (if (= 0 (count runtime-refer)) "" (str "import { " (str/join ", " (mapv mangle-name runtime-refer)) " } from '" module-path "';"))) (let [alias0 (get r "alias")
    alias (if (absent? alias0) (last-seg ns-str) alias0)]
@@ -1239,6 +1239,8 @@
   (expect! "unbound 'name' -> value wrapper" (do
   (reset! bound-vars {})
   (= (emit-ref-name "name") "((_x) => String(_x))")))
+  (expect! "require: dotted npm subpath remains exact" (= (emit-require-line "fixture.app" {"ns" "three/addons/loaders/GLTFLoader.js" "alias" "loader" "refer" false} {}) "import * as loader from 'three/addons/loaders/GLTFLoader.js';"))
+  (expect! "require: dotted Beagle namespace remains importer-relative" (= (emit-require-line "fixture.app" {"ns" "fixture.shared.loader" "alias" "loader" "refer" false} {}) "import * as loader from './shared/loader.js';"))
   (doseq [f (deref failures)]
   (println (str "  FAIL: " f)))
   (println (str "  EMIT-JS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

@@ -527,6 +527,11 @@
      '(require @anthropic-ai/claude-agent-sdk :as sdk)
      '(defn f [] -> Any (sdk/query)))
 
+   (check-js-contains "dotted npm subpath -> passes through verbatim"
+     "import * as loader from 'three/addons/loaders/GLTFLoader.js';"
+     '(require three/addons/loaders/GLTFLoader.js :as loader)
+     '(defn f [] -> Any loader/GLTFLoader))
+
    ;; importer test.app lives at test/app.js, so a root-level sibling module
    ;; resolves importer-relative as ../inventory/core.js (not ./ — that only
    ;; works from the module root). See relative-js-module-path in emit-js.rkt.
