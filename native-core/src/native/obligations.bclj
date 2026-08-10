@@ -1446,6 +1446,35 @@
 (defn store-resources [store :- core/StoreOp] :- (Vec core/NativeId)
   [(get store :region) (get store :capability)])
 
+;; An epoch a callee opens closes before that callee returns — leak freedom
+;; proves it on every path — so neither the region nor the effect naming it
+;; crosses the call boundary. A caller is required to declare only what it can
+;; observe, which is the callee's effects minus its epoch-local ones.
+(defn epoch-local-region?
+  [regions :- (Vec core/RegionDef)
+   region-id :- Any] :- Bool
+  (and (some? region-id)
+    (some?
+      (some
+        (fn [region :- core/RegionDef] :- Bool
+          (and (= (get region-id :value "")
+                 (get (core/regiondef-id region) :value ""))
+            (instance? native.core.ArenaRegion (core/regiondef-kind region))
+            (some? (core/regiondef-parent region))))
+        regions))))
+
+(defn callee-exported-effects
+  [program :- core/NativeCoreProgram
+   callee :- core/FunctionDef] :- (Vec core/NativeId)
+  (filterv
+    (fn [effect-id :- core/NativeId] :- Bool
+      (let [effect :- (U core/EffectDef Nil)
+            (find-effect (core/nativecoreprogram-effects program) effect-id)]
+        (or (nil? effect)
+          (not (epoch-local-region? (core/nativecoreprogram-regions program)
+                 (get (core/effectdef-kind effect) :region nil))))))
+    (core/functiondef-effects callee)))
+
 (defn instruction-effects-bounded?
   [program :- core/NativeCoreProgram
    function :- core/FunctionDef
@@ -1524,7 +1553,7 @@
       (let [callee :- (U core/FunctionDef Nil)
             (find-function (core/nativecoreprogram-functions program) callee-id)]
         (and (not (nil? callee))
-          (core/ids-in? (core/functiondef-effects callee)
+          (core/ids-in? (callee-exported-effects program callee)
             (core/functiondef-effects function))
           (core/ids-in? (core/functiondef-capabilities callee)
             (core/functiondef-capabilities function))))
@@ -1933,6 +1962,11 @@
       (epoch-write-legal? regions
         (epoch-of epochs (get store :value))
         (get store :region))
+
+      ;; The one legal young-to-old edge: promote COPIES its source into the
+      ;; destination arena, so the source's epoch is irrelevant to the write.
+      (instance? native.core.PromoteInstructionV0 instruction)
+      true
 
       ;; Atom cells live in the external atom-state region: writes require
       ;; driver-lifetime values, and the cell's own storage a root arena.
@@ -2893,6 +2927,7 @@
             (obligation-id "type-i64"))
           (obligation-id "function-store")
           [(obligation-id "ssa-address") (obligation-id "ssa-value")]
+          nil
           (core/->TokenFlowV0 [] []))]
        [(core/->ReturnTerminator nil)])]
     (obligation-id "block-caller")
@@ -2931,6 +2966,7 @@
              (obligation-id "type-i64"))
            (obligation-id "function-store")
            [(obligation-id "ssa-young-text") (obligation-id "ssa-input")]
+           nil
            (core/->TokenFlowV0 [] []))
          (epoch-close-instruction "call")]
         [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))

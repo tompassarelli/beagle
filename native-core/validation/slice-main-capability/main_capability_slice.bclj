@@ -43,7 +43,7 @@
                 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
                   configuration (core/abi-profile-lp64))
                 epoch-result: lower/EpochLoweringResultV0
-                (lower/epoch-identity-stage (slice/native-frozen native-result)
+                (lower/epoch-derived-stage (slice/native-frozen native-result)
                   compiler-commit configuration (core/abi-profile-lp64))
                 frozen-native: stages/FrozenNativeStageV0
                 (lower/epoch-result-frozen epoch-result)
@@ -51,10 +51,17 @@
                 (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
                 selected: core/NativeCoreProgram (body-slice/projected-program full)
+                ;; QBE materializes epoch-0 only: it reads the identity
+                ;; program, not the derived one it would refuse.
+                qbe-selected: core/NativeCoreProgram
+                (body-slice/projected-program
+                  (lower/epoch-identity-program
+                    (slice/native-frozen native-result) compiler-commit
+                    configuration (core/abi-profile-lp64)))
                 c-result: body/BodyMaterializationV0
                 (body/materialize-program selected 0)
                 qbe-result: qbe/QbeMaterialization
-                (qbe/materialize-program selected 0 "lp64")
+                (qbe/materialize-program qbe-selected 0 "lp64")
                 head: String
                 (str "stage source-freeze ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"

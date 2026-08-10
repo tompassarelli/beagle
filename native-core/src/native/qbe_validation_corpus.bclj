@@ -238,6 +238,7 @@
        (core/->SsaValueV0 (slice-id "sli-s4-cal") (slice-id "type-0-i64"))
        (slice-id "fn-0-add")
        [(slice-id "sli-p1-lhs") (slice-id "sli-p2-rhs")]
+       nil
        (core/->TokenFlowV0 [] []))]
     [(core/->JumpTerminator (slice-id "sli-b3-joi") [(slice-id "sli-s4-cal")])]))
 

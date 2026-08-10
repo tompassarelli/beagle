@@ -339,7 +339,7 @@
                 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
                   configuration abi)
                 epoch-result: lower/EpochLoweringResultV0
-                (lower/epoch-identity-stage (slice/native-frozen native-result)
+                (lower/epoch-derived-stage (slice/native-frozen native-result)
                   compiler-commit configuration abi)
                 frozen-native: stages/FrozenNativeStageV0
                 (lower/epoch-result-frozen epoch-result)
@@ -434,13 +434,18 @@
                 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
                   configuration abi)
                 epoch-result: lower/EpochLoweringResultV0
-                (lower/epoch-identity-stage (slice/native-frozen native-result)
+                (lower/epoch-derived-stage (slice/native-frozen native-result)
                   compiler-commit configuration abi)
                 frozen-native: stages/FrozenNativeStageV0
                 (lower/epoch-result-frozen epoch-result)
                 program: core/NativeCoreProgram
                 (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
+                ;; QBE materializes epoch-0 only, so it is handed the identity
+                ;; program rather than the derived one it would refuse.
+                qbe-program: core/NativeCoreProgram
+                (lower/epoch-identity-program (slice/native-frozen native-result)
+                  compiler-commit configuration abi)
                 projected: core/NativeCoreProgram (projected-program program)
                 result: body/BodyMaterializationV0
                 (body/materialize-program projected 0)
@@ -451,8 +456,8 @@
                 qbe-report: String
                 (if complete
                   (str "qbe-stage typed-to-native COMPLETE\n"
-                    (emit-qbe-function! program qbe-function-name artifacts-dir
-                      qbe-module-index abi))
+                    (emit-qbe-function! qbe-program qbe-function-name
+                      artifacts-dir qbe-module-index abi))
                   (str "qbe-stage typed-to-native PENDING\n"
                     "qbe-materialize REFUSED native lowering incomplete\n"))
                 head: String

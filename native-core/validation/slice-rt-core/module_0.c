@@ -1775,9 +1775,10 @@ native_m0_type_2 native_m0_fn_14(native_arena *arena, const native_capability *c
   (void)capability;
   (void)native_v_0;
   (void)native_v_1;
+  native_arena native_epoch_0;
   native_m0_type_0 native_s_0;
-  native_m0_type_1 native_s_1;
-  native_m0_type_5 native_s_2;
+  native_m0_type_0 native_s_1;
+  native_m0_type_1 native_s_2;
   native_m0_type_5 native_s_3;
   native_m0_type_5 native_s_4;
   native_m0_type_5 native_s_5;
@@ -1792,213 +1793,213 @@ native_m0_type_2 native_m0_fn_14(native_arena *arena, const native_capability *c
   native_m0_type_5 native_s_14;
   native_m0_type_5 native_s_15;
   native_m0_type_5 native_s_16;
-  native_m0_type_20 native_s_17;
-  native_m0_type_5 native_s_18;
-  native_m0_type_29 native_s_19;
-  native_m0_type_5 native_s_20;
-  native_m0_type_29 native_s_21;
-  native_m0_type_5 native_s_22;
-  native_m0_type_29 native_s_23;
-  native_m0_type_5 native_s_24;
-  native_m0_type_29 native_s_25;
-  native_m0_type_5 native_s_26;
-  native_m0_type_29 native_s_27;
-  native_m0_type_2 native_s_28;
-  native_m0_type_24 native_s_29;
-  native_m0_type_1 native_s_30;
+  native_m0_type_5 native_s_17;
+  native_m0_type_20 native_s_18;
+  native_m0_type_5 native_s_19;
+  native_m0_type_29 native_s_20;
+  native_m0_type_5 native_s_21;
+  native_m0_type_29 native_s_22;
+  native_m0_type_5 native_s_23;
+  native_m0_type_29 native_s_24;
+  native_m0_type_5 native_s_25;
+  native_m0_type_29 native_s_26;
+  native_m0_type_5 native_s_27;
+  native_m0_type_29 native_s_28;
+  native_m0_type_2 native_s_29;
+  native_m0_type_24 native_s_30;
   native_m0_type_1 native_s_31;
-  native_m0_type_20 native_s_32;
-  native_m0_type_1 native_s_33;
-  native_m0_type_20 native_s_34;
-  native_m0_type_2 native_s_35;
-  native_m0_type_5 native_s_36;
-  native_m0_type_20 native_s_37;
-  native_m0_type_1 native_s_38;
-  native_m0_type_9 native_s_39;
-  native_m0_type_1 native_s_40;
-  native_m0_type_9 native_s_41;
-  native_m0_type_1 native_s_42;
-  native_m0_type_1 native_s_43;
+  native_m0_type_1 native_s_32;
+  native_m0_type_20 native_s_33;
+  native_m0_type_1 native_s_34;
+  native_m0_type_20 native_s_35;
+  native_m0_type_2 native_s_36;
+  native_m0_type_5 native_s_37;
+  native_m0_type_20 native_s_38;
+  native_m0_type_1 native_s_39;
+  native_m0_type_9 native_s_40;
+  native_m0_type_1 native_s_41;
+  native_m0_type_0 native_s_42;
+  native_m0_type_9 native_s_43;
   native_m0_type_1 native_s_44;
-  native_m0_type_2 native_s_45;
-  native_m0_type_24 native_s_46;
-  native_m0_type_1 native_s_47;
-  native_m0_type_1 native_s_48;
-  native_m0_type_2 native_s_49;
-  native_m0_type_5 native_s_50;
+  native_m0_type_1 native_s_45;
+  native_m0_type_1 native_s_46;
+  native_m0_type_2 native_s_47;
+  native_m0_type_24 native_s_48;
+  native_m0_type_1 native_s_49;
+  native_m0_type_1 native_s_50;
   native_m0_type_2 native_s_51;
-  native_m0_type_1 native_s_52;
-  native_m0_type_9 native_s_53;
+  native_m0_type_5 native_s_52;
+  native_m0_type_2 native_s_53;
   native_m0_type_1 native_s_54;
   native_m0_type_9 native_s_55;
   native_m0_type_1 native_s_56;
-  native_m0_type_2 native_s_57;
-  native_m0_type_2 native_s_58;
-  native_m0_type_2 native_s_59;
-  native_m0_type_5 native_s_60;
-  native_m0_type_29 native_s_61;
-  native_m0_type_28 native_s_62;
-  native_m0_type_1 native_s_63;
-  native_m0_type_2 native_s_64;
-  native_m0_type_2 native_s_65;
-  native_m0_type_2 native_s_66;
+  native_m0_type_0 native_s_57;
+  native_m0_type_9 native_s_58;
+  native_m0_type_1 native_s_59;
+  native_m0_type_2 native_s_60;
+  native_m0_type_2 native_s_61;
+  native_m0_type_2 native_s_62;
+  native_m0_type_5 native_s_63;
+  native_m0_type_29 native_s_64;
+  native_m0_type_28 native_s_65;
+  native_m0_type_1 native_s_66;
   native_m0_type_2 native_s_67;
   native_m0_type_2 native_s_68;
-  native_m0_type_5 native_s_69;
-  native_m0_type_29 native_s_70;
-  native_m0_type_28 native_s_71;
-  native_m0_type_4 native_s_72;
-  native_m0_type_2 native_s_73;
-  native_m0_type_5 native_s_74;
-  native_m0_type_29 native_s_75;
-  native_m0_type_28 native_s_76;
-  native_m0_type_4 native_s_77;
-  native_m0_type_2 native_s_78;
-  native_m0_type_5 native_s_79;
-  native_m0_type_29 native_s_80;
-  native_m0_type_5 native_s_81;
-  native_m0_type_29 native_s_82;
-  native_m0_type_2 native_s_83;
+  native_m0_type_2 native_s_69;
+  native_m0_type_2 native_s_70;
+  native_m0_type_2 native_s_71;
+  native_m0_type_5 native_s_72;
+  native_m0_type_29 native_s_73;
+  native_m0_type_28 native_s_74;
+  native_m0_type_4 native_s_75;
+  native_m0_type_2 native_s_76;
+  native_m0_type_5 native_s_77;
+  native_m0_type_29 native_s_78;
+  native_m0_type_28 native_s_79;
+  native_m0_type_4 native_s_80;
+  native_m0_type_2 native_s_81;
+  native_m0_type_5 native_s_82;
+  native_m0_type_29 native_s_83;
   native_m0_type_5 native_s_84;
   native_m0_type_29 native_s_85;
-  native_m0_type_28 native_s_86;
-  native_m0_type_4 native_s_87;
-  native_m0_type_2 native_s_88;
-  native_m0_type_5 native_s_89;
-  native_m0_type_29 native_s_90;
-  native_m0_type_28 native_s_91;
-  native_m0_type_4 native_s_92;
-  native_m0_type_2 native_s_93;
+  native_m0_type_2 native_s_86;
+  native_m0_type_5 native_s_87;
+  native_m0_type_29 native_s_88;
+  native_m0_type_28 native_s_89;
+  native_m0_type_4 native_s_90;
+  native_m0_type_2 native_s_91;
+  native_m0_type_5 native_s_92;
+  native_m0_type_29 native_s_93;
   native_m0_type_28 native_s_94;
-  native_m0_type_2 native_s_95;
+  native_m0_type_4 native_s_95;
   native_m0_type_2 native_s_96;
-  native_m0_type_2 native_s_97;
-  native_m0_type_8 native_s_98;
+  native_m0_type_28 native_s_97;
+  native_m0_type_2 native_s_98;
   native_m0_type_2 native_s_99;
   native_m0_type_2 native_s_100;
-  native_m0_type_2 native_s_101;
+  native_m0_type_8 native_s_101;
   native_m0_type_2 native_s_102;
   native_m0_type_2 native_s_103;
   native_m0_type_2 native_s_104;
-  native_m0_type_28 native_s_105;
-  native_m0_type_1 native_s_106;
-  native_m0_type_1 native_s_107;
-  native_m0_type_2 native_s_108;
-  native_m0_type_2 native_s_109;
-  native_m0_type_2 native_s_110;
-  native_m0_type_28 native_s_111;
+  native_m0_type_2 native_s_105;
+  native_m0_type_2 native_s_106;
+  native_m0_type_2 native_s_107;
+  native_m0_type_28 native_s_108;
+  native_m0_type_1 native_s_109;
+  native_m0_type_1 native_s_110;
+  native_m0_type_2 native_s_111;
   native_m0_type_2 native_s_112;
   native_m0_type_2 native_s_113;
-  native_m0_type_2 native_s_114;
-  native_m0_type_8 native_s_115;
+  native_m0_type_28 native_s_114;
+  native_m0_type_2 native_s_115;
   native_m0_type_2 native_s_116;
   native_m0_type_2 native_s_117;
-  native_m0_type_2 native_s_118;
+  native_m0_type_8 native_s_118;
   native_m0_type_2 native_s_119;
   native_m0_type_2 native_s_120;
   native_m0_type_2 native_s_121;
-  native_m0_type_28 native_s_122;
-  native_m0_type_1 native_s_123;
-  native_m0_type_1 native_s_124;
-  native_m0_type_2 native_s_125;
-  native_m0_type_2 native_s_126;
-  native_m0_type_2 native_s_127;
-  native_m0_type_28 native_s_128;
+  native_m0_type_2 native_s_122;
+  native_m0_type_2 native_s_123;
+  native_m0_type_2 native_s_124;
+  native_m0_type_28 native_s_125;
+  native_m0_type_1 native_s_126;
+  native_m0_type_1 native_s_127;
+  native_m0_type_2 native_s_128;
   native_m0_type_2 native_s_129;
   native_m0_type_2 native_s_130;
-  native_m0_type_2 native_s_131;
-  native_m0_type_8 native_s_132;
+  native_m0_type_28 native_s_131;
+  native_m0_type_2 native_s_132;
   native_m0_type_2 native_s_133;
   native_m0_type_2 native_s_134;
-  native_m0_type_2 native_s_135;
+  native_m0_type_8 native_s_135;
   native_m0_type_2 native_s_136;
   native_m0_type_2 native_s_137;
   native_m0_type_2 native_s_138;
-  native_m0_type_28 native_s_139;
-  native_m0_type_1 native_s_140;
-  native_m0_type_1 native_s_141;
-  native_m0_type_2 native_s_142;
-  native_m0_type_2 native_s_143;
-  native_m0_type_2 native_s_144;
-  native_m0_type_28 native_s_145;
+  native_m0_type_2 native_s_139;
+  native_m0_type_2 native_s_140;
+  native_m0_type_2 native_s_141;
+  native_m0_type_28 native_s_142;
+  native_m0_type_1 native_s_143;
+  native_m0_type_1 native_s_144;
+  native_m0_type_2 native_s_145;
   native_m0_type_2 native_s_146;
   native_m0_type_2 native_s_147;
-  native_m0_type_2 native_s_148;
-  native_m0_type_8 native_s_149;
+  native_m0_type_28 native_s_148;
+  native_m0_type_2 native_s_149;
   native_m0_type_2 native_s_150;
   native_m0_type_2 native_s_151;
-  native_m0_type_2 native_s_152;
+  native_m0_type_8 native_s_152;
   native_m0_type_2 native_s_153;
   native_m0_type_2 native_s_154;
   native_m0_type_2 native_s_155;
-  native_m0_type_28 native_s_156;
-  native_m0_type_1 native_s_157;
-  native_m0_type_1 native_s_158;
-  native_m0_type_2 native_s_159;
-  native_m0_type_2 native_s_160;
-  native_m0_type_2 native_s_161;
-  native_m0_type_28 native_s_162;
+  native_m0_type_2 native_s_156;
+  native_m0_type_2 native_s_157;
+  native_m0_type_2 native_s_158;
+  native_m0_type_28 native_s_159;
+  native_m0_type_1 native_s_160;
+  native_m0_type_1 native_s_161;
+  native_m0_type_2 native_s_162;
   native_m0_type_2 native_s_163;
   native_m0_type_2 native_s_164;
-  native_m0_type_2 native_s_165;
-  native_m0_type_8 native_s_166;
+  native_m0_type_28 native_s_165;
+  native_m0_type_2 native_s_166;
   native_m0_type_2 native_s_167;
   native_m0_type_2 native_s_168;
-  native_m0_type_2 native_s_169;
+  native_m0_type_8 native_s_169;
   native_m0_type_2 native_s_170;
   native_m0_type_2 native_s_171;
   native_m0_type_2 native_s_172;
-  native_m0_type_28 native_s_173;
-  native_m0_type_1 native_s_174;
-  native_m0_type_1 native_s_175;
-  native_m0_type_2 native_s_176;
-  native_m0_type_2 native_s_177;
-  native_m0_type_2 native_s_178;
+  native_m0_type_2 native_s_173;
+  native_m0_type_2 native_s_174;
+  native_m0_type_2 native_s_175;
+  native_m0_type_28 native_s_176;
+  native_m0_type_1 native_s_177;
+  native_m0_type_1 native_s_178;
   native_m0_type_2 native_s_179;
   native_m0_type_2 native_s_180;
-  native_m0_type_28 native_s_181;
-  native_m0_type_1 native_s_182;
-  native_m0_type_28 native_s_183;
-  native_m0_type_1 native_s_184;
-  native_m0_type_9 native_s_185;
-  native_m0_type_1 native_s_186;
-  native_m0_type_9 native_s_187;
-  native_m0_type_1 native_s_188;
-  native_m0_type_28 native_s_189;
-  native_m0_type_1 native_s_190;
-  native_m0_type_2 native_s_191;
-  native_m0_type_2 native_s_192;
-  native_m0_type_2 native_s_193;
-  native_m0_type_2 native_s_194;
+  native_m0_type_2 native_s_181;
+  native_m0_type_2 native_s_182;
+  native_m0_type_2 native_s_183;
+  native_m0_type_28 native_s_184;
+  native_m0_type_1 native_s_185;
+  native_m0_type_28 native_s_186;
+  native_m0_type_1 native_s_187;
+  native_m0_type_9 native_s_188;
+  native_m0_type_1 native_s_189;
+  native_m0_type_0 native_s_190;
+  native_m0_type_9 native_s_191;
+  native_m0_type_1 native_s_192;
+  native_m0_type_28 native_s_193;
+  native_m0_type_1 native_s_194;
   native_m0_type_2 native_s_195;
-  native_m0_type_5 native_s_196;
-  native_m0_type_29 native_s_197;
-  native_m0_type_28 native_s_198;
-  native_m0_type_4 native_s_199;
-  native_m0_type_2 native_s_200;
-  native_m0_type_5 native_s_201;
-  native_m0_type_29 native_s_202;
-  native_m0_type_28 native_s_203;
-  native_m0_type_4 native_s_204;
-  native_m0_type_2 native_s_205;
-  native_m0_type_5 native_s_206;
-  native_m0_type_29 native_s_207;
-  native_m0_type_28 native_s_208;
-  native_m0_type_4 native_s_209;
-  native_m0_type_2 native_s_210;
-  native_m0_type_5 native_s_211;
-  native_m0_type_29 native_s_212;
-  native_m0_type_28 native_s_213;
-  native_m0_type_4 native_s_214;
-  native_m0_type_2 native_s_215;
-  native_m0_type_5 native_s_216;
-  native_m0_type_29 native_s_217;
-  native_m0_type_28 native_s_218;
-  native_m0_type_4 native_s_219;
-  native_m0_type_2 native_s_220;
-  native_m0_type_2 native_s_221;
-  native_m0_type_2 native_s_222;
-  native_m0_type_2 native_s_223;
+  native_m0_type_2 native_s_196;
+  native_m0_type_2 native_s_197;
+  native_m0_type_2 native_s_198;
+  native_m0_type_2 native_s_199;
+  native_m0_type_5 native_s_200;
+  native_m0_type_29 native_s_201;
+  native_m0_type_28 native_s_202;
+  native_m0_type_4 native_s_203;
+  native_m0_type_2 native_s_204;
+  native_m0_type_5 native_s_205;
+  native_m0_type_29 native_s_206;
+  native_m0_type_28 native_s_207;
+  native_m0_type_4 native_s_208;
+  native_m0_type_2 native_s_209;
+  native_m0_type_5 native_s_210;
+  native_m0_type_29 native_s_211;
+  native_m0_type_28 native_s_212;
+  native_m0_type_4 native_s_213;
+  native_m0_type_2 native_s_214;
+  native_m0_type_5 native_s_215;
+  native_m0_type_29 native_s_216;
+  native_m0_type_28 native_s_217;
+  native_m0_type_4 native_s_218;
+  native_m0_type_2 native_s_219;
+  native_m0_type_5 native_s_220;
+  native_m0_type_29 native_s_221;
+  native_m0_type_28 native_s_222;
+  native_m0_type_4 native_s_223;
   native_m0_type_2 native_s_224;
   native_m0_type_2 native_s_225;
   native_m0_type_2 native_s_226;
@@ -2027,143 +2028,151 @@ native_m0_type_2 native_m0_fn_14(native_arena *arena, const native_capability *c
   native_m0_type_2 native_s_249;
   native_m0_type_2 native_s_250;
   native_m0_type_2 native_s_251;
+  native_m0_type_2 native_s_252;
+  native_m0_type_2 native_s_253;
+  native_m0_type_2 native_s_254;
+  native_m0_type_2 native_s_255;
+  native_m0_type_0 native_s_256;
   native_s_0 = arena;
   (void)native_s_0;
-  native_s_1 = INT64_C(1);
+  (void)native_arena_init_growable(&native_epoch_0, (size_t)0U);
+  native_s_1 = &native_epoch_0;
   (void)native_s_1;
-  native_s_2 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
+  native_s_2 = INT64_C(1);
   (void)native_s_2;
-  native_s_3 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
+  native_s_3 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
   (void)native_s_3;
-  native_s_4 = (uint64_t)(uintptr_t)&native_m0_keyword_5;
+  native_s_4 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
   (void)native_s_4;
-  native_s_5 = (uint64_t)(uintptr_t)&native_m0_keyword_6;
+  native_s_5 = (uint64_t)(uintptr_t)&native_m0_keyword_5;
   (void)native_s_5;
-  native_s_6 = (uint64_t)(uintptr_t)&native_m0_keyword_7;
+  native_s_6 = (uint64_t)(uintptr_t)&native_m0_keyword_6;
   (void)native_s_6;
-  native_s_7 = (uint64_t)(uintptr_t)&native_m0_keyword_8;
+  native_s_7 = (uint64_t)(uintptr_t)&native_m0_keyword_7;
   (void)native_s_7;
-  native_s_8 = (uint64_t)(uintptr_t)&native_m0_keyword_9;
+  native_s_8 = (uint64_t)(uintptr_t)&native_m0_keyword_8;
   (void)native_s_8;
-  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
+  native_s_9 = (uint64_t)(uintptr_t)&native_m0_keyword_9;
   (void)native_s_9;
-  native_s_10 = (uint64_t)(uintptr_t)&native_m0_keyword_10;
+  native_s_10 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_10;
-  native_s_11 = (uint64_t)(uintptr_t)&native_m0_keyword_11;
+  native_s_11 = (uint64_t)(uintptr_t)&native_m0_keyword_10;
   (void)native_s_11;
-  native_s_12 = (uint64_t)(uintptr_t)&native_m0_keyword_12;
+  native_s_12 = (uint64_t)(uintptr_t)&native_m0_keyword_11;
   (void)native_s_12;
-  native_s_13 = (uint64_t)(uintptr_t)&native_m0_keyword_13;
+  native_s_13 = (uint64_t)(uintptr_t)&native_m0_keyword_12;
   (void)native_s_13;
-  native_s_14 = (uint64_t)(uintptr_t)&native_m0_keyword_14;
+  native_s_14 = (uint64_t)(uintptr_t)&native_m0_keyword_13;
   (void)native_s_14;
-  native_s_15 = (uint64_t)(uintptr_t)&native_m0_keyword_15;
+  native_s_15 = (uint64_t)(uintptr_t)&native_m0_keyword_14;
   (void)native_s_15;
-  native_s_16 = (uint64_t)(uintptr_t)&native_m0_keyword_16;
+  native_s_16 = (uint64_t)(uintptr_t)&native_m0_keyword_15;
   (void)native_s_16;
+  native_s_17 = (uint64_t)(uintptr_t)&native_m0_keyword_16;
+  (void)native_s_17;
   {
-    const native_m0_type_5 native_set_values_17[15] = { native_s_2, native_s_3, native_s_4, native_s_5, native_s_6, native_s_7, native_s_8, native_s_9, native_s_10, native_s_11, native_s_12, native_s_13, native_s_14, native_s_15, native_s_16 };
-    native_s_17 = native_set_from_array((native_arena *)native_s_0, native_set_values_17, INT64_C(15), INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+    const native_m0_type_5 native_set_values_18[15] = { native_s_3, native_s_4, native_s_5, native_s_6, native_s_7, native_s_8, native_s_9, native_s_10, native_s_11, native_s_12, native_s_13, native_s_14, native_s_15, native_s_16, native_s_17 };
+    native_s_18 = native_set_from_array((native_arena *)native_s_1, native_set_values_18, INT64_C(15), INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
   }
-  native_s_18 = (uint64_t)(uintptr_t)&native_m0_keyword_10;
-  (void)native_s_18;
+  native_s_19 = (uint64_t)(uintptr_t)&native_m0_keyword_10;
+  (void)native_s_19;
   {
-    const void *native_map_hit_19 = native_map_get(native_v_0, &native_s_18, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_19, 0, sizeof native_s_19);
-    if (native_map_hit_19 != NULL) {
-      native_s_19.tag = INT64_C(0);
-      native_s_19.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_19;
+    const void *native_map_hit_20 = native_map_get(native_v_0, &native_s_19, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_20, 0, sizeof native_s_20);
+    if (native_map_hit_20 != NULL) {
+      native_s_20.tag = INT64_C(0);
+      native_s_20.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_20;
     } else {
-      native_s_19.tag = INT64_C(1);
+      native_s_20.tag = INT64_C(1);
     }
   }
-  native_s_20 = (uint64_t)(uintptr_t)&native_m0_keyword_13;
-  (void)native_s_20;
+  native_s_21 = (uint64_t)(uintptr_t)&native_m0_keyword_13;
+  (void)native_s_21;
   {
-    const void *native_map_hit_21 = native_map_get(native_v_0, &native_s_20, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_21, 0, sizeof native_s_21);
-    if (native_map_hit_21 != NULL) {
-      native_s_21.tag = INT64_C(0);
-      native_s_21.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_21;
+    const void *native_map_hit_22 = native_map_get(native_v_0, &native_s_21, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_22, 0, sizeof native_s_22);
+    if (native_map_hit_22 != NULL) {
+      native_s_22.tag = INT64_C(0);
+      native_s_22.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_22;
     } else {
-      native_s_21.tag = INT64_C(1);
+      native_s_22.tag = INT64_C(1);
     }
   }
-  native_s_22 = (uint64_t)(uintptr_t)&native_m0_keyword_7;
-  (void)native_s_22;
+  native_s_23 = (uint64_t)(uintptr_t)&native_m0_keyword_7;
+  (void)native_s_23;
   {
-    const void *native_map_hit_23 = native_map_get(native_v_0, &native_s_22, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_23, 0, sizeof native_s_23);
-    if (native_map_hit_23 != NULL) {
-      native_s_23.tag = INT64_C(0);
-      native_s_23.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_23;
+    const void *native_map_hit_24 = native_map_get(native_v_0, &native_s_23, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_24, 0, sizeof native_s_24);
+    if (native_map_hit_24 != NULL) {
+      native_s_24.tag = INT64_C(0);
+      native_s_24.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_24;
     } else {
-      native_s_23.tag = INT64_C(1);
+      native_s_24.tag = INT64_C(1);
     }
   }
-  native_s_24 = (uint64_t)(uintptr_t)&native_m0_keyword_11;
-  (void)native_s_24;
+  native_s_25 = (uint64_t)(uintptr_t)&native_m0_keyword_11;
+  (void)native_s_25;
   {
-    const void *native_map_hit_25 = native_map_get(native_v_0, &native_s_24, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_25, 0, sizeof native_s_25);
-    if (native_map_hit_25 != NULL) {
-      native_s_25.tag = INT64_C(0);
-      native_s_25.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_25;
+    const void *native_map_hit_26 = native_map_get(native_v_0, &native_s_25, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_26, 0, sizeof native_s_26);
+    if (native_map_hit_26 != NULL) {
+      native_s_26.tag = INT64_C(0);
+      native_s_26.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_26;
     } else {
-      native_s_25.tag = INT64_C(1);
+      native_s_26.tag = INT64_C(1);
     }
   }
-  native_s_26 = (uint64_t)(uintptr_t)&native_m0_keyword_5;
-  (void)native_s_26;
+  native_s_27 = (uint64_t)(uintptr_t)&native_m0_keyword_5;
+  (void)native_s_27;
   {
-    const void *native_map_hit_27 = native_map_get(native_v_0, &native_s_26, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_27, 0, sizeof native_s_27);
-    if (native_map_hit_27 != NULL) {
-      native_s_27.tag = INT64_C(0);
-      native_s_27.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_27;
+    const void *native_map_hit_28 = native_map_get(native_v_0, &native_s_27, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_28, 0, sizeof native_s_28);
+    if (native_map_hit_28 != NULL) {
+      native_s_28.tag = INT64_C(0);
+      native_s_28.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_28;
     } else {
-      native_s_27.tag = INT64_C(1);
+      native_s_28.tag = INT64_C(1);
     }
   }
-  native_s_28 = true;
-  (void)native_s_28;
-  if (native_s_28) {
+  native_s_29 = true;
+  (void)native_s_29;
+  if (native_s_29) {
     goto native_l14_2;
   } else {
     goto native_l14_1;
   }
 native_l14_1: ;
-  native_s_225 = native_s_28;
+  native_s_229 = native_s_29;
   goto native_l14_140;
 native_l14_2: ;
-  native_s_29 = native_map_keys((native_arena *)native_s_0, native_v_0, (size_t)8);
-  native_s_30 = native_vec_length(native_s_29);
-  native_s_31 = INT64_C(0);
-  (void)native_s_31;
-  native_s_32 = native_set_from_array((native_arena *)native_s_0, NULL, INT64_C(0), INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
-  native_s_33 = native_s_31;
+  native_s_30 = native_map_keys((native_arena *)native_s_1, native_v_0, (size_t)8);
+  native_s_31 = native_vec_length(native_s_30);
+  native_s_32 = INT64_C(0);
+  (void)native_s_32;
+  native_s_33 = native_set_from_array((native_arena *)native_s_1, NULL, INT64_C(0), INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
   native_s_34 = native_s_32;
+  native_s_35 = native_s_33;
   goto native_l14_3;
 native_l14_3: ;
-  native_s_35 = (native_s_33 < native_s_30);
-  if (native_s_35) {
+  native_s_36 = (native_s_34 < native_s_31);
+  if (native_s_36) {
     goto native_l14_4;
   } else {
     goto native_l14_7;
   }
 native_l14_4: ;
-  native_s_36 = *(const native_m0_type_5 *)native_vec_at(native_s_29, native_s_33, INT64_C(8));
-  native_s_37 = native_set_conj((native_arena *)native_s_0, native_s_34, &native_s_36, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
-  native_s_38 = INT64_C(1);
-  (void)native_s_38;
-  if (__builtin_add_overflow(native_s_33, native_s_38, &native_s_39.payload.variant_0)) {
-    native_s_39.tag = INT64_C(1);
+  native_s_37 = *(const native_m0_type_5 *)native_vec_at(native_s_30, native_s_34, INT64_C(8));
+  native_s_38 = native_set_conj((native_arena *)native_s_1, native_s_35, &native_s_37, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  native_s_39 = INT64_C(1);
+  (void)native_s_39;
+  if (__builtin_add_overflow(native_s_34, native_s_39, &native_s_40.payload.variant_0)) {
+    native_s_40.tag = INT64_C(1);
   } else {
-    native_s_39.tag = INT64_C(0);
+    native_s_40.tag = INT64_C(0);
   }
-  switch (native_s_39.tag) {
+  switch (native_s_40.tag) {
   case INT64_C(0):
-    native_s_41 = native_s_39;
+    native_s_43 = native_s_40;
   goto native_l14_6;
   case INT64_C(1):
     goto native_l14_5;
@@ -2171,55 +2180,58 @@ native_l14_4: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_5: ;
-  native_s_40 = INT64_C(2);
-  (void)native_s_40;
-  native_trap((uint32_t)native_s_40);
+  native_s_41 = INT64_C(2);
+  (void)native_s_41;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_42 = NULL;
+  (void)native_s_42;
+  native_trap((uint32_t)native_s_41);
 native_l14_6: ;
-  native_s_42 = native_s_41.payload.variant_0;
-  native_s_33 = native_s_42;
-  native_s_34 = native_s_37;
+  native_s_44 = native_s_43.payload.variant_0;
+  native_s_34 = native_s_44;
+  native_s_35 = native_s_38;
   goto native_l14_3;
 native_l14_7: ;
-  native_s_43 = native_set_count(native_s_17);
-  native_s_44 = native_set_count(native_s_34);
-  native_s_45 = (native_s_43 == native_s_44);
-  native_s_46 = native_set_vector((native_arena *)native_s_0, native_s_17, (size_t)8);
-  native_s_47 = INT64_C(0);
-  (void)native_s_47;
-  native_s_48 = native_s_47;
+  native_s_45 = native_set_count(native_s_18);
+  native_s_46 = native_set_count(native_s_35);
+  native_s_47 = (native_s_45 == native_s_46);
+  native_s_48 = native_set_vector((native_arena *)native_s_1, native_s_18, (size_t)8);
+  native_s_49 = INT64_C(0);
+  (void)native_s_49;
+  native_s_50 = native_s_49;
   goto native_l14_8;
 native_l14_8: ;
-  native_s_49 = (native_s_48 < native_s_43);
-  if (native_s_45) {
+  native_s_51 = (native_s_50 < native_s_45);
+  if (native_s_47) {
     goto native_l14_9;
   } else {
     goto native_l14_14;
   }
 native_l14_9: ;
-  if (native_s_49) {
+  if (native_s_51) {
     goto native_l14_10;
   } else {
     goto native_l14_15;
   }
 native_l14_10: ;
-  native_s_50 = *(const native_m0_type_5 *)native_vec_at(native_s_46, native_s_48, INT64_C(8));
-  native_s_51 = native_set_contains(native_s_34, &native_s_50, NATIVE_COLLECTION_EQ_KEYWORD);
-  if (native_s_51) {
+  native_s_52 = *(const native_m0_type_5 *)native_vec_at(native_s_48, native_s_50, INT64_C(8));
+  native_s_53 = native_set_contains(native_s_35, &native_s_52, NATIVE_COLLECTION_EQ_KEYWORD);
+  if (native_s_53) {
     goto native_l14_11;
   } else {
     goto native_l14_14;
   }
 native_l14_11: ;
-  native_s_52 = INT64_C(1);
-  (void)native_s_52;
-  if (__builtin_add_overflow(native_s_48, native_s_52, &native_s_53.payload.variant_0)) {
-    native_s_53.tag = INT64_C(1);
+  native_s_54 = INT64_C(1);
+  (void)native_s_54;
+  if (__builtin_add_overflow(native_s_50, native_s_54, &native_s_55.payload.variant_0)) {
+    native_s_55.tag = INT64_C(1);
   } else {
-    native_s_53.tag = INT64_C(0);
+    native_s_55.tag = INT64_C(0);
   }
-  switch (native_s_53.tag) {
+  switch (native_s_55.tag) {
   case INT64_C(0):
-    native_s_55 = native_s_53;
+    native_s_58 = native_s_55;
   goto native_l14_13;
   case INT64_C(1):
     goto native_l14_12;
@@ -2227,46 +2239,49 @@ native_l14_11: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_12: ;
-  native_s_54 = INT64_C(2);
-  (void)native_s_54;
-  native_trap((uint32_t)native_s_54);
+  native_s_56 = INT64_C(2);
+  (void)native_s_56;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_57 = NULL;
+  (void)native_s_57;
+  native_trap((uint32_t)native_s_56);
 native_l14_13: ;
-  native_s_56 = native_s_55.payload.variant_0;
-  native_s_48 = native_s_56;
+  native_s_59 = native_s_58.payload.variant_0;
+  native_s_50 = native_s_59;
   goto native_l14_8;
 native_l14_14: ;
-  native_s_57 = false;
-  (void)native_s_57;
-  native_s_59 = native_s_57;
+  native_s_60 = false;
+  (void)native_s_60;
+  native_s_62 = native_s_60;
   goto native_l14_16;
 native_l14_15: ;
-  native_s_58 = true;
-  (void)native_s_58;
-  native_s_59 = native_s_58;
+  native_s_61 = true;
+  (void)native_s_61;
+  native_s_62 = native_s_61;
   goto native_l14_16;
 native_l14_16: ;
-  if (native_s_59) {
+  if (native_s_62) {
     goto native_l14_18;
   } else {
     goto native_l14_17;
   }
 native_l14_17: ;
-  native_s_226 = native_s_59;
+  native_s_230 = native_s_62;
   goto native_l14_141;
 native_l14_18: ;
-  native_s_60 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
-  (void)native_s_60;
+  native_s_63 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
+  (void)native_s_63;
   {
-    const void *native_map_hit_61 = native_map_get(native_v_0, &native_s_60, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_61, 0, sizeof native_s_61);
-    if (native_map_hit_61 != NULL) {
-      native_s_61.tag = INT64_C(0);
-      native_s_61.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_61;
+    const void *native_map_hit_64 = native_map_get(native_v_0, &native_s_63, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_64, 0, sizeof native_s_64);
+    if (native_map_hit_64 != NULL) {
+      native_s_64.tag = INT64_C(0);
+      native_s_64.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_64;
     } else {
-      native_s_61.tag = INT64_C(1);
+      native_s_64.tag = INT64_C(1);
     }
   }
-  switch (native_s_61.tag) {
+  switch (native_s_64.tag) {
   case INT64_C(0):
     goto native_l14_19;
   case INT64_C(1):
@@ -2275,11 +2290,11 @@ native_l14_18: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_19: ;
-  if (native_s_61.tag != INT64_C(0)) {
+  if (native_s_64.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_62 = native_s_61.payload.variant_0;
-  switch (native_s_62.tag) {
+  native_s_65 = native_s_64.payload.variant_0;
+  switch (native_s_65.tag) {
   case INT64_C(0):
     goto native_l14_21;
   case INT64_C(1):
@@ -2288,131 +2303,109 @@ native_l14_19: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_20: ;
-  if (native_s_62.tag != INT64_C(1)) {
+  if (native_s_65.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_63 = native_s_62.payload.variant_1;
-  native_s_64 = (native_s_1 == native_s_63);
-  native_s_66 = native_s_64;
+  native_s_66 = native_s_65.payload.variant_1;
+  native_s_67 = (native_s_2 == native_s_66);
+  native_s_69 = native_s_67;
   goto native_l14_22;
 native_l14_21: ;
-  native_s_65 = false;
-  (void)native_s_65;
-  native_s_66 = native_s_65;
+  native_s_68 = false;
+  (void)native_s_68;
+  native_s_69 = native_s_68;
   goto native_l14_22;
 native_l14_22: ;
-  native_s_68 = native_s_66;
+  native_s_71 = native_s_69;
   goto native_l14_24;
 native_l14_23: ;
-  native_s_67 = false;
-  (void)native_s_67;
-  native_s_68 = native_s_67;
+  native_s_70 = false;
+  (void)native_s_70;
+  native_s_71 = native_s_70;
   goto native_l14_24;
 native_l14_24: ;
-  if (native_s_68) {
+  if (native_s_71) {
     goto native_l14_26;
   } else {
     goto native_l14_25;
   }
 native_l14_25: ;
-  native_s_227 = native_s_68;
+  native_s_231 = native_s_71;
   goto native_l14_142;
 native_l14_26: ;
-  native_s_69 = (uint64_t)(uintptr_t)&native_m0_keyword_12;
-  (void)native_s_69;
+  native_s_72 = (uint64_t)(uintptr_t)&native_m0_keyword_12;
+  (void)native_s_72;
   {
-    const void *native_map_hit_70 = native_map_get(native_v_0, &native_s_69, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_70, 0, sizeof native_s_70);
-    if (native_map_hit_70 != NULL) {
-      native_s_70.tag = INT64_C(0);
-      native_s_70.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_70;
+    const void *native_map_hit_73 = native_map_get(native_v_0, &native_s_72, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_73, 0, sizeof native_s_73);
+    if (native_map_hit_73 != NULL) {
+      native_s_73.tag = INT64_C(0);
+      native_s_73.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_73;
     } else {
-      native_s_70.tag = INT64_C(1);
+      native_s_73.tag = INT64_C(1);
     }
   }
-  if (native_s_70.tag != INT64_C(0)) {
+  if (native_s_73.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_71 = native_s_70.payload.variant_0;
-  if (native_s_71.tag != INT64_C(0)) {
+  native_s_74 = native_s_73.payload.variant_0;
+  if (native_s_74.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_72 = native_s_71.payload.variant_0;
-  native_s_73 = native_m0_fn_12(native_s_72);
-  if (native_s_73) {
+  native_s_75 = native_s_74.payload.variant_0;
+  native_s_76 = native_m0_fn_12(native_s_75);
+  if (native_s_76) {
     goto native_l14_28;
   } else {
     goto native_l14_27;
   }
 native_l14_27: ;
-  native_s_228 = native_s_73;
+  native_s_232 = native_s_76;
   goto native_l14_143;
 native_l14_28: ;
-  native_s_74 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
-  (void)native_s_74;
+  native_s_77 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
+  (void)native_s_77;
   {
-    const void *native_map_hit_75 = native_map_get(native_v_0, &native_s_74, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_75, 0, sizeof native_s_75);
-    if (native_map_hit_75 != NULL) {
-      native_s_75.tag = INT64_C(0);
-      native_s_75.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_75;
+    const void *native_map_hit_78 = native_map_get(native_v_0, &native_s_77, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_78, 0, sizeof native_s_78);
+    if (native_map_hit_78 != NULL) {
+      native_s_78.tag = INT64_C(0);
+      native_s_78.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_78;
     } else {
-      native_s_75.tag = INT64_C(1);
+      native_s_78.tag = INT64_C(1);
     }
   }
-  if (native_s_75.tag != INT64_C(0)) {
+  if (native_s_78.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_76 = native_s_75.payload.variant_0;
-  if (native_s_76.tag != INT64_C(0)) {
+  native_s_79 = native_s_78.payload.variant_0;
+  if (native_s_79.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_77 = native_s_76.payload.variant_0;
-  native_s_78 = native_m0_fn_12(native_s_77);
-  if (native_s_78) {
+  native_s_80 = native_s_79.payload.variant_0;
+  native_s_81 = native_m0_fn_12(native_s_80);
+  if (native_s_81) {
     goto native_l14_30;
   } else {
     goto native_l14_29;
   }
 native_l14_29: ;
-  native_s_229 = native_s_78;
+  native_s_233 = native_s_81;
   goto native_l14_144;
 native_l14_30: ;
-  native_s_79 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
-  (void)native_s_79;
+  native_s_82 = (uint64_t)(uintptr_t)&native_m0_keyword_4;
+  (void)native_s_82;
   {
-    const void *native_map_hit_80 = native_map_get(native_v_0, &native_s_79, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_80, 0, sizeof native_s_80);
-    if (native_map_hit_80 != NULL) {
-      native_s_80.tag = INT64_C(0);
-      native_s_80.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_80;
+    const void *native_map_hit_83 = native_map_get(native_v_0, &native_s_82, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_83, 0, sizeof native_s_83);
+    if (native_map_hit_83 != NULL) {
+      native_s_83.tag = INT64_C(0);
+      native_s_83.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_83;
     } else {
-      native_s_80.tag = INT64_C(1);
+      native_s_83.tag = INT64_C(1);
     }
   }
-  native_s_81 = (uint64_t)(uintptr_t)&native_m0_keyword_16;
-  (void)native_s_81;
-  {
-    const void *native_map_hit_82 = native_map_get(native_v_0, &native_s_81, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_82, 0, sizeof native_s_82);
-    if (native_map_hit_82 != NULL) {
-      native_s_82.tag = INT64_C(0);
-      native_s_82.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_82;
-    } else {
-      native_s_82.tag = INT64_C(1);
-    }
-  }
-  native_s_83 = native_value_equal(&native_m0_value_29, &native_s_80, &native_s_82);
-  if (native_s_83) {
-    goto native_l14_32;
-  } else {
-    goto native_l14_31;
-  }
-native_l14_31: ;
-  native_s_230 = native_s_83;
-  goto native_l14_145;
-native_l14_32: ;
-  native_s_84 = (uint64_t)(uintptr_t)&native_m0_keyword_14;
+  native_s_84 = (uint64_t)(uintptr_t)&native_m0_keyword_16;
   (void)native_s_84;
   {
     const void *native_map_hit_85 = native_map_get(native_v_0, &native_s_84, NATIVE_COLLECTION_EQ_KEYWORD);
@@ -2424,55 +2417,77 @@ native_l14_32: ;
       native_s_85.tag = INT64_C(1);
     }
   }
-  if (native_s_85.tag != INT64_C(0)) {
+  native_s_86 = native_value_equal(&native_m0_value_29, &native_s_83, &native_s_85);
+  if (native_s_86) {
+    goto native_l14_32;
+  } else {
+    goto native_l14_31;
+  }
+native_l14_31: ;
+  native_s_234 = native_s_86;
+  goto native_l14_145;
+native_l14_32: ;
+  native_s_87 = (uint64_t)(uintptr_t)&native_m0_keyword_14;
+  (void)native_s_87;
+  {
+    const void *native_map_hit_88 = native_map_get(native_v_0, &native_s_87, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_88, 0, sizeof native_s_88);
+    if (native_map_hit_88 != NULL) {
+      native_s_88.tag = INT64_C(0);
+      native_s_88.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_88;
+    } else {
+      native_s_88.tag = INT64_C(1);
+    }
+  }
+  if (native_s_88.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_86 = native_s_85.payload.variant_0;
-  if (native_s_86.tag != INT64_C(0)) {
+  native_s_89 = native_s_88.payload.variant_0;
+  if (native_s_89.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_87 = native_s_86.payload.variant_0;
-  native_s_88 = native_m0_fn_12(native_s_87);
-  if (native_s_88) {
+  native_s_90 = native_s_89.payload.variant_0;
+  native_s_91 = native_m0_fn_12(native_s_90);
+  if (native_s_91) {
     goto native_l14_34;
   } else {
     goto native_l14_33;
   }
 native_l14_33: ;
-  native_s_231 = native_s_88;
+  native_s_235 = native_s_91;
   goto native_l14_146;
 native_l14_34: ;
-  native_s_89 = (uint64_t)(uintptr_t)&native_m0_keyword_6;
-  (void)native_s_89;
+  native_s_92 = (uint64_t)(uintptr_t)&native_m0_keyword_6;
+  (void)native_s_92;
   {
-    const void *native_map_hit_90 = native_map_get(native_v_0, &native_s_89, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_90, 0, sizeof native_s_90);
-    if (native_map_hit_90 != NULL) {
-      native_s_90.tag = INT64_C(0);
-      native_s_90.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_90;
+    const void *native_map_hit_93 = native_map_get(native_v_0, &native_s_92, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_93, 0, sizeof native_s_93);
+    if (native_map_hit_93 != NULL) {
+      native_s_93.tag = INT64_C(0);
+      native_s_93.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_93;
     } else {
-      native_s_90.tag = INT64_C(1);
+      native_s_93.tag = INT64_C(1);
     }
   }
-  if (native_s_90.tag != INT64_C(0)) {
+  if (native_s_93.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_91 = native_s_90.payload.variant_0;
-  if (native_s_91.tag != INT64_C(0)) {
+  native_s_94 = native_s_93.payload.variant_0;
+  if (native_s_94.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_92 = native_s_91.payload.variant_0;
-  native_s_93 = native_m0_fn_12(native_s_92);
-  if (native_s_93) {
+  native_s_95 = native_s_94.payload.variant_0;
+  native_s_96 = native_m0_fn_12(native_s_95);
+  if (native_s_96) {
     goto native_l14_36;
   } else {
     goto native_l14_35;
   }
 native_l14_35: ;
-  native_s_232 = native_s_93;
+  native_s_236 = native_s_96;
   goto native_l14_147;
 native_l14_36: ;
-  switch (native_s_19.tag) {
+  switch (native_s_20.tag) {
   case INT64_C(0):
     goto native_l14_37;
   case INT64_C(1):
@@ -2481,11 +2496,11 @@ native_l14_36: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_37: ;
-  if (native_s_19.tag != INT64_C(0)) {
+  if (native_s_20.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_94 = native_s_19.payload.variant_0;
-  switch (native_s_94.tag) {
+  native_s_97 = native_s_20.payload.variant_0;
+  switch (native_s_97.tag) {
   case INT64_C(0):
     goto native_l14_39;
   case INT64_C(1):
@@ -2494,84 +2509,84 @@ native_l14_37: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_38: ;
-  native_s_95 = true;
-  (void)native_s_95;
-  native_s_97 = native_s_95;
+  native_s_98 = true;
+  (void)native_s_98;
+  native_s_100 = native_s_98;
   goto native_l14_40;
 native_l14_39: ;
-  native_s_96 = false;
-  (void)native_s_96;
-  native_s_97 = native_s_96;
+  native_s_99 = false;
+  (void)native_s_99;
+  native_s_100 = native_s_99;
   goto native_l14_40;
 native_l14_40: ;
-  native_s_104 = native_s_97;
+  native_s_107 = native_s_100;
   goto native_l14_47;
 native_l14_41: ;
-  if (native_s_19.tag != INT64_C(1)) {
+  if (native_s_20.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_98 = native_s_19.payload.variant_1;
-  (void)native_s_98;
-  switch (native_s_98.tag) {
+  native_s_101 = native_s_20.payload.variant_1;
+  (void)native_s_101;
+  switch (native_s_101.tag) {
   case INT64_C(0):
     goto native_l14_43;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_99 = true;
-  (void)native_s_99;
-  native_s_101 = native_s_99;
-  goto native_l14_44;
-native_l14_43: ;
-  native_s_100 = false;
-  (void)native_s_100;
-  native_s_101 = native_s_100;
-  goto native_l14_44;
-native_l14_44: ;
-  native_s_104 = native_s_101;
-  goto native_l14_47;
   native_s_102 = true;
   (void)native_s_102;
   native_s_104 = native_s_102;
-  goto native_l14_47;
+  goto native_l14_44;
+native_l14_43: ;
   native_s_103 = false;
   (void)native_s_103;
   native_s_104 = native_s_103;
+  goto native_l14_44;
+native_l14_44: ;
+  native_s_107 = native_s_104;
+  goto native_l14_47;
+  native_s_105 = true;
+  (void)native_s_105;
+  native_s_107 = native_s_105;
+  goto native_l14_47;
+  native_s_106 = false;
+  (void)native_s_106;
+  native_s_107 = native_s_106;
   goto native_l14_47;
 native_l14_47: ;
-  if (native_s_104) {
+  if (native_s_107) {
     goto native_l14_49;
   } else {
     goto native_l14_48;
   }
 native_l14_48: ;
-  native_s_233 = native_s_104;
+  native_s_237 = native_s_107;
   goto native_l14_148;
 native_l14_49: ;
-  if (native_s_19.tag != INT64_C(0)) {
+  if (native_s_20.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_105 = native_s_19.payload.variant_0;
-  if (native_s_105.tag != INT64_C(1)) {
+  native_s_108 = native_s_20.payload.variant_0;
+  if (native_s_108.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_106 = native_s_105.payload.variant_1;
-  native_s_107 = INT64_C(0);
-  (void)native_s_107;
-  native_s_108 = (native_s_106 < native_s_107);
-  native_s_109 = false;
-  (void)native_s_109;
-  native_s_110 = (native_s_108 == native_s_109);
-  if (native_s_110) {
+  native_s_109 = native_s_108.payload.variant_1;
+  native_s_110 = INT64_C(0);
+  (void)native_s_110;
+  native_s_111 = (native_s_109 < native_s_110);
+  native_s_112 = false;
+  (void)native_s_112;
+  native_s_113 = (native_s_111 == native_s_112);
+  if (native_s_113) {
     goto native_l14_51;
   } else {
     goto native_l14_50;
   }
 native_l14_50: ;
-  native_s_234 = native_s_110;
+  native_s_238 = native_s_113;
   goto native_l14_149;
 native_l14_51: ;
-  switch (native_s_21.tag) {
+  switch (native_s_22.tag) {
   case INT64_C(0):
     goto native_l14_52;
   case INT64_C(1):
@@ -2580,11 +2595,11 @@ native_l14_51: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_52: ;
-  if (native_s_21.tag != INT64_C(0)) {
+  if (native_s_22.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_111 = native_s_21.payload.variant_0;
-  switch (native_s_111.tag) {
+  native_s_114 = native_s_22.payload.variant_0;
+  switch (native_s_114.tag) {
   case INT64_C(0):
     goto native_l14_54;
   case INT64_C(1):
@@ -2593,84 +2608,84 @@ native_l14_52: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_53: ;
-  native_s_112 = true;
-  (void)native_s_112;
-  native_s_114 = native_s_112;
+  native_s_115 = true;
+  (void)native_s_115;
+  native_s_117 = native_s_115;
   goto native_l14_55;
 native_l14_54: ;
-  native_s_113 = false;
-  (void)native_s_113;
-  native_s_114 = native_s_113;
+  native_s_116 = false;
+  (void)native_s_116;
+  native_s_117 = native_s_116;
   goto native_l14_55;
 native_l14_55: ;
-  native_s_121 = native_s_114;
+  native_s_124 = native_s_117;
   goto native_l14_62;
 native_l14_56: ;
-  if (native_s_21.tag != INT64_C(1)) {
+  if (native_s_22.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_115 = native_s_21.payload.variant_1;
-  (void)native_s_115;
-  switch (native_s_115.tag) {
+  native_s_118 = native_s_22.payload.variant_1;
+  (void)native_s_118;
+  switch (native_s_118.tag) {
   case INT64_C(0):
     goto native_l14_58;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_116 = true;
-  (void)native_s_116;
-  native_s_118 = native_s_116;
-  goto native_l14_59;
-native_l14_58: ;
-  native_s_117 = false;
-  (void)native_s_117;
-  native_s_118 = native_s_117;
-  goto native_l14_59;
-native_l14_59: ;
-  native_s_121 = native_s_118;
-  goto native_l14_62;
   native_s_119 = true;
   (void)native_s_119;
   native_s_121 = native_s_119;
-  goto native_l14_62;
+  goto native_l14_59;
+native_l14_58: ;
   native_s_120 = false;
   (void)native_s_120;
   native_s_121 = native_s_120;
+  goto native_l14_59;
+native_l14_59: ;
+  native_s_124 = native_s_121;
+  goto native_l14_62;
+  native_s_122 = true;
+  (void)native_s_122;
+  native_s_124 = native_s_122;
+  goto native_l14_62;
+  native_s_123 = false;
+  (void)native_s_123;
+  native_s_124 = native_s_123;
   goto native_l14_62;
 native_l14_62: ;
-  if (native_s_121) {
+  if (native_s_124) {
     goto native_l14_64;
   } else {
     goto native_l14_63;
   }
 native_l14_63: ;
-  native_s_235 = native_s_121;
+  native_s_239 = native_s_124;
   goto native_l14_150;
 native_l14_64: ;
-  if (native_s_21.tag != INT64_C(0)) {
+  if (native_s_22.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_122 = native_s_21.payload.variant_0;
-  if (native_s_122.tag != INT64_C(1)) {
+  native_s_125 = native_s_22.payload.variant_0;
+  if (native_s_125.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_123 = native_s_122.payload.variant_1;
-  native_s_124 = INT64_C(0);
-  (void)native_s_124;
-  native_s_125 = (native_s_123 < native_s_124);
-  native_s_126 = false;
-  (void)native_s_126;
-  native_s_127 = (native_s_125 == native_s_126);
-  if (native_s_127) {
+  native_s_126 = native_s_125.payload.variant_1;
+  native_s_127 = INT64_C(0);
+  (void)native_s_127;
+  native_s_128 = (native_s_126 < native_s_127);
+  native_s_129 = false;
+  (void)native_s_129;
+  native_s_130 = (native_s_128 == native_s_129);
+  if (native_s_130) {
     goto native_l14_66;
   } else {
     goto native_l14_65;
   }
 native_l14_65: ;
-  native_s_236 = native_s_127;
+  native_s_240 = native_s_130;
   goto native_l14_151;
 native_l14_66: ;
-  switch (native_s_23.tag) {
+  switch (native_s_24.tag) {
   case INT64_C(0):
     goto native_l14_67;
   case INT64_C(1):
@@ -2679,11 +2694,11 @@ native_l14_66: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_67: ;
-  if (native_s_23.tag != INT64_C(0)) {
+  if (native_s_24.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_128 = native_s_23.payload.variant_0;
-  switch (native_s_128.tag) {
+  native_s_131 = native_s_24.payload.variant_0;
+  switch (native_s_131.tag) {
   case INT64_C(0):
     goto native_l14_69;
   case INT64_C(1):
@@ -2692,84 +2707,84 @@ native_l14_67: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_68: ;
-  native_s_129 = true;
-  (void)native_s_129;
-  native_s_131 = native_s_129;
+  native_s_132 = true;
+  (void)native_s_132;
+  native_s_134 = native_s_132;
   goto native_l14_70;
 native_l14_69: ;
-  native_s_130 = false;
-  (void)native_s_130;
-  native_s_131 = native_s_130;
+  native_s_133 = false;
+  (void)native_s_133;
+  native_s_134 = native_s_133;
   goto native_l14_70;
 native_l14_70: ;
-  native_s_138 = native_s_131;
+  native_s_141 = native_s_134;
   goto native_l14_77;
 native_l14_71: ;
-  if (native_s_23.tag != INT64_C(1)) {
+  if (native_s_24.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_132 = native_s_23.payload.variant_1;
-  (void)native_s_132;
-  switch (native_s_132.tag) {
+  native_s_135 = native_s_24.payload.variant_1;
+  (void)native_s_135;
+  switch (native_s_135.tag) {
   case INT64_C(0):
     goto native_l14_73;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_133 = true;
-  (void)native_s_133;
-  native_s_135 = native_s_133;
-  goto native_l14_74;
-native_l14_73: ;
-  native_s_134 = false;
-  (void)native_s_134;
-  native_s_135 = native_s_134;
-  goto native_l14_74;
-native_l14_74: ;
-  native_s_138 = native_s_135;
-  goto native_l14_77;
   native_s_136 = true;
   (void)native_s_136;
   native_s_138 = native_s_136;
-  goto native_l14_77;
+  goto native_l14_74;
+native_l14_73: ;
   native_s_137 = false;
   (void)native_s_137;
   native_s_138 = native_s_137;
+  goto native_l14_74;
+native_l14_74: ;
+  native_s_141 = native_s_138;
+  goto native_l14_77;
+  native_s_139 = true;
+  (void)native_s_139;
+  native_s_141 = native_s_139;
+  goto native_l14_77;
+  native_s_140 = false;
+  (void)native_s_140;
+  native_s_141 = native_s_140;
   goto native_l14_77;
 native_l14_77: ;
-  if (native_s_138) {
+  if (native_s_141) {
     goto native_l14_79;
   } else {
     goto native_l14_78;
   }
 native_l14_78: ;
-  native_s_237 = native_s_138;
+  native_s_241 = native_s_141;
   goto native_l14_152;
 native_l14_79: ;
-  if (native_s_23.tag != INT64_C(0)) {
+  if (native_s_24.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_139 = native_s_23.payload.variant_0;
-  if (native_s_139.tag != INT64_C(1)) {
+  native_s_142 = native_s_24.payload.variant_0;
+  if (native_s_142.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_140 = native_s_139.payload.variant_1;
-  native_s_141 = INT64_C(0);
-  (void)native_s_141;
-  native_s_142 = (native_s_140 < native_s_141);
-  native_s_143 = false;
-  (void)native_s_143;
-  native_s_144 = (native_s_142 == native_s_143);
-  if (native_s_144) {
+  native_s_143 = native_s_142.payload.variant_1;
+  native_s_144 = INT64_C(0);
+  (void)native_s_144;
+  native_s_145 = (native_s_143 < native_s_144);
+  native_s_146 = false;
+  (void)native_s_146;
+  native_s_147 = (native_s_145 == native_s_146);
+  if (native_s_147) {
     goto native_l14_81;
   } else {
     goto native_l14_80;
   }
 native_l14_80: ;
-  native_s_238 = native_s_144;
+  native_s_242 = native_s_147;
   goto native_l14_153;
 native_l14_81: ;
-  switch (native_s_25.tag) {
+  switch (native_s_26.tag) {
   case INT64_C(0):
     goto native_l14_82;
   case INT64_C(1):
@@ -2778,11 +2793,11 @@ native_l14_81: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_82: ;
-  if (native_s_25.tag != INT64_C(0)) {
+  if (native_s_26.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_145 = native_s_25.payload.variant_0;
-  switch (native_s_145.tag) {
+  native_s_148 = native_s_26.payload.variant_0;
+  switch (native_s_148.tag) {
   case INT64_C(0):
     goto native_l14_84;
   case INT64_C(1):
@@ -2791,84 +2806,84 @@ native_l14_82: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_83: ;
-  native_s_146 = true;
-  (void)native_s_146;
-  native_s_148 = native_s_146;
+  native_s_149 = true;
+  (void)native_s_149;
+  native_s_151 = native_s_149;
   goto native_l14_85;
 native_l14_84: ;
-  native_s_147 = false;
-  (void)native_s_147;
-  native_s_148 = native_s_147;
+  native_s_150 = false;
+  (void)native_s_150;
+  native_s_151 = native_s_150;
   goto native_l14_85;
 native_l14_85: ;
-  native_s_155 = native_s_148;
+  native_s_158 = native_s_151;
   goto native_l14_92;
 native_l14_86: ;
-  if (native_s_25.tag != INT64_C(1)) {
+  if (native_s_26.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_149 = native_s_25.payload.variant_1;
-  (void)native_s_149;
-  switch (native_s_149.tag) {
+  native_s_152 = native_s_26.payload.variant_1;
+  (void)native_s_152;
+  switch (native_s_152.tag) {
   case INT64_C(0):
     goto native_l14_88;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_150 = true;
-  (void)native_s_150;
-  native_s_152 = native_s_150;
-  goto native_l14_89;
-native_l14_88: ;
-  native_s_151 = false;
-  (void)native_s_151;
-  native_s_152 = native_s_151;
-  goto native_l14_89;
-native_l14_89: ;
-  native_s_155 = native_s_152;
-  goto native_l14_92;
   native_s_153 = true;
   (void)native_s_153;
   native_s_155 = native_s_153;
-  goto native_l14_92;
+  goto native_l14_89;
+native_l14_88: ;
   native_s_154 = false;
   (void)native_s_154;
   native_s_155 = native_s_154;
+  goto native_l14_89;
+native_l14_89: ;
+  native_s_158 = native_s_155;
+  goto native_l14_92;
+  native_s_156 = true;
+  (void)native_s_156;
+  native_s_158 = native_s_156;
+  goto native_l14_92;
+  native_s_157 = false;
+  (void)native_s_157;
+  native_s_158 = native_s_157;
   goto native_l14_92;
 native_l14_92: ;
-  if (native_s_155) {
+  if (native_s_158) {
     goto native_l14_94;
   } else {
     goto native_l14_93;
   }
 native_l14_93: ;
-  native_s_239 = native_s_155;
+  native_s_243 = native_s_158;
   goto native_l14_154;
 native_l14_94: ;
-  if (native_s_25.tag != INT64_C(0)) {
+  if (native_s_26.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_156 = native_s_25.payload.variant_0;
-  if (native_s_156.tag != INT64_C(1)) {
+  native_s_159 = native_s_26.payload.variant_0;
+  if (native_s_159.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_157 = native_s_156.payload.variant_1;
-  native_s_158 = INT64_C(0);
-  (void)native_s_158;
-  native_s_159 = (native_s_157 < native_s_158);
-  native_s_160 = false;
-  (void)native_s_160;
-  native_s_161 = (native_s_159 == native_s_160);
-  if (native_s_161) {
+  native_s_160 = native_s_159.payload.variant_1;
+  native_s_161 = INT64_C(0);
+  (void)native_s_161;
+  native_s_162 = (native_s_160 < native_s_161);
+  native_s_163 = false;
+  (void)native_s_163;
+  native_s_164 = (native_s_162 == native_s_163);
+  if (native_s_164) {
     goto native_l14_96;
   } else {
     goto native_l14_95;
   }
 native_l14_95: ;
-  native_s_240 = native_s_161;
+  native_s_244 = native_s_164;
   goto native_l14_155;
 native_l14_96: ;
-  switch (native_s_27.tag) {
+  switch (native_s_28.tag) {
   case INT64_C(0):
     goto native_l14_97;
   case INT64_C(1):
@@ -2877,11 +2892,11 @@ native_l14_96: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_97: ;
-  if (native_s_27.tag != INT64_C(0)) {
+  if (native_s_28.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_162 = native_s_27.payload.variant_0;
-  switch (native_s_162.tag) {
+  native_s_165 = native_s_28.payload.variant_0;
+  switch (native_s_165.tag) {
   case INT64_C(0):
     goto native_l14_99;
   case INT64_C(1):
@@ -2890,127 +2905,127 @@ native_l14_97: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_98: ;
-  native_s_163 = true;
-  (void)native_s_163;
-  native_s_165 = native_s_163;
+  native_s_166 = true;
+  (void)native_s_166;
+  native_s_168 = native_s_166;
   goto native_l14_100;
 native_l14_99: ;
-  native_s_164 = false;
-  (void)native_s_164;
-  native_s_165 = native_s_164;
+  native_s_167 = false;
+  (void)native_s_167;
+  native_s_168 = native_s_167;
   goto native_l14_100;
 native_l14_100: ;
-  native_s_172 = native_s_165;
+  native_s_175 = native_s_168;
   goto native_l14_107;
 native_l14_101: ;
-  if (native_s_27.tag != INT64_C(1)) {
+  if (native_s_28.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_166 = native_s_27.payload.variant_1;
-  (void)native_s_166;
-  switch (native_s_166.tag) {
+  native_s_169 = native_s_28.payload.variant_1;
+  (void)native_s_169;
+  switch (native_s_169.tag) {
   case INT64_C(0):
     goto native_l14_103;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_167 = true;
-  (void)native_s_167;
-  native_s_169 = native_s_167;
-  goto native_l14_104;
-native_l14_103: ;
-  native_s_168 = false;
-  (void)native_s_168;
-  native_s_169 = native_s_168;
-  goto native_l14_104;
-native_l14_104: ;
-  native_s_172 = native_s_169;
-  goto native_l14_107;
   native_s_170 = true;
   (void)native_s_170;
   native_s_172 = native_s_170;
-  goto native_l14_107;
+  goto native_l14_104;
+native_l14_103: ;
   native_s_171 = false;
   (void)native_s_171;
   native_s_172 = native_s_171;
+  goto native_l14_104;
+native_l14_104: ;
+  native_s_175 = native_s_172;
+  goto native_l14_107;
+  native_s_173 = true;
+  (void)native_s_173;
+  native_s_175 = native_s_173;
+  goto native_l14_107;
+  native_s_174 = false;
+  (void)native_s_174;
+  native_s_175 = native_s_174;
   goto native_l14_107;
 native_l14_107: ;
-  if (native_s_172) {
+  if (native_s_175) {
     goto native_l14_109;
   } else {
     goto native_l14_108;
   }
 native_l14_108: ;
-  native_s_241 = native_s_172;
+  native_s_245 = native_s_175;
   goto native_l14_156;
 native_l14_109: ;
-  if (native_s_27.tag != INT64_C(0)) {
+  if (native_s_28.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_173 = native_s_27.payload.variant_0;
-  if (native_s_173.tag != INT64_C(1)) {
+  native_s_176 = native_s_28.payload.variant_0;
+  if (native_s_176.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_174 = native_s_173.payload.variant_1;
-  native_s_175 = INT64_C(0);
-  (void)native_s_175;
-  native_s_176 = (native_s_174 < native_s_175);
-  native_s_177 = false;
-  (void)native_s_177;
-  native_s_178 = (native_s_176 == native_s_177);
-  if (native_s_178) {
+  native_s_177 = native_s_176.payload.variant_1;
+  native_s_178 = INT64_C(0);
+  (void)native_s_178;
+  native_s_179 = (native_s_177 < native_s_178);
+  native_s_180 = false;
+  (void)native_s_180;
+  native_s_181 = (native_s_179 == native_s_180);
+  if (native_s_181) {
     goto native_l14_111;
   } else {
     goto native_l14_110;
   }
 native_l14_110: ;
-  native_s_242 = native_s_178;
+  native_s_246 = native_s_181;
   goto native_l14_157;
 native_l14_111: ;
-  native_s_179 = native_value_equal(&native_m0_value_29, &native_s_23, &native_s_25);
-  if (native_s_179) {
+  native_s_182 = native_value_equal(&native_m0_value_29, &native_s_24, &native_s_26);
+  if (native_s_182) {
     goto native_l14_113;
   } else {
     goto native_l14_112;
   }
 native_l14_112: ;
-  native_s_243 = native_s_179;
+  native_s_247 = native_s_182;
   goto native_l14_158;
 native_l14_113: ;
-  native_s_180 = native_value_equal(&native_m0_value_29, &native_s_25, &native_s_27);
-  if (native_s_180) {
+  native_s_183 = native_value_equal(&native_m0_value_29, &native_s_26, &native_s_28);
+  if (native_s_183) {
     goto native_l14_115;
   } else {
     goto native_l14_114;
   }
 native_l14_114: ;
-  native_s_244 = native_s_180;
+  native_s_248 = native_s_183;
   goto native_l14_159;
 native_l14_115: ;
-  if (native_s_19.tag != INT64_C(0)) {
+  if (native_s_20.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_181 = native_s_19.payload.variant_0;
-  if (native_s_181.tag != INT64_C(1)) {
+  native_s_184 = native_s_20.payload.variant_0;
+  if (native_s_184.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_182 = native_s_181.payload.variant_1;
-  if (native_s_25.tag != INT64_C(0)) {
+  native_s_185 = native_s_184.payload.variant_1;
+  if (native_s_26.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_183 = native_s_25.payload.variant_0;
-  if (native_s_183.tag != INT64_C(1)) {
+  native_s_186 = native_s_26.payload.variant_0;
+  if (native_s_186.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_184 = native_s_183.payload.variant_1;
-  if (__builtin_add_overflow(native_s_182, native_s_184, &native_s_185.payload.variant_0)) {
-    native_s_185.tag = INT64_C(1);
+  native_s_187 = native_s_186.payload.variant_1;
+  if (__builtin_add_overflow(native_s_185, native_s_187, &native_s_188.payload.variant_0)) {
+    native_s_188.tag = INT64_C(1);
   } else {
-    native_s_185.tag = INT64_C(0);
+    native_s_188.tag = INT64_C(0);
   }
-  switch (native_s_185.tag) {
+  switch (native_s_188.tag) {
   case INT64_C(0):
-    native_s_187 = native_s_185;
+    native_s_191 = native_s_188;
   goto native_l14_117;
   case INT64_C(1):
     goto native_l14_116;
@@ -3018,12 +3033,15 @@ native_l14_115: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_116: ;
-  native_s_186 = INT64_C(2);
-  (void)native_s_186;
-  native_trap((uint32_t)native_s_186);
+  native_s_189 = INT64_C(2);
+  (void)native_s_189;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_190 = NULL;
+  (void)native_s_190;
+  native_trap((uint32_t)native_s_189);
 native_l14_117: ;
-  native_s_188 = native_s_187.payload.variant_0;
-  switch (native_s_21.tag) {
+  native_s_192 = native_s_191.payload.variant_0;
+  switch (native_s_22.tag) {
   case INT64_C(0):
     goto native_l14_118;
   case INT64_C(1):
@@ -3032,11 +3050,11 @@ native_l14_117: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_118: ;
-  if (native_s_21.tag != INT64_C(0)) {
+  if (native_s_22.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_189 = native_s_21.payload.variant_0;
-  switch (native_s_189.tag) {
+  native_s_193 = native_s_22.payload.variant_0;
+  switch (native_s_193.tag) {
   case INT64_C(0):
     goto native_l14_120;
   case INT64_C(1):
@@ -3045,169 +3063,169 @@ native_l14_118: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_119: ;
-  if (native_s_189.tag != INT64_C(1)) {
+  if (native_s_193.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_190 = native_s_189.payload.variant_1;
-  native_s_191 = (native_s_188 == native_s_190);
-  native_s_193 = native_s_191;
+  native_s_194 = native_s_193.payload.variant_1;
+  native_s_195 = (native_s_192 == native_s_194);
+  native_s_197 = native_s_195;
   goto native_l14_121;
 native_l14_120: ;
-  native_s_192 = false;
-  (void)native_s_192;
-  native_s_193 = native_s_192;
+  native_s_196 = false;
+  (void)native_s_196;
+  native_s_197 = native_s_196;
   goto native_l14_121;
 native_l14_121: ;
-  native_s_195 = native_s_193;
+  native_s_199 = native_s_197;
   goto native_l14_123;
 native_l14_122: ;
-  native_s_194 = false;
-  (void)native_s_194;
-  native_s_195 = native_s_194;
+  native_s_198 = false;
+  (void)native_s_198;
+  native_s_199 = native_s_198;
   goto native_l14_123;
 native_l14_123: ;
-  if (native_s_195) {
+  if (native_s_199) {
     goto native_l14_125;
   } else {
     goto native_l14_124;
   }
 native_l14_124: ;
-  native_s_245 = native_s_195;
+  native_s_249 = native_s_199;
   goto native_l14_160;
 native_l14_125: ;
-  native_s_196 = (uint64_t)(uintptr_t)&native_m0_keyword_8;
-  (void)native_s_196;
+  native_s_200 = (uint64_t)(uintptr_t)&native_m0_keyword_8;
+  (void)native_s_200;
   {
-    const void *native_map_hit_197 = native_map_get(native_v_0, &native_s_196, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_197, 0, sizeof native_s_197);
-    if (native_map_hit_197 != NULL) {
-      native_s_197.tag = INT64_C(0);
-      native_s_197.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_197;
+    const void *native_map_hit_201 = native_map_get(native_v_0, &native_s_200, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_201, 0, sizeof native_s_201);
+    if (native_map_hit_201 != NULL) {
+      native_s_201.tag = INT64_C(0);
+      native_s_201.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_201;
     } else {
-      native_s_197.tag = INT64_C(1);
+      native_s_201.tag = INT64_C(1);
     }
   }
-  if (native_s_197.tag != INT64_C(0)) {
+  if (native_s_201.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_198 = native_s_197.payload.variant_0;
-  if (native_s_198.tag != INT64_C(0)) {
+  native_s_202 = native_s_201.payload.variant_0;
+  if (native_s_202.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_199 = native_s_198.payload.variant_0;
-  native_s_200 = native_m0_fn_11(native_s_199);
-  if (native_s_200) {
+  native_s_203 = native_s_202.payload.variant_0;
+  native_s_204 = native_m0_fn_11(native_s_203);
+  if (native_s_204) {
     goto native_l14_127;
   } else {
     goto native_l14_126;
   }
 native_l14_126: ;
-  native_s_246 = native_s_200;
+  native_s_250 = native_s_204;
   goto native_l14_161;
 native_l14_127: ;
-  native_s_201 = (uint64_t)(uintptr_t)&native_m0_keyword_9;
-  (void)native_s_201;
+  native_s_205 = (uint64_t)(uintptr_t)&native_m0_keyword_9;
+  (void)native_s_205;
   {
-    const void *native_map_hit_202 = native_map_get(native_v_0, &native_s_201, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_202, 0, sizeof native_s_202);
-    if (native_map_hit_202 != NULL) {
-      native_s_202.tag = INT64_C(0);
-      native_s_202.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_202;
+    const void *native_map_hit_206 = native_map_get(native_v_0, &native_s_205, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_206, 0, sizeof native_s_206);
+    if (native_map_hit_206 != NULL) {
+      native_s_206.tag = INT64_C(0);
+      native_s_206.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_206;
     } else {
-      native_s_202.tag = INT64_C(1);
+      native_s_206.tag = INT64_C(1);
     }
   }
-  if (native_s_202.tag != INT64_C(0)) {
+  if (native_s_206.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_203 = native_s_202.payload.variant_0;
-  if (native_s_203.tag != INT64_C(0)) {
+  native_s_207 = native_s_206.payload.variant_0;
+  if (native_s_207.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_204 = native_s_203.payload.variant_0;
-  native_s_205 = native_m0_fn_11(native_s_204);
-  if (native_s_205) {
+  native_s_208 = native_s_207.payload.variant_0;
+  native_s_209 = native_m0_fn_11(native_s_208);
+  if (native_s_209) {
     goto native_l14_129;
   } else {
     goto native_l14_128;
   }
 native_l14_128: ;
-  native_s_247 = native_s_205;
+  native_s_251 = native_s_209;
   goto native_l14_162;
 native_l14_129: ;
-  native_s_206 = (uint64_t)(uintptr_t)&native_m0_keyword_15;
-  (void)native_s_206;
+  native_s_210 = (uint64_t)(uintptr_t)&native_m0_keyword_15;
+  (void)native_s_210;
   {
-    const void *native_map_hit_207 = native_map_get(native_v_0, &native_s_206, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_207, 0, sizeof native_s_207);
-    if (native_map_hit_207 != NULL) {
-      native_s_207.tag = INT64_C(0);
-      native_s_207.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_207;
+    const void *native_map_hit_211 = native_map_get(native_v_0, &native_s_210, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_211, 0, sizeof native_s_211);
+    if (native_map_hit_211 != NULL) {
+      native_s_211.tag = INT64_C(0);
+      native_s_211.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_211;
     } else {
-      native_s_207.tag = INT64_C(1);
+      native_s_211.tag = INT64_C(1);
     }
   }
-  if (native_s_207.tag != INT64_C(0)) {
+  if (native_s_211.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_208 = native_s_207.payload.variant_0;
-  if (native_s_208.tag != INT64_C(0)) {
+  native_s_212 = native_s_211.payload.variant_0;
+  if (native_s_212.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_209 = native_s_208.payload.variant_0;
-  native_s_210 = native_m0_fn_11(native_s_209);
-  if (native_s_210) {
+  native_s_213 = native_s_212.payload.variant_0;
+  native_s_214 = native_m0_fn_11(native_s_213);
+  if (native_s_214) {
     goto native_l14_131;
   } else {
     goto native_l14_130;
   }
 native_l14_130: ;
-  native_s_248 = native_s_210;
+  native_s_252 = native_s_214;
   goto native_l14_163;
 native_l14_131: ;
-  native_s_211 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
-  (void)native_s_211;
+  native_s_215 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
+  (void)native_s_215;
   {
-    const void *native_map_hit_212 = native_map_get(native_v_0, &native_s_211, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_212, 0, sizeof native_s_212);
-    if (native_map_hit_212 != NULL) {
-      native_s_212.tag = INT64_C(0);
-      native_s_212.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_212;
+    const void *native_map_hit_216 = native_map_get(native_v_0, &native_s_215, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_216, 0, sizeof native_s_216);
+    if (native_map_hit_216 != NULL) {
+      native_s_216.tag = INT64_C(0);
+      native_s_216.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_216;
     } else {
-      native_s_212.tag = INT64_C(1);
+      native_s_216.tag = INT64_C(1);
     }
   }
-  if (native_s_212.tag != INT64_C(0)) {
+  if (native_s_216.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_213 = native_s_212.payload.variant_0;
-  if (native_s_213.tag != INT64_C(0)) {
+  native_s_217 = native_s_216.payload.variant_0;
+  if (native_s_217.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_214 = native_s_213.payload.variant_0;
-  native_s_215 = native_m0_fn_11(native_s_214);
-  if (native_s_215) {
+  native_s_218 = native_s_217.payload.variant_0;
+  native_s_219 = native_m0_fn_11(native_s_218);
+  if (native_s_219) {
     goto native_l14_133;
   } else {
     goto native_l14_132;
   }
 native_l14_132: ;
-  native_s_249 = native_s_215;
+  native_s_253 = native_s_219;
   goto native_l14_164;
 native_l14_133: ;
-  native_s_216 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
-  (void)native_s_216;
+  native_s_220 = (uint64_t)(uintptr_t)&native_m0_keyword_3;
+  (void)native_s_220;
   {
-    const void *native_map_hit_217 = native_map_get(native_v_0, &native_s_216, NATIVE_COLLECTION_EQ_KEYWORD);
-    memset(&native_s_217, 0, sizeof native_s_217);
-    if (native_map_hit_217 != NULL) {
-      native_s_217.tag = INT64_C(0);
-      native_s_217.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_217;
+    const void *native_map_hit_221 = native_map_get(native_v_0, &native_s_220, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_221, 0, sizeof native_s_221);
+    if (native_map_hit_221 != NULL) {
+      native_s_221.tag = INT64_C(0);
+      native_s_221.payload.variant_0 = *(const native_m0_type_28 *)native_map_hit_221;
     } else {
-      native_s_217.tag = INT64_C(1);
+      native_s_221.tag = INT64_C(1);
     }
   }
-  switch (native_s_217.tag) {
+  switch (native_s_221.tag) {
   case INT64_C(0):
     goto native_l14_134;
   case INT64_C(1):
@@ -3216,11 +3234,11 @@ native_l14_133: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_134: ;
-  if (native_s_217.tag != INT64_C(0)) {
+  if (native_s_221.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_218 = native_s_217.payload.variant_0;
-  switch (native_s_218.tag) {
+  native_s_222 = native_s_221.payload.variant_0;
+  switch (native_s_222.tag) {
   case INT64_C(0):
     goto native_l14_135;
   case INT64_C(1):
@@ -3229,109 +3247,112 @@ native_l14_134: ;
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l14_135: ;
-  if (native_s_218.tag != INT64_C(0)) {
+  if (native_s_222.tag != INT64_C(0)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_219 = native_s_218.payload.variant_0;
-  native_s_220 = native_text_eq(native_v_1, native_s_219);
-  native_s_222 = native_s_220;
+  native_s_223 = native_s_222.payload.variant_0;
+  native_s_224 = native_text_eq(native_v_1, native_s_223);
+  native_s_226 = native_s_224;
   goto native_l14_137;
 native_l14_136: ;
-  native_s_221 = false;
-  (void)native_s_221;
-  native_s_222 = native_s_221;
+  native_s_225 = false;
+  (void)native_s_225;
+  native_s_226 = native_s_225;
   goto native_l14_137;
 native_l14_137: ;
-  native_s_224 = native_s_222;
+  native_s_228 = native_s_226;
   goto native_l14_139;
 native_l14_138: ;
-  native_s_223 = false;
-  (void)native_s_223;
-  native_s_224 = native_s_223;
+  native_s_227 = false;
+  (void)native_s_227;
+  native_s_228 = native_s_227;
   goto native_l14_139;
 native_l14_139: ;
-  native_s_250 = native_s_224;
+  native_s_254 = native_s_228;
   goto native_l14_165;
 native_l14_140: ;
-  native_s_251 = native_s_225;
+  native_s_255 = native_s_229;
   goto native_l14_166;
 native_l14_141: ;
-  native_s_251 = native_s_226;
+  native_s_255 = native_s_230;
   goto native_l14_166;
 native_l14_142: ;
-  native_s_251 = native_s_227;
+  native_s_255 = native_s_231;
   goto native_l14_166;
 native_l14_143: ;
-  native_s_251 = native_s_228;
+  native_s_255 = native_s_232;
   goto native_l14_166;
 native_l14_144: ;
-  native_s_251 = native_s_229;
+  native_s_255 = native_s_233;
   goto native_l14_166;
 native_l14_145: ;
-  native_s_251 = native_s_230;
+  native_s_255 = native_s_234;
   goto native_l14_166;
 native_l14_146: ;
-  native_s_251 = native_s_231;
+  native_s_255 = native_s_235;
   goto native_l14_166;
 native_l14_147: ;
-  native_s_251 = native_s_232;
+  native_s_255 = native_s_236;
   goto native_l14_166;
 native_l14_148: ;
-  native_s_251 = native_s_233;
+  native_s_255 = native_s_237;
   goto native_l14_166;
 native_l14_149: ;
-  native_s_251 = native_s_234;
+  native_s_255 = native_s_238;
   goto native_l14_166;
 native_l14_150: ;
-  native_s_251 = native_s_235;
+  native_s_255 = native_s_239;
   goto native_l14_166;
 native_l14_151: ;
-  native_s_251 = native_s_236;
+  native_s_255 = native_s_240;
   goto native_l14_166;
 native_l14_152: ;
-  native_s_251 = native_s_237;
+  native_s_255 = native_s_241;
   goto native_l14_166;
 native_l14_153: ;
-  native_s_251 = native_s_238;
+  native_s_255 = native_s_242;
   goto native_l14_166;
 native_l14_154: ;
-  native_s_251 = native_s_239;
+  native_s_255 = native_s_243;
   goto native_l14_166;
 native_l14_155: ;
-  native_s_251 = native_s_240;
+  native_s_255 = native_s_244;
   goto native_l14_166;
 native_l14_156: ;
-  native_s_251 = native_s_241;
+  native_s_255 = native_s_245;
   goto native_l14_166;
 native_l14_157: ;
-  native_s_251 = native_s_242;
+  native_s_255 = native_s_246;
   goto native_l14_166;
 native_l14_158: ;
-  native_s_251 = native_s_243;
+  native_s_255 = native_s_247;
   goto native_l14_166;
 native_l14_159: ;
-  native_s_251 = native_s_244;
+  native_s_255 = native_s_248;
   goto native_l14_166;
 native_l14_160: ;
-  native_s_251 = native_s_245;
+  native_s_255 = native_s_249;
   goto native_l14_166;
 native_l14_161: ;
-  native_s_251 = native_s_246;
+  native_s_255 = native_s_250;
   goto native_l14_166;
 native_l14_162: ;
-  native_s_251 = native_s_247;
+  native_s_255 = native_s_251;
   goto native_l14_166;
 native_l14_163: ;
-  native_s_251 = native_s_248;
+  native_s_255 = native_s_252;
   goto native_l14_166;
 native_l14_164: ;
-  native_s_251 = native_s_249;
+  native_s_255 = native_s_253;
   goto native_l14_166;
 native_l14_165: ;
-  native_s_251 = native_s_250;
+  native_s_255 = native_s_254;
   goto native_l14_166;
 native_l14_166: ;
-  return native_s_251;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_256 = NULL;
+  (void)native_s_256;
+  return native_s_255;
 }
 native_m0_type_5 native_m0_fn_15(native_m0_type_4 native_v_0, native_m0_type_27 native_v_1, native_m0_type_27 native_v_2, native_m0_type_27 native_v_3, native_m0_type_27 native_v_4, native_m0_type_41 native_v_5, native_m0_type_41 native_v_6, native_m0_type_41 native_v_7, native_m0_type_41 native_v_8) {
   (void)native_v_0;

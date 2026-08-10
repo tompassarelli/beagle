@@ -136,6 +136,18 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc reference ) 2>/dev/null; then
 fi
 echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + refusal traps ok"
 
+# fram.text-ops is the one corpus module whose escape closure leaves an
+# interior allocation, so its C opens and destroys a real epoch arena. An
+# epoch close is a free(), which only a sanitizer can hold to account: the
+# clean (non-refusal) run therefore also runs under ASan + UBSan.
+sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
+          -fno-omit-frame-pointer -g)
+( cd "$build" && gcc "${strict[@]}" "${sanitize[@]}" -o probe_gcc_san \
+    module_0.c native_shim.c main.c )
+( cd "$build" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+    ./probe_gcc_san )
+echo "drive.sh: gcc ASan+UBSan clean over the epoch-carrying slice"
+
 find_clang() {
   if command -v clang >/dev/null 2>&1; then command -v clang; return 0; fi
   local candidate

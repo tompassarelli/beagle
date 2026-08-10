@@ -1,0 +1,22 @@
+module_0.h/.c  native.body-c17 over native.epoch-validation-corpus' probe program
+               after lower/epoch-derived-stage: the interior Text lives in a
+               minted epoch the emitted C opens and destroys
+module_1.h/.c  the SAME probe program after lower/epoch-identity-stage: epoch-0,
+               so the Text lives in the root arena the driver owns
+module_2.h/.c  promote: a Text allocated in an epoch, copied into the root arena
+               by native_value_promote, and returned after the epoch is destroyed
+module_3.h/.c  two nested epochs (inner a child of outer) closing LIFO
+module_4.h/.c  caller/callee under derived assignment: the callee's arena
+               argument is the CALLER's epoch arena (rule E3)
+module_5.h/.c  the same pair at epoch-0
+main.c         hand-written driver INPUT, not an output: owns the root arena and
+               reads native_arena_reserved_bytes, which is the only place a test
+               can observe whether an epoch reclaimed anything
+report.txt     the corpus' own obligation gate, including the old-to-young
+               negative obligation 8 must refuse and the promoted program it
+               must accept
+watermark.txt  root-arena high-water marks at 64 and 65536 iterations, derived
+               versus identity, for both the self-owned and the caller-owned
+               epoch
+determinism    two independent emitter runs compared byte-for-byte inside
+               drive.sh before anything is copied into this directory

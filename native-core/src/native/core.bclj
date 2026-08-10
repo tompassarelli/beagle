@@ -387,10 +387,16 @@
      capability: NativeId
      byte-count-id: NativeId
      tokens: TokenFlowV0])
+  ;; arena-id names the arena SSA value the callee allocates through — the
+  ;; caller-arena argument written as an operand instead of recovered by the
+  ;; emitter from the caller's single ArenaInstruction. Nil when the caller
+  ;; declares no region; the epoch stage retargets it to an epoch's arena
+  ;; wherever the callee is proven epoch-safe.
   (CallInstruction
     [result: SsaValueV0
      function-id: NativeId
      arguments: (Vec NativeId)
+     arena-id: (U NativeId Nil)
      tokens: TokenFlowV0])
   ;; The ABI declaration, rather than a source-language callee name, owns the
   ;; physical symbol, effects, capabilities, ownership, and failure contract.
@@ -624,6 +630,15 @@
     [result: SsaValueV0
      source-id: NativeId
      tokens: TokenFlowV0])
+  ;; Copies a value into an OLDER epoch's arena: the sole instruction whose
+  ;; result epoch outlives its source's. arena-id is the DESTINATION arena;
+  ;; domain-type is the frozen TypeDef that drives the copy walk, so the
+  ;; materializer never infers structure from bytes.
+  (PromoteInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     domain-type: NativeId
+     arena-id: NativeId])
   ;; Acquires the dedicated Atom-state token once at function entry. Atom
   ;; operations must carry this SSA handle, so state cannot be implicit.
   (AtomStateInstruction
@@ -931,7 +946,8 @@
     [(StoreInstruction result store tokens) (ssavaluev0-id result)]
     [(AllocateInstruction result region capability byte-count-id tokens)
      (ssavaluev0-id result)]
-    [(CallInstruction result function-id arguments tokens) (ssavaluev0-id result)]
+    [(CallInstruction result function-id arguments arena-id tokens)
+     (ssavaluev0-id result)]
     [(ExternCallInstruction result abi-id arguments arena-id tokens)
      (ssavaluev0-id result)]
     [(CompareInstruction result comparison left-id right-id) (ssavaluev0-id result)]
@@ -1002,6 +1018,8 @@
      (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
     [(ArenaCloseInstructionV0 result source-id tokens) (ssavaluev0-id result)]
+    [(PromoteInstructionV0 result source-id domain-type arena-id)
+     (ssavaluev0-id result)]
     [(AtomStateInstruction result region capability tokens)
      (ssavaluev0-id result)]
     [(AtomCreateInstruction result initial-id arena-id state-id)
@@ -1488,7 +1506,7 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      (and (id-in? known-regions region)
        (id-in? known-capabilities capability))]
-    [(CallInstruction result function-id arguments tokens)
+    [(CallInstruction result function-id arguments arena-id tokens)
      (id-in? known-functions function-id)]
     [(ExternCallInstruction result abi-id arguments arena-id tokens)
      (id-in? known-abis abi-id)]
@@ -1554,6 +1572,8 @@
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(ArenaCloseInstructionV0 result source-id tokens) true]
+    [(PromoteInstructionV0 result source-id domain-type arena-id)
+     (id-in? known-types domain-type)]
     [(AtomStateInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(AtomCreateInstruction result initial-id arena-id state-id) true]
@@ -1752,7 +1772,8 @@
     [(StoreInstruction result store tokens) (store-op-ssa-refs store)]
     [(AllocateInstruction result region capability byte-count-id tokens)
      [byte-count-id]]
-    [(CallInstruction result function-id arguments tokens) arguments]
+    [(CallInstruction result function-id arguments arena-id tokens)
+     (if (nil? arena-id) arguments (into arguments [arena-id]))]
     [(ExternCallInstruction result abi-id arguments arena-id tokens)
      (if (nil? arena-id) arguments (into arguments [arena-id]))]
     [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
@@ -1822,6 +1843,8 @@
      [arena-id source-id value-id]]
     [(ArenaInstruction result region capability tokens) []]
     [(ArenaCloseInstructionV0 result source-id tokens) [source-id]]
+    [(PromoteInstructionV0 result source-id domain-type arena-id)
+     [source-id arena-id]]
     [(AtomStateInstruction result region capability tokens) []]
     [(AtomCreateInstruction result initial-id arena-id state-id)
      [initial-id arena-id state-id]]
@@ -1918,7 +1941,7 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
-    [(CallInstruction result function-id arguments tokens) true]
+    [(CallInstruction result function-id arguments arena-id tokens) true]
     [(ExternCallInstruction result abi-id arguments arena-id tokens) true]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) true]
@@ -1967,6 +1990,7 @@
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
     [(ArenaCloseInstructionV0 result source-id tokens) true]
+    [(PromoteInstructionV0 result source-id domain-type arena-id) true]
     [(AtomStateInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
@@ -2022,14 +2046,16 @@
 (defn program-unique-ids? [program :- NativeCoreProgram] :- Bool
   (unique-ids? (program-owned-ids program)))
 
-;; Epoch-0: every region is a root the driver owns and no epoch ever closes.
-;; The materializers are inert on such a program — nothing they emit consults
-;; a region beyond "does this function declare one" — so it is the shape they
-;; are allowed to see until they learn to open and close minted epochs.
+;; Epoch-0: every region is a root the driver owns, no epoch ever closes, and
+;; nothing crosses epochs. A materializer is inert on such a program — nothing
+;; it emits consults a region beyond "does this function declare one" — so it
+;; is the shape a materializer that has not learned epochs may still see.
 (defn block-epoch-0? [block: BasicBlock] -> Bool
   (every?
     (fn [instruction: Instruction] -> Bool
-      (not (instance? native.core.ArenaCloseInstructionV0 instruction)))
+      (and
+        (not (instance? native.core.ArenaCloseInstructionV0 instruction))
+        (not (instance? native.core.PromoteInstructionV0 instruction))))
     (basicblock-instructions block)))
 
 (defn program-epoch-0? [program: NativeCoreProgram] -> Bool

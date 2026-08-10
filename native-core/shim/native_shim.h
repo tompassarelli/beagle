@@ -358,6 +358,17 @@ uint64_t native_value_to_text(native_arena *arena,
                               const native_value_descriptor *descriptor,
                               const void *value,
                               native_value_text_mode mode);
+/* Copies `value` into `destination`, an arena that outlives the one the value
+   currently lives in — the single young-to-old edge the epoch model licenses.
+   The walk is the equality walk with allocation where equality compares: every
+   reachable handle is reallocated in `destination`, so the result shares no
+   storage with the source and survives the source epoch's close. The result is
+   written through `out`, which the caller sizes from the same descriptor
+   (a value of arbitrary size cannot be returned generically in C). Aliasing is
+   not preserved: promote copies, exactly as assoc/conj already do. */
+void native_value_promote(native_arena *destination,
+                          const native_value_descriptor *descriptor,
+                          const void *value, void *out);
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length);
 bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
 

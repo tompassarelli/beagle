@@ -210,6 +210,8 @@
     (instance? native.core.TransientMapAssocInstructionV0 instruction) true
     (instance? native.core.TransientSetConjInstructionV0 instruction) true
     (instance? native.core.ArenaInstruction instruction) true
+    (instance? native.core.ArenaCloseInstructionV0 instruction) true
+    (instance? native.core.PromoteInstructionV0 instruction) true
     (instance? native.core.AtomStateInstruction instruction) true
     (instance? native.core.AtomCreateInstruction instruction) true
     (instance? native.core.AtomDerefInstruction instruction) true
@@ -368,6 +370,62 @@
         (str result "  "
           (c17/c-type types module-index (valueslotv0-type-id (nth slots position)))
           " native_s_" position ";\n")))))
+
+;; An ArenaInstruction naming a region WITH a parent opens an epoch: a
+;; stack-local arena of this function, not a rename of the incoming parameter.
+;; The ordinal is the position among the function's own epoch opens, so the C
+;; variable's name depends on nothing outside the function.
+(defn epoch-region?
+  [regions: (Vec core/RegionDef)
+   region-id: core/NativeId] -> Bool
+  (loop [position: Int 0]
+    (cond
+      (>= position (count regions)) false
+      (core/native-id= (core/regiondef-id (nth regions position)) region-id)
+      (some? (core/regiondef-parent (nth regions position)))
+      :else (recur (+ position 1)))))
+
+(defn function-epoch-arenas
+  [regions: (Vec core/RegionDef)
+   function: core/FunctionDef] -> (Vec core/NativeId)
+  (loop [block-position: Int 0
+         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
+         collected: (Vec core/NativeId) []]
+    (if (>= block-position (count blocks))
+      collected
+      (recur (+ block-position 1) blocks
+        (loop [position: Int 0
+               instructions: (Vec core/Instruction)
+               (core/basicblock-instructions (nth blocks block-position))
+               inner: (Vec core/NativeId) collected]
+          (if (>= position (count instructions))
+            inner
+            (let [instruction: core/Instruction (nth instructions position)]
+              (recur (+ position 1) instructions
+                (if (and (instance? native.core.ArenaInstruction instruction)
+                      (epoch-region? regions
+                        (core/arenainstruction-region instruction)))
+                  (conj inner (core/instruction-result-id instruction))
+                  inner)))))))))
+
+(defn epoch-arena-index
+  [epochs: (Vec core/NativeId)
+   value-id: core/NativeId] -> Int
+  (loop [position: Int 0]
+    (cond
+      (>= position (count epochs)) -1
+      (core/native-id= (nth epochs position) value-id) position
+      :else (recur (+ position 1)))))
+
+(defn epoch-arena-name [index: Int] -> String
+  (str "native_epoch_" index))
+
+(defn emit-epoch-arena-declarations [epochs: (Vec core/NativeId)] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count epochs))
+      result
+      (recur (+ position 1)
+        (str result "  native_arena " (epoch-arena-name position) ";\n")))))
 
 (defn text-symbol [module-index: Int position: Int] -> String
   (str (c17/module-prefix module-index) "_text_" position))
@@ -687,6 +745,7 @@
                       (instance? native.core.ValueSemanticsInstruction instruction)
                       (instance? native.core.ValueToTextInstructionV0 instruction)
                       (instance? native.core.VecSortInstructionV0 instruction)
+                      (instance? native.core.PromoteInstructionV0 instruction)
                       (structural-collection-equality? instruction)))
                   (core/basicblock-instructions block))))
             (core/functiondef-blocks function))))
@@ -1008,47 +1067,30 @@
 
 ;; A callee that declares a region takes the arena (and a capability) ahead of
 ;; its own parameters, and bounded-effects guarantees the caller holds both.
-(defn function-arena-id [function: core/FunctionDef] -> (U core/NativeId Nil)
-  (loop [block-position: Int 0]
-    (if (>= block-position (count (core/functiondef-blocks function)))
-      nil
-      (let [instructions: (Vec core/Instruction)
-            (core/basicblock-instructions
-              (nth (core/functiondef-blocks function) block-position))
-            arena-id: (U core/NativeId Nil)
-            (loop [instruction-position: Int 0]
-              (if (>= instruction-position (count instructions))
-                nil
-                (let [instruction: core/Instruction
-                      (nth instructions instruction-position)]
-                  (if (instance? native.core.ArenaInstruction instruction)
-                    (core/ssavaluev0-id
-                      (core/arenainstruction-result instruction))
-                    (recur (+ instruction-position 1))))))]
-        (if (nil? arena-id)
-          (recur (+ block-position 1))
-          arena-id)))))
-
+;; WHICH arena is the call's own operand, not a per-function singleton: a
+;; caller that opened an epoch hands a callee whose allocations die with that
+;; epoch the epoch's arena, and its other callees the root.
 (defn caller-arena-argument
   [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)] -> String
-  (let [arena-id: (U core/NativeId Nil) (function-arena-id function)]
-    (if (nil? arena-id)
-      "arena"
-      (str "(native_arena *)" (value-name function slots arena-id)))))
+   slots: (Vec ValueSlotV0)
+   arena-id: (U core/NativeId Nil)] -> String
+  (if (nil? arena-id)
+    "arena"
+    (str "(native_arena *)" (value-name function slots arena-id))))
 
 (defn callee-resource-arguments
   [functions: (Vec core/FunctionDef)
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
-   target: core/NativeId] -> String
+   target: core/NativeId
+   arena-id: (U core/NativeId Nil)] -> String
   (let [position: Int (function-index-of functions target)]
     (if (< position 0)
       ""
       (let [callee: core/FunctionDef (nth functions position)
             arena: String
             (if (> (count (core/functiondef-regions callee)) 0)
-              (caller-arena-argument function slots)
+              (caller-arena-argument function slots arena-id)
               "")
             capability: String
             (if (> (count (core/functiondef-capabilities callee)) 0)
@@ -1206,9 +1248,10 @@
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
    target: core/NativeId
-   arguments: (Vec core/NativeId)] -> String
+   arguments: (Vec core/NativeId)
+   arena-id: (U core/NativeId Nil)] -> String
   (let [prefix: String
-        (callee-resource-arguments functions function slots target)
+        (callee-resource-arguments functions function slots target arena-id)
         supplied: String (emit-arguments function slots arguments)]
     (cond
       (= 0 (count prefix)) supplied
@@ -1766,6 +1809,7 @@
 (defn emit-instruction
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
+   epochs: (Vec core/NativeId)
    functions: (Vec core/FunctionDef)
    abis: (Vec core/AbiDeclV0)
    module-index: Int
@@ -1784,7 +1828,36 @@
         ";\n  (void)" target ";\n")
 
       (instance? native.core.ArenaInstruction instruction)
-      (str "  " target " = arena;\n  (void)" target ";\n")
+      (let [epoch: Int
+            (epoch-arena-index epochs (core/instruction-result-id instruction))]
+        (if (< epoch 0)
+          (str "  " target " = arena;\n  (void)" target ";\n")
+          ;; Growth floor zero: an epoch that allocates nothing costs nothing,
+          ;; and the first allocation takes the shim's default chunk.
+          (str "  (void)native_arena_init_growable(&" (epoch-arena-name epoch)
+            ", (size_t)0U);\n"
+            "  " target " = &" (epoch-arena-name epoch) ";\n"
+            "  (void)" target ";\n")))
+
+      ;; Leak freedom is what licenses the unconditional destroy: the stage
+      ;; placed this close on every path out of the epoch, in tree order.
+      (instance? native.core.ArenaCloseInstructionV0 instruction)
+      (str "  native_arena_destroy((native_arena *)"
+        (value-name function slots
+          (core/arenacloseinstructionv0-source-id instruction)) ");\n"
+        "  " target " = NULL;\n  (void)" target ";\n")
+
+      (instance? native.core.PromoteInstructionV0 instruction)
+      (str "  native_value_promote((native_arena *)"
+        (value-name function slots
+          (core/promoteinstructionv0-arena-id instruction))
+        ", &"
+        (descriptor-symbol types module-index
+          (core/promoteinstructionv0-domain-type instruction))
+        ", &"
+        (value-name function slots
+          (core/promoteinstructionv0-source-id instruction))
+        ", &" target ");\n")
 
       (instance? native.core.AtomStateInstruction instruction)
       (str "  " target " = (void *)capability;\n  (void)" target ";\n")
@@ -2747,7 +2820,8 @@
         "("
         (emit-call-arguments functions function slots
           (core/callinstruction-function-id instruction)
-          (core/callinstruction-arguments instruction)) ");\n")
+          (core/callinstruction-arguments instruction)
+          (core/callinstruction-arena-id instruction)) ");\n")
 
       (instance? native.core.ExternCallInstruction instruction)
       (emit-extern-call types layouts abis function slots target instruction)
@@ -2756,6 +2830,7 @@
     (str emitted
       (if (or (instance? native.core.AtomInstruction instruction)
               (instance? native.core.ArenaInstruction instruction)
+              (instance? native.core.ArenaCloseInstructionV0 instruction)
               (and (instance? native.core.UnionExtractInstruction instruction)
                 (unit-type? types (core/ssavaluev0-type-id result)))
               (value-referenced? function (core/ssavaluev0-id result)))
@@ -2893,6 +2968,7 @@
 (defn emit-block
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
+   epochs: (Vec core/NativeId)
    functions: (Vec core/FunctionDef)
    abis: (Vec core/AbiDeclV0)
    module-index: Int
@@ -2915,14 +2991,16 @@
           result
           (recur (+ inner 1)
             (str result
-              (emit-instruction types layouts functions abis module-index pool
-                function slots (nth instructions inner))))))
+              (emit-instruction types layouts epochs functions abis
+                module-index pool function slots
+                (nth instructions inner))))))
       (emit-terminator layouts function function-index slots
         (nth (core/basicblock-terminators block) 0)))))
 
 (defn emit-function
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
+   regions: (Vec core/RegionDef)
    functions: (Vec core/FunctionDef)
    abis: (Vec core/AbiDeclV0)
    module-index: Int
@@ -2930,6 +3008,7 @@
    function-index: Int
    function: core/FunctionDef] -> String
   (let [slots: (Vec ValueSlotV0) (function-value-slots function)
+        epochs: (Vec core/NativeId) (function-epoch-arenas regions function)
         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (str (c17/function-return-type types module-index function) " "
       (function-name module-index function-index)
@@ -2946,19 +3025,21 @@
           (recur (+ position 1)
             (str fragment "  (void)native_v_" position ";\n")
             parameters)))
+      (emit-epoch-arena-declarations epochs)
       (emit-declarations types module-index slots)
       (loop [position: Int 0 result: String ""]
         (if (>= position (count blocks))
           result
           (recur (+ position 1)
             (str result
-              (emit-block types layouts functions abis module-index pool function
-                function-index slots position)))))
+              (emit-block types layouts epochs functions abis module-index pool
+                function function-index slots position)))))
       "}\n")))
 
 (defn emit-functions
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
+   regions: (Vec core/RegionDef)
    functions: (Vec core/FunctionDef)
    abis: (Vec core/AbiDeclV0)
    module-index: Int
@@ -2968,12 +3049,13 @@
       result
       (recur (+ position 1)
         (str result
-          (emit-function types layouts functions abis module-index pool position
-            (nth functions position)))))))
+          (emit-function types layouts regions functions abis module-index pool
+            position (nth functions position)))))))
 
 (defn emit-source
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
+   regions: (Vec core/RegionDef)
    functions: (Vec core/FunctionDef)
    abis: (Vec core/AbiDeclV0)
    module-index: Int
@@ -2983,7 +3065,7 @@
     "#include \"" header-name "\"\n\n"
     (emit-text-pool module-index pool)
     (emit-value-descriptors types layouts functions module-index)
-    (emit-functions types layouts functions abis module-index pool)))
+    (emit-functions types layouts regions functions abis module-index pool)))
 
 (defn materialize-program
   [program: core/NativeCoreProgram
@@ -2995,11 +3077,6 @@
 
       (not (core/validationreport-passed validation))
       (->BodyFailureV0 "native program is not frozen: validation obligations failed")
-
-      ;; A minted epoch would emit here as if it were the root arena.
-      (not (core/program-epoch-0? program))
-      (->BodyFailureV0
-        "native program carries a minted epoch: the restricted C17 body slice materializes epoch-0 only")
 
       (not (program-supported? program))
       (->BodyFailureV0
@@ -3023,5 +3100,5 @@
             header-name
             (c17/emit-header types layouts functions module-index)
             (str "module_" module-index ".c")
-            (emit-source types layouts functions abis module-index pool
-              header-name)))))))
+            (emit-source types layouts (core/nativecoreprogram-regions program)
+              functions abis module-index pool header-name)))))))

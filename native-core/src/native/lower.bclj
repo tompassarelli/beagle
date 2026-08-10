@@ -13763,6 +13763,7 @@
                                     (typedfunctionv0-return-type signature))
                                   (typedfunctionv0-id signature)
                                   coerced-values
+                                  nil
                                   (core/->TokenFlowV0 [] [])))]
                           (if (signature-traps? env signature)
                             (let [trap-id: core/NativeId
@@ -15407,6 +15408,35 @@
 
       :else nil)))
 
+;; What the C emitters used to recover from the caller's single
+;; ArenaInstruction is written down as an operand instead, so a caller with
+;; more than one arena has a per-call-site answer for the epoch stage to
+;; retarget. A function that acquires no arena leaves the operand nil.
+(defn attach-call-arena
+  [instruction: core/Instruction
+   arena-id: core/NativeId] -> core/Instruction
+  (if (instance? native.core.CallInstruction instruction)
+    (core/->CallInstruction
+      (core/callinstruction-result instruction)
+      (core/callinstruction-function-id instruction)
+      (core/callinstruction-arguments instruction)
+      arena-id
+      (core/callinstruction-tokens instruction))
+    instruction))
+
+(defn attach-call-arenas
+  [blocks: (Vec core/BasicBlock)
+   arena-id: core/NativeId] -> (Vec core/BasicBlock)
+  (mapv
+    (fn [block: core/BasicBlock] -> core/BasicBlock
+      (with block
+        [:instructions
+         (mapv
+           (fn [instruction: core/Instruction] -> core/Instruction
+             (attach-call-arena instruction arena-id))
+           (core/basicblock-instructions block))]))
+    blocks))
+
 (defn lower-ready-function [function: TypedFunctionV0] -> core/FunctionDef
   (let [entry-id: core/NativeId
         (lower-id "block-entry" [(id-value (typedfunctionv0-id function))])
@@ -15428,12 +15458,17 @@
         (if (function-uses-atom-state? function)
           (with-arena-acquire entry-id
             (atom-state-acquire-instruction function) arena-blocks)
-          arena-blocks)]
+          arena-blocks)
+        with-call-arenas: (Vec core/BasicBlock)
+        (if (or (function-writes? function) (function-allocates? function))
+          (attach-call-arenas blocks
+            (arena-value-id (typedfunctionv0-id function)))
+          blocks)]
     (core/->FunctionDef
       (typedfunctionv0-id function)
       (typedfunctionv0-name function)
       (typedfunctionv0-parameters function)
-      blocks
+      with-call-arenas
       entry-id
       (typedfunctionv0-return-type function)
       (typedfunctionv0-effects function)
@@ -16334,6 +16369,13 @@
       [(encode-ssa-value (core/arenacloseinstructionv0-result instruction))
        (id-value (core/arenacloseinstructionv0-source-id instruction))])
 
+    (instance? native.core.PromoteInstructionV0 instruction)
+    (stages/canonical-record "promote-instruction-v0"
+      [(encode-ssa-value (core/promoteinstructionv0-result instruction))
+       (id-value (core/promoteinstructionv0-source-id instruction))
+       (id-value (core/promoteinstructionv0-domain-type instruction))
+       (id-value (core/promoteinstructionv0-arena-id instruction))])
+
     (instance? native.core.AtomStateInstruction instruction)
     (stages/canonical-record "atom-state-instruction"
       [(encode-ssa-value (core/atomstateinstruction-result instruction))
@@ -16454,10 +16496,14 @@
          (core/codecprimitiveinstructionv0-operation instruction))])
 
     (instance? native.core.CallInstruction instruction)
-    (stages/canonical-record "call-instruction"
-      [(encode-ssa-value (core/callinstruction-result instruction))
-       (id-value (core/callinstruction-function-id instruction))
-       (encode-id-roots "arguments" (core/callinstruction-arguments instruction))])
+    (let [arena: (U core/NativeId Nil)
+          (core/callinstruction-arena-id instruction)]
+      (stages/canonical-record "call-instruction"
+        [(encode-ssa-value (core/callinstruction-result instruction))
+         (id-value (core/callinstruction-function-id instruction))
+         (encode-id-roots "arguments"
+           (core/callinstruction-arguments instruction))
+         (if (nil? arena) "no-arena" (id-value arena))]))
 
     (instance? native.core.ExternCallInstruction instruction)
     (let [arena: (U core/NativeId Nil)
@@ -17133,13 +17179,112 @@
         next
         (recur next)))))
 
+;; --- Rule E3, caller ownership. A function is EPOCH-SAFE when nothing it
+;; allocates through the arena it was handed outlives the call: no allocating
+;; instruction naming that arena has its result in the function's escape set,
+;; and every region-declaring callee is itself epoch-safe. A caller may then
+;; pass such a callee one of ITS epoch arenas instead of the root — which is
+;; the whole content of the caller-arena generalization, and the reason the
+;; arena is a per-call operand rather than a per-function singleton.
+;;
+;; The fixpoint decreases from "all safe": a call-graph cycle whose members are
+;; each locally safe is safe, because local safety says a frame's allocations
+;; never leave that frame, which composes over any call depth including cyclic
+;; ones. Nothing here needs the missing-summary default, because a missing
+;; callee (an id no FunctionDef in the program owns) is simply not safe.
+(defn function-callee-ids [function: core/FunctionDef] -> (Vec core/NativeId)
+  (loop [block-position: Int 0
+         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
+         collected: (Vec core/NativeId) []]
+    (if (>= block-position (count blocks))
+      collected
+      (recur (+ block-position 1) blocks
+        (loop [position: Int 0
+               instructions: (Vec core/Instruction)
+               (core/basicblock-instructions (nth blocks block-position))
+               inner: (Vec core/NativeId) collected]
+          (if (>= position (count instructions))
+            inner
+            (let [instruction: core/Instruction (nth instructions position)]
+              (recur (+ position 1) instructions
+                (if (instance? native.core.CallInstruction instruction)
+                  (conj inner (core/callinstruction-function-id instruction))
+                  inner)))))))))
+
+(defn function-allocations-die-locally?
+  [function: core/FunctionDef
+   escaped: (Map String Bool)] -> Bool
+  (every?
+    (fn [block: core/BasicBlock] -> Bool
+      (every?
+        (fn [instruction: core/Instruction] -> Bool
+          (or (not (allocating-instruction? instruction))
+            (not (epoch-marked? escaped
+                   (core/instruction-result-id instruction)))))
+        (core/basicblock-instructions block)))
+    (core/functiondef-blocks function)))
+
+(defn epoch-safe-locally? [function: core/FunctionDef] -> Bool
+  (function-allocations-die-locally? function (function-escape-set function)))
+
+(defn find-function-by-id
+  [functions: (Vec core/FunctionDef)
+   target: core/NativeId] -> (U core/FunctionDef Nil)
+  (loop [position: Int 0]
+    (cond
+      (>= position (count functions)) nil
+      (same-id? (core/functiondef-id (nth functions position)) target)
+      (nth functions position)
+      :else (recur (+ position 1)))))
+
+(defn epoch-safe-pass
+  [functions: (Vec core/FunctionDef)
+   safe: (Map String Bool)] -> (Map String Bool)
+  (loop [position: Int 0 current: (Map String Bool) safe]
+    (if (>= position (count functions))
+      current
+      (let [function: core/FunctionDef (nth functions position)
+            key: String (id-value (core/functiondef-id function))]
+        (recur (+ position 1)
+          (if (not (= true (get current key)))
+            current
+            (let [callees: (Vec core/NativeId) (function-callee-ids function)
+                  callees-safe: Bool
+                  (every?
+                    (fn [callee-id: core/NativeId] -> Bool
+                      (let [callee: (U core/FunctionDef Nil)
+                            (find-function-by-id functions callee-id)]
+                        (or (nil? callee)
+                          (= 0 (count (core/functiondef-regions callee)))
+                          (= true (get current (id-value callee-id))))))
+                    callees)]
+              (if callees-safe current (assoc current key false)))))))))
+
+(defn epoch-safe-functions
+  [functions: (Vec core/FunctionDef)] -> (Map String Bool)
+  (loop [safe: (Map String Bool)
+         (loop [position: Int 0 seeded: (Map String Bool) {}]
+           (if (>= position (count functions))
+             seeded
+             (recur (+ position 1)
+               (assoc seeded
+                 (id-value (core/functiondef-id (nth functions position)))
+                 (epoch-safe-locally? (nth functions position))))))
+         budget: Int (+ 1 (count functions))]
+    (let [next: (Map String Bool) (epoch-safe-pass functions safe)]
+      (if (or (= next safe) (<= budget 0))
+        next
+        (recur next (- budget 1))))))
+
 ;; Retargetable: an allocating instruction whose arena travels in a top-level
-;; arena-id operand. Atom cells stay pinned to the root (TODO-EPOCH-ATOM-STORE)
+;; arena-id operand, or a call whose arena operand the stage may redirect.
+;; Atom cells stay pinned to the root (TODO-EPOCH-ATOM-STORE)
 ;; and codec/text-builtin operations keep their arena nested inside the
 ;; operation record (TODO-EPOCH-NESTED-ARENA-OPERAND) — both keep the parent
 ;; epoch in v0.
 (defn epoch-retargetable? [instruction: core/Instruction] -> Bool
-  (and (allocating-instruction? instruction)
+  (and (or (allocating-instruction? instruction)
+         (instance? native.core.CallInstruction instruction))
     (not (instance? native.core.AtomCreateInstruction instruction))
     (not (instance? native.core.CodecPrimitiveInstructionV0 instruction))
     (some? (get instruction :arena-id nil))))
@@ -17148,6 +17293,14 @@
   [instruction: core/Instruction
    epoch-arena: core/NativeId] -> core/Instruction
   (cond
+    (instance? native.core.CallInstruction instruction)
+    (core/->CallInstruction
+      (core/callinstruction-result instruction)
+      (core/callinstruction-function-id instruction)
+      (core/callinstruction-arguments instruction)
+      epoch-arena
+      (core/callinstruction-tokens instruction))
+
     (instance? native.core.RecordAssocInstructionV0 instruction)
     (core/->RecordAssocInstructionV0
       (core/recordassocinstructionv0-result instruction)
@@ -17363,7 +17516,29 @@
   (str code ": " (id-value (core/instruction-result-id instruction))
     " keeps the parent epoch in " (id-value (core/functiondef-id function))))
 
-(defn epoch-rewrite-function [function: core/FunctionDef] -> EpochRewriteV0
+;; An epoch-safe callee that declares a region may take one of the caller's
+;; epoch arenas: its allocations then die at that epoch's close. The call's own
+;; result must stay interior too — a call whose value leaves the function keeps
+;; the root arena, so obligation 8 has nothing to refuse.
+(defn epoch-redirectable-call?
+  [instruction: core/Instruction
+   functions: (Vec core/FunctionDef)
+   safe: (Map String Bool)] -> Bool
+  (and (instance? native.core.CallInstruction instruction)
+    (let [callee: (U core/FunctionDef Nil)
+          (find-function-by-id functions
+            (core/callinstruction-function-id instruction))]
+      (and (some? callee)
+        (> (count (core/functiondef-regions callee)) 0)
+        (= true
+          (get safe
+            (id-value
+              (core/functiondef-id callee))))))))
+
+(defn epoch-rewrite-function
+  [function: core/FunctionDef
+   functions: (Vec core/FunctionDef)
+   safe: (Map String Bool)] -> EpochRewriteV0
   (let [root-arena: (U EpochRootArenaV0 Nil) (entry-arena-instruction function)]
     (if (nil? root-arena)
       (->EpochRewriteV0 function [] [] [])
@@ -17386,7 +17561,10 @@
                       inner
                       (let [instruction: core/Instruction (nth instructions position)]
                         (recur (+ position 1) instructions
-                          (if (and (allocating-instruction? instruction)
+                          (if (and
+                                (or (allocating-instruction? instruction)
+                                  (epoch-redirectable-call? instruction
+                                    functions safe))
                                 (not (epoch-marked? escaped
                                        (core/instruction-result-id instruction))))
                             (conj inner instruction)
@@ -17534,10 +17712,13 @@
 
 (defn epoch-assign-function
   [assignment: EpochAssignmentV0
-   function: core/FunctionDef] -> EpochRewriteV0
+   function: core/FunctionDef
+   functions: (Vec core/FunctionDef)
+   safe: (Map String Bool)] -> EpochRewriteV0
   (match assignment
     [(EpochIdentityV0 token) (->EpochRewriteV0 function [] [] [])]
-    [(EpochDerivedV0 token) (epoch-rewrite-function function)]))
+    [(EpochDerivedV0 token)
+     (epoch-rewrite-function function functions safe)]))
 
 (defn lower-epoch-stage
   [frozen-native: stages/FrozenNativeStageV0
@@ -17549,10 +17730,13 @@
         (stages/frozennativestagev0-stage frozen-native)
         input-digest: String (stages/frozennativestagev0-digest frozen-native)
         program: core/NativeCoreProgram (stages/nativestagev0-program stage)
+        safe: (Map String Bool)
+        (epoch-safe-functions (core/nativecoreprogram-functions program))
         rewrites: (Vec EpochRewriteV0)
         (mapv
           (fn [function: core/FunctionDef] -> EpochRewriteV0
-            (epoch-assign-function assignment function))
+            (epoch-assign-function assignment function
+              (core/nativecoreprogram-functions program) safe))
           (core/nativecoreprogram-functions program))
         functions: (Vec core/FunctionDef)
         (mapv
@@ -17661,6 +17845,18 @@
       (epoch-result-frozen
         (epoch-identity-stage frozen-native compiler-commit configuration
           abi)))))
+
+;; The derived policy: §2's inference, minting an epoch wherever a function's
+;; escape closure leaves interior allocations. A materializer downstream of
+;; this seam must open and close minted epochs; the QBE backend does not yet,
+;; so its consumers stay on the identity seam by name.
+(defn epoch-derived-stage
+  [frozen-native: stages/FrozenNativeStageV0
+   compiler-commit: String
+   configuration: (Vec String)
+   abi: core/AbiProfileV0] -> EpochLoweringResultV0
+  (lower-epoch-stage frozen-native compiler-commit configuration abi
+    (->EpochDerivedV0 true)))
 
 (defn fixture-id [kind: String label: String] -> core/NativeId
   (lower-id "fixture" [kind label]))

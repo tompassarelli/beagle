@@ -217,6 +217,19 @@ if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
   cmp -s "$scratch/clang.out" "$generated/lowered-managed.out" \
     || die "Clang C17 probe differs from the lowered managed oracle"
   echo "slice-rt-core: GCC and Clang strict C17 compile/link/run PASS"
+
+  # fram.rt-core carries a minted epoch, so its C destroys an arena mid-body.
+  # An epoch close is a free(): only a sanitizer can hold the reclamation to
+  # account, and the oracle comparison is repeated under it.
+  sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
+            -fno-omit-frame-pointer -g)
+  (cd "$build" && gcc "${strict[@]}" "${sanitize[@]}" -o probe_gcc_san \
+    module_0.c native_shim.c main.c)
+  ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+    "$build/probe_gcc_san" >"$scratch/gcc-san.out"
+  cmp -s "$scratch/gcc-san.out" "$generated/lowered-managed.out" \
+    || die "sanitized GCC C17 probe differs from the lowered managed oracle"
+  echo "slice-rt-core: GCC ASan+UBSan compile/link/run PASS"
 fi
 
 if rg -q '^qbe-materialize OK module_0.ssa$' "$generated/report.txt"; then

@@ -1,0 +1,8 @@
+derived          64 iterations: 0 reserved root bytes
+derived       65536 iterations: 0 reserved root bytes
+identity         64 iterations: 4096 reserved root bytes
+identity      65536 iterations: 1581056 reserved root bytes
+caller-derived      64 iterations: 0 reserved root bytes
+caller-derived   65536 iterations: 0 reserved root bytes
+caller-identity     64 iterations: 4096 reserved root bytes
+caller-identity  65536 iterations: 1048576 reserved root bytes

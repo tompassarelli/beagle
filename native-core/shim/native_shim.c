@@ -5166,6 +5166,165 @@ bool native_value_equal(const native_value_descriptor *descriptor,
   return native_value_equal_inner(descriptor, left, right);
 }
 
+/* Maps are refused rather than half-copied, exactly as equality refuses them:
+   the header carries an edit_arena the walk would have to re-root. */
+static void native_value_promote_inner(
+    native_arena *destination, const native_value_descriptor *descriptor,
+    const void *value, void *out) {
+  size_t index;
+
+  if (!native_value_descriptor_valid(descriptor) || (destination == NULL) ||
+      (value == NULL) || (out == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+
+  switch (descriptor->kind) {
+    case NATIVE_VALUE_BOOL:
+    case NATIVE_VALUE_SIGNED:
+    case NATIVE_VALUE_UNSIGNED:
+    case NATIVE_VALUE_FLOAT:
+      memcpy(out, value, descriptor->size);
+      return;
+
+    case NATIVE_VALUE_TEXT:
+    case NATIVE_VALUE_KEYWORD: {
+      uint64_t handle;
+      uint64_t copied;
+      uint64_t length;
+      uint8_t *bytes = NULL;
+
+      if (descriptor->size != sizeof(uint64_t)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&handle, value, sizeof handle);
+      if (handle == UINT64_C(0)) {
+        memcpy(out, &handle, sizeof handle);
+        return;
+      }
+      length = native_text_length(handle);
+      copied = native_text_alloc(destination, length, &bytes);
+      if ((length != UINT64_C(0)) && (bytes != NULL)) {
+        memcpy(bytes, native_text_bytes(handle), (size_t)length);
+      }
+      memcpy(out, &copied, sizeof copied);
+      return;
+    }
+
+    case NATIVE_VALUE_BYTES: {
+      native_bytes source;
+      native_bytes copied;
+
+      memcpy(&source, value, sizeof source);
+      copied.length = source.length;
+      copied.data = NULL;
+      if (source.length != (size_t)0U) {
+        if (source.data == NULL) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        copied.data = (uint8_t *)native_arena_alloc(destination, source.length,
+                                                    sizeof(uint8_t));
+        memcpy(copied.data, source.data, source.length);
+      }
+      memcpy(out, &copied, sizeof copied);
+      return;
+    }
+
+    case NATIVE_VALUE_RECORD:
+      if ((descriptor->fields == NULL) && (descriptor->field_count != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(out, value, descriptor->size);
+      for (index = 0U; index < descriptor->field_count; index++) {
+        const native_value_field_descriptor *field = &descriptor->fields[index];
+        native_value_promote_inner(destination, field->value,
+                                   (const uint8_t *)value + field->offset,
+                                   (uint8_t *)out + field->offset);
+      }
+      return;
+
+    case NATIVE_VALUE_UNION: {
+      int64_t tag;
+      const native_value_variant_descriptor *variant;
+
+      memcpy(out, value, descriptor->size);
+      memcpy(&tag, (const uint8_t *)value + descriptor->tag_offset, sizeof tag);
+      variant = native_value_variant(descriptor, tag);
+      if (variant->payload == NULL) {
+        return;
+      }
+      native_value_promote_inner(
+          destination, variant->payload,
+          (const uint8_t *)value + variant->payload_offset,
+          (uint8_t *)out + variant->payload_offset);
+      return;
+    }
+
+    case NATIVE_VALUE_VECTOR: {
+      const native_vec *source;
+      native_vec *copied;
+
+      memcpy(&source, value, sizeof source);
+      if (source == NULL) {
+        memcpy(out, &source, sizeof source);
+        return;
+      }
+      if (!native_value_descriptor_valid(descriptor->element) ||
+          (descriptor->stride < descriptor->element->size) ||
+          ((descriptor->stride % descriptor->element->alignment) != 0U) ||
+          (source->length < INT64_C(0)) ||
+          (source->length > source->capacity) ||
+          ((source->length > INT64_C(0)) && (source->elements == NULL))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      copied = native_vec_new(destination, source->length,
+                              (int64_t)descriptor->stride,
+                              descriptor->element->alignment);
+      for (index = 0U; index < (size_t)source->length; index++) {
+        native_value_promote_inner(
+            destination, descriptor->element,
+            (const uint8_t *)source->elements + (index * descriptor->stride),
+            (uint8_t *)copied->elements + (index * descriptor->stride));
+      }
+      copied->length = source->length;
+      if (copied->watermark != NULL) {
+        *copied->watermark = source->length;
+      }
+      memcpy(out, &copied, sizeof copied);
+      return;
+    }
+
+    case NATIVE_VALUE_REFERENCE: {
+      const void *source;
+      void *copied;
+
+      memcpy(&source, value, sizeof source);
+      if (source == NULL) {
+        memcpy(out, &source, sizeof source);
+        return;
+      }
+      if (!native_value_descriptor_valid(descriptor->element)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      copied = native_arena_alloc(destination, descriptor->element->size,
+                                  descriptor->element->alignment);
+      native_value_promote_inner(destination, descriptor->element, source,
+                                 copied);
+      memcpy(out, &copied, sizeof copied);
+      return;
+    }
+
+    case NATIVE_VALUE_MAP:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+void native_value_promote(native_arena *destination,
+                          const native_value_descriptor *descriptor,
+                          const void *value, void *out) {
+  native_value_promote_inner(destination, descriptor, value, out);
+}
+
 static uint64_t native_value_semantic_unsigned(const void *value, size_t size) {
   if (size == sizeof(uint8_t)) {
     uint8_t result;
