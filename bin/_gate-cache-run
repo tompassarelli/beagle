@@ -29,6 +29,9 @@
 #   absent.list     paths probed and not found (as spelled) -> still absent
 #   nixpaths.list   /nix/store inputs (immutable by path)   -> still present
 #
+# An access the trace cannot place at a definite absolute path is never keyed
+# on a guess: it makes the run uncacheable. See the awk header below.
+#
 # Paths are stored repo-relative (%R%) and home-relative (%H%), so an entry
 # survives its checkout being moved or renamed. It does NOT make two checkouts
 # share proofs: identity pins the launch cwd, deliberately. A closure records
@@ -277,13 +280,29 @@ fi
 [[ "$status" -eq 0 ]] || exit "$status"
 
 # --- derive the input closure from the trace ---------------------------------
-# awk emits "CLASS<TAB>abs-path": W written, L dir-listed, R read, A absent.
-# AT_FDCWD</cwd> decorations carry the kernel-truth cwd per call, so relative
-# paths resolve without tracking fork inheritance. Success return values may
+# awk emits "CLASS<TAB>abs-path": W written, L dir-listed, R read, A absent,
+# plus U<TAB>relative-path for an access that cannot be placed at all.
+# AT_FDCWD</cwd> decorations carry the kernel-truth cwd per call, so every *at
+# syscall resolves against the kernel'"'"'s own answer. Success return values may
 # be decorated too ("= 3</path>").
+#
+# A path with no such decoration — execve above all, which takes no dirfd — can
+# only be resolved against the calling pid'"'"'s cwd, and a forked child has none
+# of its own until it chdirs or issues a decorated call. Resolving those against
+# the LAUNCH cwd is a guess, and a guess that lands on a real file is the worst
+# outcome available: `( cd "$build"; ./probe )` would key the entry on whatever
+# ./probe names at the launch cwd while the file actually executed went
+# unrecorded — a green replayed from the wrong proof. So an unplaceable access
+# is not resolved and not dropped: it is class U, and it makes the whole run
+# uncacheable. The first pid IS launch_cwd (strace'"'"'s direct child, and the
+# wrapper never chdirs), which is knowledge, not a guess, so it is seeded.
 
 awk -v launch_cwd="$launch_cwd" '
-    function resolve(p, base) { return (p ~ /^\//) ? p : base "/" p }
+    function resolve(p, base) {
+        if (p ~ /^\//) return p
+        if (base == "") { unplaceable[p] = 1; return "" }
+        return base "/" p
+    }
     # fd decorations for pipes/sockets/anon inodes are not filesystem paths;
     # one leaking into path position must never key (or de-key) a result.
     function emit(c, p) {
@@ -293,6 +312,7 @@ awk -v launch_cwd="$launch_cwd" '
     }
     {
         pid = $1
+        if (!seeded) { cwd[pid] = launch_cwd; seeded = 1 }
         line = $0; sub(/^[0-9]+[ \t]+/, "", line)
         if (line ~ /<unfinished \.\.\.>$/) {
             sub(/[ \t]*<unfinished \.\.\.>$/, "", line); pend[pid] = line; next
@@ -307,7 +327,7 @@ awk -v launch_cwd="$launch_cwd" '
         # kernel-truth cwd from decorated AT_FDCWD
         if (match(line, /AT_FDCWD<[^>]+>/))
             cwd[pid] = substr(line, RSTART + 9, RLENGTH - 10)
-        base = (pid in cwd) ? cwd[pid] : launch_cwd
+        base = (pid in cwd) ? cwd[pid] : ""
 
         # decorated dirfd bases, in arg order
         nb = 0; rest = line
@@ -346,7 +366,7 @@ awk -v launch_cwd="$launch_cwd" '
             if (ok) emit("R", p); else if (enoent) emit("A", p)
         } else if (sc == "chdir") {
             p = resolve(quotes[1], base)
-            if (ok) { cwd[pid] = p; emit("R", p) }
+            if (ok && p != "") { cwd[pid] = p; emit("R", p) }
         } else if (sc ~ /^(mkdir|mkdirat|rmdir|unlink|unlinkat|truncate|chmod|fchmodat|utimensat|futimesat|setxattr|removexattr)$/) {
             if (ok) emit("W", resolve(quotes[1], b1))
         } else if (sc ~ /^(rename|renameat|renameat2)$/) {
@@ -357,11 +377,13 @@ awk -v launch_cwd="$launch_cwd" '
             if (ok && nq >= 2) { emit("W", resolve(quotes[1], b1)); emit("W", resolve(quotes[2], b2)) }
         }
     }
+    END { for (p in unplaceable) print "U\t" p }
 ' "$trace" | sort -u > "$scratch/records.raw"
 
-# Aggregate with precedence W > L > R > A per path.
+# Aggregate with precedence U > W > L > R > A per path. U outranks everything:
+# an access nobody could place must not be masked by one that could.
 awk -F'\t' '
-    { rank = ($1 == "W") ? 4 : ($1 == "L") ? 3 : ($1 == "R") ? 2 : 1
+    { rank = ($1 == "U") ? 5 : ($1 == "W") ? 4 : ($1 == "L") ? 3 : ($1 == "R") ? 2 : 1
       if (rank > best[$2]) { best[$2] = rank; cls[$2] = $1 } }
     END { for (p in cls) print cls[p] "\t" p }
 ' "$scratch/records.raw" > "$scratch/records.agg"
@@ -375,9 +397,12 @@ awk -F'\t' '
 # keeps the spelling that was actually probed; `[[ -e ]]` re-probes it the same
 # way the run did, so a newly appearing intermediate component still
 # invalidates. On any count mismatch fall back to the uncleaned paths.
-: > "$scratch/records.absent"
-awk -F'\t' -v keep="$scratch/records.absent" \
-    '$1 == "A" { print > keep; next } { print }' \
+# Class U is held out for the same reason and one more: it is not absolute, so
+# realpath would resolve it against the WRAPPER's cwd and manufacture exactly
+# the guess the class exists to refuse.
+: > "$scratch/records.verbatim"
+awk -F'\t' -v keep="$scratch/records.verbatim" \
+    '$1 == "A" || $1 == "U" { print > keep; next } { print }' \
     "$scratch/records.agg" > "$scratch/records.present"
 cut -f2 "$scratch/records.present" > "$scratch/records.p"
 if xargs -r -d '\n' realpath -smq -- < "$scratch/records.p" > "$scratch/records.norm" 2>/dev/null &&
@@ -386,7 +411,7 @@ if xargs -r -d '\n' realpath -smq -- < "$scratch/records.p" > "$scratch/records.
 else
     cp "$scratch/records.present" "$scratch/records"
 fi
-cat "$scratch/records.absent" >> "$scratch/records"
+cat "$scratch/records.verbatim" >> "$scratch/records"
 
 # ~/.clojure/.cpcache is the Clojure CLI's derived classpath cache: its file
 # names hash the classpath STRING, which embeds this run's temp dirs, so the
@@ -431,6 +456,12 @@ is_ignored() {
 uncacheable=""
 
 while IFS=$'\t' read -r cls p; do
+    # Checked before the absolute-path filter and before every exclusion: a
+    # path we could not place is a path we cannot decide is scratch either.
+    if [[ "$cls" == "U" ]]; then
+        uncacheable="unplaceable relative access: $p"
+        continue
+    fi
     [[ "$p" == /* ]] || continue
     case "$p" in *pipe:\[* | *socket:\[* | *anon_inode:*) continue ;; esac
     [[ "$p" == *"$scratch"* ]] && continue

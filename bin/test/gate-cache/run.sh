@@ -195,6 +195,45 @@ out13="$(dotdot)"
 [[ "$out13" != *cached-green* && "$out13" == *"probe resolved"* ]]
 check "\`..\` probe becoming resolvable invalidates" $?
 
+# t14: an access with no kernel-truth cwd must be refused, never guessed.
+# execve carries no dirfd, and a forked child has no cwd of its own until it
+# chdirs, so `( cd sub; ./tool.sh; echo … )` — not the last command, so bash
+# forks — leaves ./tool.sh unplaceable. A same-named DECOY sits at the launch
+# cwd, so the guess lands on a real file: the entry then carries the decoy as a
+# dependency the run never had, and calls that the proof of the exec. Where the
+# guess lands on nothing instead, the same records make the run permanently
+# unreplayable. Both are the cache keying on a path it invented.
+mkdir -p "$sandbox/sub"
+printf '#!/usr/bin/env bash\necho "DECOY TOOL"\n' > "$sandbox/tool.sh"
+printf '#!/usr/bin/env bash\necho "REAL TOOL v1"\n' > "$sandbox/sub/tool.sh"
+chmod +x "$sandbox/tool.sh" "$sandbox/sub/tool.sh"
+cat > "$sandbox/misresolve.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+d="$(cd "$(dirname "$0")" && pwd)"
+(
+  cd "$d/sub"
+  ./tool.sh
+  echo "subshell done"
+)
+echo "misresolve ok"
+EOF
+chmod +x "$sandbox/misresolve.sh"
+misresolve() {
+    ( cd "$sandbox" && "$WRAP" --domain test --id misresolve --watch "$sandbox" -- \
+        "$sandbox/misresolve.sh" 2>&1 )
+}
+out14="$(misresolve)"
+[[ "$out14" == *"REAL TOOL v1"* && "$out14" == *"not cached: unplaceable"* ]]
+check "unplaceable relative exec is refused, not resolved against launch cwd" $?
+out14b="$(misresolve)"
+[[ "$out14b" != *cached-green* && "$out14b" == *"REAL TOOL v1"* ]]
+check "an unplaceable access leaves no proof to replay" $?
+printf '#!/usr/bin/env bash\necho "REAL TOOL v2"\n' > "$sandbox/sub/tool.sh"
+out14c="$(misresolve)"
+[[ "$out14c" == *"REAL TOOL v2"* && "$out14c" != *cached-green* ]]
+check "an edit to the real tool is always reflected, never replayed stale" $?
+
 echo
 if [[ $failures -gt 0 ]]; then
     echo "gate-cache tests: $failures FAILED"
