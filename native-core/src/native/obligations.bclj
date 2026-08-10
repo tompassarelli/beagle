@@ -2005,10 +2005,118 @@
   (let [epoch :- (U core/NativeId Nil) (epoch-of epochs value-id)]
     (or (nil? epoch) (root-region? regions epoch))))
 
+;; The epochs a call would hand a summary-less callee: every argument the
+;; root-or-free rule refuses, by epoch. Empty means the plain rule already
+;; admits the call.
+(defn call-retained-epochs
+  [regions :- (Vec core/RegionDef)
+   epochs :- (Map String core/NativeId)
+   arguments :- (Vec core/NativeId)] :- (Vec core/NativeId)
+  (loop [position :- Int 0 retained :- (Vec core/NativeId) []]
+    (if (>= position (count arguments))
+      retained
+      (recur (+ position 1)
+        (if (root-or-free-epoch? regions epochs (nth arguments position))
+          retained
+          (let [epoch :- (U core/NativeId Nil)
+                (epoch-of epochs (nth arguments position))]
+            (if (nil? epoch) retained (conj retained epoch))))))))
+
+;; A use of the call result qualifies for E3 only as the SOURCE of a promote
+;; whose destination arena is an ancestor-or-equal of every retained epoch:
+;; the copy must land where it outlives the epoch the call ran in. An
+;; unresolved destination or an incomparable retained epoch refuses.
+(defn promote-out-of-epochs?
+  [regions :- (Vec core/RegionDef)
+   handles :- (Map String core/NativeId)
+   retained :- (Vec core/NativeId)
+   result-id :- core/NativeId
+   instruction :- core/Instruction] :- Bool
+  (and (instance? native.core.PromoteInstructionV0 instruction)
+    (core/native-id= (core/promoteinstructionv0-source-id instruction)
+      result-id)
+    (let [destination :- (U core/NativeId Nil)
+          (handle-region handles
+            (core/promoteinstructionv0-arena-id instruction))]
+      (and (some? destination)
+        (every?
+          (fn [epoch :- core/NativeId] :- Bool
+            (region-on-ancestor-chain? regions destination epoch))
+          retained)))))
+
+(defn call-result-only-promoted?
+  [regions :- (Vec core/RegionDef)
+   handles :- (Map String core/NativeId)
+   function :- core/FunctionDef
+   retained :- (Vec core/NativeId)
+   result-id :- core/NativeId] :- Bool
+  (every?
+    (fn [block :- core/BasicBlock] :- Bool
+      (and
+        (every?
+          (fn [instruction :- core/Instruction] :- Bool
+            (or (not (core/id-in? (core/instruction-ssa-refs instruction)
+                       result-id))
+              (promote-out-of-epochs? regions handles retained result-id
+                instruction)))
+          (core/basicblock-instructions block))
+        (every?
+          (fn [terminator :- core/Terminator] :- Bool
+            (not (core/id-in? (core/terminator-ssa-refs terminator)
+                   result-id)))
+          (core/basicblock-terminators block))))
+    (core/functiondef-blocks function)))
+
+(defn call-result-promoted-somewhere?
+  [function :- core/FunctionDef
+   result-id :- core/NativeId] :- Bool
+  (loop [block-position :- Int 0
+         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (if (>= block-position (count blocks))
+      false
+      (let [instructions :- (Vec core/Instruction)
+            (core/basicblock-instructions (nth blocks block-position))
+            found :- Bool
+            (loop [position :- Int 0]
+              (if (>= position (count instructions))
+                false
+                (let [instruction :- core/Instruction
+                      (nth instructions position)]
+                  (if (and
+                        (instance? native.core.PromoteInstructionV0
+                          instruction)
+                        (core/native-id=
+                          (core/promoteinstructionv0-source-id instruction)
+                          result-id))
+                    true
+                    (recur (+ position 1))))))]
+        (if found true (recur (+ block-position 1) blocks))))))
+
+;; E3 promote admission. A call whose arguments the root-or-free rule refuses
+;; is still epoch-safe when its result's ONLY use anywhere in the function is
+;; promotion to an older-or-equal arena: the result is copied out before the
+;; epoch closes and nothing else escapes. Any other use — a terminator, a
+;; store, another call, even a use that stays inside the epoch — refuses, and
+;; a result no promote consumes proves nothing, so it refuses too.
+(defn call-epoch-legal?
+  [regions :- (Vec core/RegionDef)
+   handles :- (Map String core/NativeId)
+   epochs :- (Map String core/NativeId)
+   function :- core/FunctionDef
+   arguments :- (Vec core/NativeId)
+   result-id :- core/NativeId] :- Bool
+  (let [retained :- (Vec core/NativeId)
+        (call-retained-epochs regions epochs arguments)]
+    (or (= 0 (count retained))
+      (and (call-result-only-promoted? regions handles function retained
+             result-id)
+        (call-result-promoted-somewhere? function result-id)))))
+
 (defn instruction-epoch-writes-legal?
   [regions :- (Vec core/RegionDef)
    handles :- (Map String core/NativeId)
    epochs :- (Map String core/NativeId)
+   function :- core/FunctionDef
    instruction :- core/Instruction] :- Bool
   (let [store :- Any (get instruction :store nil)]
     (cond
@@ -2059,18 +2167,18 @@
           (core/atomswapinstruction-arguments instruction)))
 
       ;; A missing callee summary means retained (the v2 lesson): arguments
-      ;; handed across a call must carry driver lifetime.
+      ;; handed across a call must carry driver lifetime — except under the
+      ;; E3 promote admission, where the only surviving copy of anything the
+      ;; callee could hand back is promoted out before the epoch closes.
       (instance? native.core.CallInstruction instruction)
-      (every?
-        (fn [argument :- core/NativeId] :- Bool
-          (root-or-free-epoch? regions epochs argument))
-        (core/callinstruction-arguments instruction))
+      (call-epoch-legal? regions handles epochs function
+        (core/callinstruction-arguments instruction)
+        (core/instruction-result-id instruction))
 
       (instance? native.core.ExternCallInstruction instruction)
-      (every?
-        (fn [argument :- core/NativeId] :- Bool
-          (root-or-free-epoch? regions epochs argument))
-        (core/externcallinstruction-arguments instruction))
+      (call-epoch-legal? regions handles epochs function
+        (core/externcallinstruction-arguments instruction)
+        (core/instruction-result-id instruction))
 
       ;; Arena-destination operations copy or reference every non-handle
       ;; operand from storage in the destination region.
@@ -2122,7 +2230,7 @@
               (every?
                 (fn [instruction :- core/Instruction] :- Bool
                   (instruction-epoch-writes-legal? regions handles epochs
-                    instruction))
+                    function instruction))
                 (core/basicblock-instructions block))
               (every?
                 (fn [terminator :- core/Terminator] :- Bool
@@ -3186,6 +3294,144 @@
   (with epoch-sound-program
     [:functions [fixture-token-function call-young-function]]))
 
+;; --- E3 promote-admission fixtures. The admitted pair hands the young Text
+;; across a call and promotes the call RESULT into the root arena as the
+;; result's only use; each negative keeps the promote and adds exactly one
+;; more use of the raw result.
+
+(defn young-call-instruction [] :- core/Instruction
+  (core/->CallInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-e3-call")
+      (obligation-id "type-text"))
+    (obligation-id "function-store")
+    [(obligation-id "ssa-young-text") (obligation-id "ssa-input")]
+    nil
+    (core/->TokenFlowV0 [] [])))
+
+(defn young-extern-call-instruction [] :- core/Instruction
+  (core/->ExternCallInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-e3-extern")
+      (obligation-id "type-text"))
+    (obligation-id "abi-checked-add")
+    [(obligation-id "ssa-young-text") (obligation-id "ssa-input")]
+    nil
+    (core/->TokenFlowV0 [] [])))
+
+(defn promote-result-instruction
+  [label :- String
+   source :- core/NativeId] :- core/Instruction
+  (core/->PromoteInstructionV0
+    (core/->SsaValueV0 (obligation-id (str "ssa-e3-promoted-" label))
+      (obligation-id "type-text"))
+    source
+    (obligation-id "type-text")
+    (obligation-id "ssa-root-arena")))
+
+;; E3 positive: young argument, result promoted to the root arena, no other
+;; use — admitted.
+(def call-promote-function :- core/FunctionDef
+  (with epoch-sound-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(root-arena-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (young-call-instruction)
+         (promote-result-instruction "call" (obligation-id "ssa-e3-call"))
+         (epoch-close-instruction "e3-call")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]
+    [:regions [(obligation-id "region-fixture")
+               (obligation-id "region-epoch")]]))
+
+(def call-promote-program :- core/NativeCoreProgram
+  (with epoch-sound-program
+    [:functions [fixture-token-function call-promote-function]]))
+
+;; E3 negative #1: the promoted result ALSO resets a root-pinned cell raw —
+;; a second escaping use, so the admission may not fire.
+(def call-promote-atom-escape-function :- core/FunctionDef
+  (with call-promote-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(root-arena-instruction)
+         (atom-state-instruction)
+         (root-text-instruction "initial")
+         (atom-create-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (young-call-instruction)
+         (promote-result-instruction "atom-escape"
+           (obligation-id "ssa-e3-call"))
+         (atom-reset-instruction (obligation-id "ssa-e3-call"))
+         (epoch-close-instruction "e3-atom")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]
+    [:regions [(obligation-id "region-fixture")
+               (obligation-id "region-atom-state")
+               (obligation-id "region-epoch")]]))
+
+(def call-promote-atom-escape-program :- core/NativeCoreProgram
+  (with atom-epoch-program
+    [:functions [fixture-token-function call-promote-atom-escape-function]]))
+
+;; E3 negative #2: the raw result also feeds a Text build in the YOUNG arena.
+;; That write is legal on its own (young into young), so this is the one
+;; corruption only the escape walk itself refuses.
+(def call-promote-young-use-function :- core/FunctionDef
+  (with call-promote-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(root-arena-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (young-call-instruction)
+         (promote-result-instruction "young-use"
+           (obligation-id "ssa-e3-call"))
+         (core/->TextConcatInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-e3-young-use")
+             (obligation-id "type-text"))
+           (obligation-id "ssa-epoch-arena")
+           [(obligation-id "ssa-e3-call")])
+         (epoch-close-instruction "e3-young-use")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
+
+(def call-promote-young-use-program :- core/NativeCoreProgram
+  (with epoch-sound-program
+    [:functions [fixture-token-function call-promote-young-use-function]]))
+
+;; E3 extern positive: the same admitted shape through an extern call.
+(def extern-promote-function :- core/FunctionDef
+  (with call-promote-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(root-arena-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (young-extern-call-instruction)
+         (promote-result-instruction "extern"
+           (obligation-id "ssa-e3-extern"))
+         (epoch-close-instruction "e3-extern")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
+
+(def extern-promote-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [extern-promote-function]]))
+
+;; E3 extern negative: the promoted extern result is ALSO returned raw.
+(def extern-promote-return-function :- core/FunctionDef
+  (with extern-promote-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(root-arena-instruction)
+         (epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (young-extern-call-instruction)
+         (promote-result-instruction "extern-return"
+           (obligation-id "ssa-e3-extern"))
+         (epoch-close-instruction "e3-extern-return")]
+        [(core/->ReturnTerminator (obligation-id "ssa-e3-extern"))])]]))
+
+(def extern-promote-return-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [extern-promote-return-function]]))
+
 ;; leak-freedom #2: LIFO violation — the outer epoch closes while its child
 ;; is still open (closes must run in reverse tree order).
 (def lifo-violation-function :- core/FunctionDef
@@ -3277,6 +3523,24 @@
 (def epoch-soundness-negative-atom-young-store :- Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness atom-young-store-program))))
 
+(def epoch-soundness-positive-call-promoted-result :- Bool
+  (obligation-passed? (epoch-soundness call-promote-program)))
+
+(def epoch-soundness-negative-call-promote-atom-escape :- Bool
+  (= "epoch-soundness"
+    (verdict-tag (epoch-soundness call-promote-atom-escape-program))))
+
+(def epoch-soundness-negative-call-promote-young-use :- Bool
+  (= "epoch-soundness"
+    (verdict-tag (epoch-soundness call-promote-young-use-program))))
+
+(def epoch-soundness-positive-extern-promoted-result :- Bool
+  (obligation-passed? (epoch-soundness extern-promote-program)))
+
+(def epoch-soundness-negative-extern-promote-return :- Bool
+  (= "epoch-soundness"
+    (verdict-tag (epoch-soundness extern-promote-return-program))))
+
 (def leak-freedom-negative-lifo :- Bool
   (= "leak-freedom" (verdict-tag (leak-freedom lifo-violation-program))))
 
@@ -3301,10 +3565,13 @@
    epoch-soundness-negative-return-young
    epoch-soundness-negative-call-young
    epoch-soundness-negative-atom-young-store
+   epoch-soundness-negative-call-promote-atom-escape
+   epoch-soundness-negative-call-promote-young-use
+   epoch-soundness-negative-extern-promote-return
    leak-freedom-negative-lifo
    leak-freedom-negative-double-close])
 
-(def nineteen-rejection-depth-fixtures-named? :- Bool
+(def twenty-two-rejection-depth-fixtures-named? :- Bool
   (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
 
 (defn validate-native-core-program
@@ -3341,6 +3608,8 @@
     epoch-soundness-positive
     epoch-soundness-positive-atom-root-store
     epoch-soundness-positive-atom-promoted-store
+    epoch-soundness-positive-call-promoted-result
+    epoch-soundness-positive-extern-promoted-result
     leak-freedom-positive))
 
 (def nine-negatives-named? :- Bool

@@ -49,15 +49,20 @@ bb -cp "$work/out" -e "
    'bounded-effects-negative-undeclared-region 'bounded-effects-negative-unbounded-call
    'epoch-soundness-negative-return-young 'epoch-soundness-negative-call-young
    'epoch-soundness-negative-atom-young-store
+   'epoch-soundness-negative-call-promote-atom-escape
+   'epoch-soundness-negative-call-promote-young-use
+   'epoch-soundness-negative-extern-promote-return
    'epoch-soundness-positive-atom-root-store
    'epoch-soundness-positive-atom-promoted-store
+   'epoch-soundness-positive-call-promoted-result
+   'epoch-soundness-positive-extern-promoted-result
    'leak-freedom-negative-lifo 'leak-freedom-negative-double-close])
 (doseq [n fixtures]
   (println (pr-str [n (deref (ns-resolve ns n))])))
 (println (pr-str ['nine-valid-passes? (deref (ns-resolve ns 'nine-valid-passes?))]))
 (println (pr-str ['nine-negatives-named? (deref (ns-resolve ns 'nine-negatives-named?))]))
-(println (pr-str ['nineteen-rejection-depth-fixtures-named?
-                  (deref (ns-resolve ns 'nineteen-rejection-depth-fixtures-named?))]))
+(println (pr-str ['twenty-two-rejection-depth-fixtures-named?
+                  (deref (ns-resolve ns 'twenty-two-rejection-depth-fixtures-named?))]))
 " > "$report"
 
 status=0
