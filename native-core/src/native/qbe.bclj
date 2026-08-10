@@ -2347,6 +2347,10 @@
       (->QbeFailure (str "abi profile " abi-id ": qbe materializes lp64 only"))
       (not (core/validationreport-passed validation))
       (->QbeFailure "native program is not frozen: validation obligations failed")
+      ;; A minted epoch would emit here as if it were the root arena.
+      (not (core/program-epoch-0? program))
+      (->QbeFailure
+        "native program carries a minted epoch: the QBE materializer emits epoch-0 only")
       (program-has-socket-extern? program)
       (->QbeFailure
         "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")

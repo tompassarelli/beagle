@@ -1,6 +1,7 @@
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
+stage native-to-epoch COMPLETE
 source-modules 1
 source-imports 1
 program-types 25

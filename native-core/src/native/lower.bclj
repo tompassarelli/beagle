@@ -16804,26 +16804,6 @@
     (fn [function: TypedFunctionV0] -> Bool (ready-function? function))
     functions))
 
-;; Typed-to-native emits the degenerate two-root region set and no epoch
-;; instructions, so obligations 8/9 hold by construction; this check is the
-;; cheap witness of that construction rather than a re-derivation.
-(defn program-epoch-inert? [program: core/NativeCoreProgram] -> Bool
-  (and
-    (every?
-      (fn [region: core/RegionDef] -> Bool
-        (nil? (core/regiondef-parent region)))
-      (core/nativecoreprogram-regions program))
-    (every?
-      (fn [function: core/FunctionDef] -> Bool
-        (every?
-          (fn [block: core/BasicBlock] -> Bool
-            (every?
-              (fn [instruction: core/Instruction] -> Bool
-                (not (instance? native.core.ArenaCloseInstructionV0 instruction)))
-              (core/basicblock-instructions block)))
-          (core/functiondef-blocks function)))
-      (core/nativecoreprogram-functions program))))
-
 (defn native-diagnostics
   [layouts-closed: Bool
    legal-abi: Bool
@@ -16902,7 +16882,10 @@
           (fn [function: core/FunctionDef] -> Bool
             (function-tokens-discharged? function))
           functions)
-        epoch-inert: Bool (program-epoch-inert? program)
+        ;; Typed-to-native emits the degenerate two-root region set and no
+        ;; epoch instructions, so obligations 8/9 hold by construction; this
+        ;; is the witness of that construction, not a re-derivation.
+        epoch-inert: Bool (core/program-epoch-0? program)
         obligation-results: (Vec core/ObligationResult)
         (native-obligation-results core-valid true closed-layouts true legal-abi
           tokens-discharged core-valid epoch-inert epoch-inert)
@@ -16970,6 +16953,16 @@
     [frozen: stages/FrozenNativeStageV0
      receipt: core/PassReceiptV0
      obligations: (Vec core/ReceiptObligationV0)]))
+
+;; The assignment the stage runs under. EpochIdentityV0 assigns every
+;; allocation to epoch-0 — the root arena it already names — so the stage
+;; mints no region, retargets no operand, inserts no close, and the program it
+;; freezes is the one it was handed under a new identity. EpochDerivedV0 is
+;; the inference of §2. Every materializer path runs the stage under identity
+;; until the emitters can open and close a minted epoch.
+(defunion EpochAssignmentV0
+  (EpochIdentityV0 [token: Bool])
+  (EpochDerivedV0 [token: Bool]))
 
 (defn find-block-with-id
   [blocks: (Vec core/BasicBlock)
@@ -17539,11 +17532,19 @@
         (core/->EpochSoundnessObligation true) "v0" digest false detail))
     pendings))
 
+(defn epoch-assign-function
+  [assignment: EpochAssignmentV0
+   function: core/FunctionDef] -> EpochRewriteV0
+  (match assignment
+    [(EpochIdentityV0 token) (->EpochRewriteV0 function [] [] [])]
+    [(EpochDerivedV0 token) (epoch-rewrite-function function)]))
+
 (defn lower-epoch-stage
   [frozen-native: stages/FrozenNativeStageV0
    compiler-commit: String
    configuration: (Vec String)
-   abi: core/AbiProfileV0] -> EpochLoweringResultV0
+   abi: core/AbiProfileV0
+   assignment: EpochAssignmentV0] -> EpochLoweringResultV0
   (let [stage: stages/NativeStageV0
         (stages/frozennativestagev0-stage frozen-native)
         input-digest: String (stages/frozennativestagev0-digest frozen-native)
@@ -17551,7 +17552,7 @@
         rewrites: (Vec EpochRewriteV0)
         (mapv
           (fn [function: core/FunctionDef] -> EpochRewriteV0
-            (epoch-rewrite-function function))
+            (epoch-assign-function assignment function))
           (core/nativecoreprogram-functions program))
         functions: (Vec core/FunctionDef)
         (mapv
@@ -17626,6 +17627,40 @@
     (if (and nine-pass (= 0 (count pending-rows)))
       (->EpochLoweringCompleteV0 frozen receipt)
       (->EpochLoweringPendingV0 frozen receipt pending-rows))))
+
+(defn epoch-result-frozen
+  [result: EpochLoweringResultV0] -> stages/FrozenNativeStageV0
+  (match result
+    [(EpochLoweringCompleteV0 frozen receipt) frozen]
+    [(EpochLoweringPendingV0 frozen receipt obligations) frozen]))
+
+(defn epoch-result-complete? [result: EpochLoweringResultV0] -> Bool
+  (match result
+    [(EpochLoweringCompleteV0 frozen receipt) true]
+    [(EpochLoweringPendingV0 frozen receipt obligations) false]))
+
+;; The seam every materializer crosses. A materializer never sees the native
+;; stage directly: it sees what the epoch stage froze. Under identity that is
+;; the same program under a new identity, which is what makes the wiring
+;; provable — the emitters must produce the same bytes or the seam leaked.
+(defn epoch-identity-stage
+  [frozen-native: stages/FrozenNativeStageV0
+   compiler-commit: String
+   configuration: (Vec String)
+   abi: core/AbiProfileV0] -> EpochLoweringResultV0
+  (lower-epoch-stage frozen-native compiler-commit configuration abi
+    (->EpochIdentityV0 true)))
+
+(defn epoch-identity-program
+  [frozen-native: stages/FrozenNativeStageV0
+   compiler-commit: String
+   configuration: (Vec String)
+   abi: core/AbiProfileV0] -> core/NativeCoreProgram
+  (stages/nativestagev0-program
+    (stages/frozennativestagev0-stage
+      (epoch-result-frozen
+        (epoch-identity-stage frozen-native compiler-commit configuration
+          abi)))))
 
 (defn fixture-id [kind: String label: String] -> core/NativeId
   (lower-id "fixture" [kind label]))
@@ -18083,19 +18118,13 @@
 ;; the digest chain stays honest (a rewritten program freezes to a different
 ;; digest with parent and compiler-pass naming the native stage it came from).
 
-(defn epoch-result-frozen
-  [result: EpochLoweringResultV0] -> stages/FrozenNativeStageV0
-  (match result
-    [(EpochLoweringCompleteV0 frozen receipt) frozen]
-    [(EpochLoweringPendingV0 frozen receipt obligations) frozen]))
-
 (defn epoch-rewrite-gate? [pipeline: FixturePipelineResultV0] -> Bool
   (match pipeline
     [(FixturePipelineFailedV0 stage detail) false]
     [(FixturePipelineCompleteV0 frozen)
      (let [result: EpochLoweringResultV0
            (lower-epoch-stage frozen "epoch-gate-commit" ["profile=3"]
-             (core/abi-profile-lp64))
+             (core/abi-profile-lp64) (->EpochDerivedV0 true))
            rewritten-frozen: stages/FrozenNativeStageV0
            (epoch-result-frozen result)
            rewritten: core/NativeCoreProgram
@@ -18226,7 +18255,7 @@
 (def epoch-stage-mint-passes?: Bool
   (let [result: EpochLoweringResultV0
         (lower-epoch-stage epoch-mint-frozen "epoch-gate-commit" ["profile=3"]
-          (core/abi-profile-lp64))
+          (core/abi-profile-lp64) (->EpochDerivedV0 true))
         frozen: stages/FrozenNativeStageV0 (epoch-result-frozen result)
         rewritten: core/NativeCoreProgram
         (stages/nativestagev0-program
@@ -18241,3 +18270,56 @@
         (fn [verdict: obligations/ObligationVerdictV0] -> Bool
           (obligations/obligation-passed? verdict))
         verdicts))))
+
+;; --- Gate G3: under EpochIdentityV0 the stage is a relabelling and nothing
+;; else, and that is stated as strongly as the encoding allows — take the
+;; input program, give it the epoch program's id, parent and compiler-pass,
+;; re-encode, and require the two encodings equal byte for byte. Everything a
+;; materializer can read is then provably the same bytes it read before the
+;; stage existed, while the digest still moves, because an epoch-annotated
+;; program is a different program.
+
+(defn epoch-identity-inert? [frozen: stages/FrozenNativeStageV0] -> Bool
+  (let [result: EpochLoweringResultV0
+        (epoch-identity-stage frozen "epoch-gate-commit" ["profile=3"]
+          (core/abi-profile-lp64))
+        rewritten-frozen: stages/FrozenNativeStageV0
+        (epoch-result-frozen result)
+        stage: stages/NativeStageV0 (stages/frozennativestagev0-stage frozen)
+        program: core/NativeCoreProgram (stages/nativestagev0-program stage)
+        rewritten: core/NativeCoreProgram
+        (stages/nativestagev0-program
+          (stages/frozennativestagev0-stage rewritten-frozen))
+        relabelled: stages/NativeStageV0
+        (stages/->NativeStageV0
+          (stages/nativestagev0-terms stage)
+          (stages/nativestagev0-typed-digest stage)
+          (with program
+            [:id (core/nativecoreprogram-id rewritten)]
+            [:parent (core/nativecoreprogram-parent rewritten)]
+            [:compiler-pass (core/nativecoreprogram-compiler-pass rewritten)])
+          (stages/nativestagev0-obligation-roots stage))]
+    (and (epoch-result-complete? result)
+      (core/program-epoch-0? rewritten)
+      (= 0 (program-minted-epoch-count rewritten))
+      (= 0 (program-close-count rewritten))
+      (= "native-to-epoch-v0" (core/nativecoreprogram-compiler-pass rewritten))
+      (= (stages/encode-native-stage relabelled)
+         (stages/frozennativestagev0-encoding rewritten-frozen))
+      (not (= (stages/frozennativestagev0-digest rewritten-frozen)
+              (stages/frozennativestagev0-digest frozen))))))
+
+(defn epoch-identity-gate? [pipeline: FixturePipelineResultV0] -> Bool
+  (match pipeline
+    [(FixturePipelineFailedV0 stage detail) false]
+    [(FixturePipelineCompleteV0 frozen) (epoch-identity-inert? frozen)]))
+
+(def epoch-identity-fixture-passes?: Bool (epoch-identity-gate? fixture-result))
+
+(def epoch-identity-fold-passes?: Bool (epoch-identity-gate? fold-empty-result))
+
+;; The non-vacuous half: derived assignment mints an epoch and a close on this
+;; fixture (epoch-stage-mint-passes?), so identity holding it at zero and zero
+;; is the assignment being honoured rather than an empty program.
+(def epoch-identity-mint-passes?: Bool
+  (epoch-identity-inert? epoch-mint-frozen))

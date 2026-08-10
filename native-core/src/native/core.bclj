@@ -2022,6 +2022,26 @@
 (defn program-unique-ids? [program :- NativeCoreProgram] :- Bool
   (unique-ids? (program-owned-ids program)))
 
+;; Epoch-0: every region is a root the driver owns and no epoch ever closes.
+;; The materializers are inert on such a program — nothing they emit consults
+;; a region beyond "does this function declare one" — so it is the shape they
+;; are allowed to see until they learn to open and close minted epochs.
+(defn block-epoch-0? [block: BasicBlock] -> Bool
+  (every?
+    (fn [instruction: Instruction] -> Bool
+      (not (instance? native.core.ArenaCloseInstructionV0 instruction)))
+    (basicblock-instructions block)))
+
+(defn program-epoch-0? [program: NativeCoreProgram] -> Bool
+  (and
+    (every?
+      (fn [region: RegionDef] -> Bool (nil? (regiondef-parent region)))
+      (nativecoreprogram-regions program))
+    (every?
+      (fn [function: FunctionDef] -> Bool
+        (every? block-epoch-0? (functiondef-blocks function)))
+      (nativecoreprogram-functions program))))
+
 (defn validate-program [program :- NativeCoreProgram] :- ValidationReport
   (let [unique-pass :- Bool (program-unique-ids? program) allowed-pass :- Bool (program-allowed-sets-valid? program) reference-pass :- Bool (program-reference-closed? program) terminator-pass :- Bool (functions-single-terminator? (nativecoreprogram-functions program)) ssa-pass :- Bool (program-ssa-closed? program) valid-ssa-pass :- Bool (and unique-pass reference-pass terminator-pass ssa-pass) results :- (Vec ObligationResult) [(->ObligationResult (->ValidSsaObligation true) valid-ssa-pass "IDs, references, terminators, and SSA uses form a closed function graph") (->ObligationResult (->BoundedEffectsObligation true) allowed-pass "declared resource use stays inside closed allowed sets")]]
     (->ValidationReport (and unique-pass allowed-pass reference-pass terminator-pass ssa-pass)

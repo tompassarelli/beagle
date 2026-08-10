@@ -1,6 +1,7 @@
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
+stage native-to-epoch COMPLETE
 program-types 69
 program-layouts 69
 program-functions 0

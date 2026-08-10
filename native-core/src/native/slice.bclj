@@ -464,7 +464,11 @@
                 native-result: lower/NativeLoweringResultV0
                 (lower/lower-native-stage frozen-typed slice compiler-commit
                   configuration abi)
-                frozen-native: stages/FrozenNativeStageV0 (native-frozen native-result)
+                epoch-result: lower/EpochLoweringResultV0
+                (lower/epoch-identity-stage (native-frozen native-result)
+                  compiler-commit configuration abi)
+                frozen-native: stages/FrozenNativeStageV0
+                (lower/epoch-result-frozen epoch-result)
                 program: core/NativeCoreProgram
                 (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
@@ -478,6 +482,10 @@
                   "stage source-to-typed ACCEPTED\n"
                   "stage typed-to-native "
                   (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                    "COMPLETE" "PENDING")
+                  "\n"
+                  "stage native-to-epoch "
+                  (if (lower/epoch-result-complete? epoch-result)
                     "COMPLETE" "PENDING")
                   "\n"
                   "program-types " (str (count (core/nativecoreprogram-types program))) "\n"

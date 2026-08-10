@@ -394,6 +394,7 @@
    native-receipt: core/PassReceiptV0
    program: core/NativeCoreProgram
    complete: Bool
+   epoch-complete: Bool
    host-erased: Bool])
 
 (defn freeze-result [abi: core/AbiProfileV0] -> lower/SourceFreezeResultV0
@@ -453,13 +454,18 @@
           compiler-commit
           (configuration-for abi)
           abi)
-        frozen-native: stages/FrozenNativeStageV0 (native-frozen native)]
+        epoch: lower/EpochLoweringResultV0
+        (lower/epoch-identity-stage (native-frozen native) compiler-commit
+          (configuration-for abi) abi)
+        frozen-native: stages/FrozenNativeStageV0
+        (lower/epoch-result-frozen epoch)]
     (->SliceStateV0
       (lower/sourcefreezeacceptedv0-receipt frozen-accepted)
       (lower/typingacceptedv0-receipt typed)
       (native-receipt native)
       (stages/nativestagev0-program (stages/frozennativestagev0-stage frozen-native))
       (instance? native.lower.NativeLoweringCompleteV0 native)
+      (lower/epoch-result-complete? epoch)
       (lower/native-program-host-erased? frozen-native))))
 
 (def obligation-names: (Vec String)
@@ -579,6 +585,7 @@
       "functions: " (count (core/nativecoreprogram-functions program)) "\n"
       "abis: " (count (core/nativecoreprogram-abis program)) "\n"
       "native lowering complete: " (if (slicestatev0-complete state) "yes" "no") "\n"
+      "epoch stage complete: " (if (slicestatev0-epoch-complete state) "yes" "no") "\n"
       "native terms host-erased: " (if (slicestatev0-host-erased state) "yes" "no") "\n"
       "core validator: "
       (if (core/validationreport-passed (core/validate-program program)) "pass" "FAIL") "\n\n"

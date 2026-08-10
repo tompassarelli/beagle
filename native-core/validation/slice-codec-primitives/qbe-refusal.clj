@@ -18,7 +18,11 @@
                      (lower/typingacceptedv0-slice typing)
                      compiler-commit configuration
                      (core/abi-profile-lp64))
-      frozen-native (slice/native-frozen native-result)
+      frozen-native (lower/epoch-result-frozen
+                      (lower/epoch-identity-stage
+                        (slice/native-frozen native-result)
+                        compiler-commit configuration
+                        (core/abi-profile-lp64)))
       program (stages/nativestagev0-program
              (stages/frozennativestagev0-stage frozen-native))
       projected (body-slice/projected-program program)

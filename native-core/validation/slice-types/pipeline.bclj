@@ -375,9 +375,13 @@
         (lower/lower-native-stage typed-freeze typed-slice "e50f806" configuration
           (core/abi-profile-lp64))
         native-freeze: stages/FrozenNativeStageV0 (require-native-freeze native-result)
+        epoch-freeze: stages/FrozenNativeStageV0
+        (lower/epoch-result-frozen
+          (lower/epoch-identity-stage native-freeze "e50f806" configuration
+            (core/abi-profile-lp64)))
         lowered-program: core/NativeCoreProgram
         (stages/nativestagev0-program
-          (stages/frozennativestagev0-stage native-freeze))
+          (stages/frozennativestagev0-stage epoch-freeze))
         material-program: core/NativeCoreProgram (c17-projection lowered-program)
         obligations-text: String (join-lines (obligation-lines material-program))
         artifact: c11/C11Artifact
@@ -407,6 +411,13 @@
            (str "native-host-erased="
              (lower/native-program-host-erased? native-freeze))
            (str "typed-to-native-status=" (native-status native-result))
+           (str "epoch-digest-bytes="
+             (count (stages/frozennativestagev0-digest epoch-freeze)))
+           (str "epoch-native-rebound="
+             (not (= (stages/frozennativestagev0-digest epoch-freeze)
+                     (stages/frozennativestagev0-digest native-freeze))))
+           (str "materialized-compiler-pass="
+             (core/nativecoreprogram-compiler-pass lowered-program))
            (str "materialized-types=" (count (core/nativecoreprogram-types material-program)))
            (str "materialized-layouts=" (count (core/nativecoreprogram-layouts material-program)))
            "materializer=native.c11/materialize-program"

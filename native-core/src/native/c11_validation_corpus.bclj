@@ -156,9 +156,9 @@
 (defn require-fold-lowered-program
   [result: lower/FixturePipelineResultV0] -> core/NativeCoreProgram
   (if (instance? native.lower.FixturePipelineCompleteV0 result)
-    (stages/nativestagev0-program
-      (stages/frozennativestagev0-stage
-        (lower/fixturepipelinecompletev0-frozen result)))
+    (lower/epoch-identity-program
+      (lower/fixturepipelinecompletev0-frozen result)
+      "c11-validation-corpus-v0" ["profile=3"] (core/abi-profile-lp64))
     (throw (ex-info "fold empty-input specialization did not lower" {}))))
 
 (def fold-lowered-program: core/NativeCoreProgram

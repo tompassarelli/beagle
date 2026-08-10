@@ -690,6 +690,10 @@
       (->C11Failure "module index must be nonnegative")
       (not (core/validationreport-passed validation))
       (->C11Failure "native program is not frozen: validation obligations failed")
+      ;; A minted epoch would emit here as if it were the root arena.
+      (not (core/program-epoch-0? program))
+      (->C11Failure
+        "native program carries a minted epoch: the restricted C17 reference slice materializes epoch-0 only")
       (not (program-supported? program))
       (->C11Failure "native program uses a shape outside the restricted C17 reference slice")
       :else

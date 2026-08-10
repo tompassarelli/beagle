@@ -24,7 +24,10 @@
                 native-result (lower/lower-native-stage
                                 frozen-typed typed-slice compiler-commit configuration
                                 abi)
-                frozen-native (slice/native-frozen native-result)
+                frozen-native (lower/epoch-result-frozen
+                                (lower/epoch-identity-stage
+                                  (slice/native-frozen native-result)
+                                  compiler-commit configuration abi))
                 program (stages/nativestagev0-program
                           (stages/frozennativestagev0-stage frozen-native))
                 projected (body-slice/projected-program program)

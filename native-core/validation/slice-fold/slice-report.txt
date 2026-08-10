@@ -5,6 +5,7 @@ layouts: 54
 functions: 0
 abis: 0
 native lowering complete: no
+epoch stage complete: yes
 native terms host-erased: yes
 core validator: pass
 

@@ -866,6 +866,11 @@
       (not (core/validationreport-passed validation))
       (->C17Failure "native program is not frozen: validation obligations failed")
 
+      ;; A minted epoch would emit here as if it were the root arena.
+      (not (core/program-epoch-0? program))
+      (->C17Failure
+        "native program carries a minted epoch: the restricted C17 reference slice materializes epoch-0 only")
+
       (not (types-orderable? (core/nativecoreprogram-types program) (core/nativecoreprogram-layouts program)))
       (->C17Failure "value types form a declaration cycle the restricted C17 slice cannot order")
 
