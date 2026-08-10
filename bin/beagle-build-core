@@ -584,12 +584,29 @@ bb -cp "$compiled" -e '
   (and (= 9 (count verdicts))
        (every? obligations/obligation-passed? verdicts)))
 
-(defn native-report-head [rows entries source program projected abi]
+(defn epoch-pending-details [epoch-result]
+  (if (instance? native.lower.EpochLoweringPendingV0 epoch-result)
+    (mapv core/receiptobligationv0-detail
+          (lower/epochloweringpendingv0-obligations epoch-result))
+    []))
+
+(defn epoch-pending-report [epoch-result]
+  (apply str (map #(str "epoch-pending " % "\n")
+                  (epoch-pending-details epoch-result))))
+
+(defn native-report-head
+  [rows entries source program projected native-program epoch-result abi]
   (str (apply str (map #(str "source-entry " % "\n") entries))
        "stage source-freeze ACCEPTED\n"
        "stage source-to-typed ACCEPTED\n"
        "stage typed-to-native COMPLETE\n"
        "native-lowering-result NativeLoweringCompleteV0\n"
+       "stage native-to-epoch "
+       (if (lower/epoch-result-complete? epoch-result) "COMPLETE" "PENDING") "\n"
+       "epoch-regions-minted "
+       (- (count (core/nativecoreprogram-regions program))
+          (count (core/nativecoreprogram-regions native-program))) "\n"
+       (epoch-pending-report epoch-result)
        "source-modules " (count (stages/sourcestagev0-modules source)) "\n"
        "source-imports " (count (stages/sourcestagev0-imports source)) "\n"
        "source-definitions " (source-definition-count rows) "\n"
@@ -651,14 +668,15 @@ bb -cp "$compiled" -e '
         {:ok? true
          :report report}))))
 
-(defn materialize-programs! [projected artifacts-dir materializers abi-id]
+(defn materialize-programs!
+  [projected qbe-projected artifacts-dir materializers abi-id]
   (loop [remaining materializers reports []]
     (if (empty? remaining)
       {:ok? true :report (str (apply str reports) "result PASS\n")}
       (let [materializer (first remaining)
             result (case materializer
                      "c17" (materialize-c17! projected artifacts-dir)
-                     "qbe" (materialize-qbe! projected artifacts-dir abi-id))
+                     "qbe" (materialize-qbe! qbe-projected artifacts-dir abi-id))
             next-reports (conj reports (:report result))]
         (if (:ok? result)
           (recur (rest remaining) next-reports)
@@ -718,28 +736,62 @@ bb -cp "$compiled" -e '
                                   (slice/pending-reports (slice/native-pending native-result))
                                   "result FAIL NativeLoweringCompleteV0 required\n")})
                   (let [_finish-lowering (finish-stage! "typed-to-native" "COMPLETE")
-                        frozen-native (lower/nativeloweringcompletev0-frozen native-result)
+                        native-frozen (lower/nativeloweringcompletev0-frozen native-result)
+                        _start-epoch (start-stage! "native-to-epoch")
+                        epoch-result (lower/epoch-derived-stage native-frozen
+                                                                compiler-commit
+                                                                configuration abi)
+                        epoch-complete? (lower/epoch-result-complete? epoch-result)
+                        epoch-pendings (epoch-pending-details epoch-result)
+                        _finish-epoch (finish-stage!
+                                       "native-to-epoch"
+                                       (if epoch-complete? "COMPLETE" "PENDING"))
+                        ;; The seam every materializer crosses: what a
+                        ;; materializer sees is what the epoch stage froze.
+                        frozen-native (lower/epoch-result-frozen epoch-result)
                         native-encoding (stages/frozennativestagev0-encoding frozen-native)
                         _write-native
                         (spit (str artifacts-dir "/module.native-program") native-encoding)
                         program (stages/nativestagev0-program
                                  (stages/frozennativestagev0-stage frozen-native))
+                        native-program (stages/nativestagev0-program
+                                        (stages/frozennativestagev0-stage native-frozen))
+                        ;; QBE opens no minted epoch, so it is handed the
+                        ;; identity program rather than the derived one it
+                        ;; would refuse.
+                        qbe-program (lower/epoch-identity-program native-frozen
+                                                                  compiler-commit
+                                                                  configuration abi)
                         projected (body-slice/projected-program program)
+                        qbe-projected (body-slice/projected-program qbe-program)
                         _start-obligations (start-stage! "native-obligations")
                         verdicts (obligations/validate-native-core-program projected abi)
                         head (native-report-head rows entries source program projected
-                                                 abi)]
-                    (if-not (obligation-pass? verdicts)
+                                                 native-program epoch-result abi)]
+                    (cond
+                      ;; Pending with no named pending row is the epoch stage
+                      ;; refusing its own nine obligations, never a frontier.
+                      (and (not epoch-complete?) (empty? epoch-pendings))
+                      (do
+                        (finish-stage! "native-obligations" "FAIL")
+                        {:ok? false
+                         :report (str head
+                                      "result FAIL epoch stage obligations required\n")})
+
+                      (not (obligation-pass? verdicts))
                       (do
                         (finish-stage! "native-obligations" "FAIL")
                         {:ok? false
                          :report (str head
                                       "result FAIL nine native obligations required\n")})
+
+                      :else
                       (do
                         (finish-stage! "native-obligations" "PASS")
                         (let [materialization
-                              (materialize-programs! projected artifacts-dir materializers
-                                                   abi-id)]
+                              (materialize-programs! projected qbe-projected
+                                                     artifacts-dir materializers
+                                                     abi-id)]
                           (assoc materialization
                                  :report (str head (:report materialization))))))))))))))))
 
