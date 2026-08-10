@@ -372,9 +372,14 @@ else
     cp "$scratch/records.agg" "$scratch/records"
 fi
 
+# ~/.clojure/.cpcache is the Clojure CLI's derived classpath cache: its file
+# names hash the classpath STRING, which embeds this run's temp dirs, so the
+# probed names differ every run and an entry recording them never revalidates.
+# Its real sources (deps.edn, classpath contents) are traced in their own
+# right, so excluding the cache itself drops churn, not coverage.
 ignore_prefixes=("$scratch" "${TMPDIR:-/tmp}" /tmp /var/tmp /proc /sys /dev
                  /run/user /nix/var "$HOME/.cache" "$HOME/.local/state"
-                 "$cache_root")
+                 "$HOME/.clojure/.cpcache" "$cache_root")
 
 # Racket derives compiled-file probe paths by APPENDING an absolute source
 # path to a collects root ("/nix/store/.../compiled/var/tmp/<run-tmp>/x.zo"),
