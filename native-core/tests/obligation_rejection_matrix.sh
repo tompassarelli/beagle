@@ -6,6 +6,14 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 
+# Cached gate: the run is traced and its green result keyed on the full input
+# closure (bin/_gate-cache-run); an unchanged closure replays as cached-green.
+# BEAGLE_GATE_NO_CACHE=1 forces the full run.
+if [[ -z "${BEAGLE_GATE_CACHE_INNER:-}" && -x "$repo/bin/_gate-cache-run" ]]; then
+  exec "$repo/bin/_gate-cache-run" --domain native-gates \
+    --id "$(basename "$0")${1:+ $*}" -- "$0" "$@"
+fi
+
 command -v bb >/dev/null 2>&1 || { echo "obligation_rejection_matrix.sh: babashka (bb) is required" >&2; exit 2; }
 
 work="$(mktemp -d)"

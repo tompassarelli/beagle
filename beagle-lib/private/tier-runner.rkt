@@ -37,6 +37,21 @@
 (define manifest-path  (build-path beagle-root "beagle-test" "tiers.rktd"))
 (define tests-dir      (build-path beagle-root "beagle-test" "tests"))
 
+;; Content-keyed result cache (bin/_gate-cache-run). When present, each
+;; per-file raco-test child runs through it: a stored green result whose whole
+;; traced input closure is byte-identical is replayed instead of re-run, and
+;; its first stdout line is a "beagle-gate-cache: cached-green ..." marker.
+;; The wrapper itself decides every bypass (BEAGLE_GATE_NO_CACHE=1, nested
+;; tracing, missing strace), so the runner's only job is to route through it
+;; and surface cached-vs-ran in the report.
+(define gate-cache-wrapper (build-path beagle-root "bin" "_gate-cache-run"))
+
+(define (gate-cache-available?)
+  (file-exists? gate-cache-wrapper))
+
+(define cache-marker-rx #rx"^beagle-gate-cache: ")
+(define cached-green-rx #rx"^beagle-gate-cache: cached-green ")
+
 ;; --- manifest --------------------------------------------------------------
 
 (define (read-manifest)
@@ -52,8 +67,9 @@
 
 ;; --- per-file test invocation ---------------------------------------------
 
-(struct file-result (name status passed total stderr-lines) #:transparent)
-;; status ∈ '(pass fail error skip)
+(struct file-result (name status passed total stderr-lines cached?) #:transparent)
+;; status ∈ '(pass fail error skip); cached? = green replayed from the
+;; gate-result cache (the same proof, not a new run)
 
 (define raco-tail-rx
   #px"^([0-9]+) tests passed$|^([0-9]+)/([0-9]+) test failures$|^([0-9]+) success\\(es\\) ([0-9]+) failure\\(s\\) ([0-9]+) error\\(s\\) ([0-9]+) test\\(s\\) run$")
@@ -163,7 +179,7 @@
   (define full-path (build-path tests-dir fname))
   (cond
     [(not (file-exists? full-path))
-     (file-result fname 'skip 0 0 (list (format "MISSING: ~a" full-path)))]
+     (file-result fname 'skip 0 0 (list (format "MISSING: ~a" full-path)) #f)]
     [else
      ;; Per-child temp subdir under the runner-owned root, exported to the child
      ;; via TMPDIR/TMP/TEMP so all its make-temporary-* scratch is contained
@@ -172,19 +188,29 @@
      (define root (unbox run-temp-root))
      (define child-tmp
        (and root (make-temporary-directory "child-~a" #:base-dir root)))
+     (define raco (find-executable-path "raco"))
+     (define argv
+       (if (gate-cache-available?)
+           (list gate-cache-wrapper
+                 "--domain" "raco-test" "--id" fname "--"
+                 raco "test" (path->string full-path))
+           (list raco "test" (path->string full-path))))
      (define-values (sp stdout stdin stderr)
        (parameterize ([current-environment-variables
                        (if child-tmp
                            (env-with-tmpdir child-tmp)
                            (current-environment-variables))])
-         (subprocess #f #f #f (find-executable-path "raco")
-                     "test" (path->string full-path))))
+         (apply subprocess #f #f #f argv)))
      (close-output-port stdin)
      ;; Concurrent drain: cannot deadlock even when the child floods stderr
      ;; past pipe capacity while stdout is still open (see drain-child).
      (define-values (stdout-str stderr-str code) (drain-child sp stdout stderr))
-     (define all-lines (append (string-split stdout-str "\n")
+     (define raw-lines (append (string-split stdout-str "\n")
                                (string-split stderr-str "\n")))
+     (define cached?
+       (for/or ([l (in-list raw-lines)]) (regexp-match? cached-green-rx l)))
+     (define all-lines
+       (filter (lambda (l) (not (regexp-match? cache-marker-rx l))) raw-lines))
      (define summary (parse-raco-summary all-lines))
      (define status
        (case (car summary)
@@ -192,7 +218,8 @@
          [(fail) 'fail]
          [(unknown) (if (zero? code) 'pass 'fail)]))
      (file-result fname status (cadr summary) (caddr summary)
-                  (if (eq? status 'fail) all-lines '()))]))
+                  (if (eq? status 'fail) all-lines '())
+                  (and cached? (eq? status 'pass)))]))
 
 ;; --- bounded parallel scheduling -------------------------------------------
 ;;
@@ -291,18 +318,24 @@
 (define (print-tier-section label results)
   (printf "~a:\n" label)
   (for ([r (in-list results)])
-    (printf "  ~a ~a   ~a/~a\n"
+    (printf "  ~a ~a   ~a/~a~a\n"
             (status->glyph (file-result-status r))
             (~truncate (file-result-name r) 32)
             (file-result-passed r)
-            (file-result-total r)))
+            (file-result-total r)
+            (if (file-result-cached? r) "  (cached)" "")))
   (define failures
     (filter (lambda (r) (eq? (file-result-status r) 'fail)) results))
-  (printf "  TOTAL: ~a/~a (~a ~a)\n\n"
+  (define cached
+    (filter file-result-cached? results))
+  (printf "  TOTAL: ~a/~a (~a ~a~a)\n\n"
           (apply + (map file-result-passed results))
           (apply + (map file-result-total results))
           (length failures)
-          (if (= 1 (length failures)) "failure" "failures")))
+          (if (= 1 (length failures)) "failure" "failures")
+          (if (null? cached)
+              ""
+              (format ", ~a cached-green" (length cached)))))
 
 (define (~truncate s n)
   (cond

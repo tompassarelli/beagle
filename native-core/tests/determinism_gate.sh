@@ -8,6 +8,27 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 validation="$repo/native-core/validation"
 
+# Cached gate: the run is traced and its green result keyed on the full input
+# closure (bin/_gate-cache-run); an unchanged closure replays as cached-green.
+# BEAGLE_GATE_NO_CACHE=1 forces the full run.
+#
+# The all-modules run fans out through per-module invocations so each
+# materialization is its own cache unit: slice-types and slice-store execute
+# LeakSanitizer-built binaries, which refuse to run under ptrace, so those two
+# always run direct (flagged untraceable) — fanning out keeps the other
+# modules cacheable instead of poisoning one whole-gate identity.
+if [[ $# -eq 0 && -z "${BEAGLE_GATE_CACHE_INNER:-}" && -x "$repo/bin/_gate-cache-run" ]]; then
+  overall=0
+  for m in slice-fold slice-types-full slice-types slice-store slice-vec slice-kernel-classify; do
+    "$0" --module "$m" || overall=1
+  done
+  exit "$overall"
+fi
+if [[ -z "${BEAGLE_GATE_CACHE_INNER:-}" && -x "$repo/bin/_gate-cache-run" ]]; then
+  exec "$repo/bin/_gate-cache-run" --domain native-gates \
+    --id "$(basename "$0")${1:+ $*}" -- "$0" "$@"
+fi
+
 module=""
 quick=0
 while [ $# -gt 0 ]; do
