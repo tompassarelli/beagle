@@ -569,10 +569,11 @@ native_m0_type_19 native_m0_fn_8(native_m0_type_10 native_v_0) {
   native_m0_type_1 native_s_9;
   native_m0_type_9 native_s_10;
   native_m0_type_9 native_s_11;
-  native_m0_type_19 native_s_12;
-  native_m0_type_10 native_s_13;
-  native_m0_type_19 native_s_14;
+  native_m0_type_9 native_s_12;
+  native_m0_type_19 native_s_13;
+  native_m0_type_10 native_s_14;
   native_m0_type_19 native_s_15;
+  native_m0_type_19 native_s_16;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_0;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_keyword_2;
@@ -640,18 +641,20 @@ native_l8_7: ;
   native_s_11 = native_s_10;
   goto native_l8_9;
 native_l8_8: ;
-  native_s_13 = native_v_0;
+  native_s_14 = native_v_0;
   goto native_l8_10;
 native_l8_9: ;
-  native_s_12 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_11 } };
-  native_s_15 = native_s_12;
+  (void)native_s_11;
+  native_s_12 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_13 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_12 } };
+  native_s_16 = native_s_13;
   goto native_l8_11;
 native_l8_10: ;
-  native_s_14 = (native_m0_type_19){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_13 } };
-  native_s_15 = native_s_14;
+  native_s_15 = (native_m0_type_19){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
+  native_s_16 = native_s_15;
   goto native_l8_11;
 native_l8_11: ;
-  return native_s_15;
+  return native_s_16;
 }
 native_m0_type_0 native_m0_fn_9(native_m0_type_14 native_v_0) {
   (void)native_v_0;
@@ -1129,8 +1132,9 @@ native_m0_type_27 native_m0_fn_16(native_m0_type_17 native_v_0) {
   native_m0_type_3 native_s_5;
   native_m0_type_27 native_s_6;
   native_m0_type_9 native_s_7;
-  native_m0_type_27 native_s_8;
+  native_m0_type_9 native_s_8;
   native_m0_type_27 native_s_9;
+  native_m0_type_27 native_s_10;
   native_s_0 = native_m0_fn_18(native_v_0);
   if (native_s_0) {
     goto native_l16_1;
@@ -1155,14 +1159,16 @@ native_l16_2: ;
   goto native_l16_4;
 native_l16_3: ;
   native_s_6 = (native_m0_type_27){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_5 } };
-  native_s_9 = native_s_6;
+  native_s_10 = native_s_6;
   goto native_l16_5;
 native_l16_4: ;
-  native_s_8 = (native_m0_type_27){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_7 } };
-  native_s_9 = native_s_8;
+  (void)native_s_7;
+  native_s_8 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_9 = (native_m0_type_27){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_8 } };
+  native_s_10 = native_s_9;
   goto native_l16_5;
 native_l16_5: ;
-  return native_s_9;
+  return native_s_10;
 }
 native_m0_type_27 native_m0_fn_17(native_m0_type_18 native_v_0) {
   (void)native_v_0;
@@ -1175,10 +1181,11 @@ native_m0_type_27 native_m0_fn_17(native_m0_type_18 native_v_0) {
   native_m0_type_5 native_s_6;
   native_m0_type_3 native_s_7;
   native_m0_type_9 native_s_8;
-  native_m0_type_27 native_s_9;
-  native_m0_type_3 native_s_10;
-  native_m0_type_27 native_s_11;
+  native_m0_type_9 native_s_9;
+  native_m0_type_27 native_s_10;
+  native_m0_type_3 native_s_11;
   native_m0_type_27 native_s_12;
+  native_m0_type_27 native_s_13;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l17_2;
@@ -1219,18 +1226,20 @@ native_l17_5: ;
   }
   native_s_6 = *((const native_m0_type_5 *)native_s_5);
   native_s_7 = native_s_6.field_0;
-  native_s_10 = native_s_7;
+  native_s_11 = native_s_7;
   goto native_l17_7;
 native_l17_6: ;
-  native_s_9 = (native_m0_type_27){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_8 } };
-  native_s_12 = native_s_9;
+  (void)native_s_8;
+  native_s_9 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_10 = (native_m0_type_27){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_9 } };
+  native_s_13 = native_s_10;
   goto native_l17_8;
 native_l17_7: ;
-  native_s_11 = (native_m0_type_27){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_10 } };
-  native_s_12 = native_s_11;
+  native_s_12 = (native_m0_type_27){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_11 } };
+  native_s_13 = native_s_12;
   goto native_l17_8;
 native_l17_8: ;
-  return native_s_12;
+  return native_s_13;
 }
 native_m0_type_1 native_m0_fn_18(native_m0_type_17 native_v_0) {
   (void)native_v_0;

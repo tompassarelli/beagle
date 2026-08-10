@@ -124,7 +124,8 @@ clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M \
   "$here/managed_runner.clj" "$here/corpus.tsv" >"$scratch/managed.out"
 
 cp "$here/main.c" "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$scratch/"
+  "$repo/native-core/shim/native_shim.h" \
+  "$repo/native-core/shim/native_unicode15_data.h" "$scratch/"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror -frounding-math)
 rounding_modes=(nearest upward downward towardzero)

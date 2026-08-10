@@ -363,6 +363,7 @@ native_m0_type_1 native_m0_fn_11(native_m0_type_1 native_v_0) {
   native_m0_type_1 native_s_5;
   native_m0_type_1 native_s_6;
   native_m0_type_1 native_s_7;
+  native_m0_type_1 native_s_8;
   native_s_0 = false;
   (void)native_s_0;
   native_s_1 = native_v_0;
@@ -400,5 +401,8 @@ native_l11_5: ;
   native_s_2 = native_s_6;
   goto native_l11_1;
 native_l11_6: ;
-  return native_s_7;
+  native_s_8 = native_s_7;
+  goto native_l11_7;
+native_l11_7: ;
+  return native_s_8;
 }

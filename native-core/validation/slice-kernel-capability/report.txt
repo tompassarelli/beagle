@@ -18,6 +18,6 @@ obligation-host PASS checked-arithmetic
 obligation-host PASS legal-abi
 obligation-host PASS discharged-tokens
 obligation-host PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-threading: no native lowering for this source form [relational-admission-errors]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type [relational-admission-errors]
 materialize OK module_0.h module_0.c
 qbe REFUSED QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation

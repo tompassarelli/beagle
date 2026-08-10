@@ -88,7 +88,29 @@ mkdir -p "$build"
 cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
-strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
+# The emitter numbers its type table in collection order, so the probe names
+# every generated type through a macro resolved here instead of spelling an
+# ordinal that an unrelated fram.types change silently repoints.
+return_type_of() { # <fn-index>
+  sed -nE "s/^(native_m0_type_[0-9]+) native_m0_fn_$1\(.*/\1/p" "$art/module_0.h"
+}
+value_param_of() { # <fn-index> — first parameter that is a generated type
+  sed -nE "s/^native_m0_type_[0-9]+ native_m0_fn_$1\((.*)\);$/\1/p" "$art/module_0.h" \
+    | tr ',' '\n' | sed -nE 's/^ *(native_m0_type_[0-9]+) .*/\1/p' | head -1
+}
+defines=(
+  "-DSLICE_ANY_TYPE=$(value_param_of 0)"          # instant? [v: Any]
+  "-DSLICE_TRIPLE_TYPE=$(return_type_of 21)"      # triple -> Triple
+  "-DSLICE_TERM_TYPE=$(value_param_of 21)"        # triple [t1: Term …]
+  "-DSLICE_PAGE_REQUEST_TYPE=$(value_param_of 11)" # …cursor-value [r: RpcPageRequest]
+  "-DSLICE_INSTANT_TYPE=$(return_type_of 1)"      # instant -> Instant
+)
+for define in "${defines[@]}"; do
+  [[ "$define" == *=native_m0_type_* ]] \
+    || { echo "drive.sh: could not resolve a generated type: $define" >&2; exit 1; }
+done
+
+strict=(-std=c17 -pedantic -Wall -Wextra -Werror "${defines[@]}")
 ( cd "$build" && gcc "${strict[@]}" -o probe_gcc module_0.c native_shim.c main.c )
 ( cd "$build" && ./probe_gcc )
 if ( cd "$build" && ulimit -c 0 && ./probe_gcc trap ) 2>/dev/null; then
@@ -110,7 +132,7 @@ find_clang() {
 
 clang_bin="$(find_clang || true)"
 if [ -n "$clang_bin" ]; then
-  ( cd "$build" && "$clang_bin" -std=c17 -Werror -o probe_clang module_0.c native_shim.c main.c )
+  ( cd "$build" && "$clang_bin" -std=c17 -Werror "${defines[@]}" -o probe_clang module_0.c native_shim.c main.c )
   ( cd "$build" && ./probe_clang )
   if ( cd "$build" && ulimit -c 0 && ./probe_clang overflow ) 2>/dev/null; then
     echo "drive.sh: clang: INT64_MAX + 1 did not trap" >&2

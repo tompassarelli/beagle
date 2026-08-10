@@ -27,7 +27,10 @@ for name in core stages obligations lower fold_c17 fold_slice_corpus; do
   cp "$repo/native-core/src/native/$name.bclj" "$work/src/native/$name.bclj"
 done
 
-BEAGLE_OUT="$work/out" "$repo/bin/beagle" build --target clj "$work"/src/native/*.bclj \
+# --out (not --target): these sources already declare the clj target, and only
+# the ns-path emit puts them at out/native/<mod>.clj where the bb classpath
+# below resolves them. A forced --target writes flat basename.clj instead.
+"$repo/bin/beagle-build-all" "$work"/src/native/*.bclj --out "$work/out" \
   > "$work/build.log" 2>&1 || { cat "$work/build.log" >&2; exit 1; }
 
 bb -cp "$work/out" -e \

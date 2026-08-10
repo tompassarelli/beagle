@@ -8,18 +8,18 @@ typedef int64_t native_m0_type_0;
 _Static_assert(sizeof(native_m0_type_0) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_0) == 8, "layout alignment");
 
-typedef bool native_m0_type_1;
-_Static_assert(sizeof(native_m0_type_1) == 1, "layout size");
-_Static_assert(_Alignof(native_m0_type_1) == 1, "layout alignment");
-
-typedef struct native_m0_type_2 {
+typedef struct native_m0_type_1 {
   native_m0_type_0 field_0;
   native_m0_type_0 field_1;
-} native_m0_type_2;
-_Static_assert(sizeof(native_m0_type_2) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_2) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_2, field_0) == 0, "field offset");
-_Static_assert(offsetof(native_m0_type_2, field_1) == 8, "field offset");
+} native_m0_type_1;
+_Static_assert(sizeof(native_m0_type_1) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_1) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_1, field_0) == 0, "field offset");
+_Static_assert(offsetof(native_m0_type_1, field_1) == 8, "field offset");
+
+typedef bool native_m0_type_2;
+_Static_assert(sizeof(native_m0_type_2) == 1, "layout size");
+_Static_assert(_Alignof(native_m0_type_2) == 1, "layout alignment");
 
 typedef int64_t native_m0_type_3;
 _Static_assert(sizeof(native_m0_type_3) == 8, "layout size");
@@ -36,6 +36,6 @@ native_m0_type_0 native_m0_fn_0(native_m0_type_0 native_v_0, native_m0_type_0 na
 native_m0_type_0 native_m0_fn_1(native_m0_type_0 native_v_0);
 native_m0_type_0 native_m0_fn_2(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1);
 native_m0_type_0 native_m0_fn_3(native_m0_type_0 native_v_0);
-native_m0_type_2 native_m0_fn_4(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1);
+native_m0_type_1 native_m0_fn_4(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1);
 
 #endif

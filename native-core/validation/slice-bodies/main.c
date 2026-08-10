@@ -4,93 +4,155 @@
    fn_3 instant-seconds-between  fn_4 triple?
    fn_11 rpc-page-request-cursor-value  fn_16 commit-operation?
    fn_19 atom? through fn_30 occurrence-before?
-   Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil,
-   6 Instant, 7 Triple, 22 CommitOperation.
-   Term tags: 0 text, 1 i64, 2 f64, 3 bool, 4 keyword, 5 Instant, 6 Triple. */
+   Term tags: 0 text, 1 i64, 2 f64, 3 bool, 4 keyword, 5 Instant, 6 Triple.
+   Every generated TYPE is named through a macro drive.sh resolves out of the
+   emitted header: the emitter numbers its type table in collection order, so
+   an ordinal spelled here would silently mean a different type the next time
+   fram.types gains or loses a shape. Any TAGS stay spelled out below on
+   purpose — reading a tag back out of the predicate that tests it would make
+   the predicate assertions tautological. A tag that moves under fram must
+   surface as this probe's numbered exit, and be re-read from the source. */
 #include "module_0.h"
 
-static native_m0_type_50 any_reference(int64_t tag, void *target) {
-  native_m0_type_50 value;
+#ifndef SLICE_ANY_TYPE
+#error "SLICE_ANY_TYPE must name the generated Any type"
+#endif
+#ifndef SLICE_TRIPLE_TYPE
+#error "SLICE_TRIPLE_TYPE must name the generated Triple type"
+#endif
+#ifndef SLICE_TERM_TYPE
+#error "SLICE_TERM_TYPE must name the generated Term type"
+#endif
+#ifndef SLICE_PAGE_REQUEST_TYPE
+#error "SLICE_PAGE_REQUEST_TYPE must name the generated RpcPageRequest type"
+#endif
+#ifndef SLICE_INSTANT_TYPE
+#error "SLICE_INSTANT_TYPE must name the generated Instant type"
+#endif
+
+typedef SLICE_ANY_TYPE slice_any;
+typedef SLICE_TRIPLE_TYPE slice_triple;
+typedef SLICE_TERM_TYPE slice_term;
+typedef SLICE_PAGE_REQUEST_TYPE slice_page_request;
+typedef SLICE_INSTANT_TYPE slice_instant;
+
+/* Any variant tags, in fram.types collection order. */
+#define ANY_TAG_BOOL INT64_C(0)
+#define ANY_TAG_I64 INT64_C(1)
+#define ANY_TAG_F64 INT64_C(2)
+#define ANY_TAG_TEXT INT64_C(3)
+#define ANY_TAG_KEYWORD INT64_C(4)
+#define ANY_TAG_NIL INT64_C(5)
+#define ANY_TAG_INSTANT INT64_C(6)
+#define ANY_TAG_TRIPLE INT64_C(7)
+#define ANY_TAG_COMMIT_OPERATION INT64_C(21)
+
+/* Term variant tags, in fram.types collection order. */
+#define TERM_TAG_TEXT INT64_C(0)
+#define TERM_TAG_I64 INT64_C(1)
+#define TERM_TAG_KEYWORD INT64_C(4)
+#define TERM_TAG_TRIPLE INT64_C(6)
+
+/* Arms of a nullable field (Term?): present carries the value, nil does not. */
+#define NULLABLE_TAG_PRESENT INT64_C(0)
+#define NULLABLE_TAG_NIL INT64_C(1)
+
+static slice_any any_reference(int64_t tag, void *target) {
+  slice_any value;
   value.tag = tag;
-  if (tag == INT64_C(6)) {
+  if (tag == ANY_TAG_INSTANT) {
     value.payload.variant_6 = target;
-  } else if (tag == INT64_C(7)) {
+  } else if (tag == ANY_TAG_TRIPLE) {
     value.payload.variant_7 = target;
   } else {
-    value.payload.variant_22 = target;
+    value.payload.variant_21 = target;
   }
   return value;
 }
 
-static native_m0_type_50 any_bool(bool boolean) {
-  native_m0_type_50 value = {
-    .tag = INT64_C(0), .payload = { .variant_0 = boolean }
+static slice_any any_bool(bool boolean) {
+  slice_any value = {
+    .tag = ANY_TAG_BOOL, .payload = { .variant_0 = boolean }
   };
   return value;
 }
 
-static native_m0_type_50 any_i64(int64_t number) {
-  native_m0_type_50 value = {
-    .tag = INT64_C(1), .payload = { .variant_1 = number }
+static slice_any any_i64(int64_t number) {
+  slice_any value = {
+    .tag = ANY_TAG_I64, .payload = { .variant_1 = number }
   };
   return value;
 }
 
-static native_m0_type_50 any_f64(double number) {
-  native_m0_type_50 value = {
-    .tag = INT64_C(2), .payload = { .variant_2 = number }
+static slice_any any_f64(double number) {
+  slice_any value = {
+    .tag = ANY_TAG_F64, .payload = { .variant_2 = number }
   };
   return value;
 }
 
-static native_m0_type_50 any_text(uint64_t handle) {
-  native_m0_type_50 value = {
-    .tag = INT64_C(3), .payload = { .variant_3 = handle }
+static slice_any any_text(uint64_t handle) {
+  slice_any value = {
+    .tag = ANY_TAG_TEXT, .payload = { .variant_3 = handle }
   };
   return value;
 }
 
-static native_m0_type_50 any_keyword(uint64_t keyword) {
-  native_m0_type_50 value = {
-    .tag = INT64_C(4), .payload = { .variant_4 = keyword }
+static slice_any any_keyword(uint64_t keyword) {
+  slice_any value = {
+    .tag = ANY_TAG_KEYWORD, .payload = { .variant_4 = keyword }
   };
   return value;
 }
 
-static native_m0_type_9 keyword_of(native_arena *arena, const char *spelling) {
+static uint64_t keyword_of(native_arena *arena, const char *spelling) {
   uint8_t *bytes = NULL;
   uint64_t length = (uint64_t)strlen(spelling);
-  native_m0_type_9 handle = native_text_alloc(arena, length, &bytes);
+  uint64_t handle = native_text_alloc(arena, length, &bytes);
   if (length != UINT64_C(0)) {
     memcpy(bytes, spelling, (size_t)length);
   }
   return handle;
 }
 
-static native_m0_type_50 any_nil(void) {
-  native_m0_type_50 value = { .tag = INT64_C(5) };
+static slice_any any_nil(void) {
+  slice_any value = { .tag = ANY_TAG_NIL };
   return value;
 }
 
 /* An RpcPageRequest whose cursor is present and carries the given Term. */
-static native_m0_type_72 page_request(native_m0_type_64 cursor) {
-  native_m0_type_72 request;
+static slice_page_request page_request(slice_term cursor) {
+  slice_page_request request;
   request.field_0 = INT64_C(10);
-  request.field_1.tag = INT64_C(0);
+  request.field_1.tag = NULLABLE_TAG_PRESENT;
   request.field_1.payload.variant_0 = cursor;
   return request;
 }
 
-static native_m0_type_64 term_i64(int64_t number) {
-  native_m0_type_64 term;
-  term.tag = INT64_C(1);
+static slice_term term_text(uint64_t handle) {
+  slice_term term;
+  term.tag = TERM_TAG_TEXT;
+  term.payload.variant_0 = handle;
+  return term;
+}
+
+static slice_term term_keyword(uint64_t keyword) {
+  slice_term term;
+  term.tag = TERM_TAG_KEYWORD;
+  term.payload.variant_4 = keyword;
+  return term;
+}
+
+static slice_term term_i64(int64_t number) {
+  slice_term term;
+  term.tag = TERM_TAG_I64;
   term.payload.variant_1 = number;
   return term;
 }
 
-static native_m0_type_64 term_triple(void *target) {
-  native_m0_type_64 term;
-  term.tag = INT64_C(6);
+static slice_term term_triple(void *target) {
+  slice_term term;
+  term.tag = TERM_TAG_TRIPLE;
   term.payload.variant_6 = target;
   return term;
 }
@@ -101,19 +163,19 @@ int main(int argc, char **argv) {
   native_capability capability = { UINT64_C(0) };
   native_arena_init(&arena, storage, sizeof(storage));
 
-  native_m0_type_2 moment = { INT64_C(0), INT64_C(0) };
-  native_m0_type_50 as_instant = any_reference(INT64_C(6), &moment);
-  native_m0_type_50 as_triple = any_reference(INT64_C(7), &moment);
-  native_m0_type_50 as_operation = any_reference(INT64_C(22), &moment);
-  native_m0_type_50 as_number = any_i64(INT64_C(42));
-  native_m0_type_9 custom = keyword_of(&arena, "custom");
-  native_m0_type_9 tx_sequence =
+  slice_instant moment = { INT64_C(0), INT64_C(0) };
+  slice_any as_instant = any_reference(ANY_TAG_INSTANT, &moment);
+  slice_any as_triple = any_reference(ANY_TAG_TRIPLE, &moment);
+  slice_any as_operation = any_reference(ANY_TAG_COMMIT_OPERATION, &moment);
+  slice_any as_number = any_i64(INT64_C(42));
+  uint64_t custom = keyword_of(&arena, "custom");
+  uint64_t tx_sequence =
     keyword_of(&arena, "kernel/tx-sequence");
-  native_m0_type_9 op_ordinal = keyword_of(&arena, "kernel/op-ordinal");
-  native_m0_type_9 asserts = keyword_of(&arena, "kernel/asserts");
-  native_m0_type_9 retracts = keyword_of(&arena, "kernel/retracts");
-  native_m0_type_9 withdraws = keyword_of(&arena, "kernel/withdraws");
-  native_m0_type_9 recorded_at = keyword_of(&arena, "kernel/recorded-at");
+  uint64_t op_ordinal = keyword_of(&arena, "kernel/op-ordinal");
+  uint64_t asserts = keyword_of(&arena, "kernel/asserts");
+  uint64_t retracts = keyword_of(&arena, "kernel/retracts");
+  uint64_t withdraws = keyword_of(&arena, "kernel/withdraws");
+  uint64_t recorded_at = keyword_of(&arena, "kernel/recorded-at");
 
   if ((argc > 1) && (argv[1][0] == 't')) {
     /* nanoseconds outside [0, 1000000000) must trap, never return */
@@ -123,8 +185,8 @@ int main(int argc, char **argv) {
   if ((argc > 1) && (argv[1][0] == 'o')) {
     /* INT64_MAX + 1 must answer the overflow tag, whose arm traps. Returning
        here at all would mean a wrapped value escaped the checked add. */
-    native_m0_type_2 edge = { INT64_MAX, INT64_C(0) };
-    native_m0_type_2 escaped = native_m0_fn_2(edge, INT64_C(1));
+    slice_instant edge = { INT64_MAX, INT64_C(0) };
+    slice_instant escaped = native_m0_fn_2(edge, INT64_C(1));
     return (escaped.field_0 == INT64_MIN) ? 10 : 11;
   }
 
@@ -147,22 +209,22 @@ int main(int argc, char **argv) {
     return 6;
   }
 
-  native_m0_type_2 built = native_m0_fn_1(INT64_C(-5), INT64_C(999999999));
+  slice_instant built = native_m0_fn_1(INT64_C(-5), INT64_C(999999999));
   if ((built.field_0 != INT64_C(-5)) || (built.field_1 != INT64_C(999999999))) {
     return 7;
   }
-  native_m0_type_2 zero = native_m0_fn_1(INT64_C(0), INT64_C(0));
+  slice_instant zero = native_m0_fn_1(INT64_C(0), INT64_C(0));
   if ((zero.field_0 != INT64_C(0)) || (zero.field_1 != INT64_C(0))) {
     return 8;
   }
 
   /* checked add: the ok arm carries the exact sum and leaves nanos alone */
-  native_m0_type_2 shifted = native_m0_fn_2(built, INT64_C(90));
+  slice_instant shifted = native_m0_fn_2(built, INT64_C(90));
   if ((shifted.field_0 != INT64_C(85)) ||
       (shifted.field_1 != INT64_C(999999999))) {
     return 12;
   }
-  native_m0_type_2 back = native_m0_fn_2(shifted, INT64_C(-90));
+  slice_instant back = native_m0_fn_2(shifted, INT64_C(-90));
   if (back.field_0 != INT64_C(-5)) {
     return 13;
   }
@@ -178,42 +240,42 @@ int main(int argc, char **argv) {
   /* the tag decision sits exactly on the overflow boundary: one below INT64_MAX
      still takes the ok arm, and the "overflow" probe shows INT64_MAX + 1 does
      not. A wrapping add would have answered ok on both. */
-  native_m0_type_2 near = { INT64_MAX - INT64_C(1), INT64_C(0) };
-  native_m0_type_2 edge = native_m0_fn_2(near, INT64_C(1));
+  slice_instant near = { INT64_MAX - INT64_C(1), INT64_C(0) };
+  slice_instant edge = native_m0_fn_2(near, INT64_C(1));
   if (edge.field_0 != INT64_MAX) {
     return 16;
   }
 
   /* Term? -> Any widening preserves each payload and maps absence to nil. */
   {
-    native_m0_type_50 widened =
+    slice_any widened =
       native_m0_fn_11(page_request(term_i64(INT64_C(77))));
-    if ((widened.tag != INT64_C(1)) ||
+    if ((widened.tag != ANY_TAG_I64) ||
         (widened.payload.variant_1 != INT64_C(77))) {
       return 17;
     }
   }
   {
-    native_m0_type_50 widened =
+    slice_any widened =
       native_m0_fn_11(page_request(term_triple(&moment)));
-    if ((widened.tag != INT64_C(7)) ||
+    if ((widened.tag != ANY_TAG_TRIPLE) ||
         (widened.payload.variant_7 != &moment)) {
       return 18;
     }
   }
   {
-    native_m0_type_72 absent;
+    slice_page_request absent;
     absent.field_0 = INT64_C(10);
-    absent.field_1.tag = INT64_C(1);
-    absent.field_1.payload.variant_1.tag = INT64_C(0);
-    native_m0_type_50 widened = native_m0_fn_11(absent);
-    if (widened.tag != INT64_C(5)) {
+    absent.field_1.tag = NULLABLE_TAG_NIL;
+    absent.field_1.payload.variant_1.tag = INT64_C(0); /* the sole Nil arm */
+    slice_any widened = native_m0_fn_11(absent);
+    if (widened.tag != ANY_TAG_NIL) {
       return 19;
     }
   }
 
   uint8_t *space_bytes = NULL;
-  native_m0_type_8 space = native_text_alloc(&arena, UINT64_C(5), &space_bytes);
+  uint64_t space = native_text_alloc(&arena, UINT64_C(5), &space_bytes);
   memcpy(space_bytes, "space", 5);
 
   /* The nested predicate tree distinguishes every scalar tag without
@@ -230,83 +292,84 @@ int main(int argc, char **argv) {
     return 21;
   }
 
-  /* Constructing a recursive Term boxes the by-value Triple into the arena. */
-  native_m0_type_51 scalar_triple = native_m0_fn_21(
-    &arena, &capability, any_text(space), any_keyword(custom),
-    any_i64(INT64_C(2)));
-  native_m0_type_50 scalar_triple_ref =
-    any_reference(INT64_C(7), &scalar_triple);
+  /* Constructing a recursive Term boxes the by-value Triple into the arena.
+     triple takes t1/t2/t3 as Term and widens each slot into the Triple's Any. */
+  slice_triple scalar_triple = native_m0_fn_21(
+    &arena, &capability, term_text(space), term_keyword(custom),
+    term_i64(INT64_C(2)));
+  slice_any scalar_triple_ref =
+    any_reference(ANY_TAG_TRIPLE, &scalar_triple);
   if (!native_m0_fn_20(scalar_triple_ref)) {
     return 22;
   }
-  native_m0_type_51 invalid_term = {
+  slice_triple invalid_term = {
     any_nil(), any_i64(INT64_C(1)), any_i64(INT64_C(2))
   };
-  if (native_m0_fn_20(any_reference(INT64_C(7), &invalid_term))) {
+  if (native_m0_fn_20(any_reference(ANY_TAG_TRIPLE, &invalid_term))) {
     return 23;
   }
 
   /* Boundary coercion wraps text, keyword, and integer values into Any; the
      predicate then checks and extracts them before comparing. */
-  native_m0_type_51 tx =
+  slice_triple tx =
     native_m0_fn_22(&arena, &capability, space, INT64_C(9));
-  if ((tx.field_0.tag != INT64_C(3)) ||
+  if ((tx.field_0.tag != ANY_TAG_TEXT) ||
       (tx.field_0.payload.variant_3 != space) ||
-      (tx.field_1.tag != INT64_C(4)) ||
+      (tx.field_1.tag != ANY_TAG_KEYWORD) ||
       (tx.field_1.payload.variant_4 == tx_sequence) ||
       !native_text_eq(tx.field_1.payload.variant_4, tx_sequence) ||
-      (tx.field_2.tag != INT64_C(1)) ||
+      (tx.field_2.tag != ANY_TAG_I64) ||
       (tx.field_2.payload.variant_1 != INT64_C(9)) ||
-      !native_m0_fn_23(any_reference(INT64_C(7), &tx))) {
+      !native_m0_fn_23(any_reference(ANY_TAG_TRIPLE, &tx))) {
     return 24;
   }
-  native_m0_type_51 dynamic_tx_predicate = tx;
+  slice_triple dynamic_tx_predicate = tx;
   dynamic_tx_predicate.field_1 = any_keyword(tx_sequence);
-  if (!native_m0_fn_23(any_reference(INT64_C(7), &dynamic_tx_predicate))) {
+  if (!native_m0_fn_23(any_reference(ANY_TAG_TRIPLE, &dynamic_tx_predicate))) {
     return 25;
   }
-  native_m0_type_51 wrong_predicate = tx;
+  slice_triple wrong_predicate = tx;
   wrong_predicate.field_1 = any_keyword(custom);
-  if (native_m0_fn_23(any_reference(INT64_C(7), &wrong_predicate))) {
+  if (native_m0_fn_23(any_reference(ANY_TAG_TRIPLE, &wrong_predicate))) {
     return 26;
   }
 
   /* Passing a direct Triple where Any is required emits an arena-owned box. */
-  native_m0_type_51 occurrence =
+  slice_triple occurrence =
     native_m0_fn_24(&arena, &capability, tx, INT64_C(3));
-  if ((occurrence.field_0.tag != INT64_C(7)) ||
+  if ((occurrence.field_0.tag != ANY_TAG_TRIPLE) ||
       (occurrence.field_0.payload.variant_7 == NULL) ||
-      (occurrence.field_1.tag != INT64_C(4)) ||
+      (occurrence.field_1.tag != ANY_TAG_KEYWORD) ||
       (occurrence.field_1.payload.variant_4 == op_ordinal) ||
       !native_text_eq(occurrence.field_1.payload.variant_4, op_ordinal) ||
-      (occurrence.field_2.tag != INT64_C(1)) ||
+      (occurrence.field_2.tag != ANY_TAG_I64) ||
       (occurrence.field_2.payload.variant_1 != INT64_C(3)) ||
-      !native_m0_fn_25(any_reference(INT64_C(7), &occurrence))) {
+      !native_m0_fn_25(any_reference(ANY_TAG_TRIPLE, &occurrence))) {
     return 27;
   }
-  native_m0_type_51 dynamic_occurrence_predicate = occurrence;
+  slice_triple dynamic_occurrence_predicate = occurrence;
   dynamic_occurrence_predicate.field_1 = any_keyword(op_ordinal);
   if (!native_m0_fn_25(
-        any_reference(INT64_C(7), &dynamic_occurrence_predicate))) {
+        any_reference(ANY_TAG_TRIPLE, &dynamic_occurrence_predicate))) {
     return 28;
   }
-  native_m0_type_51 *boxed_tx = occurrence.field_0.payload.variant_7;
-  if ((boxed_tx->field_0.tag != INT64_C(3)) ||
+  slice_triple *boxed_tx = occurrence.field_0.payload.variant_7;
+  if ((boxed_tx->field_0.tag != ANY_TAG_TEXT) ||
       (boxed_tx->field_0.payload.variant_3 != space)) {
     return 29;
   }
 
   /* The remaining constructors retain their predicate keyword and box each
      record-valued slot with the same arena ownership. */
-  native_m0_type_51 assertion =
+  slice_triple assertion =
     native_m0_fn_26(&arena, &capability, occurrence, tx);
-  native_m0_type_51 retraction =
+  slice_triple retraction =
     native_m0_fn_27(&arena, &capability, occurrence, tx);
-  native_m0_type_51 later =
+  slice_triple later =
     native_m0_fn_24(&arena, &capability, tx, INT64_C(4));
-  native_m0_type_51 withdrawal =
+  slice_triple withdrawal =
     native_m0_fn_28(&arena, &capability, occurrence, later);
-  native_m0_type_51 recorded =
+  slice_triple recorded =
     native_m0_fn_29(&arena, &capability, tx, moment);
   if (!native_text_eq(assertion.field_1.payload.variant_4, asserts) ||
       !native_text_eq(retraction.field_1.payload.variant_4, retracts) ||

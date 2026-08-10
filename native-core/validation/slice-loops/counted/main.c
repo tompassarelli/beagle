@@ -3,6 +3,12 @@
    fn_4 scan-six. Every function is checked on its zero/empty input. */
 #include "module_0.h"
 
+#ifndef COUNTED_PAIR_TYPE
+#error "COUNTED_PAIR_TYPE must name the generated scan-six pair type"
+#endif
+
+typedef COUNTED_PAIR_TYPE counted_pair;
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
@@ -47,9 +53,9 @@ int main(int argc, char **argv) {
   }
 
   {
-    native_m0_type_2 empty = native_m0_fn_4(INT64_C(0), INT64_C(0));
-    native_m0_type_2 split = native_m0_fn_4(INT64_C(10), INT64_C(4));
-    native_m0_type_2 all_missed = native_m0_fn_4(INT64_C(5), INT64_C(9));
+    counted_pair empty = native_m0_fn_4(INT64_C(0), INT64_C(0));
+    counted_pair split = native_m0_fn_4(INT64_C(10), INT64_C(4));
+    counted_pair all_missed = native_m0_fn_4(INT64_C(5), INT64_C(9));
     if ((empty.field_0 != INT64_C(0)) || (empty.field_1 != INT64_C(0))) {
       return 13;
     }

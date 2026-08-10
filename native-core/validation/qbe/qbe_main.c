@@ -3,8 +3,13 @@
 
 int64_t native_m0_fn_0(native_arena *arena, const native_capability *capability,
                        int64_t left, int64_t right);
+int64_t native_m1_fn_3(int64_t left, int64_t right, int64_t distance);
 native_vec *native_m2_fn_0(native_arena *arena, const native_capability *capability,
                            const native_vec *left, const native_vec *right);
+native_vec *native_m2_fn_1(native_arena *arena, const native_capability *capability,
+                           const native_vec *source);
+native_vec *native_m2_fn_2(native_arena *arena, const native_capability *capability,
+                           const native_vec *source, int64_t start, int64_t end);
 
 int main(void) {
   uint8_t storage[256];
@@ -18,6 +23,9 @@ int main(void) {
   *slot = native_m0_fn_0(&arena, &capability, INT64_C(-1), INT64_C(1));
   if (*slot != INT64_C(0)) {
     return 2;
+  }
+  if (native_m1_fn_3(INT64_C(240), INT64_C(90), INT64_C(1)) != INT64_C(432)) {
+    return 6;
   }
   native_arena_reset(&arena);
   int64_t left_items[] = { INT64_C(3), INT64_C(5) };
@@ -36,6 +44,16 @@ int main(void) {
   }
   if ((left.length != INT64_C(2)) || (right.length != INT64_C(3))) {
     return 5;
+  }
+  native_vec *reversed = native_m2_fn_1(&arena, &capability, joined);
+  native_vec *middle = native_m2_fn_2(&arena, &capability, joined, INT64_C(1), INT64_C(4));
+  const int64_t reverse_expected[] = { INT64_C(21), INT64_C(13), INT64_C(8),
+                                       INT64_C(5), INT64_C(3) };
+  const int64_t middle_expected[] = { INT64_C(5), INT64_C(8), INT64_C(13) };
+  if ((reversed->length != INT64_C(5)) || (middle->length != INT64_C(3))
+      || (memcmp(reversed->elements, reverse_expected, sizeof(reverse_expected)) != 0)
+      || (memcmp(middle->elements, middle_expected, sizeof(middle_expected)) != 0)) {
+    return 7;
   }
   native_arena_reset(&arena);
   return 0;

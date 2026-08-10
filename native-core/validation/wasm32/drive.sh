@@ -8,8 +8,11 @@
 # shim when a descriptor size disagrees with sizeof(void *). It stands in for
 # slice-rt-core, which cannot run here without per-ABI goldens and a wasm
 # managed-oracle comparison.
-# Toolchain: BEAGLE_WASI_CC (or WASI_CC), WASMTIME, and wasm-ld on PATH (the
-# clang wrapper spawns it by bare name); absence is a hard failure.
+# Toolchain, declared: BEAGLE_WASI_CC (or WASI_CC), WASMTIME, and wasm-ld on
+# PATH (the clang wrapper spawns it by bare name). None of the three ships with
+# the repo or its flake, so their absence is a named SKIP at exit 0 — a machine
+# without a wasm32 cross toolchain has nothing to say about the wasm32 ABI. Any
+# failure AFTER the toolchain is in hand stays a hard failure.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,12 +26,19 @@ die() {
   exit 1
 }
 
+skip() {
+  echo "SKIP: wasm32: $*"
+  exit 0
+}
+
 cc="${BEAGLE_WASI_CC:-${WASI_CC:-}}"
 [[ -n "$cc" && -x "$cc" ]] \
-  || die "no wasm32-wasi clang: set BEAGLE_WASI_CC (or WASI_CC) to an executable"
+  || skip "no wasm32-wasi clang; set BEAGLE_WASI_CC (or WASI_CC) to an executable"
 wasmtime="${WASMTIME:-$(command -v wasmtime || true)}"
 [[ -n "$wasmtime" && -x "$wasmtime" ]] \
-  || die "no wasmtime: set WASMTIME to an executable"
+  || skip "no wasmtime; set WASMTIME to an executable"
+command -v wasm-ld >/dev/null 2>&1 \
+  || skip "no wasm-ld on PATH; the wasi clang wrapper spawns it by bare name"
 for command in bb cmp sha256sum; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"

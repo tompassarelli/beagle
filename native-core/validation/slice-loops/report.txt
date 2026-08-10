@@ -18,7 +18,7 @@ lowered fn_7 bounded-min 4 blocks
 lowered fn_8 bounded-min-three 7 blocks
 lowered fn_9 bounded-max 4 blocks
 lowered fn_10 settle-do 5 blocks
-lowered fn_11 settle-cond 7 blocks
+lowered fn_11 settle-cond 8 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

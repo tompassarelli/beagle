@@ -1,8 +1,8 @@
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
-program-types 71
-program-layouts 71
+program-types 69
+program-layouts 69
 program-functions 0
 program-abis 0
 projected-types 5

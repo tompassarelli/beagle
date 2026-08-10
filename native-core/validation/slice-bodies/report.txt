@@ -2,11 +2,11 @@ stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
-source-imports 0
-program-types 76
+source-imports 1
+program-types 74
 program-functions 31
 program-abis 31
-projected-types 74
+projected-types 72
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
 lowered fn_2 instant-shift-seconds 3 blocks
@@ -28,7 +28,7 @@ lowered fn_17 transaction-frame? 4 blocks
 lowered fn_18 term-store-dump? 4 blocks
 lowered fn_19 atom? 49 blocks
 lowered fn_20 term? 14 blocks
-lowered fn_21 triple 4 blocks
+lowered fn_21 triple 28 blocks
 lowered fn_22 transaction-coordinate 7 blocks
 lowered fn_23 transaction-coordinate? 35 blocks
 lowered fn_24 occurrence-coordinate 7 blocks

@@ -64,20 +64,31 @@ emit_slice() {
   fi
 }
 
+# A probe main must never spell a generated type by its ordinal: the emitter
+# numbers the type table in collection order, so an unrelated lowering change
+# renumbers it. Read the ordinal back out of the emitted header instead, the
+# same way validation/wasm32 resolves slice-union's types.
+return_type_of() { # return_type_of <header> <fn-index>
+  local header="$1" index="$2" name
+  name="$(sed -nE "s/^(native_m0_type_[0-9]+) native_m0_fn_$index\(.*/\1/p" "$header")"
+  [ -n "$name" ] || { echo "drive.sh: no return type for fn_$index in $header" >&2; exit 1; }
+  printf '%s\n' "$name"
+}
+
 compile_and_run() {
-  local art="$1" label="$2"
+  local art="$1" label="$2"; shift 2
   local build="$scratch/c-$label"
   mkdir -p "$build"
   cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
   cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
-  ( cd "$build" && gcc -std=c17 -pedantic -Wall -Wextra -Werror \
+  ( cd "$build" && gcc -std=c17 -pedantic -Wall -Wextra -Werror "$@" \
       -o probe_gcc module_0.c native_shim.c main.c )
   ( cd "$build" && ./probe_gcc )
   echo "drive.sh: $label gcc $(gcc -dumpversion) strict compile + run ok"
   local clang_bin
   clang_bin="$(command -v clang 2>/dev/null || ls -d /nix/store/*-clang-wrapper-*/bin/clang 2>/dev/null | sort -V | tail -1)"
   if [ -n "$clang_bin" ]; then
-    ( cd "$build" && "$clang_bin" -std=c17 -Werror -o probe_clang module_0.c native_shim.c main.c )
+    ( cd "$build" && "$clang_bin" -std=c17 -Werror "$@" -o probe_clang module_0.c native_shim.c main.c )
     ( cd "$build" && ./probe_clang )
     echo "drive.sh: $label clang $("$clang_bin" -dumpversion) compile + run ok"
   else
@@ -125,4 +136,5 @@ if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
 fi
 
 compile_and_run "$here" loops
-compile_and_run "$here/counted" counted
+compile_and_run "$here/counted" counted \
+  "-DCOUNTED_PAIR_TYPE=$(return_type_of "$here/counted/module_0.h" 4)"
