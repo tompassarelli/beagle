@@ -169,6 +169,32 @@ rc11b=$?
 [[ $rc11b -eq 0 && "$out11b" == *"sanitized ok"* && "$out11b" != *cached-green* && "$out11b" != *untraceable* ]]
 check "flagged identity runs direct thereafter (uncached, single run)" $?
 
+# t12: an ENOENT probe whose path contains `..` must be recorded as spelled.
+# gcc probes /lib/../lib64: absent because /lib is missing, yet it collapses
+# lexically onto /lib64, which exists. Storing the collapsed path asserts an
+# absence that never held, and the entry can never be replayed.
+mkdir -p "$sandbox/real"
+cat > "$sandbox/dotdot.sh" <<'EOF'
+#!/usr/bin/env bash
+d="$(cd "$(dirname "$0")" && pwd)"
+[ -e "$d/gone/../real" ] && echo "probe resolved" || echo "probe absent"
+echo "dotdot ok"
+EOF
+chmod +x "$sandbox/dotdot.sh"
+dotdot() { "$WRAP" --domain test --id dotdot --watch "$sandbox" -- "$sandbox/dotdot.sh" 2>&1; }
+out12="$(dotdot)"
+[[ "$out12" == *"probe absent"* && "$out12" != *cached-green* ]]
+check "\`..\` probe: cold run records the absent path" $?
+out12b="$(dotdot)"
+[[ "$out12b" == *cached-green* ]]
+check "\`..\` probe does not poison the entry (replays cached-green)" $?
+
+# t13: and it is still a live assertion — making the probe resolve invalidates.
+mkdir -p "$sandbox/gone"
+out13="$(dotdot)"
+[[ "$out13" != *cached-green* && "$out13" == *"probe resolved"* ]]
+check "\`..\` probe becoming resolvable invalidates" $?
+
 echo
 if [[ $failures -gt 0 ]]; then
     echo "gate-cache tests: $failures FAILED"

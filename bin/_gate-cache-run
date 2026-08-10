@@ -26,11 +26,16 @@
 #   files.sha256    content hash per file (post-run state)  -> re-hash equal
 #   links.list      symlink -> fully-resolved target        -> same resolution
 #   dirs.digest     one digest over every listed directory  -> same listings
-#   absent.list     paths probed and not found              -> still absent
+#   absent.list     paths probed and not found (as spelled) -> still absent
 #   nixpaths.list   /nix/store inputs (immutable by path)   -> still present
 #
-# Paths are stored repo-relative (%R%) and home-relative (%H%) so a worktree
-# and its main checkout share entries, exactly like bin/beagle-build-core.
+# Paths are stored repo-relative (%R%) and home-relative (%H%), so an entry
+# survives its checkout being moved or renamed. It does NOT make two checkouts
+# share proofs: identity pins the launch cwd, deliberately. A closure records
+# the absolute paths a run touched, and relative paths in that run resolve
+# against the launch cwd — so dropping cwd from identity would let a proof
+# earned in one directory be replayed in another whose same-named relative
+# inputs differ. That is a false green; a cold worktree is only a slow one.
 # Scratch (the run's private TMPDIR, /tmp, /proc, /sys, /dev, caches) is
 # excluded; an explicit --watch root is exempt from those exclusions so tests
 # can sandbox the mechanism under /tmp.
@@ -362,15 +367,26 @@ awk -F'\t' '
 ' "$scratch/records.raw" > "$scratch/records.agg"
 
 # Lexical cleanup only (realpath -s never follows symlinks: a final-component
-# symlink must keep its own identity so a repoint invalidates). On any count
-# mismatch fall back to the uncleaned paths.
-cut -f2 "$scratch/records.agg" > "$scratch/records.p"
+# symlink must keep its own identity so a repoint invalidates), and never for
+# class A. A `..` component is resolvable only by the kernel: gcc probes
+# `/lib/../lib64`, which is ENOENT here because `/lib` is missing, and
+# collapsing it to `/lib64` — which exists — would store an assertion the run
+# never made and no revalidation could ever satisfy. An absent record therefore
+# keeps the spelling that was actually probed; `[[ -e ]]` re-probes it the same
+# way the run did, so a newly appearing intermediate component still
+# invalidates. On any count mismatch fall back to the uncleaned paths.
+: > "$scratch/records.absent"
+awk -F'\t' -v keep="$scratch/records.absent" \
+    '$1 == "A" { print > keep; next } { print }' \
+    "$scratch/records.agg" > "$scratch/records.present"
+cut -f2 "$scratch/records.present" > "$scratch/records.p"
 if xargs -r -d '\n' realpath -smq -- < "$scratch/records.p" > "$scratch/records.norm" 2>/dev/null &&
    [[ "$(wc -l < "$scratch/records.norm")" == "$(wc -l < "$scratch/records.p")" ]]; then
-    paste "$scratch/records.agg" "$scratch/records.norm" | cut -f1,3 > "$scratch/records"
+    paste "$scratch/records.present" "$scratch/records.norm" | cut -f1,3 > "$scratch/records"
 else
-    cp "$scratch/records.agg" "$scratch/records"
+    cp "$scratch/records.present" "$scratch/records"
 fi
+cat "$scratch/records.absent" >> "$scratch/records"
 
 # ~/.clojure/.cpcache is the Clojure CLI's derived classpath cache: its file
 # names hash the classpath STRING, which embeds this run's temp dirs, so the
