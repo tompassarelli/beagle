@@ -359,7 +359,7 @@
   (= node "call") (let [fn-expr (get e "fn")
    args (get e "args")]
   (if (= (get fn-expr "node") "ref") (let [fname (get fn-expr "name")]
-  (if (and (contains? (deref scalar-fns) fname) (= 1 (count args))) (emit-expr* (nth args 0)) (str "(" fname (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
+  (if (and (= 1 (count args)) (or (contains? (deref scalar-fns) fname) (= "bgl/promote" fname))) (emit-expr* (nth args 0)) (str "(" fname (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
   (= node "vec") (str "[" (str/join " " (mapv emit-expr* (get e "items"))) "]")
   (= node "map") (let [strs (mapv (fn [p] (str (emit-expr* (get p "key")) " " (emit-expr* (get p "val")))) (get e "pairs"))]
   (str "{" (str/join " " strs) "}"))

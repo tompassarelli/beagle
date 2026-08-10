@@ -904,6 +904,7 @@
   (if (= (get fn-expr "node") "ref") (let [fname (get fn-expr "name")]
   (cond
   (and (contains? (deref scalar-fns) fname) (= 1 n)) (emit-expr* (nth args 0))
+  (and (= "bgl/promote" fname) (= 1 n)) (emit-expr* (nth args 0))
   (and (or (= fname "=") (= fname "==")) (>= n 2)) (str "(" (emit-eq-pairs args) ")")
   (and (= fname "not=") (>= n 2)) (str "(!(" (emit-eq-pairs args) "))")
   (and (js-infix? fname) (>= n 2)) (str "(" (str/join (str " " (get JS-INFIX-OPS fname) " ") (mapv emit-expr* args)) ")")

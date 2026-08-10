@@ -1,0 +1,31 @@
+#lang beagle/clj
+(ns native.promote-hosted)
+
+(define-mode strict)
+
+;; The Core probe's bodies in the hosted dialect. A hosted target has one
+;; GC-owned heap and no epochs, so promotion is identity: the value that comes
+;; out is the value that went in, and the host owns its memory. The driver
+;; proves that twice — by running these, and by erasing every promotion from
+;; this file and comparing the emitted Clojure byte for byte.
+
+(defn promoted-text [tail: String] -> String
+  (bgl/promote (str "epoch" tail)))
+
+(defn promoted-count [n: Int] -> Int
+  (bgl/promote (+ n 1)))
+
+(defn promoted-parameter [tail: String] -> String
+  (bgl/promote tail))
+
+;; The claim in one expression: promotion in a hosted dialect does not copy,
+;; because there is nothing for the copy to outlive.
+(defn same-object? [] -> Bool
+  (let [value: (Vec Int) [1 2 3]]
+    (identical? value (bgl/promote value))))
+
+(defn report [] -> String
+  (str (promoted-text "-tail") " "
+    (promoted-count 41) " "
+    (promoted-parameter "-tail") " "
+    (same-object?)))

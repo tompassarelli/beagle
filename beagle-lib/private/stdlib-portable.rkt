@@ -146,6 +146,14 @@
    ;; --- identity / value ---------------------------------------------------
    'identity   (poly-fn '(A) (list (tv 'A)) (tv 'A))
    'constantly (fn-of '(Any) 'Any)
+   ;; --- memory model -------------------------------------------------------
+   ;; `bgl/promote` copies a value into the enclosing epoch's arena, so it
+   ;; outlives the epoch it was allocated in. The type is identity: promotion
+   ;; changes a value's lifetime, never its type. Every target renders it —
+   ;; Core as a descriptor-driven copy, every GC-hosted target as the identity
+   ;; the host heap already gives it. `bgl/` because it is a Beagle original
+   ;; with no Clojure namesake and no single owning target.
+   'bgl/promote (poly-fn '(A) (list (tv 'A)) (tv 'A))
    ;; --- sequence generators / iteration ------------------------------------
    'range      (fn-of '() 'Any #:rest 'Any)    ; (range), (range n), (range a b), (range a b step)
    'repeat     (fn-of '(Any) 'Any #:rest 'Any) ; (repeat x), (repeat n x)

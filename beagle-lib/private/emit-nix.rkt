@@ -879,6 +879,12 @@
 
   ;; Core stdlib translations
   (cond
+    ;; `bgl/promote` copies a value into an older epoch's arena. Nix has one
+    ;; GC-owned heap and no epochs, so the value already outlives every scope
+    ;; that could name it: the form erases.
+    [(and fn-name (eq? fn-name 'bgl/promote) (= (length args) 1))
+     (emit-expr (car args) depth)]
+
     ;; Unary not → !
     [(and fn-name (eq? fn-name 'not) (= (length args) 1))
      (format "!~a" (paren-wrap (emit-expr (car args) depth) (car args)))]

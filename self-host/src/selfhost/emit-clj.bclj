@@ -642,7 +642,12 @@
               args (get e "args")]
           (if (= (get fn-expr "node") "ref")
             (let [fname (get fn-expr "name")]
-              (if (and (contains? (deref scalar-fns) fname) (= 1 (count args)))
+              ;; bgl/promote erases here for the same reason a scalar
+              ;; constructor does: the hosted heap already outlives every
+              ;; epoch the form could name.
+              (if (and (= 1 (count args))
+                    (or (contains? (deref scalar-fns) fname)
+                      (= "bgl/promote" fname)))
                 (emit-expr* (nth args 0))
                 (str "(" fname (emit-args args) ")")))
             (str "(" (emit-expr* fn-expr) (emit-args args) ")")))

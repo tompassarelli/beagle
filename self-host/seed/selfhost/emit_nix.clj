@@ -329,6 +329,7 @@
    pw (fn [a] (paren-wrap (emit-expr* a depth) a))
    E (fn [a] (emit-expr* a depth))]
   (cond
+  (and (some? fname) (= fname "bgl/promote") (= n 1)) (E (nth args 0))
   (and (some? fname) (= fname "not") (= n 1)) (str "!" (pw (nth args 0)))
   (and (some? fname) (= fname "mod") (= n 2)) (let [a (E (nth args 0))
    b (E (nth args 1))]

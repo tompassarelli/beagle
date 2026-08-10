@@ -484,6 +484,9 @@
                                                                                                                            [a: Any] -> String (paren-wrap (emit-expr* a depth) a)) E: Any (fn
                                                                                                                                                                                             [a: Any] -> String (emit-expr* a depth))]
     (cond
+      ;; bgl/promote erases: the Nix heap already outlives every epoch.
+      (and (some? fname) (= fname "bgl/promote") (= n 1))
+      (E (nth args 0))
       (and (some? fname) (= fname "not") (= n 1))
       (str "!" (pw (nth args 0)))
       (and (some? fname) (= fname "mod") (= n 2))

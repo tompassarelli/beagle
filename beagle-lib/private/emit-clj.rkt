@@ -801,6 +801,13 @@ CLJ
        [(and (set-member? (current-emit-scalar-fns) fn-sym)
              (= 1 (length (call-form-args e))))
         (emit-expr (car (call-form-args e)))]
+       ;; `bgl/promote` copies a value into an older epoch's arena. A hosted
+       ;; target has one GC-owned heap and no epochs, so the value already
+       ;; outlives every scope that could name it: the form erases, the same
+       ;; way a type annotation does.
+       [(and (eq? fn-sym 'bgl/promote)
+             (= 1 (length (call-form-args e))))
+        (emit-expr (car (call-form-args e)))]
        [(and (eq? fn-sym 'sha256-bytes)
              (= 1 (length (call-form-args e)))
              (not (set-member? (current-emit-local-names) fn-sym)))

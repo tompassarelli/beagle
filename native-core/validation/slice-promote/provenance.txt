@@ -1,0 +1,23 @@
+promote_probe.bgl   driver INPUT: the Beagle Core source the whole slice is
+                    about. Four functions, one surface question each.
+promote_hosted.bclj driver INPUT: the same bodies in the hosted dialect, where
+                    promotion is identity.
+erase-promote.clj   driver INPUT: rewrites `(bgl/promote EXPR)` to `EXPR`
+                    paren-matched and line-preserving, so the hosted emission
+                    can be compared byte for byte against the form-free twin.
+main.c              hand-written driver INPUT, not an output: it reads the
+                    promoted Text after the call destroyed the epoch that Text
+                    was built in, which is the only place a test can see
+                    whether promote copied.
+module_0.h/.c       native.body-c17 over promote_probe.bgl's frozen native
+                    program after lower/epoch-derived-stage: promoted-text gets
+                    a minted epoch, its promote survives, and the promotes in
+                    promoted-count and promoted-parameter are plain copies.
+module_1.h/.c       the SAME program after lower/epoch-identity-stage: nothing
+                    is younger than the root, so every promote collapsed and no
+                    epoch was minted.
+report.txt          the instruction census the no-op rewrite is claimed in —
+                    promote counts before and after the stage, per function —
+                    plus the nine obligations under both assignments.
+determinism         two independent emitter runs compared byte-for-byte inside
+                    drive.sh before anything is copied into this directory.

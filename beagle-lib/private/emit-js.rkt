@@ -2136,6 +2136,11 @@
        [(and (set-member? (current-js-scalar-fns) fn-sym)
              (= 1 (length args)))
         (emit-expr (car args))]
+       ;; `bgl/promote` copies a value into an older epoch's arena. JS has one
+       ;; GC-owned heap and no epochs, so the value already outlives every
+       ;; scope that could name it: the form erases.
+       [(and (eq? fn-sym 'bgl/promote) (= 1 (length args)))
+        (emit-expr (car args))]
        ;; Value-equality family routes to the runtime $$bc$equiv (Clojure =
        ;; semantics: structural, recursive over vectors/sets/maps/records).
        ;; `identical?` deliberately does NOT come here — it is reference

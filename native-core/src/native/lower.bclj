@@ -4069,6 +4069,72 @@
 (defn comparable-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (comparable-type-inner? types target []))
 
+;; The domain native_value_promote's descriptor walk can copy: scalars, text,
+;; bytes, keywords, and any acyclic composition of them through records,
+;; unions, outcomes, vectors and references. Maps, sets, atom cells, callables
+;; and recursive types are refused HERE, where the compiler still has the type
+;; to name in a diagnostic — the runtime walk has no map case and no depth
+;; bound, and a trap is not a diagnostic.
+(defn promote-domain-type-inner?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId
+   visiting: (Vec core/NativeId)] -> Bool
+  (if (core/id-in? visiting target)
+    false
+    (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+      (if (nil? definition)
+        false
+        (let [shape: core/TypeShape (core/typedef-shape definition)
+              next: (Vec core/NativeId) (conj visiting target)]
+          (cond
+            (instance? native.core.AtomType shape)
+            (let [kind: core/AtomKind (core/atomtype-kind shape)]
+              (or (instance? native.core.BoolKind kind)
+                (instance? native.core.I64Kind kind)
+                (instance? native.core.F64Kind kind)
+                (instance? native.core.TextKind kind)
+                (instance? native.core.BytesKind kind)
+                (instance? native.core.KeywordKind kind)))
+
+            (instance? native.core.RecordType shape)
+            (every?
+              (fn [field: core/TypeField] -> Bool
+                (promote-domain-type-inner? types
+                  (core/typefield-type-id field) next))
+              (core/recordtype-fields shape))
+
+            (instance? native.core.UnionType shape)
+            (every?
+              (fn [variant: core/TypeVariant] -> Bool
+                (let [payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (nil? payload)
+                    true
+                    (promote-domain-type-inner? types payload next))))
+              (core/uniontype-variants shape))
+
+            (instance? native.core.OutcomeType shape)
+            (and
+              (promote-domain-type-inner? types
+                (core/outcometype-value-type shape) next)
+              (promote-domain-type-inner? types
+                (core/outcometype-failure-type shape) next))
+
+            (instance? native.core.VectorType shape)
+            (promote-domain-type-inner? types
+              (core/vectortype-element-type shape) next)
+
+            (instance? native.core.ReferenceType shape)
+            (promote-domain-type-inner? types
+              (core/referencetype-target-type shape) next)
+
+            :else false))))))
+
+(defn promote-domain-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (promote-domain-type-inner? types target []))
+
 ;; The vector TypeDef for an element type exists only when some annotation in
 ;; the module named (Vec T); a literal cannot mint one, so it looks one up.
 (defn vector-type-of
@@ -4260,6 +4326,11 @@
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)
       (instance? native.core.ValueToTextInstructionV0 instruction)
+      ;; A promote's copy is an allocation into its destination arena: the
+      ;; function must declare the allocate effect and acquire an arena for
+      ;; it, and rule E3 must count it against a caller handing this frame an
+      ;; epoch it will destroy.
+      (instance? native.core.PromoteInstructionV0 instruction)
       (and (instance? native.core.CodecPrimitiveInstructionV0 instruction)
         (let [operation: core/CodecPrimitiveOpV0
               (core/codecprimitiveinstructionv0-operation instruction)]
@@ -12114,6 +12185,47 @@
                 (fail-result current
                   "TODO-NATIVE-BYTES-OPERANDS: native.bytes/from-ints-bounded takes a native Vec Int and an Int byte bound")
 
+                ;; `bgl/promote` — this value must outlive the epoch it was
+                ;; allocated in. A value that owns no arena storage is already
+                ;; as old as anything that can name it, so the promotion is a
+                ;; register move and the instruction never reaches an emitter.
+                (and (= "bgl/promote" callee) (= 1 (count values))
+                  (not (obligations/type-carries-handles? types
+                         (nth value-types 0))))
+                (let [result-id: core/NativeId (state-id current owner "promote")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CopyInstruction
+                        (core/->SsaValueV0 result-id (nth value-types 0))
+                        (nth values 0)))
+                    result-id (nth value-types 0) false))
+
+                ;; arena-id is the DESTINATION. Before the epoch stage runs
+                ;; that is the function's own arena, which makes the promote a
+                ;; same-epoch copy the stage then collapses; where the stage
+                ;; moves the SOURCE into a minted epoch, this operand is what
+                ;; keeps the copy in the older one.
+                (and (= "bgl/promote" callee) (= 1 (count values))
+                  (promote-domain-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId (state-id current owner "promote")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->PromoteInstructionV0
+                        (core/->SsaValueV0 result-id (nth value-types 0))
+                        (nth values 0)
+                        (nth value-types 0)
+                        (arena-value-id owner)))
+                    result-id (nth value-types 0) false))
+
+                (and (= "bgl/promote" callee) (= 1 (count values)))
+                (fail-result current
+                  (str "TODO-NATIVE-PROMOTE-DOMAIN: bgl/promote has no copy walk for "
+                    (id-value (nth value-types 0))))
+
+                (= "bgl/promote" callee)
+                (fail-result current
+                  "TODO-NATIVE-PROMOTE-ARITY: bgl/promote takes exactly one value")
+
                 (and (= "utf8-encode" callee) (= 1 (count values))
                   (text-operand? (nth value-types 0)))
                 (let [result-type: (U core/NativeId Nil)
@@ -17136,8 +17248,13 @@
                 inner
                 (let [instruction: core/Instruction (nth instructions position)]
                   (recur (+ position 1) instructions
-                    (if (epoch-marked? inner
-                          (core/instruction-result-id instruction))
+                    ;; promote is the one copying barrier in the walk: what
+                    ;; leaves the frame is the copy, so the source keeps its
+                    ;; own escape status and stays eligible for an epoch.
+                    (if (and (epoch-marked? inner
+                               (core/instruction-result-id instruction))
+                          (not (instance? native.core.PromoteInstructionV0
+                                 instruction)))
                       (epoch-mark-ids inner
                         (core/instruction-ssa-refs instruction))
                       inner)))))
@@ -17281,12 +17398,14 @@
 ;; Atom cells stay pinned to the root (TODO-EPOCH-ATOM-STORE)
 ;; and codec/text-builtin operations keep their arena nested inside the
 ;; operation record (TODO-EPOCH-NESTED-ARENA-OPERAND) — both keep the parent
-;; epoch in v0.
+;; epoch in v0. A promote is excluded on different grounds: its arena operand
+;; is the DESTINATION the author asked for, not a site with an open choice.
 (defn epoch-retargetable? [instruction: core/Instruction] -> Bool
   (and (or (allocating-instruction? instruction)
          (instance? native.core.CallInstruction instruction))
     (not (instance? native.core.AtomCreateInstruction instruction))
     (not (instance? native.core.CodecPrimitiveInstructionV0 instruction))
+    (not (instance? native.core.PromoteInstructionV0 instruction))
     (some? (get instruction :arena-id nil))))
 
 (defn retarget-arena-operand
@@ -17565,6 +17684,10 @@
                                 (or (allocating-instruction? instruction)
                                   (epoch-redirectable-call? instruction
                                     functions safe))
+                                ;; A promote already names the epoch it wants,
+                                ;; so it is never a reason to mint one.
+                                (not (instance? native.core.PromoteInstructionV0
+                                       instruction))
                                 (not (epoch-marked? escaped
                                        (core/instruction-result-id instruction))))
                             (conj inner instruction)
@@ -17677,6 +17800,53 @@
               [(core/->EffectDef effect-id (core/->AllocateEffect region-id))]
               pendings)))))))
 
+;; The no-op promote. Once the assignment is known, a promote whose source
+;; already outlives its destination arena is a plain copy — the same test
+;; obligation 8 uses for every other write, run for its answer instead of its
+;; verdict. Under identity assignment nothing is younger than the root, so
+;; every promote collapses and the seam stays a relabelling even for a program
+;; that wrote the surface form.
+(defn promote-noop?
+  [regions: (Vec core/RegionDef)
+   function: core/FunctionDef
+   epochs: (Map String core/NativeId)
+   source-id: core/NativeId
+   arena-id: core/NativeId] -> Bool
+  (obligations/epoch-write-legal? regions
+    (obligations/epoch-of epochs source-id)
+    (obligations/function-arena-region function arena-id)))
+
+(defn epoch-collapse-promotes
+  [regions: (Vec core/RegionDef)
+   types: (Vec core/TypeDef)
+   function: core/FunctionDef] -> core/FunctionDef
+  (let [result: obligations/EpochMapResultV0
+        (obligations/function-epoch-map regions types function)]
+    (if (not (obligations/epochmapresultv0-converged result))
+      function
+      (let [epochs: (Map String core/NativeId)
+            (obligations/epochmapresultv0-epochs result)]
+        (with function
+          [:blocks
+           (mapv
+             (fn [block: core/BasicBlock] -> core/BasicBlock
+               (with block
+                 [:instructions
+                  (mapv
+                    (fn [instruction: core/Instruction] -> core/Instruction
+                      (if (instance? native.core.PromoteInstructionV0
+                            instruction)
+                        (if (promote-noop? regions function epochs
+                              (core/promoteinstructionv0-source-id instruction)
+                              (core/promoteinstructionv0-arena-id instruction))
+                          (core/->CopyInstruction
+                            (core/promoteinstructionv0-result instruction)
+                            (core/promoteinstructionv0-source-id instruction))
+                          instruction)
+                        instruction))
+                    (core/basicblock-instructions block))]))
+             (core/functiondef-blocks function))])))))
+
 (defn epoch-receipt-obligations
   [digest: String
    verdicts: (Vec obligations/ObligationVerdictV0)] -> (Vec core/ReceiptObligationV0)
@@ -17750,6 +17920,14 @@
             (recur (+ position 1)
               (vec (concat collected
                      (epochrewritev0-regions (nth rewrites position)))))))
+        all-regions: (Vec core/RegionDef)
+        (vec (concat (core/nativecoreprogram-regions program) minted-regions))
+        collapsed: (Vec core/FunctionDef)
+        (mapv
+          (fn [function: core/FunctionDef] -> core/FunctionDef
+            (epoch-collapse-promotes all-regions
+              (core/nativecoreprogram-types program) function))
+          functions)
         minted-effects: (Vec core/EffectDef)
         (loop [position: Int 0 collected: (Vec core/EffectDef) []]
           (if (>= position (count rewrites))
@@ -17769,9 +17947,8 @@
           [:id (lower-id "epoch-program" [input-digest])]
           [:parent (core/nativecoreprogram-id program)]
           [:compiler-pass "native-to-epoch-v0"]
-          [:functions functions]
-          [:regions (vec (concat (core/nativecoreprogram-regions program)
-                           minted-regions))]
+          [:functions collapsed]
+          [:regions all-regions]
           [:effects (vec (concat (core/nativecoreprogram-effects program)
                            minted-effects))]
           [:allowed-regions
