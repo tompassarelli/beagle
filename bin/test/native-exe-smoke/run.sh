@@ -58,7 +58,7 @@ run_frontend() {
         "native-exe-entry PASS name=native.core-entry/$entry symbol=$symbol return=Int abi=$abi" \
         "$stage/native-exe.report.txt"
     grep -Fq "native-exe-c17 PASS compiler=" "$stage/native-exe.report.txt"
-    [[ "$(grep -c '^obligation-projection PASS ' "$stage/report.txt")" == "7" ]]
+    [[ "$(grep -c '^obligation-projection PASS ' "$stage/report.txt")" == "9" ]]
 
     set +e
     env -i "$executable"
@@ -105,7 +105,7 @@ for expected in \
     "result PASS"; do
     grep -Fqx "$expected" "$projection_c17/report.txt"
 done
-[[ "$(grep -c '^obligation-projection PASS ' "$projection_c17/report.txt")" == "7" ]]
+[[ "$(grep -c '^obligation-projection PASS ' "$projection_c17/report.txt")" == "9" ]]
 [[ -f "$projection_c17/module_0.c" && ! -e "$projection_c17/module_0.ssa" ]]
 if grep -Eq 'unreachable|bad-entry|hidden|^pending ' "$projection_c17/report.txt"; then
     echo "native-exe smoke: entry projection retained unreachable definitions" >&2
@@ -121,7 +121,7 @@ qbe_both="$scratch/qbe-both"
 grep -Fqx "materialize-c17 OK module_0.h module_0.c" "$qbe_both/report.txt"
 grep -Fqx "materialize-qbe OK module_0.ssa" "$qbe_both/report.txt"
 grep -Fqx "result PASS" "$qbe_both/report.txt"
-[[ "$(grep -c '^obligation-projection PASS ' "$qbe_both/report.txt")" == "7" ]]
+[[ "$(grep -c '^obligation-projection PASS ' "$qbe_both/report.txt")" == "9" ]]
 [[ "$(grep -c '^stage-progress source-freeze ' "$qbe_both/report.txt")" == "1" ]]
 [[ "$(grep -c '^stage-progress source-to-typed ' "$qbe_both/report.txt")" == "1" ]]
 [[ "$(grep -c '^stage-progress typed-to-native ' "$qbe_both/report.txt")" == "1" ]]

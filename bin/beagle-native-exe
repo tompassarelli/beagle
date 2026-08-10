@@ -283,8 +283,8 @@ for required in \
 done
 
 obligation_count="$(grep -c '^obligation-projection PASS ' "$report" || true)"
-[[ "$obligation_count" == "7" ]] ||
-    die "Core build report has $obligation_count/7 passing obligations"
+[[ "$obligation_count" == "9" ]] ||
+    die "Core build report has $obligation_count/9 passing obligations"
 
 mapfile -t program_counts < <(awk '$1 == "program-functions" && NF == 2 { print $2 }' "$report")
 [[ ${#program_counts[@]} -eq 1 && "${program_counts[0]}" =~ ^[0-9]+$ ]] ||

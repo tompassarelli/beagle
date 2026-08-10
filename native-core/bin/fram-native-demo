@@ -36,8 +36,8 @@ for line in \
   rg -Fx "$line" "$types_report" >/dev/null \
     || die "fram.types report is missing: $line"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$types_report")" -eq 7 ]] \
-  || die "fram.types did not pass exactly seven obligations"
+[[ "$(rg -c '^obligation-projection PASS ' "$types_report")" -eq 9 ]] \
+  || die "fram.types did not pass exactly nine obligations"
 if rg -n '^pending ' "$types_report" >/dev/null; then
   die "fram.types reported pending lowering work"
 fi
@@ -65,14 +65,14 @@ for line in \
   rg -Fx "$line" "$work/kernel/report.txt" >/dev/null \
     || die "fram.kernel-classify report is missing: $line"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$work/kernel/report.txt")" -eq 7 ]] \
-  || die "fram.kernel-classify C17 projection did not pass seven obligations"
-[[ "$(rg -c '^qbe-obligation PASS ' "$work/kernel/report.txt")" -eq 7 ]] \
-  || die "fram.kernel-classify QBE projection did not pass seven obligations"
+[[ "$(rg -c '^obligation-projection PASS ' "$work/kernel/report.txt")" -eq 9 ]] \
+  || die "fram.kernel-classify C17 projection did not pass nine obligations"
+[[ "$(rg -c '^qbe-obligation PASS ' "$work/kernel/report.txt")" -eq 9 ]] \
+  || die "fram.kernel-classify QBE projection did not pass nine obligations"
 
 echo 'Fram Native Core funding demo'
-echo 'fram.types: COMPLETE, 31 functions, 7/7 obligations, strict C17 gcc+clang run PASS'
-echo 'fram.kernel-classify: COMPLETE, 19 functions, 7/7 obligations, full managed/C17 parity PASS'
+echo 'fram.types: COMPLETE, 31 functions, 9/9 obligations, strict C17 gcc+clang run PASS'
+echo 'fram.kernel-classify: COMPLETE, 19 functions, 9/9 obligations, full managed/C17 parity PASS'
 rg --no-line-number '^slice-kernel-classify: delivery-trigger\?' "$work/kernel.log"
 echo 'QBE: delivery-trigger? from the same frozen native program, assemble+link+run PASS'
 echo 'RESULT: PASS'
