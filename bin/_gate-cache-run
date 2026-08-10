@@ -1,0 +1,516 @@
+#!/usr/bin/env bash
+# _gate-cache-run: content-keyed result cache for gate/test invocations.
+#
+# Usage:
+#   bin/_gate-cache-run --domain DOMAIN --id ID [--watch DIR]... -- CMD ARG...
+#
+# A green result is a cacheable artifact keyed on the SHA-256 of everything
+# the run read. The input closure is DERIVED, never hand-maintained: the run
+# executes under `strace -f -e trace=%file`, and every file the process tree
+# opened, statted, executed, listed, or probed-and-missed becomes part of the
+# key. A later invocation whose entire recorded closure is byte-identical is
+# served the stored result as the SAME proof (marked cached-green on stdout,
+# distinct from ran-green). Any doubt is resolved toward re-running: an input
+# that cannot be revalidated, a read of a file that has since vanished, or a
+# missing tracer all mean the command runs for real.
+#
+#   - Only exit-0 results are ever stored; red always re-runs.
+#   - BEAGLE_GATE_NO_CACHE=1 bypasses entirely (full run, nothing stored).
+#   - BEAGLE_GATE_CACHE overrides the cache root
+#     (default ${XDG_CACHE_HOME:-~/.cache}/beagle/gate-results).
+#   - Nested invocations run direct: ptrace forbids tracing a process another
+#     tracer (the outer strace -f) already owns, so the wrapper exports
+#     BEAGLE_GATE_CACHE_INNER=1 to its child and steps aside when it sees it.
+#
+# Closure record kinds, and what revalidates each:
+#   files.sha256    content hash per file (post-run state)  -> re-hash equal
+#   links.list      symlink -> fully-resolved target        -> same resolution
+#   dirs.digest     one digest over every listed directory  -> same listings
+#   absent.list     paths probed and not found              -> still absent
+#   nixpaths.list   /nix/store inputs (immutable by path)   -> still present
+#
+# Paths are stored repo-relative (%R%) and home-relative (%H%) so a worktree
+# and its main checkout share entries, exactly like bin/beagle-build-core.
+# Scratch (the run's private TMPDIR, /tmp, /proc, /sys, /dev, caches) is
+# excluded; an explicit --watch root is exempt from those exclusions so tests
+# can sandbox the mechanism under /tmp.
+#
+# Stat-identity memo: .hashmemo caches dev:ino:size:mtime:ctime -> sha256 so a
+# no-op revalidation is stats, not re-hashing. A stat-identity change falls
+# back to a real hash; the memo can only cost an extra hash, never skip one.
+set -uo pipefail
+
+die() { echo "_gate-cache-run: $*" >&2; exit 2; }
+
+domain=""
+id=""
+watch_roots=()
+cmd=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --domain) domain="$2"; shift 2 ;;
+        --id)     id="$2"; shift 2 ;;
+        --watch)  watch_roots+=("$(realpath -m "$2")"); shift 2 ;;
+        --)       shift; cmd=("$@"); break ;;
+        *)        die "unknown argument: $1" ;;
+    esac
+done
+[[ -n "$domain" && -n "$id" && ${#cmd[@]} -gt 0 ]] ||
+    die "need --domain, --id, and -- CMD"
+
+# Bypass paths: each still marks the child as inner so a self-wrapping gate
+# script does not re-exec the wrapper forever.
+if [[ "${BEAGLE_GATE_NO_CACHE:-0}" == "1" || -n "${BEAGLE_GATE_CACHE_INNER:-}" ]] ||
+   ! command -v strace >/dev/null 2>&1; then
+    export BEAGLE_GATE_CACHE_INNER=1
+    exec "${cmd[@]}"
+fi
+
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+repo="$(cd "$(dirname "$self")/.." && pwd)"
+cache_root="${BEAGLE_GATE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/gate-results}"
+memo="$cache_root/.hashmemo"
+launch_cwd="$(pwd)"
+
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/gate-cache.XXXXXX")"
+trap 'rm -rf "${scratch:?}"' EXIT
+
+# --- path normalization ------------------------------------------------------
+# Global (not line-anchored): env values and argv lines embed paths mid-line.
+# %R% before %H%: the repo lives under $HOME.
+
+normalize()   { sed -e "s|$repo/|%R%/|g" -e "s|$HOME/|%H%/|g"; }
+denormalize() { sed -e "s|%R%/|$repo/|g" -e "s|%H%/|$HOME/|g"; }
+n_denorm()    { local s="$1"; s=${s//"%R%/"/"$repo/"}; s=${s//"%H%/"/"$HOME/"}; printf '%s' "$s"; }
+
+# --- identity: which invocation is this? -------------------------------------
+# Filtered env: every var that plausibly steers a gate or the toolchain.
+# BEAGLE_GATE_* stays out (the cache's own controls are not the run's inputs).
+# _BEAGLE_RACKET is load-bearing: it selects the interpreter without reading
+# the flake, so it must key the result itself.
+
+env_material() {
+    env | LC_ALL=C sort | grep -E \
+        '^(BEAGLE_[A-Z0-9_]+|_BEAGLE_RACKET|PLT[A-Z0-9_]*|NATIVE_[A-Z0-9_]+|FRAM_[A-Z0-9_]+|WASI[A-Z0-9_]*|WASMTIME|QBE[A-Z0-9_]*|CI|NIXOS_[A-Z0-9_]+|LANG|LC_[A-Z]+)=' |
+        grep -v '^BEAGLE_GATE_' | normalize
+    return 0
+}
+
+identity_material() {
+    echo "beagle-gate-cache/1"
+    echo "domain=$domain"
+    echo "id=$id"
+    printf '%s\n' "$launch_cwd" | normalize | sed 's/^/cwd=/'
+    printf '%s\n' "${cmd[@]}" | normalize | sed 's/^/argv=/'
+    echo "wrapper=$(sha256sum "$self" | cut -d' ' -f1)"
+    local w
+    for w in "${watch_roots[@]:-}"; do
+        [[ -n "$w" ]] && printf '%s\n' "$w" | normalize | sed 's/^/watch=/'
+    done
+    env_material
+}
+
+identity_sha="$(identity_material | sha256sum | cut -d' ' -f1)"
+domain_dir="$cache_root/$domain/$identity_sha"
+
+# Sanitizer-bearing gates cannot run traced: LeakSanitizer's stop-the-world
+# needs ptrace on its own process, and one tracee admits one tracer. Such an
+# identity is flagged on first discovery and runs direct — full run, never
+# cached, never under-keyed. The flag expires so the identity is re-probed
+# once the toolchain or gate might have changed.
+untraceable_flag="$domain_dir/.untraceable"
+if [[ -f "$untraceable_flag" && -n "$(find "$untraceable_flag" -mtime -14 2>/dev/null)" ]]; then
+    rm -rf "${scratch:?}"
+    trap - EXIT
+    export BEAGLE_GATE_CACHE_INNER=1
+    exec "${cmd[@]}"
+fi
+
+# --- stat-identity memo helpers ---------------------------------------------
+
+stat_batch() {  # stdin: abs paths; stdout: "key<TAB>path" (key has no tabs)
+    xargs -r -d '\n' stat -c $'%d:%i:%s|%y|%z\t%n' -- 2>/dev/null
+}
+
+# hash_paths: stdin abs paths -> stdout "sha256  path", memo-accelerated.
+# Paths that cannot be statted or hashed are dropped; callers compare counts.
+hash_paths() {
+    local stats="$scratch/hp.stats" need="$scratch/hp.need" out="$scratch/hp.out"
+    : > "$need"
+    stat_batch > "$stats" || true
+    [[ -f "$memo" ]] || { mkdir -p "$cache_root" 2>/dev/null; touch "$memo" 2>/dev/null; } || true
+    awk -F'\t' -v memofile="$memo" -v need="$need" '
+        BEGIN {
+            while ((getline l < memofile) > 0) {
+                t = index(l, "\t"); if (t) m[substr(l, 1, t-1)] = substr(l, t+1)
+            }
+            close(memofile)
+        }
+        { if ($1 in m) print m[$1] "  " $2; else print $2 > need }
+    ' "$stats" > "$out"
+    if [[ -s "$need" ]]; then
+        local hashed="$scratch/hp.hashed"
+        xargs -r -d '\n' sha256sum -- < "$need" 2>/dev/null > "$hashed" || true
+        awk -F'\t' 'NR==FNR { key[$2] = $1; next }
+             { p = substr($0, 67); if (p in key) print key[p] "\t" substr($0, 1, 64) }
+        ' "$stats" "$hashed" >> "$memo" 2>/dev/null || true
+        cat "$hashed" >> "$out"
+    fi
+    cat "$out"
+}
+
+# --- directory listing digest ------------------------------------------------
+# Canonical stream: normalized dir paths on stdin, LC_ALL=C sorted by caller.
+
+dirs_stream() {
+    local nd d
+    while IFS= read -r nd; do
+        d="$(n_denorm "$nd")"
+        printf 'D %s\n' "$nd"
+        [[ -d "$d" ]] || continue
+        find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null |
+            LC_ALL=C sort | sed 's/^/E /'
+    done
+    return 0
+}
+
+dirs_digest() {  # stdin: normalized LIST dir paths
+    LC_ALL=C sort -u | dirs_stream | sha256sum | cut -d' ' -f1
+}
+
+# --- validation --------------------------------------------------------------
+
+validate_entry() {
+    local e="$1" p t resolved
+    [[ -f "$e/meta" && -f "$e/stdout" ]] || return 1
+    # nix store inputs: immutable by construction; presence is identity.
+    if [[ -s "$e/nixpaths.list" ]]; then
+        while IFS= read -r p; do [[ -e "$p" ]] || return 1; done < "$e/nixpaths.list"
+    fi
+    # probed-absent paths must still be absent.
+    if [[ -s "$e/absent.list" ]]; then
+        denormalize < "$e/absent.list" > "$scratch/v.absent"
+        while IFS= read -r p; do [[ ! -e "$p" ]] || return 1; done < "$scratch/v.absent"
+    fi
+    # symlinks must resolve to the same final target.
+    if [[ -s "$e/links.list" ]]; then
+        while IFS=$'\t' read -r p t; do
+            resolved="$(readlink -f -- "$(n_denorm "$p")" 2>/dev/null || true)"
+            [[ "$resolved" == "$(n_denorm "$t")" ]] || return 1
+        done < "$e/links.list"
+    fi
+    # listed directories must list identically (one digest over the stream).
+    if [[ -f "$e/dirs.digest" ]]; then
+        [[ "$(sed -n 's/^LIST //p' "$e/dirs.list" | dirs_digest)" == "$(cat "$e/dirs.digest")" ]] ||
+            return 1
+    fi
+    if [[ -s "$e/dirs.list" ]]; then
+        sed -n 's/^EXIST //p' "$e/dirs.list" | denormalize > "$scratch/v.dirs"
+        while IFS= read -r p; do [[ -d "$p" ]] || return 1; done < "$scratch/v.dirs"
+    fi
+    # file contents: every recorded hash must still hold.
+    if [[ -s "$e/files.sha256" ]]; then
+        denormalize < "$e/files.sha256" | LC_ALL=C sort > "$scratch/v.want"
+        cut -c67- "$scratch/v.want" > "$scratch/v.paths"
+        hash_paths < "$scratch/v.paths" | LC_ALL=C sort > "$scratch/v.have"
+        cmp -s "$scratch/v.want" "$scratch/v.have" || return 1
+    fi
+    return 0
+}
+
+# --- lookup ------------------------------------------------------------------
+
+if [[ -d "$domain_dir" ]]; then
+    for entry in $(ls -1t "$domain_dir" 2>/dev/null); do
+        e="$domain_dir/$entry"
+        [[ -d "$e" ]] || continue
+        if validate_entry "$e"; then
+            proof="$(sed -n 's/^created=//p' "$e/meta" | head -1)"
+            echo "beagle-gate-cache: cached-green $domain/$id entry=${entry:0:12} proof=$proof"
+            cat "$e/stdout"
+            [[ -f "$e/stderr" ]] && cat "$e/stderr" >&2
+            touch -c "$e" 2>/dev/null || true
+            exit 0
+        fi
+    done
+fi
+
+# --- run for real, traced ----------------------------------------------------
+
+child_tmp="$scratch/tmp"
+mkdir -p "$child_tmp"
+trace="$scratch/trace"
+out_f="$scratch/stdout"
+err_f="$scratch/stderr"
+
+# stdout streams live through tee; stderr goes to a file and is replayed after
+# the run. A process substitution on strace's stderr would deadlock: the tee
+# forked before exec becomes strace's own child, strace waits for all its
+# children at exit, and the tee waits for EOF on the fd strace still holds.
+start_ts=$(date +%s)
+set +e
+TMPDIR="$child_tmp" TMP="$child_tmp" TEMP="$child_tmp" \
+BEAGLE_GATE_CACHE_INNER=1 \
+strace -f -qq -s 500 --decode-fds=path -e trace=%file,%process,fchdir \
+    -o "$trace" -- "${cmd[@]}" 2> "$err_f" | tee "$out_f"
+status=${PIPESTATUS[0]}
+set -e
+cat "$err_f" >&2
+duration=$(( $(date +%s) - start_ts ))
+
+if [[ "$status" -ne 0 ]] &&
+   grep -q "does not work under ptrace" "$out_f" "$err_f" 2>/dev/null; then
+    mkdir -p "$domain_dir" 2>/dev/null || true
+    touch "$untraceable_flag" 2>/dev/null || true
+    echo "beagle-gate-cache: $domain/$id is untraceable (sanitizer refuses ptrace); rerunning direct" >&2
+    rm -rf "${scratch:?}"
+    trap - EXIT
+    export BEAGLE_GATE_CACHE_INNER=1
+    exec "${cmd[@]}"
+fi
+
+[[ "$status" -eq 0 ]] || exit "$status"
+
+# --- derive the input closure from the trace ---------------------------------
+# awk emits "CLASS<TAB>abs-path": W written, L dir-listed, R read, A absent.
+# AT_FDCWD</cwd> decorations carry the kernel-truth cwd per call, so relative
+# paths resolve without tracking fork inheritance. Success return values may
+# be decorated too ("= 3</path>").
+
+awk -v launch_cwd="$launch_cwd" '
+    function resolve(p, base) { return (p ~ /^\//) ? p : base "/" p }
+    # fd decorations for pipes/sockets/anon inodes are not filesystem paths;
+    # one leaking into path position must never key (or de-key) a result.
+    function emit(c, p) {
+        if (p == "") return
+        if (p ~ /(pipe|socket|anon_inode|memfd):/) return
+        print c "\t" p
+    }
+    {
+        pid = $1
+        line = $0; sub(/^[0-9]+[ \t]+/, "", line)
+        if (line ~ /<unfinished \.\.\.>$/) {
+            sub(/[ \t]*<unfinished \.\.\.>$/, "", line); pend[pid] = line; next
+        }
+        if (line ~ /^<\.\.\. [a-z0-9_]+ resumed>/) {
+            sub(/^<\.\.\. [a-z0-9_]+ resumed>[ ]?/, "", line)
+            line = pend[pid] line; delete pend[pid]
+        }
+        if (match(line, /^[a-z0-9_]+\(/) == 0) next
+        sc = substr(line, RSTART, RLENGTH - 1)
+
+        # kernel-truth cwd from decorated AT_FDCWD
+        if (match(line, /AT_FDCWD<[^>]+>/))
+            cwd[pid] = substr(line, RSTART + 9, RLENGTH - 10)
+        base = (pid in cwd) ? cwd[pid] : launch_cwd
+
+        # decorated dirfd bases, in arg order
+        nb = 0; rest = line
+        while (match(rest, /(AT_FDCWD|[0-9]+)<[^>]+>/)) {
+            tok = substr(rest, RSTART, RLENGTH)
+            sub(/^[^<]*</, "", tok); sub(/>$/, "", tok)
+            bases[++nb] = tok
+            rest = substr(rest, RSTART + RLENGTH)
+        }
+        # quoted path args, in order
+        nq = 0; rest = line
+        while (match(rest, /"[^"]*"/) && nq < 4) {
+            quotes[++nq] = substr(rest, RSTART + 1, RLENGTH - 2)
+            rest = substr(rest, RSTART + RLENGTH)
+        }
+
+        enoent = (line ~ / = -1 ENOENT /) ? 1 : 0
+        failed = (line ~ / = -1 /) ? 1 : 0
+        ok = (!failed && line ~ / = [0-9]+(<[^>]*>)?$/) ? 1 : 0
+
+        if (nq == 0) {
+            if (sc == "fchdir" && nb >= 1 && ok) cwd[pid] = bases[1]
+            next
+        }
+        b1 = (nb >= 1) ? bases[1] : base
+        b2 = (nb >= 2) ? bases[2] : base
+
+        if (sc ~ /^(open|openat|openat2|creat)$/) {
+            p = resolve(quotes[1], b1)
+            wr = (line ~ /O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND/) ? 1 : 0
+            if (ok && wr)           emit("W", p)
+            else if (ok)            emit((line ~ /O_DIRECTORY/) ? "L" : "R", p)
+            else if (enoent && !wr) emit("A", p)
+        } else if (sc ~ /^(stat|lstat|fstatat64|newfstatat|statx|access|faccessat|faccessat2|readlink|readlinkat|getxattr|lgetxattr|execve|execveat)$/) {
+            p = resolve(quotes[1], b1)
+            if (ok) emit("R", p); else if (enoent) emit("A", p)
+        } else if (sc == "chdir") {
+            p = resolve(quotes[1], base)
+            if (ok) { cwd[pid] = p; emit("R", p) }
+        } else if (sc ~ /^(mkdir|mkdirat|rmdir|unlink|unlinkat|truncate|chmod|fchmodat|utimensat|futimesat|setxattr|removexattr)$/) {
+            if (ok) emit("W", resolve(quotes[1], b1))
+        } else if (sc ~ /^(rename|renameat|renameat2)$/) {
+            if (ok && nq >= 2) { emit("W", resolve(quotes[1], b1)); emit("W", resolve(quotes[2], b2)) }
+        } else if (sc ~ /^(symlink|symlinkat)$/) {
+            if (ok && nq >= 2) emit("W", resolve(quotes[2], (sc == "symlinkat") ? b1 : base))
+        } else if (sc ~ /^(link|linkat)$/) {
+            if (ok && nq >= 2) { emit("W", resolve(quotes[1], b1)); emit("W", resolve(quotes[2], b2)) }
+        }
+    }
+' "$trace" | sort -u > "$scratch/records.raw"
+
+# Aggregate with precedence W > L > R > A per path.
+awk -F'\t' '
+    { rank = ($1 == "W") ? 4 : ($1 == "L") ? 3 : ($1 == "R") ? 2 : 1
+      if (rank > best[$2]) { best[$2] = rank; cls[$2] = $1 } }
+    END { for (p in cls) print cls[p] "\t" p }
+' "$scratch/records.raw" > "$scratch/records.agg"
+
+# Lexical cleanup only (realpath -s never follows symlinks: a final-component
+# symlink must keep its own identity so a repoint invalidates). On any count
+# mismatch fall back to the uncleaned paths.
+cut -f2 "$scratch/records.agg" > "$scratch/records.p"
+if xargs -r -d '\n' realpath -smq -- < "$scratch/records.p" > "$scratch/records.norm" 2>/dev/null &&
+   [[ "$(wc -l < "$scratch/records.norm")" == "$(wc -l < "$scratch/records.p")" ]]; then
+    paste "$scratch/records.agg" "$scratch/records.norm" | cut -f1,3 > "$scratch/records"
+else
+    cp "$scratch/records.agg" "$scratch/records"
+fi
+
+ignore_prefixes=("$scratch" "${TMPDIR:-/tmp}" /tmp /var/tmp /proc /sys /dev
+                 /run/user /nix/var "$HOME/.cache" "$HOME/.local/state"
+                 "$cache_root")
+
+# Racket derives compiled-file probe paths by APPENDING an absolute source
+# path to a collects root ("/nix/store/.../compiled/var/tmp/<run-tmp>/x.zo"),
+# so a run-unique temp dir can appear mid-path, not just as a prefix. Such a
+# path can never recur, so recording it only churns the entry hash. Substring-
+# match is safe exactly when the needle is run-unique (mktemp suffixes); a
+# generic TMPDIR like /tmp or /var/tmp must never be substring-dropped or it
+# would swallow real inputs.
+tmp_sub=""
+case "${TMPDIR:-}" in
+    "" | /tmp | /tmp/ | /var/tmp | /var/tmp/) ;;
+    *) tmp_sub="${TMPDIR%/}" ;;
+esac
+
+is_watched() {
+    local p="$1" w
+    for w in "${watch_roots[@]:-}"; do
+        [[ -n "$w" && ( "$p" == "$w" || "$p" == "$w"/* ) ]] && return 0
+    done
+    return 1
+}
+is_ignored() {
+    local p="$1" i
+    is_watched "$p" && return 1
+    for i in "${ignore_prefixes[@]}"; do
+        [[ "$p" == "$i" || "$p" == "$i"/* ]] && return 0
+    done
+    return 1
+}
+
+: > "$scratch/hash.paths"; : > "$scratch/links.list"; : > "$scratch/dirs.list"
+: > "$scratch/absent.list"; : > "$scratch/nixpaths.list"; : > "$scratch/listdirs"
+uncacheable=""
+
+while IFS=$'\t' read -r cls p; do
+    [[ "$p" == /* ]] || continue
+    case "$p" in *pipe:\[* | *socket:\[* | *anon_inode:*) continue ;; esac
+    [[ "$p" == *"$scratch"* ]] && continue
+    [[ -n "$tmp_sub" && "$p" == *"$tmp_sub"* ]] && continue
+    is_ignored "$p" && continue
+    if [[ "$p" == /nix/store/* ]]; then
+        case "$cls" in
+            A) printf '%s\n' "$p" >> "$scratch/absent.list" ;;
+            *) printf '%s\n' "$p" >> "$scratch/nixpaths.list" ;;
+        esac
+        continue
+    fi
+    case "$cls" in
+        A) printf '%s\n' "$p" >> "$scratch/absent.list" ;;
+        L)
+            if   [[ -d "$p" ]]; then printf '%s\n' "$p" >> "$scratch/listdirs"
+            elif [[ -f "$p" ]]; then printf '%s\n' "$p" >> "$scratch/hash.paths"
+            fi
+            ;;
+        R|W)
+            if [[ -L "$p" ]]; then
+                tgt="$(readlink -f -- "$p" 2>/dev/null || true)"
+                printf '%s\t%s\n' "$p" "$tgt" >> "$scratch/links.list"
+                [[ -f "$p" && "$tgt" != /nix/store/* ]] &&
+                    printf '%s\n' "$p" >> "$scratch/hash.paths"
+            elif [[ -f "$p" ]]; then
+                printf '%s\n' "$p" >> "$scratch/hash.paths"
+            elif [[ -d "$p" ]]; then
+                printf '%s\n' "$p" >> "$scratch/existdirs.tmp"
+            elif [[ "$cls" == "R" ]]; then
+                # an input existed during the run and is gone now: unprovable
+                uncacheable="read input vanished: $p"
+            fi
+            ;;
+    esac
+done < "$scratch/records"
+
+if [[ -n "$uncacheable" ]]; then
+    echo "beagle-gate-cache: ran-green $domain/$id (not cached: $uncacheable)" >&2
+    exit 0
+fi
+
+mkdir -p "$cache_root" 2>/dev/null || exit 0
+staging="$(mktemp -d "$cache_root/.staging.XXXXXX" 2>/dev/null)" || exit 0
+
+LC_ALL=C sort -u "$scratch/hash.paths" > "$scratch/hash.uniq"
+hash_paths < "$scratch/hash.uniq" | LC_ALL=C sort | normalize > "$staging/files.sha256"
+if [[ "$(wc -l < "$staging/files.sha256")" != "$(wc -l < "$scratch/hash.uniq")" ]]; then
+    rm -rf -- "${staging:?}"
+    echo "beagle-gate-cache: ran-green $domain/$id (not cached: unreadable input)" >&2
+    exit 0
+fi
+
+normalize < "$scratch/listdirs" | LC_ALL=C sort -u > "$scratch/listdirs.norm"
+dirs_digest < "$scratch/listdirs.norm" > "$staging/dirs.digest"
+{
+    sed 's/^/LIST /' "$scratch/listdirs.norm"
+    [[ -f "$scratch/existdirs.tmp" ]] &&
+        normalize < "$scratch/existdirs.tmp" | sed 's/^/EXIST /'
+} | LC_ALL=C sort -u > "$staging/dirs.list"
+
+normalize < "$scratch/absent.list"   | LC_ALL=C sort -u > "$staging/absent.list"
+LC_ALL=C sort -u "$scratch/nixpaths.list" > "$staging/nixpaths.list"
+normalize < "$scratch/links.list"    | LC_ALL=C sort -u > "$staging/links.list"
+
+cp "$out_f" "$staging/stdout"
+cp "$err_f" "$staging/stderr"
+{
+    echo "domain=$domain"
+    echo "id=$id"
+    echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "duration_s=$duration"
+    echo "identity=$identity_sha"
+    printf '%s\n' "${cmd[@]}" | normalize | sed 's/^/argv=/'
+} > "$staging/meta"
+
+entry_sha="$(cat "$staging/files.sha256" "$staging/links.list" \
+                 "$staging/dirs.list" "$staging/dirs.digest" \
+                 "$staging/absent.list" "$staging/nixpaths.list" |
+             sha256sum | cut -d' ' -f1)"
+
+mkdir -p "$domain_dir" 2>/dev/null || true
+if mv -T "$staging" "$domain_dir/$entry_sha" 2>/dev/null; then
+    echo "beagle-gate-cache: ran-green $domain/$id stored entry=${entry_sha:0:12}" >&2
+    find "$cache_root" -mindepth 3 -maxdepth 3 -type d -mtime +14 \
+        -exec rm -rf -- '{}' + 2>/dev/null || true
+    # cap stored states per identity: newest 8 win (alternating states keep
+    # their proofs; unbounded churn does not accumulate)
+    ls -1t "$domain_dir" 2>/dev/null | tail -n +9 | while IFS= read -r old; do
+        rm -rf -- "${domain_dir:?}/$old"
+    done
+    # memo compaction: last write per stat-key wins; bounded, best-effort
+    if [[ -f "$memo" && "$(stat -c %s "$memo" 2>/dev/null || echo 0)" -gt 10000000 ]]; then
+        (
+            flock -n 9 || exit 0
+            awk -F'\t' '{ m[$1] = $2 } END { for (k in m) print k "\t" m[k] }' \
+                "$memo" > "$memo.compact" 2>/dev/null &&
+                mv "$memo.compact" "$memo"
+        ) 9>>"$memo.lock" 2>/dev/null || true
+    fi
+else
+    rm -rf -- "${staging:?}"
+fi
+exit 0
