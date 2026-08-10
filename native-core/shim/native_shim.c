@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
+#include <poll.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
@@ -8480,6 +8481,25 @@ static bool native_host_socket_peer_error(int error) {
   return (error == EPIPE) || (error == ECONNRESET) || (error == ENOTCONN);
 }
 
+static int32_t native_host_socket_wait_writable(int peer) {
+  struct pollfd descriptor = {peer, POLLOUT, 0};
+  int ready;
+  do {
+    ready = poll(&descriptor, (nfds_t)1U, -1);
+  } while ((ready == -1) && (errno == EINTR));
+  if (ready == -1) {
+    return native_host_socket_errno();
+  }
+  if ((descriptor.revents & POLLNVAL) != 0) {
+    return EBADF;
+  }
+  // Retry send so its error mapping remains the single socket-error authority.
+  if ((descriptor.revents & (POLLOUT | POLLERR | POLLHUP)) != 0) {
+    return NATIVE_HOST_SOCKET_OK;
+  }
+  return EIO;
+}
+
 int32_t native_host_socket_inherited_listener_v0(
     const native_capability *capability, int64_t fd, int64_t *out) {
   int descriptor;
@@ -8627,6 +8647,11 @@ int32_t native_host_socket_write_bounded_v0(
       return NATIVE_HOST_SOCKET_PEER_CLOSED;
     } else if (errno == EINTR) {
       continue;
+    } else if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+      status = native_host_socket_wait_writable(peer);
+      if (status != NATIVE_HOST_SOCKET_OK) {
+        return status;
+      }
     } else {
       int error = errno;
       return native_host_socket_peer_error(error)

@@ -1,8 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "native_shim.h"
 #include "module_0.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -11,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 static void fail(const char *detail) {
@@ -29,6 +33,109 @@ static void require_status(int32_t actual, int32_t expected,
             detail, actual, expected);
     exit(1);
   }
+}
+
+static void test_nonblocking_write_progress(
+    const native_capability *capability) {
+  enum { PAYLOAD_LENGTH = 262144 };
+  const struct timespec reader_delay = {0, 100000000L};
+  int peers[2];
+  int gate[2];
+  int send_buffer_bytes = 4096;
+  int flags;
+  uint8_t *payload = (uint8_t *)malloc((size_t)PAYLOAD_LENGTH);
+  native_bytes bytes = {payload, (size_t)PAYLOAD_LENGTH};
+  int64_t written = INT64_C(-1);
+  pid_t child;
+
+  if (payload == NULL) {
+    fail("allocate nonblocking payload");
+  }
+  for (size_t index = (size_t)0U; index < (size_t)PAYLOAD_LENGTH; index += 1U) {
+    payload[index] = (uint8_t)(((index * (size_t)131U) +
+                                (index / (size_t)251U)) &
+                               (size_t)UINT8_MAX);
+  }
+  if ((socketpair(AF_UNIX, SOCK_STREAM, 0, peers) == -1) ||
+      (pipe(gate) == -1) ||
+      (setsockopt(peers[0], SOL_SOCKET, SO_SNDBUF, &send_buffer_bytes,
+                  (socklen_t)sizeof send_buffer_bytes) == -1)) {
+    fail("prepare nonblocking socket pair");
+  }
+  flags = fcntl(peers[0], F_GETFL);
+  if ((flags == -1) || (fcntl(peers[0], F_SETFL, flags | O_NONBLOCK) == -1)) {
+    fail("make socket writer nonblocking");
+  }
+
+  child = fork();
+  if (child == -1) {
+    fail("fork nonblocking reader");
+  }
+  if (child == 0) {
+    uint8_t *received = (uint8_t *)malloc((size_t)PAYLOAD_LENGTH);
+    uint8_t signal;
+    size_t offset = (size_t)0U;
+    ssize_t count;
+    struct timespec remaining = reader_delay;
+    (void)close(peers[0]);
+    (void)close(gate[1]);
+    do {
+      count = read(gate[0], &signal, (size_t)1U);
+    } while ((count == (ssize_t)-1) && (errno == EINTR));
+    if ((received == NULL) || (count != (ssize_t)1)) {
+      _exit(10);
+    }
+    while ((nanosleep(&remaining, &remaining) == -1) && (errno == EINTR)) {
+    }
+    while (offset < (size_t)PAYLOAD_LENGTH) {
+      count = recv(peers[1], received + offset,
+                   (size_t)PAYLOAD_LENGTH - offset, 0);
+      if (count <= (ssize_t)0) {
+        _exit(11);
+      }
+      offset += (size_t)count;
+    }
+    if (memcmp(received, payload, (size_t)PAYLOAD_LENGTH) != 0) {
+      _exit(12);
+    }
+    do {
+      count = recv(peers[1], &signal, (size_t)1U, 0);
+    } while ((count == (ssize_t)-1) && (errno == EINTR));
+    if (count != (ssize_t)0) {
+      _exit(13);
+    }
+    free(received);
+    free(payload);
+    (void)close(gate[0]);
+    (void)close(peers[1]);
+    _exit(0);
+  }
+
+  (void)close(peers[1]);
+  (void)close(gate[0]);
+  if (write(gate[1], "w", (size_t)1U) != (ssize_t)1) {
+    fail("release nonblocking reader");
+  }
+  (void)close(gate[1]);
+  require_status(native_host_socket_write_bounded_v0(
+                     capability, (int64_t)peers[0], bytes,
+                     (int64_t)PAYLOAD_LENGTH, &written),
+                 NATIVE_HOST_SOCKET_OK, "nonblocking write");
+  if (written != (int64_t)PAYLOAD_LENGTH) {
+    fail("nonblocking write length");
+  }
+  if (shutdown(peers[0], SHUT_WR) == -1) {
+    fail("shutdown nonblocking writer");
+  }
+  (void)close(peers[0]);
+  {
+    int child_status = 0;
+    if ((waitpid(child, &child_status, 0) != child) ||
+        (!WIFEXITED(child_status)) || (WEXITSTATUS(child_status) != 0)) {
+      fail("nonblocking reader lifecycle");
+    }
+  }
+  free(payload);
 }
 
 int main(void) {
@@ -135,6 +242,7 @@ int main(void) {
                  NATIVE_HOST_SOCKET_OK, "close peer");
   require_status(native_host_socket_close_v0(&capability, inherited),
                  NATIVE_HOST_SOCKET_OK, "close listener");
+  test_nonblocking_write_progress(&capability);
   puts("socket capability fixture: ok");
   return 0;
 }
