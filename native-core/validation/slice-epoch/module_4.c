@@ -10,30 +10,43 @@ native_m4_type_1 native_m4_fn_0(native_arena *arena, const native_capability *ca
   (void)capability;
   (void)native_v_0;
   (void)native_v_1;
+  native_arena native_epoch_0;
   native_m4_type_0 native_s_0;
-  native_m4_type_3 native_s_1;
-  native_m4_type_1 native_s_2;
+  native_m4_type_0 native_s_1;
+  native_m4_type_3 native_s_2;
   native_m4_type_1 native_s_3;
-  native_m4_type_2 native_s_4;
-  native_m4_type_1 native_s_5;
+  native_m4_type_1 native_s_4;
+  native_m4_type_2 native_s_5;
+  native_m4_type_0 native_s_6;
+  native_m4_type_1 native_s_7;
+  native_m4_type_0 native_s_8;
   native_s_0 = arena;
   (void)native_s_0;
-  native_s_1 = native_text_trim((native_arena *)native_s_0, native_v_0);
-  native_s_2 = (int64_t)native_text_length(native_s_1);
-  native_s_3 = INT64_C(5);
-  (void)native_s_3;
-  native_s_4 = (native_s_2 == native_s_3);
-  if (native_s_4) {
+  (void)native_arena_init_growable(&native_epoch_0, (size_t)0U);
+  native_s_1 = &native_epoch_0;
+  (void)native_s_1;
+  native_s_2 = native_text_trim((native_arena *)native_s_1, native_v_0);
+  native_s_3 = (int64_t)native_text_length(native_s_2);
+  native_s_4 = INT64_C(5);
+  (void)native_s_4;
+  native_s_5 = (native_s_3 == native_s_4);
+  if (native_s_5) {
     goto native_l0_1;
   } else {
     goto native_l0_2;
   }
 native_l0_1: ;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_6 = NULL;
+  (void)native_s_6;
   return native_v_1;
 native_l0_2: ;
-  native_s_5 = INT64_C(-1);
-  (void)native_s_5;
-  return native_s_5;
+  native_s_7 = INT64_C(-1);
+  (void)native_s_7;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_8 = NULL;
+  (void)native_s_8;
+  return native_s_7;
 }
 native_m4_type_1 native_m4_fn_1(native_arena *arena, const native_capability *capability, native_m4_type_1 native_v_0) {
   (void)arena;

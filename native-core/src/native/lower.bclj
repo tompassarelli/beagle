@@ -17393,20 +17393,82 @@
         next
         (recur next (- budget 1))))))
 
-;; Retargetable: an allocating instruction whose arena travels in a top-level
-;; arena-id operand, or a call whose arena operand the stage may redirect.
-;; Atom cells stay pinned to the root (TODO-EPOCH-ATOM-STORE)
-;; and codec/text-builtin operations keep their arena nested inside the
-;; operation record (TODO-EPOCH-NESTED-ARENA-OPERAND) — both keep the parent
-;; epoch in v0. A promote is excluded on different grounds: its arena operand
-;; is the DESTINATION the author asked for, not a site with an open choice.
+;; Retargetable: an allocating instruction or redirectable call with an arena
+;; SSA operand, wherever the instruction family keeps it — top level, or
+;; nested inside a text-builtin or codec operation record
+;; (obligations/instruction-arena-operand resolves both). Atom cells stay
+;; pinned to the root (TODO-EPOCH-ATOM-STORE), and an allocation with no
+;; arena operand at any level addresses its region directly, so the stage has
+;; nothing to redirect and keeps the parent epoch
+;; (TODO-EPOCH-NO-ARENA-OPERAND). A promote is excluded on different grounds:
+;; its arena operand is the DESTINATION the author asked for, not a site with
+;; an open choice.
 (defn epoch-retargetable? [instruction: core/Instruction] -> Bool
   (and (or (allocating-instruction? instruction)
          (instance? native.core.CallInstruction instruction))
     (not (instance? native.core.AtomCreateInstruction instruction))
-    (not (instance? native.core.CodecPrimitiveInstructionV0 instruction))
     (not (instance? native.core.PromoteInstructionV0 instruction))
-    (some? (get instruction :arena-id nil))))
+    (some? (obligations/instruction-arena-operand instruction))))
+
+(defn retarget-text-builtin-arena
+  [operation: core/TextBuiltinOpV0
+   epoch-arena: core/NativeId] -> core/TextBuiltinOpV0
+  (cond
+    (instance? native.core.TextTrimV0 operation)
+    (core/->TextTrimV0 epoch-arena (core/texttrimv0-source-id operation))
+    (instance? native.core.TextLowerV0 operation)
+    (core/->TextLowerV0 epoch-arena (core/textlowerv0-source-id operation))
+    (instance? native.core.TextLetterDecimalRunsV0 operation)
+    (core/->TextLetterDecimalRunsV0 epoch-arena
+      (core/textletterdecimalrunsv0-source-id operation)
+      (core/textletterdecimalrunsv0-pattern-id operation))
+    (instance? native.core.TextRegexReplaceV0 operation)
+    (core/->TextRegexReplaceV0 epoch-arena
+      (core/textregexreplacev0-source-id operation)
+      (core/textregexreplacev0-pattern-id operation)
+      (core/textregexreplacev0-replacement-id operation))
+    (instance? native.core.TextRegexFindV0 operation)
+    (core/->TextRegexFindV0 epoch-arena
+      (core/textregexfindv0-source-id operation)
+      (core/textregexfindv0-pattern-id operation))
+    (instance? native.core.TextSplitV0 operation)
+    (core/->TextSplitV0 epoch-arena
+      (core/textsplitv0-source-id operation)
+      (core/textsplitv0-pattern-id operation))
+    (instance? native.core.TextVectorTrimV0 operation)
+    (core/->TextVectorTrimV0 epoch-arena
+      (core/textvectortrimv0-source-id operation))
+    (instance? native.core.TextVectorRemoveBlankV0 operation)
+    (core/->TextVectorRemoveBlankV0 epoch-arena
+      (core/textvectorremoveblankv0-source-id operation))
+    (instance? native.core.TextJoinV0 operation)
+    (core/->TextJoinV0 epoch-arena
+      (core/textjoinv0-separator-id operation)
+      (core/textjoinv0-source-id operation))
+    (instance? native.core.TextRepeatV0 operation)
+    (core/->TextRepeatV0 epoch-arena
+      (core/textrepeatv0-source-id operation)
+      (core/textrepeatv0-count-id operation))
+    :else operation))
+
+(defn retarget-codec-primitive-arena
+  [operation: core/CodecPrimitiveOpV0
+   epoch-arena: core/NativeId] -> core/CodecPrimitiveOpV0
+  (cond
+    (instance? native.core.Utf8EncodeV0 operation)
+    (core/->Utf8EncodeV0 epoch-arena (core/utf8encodev0-source-id operation))
+    (instance? native.core.Utf8DecodeV0 operation)
+    (core/->Utf8DecodeV0 epoch-arena (core/utf8decodev0-source-id operation))
+    (instance? native.core.Utf8DecodeSourceV0 operation)
+    (core/->Utf8DecodeSourceV0 epoch-arena
+      (core/utf8decodesourcev0-source-id operation))
+    (instance? native.core.NativeBytesFromIntsBoundedV0 operation)
+    (core/->NativeBytesFromIntsBoundedV0 epoch-arena
+      (core/nativebytesfromintsboundedv0-source-id operation)
+      (core/nativebytesfromintsboundedv0-max-bytes-id operation))
+    (instance? native.core.Sha256BytesV0 operation)
+    (core/->Sha256BytesV0 epoch-arena (core/sha256bytesv0-source-id operation))
+    :else operation))
 
 (defn retarget-arena-operand
   [instruction: core/Instruction
@@ -17583,6 +17645,16 @@
       (core/valuetotextinstructionv0-domain-type instruction)
       (core/valuetotextinstructionv0-value-id instruction)
       epoch-arena)
+    (instance? native.core.TextBuiltinInstruction instruction)
+    (core/->TextBuiltinInstruction
+      (core/textbuiltininstruction-result instruction)
+      (retarget-text-builtin-arena
+        (core/textbuiltininstruction-builtin instruction) epoch-arena))
+    (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+    (core/->CodecPrimitiveInstructionV0
+      (core/codecprimitiveinstructionv0-result instruction)
+      (retarget-codec-primitive-arena
+        (core/codecprimitiveinstructionv0-operation instruction) epoch-arena))
     :else instruction))
 
 (defrecord EpochRootArenaV0
@@ -17705,9 +17777,10 @@
                           instruction))
                       (not (epoch-retargetable? instruction))
                       (conj collected
-                        (epoch-pending-detail "TODO-EPOCH-NESTED-ARENA-OPERAND"
+                        (epoch-pending-detail "TODO-EPOCH-NO-ARENA-OPERAND"
                           function instruction))
-                      (not (optional-same-id? (get instruction :arena-id nil)
+                      (not (optional-same-id?
+                             (obligations/instruction-arena-operand instruction)
                              root-arena-value))
                       (conj collected
                         (epoch-pending-detail "TODO-EPOCH-AMBIGUOUS-ESCAPE"
@@ -17720,7 +17793,8 @@
                 (let [instruction: core/Instruction (nth interior position)]
                   (recur (+ position 1)
                     (if (and (epoch-retargetable? instruction)
-                          (optional-same-id? (get instruction :arena-id nil)
+                          (optional-same-id?
+                            (obligations/instruction-arena-operand instruction)
                             root-arena-value))
                       (assoc marked
                         (id-value (core/instruction-result-id instruction))
@@ -18644,6 +18718,249 @@
           (obligations/obligation-passed? verdict))
         verdicts))))
 
+;; The nested-arena-operand shape the stage admits: an interior text-builtin
+;; allocation whose arena operand travels inside the builtin record (the fram
+;; substring-needle-result / str-trim shape). The stage must resolve the
+;; nested operand, retarget it into the minted epoch alongside the top-level
+;; TextConcat, insert the close, and keep all nine obligations green.
+
+(def epoch-nested-function: core/FunctionDef
+  (core/->FunctionDef
+    (fixture-id "epoch-nested" "function")
+    "epoch-nested"
+    [(core/->Parameter (fixture-id "epoch-nested" "n") (int-type-id))]
+    [(core/->BasicBlock (fixture-id "epoch-nested" "entry") []
+       [(core/->ArenaInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-nested" "arena")
+            (arena-handle-type-id))
+          (arena-region-id)
+          (allocate-capability-id)
+          (core/->TokenFlowV0
+            [(arena-region-id) (allocate-capability-id)] []))
+        (core/->TextConcatInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-nested" "text")
+            (text-type-id))
+          (fixture-id "epoch-nested" "arena")
+          [])
+        (core/->TextBuiltinInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-nested" "trimmed")
+            (text-type-id))
+          (core/->TextTrimV0 (fixture-id "epoch-nested" "arena")
+            (fixture-id "epoch-nested" "text")))]
+       [(core/->ReturnTerminator (fixture-id "epoch-nested" "n"))])]
+    (fixture-id "epoch-nested" "entry")
+    (int-type-id)
+    [(allocate-effect-id)]
+    [(arena-region-id)]
+    [(allocate-capability-id)]))
+
+(def epoch-nested-program: core/NativeCoreProgram
+  (let [types: (Vec core/TypeDef)
+        [(i64-type) (text-type) (arena-handle-type)]]
+    (core/->NativeCoreProgram
+      (fixture-id "epoch-nested" "program")
+      nil
+      "typed-to-native-v0"
+      types
+      [(core/->EffectDef (allocate-effect-id)
+         (core/->AllocateEffect (arena-region-id)))]
+      (slice-regions)
+      [(core/->CapabilityDef (allocate-capability-id)
+         (core/->AllocateCapability true)
+         (arena-region-id)
+         true)]
+      (collect-layouts (resolve-layouts types (core/abi-profile-lp64)))
+      [epoch-nested-function]
+      [(allocate-effect-id)]
+      [(arena-region-id)]
+      [(allocate-capability-id)]
+      []
+      [])))
+
+(def epoch-nested-frozen: stages/FrozenNativeStageV0
+  (let [root: core/NativeId (fixture-id "epoch-nested" "terms")
+        stage: stages/NativeStageV0
+        (stages/->NativeStageV0
+          (stages/->TermGraphV0 root
+            [(stages/->TermNodeV0 root
+               (stages/->TextTermV0 "native-stage-v0"))])
+          "sha256:epoch-nested-fixture"
+          epoch-nested-program
+          [])
+        encoding: String (stages/encode-native-stage stage)]
+    (stages/->FrozenNativeStageV0 stage encoding
+      (stages/content-digest encoding))))
+
+(defn program-allocating-arena-operands
+  [program: core/NativeCoreProgram] -> (Vec core/NativeId)
+  (loop [function-position: Int 0
+         functions: (Vec core/FunctionDef)
+         (core/nativecoreprogram-functions program)
+         collected: (Vec core/NativeId) []]
+    (if (>= function-position (count functions))
+      collected
+      (recur (+ function-position 1) functions
+        (loop [block-position: Int 0
+               blocks: (Vec core/BasicBlock)
+               (core/functiondef-blocks (nth functions function-position))
+               inner: (Vec core/NativeId) collected]
+          (if (>= block-position (count blocks))
+            inner
+            (recur (+ block-position 1) blocks
+              (loop [position: Int 0
+                     instructions: (Vec core/Instruction)
+                     (core/basicblock-instructions
+                       (nth blocks block-position))
+                     arenas: (Vec core/NativeId) inner]
+                (if (>= position (count instructions))
+                  arenas
+                  (recur (+ position 1) instructions
+                    (let [instruction: core/Instruction
+                          (nth instructions position)
+                          arena: (U core/NativeId Nil)
+                          (if (allocating-instruction? instruction)
+                            (obligations/instruction-arena-operand instruction)
+                            nil)]
+                      (if (nil? arena)
+                        arenas
+                        (conj arenas arena)))))))))))))
+
+(def epoch-stage-nested-mint-passes?: Bool
+  (let [result: EpochLoweringResultV0
+        (lower-epoch-stage epoch-nested-frozen "epoch-gate-commit" ["profile=3"]
+          (core/abi-profile-lp64) (->EpochDerivedV0 true))
+        frozen: stages/FrozenNativeStageV0 (epoch-result-frozen result)
+        rewritten: core/NativeCoreProgram
+        (stages/nativestagev0-program
+          (stages/frozennativestagev0-stage frozen))
+        verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-core-program rewritten
+          (core/abi-profile-lp64))]
+    (and (instance? native.lower.EpochLoweringCompleteV0 result)
+      (= 1 (program-minted-epoch-count rewritten))
+      (= 1 (program-close-count rewritten))
+      ;; Both allocations moved off the root arena, the nested trim included.
+      (every?
+        (fn [arena: core/NativeId] -> Bool
+          (not (same-id? arena (fixture-id "epoch-nested" "arena"))))
+        (program-allocating-arena-operands rewritten))
+      (= 2 (count (program-allocating-arena-operands rewritten)))
+      (every?
+        (fn [verdict: obligations/ObligationVerdictV0] -> Bool
+          (obligations/obligation-passed? verdict))
+        verdicts))))
+
+;; The still-refused sub-case: an interior allocation with no arena SSA
+;; operand at any level. An AllocateInstruction addresses its region and
+;; capability directly, so the stage has nothing to redirect — it keeps the
+;; parent epoch under TODO-EPOCH-NO-ARENA-OPERAND and the program stays green.
+
+(def epoch-no-arena-ref-type: core/TypeDef
+  (core/->TypeDef (fixture-id "epoch-no-arena" "ref-type") "EpochRefI64"
+    (core/->ReferenceType (int-type-id))))
+
+(def epoch-no-arena-function: core/FunctionDef
+  (core/->FunctionDef
+    (fixture-id "epoch-no-arena" "function")
+    "epoch-no-arena"
+    [(core/->Parameter (fixture-id "epoch-no-arena" "n") (int-type-id))]
+    [(core/->BasicBlock (fixture-id "epoch-no-arena" "entry") []
+       [(core/->ArenaInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-no-arena" "arena")
+            (arena-handle-type-id))
+          (arena-region-id)
+          (allocate-capability-id)
+          (core/->TokenFlowV0
+            [(arena-region-id) (allocate-capability-id)] []))
+        (core/->AtomInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-no-arena" "bytes")
+            (int-type-id))
+          (core/->I64Atom 8))
+        (core/->AllocateInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-no-arena" "slot")
+            (fixture-id "epoch-no-arena" "ref-type"))
+          (arena-region-id)
+          (allocate-capability-id)
+          (fixture-id "epoch-no-arena" "bytes")
+          (core/->TokenFlowV0 [] []))]
+       [(core/->ReturnTerminator (fixture-id "epoch-no-arena" "n"))])]
+    (fixture-id "epoch-no-arena" "entry")
+    (int-type-id)
+    [(allocate-effect-id)]
+    [(arena-region-id)]
+    [(allocate-capability-id)]))
+
+(def epoch-no-arena-program: core/NativeCoreProgram
+  (let [types: (Vec core/TypeDef)
+        [(i64-type) (text-type) (arena-handle-type) epoch-no-arena-ref-type]]
+    (core/->NativeCoreProgram
+      (fixture-id "epoch-no-arena" "program")
+      nil
+      "typed-to-native-v0"
+      types
+      [(core/->EffectDef (allocate-effect-id)
+         (core/->AllocateEffect (arena-region-id)))]
+      (slice-regions)
+      [(core/->CapabilityDef (allocate-capability-id)
+         (core/->AllocateCapability true)
+         (arena-region-id)
+         true)]
+      (collect-layouts (resolve-layouts types (core/abi-profile-lp64)))
+      [epoch-no-arena-function]
+      [(allocate-effect-id)]
+      [(arena-region-id)]
+      [(allocate-capability-id)]
+      []
+      [])))
+
+(def epoch-no-arena-frozen: stages/FrozenNativeStageV0
+  (let [root: core/NativeId (fixture-id "epoch-no-arena" "terms")
+        stage: stages/NativeStageV0
+        (stages/->NativeStageV0
+          (stages/->TermGraphV0 root
+            [(stages/->TermNodeV0 root
+               (stages/->TextTermV0 "native-stage-v0"))])
+          "sha256:epoch-no-arena-fixture"
+          epoch-no-arena-program
+          [])
+        encoding: String (stages/encode-native-stage stage)]
+    (stages/->FrozenNativeStageV0 stage encoding
+      (stages/content-digest encoding))))
+
+(defn pending-detail-code? [detail: String code: String] -> Bool
+  (and (>= (count detail) (count code))
+    (= code (subs detail 0 (count code)))))
+
+(def epoch-stage-no-arena-refusal-passes?: Bool
+  (let [result: EpochLoweringResultV0
+        (lower-epoch-stage epoch-no-arena-frozen "epoch-gate-commit"
+          ["profile=3"] (core/abi-profile-lp64) (->EpochDerivedV0 true))
+        frozen: stages/FrozenNativeStageV0 (epoch-result-frozen result)
+        rewritten: core/NativeCoreProgram
+        (stages/nativestagev0-program
+          (stages/frozennativestagev0-stage frozen))
+        pendings: (Vec core/ReceiptObligationV0)
+        (match result
+          [(EpochLoweringCompleteV0 complete-frozen receipt) []]
+          [(EpochLoweringPendingV0 pending-frozen receipt obligations)
+           obligations])
+        verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-core-program rewritten
+          (core/abi-profile-lp64))]
+    (and (instance? native.lower.EpochLoweringPendingV0 result)
+      (= 0 (program-minted-epoch-count rewritten))
+      (= 0 (program-close-count rewritten))
+      (= 1 (count pendings))
+      (every?
+        (fn [row: core/ReceiptObligationV0] -> Bool
+          (pending-detail-code? (core/receiptobligationv0-detail row)
+            "TODO-EPOCH-NO-ARENA-OPERAND"))
+        pendings)
+      (every?
+        (fn [verdict: obligations/ObligationVerdictV0] -> Bool
+          (obligations/obligation-passed? verdict))
+        verdicts))))
+
 ;; --- Gate G3: under EpochIdentityV0 the stage is a relabelling and nothing
 ;; else, and that is stated as strongly as the encoding allows — take the
 ;; input program, give it the epoch program's id, parent and compiler-pass,
@@ -18696,3 +19013,9 @@
 ;; is the assignment being honoured rather than an empty program.
 (def epoch-identity-mint-passes?: Bool
   (epoch-identity-inert? epoch-mint-frozen))
+
+;; Same honour under the nested-arena-operand fixture: derived assignment
+;; retargets its builtin-record operand, so identity holding it at zero mints
+;; and zero closes is again the assignment, not an empty program.
+(def epoch-identity-nested-passes?: Bool
+  (epoch-identity-inert? epoch-nested-frozen))

@@ -12,8 +12,9 @@
 ;;   1  probe under IDENTITY assignment — the same program at epoch-0
 ;;   2  promote — a young Text copied into the root arena before the close
 ;;   3  nested — two nested epochs closing LIFO
-;;   4  caller/callee under DERIVED assignment — the callee allocates into the
-;;      epoch arena its caller passes (rule E3)
+;;   4  caller/callee under DERIVED assignment — the call rides in the epoch
+;;      arena the caller passes (rule E3); the callee's interior trim dies in
+;;      the callee's own minted epoch
 ;;   5  the same pair at epoch-0
 
 (define-mode strict)
@@ -137,12 +138,13 @@
     [(lower/allocate-capability-id)]))
 
 ;; --- Module 4/5: caller ownership (rule E3). `callee` allocates through a
-;; text builtin, whose arena is nested inside the operation record and so is
-;; never retargeted — it allocates into whatever arena it is handed, and
-;; nothing it allocates escapes it, which makes it epoch-safe. `caller` has no
-;; interior allocation of its own; the only thing it can put in an epoch is the
-;; CALL, and it may only do that because the callee's summary says so. The
-;; whole reclamation therefore rides on the arena being a per-call operand.
+;; text builtin whose arena is nested inside the operation record; nothing it
+;; allocates escapes it, which makes it epoch-safe. Under derived assignment
+;; the callee's interior trim is retargeted into a callee-minted epoch (the
+;; stage resolves nested arena operands), so the pair mints TWO epochs: the
+;; callee's own, and the caller's, which holds the CALL — redirectable only
+;; because the callee's summary says so. The call's reclamation still rides
+;; on the arena being a per-call operand.
 
 (defn trim-instruction
   [label: String
@@ -504,7 +506,7 @@
     (nine-pass? nested-program)
     (not (epoch-sound? old-young-program))
     (epoch-sound? promote-program)
-    (= 1 caller-derived-minted)
+    (= 2 caller-derived-minted)
     (nine-pass? caller-derived-program)
     (nine-pass? caller-identity-program)))
 

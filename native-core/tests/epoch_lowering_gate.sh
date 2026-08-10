@@ -44,9 +44,10 @@ bb -cp "$work/out" -e "
 (require 'native.lower)
 (def ns (find-ns 'native.lower))
 (doseq [n ['epoch-stage-fixture-passes? 'epoch-stage-fold-passes?
-           'epoch-stage-mint-passes?
+           'epoch-stage-mint-passes? 'epoch-stage-nested-mint-passes?
+           'epoch-stage-no-arena-refusal-passes?
            'epoch-identity-fixture-passes? 'epoch-identity-fold-passes?
-           'epoch-identity-mint-passes?]]
+           'epoch-identity-mint-passes? 'epoch-identity-nested-passes?]]
   (println (pr-str [n (deref (ns-resolve ns n))])))
 " > "$report"
 
