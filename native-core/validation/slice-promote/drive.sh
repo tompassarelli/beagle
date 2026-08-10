@@ -87,11 +87,24 @@ grep -qx 'result PASS' "$work/core/report.txt" \
   || { cat "$work/core/report.txt" >&2; echo "drive.sh: surface build did not pass" >&2; exit 1; }
 [ "$(grep -c '^obligation-projection PASS ' "$work/core/report.txt")" = 9 ] \
   || { echo "drive.sh: surface build did not clear nine obligations" >&2; exit 1; }
-# The epoch-free promote is a plain assignment in the C, never a promote call.
+# The surface path crosses the derived epoch stage, so the probe's four
+# functions are the whole promote taxonomy in one C file:
+#   promoted-text       interior concatenation -> minted epoch + a real promote
+#   promoted-parameter  source already outlives the destination -> collapsed
+#   promoted-count      epoch-free Int -> a register move, never a promote
+#   escaping-text       no form, nothing interior -> no epoch at all
+grep -qx 'stage native-to-epoch COMPLETE' "$work/core/report.txt" \
+  || { echo "drive.sh: surface build did not cross the epoch stage" >&2; exit 1; }
+[ "$(awk '$1 == "epoch-regions-minted" { print $2 }' "$work/core/report.txt")" = 1 ] \
+  || { echo "drive.sh: surface build minted the wrong epoch count" >&2; exit 1; }
 grep -q 'native_value_promote' "$work/core/module_0.c" \
   || { echo "drive.sh: surface build lost the handle-carrying promote" >&2; exit 1; }
-[ "$(grep -c 'native_value_promote' "$work/core/module_0.c")" = 2 ] \
+[ "$(grep -c 'native_value_promote' "$work/core/module_0.c")" = 1 ] \
   || { echo "drive.sh: surface build promote count moved" >&2; exit 1; }
+[ "$(grep -c 'native_arena native_epoch_' "$work/core/module_0.c")" = 1 ] \
+  || { echo "drive.sh: surface build emitted no minted epoch arena" >&2; exit 1; }
+grep -q 'native_arena_destroy' "$work/core/module_0.c" \
+  || { echo "drive.sh: surface build left the minted epoch open" >&2; exit 1; }
 cp "$work/core/source.facts" "$work/promote.facts"
 
 modules=(core stages lower obligations c11 fold_c17 body_c17 qbe slice
