@@ -118,7 +118,7 @@ for source in "${sources[@]}"; do
         die "$source must begin with bare #lang beagle"
 done
 
-for command in bb clojure sha256sum; do
+for command in bb sha256sum; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
@@ -145,7 +145,7 @@ done
 work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-core-build.XXXXXX")"
 cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
-mkdir -p "$work/compiled" "$work/artifacts"
+mkdir -p "$work/artifacts"
 
 facts="$work/source.facts"
 projector_args=()
@@ -159,35 +159,90 @@ for source in "${sources[@]}"; do
 done
 bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 
-"$BIN/beagle-build-all" \
-    "$BEAGLE_DIR/native-core/src/native/core.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/stages.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/lower.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/obligations.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/c11.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/slice.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/fold_c17.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/body_c17.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/body_slice.bclj" \
-    "$BEAGLE_DIR/native-core/src/native/qbe.bclj" \
-    --out "$work/compiled" >"$work/build.log" 2>&1 || {
-        sed -n '1,200p' "$work/build.log" >&2
-        exit 1
-    }
+core_modules=(
+    native-core/src/native/core.bclj
+    native-core/src/native/stages.bclj
+    native-core/src/native/lower.bclj
+    native-core/src/native/obligations.bclj
+    native-core/src/native/c11.bclj
+    native-core/src/native/slice.bclj
+    native-core/src/native/fold_c17.bclj
+    native-core/src/native/body_c17.bclj
+    native-core/src/native/body_slice.bclj
+    native-core/src/native/qbe.bclj
+)
 
-# Generated Clojure needs provider records referred and imported until the
-# emitter qualifies cross-module union patterns itself.
-core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
-    "$work/compiled/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
-    generated="$work/compiled/native/$module.clj"
-    [[ -f "$generated" ]] || continue
-    sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
-    awk -v imp="(import '[native.core $core_records])" \
-        '!seen && /^$/ { print imp; seen = 1 } { print }' \
-        "$generated" >"$generated.tmp"
-    mv "$generated.tmp" "$generated"
-done
+# The compiled projection is a pure function of the ten Core modules, the Racket
+# emitter that lowers them, and the fixup applied below — so the key covers
+# exactly those and nothing else. Keys are built from repo-RELATIVE paths so a
+# worktree and its main checkout share entries. A key that is too coarse costs
+# one rebuild; a key that is too narrow serves a stale compiler, so anything
+# whose bytes can change the emitted .clj is hashed in.
+cache_key_material() {
+    local relative
+    for relative in "${core_modules[@]}" \
+                    bin/beagle-build-core \
+                    bin/beagle-build-all \
+                    bin/beagle-build \
+                    bin/_beagle-racket \
+                    share/targets.sh; do
+        printf '%s %s\n' "$relative" \
+            "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
+    done
+    find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
+        LC_ALL=C sort -z |
+        xargs -0 sha256sum |
+        awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+}
+
+cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
+cache_entry="$cache_root/$(cache_key_material | sha256sum | awk '{print $1}')"
+compiled="$cache_entry/compiled"
+
+if [[ ! -f "$cache_entry/.complete" ]]; then
+    compiled="$work/compiled"
+    mkdir -p "$compiled"
+    build_all_args=()
+    for relative in "${core_modules[@]}"; do
+        build_all_args+=("$BEAGLE_DIR/$relative")
+    done
+    "$BIN/beagle-build-all" "${build_all_args[@]}" \
+        --out "$compiled" >"$work/build.log" 2>&1 || {
+            sed -n '1,200p' "$work/build.log" >&2
+            exit 1
+        }
+
+    # Generated Clojure needs provider records referred and imported until the
+    # emitter qualifies cross-module union patterns itself.
+    core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+        "$compiled/native/core.clj" | tr '\n' ' ')"
+    for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+        generated="$compiled/native/$module.clj"
+        [[ -f "$generated" ]] || continue
+        sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
+        awk -v imp="(import '[native.core $core_records])" \
+            '!seen && /^$/ { print imp; seen = 1 } { print }' \
+            "$generated" >"$generated.tmp"
+        mv "$generated.tmp" "$generated"
+    done
+
+    # Publish by renaming a fully-populated staging dir, so a reader never sees
+    # a half-written entry and a lost race just keeps this run's own copy.
+    if mkdir -p "$cache_root" 2>/dev/null &&
+       staging="$(mktemp -d "$cache_root/.staging.XXXXXX" 2>/dev/null)"; then
+        if cp -a "$compiled" "$staging/compiled" 2>/dev/null &&
+           : >"$staging/.complete" 2>/dev/null &&
+           mv -T "$staging" "$cache_entry" 2>/dev/null; then
+            compiled="$cache_entry/compiled"
+            find "$cache_root" -mindepth 1 -maxdepth 1 -type d -mtime +14 \
+                -exec rm -rf -- '{}' + 2>/dev/null || true
+        else
+            rm -rf -- "${staging:?}"
+        fi
+    fi
+else
+    touch -c "$cache_entry" 2>/dev/null || true
+fi
 
 compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
 export BEAGLE_CORE_FACTS="$facts"
@@ -202,7 +257,7 @@ export BEAGLE_CORE_MATERIALIZERS="$work/materializers"
 export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
 
 set +e
-clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
+bb -cp "$compiled" -e '
 (require (quote [native.core :as core])
          (quote [native.stages :as stages])
          (quote [native.lower :as lower])
@@ -213,12 +268,12 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
          (quote [native.qbe :as qbe])
          (quote [clojure.string :as str]))
 
-(import (quote [java.io FileOutputStream])
-        (quote [java.lang ProcessHandle])
+(import (quote [java.lang ProcessHandle])
+        (quote [java.nio ByteBuffer])
         (quote [java.nio.channels FileChannel])
         (quote [java.nio.charset StandardCharsets])
-        (quote [java.nio.file AtomicMoveNotSupportedException CopyOption Files
-                OpenOption Paths StandardCopyOption StandardOpenOption]))
+        (quote [java.nio.file CopyOption Files OpenOption Paths
+                StandardCopyOption StandardOpenOption]))
 
 (def report-path (System/getenv "BEAGLE_CORE_REPORT"))
 (def stage-progress (atom []))
@@ -232,16 +287,22 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                                  (.pid (ProcessHandle/current)) "."
                                  (System/nanoTime) ".tmp"))]
     (try
-      (with-open [stream (FileOutputStream. (.toFile temporary))]
-        (.write stream (.getBytes text StandardCharsets/UTF_8))
-        (.flush stream)
-        (.sync (.getFD stream)))
+      (let [buffer (ByteBuffer/wrap (.getBytes text StandardCharsets/UTF_8))]
+        (with-open [channel (FileChannel/open temporary
+                                              (into-array OpenOption
+                                                          [StandardOpenOption/CREATE_NEW
+                                                           StandardOpenOption/WRITE]))]
+          (while (.hasRemaining buffer)
+            (.write channel buffer))
+          (.force channel true)))
       (try
         (Files/move temporary destination
                     (into-array CopyOption
                                 [StandardCopyOption/ATOMIC_MOVE
                                  StandardCopyOption/REPLACE_EXISTING]))
-        (catch AtomicMoveNotSupportedException _
+        ;; AtomicMoveNotSupportedException is outside the interpreter class
+        ;; allowlist, so the cross-filesystem fallback keys on its supertype.
+        (catch java.io.IOException _
           (Files/move temporary destination
                       (into-array CopyOption
                                   [StandardCopyOption/REPLACE_EXISTING]))))
