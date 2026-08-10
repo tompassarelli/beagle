@@ -45,4 +45,6 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
+obligation-projection PASS epoch-soundness
+obligation-projection PASS leak-freedom
 materialize OK module_0.h module_0.c

@@ -112,17 +112,17 @@ if rg -n '^pending ' "$report" >/dev/null; then
   die "the complete module reported pending functions"
 fi
 
-obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects)
+obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects epoch-soundness leak-freedom)
 for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-projection PASS $obligation" "$report" >/dev/null \
     || die "validator did not pass: $obligation"
   rg -Fx "qbe-obligation PASS $obligation" "$report" >/dev/null \
     || die "QBE projection validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$report")" -eq 7 ]] \
-  || die "report did not contain exactly seven passing validators"
-[[ "$(rg -c '^qbe-obligation PASS ' "$report")" -eq 7 ]] \
-  || die "report did not contain exactly seven passing QBE validators"
+[[ "$(rg -c '^obligation-projection PASS ' "$report")" -eq 9 ]] \
+  || die "report did not contain exactly nine passing validators"
+[[ "$(rg -c '^qbe-obligation PASS ' "$report")" -eq 9 ]] \
+  || die "report did not contain exactly nine passing QBE validators"
 [[ "$(rg -c '^lowered fn_[0-9]+ ' "$report")" -eq 19 ]] \
   || die "report did not contain exactly nineteen lowered functions"
 

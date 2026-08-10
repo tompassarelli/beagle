@@ -16,6 +16,8 @@ checked-arithmetic: pass
 legal-abi: pass
 discharged-tokens: pass
 bounded-effects: pass
+epoch-soundness: pass
+leak-freedom: pass
 
 source-freeze receipt obligations:
   discharged: source Term identities and module roots are closed
@@ -48,6 +50,8 @@ typed-to-native receipt obligations:
   PENDING: every implemented probe function carries an explicit ABI declaration
   discharged: implemented functions do not leak an affine capability token
   discharged: implemented function effects stay inside program declarations
+  discharged: no reference points from an older epoch into a younger one
+  discharged: every opened epoch region provably closes on all paths in tree order
   discharged: native Terms contain no raw Any, host exception, host collection, or target syntax
   PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frame
   PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for max-sequence

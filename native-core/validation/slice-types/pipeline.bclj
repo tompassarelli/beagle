@@ -270,7 +270,9 @@
    "CHECKED_ARITHMETIC"
    "LEGAL_ABI"
    "DISCHARGED_TOKENS"
-   "BOUNDED_EFFECTS"])
+   "BOUNDED_EFFECTS"
+   "EPOCH_SOUNDNESS"
+   "LEAK_FREEDOM"])
 
 (defn obligation-lines [program: core/NativeCoreProgram] -> (Vec String)
   (let [verdicts: (Vec obligations/ObligationVerdictV0)

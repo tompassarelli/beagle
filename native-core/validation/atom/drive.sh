@@ -101,7 +101,9 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
                 (native.obligations/checked-arithmetic program)
                 (native.obligations/legal-abi program)
                 (native.obligations/discharged-tokens program)
-                (native.obligations/bounded-effects program)]
+                (native.obligations/bounded-effects program)
+                (native.obligations/epoch-soundness program)
+                (native.obligations/leak-freedom program)]
       result (native.body-c17/materialize-program program 4)]
   (when-not (every? native.obligations/obligation-passed? verdicts)
     (throw (ex-info \"Atom fixture failed a Native Core obligation\"
@@ -151,7 +153,7 @@ strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
   -c module_0.c -o source_mutations.o)
 (cd "$scratch/c" && gcc "${strict[@]}" -o atom_gcc \
   module_4.c native_shim.c main.c && ./atom_gcc)
-echo "drive.sh: seven obligations + QBE refusal + gcc strict C17 run ok"
+echo "drive.sh: nine obligations + QBE refusal + gcc strict C17 run ok"
 
 clang_bin="$(command -v clang || true)"
 if [[ -z "$clang_bin" ]]; then

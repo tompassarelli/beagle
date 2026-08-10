@@ -317,6 +317,8 @@
     [(TransientSetConjInstructionV0 value)
      (core/transientsetconjinstructionv0-result instruction)]
     [(ArenaInstruction value) (core/arenainstruction-result instruction)]
+    [(ArenaCloseInstructionV0 value)
+     (core/arenacloseinstructionv0-result instruction)]
     [(AtomStateInstruction value) (core/atomstateinstruction-result instruction)]
     [(AtomCreateInstruction value) (core/atomcreateinstruction-result instruction)]
     [(AtomDerefInstruction value) (core/atomderefinstruction-result instruction)]
@@ -1074,6 +1076,7 @@
     [(TransientMapAssocInstructionV0 value) false]
     [(TransientSetConjInstructionV0 value) false]
     [(ArenaInstruction value) false]
+    [(ArenaCloseInstructionV0 value) false]
     [(AtomStateInstruction value) false]
     [(AtomCreateInstruction value) false]
     [(AtomDerefInstruction value) false]
@@ -1547,6 +1550,7 @@
       [(TransientSetConjInstructionV0 value) ""]
       [(ArenaInstruction value)
        (str "  " result-name " =l copy %arena\n")]
+      [(ArenaCloseInstructionV0 value) ""]
       [(AtomStateInstruction value) ""]
       [(AtomCreateInstruction value) ""]
       [(AtomDerefInstruction value) ""]
@@ -1975,6 +1979,7 @@
     [(TransientMapAssocInstructionV0 value) false]
     [(TransientSetConjInstructionV0 value) false]
     [(ArenaInstruction value) true]
+    [(ArenaCloseInstructionV0 value) false]
     [(AtomStateInstruction value) false]
     [(AtomCreateInstruction value) false]
     [(AtomDerefInstruction value) false]

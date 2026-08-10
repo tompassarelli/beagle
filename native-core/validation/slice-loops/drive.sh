@@ -3,7 +3,7 @@
 # frozen source program -> typed program -> native program (one SSA header block per
 # loop, one back-edge Jump per recur) -> 7 obligations -> native.body-c17 ->
 # gcc/clang -std=c17 -> probe main.
-# Two programs: loops.bclj must pass all seven obligations; counted/ carries the
+# Two programs: loops.bclj must pass all nine obligations; counted/ carries the
 # fram counted shapes and refuses checked-arithmetic on its interim add-i64.
 set -euo pipefail
 
@@ -98,7 +98,7 @@ compile_and_run() {
 
 emit_slice "$here/loops.bclj" "$here" "native.loops"
 if grep -q '^obligation-projection FAIL' "$here/report.txt"; then
-  echo "drive.sh: loops.bclj must discharge all seven obligations" >&2
+  echo "drive.sh: loops.bclj must discharge all nine obligations" >&2
   exit 1
 fi
 

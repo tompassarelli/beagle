@@ -96,13 +96,13 @@ for function in getenv getenv-present? getenv-length monotonic-now; do
   rg -n "^lowered fn_[0-9]+ ${function//\?/\\?} " "$report" >/dev/null \
     || die "host function did not lower: $function"
 done
-obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects)
+obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects epoch-soundness leak-freedom)
 for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-host PASS $obligation" "$report" >/dev/null \
     || die "validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-host PASS ' "$report")" -eq 7 ]] \
-  || die "report did not contain exactly seven passing validators"
+[[ "$(rg -c '^obligation-host PASS ' "$report")" -eq 9 ]] \
+  || die "report did not contain exactly nine passing validators"
 
 map="$scratch/generated/function_map.h"
 printf '%s\n' \

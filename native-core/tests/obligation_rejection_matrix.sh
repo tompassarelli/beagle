@@ -39,17 +39,22 @@ bb -cp "$work/out" -e "
 (def fixtures
   ['valid-ssa-negative 'exhaustive-matches-negative 'closed-layouts-negative
    'checked-arithmetic-negative 'legal-abi-negative 'discharged-tokens-negative
-   'bounded-effects-negative
+   'bounded-effects-negative 'epoch-soundness-negative 'leak-freedom-negative
    'valid-ssa-negative-sibling 'valid-ssa-negative-jump-mismatch
    'exhaustive-matches-negative-duplicate 'exhaustive-matches-negative-unknown-variant
    'closed-layouts-negative-zero-size 'closed-layouts-negative-misaligned-offset
    'checked-arithmetic-negative-raw-consume 'checked-arithmetic-negative-non-outcome
    'legal-abi-negative-result-mismatch 'legal-abi-negative-missing-capability
    'discharged-tokens-negative-leak 'discharged-tokens-negative-phantom-consume
-   'bounded-effects-negative-undeclared-region 'bounded-effects-negative-unbounded-call])
+   'bounded-effects-negative-undeclared-region 'bounded-effects-negative-unbounded-call
+   'epoch-soundness-negative-return-young 'epoch-soundness-negative-call-young
+   'leak-freedom-negative-lifo 'leak-freedom-negative-double-close])
 (doseq [n fixtures]
   (println (pr-str [n (deref (ns-resolve ns n))])))
-(println (pr-str ['seven-valid-passes? (deref (ns-resolve ns 'seven-valid-passes?))]))
+(println (pr-str ['nine-valid-passes? (deref (ns-resolve ns 'nine-valid-passes?))]))
+(println (pr-str ['nine-negatives-named? (deref (ns-resolve ns 'nine-negatives-named?))]))
+(println (pr-str ['eighteen-rejection-depth-fixtures-named?
+                  (deref (ns-resolve ns 'eighteen-rejection-depth-fixtures-named?))]))
 " > "$report"
 
 status=0

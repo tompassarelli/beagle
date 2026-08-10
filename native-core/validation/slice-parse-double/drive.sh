@@ -85,13 +85,13 @@ if rg -n '^pending ' "$scratch/report.txt" >/dev/null; then
   die "the parse-double projection reported pending functions"
 fi
 
-obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects)
+obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects epoch-soundness leak-freedom)
 for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-projection PASS $obligation" "$scratch/report.txt" >/dev/null \
     || die "validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$scratch/report.txt")" -eq 7 ]] \
-  || die "report did not contain exactly seven passing validators"
+[[ "$(rg -c '^obligation-projection PASS ' "$scratch/report.txt")" -eq 9 ]] \
+  || die "report did not contain exactly nine passing validators"
 
 function_index() {
   local name="$1"
@@ -154,4 +154,4 @@ run_compiler "$clang_bin" clang
 case_count="$(wc -l <"$here/corpus.tsv")"
 echo "slice-parse-double: managed + strict GCC/Clang parity PASS ($case_count cases)"
 echo "slice-parse-double: FE_TONEAREST/UPWARD/DOWNWARD/TOWARDZERO parity PASS"
-echo "slice-parse-double: seven Native obligations PASS; deterministic QBE refusal PASS"
+echo "slice-parse-double: nine Native obligations PASS; deterministic QBE refusal PASS"

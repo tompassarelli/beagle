@@ -177,7 +177,8 @@
 (defn verdict-subject [verdict: Any] -> String
   (str (id-text (get verdict :type-id nil))
     (id-text (get verdict :function-id nil))
-    (id-text (get verdict :abi-id nil))))
+    (id-text (get verdict :abi-id nil))
+    (id-text (get verdict :region-id nil))))
 
 (defn obligation-report
   [label: String

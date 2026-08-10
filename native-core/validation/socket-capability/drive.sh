@@ -26,7 +26,7 @@ mkdir -p "$scratch/out" "$scratch/generated" "$scratch/source-c17" \
 source_report="$scratch/source-c17/report.txt"
 rg -Fx 'stage typed-to-native COMPLETE' "$source_report" >/dev/null \
   || die "canonical byte sink did not lower"
-[[ "$(rg -c '^obligation-projection PASS ' "$source_report")" == "7" ]] \
+[[ "$(rg -c '^obligation-projection PASS ' "$source_report")" == "9" ]] \
   || die "canonical byte sink failed native obligations"
 rg -Fx 'materialize-c17 OK module_0.h module_0.c' "$source_report" >/dev/null \
   || die "canonical byte sink did not materialize as C17"

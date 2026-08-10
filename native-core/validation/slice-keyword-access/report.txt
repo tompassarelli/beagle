@@ -33,6 +33,8 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
+obligation-projection PASS epoch-soundness
+obligation-projection PASS leak-freedom
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-KEYWORD-MAP-KEY: keyword access needs a Keyword-keyed map [wrong-key-type]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-KEYWORD-ACCESS-TARGET: keyword access needs a closed map or known record field [missing-record-field]
 materialize OK module_0.h module_0.c

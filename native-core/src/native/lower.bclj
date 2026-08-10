@@ -1,7 +1,8 @@
 #lang beagle/clj
 (ns native.lower
   (:require [native.core :as core]
-            [native.stages :as stages]))
+            [native.stages :as stages]
+            [native.obligations :as obligations]))
 
 (define-mode strict)
 
@@ -16328,6 +16329,11 @@
        (id-value (core/arenainstruction-region instruction))
        (id-value (core/arenainstruction-capability instruction))])
 
+    (instance? native.core.ArenaCloseInstructionV0 instruction)
+    (stages/canonical-record "arena-close-instruction-v0"
+      [(encode-ssa-value (core/arenacloseinstructionv0-result instruction))
+       (id-value (core/arenacloseinstructionv0-source-id instruction))])
+
     (instance? native.core.AtomStateInstruction instruction)
     (stages/canonical-record "atom-state-instruction"
       [(encode-ssa-value (core/atomstateinstruction-result instruction))
@@ -16703,7 +16709,9 @@
    checked: Bool
    legal-abi: Bool
    tokens-discharged: Bool
-   effects-bounded: Bool] -> (Vec core/ObligationResult)
+   effects-bounded: Bool
+   epoch-sound: Bool
+   leak-free: Bool] -> (Vec core/ObligationResult)
   [(core/->ObligationResult (core/->ValidSsaObligation true) valid-ssa
      "typed SSA definitions and uses are closed")
    (core/->ObligationResult (core/->ExhaustiveMatchesObligation true) exhaustive
@@ -16717,7 +16725,11 @@
    (core/->ObligationResult (core/->DischargedTokensObligation true) tokens-discharged
      "affine region and capability tokens are discharged")
    (core/->ObligationResult (core/->BoundedEffectsObligation true) effects-bounded
-     "function effects stay inside the declared program capability sets")])
+     "function effects stay inside the declared program capability sets")
+   (core/->ObligationResult (core/->EpochSoundnessObligation true) epoch-sound
+     "no reference points from an older epoch into a younger one")
+   (core/->ObligationResult (core/->LeakFreedomObligation true) leak-free
+     "every opened epoch region provably closes on all paths in tree order")])
 
 (defn encode-obligation-result [result: core/ObligationResult] -> String
   (stages/canonical-record "native-obligation-v0"
@@ -16753,7 +16765,9 @@
    layouts-closed: Bool
    legal-abi: Bool
    tokens-discharged: Bool
-   clean: Bool] -> (Vec core/ReceiptObligationV0)
+   clean: Bool
+   epoch-sound: Bool
+   leak-free: Bool] -> (Vec core/ReceiptObligationV0)
   [(core/->ReceiptObligationV0
      (core/->ValidSsaObligation true) "v0" digest core-valid
      "Native Core validator accepts all SSA definitions and references")
@@ -16776,6 +16790,12 @@
      (core/->BoundedEffectsObligation true) "v0" digest core-valid
      "implemented function effects stay inside program declarations")
    (core/->ReceiptObligationV0
+     (core/->EpochSoundnessObligation true) "v0" digest epoch-sound
+     "no reference points from an older epoch into a younger one")
+   (core/->ReceiptObligationV0
+     (core/->LeakFreedomObligation true) "v0" digest leak-free
+     "every opened epoch region provably closes on all paths in tree order")
+   (core/->ReceiptObligationV0
      (core/->ValidSsaObligation true) "v0" digest clean
      "native Terms contain no raw Any, host exception, host collection, or target syntax")])
 
@@ -16783,6 +16803,26 @@
   (every?
     (fn [function: TypedFunctionV0] -> Bool (ready-function? function))
     functions))
+
+;; Typed-to-native emits the degenerate two-root region set and no epoch
+;; instructions, so obligations 8/9 hold by construction; this check is the
+;; cheap witness of that construction rather than a re-derivation.
+(defn program-epoch-inert? [program: core/NativeCoreProgram] -> Bool
+  (and
+    (every?
+      (fn [region: core/RegionDef] -> Bool
+        (nil? (core/regiondef-parent region)))
+      (core/nativecoreprogram-regions program))
+    (every?
+      (fn [function: core/FunctionDef] -> Bool
+        (every?
+          (fn [block: core/BasicBlock] -> Bool
+            (every?
+              (fn [instruction: core/Instruction] -> Bool
+                (not (instance? native.core.ArenaCloseInstructionV0 instruction)))
+              (core/basicblock-instructions block)))
+          (core/functiondef-blocks function)))
+      (core/nativecoreprogram-functions program))))
 
 (defn native-diagnostics
   [layouts-closed: Bool
@@ -16862,9 +16902,10 @@
           (fn [function: core/FunctionDef] -> Bool
             (function-tokens-discharged? function))
           functions)
+        epoch-inert: Bool (program-epoch-inert? program)
         obligation-results: (Vec core/ObligationResult)
         (native-obligation-results core-valid true closed-layouts true legal-abi
-          tokens-discharged core-valid)
+          tokens-discharged core-valid epoch-inert epoch-inert)
         root: core/NativeId (lower-id "native-terms" [typed-digest])
         obligation-roots: (Vec core/NativeId)
         (mapv
@@ -16893,7 +16934,7 @@
         obligations: (Vec core/ReceiptObligationV0)
         (vec (concat
                (native-receipt-obligations digest core-valid closed-layouts
-                 legal-abi tokens-discharged clean)
+                 legal-abi tokens-discharged clean epoch-inert epoch-inert)
                pending-layouts
                pending-functions))
         diagnostics: (Vec core/DiagnosticV0)
@@ -16912,6 +16953,679 @@
   (term-graph-clean?
     (stages/nativestagev0-terms
       (stages/frozennativestagev0-stage frozen))))
+
+;; --- The epoch stage: a fourth pass, program -> program, between native
+;; lowering and every materializer. It mints the region tree (one local epoch
+;; per function whose escape closure leaves interior allocations), retargets
+;; those allocations' arena operands, inserts the epoch open and its
+;; ArenaCloseInstructionV0 on every exit path, and re-freezes under
+;; compiler-pass "native-to-epoch-v0". An underivable site keeps the parent
+;; epoch — sound, merely unreclaimed — and is named with a TODO-EPOCH-* code.
+
+(defunion EpochLoweringResultV0
+  (EpochLoweringCompleteV0
+    [frozen: stages/FrozenNativeStageV0
+     receipt: core/PassReceiptV0])
+  (EpochLoweringPendingV0
+    [frozen: stages/FrozenNativeStageV0
+     receipt: core/PassReceiptV0
+     obligations: (Vec core/ReceiptObligationV0)]))
+
+(defn find-block-with-id
+  [blocks: (Vec core/BasicBlock)
+   block-id: core/NativeId] -> (U core/BasicBlock Nil)
+  (loop [position: Int 0]
+    (cond
+      (>= position (count blocks)) nil
+      (same-id? (core/basicblock-id (nth blocks position)) block-id)
+      (nth blocks position)
+      :else (recur (+ position 1)))))
+
+(defn epoch-mark-ids
+  [marks: (Map String Bool)
+   ids: (Vec core/NativeId)] -> (Map String Bool)
+  (loop [position: Int 0 current: (Map String Bool) marks]
+    (if (>= position (count ids))
+      current
+      (recur (+ position 1)
+        (assoc current (id-value (nth ids position)) true)))))
+
+(defn epoch-marked? [marks: (Map String Bool) value-id: core/NativeId] -> Bool
+  (= true (get marks (id-value value-id))))
+
+;; Escape seeds: values a function hands past its own frame. Store operands,
+;; atom-cell traffic, call and extern arguments (a missing callee summary
+;; means retained — the v2 lesson), returns, and trap payloads.
+(defn epoch-escape-seeds [function: core/FunctionDef] -> (Map String Bool)
+  (loop [block-position: Int 0
+         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
+         marks: (Map String Bool) {}]
+    (if (>= block-position (count blocks))
+      marks
+      (let [block: core/BasicBlock (nth blocks block-position)
+            with-instructions: (Map String Bool)
+            (loop [position: Int 0
+                   instructions: (Vec core/Instruction)
+                   (core/basicblock-instructions block)
+                   current: (Map String Bool) marks]
+              (if (>= position (count instructions))
+                current
+                (let [instruction: core/Instruction (nth instructions position)]
+                  (recur (+ position 1) instructions
+                    (cond
+                      (instance? native.core.StoreInstruction instruction)
+                      (epoch-mark-ids current
+                        (core/instruction-ssa-refs instruction))
+
+                      (or (instance? native.core.AtomCreateInstruction instruction)
+                        (instance? native.core.AtomDerefInstruction instruction)
+                        (instance? native.core.AtomResetInstruction instruction)
+                        (instance? native.core.AtomCompareExchangeInstruction
+                          instruction)
+                        (instance? native.core.AtomSwapInstruction instruction))
+                      (epoch-mark-ids current
+                        (conj (core/instruction-ssa-refs instruction)
+                          (core/instruction-result-id instruction)))
+
+                      (instance? native.core.CallInstruction instruction)
+                      (epoch-mark-ids current
+                        (core/callinstruction-arguments instruction))
+
+                      (instance? native.core.ExternCallInstruction instruction)
+                      (epoch-mark-ids current
+                        (core/externcallinstruction-arguments instruction))
+
+                      :else current)))))
+            with-terminators: (Map String Bool)
+            (loop [position: Int 0
+                   terminators: (Vec core/Terminator)
+                   (core/basicblock-terminators block)
+                   current: (Map String Bool) with-instructions]
+              (if (>= position (count terminators))
+                current
+                (let [terminator: core/Terminator (nth terminators position)]
+                  (recur (+ position 1) terminators
+                    (cond
+                      (instance? native.core.ReturnTerminator terminator)
+                      (let [value: (U core/NativeId Nil)
+                            (core/returnterminator-value terminator)]
+                        (if (nil? value)
+                          current
+                          (epoch-mark-ids current [value])))
+                      (instance? native.core.TrapTerminator terminator)
+                      (epoch-mark-ids current
+                        [(core/trapterminator-failure-id terminator)])
+                      :else current)))))]
+        (recur (+ block-position 1) blocks with-terminators)))))
+
+(defn epoch-flow-arguments
+  [function: core/FunctionDef
+   marks: (Map String Bool)
+   target-id: core/NativeId
+   arguments: (Vec core/NativeId)] -> (Map String Bool)
+  (let [target: (U core/BasicBlock Nil)
+        (find-block-with-id (core/functiondef-blocks function) target-id)]
+    (if (nil? target)
+      marks
+      (let [parameters: (Vec core/Parameter)
+            (core/basicblock-parameters target)]
+        (loop [position: Int 0 current: (Map String Bool) marks]
+          (if (or (>= position (count parameters))
+                (>= position (count arguments)))
+            current
+            (recur (+ position 1)
+              (if (epoch-marked? current
+                    (core/parameter-id (nth parameters position)))
+                (epoch-mark-ids current [(nth arguments position)])
+                current))))))))
+
+(defn epoch-escape-pass
+  [function: core/FunctionDef
+   marks: (Map String Bool)] -> (Map String Bool)
+  (loop [block-position: Int 0
+         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
+         current: (Map String Bool) marks]
+    (if (>= block-position (count blocks))
+      current
+      (let [block: core/BasicBlock (nth blocks block-position)
+            with-instructions: (Map String Bool)
+            (loop [position: Int 0
+                   instructions: (Vec core/Instruction)
+                   (core/basicblock-instructions block)
+                   inner: (Map String Bool) current]
+              (if (>= position (count instructions))
+                inner
+                (let [instruction: core/Instruction (nth instructions position)]
+                  (recur (+ position 1) instructions
+                    (if (epoch-marked? inner
+                          (core/instruction-result-id instruction))
+                      (epoch-mark-ids inner
+                        (core/instruction-ssa-refs instruction))
+                      inner)))))
+            with-terminators: (Map String Bool)
+            (loop [position: Int 0
+                   terminators: (Vec core/Terminator)
+                   (core/basicblock-terminators block)
+                   inner: (Map String Bool) with-instructions]
+              (if (>= position (count terminators))
+                inner
+                (let [terminator: core/Terminator (nth terminators position)]
+                  (recur (+ position 1) terminators
+                    (cond
+                      (instance? native.core.JumpTerminator terminator)
+                      (epoch-flow-arguments function inner
+                        (core/jumpterminator-block-id terminator)
+                        (core/jumpterminator-arguments terminator))
+                      (instance? native.core.SwitchTerminator terminator)
+                      (loop [case-position: Int 0
+                             cases: (Vec core/SwitchCaseV0)
+                             (core/switchterminator-cases terminator)
+                             case-marks: (Map String Bool) inner]
+                        (if (>= case-position (count cases))
+                          case-marks
+                          (let [switch-case: core/SwitchCaseV0
+                                (nth cases case-position)]
+                            (recur (+ case-position 1) cases
+                              (epoch-flow-arguments function case-marks
+                                (core/switchcasev0-block-id switch-case)
+                                (core/switchcasev0-arguments switch-case))))))
+                      :else inner)))))]
+        (recur (+ block-position 1) blocks with-terminators)))))
+
+;; Marks only grow, so the closure is a monotone fixpoint over a finite set.
+(defn function-escape-set [function: core/FunctionDef] -> (Map String Bool)
+  (loop [marks: (Map String Bool) (epoch-escape-seeds function)]
+    (let [next: (Map String Bool) (epoch-escape-pass function marks)]
+      (if (= (count next) (count marks))
+        next
+        (recur next)))))
+
+;; Retargetable: an allocating instruction whose arena travels in a top-level
+;; arena-id operand. Atom cells stay pinned to the root (TODO-EPOCH-ATOM-STORE)
+;; and codec/text-builtin operations keep their arena nested inside the
+;; operation record (TODO-EPOCH-NESTED-ARENA-OPERAND) — both keep the parent
+;; epoch in v0.
+(defn epoch-retargetable? [instruction: core/Instruction] -> Bool
+  (and (allocating-instruction? instruction)
+    (not (instance? native.core.AtomCreateInstruction instruction))
+    (not (instance? native.core.CodecPrimitiveInstructionV0 instruction))
+    (some? (get instruction :arena-id nil))))
+
+(defn retarget-arena-operand
+  [instruction: core/Instruction
+   epoch-arena: core/NativeId] -> core/Instruction
+  (cond
+    (instance? native.core.RecordAssocInstructionV0 instruction)
+    (core/->RecordAssocInstructionV0
+      (core/recordassocinstructionv0-result instruction)
+      (core/recordassocinstructionv0-source-id instruction)
+      (core/recordassocinstructionv0-field-id instruction)
+      (core/recordassocinstructionv0-value-id instruction)
+      epoch-arena)
+    (instance? native.core.BoxRecordInstruction instruction)
+    (core/->BoxRecordInstruction
+      (core/boxrecordinstruction-result instruction)
+      (core/boxrecordinstruction-source-id instruction)
+      epoch-arena)
+    (instance? native.core.VecAssocInstructionV0 instruction)
+    (core/->VecAssocInstructionV0
+      (core/vecassocinstructionv0-result instruction)
+      (core/vecassocinstructionv0-source-id instruction)
+      (core/vecassocinstructionv0-index-id instruction)
+      (core/vecassocinstructionv0-value-id instruction)
+      epoch-arena)
+    (instance? native.core.VecPushInstruction instruction)
+    (core/->VecPushInstruction
+      (core/vecpushinstruction-result instruction)
+      (core/vecpushinstruction-source-id instruction)
+      (core/vecpushinstruction-value-id instruction)
+      epoch-arena)
+    (instance? native.core.VecEmptyInstruction instruction)
+    (core/->VecEmptyInstruction
+      (core/vecemptyinstruction-result instruction)
+      (core/vecemptyinstruction-capacity-id instruction)
+      epoch-arena)
+    (instance? native.core.VecConcatInstruction instruction)
+    (core/->VecConcatInstruction
+      (core/vecconcatinstruction-result instruction)
+      (core/vecconcatinstruction-left-id instruction)
+      (core/vecconcatinstruction-right-id instruction)
+      epoch-arena)
+    (instance? native.core.VecSliceInstructionV0 instruction)
+    (core/->VecSliceInstructionV0
+      (core/vecsliceinstructionv0-result instruction)
+      (core/vecsliceinstructionv0-source-id instruction)
+      (core/vecsliceinstructionv0-start-id instruction)
+      (core/vecsliceinstructionv0-end-id instruction)
+      epoch-arena)
+    (instance? native.core.VecReverseInstructionV0 instruction)
+    (core/->VecReverseInstructionV0
+      (core/vecreverseinstructionv0-result instruction)
+      (core/vecreverseinstructionv0-source-id instruction)
+      epoch-arena)
+    (instance? native.core.ByteSourceSliceInstructionV0 instruction)
+    (core/->ByteSourceSliceInstructionV0
+      (core/bytesourcesliceinstructionv0-result instruction)
+      (core/bytesourcesliceinstructionv0-source-id instruction)
+      (core/bytesourcesliceinstructionv0-start-id instruction)
+      (core/bytesourcesliceinstructionv0-end-id instruction)
+      epoch-arena)
+    (instance? native.core.VecSortInstructionV0 instruction)
+    (core/->VecSortInstructionV0
+      (core/vecsortinstructionv0-result instruction)
+      (core/vecsortinstructionv0-source-id instruction)
+      epoch-arena
+      (core/vecsortinstructionv0-element-type instruction))
+    (instance? native.core.MapLiteralInstructionV0 instruction)
+    (core/->MapLiteralInstructionV0
+      (core/mapliteralinstructionv0-result instruction)
+      (core/mapliteralinstructionv0-key-ids instruction)
+      (core/mapliteralinstructionv0-value-ids instruction)
+      epoch-arena
+      (core/mapliteralinstructionv0-key-equality instruction))
+    (instance? native.core.SetLiteralInstructionV0 instruction)
+    (core/->SetLiteralInstructionV0
+      (core/setliteralinstructionv0-result instruction)
+      (core/setliteralinstructionv0-value-ids instruction)
+      epoch-arena
+      (core/setliteralinstructionv0-element-equality instruction))
+    (instance? native.core.MapAssocInstructionV0 instruction)
+    (core/->MapAssocInstructionV0
+      (core/mapassocinstructionv0-result instruction)
+      (core/mapassocinstructionv0-source-id instruction)
+      (core/mapassocinstructionv0-key-id instruction)
+      (core/mapassocinstructionv0-value-id instruction)
+      epoch-arena
+      (core/mapassocinstructionv0-key-equality instruction))
+    (instance? native.core.MapDissocInstructionV0 instruction)
+    (core/->MapDissocInstructionV0
+      (core/mapdissocinstructionv0-result instruction)
+      (core/mapdissocinstructionv0-source-id instruction)
+      (core/mapdissocinstructionv0-key-id instruction)
+      epoch-arena
+      (core/mapdissocinstructionv0-key-equality instruction))
+    (instance? native.core.MapKeysInstructionV0 instruction)
+    (core/->MapKeysInstructionV0
+      (core/mapkeysinstructionv0-result instruction)
+      (core/mapkeysinstructionv0-source-id instruction)
+      epoch-arena)
+    (instance? native.core.MapValuesInstructionV0 instruction)
+    (core/->MapValuesInstructionV0
+      (core/mapvaluesinstructionv0-result instruction)
+      (core/mapvaluesinstructionv0-source-id instruction)
+      epoch-arena)
+    (instance? native.core.SetConjInstructionV0 instruction)
+    (core/->SetConjInstructionV0
+      (core/setconjinstructionv0-result instruction)
+      (core/setconjinstructionv0-source-id instruction)
+      (core/setconjinstructionv0-value-id instruction)
+      epoch-arena
+      (core/setconjinstructionv0-element-equality instruction))
+    (instance? native.core.SetDisjInstructionV0 instruction)
+    (core/->SetDisjInstructionV0
+      (core/setdisjinstructionv0-result instruction)
+      (core/setdisjinstructionv0-source-id instruction)
+      (core/setdisjinstructionv0-value-id instruction)
+      epoch-arena
+      (core/setdisjinstructionv0-element-equality instruction))
+    (instance? native.core.SetVectorInstructionV0 instruction)
+    (core/->SetVectorInstructionV0
+      (core/setvectorinstructionv0-result instruction)
+      (core/setvectorinstructionv0-source-id instruction)
+      epoch-arena)
+    (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
+    (core/->CollectionTransientOpenInstructionV0
+      (core/collectiontransientopeninstructionv0-result instruction)
+      (core/collectiontransientopeninstructionv0-source-id instruction)
+      epoch-arena)
+    (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
+    (core/->CollectionPersistentCloseInstructionV0
+      (core/collectionpersistentcloseinstructionv0-result instruction)
+      (core/collectionpersistentcloseinstructionv0-source-id instruction)
+      epoch-arena)
+    (instance? native.core.TransientMapAssocInstructionV0 instruction)
+    (core/->TransientMapAssocInstructionV0
+      (core/transientmapassocinstructionv0-result instruction)
+      (core/transientmapassocinstructionv0-source-id instruction)
+      (core/transientmapassocinstructionv0-key-id instruction)
+      (core/transientmapassocinstructionv0-value-id instruction)
+      epoch-arena
+      (core/transientmapassocinstructionv0-key-equality instruction))
+    (instance? native.core.TransientSetConjInstructionV0 instruction)
+    (core/->TransientSetConjInstructionV0
+      (core/transientsetconjinstructionv0-result instruction)
+      (core/transientsetconjinstructionv0-source-id instruction)
+      (core/transientsetconjinstructionv0-value-id instruction)
+      epoch-arena
+      (core/transientsetconjinstructionv0-element-equality instruction))
+    (instance? native.core.TextSliceInstruction instruction)
+    (core/->TextSliceInstruction
+      (core/textsliceinstruction-result instruction)
+      epoch-arena
+      (core/textsliceinstruction-source-id instruction)
+      (core/textsliceinstruction-start-id instruction)
+      (core/textsliceinstruction-end-id instruction)
+      (core/textsliceinstruction-failure-code instruction))
+    (instance? native.core.TextConcatInstruction instruction)
+    (core/->TextConcatInstruction
+      (core/textconcatinstruction-result instruction)
+      epoch-arena
+      (core/textconcatinstruction-operand-ids instruction))
+    (instance? native.core.ValueToTextInstructionV0 instruction)
+    (core/->ValueToTextInstructionV0
+      (core/valuetotextinstructionv0-result instruction)
+      (core/valuetotextinstructionv0-mode instruction)
+      (core/valuetotextinstructionv0-domain-type instruction)
+      (core/valuetotextinstructionv0-value-id instruction)
+      epoch-arena)
+    :else instruction))
+
+(defrecord EpochRootArenaV0
+  [value-id: core/NativeId
+   region: core/NativeId
+   capability: core/NativeId
+   arena-type: core/NativeId])
+
+(defn entry-arena-instruction
+  [function: core/FunctionDef] -> (U EpochRootArenaV0 Nil)
+  (let [entry: (U core/BasicBlock Nil)
+        (find-block-with-id (core/functiondef-blocks function)
+          (core/functiondef-entry-block function))]
+    (if (nil? entry)
+      nil
+      (loop [position: Int 0
+             instructions: (Vec core/Instruction)
+             (core/basicblock-instructions entry)]
+        (if (>= position (count instructions))
+          nil
+          (let [instruction: core/Instruction (nth instructions position)]
+            (if (instance? native.core.ArenaInstruction instruction)
+              (->EpochRootArenaV0
+                (core/instruction-result-id instruction)
+                (core/arenainstruction-region instruction)
+                (core/arenainstruction-capability instruction)
+                (core/ssavaluev0-type-id
+                  (core/arenainstruction-result instruction)))
+              (recur (+ position 1) instructions))))))))
+
+(defn exit-block? [block: core/BasicBlock] -> Bool
+  (and (= 1 (count (core/basicblock-terminators block)))
+    (let [terminator: core/Terminator (nth (core/basicblock-terminators block) 0)]
+      (or (instance? native.core.ReturnTerminator terminator)
+        (instance? native.core.TrapTerminator terminator)))))
+
+(defrecord EpochRewriteV0
+  [function: core/FunctionDef
+   regions: (Vec core/RegionDef)
+   effects: (Vec core/EffectDef)
+   pendings: (Vec String)])
+
+(defn optional-same-id? [candidate: Any target: core/NativeId] -> Bool
+  (and (some? candidate) (= (get candidate :value "") (id-value target))))
+
+(defn epoch-pending-detail
+  [code: String
+   function: core/FunctionDef
+   instruction: core/Instruction] -> String
+  (str code ": " (id-value (core/instruction-result-id instruction))
+    " keeps the parent epoch in " (id-value (core/functiondef-id function))))
+
+(defn epoch-rewrite-function [function: core/FunctionDef] -> EpochRewriteV0
+  (let [root-arena: (U EpochRootArenaV0 Nil) (entry-arena-instruction function)]
+    (if (nil? root-arena)
+      (->EpochRewriteV0 function [] [] [])
+      (let [root-arena-value: core/NativeId
+            (epochrootarenav0-value-id root-arena)
+            escaped: (Map String Bool) (function-escape-set function)
+            function-id: core/NativeId (core/functiondef-id function)
+            interior: (Vec core/Instruction)
+            (loop [block-position: Int 0
+                   blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
+                   collected: (Vec core/Instruction) []]
+              (if (>= block-position (count blocks))
+                collected
+                (recur (+ block-position 1) blocks
+                  (loop [position: Int 0
+                         instructions: (Vec core/Instruction)
+                         (core/basicblock-instructions (nth blocks block-position))
+                         inner: (Vec core/Instruction) collected]
+                    (if (>= position (count instructions))
+                      inner
+                      (let [instruction: core/Instruction (nth instructions position)]
+                        (recur (+ position 1) instructions
+                          (if (and (allocating-instruction? instruction)
+                                (not (epoch-marked? escaped
+                                       (core/instruction-result-id instruction))))
+                            (conj inner instruction)
+                            inner))))))))
+            pendings: (Vec String)
+            (loop [position: Int 0 collected: (Vec String) []]
+              (if (>= position (count interior))
+                collected
+                (let [instruction: core/Instruction (nth interior position)]
+                  (recur (+ position 1)
+                    (cond
+                      (instance? native.core.AtomCreateInstruction instruction)
+                      (conj collected
+                        (epoch-pending-detail "TODO-EPOCH-ATOM-STORE" function
+                          instruction))
+                      (not (epoch-retargetable? instruction))
+                      (conj collected
+                        (epoch-pending-detail "TODO-EPOCH-NESTED-ARENA-OPERAND"
+                          function instruction))
+                      (not (optional-same-id? (get instruction :arena-id nil)
+                             root-arena-value))
+                      (conj collected
+                        (epoch-pending-detail "TODO-EPOCH-AMBIGUOUS-ESCAPE"
+                          function instruction))
+                      :else collected)))))
+            retarget: (Map String Bool)
+            (loop [position: Int 0 marked: (Map String Bool) {}]
+              (if (>= position (count interior))
+                marked
+                (let [instruction: core/Instruction (nth interior position)]
+                  (recur (+ position 1)
+                    (if (and (epoch-retargetable? instruction)
+                          (optional-same-id? (get instruction :arena-id nil)
+                            root-arena-value))
+                      (assoc marked
+                        (id-value (core/instruction-result-id instruction))
+                        true)
+                      marked)))))]
+        (if (= 0 (count retarget))
+          (->EpochRewriteV0 function [] [] pendings)
+          (let [region-id: core/NativeId
+                (lower-id "region" ["epoch" (id-value function-id) "0"])
+                effect-id: core/NativeId
+                (lower-id "effect" ["epoch" (id-value function-id) "0"])
+                epoch-arena: core/NativeId
+                (lower-id "epoch-arena" [(id-value function-id) "0"])
+                token-id: core/NativeId
+                (lower-id "epoch-token" [(id-value function-id) "0"])
+                arena-type: core/NativeId
+                (epochrootarenav0-arena-type root-arena)
+                open: core/Instruction
+                (core/->ArenaInstruction
+                  (core/->SsaValueV0 epoch-arena arena-type)
+                  region-id
+                  (epochrootarenav0-capability root-arena)
+                  (core/->TokenFlowV0 [region-id]
+                    [(core/->ResourceTokenV0 token-id
+                       (core/->RegionTokenV0 region-id))]))
+                entry-id: core/NativeId (core/functiondef-entry-block function)
+                blocks: (Vec core/BasicBlock)
+                (mapv
+                  (fn [block: core/BasicBlock] -> core/BasicBlock
+                    (let [retargeted: (Vec core/Instruction)
+                          (mapv
+                            (fn
+                              [instruction: core/Instruction] -> core/Instruction
+                              (if (= true
+                                    (get retarget
+                                      (id-value
+                                        (core/instruction-result-id instruction))))
+                                (retarget-arena-operand instruction epoch-arena)
+                                instruction))
+                            (core/basicblock-instructions block))
+                          with-open: (Vec core/Instruction)
+                          (if (same-id? (core/basicblock-id block) entry-id)
+                            (loop [position: Int 0
+                                   rebuilt: (Vec core/Instruction) []]
+                              (if (>= position (count retargeted))
+                                rebuilt
+                                (let [instruction: core/Instruction
+                                      (nth retargeted position)]
+                                  (recur (+ position 1)
+                                    (if (same-id?
+                                          (core/instruction-result-id instruction)
+                                          root-arena-value)
+                                      (conj (conj rebuilt instruction) open)
+                                      (conj rebuilt instruction))))))
+                            retargeted)
+                          with-close: (Vec core/Instruction)
+                          (if (exit-block? block)
+                            (conj with-open
+                              (core/->ArenaCloseInstructionV0
+                                (core/->SsaValueV0
+                                  (lower-id "epoch-close"
+                                    [(id-value function-id) "0"
+                                     (id-value (core/basicblock-id block))])
+                                  arena-type)
+                                epoch-arena
+                                (core/->TokenFlowV0 [token-id] [])))
+                            with-open)]
+                      (with block [:instructions with-close])))
+                  (core/functiondef-blocks function))]
+            (->EpochRewriteV0
+              (with function
+                [:blocks blocks]
+                [:regions (conj (core/functiondef-regions function) region-id)]
+                [:effects (conj (core/functiondef-effects function) effect-id)])
+              [(core/->RegionDef region-id (core/->ArenaRegion true)
+                 (epochrootarenav0-region root-arena))]
+              [(core/->EffectDef effect-id (core/->AllocateEffect region-id))]
+              pendings)))))))
+
+(defn epoch-receipt-obligations
+  [digest: String
+   verdicts: (Vec obligations/ObligationVerdictV0)] -> (Vec core/ReceiptObligationV0)
+  (let [codes: (Vec core/ObligationCode)
+        [(core/->ValidSsaObligation true)
+         (core/->ExhaustiveMatchesObligation true)
+         (core/->ClosedLayoutsObligation true)
+         (core/->CheckedOperationsObligation true)
+         (core/->LegalAbiObligation true)
+         (core/->DischargedTokensObligation true)
+         (core/->BoundedEffectsObligation true)
+         (core/->EpochSoundnessObligation true)
+         (core/->LeakFreedomObligation true)]]
+    (loop [position: Int 0 rows: (Vec core/ReceiptObligationV0) []]
+      (if (or (>= position (count verdicts)) (>= position (count codes)))
+        rows
+        (recur (+ position 1)
+          (conj rows
+            (core/->ReceiptObligationV0
+              (nth codes position) "v0" digest
+              (obligations/obligation-passed? (nth verdicts position))
+              (str "epoch-stage obligation "
+                (obligations/verdict-tag (nth verdicts position))))))))))
+
+(defn epoch-pending-obligations
+  [digest: String
+   pendings: (Vec String)] -> (Vec core/ReceiptObligationV0)
+  (mapv
+    (fn [detail: String] -> core/ReceiptObligationV0
+      (core/->ReceiptObligationV0
+        (core/->EpochSoundnessObligation true) "v0" digest false detail))
+    pendings))
+
+(defn lower-epoch-stage
+  [frozen-native: stages/FrozenNativeStageV0
+   compiler-commit: String
+   configuration: (Vec String)
+   abi: core/AbiProfileV0] -> EpochLoweringResultV0
+  (let [stage: stages/NativeStageV0
+        (stages/frozennativestagev0-stage frozen-native)
+        input-digest: String (stages/frozennativestagev0-digest frozen-native)
+        program: core/NativeCoreProgram (stages/nativestagev0-program stage)
+        rewrites: (Vec EpochRewriteV0)
+        (mapv
+          (fn [function: core/FunctionDef] -> EpochRewriteV0
+            (epoch-rewrite-function function))
+          (core/nativecoreprogram-functions program))
+        functions: (Vec core/FunctionDef)
+        (mapv
+          (fn [rewrite: EpochRewriteV0] -> core/FunctionDef
+            (epochrewritev0-function rewrite))
+          rewrites)
+        minted-regions: (Vec core/RegionDef)
+        (loop [position: Int 0 collected: (Vec core/RegionDef) []]
+          (if (>= position (count rewrites))
+            collected
+            (recur (+ position 1)
+              (vec (concat collected
+                     (epochrewritev0-regions (nth rewrites position)))))))
+        minted-effects: (Vec core/EffectDef)
+        (loop [position: Int 0 collected: (Vec core/EffectDef) []]
+          (if (>= position (count rewrites))
+            collected
+            (recur (+ position 1)
+              (vec (concat collected
+                     (epochrewritev0-effects (nth rewrites position)))))))
+        pendings: (Vec String)
+        (loop [position: Int 0 collected: (Vec String) []]
+          (if (>= position (count rewrites))
+            collected
+            (recur (+ position 1)
+              (vec (concat collected
+                     (epochrewritev0-pendings (nth rewrites position)))))))
+        rewritten: core/NativeCoreProgram
+        (with program
+          [:id (lower-id "epoch-program" [input-digest])]
+          [:parent (core/nativecoreprogram-id program)]
+          [:compiler-pass "native-to-epoch-v0"]
+          [:functions functions]
+          [:regions (vec (concat (core/nativecoreprogram-regions program)
+                           minted-regions))]
+          [:effects (vec (concat (core/nativecoreprogram-effects program)
+                           minted-effects))]
+          [:allowed-regions
+           (vec (concat (core/nativecoreprogram-allowed-regions program)
+                  (mapv (fn [region: core/RegionDef] -> core/NativeId
+                          (core/regiondef-id region))
+                    minted-regions)))]
+          [:allowed-effects
+           (vec (concat (core/nativecoreprogram-allowed-effects program)
+                  (mapv (fn [effect: core/EffectDef] -> core/NativeId
+                          (core/effectdef-id effect))
+                    minted-effects)))])
+        verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-core-program rewritten abi)
+        nine-pass: Bool (every? obligations/obligation-passed? verdicts)
+        ;; The epoch stage never invents terms: the parent stage's term graph
+        ;; rides along, and the program encoding (id, parent, compiler-pass,
+        ;; region tree) carries the difference into the digest.
+        next-stage: stages/NativeStageV0
+        (stages/->NativeStageV0
+          (stages/nativestagev0-terms stage)
+          (stages/nativestagev0-typed-digest stage)
+          rewritten
+          (stages/nativestagev0-obligation-roots stage))
+        encoding: String (stages/encode-native-stage next-stage)
+        digest: String (stages/content-digest encoding)
+        frozen: stages/FrozenNativeStageV0
+        (stages/->FrozenNativeStageV0 next-stage encoding digest)
+        pending-rows: (Vec core/ReceiptObligationV0)
+        (epoch-pending-obligations digest pendings)
+        receipt: core/PassReceiptV0
+        (make-receipt input-digest compiler-commit "native-to-epoch"
+          configuration []
+          (vec (concat (epoch-receipt-obligations digest verdicts)
+                 pending-rows))
+          digest)]
+    (if (and nine-pass (= 0 (count pending-rows)))
+      (->EpochLoweringCompleteV0 frozen receipt)
+      (->EpochLoweringPendingV0 frozen receipt pending-rows))))
 
 (defn fixture-id [kind: String label: String] -> core/NativeId
   (lower-id "fixture" [kind label]))
@@ -17362,3 +18076,168 @@
            (stages/nativestagev0-program
              (stages/frozennativestagev0-stage frozen)))))]
     [(FixturePipelineFailedV0 stage detail) false]))
+
+;; --- Gate G2: the epoch stage rewrite keeps every rewritten fixture program
+;; green under all nine obligations (the seven legacy ones on the rewritten
+;; instructions and region tree, plus epoch soundness and leak freedom), and
+;; the digest chain stays honest (a rewritten program freezes to a different
+;; digest with parent and compiler-pass naming the native stage it came from).
+
+(defn epoch-result-frozen
+  [result: EpochLoweringResultV0] -> stages/FrozenNativeStageV0
+  (match result
+    [(EpochLoweringCompleteV0 frozen receipt) frozen]
+    [(EpochLoweringPendingV0 frozen receipt obligations) frozen]))
+
+(defn epoch-rewrite-gate? [pipeline: FixturePipelineResultV0] -> Bool
+  (match pipeline
+    [(FixturePipelineFailedV0 stage detail) false]
+    [(FixturePipelineCompleteV0 frozen)
+     (let [result: EpochLoweringResultV0
+           (lower-epoch-stage frozen "epoch-gate-commit" ["profile=3"]
+             (core/abi-profile-lp64))
+           rewritten-frozen: stages/FrozenNativeStageV0
+           (epoch-result-frozen result)
+           rewritten: core/NativeCoreProgram
+           (stages/nativestagev0-program
+             (stages/frozennativestagev0-stage rewritten-frozen))
+           verdicts: (Vec obligations/ObligationVerdictV0)
+           (obligations/validate-native-core-program rewritten
+             (core/abi-profile-lp64))]
+       (and
+         (every?
+           (fn [verdict: obligations/ObligationVerdictV0] -> Bool
+             (obligations/obligation-passed? verdict))
+           verdicts)
+         (= "native-to-epoch-v0" (core/nativecoreprogram-compiler-pass rewritten))
+         (not (= (stages/frozennativestagev0-digest rewritten-frozen)
+              (stages/frozennativestagev0-digest frozen)))))]))
+
+(def epoch-stage-fixture-passes?: Bool (epoch-rewrite-gate? fixture-result))
+
+(def epoch-stage-fold-passes?: Bool (epoch-rewrite-gate? fold-empty-result))
+
+;; The pipeline fixtures allocate only values that escape (their products), so
+;; the stage mints nothing there. This program carries one provably interior
+;; allocation, making the mint-retarget-close path a non-vacuous gate: the
+;; stage must mint exactly one epoch region, insert its close, and leave all
+;; nine obligations green on the rewritten program.
+
+(def epoch-mint-function: core/FunctionDef
+  (core/->FunctionDef
+    (fixture-id "epoch-mint" "function")
+    "epoch-mint"
+    [(core/->Parameter (fixture-id "epoch-mint" "n") (int-type-id))]
+    [(core/->BasicBlock (fixture-id "epoch-mint" "entry") []
+       [(core/->ArenaInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-mint" "arena")
+            (arena-handle-type-id))
+          (arena-region-id)
+          (allocate-capability-id)
+          (core/->TokenFlowV0
+            [(arena-region-id) (allocate-capability-id)] []))
+        (core/->TextConcatInstruction
+          (core/->SsaValueV0 (fixture-id "epoch-mint" "text")
+            (text-type-id))
+          (fixture-id "epoch-mint" "arena")
+          [])]
+       [(core/->ReturnTerminator (fixture-id "epoch-mint" "n"))])]
+    (fixture-id "epoch-mint" "entry")
+    (int-type-id)
+    [(allocate-effect-id)]
+    [(arena-region-id)]
+    [(allocate-capability-id)]))
+
+(def epoch-mint-program: core/NativeCoreProgram
+  (let [types: (Vec core/TypeDef)
+        [(i64-type) (text-type) (arena-handle-type)]]
+    (core/->NativeCoreProgram
+      (fixture-id "epoch-mint" "program")
+      nil
+      "typed-to-native-v0"
+      types
+      [(core/->EffectDef (allocate-effect-id)
+         (core/->AllocateEffect (arena-region-id)))]
+      (slice-regions)
+      [(core/->CapabilityDef (allocate-capability-id)
+         (core/->AllocateCapability true)
+         (arena-region-id)
+         true)]
+      (collect-layouts (resolve-layouts types (core/abi-profile-lp64)))
+      [epoch-mint-function]
+      [(allocate-effect-id)]
+      [(arena-region-id)]
+      [(allocate-capability-id)]
+      []
+      [])))
+
+(def epoch-mint-frozen: stages/FrozenNativeStageV0
+  (let [root: core/NativeId (fixture-id "epoch-mint" "terms")
+        stage: stages/NativeStageV0
+        (stages/->NativeStageV0
+          (stages/->TermGraphV0 root
+            [(stages/->TermNodeV0 root
+               (stages/->TextTermV0 "native-stage-v0"))])
+          "sha256:epoch-mint-fixture"
+          epoch-mint-program
+          [])
+        encoding: String (stages/encode-native-stage stage)]
+    (stages/->FrozenNativeStageV0 stage encoding
+      (stages/content-digest encoding))))
+
+(defn program-close-count [program: core/NativeCoreProgram] -> Int
+  (loop [function-position: Int 0
+         functions: (Vec core/FunctionDef)
+         (core/nativecoreprogram-functions program)
+         total: Int 0]
+    (if (>= function-position (count functions))
+      total
+      (recur (+ function-position 1) functions
+        (loop [block-position: Int 0
+               blocks: (Vec core/BasicBlock)
+               (core/functiondef-blocks (nth functions function-position))
+               inner: Int total]
+          (if (>= block-position (count blocks))
+            inner
+            (recur (+ block-position 1) blocks
+              (loop [position: Int 0
+                     instructions: (Vec core/Instruction)
+                     (core/basicblock-instructions (nth blocks block-position))
+                     closes: Int inner]
+                (if (>= position (count instructions))
+                  closes
+                  (recur (+ position 1) instructions
+                    (if (instance? native.core.ArenaCloseInstructionV0
+                          (nth instructions position))
+                      (+ closes 1)
+                      closes)))))))))))
+
+(defn program-minted-epoch-count [program: core/NativeCoreProgram] -> Int
+  (loop [position: Int 0
+         regions: (Vec core/RegionDef) (core/nativecoreprogram-regions program)
+         minted: Int 0]
+    (if (>= position (count regions))
+      minted
+      (recur (+ position 1) regions
+        (if (nil? (core/regiondef-parent (nth regions position)))
+          minted
+          (+ minted 1))))))
+
+(def epoch-stage-mint-passes?: Bool
+  (let [result: EpochLoweringResultV0
+        (lower-epoch-stage epoch-mint-frozen "epoch-gate-commit" ["profile=3"]
+          (core/abi-profile-lp64))
+        frozen: stages/FrozenNativeStageV0 (epoch-result-frozen result)
+        rewritten: core/NativeCoreProgram
+        (stages/nativestagev0-program
+          (stages/frozennativestagev0-stage frozen))
+        verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-core-program rewritten
+          (core/abi-profile-lp64))]
+    (and (instance? native.lower.EpochLoweringCompleteV0 result)
+      (= 1 (program-minted-epoch-count rewritten))
+      (= 1 (program-close-count rewritten))
+      (every?
+        (fn [verdict: obligations/ObligationVerdictV0] -> Bool
+          (obligations/obligation-passed? verdict))
+        verdicts))))

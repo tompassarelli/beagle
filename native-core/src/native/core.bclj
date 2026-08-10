@@ -616,6 +616,14 @@
      region: NativeId
      capability: NativeId
      tokens: TokenFlowV0])
+  ;; Closes an epoch arena, consuming the RegionTokenV0 its ArenaInstruction
+  ;; produced. source-id names that arena SSA value; the closed region is the
+  ;; region of the producing ArenaInstruction. Root regions never close — the
+  ;; driver owns their lifecycle.
+  (ArenaCloseInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     tokens: TokenFlowV0])
   ;; Acquires the dedicated Atom-state token once at function entry. Atom
   ;; operations must carry this SSA handle, so state cannot be implicit.
   (AtomStateInstruction
@@ -730,7 +738,9 @@
   (CheckedOperationsObligation [token: Bool])
   (LegalAbiObligation [token: Bool])
   (DischargedTokensObligation [token: Bool])
-  (BoundedEffectsObligation [token: Bool]))
+  (BoundedEffectsObligation [token: Bool])
+  (EpochSoundnessObligation [token: Bool])
+  (LeakFreedomObligation [token: Bool]))
 
 (defrecord ObligationResult
   [code :- ObligationCode
@@ -991,6 +1001,7 @@
        element-equality)
      (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
+    [(ArenaCloseInstructionV0 result source-id tokens) (ssavaluev0-id result)]
     [(AtomStateInstruction result region capability tokens)
      (ssavaluev0-id result)]
     [(AtomCreateInstruction result initial-id arena-id state-id)
@@ -1542,6 +1553,7 @@
      (concrete-equality-refs-closed? element-equality known-types)]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(ArenaCloseInstructionV0 result source-id tokens) true]
     [(AtomStateInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(AtomCreateInstruction result initial-id arena-id state-id) true]
@@ -1809,6 +1821,7 @@
        element-equality)
      [arena-id source-id value-id]]
     [(ArenaInstruction result region capability tokens) []]
+    [(ArenaCloseInstructionV0 result source-id tokens) [source-id]]
     [(AtomStateInstruction result region capability tokens) []]
     [(AtomCreateInstruction result initial-id arena-id state-id)
      [initial-id arena-id state-id]]
@@ -1953,6 +1966,7 @@
     [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
+    [(ArenaCloseInstructionV0 result source-id tokens) true]
     [(AtomStateInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]

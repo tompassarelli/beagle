@@ -108,7 +108,8 @@ for name in captured-reduce captured-map captured-filter captured-every? \
 done
 
 for obligation in valid-ssa exhaustive-matches closed-layouts \
-    checked-arithmetic legal-abi discharged-tokens bounded-effects; do
+    checked-arithmetic legal-abi discharged-tokens bounded-effects \
+    epoch-soundness leak-freedom; do
   rg -q "^obligation-projection PASS $obligation$" "$report" || {
     echo "drive.sh: missing passing obligation: $obligation" >&2
     exit 1

@@ -464,7 +464,8 @@
 
 (def obligation-names: (Vec String)
   ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
-   "legal-abi" "discharged-tokens" "bounded-effects"])
+   "legal-abi" "discharged-tokens" "bounded-effects" "epoch-soundness"
+   "leak-freedom"])
 
 (defn obligation-report
   [program: core/NativeCoreProgram

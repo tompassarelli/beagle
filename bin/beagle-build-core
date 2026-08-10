@@ -581,7 +581,7 @@ bb -cp "$compiled" -e '
                  ["record" "def" "defn"])))
 
 (defn obligation-pass? [verdicts]
-  (and (= 7 (count verdicts))
+  (and (= 9 (count verdicts))
        (every? obligations/obligation-passed? verdicts)))
 
 (defn native-report-head [rows entries source program projected abi]
@@ -734,7 +734,7 @@ bb -cp "$compiled" -e '
                         (finish-stage! "native-obligations" "FAIL")
                         {:ok? false
                          :report (str head
-                                      "result FAIL seven native obligations required\n")})
+                                      "result FAIL nine native obligations required\n")})
                       (do
                         (finish-stage! "native-obligations" "PASS")
                         (let [materialization

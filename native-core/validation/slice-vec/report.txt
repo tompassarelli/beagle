@@ -93,6 +93,8 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
+obligation-projection PASS epoch-soundness
+obligation-projection PASS leak-freedom
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [term-slots-width-for]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-atom-term-slots!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-triple-term-slots!]

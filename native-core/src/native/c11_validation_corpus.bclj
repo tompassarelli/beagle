@@ -219,7 +219,9 @@
    (obligations/checked-arithmetic fold-program)
    (obligations/legal-abi fold-program)
    (obligations/discharged-tokens fold-program)
-   (obligations/bounded-effects fold-program)])
+   (obligations/bounded-effects fold-program)
+   (obligations/epoch-soundness fold-program)
+   (obligations/leak-freedom fold-program)])
 
 (def fold-obligations-pass?: Bool
   (every? obligations/obligation-passed? fold-obligation-verdicts))

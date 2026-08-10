@@ -11,7 +11,9 @@
   (CheckedArithmeticDiagnosticV0 [function-id :- core/NativeId])
   (LegalAbiDiagnosticV0 [abi-id :- core/NativeId])
   (DischargedTokensDiagnosticV0 [function-id :- core/NativeId])
-  (BoundedEffectsDiagnosticV0 [function-id :- core/NativeId]))
+  (BoundedEffectsDiagnosticV0 [function-id :- core/NativeId])
+  (EpochSoundnessDiagnosticV0 [function-id :- core/NativeId])
+  (LeakFreedomDiagnosticV0 [region-id :- core/NativeId]))
 
 (defrecord DefSiteV0
   [found :- Bool
@@ -48,7 +50,24 @@
     [(CheckedArithmeticDiagnosticV0 function-id) false]
     [(LegalAbiDiagnosticV0 abi-id) false]
     [(DischargedTokensDiagnosticV0 function-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+    [(BoundedEffectsDiagnosticV0 function-id) false]
+    [(EpochSoundnessDiagnosticV0 function-id) false]
+    [(LeakFreedomDiagnosticV0 region-id) false]))
+
+;; Named tag per verdict variant, so a fixture can assert "failed with ITS
+;; diagnostic" without repeating a ten-arm match at each call site.
+(defn verdict-tag [verdict :- ObligationVerdictV0] :- String
+  (match verdict
+    [(ObligationPassV0 code) "pass"]
+    [(ValidSsaDiagnosticV0 function-id) "valid-ssa"]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) "exhaustive-matches"]
+    [(ClosedLayoutsDiagnosticV0 type-id) "closed-layouts"]
+    [(CheckedArithmeticDiagnosticV0 function-id) "checked-arithmetic"]
+    [(LegalAbiDiagnosticV0 abi-id) "legal-abi"]
+    [(DischargedTokensDiagnosticV0 function-id) "discharged-tokens"]
+    [(BoundedEffectsDiagnosticV0 function-id) "bounded-effects"]
+    [(EpochSoundnessDiagnosticV0 function-id) "epoch-soundness"]
+    [(LeakFreedomDiagnosticV0 region-id) "leak-freedom"]))
 
 (defn find-block
   [blocks :- (Vec core/BasicBlock)
@@ -1531,6 +1550,678 @@
           (->BoundedEffectsDiagnosticV0
             (core/functiondef-id function)))))))
 
+;; --- Obligation 8 (epoch soundness) and 9 (leak freedom) ---
+;;
+;; The region tree orders lifetimes: a parent region strictly outlives its
+;; children. Epoch soundness forbids old-to-young references — every written
+;; value's epoch must be an ancestor-or-equal of its destination's epoch.
+;; Leak freedom requires every opened epoch (an ArenaRegion row with a parent)
+;; to close via ArenaCloseInstructionV0 on all paths, LIFO in the region tree.
+;; Root regions carry driver lifetime, so root-epoch values pass every write
+;; and root regions never close. Epoch-free values (scalars and values whose
+;; type carries no handle) pass every check.
+
+(defn find-region
+  [regions :- (Vec core/RegionDef)
+   region-id :- core/NativeId] :- (U core/RegionDef Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count regions)) nil
+      (core/native-id= (core/regiondef-id (nth regions index)) region-id)
+      (nth regions index)
+      :else (recur (+ index 1)))))
+
+(defn root-region?
+  [regions :- (Vec core/RegionDef)
+   region-id :- core/NativeId] :- Bool
+  (let [region :- (U core/RegionDef Nil) (find-region regions region-id)]
+    (and (some? region) (nil? (core/regiondef-parent region)))))
+
+(defn epoch-region?
+  [regions :- (Vec core/RegionDef)
+   region-id :- core/NativeId] :- Bool
+  (let [region :- (U core/RegionDef Nil) (find-region regions region-id)]
+    (and (some? region)
+      (instance? native.core.ArenaRegion (core/regiondef-kind region))
+      (some? (core/regiondef-parent region)))))
+
+(defn region-on-ancestor-chain?
+  [regions :- (Vec core/RegionDef)
+   target :- core/NativeId
+   chain-start :- core/NativeId] :- Bool
+  (loop [current :- core/NativeId chain-start
+         budget :- Int (+ 1 (count regions))]
+    (if (core/native-id= current target)
+      true
+      (let [region :- (U core/RegionDef Nil) (find-region regions current)]
+        (if (nil? region)
+          false
+          (let [parent :- (U core/NativeId Nil) (core/regiondef-parent region)]
+            (if (or (nil? parent) (<= budget 0))
+              false
+              (recur parent (- budget 1)))))))))
+
+;; A value with no epoch is a scalar or a caller-owned parameter — it always
+;; outlives any destination the program can name. A root-epoch value carries
+;; driver lifetime. Otherwise the value's epoch must sit on the destination's
+;; parent chain; an unknown destination refuses conservatively.
+(defn epoch-write-legal?
+  [regions :- (Vec core/RegionDef)
+   value-epoch :- (U core/NativeId Nil)
+   destination-epoch :- (U core/NativeId Nil)] :- Bool
+  (cond
+    (nil? value-epoch) true
+    (root-region? regions value-epoch) true
+    (nil? destination-epoch) false
+    :else (region-on-ancestor-chain? regions value-epoch destination-epoch)))
+
+(defn epoch-incomparable-id [] :- core/NativeId
+  (obligation-id "epoch-incomparable"))
+
+;; Whether a value of this type can reference region storage: Text, Bytes,
+;; Keyword, and Ref atoms are handles; records and unions carry handles when
+;; any field or payload does; collections, references, atom cells, functions,
+;; and outcomes are treated as handle-carrying. Unknown types refuse
+;; conservatively (treated as handles).
+(defn type-carries-handles-with-budget?
+  [types :- (Vec core/TypeDef)
+   type-id :- core/NativeId
+   budget :- Int] :- Bool
+  (if (<= budget 0)
+    true
+    (let [definition :- (U core/TypeDef Nil) (find-type types type-id)]
+      (if (nil? definition)
+        true
+        (let [shape :- core/TypeShape (core/typedef-shape definition)]
+          (cond
+            (instance? native.core.AtomType shape)
+            (let [kind :- core/AtomKind (core/atomtype-kind shape)]
+              (or (instance? native.core.TextKind kind)
+                (instance? native.core.BytesKind kind)
+                (instance? native.core.KeywordKind kind)
+                (instance? native.core.RefKind kind)))
+
+            (instance? native.core.RecordType shape)
+            (some?
+              (some
+                (fn [field :- core/TypeField] :- Bool
+                  (type-carries-handles-with-budget? types
+                    (core/typefield-type-id field) (- budget 1)))
+                (core/recordtype-fields shape)))
+
+            (instance? native.core.UnionType shape)
+            (some?
+              (some
+                (fn [variant :- core/TypeVariant] :- Bool
+                  (let [payload :- (U core/NativeId Nil)
+                        (core/typevariant-payload-type variant)]
+                    (and (some? payload)
+                      (type-carries-handles-with-budget? types payload
+                        (- budget 1)))))
+                (core/uniontype-variants shape)))
+
+            :else true))))))
+
+(defn type-carries-handles?
+  [types :- (Vec core/TypeDef)
+   type-id :- core/NativeId] :- Bool
+  (type-carries-handles-with-budget? types type-id (+ 1 (count types))))
+
+;; The arena SSA operand an instruction allocates through, wherever the
+;; instruction family keeps it (top level, text builtin, codec operation).
+(defn instruction-arena-operand
+  [instruction :- core/Instruction] :- (U core/NativeId Nil)
+  (let [top :- Any (get instruction :arena-id nil)
+        operation :- Any (get instruction :operation nil)
+        builtin :- Any (get instruction :builtin nil)]
+    (cond
+      (some? top) top
+      (some? operation) (get operation :arena-id nil)
+      (some? builtin) (get builtin :arena-id nil)
+      :else nil)))
+
+(defn function-arena-region
+  [function :- core/FunctionDef
+   arena-value-id :- core/NativeId] :- (U core/NativeId Nil)
+  (loop [block-position :- Int 0
+         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (if (>= block-position (count blocks))
+      nil
+      (let [instructions :- (Vec core/Instruction)
+            (core/basicblock-instructions (nth blocks block-position))
+            found :- (U core/NativeId Nil)
+            (loop [position :- Int 0]
+              (if (>= position (count instructions))
+                nil
+                (let [instruction :- core/Instruction (nth instructions position)]
+                  (if (and (instance? native.core.ArenaInstruction instruction)
+                        (core/native-id= arena-value-id
+                          (core/instruction-result-id instruction)))
+                    (core/arenainstruction-region instruction)
+                    (recur (+ position 1))))))]
+        (if (nil? found)
+          (recur (+ block-position 1) blocks)
+          found)))))
+
+(defn epoch-of
+  [epochs :- (Map String core/NativeId)
+   value-id :- core/NativeId] :- (U core/NativeId Nil)
+  (get epochs (native-id-key value-id)))
+
+;; Merge keeps the YOUNGER of two comparable epochs — the conservative
+;; representative for both ancestor and closed-region checks — and collapses
+;; incomparable epochs to a sentinel that fails every non-free check.
+(defn merge-epochs
+  [regions :- (Vec core/RegionDef)
+   left :- (U core/NativeId Nil)
+   right :- (U core/NativeId Nil)] :- (U core/NativeId Nil)
+  (cond
+    (nil? left) right
+    (nil? right) left
+    (core/native-id= left right) left
+    (region-on-ancestor-chain? regions left right) right
+    (region-on-ancestor-chain? regions right left) left
+    :else (epoch-incomparable-id)))
+
+(defn merge-epoch-into
+  [regions :- (Vec core/RegionDef)
+   epochs :- (Map String core/NativeId)
+   value-id :- core/NativeId
+   epoch :- (U core/NativeId Nil)] :- (Map String core/NativeId)
+  (if (nil? epoch)
+    epochs
+    (let [key :- String (native-id-key value-id)
+          merged :- (U core/NativeId Nil)
+          (merge-epochs regions (get epochs key) epoch)]
+      (if (nil? merged) epochs (assoc epochs key merged)))))
+
+(defn instruction-epoch
+  [regions :- (Vec core/RegionDef)
+   types :- (Vec core/TypeDef)
+   function :- core/FunctionDef
+   epochs :- (Map String core/NativeId)
+   instruction :- core/Instruction] :- (U core/NativeId Nil)
+  (cond
+    (instance? native.core.ArenaInstruction instruction)
+    (core/arenainstruction-region instruction)
+
+    (instance? native.core.AtomStateInstruction instruction)
+    (core/atomstateinstruction-region instruction)
+
+    (instance? native.core.ArenaCloseInstructionV0 instruction)
+    nil
+
+    (instance? native.core.AllocateInstruction instruction)
+    (core/allocateinstruction-region instruction)
+
+    (some? (instruction-arena-operand instruction))
+    (let [arena :- Any (instruction-arena-operand instruction)
+          region :- (U core/NativeId Nil)
+          (function-arena-region function arena)]
+      (if (nil? region) (epoch-incomparable-id) region))
+
+    :else
+    (let [result :- core/SsaValueV0 (get instruction :result)]
+      (if (not (type-carries-handles? types (core/ssavaluev0-type-id result)))
+        nil
+        (loop [position :- Int 0
+               refs :- (Vec core/NativeId)
+               (core/instruction-ssa-refs instruction)
+               merged :- (U core/NativeId Nil) nil]
+          (if (>= position (count refs))
+            merged
+            (recur (+ position 1) refs
+              (merge-epochs regions merged
+                (epoch-of epochs (nth refs position))))))))))
+
+(defn block-parameter-epochs
+  [regions :- (Vec core/RegionDef)
+   function :- core/FunctionDef
+   epochs :- (Map String core/NativeId)
+   target-id :- core/NativeId
+   arguments :- (Vec core/NativeId)] :- (Map String core/NativeId)
+  (let [target :- (U core/BasicBlock Nil)
+        (find-block (core/functiondef-blocks function) target-id)]
+    (if (nil? target)
+      epochs
+      (let [parameters :- (Vec core/Parameter)
+            (core/basicblock-parameters target)]
+        (loop [position :- Int 0 current :- (Map String core/NativeId) epochs]
+          (if (or (>= position (count parameters))
+                (>= position (count arguments)))
+            current
+            (recur (+ position 1)
+              (merge-epoch-into regions current
+                (core/parameter-id (nth parameters position))
+                (epoch-of epochs (nth arguments position))))))))))
+
+(defn terminator-epoch-flow
+  [regions :- (Vec core/RegionDef)
+   function :- core/FunctionDef
+   epochs :- (Map String core/NativeId)
+   terminator :- core/Terminator] :- (Map String core/NativeId)
+  (cond
+    (instance? native.core.JumpTerminator terminator)
+    (block-parameter-epochs regions function epochs
+      (core/jumpterminator-block-id terminator)
+      (core/jumpterminator-arguments terminator))
+
+    (instance? native.core.SwitchTerminator terminator)
+    (loop [position :- Int 0
+           cases :- (Vec core/SwitchCaseV0)
+           (core/switchterminator-cases terminator)
+           current :- (Map String core/NativeId) epochs]
+      (if (>= position (count cases))
+        current
+        (let [switch-case :- core/SwitchCaseV0 (nth cases position)]
+          (recur (+ position 1) cases
+            (block-parameter-epochs regions function current
+              (core/switchcasev0-block-id switch-case)
+              (core/switchcasev0-arguments switch-case))))))
+
+    :else epochs))
+
+(defn function-epoch-map-pass
+  [regions :- (Vec core/RegionDef)
+   types :- (Vec core/TypeDef)
+   function :- core/FunctionDef
+   epochs :- (Map String core/NativeId)] :- (Map String core/NativeId)
+  (loop [block-position :- Int 0
+         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)
+         current :- (Map String core/NativeId) epochs]
+    (if (>= block-position (count blocks))
+      current
+      (let [block :- core/BasicBlock (nth blocks block-position)
+            instructions :- (Vec core/Instruction)
+            (core/basicblock-instructions block)
+            with-instructions :- (Map String core/NativeId)
+            (loop [position :- Int 0
+                   inner :- (Map String core/NativeId) current]
+              (if (>= position (count instructions))
+                inner
+                (let [instruction :- core/Instruction (nth instructions position)
+                      result :- core/SsaValueV0 (get instruction :result)]
+                  (recur (+ position 1)
+                    (merge-epoch-into regions inner
+                      (core/ssavaluev0-id result)
+                      (instruction-epoch regions types function inner
+                        instruction))))))
+            with-terminators :- (Map String core/NativeId)
+            (loop [position :- Int 0
+                   terminators :- (Vec core/Terminator)
+                   (core/basicblock-terminators block)
+                   inner :- (Map String core/NativeId) with-instructions]
+              (if (>= position (count terminators))
+                inner
+                (recur (+ position 1) terminators
+                  (terminator-epoch-flow regions function inner
+                    (nth terminators position)))))]
+        (recur (+ block-position 1) blocks with-terminators)))))
+
+(defrecord EpochMapResultV0
+  [epochs :- (Map String core/NativeId)
+   converged :- Bool])
+
+;; The epoch lattice is nil < region < incomparable, so the fixpoint is
+;; monotone; the cap only guards against a defective walk, and hitting it
+;; reads as non-convergence (the caller refuses).
+(defn function-epoch-map
+  [regions :- (Vec core/RegionDef)
+   types :- (Vec core/TypeDef)
+   function :- core/FunctionDef] :- EpochMapResultV0
+  (let [cap :- Int (+ 4 (* 3 (count (core/function-value-ids function))))]
+    (loop [round :- Int 0 epochs :- (Map String core/NativeId) {}]
+      (let [next :- (Map String core/NativeId)
+            (function-epoch-map-pass regions types function epochs)]
+        (cond
+          (= next epochs) (->EpochMapResultV0 next true)
+          (>= round cap) (->EpochMapResultV0 next false)
+          :else (recur (+ round 1) next))))))
+
+(defn function-closed-regions
+  [function :- core/FunctionDef] :- (Vec core/NativeId)
+  (loop [block-position :- Int 0
+         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)
+         closed :- (Vec core/NativeId) []]
+    (if (>= block-position (count blocks))
+      closed
+      (let [instructions :- (Vec core/Instruction)
+            (core/basicblock-instructions (nth blocks block-position))]
+        (recur (+ block-position 1) blocks
+          (loop [position :- Int 0 inner :- (Vec core/NativeId) closed]
+            (if (>= position (count instructions))
+              inner
+              (let [instruction :- core/Instruction (nth instructions position)]
+                (recur (+ position 1)
+                  (if (instance? native.core.ArenaCloseInstructionV0 instruction)
+                    (let [region :- (U core/NativeId Nil)
+                          (function-arena-region function
+                            (core/arenacloseinstructionv0-source-id instruction))]
+                      (if (nil? region) inner (conj inner region)))
+                    inner))))))))))
+
+;; True when no region closed inside this function is an ancestor-or-equal of
+;; the value's epoch — a closed epoch's values may not leave the function.
+(defn value-outlives-closed-regions?
+  [regions :- (Vec core/RegionDef)
+   closed :- (Vec core/NativeId)
+   epochs :- (Map String core/NativeId)
+   value-id :- core/NativeId] :- Bool
+  (let [epoch :- (U core/NativeId Nil) (epoch-of epochs value-id)]
+    (if (nil? epoch)
+      true
+      (every?
+        (fn [closed-region :- core/NativeId] :- Bool
+          (not (region-on-ancestor-chain? regions closed-region epoch)))
+        closed))))
+
+(defn root-or-free-epoch?
+  [regions :- (Vec core/RegionDef)
+   epochs :- (Map String core/NativeId)
+   value-id :- core/NativeId] :- Bool
+  (let [epoch :- (U core/NativeId Nil) (epoch-of epochs value-id)]
+    (or (nil? epoch) (root-region? regions epoch))))
+
+(defn instruction-epoch-writes-legal?
+  [regions :- (Vec core/RegionDef)
+   function :- core/FunctionDef
+   epochs :- (Map String core/NativeId)
+   instruction :- core/Instruction] :- Bool
+  (let [store :- Any (get instruction :store nil)]
+    (cond
+      (some? store)
+      (epoch-write-legal? regions
+        (epoch-of epochs (get store :value))
+        (get store :region))
+
+      ;; Atom cells live in the external atom-state region: writes require
+      ;; driver-lifetime values, and the cell's own storage a root arena.
+      (instance? native.core.AtomCreateInstruction instruction)
+      (let [cell-region :- (U core/NativeId Nil)
+            (function-arena-region function
+              (core/atomcreateinstruction-arena-id instruction))]
+        (and (root-or-free-epoch? regions epochs
+               (core/atomcreateinstruction-initial-id instruction))
+          (or (nil? cell-region) (root-region? regions cell-region))))
+
+      (instance? native.core.AtomResetInstruction instruction)
+      (root-or-free-epoch? regions epochs
+        (core/atomresetinstruction-value-id instruction))
+
+      (instance? native.core.AtomCompareExchangeInstruction instruction)
+      (root-or-free-epoch? regions epochs
+        (core/atomcompareexchangeinstruction-replacement-id instruction))
+
+      (instance? native.core.AtomSwapInstruction instruction)
+      (every?
+        (fn [argument :- core/NativeId] :- Bool
+          (root-or-free-epoch? regions epochs argument))
+        (core/atomswapinstruction-arguments instruction))
+
+      ;; A missing callee summary means retained (the v2 lesson): arguments
+      ;; handed across a call must carry driver lifetime.
+      (instance? native.core.CallInstruction instruction)
+      (every?
+        (fn [argument :- core/NativeId] :- Bool
+          (root-or-free-epoch? regions epochs argument))
+        (core/callinstruction-arguments instruction))
+
+      (instance? native.core.ExternCallInstruction instruction)
+      (every?
+        (fn [argument :- core/NativeId] :- Bool
+          (root-or-free-epoch? regions epochs argument))
+        (core/externcallinstruction-arguments instruction))
+
+      ;; Arena-destination operations copy or reference every non-arena
+      ;; operand from storage in the destination region.
+      (some? (instruction-arena-operand instruction))
+      (let [arena :- Any (instruction-arena-operand instruction)
+            destination :- (U core/NativeId Nil)
+            (function-arena-region function arena)]
+        (every?
+          (fn [operand :- core/NativeId] :- Bool
+            (or (core/native-id= operand arena)
+              (epoch-write-legal? regions
+                (epoch-of epochs operand) destination)))
+          (core/instruction-ssa-refs instruction)))
+
+      :else true)))
+
+(defn terminator-epoch-legal?
+  [regions :- (Vec core/RegionDef)
+   closed :- (Vec core/NativeId)
+   epochs :- (Map String core/NativeId)
+   terminator :- core/Terminator] :- Bool
+  (cond
+    (instance? native.core.ReturnTerminator terminator)
+    (let [value :- (U core/NativeId Nil)
+          (core/returnterminator-value terminator)]
+      (or (nil? value)
+        (value-outlives-closed-regions? regions closed epochs value)))
+
+    (instance? native.core.TrapTerminator terminator)
+    (value-outlives-closed-regions? regions closed epochs
+      (core/trapterminator-failure-id terminator))
+
+    :else true))
+
+(defn function-epoch-sound?
+  [regions :- (Vec core/RegionDef)
+   types :- (Vec core/TypeDef)
+   function :- core/FunctionDef] :- Bool
+  (let [result :- EpochMapResultV0 (function-epoch-map regions types function)]
+    (if (not (epochmapresultv0-converged result))
+      false
+      (let [epochs :- (Map String core/NativeId)
+            (epochmapresultv0-epochs result)
+            closed :- (Vec core/NativeId) (function-closed-regions function)]
+        (every?
+          (fn [block :- core/BasicBlock] :- Bool
+            (and
+              (every?
+                (fn [instruction :- core/Instruction] :- Bool
+                  (instruction-epoch-writes-legal? regions function epochs
+                    instruction))
+                (core/basicblock-instructions block))
+              (every?
+                (fn [terminator :- core/Terminator] :- Bool
+                  (terminator-epoch-legal? regions closed epochs terminator))
+                (core/basicblock-terminators block))))
+          (core/functiondef-blocks function))))))
+
+(defn epoch-soundness [program :- core/NativeCoreProgram] :- ObligationVerdictV0
+  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+         (core/nativecoreprogram-functions program)]
+    (if (>= index (count functions))
+      (->ObligationPassV0 (core/->EpochSoundnessObligation true))
+      (let [function :- core/FunctionDef (nth functions index)]
+        (if (function-epoch-sound? (core/nativecoreprogram-regions program)
+              (core/nativecoreprogram-types program) function)
+          (recur (+ index 1) functions)
+          (->EpochSoundnessDiagnosticV0 (core/functiondef-id function)))))))
+
+;; --- Obligation 9: leak freedom. A path-sensitive walk mirroring
+;; token-paths-valid?, carrying the stack of open epochs instead of a token
+;; multiset: opens push (parent must be a root or already open), closes pop
+;; the top exactly (LIFO in the region tree), every exit requires an empty
+;; stack, and a loop header re-entered with a different stack refuses.
+
+(defrecord EpochStackVisitV0
+  [block-id :- core/NativeId
+   stack :- (Vec core/NativeId)])
+
+(defrecord EpochStackWorkV0
+  [block-id :- core/NativeId
+   stack :- (Vec core/NativeId)
+   path :- (Vec EpochStackVisitV0)])
+
+(defrecord EpochBlockStepV0
+  [stack :- (Vec core/NativeId)
+   violation :- (U core/NativeId Nil)])
+
+(defn epoch-stacks-equal?
+  [left :- (Vec core/NativeId)
+   right :- (Vec core/NativeId)] :- Bool
+  (and (= (count left) (count right))
+    (loop [index :- Int 0]
+      (if (>= index (count left))
+        true
+        (if (core/native-id= (nth left index) (nth right index))
+          (recur (+ index 1))
+          false)))))
+
+(defn epoch-stack-top [stack :- (Vec core/NativeId)] :- (U core/NativeId Nil)
+  (if (= 0 (count stack)) nil (nth stack (- (count stack) 1))))
+
+(defn epoch-stack-pop [stack :- (Vec core/NativeId)] :- (Vec core/NativeId)
+  (loop [index :- Int 0 popped :- (Vec core/NativeId) []]
+    (if (>= index (- (count stack) 1))
+      popped
+      (recur (+ index 1) (conj popped (nth stack index))))))
+
+(defn epoch-stack-visit
+  [visited :- (Vec EpochStackVisitV0)
+   block-id :- core/NativeId] :- (U EpochStackVisitV0 Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count visited)) nil
+      (core/native-id= (epochstackvisitv0-block-id (nth visited index)) block-id)
+      (nth visited index)
+      :else (recur (+ index 1)))))
+
+(defn epoch-stack-visited?
+  [memo :- (Vec EpochStackVisitV0)
+   block-id :- core/NativeId
+   stack :- (Vec core/NativeId)] :- Bool
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count memo)) false
+      (and (core/native-id= (epochstackvisitv0-block-id (nth memo index))
+             block-id)
+        (epoch-stacks-equal? (epochstackvisitv0-stack (nth memo index)) stack))
+      true
+      :else (recur (+ index 1)))))
+
+(defn epoch-block-step
+  [regions :- (Vec core/RegionDef)
+   function :- core/FunctionDef
+   block :- core/BasicBlock
+   stack :- (Vec core/NativeId)] :- EpochBlockStepV0
+  (loop [position :- Int 0
+         instructions :- (Vec core/Instruction)
+         (core/basicblock-instructions block)
+         current :- (Vec core/NativeId) stack]
+    (if (>= position (count instructions))
+      (->EpochBlockStepV0 current nil)
+      (let [instruction :- core/Instruction (nth instructions position)]
+        (cond
+          (and (instance? native.core.ArenaInstruction instruction)
+            (epoch-region? regions
+              (core/arenainstruction-region instruction)))
+          (let [region :- core/NativeId
+                (core/arenainstruction-region instruction)
+                definition :- (U core/RegionDef Nil)
+                (find-region regions region)
+                parent :- Any
+                (if (nil? definition) nil (core/regiondef-parent definition))]
+            (cond
+              (core/id-in? current region)
+              (->EpochBlockStepV0 current region)
+              (nil? parent)
+              (->EpochBlockStepV0 current region)
+              (not (or (root-region? regions parent)
+                    (core/id-in? current parent)))
+              (->EpochBlockStepV0 current region)
+              :else (recur (+ position 1) instructions (conj current region))))
+
+          (instance? native.core.ArenaCloseInstructionV0 instruction)
+          (let [region :- (U core/NativeId Nil)
+                (function-arena-region function
+                  (core/arenacloseinstructionv0-source-id instruction))]
+            (cond
+              (nil? region)
+              (->EpochBlockStepV0 current (obligation-id "epoch-close-unresolved"))
+              (not (epoch-region? regions region))
+              (->EpochBlockStepV0 current region)
+              (= 0 (count current))
+              (->EpochBlockStepV0 current region)
+              (not (dynamic-id= (epoch-stack-top current) region))
+              (->EpochBlockStepV0 current region)
+              :else (recur (+ position 1) instructions
+                      (epoch-stack-pop current))))
+
+          :else (recur (+ position 1) instructions current))))))
+
+(defn function-leak-violation
+  [regions :- (Vec core/RegionDef)
+   function :- core/FunctionDef] :- (U core/NativeId Nil)
+  (loop [position :- Int 0
+         work :- (Vec EpochStackWorkV0)
+         [(->EpochStackWorkV0 (core/functiondef-entry-block function) [] [])]
+         memo :- (Vec EpochStackVisitV0) []]
+    (if (>= position (count work))
+      nil
+      (let [item :- EpochStackWorkV0 (nth work position)
+            current-id :- core/NativeId (epochstackworkv0-block-id item)
+            current-stack :- (Vec core/NativeId) (epochstackworkv0-stack item)
+            path :- (Vec EpochStackVisitV0) (epochstackworkv0-path item)
+            entered :- (U EpochStackVisitV0 Nil)
+            (epoch-stack-visit path current-id)]
+        (if (some? entered)
+          (if (epoch-stacks-equal? (epochstackvisitv0-stack entered)
+                current-stack)
+            (recur (+ position 1) work memo)
+            (let [top :- (U core/NativeId Nil) (epoch-stack-top current-stack)]
+              (if (nil? top)
+                (epoch-stack-top (epochstackvisitv0-stack entered))
+                top)))
+          (if (epoch-stack-visited? memo current-id current-stack)
+            (recur (+ position 1) work memo)
+            (let [block :- (U core/BasicBlock Nil)
+                  (find-block (core/functiondef-blocks function) current-id)]
+              (if (nil? block)
+                (obligation-id "epoch-missing-block")
+                (let [step :- EpochBlockStepV0
+                      (epoch-block-step regions function block current-stack)
+                      violation :- (U core/NativeId Nil)
+                      (epochblockstepv0-violation step)]
+                  (if (some? violation)
+                    violation
+                    (let [next-stack :- (Vec core/NativeId)
+                          (epochblockstepv0-stack step)
+                          successors :- (Vec core/NativeId)
+                          (block-successors block)
+                          visit :- EpochStackVisitV0
+                          (->EpochStackVisitV0 current-id current-stack)
+                          next-path :- (Vec EpochStackVisitV0) (conj path visit)
+                          next-memo :- (Vec EpochStackVisitV0) (conj memo visit)]
+                      (if (= 0 (count successors))
+                        (if (= 0 (count next-stack))
+                          (recur (+ position 1) work next-memo)
+                          (epoch-stack-top next-stack))
+                        (let [next-work :- (Vec EpochStackWorkV0)
+                              (mapv
+                                (fn
+                                  [successor :- core/NativeId] :- EpochStackWorkV0
+                                  (->EpochStackWorkV0 successor next-stack
+                                    next-path))
+                                successors)]
+                          (recur (+ position 1)
+                            (vec (concat work next-work))
+                            next-memo))))))))))))))
+
+(defn leak-freedom [program :- core/NativeCoreProgram] :- ObligationVerdictV0
+  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+         (core/nativecoreprogram-functions program)]
+    (if (>= index (count functions))
+      (->ObligationPassV0 (core/->LeakFreedomObligation true))
+      (let [violation :- (U core/NativeId Nil)
+            (function-leak-violation (core/nativecoreprogram-regions program)
+              (nth functions index))]
+        (if (nil? violation)
+          (recur (+ index 1) functions)
+          (->LeakFreedomDiagnosticV0 violation))))))
+
 (def fixture-i64-type :- core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
@@ -1760,113 +2451,188 @@
   (obligation-passed? (valid-ssa valid-program)))
 
 (def valid-ssa-negative :- Bool
-  (match (valid-ssa invalid-ssa-program)
-    [(ValidSsaDiagnosticV0 function-id) true]
-    [(ObligationPassV0 code) false]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
-    [(ClosedLayoutsDiagnosticV0 type-id) false]
-    [(CheckedArithmeticDiagnosticV0 function-id) false]
-    [(LegalAbiDiagnosticV0 abi-id) false]
-    [(DischargedTokensDiagnosticV0 function-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+  (= "valid-ssa" (verdict-tag (valid-ssa invalid-ssa-program))))
 
 (def exhaustive-matches-positive :- Bool
   (obligation-passed? (exhaustive-matches valid-program)))
 
 (def exhaustive-matches-negative :- Bool
-  (match (exhaustive-matches nonexhaustive-program)
-    [(ExhaustiveMatchesDiagnosticV0 function-id) true]
-    [(ObligationPassV0 code) false]
-    [(ValidSsaDiagnosticV0 function-id) false]
-    [(ClosedLayoutsDiagnosticV0 type-id) false]
-    [(CheckedArithmeticDiagnosticV0 function-id) false]
-    [(LegalAbiDiagnosticV0 abi-id) false]
-    [(DischargedTokensDiagnosticV0 function-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+  (= "exhaustive-matches" (verdict-tag (exhaustive-matches nonexhaustive-program))))
 
 (def closed-layouts-positive :- Bool
   (obligation-passed? (closed-layouts valid-program (core/abi-profile-lp64))))
 
 (def closed-layouts-negative :- Bool
-  (match (closed-layouts open-layout-program (core/abi-profile-lp64))
-    [(ClosedLayoutsDiagnosticV0 type-id) true]
-    [(ObligationPassV0 code) false]
-    [(ValidSsaDiagnosticV0 function-id) false]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
-    [(CheckedArithmeticDiagnosticV0 function-id) false]
-    [(LegalAbiDiagnosticV0 abi-id) false]
-    [(DischargedTokensDiagnosticV0 function-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+  (= "closed-layouts"
+    (verdict-tag (closed-layouts open-layout-program (core/abi-profile-lp64)))))
 
 (def checked-arithmetic-positive :- Bool
   (obligation-passed? (checked-arithmetic valid-program)))
 
 (def checked-arithmetic-negative :- Bool
-  (match (checked-arithmetic unchecked-arithmetic-program)
-    [(CheckedArithmeticDiagnosticV0 function-id) true]
-    [(ObligationPassV0 code) false]
-    [(ValidSsaDiagnosticV0 function-id) false]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
-    [(ClosedLayoutsDiagnosticV0 type-id) false]
-    [(LegalAbiDiagnosticV0 abi-id) false]
-    [(DischargedTokensDiagnosticV0 function-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+  (= "checked-arithmetic"
+    (verdict-tag (checked-arithmetic unchecked-arithmetic-program))))
 
 (def legal-abi-positive :- Bool
   (obligation-passed? (legal-abi valid-program)))
 
 (def legal-abi-negative :- Bool
-  (match (legal-abi illegal-abi-program)
-    [(LegalAbiDiagnosticV0 abi-id) true]
-    [(ObligationPassV0 code) false]
-    [(ValidSsaDiagnosticV0 function-id) false]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
-    [(ClosedLayoutsDiagnosticV0 type-id) false]
-    [(CheckedArithmeticDiagnosticV0 function-id) false]
-    [(DischargedTokensDiagnosticV0 function-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+  (= "legal-abi" (verdict-tag (legal-abi illegal-abi-program))))
 
 (def discharged-tokens-positive :- Bool
   (obligation-passed? (discharged-tokens valid-program)))
 
 (def discharged-tokens-negative :- Bool
-  (match (discharged-tokens undischarged-token-program)
-    [(DischargedTokensDiagnosticV0 function-id) true]
-    [(ObligationPassV0 code) false]
-    [(ValidSsaDiagnosticV0 function-id) false]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
-    [(ClosedLayoutsDiagnosticV0 type-id) false]
-    [(CheckedArithmeticDiagnosticV0 function-id) false]
-    [(LegalAbiDiagnosticV0 abi-id) false]
-    [(BoundedEffectsDiagnosticV0 function-id) false]))
+  (= "discharged-tokens"
+    (verdict-tag (discharged-tokens undischarged-token-program))))
 
 (def bounded-effects-positive :- Bool
   (obligation-passed? (bounded-effects valid-program)))
 
 (def bounded-effects-negative :- Bool
-  (match (bounded-effects unbounded-effect-program)
-    [(BoundedEffectsDiagnosticV0 function-id) true]
-    [(ObligationPassV0 code) false]
-    [(ValidSsaDiagnosticV0 function-id) false]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
-    [(ClosedLayoutsDiagnosticV0 type-id) false]
-    [(CheckedArithmeticDiagnosticV0 function-id) false]
-    [(LegalAbiDiagnosticV0 abi-id) false]
-    [(DischargedTokensDiagnosticV0 function-id) false]))
+  (= "bounded-effects" (verdict-tag (bounded-effects unbounded-effect-program))))
 
-;; Named tag per verdict variant, so a rejection-depth fixture can assert
-;; "failed with ITS diagnostic" without repeating an 8-arm match at each
-;; call site.
-(defn verdict-tag [verdict :- ObligationVerdictV0] :- String
-  (match verdict
-    [(ObligationPassV0 code) "pass"]
-    [(ValidSsaDiagnosticV0 function-id) "valid-ssa"]
-    [(ExhaustiveMatchesDiagnosticV0 function-id) "exhaustive-matches"]
-    [(ClosedLayoutsDiagnosticV0 type-id) "closed-layouts"]
-    [(CheckedArithmeticDiagnosticV0 function-id) "checked-arithmetic"]
-    [(LegalAbiDiagnosticV0 abi-id) "legal-abi"]
-    [(DischargedTokensDiagnosticV0 function-id) "discharged-tokens"]
-    [(BoundedEffectsDiagnosticV0 function-id) "bounded-effects"]))
+;; --- Epoch fixture vocabulary: a child epoch region under the root fixture
+;; region, an inner grandchild for LIFO fixtures, an arena-handle type, and a
+;; Text type so young values are handle-carrying.
+
+(def fixture-epoch-region :- core/RegionDef
+  (core/->RegionDef (obligation-id "region-epoch")
+    (core/->ArenaRegion true) (obligation-id "region-fixture")))
+
+(def fixture-epoch-inner-region :- core/RegionDef
+  (core/->RegionDef (obligation-id "region-epoch-inner")
+    (core/->ArenaRegion true) (obligation-id "region-epoch")))
+
+(def fixture-text-type :- core/TypeDef
+  (core/->TypeDef (obligation-id "type-text") "Text"
+    (core/->AtomType (core/->TextKind true))))
+
+(def fixture-arena-type :- core/TypeDef
+  (core/->TypeDef (obligation-id "type-arena") "ArenaHandle"
+    (core/->ReferenceType (obligation-id "type-arena"))))
+
+(defn epoch-open-instruction [] :- core/Instruction
+  (core/->ArenaInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-epoch-arena")
+      (obligation-id "type-arena"))
+    (obligation-id "region-epoch")
+    (obligation-id "capability-write")
+    (core/->TokenFlowV0 [(obligation-id "region-epoch")]
+      [(core/->ResourceTokenV0 (obligation-id "token-epoch")
+         (core/->RegionTokenV0 (obligation-id "region-epoch")))])))
+
+(defn epoch-young-text-instruction [] :- core/Instruction
+  (core/->TextConcatInstruction
+    (core/->SsaValueV0 (obligation-id "ssa-young-text")
+      (obligation-id "type-text"))
+    (obligation-id "ssa-epoch-arena")
+    []))
+
+(defn epoch-close-instruction [label :- String] :- core/Instruction
+  (core/->ArenaCloseInstructionV0
+    (core/->SsaValueV0 (obligation-id (str "ssa-epoch-close-" label))
+      (obligation-id "type-i64"))
+    (obligation-id "ssa-epoch-arena")
+    (core/->TokenFlowV0 [(obligation-id "token-epoch")] [])))
+
+;; Epoch-soundness positive: a young Text lives and dies inside its epoch.
+(def epoch-sound-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-epoch-sound") "epoch-sound"
+    [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+       [(epoch-open-instruction)
+        (epoch-young-text-instruction)
+        (epoch-close-instruction "sound")]
+       [(core/->ReturnTerminator (obligation-id "ssa-input"))])]
+    (obligation-id "block-epoch-entry")
+    (obligation-id "type-i64")
+    [] [(obligation-id "region-epoch")] [(obligation-id "capability-write")]))
+
+(def epoch-sound-program :- core/NativeCoreProgram
+  (with valid-program
+    [:types [fixture-i64-type fixture-union-type fixture-outcome-type
+             fixture-text-type fixture-arena-type]]
+    [:regions [fixture-region fixture-epoch-region fixture-epoch-inner-region]]
+    [:functions [epoch-sound-function]]))
+
+;; Epoch-soundness negative: a young-epoch Text stored into root-region
+;; storage — the old-to-young reference obligation 8 exists to refuse.
+(def old-young-store-function :- core/FunctionDef
+  (with epoch-sound-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (core/->StoreInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-store-young")
+             (obligation-id "type-i64"))
+           (core/->StoreText (obligation-id "ssa-input")
+             (obligation-id "ssa-young-text")
+             (obligation-id "region-fixture")
+             (obligation-id "capability-write"))
+           (core/->TokenFlowV0 [] []))
+         (epoch-close-instruction "store")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
+
+(def old-young-store-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [old-young-store-function]]))
+
+;; Leak-freedom positive: the epoch opened in the entry block closes on both
+;; branch exits.
+(def epoch-close-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-epoch-close") "epoch-close"
+    [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-close-entry") []
+       [(epoch-open-instruction)]
+       [(core/->BranchTerminator (obligation-id "ssa-input")
+          (obligation-id "block-close-left")
+          (obligation-id "block-close-right"))])
+     (core/->BasicBlock (obligation-id "block-close-left") []
+       [(epoch-close-instruction "left")]
+       [(core/->ReturnTerminator nil)])
+     (core/->BasicBlock (obligation-id "block-close-right") []
+       [(epoch-close-instruction "right")]
+       [(core/->ReturnTerminator nil)])]
+    (obligation-id "block-close-entry")
+    nil
+    [] [(obligation-id "region-epoch")] [(obligation-id "capability-write")]))
+
+(def epoch-close-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [epoch-close-function]]))
+
+;; Leak-freedom negative: opened on one branch, closed on the other — no path
+;; both opens and closes the epoch (patterned on leak-token-function).
+(def branch-close-function :- core/FunctionDef
+  (with epoch-close-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-leak-entry") []
+        []
+        [(core/->BranchTerminator (obligation-id "ssa-input")
+           (obligation-id "block-leak-open")
+           (obligation-id "block-leak-close"))])
+      (core/->BasicBlock (obligation-id "block-leak-open") []
+        [(epoch-open-instruction)]
+        [(core/->ReturnTerminator nil)])
+      (core/->BasicBlock (obligation-id "block-leak-close") []
+        [(epoch-close-instruction "leak")]
+        [(core/->ReturnTerminator nil)])]]
+    [:entry-block (obligation-id "block-leak-entry")]))
+
+(def branch-close-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [branch-close-function]]))
+
+(def epoch-soundness-positive :- Bool
+  (obligation-passed? (epoch-soundness epoch-sound-program)))
+
+(def epoch-soundness-negative :- Bool
+  (= "epoch-soundness" (verdict-tag (epoch-soundness old-young-store-program))))
+
+(def leak-freedom-positive :- Bool
+  (obligation-passed? (leak-freedom epoch-close-program)))
+
+(def leak-freedom-negative :- Bool
+  (= "leak-freedom" (verdict-tag (leak-freedom branch-close-program))))
 
 ;; --- Rejection-depth corpus: two additional corrupt-program fixtures per
 ;; obligation beyond the one landed above, each a distinct corruption vector.
@@ -2137,6 +2903,79 @@
   (with valid-program
     [:functions [fixture-function fixture-token-function unbounded-call-function]]))
 
+;; epoch-soundness #2: a young-epoch value RETURNED from the function that
+;; closes its epoch (escape through the crossing set of a dead region).
+(def return-young-function :- core/FunctionDef
+  (with epoch-sound-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (epoch-close-instruction "return")]
+        [(core/->ReturnTerminator (obligation-id "ssa-young-text"))])]]))
+
+(def return-young-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [return-young-function]]))
+
+;; epoch-soundness #3: a young-epoch value passed as a call argument — a
+;; missing callee summary means retained, so the argument must carry driver
+;; lifetime.
+(def call-young-function :- core/FunctionDef
+  (with epoch-sound-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
+        [(epoch-open-instruction)
+         (epoch-young-text-instruction)
+         (core/->CallInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-young-call")
+             (obligation-id "type-i64"))
+           (obligation-id "function-store")
+           [(obligation-id "ssa-young-text") (obligation-id "ssa-input")]
+           (core/->TokenFlowV0 [] []))
+         (epoch-close-instruction "call")]
+        [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
+
+(def call-young-program :- core/NativeCoreProgram
+  (with epoch-sound-program
+    [:functions [fixture-token-function call-young-function]]))
+
+;; leak-freedom #2: LIFO violation — the outer epoch closes while its child
+;; is still open (closes must run in reverse tree order).
+(def lifo-violation-function :- core/FunctionDef
+  (with epoch-close-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-lifo-entry") []
+        [(epoch-open-instruction)
+         (core/->ArenaInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-epoch-inner-arena")
+             (obligation-id "type-arena"))
+           (obligation-id "region-epoch-inner")
+           (obligation-id "capability-write")
+           (core/->TokenFlowV0 []
+             [(core/->ResourceTokenV0 (obligation-id "token-epoch-inner")
+                (core/->RegionTokenV0 (obligation-id "region-epoch-inner")))]))
+         (epoch-close-instruction "lifo")]
+        [(core/->ReturnTerminator nil)])]]
+    [:entry-block (obligation-id "block-lifo-entry")]))
+
+(def lifo-violation-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [lifo-violation-function]]))
+
+;; leak-freedom #3: a double close — the second close finds its epoch already
+;; popped (distinct from never closing at all).
+(def double-close-function :- core/FunctionDef
+  (with epoch-close-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-double-entry") []
+        [(epoch-open-instruction)
+         (epoch-close-instruction "first")
+         (epoch-close-instruction "second")]
+        [(core/->ReturnTerminator nil)])]]
+    [:entry-block (obligation-id "block-double-entry")]))
+
+(def double-close-program :- core/NativeCoreProgram
+  (with epoch-sound-program [:functions [double-close-function]]))
+
 (def valid-ssa-negative-sibling :- Bool
   (= "valid-ssa" (verdict-tag (valid-ssa sibling-block-use-program))))
 
@@ -2182,6 +3021,18 @@
 (def bounded-effects-negative-unbounded-call :- Bool
   (= "bounded-effects" (verdict-tag (bounded-effects unbounded-call-program))))
 
+(def epoch-soundness-negative-return-young :- Bool
+  (= "epoch-soundness" (verdict-tag (epoch-soundness return-young-program))))
+
+(def epoch-soundness-negative-call-young :- Bool
+  (= "epoch-soundness" (verdict-tag (epoch-soundness call-young-program))))
+
+(def leak-freedom-negative-lifo :- Bool
+  (= "leak-freedom" (verdict-tag (leak-freedom lifo-violation-program))))
+
+(def leak-freedom-negative-double-close :- Bool
+  (= "leak-freedom" (verdict-tag (leak-freedom double-close-program))))
+
 (def rejection-depth-results :- (Vec Bool)
   [valid-ssa-negative-sibling
    valid-ssa-negative-jump-mismatch
@@ -2196,9 +3047,13 @@
    discharged-tokens-negative-leak
    discharged-tokens-negative-phantom-consume
    bounded-effects-negative-undeclared-region
-   bounded-effects-negative-unbounded-call])
+   bounded-effects-negative-unbounded-call
+   epoch-soundness-negative-return-young
+   epoch-soundness-negative-call-young
+   leak-freedom-negative-lifo
+   leak-freedom-negative-double-close])
 
-(def fourteen-rejection-depth-fixtures-named? :- Bool
+(def eighteen-rejection-depth-fixtures-named? :- Bool
   (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
 
 (defn validate-native-core-program
@@ -2210,7 +3065,9 @@
    (checked-arithmetic program)
    (legal-abi program)
    (discharged-tokens program)
-   (bounded-effects program)])
+   (bounded-effects program)
+   (epoch-soundness program)
+   (leak-freedom program)])
 
 (def valid-fixture-results :- (Vec Bool)
   (mapv (fn [verdict :- ObligationVerdictV0] :- Bool
@@ -2224,10 +3081,14 @@
    checked-arithmetic-negative
    legal-abi-negative
    discharged-tokens-negative
-   bounded-effects-negative])
+   bounded-effects-negative
+   epoch-soundness-negative
+   leak-freedom-negative])
 
-(def seven-valid-passes? :- Bool
-  (every? (fn [passed :- Bool] :- Bool passed) valid-fixture-results))
+(def nine-valid-passes? :- Bool
+  (and (every? (fn [passed :- Bool] :- Bool passed) valid-fixture-results)
+    epoch-soundness-positive
+    leak-freedom-positive))
 
-(def seven-negatives-named? :- Bool
+(def nine-negatives-named? :- Bool
   (every? (fn [passed :- Bool] :- Bool passed) negative-fixture-results))

@@ -64,6 +64,8 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
+obligation-projection PASS epoch-soundness
+obligation-projection PASS leak-freedom
 materialize OK module_0.h module_0.c
 qbe-stage typed-to-native COMPLETE
 qbe-selected-function numeric-int-double-less?
@@ -77,4 +79,6 @@ qbe-obligation PASS checked-arithmetic
 qbe-obligation PASS legal-abi
 qbe-obligation PASS discharged-tokens
 qbe-obligation PASS bounded-effects
+qbe-obligation PASS epoch-soundness
+qbe-obligation PASS leak-freedom
 qbe-materialize OK module_2.ssa

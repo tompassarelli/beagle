@@ -18,6 +18,8 @@ obligation-program PASS checked-arithmetic
 obligation-program PASS legal-abi
 obligation-program PASS discharged-tokens
 obligation-program PASS bounded-effects
+obligation-program PASS epoch-soundness
+obligation-program PASS leak-freedom
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -25,6 +27,8 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
+obligation-projection PASS epoch-soundness
+obligation-projection PASS leak-freedom
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant-shift-seconds

@@ -14,6 +14,8 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
+obligation-projection PASS epoch-soundness
+obligation-projection PASS leak-freedom
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop [non-tail]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-OUTSIDE-LOOP: recur has no enclosing loop header [outside-loop]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-ARITY: recur passes 2 arguments to a loop with 1 accumulators [wrong-arity]

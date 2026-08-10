@@ -13,5 +13,7 @@ obligation-main PASS checked-arithmetic
 obligation-main PASS legal-abi
 obligation-main PASS discharged-tokens
 obligation-main PASS bounded-effects
+obligation-main PASS epoch-soundness
+obligation-main PASS leak-freedom
 materialize OK module_0.h module_0.c
 qbe REFUSED QBE stdout extern ABI is unsupported: Text handles have no QBE call representation
