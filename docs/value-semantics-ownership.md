@@ -1,10 +1,11 @@
 # Value-Semantics Ownership & Type-Driven Representation Selection
 
-**Status:** Design / proposal (not yet built). 2026-06-21.
-**Scope:** Primarily the JS backend; the invariant and harness span *every* language
-target (`bin/beagle langs` — this design doc deliberately points at the table rather
-than copying a count that goes stale).
-**Load-bearing consumer:** Eddy (`.eddy → Beagle/JS`) — see [§5](#5-the-load-bearing-case-eddy-the-downstream-consumer).
+**Status:** JS P1–P3 implemented; implementation record and remaining research.
+2026-06-21, refreshed 2026-08-11.
+**Scope:** Primarily the JS backend. The invariant spans every language target; the
+current differential harness covers the Clojure oracle and JavaScript. Query current
+targets with `bin/beagle langs` rather than copying a count that goes stale.
+**Load-bearing consumer:** Wake (`.wake → Beagle/JS`) — see [§5](#5-the-load-bearing-case-wake-the-downstream-consumer).
 **Thesis hook:** the *second axis* of owned resolution — see [§12](#12-thesis-framing-owned-resolution-second-axis).
 
 ---
@@ -22,11 +23,11 @@ Result: **Cherry's correctness at Squint's bundle size** — the persistent runt
 tree-shaken away everywhere the types say native suffices. Neither Squint nor Cherry
 can do this; the reason Beagle can is the entire reason its type system exists.
 
-**Why this is load-bearing, not academic:** Eddy — `.eddy → Beagle/JS → direct-DOM JS`
-— is *downstream of this surface*. Its zero-runtime promise ("no framework runtime,
-zero dependencies") is incompatible with shipping a persistent runtime always-on, so
-type-erasure is the **only** way Eddy can be both correct and dependency-free
-([§5](#5-the-load-bearing-case-eddy-the-downstream-consumer)).
+**Why this is load-bearing, not academic:** Wake's compiler is Beagle/JS and turns
+`.wake` declarations into direct-DOM JavaScript and FRAM plans. Wake deliberately is
+not a browser framework, so an always-on persistent runtime would tax a live downstream
+compiler and its generated applications. Type erasure is how Beagle keeps faithful
+semantics without imposing that tax ([§5](#5-the-load-bearing-case-wake-the-downstream-consumer)).
 
 This is **thesis-driven, not demand-driven** — so it is *not* gated on a corpus
 ([§11](#11-why-this-is-thesis-driven-not-demand-gated)).
@@ -37,28 +38,25 @@ This is **thesis-driven, not demand-driven** — so it is *not* gated on a corpu
 
 Facts from the tree as of this writing (anchors, not prose-to-be-trusted):
 
-- **`=` is reference identity, not value equality.** `emit-js.rkt:1267-1269` routes
-  `=` through the infix table; `js-capabilities.rkt` `JS-INFIX-OPS` maps `'= → "==="`
-  (and `'not= → "!=="`). So `(= {:a 1} {:a 1})` compiles to `({a:1} === {a:1})` ⇒
-  **`false`**. This is a live Clojure-semantics bug, independent of the persistence
-  question.
+- **`=` is structural value equality.** `emit-js.rkt` routes compound or uncertain
+  operands through `core.js` `equiv`; only pairs proven scalar use native `===`.
+  `identical?` deliberately remains reference identity.
 - **Immutability (no mutation) is already done** by copy-on-write: `conj → [...a, x]`,
   `assoc → ({...o, k:v})`, `update → {...m,[k]:f(m[k])}`, `dissoc`/`merge` likewise
-  (`emit-js.rkt:105-212`). Value *equality* was never wired to match.
-- **A runtime module already exists and is owned:** `beagle-lib/lib/beagle/core.js`
-  (248 lines, 30+ helpers), imported as `import * as $$bc from 'beagle/core.js'`
-  (`emit-js.rkt:639`). Ops route to it via `runtime-call` (`emit-js.rkt:296-418`).
-- **A `hash` already ships but is crude:** `core.js:204` is `JSON.stringify(x)`.
-  `memoize` keys on `JSON.stringify(args)` too — so there is already an *inconsistent*
-  content-keying convention (some ops content-key, `=`/`dedupe`/set-membership use
-  `===`).
-- **Representations:** keywords → bare strings (`kw->prop`), maps → plain objects,
-  vectors → arrays, sets → native `new Set` (so set membership of compound values is
-  reference identity — also wrong vs Clojure).
+  (`emit-js.rkt`).
+- **The owned runtime is split by need.** `beagle-lib/lib/beagle/core.js` supplies
+  structural `equiv`/`hash` and representation-polymorphic reads. Native-only programs
+  import the lite helpers; HAMT-aware variants are selected only when required.
+- **Compound keys and value sets use persistent structures.** The emitter keeps
+  provably scalar-keyed maps and sets native, and routes compound or uncertain key
+  positions through `beagle-lib/lib/beagle/hamt.js`.
+- **The differential and representation-soundness gates are active.** Clojure is the
+  oracle for JavaScript value behavior, while an independent structural oracle checks
+  that native sites are not falsely promoted and compound-key sites are not missed.
 
-**Implication:** the runtime home, an (inconsistent) hash, and copy-on-write
-immutability already exist. What is missing is a single *owned* definition of value
-identity and the machinery to render it faithfully and cheaply.
+**Implication:** value identity is owned by Beagle's JS backend today. Remaining work
+is stronger analysis, additional target coverage, and measuring the downstream bundle
+residual rather than repairing a missing semantic foundation.
 
 ---
 
@@ -66,11 +64,10 @@ identity and the machinery to render it faithfully and cheaply.
 
 | | **A. Value equality** | **B. Structural sharing + compound keys** |
 |---|---|---|
-| Symptom | `(= {:a 1} {:a 1})` → `false`; sets/dedup of equal maps wrong | `assoc` is O(n) copy; maps/vectors can't be map/set *keys* by value |
-| Bites | The moment any program compares compound values — **now, latent** | At scale (hot-loop big-map updates) or when compound keys are needed |
-| Spec status | **Mandated** ("Beagle is Clojure plus types"; `=` must be Clojure `=`) | Founding-but-narrow; see §7 |
-| Fix | Cheap: structural `equiv`/`hash`, **native representation kept** | Heavy: a real keyed/persistent structure |
-| Needs persistent structures? | **No** | Only the *compound-key* slice does (see §7b) |
+| Original symptom | `(= {:a 1} {:a 1})` was false; sets/dedup of equal maps were wrong | Native objects cannot use compound values as keys; copy-on-write is O(n) |
+| Bites | Any comparison of compound values | Compound-key use immediately; hot-loop mutation at scale |
+| Current JS status | Structural `equiv`/`hash`, native representation retained | HAMT for correctness-required sites; perf promotion remains research |
+| Needs persistent structures? | **No** | Only the compound-key/value-set slice does (see §7b) |
 
 The sharpening that makes the whole design tractable: **native representation + a
 correct `equiv` is fully correct for everything except using a compound value as a
@@ -131,77 +128,53 @@ You do not pick a column of the table. You delete the table.
 
 ---
 
-## 5. The load-bearing case: Eddy (the downstream consumer)
+## 5. The load-bearing case: Wake (the downstream consumer)
 
 This is the strongest external motivation, and it converts the persistent-layer
 approach from "nice" to **load-bearing**.
 
-**Eddy is downstream of this exact decision.** Per Eddy's `claude.md`, Eddy is
-`.eddy → Beagle/JS compiler → direct-DOM JavaScript`: **every Eddy-generated app *is*
-Beagle's JS output.** So Eddy inherits whatever value-semantics the JS target has —
-today, including the broken `=`. This document is not choosing whether to build
-something Eddy *might* use; it is choosing the semantics of the surface Eddy *already
-emits onto*.
+**Wake is downstream of this exact decision.** Wake's compiler modules are `.bjs` and
+compile `.wake` declarations into one checked application graph, then project that
+graph as direct-DOM JavaScript and a FRAM plan. The compiler therefore executes with
+Beagle's structural `equiv`/`hash` semantics and type-selected native or persistent
+representations. Generated applications are emitted artifacts rather than Beagle
+programs themselves; that distinction belongs in every measurement.
 
-**Eddy's zero-runtime thesis is incompatible with always-on persistence.** Eddy's
-identity is *"No framework runtime. No virtual DOM. No signal graph. Zero
-dependencies. ~490 lines of self-contained JS you own."* The Cherry way of getting
-correct value-semantics — ship a ~56 KB persistent runtime, always — would put a
-framework-runtime-sized blob into **every** Eddy app, and Eddy's reason to exist
-evaporates. Therefore:
+**Wake's direct-DOM constraint is incompatible with always-on persistence.** Wake is
+deliberately not a browser framework. Its applications use ordinary JavaScript and DOM
+nodes, and custom panes receive the narrow `window.wake` integration seam. The Cherry
+approach to correct value semantics — shipping a persistent runtime unconditionally —
+would add a framework-sized floor to a compiler whose purpose is to project only the
+application graph it checked. Therefore:
 
 > **Type-driven representation selection ([§7](#7-type-driven-representation-selection))
-> is the *only* correctness fix compatible with Eddy's thesis.** Native where provable;
-> persistent tree-shaken in only where a specific app genuinely needs it. The erasure
-> is not an optimization — it is the *precondition* for Eddy being both correct *and*
-> zero-runtime. "Own it + erase it" beats "vendor it" not just on principle, but on
-> Eddy's product survival.
+> is the correctness fix compatible with Wake's architecture.** Native where provable;
+> persistent only where a compiler module genuinely needs it. The generated app must
+> not inherit a Beagle runtime merely because its generator is written in Beagle.
 
-**Eddy is the best case for the bundle win, not the worst.** Eddy's entities are
-string/keyword-keyed maps of scalar fields (see the `.eddy` surface). Those are exactly
-the values the [§7b](#7b-what-the-analysis-computes) analysis proves **native-safe** —
-so persistence tree-shakes to **~zero** in a typical Eddy app. The §10 residual is
-minimized precisely in Eddy's domain. (A complex app using compound keys pays for those
-sites; rare here.)
+**Wake is a strong corpus for the bundle win.** Its compiler graph is composed mostly
+of records, vectors, and string/keyword-keyed metadata maps. The generated local store
+uses scalar integer `eid` keys; the FRAM connector keeps an ephemeral browser cache
+while durable identity and storage semantics stay behind the Wake gateway. Those are
+the values the [§7b](#7b-what-the-analysis-computes) analysis should prove
+**native-safe**. A compound-key site should pay for persistence locally, not set the
+bundle floor for every compiler module or generated app.
 
-**Where it surfaces in Eddy — RESOLVED by reading the generated code (2026-06-21,
-`crm-v2`, the richest demo: FK + derived field + undo).** Eddy compiles *render*
-diffing away (direct per-attribute mutation) — untouched. The **state layer** is the
-candidate, and the finding is decisive: Eddy's store is **eid-relational**. Entities
-live in `new Map()` keyed by integer `eid`; *every* equality in the generated app is
-**scalar** (`e.contact === fkEid`, `selectedContact === eid`, `evt.type === 'update'`;
-the derived `display-name` is `(str name " @ " company)` over scalar fields); and
-`update()` fires `notify()` **unconditionally** — no `if (old === value)` gate. So Eddy
-today emits **zero compound `=` and zero compound map-keys**: the `=`-bug is **fully
-latent, not a live bug.** Eddy is *insulated* by its eid-relational design.
+**There are two falsifiers, not one.** Compile the current Wake compiler under the
+representation analysis and measure its persistent residual. Then compile a canonical
+`.wake` application and verify that its emitted JavaScript gains no implicit Beagle
+runtime. The first checks Beagle's downstream bundle; the second protects Wake's output
+contract. Neither result should be inferred from the other.
 
-So P2's value to Eddy is **not a bugfix — it is an enabler.** Two unlocks: (1) **sound
-change-gating** — Eddy currently fires `notify`/re-render on every set and recomputes
-derived/FK views from scratch (`byContact` filters all entities; O(n) per change);
-cheap, correct `=` is the precondition for "skip if the value didn't actually change,"
-extended to *compound* field values (scalar attrs could already gate with `===` today —
-and don't). (2) **value-keyed derived caches** — memoize `byContact`/`display-name` by
-their inputs' *content*. That is Eddy's next reactivity tier, blocked precisely on the
-value-semantics this doc owns. Dependency direction is Eddy → Beagle, so it lands with
-*no new Eddy work*.
+**The FRAM boundary remains separate.** Wake emits application schema and a closed
+gateway surface; FRAM owns recursive terms, occurrences, history, Datalog, and durable
+storage. Value-representation selection in Beagle must not turn Wake into a storage
+engine or move FRAM semantics into generated JavaScript.
 
-**The deeper convergence (ambition).** Eddy's store *is already fact-shaped*: stable
-integer **eid** identity, an append **event log** (`notify({add|update|remove, eid,
-attr, old, new})` = supersettable assertions), **undo/redo as a fold over that log**,
-and **derived views** over the entities. Eddy independently reinvented a fact store in
-emitted JS — and reached for **identity addressing (eid)**, independently corroborating
-the addressing thesis (fram `docs/ADDRESSING_THESIS.md`). This is where the *two
-customers converge*: value-semantics-ownership (sound `=`/hash/change-detection over the
-log) and the fact engine (eid substrate, supersession, Datalog derived-views replacing
-hand-rolled `byContact` filters) are the two halves that make Eddy's store rigorous. See
-the existing `web/spike/eddy-on-claims/` probe — this work is its value-semantics half.
-
-**Strategic consequence — the CLJS consolidation.** `.bjs` + faithful value-semantics =
-*Cherry done right*: ClojureScript semantics, native-JS bundle size, Beagle-owned
-diagnostics. It dominates `.bcljs` on every axis except calling an existing CLJS
-library. So this work also collapses the JS story to **one owned surface** — `.bjs`
-becomes primary; CLJS is demoted to a compatibility shim (kept, not fed). Eddy riding on
-`.bjs` is the forcing function that makes that consolidation real.
+**Strategic consequence — the JS surface stays owned.** `.bjs` plus faithful value
+semantics gives Wake Clojure value behavior, native-JS bundle size, and Beagle-owned
+diagnostics. Wake's live compiler corpus is the forcing function that makes that
+consolidation measurable.
 
 ---
 
@@ -303,12 +276,12 @@ This is value-resolution *owned by the language*, exactly as name-resolution is.
 The single artifact that makes the whole assertion testable.
 
 - **Shape.** A corpus of small Beagle programs, each computing values / exercising `=`,
-  `hash`, set-membership, and map-by-value-key. Compile each to **every target** (`bin/beagle langs`),
-  run, and assert results agree against a reference oracle (the Clojure target is the
-  natural oracle, since Clojure `=`/hash are the definition).
-- **Today it fails** on JS (`(= {:a 1} {:a 1})` ⇒ `false`). The deliverable is: **it
-  passes by construction on every target**, with any per-target divergence surfaced as
-  a failing test rather than a silent runtime difference.
+  `hash`, set-membership, and map-by-value-key. Compile each runnable target and assert
+  results agree against the Clojure oracle. The current harness covers Clojure and
+  JavaScript; `bin/beagle langs` reports the targets still needing runners.
+- **Today it passes on JavaScript.** Compound equality, hashing, deduplication, set
+  membership, immutability, and compound-key maps are asserted green. A target joins
+  the claim only when its runner is wired into this differential suite.
 - That one green suite **is** the owned-value-resolution demonstration: target-invariant
   value semantics, measured and falsifiable. It also converts "JS `=` is broken" from a
   one-off patch into "every backend conforms to one owned semantics."
@@ -321,13 +294,14 @@ The single artifact that makes the whole assertion testable.
   plus **Cherry as external baseline**.
 - **Metrics, on a representative `.bjs` corpus.** (i) conformance pass-rate (§9);
   (ii) shipped persistent-runtime bytes after tree-shaking.
-- **Eddy as the headline corpus.** Compile a representative Eddy-generated app
-  (`.eddy → Beagle/JS`) under config A and measure its persistent residual. Hypothesis:
-  **~zero** — and already *evidence-consistent*: `crm-v2`'s generated code is
-  eid-relational, emitting zero compound `=` / compound keys ([§5](#5-the-load-bearing-case-eddy-the-downstream-consumer)),
-  so the §7b analysis proves every value native-safe. Eddy is the *existence proof* that
-  faithful semantics cost nothing at Eddy's scale. A non-zero residual would localize
-  exactly which Eddy feature first forces persistence.
+- **Wake as the headline corpus.** Compile the registered Wake `.bjs` compiler modules
+  under config A and measure their persistent residual. Hypothesis: **near zero** for
+  the current scalar-keyed graph and emitter code; a non-zero residual localizes the
+  first compiler value that genuinely needs persistence. Separately compile
+  `wiki.wake`, `crm-v2.wake`, `todo.wake`, and `tracker.wake`, then verify their emitted
+  application JavaScript. That second check protects Wake's own generated `equiv`/`hash`
+  runtime and must not be counted as Beagle-emitted runtime
+  ([§5](#5-the-load-bearing-case-wake-the-downstream-consumer)).
 - **Hypotheses.** A passes 100% conformance where B fails on compound values; A's
   persistent residual **≪** Cherry's ~56 KB-gz floor, because types erased it at most
   sites.
@@ -345,9 +319,10 @@ a corpus exercising them). Faithful, target-invariant value-semantics is **thesi
 driven** — a founding demonstration that types + owned resolution beat both untyped
 extremes. Gating it on a corpus is the self-fulfilling deadlock the gate's own scope
 clause excludes: *the corpus cannot exercise what isn't built.* Build it because it is
-foundational, not because a `.bjs` file asked. (Eddy [§5](#5-the-load-bearing-case-eddy-the-downstream-consumer)
-makes this concrete: the consumer that needs it most can't ship the thing that would
-let it ask.)
+foundational, not because a `.bjs` file asked. Wake
+([§5](#5-the-load-bearing-case-wake-the-downstream-consumer)) makes this concrete: a
+registered compiler corpus already exercises the JS target, while the invariant must
+hold beyond whatever shapes that corpus happens to contain today.
 
 (The §7b *perf* promotion is the one genuinely demand-driven sub-part — gate that on
 profiling. The *correctness* invariant and harness are not gated.)
@@ -358,20 +333,19 @@ profiling. The *correctness* invariant and harness are not gated.)
 
 Owned resolution has so far been about **names** — Beagle owns what a reference points
 to; the target can't (see fram `docs/ADDRESSING_THESIS.md`). This is the **second
-axis: Beagle owns what a value *is and means*, identically across Clojure, CLJS, JS,
-Nix — the target can't.** Same founding assertion ("graph-as-truth requires owned
+axis: Beagle owns what a value *is and means*, identically across Clojure, JavaScript,
+and Nix — the target can't.** Same founding assertion ("graph-as-truth requires owned
 resolution requires a language"), applied to value semantics instead of identity — and
 unlike name-resolution, this one is *immediately demonstrable* via §9.
 
-**The stacked move (why Eddy and this are one thesis, not two).** Eddy compiles away the
-*framework runtime* — it resolves reactivity at compile time and emits direct mutation.
-This work compiles away the *value-semantics runtime* — it resolves representation at
-compile time and emits native where provable. Same move, different layer, **stacked**:
-Eddy on top of Beagle. React resolves "what changed" at runtime; Eddy resolves it at
-compile time. Cherry resolves "what do these values mean" at runtime; Beagle resolves it
-at compile time. One assertion — *resolve at compile time what others resolve at runtime,
-emit minimal code you own* — demonstrated at two layers, with Eddy as the proof it
-composes.
+**The stacked move (why Wake and this are one thesis, not two).** Wake resolves an
+application's schema, UI projection, and closed data boundary at compile time, then
+emits direct-DOM JavaScript and a FRAM plan. This work resolves value representation
+while Beagle compiles Wake's `.bjs` compiler. Same move, different layer, **stacked**:
+Wake on top of Beagle. The artifact boundary remains explicit: Beagle selects the
+compiler's representation; Wake owns the separate value runtime it writes into an
+application. One assertion — *resolve at compile time what others resolve at runtime,
+emit minimal code you own* — demonstrated at both layers without conflating them.
 
 **Discipline (so the dissertation doesn't eat the talk):** the *talk-sized* assertion is
 "owned value-resolution: identical semantics across every target, proven by one
@@ -381,22 +355,23 @@ field behind it.
 
 ---
 
-## 13. Phasing (foundation-first)
+## 13. Implementation sequence (foundation-first)
 
-1. **P1 — Invariant + falsifier.** Canonical IR value-identity ([§8](#8-canonical-value-identity-in-the-ir))
+1. **P1 — Invariant + falsifier (shipped).** Canonical IR value-identity ([§8](#8-canonical-value-identity-in-the-ir))
    + cross-target conformance harness ([§9](#9-the-cross-target-conformance-harness-the-falsifier)).
-   Establishes the owned definition and measures current divergence across every
-   target. *This is what to build first — not the JS-only patch.*
-2. **P2 — JS conformance.** Type-directed `equiv` + structural `hash` in `core.js`,
+   Establishes the owned definition and measures Clojure/JavaScript divergence. Other
+   targets join the claim when their runners land.
+2. **P2 — JS conformance (shipped).** Type-directed `equiv` + structural `hash` in `core.js`,
    wired to `=`/`not=`/`contains?`/`distinct`/set-membership (scalar args → native ops;
-   compound → `equiv`). Closes the correctness gap everywhere **except** compound keys.
-   Harness goes green on JS except compound-key tests. **Pays Eddy immediately**
-   ([§5](#5-the-load-bearing-case-eddy-the-downstream-consumer)) with no new Eddy work.
-3. **P3 — Representation selection + own persistent layer.** The §7b correctness
+   compound → `equiv`). This closed the native-value correctness gap and directly
+   corrected Wake's compiler execution semantics
+   ([§5](#5-the-load-bearing-case-wake-the-downstream-consumer)); it does not silently
+   replace Wake's generated-code runtime.
+3. **P3 — Representation selection + own persistent layer (shipped).** The §7b correctness
    analysis + a tree-shakeable HAMT (Beagle-owned; `hamt_plus`/Immutable.js as
-   *reference*, not dependency) for the compound-key residual. Compound-key tests go
-   green. Run the §10 experiment (Eddy as headline corpus).
-4. **P4 — Research.** Coherence/coercion across flow boundaries ([§7c](#7c-the-coherence--coercion-discipline-the-hard-part));
+   *reference*, not dependency) for the compound-key residual. Compound-key tests are
+   green. The §10 Wake bundle experiment remains to be run.
+4. **P4 — Research (remaining).** Coherence/coercion across flow boundaries ([§7c](#7c-the-coherence--coercion-discipline-the-hard-part));
    perf-driven promotion for hot-loop mutation; generalize and strengthen the analysis.
 
 ---
@@ -407,12 +382,12 @@ field behind it.
   often, how expensive?
 - **Analysis strength.** How large a fraction of values can be *proven* native-safe?
   Directly determines the bundle win (the §10 null branch).
-- **Eddy `=`-payoff is latent, not live (RESOLVED 2026-06-21).** `crm-v2` generated
-  code is eid-relational — all equality scalar, integer-keyed `Map`, unconditional
-  `notify`. So P2 is an *enabler* for Eddy's change-gating / value-keyed-cache tier (and
-  the eddy-on-claims convergence), not a bugfix
-  ([§5](#5-the-load-bearing-case-eddy-the-downstream-consumer)). Open: does the *next*
-  reactivity tier want to gate on value — i.e. is the enabler demand-real soon?
+- **Wake has a separate generated-code value runtime.** The current generator emits
+  its own `equiv`/`hash` helpers and uses `equiv` for local and FRAM browser-store change
+  gates. Beagle P2 corrects the `.bjs` compiler, not those emitted helpers. Differentially
+  test the two definitions or establish an explicit shared emission boundary; do not
+  assume they remain aligned
+  ([§5](#5-the-load-bearing-case-wake-the-downstream-consumer)).
 - **Other backends' current conformance.** Does Nix attrset `==` already
   conform, or need work? The harness will tell.
 - **No author-facing knob.** Representation stays a compiler decision from types — never
@@ -440,6 +415,6 @@ field behind it.
 - Internal anchors: `beagle-lib/private/emit-js.rkt` (`:1267` infix `=`, `:296-418`
   runtime calls, `:639` import), `beagle-lib/private/js-capabilities.rkt`
   (`JS-INFIX-OPS`), `beagle-lib/lib/beagle/core.js` (`:204` `hash`).
-- Eddy: `/home/tom/code/eddy/README.md`, `/home/tom/code/eddy/claude.md`
-  (`.eddy → Beagle/JS → direct-DOM JS`; zero-runtime thesis).
+- Wake: `wake:README.md`, `wake:claude.md`, `wake:web/compiler/codegen.bjs`, and
+  `wake:web/demo/wiki.wake` (`.wake → checked graph → direct-DOM JS | FRAM plan`).
 - Thesis: fram `docs/ADDRESSING_THESIS.md` (owned resolution, first axis).

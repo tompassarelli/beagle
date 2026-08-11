@@ -29,8 +29,9 @@
 
 ;; Heredoc reader (`#<<TAG`) removed per audit row 5. Raw strings (`#r#"..."#`)
 ;; were also removed there ("never used in any user-facing corpus") but are
-;; RESTORED below: eddy's JS/SQL emitters are a real user (49 blocks), and the
-;; only alternative on the js target is escaped-string churn. Rust-style:
+;; RESTORED below: Wake's Beagle/JS code generator uses them for substantial
+;; emitted JavaScript, and the only alternative on the js target is
+;; escaped-string churn. Rust-style:
 ;; opener `#r` + N `#` + `"`, closer `"` + N `#`, body verbatim.
 (define (read-raw-string port hashes)
   (define tail (make-string hashes #\#))
