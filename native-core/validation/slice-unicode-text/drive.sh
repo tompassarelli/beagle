@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Toolchain, declared: the pinned flake dev shell (nix develop) supplies the
-# Unicode 15 input files and NATIVE_MUSL_CC; outside it there is nothing to
-# compare the generated tables against, so the driver SKIPs at exit 0 with the
-# reason named. Inside the dev shell every check below is a hard failure —
-# including the exact OpenJDK the oracle is pinned to.
+# Unicode 15 input files, NATIVE_MUSL_CC, and the JDK the oracle runs on;
+# outside it there is nothing to compare the generated tables against, so the
+# driver SKIPs at exit 0 with the reason named. Inside the dev shell every check
+# below is a hard failure — including the Unicode era of the oracle JDK.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -13,14 +13,18 @@ repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-unicode-text.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-# `clojure` is REQUIRED here and nowhere else in the sweep: this driver's oracle
-# IS a pinned JDK's Unicode 15 implementation, so it cannot run on babashka.
-# Babashka's SubstrateVM reports java.runtime.version 25.x and carries Unicode 16
-# tables: U+2EBF0 and U+10D40 are assigned letters/digits there and unassigned in
-# OpenJDK 21.0.12's Unicode 15, so age-boundary-runs yields four runs instead of
-# the two the native Unicode 15 tables produce. The compiler projection below
-# runs on bb like every other driver; only the oracle keeps the JVM.
-for command in awk bb clojure cmp gcc readelf rg strings; do
+# A JVM is REQUIRED here and nowhere else in the sweep: this driver's oracle IS
+# a JDK's Unicode 15 implementation, so it cannot run on babashka. Babashka's
+# SubstrateVM carries Unicode 16 tables, where U+2EBF0 and U+10D40 are assigned
+# letter/digit and unassigned under Unicode 15, so age-boundary-runs yields four
+# runs instead of the two the native Unicode 15 tables produce. The compiler
+# projection below runs on bb like every other driver; only the oracle keeps the
+# JVM, and it takes that JVM from the flake (NATIVE_UNICODE15_JAVA_HOME), never
+# from PATH — an ambient `java` is whatever the machine installed, which is how
+# a Unicode 16 runtime would silently grade the tables against the wrong
+# standard. The Unicode era is asserted below as a property, not as a version
+# string, because the era is the actual invariant.
+for command in awk bb cmp gcc readelf rg strings; do
   command -v "$command" >/dev/null || {
     echo "drive.sh: required command is unavailable: $command" >&2
     exit 1
@@ -43,13 +47,32 @@ done
 [[ -x "$musl_cc" ]] \
   || skip "no NATIVE_MUSL_CC; enter the pinned flake dev shell (nix develop)"
 
-runtime_version="$(clojure -M -e '(print (System/getProperty "java.runtime.version"))')"
-[[ "$runtime_version" == 21.0.12+2* ]] || {
-  echo "drive.sh: exact OpenJDK 21.0.12+2 oracle is required, found $runtime_version" >&2
-  exit 1
+oracle_java_home="${NATIVE_UNICODE15_JAVA_HOME:-}"
+oracle_clojure="${NATIVE_UNICODE15_CLOJURE:-}"
+[[ -x "$oracle_java_home/bin/java" ]] \
+  || skip "no NATIVE_UNICODE15_JAVA_HOME; enter the pinned flake dev shell (nix develop)"
+[[ -x "$oracle_clojure" ]] \
+  || skip "no NATIVE_UNICODE15_CLOJURE; enter the pinned flake dev shell (nix develop)"
+
+# Run the oracle on the JDK the flake names, never on an ambient one.
+oracle() {
+  JAVA_HOME="$oracle_java_home" PATH="$oracle_java_home/bin:$PATH" \
+    "$oracle_clojure" "$@"
 }
 
-clojure -M "$repo/native-core/bin/generate-unicode15-tables.clj" \
+# The oracle must implement Unicode 15, not merely be some JDK 21. U+2EBF0 and
+# U+10D40 are the era witnesses: unassigned through Unicode 15, assigned
+# letter/digit in Unicode 16. Asserting the codepoints pins the standard the
+# tables are graded against; a version string only pins a build number.
+runtime_version="$(oracle -M -e '(print (System/getProperty "java.runtime.version"))')"
+oracle -M -e "
+(when-not (= [Character/UNASSIGNED Character/UNASSIGNED]
+             [(Character/getType (int 0x2EBF0)) (Character/getType (int 0x10D40))])
+  (binding [*out* *err*]
+    (println \"drive.sh: oracle JDK is not on Unicode 15 (U+2EBF0/U+10D40 are assigned): $runtime_version\"))
+  (System/exit 1))"
+
+oracle -M "$repo/native-core/bin/generate-unicode15-tables.clj" \
   "$unicode_data" "$special_casing" "$derived_core_properties" \
   "$scratch/native_unicode15_data.generated.h"
 cmp "$repo/native-core/shim/native_unicode15_data.h" \
@@ -136,7 +159,7 @@ if [[ -z "$lower_index" || -z "$runs_index" ]]; then
   exit 1
 fi
 
-clojure -M -e "
+oracle -M -e "
 (load-file \"$here/managed_oracle.clj\")
 (require 'native.unicode-text-oracle)
 (assert (= [\"aς:b\" \"aσ.b\" \"aς’b\" \"aσ-b\"
@@ -178,7 +201,7 @@ run_compiler "$clang_bin" probe_clang
 cp "$here/exhaustive.c" "$scratch/"
 gcc "${strict[@]}" -I "$scratch" -o "$scratch/exhaustive" \
   "$scratch/native_shim.c" "$scratch/exhaustive.c"
-clojure -M "$here/exhaustive_oracle.clj" >"$scratch/exhaustive-managed.bin"
+oracle -M "$here/exhaustive_oracle.clj" >"$scratch/exhaustive-managed.bin"
 "$scratch/exhaustive" >"$scratch/exhaustive-native.bin"
 cmp "$scratch/exhaustive-managed.bin" "$scratch/exhaustive-native.bin"
 

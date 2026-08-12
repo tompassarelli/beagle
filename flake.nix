@@ -236,6 +236,15 @@
           NATIVE_SPECIAL_CASING15 = specialCasing15;
           NATIVE_DERIVED_CORE_PROPERTIES15 = derivedCoreProperties15;
 
+          # slice-unicode-text is the one driver whose oracle IS a JVM: it
+          # compares the native Unicode 15 tables against a JDK that implements
+          # Unicode 15. Name that JDK here so the oracle is pinned by this
+          # flake's lock rather than by whatever `java` a machine happens to
+          # install — an ambient JDK on Unicode 16 silently grades the tables
+          # against the wrong standard. Nothing else in the sweep needs a JVM.
+          NATIVE_UNICODE15_JAVA_HOME = "${pkgs.jdk21}";
+          NATIVE_UNICODE15_CLOJURE = "${pkgs.clojure}/bin/clojure";
+
           buildInputs = [
             racket
             pkgs.babashka
