@@ -47,11 +47,27 @@
 (struct type-app   (ctor args)                 #:transparent)
 (struct type-union (alts)                      #:transparent)
 (struct type-var   (name)                      #:transparent)
-(struct type-poly  (vars body bounds)           #:transparent)  ; bounds: hasheq var→type or #f
+(struct type-meta  (id [solution #:mutable])
+  #:transparent
+  #:methods gen:equal+hash
+  [(define (equal-proc left right recur) (eq? left right))
+   (define (hash-proc value recur) (eq-hash-code value))
+   (define (hash2-proc value recur) (eq-hash-code value))])
+(struct type-poly  (vars body bounds [origin #:mutable #:auto])
+  #:auto-value 'authored
+  #:transparent) ; bounds: hasheq var→type or #f; origin: authored or inferred
+
+(define (make-inferred-type-poly vars body)
+  (define poly (type-poly vars body #f))
+  (set-type-poly-origin! poly 'inferred)
+  poly)
+
+(define (inferred-type-poly? value)
+  (and (type-poly? value) (eq? (type-poly-origin value) 'inferred)))
 
 (define (type? x)
   (or (type-prim? x) (type-fn? x) (type-app? x) (type-union? x)
-      (type-var? x) (type-poly? x)))
+      (type-var? x) (type-meta? x) (type-poly? x)))
 
 (define current-type-vars (make-parameter '()))
 ;; Set by checker: maps union-name → (listof member-symbol) for subtype checks
@@ -309,7 +325,9 @@
 ;; It DOES unqualify prim names (Store ≡ mod/Store) so a record referenced through an
 ;; alias still equals itself. Falls back to equal? for shapes not enumerated.
 (define (type-invariant-equal? a b)
-  (cond
+  (let ([a (prune-type a)] [b (prune-type b)])
+   (cond
+    [(or (type-meta? a) (type-meta? b)) (eq? a b)]
     [(and (type-prim? a) (type-prim? b))
      (eq? (unqualify-type-name (type-prim-name a)) (unqualify-type-name (type-prim-name b)))]
     [(and (type-app? a) (type-app? b))
@@ -320,13 +338,18 @@
      (and (= (length (type-union-alts a)) (length (type-union-alts b)))
           (andmap type-invariant-equal? (type-union-alts a) (type-union-alts b)))]
     [(and (type-var? a) (type-var? b)) (eq? (type-var-name a) (type-var-name b))]
-    [else (equal? a b)]))
+    [else (equal? a b)])))
 
 (define (type-compatible? actual expected)
-  (cond
+  (let ([actual (and actual (prune-type actual))]
+        [expected (and expected (prune-type expected))])
+   (cond
     [(or (not actual) (not expected)) #t]
     [(any-type? actual)   #t]
     [(any-type? expected) #t]
+    ;; Compatibility is observational and never solves a metavariable.  The
+    ;; inference path records evidence through `unify-types!` instead.
+    [(or (type-meta? actual) (type-meta? expected)) #t]
     [(type-var? actual)   #t]
     [(type-var? expected) #t]
     [(type-poly? expected) (type-compatible? actual (type-poly-body expected))]
@@ -461,13 +484,383 @@
           (= (length (type-app-args actual)) (length (type-app-args expected)))
           (andmap type-compatible? (type-app-args actual) (type-app-args expected)))]
 
-    [else #f]))
+    [else #f])))
 
 (define (any-type? t)
   (and (type-prim? t) (eq? (type-prim-name t) 'Any)))
 
 (define (dynamic-type? t)
   (and (type-app? t) (eq? (type-app-ctor t) 'Dyn)))
+
+;; --- inference metavariables ----------------------------------------------
+
+;; Authored `type-var` nodes are rigid names introduced by `forall`.  Inference
+;; uses a separate mutable node so solving cannot change the meaning of an
+;; authored annotation.
+(define current-type-meta-counter (make-parameter 0))
+
+(define (call-with-fresh-type-metas thunk)
+  (parameterize ([current-type-meta-counter 0])
+    (thunk)))
+
+(define (fresh-type-meta)
+  (define id (current-type-meta-counter))
+  (current-type-meta-counter (add1 id))
+  (type-meta id #f))
+
+(define (prune-type type)
+  (cond
+    [(and (type-meta? type) (type-meta-solution type))
+     (define solved (prune-type (type-meta-solution type)))
+     (set-type-meta-solution! type solved)
+     solved]
+    [else type]))
+
+(define (copy-type-poly poly body bounds)
+  (define copied (type-poly (type-poly-vars poly) body bounds))
+  (set-type-poly-origin! copied (type-poly-origin poly))
+  copied)
+
+(define (zonk-type type)
+  (define current (prune-type type))
+  (cond
+    [(or (not current) (type-prim? current) (type-var? current)
+         (type-meta? current))
+     current]
+    [(type-fn? current)
+     (type-fn (map zonk-type (type-fn-params current))
+              (and (type-fn-rest-type current)
+                   (zonk-type (type-fn-rest-type current)))
+              (zonk-type (type-fn-ret current)))]
+    [(type-app? current)
+     (type-app (type-app-ctor current) (map zonk-type (type-app-args current)))]
+    [(type-union? current)
+     (type-union (map zonk-type (type-union-alts current)))]
+    [(type-poly? current)
+     (define bounds (type-poly-bounds current))
+     (copy-type-poly
+      current
+      (zonk-type (type-poly-body current))
+      (and bounds
+           (for/hasheq ([(name bound) (in-hash bounds)])
+             (values name (zonk-type bound)))))]
+    [else current]))
+
+(define (type-occurs? meta type)
+  (define current (prune-type type))
+  (cond
+    [(type-meta? current) (eq? meta current)]
+    [(type-fn? current)
+     (or (ormap (lambda (param) (type-occurs? meta param))
+                (type-fn-params current))
+         (and (type-fn-rest-type current)
+              (type-occurs? meta (type-fn-rest-type current)))
+         (type-occurs? meta (type-fn-ret current)))]
+    [(type-app? current)
+     (ormap (lambda (arg) (type-occurs? meta arg)) (type-app-args current))]
+    [(type-union? current)
+     (ormap (lambda (alt) (type-occurs? meta alt)) (type-union-alts current))]
+    [(type-poly? current)
+     (or (type-occurs? meta (type-poly-body current))
+         (and (type-poly-bounds current)
+              (for/or ([bound (in-hash-values (type-poly-bounds current))])
+                (type-occurs? meta bound))))]
+    [else #f]))
+
+(struct exn:fail:type-unification exn:fail (left right reason) #:transparent)
+
+(define (raise-type-unification left right reason)
+  (raise
+   (exn:fail:type-unification
+    (format "cannot unify ~a with ~a: ~a"
+            (type->string left) (type->string right) reason)
+    (current-continuation-marks)
+    left right reason)))
+
+(define (bind-type-meta! meta type)
+  (define target (prune-type type))
+  (cond
+    [(eq? meta target) meta]
+    ;; Explicit Any is a compatibility escape, not evidence about an omitted
+    ;; binder.  Leaving the meta open lets later constraints still solve it.
+    [(any-type? target) meta]
+    [(type-occurs? meta target)
+     (raise-type-unification meta target "occurs check failed")]
+    [else
+     (set-type-meta-solution! meta target)
+     target]))
+
+(define (unify-invariant-types! actual expected)
+  (define left (prune-type actual))
+  (define right (prune-type expected))
+  (cond
+    [(eq? left right) left]
+    [(and (any-type? left) (any-type? right)) right]
+    [(type-meta? left) (bind-type-meta! left right)]
+    [(type-meta? right) (bind-type-meta! right left)]
+    [(or (any-type? left) (any-type? right))
+     (raise-type-unification left right "invariant Any mismatch")]
+    [(and (closed-monomorphic-type? left)
+          (closed-monomorphic-type? right)
+          (type-invariant-equal? left right))
+     right]
+    [(and (type-app? left) (type-app? right)
+          (eq? (type-app-ctor left) (type-app-ctor right)))
+     (unless (= (length (type-app-args left)) (length (type-app-args right)))
+       (raise-type-unification left right "different arity"))
+     (for ([left-arg (in-list (type-app-args left))]
+           [right-arg (in-list (type-app-args right))])
+       (unify-invariant-types! left-arg right-arg))
+     (zonk-type right)]
+    [(and (type-union? left) (type-union? right))
+     (unless (= (length (type-union-alts left)) (length (type-union-alts right)))
+       (raise-type-unification left right "different arity"))
+     (for ([left-alt (in-list (type-union-alts left))]
+           [right-alt (in-list (type-union-alts right))])
+       (unify-invariant-types! left-alt right-alt))
+     (zonk-type right)]
+    [else
+     (raise-type-unification left right "invariant types differ")]))
+
+(define (closed-monomorphic-type? type)
+  (define current (prune-type type))
+  (cond
+    [(or (type-meta? current) (type-var? current) (type-poly? current)) #f]
+    [(type-fn? current)
+     (and (andmap closed-monomorphic-type? (type-fn-params current))
+          (or (not (type-fn-rest-type current))
+              (closed-monomorphic-type? (type-fn-rest-type current)))
+          (closed-monomorphic-type? (type-fn-ret current)))]
+    [(type-app? current) (andmap closed-monomorphic-type? (type-app-args current))]
+    [(type-union? current) (andmap closed-monomorphic-type? (type-union-alts current))]
+    [else #t]))
+
+(define (unify-type-lists! actuals expecteds left right)
+  (unless (= (length actuals) (length expecteds))
+    (raise-type-unification left right "different arity"))
+  (for ([actual (in-list actuals)]
+        [expected (in-list expecteds)])
+    (unify-types! actual expected)))
+
+;; Directional unification: `actual` must satisfy `expected`.  This retains
+;; Beagle's established concrete compatibility (including numeric widening)
+;; while solving metas structurally.  Authored type variables stay rigid.
+(define (unify-types! actual expected)
+  (define left (prune-type actual))
+  (define right (prune-type expected))
+  (cond
+    [(eq? left right) left]
+    [(any-type? left) right]
+    [(any-type? right) left]
+    [(type-meta? left) (bind-type-meta! left right)]
+    [(type-meta? right) (bind-type-meta! right left)]
+    [(and (type-var? left) (type-var? right)
+          (eq? (type-var-name left) (type-var-name right)))
+     right]
+    [(or (type-var? left) (type-var? right))
+     (raise-type-unification left right "authored type variables are rigid")]
+    [(or (type-poly? left) (type-poly? right))
+     (raise-type-unification left right "polymorphic types must be instantiated before unification")]
+    [(and (closed-monomorphic-type? left)
+          (closed-monomorphic-type? right)
+          (type-compatible? left right))
+     right]
+    [(and (type-fn? left) (type-fn? right))
+     (unify-type-lists! (type-fn-params left) (type-fn-params right) left right)
+     (cond
+       [(and (type-fn-rest-type left) (type-fn-rest-type right))
+        (unify-types! (type-fn-rest-type left) (type-fn-rest-type right))]
+       [(or (type-fn-rest-type left) (type-fn-rest-type right))
+        (raise-type-unification left right "different variadic shape")])
+     (unify-types! (type-fn-ret left) (type-fn-ret right))
+     (zonk-type right)]
+    [(and (type-app? left) (type-app? right)
+          (eq? (type-app-ctor left) 'Atom)
+          (eq? (type-app-ctor right) 'Atom))
+     (unless (= (length (type-app-args left)) (length (type-app-args right)))
+       (raise-type-unification left right "different arity"))
+     (for ([left-arg (in-list (type-app-args left))]
+           [right-arg (in-list (type-app-args right))])
+       (unify-invariant-types! left-arg right-arg))
+     (zonk-type right)]
+    [(and (type-app? left) (type-app? right))
+     (unless (eq? (type-app-ctor left) (type-app-ctor right))
+       (raise-type-unification left right "different type constructors"))
+     (unify-type-lists! (type-app-args left) (type-app-args right) left right)
+     (zonk-type right)]
+    [(and (type-union? left) (type-union? right))
+     (unify-type-lists! (type-union-alts left) (type-union-alts right) left right)
+     (zonk-type right)]
+    [else
+     (raise-type-unification left right "incompatible types")]))
+
+(define (free-type-metas type)
+  (define seen (make-hasheq))
+  (define result '())
+  (define (walk value)
+    (define current (prune-type value))
+    (cond
+      [(type-meta? current)
+       (unless (hash-has-key? seen current)
+         (hash-set! seen current #t)
+         (set! result (cons current result)))]
+      [(type-fn? current)
+       (for-each walk (type-fn-params current))
+       (when (type-fn-rest-type current) (walk (type-fn-rest-type current)))
+       (walk (type-fn-ret current))]
+      [(type-app? current) (for-each walk (type-app-args current))]
+      [(type-union? current) (for-each walk (type-union-alts current))]
+      [(type-poly? current)
+       (walk (type-poly-body current))
+       (when (type-poly-bounds current)
+         (for ([bound (in-hash-values (type-poly-bounds current))])
+           (walk bound)))]))
+  (walk type)
+  (reverse result))
+
+(define (free-type-metas-in types)
+  (define seen (make-hasheq))
+  (for*/list ([type (in-list types)]
+              [meta (in-list (free-type-metas type))]
+              #:unless (hash-ref seen meta #f)
+              #:do [(hash-set! seen meta #t)])
+    meta))
+
+(define (type-var-names-in type)
+  (define names (mutable-seteq))
+  (define (walk value)
+    (define current (prune-type value))
+    (cond
+      [(type-var? current) (set-add! names (type-var-name current))]
+      [(type-fn? current)
+       (for-each walk (type-fn-params current))
+       (when (type-fn-rest-type current) (walk (type-fn-rest-type current)))
+       (walk (type-fn-ret current))]
+      [(type-app? current) (for-each walk (type-app-args current))]
+      [(type-union? current) (for-each walk (type-union-alts current))]
+      [(type-poly? current)
+       (for-each (lambda (name) (set-add! names name)) (type-poly-vars current))
+       (walk (type-poly-body current))
+       (when (type-poly-bounds current)
+         (for ([bound (in-hash-values (type-poly-bounds current))])
+           (walk bound)))]))
+  (walk type)
+  names)
+
+(define (generalized-name index)
+  (define-values (round letter) (quotient/remainder index 26))
+  (string->symbol
+   (format "~a~a"
+           (integer->char (+ (char->integer #\A) letter))
+           (if (zero? round) "" round))))
+
+(define (rewrite-type-metas type replacements)
+  (define current (prune-type type))
+  (cond
+    [(type-meta? current) (hash-ref replacements current current)]
+    [(or (not current) (type-prim? current) (type-var? current)) current]
+    [(type-fn? current)
+     (type-fn (map (lambda (param) (rewrite-type-metas param replacements))
+                   (type-fn-params current))
+              (and (type-fn-rest-type current)
+                   (rewrite-type-metas (type-fn-rest-type current) replacements))
+              (rewrite-type-metas (type-fn-ret current) replacements))]
+    [(type-app? current)
+     (type-app (type-app-ctor current)
+               (map (lambda (arg) (rewrite-type-metas arg replacements))
+                    (type-app-args current)))]
+    [(type-union? current)
+     (type-union
+      (map (lambda (alt) (rewrite-type-metas alt replacements))
+           (type-union-alts current)))]
+    [(type-poly? current)
+     (define bounds (type-poly-bounds current))
+     (copy-type-poly
+      current
+      (rewrite-type-metas (type-poly-body current) replacements)
+      (and bounds
+           (for/hasheq ([(name bound) (in-hash bounds)])
+             (values name (rewrite-type-metas bound replacements)))))]
+    [else current]))
+
+(define (excluded-meta-set values)
+  (define excluded (make-hasheq))
+  (define entries (if (list? values) values (list values)))
+  (for ([entry (in-list entries)])
+    (cond
+      [(type-meta? (prune-type entry))
+       (hash-set! excluded (prune-type entry) #t)]
+      [(type? entry)
+       (for ([meta (in-list (free-type-metas entry))])
+         (hash-set! excluded meta #t))]))
+  excluded)
+
+(define (generalize-type type #:excluding [context-types '()])
+  (define zonked (zonk-type type))
+  (define excluded (excluded-meta-set context-types))
+  (define metas
+    (filter (lambda (meta) (not (hash-ref excluded meta #f)))
+            (free-type-metas zonked)))
+  (cond
+    [(null? metas) zonked]
+    [else
+     (define reserved (type-var-names-in zonked))
+     (define replacements (make-hasheq))
+     (define names
+       (let loop ([remaining metas] [candidate-index 0] [result '()])
+         (cond
+           [(null? remaining) (reverse result)]
+           [else
+            (define name (generalized-name candidate-index))
+            (if (set-member? reserved name)
+                (loop remaining (add1 candidate-index) result)
+                (begin
+                  (set-add! reserved name)
+                  (hash-set! replacements (car remaining) (type-var name))
+                  (loop (cdr remaining) (add1 candidate-index) (cons name result))))])))
+     (make-inferred-type-poly names (rewrite-type-metas zonked replacements))]))
+
+(define (substitute-type-vars type replacements)
+  (cond
+    [(type-var? type) (hash-ref replacements (type-var-name type) type)]
+    [(or (not type) (type-prim? type) (type-meta? type)) type]
+    [(type-fn? type)
+     (type-fn (map (lambda (param) (substitute-type-vars param replacements))
+                   (type-fn-params type))
+              (and (type-fn-rest-type type)
+                   (substitute-type-vars (type-fn-rest-type type) replacements))
+              (substitute-type-vars (type-fn-ret type) replacements))]
+    [(type-app? type)
+     (type-app (type-app-ctor type)
+               (map (lambda (arg) (substitute-type-vars arg replacements))
+                    (type-app-args type)))]
+    [(type-union? type)
+     (type-union
+      (map (lambda (alt) (substitute-type-vars alt replacements))
+           (type-union-alts type)))]
+    [(type-poly? type)
+     (define nested-replacements
+       (for/fold ([current replacements]) ([name (in-list (type-poly-vars type))])
+         (hash-remove current name)))
+     (define bounds (type-poly-bounds type))
+     (copy-type-poly
+      type
+      (substitute-type-vars (type-poly-body type) nested-replacements)
+      (and bounds
+           (for/hasheq ([(name bound) (in-hash bounds)])
+             (values name (substitute-type-vars bound nested-replacements)))))]
+    [else type]))
+
+;; Only compiler-inferred schemes instantiate here.  Explicit `forall` keeps
+;; its existing authored call-resolution and bound-checking path.
+(define (instantiate-type type)
+  (cond
+    [(inferred-type-poly? type)
+     (define replacements (make-hasheq))
+     (for ([name (in-list (type-poly-vars type))])
+       (hash-set! replacements name (fresh-type-meta)))
+     (substitute-type-vars (type-poly-body type) replacements)]
+    [else type]))
 
 ;; --- the type delaborator: an extensible head-keyed render registry --------
 ;; type->string is the single universal type renderer (every consumer — sig,
@@ -486,6 +879,7 @@
         [(type-app? t)   'app]
         [(type-union? t) 'union]
         [(type-var? t)   'var]
+        [(type-meta? t)  'meta]
         [(type-poly? t)  'poly]
         [else            'unknown]))
 
@@ -540,6 +934,12 @@
       [else
        (format "(U ~a)" (string-join (map recur alts) " "))])))
 (register-type-delab! 'var (lambda (t recur) (symbol->string (type-var-name t))))
+(register-type-delab! 'meta
+  (lambda (t recur)
+    (define pruned (prune-type t))
+    (if (eq? pruned t)
+        (format "?~a" (type-meta-id t))
+        (recur pruned))))
 (register-type-delab! 'poly
   (lambda (t recur)
     (define bounds (type-poly-bounds t))
@@ -582,6 +982,13 @@
                           'args (map type->jsexpr (type-app-args t)))]
     [(type-union? t) (node "union" 'alts (map type->jsexpr (type-union-alts t)))]
     [(type-var? t)   (node "var" 'name (symbol->string (type-var-name t)))]
+    [(type-meta? t)
+     (define pruned (prune-type t))
+     (if (eq? pruned t)
+         (error 'beagle
+                "unresolved inference metavariable escaped type serialization: ~a"
+                (type->string t))
+         (type->jsexpr pruned))]
     [(type-poly? t)  (node "poly"
                           'vars (map symbol->string (type-poly-vars t))
                           'body (type->jsexpr (type-poly-body t)))]
@@ -631,6 +1038,7 @@
 
 (define (apply-type-bindings type bindings)
   (cond
+    [(type-meta? type) (zonk-type type)]
     [(type-var? type)
      (hash-ref bindings (type-var-name type) (type-prim 'Any))]
     [(type-prim? type) type]
@@ -663,7 +1071,10 @@
  (struct-out type-app)
  (struct-out type-union)
  (struct-out type-var)
+ (struct-out type-meta)
  (struct-out type-poly)
+ make-inferred-type-poly
+ inferred-type-poly?
  current-type-vars
  current-union-members
  current-enum-types
@@ -680,6 +1091,17 @@
  type-compatible?
  type-invariant-equal?
  type->string
+ call-with-fresh-type-metas
+ fresh-type-meta
+ prune-type
+ zonk-type
+ type-occurs?
+ (struct-out exn:fail:type-unification)
+ unify-types!
+ free-type-metas
+ free-type-metas-in
+ generalize-type
+ instantiate-type
  infer-literal-type
  infer-type-var-bindings
  apply-type-bindings
