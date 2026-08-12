@@ -13,60 +13,50 @@
   (get-output-string out))
 
 (define (br . xs) (cons '#%brackets xs))
+(define (typed name type) (list name type))
 
 (test-case "untyped def warns in strict mode"
   (define out (lint-prog '(def x 42)))
   (check-true (regexp-match? #rx"untyped def x" out)))
 
-;; The following lint tests asserted positive/negative warnings against the
-;; postfix `(def x: T v)` / `(defn f [..] -> RET ..)` surface. That surface
-;; is now rejected at parse time (see parse.rkt "rejects inline …" tests),
-;; so the linter never sees these forms. The lint rule itself (warn on
-;; untyped def, warn on defn with no return type) is still wired and will
-;; need fresh fixtures using postfix `: T` annotations (the canonical typed-
-;; binding surface). The interim `(claim NAME TYPE)` carrier was deleted
-;; under the Zero-users rule. Until the fixtures are rewritten on `: T`,
-;; these are deferred:
-;;
-;;   "typed def does not warn"                     — (def x: Int 42)
-;;   "defn without return type warns"              — (defn foo [x: Int] x)
-;;   "defn with untyped params warns"              — (defn foo [x y] -> Int …)
-;;   "fully typed defn produces no warnings"       — (defn foo [..] -> Int …)
+(test-case "typed def does not warn"
+  (define out (lint-prog '(def x Int 42)))
+  (check-false (regexp-match? #rx"untyped def x" out)))
 
 (test-case "lint skipped in dynamic mode"
   (define out (lint-prog '(define-mode dynamic)
                          '(def x 42)
-                         '(defn foo [x] x)))
+                         (list 'defn 'foo (br 'x) 'Any 'x)))
   (check-equal? out ""))
 
 ;; --- shadowed bindings -----------------------------------------------------
 
-;; These tests previously used `: Int` as the defn return type to keep the
-;; lint output clean of "no return type" warnings. With inline return-type
-;; gone, the body parses but emits a return-type warning alongside the
-;; shadow warning. We narrow the regex to only check for the shadow
-;; warning (the test-under-test), tolerating the parallel return-type
-;; warning that now fires.
+;; Signatures use structural binders and the mandatory positional return.
 
 (test-case "let shadowing fn param warns"
-  (define out (lint-prog '(defn foo [x #%: Int]
-                            (let [x 2] x))))
+  (define out
+    (lint-prog
+     (list 'defn 'foo (br (typed 'x 'Int)) 'Int '(let [x 2] x))))
   (check-true (regexp-match? #rx"let binding x shadows" out)))
 
 (test-case "nested fn param shadowing outer param warns"
-  (define out (lint-prog '(defn outer [x #%: Int]
-                            (let [f (fn [x] x)] (f 1)))))
+  (define out
+    (lint-prog
+     (list 'defn 'outer (br (typed 'x 'Int)) 'Int
+           (list 'let (br 'f (list 'fn (br 'x) 'Int 'x)) '(f 1)))))
   (check-true (regexp-match? #rx"parameter x shadows" out)))
 
 (test-case "no shadow warning for distinct names"
-  (define out (lint-prog '(defn foo [x #%: Int]
-                            (let [y 2] (+ x y)))))
+  (define out
+    (lint-prog
+     (list 'defn 'foo (br (typed 'x 'Int)) 'Int '(let [y 2] (+ x y)))))
   (check-false (regexp-match? #rx"shadows" out)))
 
 (test-case "nested let shadowing warns"
-  (define out (lint-prog '(defn bar [a #%: Int]
-                            (let [x 1]
-                              (let [x 2] x)))))
+  (define out
+    (lint-prog
+     (list 'defn 'bar (br (typed 'a 'Int)) 'Int
+           '(let [x 1] (let [x 2] x)))))
   (check-true (regexp-match? #rx"let binding x shadows" out)))
 
 ;; --- unused externs --------------------------------------------------------
@@ -82,8 +72,8 @@
 
 (test-case "catch type counts as an extern use"
   (define out (lint-prog '(declare-extern Error Any)
-                         '(defn guarded []
-                            (try 1 (catch Error error 0)))))
+                         (list 'defn 'guarded (br) 'Int
+                               '(try 1 (catch (error Error) 0)))))
   (check-false (regexp-match? #rx"unused declare-extern: Error" out)))
 
 (test-case "scoped package imports are not reported as unused externs"
@@ -98,7 +88,7 @@
 ;; --- with and defenum lint traversal -----------------------------------------
 
 (test-case "with form does not crash lint"
-  (define out (lint-prog `(defrecord P ,(list '#%brackets 'x '#%: 'Int))
+  (define out (lint-prog `(defrecord P ,(br (typed 'x 'Int)))
                          `(def p (->P 1))
                          `(def q (with p ,(list '#%brackets ':x 2)))))
   (check-true (string? out)))
