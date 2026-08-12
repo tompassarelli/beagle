@@ -62,6 +62,7 @@
              "generic-type-arity.rkt"   ; local/imported parametric constructors require their exact argument count
              "scrutinee-narrowing.rkt"  ; match/instance? narrow a stable scrutinee to the proven member; binders still bind fields
              "module-overlay-check.rkt"  ; coherent multi-EDN candidate overlay + cross-module interfaces
+             "checked-bundle.rkt"       ; exact-byte closed module closure + checked projection
              "defmacro.rkt"
              "diagnostic-kind.rkt"
              "expand-tool.rkt"          ; #32 — `beagle expand` reads+renders the full surface (canonical reader)

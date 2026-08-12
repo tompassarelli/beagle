@@ -109,12 +109,19 @@
                      #:key module-source-id-string)))
   (candidate-overlay by-namespace by-source))
 
-(define (overlay-resolver overlay)
+(define (overlay-resolver overlay #:closed? [closed? #f])
   (lambda (namespace importer-source)
     (define sources
       (hash-ref (candidate-overlay-by-namespace overlay) namespace '()))
     (cond
-      [(null? sources) #f]
+      [(null? sources)
+       (if closed?
+           (error
+            'check-module-overlay
+            "required namespace ~a is absent from the closed source bundle (required by ~a)"
+            namespace
+            importer-source)
+           #f)]
       [(null? (cdr sources)) (car sources)]
       [else
        (error
@@ -141,23 +148,20 @@
      (if (exn? value) (exn-message value) (format "~a" value))))
    #f))
 
-(define (check-edn-overlay edn-paths
-                         #:check-profile [check-profile 2]
-                         #:check-namespaces [check-namespaces #f]
-                         #:check-sources [check-sources #f]
-                         #:emit? [emit? #t])
+(define (check-module-overlay sources
+                              #:check-profile [check-profile 2]
+                              #:check-namespaces [check-namespaces #f]
+                              #:check-sources [check-sources #f]
+                              #:emit? [emit? #t]
+                              #:capture-types? [capture-types? #f]
+                              #:closed? [closed? #f]
+                              #:parse-source [parse-source* parse-source])
   (let/ec abort
     (define (guard source phase thunk)
       (with-handlers ([(lambda (_value) #t)
                        (lambda (value)
                          (abort (failed-result source phase value)))])
         (thunk)))
-    (define sources
-      (for/list ([edn-path (in-list edn-paths)])
-        (guard
-         (if (path? edn-path) (path->string edn-path) edn-path)
-         'read
-         (lambda () (edn->module-source edn-path)))))
     (when (null? sources)
       (abort
        (failed-result
@@ -167,7 +171,8 @@
          (current-continuation-marks)))))
     (define bootstrap-overlay
       (guard #f 'index (lambda () (source-overlay sources))))
-    (define bootstrap-resolver (overlay-resolver bootstrap-overlay))
+    (define bootstrap-resolver
+      (overlay-resolver bootstrap-overlay #:closed? closed?))
     ;; Pass one is intentionally parse-only: it establishes canonical provider
     ;; interfaces while every import already reads candidate datums.
     (define bootstrap-programs
@@ -177,7 +182,7 @@
          (guard
           (module-source-source-id source)
           'parse
-          (lambda () (parse-source source bootstrap-resolver))))))
+          (lambda () (parse-source* source bootstrap-resolver))))))
     (define authoritative-sources
       (for/list ([entry (in-list bootstrap-programs)])
         (define source (car entry))
@@ -280,7 +285,7 @@
             source-id)
            (current-continuation-marks))))))
     (define authoritative-resolver
-      (overlay-resolver authoritative-overlay))
+      (overlay-resolver authoritative-overlay #:closed? closed?))
     (define all-programs
       (for/list ([source (in-list authoritative-sources)])
         (cons
@@ -288,7 +293,7 @@
          (guard
           (module-source-source-id source)
           'parse
-          (lambda () (parse-source source authoritative-resolver))))))
+          (lambda () (parse-source* source authoritative-resolver))))))
     (define programs
       (if (or selected-namespaces selected-sources)
           (filter
@@ -322,7 +327,8 @@
               (if (exn? error)
                   (exn-message error)
                   (format "~a" error)))
-             diagnostics))))))
+             diagnostics)))
+         #:capture-types? capture-types?)))
     (define interfaces
       (map module-source-interface authoritative-sources))
     (define overlay-digest
@@ -359,8 +365,35 @@
                (lambda () (emit-program prog)))))))
     (overlay-check-result #t modules '() overlay-digest)))
 
+(define (check-edn-overlay edn-paths
+                           #:check-profile [check-profile 2]
+                           #:check-namespaces [check-namespaces #f]
+                           #:check-sources [check-sources #f]
+                           #:emit? [emit? #t])
+  (let/ec abort
+    (define sources
+      (for/list ([edn-path (in-list edn-paths)])
+        (with-handlers
+            ([(lambda (_value) #t)
+              (lambda (value)
+                (abort
+                 (failed-result
+                  (if (path? edn-path)
+                      (path->string edn-path)
+                      edn-path)
+                  'read
+                  value)))])
+          (edn->module-source edn-path))))
+    (check-module-overlay
+     sources
+     #:check-profile check-profile
+     #:check-namespaces check-namespaces
+     #:check-sources check-sources
+     #:emit? emit?)))
+
 (provide
  check-edn-overlay
+ check-module-overlay
  (struct-out overlay-diagnostic)
  (struct-out checked-overlay-module)
  (struct-out overlay-check-result))

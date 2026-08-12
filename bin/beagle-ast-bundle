@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# beagle-ast-bundle: exact-byte, closed multi-module checked projection.
+
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/checked-bundle-cli.rkt" "$@"
