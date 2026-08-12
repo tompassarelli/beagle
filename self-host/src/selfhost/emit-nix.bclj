@@ -24,6 +24,11 @@
 ;; current (recur ...) target name, or nil outside a loop.
 (def recur-name-ref Any (atom nil))
 
+;; Nominal record authority is scoped to one whole program. A primitive type
+;; name alone is not proof that a map pattern is total: aliases that normalize
+;; to Map must retain Nix's explicit missing-key defaults.
+(def nix-record-types-ref Any (atom {}))
+
 (defn emit-expr* [(e Any) (depth Int)] String
   (let [(f [Any Int -> String]) (deref emit-expr-ref)] (f e depth)))
 
@@ -160,6 +165,11 @@
 (defn param-binding-target [(p Any)] Any
   (if (and (map? p) (= (get p "type") "param")) (get p "name") p))
 
+(defn nominal-record-param? [(p Any)] Bool
+  (let [annotation (if (= (get p "type") "param") (get p "ann") nil)]
+    (and (= (get annotation "kind") "prim")
+      (= true (get (deref nix-record-types-ref) (get annotation "name"))))))
+
 (defn nix-param-pattern [(p Any) (depth Int)] String
   (let [target (param-binding-target p)
         t (get target "type")]
@@ -170,12 +180,14 @@
       (let [ks (get target "keys")
             as (get target "as")
             defaults (get target "or")
+            nominal-record? (nominal-record-param? p)
             _validated (do
                          (when (= (count ks) 0)
                            (throw (ex-info
                              "empty map destructuring parameters are not supported by the nix backend — bind the aggregate to a name"
                              {})))
-                         (when (not (= (count defaults) (count ks)))
+                         (when (and (not nominal-record?)
+                                 (not (= (count defaults) (count ks))))
                            (throw (ex-info
                              "map destructuring parameters require :or defaults for every key on the nix backend — Nix attrset patterns otherwise reject missing keys instead of binding nil"
                              {}))))
@@ -1142,9 +1154,24 @@
       (= node "nix-inherit")
       (= node "nix-inherit-from"))))
 
+(defn program-record-types [(prog Any)] Any
+  (let [imported-fields (get prog "imported-record-fields")
+        from-fields (if (map? imported-fields)
+                      (reduce (fn [(names Any) (name String)] Any
+                                (assoc names name true))
+                        {} (keys imported-fields))
+                      {})]
+    (reduce
+      (fn [(names Any) (form Any)] Any
+        (if (= (get form "node") "record")
+          (assoc names (get form "name") true)
+          names))
+      from-fields (get prog "forms"))))
+
 (defn emit-program! [(prog Any)] String
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
+  (reset! nix-record-types-ref (program-record-types prog))
   (let [forms (vec (get prog "forms")) requires (vec (get prog "requires")) defs (filterv top-def-form? forms) body-exprs (filterv (fn
                                                                                                                                      [(f Any)] Bool (not (top-def-form? f))) forms) import-str (if (= 0 (count requires)) "" (str (str/join "\n" (mapv (fn
                                                                                                                                                                                                                                                          [(r Any)] String (let [ns0 (get r "ns") alias0 (get r "alias") alias (if (or (nil? alias0) (false? alias0)) (let [parts (str/split ns0 #"\.")] (nth parts (- (count parts) 1))) alias0)] (str "  " (mangle-name alias) " = import ./" (str/replace ns0 "." "/") ".nix;"))) requires)) "\n")) def-strs (mapv (fn
@@ -1173,6 +1200,7 @@
 (defn run-tests! [] Int
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
+  (reset! nix-record-types-ref {})
   (reset! passes [])
   (reset! failures [])
   (expect! "mangle: plain" (= (mangle-name "foo") "foo"))
@@ -1229,7 +1257,7 @@
   (expect! "nix-with prefix-only vec collapses"
     (= (emit-expr! {"node" "nix-with" "ns-expr" {"node" "ref" "name" "config.boot.kernelPackages"} "body" {"node" "vec" "items" [{"node" "ref" "name" "framework-laptop-kmod"}]}} 0)
       "with config.boot.kernelPackages; [ framework-laptop-kmod ]"))
-  (expect! "typed map param unwraps to native attrset pattern"
+  (expect! "Map-shaped typed param with defaults unwraps to native attrset pattern"
     (= (nix-param-pattern
          {"type" "param"
           "name" {"type" "map-destructure"
@@ -1239,9 +1267,31 @@
                         {"key" "y"
                          "value" {"node" "literal" "kind" "number" "value" 7}}]
                   "as" "whole"}
-          "ann" {"kind" "record" "name" "Point"}}
+          "ann" {"kind" "app" "name" "Map"
+                 "args" [{"kind" "prim" "name" "Keyword"}
+                         {"kind" "prim" "name" "Int"}]}}
          0)
        "{ x ? 1, y ? 7, ... } @ whole:"))
+  (expect! "nominal record map params may require fields without defaults"
+    (let [param {"type" "param"
+                 "name" {"type" "map-destructure"
+                         "keys" ["x" "y"] "or" [] "as" false}
+                 "ann" {"kind" "prim" "name" "Point"}}
+          prog {"forms" [{"node" "record" "name" "Point" "fields" []}
+                          {"node" "defn" "name" "sum" "params" [param]
+                           "rest" false "body" [{"node" "literal" "kind" "number" "value" 0}]}]
+                "requires" []}]
+      (str/includes? (emit-program! prog) "sum = { x, y, ... }:")))
+  (expect! "imported nominal record registry permits required fields"
+    (let [param {"type" "param"
+                 "name" {"type" "map-destructure"
+                         "keys" ["x"] "or" [] "as" false}
+                 "ann" {"kind" "prim" "name" "Point"}}
+          prog {"forms" [{"node" "defn" "name" "x-of" "params" [param]
+                           "rest" false "body" [{"node" "ref" "name" "x"}]}]
+                "requires" []
+                "imported-record-fields" {"Point" {":x" {"kind" "prim" "name" "Int"}}}}]
+      (str/includes? (emit-program! prog) "x-of = { x, ... }:")))
   (expect! "typed map param rejects missing-key semantic drift"
     (try
       (nix-param-pattern
@@ -1252,6 +1302,22 @@
       false
       (catch (problem Exception)
         (str/includes? (ex-message problem) "require :or defaults for every key"))))
+  (expect! "nominal record authority does not leak between programs"
+    (let [record-prog {"forms" [{"node" "record" "name" "Point" "fields" []}]
+                       "requires" []}
+          param {"type" "param"
+                 "name" {"type" "map-destructure"
+                         "keys" ["x"] "or" [] "as" false}
+                 "ann" {"kind" "prim" "name" "Point"}}
+          alias-prog {"forms" [{"node" "defn" "name" "x-of" "params" [param]
+                                "rest" false "body" [{"node" "ref" "name" "x"}]}]
+                      "requires" []}]
+      (emit-program! record-prog)
+      (try
+        (emit-program! alias-prog)
+        false
+        (catch (problem Exception)
+          (str/includes? (ex-message problem) "require :or defaults for every key")))))
   (expect! "typed sequential param keeps pointed nix rejection"
     (try
       (nix-param-pattern
