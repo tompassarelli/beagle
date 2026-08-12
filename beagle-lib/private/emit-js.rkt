@@ -1007,6 +1007,7 @@
 ;; `loop`'s `_recur_N` freshening for the same reason: distinct JS identifiers
 ;; per rebinding, one flat block.
 (define current-rename-env (make-parameter (hash)))
+(define current-binder-types (make-parameter #f))
 
 (define (resolved-name sym)
   (hash-ref (current-rename-env) sym (lambda () (mangle-name sym))))
@@ -1021,37 +1022,40 @@
 ;; reads through the param route to HAMT ops). Composes with with-bindings.
 (define (with-param-envs params thunk)
   (define-values (te re)
-    (for/fold ([te (current-type-env)] [re (current-rep-env)])
-              ([p (in-list params)])
-      (if (and (param? p) (param-type p))
-          (let* ([nm (param-name p)] [ty (param-type p)] [rep (type-read-rep ty)])
-            (values (hash-set te nm ty)
-                    (if (eq? rep 'native) re (hash-set re nm rep))))
-          (values te re))))
+    (extend-binding-type-envs params (current-type-env) (current-rep-env)))
   (parameterize ([current-type-env te] [current-rep-env re])
     (thunk)))
 
-(define (names-from-binding-target name)
+(define (binding-type-pairs binding)
+  (define target (param-binding-target binding))
+  (define direct-type (and (param? binding) (param-type binding)))
+  (define projected
+    (and (current-binder-types)
+         (hash-ref (current-binder-types) binding #f)))
   (cond
-    [(symbol? name) (list name)]
-    [(map-destructure? name)
-     (append (map-destructure-keys name)
-             (if (map-destructure-as-name name)
-               (list (map-destructure-as-name name))
-               '()))]
-    [(seq-destructure? name)
-     (append (seq-destructure-names name)
-             (if (seq-destructure-rest-name name)
-               (list (seq-destructure-rest-name name))
-               '()))]
+    [projected (hash->list projected)]
+    [(and (symbol? target) direct-type) (list (cons target direct-type))]
     [else '()]))
+
+(define (extend-binding-type-envs bindings type-env rep-env)
+  (for*/fold ([te type-env] [re rep-env])
+             ([binding (in-list bindings)]
+              [entry (in-list (binding-type-pairs binding))])
+    (define name (car entry))
+    (define ty (cdr entry))
+    (define rep (type-read-rep ty))
+    (values (hash-set te name ty)
+            (if (eq? rep 'native) re (hash-set re name rep)))))
+
+(define (names-from-binding-target name)
+  (binding-target-bound-names name))
 
 (define (binding-names-from-params params [rest-param #f])
   (append
    (apply append (map (lambda (p)
-     (if (param? p) (list (param-name p)) (names-from-binding-target p)))
+     (names-from-binding-target p))
      params))
-   (if rest-param (list (param-name rest-param)) '())))
+   (if rest-param (names-from-binding-target rest-param) '())))
 
 ;; --- entry point -----------------------------------------------------------
 
@@ -1282,6 +1286,7 @@
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
                  [current-js-semantic-contracts (program-semantic-contracts prog)]
                  [current-type-table (program-type-table prog)]  ; P3: per-node arg types for scalar-=== dispatch (#f when capture off)
+                 [current-binder-types (program-binder-type-table prog)]
                  [needs-runtime? #f]
                  [hamt-ops-used (make-hash)]
                  [bc-needs-v? (box #f)]
@@ -1473,8 +1478,16 @@
 
     [(defn-form? f)
      (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
+     (define setup (emit-js-param-setup (defn-form-params f)))
      (define async? (contains-await? (defn-form-body f)))
      (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
+     (define emitted-body
+       (with-param-envs (defn-form-params f)
+         (lambda ()
+           (with-bindings bound
+             (lambda () (emit-body-return (defn-form-body f) "  "))))))
+     (define inner
+       (string-join (append setup (list emitted-body)) "\n  "))
      (format "~a~a {\n  ~a\n}"
              (if (exported-binding? (defn-form-name f) (defn-form-private? f))
                  "export "
@@ -1483,9 +1496,7 @@
                                 #:async? async?
                                 #:name (mangle-name (defn-form-name f))
                                 #:params params)
-             (with-param-envs (defn-form-params f)
-               (lambda ()
-                 (with-bindings bound (lambda () (emit-body-return (defn-form-body f) "  "))))))]
+             inner)]
 
     [(defn-multi? f)
      (define name (mangle-name (defn-multi-name f)))
@@ -1497,12 +1508,17 @@
          (define n (length (arity-clause-params a)))
          (define rest? (arity-clause-rest-param a))
          (define destructure-strs
-           (for/list ([p (in-list (arity-clause-params a))]
-                      [i (in-naturals)])
-             (format "const ~a = _args[~a];" (emit-js-param p) i)))
+           (apply append
+                  (for/list ([p (in-list (arity-clause-params a))]
+                             [i (in-naturals)])
+                    (define target (param-binding-target p))
+                    (if (or (map-destructure? target) (seq-destructure? target))
+                        (emit-pattern-binding-statements target (format "$beagle$args[~a]" i))
+                        (list (format "const ~a = $beagle$args[~a];"
+                                      (emit-js-param p) i))))))
          (define rest-str
            (if rest?
-             (list (format "const ~a = _args.slice(~a);" (emit-js-param rest?) n))
+             (list (format "const ~a = $beagle$args.slice(~a);" (emit-js-param rest?) n))
              '()))
          (define all-bindings (append destructure-strs rest-str))
          (define arity-bound (binding-names-from-params (arity-clause-params a) (arity-clause-rest-param a)))
@@ -1514,7 +1530,7 @@
          (if rest?
            (format "  if (arguments.length >= ~a) {\n    ~a\n  }" n inner)
            (format "  if (arguments.length === ~a) {\n    ~a\n  }" n inner))))
-     (format "~a~afunction ~a(..._args) {\n~a\n  throw new Error('No matching arity: ' + _args.length);\n}"
+     (format "~a~afunction ~a(...$beagle$args) {\n~a\n  throw new Error('No matching arity: ' + $beagle$args.length);\n}"
              (if (exported-binding? (defn-multi-name f) (defn-multi-private? f))
                  "export "
                  "")
@@ -1832,23 +1848,45 @@
                              (expr-has-await? (let-binding-value b)))
                            (contains-await? body)))
      (define loop-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
+     ;; Recur has one value per SOURCE binding. A destructuring pattern must
+     ;; therefore own one stable aggregate slot; projecting leaves into recur
+     ;; slots would change arity and lose the aggregate on the next iteration.
      (define bind-names
-       (for/list ([b (in-list bindings)])
-         (emit-binding-target (let-binding-name b))))
+       (for/list ([b (in-list bindings)] [i (in-naturals)])
+         (define target (let-binding-name b))
+         (if (or (map-destructure? target) (seq-destructure? target))
+             (format "$beagle$loop$~a" i)
+             (emit-binding-target target))))
      (define bind-strs
-       (for/list ([b (in-list bindings)])
+       (for/list ([b (in-list bindings)] [slot (in-list bind-names)])
          (format "let ~a = ~a;"
-                 (emit-binding-target (let-binding-name b))
+                 slot
                  (await-async-iife (emit-expr (let-binding-value b))))))
+     (define projection-strs
+       (apply append
+              (for/list ([b (in-list bindings)] [slot (in-list bind-names)])
+                (define target (let-binding-name b))
+                (if (or (map-destructure? target) (seq-destructure? target))
+                    (emit-pattern-binding-statements target slot)
+                    '()))))
+     (define-values (loop-type-env loop-rep-env)
+       (extend-binding-type-envs
+        (map let-binding-name bindings)
+        (current-type-env)
+        (current-rep-env)))
      (with-bindings loop-names
        (lambda ()
-         (define body-str
-           (string-join (map (lambda (e) (emit-loop-stmt e bind-names)) body) "\n    "))
-         (define prefix (if has-await "async " ""))
-         (format "(~a() => { ~a while (true) {\n    ~a\n  } })()"
-                 prefix
-                 (string-join bind-strs " ")
-                 body-str)))]
+         (parameterize ([current-type-env loop-type-env]
+                        [current-rep-env loop-rep-env])
+           (define body-str
+             (string-join (map (lambda (e) (emit-loop-stmt e bind-names)) body) "\n    "))
+           (define prefix (if has-await "async " ""))
+           (format "(~a() => { ~a while (true) {\n    ~a~a~a\n  } })()"
+                   prefix
+                   (string-join bind-strs " ")
+                   (string-join projection-strs " ")
+                   (if (null? projection-strs) "" "\n    ")
+                   body-str))))]
 
     [(recur-form? e)
      (define assignments
@@ -1862,6 +1900,7 @@
 
     [(fn-form? e)
      (define params (emit-js-params (fn-form-params e) (fn-form-rest-param e)))
+     (define setup (emit-js-param-setup (fn-form-params e)))
      (define body (fn-form-body e))
      (define async? (contains-await? body))
      (define prefix (if async? "async " ""))
@@ -1870,7 +1909,8 @@
       (lambda ()
        (with-bindings bound
        (lambda ()
-         (if (and (= (length body) 1) (not (stmt-inline? (car body))))
+         (if (and (null? setup)
+                  (= (length body) 1) (not (stmt-inline? (car body))))
            (let ([body-str (emit-expr (car body))])
              ;; An expression-body arrow whose body emits an OBJECT LITERAL must be
              ;; parenthesized: `=> {…}` is a JS block (a labeled-statement parse),
@@ -1880,7 +1920,10 @@
                (format "~a(~a) => (~a)" prefix params body-str)
                (format "~a(~a) => ~a" prefix params body-str)))
            (format "~a(~a) => { ~a }"
-                   prefix params (emit-body-return body ""))))))) ]
+                   prefix params
+                   (string-join
+                    (append setup (list (emit-body-return body "")))
+                    " "))))))) ]
 
     [(letfn-form? e)
      (define fns (letfn-form-fns e))
@@ -1897,6 +1940,7 @@
              (define params
                (emit-js-params
                 (letfn-fn-params f) (letfn-fn-rest-param f)))
+             (define setup (emit-js-param-setup (letfn-fn-params f)))
              (define fn-body (letfn-fn-body f))
              (define fn-async? (contains-await? fn-body))
              (define prefix (if fn-async? "async " ""))
@@ -1905,7 +1949,9 @@
                (lambda ()
                  (format "~afunction ~a(~a) { ~a }"
                          prefix name params
-                         (emit-body-return fn-body ""))))))
+                         (string-join
+                          (append setup (list (emit-body-return fn-body "")))
+                          " "))))))
          (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
                 #:async? has-await)))]
 
@@ -2472,7 +2518,11 @@
     (for/list ([c (in-list clauses)])
       (cond
         [(for-binding? c) (names-from-binding-target (for-binding-name c))]
-        [(for-let? c) (map let-binding-name (for-let-bindings c))]
+        [(for-let? c)
+         (apply append
+                (map (lambda (binding)
+                       (names-from-binding-target (let-binding-name binding)))
+                     (for-let-bindings c)))]
         [else '()]))))
   (with-bindings for-names
     (lambda ()
@@ -2485,35 +2535,56 @@
 (define (emit-for-clauses clauses body-str)
   (match clauses
     [(list (for-binding name expr _))
+     (define-values (arg setup)
+       (emit-js-binding-parameter name "$beagle$item"))
      (format "~a.map((~a) => ~a)"
              (emit-expr expr)
-             (emit-binding-target name)
-             body-str)]
+             arg
+             (if (null? setup)
+                 body-str
+                 (format "{ ~a return ~a; }" (string-join setup " ") body-str)))]
     [(list (for-binding name expr _) (for-when test) rest ...)
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str)))
+     (define-values (arg setup)
+       (emit-js-binding-parameter name "$beagle$item"))
+     (define filter-body
+       (if (null? setup)
+           (emit-expr test)
+           (format "{ ~a return ~a; }" (string-join setup " ") (emit-expr test))))
+     (define map-body
+       (if (null? setup)
+           inner
+           (format "{ ~a return ~a; }" (string-join setup " ") inner)))
      (format "~a.filter((~a) => ~a).map((~a) => ~a)"
              (emit-expr expr)
-             (emit-binding-target name)
-             (emit-expr test)
-             (emit-binding-target name)
-             inner)]
+             arg filter-body arg map-body)]
     [(list (for-binding name expr _) rest ...)
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str)))
+     (define-values (arg setup)
+       (emit-js-binding-parameter name "$beagle$item"))
      (format "~a.map((~a) => ~a)"
              (emit-expr expr)
-             (emit-binding-target name)
-             inner)]
+             arg
+             (if (null? setup)
+                 inner
+                 (format "{ ~a return ~a; }" (string-join setup " ") inner)))]
     [(list (? for-let? fl) rest ...)
      (define binds (for-let-bindings fl))
      (define let-strs
-       (for/list ([b (in-list binds)])
-         (format "const ~a = ~a"
-                 (mangle-name (let-binding-name b))
-                 (await-async-iife (emit-expr (let-binding-value b))))))
+       (apply append
+              (for/list ([b (in-list binds)] [i (in-naturals)])
+                (define target (let-binding-name b))
+                (define value (await-async-iife (emit-expr (let-binding-value b))))
+                (if (or (map-destructure? target) (seq-destructure? target))
+                    (let ([slot (format "$beagle$let$~a" i)])
+                      (cons (format "const ~a = ~a" slot value)
+                            (emit-pattern-binding-statements target slot)))
+                    (list (format "const ~a = ~a"
+                                  (mangle-name target) value))))))
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str)))
@@ -2533,18 +2604,25 @@
      (with-bindings doseq-names
        (lambda ()
          (define body-str (emit-body-stmts body "  "))
+         (define-values (arg setup)
+           (emit-js-binding-parameter name "$beagle$item"))
+         (define setup-str (string-join setup "\n  "))
+         (define inner-body
+           (if (null? setup)
+               body-str
+               (string-append setup-str "\n  " body-str)))
          (if (contains-await? body)
            ;; A forEach callback can't `await` sequentially (and the arrow
            ;; isn't async), so when the body awaits, emit a for-of loop —
            ;; which sequences awaits correctly inside the enclosing async fn.
            (format "for (const ~a of ~a) {\n  ~a\n}"
-                   (emit-binding-target name)
+                   arg
                    (emit-expr expr)
-                   body-str)
+                   inner-body)
            (format "~a.forEach((~a) => {\n  ~a\n});"
                    (emit-expr expr)
-                   (emit-binding-target name)
-                   body-str))))]
+                   arg
+                   inner-body))))]
     [_ (error 'beagle-js "complex doseq clauses not yet supported for JS target")]))
 
 ;; --- defscalar -------------------------------------------------------------
@@ -2586,44 +2664,119 @@
 ;; --- helpers ---------------------------------------------------------------
 
 (define (emit-js-params params rest-p)
-  (define fixed (string-join (map emit-js-param params) ", "))
+  (define fixed
+    (string-join
+     (for/list ([p (in-list params)] [i (in-naturals)])
+       (if (memq (let ([target (param-binding-target p)])
+                   (cond [(map-destructure? target) 'map]
+                         [(seq-destructure? target) 'seq]
+                         [else #f]))
+                 '(map seq))
+           (format "$beagle$param$~a" i)
+           (emit-js-param p)))
+     ", "))
   (if rest-p
     (if (string=? fixed "")
       (format "...~a" (emit-js-param rest-p))
       (format "~a, ...~a" fixed (emit-js-param rest-p)))
     fixed))
 
+(define (emit-pattern-binding-statements target source)
+  (cond
+    [(symbol? target)
+     ;; `set!` may target any lexical binding. Pattern leaves therefore use
+     ;; `let`; the hidden aggregate slot remains single-evaluation `const`.
+     (list (format "let ~a = ~a;" (resolved-name target) source))]
+    [(seq-destructure? target)
+     (append
+      (apply append
+             (for/list ([item (in-list (seq-destructure-names target))]
+                        [i (in-naturals)])
+               (emit-pattern-binding-statements
+                item (format "~a[~a]" source i))))
+      (if (seq-destructure-rest-name target)
+          (list
+           (format "const ~a = ~a.slice(~a);"
+                   (resolved-name (seq-destructure-rest-name target))
+                   source
+                   (length (seq-destructure-names target))))
+          '()))]
+    [(map-destructure? target)
+     (define defaults (map-destructure-or-defaults target))
+     (append
+      (if (map-destructure-as-name target)
+          (list (format "let ~a = ~a;"
+                        (resolved-name (map-destructure-as-name target)) source))
+          '())
+      (for/list ([name (in-list (map-destructure-keys target))])
+        (define property
+          (kw->prop (string->symbol
+                     (string-append ":" (symbol->string name)))))
+        (define value (format "~a[~a]" source (js-string-lit property)))
+        (define default (assq name defaults))
+        (format "let ~a = ~a;"
+                (resolved-name name)
+                (if default
+                    (format "(~a ?? ~a)" value (emit-expr (cdr default)))
+                    value))))]
+    [else (error 'beagle-js "unsupported destructuring target: ~v" target)]))
+
+(define (pattern-param? binding)
+  (define target (param-binding-target binding))
+  (or (map-destructure? target) (seq-destructure? target)))
+
+(define (emit-js-binding-parameter binding source)
+  (define target (param-binding-target binding))
+  (if (pattern-param? binding)
+      (values "$beagle$item"
+              (emit-pattern-binding-statements target source))
+      (values (emit-binding-target target) '())))
+
+(define (emit-js-param-setup params)
+  (apply append
+         (for/list ([p (in-list params)] [i (in-naturals)])
+           (define target (param-binding-target p))
+           (if (or (map-destructure? target) (seq-destructure? target))
+               (emit-pattern-binding-statements target (format "$beagle$param$~a" i))
+               '()))))
+
 ;; Render a destructuring pattern to its JS form. Returns #f for non-destructure
 ;; inputs so callers can fall through to their own handling.
 (define (emit-destructure p)
+  (define target (param-binding-target p))
   (cond
-    [(map-destructure? p)
-     (define or-alist (map-destructure-or-defaults p))
+    [(map-destructure? target)
+     (define or-alist (map-destructure-or-defaults target))
      (define key-strs
-       (for/list ([k (in-list (map-destructure-keys p))])
+       (for/list ([k (in-list (map-destructure-keys target))])
          (define default-pair (assq k or-alist))
          (if default-pair
              (format "~a = ~a" (resolved-name k) (emit-expr (cdr default-pair)))
              (resolved-name k))))
      (format "{~a}" (string-join key-strs ", "))]
-    [(seq-destructure? p)
-     (define mangled (map resolved-name (seq-destructure-names p)))
+    [(seq-destructure? target)
+     (define mangled
+       (for/list ([name (in-list (seq-destructure-names target))])
+         (if (symbol? name)
+             (resolved-name name)
+             (emit-destructure name))))
      (cond
-       [(seq-destructure-rest-name p)
+       [(seq-destructure-rest-name target)
         (format "[~a, ...~a]" (string-join mangled ", ")
-                (resolved-name (seq-destructure-rest-name p)))]
+                (resolved-name (seq-destructure-rest-name target)))]
        [else
         (format "[~a]" (string-join mangled ", "))])]
     [else #f]))
 
 (define (emit-js-param p)
   (or (emit-destructure p)
-      (mangle-name (param-name p))))
+      (mangle-name (param-binding-target p))))
 
 (define (emit-binding-target name)
   (cond
     [(emit-destructure name) => values]
-    [(symbol? name) (resolved-name name)]
+    [(symbol? (param-binding-target name))
+     (resolved-name (param-binding-target name))]
     [else (error 'beagle-js "unsupported binding target: ~v" name)]))
 
 ;; Emit the JS const-binding statement(s) for one let-binding target, given
@@ -2689,14 +2842,13 @@
 ;; mutable? — emit `let` (the binding is reassigned via set! in its scope) instead
 ;; of the default `const`. Without this, `(set! <bare-local> v)` compiled to
 ;; `const x = …; x = …;` and threw "Assignment to constant variable" at runtime.
-(define (emit-let-binding-stmts target val-str [mutable? #f])
+(define (emit-let-binding-stmts target val-str [mutable? #f]
+                                [aggregate-slot "$beagle$binding"])
   (define kw (if mutable? "let" "const"))
-  (define as-name (and (map-destructure? target) (map-destructure-as-name target)))
   (cond
-    [as-name
-     (define as-js (resolved-name as-name))
-     (list (format "const ~a = ~a;" as-js val-str)
-           (format "~a ~a = ~a;" kw (emit-binding-target target) as-js))]
+    [(or (map-destructure? target) (seq-destructure? target))
+     (cons (format "const ~a = ~a;" aggregate-slot val-str)
+           (emit-pattern-binding-statements target aggregate-slot))]
     [else
      (list (format "~a ~a = ~a;" kw (emit-binding-target target) val-str))]))
 
@@ -2717,7 +2869,8 @@
                [type-env (current-type-env)]
                [rename-env (current-rename-env)]
                [seen (hash)])
-              ([b (in-list bindings)])
+              ([b (in-list bindings)]
+               [i (in-naturals)])
       (define val-str (await-async-iife
                         (parameterize ([current-js-bound bound]
                                        [current-rep-env rep-env]
@@ -2738,7 +2891,9 @@
           (values (hash-set re nm js-name) (hash-set sn nm (add1 n)))))
       (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
       (define stmts (parameterize ([current-rename-env rename-env*])
-                      (emit-let-binding-stmts (let-binding-name b) val-str mutable?)))
+                      (emit-let-binding-stmts
+                       (let-binding-name b) val-str mutable?
+                       (format "$beagle$binding$~a" i))))
       (define name (let-binding-name b))
       (define bty (and (symbol? name)
                        (or (let-binding-type b) (node-type (let-binding-value b)))))
@@ -2746,12 +2901,14 @@
                       (parameterize ([current-rep-env rep-env] [current-type-env type-env])
                         (classify-rep (let-binding-value b)))
                       'native))
+      (define-values (projected-type-env projected-rep-env)
+        (extend-binding-type-envs (list name) type-env rep-env))
       (values (append strs stmts)
               (set-union bound (list->set new-names))
               (if (and (symbol? name) (not (eq? rep 'native)))
-                  (hash-set rep-env name rep)
-                  rep-env)
-              (if bty (hash-set type-env name bty) type-env)
+                  (hash-set projected-rep-env name rep)
+                  projected-rep-env)
+              (if bty (hash-set projected-type-env name bty) projected-type-env)
               rename-env*
               seen*)))
   (values strs rep-env type-env rename-env))
@@ -2849,24 +3006,23 @@
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
      (define mutated-syms
        (collect-let-set!-target-syms (let-form-bindings e) (let-form-body e)))
-     (define binding-strs
-       (apply append
-         (for/list ([b (in-list (let-form-bindings e))])
-           (define new-names (names-from-binding-target (let-binding-name b)))
-           (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
-           (emit-let-binding-stmts (let-binding-name b) (await-async-iife (emit-expr (let-binding-value b))) mutable?))))
+     (define-values (binding-strs rep-env-out type-env-out rename-env-out)
+       (emit-let-bindings (let-form-bindings e) mutated-syms))
      (with-bindings let-names
        (lambda ()
-         ;; Only the tail form drives the loop (recur/return); earlier forms are
-         ;; side-effecting statements. Running emit-loop-stmt over all of them
-         ;; would `return` a non-tail expression and make the recur unreachable.
-         (define forms (let-form-body e))
-         (define body-str
-           (string-append
-             (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
-             (if (> (length forms) 1) " " "")
-             (emit-loop-stmt (last forms) bind-names emit-value)))
-         (string-append (string-join binding-strs " ") " " body-str)))]
+         (parameterize ([current-rep-env rep-env-out]
+                        [current-type-env type-env-out]
+                        [current-rename-env rename-env-out])
+           ;; Only the tail form drives the loop (recur/return); earlier forms are
+           ;; side-effecting statements. Running emit-loop-stmt over all of them
+           ;; would `return` a non-tail expression and make the recur unreachable.
+           (define forms (let-form-body e))
+           (define body-str
+             (string-append
+               (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
+               (if (> (length forms) 1) " " "")
+               (emit-loop-stmt (last forms) bind-names emit-value)))
+           (string-append (string-join binding-strs " ") " " body-str))))]
     [(and (cond-form? e) (for/or ([c (in-list (cond-form-clauses e))]) (body-contains-recur? (cond-clause-body c))))
      (define (else-clause? c)
        (let ([t (cond-clause-test c)]) (and (symbol? t) (or (eq? t ':else) (eq? t 'else)))))

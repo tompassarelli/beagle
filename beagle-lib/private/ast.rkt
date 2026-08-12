@@ -3,7 +3,8 @@
 ;; AST struct definitions and shared utilities for beagle's parse pipeline.
 ;; Extracted from parse.rkt to reduce module size and allow direct struct imports.
 
-(require "types.rkt")
+(require racket/string
+         "types.rkt")
 
 ;; --- tag aliases -----------------------------------------------------------
 (define BT BRACKET-TAG)
@@ -37,6 +38,10 @@
 (define (validate-identifier! sym [context "identifier"])
   (when (symbol? sym)
     (define s (symbol->string sym))
+    (when (string-prefix? s "$beagle$")
+      (error 'beagle
+             "~a '~a' uses the reserved compiler identifier prefix $beagle$"
+             context s))
     (when (regexp-match? unsafe-ident-rx s)
       (error 'beagle
              "~a '~a' contains characters that would inject code in target output"
@@ -201,6 +206,25 @@
   (hash-set! PROGRAM->TYPES prog tbl))
 (define (program-type-table prog)
   (hash-ref PROGRAM->TYPES prog #f))
+
+;; Checked lexical binder types are a cross-pass side table.  Parameter and
+;; destructuring ASTs retain authored syntax; emitters read this table to make
+;; representation decisions for every name projected out of an aggregate.
+(define PROGRAM->BINDER-TYPES (make-weak-hasheq))
+(define current-binder-type-table (make-parameter #f))
+(define (register-program-binder-type-table! prog tbl)
+  (hash-set! PROGRAM->BINDER-TYPES prog tbl))
+(define (program-binder-type-table prog)
+  (hash-ref PROGRAM->BINDER-TYPES prog #f))
+(define (store-binder-type! binding name ty)
+  (when (and ty (current-binder-type-table))
+    (define by-name
+      (hash-ref! (current-binder-type-table) binding make-hasheq))
+    (hash-set! by-name name ty))
+  ty)
+(define (binding-projected-types prog binding)
+  (define tbl (program-binder-type-table prog))
+  (and tbl (hash-ref tbl binding #f)))
 
 ;; --- symbol predicates -----------------------------------------------------
 (define (dot-method-sym? sym)
@@ -489,6 +513,18 @@
               (if (symbol? n) '() (destructure-or-default-exprs n))))]
     [else '()]))
 (struct seq-destructure (names rest-name)                    #:transparent)
+
+;; Normalize the binding-bearing AST variants for downstream passes.  A param
+;; wraps its target to retain an optional annotation; local binding nodes store
+;; the target directly.
+(define (param-binding-target p)
+  (if (param? p) (param-name p) p))
+
+(define (binding-target-bound-names target)
+  (define unwrapped (param-binding-target target))
+  (if (symbol? unwrapped)
+      (list unwrapped)
+      (destructure-bound-names unwrapped)))
 ;; deftype surface removed (2026-05). The canonical decomposition is defrecord
 ;; (data shape) + extend-type (protocol impls); parse.rkt rejects deftype at the
 ;; surface.
@@ -561,6 +597,9 @@
  register-program-body-locs-table! program-body-locs-table
  current-type-table store-type!
  register-program-type-table! program-type-table
+ current-binder-type-table store-binder-type!
+ register-program-binder-type-table! program-binder-type-table
+ binding-projected-types
  ;; Symbol predicates
  dot-method-sym? static-method-sym? dynamic-var-sym? constructor-sym? keyword-sym?
  ;; Parse injection
@@ -600,6 +639,7 @@
  (struct-out defn-multi) (struct-out arity-clause)
  ;; Shared utility structs
  (struct-out param) (struct-out map-destructure) (struct-out seq-destructure)
+ param-binding-target binding-target-bound-names
  destructure-bound-names destructure-or-default-exprs
  (struct-out extend-type-form)
  (struct-out type-impl) (struct-out impl-method)

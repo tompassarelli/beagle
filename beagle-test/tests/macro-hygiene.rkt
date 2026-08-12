@@ -121,11 +121,11 @@
   (define prog
     (parse-prog
      '(ns m)
-     '(defn helper [x] (* x 100))
+     (list 'defn 'helper (br 'x) 'Any '(* x 100))
      (list 'defmacro 'double (br 'x)
            (list 'quasiquote (list 'helper (list 'unquote 'x))))
-     (list 'defn 'use (br 'n)
-           (list 'let (br 'helper (list 'fn (br 'y) 'y))
+     (list 'defn 'use (br 'n) 'Any
+           (list 'let (br 'helper (list 'fn (br 'y) 'Any 'y))
                  '(double n)))))
   (define alias-def
     (findf (lambda (f) (and (def-form? f) (eq? (def-form-name f) 'helper__hyg)))
@@ -140,9 +140,9 @@
 ;; Driven through the #lang loader so the reader handles the backtick/comma.
 (define HYG-EMIT-SRC
   (string-append
-   "(defn helper [x: Int] -> Int (* x 100))\n"
+   "(defn helper [(x Int)] Int (* x 100))\n"
    "(defmacro double [x] `(helper ,x))\n"
-   "(defn use [n: Int] -> Int (double n))\n"))
+   "(defn use [(n Int)] Int (double n))\n"))
 
 (define (emit-via-lang target ext)
   (define tmp (make-temporary-file (format "hyg-~a-~~a.~a" target ext)))

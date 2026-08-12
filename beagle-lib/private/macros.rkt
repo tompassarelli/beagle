@@ -11,7 +11,12 @@
          "types.rkt"
          "tags.rkt"
          "macro-eval.rkt"
-         (only-in "ast.rkt" current-registry))
+         (only-in "ast.rkt"
+                  current-registry
+                  bracketed?
+                  bracket-body
+                  map-tagged?
+                  map-body))
 
 (struct macro-def (kind fixed-params rest-param template) #:transparent)
 ;; kind: 'safe (internal fixture) or 'defmacro (the authoring surface)
@@ -335,34 +340,72 @@
     [(list? form) form]
     [else '()]))
 
+(define (binding-form-binders! form macro-params add!)
+  (define (add-symbol! value)
+    (when (and (symbol? value)
+               (not (eq? value '&))
+               (not (memq value macro-params)))
+      (add! value)))
+  (cond
+    [(symbol? form) (add-symbol! form)]
+    [(bracketed? form)
+     (let loop ([items (bracket-body form)])
+       (cond
+         [(null? items) (void)]
+         [(eq? (car items) '&)
+          (when (pair? (cdr items)) (add-symbol! (cadr items)))]
+         [else
+          (binding-form-binders! (car items) macro-params add!)
+          (loop (cdr items))]))]
+    [(map-tagged? form)
+     (let loop ([items (map-body form)])
+       (cond
+         [(null? items) (void)]
+         [(and (eq? (car items) ':keys)
+               (pair? (cdr items))
+               (bracketed? (cadr items)))
+          (for ([name (in-list (bracket-body (cadr items)))])
+            (add-symbol! name))
+          (loop (cddr items))]
+         [(and (eq? (car items) ':as) (pair? (cdr items)))
+          (add-symbol! (cadr items))
+          (loop (cddr items))]
+         [(and (memq (car items) '(:or :strs :syms)) (pair? (cdr items)))
+          (loop (cddr items))]
+         [else (loop (cdr items))]))]
+    [else (void)]))
+
+(define (typed-binding-form? form)
+  (and (list? form)
+       (= (length form) 2)
+       (not (bracketed? form))
+       (not (map-tagged? form))
+       (let ([target (car form)])
+         (or (symbol? target) (bracketed? target) (map-tagged? target)))))
+
 (define (collect-param-binders! form macro-params add!)
   (let loop ([items (unwrap-brackets* form)])
     (cond
       [(null? items) (void)]
-      [(and (list? (car items)) (= (length (car items)) 2)
-            (symbol? (caar items)))
-       (unless (memq (caar items) macro-params)
-         (add! (caar items)))
+      [(typed-binding-form? (car items))
+       ;; `(binding-form Type)` annotates the whole binding operation.  The
+       ;; type is data, never a binder source.
+       (binding-form-binders! (caar items) macro-params add!)
        (loop (cdr items))]
-      [(and (symbol? (car items)) (not (eq? (car items) '&))
-            (not (memq (car items) macro-params)))
-       (add! (car items))
-       (loop (cdr items))]
-      [else (loop (cdr items))])))
+      [else
+       (binding-form-binders! (car items) macro-params add!)
+       (loop (cdr items))])))
 
 (define (collect-let-binders! form macro-params add!)
   (let loop ([rest (unwrap-brackets* form)])
     (cond
       [(or (null? rest) (null? (cdr rest))) (void)]
-      [(and (list? (car rest)) (= (length (car rest)) 2)
-            (symbol? (caar rest))
-            (not (memq (caar rest) macro-params)))
-       (add! (caar rest))
+      [(typed-binding-form? (car rest))
+       (binding-form-binders! (caar rest) macro-params add!)
        (loop (cddr rest))]
-      [(and (symbol? (car rest)) (not (memq (car rest) macro-params)))
-       (add! (car rest))
-       (loop (cddr rest))]
-      [else (loop (cddr rest))])))
+      [else
+       (binding-form-binders! (car rest) macro-params add!)
+       (loop (cddr rest))])))
 
 (define (unquote-form? d)
   (and (pair? d)

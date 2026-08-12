@@ -374,13 +374,16 @@
       (recur (type-fn-ret type)))]
     [(type-poly? type)
      (define bounds (type-poly-bounds type))
-     (type-poly
-      (type-poly-vars type)
-      (recur (type-poly-body type))
-      (and
-       bounds
-       (for/hasheq ([(name bound) (in-hash bounds)])
-         (values name (recur bound)))))]
+     (define qualified
+       (type-poly
+        (type-poly-vars type)
+        (recur (type-poly-body type))
+        (and
+         bounds
+         (for/hasheq ([(name bound) (in-hash bounds)])
+           (values name (recur bound))))))
+     (set-type-poly-origin! qualified (type-poly-origin type))
+     qualified]
     [else type]))
 
 (define (canonical-exported-aliases

@@ -3,10 +3,10 @@
 (define-mode strict)
 
 (defmacro define-box [name value]
-  `(def ~name: Box
+  `(def ~name Box
      (->Box (normalize ~value))))
 
-(defrecord Box [value: String])
+(defrecord Box [(value String)])
 
-(defn normalize [value: String] -> String
+(defn normalize [(value String)] String
   value)

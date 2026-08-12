@@ -189,13 +189,13 @@
   (register-macro!
    reg 'typed-local 'defmacro '()
    (list 'quasiquote
-         (list 'let (br 'shifted ANN-MARKER 'Int 1)
+         (list 'let (br (list 'shifted 'Int) 1)
                (list '+ 'shifted 1))))
   (define expanded (expand-fully reg '(typed-local)))
   (define bindings (cadr expanded))
-  (define binder-name (cadr bindings))
+  (define binder-name (car (cadr bindings)))
   (check-false (eq? binder-name 'shifted))
-  (check-eq? (cadddr bindings) 'Int)
+  (check-eq? (cadr (cadr bindings)) 'Int)
   (check-eq? (cadr (caddr expanded)) binder-name))
 
 ;; --- (f) arity error ------------------------------------------------------
@@ -338,8 +338,8 @@
    macro-definition-site-fixture-source
    '(define-target js)
    (list 'ns 'test-consumer (list ':require require-spec))
-   (list 'defrecord 'Box (br 'value ANN-MARKER 'Int))
-   (list 'defn 'normalize (br 'value ANN-MARKER 'Int) '-> 'Int 'value)
+   (list 'defrecord 'Box (br (list 'value 'Int)))
+   (list 'defn 'normalize (br (list 'value 'Int)) 'Int 'value)
    invocation))
 
 (define (check-imported-define-box prog expected-prefix expected-name)

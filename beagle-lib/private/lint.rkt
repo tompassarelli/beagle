@@ -64,8 +64,6 @@
   (cond
     [(def-form? f) (lint-def f)]
     [(defonce-form? f) (lint-defonce f)]
-    [(defn-form? f) (lint-defn f)]
-    [(defn-multi? f) (lint-defn-multi f)]
     [else (void)]))
 
 (define (warn fmt . args)
@@ -91,29 +89,6 @@
     (warn "untyped defonce ~a (consider adding `NAME Type`)"
           (defonce-form-name f))))
 
-(define (lint-defn f)
-  (define name (defn-form-name f))
-  (define params (defn-form-params f))
-  (define untyped-params
-    (for/list ([p (in-list params)]
-               #:when (and (param? p) (not (param-type p))))
-      (param-name p)))
-  (unless (null? untyped-params)
-    (warn "defn ~a has untyped parameter(s): ~a (consider adding `(name Type)`)"
-          name
-          (string-join (map symbol->string untyped-params) ", "))))
-
-(define (lint-defn-multi f)
-  (define name (defn-multi-name f))
-  (for ([a (in-list (defn-multi-arities f))])
-    (define untyped-params
-      (for/list ([p (in-list (arity-clause-params a))]
-                 #:when (and (param? p) (not (param-type p))))
-        (param-name p)))
-    (unless (null? untyped-params)
-      (warn "defn ~a has untyped parameter(s): ~a"
-            name (string-join (map symbol->string untyped-params) ", ")))))
-
 (define (string-join xs sep)
   (cond
     [(null? xs) ""]
@@ -123,11 +98,8 @@
 ;; --- shadowed bindings -----------------------------------------------------
 
 (define (add-param-to-scope! p scope)
-  (cond
-    [(or (map-destructure? p) (seq-destructure? p))
-     (for ([n (in-list (destructure-bound-names p))])
-       (hash-set! scope n #t))]
-    [else (hash-set! scope (param-name p) #t)]))
+  (for ([name (in-list (binding-target-bound-names p))])
+    (hash-set! scope name #t)))
 
 (define (lint-shadows prog)
   (for ([form (in-list (program-forms prog))])
@@ -170,37 +142,24 @@
     [(fn-form params _rest-p _ body)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
-       (cond
-         [(or (map-destructure? p) (seq-destructure? p))
-          (for ([n (in-list (destructure-bound-names p))])
-            (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
-            (hash-set! inner n #t))]
-         [else
-          (define n (param-name p))
-          (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
-          (hash-set! inner n #t)]))
+       (for ([n (in-list (binding-target-bound-names p))])
+         (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
+         (hash-set! inner n #t)))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(let-form bindings body)
      (define inner (scope-copy scope))
      (for ([b (in-list bindings)])
-       (define n (let-binding-name b))
-       (cond
-         [(map-destructure? n)
-          (for ([k (in-list (map-destructure-keys n))])
-            (when (hash-has-key? scope k) (warn-shadow "let binding" k ctx))
-            (hash-set! inner k #t))]
-         [(seq-destructure? n)
-          (for ([k (in-list (seq-destructure-names n))])
-            (when (hash-has-key? scope k) (warn-shadow "let binding" k ctx))
-            (hash-set! inner k #t))
-          (when (seq-destructure-rest-name n)
-            (define rn (seq-destructure-rest-name n))
-            (when (hash-has-key? scope rn) (warn-shadow "let binding" rn ctx))
-            (hash-set! inner rn #t))]
-         [else
-          (when (hash-has-key? scope n) (warn-shadow "let binding" n ctx))
-          (hash-set! inner n #t)])
-       (check-shadow (let-binding-value b) inner ctx))
+       ;; Initializers and :or defaults see the bindings installed by earlier
+       ;; entries, never the names introduced by this entry itself.
+       (check-shadow (let-binding-value b) inner ctx)
+       (for ([default (in-list
+                       (destructure-or-default-exprs (let-binding-name b)))])
+         (check-shadow default inner ctx))
+       (for ([name (in-list
+                    (binding-target-bound-names (let-binding-name b)))])
+         (when (hash-has-key? inner name)
+           (warn-shadow "let binding" name ctx))
+         (hash-set! inner name #t)))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(binding-form bindings body)
      ;; `binding` introduces no new locals — targets reference existing
@@ -310,9 +269,10 @@
     [(with-open-form bindings body)
      (define inner (scope-copy scope))
      (for ([b (in-list bindings)])
-       (when (symbol? (let-binding-name b))
-         (hash-set! inner (let-binding-name b) #t))
-       (check-shadow (let-binding-value b) inner ctx))
+       (check-shadow (let-binding-value b) inner ctx)
+       (for ([name (in-list
+                    (binding-target-bound-names (let-binding-name b)))])
+         (hash-set! inner name #t)))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(doto-form target forms)
      (check-shadow target scope ctx)
@@ -340,10 +300,12 @@
      (define inner (scope-copy scope))
      (for ([c (in-list clauses)])
        (when (for-binding? c)
-         (define n (for-binding-name c))
-         (when (hash-has-key? scope n)
-           (warn-shadow "doseq binding" n ctx))
-         (hash-set! inner n #t))
+         (check-shadow (for-binding-expr c) inner ctx)
+         (for ([name (in-list
+                      (binding-target-bound-names (for-binding-name c)))])
+           (when (hash-has-key? inner name)
+             (warn-shadow "doseq binding" name ctx))
+           (hash-set! inner name #t)))
        (when (for-when? c)
          (check-shadow (for-when-test c) inner ctx)))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]

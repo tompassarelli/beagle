@@ -1209,10 +1209,11 @@ CLJ
 ;; Used by params, let-bindings, for-bindings.
 (define (emit-binding-name name)
   (cond
+    [(param? name)           (emit-binding-name (param-name name))]
     [(map-destructure? name) (emit-map-destructure name)]
     [(seq-destructure? name) (emit-seq-destructure name)]
     [(symbol? name)          (symbol->string name)]
-    [else                    (symbol->string (param-name name))]))
+    [else (error 'beagle-clj "unsupported binding target: ~v" name)]))
 
 (define (emit-args args)
   (cond
@@ -1224,7 +1225,12 @@ CLJ
 ;; Emit one param with an optional type-hint prefix. tag-prefix is a
 ;; pre-formatted string like "^Int " or "" — see clj-tag-prefix.
 (define (emit-param/tag p tag-prefix)
-  (string-append tag-prefix (emit-param p)))
+  ;; Clojure type hints attach to identifier binders.  An aggregate annotation
+  ;; on a destructuring pattern is a Beagle checking boundary, not a JVM local
+  ;; tag, so emitting it on `[...]` / `{...}` would be invalid host syntax.
+  (if (symbol? (param-binding-target p))
+      (string-append tag-prefix (emit-param p))
+      (emit-param p)))
 
 (define (emit-params params)
   (string-join (map emit-param params) " "))

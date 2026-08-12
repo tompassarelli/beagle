@@ -77,6 +77,27 @@
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int)
   (check-equal? (length (defn-form-params f)) 1))
 
+(test-case "template hygiene recursively renames typed destructuring binders"
+  (define src
+    (string-append
+     "(defrecord Config [(host String) (port Int)])\n"
+     "(defmacro mk []\n"
+     "  `(defn connect [([[left right] {:keys [host port] :as cfg}]\n"
+     "                   (HVec (HVec Int Int) Config))]\n"
+     "     String\n"
+     "     host))\n"
+     "(mk)\n"))
+  (define f (cadr (program-forms (parse-src src))))
+  (define target (param-name (car (defn-form-params f))))
+  (define nested-seq (car (seq-destructure-names target)))
+  (define nested-map (cadr (seq-destructure-names target)))
+  (define left-name (car (seq-destructure-names nested-seq)))
+  (define host-name (car (map-destructure-keys nested-map)))
+  (check-false (eq? left-name 'left))
+  (check-false (eq? host-name 'host))
+  (check-false (eq? (map-destructure-as-name nested-map) 'cfg))
+  (check-eq? (type-app-ctor (param-type (car (defn-form-params f)))) 'HVec))
+
 ;; --- (2) canonical constructor: ann in a procedural defmacro ----------------
 
 (define ANN-CTOR-SRC

@@ -650,12 +650,15 @@
               (copy-type (type-fn-ret type)))]
     [(type-poly? type)
      (define bounds (type-poly-bounds type))
-     (type-poly
-      (type-poly-vars type)
-      (copy-type (type-poly-body type))
-      (and bounds
-           (for/hasheq ([(name bound) (in-hash bounds)])
-             (values name (copy-type bound)))))]
+     (define copied
+       (type-poly
+        (type-poly-vars type)
+        (copy-type (type-poly-body type))
+        (and bounds
+             (for/hasheq ([(name bound) (in-hash bounds)])
+               (values name (copy-type bound))))))
+     (set-type-poly-origin! copied (type-poly-origin type))
+     copied]
     [else type]))
 
 (define (require-specs-in datum)
@@ -4917,7 +4920,8 @@
        (when (< (length clause-d) 3)
          (error 'beagle "catch clause needs (catch (name ExType) body...)"))
        (define binding (cadr clause-d))
-       (unless (structured-binding? binding)
+       (unless (and (structured-binding? binding)
+                    (symbol? (car binding)))
          (raise-parse-error
           'inline-type-annotation
           "catch binding must be `(name ExType)`, got: ~v"
@@ -5034,12 +5038,29 @@
                  (structured-binding? (car after-amp)))
             (define-values (name type)
               (parse-structured-binding (car after-amp) "rest parameter"))
+            (unless (symbol? name)
+              (raise-parse-error
+               'inline-type-annotation
+               "rest parameter must bind one name, not a destructuring pattern"))
             (param name type)]
            [(ormap annotation-marker? after-amp)
             (raise-retired-binding-annotation "rest parameter")]
            [else
             (error 'beagle "bad rest parameter after &: ~v"
                    (if (= (length after-amp) 1) (car after-amp) after-amp))])))
+  (define all-bound
+    (append (apply append (map binding-target-bound-names fixed))
+            (if rest-p (binding-target-bound-names rest-p) '())))
+  (define duplicate
+    (for/fold ([seen (seteq)] [dup #f] #:result dup)
+              ([name (in-list all-bound)])
+      (values (set-add seen name)
+              (or dup (and (set-member? seen name) name)))))
+  (when duplicate
+    (raise-parse-error
+     'duplicate
+     "parameter list binds `~a` more than once; every nested destructuring name and :as alias must be unique"
+     duplicate))
   (values fixed rest-p))
 
 ;; Walks param items left-to-right. Bracket and map destructures are single
@@ -5100,11 +5121,14 @@
   (define key-names (bracket-body (cadr body)))
   (unless (andmap symbol? key-names)
     (error 'beagle "{:keys [...]} entries must be symbols, got: ~v" key-names))
+  (for ([name (in-list key-names)])
+    (validate-identifier! name "map destructuring binding"))
   (let loop ([rest (cddr body)] [as-name #f] [or-defaults '()])
     (cond
       [(null? rest)
        (map-destructure key-names as-name or-defaults)]
       [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
+       (validate-identifier! (cadr rest) "map destructuring :as binding")
        (loop (cddr rest) (cadr rest) or-defaults)]
       [(and (eq? (car rest) ':or) (pair? (cdr rest)) (map-tagged? (cadr rest)))
        (define entries (map-body (cadr rest)))
@@ -5368,8 +5392,10 @@
         [(eq? (car items) '&)
          (unless (and (= (length (cdr items)) 1) (symbol? (cadr items)))
            (error 'beagle "sequential destructure: & must be followed by exactly one symbol"))
+         (validate-identifier! (cadr items) "sequential destructuring rest binding")
          (values (reverse acc) (cadr items))]
         [(symbol? (car items))
+         (validate-identifier! (car items) "sequential destructuring binding")
          (loop (cdr items) (cons (car items) acc))]
         [(bracketed? (car items))
          (loop (cdr items) (cons (parse-seq-destructure (car items)) acc))]

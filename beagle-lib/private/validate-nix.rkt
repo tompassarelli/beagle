@@ -285,8 +285,10 @@
 
   ;; Extract binding names from a let-form
   (define (let-scope bindings)
-    (for/hash ([b (in-list bindings)])
-      (values (symbol->string (let-binding-name b)) #t)))
+    (for*/hash ([b (in-list bindings)]
+                [name (in-list
+                       (binding-target-bound-names (let-binding-name b)))])
+      (values (symbol->string name) #t)))
 
   ;; Extract formal names from nix-fn-set
   (define (fn-set-scope formals)

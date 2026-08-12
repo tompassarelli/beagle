@@ -49,13 +49,20 @@
 ;; same meaning native on both surfaces. Sequential destructuring has no
 ;; nix analog: pointed error naming the let-binding replacement.
 (define (nix-param-pattern p depth)
+  (define target (param-binding-target p))
   (cond
-    [(param? p) (format "~a:" (mangle-name (param-name p)))]
-    [(map-destructure? p)
-     (define ors (map-destructure-or-defaults p))
-     (define as-name (map-destructure-as-name p))
+    [(symbol? target) (format "~a:" (mangle-name target))]
+    [(map-destructure? target)
+     (define ors (map-destructure-or-defaults target))
+     (define as-name (map-destructure-as-name target))
+     (when (null? (map-destructure-keys target))
+       (error 'emit-nix
+              "empty map destructuring parameters are not supported by the nix backend — bind the aggregate to a name"))
+     (unless (= (length ors) (length (map-destructure-keys target)))
+       (error 'emit-nix
+              "map destructuring parameters require :or defaults for every key on the nix backend — Nix attrset patterns otherwise reject missing keys instead of binding nil"))
      (define entries
-       (for/list ([k (in-list (map-destructure-keys p))])
+       (for/list ([k (in-list (map-destructure-keys target))])
          (unless (symbol? k)
            (error 'beagle
                   "nested map destructuring in params is not supported by the nix backend — destructure the outer level and bind the rest with let"))
@@ -63,8 +70,10 @@
          (if dflt
              (format "~a ? ~a" (mangle-name k) (emit-expr (cdr dflt) depth))
              (mangle-name k))))
-     (format "{ ~a, ... }~a:"
-             (string-join entries ", ")
+     (format "{ ~a... }~a:"
+             (if (null? entries)
+                 ""
+                 (string-append (string-join entries ", ") ", "))
              (if as-name (format " @ ~a" (mangle-name as-name)) ""))]
     [else
      (error 'beagle
@@ -865,10 +874,12 @@
    (indent depth) (emit-body body depth)))
 
 (define (emit-binding-target b)
+  (define target (param-binding-target b))
   (cond
-    [(symbol? b) (mangle-name b)]
-    [(param? b) (mangle-name (param-name b))]
-    [else (format "~v" b)]))
+    [(symbol? target) (mangle-name target)]
+    [else
+     (error 'emit-nix
+            "destructuring in let bindings is not supported by the nix backend — bind the aggregate to a name, then project its fields explicitly")]))
 
 ;; --- call ------------------------------------------------------------------
 
@@ -1342,7 +1353,11 @@
        (define c (car cs))
        (cond
          [(for-binding? c)
-          (define var (mangle-name (for-binding-name c)))
+          (define target (for-binding-name c))
+          (unless (symbol? target)
+            (error 'emit-nix
+                   "destructuring in for bindings is not supported by the nix backend — bind each element to a name, then project it in :let"))
+          (define var (mangle-name target))
           (define coll (emit-expr (for-binding-expr c) depth))
           (loop (cdr cs)
                 (format "builtins.concatMap (~a: ~a) ~a"
@@ -1356,6 +1371,9 @@
           (define ind (indent (+ depth 1)))
           (define bind-strs
             (for/list ([b (in-list binds)])
+              (unless (symbol? (let-binding-name b))
+                (error 'emit-nix
+                       "destructuring in for :let is not supported by the nix backend — bind the aggregate to a name, then project it explicitly"))
               (format "~a~a = ~a;" ind
                       (mangle-name (let-binding-name b))
                       (emit-expr (let-binding-value b) (+ depth 1)))))
@@ -1372,6 +1390,10 @@
 (define (emit-loop e depth)
   (define bindings (loop-form-bindings e))
   (define body (loop-form-body e))
+
+  (unless (andmap (lambda (b) (symbol? (let-binding-name b))) bindings)
+    (error 'emit-nix
+           "destructuring in loop bindings is not supported by the nix backend — bind the aggregate to one loop name, then project inside the body"))
 
   (define param-names
     (for/list ([b (in-list bindings)])

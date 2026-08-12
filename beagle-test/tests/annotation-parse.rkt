@@ -32,6 +32,9 @@
 (define-syntax-rule (err/rx name rx src)
   (test-case name (check-exn rx (lambda () (parse-src src)))))
 
+(define-syntax-rule (check-err/rx name rx src)
+  (test-case name (check-exn rx (lambda () (check-src src)))))
+
 ;; Every binding-bearing surface uses `(name Type)` as one structural datum.
 (ok "def"                     "(def answer Int 42)")
 (ok "def + docstring"         "(def answer Int \"doc\" 42)")
@@ -44,6 +47,14 @@
     "(defn f [([x y] (HVec Float Float)) opts] Float x)")
 (ok "typed map destructuring parameter"
     "(defrecord Config [(host String) (port Int)])\n(defn f [({:keys [host port]} Config) (timeout Int)] String host)")
+(ok "nested heterogeneous destructuring parameter"
+    (string-append
+     "(defrecord Config [(host String)])\n"
+     "(defn f [([[x y] {:keys [host]}] (HVec (HVec Int Float) Config))] String host)"))
+(ok "explicit destructuring Any is a dynamic boundary"
+    "(defn f [([x {:keys [y]}] Any)] Any y)")
+(ok "homogeneous map default closes missing-key nullability"
+    "(defn f [({:keys [x] :or {x 0}} (Map Keyword Int))] Int x)")
 (ok "typed rest param"        "(defn r [(x Int) & (more (Vec Int))] Int x)")
 (ok "bare rest param"         "(defn r [x & more] Any more)")
 (ok "function type param"     "(defn hof [(cb [Int -> String])] String (cb 1))")
@@ -112,6 +123,67 @@
 (err/rx "record fields cannot destructure"
         #rx"field name must be a symbol"
         "(defrecord Bad [([x y] (HVec Int Int))])")
+(err/rx "rest parameter cannot destructure"
+        #rx"rest parameter must bind one name"
+        "(defn f [x & ([y z] (HVec Int Int))] Int x)")
+(err/rx "catch cannot destructure"
+        #rx"catch binding must be"
+        "(defn f [] Int (try 1 (catch ([e more] (HVec Exception Any)) 0)))")
+(err/rx "duplicate nested parameter name rejected"
+        #rx"binds `x` more than once"
+        "(defn f [([x x] (HVec Int Int))] Int x)")
+(err/rx "duplicate pattern and scalar parameter rejected"
+        #rx"binds `x` more than once"
+        "(defn f [([x y] (HVec Int Int)) (x Int)] Int x)")
+(err/rx "duplicate map key and as name rejected"
+        #rx"binds `x` more than once"
+        "(defn f [({:keys [x] :as x} (Map Keyword Int))] Any x)")
+(err/rx "compiler identifier prefix is reserved"
+        #rx"reserved compiler identifier prefix"
+        "(defn f [($beagle$param$0 Int)] Int $beagle$param$0)")
+
+(check-err/rx "nominal record rejects positional destructuring"
+              #rx"nominal records require"
+              "(defrecord Point [(x Int) (y Int)])\n(defn f [([x y] Point)] Int x)")
+(check-err/rx "HVec arity mismatch is pointed"
+              #rx"pattern requires 3 positional values, but the tuple has 2"
+              "(defn f [([x y z] (HVec Int Int))] Int x)")
+(check-err/rx "unknown record field is pointed"
+              #rx"field :missing is not present"
+              "(defrecord Config [(host String)])\n(defn f [({:keys [missing]} Config)] Any missing)")
+(check-err/rx "Map destructuring requires keyword-compatible keys"
+              #rx"requires Keyword-compatible map keys"
+              "(defn f [({:keys [x]} (Map String Int))] Any x)")
+(check-err/rx "Vec positional leaf is nullable"
+              #rx"expected return Int, got Int[?]"
+              "(defn f [([x] (Vec Int))] Int x)")
+(check-err/rx "List positional leaf is nullable"
+              #rx"expected return Int, got Int[?]"
+              "(defn f [([x] (List Int))] Int x)")
+(check-err/rx "Map key without default is nullable"
+              #rx"expected return Int, got Int[?]"
+              "(defn f [({:keys [x]} (Map Keyword Int))] Int x)")
+(check-err/rx "wrong map default type is rejected"
+              #rx"destructuring default for x: expected Int, got String"
+              "(defn f [({:keys [x] :or {x \"bad\"}} (Map Keyword Int))] Int x)")
+(test-case "throwable record fields map-destructure by keyword"
+  (check-not-exn
+   (lambda ()
+     (parameterize ([current-check-profile 3])
+       (type-check!
+        (parse-src
+         (string-append
+          "(defunion :throwable Boom (Boom [(message String)]))\n"
+          "(defn f [({:keys [message]} Boom)] String message)")))))))
+(test-case "parametric nominal aggregate projects substituted map fields"
+  (check-not-exn
+   (lambda ()
+     (parameterize ([current-check-profile 3])
+       (type-check!
+        (parse-src
+         (string-append
+          "(defunion (Box T) (BoxValue [(value T)]))\n"
+          "(defn unbox [({:keys [value]} (Box String))] String value)")))))))
 
 ;; There is no compatibility parser for either retired punctuation form.
 (err/rx "flat colon binding rejected"

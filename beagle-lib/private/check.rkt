@@ -746,6 +746,8 @@
     (hash-clear! ENUM-TYPES)
     (hash-clear! PARAMETRIC-UNIONS)
     (hash-clear! PARAMETRIC-MEMBER-UNION)
+    (define binder-type-tbl (make-hasheq))
+    (register-program-binder-type-table! prog binder-type-tbl)
     (define env (build-initial-env prog))
     (define nix-schema
       (and (eq? (program-target prog) 'nix)
@@ -760,6 +762,7 @@
                    [current-semantic-contracts (program-semantic-contracts prog)]
                    [current-error-definitions (hasheq)]
                    [current-raising-functions (hasheq)]
+                   [current-binder-type-table binder-type-tbl]
                    [current-nixos-schema nix-schema])
       (define-values (regex-bindings regex-string-ops)
         (prepare-regex-contracts! prog))
@@ -1796,8 +1799,15 @@
              (unless (null? fields)
                (hash-set! RECORD-FIELDS m
                           (for/hasheq ([fld (in-list fields)])
-                            (values (param-name fld) (or (param-type fld) ANY))))
-               (hash-set! RECORD-FIELD-ORDER m (map param-name fields))
+                            (values
+                             (string->symbol
+                              (string-append ":" (symbol->string (param-name fld))))
+                             (or (param-type fld) ANY))))
+               (hash-set! RECORD-FIELD-ORDER m
+                          (map (lambda (fld)
+                                 (string->symbol
+                                  (string-append ":" (symbol->string (param-name fld)))))
+                               fields))
                (hash-set! env (string->symbol (string-append "->" (symbol->string m)))
                           (type-fn (map (lambda (f) (or (param-type f) ANY)) fields) #f (type-prim m)))))))]
       [(defscalar-form name backing preds)
@@ -1904,6 +1914,209 @@
   (cond
     [(or (map-destructure? p) (seq-destructure? p)) ANY]
     [else (or (param-type p) ANY)]))
+
+;; A typed destructuring binder annotates the value entering the pattern.  The
+;; pattern's bound names receive projections of that aggregate type; they must
+;; never inherit a blanket Any merely because the surface binder is not a
+;; symbol.  Explicit Any remains the intentional dynamic escape hatch.
+(define (destructure-type-error pattern aggregate where message [src #f])
+  (raise-diag
+   'type-mismatch
+   (format "~a destructuring ~a: ~a (aggregate type ~a)"
+           where
+           (if (map-destructure? pattern) "map" "sequential")
+           message
+           (type->string aggregate))
+   (hasheq 'expected-shape
+           (if (map-destructure? pattern)
+               "record or Map"
+               "HVec, Vec, or List")
+           'actual (type->string aggregate))
+   #:src src))
+
+(define (record-field-map-for-type aggregate)
+  (cond
+    [(and (type-prim? aggregate)
+          (hash-has-key? RECORD-FIELDS (type-prim-name aggregate)))
+     (hash-ref RECORD-FIELDS (type-prim-name aggregate))]
+    [(and (type-app? aggregate)
+          (hash-has-key? RECORD-FIELDS (type-app-ctor aggregate)))
+     (hash-ref RECORD-FIELDS (type-app-ctor aggregate))]
+    [else #f]))
+
+(define (record-field-type-for aggregate keyword)
+  (cond
+    [(record-field-map-for-type aggregate)
+     => (lambda (field-map)
+          (define found (hash-ref field-map keyword #f))
+          (and found (project-record-field-type found aggregate)))]
+    [(and (type-prim? aggregate)
+          (hash-ref UNION-MEMBERS (type-prim-name aggregate) #f))
+     (define members (hash-ref UNION-MEMBERS (type-prim-name aggregate)))
+     (define declaring
+       (filter (lambda (member)
+                 (and (hash-has-key? RECORD-FIELDS member)
+                      (hash-has-key? (hash-ref RECORD-FIELDS member) keyword)))
+               members))
+     (and (pair? declaring)
+          (= (length declaring) (length members))
+          (apply merge-types
+                 (for/list ([member (in-list declaring)])
+                   (hash-ref (hash-ref RECORD-FIELDS member) keyword))))]
+    [(and (type-app? aggregate)
+          (hash-ref UNION-MEMBERS (type-app-ctor aggregate) #f))
+     (define members (hash-ref UNION-MEMBERS (type-app-ctor aggregate)))
+     (define declaring
+       (filter (lambda (member)
+                 (and (hash-has-key? RECORD-FIELDS member)
+                      (hash-has-key? (hash-ref RECORD-FIELDS member) keyword)))
+               members))
+     (and (pair? declaring)
+          (= (length declaring) (length members))
+          (apply merge-types
+                 (for/list ([member (in-list declaring)])
+                   (resolve-parametric-field-type
+                    (hash-ref (hash-ref RECORD-FIELDS member) keyword)
+                    aggregate))))]
+    [else #f]))
+
+(define (project-record-field-type field-type aggregate)
+  (if (type-app? aggregate)
+      (resolve-parametric-field-type field-type aggregate)
+      field-type))
+
+;; Mutates OUT by installing every name introduced by PATTERN.  This routine is
+;; shared by parameters and local binding forms so nested patterns, :as, and
+;; :or defaults have one type meaning everywhere.
+(define (bind-destructure-type! out pattern aggregate where [src #f]
+                                [binding-owner pattern])
+  (define (recur target target-type)
+    (cond
+      [(symbol? target)
+       (hash-set! out target target-type)
+       (store-binder-type! binding-owner target target-type)
+       (store-binder-type! pattern target target-type)]
+      [(any-type? target-type)
+       ;; Explicit `(pattern Any)` is the documented dynamic boundary.
+       (for ([name (in-list (destructure-bound-names target))])
+         (hash-set! out name ANY)
+         (store-binder-type! binding-owner name ANY)
+         (store-binder-type! pattern name ANY))
+       (for ([default (in-list (destructure-or-default-exprs target))])
+         (infer-expr default out))]
+      [(seq-destructure? target)
+       (define names (seq-destructure-names target))
+       (define-values (item-types rest-type)
+         (cond
+           [(and (type-app? target-type)
+                 (eq? (type-app-ctor target-type) 'HVec))
+            (define elems (type-app-args target-type))
+            (when (> (length names) (length elems))
+              (destructure-type-error
+               target target-type where
+               (format "pattern requires ~a positional values, but the tuple has ~a"
+                       (length names) (length elems))
+               src))
+            (values (take elems (length names))
+                    (type-app 'HVec (drop elems (length names))))]
+           [(and (type-app? target-type)
+                 (memq (type-app-ctor target-type) '(Vec List))
+                 (= (length (type-app-args target-type)) 1))
+            ;; A homogeneous sequence may be empty or shorter than the
+            ;; pattern. Missing positions bind nil on every backend.
+            (values (make-list (length names)
+                               (nullable-type (car (type-app-args target-type))))
+                    target-type)]
+           [else
+            (destructure-type-error
+             target target-type where
+             "positional patterns require a tuple or homogeneous sequential value; nominal records require {:keys [...]}"
+             src)]))
+       (for ([name (in-list names)] [item-type (in-list item-types)])
+         (recur name item-type))
+       (when (seq-destructure-rest-name target)
+         (define rest-name (seq-destructure-rest-name target))
+         (hash-set! out rest-name rest-type)
+         (store-binder-type! binding-owner rest-name rest-type)
+         (store-binder-type! pattern rest-name rest-type))]
+      [(map-destructure? target)
+       (define field-map (record-field-map-for-type target-type))
+       (define nominal-union?
+         (or (and (type-prim? target-type)
+                  (hash-ref UNION-MEMBERS (type-prim-name target-type) #f))
+             (and (type-app? target-type)
+                  (hash-ref UNION-MEMBERS (type-app-ctor target-type) #f))))
+       (define map-value-type
+         (and (type-app? target-type)
+              (eq? (type-app-ctor target-type) 'Map)
+              (= (length (type-app-args target-type)) 2)
+              (let ([key-type (car (type-app-args target-type))])
+                (unless (type-compatible? (type-prim 'Keyword) key-type)
+                  (destructure-type-error
+                   target target-type where
+                   (format "{:keys [...]} requires Keyword-compatible map keys, got ~a"
+                           (type->string key-type))
+                   src))
+                (cadr (type-app-args target-type)))))
+       (unless (or field-map nominal-union? map-value-type)
+         (destructure-type-error
+          target target-type where
+          "key patterns require a nominal record or homogeneous Map"
+          src))
+       (define projected (make-hasheq))
+       (define default-expressions (make-hasheq))
+       ;; Defaults are checked against the non-null aggregate value type before
+       ;; the resulting binding is installed. A valid default makes a Map key
+       ;; present from the body's perspective.
+       (for ([entry (in-list (map-destructure-or-defaults target))])
+         (hash-set! default-expressions (car entry) (cdr entry)))
+       (for ([name (in-list (map-destructure-keys target))])
+         (define keyword
+           (string->symbol (string-append ":" (symbol->string name))))
+         (define field-type
+           (cond
+             [(or field-map nominal-union?)
+              (define found (record-field-type-for target-type keyword))
+              (unless found
+                (destructure-type-error
+                 target target-type where
+                 (format "field ~a is not present on every member of the nominal aggregate" keyword)
+                 src))
+              found]
+             ;; A homogeneous Map does not prove key presence. A compatible
+             ;; :or default closes that absence below; otherwise the binding
+             ;; remains nullable.
+             [else
+              (if (hash-has-key? default-expressions name)
+                  map-value-type
+                  (nullable-type map-value-type))]))
+         (when (hash-has-key? default-expressions name)
+           (define actual
+             (infer-expr (hash-ref default-expressions name) out))
+           (define expected
+             (if (or field-map nominal-union?) field-type map-value-type))
+           (unless (type-compatible? actual expected)
+             (raise-diag
+              'type-mismatch
+              (format "~a destructuring default for ~a: expected ~a, got ~a"
+                      where name (type->string expected) (type->string actual))
+              (hash-set (type-mismatch-details expected actual)
+                        'name (symbol->string name))
+              #:src (or (src-for (hash-ref default-expressions name)) src))))
+         (hash-set! projected name field-type)
+         (hash-set! out name field-type)
+         (store-binder-type! binding-owner name field-type)
+         (store-binder-type! pattern name field-type))
+       (when (map-destructure-as-name target)
+         (define as-name (map-destructure-as-name target))
+         (hash-set! out as-name target-type)
+         (store-binder-type! binding-owner as-name target-type)
+         (store-binder-type! pattern as-name target-type))
+       ]
+      [else
+       (error 'beagle "unsupported binding target: ~v" target)]))
+  (recur pattern aggregate)
+  out)
 
 (define (declared-return-compatible? actual expected)
   (or (type-compatible? actual expected)
@@ -2089,7 +2302,13 @@
        (for ([dex (in-list (destructure-or-default-exprs p))])
          (infer-expr dex out))]
       [else
-       (hash-set! out (param-name p) (or (param-type p) ANY))]))
+       (define target (param-name p))
+       (define declared (or (param-type p) ANY))
+       (if (or (map-destructure? target) (seq-destructure? target))
+           (bind-destructure-type! out target declared "parameter" (src-for p) p)
+           (begin
+             (hash-set! out target declared)
+             (store-binder-type! p target declared)))]))
   out)
 
 (define (body-diverges? body)
@@ -3330,14 +3549,7 @@
      (for ([c (in-list (for-form-clauses e))])
        (cond
          [(for-binding? c)
-          (define coll-type (infer-expr (for-binding-expr c) body-env))
-          (define elem-type
-            (if (and (type-app? coll-type)
-                     (memq (type-app-ctor coll-type) '(Vec List Set))
-                     (= (length (type-app-args coll-type)) 1))
-              (car (type-app-args coll-type))
-              ANY))
-          (hash-set! body-env (for-binding-name c) (or (for-binding-type c) elem-type))]
+          (extend-with-for-binding! body-env c)]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]
          ;; `:let` takes let's own binding grammar, so it gets let's enforcement.
          [(for-let? c)
@@ -3525,14 +3737,7 @@
      (for ([c (in-list (doseq-form-clauses e))])
        (cond
          [(for-binding? c)
-          (define coll-type (infer-expr (for-binding-expr c) body-env))
-          (define elem-type
-            (if (and (type-app? coll-type)
-                     (memq (type-app-ctor coll-type) '(Vec List Set))
-                     (= (length (type-app-args coll-type)) 1))
-              (car (type-app-args coll-type))
-              ANY))
-          (hash-set! body-env (for-binding-name c) (or (for-binding-type c) elem-type))]
+          (extend-with-for-binding! body-env c)]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]
          ;; `:let` takes let's own binding grammar, so it gets let's enforcement.
          [(for-let? c)
@@ -3930,13 +4135,12 @@
   ANY)
 
 (define (infer-jst-method e env)
-  (define body-env (mut-copy env))
+  (define all-params
+    (if (jst-method-rest-param e)
+        (append (jst-method-params e) (list (jst-method-rest-param e)))
+        (jst-method-params e)))
+  (define body-env (extend-with-params env all-params))
   (hash-set! body-env 'this ANY)
-  (for ([p (in-list (jst-method-params e))])
-    (when (param? p)
-      (hash-set! body-env (param-name p) (or (param-type p) ANY))))
-  (when (jst-method-rest-param e)
-    (hash-set! body-env (jst-method-rest-param e) (type-app 'Vec (list ANY))))
   (define body (jst-method-body e))
   (define actual-ret (jst-infer-body body body-env))
   (define expected-ret (jst-method-return-type e))
@@ -4046,34 +4250,19 @@
     (define declared (let-binding-type b))
     (define bname (let-binding-name b))
     (cond
-      [(map-destructure? bname)
-       (define rec-name (and (type-prim? inferred) (type-prim-name inferred)))
-       (define field-map (and rec-name (hash-ref RECORD-FIELDS rec-name #f)))
-       (for ([k (in-list (map-destructure-keys bname))])
-         (define kw (string->symbol (string-append ":" (symbol->string k))))
-         (define field-type (and field-map (hash-ref field-map kw #f)))
-         (hash-set! out k (or field-type ANY)))
-       (when (map-destructure-as-name bname)
-         (hash-set! out (map-destructure-as-name bname) (or declared inferred ANY)))
-       (for ([dex (in-list (destructure-or-default-exprs bname))])
-         (infer-expr dex out))]
-      [(seq-destructure? bname)
-       (define elem-type
-         (if (and (type-app? inferred)
-                  (memq (type-app-ctor inferred) '(Vec List))
-                  (= (length (type-app-args inferred)) 1))
-           (car (type-app-args inferred))
-           ANY))
-       (for ([n (in-list (seq-destructure-names bname))])
-         (cond
-           [(symbol? n) (hash-set! out n elem-type)]
-           [else
-            ;; Nested pattern: bind every inner name as Any (element types
-            ;; don't project through nesting in v0 inference).
-            (for ([inner (in-list (destructure-bound-names n))])
-              (hash-set! out inner ANY))]))
-       (when (seq-destructure-rest-name bname)
-         (hash-set! out (seq-destructure-rest-name bname) (or inferred ANY)))]
+      [(or (map-destructure? bname) (seq-destructure? bname))
+       (when declared
+         (unless (or (check-hvec-literal (let-binding-value b) declared out
+                                         (src-for (let-binding-value b)))
+                     (type-compatible? inferred declared))
+           (raise-diag
+            'let-binding
+            (format "destructured let binding: expected aggregate ~a, got ~a"
+                    (type->string declared) (type->string inferred))
+            (type-mismatch-details declared inferred)
+            #:src (src-for (let-binding-value b)))))
+       (bind-destructure-type! out bname (or declared inferred)
+                               "let binding" (src-for (let-binding-value b)))]
       [else
        (when declared
          (unless (or (check-atom-ctor (let-binding-value b) declared out
@@ -4088,6 +4277,40 @@
        (check-binding-accessor-mismatch bname (let-binding-value b) out)
        (hash-set! out bname (or declared inferred ANY))]))
   out)
+
+(define (collection-element-type collection-type)
+  (cond
+    [(and (type-app? collection-type)
+          (memq (type-app-ctor collection-type) '(Vec List Set))
+          (= (length (type-app-args collection-type)) 1))
+     (car (type-app-args collection-type))]
+    [(and (type-app? collection-type)
+          (eq? (type-app-ctor collection-type) 'HVec)
+          (pair? (type-app-args collection-type)))
+     (apply merge-types (type-app-args collection-type))]
+    [else ANY]))
+
+(define (extend-with-for-binding! body-env binding)
+  (define collection-type
+    (infer-expr (for-binding-expr binding) body-env))
+  (define inferred-element (collection-element-type collection-type))
+  (define declared (for-binding-type binding))
+  (define target (for-binding-name binding))
+  (when (and declared
+             (not (type-compatible? inferred-element declared)))
+    (raise-diag
+     'type-mismatch
+     (format "for/doseq binding: expected element ~a, got ~a from ~a"
+             (type->string declared)
+             (type->string inferred-element)
+             (type->string collection-type))
+     (type-mismatch-details declared inferred-element)
+     #:src (src-for (for-binding-expr binding))))
+  (define effective (or declared inferred-element))
+  (if (or (map-destructure? target) (seq-destructure? target))
+      (bind-destructure-type! body-env target effective "for/doseq binding"
+                              (src-for binding))
+      (hash-set! body-env target effective)))
 
 ;; Variadic-aware argument checking.
 ;; --- numeric-preserving arithmetic (cracks thread 20260613013145 #3) ---------
@@ -4351,6 +4574,8 @@
     ;; beagle-explain-type). When off, type-tbl is #f so store-type! no-ops.
     (define type-tbl (and capture-types? (make-hasheq)))
     (when type-tbl (register-program-type-table! prog type-tbl))
+    (define binder-type-tbl (make-hasheq))
+    (register-program-binder-type-table! prog binder-type-tbl)
     ;; Free dotted-name scope check (nix target) needs the program-wide set of
     ;; bound symbols (a root bound in any form counts), computed once here and
     ;; applied per-form below so each rejection reports with that form's stx.
@@ -4360,6 +4585,7 @@
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-body-locs-table body-locs-tbl]
                    [current-type-table type-tbl]
+                   [current-binder-type-table binder-type-tbl]
                    [current-check-target (program-target prog)]
                    [current-semantic-contracts (program-semantic-contracts prog)]
                    [current-error-definitions (hasheq)]
@@ -4735,6 +4961,14 @@
 
 (define current-local-bindings (make-parameter (set)))
 
+(define (add-binding-targets-to-set base bindings [rest-binding #f])
+  (for*/fold ([out base])
+             ([binding (in-list (if rest-binding
+                                    (append bindings (list rest-binding))
+                                    bindings))]
+              [name (in-list (binding-target-bound-names binding))])
+    (set-add out name)))
+
 ;; --- did-you-mean for nix surface forms -----------------------------------
 ;; When an undefined-function note is about to fire, check whether the name
 ;; is close to a known nix surface form (canonical names only, no aliases).
@@ -4883,11 +5117,15 @@
            (define provs
              (parameterize ([current-prov-env env])
                (collect-provenances (let-binding-value b))))
+           (define bound-names
+             (binding-target-bound-names (let-binding-name b)))
            (values
              (if (= 1 (set-count provs))
-                 (hash-set env (let-binding-name b) (set-first provs))
+                 (for/fold ([next-env env]) ([name (in-list bound-names)])
+                   (hash-set next-env name (set-first provs)))
                  env)
-             (set-add locals (let-binding-name b)))))
+             (for/fold ([next-locals locals]) ([name (in-list bound-names)])
+               (set-add next-locals name)))))
        (parameterize ([current-prov-env new-env]
                       [current-local-bindings new-locals])
          (for-each walk body))]
@@ -4905,31 +5143,39 @@
        (define body-syms (for/fold ([s (mutable-set)]) ([b (in-list (defn-form-body e))])
                            (set-union! s (symbols-in b)) s))
        (for ([p (in-list (defn-form-params e))])
-         (when (and (param? p)
+         (define target (param-binding-target p))
+         (when (and (symbol? target)
+                    (param? p)
                     (param-type p)
                     (scalar-type? (param-type p))
-                    (not (set-member? body-syms (param-name p))))
+                    (not (set-member? body-syms target)))
            (define src (and src-table (hash-ref src-table e #f)))
            (fprintf (current-error-port)
                     "note: unused parameter '~a' in ~a~a\n"
-                    (param-name p) (defn-form-name e)
+                    target (defn-form-name e)
                     (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
        (define param-names
-         (for/fold ([s (current-local-bindings)]) ([p (in-list (defn-form-params e))])
-           (if (param? p) (set-add s (param-name p)) s)))
+         (add-binding-targets-to-set
+          (current-local-bindings)
+          (defn-form-params e)
+          (defn-form-rest-param e)))
        (parameterize ([current-local-bindings param-names])
          (for-each walk (defn-form-body e)))]
       [(defn-multi? e)
        (for ([a (in-list (defn-multi-arities e))])
          (define param-names
-           (for/fold ([s (current-local-bindings)]) ([p (in-list (arity-clause-params a))])
-             (if (param? p) (set-add s (param-name p)) s)))
+           (add-binding-targets-to-set
+            (current-local-bindings)
+            (arity-clause-params a)
+            (arity-clause-rest-param a)))
          (parameterize ([current-local-bindings param-names])
            (for-each walk (arity-clause-body a))))]
       [(fn-form? e)
        (define param-names
-         (for/fold ([s (current-local-bindings)]) ([p (in-list (fn-form-params e))])
-           (if (param? p) (set-add s (param-name p)) s)))
+         (add-binding-targets-to-set
+          (current-local-bindings)
+          (fn-form-params e)
+          (fn-form-rest-param e)))
        (parameterize ([current-local-bindings param-names])
          (for-each walk (fn-form-body e)))]
       [(cond-form? e)

@@ -20,15 +20,63 @@
 
 (define (emit-jst-params params rest-param)
   (define fixed
-    (for/list ([p (in-list params)])
-      (cond
-        [(param? p) (mangle-name (param-name p))]
-        [else (mangle-name p)])))
+    (for/list ([p (in-list params)] [i (in-naturals)])
+      (define target (param-binding-target p))
+      (if (or (map-destructure? target) (seq-destructure? target))
+          (format "$beagle$param$~a" i)
+          (mangle-name target))))
   (define all
     (if rest-param
-        (append fixed (list (format "...~a" (mangle-name rest-param))))
+        (append fixed
+                (list (format "...~a"
+                              (mangle-name (param-binding-target rest-param)))))
         fixed))
   (string-join all ", "))
+
+(define (emit-jst-pattern-setup target source)
+  (cond
+    [(symbol? target)
+     (list (format "const ~a = ~a;" (mangle-name target) source))]
+    [(seq-destructure? target)
+     (append
+      (apply append
+             (for/list ([item (in-list (seq-destructure-names target))]
+                        [i (in-naturals)])
+               (emit-jst-pattern-setup item (format "~a[~a]" source i))))
+      (if (seq-destructure-rest-name target)
+          (list (format "const ~a = ~a.slice(~a);"
+                        (mangle-name (seq-destructure-rest-name target))
+                        source
+                        (length (seq-destructure-names target))))
+          '()))]
+    [(map-destructure? target)
+     (define defaults (map-destructure-or-defaults target))
+     (define fields
+       (for/list ([name (in-list (map-destructure-keys target))])
+         (define default (assq name defaults))
+         (format "~a: ~a~a"
+                 (mangle-prop (symbol->string name))
+                 (mangle-name name)
+                 (if default
+                     (format " = ~a" (emit-jst-expr (cdr default)))
+                     ""))))
+     (append
+      (if (map-destructure-as-name target)
+          (list (format "const ~a = ~a;"
+                        (mangle-name (map-destructure-as-name target)) source))
+          '())
+      (if (null? fields)
+          '()
+          (list (format "const {~a} = ~a;" (string-join fields ", ") source))))]
+    [else (error 'beagle-jst "unsupported destructuring target: ~v" target)]))
+
+(define (emit-jst-param-setup params)
+  (apply append
+         (for/list ([p (in-list params)] [i (in-naturals)])
+           (define target (param-binding-target p))
+           (if (or (map-destructure? target) (seq-destructure? target))
+               (emit-jst-pattern-setup target (format "$beagle$param$~a" i))
+               '()))))
 
 (define (emit-jst-body body indent)
   (string-join
@@ -106,7 +154,12 @@
        [else ""])))
   (define name-str (mangle-name (jst-method-name m)))
   (define params-str (emit-jst-params (jst-method-params m) (jst-method-rest-param m)))
-  (define body-str (emit-jst-body (jst-method-body m) "    "))
+  (define setup (emit-jst-param-setup (jst-method-params m)))
+  (define body-str
+    (string-join
+     (append (map (lambda (line) (string-append "    " line)) setup)
+             (list (emit-jst-body (jst-method-body m) "    ")))
+     "\n"))
   (format "  ~a~a(~a) {\n~a\n  }" prefix name-str params-str body-str))
 
 (provide
