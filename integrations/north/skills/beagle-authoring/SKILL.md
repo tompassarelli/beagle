@@ -100,10 +100,11 @@ Beagle is Clojure plus types. Any divergence must be load-bearing for the type
 system or a backend. Bare names must behave as their Clojure namesake; qualify
 every target-specific meaning, such as `nix/assert`.
 
-Canonical typed bindings are structural `(binding-form Type)` forms. A bare
-simple binder requests inference; explicit `Any` marks a deliberately dynamic
-boundary. A bare destructure in a strict typed signature is rejected without
-an aggregate type to project. Typed and bare bindings may mix:
+Canonical typed parameters are structural `(binding-form Type)` forms; the
+type annotates the entire binding operation. A bare simple binder requests
+inference; explicit `Any` marks a deliberately dynamic boundary. A bare
+destructure in a strict typed signature is rejected without an aggregate type
+to project. Typed and bare bindings may mix:
 
 ```clojure
 (def total Int 0)

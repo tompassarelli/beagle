@@ -102,6 +102,43 @@
      "(defn host [({:keys [host] :or {host \"localhost\"}} (Map Keyword String))] String host)"))
   (check-true (string-contains? output "{ host ? \"localhost\", ... }:")))
 
+(test-case "Nix nominal-record map parameters require keys without defaults"
+  (define output
+    (compile
+     'nix
+     (string-append
+      "(defrecord Config [(host String) (port Int)])\n"
+      "(defn host [({:keys [host port]} Config)] String host)")))
+  (check-true (string-contains? output "{ host, port, ... }:"))
+  (check-false (string-contains? output " ? ")))
+
+(define (nix-error source)
+  (with-handlers ([exn:fail? exn-message])
+    (compile 'nix source)
+    ""))
+
+(test-case "Nix Map aliases still require defaults and emit them in parameter scope"
+  (check-regexp-match
+   #rx"require :or defaults"
+   (nix-error
+    (string-append
+     "(defalias ConfigMap (Map Keyword String))\n"
+     "(defn host [({:keys [host]} ConfigMap)] Any host)")))
+  (define output
+    (compile
+     'nix
+     (string-append
+      "(defalias ConfigMap (Map Keyword String))\n"
+      "(defn host [(fallback String) "
+      "({:keys [host] :or {host fallback}} ConfigMap)] String host)")))
+  (check-true
+   (string-contains? output "fallback: { host ? fallback, ... }:")))
+
+(test-case "Nix rejects primitive annotations as map aggregates"
+  (check-regexp-match
+   #rx"key patterns require a nominal record or homogeneous Map"
+   (nix-error "(defn bad [({:keys [x]} String)] Any x)")))
+
 (test-case "facts preserve one parameter whose name is a structured binding"
   (define output
     (compile-facts
@@ -110,11 +147,6 @@
   (check-true (string-contains? output "\"form-kind\" \"seq-destructure\""))
   (check-true (regexp-match? #rx"\\[[0-9]+ \"name\" [0-9]+\\]" output))
   (check-false (string-contains? output "\"binding\"")))
-
-(define (nix-error source)
-  (with-handlers ([exn:fail? exn-message])
-    (compile 'nix source)
-    ""))
 
 (test-case "Nix rejects missing-key, positional, let, for, and loop patterns pointedly"
   (check-regexp-match

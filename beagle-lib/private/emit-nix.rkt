@@ -7,7 +7,9 @@
          racket/string
          racket/format
          racket/list
+         racket/set
          "parse.rkt"
+         "types.rkt"
          "emit-dispatch.rkt"
          "emit-nix-strings.rkt")
 
@@ -19,6 +21,7 @@
 ;; --- recur context (parameterized during loop emission) -------------------
 
 (define current-recur-name (make-parameter #f))
+(define current-nix-record-types (make-parameter (seteq)))
 
 ;; --- identifier mangling ---------------------------------------------------
 
@@ -50,6 +53,7 @@
 ;; nix analog: pointed error naming the let-binding replacement.
 (define (nix-param-pattern p depth)
   (define target (param-binding-target p))
+  (define annotation (and (param? p) (param-type p)))
   (cond
     [(symbol? target) (format "~a:" (mangle-name target))]
     [(map-destructure? target)
@@ -58,7 +62,12 @@
      (when (null? (map-destructure-keys target))
        (error 'emit-nix
               "empty map destructuring parameters are not supported by the nix backend — bind the aggregate to a name"))
-     (unless (= (length ors) (length (map-destructure-keys target)))
+     (define nominal-record?
+       (and (type-prim? annotation)
+            (set-member? (current-nix-record-types)
+                         (type-prim-name annotation))))
+     (unless (or nominal-record?
+                 (= (length ors) (length (map-destructure-keys target))))
        (error 'emit-nix
               "map destructuring parameters require :or defaults for every key on the nix backend — Nix attrset patterns otherwise reject missing keys instead of binding nil"))
      (define entries
@@ -95,7 +104,19 @@
 ;; --- Nix emission from Beagle AST -----------------------------------------
 
 (define (nix-emit-program prog)
-  (parameterize ([current-emit-expr emit-expr])
+  (define record-types
+    (for/fold ([names
+                (for/fold ([imported (seteq)])
+                          ([name (in-hash-keys
+                                  (program-imported-record-fields prog))])
+                  (set-add imported name))])
+              ([form (in-list (program-forms prog))])
+      (define definition (unwrap-definition-form form))
+      (if (record-form? definition)
+          (set-add names (record-form-name definition))
+          names)))
+  (parameterize ([current-emit-expr emit-expr]
+                 [current-nix-record-types record-types])
     (nix-emit-program-body prog)))
 
 (define (nix-emit-program-body prog)

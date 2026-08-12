@@ -235,7 +235,7 @@ name-resolving bundler; one shared normalization fixes it.
 **The issue:** an inline anonymous fn whose body is a single map literal lowered to
 an arrow with a BLOCK body:
 ```clojure
-(.map xs (fn [g: Any] -> Any {:pref (.-name g) :what (.-vector g)}))
+(.map xs (fn [(g Any)] Any {:pref (.-name g) :what (.-vector g)}))
 ;; emitted:  xs.map((g) => {pref: g.name, what: g.vector})   ← {…} is a JS block
 ;;           -> SyntaxError: "Expected ; but found :"
 ;; correct:  xs.map((g) => ({pref: g.name, what: g.vector}))  ← ({…}) returns the object

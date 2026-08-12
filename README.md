@@ -89,9 +89,9 @@ path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 
 ## One canonical source shape
 
-A typed binding is `(binding-form Type)`. A symbol is the simplest binding
-form, while sequential and associative destructuring keep their ordinary
-Clojure shape:
+A typed parameter is `(binding-form Type)`; the type annotates the entire
+binding operation. A symbol is the simplest binding form, while sequential and
+associative destructuring keep their ordinary Clojure shape:
 
 ```clojure
 [x y]                                  ; inferred bindings
@@ -100,14 +100,13 @@ Clojure shape:
 [({:keys [host port]} Config)]         ; typed map destructure
 ```
 
-The wrapper annotates the binding operation, not merely an identifier. Bare
-simple binders request inference. A bare destructuring form in a strict typed
-signature is rejected because there is no aggregate type to project; wrap it
-with that type. Explicit `(value Any)` remains available for a deliberately
-dynamic boundary; omission does not silently mean `Any`. Typed and bare
-bindings may mix in one vector. The nesting is semantic structure, not visual
-decoration. Executable signatures have a mandatory positional return type, so
-no annotation punctuation is needed:
+Bare simple binders request inference. A bare destructuring form in a strict
+typed signature is rejected because there is no aggregate type to project;
+wrap it with that type. Explicit `(value Any)` remains available for a
+deliberately dynamic boundary; omission does not silently mean `Any`. Typed and
+bare bindings may mix in one vector. The nesting is semantic structure, not
+visual decoration. Executable signatures have a mandatory positional return
+type, so no annotation punctuation is needed:
 
 ```clojure
 (defrecord Point [(x Float) (y Float)])

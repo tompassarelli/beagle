@@ -38,7 +38,7 @@ Enumeration of named constants.
 ```
 
 ### structural binding annotations
-A typed binding is `(binding-form Type)`: `(x Int)`, `([x y] (HVec Float Float))`, or `({:keys [host port]} Config)`; mixed vectors are direct, as in `[([x y] (HVec Float Float)) opts]`. Nesting represents the binding semantics. Bare simple binders request inference; a bare destructure in a strict typed signature is rejected without an aggregate type to project. Explicit `Any` marks a deliberately dynamic boundary. Executable signatures place their mandatory return type directly after the parameter vector; type-level function signatures retain `->` inside the type vector.
+A typed parameter is `(binding-form Type)`; the type annotates the entire binding operation. Examples are `(x Int)`, `([x y] (HVec Float Float))`, and `({:keys [host port]} Config)`; mixed vectors are direct, as in `[([x y] (HVec Float Float)) opts]`. Nesting represents the binding semantics. Bare simple binders request inference; a bare destructure in a strict typed signature is rejected without an aggregate type to project. Explicit `Any` marks a deliberately dynamic boundary. Executable signatures place their mandatory return type directly after the parameter vector; type-level function signatures retain `->` inside the type vector.
 
 ```clojure
 (defn clamp [(n Int)] Int (if (> n 100) 100 n))
