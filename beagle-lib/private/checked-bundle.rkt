@@ -391,15 +391,14 @@
      'kind RESPONSE-KIND
      'schemaVersion CHECKED-BUNDLE-SCHEMA-VERSION
      'entrySourceId entry-source-id
-     'entryProjectionSha256
-     (hash-ref entry-projection 'projectionSha256)
-     'closureSha256 closure-sha256
-     'entry entry-projection
+     'entryProjection entry-projection
      'modules module-receipts))
+  (define response-with-closure
+    (hash-set response-base 'sourceClosureSha256 closure-sha256))
   (hash-set
-   response-base
-   'selfSha256
-   (sha256-prefixed (canonical-json-bytes response-base))))
+   response-with-closure
+   'checkedBundleSha256
+   (sha256-prefixed (canonical-json-bytes response-with-closure))))
 
 (provide
  CHECKED-BUNDLE-SCHEMA-VERSION

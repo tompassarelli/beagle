@@ -141,6 +141,9 @@
               #:when (equal? source-id (hash-ref module 'sourceId)))
     module))
 
+(define (sorted-keys object)
+  (sort (hash-keys object) symbol<?))
+
 (define (run-cli request-value #:directory [directory root])
   (parameterize ([current-directory directory])
     (define-values (process stdout stdin stderr)
@@ -163,22 +166,33 @@
      (check-equal? (hash-ref response 'schemaVersion) 1)
      (check-equal? (hash-ref response 'entrySourceId) "app/main.bjs")
      (check-equal?
-      (hash-ref response 'entryProjectionSha256)
-      (hash-ref (hash-ref response 'entry) 'projectionSha256))
+      (sorted-keys response)
+      (sort
+       '(kind schemaVersion entrySourceId entryProjection modules
+              sourceClosureSha256 checkedBundleSha256)
+       symbol<?))
      (check-equal?
-      (hash-ref response 'selfSha256)
-      (canonical-sha (hash-remove response 'selfSha256)))
+      (hash-ref response 'checkedBundleSha256)
+      (canonical-sha (hash-remove response 'checkedBundleSha256)))
      (check-equal?
-      (hash-ref response 'closureSha256)
+      (hash-ref response 'sourceClosureSha256)
       (canonical-sha
        (hasheq 'entrySourceId (hash-ref response 'entrySourceId)
                'modules (hash-ref response 'modules))))
      (check-equal?
-      (hash-ref (hash-ref response 'entry) 'projectionSha256)
+      (hash-ref (hash-ref response 'entryProjection) 'projectionSha256)
       (canonical-sha
-       (hash-remove (hash-ref response 'entry) 'projectionSha256)))
+       (hash-remove
+        (hash-ref response 'entryProjection)
+        'projectionSha256)))
      (define entry-module (module-by-id response "app/main.bjs"))
      (define provider-module (module-by-id response "wake/core.bjs"))
+     (for ([module (in-list (hash-ref response 'modules))])
+       (check-equal?
+        (sorted-keys module)
+        (sort
+         '(sourceId namespace authority sourceSha256 interfaceSha256 requires)
+         symbol<?)))
      (check-equal? (hash-ref entry-module 'authority) "package")
      (check-equal? (hash-ref provider-module 'authority) "trusted")
      (check-equal?
@@ -199,12 +213,13 @@
      (check-not-equal?
       (hash-ref (module-by-id original "app/main.bjs") 'sourceSha256)
       (hash-ref (module-by-id changed "app/main.bjs") 'sourceSha256))
-     (check-not-equal? (hash-ref original 'entryProjectionSha256)
-                       (hash-ref changed 'entryProjectionSha256))
-     (check-not-equal? (hash-ref original 'closureSha256)
-                       (hash-ref changed 'closureSha256))
-     (check-not-equal? (hash-ref original 'selfSha256)
-                       (hash-ref changed 'selfSha256)))
+     (check-not-equal?
+      (hash-ref (hash-ref original 'entryProjection) 'projectionSha256)
+      (hash-ref (hash-ref changed 'entryProjection) 'projectionSha256))
+     (check-not-equal? (hash-ref original 'sourceClosureSha256)
+                       (hash-ref changed 'sourceClosureSha256))
+     (check-not-equal? (hash-ref original 'checkedBundleSha256)
+                       (hash-ref changed 'checkedBundleSha256)))
 
    (test-case "erases recursive supplied aliases and only active requires"
      (define nested-entry
@@ -219,7 +234,7 @@
      (define entry-call
        (car
         (hash-ref
-         (car (hash-ref (hash-ref response 'entry) 'forms))
+         (car (hash-ref (hash-ref response 'entryProjection) 'forms))
          'body)))
      (check-equal?
       (hash-ref (hash-ref entry-call 'inferredType) 'name)
@@ -373,8 +388,15 @@
      (check-equal? status 0 errors)
      (check-equal? errors "")
      (define parsed (string->jsexpr output))
-     (check-equal? (hash-ref parsed 'selfSha256)
-                   (canonical-sha (hash-remove parsed 'selfSha256)))
+     (check-equal?
+      (sorted-keys parsed)
+      (sort
+       '(kind schemaVersion entrySourceId entryProjection modules
+              sourceClosureSha256 checkedBundleSha256)
+       symbol<?))
+     (check-equal? (hash-ref parsed 'checkedBundleSha256)
+                   (canonical-sha
+                    (hash-remove parsed 'checkedBundleSha256)))
      (check-true (string-suffix? output "\n")))
 
    (test-case "CLI failure leaves stdout empty"
