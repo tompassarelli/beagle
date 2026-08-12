@@ -1,0 +1,44 @@
+# Vendored fram validation sources.
+#
+# The native-core validation drivers project real fram modules through the
+# native pipeline and byte-compare the result against a committed projection.
+# Reading those modules out of a live ~/code/fram checkout made every beagle
+# gate a function of another repository's working tree: an unrelated fram
+# commit turned a beagle driver red, and — because bin/_gate-cache-run keys a
+# gate on the whole traced input closure — moved the cache key too. Copies
+# under this directory make the traced closure beagle-only, and a fram change
+# arrives as an explicit bump commit that carries the source diff next to the
+# projection diff.
+#
+# A revision pin plus `git -C ~/code/fram/main show <rev>:path` does NOT work
+# here: reading through fram's .git sweeps pack files into the traced closure,
+# so the key would bust on every fram commit while the projection stayed put.
+#
+# License: fram is dual MIT/Apache (LICENSE-MIT, LICENSE-APACHE in that repo),
+# the same terms this repository carries; vendoring is a layout decision.
+#
+# Bumping: copy the file(s) from the fram checkout, update `revision` and the
+# digests below, re-run the affected drivers, and commit the regenerated
+# projections in the SAME commit. native-core/tests/fram_upstream_freshness.sh
+# reports drift against a live checkout and never fails a gate.
+#
+# The set is the drivers' transitive read closure, not just the modules they
+# name: `beagle-ast` resolves a `(require fram.slots …)` by opening the sibling
+# source, so src/fram/slots.bgl is here even though no driver mentions it. An
+# omission shows up as a projection that no longer matches — the AST loses the
+# externs the missing module supplied.
+#
+# Format: `revision <fram-rev>`, then `<sha256>  <path-within-fram>` per file.
+# Paths are relative to fram's root and to this directory alike.
+
+revision 8be97ee365b9120446a76f83d8aa84c9b68e6bbe
+
+e58abae54c2baa2528358ade496d9ed6cf7c6b0fed45afe8638049ebd654634c  src/fram/types.bgl
+5ba91a6c86b887ea70584c6f66bc15e1ef0e5b2e98973f049dca7a464f305429  src/fram/slots.bgl
+bf8264a3c340d31662846c53dc0dde6a19ac6a6247513b392934dfd959e78e82  src/fram/store.bgl
+db8025377776873cae0dc6cc07c12e3eced629bc587f100aaa07ca4f303eebda  src/fram/kernel.bgl
+fa0f6b2ac70ace24c941ca7125aa25ea5c0910bd4f9776e9a51789de4a1e04fc  src/fram/kernel_classify.bclj
+ebeb58a97670505f016ecb79b674b4c1b08fd7f2238b40041caed7779fa53bec  src/fram/main.bclj
+8ab0b32ace8f77f972c875f48c1337db2d8a1c960a2de8b05f1ea2c9ed5cdbd7  src/fram/rt_core.bclj
+8ae7f0972491315be16b0722602f8c25ea9e0d7d6134c79cdc14ebcca27a061a  out/fram/rt_core.clj
+c4e4405c5a55f6c41529ef425d8f34503ed055a207ca2c95a918770853e08b84  out/fram/kernel_classify.clj

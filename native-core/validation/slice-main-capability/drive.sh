@@ -4,7 +4,11 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-main_file="${FRAM_MAIN:-/home/tom/code/fram/main/src/fram/main.bclj}"
+# Upstream fram sources are vendored under native-core/validation/upstream/fram
+# (its MANIFEST records the fram revision and digests); a FRAM_* override still
+# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
+# must not be a function of another repository's working tree.
+main_file="${FRAM_MAIN:-$repo/native-core/validation/upstream/fram/src/fram/main.bclj}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-main-capability.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 

@@ -8,7 +8,12 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-source_file="${FRAM_KERNEL_CLASSIFY:-/home/tom/code/fram/main/src/fram/kernel_classify.bclj}"
+# Upstream fram sources are vendored under native-core/validation/upstream/fram
+# (its MANIFEST records the fram revision and digests); a FRAM_* override still
+# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
+# must not be a function of another repository's working tree.
+source_file="${FRAM_KERNEL_CLASSIFY:-$repo/native-core/validation/upstream/fram/src/fram/kernel_classify.bclj}"
+managed_out="${FRAM_MANAGED_OUT:-$repo/native-core/validation/upstream/fram/out}"
 probe_file="$here/kernel_classify_probe.bclj"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-classify.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
@@ -184,8 +189,8 @@ fi
 [[ "$oracle_digest" == '2bab2e7d00496f24ee9ff852c0eed177b6e3ab1c64fdeb7ca39271b1cfb5feef' ]] \
   || die "managed oracle digest drifted"
 
-if [[ -d /home/tom/code/fram/main/out ]]; then
-  clojure -Sdeps '{:paths ["/home/tom/code/fram/main/out"]}' -M \
+if [[ -d "$managed_out" ]]; then
+  clojure -Sdeps "{:paths [\"$managed_out\"]}" -M \
     "$here/managed_runner.clj" "$here/corpus.tsv" >"$scratch/managed-fresh.out"
   cmp -s "$scratch/managed-fresh.out" "$here/managed.out" \
     || die "fresh managed execution differs from the committed oracle"

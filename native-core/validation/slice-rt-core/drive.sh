@@ -8,8 +8,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 artifacts="${NATIVE_SLICE_ARTIFACTS:-$here}"
 native_repo="${NATIVE_RT_CORE_NATIVE_REPO:-$repo}"
-source_file="${FRAM_RT_CORE:-/home/tom/code/fram/main/src/fram/rt_core.bclj}"
-managed_out="${FRAM_MANAGED_OUT:-/home/tom/code/fram/main/out}"
+# Upstream fram sources are vendored under native-core/validation/upstream/fram
+# (its MANIFEST records the fram revision and digests); a FRAM_* override still
+# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
+# must not be a function of another repository's working tree.
+source_file="${FRAM_RT_CORE:-$repo/native-core/validation/upstream/fram/src/fram/rt_core.bclj}"
+managed_out="${FRAM_MANAGED_OUT:-$repo/native-core/validation/upstream/fram/out}"
 native_shim="$native_repo/native-core/shim"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-rt-core.XXXXXX")"
 generated="$scratch/generated"

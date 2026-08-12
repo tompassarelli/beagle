@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns fram.main
+  "Fallback help for commands not routed by bin/fram."
+  (:gen-class))
+
+(defn -main [& _] -> Nil
+  (println "fram usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> (alias: untell) | query <edn> | selfcheck --deep"))

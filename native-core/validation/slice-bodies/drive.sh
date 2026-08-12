@@ -3,7 +3,8 @@
 #   beagle-ast -> source facts (signatures + bodies) -> frozen source program
 #     -> typed program -> native program with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
-# Re-runnable: the projection is rebuilt from live fram and must match the
+# Re-runnable: the projection is rebuilt from the vendored fram source and
+# must match the
 # committed types.facts byte for byte.
 set -euo pipefail
 
@@ -12,22 +13,26 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-src="${FRAM_TYPES:-$HOME/code/fram/main/src/fram/types.bgl}"
+# Upstream fram sources are vendored under native-core/validation/upstream/fram
+# (its MANIFEST records the fram revision and digests); a FRAM_* override still
+# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
+# must not be a function of another repository's working tree.
+src="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-bodies.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 banner=""
 if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
   # Opt-in only, and it says so in the report: this mode proves the committed
-  # projection still lowers, never that it still matches live fram.
+  # projection still lowers, never that it still matches the vendored source.
   [[ -f "$art/types.facts" ]] \
     || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/types.facts" >&2; exit 1; }
-  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches live fram"
+  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches the vendored fram source"
   echo "drive.sh: $banner" >&2
   cp "$art/types.facts" "$scratch/types.facts"
 elif [[ ! -f "$src" ]]; then
   echo "drive.sh: upstream fram source is missing: $src" >&2
-  echo "drive.sh: point FRAM_TYPES at the live source, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
+  echo "drive.sh: restore native-core/validation/upstream/fram, point FRAM_TYPES at a fram source, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
   exit 1
 else
   "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"

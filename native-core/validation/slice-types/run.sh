@@ -2,7 +2,11 @@
 set -euo pipefail
 
 types_root="$(git rev-parse --show-toplevel)"
-types_source="${FRAM_TYPES:-/home/tom/code/fram/main/src/fram/types.bgl}"
+# Upstream fram sources are vendored under native-core/validation/upstream/fram
+# (its MANIFEST records the fram revision and digests); a FRAM_* override still
+# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
+# must not be a function of another repository's working tree.
+types_source="${FRAM_TYPES:-$types_root/native-core/validation/upstream/fram/src/fram/types.bgl}"
 types_output="$types_root/native-core/validation/slice-types"
 types_scratch="$(mktemp -d /tmp/native-slice-types.XXXXXX)"
 types_clang_bin="$(command -v clang || true)"
@@ -19,7 +23,7 @@ fi
 # upstream is fatal here and must name the path instead of dying inside racket.
 if [[ ! -f "$types_source" ]]; then
   echo "run.sh: upstream fram source is missing: $types_source" >&2
-  echo "run.sh: set FRAM_TYPES to the live fram.types source; this slice has no committed-facts mode" >&2
+  echo "run.sh: restore native-core/validation/upstream/fram or set FRAM_TYPES to a fram.types source; this slice has no committed-facts mode" >&2
   exit 1
 fi
 
