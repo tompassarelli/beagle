@@ -181,7 +181,9 @@ Four source profiles. Core produces the authoritative frozen native program; `--
 `beagle ast FILE` is the canonical, versioned checked-program JSON projection
 for deterministic external consumers; it strictly checks but never executes
 the source. Source identities are relative to the containing Git checkout, or
-canonical absolute paths for files outside one.
+canonical absolute paths for files outside one. `sourceSha256` binds the exact
+source bytes; `projectionSha256` binds the canonical projection with only its
+own field omitted.
 
 Core is a source profile, not a direct source emitter; its row names the frozen
 native program build product while the materializer remains an explicit build

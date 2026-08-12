@@ -11,6 +11,7 @@
          racket/string
          racket/format
          json
+         openssl/sha1
          "ast.rkt"
          "types.rkt"
          "macros.rkt"
@@ -26,6 +27,15 @@
 (define current-checked-projection? (make-parameter #f))
 
 (define CHECKED-PROGRAM-SCHEMA-VERSION 1)
+
+(define (sha256-prefixed bytes)
+  (string-append "sha256:"
+                 (bytes->hex-string (sha256-bytes bytes))))
+
+(define (canonical-json-bytes value)
+  (define out (open-output-bytes))
+  (write-canonical-json value out)
+  (get-output-bytes out))
 
 (define (node-source->json node)
   (define tbl (current-json-src-table))
@@ -974,7 +984,9 @@
 (define (program->json-string prog)
   (jsexpr->string (program->json prog)))
 
-(define (checked-program->json prog #:source-id [source-id #f])
+(define (checked-program->json prog
+                               #:source-id [source-id #f]
+                               #:source-bytes source-bytes)
   (unless (eq? (program-mode prog) 'strict)
     (error 'beagle-ast-json
            "checked-program projection requires strict mode, got ~a"
@@ -983,42 +995,54 @@
   (unless type-table
     (error 'beagle-ast-json
            "checked-program projection requires type checking with #:capture-types? #t"))
-  (parameterize ([current-json-src-table (program-src-table prog)]
-                 [current-json-type-table type-table]
-                 [current-json-macro-table
-                  (program-macro-derived-table prog)]
-                 [current-json-source-id source-id]
-                 [current-checked-projection? #t])
-    (hasheq
-     'kind "beagle.checked-program"
-     'schemaVersion CHECKED-PROGRAM-SCHEMA-VERSION
-     'phase "checked"
-     'target (symbol->string (program-target prog))
-     'namespace (symbol->string (program-namespace prog))
-     'sourceId (or source-id 'null)
-     'mode (symbol->string (program-mode prog))
-     'gen-class (program-gen-class? prog)
-     'requires
-     (map (lambda (r)
-            (hasheq 'ns (symbol->string (require-entry-ns r))
-                    'alias (and (require-entry-alias r)
-                                (symbol->string (require-entry-alias r)))
-                    'refer (and (require-entry-refer r)
-                                (map symbol->string
-                                     (require-entry-refer r)))))
-          (program-requires prog))
-     'externs
-     (for/list ([name (in-list
-                       (sort (hash-keys (program-externs prog)) symbol<?))])
-       (hasheq 'name (symbol->string name)
-               'type (type->json (hash-ref (program-externs prog) name))))
-     'forms (map expr->json (program-forms prog)))))
+  (unless (bytes? source-bytes)
+    (error 'beagle-ast-json
+           "checked-program projection requires exact source bytes"))
+  (define base
+    (parameterize ([current-json-src-table (program-src-table prog)]
+                   [current-json-type-table type-table]
+                   [current-json-macro-table
+                    (program-macro-derived-table prog)]
+                   [current-json-source-id source-id]
+                   [current-checked-projection? #t])
+      (hasheq
+       'kind "beagle.checked-program"
+       'schemaVersion CHECKED-PROGRAM-SCHEMA-VERSION
+       'phase "checked"
+       'target (symbol->string (program-target prog))
+       'namespace (symbol->string (program-namespace prog))
+       'sourceId (or source-id 'null)
+       'sourceSha256 (sha256-prefixed source-bytes)
+       'mode (symbol->string (program-mode prog))
+       'gen-class (program-gen-class? prog)
+       'requires
+       (map (lambda (r)
+              (hasheq 'ns (symbol->string (require-entry-ns r))
+                      'alias (and (require-entry-alias r)
+                                  (symbol->string (require-entry-alias r)))
+                      'refer (and (require-entry-refer r)
+                                  (map symbol->string
+                                       (require-entry-refer r)))))
+            (program-requires prog))
+       'externs
+       (for/list ([name (in-list
+                         (sort (hash-keys (program-externs prog)) symbol<?))])
+         (hasheq 'name (symbol->string name)
+                 'type (type->json (hash-ref (program-externs prog) name))))
+       'forms (map expr->json (program-forms prog)))))
+  ;; Self-digest excludes only itself. sourceSha256 stays in BASE, binding the
+  ;; canonical checked projection to the exact input bytes without recursion.
+  (hash-set base 'projectionSha256
+            (sha256-prefixed (canonical-json-bytes base))))
 
 (define (write-checked-program-json prog
                                     [out (current-output-port)]
-                                    #:source-id [source-id #f])
+                                    #:source-id [source-id #f]
+                                    #:source-bytes source-bytes)
   (write-canonical-json
-   (checked-program->json prog #:source-id source-id)
+   (checked-program->json prog
+                          #:source-id source-id
+                          #:source-bytes source-bytes)
    out)
   (newline out))
 

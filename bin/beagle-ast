@@ -43,7 +43,10 @@ fi
          (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\"))
 
 (define src (vector-ref (current-command-line-arguments) 0))
+(define source-bytes (file->bytes src))
 (define forms (read-beagle-syntax src))
+(unless (bytes=? source-bytes (file->bytes src))
+  (error 'beagle-ast \"source changed while it was being read: ~a\" src))
 (define prog (parse-program forms #:source-path src))
 (unless (eq? (program-mode prog) 'strict)
   (error 'beagle-ast
@@ -54,6 +57,9 @@ fi
  #:capture-types? #t)
 (define source-id (vector-ref (current-command-line-arguments) 1))
 (define output (open-output-string))
-(write-checked-program-json prog output #:source-id source-id)
+(write-checked-program-json
+ prog output
+ #:source-id source-id
+ #:source-bytes source-bytes)
 (display (get-output-string output))
 " -- "$src_abs" "$source_id"

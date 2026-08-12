@@ -11,6 +11,7 @@
 
 (require rackunit
          rackunit/text-ui
+         openssl/sha1
          racket/port
          racket/system
          racket/string
@@ -29,6 +30,20 @@
     #t)))
 
 (define (root/ . parts) (apply string-append root "/" parts))
+
+(define (sha256-prefixed bytes)
+  (string-append "sha256:"
+                 (bytes->hex-string (sha256-bytes bytes))))
+
+(define write-canonical-json
+  (dynamic-require
+   `(file ,(root/ "beagle-lib/private/semantic-index.rkt"))
+   'write-canonical-json))
+
+(define (projection-sha256 json)
+  (define out (open-output-bytes))
+  (write-canonical-json (hash-remove json 'projectionSha256) out)
+  (sha256-prefixed (get-output-bytes out)))
 
 ;; Load parse + check + ast-json from worktree source files.
 (define-values (read-beagle-syntax parse-program)
@@ -103,7 +118,10 @@
        prog
        (lambda (e _loc-stx) (raise e))
        #:capture-types? #t)
-      (checked-program->json prog #:source-id source-id))
+      (checked-program->json
+       prog
+       #:source-id source-id
+       #:source-bytes (file->bytes tmp)))
     (lambda () (delete-file tmp))))
 
 (define (parse+checked-json/path path source-id)
@@ -113,7 +131,11 @@
    prog
    (lambda (e _loc-stx) (raise e))
    #:capture-types? #t)
-  (values prog (checked-program->json prog #:source-id source-id)))
+  (values prog
+          (checked-program->json
+           prog
+           #:source-id source-id
+           #:source-bytes (file->bytes path))))
 
 (define (find-form-node json node-name)
   (for/first ([form (in-list (hash-ref json 'forms))]
@@ -218,6 +240,10 @@
      (check-equal? (hash-ref json 'schemaVersion) 1)
      (check-equal? (hash-ref json 'phase) "checked")
      (check-equal? (hash-ref json 'sourceId) "checked-projection/wiki.bjs")
+     (check-equal? (hash-ref json 'sourceSha256)
+                   (sha256-prefixed (file->bytes path)))
+     (check-equal? (hash-ref json 'projectionSha256)
+                   (projection-sha256 json))
      (define declaration (car (hash-ref json 'forms)))
      (check-equal? (hash-ref declaration 'node) "def")
      (check-equal? (hash-ref declaration 'name) "revision")
@@ -259,9 +285,13 @@
      (define first-out (open-output-string))
      (define second-out (open-output-string))
      (write-checked-program-json
-      prog first-out #:source-id "checked-projection/wiki.bjs")
+      prog first-out
+      #:source-id "checked-projection/wiki.bjs"
+      #:source-bytes (file->bytes path))
      (write-checked-program-json
-      prog second-out #:source-id "checked-projection/wiki.bjs")
+      prog second-out
+      #:source-id "checked-projection/wiki.bjs"
+      #:source-bytes (file->bytes path))
      (check-equal? (get-output-string first-out)
                    (get-output-string second-out)))
 
@@ -298,6 +328,44 @@
      (check-equal? relative-output absolute-output)
      (check-equal? (hash-ref (string->jsexpr relative-output) 'sourceId)
                    relative))
+
+   (test-case "ast CLI binds same-length source changes to both digests"
+     (define source (make-temporary-file "beagle-ast-source-digest-~a.bjs"))
+     (define source-a
+       "#lang beagle/js\n(ns checked.digest)\n(def x: Int 1) ; a\n")
+     (define source-b
+       "#lang beagle/js\n(ns checked.digest)\n(def x: Int 1) ; b\n")
+     (check-equal? (string-length source-a) (string-length source-b))
+     (dynamic-wind
+       void
+       (lambda ()
+         (call-with-output-file source #:exists 'truncate
+           (lambda (out) (display source-a out)))
+         (define-values (status-a output-a errors-a)
+           (run-ast-cli (path->string source)))
+         (call-with-output-file source #:exists 'truncate
+           (lambda (out) (display source-b out)))
+         (define-values (status-b output-b errors-b)
+           (run-ast-cli (path->string source)))
+         (check-equal? (list status-a status-b) '(0 0))
+         (check-equal? (list errors-a errors-b) '("" ""))
+         (define json-a (string->jsexpr output-a))
+         (define json-b (string->jsexpr output-b))
+         (check-equal? (hash-ref json-a 'sourceId)
+                       (hash-ref json-b 'sourceId))
+         (check-not-equal? (hash-ref json-a 'sourceSha256)
+                           (hash-ref json-b 'sourceSha256))
+         (check-not-equal? (hash-ref json-a 'projectionSha256)
+                           (hash-ref json-b 'projectionSha256))
+         (check-equal? (hash-ref json-a 'sourceSha256)
+                       (sha256-prefixed (string->bytes/utf-8 source-a)))
+         (check-equal? (hash-ref json-b 'sourceSha256)
+                       (sha256-prefixed (string->bytes/utf-8 source-b)))
+         (check-equal? (hash-ref json-a 'projectionSha256)
+                       (projection-sha256 json-a))
+         (check-equal? (hash-ref json-b 'projectionSha256)
+                       (projection-sha256 json-b)))
+       (lambda () (delete-file source))))
 
    (test-case "ast CLI emits no partial stdout on serialization failure"
      (define source (make-temporary-file "beagle-ast-non-json-~a.bclj"))
@@ -363,7 +431,10 @@
            (parse-program (read-beagle-syntax tmp)
                           #:source-path (path->string tmp)))
          (check-exn #rx"capture-types"
-                    (lambda () (checked-program->json prog))))
+                    (lambda ()
+                      (checked-program->json
+                       prog
+                       #:source-bytes (file->bytes tmp)))))
        (lambda () (delete-file tmp))))))
 
 (run-tests tests)
