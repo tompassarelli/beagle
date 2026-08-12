@@ -1356,6 +1356,13 @@
    (diagnostics (Vec core/DiagnosticV0))
    (valid Bool)])
 
+(defrecord EffectiveFunctionSignatureV0
+  [(present Bool)
+   (parameter-types (Vec core/NativeId))
+   (return-type (U core/NativeId Nil))
+   (diagnostics (Vec core/DiagnosticV0))
+   (valid Bool)])
+
 (defrecord FunctionResolutionV0
   [(function TypedFunctionV0)
    (definitions (Vec core/TypeDef))
@@ -1544,43 +1551,139 @@
         (index-first-object index source-function "params")]
     (if (nil? parameters) [] (index-sequence-items index parameters))))
 
+(defn effective-function-signature
+  [(index SourceIndexV0)
+   (source-function core/NativeId)
+   (source-parameters (Vec core/NativeId))] EffectiveFunctionSignatureV0
+  (let [(effective-type (U core/NativeId Nil))
+        (index-first-object index source-function "effective-type")
+        (source-name (U String Nil))
+        (index-first-text index source-function "name")
+        (name String)
+        (if (nil? source-name) (id-value source-function) source-name)]
+    (if (nil? effective-type)
+      (->EffectiveFunctionSignatureV0 false [] nil [] true)
+      (let [(kind (U String Nil)) (source-type-kind index effective-type)]
+        (cond
+          (= "type-poly" kind)
+          (->EffectiveFunctionSignatureV0
+            true [] nil
+            [(core/->DiagnosticV0
+               "LOWER-POLYMORPHIC-FUNCTION-ABI"
+               (str name " has a generalized effective signature; Native requires a closed monomorphic ABI"))]
+            false)
+
+          (not (= "type-fn" kind))
+          (->EffectiveFunctionSignatureV0
+            true [] nil
+            [(core/->DiagnosticV0
+               "LOWER-EFFECTIVE-FUNCTION-TYPE"
+               (str name " has a non-function effective signature: " kind))]
+            false)
+
+          :else
+          (let [(parameters-node (U core/NativeId Nil))
+                (index-first-object index effective-type "params")
+                (parameter-types (Vec core/NativeId))
+                (if (nil? parameters-node)
+                  []
+                  (index-sequence-items index parameters-node))
+                (rest-type (U core/NativeId Nil))
+                (index-first-object index effective-type "rest")
+                (source-rest (U core/NativeId Nil))
+                (index-first-object index source-function "rest")
+                (return-type (U core/NativeId Nil))
+                (index-first-object index effective-type "ret")]
+            (cond
+              (or (some? rest-type) (some? source-rest))
+              (->EffectiveFunctionSignatureV0
+                true parameter-types return-type
+                [(core/->DiagnosticV0
+                   "LOWER-VARIADIC-FUNCTION-ABI"
+                   (str name " has a rest parameter; Native v0 has no call-site packing ABI"))]
+                false)
+
+              (not (= (count parameter-types) (count source-parameters)))
+              (->EffectiveFunctionSignatureV0
+                true parameter-types return-type
+                [(core/->DiagnosticV0
+                   "LOWER-EFFECTIVE-PARAMETER-COUNT"
+                   (str name " has " (count source-parameters)
+                     " source parameters but its effective signature has "
+                     (count parameter-types)))]
+                false)
+
+              (nil? return-type)
+              (->EffectiveFunctionSignatureV0
+                true parameter-types nil
+                [(core/->DiagnosticV0
+                   "LOWER-EFFECTIVE-FUNCTION-RETURN"
+                   (str name " has an effective function signature without a return type"))]
+                false)
+
+              :else
+              (->EffectiveFunctionSignatureV0
+                true parameter-types return-type [] true))))))))
+
+(defn resolve-parameters-with-signature
+  [(index SourceIndexV0)
+   (source-function core/NativeId)
+   (owner-id core/NativeId)
+   (signature EffectiveFunctionSignatureV0)] ParameterResolutionV0
+  (let [(source-parameters (Vec core/NativeId))
+        (function-parameter-items index source-function)
+        (effective Bool) (effectivefunctionsignaturev0-present signature)
+        (signature-valid Bool) (effectivefunctionsignaturev0-valid signature)
+        (effective-types (Vec core/NativeId))
+        (effectivefunctionsignaturev0-parameter-types signature)]
+    (if (and effective (not signature-valid))
+      (->ParameterResolutionV0 [] [(lower-failure-type)]
+        (effectivefunctionsignaturev0-diagnostics signature) false)
+      (loop [(position Int) 0
+             (parameters (Vec core/Parameter)) []
+             (definitions (Vec core/TypeDef)) []
+             (diagnostics (Vec core/DiagnosticV0))
+             (effectivefunctionsignaturev0-diagnostics signature)
+             (valid Bool) signature-valid]
+        (if (>= position (count source-parameters))
+          (->ParameterResolutionV0 parameters definitions diagnostics valid)
+          (let [(source-parameter core/NativeId) (nth source-parameters position)
+                (name String) (parameter-name-at index source-parameter position)
+                (source-type (U core/NativeId Nil))
+                (if effective
+                  (nth effective-types position)
+                  (field-type-at index source-parameter))]
+            (if (nil? source-type)
+              (recur (+ position 1)
+                parameters
+                definitions
+                (conj diagnostics
+                  (core/->DiagnosticV0
+                    "LOWER-PARAMETER-MISSING-ANNOTATION"
+                    (str "function parameter has no closed type: " name)))
+                false)
+              (let [(resolution TypeResolutionV0)
+                    (resolve-source-type index source-type)]
+                (recur (+ position 1)
+                  (conj parameters
+                    (core/->Parameter
+                      (lower-id "parameter" [(id-value owner-id) name])
+                      (typeresolutionv0-type-id resolution)))
+                  (append-type-defs definitions
+                    (typeresolutionv0-definitions resolution))
+                  (append-diagnostics diagnostics
+                    (typeresolutionv0-diagnostics resolution))
+                  (and valid (typeresolutionv0-valid resolution)))))))))))
+
 (defn resolve-parameters
   [(index SourceIndexV0)
    (source-function core/NativeId)
    (owner-id core/NativeId)] ParameterResolutionV0
   (let [(source-parameters (Vec core/NativeId))
-        (function-parameter-items index source-function)]
-    (loop [(position Int) 0
-           (parameters (Vec core/Parameter)) []
-           (definitions (Vec core/TypeDef)) []
-           (diagnostics (Vec core/DiagnosticV0)) []
-           (valid Bool) true]
-      (if (>= position (count source-parameters))
-        (->ParameterResolutionV0 parameters definitions diagnostics valid)
-        (let [(source-parameter core/NativeId) (nth source-parameters position)
-              (name String) (parameter-name-at index source-parameter position)
-              (source-type (U core/NativeId Nil)) (field-type-at index source-parameter)]
-          (if (nil? source-type)
-            (recur (+ position 1)
-              parameters
-              definitions
-              (conj diagnostics
-                (core/->DiagnosticV0
-                  "LOWER-PARAMETER-MISSING-ANNOTATION"
-                  (str "function parameter has no closed type: " name)))
-              false)
-            (let [(resolution TypeResolutionV0)
-                  (resolve-source-type index source-type)]
-              (recur (+ position 1)
-                (conj parameters
-                  (core/->Parameter
-                    (lower-id "parameter" [(id-value owner-id) name])
-                    (typeresolutionv0-type-id resolution)))
-                (append-type-defs definitions
-                  (typeresolutionv0-definitions resolution))
-                (append-diagnostics diagnostics
-                  (typeresolutionv0-diagnostics resolution))
-                (and valid (typeresolutionv0-valid resolution))))))))))
+        (function-parameter-items index source-function)
+        (signature EffectiveFunctionSignatureV0)
+        (effective-function-signature index source-function source-parameters)]
+    (resolve-parameters-with-signature index source-function owner-id signature)))
 
 (defn pure-effect-id [] core/NativeId (lower-id "effect" ["pure"]))
 
@@ -14340,9 +14443,17 @@
   [(env BodyEnvV0)
    (owner core/NativeId)
    (state BodyStateV0)
+   (source-function core/NativeId)
    (source-parameters (Vec core/NativeId))
    (parameters (Vec core/Parameter))] BodyStateV0
-  (let [(index SourceIndexV0) (bodyenvv0-index env)]
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (signature EffectiveFunctionSignatureV0)
+        (effective-function-signature index source-function source-parameters)
+        (effective Bool)
+        (and (effectivefunctionsignaturev0-present signature)
+          (effectivefunctionsignaturev0-valid signature))
+        (effective-types (Vec core/NativeId))
+        (effectivefunctionsignaturev0-parameter-types signature)]
     (loop [(position Int) 0 (current BodyStateV0) state]
       (if (or (>= position (count source-parameters))
             (>= position (count parameters))
@@ -14353,7 +14464,9 @@
               (target (U core/NativeId Nil))
               (parameter-target-at index source-parameter)
               (source-type (U core/NativeId Nil))
-              (field-type-at index source-parameter)]
+              (if effective
+                (nth effective-types position)
+                (field-type-at index source-parameter))]
           (if (or (nil? target) (nil? source-type))
             (recur (+ position 1) current)
             (recur (+ position 1)
@@ -14391,16 +14504,32 @@
              (str "function form has no name: " (id-value source-function)))]
           false))
       (let [(id core/NativeId) (function-id source-function source-name)
+            (source-parameters (Vec core/NativeId))
+            (function-parameter-items index source-function)
+            (effective-signature EffectiveFunctionSignatureV0)
+            (effective-function-signature index source-function source-parameters)
             (parameters ParameterResolutionV0)
-            (resolve-parameters index source-function id)
+            (resolve-parameters-with-signature index source-function id
+              effective-signature)
             (source-return (U core/NativeId Nil))
-            (index-first-object index source-function "ret")
+            (if (and
+                  (effectivefunctionsignaturev0-present effective-signature)
+                  (effectivefunctionsignaturev0-valid effective-signature))
+              (effectivefunctionsignaturev0-return-type effective-signature)
+              (if (effectivefunctionsignaturev0-present effective-signature)
+                nil
+                (index-first-object index source-function "ret")))
             (source-abi-symbol (U String Nil))
             (index-first-text index source-function "abi-symbol")
             (abi-symbol String)
             (if (nil? source-abi-symbol) source-name source-abi-symbol)
             (return-resolution TypeResolutionV0)
-            (if (nil? source-return)
+            (if (and
+                  (effectivefunctionsignaturev0-present effective-signature)
+                  (not (effectivefunctionsignaturev0-valid effective-signature)))
+              (->TypeResolutionV0
+                (type-id "LowerFailure") [(lower-failure-type)] [] false)
+              (if (nil? source-return)
               (->TypeResolutionV0
                 (type-id "Nil")
                 [(nil-type)]
@@ -14408,7 +14537,7 @@
                    "TODO-NATIVE-SIGNATURE-FACTS"
                    (str "checked source projection omitted the return annotation for " source-name))]
                 true)
-              (resolve-source-type index source-return))
+                (resolve-source-type index source-return)))
             (native-op (U String Nil)) (function-native-op index source-function)
             (readiness NativeReadinessV0)
             (if (and (some? native-op) (recognized-native-op? native-op))
@@ -14437,11 +14566,38 @@
           (and (parameterresolutionv0-valid parameters)
                (typeresolutionv0-valid return-resolution)))))))
 
+(defn reject-multi-function
+  [(index SourceIndexV0)
+   (source-function core/NativeId)] FunctionResolutionV0
+  (let [(source-name (U String Nil))
+        (index-first-text index source-function "name")
+        (name String)
+        (if (nil? source-name) (id-value source-function) source-name)
+        (id core/NativeId) (function-id source-function name)]
+    (->FunctionResolutionV0
+      (->TypedFunctionV0
+        id name name [] (type-id "LowerFailure") (type-id "LowerFailure") []
+        (->NativeTodoV0
+          "LOWER-MULTI-ARITY-FUNCTION-ABI"
+          (str name " has multiple arities; Native v0 has no dispatcher ABI"))
+        "")
+      [(lower-failure-type)]
+      [(core/->DiagnosticV0
+         "LOWER-MULTI-ARITY-FUNCTION-ABI"
+         (str name " has multiple arities; Native v0 has no dispatcher ABI"))]
+      false)))
+
 (defn resolve-functions [(index SourceIndexV0)] (Vec FunctionResolutionV0)
-  (mapv
-    (fn [(source-function core/NativeId)] FunctionResolutionV0
-      (resolve-function index source-function))
-    (index-form-ids index "defn")))
+  (vec
+    (concat
+      (mapv
+        (fn [(source-function core/NativeId)] FunctionResolutionV0
+          (resolve-function index source-function))
+        (index-form-ids index "defn"))
+      (mapv
+        (fn [(source-function core/NativeId)] FunctionResolutionV0
+          (reject-multi-function index source-function))
+        (index-form-ids index "defn-multi")))))
 
 (defn finish-body
   [(signature TypedFunctionV0)
@@ -14495,8 +14651,8 @@
                       (localbindingv0-value-id binding)
                       (localbindingv0-type-id binding))))))
             (projected BodyStateV0)
-            (project-parameter-bindings env id initialized source-parameters
-              parameters)
+            (project-parameter-bindings env id initialized source-function
+              source-parameters parameters)
             (result ExprResultV0)
             (lower-expr-expected env id projected body-node
               (typedfunctionv0-return-type signature))

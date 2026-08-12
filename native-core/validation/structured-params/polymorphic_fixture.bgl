@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.structured-params-polymorphic)
+(define-mode strict)
+
+(defn constant [unused] Int
+  1)

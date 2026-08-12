@@ -55,6 +55,19 @@
       (row! n "body" "n" (emit-seq forms emit-expr))
       n)))
 
+(defn emit-type-variable [name]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "type-variable")
+    (row! n "name" "t" name)
+    n))
+
+(defn emit-type-bound [bound]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "type-bound")
+    (row! n "name" "t" (get bound "var"))
+    (row! n "type" "n" (emit-ann (get bound "type")))
+    n))
+
 (defn emit-ann [a]
   (let [n (nid)]
     (case (get a "kind")
@@ -69,7 +82,15 @@
                   (row! n "params" "n" (emit-seq (get a "params") emit-ann))
                   (when-let [rest-type (get a "rest")]
                     (row! n "rest" "n" (emit-ann rest-type)))
-                  (row! n "ret" "n" (emit-ann (get a "ret")))))
+                  (row! n "ret" "n" (emit-ann (get a "ret"))))
+      "var"   (do (row! n "form-kind" "t" "type-var")
+                  (row! n "name" "t" (get a "name")))
+      "poly"  (do (row! n "form-kind" "t" "type-poly")
+                  (row! n "vars" "n"
+                        (emit-seq (get a "vars") emit-type-variable))
+                  (row! n "body" "n" (emit-ann (get a "body")))
+                  (row! n "bounds" "n"
+                        (emit-seq (get a "bounds") emit-type-bound))))
     n))
 
 (defn emit-param [p]
@@ -379,8 +400,18 @@
                    (when-let [op (get @native-ops (get f "name"))]
                      (row! n "native-op" "t" op))
                    (row! n "params" "n" (emit-seq (get f "params") emit-param))
+                   (when-let [rest-param (get f "rest")]
+                     (row! n "rest" "n" (emit-param rest-param)))
                    (when-let [r (get f "ret")] (row! n "ret" "n" (emit-ann r)))
+                   (when-let [effective (get f "effectiveType")]
+                     (row! n "effective-type" "n" (emit-ann effective)))
                    (row! n "body" "n" (emit-body (get f "body"))))
+      "defn-multi"
+      (do (row! n "form-kind" "t" "defn-multi")
+          (row! n "name" "t" (get f "name"))
+          (row! n "private" "t" (str (= true (get f "private"))))
+          (when-let [effective (get f "effectiveType")]
+            (row! n "effective-type" "n" (emit-ann effective))))
       nil)
     n))
 
@@ -397,7 +428,7 @@
     n))
 
 (defn selected-form? [include-defs? form]
-  (or (#{"record" "defn"} (get form "node"))
+  (or (#{"record" "defn" "defn-multi"} (get form "node"))
       (and include-defs? (= "def" (get form "node")))))
 
 (defn emit-module [ast relative-path include-defs?]

@@ -1,0 +1,7 @@
+#lang beagle
+(ns native.structured-params-multi)
+(define-mode strict)
+
+(defn choose
+  ([(value Int)] Int value)
+  ([(prefix String) (value Int)] Int value))

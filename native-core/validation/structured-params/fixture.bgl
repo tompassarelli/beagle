@@ -4,6 +4,9 @@
 
 (defrecord Request [(host-name String) (port Int)])
 
+(defn inferred-increment [value] Int
+  (quot value 1))
+
 (defn request-host [({:keys [host-name]} Request)] String
   host-name)
 
