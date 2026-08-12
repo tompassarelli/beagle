@@ -13,7 +13,7 @@ die() {
   exit 1
 }
 
-for command in awk bb clojure cmp gcc rg; do
+for command in awk bb cmp gcc rg; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -65,7 +65,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
   mv "$target.tmp" "$target"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
@@ -95,7 +95,7 @@ function_index="$(awk '$1 == "lowered" && $3 == "codec-word" {
 mkdir -p "$scratch/managed/native" "$scratch/build"
 "$repo/bin/beagle-build" "$here/fixture.bclj" \
   "$scratch/managed/native/bitwise_roots.clj" >/dev/null
-clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M \
+bb -cp "$scratch/managed" \
   "$here/managed_runner.clj" "$here/corpus.tsv" >"$scratch/managed.out"
 
 cp "$scratch/module_0.h" "$scratch/module_0.c" "$scratch/module_1.ssa" \

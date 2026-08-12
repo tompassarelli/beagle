@@ -77,9 +77,10 @@ for m in stages lower obligations c11 slice; do
   mv "$scratch/out/native/$m.clj.tmp" "$scratch/out/native/$m.clj"
 done
 
-# The lowering passes rebuild the fact index on every lookup, so a 3000-fact
-# module needs a compiling runtime, not the interpreter.
-clojure -J-Xmx4g -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+# The lowering passes rebuild the fact index on every lookup, so this
+# 3000-fact module is the sweep's heaviest projection and gets explicit heap
+# headroom. The heap is the constraint, not the runtime: it lowers under bb.
+bb -Xmx4g -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
   (native.slice/emit-slice! \"$scratch/store.facts\" \"fram.store\"

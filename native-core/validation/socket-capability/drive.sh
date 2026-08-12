@@ -11,7 +11,7 @@ die() {
   exit 1
 }
 
-for command in clojure cc rg; do
+for command in bb cc rg; do
   command -v "$command" >/dev/null 2>&1 || die "missing command: $command"
 done
 mkdir -p "$scratch/out" "$scratch/generated" "$scratch/source-c17" \
@@ -77,7 +77,7 @@ for module in stages lower obligations fold_c17 body_c17 qbe socket_capability_f
   mv "$generated.tmp" "$generated"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.socket-capability-fixture)
 (spit \"$scratch/generated/report.txt\"
   (native.socket-capability-fixture/emit-fixture!

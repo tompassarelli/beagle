@@ -52,7 +52,7 @@ emit_slice() {
   fi
   cp "$scratch/loops.facts" "$art/loops.facts"
   sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
-  clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+  bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/loops.facts\" \"$module\"

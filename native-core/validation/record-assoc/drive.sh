@@ -36,7 +36,7 @@ for module in fold_c17 body_c17 qbe validation_corpus; do
   mv "$generated.tmp" "$generated"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.validation-corpus 'native.body-c17 'native.qbe)
 (let [program native.validation-corpus/record-assoc-program
       body-result (native.body-c17/materialize-program program 0)

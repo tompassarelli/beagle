@@ -46,7 +46,7 @@ done
 for pass in one two; do
   artifacts="$sequence_scratch/artifacts-$pass"
   mkdir -p "$artifacts"
-  clojure -Sdeps "{:paths [\"$sequence_scratch/out\"]}" -M -e "
+  bb -cp "$sequence_scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$artifacts/report.txt\"
   (native.body-slice/emit-dual-slice!

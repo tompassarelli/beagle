@@ -60,7 +60,7 @@ fi
 
 # The lowering passes rebuild the fact index on every lookup, so a 1300-fact
 # module needs a compiling runtime, not the interpreter.
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
   (native.slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"

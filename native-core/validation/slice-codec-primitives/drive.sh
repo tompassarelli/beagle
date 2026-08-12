@@ -50,7 +50,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
   mv "$scratch/out/native/$module.clj.tmp" "$scratch/out/native/$module.clj"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$art/fixture.facts\"
@@ -64,7 +64,7 @@ if grep -q '^obligation-projection FAIL' "$art/report.txt"; then
   exit 1
 fi
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M \
+bb -cp "$scratch/out" \
   "$here/qbe-refusal.clj" "$art/fixture.facts" \
   "native.codec-primitives" \
   "beagle:native-core/validation/slice-codec-primitives/fixture.bclj" \
@@ -73,7 +73,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M \
 mkdir -p "$scratch/managed/native"
 "$repo/bin/beagle-build" "$managed_src" \
   "$scratch/managed/native/codec_primitives_managed.clj" >/dev/null
-clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M -e "
+bb -cp "$scratch/managed" -e "
 (require 'native.codec-primitives-managed)
 (assert (= \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"
            (native.codec-primitives-managed/digest-bytes [])))

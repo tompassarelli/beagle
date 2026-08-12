@@ -23,7 +23,7 @@ die() {
   exit 1
 }
 
-for command in bb clojure cmp gcc rg sha256sum; do
+for command in bb cmp gcc rg sha256sum; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$source_file" ]] || die "source is unavailable: $source_file"
@@ -82,7 +82,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slic
   mv "$scratch/out/native/$module.clj.tmp" "$scratch/out/native/$module.clj"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/generated/report.txt\"
   (native.body-slice/emit-dual-slice!
@@ -190,7 +190,7 @@ fi
   || die "managed oracle digest drifted"
 
 if [[ -d "$managed_out" ]]; then
-  clojure -Sdeps "{:paths [\"$managed_out\"]}" -M \
+  bb -cp "$managed_out" \
     "$here/managed_runner.clj" "$here/corpus.tsv" >"$scratch/managed-fresh.out"
   cmp -s "$scratch/managed-fresh.out" "$here/managed.out" \
     || die "fresh managed execution differs from the committed oracle"

@@ -24,7 +24,7 @@ die() {
   exit 1
 }
 
-for command in awk bb clojure cmp cut gcc pkg-config rg sed sha256sum sort; do
+for command in awk bb cmp cut gcc pkg-config rg sed sha256sum sort; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -81,12 +81,12 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
   mv "$target.tmp" "$target"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M \
+bb -cp "$scratch/out" \
   "$here/native_runner.clj" \
   "$generated/rt_core.facts" "$generated" "$compiler_commit" \
   "$generated/report.txt"
 
-clojure -Sdeps "{:paths [\"$managed_out\"]}" -M \
+bb -cp "$managed_out" \
   "$here/managed_runner.clj" >"$generated/managed.out"
 
 [[ "$(awk -F '\t' '$1 == "rt-core" { print $2 }' "$generated/managed.out" \

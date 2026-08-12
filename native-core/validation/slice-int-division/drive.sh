@@ -8,7 +8,7 @@ repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-int-division.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-for command in awk bb clojure gcc rg; do
+for command in awk bb gcc rg; do
   command -v "$command" >/dev/null || {
     echo "drive.sh: required command is unavailable: $command" >&2
     exit 1
@@ -90,7 +90,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
 done
 
 mkdir -p "$scratch/ratio" "$scratch/integer-qbe"
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
@@ -151,7 +151,7 @@ fi
 mkdir -p "$scratch/managed/native"
 "$repo/bin/beagle-build" "$here/fixture.bclj" \
   "$scratch/managed/native/int_division.clj" >/dev/null
-clojure -Sdeps "{:paths [\"$scratch/managed\"]}" -M -e "
+bb -cp "$scratch/managed" -e "
 (require 'native.int-division)
 (assert (= -2 (native.int-division/quot-int -7 3)))
 (assert (= -1 (native.int-division/rem-int -7 3)))

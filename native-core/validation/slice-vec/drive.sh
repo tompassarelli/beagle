@@ -85,7 +85,7 @@ for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   mv "$scratch/out/native/$m.clj.tmp" "$scratch/out/native/$m.clj"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/vec.facts\" \"fram.store\"

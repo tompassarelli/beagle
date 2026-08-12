@@ -17,7 +17,7 @@ die() {
   exit 1
 }
 
-for command in bb clojure cmp gcc rg sha256sum; do
+for command in bb cmp gcc rg sha256sum; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -62,7 +62,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
   mv "$scratch/out/native/$module.clj.tmp" "$scratch/out/native/$module.clj"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.main-capability-slice)
 (spit \"$scratch/generated/report.txt\"
   (native.main-capability-slice/emit-slice!

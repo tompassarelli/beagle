@@ -13,6 +13,13 @@ repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-unicode-text.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
+# `clojure` is REQUIRED here and nowhere else in the sweep: this driver's oracle
+# IS a pinned JDK's Unicode 15 implementation, so it cannot run on babashka.
+# Babashka's SubstrateVM reports java.runtime.version 25.x and carries Unicode 16
+# tables: U+2EBF0 and U+10D40 are assigned letters/digits there and unassigned in
+# OpenJDK 21.0.12's Unicode 15, so age-boundary-runs yields four runs instead of
+# the two the native Unicode 15 tables produce. The compiler projection below
+# runs on bb like every other driver; only the oracle keeps the JVM.
 for command in awk bb clojure cmp gcc readelf rg strings; do
   command -v "$command" >/dev/null || {
     echo "drive.sh: required command is unavailable: $command" >&2
@@ -97,7 +104,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
   mv "$target.tmp" "$target"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"

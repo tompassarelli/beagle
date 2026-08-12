@@ -9,7 +9,7 @@ repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-do-sequence.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-for command in awk bb clojure gcc rg; do
+for command in awk bb gcc rg; do
   command -v "$command" >/dev/null || {
     echo "drive.sh: required command is unavailable: $command" >&2
     exit 1
@@ -63,7 +63,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slic
   mv "$scratch/out/native/$module.clj.tmp" "$scratch/out/native/$module.clj"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/sequence.facts\"

@@ -55,7 +55,7 @@ for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qb
   mv "$scratch/out/native/$module.clj.tmp" "$scratch/out/native/$module.clj"
 done
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/fixture.facts\"
@@ -64,7 +64,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"$art\" \"native-slice-keyword-access-v0\" \"$abi\"))"
 cat "$art/report.txt"
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require '[native.core :as core]
          '[native.lower :as lower]
          '[native.slice :as slice])
@@ -105,7 +105,7 @@ if grep -q '^obligation-projection FAIL' "$art/report.txt"; then
   exit 1
 fi
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M \
+bb -cp "$scratch/out" \
   "$here/qbe-refusal.clj" "$scratch/fixture.facts" \
   "native.keyword-access" \
   "native-core/validation/slice-keyword-access/fixture.bclj" \

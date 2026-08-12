@@ -61,7 +61,7 @@ sed -i 's/\[native\.qbe :as qbe\]/[native.qbe :as qbe :refer :all]/' \
 sed -i "4i(import '[native.qbe $qbe_records])" \
   "$scratch/out/native/qbe_validation_corpus.clj"
 
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/source-report.txt\"
   (native.body-slice/emit-slice!
@@ -92,7 +92,7 @@ rg -q 'TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure nat
   "$scratch/refusal-report.txt"
 
 mkdir -p "$scratch/c"
-clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+bb -cp "$scratch/out" -e "
 (require 'native.body-c17 'native.core 'native.obligations 'native.qbe-validation-corpus)
 (let [program native.qbe-validation-corpus/atom-program
       verdicts [(native.obligations/valid-ssa program)
