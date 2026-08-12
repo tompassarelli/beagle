@@ -346,6 +346,155 @@
 
 ;; --- Command handlers --------------------------------------------------------
 
+(define (checked-program/file path)
+  (define prog (parse-program/file path))
+  (type-check! prog)
+  prog)
+
+(define (callable-form? form)
+  (or (defn-form? form) (defn-multi? form)))
+
+(define (callable-name form)
+  (cond
+    [(defn-form? form) (defn-form-name form)]
+    [(defn-multi? form) (defn-multi-name form)]
+    [else (error 'beagle-daemon "not a callable definition: ~v" form)]))
+
+(define (callable-clauses form)
+  (cond
+    [(defn-form? form)
+     (list (list (defn-form-params form)
+                 (defn-form-rest-param form)))]
+    [(defn-multi? form)
+     (for/list ([clause (in-list (defn-multi-arities form))])
+       (list (arity-clause-params clause)
+             (arity-clause-rest-param clause)))]
+    [else '()]))
+
+(define (authored-rest-element-type rest-param)
+  (define aggregate (and rest-param (param-type rest-param)))
+  (cond
+    [(and (type-app? aggregate)
+          (eq? (type-app-ctor aggregate) 'Vec)
+          (= (length (type-app-args aggregate)) 1))
+     (car (type-app-args aggregate))]
+    [aggregate aggregate]
+    [else (type-prim 'Any)]))
+
+(define (authored-callable-type form)
+  (define alternatives
+    (cond
+      [(defn-form? form)
+       (list
+        (type-fn
+         (map (lambda (p) (or (param-type p) (type-prim 'Any)))
+              (defn-form-params form))
+         (and (defn-form-rest-param form)
+              (authored-rest-element-type (defn-form-rest-param form)))
+         (defn-form-return-type form)))]
+      [(defn-multi? form)
+       (for/list ([clause (in-list (defn-multi-arities form))])
+         (type-fn
+          (map (lambda (p) (or (param-type p) (type-prim 'Any)))
+               (arity-clause-params clause))
+          (and (arity-clause-rest-param clause)
+               (authored-rest-element-type (arity-clause-rest-param clause)))
+          (arity-clause-return-type clause)))]
+      [else '()]))
+  (if (= (length alternatives) 1)
+      (car alternatives)
+      (type-union alternatives)))
+
+(define (public-type->string type)
+  (when (pair? (free-type-metas type))
+    (error 'beagle-daemon
+           "refusing to expose an unresolved effective signature"))
+  (type->string type))
+
+(define (effective-callable-type prog form)
+  (define name (callable-name form))
+  (define effective (program-effective-definition-type prog name #f))
+  (cond
+    [effective
+     (public-type->string effective)
+     effective]
+    [(eq? (program-mode prog) 'dynamic)
+     (define authored (authored-callable-type form))
+     (public-type->string authored)
+     authored]
+    [else
+     (error 'beagle-daemon
+            "checked program is missing the effective signature for ~a"
+            name)]))
+
+(define (signature-alternatives signature)
+  (define body
+    (if (type-poly? signature) (type-poly-body signature) signature))
+  (if (type-union? body) (type-union-alts body) (list body)))
+
+(define (binding-target->string target)
+  (cond
+    [(symbol? target) (symbol->string target)]
+    [(seq-destructure? target)
+     (define fixed (map binding-target->string (seq-destructure-names target)))
+     (define items
+       (if (seq-destructure-rest-name target)
+           (append fixed
+                   (list "&"
+                         (symbol->string (seq-destructure-rest-name target))))
+           fixed))
+     (format "[~a]" (string-join items " "))]
+    [(map-destructure? target)
+     (format "{:keys [~a]~a}"
+             (string-join (map symbol->string (map-destructure-keys target)) " ")
+             (if (map-destructure-as-name target)
+                 (format " :as ~a" (map-destructure-as-name target))
+                 ""))]
+    [else (format "~a" target)]))
+
+(define (callable-clause->jsexpr clause signature)
+  (unless (type-fn? signature)
+    (error 'beagle-daemon
+           "effective callable clause is not a function type: ~a"
+           (public-type->string signature)))
+  (define params (car clause))
+  (define rest-param (cadr clause))
+  (unless (= (length params) (length (type-fn-params signature)))
+    (error 'beagle-daemon "effective callable parameter count mismatch"))
+  (define result
+    (hasheq
+     'params
+     (for/list ([param (in-list params)]
+                [param-type (in-list (type-fn-params signature))])
+       (hasheq 'name (binding-target->string (param-binding-target param))
+               'type (public-type->string param-type)))
+     'return (public-type->string (type-fn-ret signature))))
+  (if rest-param
+      (hash-set result 'rest
+                (hasheq 'name (binding-target->string
+                               (param-binding-target rest-param))
+                        'type (public-type->string
+                               (type-fn-rest-type signature))))
+      result))
+
+(define (callable-result name file form signature)
+  (define clauses (callable-clauses form))
+  (define alternatives (signature-alternatives signature))
+  (unless (= (length clauses) (length alternatives))
+    (error 'beagle-daemon "effective callable clause count mismatch for ~a" name))
+  (define details
+    (for/list ([clause (in-list clauses)]
+               [alternative (in-list alternatives)])
+      (callable-clause->jsexpr clause alternative)))
+  (define base
+    (hasheq 'name name
+            'file file
+            'signature (public-type->string signature)))
+  (if (= (length details) 1)
+      (for/fold ([result base]) ([(key value) (in-hash (car details))])
+        (hash-set result key value))
+      (hash-set base 'arities details)))
+
 (define (handle-sig args)
   (when (< (length args) 2)
     (error "sig requires: <fn-name> <file-or-dir>..."))
@@ -354,29 +503,22 @@
   (define results '())
   (define target (string->symbol name))
   (for ([f (in-list files)])
-    (with-handlers ([exn:fail? void])
-      (define datums (get-datums f))
-      (for ([d (in-list datums)])
-        (define entry (extract-defn-entry d))
-        (when (and entry (eq? (car entry) target))
-          (set! results
-                (cons (hasheq 'name name
-                              'file f
-                              'signature (type->string (caddr entry))
-                              'params (for/list ([pn (in-list (cadr entry))]
-                                                 [pt (in-list (type-fn-params (caddr entry)))])
-                                        (hasheq 'name (symbol->string pn)
-                                                'type (type->string pt)))
-                              'return (type->string (type-fn-ret (caddr entry))))
-                      results)))
-        (define ext (extract-extern-entry d))
-        (when (and ext (eq? (car ext) target))
-          (set! results
-                (cons (hasheq 'name name
-                              'file f
-                              'signature (type->string (cadr ext))
-                              'extern #t)
-                      results))))))
+    (define prog (checked-program/file f))
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (when (and (callable-form? form)
+                 (eq? (callable-name form) target))
+        (define signature (effective-callable-type prog form))
+        (set! results
+              (cons (callable-result name f form signature) results))))
+    (define extern-type (hash-ref (program-externs prog) target #f))
+    (when extern-type
+      (set! results
+            (cons (hasheq 'name name
+                          'file f
+                          'signature (public-type->string extern-type)
+                          'extern #t)
+                  results))))
   (hasheq 'ok #t 'results (reverse results)))
 
 (define (handle-fields args)
@@ -404,29 +546,32 @@
     (error "provides requires: <file>"))
   (define file (car args))
   (with-handlers ([exn:fail? (lambda (e) (hasheq 'ok #f 'error (exn-message e)))])
-    (define datums (get-datums file))
-    (define ns-name #f)
+    (define prog (checked-program/file file))
     (define records '())
     (define fns '())
 
-    (for ([d (in-list datums)])
-      (define ns (extract-ns d))
-      (when ns (set! ns-name ns))
-      (define rec (extract-record-entry d))
-      (when rec (set! records (cons rec records)))
-      (define fn (extract-defn-entry d))
-      (when fn (set! fns (cons fn fns))))
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (when (record-form? form)
+        (set! records (cons form records)))
+      (when (callable-form? form)
+        (set! fns
+              (cons (cons form (effective-callable-type prog form)) fns))))
 
     (hasheq 'ok #t
-            'namespace (and ns-name (symbol->string ns-name))
+            'namespace (symbol->string (program-namespace prog))
             'records (for/list ([r (in-list (reverse records))])
-                       (hasheq 'name (symbol->string (car r))
-                               'fields (for/list ([f (in-list (cadr r))])
-                                         (hasheq 'name (symbol->string (param-name f))
-                                                 'type (type->string (param-type f))))))
+                       (hasheq 'name (symbol->string (record-form-name r))
+                               'fields (for/list ([f (in-list (record-form-fields r))])
+                                         (hasheq
+                                          'name (binding-target->string
+                                                 (param-binding-target f))
+                                          'type (public-type->string
+                                                 (param-type f))))))
             'functions (for/list ([fn (in-list (reverse fns))])
-                         (hasheq 'name (symbol->string (car fn))
-                                 'signature (type->string (caddr fn)))))))
+                         (hasheq 'name (symbol->string
+                                        (callable-name (car fn)))
+                                 'signature (public-type->string (cdr fn)))))))
 
 (define (handle-callers args)
   (when (< (length args) 2)
@@ -461,25 +606,28 @@
   (define def-file #f)
   (define callers '())
   (for ([f (in-list files)])
-    (with-handlers ([exn:fail? void])
-      (define datums (get-datums f))
-      (for ([d (in-list datums)])
-        (define entry (extract-defn-entry d))
-        (when (and entry (eq? (car entry) target))
-          (set! sig (caddr entry))
-          (set! def-file f))
-        (when entry
-          (define fn-name (car entry))
-          (define calls (find-calls-in target d))
-          (for ([call (in-list calls)])
-            (set! callers
-                  (cons (hasheq 'caller (symbol->string fn-name)
-                                'file f
-                                'args (length (cdr call)))
-                        callers)))))))
+    (define prog (checked-program/file f))
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (when (and (callable-form? form)
+                 (eq? (callable-name form) target))
+        (set! sig (effective-callable-type prog form))
+        (set! def-file f)))
+    (define datums (get-datums f))
+    (for ([d (in-list datums)])
+      (define entry (extract-defn-entry d))
+      (when entry
+        (define fn-name (car entry))
+        (define calls (find-calls-in target d))
+        (for ([call (in-list calls)])
+          (set! callers
+                (cons (hasheq 'caller (symbol->string fn-name)
+                              'file f
+                              'args (length (cdr call)))
+                      callers))))))
   (hasheq 'ok #t
           'name name
-          'signature (and sig (type->string sig))
+          'signature (and sig (public-type->string sig))
           'defined-in def-file
           'callers (reverse callers)))
 

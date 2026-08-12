@@ -129,41 +129,146 @@
   (with-handlers ([exn:fail? (lambda (e) (read-beagle-datums path))])
     (expand-datums path)))
 
+(define (lsp-checked-program path)
+  (define content (hash-ref open-docs (path->uri path) #f))
+  (define prog
+    (if content
+        (parse-program/bytes
+         (string->bytes/utf-8 content)
+         #:source-path path)
+        (parse-program/file path)))
+  (type-check! prog)
+  prog)
+
+(define (callable-form? form)
+  (or (defn-form? form) (defn-multi? form)))
+
+(define (callable-name form)
+  (cond
+    [(defn-form? form) (defn-form-name form)]
+    [(defn-multi? form) (defn-multi-name form)]
+    [else (error 'beagle-lsp "not a callable definition: ~v" form)]))
+
+(define (authored-rest-element-type rest-param)
+  (define aggregate (and rest-param (param-type rest-param)))
+  (cond
+    [(and (type-app? aggregate)
+          (eq? (type-app-ctor aggregate) 'Vec)
+          (= (length (type-app-args aggregate)) 1))
+     (car (type-app-args aggregate))]
+    [aggregate aggregate]
+    [else (type-prim 'Any)]))
+
+(define (authored-callable-type form)
+  (define alternatives
+    (cond
+      [(defn-form? form)
+       (list
+        (type-fn
+         (map (lambda (p) (or (param-type p) (type-prim 'Any)))
+              (defn-form-params form))
+         (and (defn-form-rest-param form)
+              (authored-rest-element-type (defn-form-rest-param form)))
+         (defn-form-return-type form)))]
+      [(defn-multi? form)
+       (for/list ([clause (in-list (defn-multi-arities form))])
+         (type-fn
+          (map (lambda (p) (or (param-type p) (type-prim 'Any)))
+               (arity-clause-params clause))
+          (and (arity-clause-rest-param clause)
+               (authored-rest-element-type (arity-clause-rest-param clause)))
+          (arity-clause-return-type clause)))]
+      [else '()]))
+  (if (= (length alternatives) 1)
+      (car alternatives)
+      (type-union alternatives)))
+
+(define (public-type->string type)
+  (when (pair? (free-type-metas type))
+    (error 'beagle-lsp
+           "refusing to expose an unresolved effective signature"))
+  (type->string type))
+
+(define (effective-callable-type prog form)
+  (define name (callable-name form))
+  (define effective (program-effective-definition-type prog name #f))
+  (cond
+    [effective
+     (public-type->string effective)
+     effective]
+    [(eq? (program-mode prog) 'dynamic)
+     (define authored (authored-callable-type form))
+     (public-type->string authored)
+     authored]
+    [else
+     (error 'beagle-lsp
+            "checked program is missing the effective signature for ~a"
+            name)]))
+
+(define (binding-target->string target)
+  (cond
+    [(symbol? target) (symbol->string target)]
+    [(seq-destructure? target)
+     (define fixed (map binding-target->string (seq-destructure-names target)))
+     (define items
+       (if (seq-destructure-rest-name target)
+           (append fixed
+                   (list "&"
+                         (symbol->string (seq-destructure-rest-name target))))
+           fixed))
+     (format "[~a]" (string-join items " "))]
+    [(map-destructure? target)
+     (format "{:keys [~a]~a}"
+             (string-join (map symbol->string (map-destructure-keys target)) " ")
+             (if (map-destructure-as-name target)
+                 (format " :as ~a" (map-destructure-as-name target))
+                 ""))]
+    [else (format "~a" target)]))
+
 (define (lookup-symbol-info path word)
   (with-handlers ([exn:fail? (lambda (_) #f)])
-    (define datums (lsp-read-datums path))
+    (define prog (lsp-checked-program path))
     (define target (string->symbol word))
     (define results '())
-    (for ([d (in-list datums)])
-      (define defn-entry (extract-defn-entry d))
-      (when (and defn-entry (eq? (car defn-entry) target))
-        (define pnames (cadr defn-entry))
-        (define ftype (caddr defn-entry))
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (when (and (callable-form? form)
+                 (eq? (callable-name form) target))
+        (define ftype (effective-callable-type prog form))
         (set! results
-              (cons (format "```\n~a : ~a\n```" target (type->string ftype))
+              (cons (format "```\n~a : ~a\n```"
+                            target (public-type->string ftype))
                     results)))
-      (define rec (extract-record-entry d))
-      (when (and rec (eq? (car rec) target))
-        (define fields (cadr rec))
+      (when (and (record-form? form)
+                 (eq? (record-form-name form) target))
+        (define fields (record-form-fields form))
         (set! results
               (cons (format "```\ndefrecord ~a\n~a\n```"
                             target
                             (string-join
                              (map (lambda (f)
-                                    (format "  ~a : ~a" (param-name f) (type->string (param-type f))))
+                                    (format
+                                     "  ~a : ~a"
+                                     (binding-target->string
+                                      (param-binding-target f))
+                                     (public-type->string (param-type f))))
                                   fields)
                              "\n"))
                     results)))
-      (define ext (extract-extern-entry d))
-      (when (and ext (eq? (car ext) target))
+      (when (and (def-form? form)
+                 (eq? (def-form-name form) target)
+                 (def-form-type form))
         (set! results
-              (cons (format "```\n~a : ~a  (extern)\n```" target (type->string (cadr ext)))
-                    results)))
-      (define def-e (extract-def-entry d))
-      (when (and def-e (eq? (car def-e) target))
-        (set! results
-              (cons (format "```\n~a : ~a\n```" target (type->string (cadr def-e)))
+              (cons (format "```\n~a : ~a\n```"
+                            target
+                            (public-type->string (def-form-type form)))
                     results))))
+    (define extern-type (hash-ref (program-externs prog) target #f))
+    (when extern-type
+      (set! results
+            (cons (format "```\n~a : ~a  (extern)\n```"
+                          target (public-type->string extern-type))
+                  results)))
     ;; Also check stdlib (target-aware: pick the right catalog for .bnix/.bjs/etc)
     (when (null? results)
       (define file-target (or (expected-target-for-extension path) 'clj))
@@ -171,7 +276,8 @@
       (define stdlib-type (hash-ref stdlib target #f))
       (when stdlib-type
         (set! results
-              (list (format "```\n~a : ~a  (stdlib)\n```" target (type->string stdlib-type))))))
+              (list (format "```\n~a : ~a  (stdlib)\n```"
+                            target (public-type->string stdlib-type))))))
     (if (null? results) #f (string-join (reverse results) "\n\n"))))
 
 ;; --- Diagnostics ------------------------------------------------------------
@@ -438,21 +544,20 @@
   (define items '())
   ;; File-local definitions
   (with-handlers ([exn:fail? (lambda (_) (void))])
-    (define datums (lsp-read-datums path))
-    (for ([d (in-list datums)])
-      (define defn-entry (extract-defn-entry d))
-      (when defn-entry
-        (define name (symbol->string (car defn-entry)))
+    (define prog (lsp-checked-program path))
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (when (callable-form? form)
+        (define name (symbol->string (callable-name form)))
         (when (string-prefix? name prefix)
-          (define ftype (caddr defn-entry))
+          (define ftype (effective-callable-type prog form))
           (set! items
                 (cons (hasheq 'label name
                               'kind 3  ; Function
-                              'detail (type->string ftype))
+                              'detail (public-type->string ftype))
                       items))))
-      (define rec (extract-record-entry d))
-      (when rec
-        (define name (symbol->string (car rec)))
+      (when (record-form? form)
+        (define name (symbol->string (record-form-name form)))
         (when (string-prefix? name prefix)
           (set! items
                 (cons (hasheq 'label name
@@ -466,14 +571,13 @@
                               'kind 4  ; Constructor
                               'detail (format "-> ~a" name))
                       items))))
-      (define def-e (extract-def-entry d))
-      (when def-e
-        (define name (symbol->string (car def-e)))
+      (when (and (def-form? form) (def-form-type form))
+        (define name (symbol->string (def-form-name form)))
         (when (string-prefix? name prefix)
           (set! items
                 (cons (hasheq 'label name
                               'kind 6  ; Variable
-                              'detail (type->string (cadr def-e)))
+                              'detail (public-type->string (def-form-type form)))
                       items))))))
   ;; Directory-sibling definitions (for cross-module)
   (with-handlers ([exn:fail? (lambda (_) (void))])
@@ -485,19 +589,24 @@
           #:when (not (equal? (path->string f) path)))
       (define mod-name
         (path->string (let-values ([(_base name _dir?) (split-path f)]) name)))
-      (define mod-prefix (string-append (substring mod-name 0 (- (string-length mod-name) 4)) "/"))
+      (define mod-prefix
+        (string-append (regexp-replace #rx"\\.[^.]+$" mod-name "") "/"))
       (when (string-prefix? mod-prefix prefix)
         (with-handlers ([exn:fail? (lambda (_) (void))])
-          (define datums (lsp-read-datums (path->string f)))
-          (for ([d (in-list datums)])
-            (define defn-entry (extract-defn-entry d))
-            (when defn-entry
-              (define qual (string-append mod-prefix (symbol->string (car defn-entry))))
+          (define sibling (lsp-checked-program (path->string f)))
+          (for ([raw-form (in-list (program-forms sibling))])
+            (define form (unwrap-definition-form raw-form))
+            (when (callable-form? form)
+              (define qual
+                (string-append mod-prefix
+                               (symbol->string (callable-name form))))
               (when (string-prefix? qual prefix)
                 (set! items
                       (cons (hasheq 'label qual
                                     'kind 3
-                                    'detail (type->string (caddr defn-entry)))
+                                    'detail
+                                    (public-type->string
+                                     (effective-callable-type sibling form)))
                             items)))))))))
   ;; Stdlib completions (target-aware)
   (define file-target (or (expected-target-for-extension path) 'clj))
@@ -508,7 +617,7 @@
       (set! items
             (cons (hasheq 'label name
                           'kind 3
-                          'detail (type->string v))
+                          'detail (public-type->string v))
                   items))))
   (if (> (length items) 100) (take items 100) items))
 
@@ -589,4 +698,4 @@
         [else (void)])
       (loop 0))))
 
-(provide run-lsp)
+(provide run-lsp lookup-symbol-info collect-completions)
