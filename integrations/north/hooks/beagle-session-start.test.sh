@@ -101,6 +101,7 @@ run_hook_raw() {
       BEAGLE_SESSION_STATE_DIR="$STATE" \
       BEAGLE_TEST_TRACE="$TRACE" \
       BEAGLE_TEST_HOLD="${BEAGLE_TEST_HOLD:-0.15}" \
+      BEAGLE_SWITCHBOARD_ACTIVITY_LIB="${BEAGLE_SWITCHBOARD_ACTIVITY_LIB:-$SCRATCH/missing-switchboard-activity.sh}" \
       AUTHORING_KILLSWITCH_STATE="$SCRATCH/killswitch.state" \
       "$HOOK"
 }
@@ -203,6 +204,21 @@ disabled="$(
       "$HOOK"
 )"
 assert_empty "$disabled" 'the authoring kill-switch is silent'
+
+cat >"$SCRATCH/switchboard-activity.sh" <<'SH'
+agents_switchboard_active() {
+  [ "${BEAGLE_TEST_SWITCHBOARD_STATE:-off}" = on ]
+}
+SH
+export BEAGLE_SWITCHBOARD_ACTIVITY_LIB="$SCRATCH/switchboard-activity.sh"
+export BEAGLE_TEST_SWITCHBOARD_STATE=off
+switchboard_off="$(run_hook_raw session-switchboard-off startup "$PROJECT")"
+assert_empty "$switchboard_off" 'the switchboard off verdict is silent'
+export BEAGLE_TEST_SWITCHBOARD_STATE=on
+switchboard_on="$(run_hook_raw session-switchboard-on startup "$PROJECT")"
+assert_contains "$(context_of "$switchboard_on")" 'Beagle authoring is active.' \
+  'the switchboard on verdict keeps the startup hook active'
+unset BEAGLE_SWITCHBOARD_ACTIVITY_LIB BEAGLE_TEST_SWITCHBOARD_STATE
 
 invalid="$(
   cd "$PROJECT" || exit 1

@@ -30,6 +30,17 @@ capture_hook_stdin() {
 }
 capture_hook_stdin
 
+# Codex requirements install the complete reviewed hook envelope once; the
+# agents switchboard controls whether this member is effective. Claude composes
+# only active hooks, so the helper is normally absent there. A pre-switchboard
+# installation also keeps the established behavior when no projection exists.
+switchboard_activity="${BEAGLE_SWITCHBOARD_ACTIVITY_LIB:-${BASH_SOURCE[0]%/*}/lib/switchboard-activity.sh}"
+if [ -r "$switchboard_activity" ]; then
+  # shellcheck disable=SC1090
+  source "$switchboard_activity" || exit 0
+  agents_switchboard_active hook beagle-session-start || exit 0
+fi
+
 # Clean-room / experiment kill-switch (opt-OUT), owner-local: when guards are
 # OFF this hook no-ops — no daemon revive, no authoring context injected — so
 # a controlled run keeps an identical neutral session surface across all arms.
