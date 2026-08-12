@@ -26,6 +26,7 @@
 (define current-json-inherited-source (make-parameter #f))
 (define current-json-source-id (make-parameter #f))
 (define current-checked-projection? (make-parameter #f))
+(define current-json-effective-definition-types (make-parameter #f))
 
 (define CHECKED-PROGRAM-SCHEMA-VERSION 2)
 
@@ -55,6 +56,10 @@
 (define (type->json t)
   (cond
     [(not t) 'null]
+    [(type-meta? t)
+     (error
+      'beagle-ast-json
+      "unresolved inference metavariable cannot appear in checked AST JSON")]
     [(type-prim? t) (hasheq 'kind "prim" 'name (symbol->string (type-prim-name t)))]
     [(type-app? t) (hasheq 'kind "app"
                            'name (symbol->string (type-app-ctor t))
@@ -79,6 +84,22 @@
                            'type (type->json (hash-ref bounds var))))
                  '()))]
     [else (error 'beagle-ast-json "unsupported checked type: ~v" t)]))
+
+(define (effective-definition-type->json name)
+  (define effective (current-json-effective-definition-types))
+  (unless (hash? effective)
+    (error
+     'beagle-ast-json
+     "checked-program projection requires finalized effective definition signatures"))
+  (type->json
+   (hash-ref
+    effective
+    name
+    (lambda ()
+      (error
+       'beagle-ast-json
+       "checked-program projection is missing the effective signature for ~a"
+       name)))))
 
 (define (destructure-defaults->json defaults)
   (for/list ([entry (in-list defaults)])
@@ -381,28 +402,42 @@
              'dynamic (and (def-form-dynamic? e) #t))]
 
     [(defn-form? e)
-     (hasheq 'node "defn"
-             'name (symbol->string (defn-form-name e))
-             'params (map param->json (defn-form-params e))
-             'rest (and (defn-form-rest-param e) (param->json (defn-form-rest-param e)))
-             'ret (type->json (defn-form-return-type e))
-             'body (map expr->json (defn-form-body e))
-             'private (defn-form-private? e)
-             'raises (type->json (defn-form-raises e))
-             'doc (or (defn-form-doc e) #f))]
+     (define wire
+       (hasheq 'node "defn"
+               'name (symbol->string (defn-form-name e))
+               'params (map param->json (defn-form-params e))
+               'rest (and (defn-form-rest-param e) (param->json (defn-form-rest-param e)))
+               'ret (type->json (defn-form-return-type e))
+               'body (map expr->json (defn-form-body e))
+               'private (defn-form-private? e)
+               'raises (type->json (defn-form-raises e))
+               'doc (or (defn-form-doc e) #f)))
+     (if (current-checked-projection?)
+         (hash-set
+          wire
+          'effectiveType
+          (effective-definition-type->json (defn-form-name e)))
+         wire)]
 
     [(defn-multi? e)
-     (hasheq 'node "defn-multi"
-             'name (symbol->string (defn-multi-name e))
-             'arities (map (lambda (a)
-                             (hasheq 'params (map param->json (arity-clause-params a))
-                                     'rest (and (arity-clause-rest-param a)
-                                                (param->json (arity-clause-rest-param a)))
-                                     'ret (type->json (arity-clause-return-type a))
-                                     'body (map expr->json (arity-clause-body a))))
-                           (defn-multi-arities e))
-             'private (defn-multi-private? e)
-             'doc (or (defn-multi-doc e) #f))]
+     (define wire
+       (hasheq 'node "defn-multi"
+               'name (symbol->string (defn-multi-name e))
+               'arities (map (lambda (a)
+                               (hasheq 'params (map param->json (arity-clause-params a))
+                                       'rest (and (arity-clause-rest-param a)
+                                                  (param->json (arity-clause-rest-param a)))
+                                       'ret (type->json (arity-clause-return-type a))
+                                       'body (map expr->json (arity-clause-body a))))
+                             (defn-multi-arities e))
+               'private (defn-multi-private? e)
+               'doc (or (defn-multi-doc e) #f)))
+     (if (current-checked-projection?)
+         (hash-set
+          wire
+          'effectiveType
+          (effective-definition-type->json (defn-multi-name e)))
+         wire)]
 
     [(fn-form? e)
      (hasheq 'node "fn"
@@ -995,6 +1030,12 @@
   (unless type-table
     (error 'beagle-ast-json
            "checked-program projection requires type checking with #:capture-types? #t"))
+  (define effective-definition-types
+    (program-effective-definition-types prog))
+  (unless (hash? effective-definition-types)
+    (error
+     'beagle-ast-json
+     "checked-program projection requires finalized effective definition signatures"))
   (define source-bytes (program-source-bytes prog))
   (unless source-bytes
     (error 'beagle-ast-json
@@ -1005,7 +1046,9 @@
                    [current-json-macro-table
                     (program-macro-derived-table prog)]
                    [current-json-source-id source-id]
-                   [current-checked-projection? #t])
+                   [current-checked-projection? #t]
+                   [current-json-effective-definition-types
+                    effective-definition-types])
       (hasheq
        'kind "beagle.checked-program"
        'schemaVersion CHECKED-PROGRAM-SCHEMA-VERSION

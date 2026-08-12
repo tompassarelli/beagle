@@ -78,18 +78,6 @@
 (define current-raising-functions (make-parameter (hasheq)))
 (define current-check-error-contract (make-parameter #f))
 
-;; Definition-local signature inference is a checker phase, not an AST rewrite.
-;; The authored tree keeps `#f` for an omitted simple parameter annotation;
-;; this table carries the finalized callable type to interfaces and emitters.
-(define PROGRAM->EFFECTIVE-DEFINITION-TYPES (make-weak-hasheq))
-(define (register-program-effective-definition-types! prog table)
-  (hash-set! PROGRAM->EFFECTIVE-DEFINITION-TYPES prog table))
-(define (program-effective-definition-types prog)
-  (hash-ref PROGRAM->EFFECTIVE-DEFINITION-TYPES prog #f))
-(define (program-effective-definition-type prog name [fallback #f])
-  (define table (program-effective-definition-types prog))
-  (if table (hash-ref table name fallback) fallback))
-
 ;; Non-#f only while the whole-program definition solver is constraining one
 ;; monomorphic SCC.  Normal checking sees only finalized signatures.
 (define current-definition-inference? (make-parameter #f))
@@ -6388,9 +6376,6 @@
                   #:src (caddr (car vs))))))
 
 (provide type-check! type-check-with-locs!
-         register-program-effective-definition-types!
-         program-effective-definition-types
-         program-effective-definition-type
          check-scalar-provenance!
          check-purity!
          beagle-diagnostic beagle-diagnostic?

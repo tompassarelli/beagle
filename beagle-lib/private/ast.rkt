@@ -226,6 +226,19 @@
   (define tbl (program-binder-type-table prog))
   (and tbl (hash-ref tbl binding #f)))
 
+;; Definition-local inference derives callable signatures without rewriting the
+;; authored AST.  The checker registers its finalized result here so every
+;; downstream publication boundary reads one shared, program-identity-scoped
+;; source of truth.
+(define PROGRAM->EFFECTIVE-DEFINITION-TYPES (make-weak-hasheq))
+(define (register-program-effective-definition-types! prog table)
+  (hash-set! PROGRAM->EFFECTIVE-DEFINITION-TYPES prog table))
+(define (program-effective-definition-types prog)
+  (hash-ref PROGRAM->EFFECTIVE-DEFINITION-TYPES prog #f))
+(define (program-effective-definition-type prog name [fallback #f])
+  (define table (program-effective-definition-types prog))
+  (if table (hash-ref table name fallback) fallback))
+
 ;; --- symbol predicates -----------------------------------------------------
 (define (dot-method-sym? sym)
   (and (symbol? sym)
@@ -600,6 +613,9 @@
  current-binder-type-table store-binder-type!
  register-program-binder-type-table! program-binder-type-table
  binding-projected-types
+ register-program-effective-definition-types!
+ program-effective-definition-types
+ program-effective-definition-type
  ;; Symbol predicates
  dot-method-sym? static-method-sym? dynamic-var-sym? constructor-sym? keyword-sym?
  ;; Parse injection

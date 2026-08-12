@@ -60,6 +60,16 @@
    (dynamic-require `(file ,(root/ "beagle-lib/private/check.rkt"))
                     'type-check-with-locs!)))
 
+(define register-program-type-table!
+  (dynamic-require
+   `(file ,(root/ "beagle-lib/private/ast.rkt"))
+   'register-program-type-table!))
+
+(define fresh-type-meta
+  (dynamic-require
+   `(file ,(root/ "beagle-lib/private/types.rkt"))
+   'fresh-type-meta))
+
 (define-values (program->json program->json-string
                              checked-program->json write-checked-program-json
                              expr->json type->json)
@@ -323,6 +333,38 @@
      (check-equal? (hash-ref binding 'names) '("x" "y"))
      (check-equal? (hash-ref (hash-ref parameter 'ann) 'name) "HVec"))
 
+   (test-case "checked-program v2 publishes inference separately from authored annotations"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.inferred-signature)\n"
+         "(defn identity [value] Int value)\n")
+        ".bclj"
+        "checked-inferred-signature.bclj"))
+     (define definition (car (hash-ref json 'forms)))
+     (define parameter (car (hash-ref definition 'params)))
+     (define effective (hash-ref definition 'effectiveType))
+     (check-equal? (hash-ref json 'schemaVersion) 2)
+     (check-equal? (hash-ref parameter 'ann) 'null)
+     (check-equal? (hash-ref effective 'kind) "fn")
+     (check-equal?
+      (hash-ref (car (hash-ref effective 'params)) 'name)
+      "Int")
+     (check-equal? (hash-ref (hash-ref effective 'ret) 'name) "Int"))
+
+   (test-case "checked-program v2 publishes one finalized multi-arity signature"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.inferred-multi)\n"
+         "(defn choose ([x] Int x) ([x y] String y))\n")
+        ".bclj"
+        "checked-inferred-multi.bclj"))
+     (define effective
+       (hash-ref (car (hash-ref json 'forms)) 'effectiveType))
+     (check-equal? (hash-ref effective 'kind) "poly")
+     (check-equal? (hash-ref (hash-ref effective 'body) 'kind) "union"))
+
    (test-case "ast CLI canonicalizes equivalent checkout paths"
      (define relative "beagle-test/tests/fixtures/checked-projection/wiki.bjs")
      (define dotted (string-append "./" relative))
@@ -472,7 +514,25 @@
      (check-exn #rx"unsupported checked AST node"
                 (lambda () (expr->json (vector 'future-node))))
      (check-exn #rx"unsupported checked type"
-                (lambda () (type->json (vector 'future-type)))))
+                (lambda () (type->json (vector 'future-type))))
+     (check-exn #rx"inference metavariable"
+                (lambda () (type->json (fresh-type-meta)))))
+
+   (test-case "checked-program refuses captured AST without finalized signatures"
+     (define tmp (make-temporary-file "beagle-no-effective-signatures-~a.bjs"))
+     (dynamic-wind
+       void
+       (lambda ()
+         (call-with-output-file tmp #:exists 'truncate
+           (lambda (out)
+             (display
+              "#lang beagle/js\n(ns checked.no-signatures)\n(defn id [x] Int x)\n"
+              out)))
+         (define prog (parse-program/file tmp))
+         (register-program-type-table! prog (make-hasheq))
+         (check-exn #rx"effective definition signatures"
+                    (lambda () (checked-program->json prog))))
+       (lambda () (delete-file tmp))))
 
    (test-case "checked-program requires captured strict checking"
      (define tmp (make-temporary-file "beagle-unchecked-program-~a.bjs"))

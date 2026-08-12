@@ -17,9 +17,10 @@
          "ast.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 2)
-;; V2 proves names/signatures/type exports/domain :raises, but does not yet
-;; encode every cross-module semantic contract (notably ^:dynamic status).
+(define INTERFACE-SCHEMA-VERSION 3)
+;; V3 publishes finalized definition signatures rather than reconstructing
+;; omitted annotations as Any. It still does not encode every cross-module
+;; semantic contract (notably ^:dynamic status).
 ;; Therefore an unchanged interface digest MUST NOT prune reverse-require
 ;; consumers: Fram must keep selecting the complete reverse closure from the
 ;; changed source/overlay digest until this flag can truthfully become #t.
@@ -85,7 +86,44 @@
 
 (define unwrap-public-form unwrap-definition-form)
 
-(define (ast-interface-bindings forms target)
+(define (publication-effective-definition-types prog provisional?)
+  (cond
+    ;; Dynamic mode has no checked inference authority. Its interface remains
+    ;; the authored surface, including Any for omitted annotations.
+    [(not (eq? (program-mode prog) 'strict)) #f]
+    ;; Candidate-overlay bootstrap parsing needs names before checking can run.
+    ;; The caller must opt into that weaker, transient interface explicitly.
+    [provisional? #f]
+    [else
+     (define effective (program-effective-definition-types prog))
+     (unless (hash? effective)
+       (error
+        'program->module-interface
+        "strict interface publication requires finalized effective definition signatures; type-check the program first or use #:provisional? #t only for bootstrap parsing"))
+     effective]))
+
+(define (published-definition-type effective name authored)
+  (define published
+    (if effective
+        (hash-ref
+         effective
+         name
+         (lambda ()
+           (error
+            'program->module-interface
+            "finalized effective definition signature is missing for ~a"
+            name)))
+        authored))
+  (when (pair? (free-type-metas published))
+    (error
+     'program->module-interface
+     "cannot publish unresolved inference metavariable in signature for ~a"
+     name))
+  published)
+
+(define (ast-interface-bindings prog effective)
+  (define forms (program-forms prog))
+  (define target (program-target prog))
   (define out (make-hasheq))
   (define (add! binding)
     (hash-set! out (interface-binding-name binding) binding))
@@ -102,9 +140,14 @@
        (add! (interface-binding name 'defonce (or type ANY) #f))]
       [(defn-form name params rest-param return-type _ private? raises _)
        (unless private?
+         (define authored
+           (function-type params rest-param return-type))
          (add!
           (interface-binding
-           name 'defn (function-type params rest-param return-type) raises)))]
+           name
+           'defn
+           (published-definition-type effective name authored)
+           raises)))]
       [(defn-multi name arities private? _)
        (unless private?
          (define alternatives
@@ -117,9 +160,12 @@
           (interface-binding
            name
            'defn-multi
-           (if (= (length alternatives) 1)
-               (car alternatives)
-               (type-union alternatives))
+           (published-definition-type
+            effective
+            name
+            (if (= (length alternatives) 1)
+                (car alternatives)
+                (type-union alternatives)))
            #f)))]
       [(record-form name fields)
        (add-record! name fields 'record-constructor)]
@@ -409,6 +455,10 @@
     [(not type) '(unknown)]
     [(type-prim? type) `(prim ,(type-prim-name type))]
     [(type-var? type) `(var ,(type-var-name type))]
+    [(type-meta? type)
+     (error
+      'program->module-interface
+      "cannot publish unresolved inference metavariable in a module interface")]
     [(type-app? type)
      `(app ,(type-app-ctor type)
            ,@(map type->canonical-datum (type-app-args type)))]
@@ -509,9 +559,12 @@
 
 (define (program->module-interface prog
                                    #:source-id [source-id #f]
-                                   #:datums [datums '()])
+                                   #:datums [datums '()]
+                                   #:provisional? [provisional? #f])
+  (define effective
+    (publication-effective-definition-types prog provisional?))
   (define ast-bindings
-    (ast-interface-bindings (program-forms prog) (program-target prog)))
+    (ast-interface-bindings prog effective))
   (define bindings (hash-copy ast-bindings))
   (for ([(name binding)
          (in-hash
@@ -532,13 +585,26 @@
     (program-type-exports
      (program-forms prog)
      exported-aliases))
+  (define local-type-names (list->seteq (hash-keys type-exports)))
+  (define qualified-bindings
+    (for/hasheq ([(name binding) (in-hash bindings)])
+      (values
+       name
+       (struct-copy
+        interface-binding
+        binding
+        [type
+         (qualify-provider-local-type-references
+          (interface-binding-type binding)
+          (program-namespace prog)
+          local-type-names)]))))
   (define canonical
     (interface-canonical-datum
      (program-namespace prog)
      (program-mode prog)
      (program-target prog)
      (program-gen-class? prog)
-     bindings
+     qualified-bindings
      macro-fingerprints
      type-declarations
      type-exports
@@ -548,7 +614,7 @@
    INTERFACE-SCHEMA-VERSION
    (program-namespace prog)
    (program-target prog)
-   bindings
+   qualified-bindings
    macro-fingerprints
    type-declarations
    type-exports
