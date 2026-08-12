@@ -2547,21 +2547,44 @@
   (or (eq? sym ANN-MARKER) (eq? sym LEGACY-MARKER) (eq? sym '->)))
 
 ;; `#%:` never reaches printed output; render it as the source spelling.
-;; A typed binding is structural: `(name Type)`. Lists have no destructuring
-;; meaning in Clojure, so this shape is unambiguous at every binding site.
+;; A typed binding is structural: `(binding-form Type)`.  The binding form is
+;; either a name or an ordinary Clojure destructuring pattern.  Keeping the
+;; pattern as one datum makes `(x Int)`, `([x y] (HVec Int Int))`, and
+;; `({:keys [host port]} Config)` the same grammatical operation.
+(define (binding-form-datum? item)
+  (or (symbol? item)
+      (bracketed? item)
+      (map-destructure-form? item)))
+
 (define (structured-binding? item)
   (and (list? item)
        (= (length item) 2)
-       (symbol? (car item))))
+       (binding-form-datum? (car item))))
+
+(define (parse-binding-form item where)
+  (cond
+    [(symbol? item)
+     (validate-identifier! item where)
+     (note-capitalized-binding! item where)
+     item]
+    [(bracketed? item) (parse-seq-destructure item)]
+    [(map-destructure-form? item) (parse-map-destructure item)]
+    [else
+     (raise-parse-error
+      'inline-type-annotation
+      "bad ~a binding form `~a` — expected a name, [pattern ...], or {:keys [...]}"
+      where
+      (binding-datum->src item))]))
 
 (define (parse-structured-binding item where)
   (unless (structured-binding? item)
     (raise-parse-error
      'inline-type-annotation
-     "bad typed ~a `~a` — write `(name Type)`"
+     "bad typed ~a `~a` — write `(binding-form Type)`"
      where
      (binding-datum->src item)))
-  (values (car item) (parse-type (cadr item))))
+  (values (parse-binding-form (car item) where)
+          (parse-type (cadr item))))
 
 (define (raise-retired-binding-annotation where)
   (raise-parse-error
@@ -4982,8 +5005,10 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
-;; A param item is a bare name, a structural `(name Type)` binding, or a
-;; destructure (`[a b]` / `{:keys [...]}`). Typed and bare items may mix.
+;; A param item is a bare name or a structural `(binding-form Type)` binding.
+;; Destructuring in a strict executable signature must carry the incoming
+;; aggregate type; Beagle has no principal row/sequence-kind type to infer for
+;; a bare pattern.
 (define (parse-params p)
   (define d (->datum p))
   (define items (unwrap-items d "parameter list"))
@@ -5031,14 +5056,17 @@
            [(structured-binding? item)
             (define-values (name type)
               (parse-structured-binding item "parameter"))
-            (validate-identifier! name "parameter")
             (param name type)]
            [(and (symbol? item) (annotation-marker? item))
             (raise-retired-binding-annotation "parameter list")]
            [(bracketed? item)
-            (parse-seq-destructure item)]
+            (raise-parse-error
+             'inline-type-annotation
+             "destructured parameter requires an aggregate type — write `([pattern ...] Type)`")]
            [(map-destructure-form? item)
-            (parse-map-destructure item)]
+            (raise-parse-error
+             'inline-type-annotation
+             "destructured parameter requires an aggregate type — write `({:keys [...]} Type)`")]
            [(and (list? item) (ormap annotation-marker? item))
             (raise-retired-binding-annotation "parameter list")]
            [(symbol? item)
@@ -5047,7 +5075,7 @@
             (param item #f)]
            [else
             (error 'beagle
-                   "bad parameter: ~v~nexpected name, (name Type), [a b], or {:keys [...]}"
+                   "bad parameter: ~v~nexpected name or (binding-form Type)"
                    item)]))
        (loop (cdr rest) (cons parsed acc))])))
 
@@ -5247,6 +5275,10 @@
       [(structured-binding? (car rest))
        (define-values (name type)
          (parse-structured-binding (car rest) "record field"))
+       (unless (symbol? name)
+         (error 'beagle
+                "defrecord field name must be a symbol, got destructuring pattern: ~v"
+                (car rest)))
        (loop (cdr rest) (cons (param name type) acc))]
       [(or (annotation-marker? (car rest))
            (and (list? (car rest))

@@ -450,6 +450,9 @@
 
 ;; --- Shared utility structs ------------------------------------------------
 (struct param       (name type)                             #:transparent)
+;; NAME is the parsed binding form, not necessarily an identifier.  Simple
+;; binders store a symbol; typed destructuring stores a map-destructure or
+;; seq-destructure and TYPE describes the incoming aggregate value.
 ;; or-defaults: alist of (key-sym . default-AST) from {:keys [...] :or {...}};
 ;; '() when absent. keys/as-name as before. seq-destructure names may contain
 ;; nested map-destructure/seq-destructure structs (Clojure nested binding).

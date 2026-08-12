@@ -40,6 +40,10 @@
 (ok "dynamic def"             "(def ^:dynamic *cfg* Int 1)")
 (ok "typed, bare, and mixed params"
     "(defn f [(x Int) y (z String)] Int x)")
+(ok "typed sequential destructuring parameter"
+    "(defn f [([x y] (HVec Float Float)) opts] Float x)")
+(ok "typed map destructuring parameter"
+    "(defrecord Config [(host String) (port Int)])\n(defn f [({:keys [host port]} Config) (timeout Int)] String host)")
 (ok "typed rest param"        "(defn r [(x Int) & (more (Vec Int))] Int x)")
 (ok "bare rest param"         "(defn r [x & more] Any more)")
 (ok "function type param"     "(defn hof [(cb [Int -> String])] String (cb 1))")
@@ -83,6 +87,31 @@
   (check-eq? (type-prim-name (defn-form-return-type function)) 'String)
   (define binding (car (let-form-bindings (car (defn-form-body function)))))
   (check-eq? (type-prim-name (let-binding-type binding)) 'Int))
+
+(test-case "typed destructuring keeps the pattern and incoming aggregate type"
+  (define program
+    (parse-src
+     (string-append
+      "(defrecord Config [(host String) (port Int)])\n"
+      "(defn unpack [([x y] (HVec Float Float)) ({:keys [host port] :as cfg} Config)] Float x)")))
+  (define function (cadr (program-forms program)))
+  (define seq-param (car (defn-form-params function)))
+  (check-true (seq-destructure? (param-name seq-param)))
+  (check-eq? (type-app-ctor (param-type seq-param)) 'HVec)
+  (define map-param (cadr (defn-form-params function)))
+  (check-true (map-destructure? (param-name map-param)))
+  (check-eq? (map-destructure-as-name (param-name map-param)) 'cfg)
+  (check-eq? (type-prim-name (param-type map-param)) 'Config))
+
+(err/rx "bare sequential destructuring parameter requires annotation"
+        #rx"destructured parameter requires an aggregate type"
+        "(defn f [[x y]] Any x)")
+(err/rx "bare map destructuring parameter requires annotation"
+        #rx"destructured parameter requires an aggregate type"
+        "(defn f [{:keys [host]}] Any host)")
+(err/rx "record fields cannot destructure"
+        #rx"field name must be a symbol"
+        "(defrecord Bad [([x y] (HVec Int Int))])")
 
 ;; There is no compatibility parser for either retired punctuation form.
 (err/rx "flat colon binding rejected"
