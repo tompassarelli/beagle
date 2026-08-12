@@ -161,6 +161,12 @@
     (= (char-at sym 0) "*")
     (= (char-at sym (- (count sym) 1)) "*")))
 
+(defn validate-identifier! [(sym String) (context String)] Any
+  (when (str/starts-with? sym "$beagle$")
+    (err! (str context " '" sym
+            "' uses the reserved compiler identifier prefix $beagle$")))
+  sym)
+
 ;; Retired annotation punctuation. The reader preserves these datums only so
 ;; the parser can reject stale source with a pointed structural replacement.
 (def ANN-MARKER String "#%:")
@@ -187,24 +193,11 @@
     (vector? d) (str "(" (str/join " " (mapv binding-datum->src d)) ")")
     :else (str d)))
 
-(defn structured-binding? [(item Any)] Bool
-  (and (vector? item)
-    (= (count item) 2)
-    (not (bracketed? item))
-    (not (map-tagged? item))
-    (string? (nth item 0))))
-
-(defn- parse-structured-binding! [(item Any) (where String)] Any
-  (if (structured-binding? item)
-    {"name" (nth item 0) "ann" (parse-type* (nth item 1))}
-    (err! (str "bad typed " where " `" (binding-datum->src item)
-            "` — write `(name Type)`"))))
-
-(defn- raise-retired-binding-annotation [(where String)] Any
+(defn- raise-retired-binding-annotation! [(where String)] Any
   (err! (str "punctuation annotations are not supported in " where
           " — write `(name Type)`")))
 
-(defn- raise-retired-return-annotation [(where String)] Any
+(defn- raise-retired-return-annotation! [(where String)] Any
   (err! (str "return arrows are not supported in " where
           " — write `[params] ReturnType body...`")))
 
@@ -218,7 +211,7 @@
 
 ;; `[...]` means sequential destructuring at EVERY binding site, so an
 ;; annotation marker inside one would bind a variable literally named `#%:`.
-(defn- raise-bracketed-annotation [(body Any)] Any
+(defn- raise-bracketed-annotation! [(body Any)] Any
   (let [(n Int) (count body)
         (idx Int) (loop [(i Int) 0]
                    (cond
@@ -696,11 +689,14 @@
   {"node" "dynamic-var" "name" name})
 
 ;; --- param / binding / pattern constructors ------------------------------------
-(defn make-param [(name String) (ann Any)] Any
+(defn make-param [(name Any) (ann Any)] Any
   {"type" "param" "name" name "ann" ann})
 
-(defn make-map-destructure [(keys Any) (as-name Any)] Any
-  {"type" "map-destructure" "keys" keys "as" (if (nil? as-name) false as-name)})
+(defn make-map-destructure [(keys Any) (as-name Any) (or-defaults Any)] Any
+  {"type" "map-destructure"
+   "keys" keys
+   "as" (if (nil? as-name) false as-name)
+   "or" or-defaults})
 
 (defn make-seq-destructure [(names Any) (rest-name Any)] Any
   {"type"
@@ -770,47 +766,158 @@
         (bracketed? (nth body 1))))))
 
 (defn parse-map-destructure [(item Any)] Any
-  (let [body (map-body item) keys-bracket (nth body 1) key-names (bracket-body keys-bracket) n (count body)]
-    (loop [(i Int) 2 (as-name Any) nil]
+  (let [body (map-body item)
+        keys-bracket (nth body 1)
+        key-names (bracket-body keys-bracket)
+        n (count body)]
+    (when (not (every? string? key-names))
+      (err! (str "{:keys [...]} entries must be names, got: " (str key-names))))
+    (doseq [name key-names]
+      (validate-identifier! name "map destructuring binding"))
+    (loop [(i Int) 2 (as-name Any) nil (or-defaults Any) []]
       (cond
         (>= i n)
-        (make-map-destructure key-names as-name)
+        (make-map-destructure key-names as-name or-defaults)
         (and (= (nth body i) ":as") (< (+ i 1) n) (string? (nth body (+ i 1))))
-        (recur (+ i 2) (nth body (+ i 1)))
-        (and (= (nth body i) ":or") (< (+ i 1) n))
-        (recur (+ i 2) as-name)
+        (do
+          (validate-identifier! (nth body (+ i 1)) "map destructuring :as binding")
+          (recur (+ i 2) (nth body (+ i 1)) or-defaults))
+        (and (= (nth body i) ":or")
+          (< (+ i 1) n)
+          (map-tagged? (nth body (+ i 1))))
+        (let [entries (map-body (nth body (+ i 1)))]
+          (if (odd? (count entries))
+            (do
+              (err! (str ":or map must be name/default pairs, got: "
+                      (binding-datum->src (nth body (+ i 1)))))
+              (recur (+ i 2) as-name or-defaults))
+            (let [parsed (loop [(j Int) 0 (acc Any) []]
+                           (if (>= j (count entries))
+                             acc
+                             (let [key (nth entries j)]
+                               (if (and (string? key) (has-item? key-names key))
+                                 (recur (+ j 2)
+                                   (conj acc
+                                     {"key" key
+                                      "value" (parse-expr* (nth entries (+ j 1)))}))
+                                 (do
+                                   (err! (str ":or key " (str key)
+                                           " must be one of the :keys binding names "
+                                           (str key-names)))
+                                   (recur (+ j 2) acc))))))]
+              (recur (+ i 2) as-name parsed))))
+        (or (= (nth body i) ":strs") (= (nth body i) ":syms"))
+        (do
+          (err! (str "map destructure " (nth body i)
+                  " is not supported — use {:keys [names]}"))
+          (recur (+ i 2) as-name or-defaults))
         :else
-        (recur (+ i 1) as-name)))))
+        (do
+          (err! (str "map destructure: unsupported entry " (str (nth body i))
+                  " — supported: {:keys [names] :or {name default} :as name}"))
+          (recur (+ i 1) as-name or-defaults))))))
 
 (defn parse-seq-destructure [(item Any)] Any
   (let [body (bracket-body item) n (count body)]
-    (when (bracketed-annotation? body) (raise-bracketed-annotation body))
+    (when (bracketed-annotation? body) (raise-bracketed-annotation! body))
     (loop [(i Int) 0 (names Any) [] (rest-name Any) nil]
       (cond
         (>= i n)
         (make-seq-destructure names rest-name)
         (= (nth body i) "&")
-        (if (and (< (+ i 1) n) (string? (nth body (+ i 1))))
-          (make-seq-destructure names (nth body (+ i 1)))
-          (make-seq-destructure names nil))
+        (if (and (= (+ i 2) n) (string? (nth body (+ i 1))))
+          (do
+            (validate-identifier! (nth body (+ i 1)) "sequential destructuring rest binding")
+            (make-seq-destructure names (nth body (+ i 1))))
+          (do
+            (err! "sequential destructure: & must be followed by exactly one name")
+            (make-seq-destructure names nil)))
         (string? (nth body i))
-        (recur (+ i 1) (conj names (nth body i)) rest-name)
+        (do
+          (validate-identifier! (nth body i) "sequential destructuring binding")
+          (recur (+ i 1) (conj names (nth body i)) rest-name))
+        (bracketed? (nth body i))
+        (recur (+ i 1) (conj names (parse-seq-destructure (nth body i))) rest-name)
+        (map-destructure-form? (nth body i))
+        (recur (+ i 1) (conj names (parse-map-destructure (nth body i))) rest-name)
         :else
-        (make-seq-destructure names rest-name)))))
+        (do
+          (err! (str "sequential destructure: expected a name, nested [..] pattern, or {:keys [..]} pattern, got: "
+                  (binding-datum->src (nth body i))))
+          (make-seq-destructure names rest-name))))))
+
+(defn binding-form-datum? [(item Any)] Bool
+  (or (string? item)
+    (bracketed? item)
+    (map-destructure-form? item)))
+
+(defn structured-binding? [(item Any)] Bool
+  (and (vector? item)
+    (= (count item) 2)
+    (not (bracketed? item))
+    (not (map-tagged? item))
+    (binding-form-datum? (nth item 0))))
+
+(defn- parse-binding-form! [(item Any) (where String)] Any
+  (cond
+    (string? item)
+    (do
+      (validate-identifier! item where)
+      (note-capitalized-binding! item where)
+      item)
+    (bracketed? item)
+    (parse-seq-destructure item)
+    (map-destructure-form? item)
+    (parse-map-destructure item)
+    :else
+    (err! (str "bad " where " binding form `" (binding-datum->src item)
+            "` — expected a name, [pattern ...], or {:keys [...]}"))))
+
+(defn- parse-structured-binding! [(item Any) (where String)] Any
+  (if (structured-binding? item)
+    {"name" (parse-binding-form! (nth item 0) where)
+     "ann" (parse-type* (nth item 1))}
+    (err! (str "bad typed " where " `" (binding-datum->src item)
+            "` — write `(binding-form Type)`"))))
 
 (defn- parse-rest-param! [(after Any)] Any
   (cond
     (and (= (count after) 1) (string? (nth after 0)))
-    (make-param (nth after 0) nil)
+    (do
+      (validate-identifier! (nth after 0) "rest parameter")
+      (make-param (nth after 0) nil))
     (and (= (count after) 1) (structured-binding? (nth after 0)))
     (let [binding (parse-structured-binding! (nth after 0) "rest parameter")]
-      (make-param (get binding "name") (get binding "ann")))
+      (if (string? (get binding "name"))
+        (make-param (get binding "name") (get binding "ann"))
+        (do
+          (err! "rest parameter must bind one name, not a destructuring pattern")
+          nil)))
     (> (count (filterv retired-binding-marker? after)) 0)
-    (raise-retired-binding-annotation "rest parameter")
+    (raise-retired-binding-annotation! "rest parameter")
     :else
     (do (err! (str "bad rest parameter after &: " (str after))) nil)))
 
-;; Grammar: each item is a bare name, `(name Type)`, or a destructuring form.
+(defn binding-target-bound-names [(binding Any)] Any
+  (let [target (if (and (map? binding) (= (get binding "type") "param"))
+                 (get binding "name")
+                 binding)
+        t (get target "type")]
+    (cond
+      (string? target) [target]
+      (= t "map-destructure")
+      (let [as-name (get target "as")]
+        (if (or (nil? as-name) (false? as-name))
+          (vec (get target "keys"))
+          (conj (vec (get target "keys")) as-name)))
+      (= t "seq-destructure")
+      (let [fixed (vec (apply concat
+                         (mapv binding-target-bound-names (get target "names"))))
+            rest-name (get target "rest")]
+        (if (or (nil? rest-name) (false? rest-name)) fixed (conj fixed rest-name)))
+      :else [])))
+
+;; Grammar: each item is a bare name or `(binding-form Type)`.
 ;; Bare and typed parameters may mix; `&` owns exactly one bare or typed rest.
 (defn parse-params! [(params-form Any)] Any
   (let [(items Any) (unwrap-items params-form)
@@ -841,20 +948,42 @@
               (and (vector? item)
                 (> (count (filterv retired-binding-marker? item)) 0)))
             (do
-              (raise-retired-binding-annotation "parameter list")
+              (raise-retired-binding-annotation! "parameter list")
               (recur (+ i 1) fixed rest-param))
             (bracketed? item)
-            (recur (+ i 1) (conj fixed (parse-seq-destructure item)) rest-param)
+            (do
+              (err! "destructured parameter requires an aggregate type — write `([pattern ...] Type)`")
+              (recur (+ i 1) fixed rest-param))
             (map-destructure-form? item)
-            (recur (+ i 1) (conj fixed (parse-map-destructure item)) rest-param)
+            (do
+              (err! "destructured parameter requires an aggregate type — write `({:keys [...]} Type)`")
+              (recur (+ i 1) fixed rest-param))
             (string? item)
             (do
+              (validate-identifier! item "parameter")
               (note-capitalized-binding! item "parameter")
               (recur (+ i 1) (conj fixed (make-param item nil)) rest-param))
             :else
             (do
-              (err! (str "bad parameter: " (str item) " — expected name, (name Type), [a b], or {:keys [...]}"))
-              (recur (+ i 1) fixed rest-param))))))]
+              (err! (str "bad parameter: " (str item) " — expected name or (binding-form Type)"))
+              (recur (+ i 1) fixed rest-param))))))
+        all-bound (into
+                    (vec (apply concat
+                           (mapv binding-target-bound-names (get parsed "params"))))
+                    (if (nil? (get parsed "rest-param"))
+                      []
+                      (binding-target-bound-names (get parsed "rest-param"))))
+        duplicate (loop [(remaining Any) all-bound (seen Any) {}]
+                    (if (= (count remaining) 0)
+                      nil
+                      (let [name (nth remaining 0)]
+                        (if (contains? seen name)
+                          name
+                          (recur (subvec (vec remaining) 1)
+                            (assoc seen name true))))))]
+    (when (not (nil? duplicate))
+      (err! (str "parameter list binds `" duplicate
+              "` more than once; every nested destructuring name and :as alias must be unique")))
     parsed))
 
 ;; --- parse-let-bindings! ------------------------------------------------------
@@ -871,7 +1000,7 @@
           (and (< (+ i 1) n) (retired-binding-marker? (nth items (+ i 1))))
           (and (vector? (nth items i))
             (> (count (filterv retired-binding-marker? (nth items i))) 0)))
-        (do (raise-retired-binding-annotation "let bindings") (recur (+ i 1) acc))
+        (do (raise-retired-binding-annotation! "let bindings") (recur (+ i 1) acc))
         (and (< (+ i 1) n) (map-destructure-form? (nth items i)))
         (recur (+ i 2)
           (conj acc
@@ -913,13 +1042,18 @@
         acc
         (structured-binding? (nth items i))
         (let [binding (parse-structured-binding! (nth items i) "record field")]
-          (recur (+ i 1)
-            (conj acc
-              {"name" (get binding "name") "ann" (get binding "ann")})))
+          (if (string? (get binding "name"))
+            (recur (+ i 1)
+              (conj acc
+                {"name" (get binding "name") "ann" (get binding "ann")}))
+            (do
+              (err! (str "defrecord field name must be a name, got destructuring pattern: "
+                      (binding-datum->src (nth items i))))
+              (recur (+ i 1) acc))))
         (or (retired-binding-marker? (nth items i))
           (and (vector? (nth items i))
             (> (count (filterv retired-binding-marker? (nth items i))) 0)))
-        (do (raise-retired-binding-annotation "record fields") (recur (+ i 1) acc))
+        (do (raise-retired-binding-annotation! "record fields") (recur (+ i 1) acc))
         :else
         (do
           (err! (str "defrecord field needs a type — use [(name Type) (name2 Type2) ...], got: " (str (nth items i))))
@@ -973,8 +1107,22 @@
         (or (retired-binding-marker? (nth items i))
           (and (< (+ i 1) n) (retired-binding-marker? (nth items (+ i 1)))))
         (do
-          (raise-retired-binding-annotation "for/doseq binding")
+          (raise-retired-binding-annotation! "for/doseq binding")
           (recur (+ i 1) acc))
+        (and (< (+ i 1) n) (bracketed? (nth items i)))
+        (recur (+ i 2)
+          (conj acc
+            {"type" "binding"
+             "name" (parse-seq-destructure (nth items i))
+             "ann" nil
+             "expr" (parse-expr* (nth items (+ i 1))) }))
+        (and (< (+ i 1) n) (map-destructure-form? (nth items i)))
+        (recur (+ i 2)
+          (conj acc
+            {"type" "binding"
+             "name" (parse-map-destructure (nth items i))
+             "ann" nil
+             "expr" (parse-expr* (nth items (+ i 1))) }))
         (and (< (+ i 1) n) (structured-binding? (nth items i)))
         (let [binding (parse-structured-binding! (nth items i) "for/doseq binding")]
           (recur (+ i 2)
@@ -1018,13 +1166,17 @@
             (catch-clause? item)
             (if (and (>= (count item) 3) (structured-binding? (nth item 1)))
               (let [binding (parse-structured-binding! (nth item 1) "catch binding")]
-                (recur (+ i 1)
-                  body
-                  (conj catches
-                    {"type" (nth (nth item 1) 1)
-                     "name" (get binding "name")
-                     "body" (mapv parse-expr* (subvec item 2))})
-                  finally-body))
+                (if (string? (get binding "name"))
+                  (recur (+ i 1)
+                    body
+                    (conj catches
+                      {"type" (nth (nth item 1) 1)
+                       "name" (get binding "name")
+                       "body" (mapv parse-expr* (subvec item 2))})
+                    finally-body)
+                  (do
+                    (err! "catch binding must bind one name, not a destructuring pattern")
+                    (recur (+ i 1) body catches finally-body))))
               (do
                 (err! (str "catch clause needs (catch (name ExType) body...), got: "
                         (binding-datum->src item)))
@@ -1150,7 +1302,7 @@
                 parsed-params (parse-params! (nth item 1))
                 rp (get parsed-params "rest-param")]
             (when (retired-return-marker? (nth item 2))
-              (raise-retired-return-annotation (str "letfn " name)))
+              (raise-retired-return-annotation! (str "letfn " name)))
             {"name" name
              "params" (get parsed-params "params")
              "rest" (if (nil? rp) false rp)
@@ -1171,7 +1323,7 @@
     (let [name (nth item 0)
           parsed-params (parse-params! (nth item 1))]
       (when (retired-return-marker? (nth item 2))
-        (raise-retired-return-annotation (str "defprotocol method " name)))
+        (raise-retired-return-annotation! (str "defprotocol method " name)))
       {"name" name
        "params" (get parsed-params "params")
        "ret" (parse-type (nth item 2))})
@@ -1188,7 +1340,7 @@
     (let [name (nth item 0)
           parsed-params (parse-params! (nth item 1))]
       (when (retired-return-marker? (nth item 2))
-        (raise-retired-return-annotation (str "method " name)))
+        (raise-retired-return-annotation! (str "method " name)))
       {"name" name
        "params" (get parsed-params "params")
        "ret" (parse-type (nth item 2))
@@ -1272,7 +1424,7 @@
     (let [parsed-params (parse-params! (nth clause 0))
           rp (get parsed-params "rest-param")]
       (when (retired-return-marker? (nth clause 1))
-        (raise-retired-return-annotation "multi-arity clause"))
+        (raise-retired-return-annotation! "multi-arity clause"))
       {"params" (get parsed-params "params")
        "rest" (if (nil? rp) false rp)
        "ret" (parse-type (nth clause 1))
@@ -1359,6 +1511,7 @@
 
 ;; --- defunion / deferror helpers ----------------------------------------------
 (defn parse-simple-defunion [(name String) (raw-members Any)] Any
+  (validate-identifier! name "defunion")
   (let [n (count raw-members)]
     (loop [(i Int) 0 (mnames Any) [] (mf Any) {} (has-fields Any) false]
       (if (>= i n)
@@ -1377,6 +1530,7 @@
   [(name String)
    (type-vars Any)
    (member-defs Any)] Any
+  (validate-identifier! name "defunion")
   (swap! USER-PARAMETRIC-ARITIES assoc name (count type-vars))
   (let [n (count member-defs)]
     (loop [(i Int) 0 (mnames Any) [] (mf Any) {}]
@@ -1392,6 +1546,7 @@
             (recur (+ i 1) mnames mf)))))))
 
 (defn parse-deferror-form [(name String) (member-defs Any)] Any
+  (validate-identifier! name "deferror")
   (let [n (count member-defs)]
     (loop [(i Int) 0 (mnames Any) [] (mf Any) {}]
       (if (>= i n)
@@ -1465,6 +1620,7 @@
           (if (>= (count all) 2) all nil))))))
 
 (defn- parse-defn-tail! [(name String) (after-name Any) (priv Bool)] Any
+  (validate-identifier! name "definition")
   (cond
     (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0)))
     (make-defn-multi name (mapv parse-arity-clause! after-name) priv)
@@ -1473,7 +1629,7 @@
       (mapv parse-arity-clause! (bare-multi-arity-clauses after-name))
       priv)
     (and (>= (count after-name) 2) (retired-return-marker? (nth after-name 1)))
-    (raise-retired-return-annotation (str "defn " name))
+    (raise-retired-return-annotation! (str "defn " name))
     (>= (count after-name) 3)
     (let [parsed-params (parse-params! (nth after-name 0))
           ret (parse-type (nth after-name 1))
@@ -1536,11 +1692,15 @@
       (not (string? name))
       (err! (str "malformed " kw ": " (str rest-items)))
       (retired-binding-marker? name)
-      (raise-retired-binding-annotation kw)
+      (raise-retired-binding-annotation! kw)
+      (str/starts-with? name "$beagle$")
+      (do
+        (validate-identifier! name kw)
+        NIL-LITERAL)
       (and (= kw "defonce") (meta-name? name-form))
       (err! "malformed defonce — metadata on the name is not supported")
       (and (> (count items) 0) (retired-binding-marker? (nth items 0)))
-      (raise-retired-binding-annotation kw)
+      (raise-retired-binding-annotation! kw)
       (and (= (count items) 3) (string-literal-datum? (nth items 1)))
       (mk-def-node kw
         name
@@ -2220,10 +2380,14 @@
         :else
         (err! (str "malformed defn-: " (str d))))
       (and (= head "defrecord") (= (count rest-items) 2))
-      (make-defrecord (nth rest-items 0)
-        (parse-record-fields! (nth rest-items 1)))
+      (do
+        (validate-identifier! (nth rest-items 0) "defrecord")
+        (make-defrecord (nth rest-items 0)
+          (parse-record-fields! (nth rest-items 1))))
       (and (= head "defenum") (>= (count rest-items) 1))
-      (make-defenum (nth rest-items 0) (subvec rest-items 1))
+      (do
+        (validate-identifier! (nth rest-items 0) "defenum")
+        (make-defenum (nth rest-items 0) (subvec rest-items 1)))
       (and (= head "defunion")
         (>= (count rest-items) 2)
         (= (nth rest-items 0) ":throwable")
@@ -2250,13 +2414,17 @@
       (and (= head "deferror") (>= (count rest-items) 1))
       (parse-deferror-form (nth rest-items 0) (subvec rest-items 1))
       (and (= head "defscalar") (>= (count rest-items) 2))
-      (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1)))
+      (do
+        (validate-identifier! (nth rest-items 0) "defscalar")
+        (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1))))
       (and (= head "defprotocol")
         (>= (count rest-items) 1)
         (string? (nth rest-items 0)))
-      {"node" "defprotocol"
-       "name" (nth rest-items 0)
-       "methods" (mapv parse-protocol-method! (subvec rest-items 1))}
+      (do
+        (validate-identifier! (nth rest-items 0) "defprotocol")
+        {"node" "defprotocol"
+         "name" (nth rest-items 0)
+         "methods" (mapv parse-protocol-method! (subvec rest-items 1))})
       (= head "deftype")
       (err! "deftype removed — use defrecord for the data shape and extend-type for protocol implementations")
       (and (= head "extend-type")
@@ -2273,7 +2441,7 @@
       (and (= head "fn")
         (>= (count rest-items) 2)
         (retired-return-marker? (nth rest-items 1)))
-      (raise-retired-return-annotation "fn")
+      (raise-retired-return-annotation! "fn")
       (and (= head "fn") (>= (count rest-items) 3))
       (let [parsed-params (parse-params! (nth rest-items 0))]
         (make-fn (get parsed-params "params")
@@ -2539,9 +2707,13 @@
     (and (string? d) (keyword-sym? d))
     (make-literal "keyword" (subs d 1))
     (and (string? d) (dynamic-var-sym? d))
-    (make-dynamic-var d)
+    (do
+      (validate-identifier! d "dynamic var")
+      (make-dynamic-var d))
     (string? d)
-    (make-ref d)
+    (do
+      (validate-identifier! d "identifier")
+      (make-ref d))
     (and (vector? d) (= (count d) 2) (= (nth d 0) "#%regex"))
     (make-regex (nth d 1))
     (bracketed? d)
@@ -2680,6 +2852,7 @@
             (= head "ns")
             (do
               (when (deref ns-set) (err! "duplicate ns form"))
+              (validate-identifier! (nth d 1) "namespace")
               (reset! namespace (nth d 1))
               (reset! ns-set true)
               (doseq [clause (subvec d 2)]
@@ -2716,11 +2889,13 @@
               nil)
             (= head "defmacro")
             (if (and (= (count d) 4) (string? (nth d 1)) (or (bracketed? (nth d 2)) (vector? (nth d 2))))
-              (mac/register-macro! (deref CURRENT-REGISTRY-CELL)
-                (nth d 1)
-                "defmacro"
-                (unwrap-items (nth d 2))
-                (nth d 3))
+              (do
+                (validate-identifier! (nth d 1) "macro")
+                (mac/register-macro! (deref CURRENT-REGISTRY-CELL)
+                  (nth d 1)
+                  "defmacro"
+                  (unwrap-items (nth d 2))
+                  (nth d 3)))
               (do
                 (err! (str "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: " (str d)))
                 nil))
@@ -2729,7 +2904,7 @@
             (= head "declare-extern")
             (if (>= (count d) 3)
               (let [name-form (nth d 1) t (parse-type (nth d 2)) add-extern! (fn
-                                                                               [(nm Any)] Nil (if (some? (get (deref extern-seen) nm)) (do (err! (str "duplicate declare-extern: " nm)) nil) (do (swap! extern-seen assoc nm true) (swap! extern-list conj {"name" nm "type" t}) nil)))]
+                                                                               [(nm Any)] Nil (if (string? nm) (do (validate-identifier! nm "extern") (if (some? (get (deref extern-seen) nm)) (do (err! (str "duplicate declare-extern: " nm)) nil) (do (swap! extern-seen assoc nm true) (swap! extern-list conj {"name" nm "type" t}) nil))) (do (err! (str "declare-extern: each name must be a name, got: " (str nm))) nil)))]
                 (if (bracketed? name-form)
                   (doseq [nm (bracket-body name-form)] (add-extern! nm))
                   (add-extern! name-form)))
@@ -2961,7 +3136,7 @@
                 (let [after (subvec d 2)]
                   (when (and (>= (count after) 2)
                           (retired-return-marker? (nth after 1)))
-                    (raise-retired-return-annotation (str "defn " (nth d 1))))
+                    (raise-retired-return-annotation! (str "defn " (nth d 1))))
                   (if (and (>= (count after) 3) (bracketed? (nth after 0)))
                     (emit! (nth d 1)
                       (make-fn-type (import-fn-ptypes (nth after 0))
@@ -3067,10 +3242,59 @@
       (reset-errors!)
       (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" ANN-MARKER "Int"]] "String" ["str" "x"]])
       (> (count (parse-errors)) 0)))
-  (expect! "defn paren-wrapped PATTERN rejected — bind a name instead"
+  (expect! "typed sequential parameter keeps one aggregate annotation"
+    (let [result (parse-params!
+                   [BRACKET-TAG
+                    [[BRACKET-TAG "a" "b"] ["HVec" "Int" "String"]]])
+          param (nth (get result "params") 0)
+          target (get param "name")]
+      (and (= (count (get result "params")) 1)
+        (= (get target "type") "seq-destructure")
+        (= (get target "names") ["a" "b"])
+        (= (get (get param "ann") "name") "HVec"))))
+  (expect! "typed map parameter preserves :or and :as"
+    (let [result (parse-params!
+                   [BRACKET-TAG
+                    [[MAP-TAG ":keys" [BRACKET-TAG "host" "port"]
+                      ":or" [MAP-TAG "port" 8080]
+                      ":as" "cfg"]
+                     "Config"]])
+          target (get (nth (get result "params") 0) "name")]
+      (and (= (get target "type") "map-destructure")
+        (= (get target "keys") ["host" "port"])
+        (= (get target "as") "cfg")
+        (= (get (nth (get target "or") 0) "key") "port")
+        (= (get (get (nth (get target "or") 0) "value") "value") 8080))))
+  (expect! "typed parameter permits nested sequential/map patterns"
+    (let [result (parse-params!
+                   [BRACKET-TAG
+                    [[BRACKET-TAG "id"
+                      [MAP-TAG ":keys" [BRACKET-TAG "host"]]
+                      [BRACKET-TAG "x" "y"]]
+                     ["HVec" "Int" "Config" ["HVec" "Float" "Float"]]]])
+          names (get (get (nth (get result "params") 0) "name") "names")]
+      (and (= (count names) 3)
+        (= (get (nth names 1) "type") "map-destructure")
+        (= (get (nth names 2) "type") "seq-destructure"))))
+  (expect! "bare sequential parameter rejected without aggregate type"
     (do
       (reset-errors!)
-      (parse-params! [BRACKET-TAG [[BRACKET-TAG "a" "b"] ANN-MARKER "Point"]])
+      (parse-params! [BRACKET-TAG [BRACKET-TAG "a" "b"]])
+      (> (count (parse-errors)) 0)))
+  (expect! "destructuring rest parameter rejected"
+    (do
+      (reset-errors!)
+      (parse-params!
+        [BRACKET-TAG "x" "&" [[BRACKET-TAG "a" "b"] ["Vec" "Int"]]])
+      (> (count (parse-errors)) 0)))
+  (expect! "nested parameter binders must be unique"
+    (do
+      (reset-errors!)
+      (parse-params!
+        [BRACKET-TAG
+         [[BRACKET-TAG "x"
+           [MAP-TAG ":keys" [BRACKET-TAG "y"] ":as" "x"]]
+          ["HVec" "Int" "Config"]]])
       (> (count (parse-errors)) 0)))
   (expect! "bracketed annotation [x : Int] rejected in a param slot"
     (do
@@ -3201,6 +3425,14 @@
         (= (count (get node "catches")) 1)
         (= (get (nth (get node "catches") 0) "name") "e")
         (= (get node "finally") false))))
+  (expect! "catch destructuring is rejected"
+    (do
+      (reset-errors!)
+      (parse-expr*
+        ["try" ["foo"]
+         ["catch" [[MAP-TAG ":keys" [BRACKET-TAG "message"]] "Exception"]
+          "message"]])
+      (> (count (parse-errors)) 0)))
   (expect! "defrecord structural fields"
     (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG ["tx" "Int"] ["op" "String"]]])]
       (and (= (get node "node") "record")
@@ -3213,6 +3445,13 @@
     (do
       (reset-errors!)
       (parse-expr* ["defrecord" "Point" [BRACKET-TAG ["x" ANN-MARKER "Float"] ["y" ANN-MARKER "Float"]]])
+      (> (count (parse-errors)) 0)))
+  (expect! "defrecord destructuring field rejected"
+    (do
+      (reset-errors!)
+      (parse-expr*
+        ["defrecord" "Point"
+         [BRACKET-TAG [[BRACKET-TAG "x" "y"] ["HVec" "Float" "Float"]]]])
       (> (count (parse-errors)) 0)))
   (expect! "defunion simple"
     (let [node (parse-expr* ["defunion" "Shape" "Circle" "Rect"])]
@@ -3421,6 +3660,11 @@
     (let [result (parse-params! [BRACKET-TAG "x" "&" ["args" ["Vec" "String"]]])]
       (and (= (get (get result "rest-param") "name") "args")
         (= (get (get (get result "rest-param") "ann") "kind") "app"))))
+  (expect! "reserved compiler identifier prefix rejected"
+    (do
+      (reset-errors!)
+      (parse-expr* "$beagle$param$0")
+      (> (count (parse-errors)) 0)))
   (expect! "parse-let-bindings! plain"
     (let [bindings (parse-let-bindings! [BRACKET-TAG "x" 1 "y" 2])]
       (and (= (count bindings) 2)
@@ -3524,6 +3768,17 @@
       (parse-program!
         [["define-macro" "safe" "old" [BRACKET-TAG "x"] "x"]])
       (> (count (parse-errors)) 0)))
+  (expect! "parse-program! reserves compiler prefix across metadata binders"
+    (let [_ (parse-program!
+              [["ns" "$beagle$ns"]
+               ["defmacro" "$beagle$macro" [BRACKET-TAG] 1]
+               ["declare-extern" "$beagle$extern" "Any"]])
+          errors (parse-errors)]
+      (= (count
+           (filterv (fn [(message String)] Bool
+                      (str/includes? message "reserved compiler identifier prefix"))
+             errors))
+        3)))
   (expect! "parse-program! require :as (fold shape)"
     (let [prog (parse-program! [["ns" "fram.fold"] ["require" "fram.kernel" ":as" "k"]])]
       (= (get prog "requires") [{"ns" "fram.kernel" "alias" "k" "refer" false}])))

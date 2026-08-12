@@ -260,16 +260,16 @@
 
 ;; --- param constructors ------------------------------------------------------
 
-(defn make-param [(name String) (ann Any)] Any
+(defn make-param [(name Any) (ann Any)] Any
   {"type" "param" "name" name "ann" ann})
 
-(defn make-map-destructure [(keys (Vec String)) (as-name Any)] Any
-  {"type" "map-destructure" "keys" keys "as" as-name})
+(defn make-map-destructure [(keys (Vec String)) (as-name Any) (or-defaults Any)] Any
+  {"type" "map-destructure" "keys" keys "as" as-name "or" or-defaults})
 
-(defn make-seq-destructure [(names (Vec String)) (rest-name Any)] Any
+(defn make-seq-destructure [(names (Vec Any)) (rest-name Any)] Any
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
-(defn make-let-binding [(name String) (ann Any) (value Any)] Any
+(defn make-let-binding [(name Any) (ann Any) (value Any)] Any
   {"name" name "ann" ann "value" value})
 
 ;; --- pattern constructors ----------------------------------------------------
@@ -357,8 +357,9 @@
 
 (defn validate-identifier [(sym String)] Bool
   (let [bad-chars ";'\"` (){}[],"]
-    (every? (fn [(c String)] Bool (nil? (str/index-of bad-chars c)))
-      (map str (seq sym)))))
+    (and (not (str/starts-with? sym "$beagle$"))
+      (every? (fn [(c String)] Bool (nil? (str/index-of bad-chars c)))
+        (map str (seq sym))))))
 
 (defn validate-module-path [(path String)] Bool
   (and (every? (fn [(c String)] Bool
@@ -407,6 +408,10 @@
   (expect! "constructor: not point." (not (constructor-sym? "point.")))
   (expect! "keyword: :name" (keyword-sym? ":name"))
   (expect! "keyword: not name" (not (keyword-sym? "name")))
+  (expect! "identifier: compiler prefix reserved"
+    (not (validate-identifier "$beagle$param$0")))
+  (expect! "identifier: ordinary dollar name remains valid"
+    (validate-identifier "$value"))
 
   ;; --- AST node construction tests ---
 
@@ -445,13 +450,20 @@
     (expect! "param name" (= (get p "name") "x"))
     (expect! "param ann" (= (get (get p "ann") "name") "Int")))
 
-  (let [d (make-map-destructure ["a" "b"] "m")]
+  (let [d (make-map-destructure ["a" "b"] "m" [])]
     (expect! "map-destructure type" (= (get d "type") "map-destructure"))
     (expect! "map-destructure keys" (= (count (get d "keys")) 2)))
 
   (let [d (make-seq-destructure ["x" "y"] "rest")]
     (expect! "seq-destructure type" (= (get d "type") "seq-destructure"))
     (expect! "seq-destructure rest" (= (get d "rest") "rest")))
+
+  (let [target (make-seq-destructure
+                 ["x" (make-map-destructure ["y"] false [])]
+                 false)
+        p (make-param target {"kind" "app" "name" "HVec" "args" []})]
+    (expect! "param accepts structural binding target"
+      (= (get (get p "name") "type") "seq-destructure")))
 
   ;; --- pattern constructors ---
 

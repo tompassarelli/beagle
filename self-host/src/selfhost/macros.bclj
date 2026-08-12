@@ -845,8 +845,65 @@
     (vector? form) form
     :else []))
 
-;; A typed binder is one `(name Type)` datum. Rename its name without touching
-;; the type expression.
+;; Structural binders are syntax trees. Collect their leaves recursively while
+;; leaving the aggregate type expression untouched: `(binding-form Type)` is
+;; one typed binder whether the form is a name, `[a [b c]]`, or `{:keys [x]}`.
+(defn typed-binding-datum? [(item Any)] Bool
+  (and (vector? item)
+    (= (count item) 2)
+    (not (= (nth item 0) BRACKET-TAG))
+    (not (= (nth item 0) MAP-TAG))
+    (or (string? (nth item 0))
+      (and (vector? (nth item 0))
+        (> (count (nth item 0)) 0)
+        (or (= (nth (nth item 0) 0) BRACKET-TAG)
+          (= (nth (nth item 0) 0) MAP-TAG))))))
+
+(defn collect-binding-form-binders [(form Any)] (Vec String)
+  (cond
+    (string? form)
+    (if (= form "&") [] [form])
+
+    (and (vector? form) (> (count form) 0) (= (nth form 0) BRACKET-TAG))
+    (let [items (subvec form 1)]
+      (loop [(i Int) 0 (acc (Vec String)) []]
+        (cond
+          (>= i (count items)) acc
+          (= (nth items i) "&")
+          (if (< (+ i 1) (count items))
+            (into acc (collect-binding-form-binders (nth items (+ i 1))))
+            acc)
+          :else
+          (recur (+ i 1)
+            (into acc (collect-binding-form-binders (nth items i)))))))
+
+    (and (vector? form) (> (count form) 0) (= (nth form 0) MAP-TAG))
+    (let [items (subvec form 1)]
+      (loop [(i Int) 0 (acc (Vec String)) []]
+        (cond
+          (>= i (count items)) acc
+          (and (= (nth items i) ":keys")
+            (< (+ i 1) (count items)))
+          (recur (+ i 2)
+            (into acc (collect-binding-form-binders (nth items (+ i 1)))))
+          (and (= (nth items i) ":as")
+            (< (+ i 1) (count items))
+            (string? (nth items (+ i 1))))
+          (recur (+ i 2) (conj acc (nth items (+ i 1))))
+          ;; :or contains binder keys already collected through :keys; its
+          ;; values are expressions, never binding positions.
+          (= (nth items i) ":or")
+          (recur (+ i 2) acc)
+          :else
+          (recur (+ i 1) acc))))
+
+    :else []))
+
+(defn remove-macro-param-binders [(names Any) (macro-params Any)] Any
+  (let [mp (set macro-params)]
+    (filterv (fn [(name String)] Bool
+               (not (clojure.core/contains? mp name))) names)))
+
 (defn collect-param-binders
   [(form Any)
    (macro-params (Vec String))] (Vec String)
@@ -854,13 +911,20 @@
     (loop [(i Int) 0 (acc (Vec String)) []]
       (cond
         (>= i n) acc
-        (and (vector? (nth items i))
-             (= (count (nth items i)) 2)
-             (string? (nth (nth items i) 0)))
+        (typed-binding-datum? (nth items i))
           (recur (+ i 1)
-                 (if (clojure.core/contains? mp (nth (nth items i) 0))
-                   acc
-                   (conj acc (nth (nth items i) 0))))
+            (into acc
+              (remove-macro-param-binders
+                (collect-binding-form-binders (nth (nth items i) 0))
+                macro-params)))
+        (and (vector? (nth items i))
+          (> (count (nth items i)) 0)
+          (or (= (nth (nth items i) 0) BRACKET-TAG)
+            (= (nth (nth items i) 0) MAP-TAG)))
+          (recur (+ i 1)
+            (into acc
+              (remove-macro-param-binders
+                (collect-binding-form-binders (nth items i)) macro-params)))
         (and (string? (nth items i))
              (not= (nth items i) "&")
              (not (clojure.core/contains? mp (nth items i))))
@@ -873,14 +937,22 @@
       (cond
         (>= i (count items)) acc
         (and (< (+ i 1) (count items))
-             (vector? (nth items i))
-             (= (count (nth items i)) 2)
-             (string? (nth (nth items i) 0)))
+             (typed-binding-datum? (nth items i)))
           (recur
             (+ i 2)
-            (if (clojure.core/contains? (set macro-params) (nth (nth items i) 0))
-              acc
-              (conj acc (nth (nth items i) 0))))
+            (into acc
+              (remove-macro-param-binders
+                (collect-binding-form-binders (nth (nth items i) 0))
+                macro-params)))
+        (and (< (+ i 1) (count items))
+          (vector? (nth items i))
+          (> (count (nth items i)) 0)
+          (or (= (nth (nth items i) 0) BRACKET-TAG)
+            (= (nth (nth items i) 0) MAP-TAG)))
+          (recur (+ i 2)
+            (into acc
+              (remove-macro-param-binders
+                (collect-binding-form-binders (nth items i)) macro-params)))
         (and (< (+ i 1) (count items))
              (string? (nth items i)))
           (recur
@@ -1189,6 +1261,38 @@
         (= param-name "x__0"))
       (expect! "hygiene: user ref to x preserved"
         (= (nth result 3) ["println" "x"]))))
+
+  ;; --- test: structural typed binder hygiene ---
+  (expect! "hygiene: recursive structural binder collection"
+    (= (collect-param-binders
+         [BRACKET-TAG
+          [[BRACKET-TAG "a"
+            [MAP-TAG ":keys" [BRACKET-TAG "b"] ":as" "whole"]]
+           ["HVec" "Int" "Config"]]
+          "&" ["rest" ["Vec" "Any"]]]
+         [])
+      ["a" "b" "whole" "rest"]))
+  (let [reg (make-macro-registry)]
+    (reset-lowering-counter!)
+    (register-macro! reg "with-pattern" "safe" ["body"]
+      ["fn"
+       [BRACKET-TAG
+        [[BRACKET-TAG "x" [MAP-TAG ":keys" [BRACKET-TAG "y"]]]
+         ["HVec" "Int" "Config"]]]
+       "Any"
+       ["list" "x" "y" "body"]])
+    (let [result (expand-macro! reg "with-pattern" ["user"] nil)
+          typed (nth (nth result 1) 1)
+          pattern (nth typed 0)
+          x-name (nth pattern 1)
+          y-name (nth (nth (nth pattern 2) 2) 1)
+          body (nth result 3)]
+      (expect! "hygiene: structural sequence leaf renamed"
+        (and (not= x-name "x") (= (nth body 1) x-name)))
+      (expect! "hygiene: structural map leaf renamed"
+        (and (not= y-name "y") (= (nth body 2) y-name)))
+      (expect! "hygiene: structural aggregate type untouched"
+        (= (nth typed 1) ["HVec" "Int" "Config"]))))
 
   ;; --- test: binder mint order matches Racket (reverse-discovery list) ---
   (let [reg (make-macro-registry)]

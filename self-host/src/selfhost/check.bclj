@@ -315,6 +315,9 @@
     (reduce (fn [(acc Any) (t Any)] Any (merge-types acc t))
             (nth types 0) types)))
 
+(defn nullable-type [(t Any)] Any
+  (make-union [t NIL-TYPE]))
+
 ;; --- remove-from-union -------------------------------------------------------
 
 (defn remove-from-union [(current-type Any) (remove-type Any)] Any
@@ -473,6 +476,7 @@
          "record-field-order" {}
          "union-members" {}
          "parametric-unions" {}
+         "parametric-member-union" {}
          "diagnostics" []}))
 
 (defn emit-diag! [(msg String)] Nil
@@ -566,6 +570,228 @@
 (defn opt-field [(x Any)] Any
   (if (= x false) nil x))
 
+(declare infer-expr! check-atom-ctor! check-hvec-literal!)
+
+(defn param-binding-target [(p Any)] Any
+  (if (= (get p "type") "param") (get p "name") p))
+
+(defn destructure-bound-names [(pattern Any)] Any
+  (let [target (param-binding-target pattern)
+        t (get target "type")]
+    (cond
+      (string? target) [target]
+      (= t "map-destructure")
+      (let [as-name (opt-field (get target "as"))]
+        (if (nil? as-name)
+          (vec (get target "keys"))
+          (conj (vec (get target "keys")) as-name)))
+      (= t "seq-destructure")
+      (let [base (vec (apply concat (mapv destructure-bound-names (get target "names"))))
+            rest-name (opt-field (get target "rest"))]
+        (if (nil? rest-name) base (conj base rest-name)))
+      :else [])))
+
+(defn destructure-default-exprs [(pattern Any)] Any
+  (let [target (param-binding-target pattern)
+        t (get target "type")]
+    (cond
+      (= t "map-destructure")
+      (mapv (fn [(entry Any)] Any (get entry "value")) (get target "or"))
+      (= t "seq-destructure")
+      (vec (apply concat (mapv destructure-default-exprs (get target "names"))))
+      :else [])))
+
+(defn parametric-def-for-app [(t Any)] Any
+  (if (app-type? t)
+    (let [ctor (get t "name")
+          direct (get-in (deref STATE) ["parametric-unions" ctor])
+          union-name (get-in (deref STATE) ["parametric-member-union" ctor])]
+      (if (not (nil? direct))
+        direct
+        (if (nil? union-name)
+          nil
+          (get-in (deref STATE) ["parametric-unions" union-name]))))
+    nil))
+
+(defn resolve-parametric-field-type! [(field-type Any) (aggregate Any)] Any
+  (let [pdef (parametric-def-for-app aggregate)]
+    (if (nil? pdef)
+      field-type
+      (let [params (get pdef "params")
+            args (get aggregate "args")
+            bindings (atom {})]
+        (doseq [i (range (min (count params) (count args)))]
+          (swap! bindings assoc (nth params i) (nth args i)))
+        (apply-type-bindings field-type bindings)))))
+
+(defn record-field-map-for-type [(aggregate Any)] Any
+  (cond
+    (prim? aggregate)
+    (get-in (deref STATE) ["record-fields" (get aggregate "name")])
+    (app-type? aggregate)
+    (get-in (deref STATE) ["record-fields" (get aggregate "name")])
+    :else nil))
+
+(defn nominal-union-members [(aggregate Any)] Any
+  (cond
+    (prim? aggregate)
+    (get-in (deref STATE) ["union-members" (get aggregate "name")])
+    (app-type? aggregate)
+    (get-in (deref STATE) ["union-members" (get aggregate "name")])
+    :else nil))
+
+(defn record-field-type-for [(aggregate Any) (keyword String)] Any
+  (let [field-map (record-field-map-for-type aggregate)]
+    (if (not (nil? field-map))
+      (if (contains? field-map keyword)
+        (resolve-parametric-field-type! (get field-map keyword) aggregate)
+        nil)
+      (let [members (nominal-union-members aggregate)]
+        (if (nil? members)
+          nil
+          (let [declaring (filterv
+                            (fn [(member String)] Bool
+                              (let [member-fields (get-in (deref STATE)
+                                                    ["record-fields" member])]
+                                (and (not (nil? member-fields))
+                                  (contains? member-fields keyword))))
+                            members)]
+            (if (and (> (count declaring) 0)
+                  (= (count declaring) (count members)))
+              (merge-types-list
+                (mapv (fn [(member String)] Any
+                        (resolve-parametric-field-type!
+                          (get-in (deref STATE) ["record-fields" member keyword])
+                          aggregate))
+                  declaring))
+              nil)))))))
+
+(defn destructure-type-error! [(pattern Any) (aggregate Any) (where String) (message String)] Nil
+  (emit-diag! (str "beagle: " where " destructuring "
+                (if (= (get pattern "type") "map-destructure") "map" "sequential")
+                ": " message " (aggregate type " (type->string aggregate) ")")))
+
+(defn bind-destructure-any! [(env Any) (pattern Any)] Any
+  (let [out (reduce (fn [(acc Any) (name String)] Any (assoc acc name ANY))
+              env (destructure-bound-names pattern))]
+    (doseq [default (destructure-default-exprs pattern)]
+      (infer-expr! default out))
+    out))
+
+;; A destructuring annotation describes the incoming aggregate. Project that
+;; type recursively onto every bound name; do not collapse a typed pattern to
+;; blanket Any. Explicit `(pattern Any)` remains the dynamic boundary.
+(defn bind-destructure-type! [(env Any) (pattern Any) (aggregate Any) (where String)] Any
+  (cond
+    (string? pattern)
+    (assoc env pattern aggregate)
+
+    (any-type? aggregate)
+    (bind-destructure-any! env pattern)
+
+    (= (get pattern "type") "seq-destructure")
+    (let [names (get pattern "names")
+          rest-name (opt-field (get pattern "rest"))]
+      (cond
+        (and (app-type? aggregate) (= (get aggregate "name") "HVec"))
+        (let [elems (get aggregate "args")]
+          (if (> (count names) (count elems))
+            (do
+              (destructure-type-error! pattern aggregate where
+                (str "pattern requires " (count names)
+                  " positional values, but the tuple has " (count elems)))
+              (bind-destructure-any! env pattern))
+            (let [with-fixed (reduce
+                               (fn [(out Any) (i Int)] Any
+                                 (bind-destructure-type! out (nth names i) (nth elems i) where))
+                               env (range (count names)))]
+              (if (nil? rest-name)
+                with-fixed
+                (assoc with-fixed rest-name
+                  (make-app "HVec" (subvec (vec elems) (count names))))))))
+
+        (and (app-type? aggregate)
+          (or (= (get aggregate "name") "Vec") (= (get aggregate "name") "List"))
+          (= (count (get aggregate "args")) 1))
+        (let [elem-type (nullable-type (nth (get aggregate "args") 0))
+              with-fixed (reduce
+                           (fn [(out Any) (target Any)] Any
+                             (bind-destructure-type! out target elem-type where))
+                           env names)]
+          (if (nil? rest-name)
+            with-fixed
+            (assoc with-fixed rest-name aggregate)))
+
+        :else
+        (do
+          (destructure-type-error! pattern aggregate where
+            "positional patterns require a tuple or homogeneous sequential value; nominal records require {:keys [...]}")
+          (bind-destructure-any! env pattern))))
+
+    (= (get pattern "type") "map-destructure")
+    (let [field-map (record-field-map-for-type aggregate)
+          union-members (nominal-union-members aggregate)
+          map-value-type (if (and (app-type? aggregate)
+                               (= (get aggregate "name") "Map")
+                               (= (count (get aggregate "args")) 2))
+                           (let [key-type (nth (get aggregate "args") 0)]
+                             (when (not (type-compatible? (make-prim "Keyword") key-type))
+                               (destructure-type-error! pattern aggregate where
+                                 (str "{:keys [...]} requires Keyword-compatible map keys, got "
+                                   (type->string key-type))))
+                             (nth (get aggregate "args") 1))
+                           nil)]
+      (if (and (nil? field-map) (nil? union-members) (nil? map-value-type))
+        (do
+          (destructure-type-error! pattern aggregate where
+            "key patterns require a nominal record or homogeneous Map")
+          (bind-destructure-any! env pattern))
+        (let [defaults (get pattern "or")
+              projection (reduce
+                           (fn [(state Any) (name String)] Any
+                             (let [keyword (str ":" name)
+                                   default-entry (first
+                                                   (filterv
+                                                     (fn [(entry Any)] Bool
+                                                       (= (get entry "key") name))
+                                                     defaults))
+                                   nominal? (or (not (nil? field-map))
+                                              (not (nil? union-members)))
+                                   projected (if nominal?
+                                               (record-field-type-for aggregate keyword)
+                                               nil)
+                                   field-type (cond
+                                                (not (nil? projected)) projected
+                                                nominal?
+                                                (do
+                                                  (destructure-type-error! pattern aggregate where
+                                                    (str "field " keyword
+                                                      " is not present on every member of the nominal aggregate"))
+                                                  ANY)
+                                                (not (nil? default-entry)) map-value-type
+                                                :else (nullable-type map-value-type))
+                                   actual (if (nil? default-entry)
+                                            nil
+                                            (infer-expr! (get default-entry "value")
+                                              (get state "env")))
+                                   expected (if nominal? field-type map-value-type)]
+                               (when (and (not (nil? default-entry))
+                                       (not (type-compatible? actual expected)))
+                                 (emit-diag! (str "beagle: " where
+                                               " destructuring default for " name
+                                               ": expected " (type->string expected)
+                                               ", got " (type->string actual))))
+                               {"env" (assoc (get state "env") name field-type)
+                                "types" (assoc (get state "types") name field-type)}))
+                           {"env" env "types" {}} (get pattern "keys"))
+              with-as (let [as-name (opt-field (get pattern "as"))]
+                        (if (nil? as-name)
+                          (get projection "env")
+                          (assoc (get projection "env") as-name aggregate)))]
+          with-as)))
+
+    :else env))
+
 (defn param-type-or-any [(p Any)] Any
   (let [t (get p "type")]
     (cond
@@ -575,22 +801,14 @@
       (= t "seq-destructure") ANY
       :else ANY)))
 
-(defn extend-with-params [(env Any) (params (Vec Any)) (rest-param Any)] Any
+(defn extend-with-params! [(env Any) (params (Vec Any)) (rest-param Any)] Any
   (let [env1 (reduce
                (fn [(out Any) (p Any)] Any
-                 (let [t (get p "type")]
-                   (cond
-                     (= t "param")
-                       (assoc out (get p "name") (param-type-or-any p))
-                     (= t "map-destructure")
-                       (let [out1 (reduce (fn [(o Any) (k Any)] Any (assoc o k ANY))
-                                          out (get p "keys"))]
-                         (if (not (nil? (get p "as"))) (assoc out1 (get p "as") ANY) out1))
-                     (= t "seq-destructure")
-                       (let [out1 (reduce (fn [(o Any) (n Any)] Any (assoc o n ANY))
-                                          out (get p "names"))]
-                         (if (not (nil? (get p "rest"))) (assoc out1 (get p "rest") ANY) out1))
-                     :else out)))
+                 (let [target (param-binding-target p)
+                       declared (param-type-or-any p)]
+                   (if (string? target)
+                     (assoc out target declared)
+                     (bind-destructure-type! out target declared "parameter"))))
                env params)]
     (if (and (not (nil? rest-param)) (= (get rest-param "type") "param"))
       (assoc env1 (get rest-param "name") (param-type-or-any rest-param))
@@ -599,21 +817,45 @@
 ;; infer-expr! is mutually recursive with the helpers below (and register-*!);
 ;; beagle/clj has no `declare` combiner, but a passthrough (declare ...) emits a
 ;; Clojure (declare ...) so the forward ref resolves at load time.
-(declare infer-expr! check-atom-ctor!)
-
 (defn extend-with-let-bindings! [(env Any) (bindings (Vec Any))] Any
   (reduce
     (fn [(out Any) (b Any)] Any
       (let [inferred (infer-expr! (get b "value") out)
             declared (get b "ann")
             bname (get b "name")]
-        (when (and (not (nil? declared))
-                   (not (check-atom-ctor! (get b "value") declared out))
-                   (not (type-compatible? inferred declared)))
-          (emit-diag! (str "beagle: let binding " bname ": expected "
-                           (type->string declared) ", got " (type->string inferred))))
-        (assoc out bname (if (not (nil? declared)) declared inferred))))
+        (if (or (= (get bname "type") "map-destructure")
+              (= (get bname "type") "seq-destructure"))
+          (do
+            (when (and (not (nil? declared))
+                    (not (check-hvec-literal! (get b "value") declared out))
+                    (not (type-compatible? inferred declared)))
+              (emit-diag! (str "beagle: destructured let binding: expected aggregate "
+                            (type->string declared) ", got " (type->string inferred))))
+            (bind-destructure-type! out bname
+              (if (not (nil? declared)) declared inferred)
+              "let binding"))
+          (do
+            (when (and (not (nil? declared))
+                     (not (check-atom-ctor! (get b "value") declared out))
+                     (not (type-compatible? inferred declared)))
+              (emit-diag! (str "beagle: let binding " bname ": expected "
+                             (type->string declared) ", got " (type->string inferred))))
+            (assoc out bname (if (not (nil? declared)) declared inferred))))))
     env bindings))
+
+(defn collection-element-type [(collection-type Any)] Any
+  (cond
+    (and (app-type? collection-type)
+      (or (= (get collection-type "name") "Vec")
+        (= (get collection-type "name") "List")
+        (= (get collection-type "name") "Set"))
+      (= (count (get collection-type "args")) 1))
+    (nth (get collection-type "args") 0)
+    (and (app-type? collection-type)
+      (= (get collection-type "name") "HVec")
+      (> (count (get collection-type "args")) 0))
+    (merge-types-list (vec (get collection-type "args")))
+    :else ANY))
 
 ;; --- type narrowing ----------------------------------------------------------
 
@@ -982,6 +1224,8 @@
       (let [env1 (assoc env name (make-prim name))]
         (swap! STATE assoc-in ["parametric-unions" name]
                {"params" type-params "members" members "member-fields" member-fields})
+        (doseq [member members]
+          (swap! STATE assoc-in ["parametric-member-union" member] name))
         (if (not (nil? member-fields))
           (reduce (fn [(e Any) (m Any)] Any
                     (let [fields (get member-fields m)]
@@ -1098,7 +1342,7 @@
       (let [params (get e "params")
             rest-param (opt-field (get e "rest"))
             expected-ret (get e "ret")
-            body-env (extend-with-params env params rest-param)
+            body-env (extend-with-params! env params rest-param)
             body-type (last-expr-type! (get e "body") body-env)]
         (when (and (not (nil? expected-ret)) (not (type-compatible? body-type expected-ret)))
           (let [is-promise (and (app-type? expected-ret)
@@ -1114,7 +1358,7 @@
 
     (= (get e "node") "defn-multi")
       (do (doseq [a (get e "arities")]
-            (let [body-env (extend-with-params env (get a "params") (opt-field (get a "rest")))
+            (let [body-env (extend-with-params! env (get a "params") (opt-field (get a "rest")))
                   body-type (last-expr-type! (get a "body") body-env)
                   expected-ret (get a "ret")]
               (when (and (not (nil? expected-ret))
@@ -1128,7 +1372,7 @@
     (= (get e "node") "fn")
       (let [params (get e "params")
             p-types (mapv param-type-or-any params)
-            body-env (extend-with-params env params (opt-field (get e "rest")))
+            body-env (extend-with-params! env params (opt-field (get e "rest")))
             ret (if (not (nil? (get e "ret")))
                   (get e "ret")
                   (last-expr-type! (get e "body") body-env))]
@@ -1167,7 +1411,7 @@
                                  (assoc be (get f "name") (make-fn p-types rtype ret))))
                              env (get e "fns"))]
         (doseq [f (get e "fns")]
-          (let [fn-env (extend-with-params body-env (get f "params") (opt-field (get f "rest")))]
+          (let [fn-env (extend-with-params! body-env (get f "params") (opt-field (get f "rest")))]
             (last-expr-type! (get f "body") fn-env)))
         (last-expr-type! (get e "body") body-env))
 
@@ -1314,16 +1558,19 @@
                            (cond
                              (= ct "binding")
                                (let [coll-type (infer-expr! (get c "expr") be)
-                                     elem-type (if (and (app-type? coll-type)
-                                                        (or (= (get coll-type "name") "Vec")
-                                                            (= (get coll-type "name") "List")
-                                                            (= (get coll-type "name") "Set"))
-                                                        (= (count (get coll-type "args")) 1))
-                                                 (nth (get coll-type "args") 0)
-                                                 ANY)
-                                     declared (get c "ann")]
-                                 (assoc be (get c "name")
-                                   (if (nil? declared) elem-type declared)))
+                                     elem-type (collection-element-type coll-type)
+                                     declared (get c "ann")
+                                     target (get c "name")
+                                     effective (if (nil? declared) elem-type declared)]
+                                 (when (and (not (nil? declared))
+                                         (not (type-compatible? elem-type declared)))
+                                   (emit-diag! (str "beagle: for/doseq binding: expected element "
+                                                 (type->string declared) ", got "
+                                                 (type->string elem-type) " from "
+                                                 (type->string coll-type))))
+                                 (if (string? target)
+                                   (assoc be target effective)
+                                   (bind-destructure-type! be target effective "for/doseq binding")))
                              (= ct "when")
                                (do (infer-expr! (get c "test") be) be)
                              (= ct "let")
@@ -1342,16 +1589,19 @@
                            (cond
                              (= ct "binding")
                                (let [coll-type (infer-expr! (get c "expr") be)
-                                     elem-type (if (and (app-type? coll-type)
-                                                        (or (= (get coll-type "name") "Vec")
-                                                            (= (get coll-type "name") "List")
-                                                            (= (get coll-type "name") "Set"))
-                                                        (= (count (get coll-type "args")) 1))
-                                                 (nth (get coll-type "args") 0)
-                                                 ANY)
-                                     declared (get c "ann")]
-                                 (assoc be (get c "name")
-                                   (if (nil? declared) elem-type declared)))
+                                     elem-type (collection-element-type coll-type)
+                                     declared (get c "ann")
+                                     target (get c "name")
+                                     effective (if (nil? declared) elem-type declared)]
+                                 (when (and (not (nil? declared))
+                                         (not (type-compatible? elem-type declared)))
+                                   (emit-diag! (str "beagle: for/doseq binding: expected element "
+                                                 (type->string declared) ", got "
+                                                 (type->string elem-type) " from "
+                                                 (type->string coll-type))))
+                                 (if (string? target)
+                                   (assoc be target effective)
+                                   (bind-destructure-type! be target effective "for/doseq binding")))
                              (= ct "when")
                                (do (infer-expr! (get c "test") be) be)
                              ;; :let clauses bind sequentially (check.rkt
@@ -1421,9 +1671,6 @@
                 ANY)))
 
     (= (get e "node") "record")
-      (make-prim (get e "name"))
-
-    (= (get e "node") "defrecord")
       (do (register-record! (get e "name") (get e "fields") env)
           ANY)
 
@@ -1702,7 +1949,7 @@
                        (if (= (count alt-types) 1)
                          (nth alt-types 0)
                          (make-union alt-types))))
-            (= node "defrecord")
+            (= node "record")
               (register-record! (get form "name") (get form "fields") env)
             (= node "defunion")
               (register-union! (get form "name") (get form "members")
@@ -1722,7 +1969,7 @@
       (= node "defonce") (do (infer-expr! form env) nil)
       (= node "defn") (do (infer-expr! form env) nil)
       (= node "defn-multi") (do (infer-expr! form env) nil)
-      (= node "defrecord") nil
+      (= node "record") nil
       (= node "defunion") nil
       (= node "defenum") nil
       (= node "defscalar") nil
@@ -1891,6 +2138,7 @@
                      "record-field-order" {}
                      "union-members" {}
                      "parametric-unions" {}
+                     "parametric-member-union" {}
                      "target" (get prog "target")
                      "diagnostics" []})
       (let [env (build-initial-env! prog)]
@@ -1928,8 +2176,17 @@
   {"node" "defn" "name" name "params" params "rest" false
    "ret" ret "body" body "private" false})
 
-(defn make-param [(name String) (ann Any)] Any
+(defn make-param [(name Any) (ann Any)] Any
   {"type" "param" "name" name "ann" ann})
+
+(defn make-seq-target [(names Any) (rest-name Any)] Any
+  {"type" "seq-destructure" "names" names "rest" rest-name})
+
+(defn make-map-target [(keys Any) (as-name Any) (defaults Any)] Any
+  {"type" "map-destructure" "keys" keys "as" as-name "or" defaults})
+
+(defn make-record-node [(name String) (fields Any)] Any
+  {"node" "record" "name" name "fields" fields})
 
 (defn make-call [(fn-name String) (args (Vec Any))] Any
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
@@ -1943,7 +2200,7 @@
 (defn make-let-node [(bindings (Vec Any)) (body (Vec Any))] Any
   {"node" "let" "bindings" bindings "body" body})
 
-(defn make-let-binding [(name String) (ann Any) (value Any)] Any
+(defn make-let-binding [(name Any) (ann Any) (value Any)] Any
   {"name" name "ann" ann "value" value})
 
 (defn make-vec-node [(items (Vec Any))] Any
@@ -2024,6 +2281,144 @@
                   [(make-ref "x")])])
           result (type-check! prog)]
       (> (get result "count") 0)))
+
+  ;; --- structural typed destructuring projection ---
+  (expect! "destructure: HVec projects positions"
+    (let [target (make-seq-target ["x" "label"] false)
+          prog (make-prog [(make-defn-node "f"
+                            [(make-param target
+                               (make-app "HVec" [(make-prim "Int") (make-prim "String")]))]
+                            (make-prim "String")
+                            [(make-ref "label")])])]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "destructure: HVec projection catches return mismatch"
+    (let [target (make-seq-target ["x" "label"] false)
+          prog (make-prog [(make-defn-node "f"
+                            [(make-param target
+                               (make-app "HVec" [(make-prim "Int") (make-prim "String")]))]
+                            (make-prim "String")
+                            [(make-ref "x")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: HVec arity mismatch rejected"
+    (let [target (make-seq-target ["x" "y" "z"] false)
+          prog (make-prog [(make-defn-node "f"
+                            [(make-param target
+                               (make-app "HVec" [(make-prim "Int") (make-prim "Int")]))]
+                            (make-prim "Int")
+                            [(make-ref "x")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: nominal record rejects positional projection"
+    (let [record (make-record-node "Point"
+                   [{"name" "x" "ann" (make-prim "Float")}
+                    {"name" "y" "ann" (make-prim "Float")}])
+          target (make-seq-target ["x" "y"] false)
+          prog (make-prog [record
+                 (make-defn-node "f" [(make-param target (make-prim "Point"))]
+                   (make-prim "Float") [(make-ref "x")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: nominal record map projects fields by name"
+    (let [record (make-record-node "Config"
+                   [{"name" "host" "ann" (make-prim "String")}
+                    {"name" "port" "ann" (make-prim "Int")}])
+          target (make-map-target ["host" "port"] "cfg" [])
+          prog (make-prog [record
+                 (make-defn-node "host" [(make-param target (make-prim "Config"))]
+                   (make-prim "String") [(make-ref "host")])])]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "destructure: nominal record unknown key rejected"
+    (let [record (make-record-node "Config"
+                   [{"name" "host" "ann" (make-prim "String")}])
+          target (make-map-target ["missing"] false [])
+          prog (make-prog [record
+                 (make-defn-node "f" [(make-param target (make-prim "Config"))]
+                   (make-prim "String") [(make-ref "missing")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: nominal union projects a field shared by every member"
+    (let [union-form {"node" "defunion"
+                      "name" "Named"
+                      "members" ["Person" "Company"]
+                      "type-params" []
+                      "member-fields"
+                      {"Person" [{"name" "name" "ann" (make-prim "String")}]
+                       "Company" [{"name" "name" "ann" (make-prim "String")}]}}
+          target (make-map-target ["name"] false [])
+          prog (make-prog [union-form
+                 (make-defn-node "name-of" [(make-param target (make-prim "Named"))]
+                   (make-prim "String") [(make-ref "name")])])]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "destructure: nominal union rejects a field absent from one member"
+    (let [union-form {"node" "defunion"
+                      "name" "Named"
+                      "members" ["Person" "Anonymous"]
+                      "type-params" []
+                      "member-fields"
+                      {"Person" [{"name" "name" "ann" (make-prim "String")}]
+                       "Anonymous" [{"name" "id" "ann" (make-prim "Int")}]}}
+          target (make-map-target ["name"] false [])
+          prog (make-prog [union-form
+                 (make-defn-node "name-of" [(make-param target (make-prim "Named"))]
+                   (make-prim "String") [(make-ref "name")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: parametric nominal union substitutes projected fields"
+    (let [union-form {"node" "defunion"
+                      "name" "Box"
+                      "members" ["BoxValue"]
+                      "type-params" ["T"]
+                      "member-fields"
+                      {"BoxValue" [{"name" "value" "ann" (make-var "T")}]}}
+          target (make-map-target ["value"] false [])
+          prog (make-prog [union-form
+                 (make-defn-node "unbox"
+                   [(make-param target (make-app "Box" [(make-prim "String")]))]
+                   (make-prim "String") [(make-ref "value")])])]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "destructure: map default checked against projected field"
+    (let [record (make-record-node "Config"
+                   [{"name" "port" "ann" (make-prim "Int")}])
+          target (make-map-target ["port"] false
+                   [{"key" "port" "value" (make-lit "string" "bad")}])
+          prog (make-prog [record
+                 (make-defn-node "f" [(make-param target (make-prim "Config"))]
+                   (make-prim "Int") [(make-ref "port")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: homogeneous Map default closes key absence"
+    (let [target (make-map-target ["x"] false
+                   [{"key" "x" "value" (make-lit "number" 0)}])
+          prog (make-prog [(make-defn-node "f"
+                            [(make-param target
+                               (make-app "Map" [(make-prim "Keyword") (make-prim "Int")]))]
+                            (make-prim "Int")
+                            [(make-ref "x")])])]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "destructure: homogeneous Map key without default is nullable"
+    (let [target (make-map-target ["x"] false [])
+          prog (make-prog [(make-defn-node "f"
+                            [(make-param target
+                               (make-app "Map" [(make-prim "Keyword") (make-prim "Int")]))]
+                            (make-prim "Int")
+                            [(make-ref "x")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: homogeneous sequence positions are nullable"
+    (let [target (make-seq-target ["x"] false)
+          prog (make-prog [(make-defn-node "f"
+                            [(make-param target (make-app "Vec" [(make-prim "Int")]))]
+                            (make-prim "Int")
+                            [(make-ref "x")])])]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "destructure: nested HVec projects recursively"
+    (let [inner (make-seq-target ["label" "score"] false)
+          target (make-seq-target ["id" inner] false)
+          ann (make-app "HVec"
+                [(make-prim "Int")
+                 (make-app "HVec" [(make-prim "String") (make-prim "Float")])])
+          prog (make-prog [(make-defn-node "f" [(make-param target ann)]
+                            (make-prim "String") [(make-ref "label")])])]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "destructure: explicit Any is the dynamic escape boundary"
+    (let [target (make-seq-target ["x" "y"] false)
+          prog (make-prog [(make-defn-node "f" [(make-param target ANY)]
+                            (make-prim "String") [(make-ref "x")])])]
+      (= (get (type-check! prog) "count") 0)))
 
   ;; --- let binding type checking ---
   (expect! "let: basic binding inference"
