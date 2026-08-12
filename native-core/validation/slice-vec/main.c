@@ -1,15 +1,15 @@
 /* Probe for the lowered Vec vocabulary. Hand-written; the module under it is
    generated. With any argument it takes the out-of-range path, which traps.
-   fn_59 bucket-size          fn_60 bucket-position-at
-   fn_61 bucket-with-position fn_62 append-position
-   fn_63 position-pair        fn_64 empty-positions
-   fn_65 frame-operation-count fn_66 frame-operation-at
-   fn_67 any-values-equal?   fn_68 increment-value
-   fn_69 decrement-value     fn_70 mask-values
-   fn_71 xor-values          fn_72 shifted-value
-   fn_73 values-differ?      fn_74 no-positions?
-   fn_75 position-slice      fn_76 position-tail
-   fn_77 reversed-positions  fn_78 append-positions */
+   fn_60 bucket-size          fn_61 bucket-position-at
+   fn_62 bucket-with-position fn_63 append-position
+   fn_64 position-pair        fn_65 empty-positions
+   fn_66 frame-operation-count fn_67 frame-operation-at
+   fn_68 any-values-equal?   fn_69 increment-value
+   fn_70 decrement-value     fn_71 mask-values
+   fn_72 xor-values          fn_73 shifted-value
+   fn_74 values-differ?      fn_75 no-positions?
+   fn_76 position-slice      fn_77 position-tail
+   fn_78 reversed-positions  fn_79 append-positions */
 #include "module_0.h"
 
 #define ARENA_BYTES ((size_t)65536)
@@ -44,16 +44,16 @@ int main(int argc, char **argv) {
 
   native_vec_storage_allocations = UINT64_C(0);
   for (int64_t i = INT64_C(0); i < PUSH_COUNT; ++i) {
-    positions = native_m0_fn_62(&arena, &capability, positions, i);
+    positions = native_m0_fn_63(&arena, &capability, positions, i);
   }
   uint64_t push_allocations = native_vec_storage_allocations;
   bucket.field_1 = positions;
 
-  if (native_m0_fn_59(bucket) != PUSH_COUNT) {
+  if (native_m0_fn_60(bucket) != PUSH_COUNT) {
     return 1;
   }
   for (int64_t i = INT64_C(0); i < PUSH_COUNT; ++i) {
-    if (native_m0_fn_60(bucket, i) != i) {
+    if (native_m0_fn_61(bucket, i) != i) {
       return 2;
     }
   }
@@ -62,45 +62,45 @@ int main(int argc, char **argv) {
   }
 
   if ((argc > 1) && (strcmp(argv[1], "overflow") == 0)) {
-    (void)native_m0_fn_68(INT64_MAX);
+    (void)native_m0_fn_69(INT64_MAX);
     return 9;
   }
   if (argc > 1) {
     /* an index at or past the length must trap, never return */
-    (void)native_m0_fn_60(bucket, PUSH_COUNT);
+    (void)native_m0_fn_61(bucket, PUSH_COUNT);
     return 9;
   }
 
-  native_m0_type_21 grown = native_m0_fn_61(&arena, &capability, bucket, INT64_C(4242));
+  native_m0_type_21 grown = native_m0_fn_62(&arena, &capability, bucket, INT64_C(4242));
   /* conj is persistent: the bucket the conj read must still hold PUSH_COUNT */
   if ((grown.field_0 != INT64_C(7))
-      || (native_m0_fn_59(grown) != (PUSH_COUNT + INT64_C(1)))
-      || (native_m0_fn_60(grown, PUSH_COUNT) != INT64_C(4242))
-      || (native_m0_fn_59(bucket) != PUSH_COUNT)) {
+      || (native_m0_fn_60(grown) != (PUSH_COUNT + INT64_C(1)))
+      || (native_m0_fn_61(grown, PUSH_COUNT) != INT64_C(4242))
+      || (native_m0_fn_60(bucket) != PUSH_COUNT)) {
     return 4;
   }
   /* and a second conj off the same base is a fork, not a second append */
-  native_m0_type_21 forked = native_m0_fn_61(&arena, &capability, bucket, INT64_C(99));
-  if ((native_m0_fn_59(forked) != (PUSH_COUNT + INT64_C(1)))
-      || (native_m0_fn_60(forked, PUSH_COUNT) != INT64_C(99))
-      || (native_m0_fn_60(grown, PUSH_COUNT) != INT64_C(4242))
-      || (native_m0_fn_59(bucket) != PUSH_COUNT)) {
+  native_m0_type_21 forked = native_m0_fn_62(&arena, &capability, bucket, INT64_C(99));
+  if ((native_m0_fn_60(forked) != (PUSH_COUNT + INT64_C(1)))
+      || (native_m0_fn_61(forked, PUSH_COUNT) != INT64_C(99))
+      || (native_m0_fn_61(grown, PUSH_COUNT) != INT64_C(4242))
+      || (native_m0_fn_60(bucket) != PUSH_COUNT)) {
     return 14;
   }
 
   native_vec_storage_allocations = UINT64_C(0);
-  native_m0_type_20 pair = native_m0_fn_63(&arena, &capability, INT64_C(11), INT64_C(22));
+  native_m0_type_20 pair = native_m0_fn_64(&arena, &capability, INT64_C(11), INT64_C(22));
   if ((native_vec_length(pair) != INT64_C(2))
       || (native_vec_storage_allocations != UINT64_C(1))) {
     return 5;
   }
   native_m0_type_21 pair_bucket = { INT64_C(0), pair };
-  if ((native_m0_fn_60(pair_bucket, INT64_C(0)) != INT64_C(11))
-      || (native_m0_fn_60(pair_bucket, INT64_C(1)) != INT64_C(22))) {
+  if ((native_m0_fn_61(pair_bucket, INT64_C(0)) != INT64_C(11))
+      || (native_m0_fn_61(pair_bucket, INT64_C(1)) != INT64_C(22))) {
     return 6;
   }
 
-  if (native_vec_length(native_m0_fn_64(&arena, &capability)) != INT64_C(0)) {
+  if (native_vec_length(native_m0_fn_65(&arena, &capability)) != INT64_C(0)) {
     return 7;
   }
 
@@ -125,13 +125,13 @@ int main(int argc, char **argv) {
   operations = native_vec_push(&arena, operations, &assert_operation, INT64_C(56), (size_t)8);
   operations = native_vec_push(&arena, operations, &retract_operation, INT64_C(56), (size_t)8);
   native_m0_type_31 frame = { INT64_C(3), operations };
-  if (native_m0_fn_65(frame) != INT64_C(2)) {
+  if (native_m0_fn_66(frame) != INT64_C(2)) {
     return 8;
   }
   if (!native_text_eq(
-          native_m0_fn_66(frame, INT64_C(0)).field_0, assert_action)
+          native_m0_fn_67(frame, INT64_C(0)).field_0, assert_action)
       || !native_text_eq(
-          native_m0_fn_66(frame, INT64_C(1)).field_0, retract_action)) {
+          native_m0_fn_67(frame, INT64_C(1)).field_0, retract_action)) {
     return 10;
   }
 
@@ -151,29 +151,29 @@ int main(int argc, char **argv) {
   equal_values = native_vec_push(&arena, equal_values, &any_bool, INT64_C(16), (size_t)8);
   different_values = native_vec_push(&arena, different_values, &any_int, INT64_C(16), (size_t)8);
   different_values = native_vec_push(&arena, different_values, &any_other, INT64_C(16), (size_t)8);
-  if (!native_m0_fn_67(values, equal_values)
-      || native_m0_fn_67(values, different_values)) {
+  if (!native_m0_fn_68(values, equal_values)
+      || native_m0_fn_68(values, different_values)) {
     return 11;
   }
 
-  if ((native_m0_fn_68(INT64_C(41)) != INT64_C(42))
-      || (native_m0_fn_69(INT64_C(43)) != INT64_C(42))
-      || (native_m0_fn_70(INT64_C(240), INT64_C(90)) != INT64_C(80))
-      || (native_m0_fn_71(INT64_C(240), INT64_C(90)) != INT64_C(170))
-      || (native_m0_fn_72(INT64_C(1), INT64_C(65)) != INT64_C(2))
-      || !native_m0_fn_73(INT64_C(7), INT64_C(8))
-      || native_m0_fn_73(INT64_C(7), INT64_C(7))
-      || !native_m0_fn_74(native_m0_fn_64(&arena, &capability))
-      || native_m0_fn_74(pair)) {
+  if ((native_m0_fn_69(INT64_C(41)) != INT64_C(42))
+      || (native_m0_fn_70(INT64_C(43)) != INT64_C(42))
+      || (native_m0_fn_71(INT64_C(240), INT64_C(90)) != INT64_C(80))
+      || (native_m0_fn_72(INT64_C(240), INT64_C(90)) != INT64_C(170))
+      || (native_m0_fn_73(INT64_C(1), INT64_C(65)) != INT64_C(2))
+      || !native_m0_fn_74(INT64_C(7), INT64_C(8))
+      || native_m0_fn_74(INT64_C(7), INT64_C(7))
+      || !native_m0_fn_75(native_m0_fn_65(&arena, &capability))
+      || native_m0_fn_75(pair)) {
     return 12;
   }
 
-  native_m0_type_20 first = native_m0_fn_75(
+  native_m0_type_20 first = native_m0_fn_76(
       &arena, &capability, pair, INT64_C(0), INT64_C(1));
-  native_m0_type_20 tail = native_m0_fn_76(
+  native_m0_type_20 tail = native_m0_fn_77(
       &arena, &capability, pair, INT64_C(1));
-  native_m0_type_20 reversed = native_m0_fn_77(&arena, &capability, pair);
-  native_m0_type_20 appended = native_m0_fn_78(&arena, &capability, pair, pair);
+  native_m0_type_20 reversed = native_m0_fn_78(&arena, &capability, pair);
+  native_m0_type_20 appended = native_m0_fn_79(&arena, &capability, pair, pair);
   if ((native_vec_length(first) != INT64_C(1))
       || (native_vec_length(tail) != INT64_C(1))
       || (native_vec_length(reversed) != INT64_C(2))

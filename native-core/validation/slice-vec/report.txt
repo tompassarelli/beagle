@@ -4,9 +4,9 @@ stage typed-to-native PENDING
 stage native-to-epoch COMPLETE
 source-modules 3
 source-imports 4
-program-types 92
-program-functions 79
-program-abis 79
+program-types 93
+program-functions 80
+program-abis 80
 projected-types 84
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
@@ -48,45 +48,46 @@ lowered fn_36 triple-handle 5 blocks
 lowered fn_37 atom-handle? 3 blocks
 lowered fn_38 handle-position 3 blocks
 lowered fn_39 valid-handle? 9 blocks
-lowered fn_40 atom-term-count 1 blocks
-lowered fn_41 triple-term-count 1 blocks
-lowered fn_42 term-count 3 blocks
-lowered fn_43 transaction-count 1 blocks
-lowered fn_44 operation-count 1 blocks
-lowered fn_45 assert-operation 7 blocks
-lowered fn_46 retract-operation 7 blocks
-lowered fn_47 valid-commit-operation? 16 blocks
-lowered fn_48 transaction-replay-ok 1 blocks
-lowered fn_49 transaction-replay-error 1 blocks
-lowered fn_50 transaction-replay-unclassified-error 1 blocks
-lowered fn_51 occurrence-at 1 blocks
-lowered fn_52 dump-term-store 1 blocks
-lowered fn_53 valid-prior-handle? 9 blocks
-lowered fn_54 valid-dump-operation? 31 blocks
-lowered fn_55 transaction-frames-ok 1 blocks
-lowered fn_56 transaction-frames-error 1 blocks
-lowered fn_57 term-store-load-ok 1 blocks
-lowered fn_58 term-store-load-error 1 blocks
-lowered fn_59 bucket-size 1 blocks
-lowered fn_60 bucket-position-at 1 blocks
-lowered fn_61 bucket-with-position 1 blocks
-lowered fn_62 append-position 1 blocks
-lowered fn_63 position-pair 1 blocks
-lowered fn_64 empty-positions 1 blocks
-lowered fn_65 frame-operation-count 1 blocks
-lowered fn_66 frame-operation-at 1 blocks
-lowered fn_67 any-values-equal? 1 blocks
-lowered fn_68 increment-value 3 blocks
-lowered fn_69 decrement-value 3 blocks
-lowered fn_70 mask-values 1 blocks
-lowered fn_71 xor-values 1 blocks
-lowered fn_72 shifted-value 1 blocks
-lowered fn_73 values-differ? 1 blocks
-lowered fn_74 no-positions? 1 blocks
-lowered fn_75 position-slice 1 blocks
-lowered fn_76 position-tail 1 blocks
-lowered fn_77 reversed-positions 1 blocks
-lowered fn_78 append-positions 1 blocks
+lowered fn_40 triple-handle-shape? 8 blocks
+lowered fn_41 atom-term-count 1 blocks
+lowered fn_42 triple-term-count 1 blocks
+lowered fn_43 term-count 3 blocks
+lowered fn_44 transaction-count 1 blocks
+lowered fn_45 operation-count 1 blocks
+lowered fn_46 assert-operation 7 blocks
+lowered fn_47 retract-operation 7 blocks
+lowered fn_48 valid-commit-operation? 16 blocks
+lowered fn_49 transaction-replay-ok 1 blocks
+lowered fn_50 transaction-replay-error 1 blocks
+lowered fn_51 transaction-replay-unclassified-error 1 blocks
+lowered fn_52 occurrence-at 1 blocks
+lowered fn_53 dump-term-store 1 blocks
+lowered fn_54 valid-prior-handle? 9 blocks
+lowered fn_55 valid-dump-operation? 31 blocks
+lowered fn_56 transaction-frames-ok 1 blocks
+lowered fn_57 transaction-frames-error 1 blocks
+lowered fn_58 term-store-load-ok 1 blocks
+lowered fn_59 term-store-load-error 1 blocks
+lowered fn_60 bucket-size 1 blocks
+lowered fn_61 bucket-position-at 1 blocks
+lowered fn_62 bucket-with-position 1 blocks
+lowered fn_63 append-position 1 blocks
+lowered fn_64 position-pair 1 blocks
+lowered fn_65 empty-positions 1 blocks
+lowered fn_66 frame-operation-count 1 blocks
+lowered fn_67 frame-operation-at 1 blocks
+lowered fn_68 any-values-equal? 1 blocks
+lowered fn_69 increment-value 3 blocks
+lowered fn_70 decrement-value 3 blocks
+lowered fn_71 mask-values 1 blocks
+lowered fn_72 xor-values 1 blocks
+lowered fn_73 shifted-value 1 blocks
+lowered fn_74 values-differ? 1 blocks
+lowered fn_75 no-positions? 1 blocks
+lowered fn_76 position-slice 1 blocks
+lowered fn_77 position-tail 1 blocks
+lowered fn_78 reversed-positions 1 blocks
+lowered fn_79 append-positions 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -111,6 +112,8 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slots/slot-of: no native low
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-LET-BODY: let form has no body [intern-handle!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-handle calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-triple-handle calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [intern-atom-handle!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [intern-triple-handle!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [known-term-handle]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: intern-term! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [replay-terms!]
@@ -130,6 +133,7 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native 
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: append-transaction! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: commit-transaction! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: replay-transaction-result! calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [append-replayed-transaction!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: replay-transaction! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: event-at calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [first-transaction-after]

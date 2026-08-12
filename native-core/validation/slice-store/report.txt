@@ -2,8 +2,8 @@ stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 stage native-to-epoch COMPLETE
-program-types 86
-program-layouts 86
+program-types 87
+program-layouts 87
 program-functions 0
 program-abis 0
 projected-types 5
@@ -85,6 +85,9 @@ pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for valid-handle?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for resolve-handle
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for resolve-triple-handle
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for intern-atom-handle!
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for intern-triple-handle!
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for triple-handle-shape?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for known-term-handle
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for intern-term!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for replay-terms!
@@ -115,6 +118,7 @@ pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for append-transaction!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for commit-transaction!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for replay-transaction-result!
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for append-replayed-transaction!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for replay-transaction!
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for occurrence-at
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for event-at

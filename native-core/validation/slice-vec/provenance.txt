@@ -6,10 +6,24 @@ upstream sources (read-only) — what drive.sh reads
   native-core/validation/slice-vec/vec_probe.bclj  (this repo; C-callable leaves)
 
 the committed vec.facts reproduces from live fram
+  vec.facts is the projection of fram at 6863f0a: fram:src/fram/types.bgl last
+  moved at 28664e2, fram:src/fram/store.bgl at 4a3066a. source.sha256 carries
+  those two file hashes, types first.
+
   drive.sh regenerates from live fram on every run and FAILS on any
-  difference from the committed vec.facts (source.sha256 records the
-  fram revision the projection was derived from); the committed-facts path
+  difference from the committed vec.facts; the committed-facts path
   is NATIVE_SLICE_COMMITTED_FACTS=1 and stamps a MODE line into report.txt.
+  NATIVE_SLICE_UPDATE=1 accepts the regenerated projection instead — the
+  refresh path, never a gate path.
+
+refreshing against a moved fram — main.c is ordinal-addressed
+  main.c is hand-written and calls the probe leaves as native_m0_fn_N by their
+  position in the lowered program, so a fram defn that lowers ahead of the
+  probe module renumbers every one of them and main.c stops compiling. The
+  repair is mechanical and must be part of the same refresh: read the new
+  ordinals out of report.txt's `lowered fn_N <name>` lines and rewrite main.c's
+  calls and its header map. Type ordinals (native_m0_type_N) are assigned in a
+  separate sequence and do not have to move with the functions.
 
 layout rule — a vector value is a REFERENCE to its header
   A (Vec T) value is one 8-byte handle on a shim-owned

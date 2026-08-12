@@ -90,7 +90,10 @@ cat "$art/report.txt"
 # under both frontends must not leave a stale passing artifact behind.
 clang_bin="$(command -v clang || true)"
 if [[ -z "$clang_bin" ]]; then
-  clang_bin="$(find /nix/store -maxdepth 3 -type f -path '*clang-wrapper*/bin/clang' | sort | tail -n1)"
+  # Glob, never `find /nix/store`: a concurrent nix build leaves a root-owned
+  # 0700 .drv.chroot there, and the resulting permission error kills the driver
+  # under `set -e`. Same form as slice-vec's find_clang.
+  clang_bin="$(ls -d /nix/store/*-clang-wrapper-*/bin/clang 2>/dev/null | sort -V | tail -n1 || true)"
 fi
 [[ -n "$clang_bin" ]] || { echo "drive.sh: clang is required" >&2; exit 1; }
 
