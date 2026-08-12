@@ -10,40 +10,40 @@
 (require native.fold-c17 :as c17)
 
 (defrecord BodyArtifactV0
-  [header-name: String
-   header-text: String
-   source-name: String
-   source-text: String])
+  [(header-name String)
+   (header-text String)
+   (source-name String)
+   (source-text String)])
 
 (defunion BodyMaterializationV0
-  (BodySuccessV0 [artifact: BodyArtifactV0])
-  (BodyFailureV0 [detail: String]))
+  (BodySuccessV0 [(artifact BodyArtifactV0)])
+  (BodyFailureV0 [(detail String)]))
 
-(defrecord ValueSlotV0 [id: core/NativeId type-id: core/NativeId])
+(defrecord ValueSlotV0 [(id core/NativeId) (type-id core/NativeId)])
 
 ;; Text and Keyword literals become length-prefixed constant blobs. Their
 ;; distinct static types share one immutable UTF-8 handle representation.
-(defrecord ConstantPoolV0 [texts: (Vec String) keywords: (Vec String)])
+(defrecord ConstantPoolV0 [(texts (Vec String)) (keywords (Vec String))])
 
 ;; v0 C17 literal alphabet. Anything else is refused rather than escaped
 ;; wrongly: without a code-point primitive the emitter cannot tell a control
 ;; byte from a multi-byte UTF-8 lead.
-(defn printable-ascii [] -> String
+(defn printable-ascii [] String
   (str " !\"#$%&'()*+,-./0123456789:;<=>?@"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
     "abcdefghijklmnopqrstuvwxyz{|}~"))
 
-(defn character-in? [alphabet: String character: String] -> Bool
-  (loop [position: Int 0]
+(defn character-in? [(alphabet String) (character String)] Bool
+  (loop [(position Int) 0]
     (cond
       (>= position (count alphabet)) false
       (= character (subs alphabet position (+ position 1))) true
       :else (recur (+ position 1)))))
 
 ;; Generated translation units are frozen UTF-8 artifacts.
-(defn text-emittable? [value: String] -> Bool true)
+(defn text-emittable? [(value String)] Bool true)
 
-(defn escape-c-character [character: String] -> String
+(defn escape-c-character [(character String)] String
   (cond
     (= character "\\") "\\\\"
     (= character "\"") "\\\""
@@ -56,27 +56,27 @@
     (= character "\r") "\\r"
     :else character))
 
-(defn escape-c-text [value: String] -> String
-  (loop [position: Int 0 result: String ""]
+(defn escape-c-text [(value String)] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count value))
       result
       (recur (+ position 1)
         (str result
           (escape-c-character (subs value position (+ position 1))))))))
 
-(defn value-position [values: (Vec String) target: String] -> Int
-  (loop [position: Int 0]
+(defn value-position [(values (Vec String)) (target String)] Int
+  (loop [(position Int) 0]
     (cond
       (>= position (count values)) -1
       (= target (nth values position)) position
       :else (recur (+ position 1)))))
 
-(defn conj-value [values: (Vec String) candidate: String] -> (Vec String)
+(defn conj-value [(values (Vec String)) (candidate String)] (Vec String)
   (if (>= (value-position values candidate) 0) values (conj values candidate)))
 
 (defn pool-with-atom
-  [pool: ConstantPoolV0
-   atom: core/NativeAtom] -> ConstantPoolV0
+  [(pool ConstantPoolV0)
+   (atom core/NativeAtom)] ConstantPoolV0
   (cond
     (instance? native.core.TextAtom atom)
     (with pool
@@ -89,60 +89,60 @@
     :else pool))
 
 (defn pool-with-instruction
-  [pool: ConstantPoolV0
-   instruction: core/Instruction] -> ConstantPoolV0
+  [(pool ConstantPoolV0)
+   (instruction core/Instruction)] ConstantPoolV0
   (if (instance? native.core.AtomInstruction instruction)
     (pool-with-atom pool (core/atominstruction-atom instruction))
     pool))
 
 ;; Deterministic: first appearance in the already-ordered function, block and
 ;; instruction sequence, so the table is a pure function of the frozen native program.
-(defn collect-pool [functions: (Vec core/FunctionDef)] -> ConstantPoolV0
-  (loop [position: Int 0 pool: ConstantPoolV0 (->ConstantPoolV0 [] [])]
+(defn collect-pool [(functions (Vec core/FunctionDef))] ConstantPoolV0
+  (loop [(position Int) 0 (pool ConstantPoolV0) (->ConstantPoolV0 [] [])]
     (if (>= position (count functions))
       pool
       (recur (+ position 1)
-        (loop [block-position: Int 0
-               blocks: (Vec core/BasicBlock)
+        (loop [(block-position Int) 0
+               (blocks (Vec core/BasicBlock))
                (core/functiondef-blocks (nth functions position))
-               current: ConstantPoolV0 pool]
+               (current ConstantPoolV0) pool]
           (if (>= block-position (count blocks))
             current
             (recur (+ block-position 1) blocks
-              (loop [inner: Int 0
-                     instructions: (Vec core/Instruction)
+              (loop [(inner Int) 0
+                     (instructions (Vec core/Instruction))
                      (core/basicblock-instructions (nth blocks block-position))
-                     collected: ConstantPoolV0 current]
+                     (collected ConstantPoolV0) current]
                 (if (>= inner (count instructions))
                   collected
                   (recur (+ inner 1) instructions
                     (pool-with-instruction collected
                       (nth instructions inner))))))))))))
 
-(defn pool-emittable? [pool: ConstantPoolV0] -> Bool
+(defn pool-emittable? [(pool ConstantPoolV0)] Bool
   (and (every? text-emittable? (constantpoolv0-texts pool))
     (every? text-emittable? (constantpoolv0-keywords pool))))
 
 ;; Consumers live in other namespaces, where a `match` on this union does not
 ;; survive emission; these three are the supported way to read the result.
-(defn materialization-ok? [result: BodyMaterializationV0] -> Bool
+(defn materialization-ok? [(result BodyMaterializationV0)] Bool
   (match result
     [(BodySuccessV0 artifact) true]
     [(BodyFailureV0 detail) false]))
 
-(defn materialization-detail [result: BodyMaterializationV0] -> String
+(defn materialization-detail [(result BodyMaterializationV0)] String
   (match result
     [(BodySuccessV0 artifact) ""]
     [(BodyFailureV0 detail) detail]))
 
-(defn materialization-artifact [result: BodyMaterializationV0] -> BodyArtifactV0
+(defn materialization-artifact [(result BodyMaterializationV0)] BodyArtifactV0
   (match result
     [(BodySuccessV0 artifact) artifact]
     [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
 
 ;; Bounds checks have no i64 Outcome shape here, so only the three arithmetic
 ;; operations materialize; anything else is refused rather than approximated.
-(defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
+(defn checked-operation-supported? [(operation core/CheckedOperationV0)] Bool
   (or (instance? native.core.CheckedAddI64V0 operation)
       (instance? native.core.CheckedSubI64V0 operation)
       (instance? native.core.CheckedMulI64V0 operation)
@@ -150,10 +150,10 @@
       (instance? native.core.CheckedRemI64V0 operation)
       (instance? native.core.CheckedModI64V0 operation)))
 
-(defn instruction-supported? [instruction: core/Instruction] -> Bool
+(defn instruction-supported? [(instruction core/Instruction)] Bool
   (cond
     (instance? native.core.AtomInstruction instruction)
-    (let [atom: core/NativeAtom (core/atominstruction-atom instruction)]
+    (let [(atom core/NativeAtom) (core/atominstruction-atom instruction)]
       (or (instance? native.core.BoolAtom atom)
           (instance? native.core.I64Atom atom)
           (instance? native.core.F64Atom atom)
@@ -231,42 +231,42 @@
     (instance? native.core.CodecPrimitiveInstructionV0 instruction) true
     :else false))
 
-(defn terminator-supported? [terminator: core/Terminator] -> Bool
+(defn terminator-supported? [(terminator core/Terminator)] Bool
   (or (instance? native.core.ReturnTerminator terminator)
       (instance? native.core.JumpTerminator terminator)
       (instance? native.core.BranchTerminator terminator)
       (instance? native.core.SwitchTerminator terminator)
       (instance? native.core.TrapTerminator terminator)))
 
-(defn block-supported? [block: core/BasicBlock] -> Bool
+(defn block-supported? [(block core/BasicBlock)] Bool
   (and (= 1 (count (core/basicblock-terminators block)))
     (every? instruction-supported? (core/basicblock-instructions block))
     (every? terminator-supported? (core/basicblock-terminators block))))
 
-(defn function-supported? [function: core/FunctionDef] -> Bool
+(defn function-supported? [(function core/FunctionDef)] Bool
   (and (> (count (core/functiondef-blocks function)) 0)
     (every? block-supported? (core/functiondef-blocks function))))
 
-(defn host-socket-symbol? [symbol: String] -> Bool
+(defn host-socket-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_socket_inherited_listener_v0")
       (= symbol "native_host_socket_accept_v0")
       (= symbol "native_host_socket_read_bounded_v0")
       (= symbol "native_host_socket_write_bounded_v0")
       (= symbol "native_host_socket_close_v0")))
 
-(defn host-direct-symbol? [symbol: String] -> Bool
+(defn host-direct-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_stdout_write_line_v0")
       (= symbol "native_host_clock_monotonic_nanoseconds_v0")))
 
-(defn program-supported? [program: core/NativeCoreProgram] -> Bool
-  (let [layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
-        types: (Vec core/TypeDef) (core/nativecoreprogram-types program)]
-    (and (every? (fn [type-def: core/TypeDef] -> Bool
+(defn program-supported? [(program core/NativeCoreProgram)] Bool
+  (let [(layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)
+        (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)]
+    (and (every? (fn [(type-def core/TypeDef)] Bool
                    (c17/type-supported? type-def types layouts))
            types)
       (c17/types-orderable? types layouts)
       (every?
-        (fn [abi: core/AbiDeclV0] -> Bool
+        (fn [(abi core/AbiDeclV0)] Bool
           (or (instance? native.core.AbiExportV0
                 (core/abideclv0-direction abi))
             (and (instance? native.core.RestrictedCOptionalOutAbiV0
@@ -282,32 +282,32 @@
         (core/nativecoreprogram-abis program))
       (every? function-supported? (core/nativecoreprogram-functions program)))))
 
-(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
-  (loop [position: Int 0]
+(defn block-index [(blocks (Vec core/BasicBlock)) (target core/NativeId)] Int
+  (loop [(position Int) 0]
     (if (>= position (count blocks))
       -1
       (if (core/native-id= (core/basicblock-id (nth blocks position)) target)
         position
         (recur (+ position 1))))))
 
-(defn label-name [function-index: Int block: Int] -> String
+(defn label-name [(function-index Int) (block Int)] String
   (str "native_l" function-index "_" block))
 
-(defn function-name [module-index: Int function-index: Int] -> String
+(defn function-name [(module-index Int) (function-index Int)] String
   (str (c17/module-prefix module-index) "_fn_" function-index))
 
 ;; Every block parameter and instruction result gets one C local declared at the
 ;; top of the function: a goto target may not jump over a declaration.
-(defn function-value-slots [function: core/FunctionDef] -> (Vec ValueSlotV0)
-  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
-    (loop [position: Int 0 slots: (Vec ValueSlotV0) []]
+(defn function-value-slots [(function core/FunctionDef)] (Vec ValueSlotV0)
+  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+    (loop [(position Int) 0 (slots (Vec ValueSlotV0)) []]
       (if (>= position (count blocks))
         slots
-        (let [block: core/BasicBlock (nth blocks position)
-              with-parameters: (Vec ValueSlotV0)
-              (loop [inner: Int 0
-                     collected: (Vec ValueSlotV0) slots
-                     parameters: (Vec core/Parameter) (core/basicblock-parameters block)]
+        (let [(block core/BasicBlock) (nth blocks position)
+              (with-parameters (Vec ValueSlotV0))
+              (loop [(inner Int) 0
+                     (collected (Vec ValueSlotV0)) slots
+                     (parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
                 (if (>= inner (count parameters))
                   collected
                   (recur (+ inner 1)
@@ -315,14 +315,14 @@
                       (->ValueSlotV0 (core/parameter-id (nth parameters inner))
                         (core/parameter-type-id (nth parameters inner))))
                     parameters)))
-              with-results: (Vec ValueSlotV0)
-              (loop [inner: Int 0
-                     collected: (Vec ValueSlotV0) with-parameters
-                     instructions: (Vec core/Instruction)
+              (with-results (Vec ValueSlotV0))
+              (loop [(inner Int) 0
+                     (collected (Vec ValueSlotV0)) with-parameters
+                     (instructions (Vec core/Instruction))
                      (core/basicblock-instructions block)]
                 (if (>= inner (count instructions))
                   collected
-                  (let [result: core/SsaValueV0
+                  (let [(result core/SsaValueV0)
                         (get (nth instructions inner) :result)]
                     (recur (+ inner 1)
                       (conj collected
@@ -331,8 +331,8 @@
                       instructions))))]
           (recur (+ position 1) with-results))))))
 
-(defn slot-index [slots: (Vec ValueSlotV0) target: core/NativeId] -> Int
-  (loop [position: Int 0]
+(defn slot-index [(slots (Vec ValueSlotV0)) (target core/NativeId)] Int
+  (loop [(position Int) 0]
     (if (>= position (count slots))
       -1
       (if (core/native-id= (valueslotv0-id (nth slots position)) target)
@@ -340,9 +340,9 @@
         (recur (+ position 1))))))
 
 (defn parameter-index
-  [parameters: (Vec core/Parameter)
-   target: core/NativeId] -> Int
-  (loop [position: Int 0]
+  [(parameters (Vec core/Parameter))
+   (target core/NativeId)] Int
+  (loop [(position Int) 0]
     (if (>= position (count parameters))
       -1
       (if (core/native-id= (core/parameter-id (nth parameters position)) target)
@@ -350,20 +350,20 @@
         (recur (+ position 1))))))
 
 (defn value-name
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: core/NativeId] -> String
-  (let [position: Int
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target core/NativeId)] String
+  (let [(position Int)
         (parameter-index (core/functiondef-parameters function) target)]
     (if (>= position 0)
       (str "native_v_" position)
       (str "native_s_" (slot-index slots target)))))
 
 (defn emit-declarations
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   slots: (Vec ValueSlotV0)] -> String
-  (loop [position: Int 0 result: String ""]
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (slots (Vec ValueSlotV0))] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count slots))
       result
       (recur (+ position 1)
@@ -376,9 +376,9 @@
 ;; The ordinal is the position among the function's own epoch opens, so the C
 ;; variable's name depends on nothing outside the function.
 (defn epoch-region?
-  [regions: (Vec core/RegionDef)
-   region-id: core/NativeId] -> Bool
-  (loop [position: Int 0]
+  [(regions (Vec core/RegionDef))
+   (region-id core/NativeId)] Bool
+  (loop [(position Int) 0]
     (cond
       (>= position (count regions)) false
       (core/native-id= (core/regiondef-id (nth regions position)) region-id)
@@ -386,21 +386,21 @@
       :else (recur (+ position 1)))))
 
 (defn function-epoch-arenas
-  [regions: (Vec core/RegionDef)
-   function: core/FunctionDef] -> (Vec core/NativeId)
-  (loop [block-position: Int 0
-         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
-         collected: (Vec core/NativeId) []]
+  [(regions (Vec core/RegionDef))
+   (function core/FunctionDef)] (Vec core/NativeId)
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+         (collected (Vec core/NativeId)) []]
     (if (>= block-position (count blocks))
       collected
       (recur (+ block-position 1) blocks
-        (loop [position: Int 0
-               instructions: (Vec core/Instruction)
+        (loop [(position Int) 0
+               (instructions (Vec core/Instruction))
                (core/basicblock-instructions (nth blocks block-position))
-               inner: (Vec core/NativeId) collected]
+               (inner (Vec core/NativeId)) collected]
           (if (>= position (count instructions))
             inner
-            (let [instruction: core/Instruction (nth instructions position)]
+            (let [(instruction core/Instruction) (nth instructions position)]
               (recur (+ position 1) instructions
                 (if (and (instance? native.core.ArenaInstruction instruction)
                       (epoch-region? regions
@@ -409,34 +409,34 @@
                   inner)))))))))
 
 (defn epoch-arena-index
-  [epochs: (Vec core/NativeId)
-   value-id: core/NativeId] -> Int
-  (loop [position: Int 0]
+  [(epochs (Vec core/NativeId))
+   (value-id core/NativeId)] Int
+  (loop [(position Int) 0]
     (cond
       (>= position (count epochs)) -1
       (core/native-id= (nth epochs position) value-id) position
       :else (recur (+ position 1)))))
 
-(defn epoch-arena-name [index: Int] -> String
+(defn epoch-arena-name [(index Int)] String
   (str "native_epoch_" index))
 
-(defn emit-epoch-arena-declarations [epochs: (Vec core/NativeId)] -> String
-  (loop [position: Int 0 result: String ""]
+(defn emit-epoch-arena-declarations [(epochs (Vec core/NativeId))] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count epochs))
       result
       (recur (+ position 1)
         (str result "  native_arena " (epoch-arena-name position) ";\n")))))
 
-(defn text-symbol [module-index: Int position: Int] -> String
+(defn text-symbol [(module-index Int) (position Int)] String
   (str (c17/module-prefix module-index) "_text_" position))
 
-(defn keyword-symbol [module-index: Int position: Int] -> String
+(defn keyword-symbol [(module-index Int) (position Int)] String
   (str (c17/module-prefix module-index) "_keyword_" position))
 
 (defn atom-expression
-  [module-index: Int
-   pool: ConstantPoolV0
-   atom: core/NativeAtom] -> String
+  [(module-index Int)
+   (pool ConstantPoolV0)
+   (atom core/NativeAtom)] String
   (cond
     (instance? native.core.BoolAtom atom)
     (if (core/boolatom-value atom) "true" "false")
@@ -455,7 +455,7 @@
           (core/keywordatom-value atom))))
     :else ""))
 
-(defn compare-operator [comparison: core/CompareOpV0] -> String
+(defn compare-operator [(comparison core/CompareOpV0)] String
   (cond
     (or (instance? native.core.CompareEqI64V0 comparison)
         (instance? native.core.CompareEqF64V0 comparison)) "=="
@@ -466,11 +466,11 @@
     :else "=="))
 
 (defn emit-text-constant
-  [module-index: Int
-   position: Int
-   value: String] -> String
-  (let [symbol: String (text-symbol module-index position)
-        literal: String (str "\"" (escape-c-text value) "\"")]
+  [(module-index Int)
+   (position Int)
+   (value String)] String
+  (let [(symbol String) (text-symbol module-index position)
+        (literal String) (str "\"" (escape-c-text value) "\"")]
     (str "struct " symbol "_blob { uint64_t length; uint8_t bytes[sizeof "
       literal "]; };\n"
       "static const struct " symbol "_blob " symbol " = { (uint64_t)(sizeof "
@@ -478,14 +478,14 @@
       "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
       " \"text blob is length-prefixed\");\n")))
 
-(defn emit-keyword-pool [module-index: Int keywords: (Vec String)] -> String
+(defn emit-keyword-pool [(module-index Int) (keywords (Vec String))] String
   (if (= 0 (count keywords))
     ""
-    (loop [position: Int 0 result: String ""]
+    (loop [(position Int) 0 (result String) ""]
       (if (>= position (count keywords))
         result
-        (let [symbol: String (keyword-symbol module-index position)
-              literal: String
+        (let [(symbol String) (keyword-symbol module-index position)
+              (literal String)
               (str "\"" (escape-c-text (nth keywords position)) "\"")]
           (recur (+ position 1)
             (str result
@@ -496,11 +496,11 @@
               "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
               " \"keyword blob is length-prefixed\");\n")))))))
 
-(defn emit-text-pool [module-index: Int pool: ConstantPoolV0] -> String
-  (let [texts: (Vec String) (constantpoolv0-texts pool)
-        keywords: (Vec String) (constantpoolv0-keywords pool)]
+(defn emit-text-pool [(module-index Int) (pool ConstantPoolV0)] String
+  (let [(texts (Vec String)) (constantpoolv0-texts pool)
+        (keywords (Vec String)) (constantpoolv0-keywords pool)]
     (str
-      (loop [position: Int 0 result: String ""]
+      (loop [(position Int) 0 (result String) ""]
         (if (>= position (count texts))
           result
           (recur (+ position 1)
@@ -512,20 +512,20 @@
         "\n"))))
 
 (defn descriptor-symbol
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   target: core/NativeId] -> String
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (target core/NativeId)] String
   (str (c17/module-prefix module-index) "_value_"
     (c17/type-index types target)))
 
 (defn descriptor-kind
-  [definition: core/TypeDef
-   layout: core/LayoutDef] -> String
-  (let [shape: core/TypeShape (core/typedef-shape definition)
-        layout-shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  [(definition core/TypeDef)
+   (layout core/LayoutDef)] String
+  (let [(shape core/TypeShape) (core/typedef-shape definition)
+        (layout-shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (cond
       (instance? native.core.AtomType shape)
-      (let [kind: core/AtomKind (core/atomtype-kind shape)]
+      (let [(kind core/AtomKind) (core/atomtype-kind shape)]
         (cond
           (instance? native.core.BoolKind kind) "NATIVE_VALUE_BOOL"
           (instance? native.core.I64Kind kind)
@@ -547,32 +547,32 @@
       :else "NATIVE_VALUE_REFERENCE")))
 
 (defn field-descriptor-symbol
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   target: core/NativeId] -> String
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (target core/NativeId)] String
   (str (descriptor-symbol types module-index target) "_fields"))
 
 (defn variant-descriptor-symbol
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   target: core/NativeId] -> String
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (target core/NativeId)] String
   (str (descriptor-symbol types module-index target) "_variants"))
 
 (defn emit-field-descriptors
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   layout: core/LayoutDef] -> String
-  (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (module-index Int)
+   (layout core/LayoutDef)] String
+  (let [(fields (Vec core/FieldLayoutV0)) (c17/record-layout-fields layout)]
     (if (= 0 (count fields))
       ""
       (str "static const native_value_field_descriptor "
         (field-descriptor-symbol types module-index (core/layoutdef-type-id layout))
         "[] = {\n"
-        (loop [position: Int 0 result: String ""]
+        (loop [(position Int) 0 (result String) ""]
           (if (>= position (count fields))
             result
-            (let [field: core/FieldLayoutV0 (nth fields position)]
+            (let [(field core/FieldLayoutV0) (nth fields position)]
               (recur (+ position 1)
                 (str result "  { .offset = (size_t)"
                   (core/fieldlayoutv0-offset-bytes field)
@@ -583,11 +583,11 @@
         "};\n"))))
 
 (defn emit-variant-descriptors
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   layout: core/LayoutDef] -> String
-  (let [variants: (Vec core/UnionVariantLayoutV0)
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (module-index Int)
+   (layout core/LayoutDef)] String
+  (let [(variants (Vec core/UnionVariantLayoutV0))
         (c17/union-layout-variants layout)]
     (if (= 0 (count variants))
       ""
@@ -595,11 +595,11 @@
         (variant-descriptor-symbol types module-index
           (core/layoutdef-type-id layout))
         "[] = {\n"
-        (loop [position: Int 0 result: String ""]
+        (loop [(position Int) 0 (result String) ""]
           (if (>= position (count variants))
             result
-            (let [variant: core/UnionVariantLayoutV0 (nth variants position)
-                  payload: (U core/NativeId Nil)
+            (let [(variant core/UnionVariantLayoutV0) (nth variants position)
+                  (payload (U core/NativeId Nil))
                   (core/unionvariantlayoutv0-payload-type variant)]
               (recur (+ position 1)
                 (str result "  { .tag = INT64_C("
@@ -614,10 +614,10 @@
         "};\n"))))
 
 (defn descriptor-element
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   layout: core/LayoutDef] -> String
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (layout core/LayoutDef)] String
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (cond
       (instance? native.core.VectorShapeV0 shape)
       (str "&" (descriptor-symbol types module-index
@@ -627,49 +627,49 @@
         (core/referenceshapev0-target-type shape)))
       :else "NULL")))
 
-(defn descriptor-stride [layout: core/LayoutDef] -> Int
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+(defn descriptor-stride [(layout core/LayoutDef)] Int
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.VectorShapeV0 shape)
       (core/vectorshapev0-stride-bytes shape)
       0)))
 
 (defn descriptor-map-key
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   layout: core/LayoutDef] -> String
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (layout core/LayoutDef)] String
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.MapShapeV0 shape)
       (str "&" (descriptor-symbol types module-index
         (core/mapshapev0-key-type shape)))
       "NULL")))
 
 (defn descriptor-map-value
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   layout: core/LayoutDef] -> String
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (layout core/LayoutDef)] String
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.MapShapeV0 shape)
       (str "&" (descriptor-symbol types module-index
         (core/mapshapev0-value-type shape)))
       "NULL")))
 
-(defn descriptor-tag-offset [layout: core/LayoutDef] -> Int
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+(defn descriptor-tag-offset [(layout core/LayoutDef)] Int
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.UnionShapeV0 shape)
       (core/unionshapev0-tag-offset-bytes shape)
       0)))
 
 (defn emit-value-descriptor
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   definition: core/TypeDef] -> String
-  (let [target: core/NativeId (core/typedef-id definition)
-        layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts target)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (module-index Int)
+   (definition core/TypeDef)] String
+  (let [(target core/NativeId) (core/typedef-id definition)
+        (layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts target)]
     (if (nil? layout)
       ""
-      (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)
-            variants: (Vec core/UnionVariantLayoutV0)
+      (let [(fields (Vec core/FieldLayoutV0)) (c17/record-layout-fields layout)
+            (variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
         (str "const native_value_descriptor "
           (descriptor-symbol types module-index target) " = {\n"
@@ -694,7 +694,7 @@
           "  .keyword_count = (size_t)0\n"
           "};\n")))))
 
-(defn structural-collection-equality? [instruction: core/Instruction] -> Bool
+(defn structural-collection-equality? [(instruction core/Instruction)] Bool
   (cond
     (instance? native.core.MapLiteralInstructionV0 instruction)
     (instance? native.core.StructuralEqualityV0
@@ -731,16 +731,16 @@
       (core/transientsetconjinstructionv0-element-equality instruction))
     :else false))
 
-(defn value-descriptors-used? [functions: (Vec core/FunctionDef)] -> Bool
+(defn value-descriptors-used? [(functions (Vec core/FunctionDef))] Bool
   (some?
     (some
-      (fn [function: core/FunctionDef] -> Bool
+      (fn [(function core/FunctionDef)] Bool
         (some?
           (some
-            (fn [block: core/BasicBlock] -> Bool
+            (fn [(block core/BasicBlock)] Bool
               (some?
                 (some
-                  (fn [instruction: core/Instruction] -> Bool
+                  (fn [(instruction core/Instruction)] Bool
                     (or
                       (instance? native.core.ValueSemanticsInstruction instruction)
                       (instance? native.core.ValueToTextInstructionV0 instruction)
@@ -752,14 +752,14 @@
       functions)))
 
 (defn emit-value-descriptors
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   functions: (Vec core/FunctionDef)
-   module-index: Int] -> String
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (functions (Vec core/FunctionDef))
+   (module-index Int)] String
   (if (not (value-descriptors-used? functions))
     ""
     (str
-      (loop [position: Int 0 result: String ""]
+      (loop [(position Int) 0 (result String) ""]
         (if (>= position (count types))
           result
           (recur (+ position 1)
@@ -768,11 +768,11 @@
                 (core/typedef-id (nth types position)))
               ";\n"))))
       "\n"
-      (loop [position: Int 0 result: String ""]
+      (loop [(position Int) 0 (result String) ""]
         (if (>= position (count types))
           result
-          (let [definition: core/TypeDef (nth types position)
-                layout: (U core/LayoutDef Nil)
+          (let [(definition core/TypeDef) (nth types position)
+                (layout (U core/LayoutDef Nil))
                 (c17/layout-for-type layouts (core/typedef-id definition))]
             (recur (+ position 1)
               (if (nil? layout)
@@ -780,7 +780,7 @@
                 (str result
                   (emit-field-descriptors types layouts module-index layout)
                   (emit-variant-descriptors types layouts module-index layout)))))))
-      (loop [position: Int 0 result: String ""]
+      (loop [(position Int) 0 (result String) ""]
         (if (>= position (count types))
           result
           (recur (+ position 1)
@@ -790,14 +790,14 @@
       "\n")))
 
 (defn field-position
-  [layouts: (Vec core/LayoutDef)
-   owner: core/NativeId
-   field: core/NativeId] -> Int
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+  [(layouts (Vec core/LayoutDef))
+   (owner core/NativeId)
+   (field core/NativeId)] Int
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
-      (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)]
-        (loop [position: Int 0]
+      (let [(fields (Vec core/FieldLayoutV0)) (c17/record-layout-fields layout)]
+        (loop [(position Int) 0]
           (if (>= position (count fields))
             -1
             (if (core/native-id= (core/fieldlayoutv0-field-id (nth fields position))
@@ -806,22 +806,22 @@
               (recur (+ position 1)))))))))
 
 (defn slot-type
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: core/NativeId] -> core/NativeId
-  (let [position: Int
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target core/NativeId)] core/NativeId
+  (let [(position Int)
         (parameter-index (core/functiondef-parameters function) target)]
     (if (>= position 0)
       (core/parameter-type-id (nth (core/functiondef-parameters function) position))
-      (let [slot: Int (slot-index slots target)]
+      (let [(slot Int) (slot-index slots target)]
         (if (< slot 0)
           (core/->NativeId "native-body-c17-missing-value")
           (valueslotv0-type-id (nth slots slot)))))))
 
 (defn function-index-of
-  [functions: (Vec core/FunctionDef)
-   target: core/NativeId] -> Int
-  (loop [position: Int 0]
+  [(functions (Vec core/FunctionDef))
+   (target core/NativeId)] Int
+  (loop [(position Int) 0]
     (if (>= position (count functions))
       -1
       (if (core/native-id= (core/functiondef-id (nth functions position)) target)
@@ -829,15 +829,15 @@
         (recur (+ position 1))))))
 
 (defn variant-tag
-  [layouts: (Vec core/LayoutDef)
-   owner: core/NativeId
-   variant: core/NativeId] -> Int
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+  [(layouts (Vec core/LayoutDef))
+   (owner core/NativeId)
+   (variant core/NativeId)] Int
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
-      (let [variants: (Vec core/UnionVariantLayoutV0)
+      (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [position: Int 0]
+        (loop [(position Int) 0]
           (if (>= position (count variants))
             -1
             (if (core/native-id=
@@ -847,9 +847,9 @@
               (recur (+ position 1)))))))))
 
 (defn type-with-id
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> (U core/TypeDef Nil)
-  (loop [position: Int 0]
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)] (U core/TypeDef Nil)
+  (loop [(position Int) 0]
     (if (>= position (count types))
       nil
       (if (core/native-id= (core/typedef-id (nth types position)) target)
@@ -857,50 +857,50 @@
           (recur (+ position 1))))))
 
 (defn variant-tag-for-payload
-  [layouts: (Vec core/LayoutDef)
-   owner: core/NativeId
-   payload-type: core/NativeId] -> Int
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+  [(layouts (Vec core/LayoutDef))
+   (owner core/NativeId)
+   (payload-type core/NativeId)] Int
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
-      (let [variants: (Vec core/UnionVariantLayoutV0)
+      (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [position: Int 0]
+        (loop [(position Int) 0]
           (if (>= position (count variants))
             -1
-            (let [variant: core/UnionVariantLayoutV0 (nth variants position)
-                  payload: (U core/NativeId Nil)
+            (let [(variant core/UnionVariantLayoutV0) (nth variants position)
+                  (payload (U core/NativeId Nil))
                   (core/unionvariantlayoutv0-payload-type variant)]
               (if (and (some? payload) (core/native-id= payload payload-type))
                 (core/unionvariantlayoutv0-tag variant)
                 (recur (+ position 1))))))))))
 
-(defn unit-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
-  (let [definition: (U core/TypeDef Nil) (type-with-id types target)]
+(defn unit-type? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (let [(definition (U core/TypeDef Nil)) (type-with-id types target)]
     (if (nil? definition)
       false
-      (let [shape: core/TypeShape (core/typedef-shape definition)]
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
         (if (not (instance? native.core.UnionType shape))
           false
-          (let [variants: (Vec core/TypeVariant)
+          (let [(variants (Vec core/TypeVariant))
                 (core/uniontype-variants shape)]
             (and (= 1 (count variants))
               (nil? (core/typevariant-payload-type (nth variants 0))))))))))
 
 (defn absent-variant-tag
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   owner: core/NativeId] -> Int
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (owner core/NativeId)] Int
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
-      (let [variants: (Vec core/UnionVariantLayoutV0)
+      (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [position: Int 0]
+        (loop [(position Int) 0]
           (if (>= position (count variants))
             -1
-            (let [variant: core/UnionVariantLayoutV0 (nth variants position)
-                  payload: (U core/NativeId Nil)
+            (let [(variant core/UnionVariantLayoutV0) (nth variants position)
+                  (payload (U core/NativeId Nil))
                   (core/unionvariantlayoutv0-payload-type variant)]
               (if (or (nil? payload)
                     (and (some? payload) (unit-type? types payload)))
@@ -908,49 +908,49 @@
                 (recur (+ position 1))))))))))
 
 (defn optional-payload-type
-  [types: (Vec core/TypeDef)
-   owner: core/NativeId] -> (U core/NativeId Nil)
-  (let [definition: (U core/TypeDef Nil) (type-with-id types owner)]
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)] (U core/NativeId Nil)
+  (let [(definition (U core/TypeDef Nil)) (type-with-id types owner)]
     (if (nil? definition)
       nil
-      (let [shape: core/TypeShape (core/typedef-shape definition)]
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
         (if (not (instance? native.core.UnionType shape))
           nil
-          (loop [position: Int 0
-                 variants: (Vec core/TypeVariant)
+          (loop [(position Int) 0
+                 (variants (Vec core/TypeVariant))
                  (core/uniontype-variants shape)]
             (if (>= position (count variants))
               nil
-              (let [payload: (U core/NativeId Nil)
+              (let [(payload (U core/NativeId Nil))
                     (core/typevariant-payload-type (nth variants position))]
                 (if (or (nil? payload) (unit-type? types payload))
                   (recur (+ position 1) variants)
                   payload)))))))))
 
 (defn outcome-variants
-  [types: (Vec core/TypeDef)
-   owner: core/NativeId] -> (Vec core/TypeVariant)
-  (let [outcome: (U core/TypeDef Nil) (type-with-id types owner)]
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)] (Vec core/TypeVariant)
+  (let [(outcome (U core/TypeDef Nil)) (type-with-id types owner)]
     (if (nil? outcome)
       []
-      (let [shape: core/TypeShape (core/typedef-shape outcome)]
+      (let [(shape core/TypeShape) (core/typedef-shape outcome)]
         (if (not (instance? native.core.OutcomeType shape))
           []
-          (let [result: (U core/TypeDef Nil)
+          (let [(result (U core/TypeDef Nil))
                 (type-with-id types (core/outcometype-failure-type shape))]
             (if (nil? result)
               []
-              (let [result-shape: core/TypeShape (core/typedef-shape result)]
+              (let [(result-shape core/TypeShape) (core/typedef-shape result)]
                 (if (instance? native.core.UnionType result-shape)
                   (core/uniontype-variants result-shape)
                   [])))))))))
 
 (defn outcome-variant
-  [types: (Vec core/TypeDef)
-   owner: core/NativeId
-   name: String] -> (U core/TypeVariant Nil)
-  (let [variants: (Vec core/TypeVariant) (outcome-variants types owner)]
-    (loop [position: Int 0]
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (name String)] (U core/TypeVariant Nil)
+  (let [(variants (Vec core/TypeVariant)) (outcome-variants types owner)]
+    (loop [(position Int) 0]
       (cond
         (>= position (count variants)) nil
         (= name (core/typevariant-name (nth variants position)))
@@ -958,72 +958,72 @@
         :else (recur (+ position 1))))))
 
 (defn outcome-variant-tag
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   owner: core/NativeId
-   name: String] -> Int
-  (let [variant: (U core/TypeVariant Nil) (outcome-variant types owner name)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (owner core/NativeId)
+   (name String)] Int
+  (let [(variant (U core/TypeVariant Nil)) (outcome-variant types owner name)]
     (if (nil? variant)
       -1
       (variant-tag layouts owner (core/typevariant-id variant)))))
 
 (defn outcome-variant-payload
-  [types: (Vec core/TypeDef)
-   owner: core/NativeId
-   name: String] -> (U core/NativeId Nil)
-  (let [variant: (U core/TypeVariant Nil) (outcome-variant types owner name)]
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (name String)] (U core/NativeId Nil)
+  (let [(variant (U core/TypeVariant Nil)) (outcome-variant types owner name)]
     (if (nil? variant) nil (core/typevariant-payload-type variant))))
 
 (defn find-abi
-  [abis: (Vec core/AbiDeclV0)
-   target: core/NativeId] -> (U core/AbiDeclV0 Nil)
-  (loop [position: Int 0]
+  [(abis (Vec core/AbiDeclV0))
+   (target core/NativeId)] (U core/AbiDeclV0 Nil)
+  (loop [(position Int) 0]
     (if (>= position (count abis))
       nil
       (if (core/native-id= (core/abideclv0-id (nth abis position)) target)
         (nth abis position)
         (recur (+ position 1))))))
 
-(defn join-c-arguments [arguments: (Vec String)] -> String
-  (loop [position: Int 0 result: String ""]
+(defn join-c-arguments [(arguments (Vec String))] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count arguments))
       result
       (recur (+ position 1)
         (str result (if (= position 0) "" ", ")
           (nth arguments position))))))
 
-(defn i64-type-id [types: (Vec core/TypeDef)] -> core/NativeId
-  (loop [position: Int 0]
+(defn i64-type-id [(types (Vec core/TypeDef))] core/NativeId
+  (loop [(position Int) 0]
     (if (>= position (count types))
       (core/->NativeId "native-body-c17-missing-i64")
-      (let [definition: core/TypeDef (nth types position)
-            shape: core/TypeShape (core/typedef-shape definition)]
+      (let [(definition core/TypeDef) (nth types position)
+            (shape core/TypeShape) (core/typedef-shape definition)]
         (if (and (instance? native.core.AtomType shape)
               (instance? native.core.I64Kind (core/atomtype-kind shape)))
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
-(defn f64-type-id [types: (Vec core/TypeDef)] -> core/NativeId
-  (loop [position: Int 0]
+(defn f64-type-id [(types (Vec core/TypeDef))] core/NativeId
+  (loop [(position Int) 0]
     (if (>= position (count types))
       (core/->NativeId "native-body-c17-missing-f64")
-      (let [definition: core/TypeDef (nth types position)
-            shape: core/TypeShape (core/typedef-shape definition)]
+      (let [(definition core/TypeDef) (nth types position)
+            (shape core/TypeShape) (core/typedef-shape definition)]
         (if (and (instance? native.core.AtomType shape)
               (instance? native.core.F64Kind (core/atomtype-kind shape)))
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
 (defn emit-optional-i64-call
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   target: String
-   result: core/SsaValueV0
-   call: String] -> String
-  (let [owner: core/NativeId (core/ssavaluev0-type-id result)
-        ok-tag: Int
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (target String)
+   (result core/SsaValueV0)
+   (call String)] String
+  (let [(owner core/NativeId) (core/ssavaluev0-type-id result)
+        (ok-tag Int)
         (variant-tag-for-payload layouts owner (i64-type-id types))
-        absent-tag: Int (absent-variant-tag types layouts owner)]
+        (absent-tag Int) (absent-variant-tag types layouts owner)]
     (if (or (< ok-tag 0) (< absent-tag 0))
       ""
       (str "  memset(&" target ", 0, sizeof " target ");\n"
@@ -1034,15 +1034,15 @@
         "  }\n"))))
 
 (defn emit-optional-f64-call
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   target: String
-   result: core/SsaValueV0
-   call: String] -> String
-  (let [owner: core/NativeId (core/ssavaluev0-type-id result)
-        ok-tag: Int
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (target String)
+   (result core/SsaValueV0)
+   (call String)] String
+  (let [(owner core/NativeId) (core/ssavaluev0-type-id result)
+        (ok-tag Int)
         (variant-tag-for-payload layouts owner (f64-type-id types))
-        absent-tag: Int (absent-variant-tag types layouts owner)]
+        (absent-tag Int) (absent-variant-tag types layouts owner)]
     (if (or (< ok-tag 0) (< absent-tag 0))
       ""
       (str "  memset(&" target ", 0, sizeof " target ");\n"
@@ -1055,12 +1055,12 @@
 ;; A record inside a closed union is a reference, so a field read through it
 ;; loads via the pointer and takes its layout from the reference target.
 (defn dereferenced-type
-  [types: (Vec core/TypeDef)
-   target: core/NativeId] -> (U core/NativeId Nil)
-  (let [definition: (U core/TypeDef Nil) (type-with-id types target)]
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)] (U core/NativeId Nil)
+  (let [(definition (U core/TypeDef Nil)) (type-with-id types target)]
     (if (nil? definition)
       nil
-      (let [shape: core/TypeShape (core/typedef-shape definition)]
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
         (if (instance? native.core.ReferenceType shape)
           (core/referencetype-target-type shape)
           nil)))))
@@ -1071,28 +1071,28 @@
 ;; caller that opened an epoch hands a callee whose allocations die with that
 ;; epoch the epoch's arena, and its other callees the root.
 (defn caller-arena-argument
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   arena-id: (U core/NativeId Nil)] -> String
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (arena-id (U core/NativeId Nil))] String
   (if (nil? arena-id)
     "arena"
     (str "(native_arena *)" (value-name function slots arena-id))))
 
 (defn callee-resource-arguments
-  [functions: (Vec core/FunctionDef)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: core/NativeId
-   arena-id: (U core/NativeId Nil)] -> String
-  (let [position: Int (function-index-of functions target)]
+  [(functions (Vec core/FunctionDef))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target core/NativeId)
+   (arena-id (U core/NativeId Nil))] String
+  (let [(position Int) (function-index-of functions target)]
     (if (< position 0)
       ""
-      (let [callee: core/FunctionDef (nth functions position)
-            arena: String
+      (let [(callee core/FunctionDef) (nth functions position)
+            (arena String)
             (if (> (count (core/functiondef-regions callee)) 0)
               (caller-arena-argument function slots arena-id)
               "")
-            capability: String
+            (capability String)
             (if (> (count (core/functiondef-capabilities callee)) 0)
               "capability" "")]
         (cond
@@ -1102,24 +1102,24 @@
           :else (str arena ", " capability))))))
 
 (defn emit-arguments
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   arguments: (Vec core/NativeId)] -> String
-  (loop [position: Int 0 result: String ""]
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (arguments (Vec core/NativeId))] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count arguments))
       result
       (recur (+ position 1)
         (str result (if (= position 0) "" ", ")
           (value-name function slots (nth arguments position)))))))
 
-(defn checked-builtin [operation: core/CheckedOperationV0] -> String
+(defn checked-builtin [(operation core/CheckedOperationV0)] String
   (cond
     (instance? native.core.CheckedAddI64V0 operation) "__builtin_add_overflow"
     (instance? native.core.CheckedSubI64V0 operation) "__builtin_sub_overflow"
     (instance? native.core.CheckedMulI64V0 operation) "__builtin_mul_overflow"
     :else ""))
 
-(defn checked-left [operation: core/CheckedOperationV0] -> core/NativeId
+(defn checked-left [(operation core/CheckedOperationV0)] core/NativeId
   (cond
     (instance? native.core.CheckedAddI64V0 operation)
     (core/checkedaddi64v0-left-id operation)
@@ -1137,7 +1137,7 @@
     (core/checkedboundsv0-index-id operation)
     :else (core/->NativeId "")))
 
-(defn checked-right [operation: core/CheckedOperationV0] -> core/NativeId
+(defn checked-right [(operation core/CheckedOperationV0)] core/NativeId
   (cond
     (instance? native.core.CheckedAddI64V0 operation)
     (core/checkedaddi64v0-right-id operation)
@@ -1155,33 +1155,33 @@
     (core/checkedboundsv0-length-id operation)
     :else (core/->NativeId "")))
 
-(defn checked-division? [operation: core/CheckedOperationV0] -> Bool
+(defn checked-division? [(operation core/CheckedOperationV0)] Bool
   (or (instance? native.core.CheckedQuotI64V0 operation)
       (instance? native.core.CheckedRemI64V0 operation)
       (instance? native.core.CheckedModI64V0 operation)))
 
 ;; Guard C's one signed-division UB edge before emitting either / or %.
 (defn emit-checked-division
-  [layouts: (Vec core/LayoutDef)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   result: core/SsaValueV0
-   operation: core/CheckedOperationV0] -> String
-  (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
-        ok-tag: Int
+  [(layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (result core/SsaValueV0)
+   (operation core/CheckedOperationV0)] String
+  (let [(outcome core/NativeId) (core/ssavaluev0-type-id result)
+        (ok-tag Int)
         (variant-tag layouts outcome (core/checked-division-ok-variant-id))
-        zero-tag: Int
+        (zero-tag Int)
         (variant-tag layouts outcome (core/checked-division-zero-variant-id))
-        left: String (value-name function slots (checked-left operation))
-        right: String (value-name function slots (checked-right operation))
-        payload: String (str target ".payload.variant_" ok-tag)
-        remainder: String (str target "_remainder")
-        edge-value: String
+        (left String) (value-name function slots (checked-left operation))
+        (right String) (value-name function slots (checked-right operation))
+        (payload String) (str target ".payload.variant_" ok-tag)
+        (remainder String) (str target "_remainder")
+        (edge-value String)
         (if (instance? native.core.CheckedQuotI64V0 operation)
           "INT64_MIN"
           "INT64_C(0)")
-        ordinary: String
+        (ordinary String)
         (cond
           (instance? native.core.CheckedQuotI64V0 operation)
           (str "    " payload " = " left " / " right ";\n")
@@ -1212,23 +1212,23 @@
 ;; No wrapped value ever escapes: the builtin reports overflow as a tag, and the
 ;; payload is written only where the ok tag is the one the switch will select.
 (defn emit-checked-instruction
-  [layouts: (Vec core/LayoutDef)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   result: core/SsaValueV0
-   operation: core/CheckedOperationV0] -> String
+  [(layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (result core/SsaValueV0)
+   (operation core/CheckedOperationV0)] String
   (cond
     (instance? native.core.CheckedBoundsV0 operation) ""
     (checked-division? operation)
     (emit-checked-division layouts function slots target result operation)
     :else
-    (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
-          ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
-          overflow-tag: Int
+    (let [(outcome core/NativeId) (core/ssavaluev0-type-id result)
+          (ok-tag Int) (variant-tag layouts outcome (core/checked-ok-variant-id))
+          (overflow-tag Int)
           (variant-tag layouts outcome (core/checked-overflow-variant-id))
-          left: String (value-name function slots (checked-left operation))
-          right: String (value-name function slots (checked-right operation))]
+          (left String) (value-name function slots (checked-left operation))
+          (right String) (value-name function slots (checked-right operation))]
       ;; A checked op whose result type is not the Outcome union has no ok tag to
       ;; write into, so the overflow decision has to become a trap on the spot.
       (if (< ok-tag 0)
@@ -1244,129 +1244,129 @@
           "  }\n")))))
 
 (defn emit-call-arguments
-  [functions: (Vec core/FunctionDef)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: core/NativeId
-   arguments: (Vec core/NativeId)
-   arena-id: (U core/NativeId Nil)] -> String
-  (let [prefix: String
+  [(functions (Vec core/FunctionDef))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target core/NativeId)
+   (arguments (Vec core/NativeId))
+   (arena-id (U core/NativeId Nil))] String
+  (let [(prefix String)
         (callee-resource-arguments functions function slots target arena-id)
-        supplied: String (emit-arguments function slots arguments)]
+        (supplied String) (emit-arguments function slots arguments)]
     (cond
       (= 0 (count prefix)) supplied
       (= 0 (count supplied)) prefix
       :else (str prefix ", " supplied))))
 
 (defn vector-layout-of
-  [layouts: (Vec core/LayoutDef)
-   vector-type: core/NativeId] -> core/LayoutShapeV0
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts vector-type)]
+  [(layouts (Vec core/LayoutDef))
+   (vector-type core/NativeId)] core/LayoutShapeV0
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts vector-type)]
     (if (nil? layout)
       (core/->VectorShapeV0 vector-type 0)
       (core/layoutdef-shape layout))))
 
 (defn vector-stride
-  [layouts: (Vec core/LayoutDef)
-   vector-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (vector-layout-of layouts vector-type)]
+  [(layouts (Vec core/LayoutDef))
+   (vector-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (vector-layout-of layouts vector-type)]
     (if (instance? native.core.VectorShapeV0 shape)
       (core/vectorshapev0-stride-bytes shape)
       0)))
 
 (defn vector-element-alignment
-  [layouts: (Vec core/LayoutDef)
-   vector-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (vector-layout-of layouts vector-type)]
+  [(layouts (Vec core/LayoutDef))
+   (vector-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (vector-layout-of layouts vector-type)]
     (if (not (instance? native.core.VectorShapeV0 shape))
       1
-      (let [element: (U core/LayoutDef Nil)
+      (let [(element (U core/LayoutDef Nil))
             (c17/layout-for-type layouts (core/vectorshapev0-element-type shape))]
         (if (nil? element) 1 (core/layoutdef-align-bytes element))))))
 
 (defn collection-layout-of
-  [layouts: (Vec core/LayoutDef)
-   collection-type: core/NativeId] -> core/LayoutShapeV0
-  (let [layout: (U core/LayoutDef Nil)
+  [(layouts (Vec core/LayoutDef))
+   (collection-type core/NativeId)] core/LayoutShapeV0
+  (let [(layout (U core/LayoutDef Nil))
         (c17/layout-for-type layouts collection-type)]
     (if (nil? layout)
       (core/->ReferenceShapeV0 collection-type)
       (core/layoutdef-shape layout))))
 
 (defn map-key-type
-  [layouts: (Vec core/LayoutDef)
-   map-type: core/NativeId] -> core/NativeId
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+  [(layouts (Vec core/LayoutDef))
+   (map-type core/NativeId)] core/NativeId
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts map-type)]
     (if (instance? native.core.MapShapeV0 shape)
       (core/mapshapev0-key-type shape)
       map-type)))
 
 (defn map-value-type
-  [layouts: (Vec core/LayoutDef)
-   map-type: core/NativeId] -> core/NativeId
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+  [(layouts (Vec core/LayoutDef))
+   (map-type core/NativeId)] core/NativeId
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts map-type)]
     (if (instance? native.core.MapShapeV0 shape)
       (core/mapshapev0-value-type shape)
       map-type)))
 
 (defn map-key-stride
-  [layouts: (Vec core/LayoutDef)
-   map-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+  [(layouts (Vec core/LayoutDef))
+   (map-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts map-type)]
     (if (instance? native.core.MapShapeV0 shape)
       (core/mapshapev0-key-stride-bytes shape)
       0)))
 
 (defn map-key-alignment
-  [layouts: (Vec core/LayoutDef)
-   map-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+  [(layouts (Vec core/LayoutDef))
+   (map-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts map-type)]
     (if (instance? native.core.MapShapeV0 shape)
       (core/mapshapev0-key-align-bytes shape)
       1)))
 
 (defn map-value-stride
-  [layouts: (Vec core/LayoutDef)
-   map-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+  [(layouts (Vec core/LayoutDef))
+   (map-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts map-type)]
     (if (instance? native.core.MapShapeV0 shape)
       (core/mapshapev0-value-stride-bytes shape)
       0)))
 
 (defn map-value-alignment
-  [layouts: (Vec core/LayoutDef)
-   map-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+  [(layouts (Vec core/LayoutDef))
+   (map-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts map-type)]
     (if (instance? native.core.MapShapeV0 shape)
       (core/mapshapev0-value-align-bytes shape)
       1)))
 
 (defn set-element-type
-  [layouts: (Vec core/LayoutDef)
-   set-type: core/NativeId] -> core/NativeId
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
+  [(layouts (Vec core/LayoutDef))
+   (set-type core/NativeId)] core/NativeId
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts set-type)]
     (if (instance? native.core.SetShapeV0 shape)
       (core/setshapev0-element-type shape)
       set-type)))
 
-(defn set-stride [layouts: (Vec core/LayoutDef) set-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
+(defn set-stride [(layouts (Vec core/LayoutDef)) (set-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts set-type)]
     (if (instance? native.core.SetShapeV0 shape)
       (core/setshapev0-stride-bytes shape)
       0)))
 
 (defn set-alignment
-  [layouts: (Vec core/LayoutDef)
-   set-type: core/NativeId] -> Int
-  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
+  [(layouts (Vec core/LayoutDef))
+   (set-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (collection-layout-of layouts set-type)]
     (if (instance? native.core.SetShapeV0 shape)
       (core/setshapev0-align-bytes shape)
       1)))
 
 (defn concrete-equality-name
-  [types: (Vec core/TypeDef)
-   module-index: Int
-   equality: core/ConcreteEqualityV0] -> String
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (equality core/ConcreteEqualityV0)] String
   (cond
     (instance? native.core.BoolEqualityV0 equality)
     "NATIVE_COLLECTION_EQ_BOOL"
@@ -1385,10 +1385,10 @@
       ")")))
 
 (defn emit-value-list
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   values: (Vec core/NativeId)] -> String
-  (loop [position: Int 0 result: String ""]
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (values (Vec core/NativeId))] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count values))
       result
       (recur (+ position 1)
@@ -1396,24 +1396,24 @@
           (value-name function slots (nth values position)))))))
 
 (defn collection-symbol
-  [prefix: String
-   slots: (Vec ValueSlotV0)
-   result-id: core/NativeId] -> String
+  [(prefix String)
+   (slots (Vec ValueSlotV0))
+   (result-id core/NativeId)] String
   (str "native_" prefix "_" (slot-index slots result-id)))
 
-(defn parts-symbol [slots: (Vec ValueSlotV0) result-id: core/NativeId] -> String
+(defn parts-symbol [(slots (Vec ValueSlotV0)) (result-id core/NativeId)] String
   (str "native_parts_" (slot-index slots result-id)))
 
 (defn text-operand-expression
-  [types: (Vec core/TypeDef)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   arena: String
-   operand: core/NativeId] -> String
-  (let [operand-type: core/NativeId (slot-type function slots operand)
-        definition: (U core/TypeDef Nil)
+  [(types (Vec core/TypeDef))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (arena String)
+   (operand core/NativeId)] String
+  (let [(operand-type core/NativeId) (slot-type function slots operand)
+        (definition (U core/TypeDef Nil))
         (c17/type-def-for types operand-type)
-        text: Bool
+        (text Bool)
         (if (nil? definition) false (c17/text-type-def? definition))]
     (if text
       (value-name function slots operand)
@@ -1421,42 +1421,42 @@
         (value-name function slots operand) ")"))))
 
 (defn emit-optional-out-extern-call
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   abis: (Vec core/AbiDeclV0)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   instruction: core/ExternCallInstruction] -> String
-  (let [abi: (U core/AbiDeclV0 Nil)
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (abis (Vec core/AbiDeclV0))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (instruction core/ExternCallInstruction)] String
+  (let [(abi (U core/AbiDeclV0 Nil))
         (find-abi abis (core/externcallinstruction-abi-id instruction))]
     (if (nil? abi)
       ""
-      (let [result: core/SsaValueV0
+      (let [(result core/SsaValueV0)
             (core/externcallinstruction-result instruction)
-            owner: core/NativeId (core/ssavaluev0-type-id result)
-            payload: (U core/NativeId Nil) (optional-payload-type types owner)
-            result-value: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
-            arena-id: (U core/NativeId Nil)
+            (owner core/NativeId) (core/ssavaluev0-type-id result)
+            (payload (U core/NativeId Nil)) (optional-payload-type types owner)
+            (result-value (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)
+            (arena-id (U core/NativeId Nil))
             (core/externcallinstruction-arena-id instruction)
-            ok-tag: Int
+            (ok-tag Int)
             (if (nil? payload) -1
               (variant-tag-for-payload layouts owner payload))
-            absent-tag: Int (absent-variant-tag types layouts owner)]
+            (absent-tag Int) (absent-variant-tag types layouts owner)]
         (if (or (nil? payload) (nil? result-value) (nil? arena-id)
               (< ok-tag 0) (< absent-tag 0))
           ""
-          (let [hidden: (Vec String)
+          (let [(hidden (Vec String))
                 [(str "(native_arena *)"
                    (value-name function slots arena-id))]
-                with-capability: (Vec String)
+                (with-capability (Vec String))
                 (if (> (count (core/abideclv0-required-capabilities abi)) 0)
                   (conj hidden "capability")
                   hidden)
-                arguments: (Vec String)
-                (loop [position: Int 0
-                       collected: (Vec String) with-capability
-                       values: (Vec core/NativeId)
+                (arguments (Vec String))
+                (loop [(position Int) 0
+                       (collected (Vec String)) with-capability
+                       (values (Vec core/NativeId))
                        (core/externcallinstruction-arguments instruction)]
                   (if (>= position (count values))
                     collected
@@ -1464,7 +1464,7 @@
                       (conj collected
                         (value-name function slots (nth values position)))
                       values)))
-                call-arguments: (Vec String)
+                (call-arguments (Vec String))
                 (conj arguments
                   (str "&" target ".payload.variant_" ok-tag))]
             (str "  memset(&" target ", 0, sizeof " target ");\n"
@@ -1476,22 +1476,22 @@
               "  }\n")))))))
 
 (defn emit-text-builtin
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   operation: core/TextBuiltinOpV0] -> String
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (operation core/TextBuiltinOpV0)] String
   (cond
     (instance? native.core.TextCompareV0 operation)
     (str "  " target " = native_text_compare("
       (value-name function slots (core/textcomparev0-left-id operation)) ", "
       (value-name function slots (core/textcomparev0-right-id operation)) ");\n")
     (instance? native.core.TextEndsWithV0 operation)
-    (let [source: String
+    (let [(source String)
           (value-name function slots (core/textendswithv0-source-id operation))
-          suffix: String
+          (suffix String)
           (value-name function slots (core/textendswithv0-suffix-id operation))
-          source-length: String (str target "_source_length")
-          suffix-length: String (str target "_suffix_length")]
+          (source-length String) (str target "_source_length")
+          (suffix-length String) (str target "_suffix_length")]
       (str "  {\n"
         "    const uint64_t " source-length " = native_text_length(" source ");\n"
         "    const uint64_t " suffix-length " = native_text_length(" suffix ");\n"
@@ -1559,22 +1559,22 @@
       (value-name function slots (core/textrepeatv0-count-id operation)) ");\n")))
 
 (defn emit-map-get
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   module-index: Int
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   instruction: core/MapGetInstructionV0] -> String
-  (let [result: core/SsaValueV0 (core/mapgetinstructionv0-result instruction)
-        result-id: core/NativeId (core/ssavaluev0-id result)
-        target: String (value-name function slots result-id)
-        source: core/NativeId (core/mapgetinstructionv0-source-id instruction)
-        source-type: core/NativeId (slot-type function slots source)
-        value-type: core/NativeId (map-value-type layouts source-type)
-        default: (U core/NativeId Nil)
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (module-index Int)
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (instruction core/MapGetInstructionV0)] String
+  (let [(result core/SsaValueV0) (core/mapgetinstructionv0-result instruction)
+        (result-id core/NativeId) (core/ssavaluev0-id result)
+        (target String) (value-name function slots result-id)
+        (source core/NativeId) (core/mapgetinstructionv0-source-id instruction)
+        (source-type core/NativeId) (slot-type function slots source)
+        (value-type core/NativeId) (map-value-type layouts source-type)
+        (default (U core/NativeId Nil))
         (core/mapgetinstructionv0-default-id instruction)
-        hit: String (collection-symbol "map_hit" slots result-id)
-        call: String
+        (hit String) (collection-symbol "map_hit" slots result-id)
+        (call String)
         (str "native_map_get(" (value-name function slots source) ", &"
           (value-name function slots (core/mapgetinstructionv0-key-id instruction))
           ", "
@@ -1587,8 +1587,8 @@
         "    " target " = (" hit " == NULL) ? "
         (value-name function slots default) " : *(const "
         (c17/c-type types module-index value-type) " *)" hit ";\n  }\n")
-      (let [result-type: core/NativeId (core/ssavaluev0-type-id result)
-            absent-tag: Int (absent-variant-tag types layouts result-type)]
+      (let [(result-type core/NativeId) (core/ssavaluev0-type-id result)
+            (absent-tag Int) (absent-variant-tag types layouts result-type)]
         (if (core/native-id= result-type value-type)
           (if (< absent-tag 0)
             ""
@@ -1599,7 +1599,7 @@
               "    } else {\n      memset(&" target ", 0, sizeof " target ");\n"
               "      " target ".tag = INT64_C(" absent-tag ");\n"
               "    }\n  }\n"))
-          (let [value-tag: Int
+          (let [(value-tag Int)
                 (variant-tag-for-payload layouts result-type value-type)]
             (if (or (< value-tag 0) (< absent-tag 0))
               ""
@@ -1614,27 +1614,27 @@
                 "    }\n  }\n"))))))))
 
 (defn emit-direct-extern-call
-  [abis: (Vec core/AbiDeclV0)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   instruction: core/ExternCallInstruction] -> String
-  (let [abi: (U core/AbiDeclV0 Nil)
+  [(abis (Vec core/AbiDeclV0))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (instruction core/ExternCallInstruction)] String
+  (let [(abi (U core/AbiDeclV0 Nil))
         (find-abi abis (core/externcallinstruction-abi-id instruction))]
     (if (nil? abi)
       ""
-      (let [result-value: (U core/AbiValueV0 Nil)
+      (let [(result-value (U core/AbiValueV0 Nil))
             (core/abideclv0-result abi)
-            arena-id: (U core/NativeId Nil)
+            (arena-id (U core/NativeId Nil))
             (core/externcallinstruction-arena-id instruction)
-            hidden: (Vec String)
+            (hidden (Vec String))
             (if (> (count (core/abideclv0-required-capabilities abi)) 0)
               ["capability"]
               [])
-            arguments: (Vec String)
-            (loop [position: Int 0
-                   collected: (Vec String) hidden
-                   values: (Vec core/NativeId)
+            (arguments (Vec String))
+            (loop [(position Int) 0
+                   (collected (Vec String)) hidden
+                   (values (Vec core/NativeId))
                    (core/externcallinstruction-arguments instruction)]
               (if (>= position (count values))
                 collected
@@ -1652,55 +1652,55 @@
               (join-c-arguments arguments) ");\n")))))))
 
 (defn emit-outcome-out-extern-call
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   abis: (Vec core/AbiDeclV0)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   instruction: core/ExternCallInstruction] -> String
-  (let [abi: (U core/AbiDeclV0 Nil)
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (abis (Vec core/AbiDeclV0))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (instruction core/ExternCallInstruction)] String
+  (let [(abi (U core/AbiDeclV0 Nil))
         (find-abi abis (core/externcallinstruction-abi-id instruction))]
     (if (nil? abi)
       ""
-      (let [result: core/SsaValueV0
+      (let [(result core/SsaValueV0)
             (core/externcallinstruction-result instruction)
-            owner: core/NativeId (core/ssavaluev0-type-id result)
-            ok-variant: (U core/TypeVariant Nil)
+            (owner core/NativeId) (core/ssavaluev0-type-id result)
+            (ok-variant (U core/TypeVariant Nil))
             (outcome-variant types owner "ok")
-            peer-variant: (U core/TypeVariant Nil)
+            (peer-variant (U core/TypeVariant Nil))
             (outcome-variant types owner "peer-closed")
-            error-variant: (U core/TypeVariant Nil)
+            (error-variant (U core/TypeVariant Nil))
             (outcome-variant types owner "error")
-            ok-payload: (U core/NativeId Nil)
+            (ok-payload (U core/NativeId Nil))
             (outcome-variant-payload types owner "ok")
-            error-payload: (U core/NativeId Nil)
+            (error-payload (U core/NativeId Nil))
             (outcome-variant-payload types owner "error")
-            ok-tag: Int (outcome-variant-tag types layouts owner "ok")
-            peer-tag: Int
+            (ok-tag Int) (outcome-variant-tag types layouts owner "ok")
+            (peer-tag Int)
             (outcome-variant-tag types layouts owner "peer-closed")
-            error-tag: Int (outcome-variant-tag types layouts owner "error")
-            result-value: (U core/AbiValueV0 Nil)
+            (error-tag Int) (outcome-variant-tag types layouts owner "error")
+            (result-value (U core/AbiValueV0 Nil))
             (core/abideclv0-result abi)
-            arena-id: (U core/NativeId Nil)
+            (arena-id (U core/NativeId Nil))
             (core/externcallinstruction-arena-id instruction)]
         (if (or (nil? ok-variant) (nil? peer-variant) (nil? error-variant)
               (nil? error-payload) (nil? result-value)
               (< ok-tag 0) (< peer-tag 0) (< error-tag 0))
           ""
-          (let [hidden: (Vec String)
+          (let [(hidden (Vec String))
                 (if (nil? arena-id)
                   []
                   [(str "(native_arena *)"
                      (value-name function slots arena-id))])
-                with-capability: (Vec String)
+                (with-capability (Vec String))
                 (if (> (count (core/abideclv0-required-capabilities abi)) 0)
                   (conj hidden "capability")
                   hidden)
-                arguments: (Vec String)
-                (loop [position: Int 0
-                       collected: (Vec String) with-capability
-                       values: (Vec core/NativeId)
+                (arguments (Vec String))
+                (loop [(position Int) 0
+                       (collected (Vec String)) with-capability
+                       (values (Vec core/NativeId))
                        (core/externcallinstruction-arguments instruction)]
                   (if (>= position (count values))
                     collected
@@ -1708,12 +1708,12 @@
                       (conj collected
                         (value-name function slots (nth values position)))
                       values)))
-                call-arguments: (Vec String)
+                (call-arguments (Vec String))
                 (if (nil? ok-payload)
                   arguments
                   (conj arguments
                     (str "&" target ".payload.variant_" ok-tag)))
-                status: String (str target "_status")]
+                (status String) (str target "_status")]
             (str "  memset(&" target ", 0, sizeof " target ");\n"
               "  {\n"
               "    int32_t " status " = " (core/abideclv0-symbol abi) "("
@@ -1731,14 +1731,14 @@
               "  }\n")))))))
 
 (defn emit-extern-call
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   abis: (Vec core/AbiDeclV0)
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   target: String
-   instruction: core/ExternCallInstruction] -> String
-  (let [abi: (U core/AbiDeclV0 Nil)
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (abis (Vec core/AbiDeclV0))
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (target String)
+   (instruction core/ExternCallInstruction)] String
+  (let [(abi (U core/AbiDeclV0 Nil))
         (find-abi abis (core/externcallinstruction-abi-id instruction))]
     (if (nil? abi)
       ""
@@ -1760,27 +1760,27 @@
         :else ""))))
 
 (defn value-referenced?
-  [function: core/FunctionDef
-   target: core/NativeId] -> Bool
-  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
-    (loop [position: Int 0]
+  [(function core/FunctionDef)
+   (target core/NativeId)] Bool
+  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+    (loop [(position Int) 0]
       (if (>= position (count blocks))
         false
-        (let [block: core/BasicBlock (nth blocks position)
-              instructions: (Vec core/Instruction)
+        (let [(block core/BasicBlock) (nth blocks position)
+              (instructions (Vec core/Instruction))
               (core/basicblock-instructions block)
-              terminators: (Vec core/Terminator)
+              (terminators (Vec core/Terminator))
               (core/basicblock-terminators block)
-              instruction-use: Bool
-              (loop [inner: Int 0]
+              (instruction-use Bool)
+              (loop [(inner Int) 0]
                 (if (>= inner (count instructions))
                   false
                   (if (core/id-in?
                         (core/instruction-ssa-refs (nth instructions inner)) target)
                     true
                     (recur (+ inner 1)))))
-              terminator-use: Bool
-              (loop [inner: Int 0]
+              (terminator-use Bool)
+              (loop [(inner Int) 0]
                 (if (>= inner (count terminators))
                   false
                   (if (core/id-in?
@@ -1792,14 +1792,14 @@
             (recur (+ position 1))))))))
 
 (defn emit-unused-block-parameters
-  [function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   block: core/BasicBlock] -> String
-  (let [parameters: (Vec core/Parameter) (core/basicblock-parameters block)]
-    (loop [position: Int 0 emitted: String ""]
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (block core/BasicBlock)] String
+  (let [(parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
+    (loop [(position Int) 0 (emitted String) ""]
       (if (>= position (count parameters))
         emitted
-        (let [parameter: core/Parameter (nth parameters position)]
+        (let [(parameter core/Parameter) (nth parameters position)]
           (recur (+ position 1)
             (if (value-referenced? function (core/parameter-id parameter))
               emitted
@@ -1807,19 +1807,19 @@
                 (value-name function slots (core/parameter-id parameter)) ";\n"))))))))
 
 (defn emit-instruction
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   epochs: (Vec core/NativeId)
-   functions: (Vec core/FunctionDef)
-   abis: (Vec core/AbiDeclV0)
-   module-index: Int
-   pool: ConstantPoolV0
-   function: core/FunctionDef
-   slots: (Vec ValueSlotV0)
-   instruction: core/Instruction] -> String
-  (let [result: core/SsaValueV0 (get instruction :result)
-        target: String (value-name function slots (core/ssavaluev0-id result))
-        emitted: String
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (epochs (Vec core/NativeId))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))
+   (module-index Int)
+   (pool ConstantPoolV0)
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (instruction core/Instruction)] String
+  (let [(result core/SsaValueV0) (get instruction :result)
+        (target String) (value-name function slots (core/ssavaluev0-id result))
+        (emitted String)
         (cond
       (instance? native.core.AtomInstruction instruction)
       (str "  " target " = "
@@ -1828,7 +1828,7 @@
         ";\n  (void)" target ";\n")
 
       (instance? native.core.ArenaInstruction instruction)
-      (let [epoch: Int
+      (let [(epoch Int)
             (epoch-arena-index epochs (core/instruction-result-id instruction))]
         (if (< epoch 0)
           (str "  " target " = arena;\n  (void)" target ";\n")
@@ -1863,27 +1863,27 @@
       (str "  " target " = (void *)capability;\n  (void)" target ";\n")
 
       (instance? native.core.AtomCreateInstruction instruction)
-      (let [initial-id: core/NativeId
+      (let [(initial-id core/NativeId)
             (core/atomcreateinstruction-initial-id instruction)
-            initial: String (value-name function slots initial-id)
-            initial-type: core/NativeId (slot-type function slots initial-id)
-            arena: String
+            (initial String) (value-name function slots initial-id)
+            (initial-type core/NativeId) (slot-type function slots initial-id)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/atomcreateinstruction-arena-id instruction)))
-            state: String
+            (state String)
             (str "(const native_capability *)"
               (value-name function slots
                 (core/atomcreateinstruction-state-id instruction)))
-            content: String (c17/c-type types module-index initial-type)]
+            (content String) (c17/c-type types module-index initial-type)]
         (str "  " target " = native_atom_new(" arena ", " state ", &"
           initial ", sizeof(" content "), _Alignof(" content "));\n"))
 
       (instance? native.core.AtomDerefInstruction instruction)
-      (let [cell: String
+      (let [(cell String)
             (value-name function slots
               (core/atomderefinstruction-cell-id instruction))
-            state: String
+            (state String)
             (str "(const native_capability *)"
               (value-name function slots
                 (core/atomderefinstruction-state-id instruction)))]
@@ -1891,14 +1891,14 @@
           ", sizeof(" target "));\n"))
 
       (instance? native.core.AtomResetInstruction instruction)
-      (let [cell: String
+      (let [(cell String)
             (value-name function slots
               (core/atomresetinstruction-cell-id instruction))
-            state: String
+            (state String)
             (str "(const native_capability *)"
               (value-name function slots
                 (core/atomresetinstruction-state-id instruction)))
-            value: String
+            (value String)
             (value-name function slots
               (core/atomresetinstruction-value-id instruction))]
         (str "  native_atom_lock(" cell ", " state ", &" target
@@ -1908,40 +1908,40 @@
           ", sizeof(" target "));\n"))
 
       (instance? native.core.AtomCompareExchangeInstruction instruction)
-      (let [cell: String
+      (let [(cell String)
             (value-name function slots
               (core/atomcompareexchangeinstruction-cell-id instruction))
-            state: String
+            (state String)
             (str "(const native_capability *)"
               (value-name function slots
                 (core/atomcompareexchangeinstruction-state-id instruction)))
-            expected: String
+            (expected String)
             (value-name function slots
               (core/atomcompareexchangeinstruction-expected-id instruction))
-            replacement: String
+            (replacement String)
             (value-name function slots
               (core/atomcompareexchangeinstruction-replacement-id instruction))]
         (str "  " target " = native_atom_compare_exchange(" cell ", " state
           ", &" expected ", &" replacement ", sizeof(" replacement "));\n"))
 
       (instance? native.core.AtomSwapInstruction instruction)
-      (let [cell: String
+      (let [(cell String)
             (value-name function slots
               (core/atomswapinstruction-cell-id instruction))
-            state: String
+            (state String)
             (str "(const native_capability *)"
               (value-name function slots
                 (core/atomswapinstruction-state-id instruction)))
-            updater: String
+            (updater String)
             (function-name module-index
               (function-index-of functions
                 (core/atomswapinstruction-updater-id instruction)))
-            arguments: (Vec core/NativeId)
+            (arguments (Vec core/NativeId))
             (core/atomswapinstruction-arguments instruction)]
         (str "  native_atom_lock(" cell ", " state ", &" target
           ", sizeof(" target "));\n"
           "  " target " = " updater "(" target
-          (loop [position: Int 0 fragment: String ""]
+          (loop [(position Int) 0 (fragment String) ""]
             (if (>= position (count arguments))
               fragment
               (recur (+ position 1)
@@ -1988,17 +1988,17 @@
           ", "))
 
       (instance? native.core.TextSliceInstruction instruction)
-      (let [arena: String
+      (let [(arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/textsliceinstruction-arena-id instruction)))
-            source: String
+            (source String)
             (value-name function slots
               (core/textsliceinstruction-source-id instruction))
-            start: String
+            (start String)
             (value-name function slots
               (core/textsliceinstruction-start-id instruction))
-            end: String
+            (end String)
             (value-name function slots
               (core/textsliceinstruction-end-id instruction))]
         (str "  if ((" start " < INT64_C(0)) || (" end " < " start
@@ -2010,15 +2010,15 @@
           start ", (uint64_t)" end ");\n"))
 
       (instance? native.core.TextConcatInstruction instruction)
-      (let [arena: String
+      (let [(arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/textconcatinstruction-arena-id instruction)))
-            operands: (Vec core/NativeId)
+            (operands (Vec core/NativeId))
             (core/textconcatinstruction-operand-ids instruction)
-            parts: String (parts-symbol slots (core/ssavaluev0-id result))]
+            (parts String) (parts-symbol slots (core/ssavaluev0-id result))]
         (str "  {\n    const uint64_t " parts "[" (count operands) "] = {"
-          (loop [position: Int 0 fragment: String ""]
+          (loop [(position Int) 0 (fragment String) ""]
             (if (>= position (count operands))
               fragment
               (recur (+ position 1)
@@ -2065,10 +2065,10 @@
         ";\n")
 
       (instance? native.core.DivF64InstructionV0 instruction)
-      (let [left: String
+      (let [(left String)
             (value-name function slots
               (core/divf64instructionv0-left-id instruction))
-            right: String
+            (right String)
             (value-name function slots
               (core/divf64instructionv0-right-id instruction))]
         (str "  if (" right " == 0.0) {\n"
@@ -2083,13 +2083,13 @@
         ";\n")
 
       (instance? native.core.CompareInstruction instruction)
-      (let [left: String
+      (let [(left String)
             (value-name function slots
               (core/compareinstruction-left-id instruction))
-            right: String
+            (right String)
             (value-name function slots
               (core/compareinstruction-right-id instruction))
-            comparison: core/CompareOpV0
+            (comparison core/CompareOpV0)
             (core/compareinstruction-comparison instruction)]
         (if (instance? native.core.CompareEqTextV0 comparison)
           (str "  " target " = native_text_eq(" left ", " right ");\n")
@@ -2097,7 +2097,7 @@
             right ");\n")))
 
       (instance? native.core.ValueSemanticsInstruction instruction)
-      (let [operation: core/ValueSemanticsOpV0
+      (let [(operation core/ValueSemanticsOpV0)
             (core/valuesemanticsinstruction-operation instruction)]
         (match operation
           [(ValueEqualV0 domain-type left-id right-id)
@@ -2143,7 +2143,7 @@
         ");\n")
 
       (instance? native.core.CodecPrimitiveInstructionV0 instruction)
-      (let [operation: core/CodecPrimitiveOpV0
+      (let [(operation core/CodecPrimitiveOpV0)
             (core/codecprimitiveinstructionv0-operation instruction)]
         (cond
           (instance? native.core.Utf8EncodeV0 operation)
@@ -2193,14 +2193,14 @@
             ");\n")))
 
       (instance? native.core.FieldInstruction instruction)
-      (let [source: core/NativeId (core/fieldinstruction-source-id instruction)
-            source-type: core/NativeId (slot-type function slots source)
-            pointee: (U core/NativeId Nil) (dereferenced-type types source-type)
-            owner: core/NativeId (if (nil? pointee) source-type pointee)
-            position: Int
+      (let [(source core/NativeId) (core/fieldinstruction-source-id instruction)
+            (source-type core/NativeId) (slot-type function slots source)
+            (pointee (U core/NativeId Nil)) (dereferenced-type types source-type)
+            (owner core/NativeId) (if (nil? pointee) source-type pointee)
+            (position Int)
             (field-position layouts owner
               (core/fieldinstruction-field-id instruction))
-            access: String
+            (access String)
             (if (nil? pointee)
               (str (value-name function slots source) ".")
               (str "((" (c17/c-type types module-index owner) " *)"
@@ -2208,11 +2208,11 @@
         (str "  " target " = " access "field_" position ";\n"))
 
       (instance? native.core.UnionConstructInstruction instruction)
-      (let [union-type: core/NativeId (core/ssavaluev0-type-id result)
-            tag: Int
+      (let [(union-type core/NativeId) (core/ssavaluev0-type-id result)
+            (tag Int)
             (variant-tag layouts union-type
               (core/unionconstructinstruction-variant-id instruction))
-            payload: (U core/NativeId Nil)
+            (payload (U core/NativeId Nil))
             (core/unionconstructinstruction-payload-id instruction)]
         (if (nil? payload)
           (str "  " target " = (" (c17/c-type types module-index union-type)
@@ -2224,10 +2224,10 @@
       ;; The tag test is the whole check: a mismatch must trap, never
       ;; reinterpret the payload bytes as the expected variant.
       (instance? native.core.UnionExtractInstruction instruction)
-      (let [source: core/NativeId
+      (let [(source core/NativeId)
             (core/unionextractinstruction-source-id instruction)
-            source-name: String (value-name function slots source)
-            tag: Int
+            (source-name String) (value-name function slots source)
+            (tag Int)
             (variant-tag layouts (slot-type function slots source)
               (core/unionextractinstruction-variant-id instruction))]
         (str "  if (" source-name ".tag != INT64_C(" tag ")) {\n"
@@ -2243,7 +2243,7 @@
         (core/checkedinstruction-operation instruction))
 
       (instance? native.core.BitwiseInstructionV0 instruction)
-      (let [operation: core/BitwiseOperationV0
+      (let [(operation core/BitwiseOperationV0)
             (core/bitwiseinstructionv0-operation instruction)]
         (cond
           (instance? native.core.BitAndI64V0 operation)
@@ -2286,7 +2286,7 @@
             ");\n")))
 
       (instance? native.core.VariantValueInstruction instruction)
-      (let [source: core/NativeId
+      (let [(source core/NativeId)
             (core/variantvalueinstruction-source-id instruction)]
         (str "  " target " = " (value-name function slots source)
           ".payload.variant_"
@@ -2295,10 +2295,10 @@
           ";\n"))
 
       (instance? native.core.RecordInstruction instruction)
-      (let [values: (Vec core/NativeId) (core/recordinstruction-field-ids instruction)]
+      (let [(values (Vec core/NativeId)) (core/recordinstruction-field-ids instruction)]
         (str "  " target " = ("
           (c17/c-type types module-index (core/ssavaluev0-type-id result)) "){"
-          (loop [position: Int 0 fragment: String ""]
+          (loop [(position Int) 0 (fragment String) ""]
             (if (>= position (count values))
               fragment
               (recur (+ position 1)
@@ -2308,14 +2308,14 @@
           " };\n"))
 
       (instance? native.core.RecordAssocInstructionV0 instruction)
-      (let [record-type-id: core/NativeId (core/ssavaluev0-type-id result)
-            record-type: String (c17/c-type types module-index record-type-id)
-            copy: String (str target "_copy")
-            arena: String
+      (let [(record-type-id core/NativeId) (core/ssavaluev0-type-id result)
+            (record-type String) (c17/c-type types module-index record-type-id)
+            (copy String) (str target "_copy")
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/recordassocinstructionv0-arena-id instruction)))
-            position: Int
+            (position Int)
             (field-position layouts record-type-id
               (core/recordassocinstructionv0-field-id instruction))]
         (str "  {\n    " record-type " *" copy " = native_arena_alloc("
@@ -2331,13 +2331,13 @@
           "    " target " = *" copy ";\n  }\n"))
 
       (instance? native.core.BoxRecordInstruction instruction)
-      (let [reference-type: core/NativeId (core/ssavaluev0-type-id result)
-            pointee: (U core/NativeId Nil)
+      (let [(reference-type core/NativeId) (core/ssavaluev0-type-id result)
+            (pointee (U core/NativeId Nil))
             (dereferenced-type types reference-type)]
         (if (nil? pointee)
           ""
-          (let [record-type: String (c17/c-type types module-index pointee)
-                arena: String
+          (let [(record-type String) (c17/c-type types module-index pointee)
+                (arena String)
                 (str "(native_arena *)"
                   (value-name function slots
                     (core/boxrecordinstruction-arena-id instruction)))]
@@ -2349,10 +2349,10 @@
               ";\n"))))
 
       (instance? native.core.RecordMaterializeInstructionV0 instruction)
-      (let [record-type: String
+      (let [(record-type String)
             (c17/c-type types module-index
               (core/ssavaluev0-type-id result))
-            source: String
+            (source String)
             (value-name function slots
               (core/recordmaterializeinstructionv0-source-id instruction))]
         (str "  if (" source " == NULL) {\n"
@@ -2368,8 +2368,8 @@
 
       ;; native_vec_at traps outside [0, length), so the read is total here.
       (instance? native.core.VecGetInstruction instruction)
-      (let [source: core/NativeId (core/vecgetinstruction-source-id instruction)
-            stride: Int (vector-stride layouts (slot-type function slots source))]
+      (let [(source core/NativeId) (core/vecgetinstruction-source-id instruction)
+            (stride Int) (vector-stride layouts (slot-type function slots source))]
         (str "  " target " = *(const "
           (c17/c-type types module-index (core/ssavaluev0-type-id result))
           " *)native_vec_at(" (value-name function slots source) ", "
@@ -2378,8 +2378,8 @@
           ", INT64_C(" stride "));\n"))
 
       (instance? native.core.VecAssocInstructionV0 instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecassocinstructionv0-arena-id instruction)))]
@@ -2396,8 +2396,8 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecPushInstruction instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecpushinstruction-arena-id instruction)))]
@@ -2411,8 +2411,8 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecEmptyInstruction instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecemptyinstruction-arena-id instruction)))]
@@ -2423,8 +2423,8 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecConcatInstruction instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecconcatinstruction-arena-id instruction)))]
@@ -2438,8 +2438,8 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecSliceInstructionV0 instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecsliceinstructionv0-arena-id instruction)))]
@@ -2487,8 +2487,8 @@
         ");\n")
 
       (instance? native.core.VecReverseInstructionV0 instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecreverseinstructionv0-arena-id instruction)))]
@@ -2499,10 +2499,10 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecSortInstructionV0 instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
-            element-type: core/NativeId
+      (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
+            (element-type core/NativeId)
             (core/vecsortinstructionv0-element-type instruction)
-            arena: String
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/vecsortinstructionv0-arena-id instruction)))]
@@ -2514,16 +2514,16 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.MapLiteralInstructionV0 instruction)
-      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)
-            keys: (Vec core/NativeId)
+      (let [(map-type core/NativeId) (core/ssavaluev0-type-id result)
+            (keys (Vec core/NativeId))
             (core/mapliteralinstructionv0-key-ids instruction)
-            values: (Vec core/NativeId)
+            (values (Vec core/NativeId))
             (core/mapliteralinstructionv0-value-ids instruction)
-            arena: String
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/mapliteralinstructionv0-arena-id instruction)))
-            equality: String
+            (equality String)
             (concrete-equality-name
               types module-index
               (core/mapliteralinstructionv0-key-equality instruction))]
@@ -2534,9 +2534,9 @@
             (map-key-alignment layouts map-type) ", INT64_C("
             (map-value-stride layouts map-type) "), (size_t)"
             (map-value-alignment layouts map-type) ", " equality ");\n")
-          (let [key-array: String
+          (let [(key-array String)
                 (collection-symbol "map_keys" slots (core/ssavaluev0-id result))
-                value-array: String
+                (value-array String)
                 (collection-symbol "map_values" slots (core/ssavaluev0-id result))]
             (str "  {\n    const "
               (c17/c-type types module-index (map-key-type layouts map-type))
@@ -2553,14 +2553,14 @@
               (map-value-alignment layouts map-type) ", " equality ");\n  }\n"))))
 
       (instance? native.core.SetLiteralInstructionV0 instruction)
-      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)
-            values: (Vec core/NativeId)
+      (let [(set-type core/NativeId) (core/ssavaluev0-type-id result)
+            (values (Vec core/NativeId))
             (core/setliteralinstructionv0-value-ids instruction)
-            arena: String
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/setliteralinstructionv0-arena-id instruction)))
-            equality: String
+            (equality String)
             (concrete-equality-name
               types module-index
               (core/setliteralinstructionv0-element-equality instruction))]
@@ -2568,7 +2568,7 @@
           (str "  " target " = native_set_from_array(" arena
             ", NULL, INT64_C(0), INT64_C(" (set-stride layouts set-type)
             "), (size_t)" (set-alignment layouts set-type) ", " equality ");\n")
-          (let [array: String
+          (let [(array String)
                 (collection-symbol "set_values" slots (core/ssavaluev0-id result))]
             (str "  {\n    const "
               (c17/c-type types module-index (set-element-type layouts set-type))
@@ -2602,8 +2602,8 @@
         ");\n")
 
       (instance? native.core.MapAssocInstructionV0 instruction)
-      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(map-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/mapassocinstructionv0-arena-id instruction)))]
@@ -2626,8 +2626,8 @@
           ");\n"))
 
       (instance? native.core.MapDissocInstructionV0 instruction)
-      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)
-            arena: String
+      (let [(map-type core/NativeId) (core/ssavaluev0-type-id result)
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/mapdissocinstructionv0-arena-id instruction)))]
@@ -2647,8 +2647,8 @@
           ");\n"))
 
       (instance? native.core.MapKeysInstructionV0 instruction)
-      (let [source: core/NativeId (core/mapkeysinstructionv0-source-id instruction)
-            map-type: core/NativeId (slot-type function slots source)]
+      (let [(source core/NativeId) (core/mapkeysinstructionv0-source-id instruction)
+            (map-type core/NativeId) (slot-type function slots source)]
         (str "  " target " = native_map_keys((native_arena *)"
           (value-name function slots
             (core/mapkeysinstructionv0-arena-id instruction))
@@ -2656,9 +2656,9 @@
           (map-key-alignment layouts map-type) ");\n"))
 
       (instance? native.core.MapValuesInstructionV0 instruction)
-      (let [source: core/NativeId
+      (let [(source core/NativeId)
             (core/mapvaluesinstructionv0-source-id instruction)
-            map-type: core/NativeId (slot-type function slots source)]
+            (map-type core/NativeId) (slot-type function slots source)]
         (str "  " target " = native_map_values((native_arena *)"
           (value-name function slots
             (core/mapvaluesinstructionv0-arena-id instruction))
@@ -2685,7 +2685,7 @@
         ");\n")
 
       (instance? native.core.SetConjInstructionV0 instruction)
-      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)]
+      (let [(set-type core/NativeId) (core/ssavaluev0-type-id result)]
         (str "  " target " = native_set_conj((native_arena *)"
           (value-name function slots
             (core/setconjinstructionv0-arena-id instruction))
@@ -2703,7 +2703,7 @@
           ");\n"))
 
       (instance? native.core.SetDisjInstructionV0 instruction)
-      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)]
+      (let [(set-type core/NativeId) (core/ssavaluev0-type-id result)]
         (str "  " target " = native_set_disj((native_arena *)"
           (value-name function slots
             (core/setdisjinstructionv0-arena-id instruction))
@@ -2721,9 +2721,9 @@
           ");\n"))
 
       (instance? native.core.SetVectorInstructionV0 instruction)
-      (let [source: core/NativeId
+      (let [(source core/NativeId)
             (core/setvectorinstructionv0-source-id instruction)
-            set-type: core/NativeId (slot-type function slots source)]
+            (set-type core/NativeId) (slot-type function slots source)]
         (str "  " target " = native_set_vector((native_arena *)"
           (value-name function slots
             (core/setvectorinstructionv0-arena-id instruction))
@@ -2731,14 +2731,14 @@
           (set-alignment layouts set-type) ");\n"))
 
       (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
-      (let [collection-type: core/NativeId (core/ssavaluev0-type-id result)
-            shape: core/LayoutShapeV0
+      (let [(collection-type core/NativeId) (core/ssavaluev0-type-id result)
+            (shape core/LayoutShapeV0)
             (collection-layout-of layouts collection-type)
-            arena: String
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/collectiontransientopeninstructionv0-arena-id instruction)))
-            source: String
+            (source String)
             (value-name function slots
               (core/collectiontransientopeninstructionv0-source-id instruction))]
         (cond
@@ -2752,14 +2752,14 @@
           :else "  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"))
 
       (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
-      (let [collection-type: core/NativeId (core/ssavaluev0-type-id result)
-            shape: core/LayoutShapeV0
+      (let [(collection-type core/NativeId) (core/ssavaluev0-type-id result)
+            (shape core/LayoutShapeV0)
             (collection-layout-of layouts collection-type)
-            arena: String
+            (arena String)
             (str "(native_arena *)"
               (value-name function slots
                 (core/collectionpersistentcloseinstructionv0-arena-id instruction)))
-            source: String
+            (source String)
             (value-name function slots
               (core/collectionpersistentcloseinstructionv0-source-id instruction))]
         (cond
@@ -2772,7 +2772,7 @@
           :else "  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"))
 
       (instance? native.core.TransientMapAssocInstructionV0 instruction)
-      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)]
+      (let [(map-type core/NativeId) (core/ssavaluev0-type-id result)]
         (str "  " target " = native_map_assoc_transient((native_arena *)"
           (value-name function slots
             (core/transientmapassocinstructionv0-arena-id instruction))
@@ -2795,7 +2795,7 @@
           ");\n"))
 
       (instance? native.core.TransientSetConjInstructionV0 instruction)
-      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)]
+      (let [(set-type core/NativeId) (core/ssavaluev0-type-id result)]
         (str "  " target " = native_set_conj_transient((native_arena *)"
           (value-name function slots
             (core/transientsetconjinstructionv0-arena-id instruction))
@@ -2838,15 +2838,15 @@
         (str "  (void)" target ";\n")))))
 
 (defn variant-tag
-  [layouts: (Vec core/LayoutDef)
-   owner: core/NativeId
-   variant: core/NativeId] -> Int
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+  [(layouts (Vec core/LayoutDef))
+   (owner core/NativeId)
+   (variant core/NativeId)] Int
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
-      (let [variants: (Vec core/UnionVariantLayoutV0)
+      (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [position: Int 0]
+        (loop [(position Int) 0]
           (if (>= position (count variants))
             -1
             (if (core/native-id=
@@ -2856,22 +2856,22 @@
               (recur (+ position 1)))))))))
 
 (defn emit-jump
-  [function: core/FunctionDef
-   function-index: Int
-   slots: (Vec ValueSlotV0)
-   target-id: core/NativeId
-   arguments: (Vec core/NativeId)] -> String
-  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
-        position: Int (block-index blocks target-id)
-        target-block: core/BasicBlock (nth blocks position)
-        parameters: (Vec core/Parameter) (core/basicblock-parameters target-block)]
+  [(function core/FunctionDef)
+   (function-index Int)
+   (slots (Vec ValueSlotV0))
+   (target-id core/NativeId)
+   (arguments (Vec core/NativeId))] String
+  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+        (position Int) (block-index blocks target-id)
+        (target-block core/BasicBlock) (nth blocks position)
+        (parameters (Vec core/Parameter)) (core/basicblock-parameters target-block)]
     (str
-      (loop [inner: Int 0 result: String ""]
+      (loop [(inner Int) 0 (result String) ""]
         (if (>= inner (count arguments))
           result
-          (let [parameter-id: core/NativeId
+          (let [(parameter-id core/NativeId)
                 (core/parameter-id (nth parameters inner))
-                argument-id: core/NativeId (nth arguments inner)]
+                (argument-id core/NativeId) (nth arguments inner)]
             (recur (+ inner 1)
               (if (core/native-id= parameter-id argument-id)
                 result
@@ -2880,15 +2880,15 @@
       "  goto " (label-name function-index position) ";\n")))
 
 (defn emit-terminator
-  [layouts: (Vec core/LayoutDef)
-   function: core/FunctionDef
-   function-index: Int
-   slots: (Vec ValueSlotV0)
-   terminator: core/Terminator] -> String
-  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+  [(layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
+   (function-index Int)
+   (slots (Vec ValueSlotV0))
+   (terminator core/Terminator)] String
+  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
     (cond
       (instance? native.core.ReturnTerminator terminator)
-      (let [value: (U core/NativeId Nil) (core/returnterminator-value terminator)]
+      (let [(value (U core/NativeId Nil)) (core/returnterminator-value terminator)]
         (if (nil? value)
           "  return;\n"
           (str "  return " (value-name function slots value) ";\n")))
@@ -2909,15 +2909,15 @@
         "  }\n")
 
       (instance? native.core.SwitchTerminator terminator)
-      (let [value: core/NativeId (core/switchterminator-value-id terminator)
-            owner: core/NativeId (slot-type function slots value)
-            cases: (Vec core/SwitchCaseV0)
+      (let [(value core/NativeId) (core/switchterminator-value-id terminator)
+            (owner core/NativeId) (slot-type function slots value)
+            (cases (Vec core/SwitchCaseV0))
             (core/switchterminator-cases terminator)]
         (str "  switch (" (value-name function slots value) ".tag) {\n"
-          (loop [position: Int 0 result: String ""]
+          (loop [(position Int) 0 (result String) ""]
             (if (>= position (count cases))
               result
-              (let [switch-case: core/SwitchCaseV0 (nth cases position)]
+              (let [(switch-case core/SwitchCaseV0) (nth cases position)]
                 (recur (+ position 1)
                   (str result "  case INT64_C("
                     (variant-tag layouts owner
@@ -2934,7 +2934,7 @@
         (value-name function slots (core/trapterminator-failure-id terminator))
         ");\n"))))
 
-(defn terminator-targets [terminator: core/Terminator] -> (Vec core/NativeId)
+(defn terminator-targets [(terminator core/Terminator)] (Vec core/NativeId)
   (cond
     (instance? native.core.JumpTerminator terminator)
     [(core/jumpterminator-block-id terminator)]
@@ -2942,20 +2942,20 @@
     [(core/branchterminator-true-block terminator)
      (core/branchterminator-false-block terminator)]
     (instance? native.core.SwitchTerminator terminator)
-    (mapv (fn [switch-case: core/SwitchCaseV0] -> core/NativeId
+    (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
             (core/switchcasev0-block-id switch-case))
       (core/switchterminator-cases terminator))
     :else []))
 
-(defn block-targeted? [function: core/FunctionDef target: core/NativeId] -> Bool
-  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
-    (loop [position: Int 0]
+(defn block-targeted? [(function core/FunctionDef) (target core/NativeId)] Bool
+  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+    (loop [(position Int) 0]
       (if (>= position (count blocks))
         false
-        (let [terminators: (Vec core/Terminator)
+        (let [(terminators (Vec core/Terminator))
               (core/basicblock-terminators (nth blocks position))
-              hit: Bool
-              (loop [inner: Int 0]
+              (hit Bool)
+              (loop [(inner Int) 0]
                 (if (>= inner (count terminators))
                   false
                   (if (core/id-in?
@@ -2966,27 +2966,27 @@
           (if hit true (recur (+ position 1))))))))
 
 (defn emit-block
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   epochs: (Vec core/NativeId)
-   functions: (Vec core/FunctionDef)
-   abis: (Vec core/AbiDeclV0)
-   module-index: Int
-   pool: ConstantPoolV0
-   function: core/FunctionDef
-   function-index: Int
-   slots: (Vec ValueSlotV0)
-   position: Int] -> String
-  (let [block: core/BasicBlock (nth (core/functiondef-blocks function) position)
-        targeted: Bool (block-targeted? function (core/basicblock-id block))
-        label: String
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (epochs (Vec core/NativeId))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))
+   (module-index Int)
+   (pool ConstantPoolV0)
+   (function core/FunctionDef)
+   (function-index Int)
+   (slots (Vec ValueSlotV0))
+   (position Int)] String
+  (let [(block core/BasicBlock) (nth (core/functiondef-blocks function) position)
+        (targeted Bool) (block-targeted? function (core/basicblock-id block))
+        (label String)
         (if targeted
           (str (label-name function-index position) ": ;\n")
           "")
-        instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
+        (instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
     (str label
       (if targeted (emit-unused-block-parameters function slots block) "")
-      (loop [inner: Int 0 result: String ""]
+      (loop [(inner Int) 0 (result String) ""]
         (if (>= inner (count instructions))
           result
           (recur (+ inner 1)
@@ -2998,18 +2998,18 @@
         (nth (core/basicblock-terminators block) 0)))))
 
 (defn emit-function
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   regions: (Vec core/RegionDef)
-   functions: (Vec core/FunctionDef)
-   abis: (Vec core/AbiDeclV0)
-   module-index: Int
-   pool: ConstantPoolV0
-   function-index: Int
-   function: core/FunctionDef] -> String
-  (let [slots: (Vec ValueSlotV0) (function-value-slots function)
-        epochs: (Vec core/NativeId) (function-epoch-arenas regions function)
-        blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (regions (Vec core/RegionDef))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))
+   (module-index Int)
+   (pool ConstantPoolV0)
+   (function-index Int)
+   (function core/FunctionDef)] String
+  (let [(slots (Vec ValueSlotV0)) (function-value-slots function)
+        (epochs (Vec core/NativeId)) (function-epoch-arenas regions function)
+        (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
     (str (c17/function-return-type types module-index function) " "
       (function-name module-index function-index)
       "(" (c17/emit-parameter-list types module-index function) ") {\n"
@@ -3017,8 +3017,8 @@
         "  (void)arena;\n" "")
       (if (> (count (core/functiondef-capabilities function)) 0)
         "  (void)capability;\n" "")
-      (loop [position: Int 0 fragment: String ""
-             parameters: (Vec core/Parameter)
+      (loop [(position Int) 0 (fragment String) ""
+             (parameters (Vec core/Parameter))
              (core/functiondef-parameters function)]
         (if (>= position (count parameters))
           fragment
@@ -3027,7 +3027,7 @@
             parameters)))
       (emit-epoch-arena-declarations epochs)
       (emit-declarations types module-index slots)
-      (loop [position: Int 0 result: String ""]
+      (loop [(position Int) 0 (result String) ""]
         (if (>= position (count blocks))
           result
           (recur (+ position 1)
@@ -3037,14 +3037,14 @@
       "}\n")))
 
 (defn emit-functions
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   regions: (Vec core/RegionDef)
-   functions: (Vec core/FunctionDef)
-   abis: (Vec core/AbiDeclV0)
-   module-index: Int
-   pool: ConstantPoolV0] -> String
-  (loop [position: Int 0 result: String ""]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (regions (Vec core/RegionDef))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))
+   (module-index Int)
+   (pool ConstantPoolV0)] String
+  (loop [(position Int) 0 (result String) ""]
     (if (>= position (count functions))
       result
       (recur (+ position 1)
@@ -3053,14 +3053,14 @@
             position (nth functions position)))))))
 
 (defn emit-source
-  [types: (Vec core/TypeDef)
-   layouts: (Vec core/LayoutDef)
-   regions: (Vec core/RegionDef)
-   functions: (Vec core/FunctionDef)
-   abis: (Vec core/AbiDeclV0)
-   module-index: Int
-   pool: ConstantPoolV0
-   header-name: String] -> String
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (regions (Vec core/RegionDef))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))
+   (module-index Int)
+   (pool ConstantPoolV0)
+   (header-name String)] String
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
     (emit-text-pool module-index pool)
@@ -3068,9 +3068,9 @@
     (emit-functions types layouts regions functions abis module-index pool)))
 
 (defn materialize-program
-  [program: core/NativeCoreProgram
-   module-index: Int] -> BodyMaterializationV0
-  (let [validation: core/ValidationReport (core/validate-program program)]
+  [(program core/NativeCoreProgram)
+   (module-index Int)] BodyMaterializationV0
+  (let [(validation core/ValidationReport) (core/validate-program program)]
     (cond
       (< module-index 0)
       (->BodyFailureV0 "module index must be nonnegative")
@@ -3087,14 +3087,14 @@
         "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
 
       :else
-      (let [layouts: (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
-            types: (Vec core/TypeDef)
+      (let [(layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)
+            (types (Vec core/TypeDef))
             (c17/dependency-ordered-types (core/nativecoreprogram-types program) layouts)
-            functions: (Vec core/FunctionDef)
+            (functions (Vec core/FunctionDef))
             (c17/ordered-functions (core/nativecoreprogram-functions program))
-            abis: (Vec core/AbiDeclV0) (core/nativecoreprogram-abis program)
-            pool: ConstantPoolV0 (collect-pool functions)
-            header-name: String (str "module_" module-index ".h")]
+            (abis (Vec core/AbiDeclV0)) (core/nativecoreprogram-abis program)
+            (pool ConstantPoolV0) (collect-pool functions)
+            (header-name String) (str "module_" module-index ".h")]
         (->BodySuccessV0
           (->BodyArtifactV0
             header-name

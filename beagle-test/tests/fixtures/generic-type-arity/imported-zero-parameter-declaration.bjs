@@ -2,4 +2,4 @@
 
 (require zero-provider :as z)
 
-(defn keep [] -> String "ok")
+(defn keep [] String "ok")

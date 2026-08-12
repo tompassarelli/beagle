@@ -4,4 +4,4 @@
 
 (declare-extern loader/GLTFLoader Any)
 
-(def exported: Any loader/GLTFLoader)
+(def exported Any loader/GLTFLoader)

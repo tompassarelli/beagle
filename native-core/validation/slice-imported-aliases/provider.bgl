@@ -1,8 +1,8 @@
 #lang beagle
 (ns provider)
 
-(defrecord Item [value: Int])
+(defrecord Item [(value Int)])
 (defalias Term (Dyn String Int Item))
 
-(def provider-label: String "provider")
-(def exported-label: String provider-label)
+(def provider-label String "provider")
+(def exported-label String provider-label)

@@ -4,10 +4,10 @@
 ;; Leaf module (no requires): a record + fns + a typed var. Its ctor
 ;; (->Point), accessors (point-x/point-y) and UNIT are the surface a
 ;; requiring module imports as g/… externs.
-(defrecord Point [x: Int y: Int])
+(defrecord Point [(x Int) (y Int)])
 
-(defn origin [] -> Point (->Point 0 0))
+(defn origin [] Point (->Point 0 0))
 
-(defn manhattan [p: Point] -> Int (+ (point-x p) (point-y p)))
+(defn manhattan [(p Point)] Int (+ (point-x p) (point-y p)))
 
-(def UNIT: Int 1)
+(def UNIT Int 1)

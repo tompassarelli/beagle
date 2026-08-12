@@ -8,47 +8,47 @@
 
 (define-mode strict)
 
-(defn fixture-id [name: String] -> core/NativeId
+(defn fixture-id [(name String)] core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))
 
-(def fixture-i64-type: core/TypeDef
+(def fixture-i64-type core/TypeDef
   (core/->TypeDef (fixture-id "type-00-i64") "I64"
     (core/atom-type-shape (core/i64-kind))))
 
-(def fixture-left-field: core/TypeField
+(def fixture-left-field core/TypeField
   (core/->TypeField (fixture-id "field-00-left") "left" (fixture-id "type-00-i64")))
 
-(def fixture-right-field: core/TypeField
+(def fixture-right-field core/TypeField
   (core/->TypeField (fixture-id "field-01-right") "right" (fixture-id "type-00-i64")))
 
-(def fixture-pair-type: core/TypeDef
+(def fixture-pair-type core/TypeDef
   (core/->TypeDef (fixture-id "type-01-pair") "Pair"
     (core/->RecordType [fixture-left-field fixture-right-field])))
 
-(def fixture-region: core/RegionDef
+(def fixture-region core/RegionDef
   (core/->RegionDef (fixture-id "region-arena") (core/arena-region-kind) nil))
 
-(def fixture-capability: core/CapabilityDef
+(def fixture-capability core/CapabilityDef
   (core/->CapabilityDef (fixture-id "capability-allocate")
     (core/->AllocateCapability true)
     (fixture-id "region-arena")
     true))
 
-(def fixture-effect: core/EffectDef
+(def fixture-effect core/EffectDef
   (core/->EffectDef (fixture-id "effect-allocate")
     (core/->AllocateEffect (fixture-id "region-arena"))))
 
-(def fixture-i64-layout: core/LayoutDef
+(def fixture-i64-layout core/LayoutDef
   (core/->LayoutDef (fixture-id "layout-00-i64") (fixture-id "type-00-i64") 8 8
     (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
-(def fixture-pair-layout: core/LayoutDef
+(def fixture-pair-layout core/LayoutDef
   (core/->LayoutDef (fixture-id "layout-01-pair") (fixture-id "type-01-pair") 16 8
     (core/->RecordShapeV0
       [(core/->FieldLayoutV0 (fixture-id "field-00-left") (fixture-id "type-00-i64") 0 8)
        (core/->FieldLayoutV0 (fixture-id "field-01-right") (fixture-id "type-00-i64") 8 8)])))
 
-(def fixture-block: core/BasicBlock
+(def fixture-block core/BasicBlock
   (core/->BasicBlock (fixture-id "block-entry")
     []
     [(core/->CheckedInstruction
@@ -56,7 +56,7 @@
        (core/->CheckedAddI64V0 (fixture-id "ssa-left") (fixture-id "ssa-right")))]
     [(core/return-terminator (fixture-id "ssa-sum"))]))
 
-(def fixture-function: core/FunctionDef
+(def fixture-function core/FunctionDef
   (core/->FunctionDef (fixture-id "function-add") "add"
     [(core/->Parameter (fixture-id "ssa-left") (fixture-id "type-00-i64"))
      (core/->Parameter (fixture-id "ssa-right") (fixture-id "type-00-i64"))]
@@ -67,7 +67,7 @@
     [(fixture-id "region-arena")]
     [(fixture-id "capability-allocate")]))
 
-(def fixture-program: core/NativeCoreProgram
+(def fixture-program core/NativeCoreProgram
   (core/->NativeCoreProgram (fixture-id "program") nil "native-c11-fixture-v0"
     [fixture-pair-type fixture-i64-type]
     [fixture-effect]
@@ -81,7 +81,7 @@
     []
     []))
 
-(def fixture-program-permuted: core/NativeCoreProgram
+(def fixture-program-permuted core/NativeCoreProgram
   (with fixture-program
     [:types [fixture-i64-type fixture-pair-type]
      :layouts [fixture-i64-layout fixture-pair-layout]]))
@@ -91,102 +91,102 @@
 ;; union aggregates, multi-block control flow, block parameters, arena
 ;; allocation, stores, and an intra-module call.
 
-(defn slice-id [name: String] -> core/NativeId
+(defn slice-id [(name String)] core/NativeId
   (core/canonical-id "native-qbe-fixture-v0" [name]))
 
-(def slice-i64-type: core/TypeDef
+(def slice-i64-type core/TypeDef
   (core/->TypeDef (slice-id "type-0-i64") "I64"
     (core/atom-type-shape (core/i64-kind))))
 
-(def slice-tag-type: core/TypeDef
+(def slice-tag-type core/TypeDef
   (core/->TypeDef (slice-id "type-1-tag") "UnionTag"
     (core/atom-type-shape (core/i64-kind))))
 
-(def slice-bool-type: core/TypeDef
+(def slice-bool-type core/TypeDef
   (core/->TypeDef (slice-id "type-2-bit") "Bool"
     (core/atom-type-shape (core/->BoolKind true))))
 
-(def slice-left-field: core/TypeField
+(def slice-left-field core/TypeField
   (core/->TypeField (slice-id "fld-0-left") "left" (slice-id "type-0-i64")))
 
-(def slice-right-field: core/TypeField
+(def slice-right-field core/TypeField
   (core/->TypeField (slice-id "fld-1-rght") "right" (slice-id "type-0-i64")))
 
-(def slice-pair-type: core/TypeDef
+(def slice-pair-type core/TypeDef
   (core/->TypeDef (slice-id "type-3-par") "Pair"
     (core/->RecordType [slice-left-field slice-right-field])))
 
-(def slice-none-variant: core/TypeVariant
+(def slice-none-variant core/TypeVariant
   (core/->TypeVariant (slice-id "var-0-none") "None" nil))
 
-(def slice-pair-variant: core/TypeVariant
+(def slice-pair-variant core/TypeVariant
   (core/->TypeVariant (slice-id "var-1-pair") "Some" (slice-id "type-3-par")))
 
 ;; Shape sorts before Pair by identity, but its QBE definition must follow Pair's.
-(def slice-shape-type: core/TypeDef
+(def slice-shape-type core/TypeDef
   (core/->TypeDef (slice-id "type-2-shp") "Shape"
     (core/->UnionType [slice-none-variant slice-pair-variant])))
 
-(def slice-ref-type: core/TypeDef
+(def slice-ref-type core/TypeDef
   (core/->TypeDef (slice-id "type-5-ref") "RefI64"
     (core/->ReferenceType (slice-id "type-0-i64"))))
 
-(def slice-types: (Vec core/TypeDef)
+(def slice-types (Vec core/TypeDef)
   [slice-i64-type slice-tag-type slice-bool-type slice-pair-type
    slice-shape-type slice-ref-type])
 
-(def slice-i64-layout: core/LayoutDef
+(def slice-i64-layout core/LayoutDef
   (core/->LayoutDef (slice-id "lay-0-i64") (slice-id "type-0-i64") 8 8
     (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
-(def slice-tag-layout: core/LayoutDef
+(def slice-tag-layout core/LayoutDef
   (core/->LayoutDef (slice-id "lay-1-tag") (slice-id "type-1-tag") 4 4
     (core/->ScalarShapeV0 (core/->SignedIntReprV0 32))))
 
-(def slice-bool-layout: core/LayoutDef
+(def slice-bool-layout core/LayoutDef
   (core/->LayoutDef (slice-id "lay-2-bit") (slice-id "type-2-bit") 4 4
     (core/->ScalarShapeV0 (core/->BoolReprV0 32))))
 
-(def slice-pair-layout: core/LayoutDef
+(def slice-pair-layout core/LayoutDef
   (core/->LayoutDef (slice-id "lay-3-par") (slice-id "type-3-par") 16 8
     (core/->RecordShapeV0
       [(core/->FieldLayoutV0 (slice-id "fld-0-left") (slice-id "type-0-i64") 0 8)
        (core/->FieldLayoutV0 (slice-id "fld-1-rght") (slice-id "type-0-i64") 8 8)])))
 
-(def slice-shape-layout: core/LayoutDef
+(def slice-shape-layout core/LayoutDef
   (core/->LayoutDef (slice-id "lay-4-shp") (slice-id "type-2-shp") 24 8
     (core/->UnionShapeV0 (slice-id "type-1-tag") 0
       [(core/->UnionVariantLayoutV0 (slice-id "var-0-none") 0 nil 0)
        (core/->UnionVariantLayoutV0 (slice-id "var-1-pair") 1 (slice-id "type-3-par") 8)])))
 
-(def slice-ref-layout: core/LayoutDef
+(def slice-ref-layout core/LayoutDef
   (core/->LayoutDef (slice-id "lay-5-ref") (slice-id "type-5-ref") 8 8
     (core/->ReferenceShapeV0 (slice-id "type-0-i64"))))
 
-(def slice-layouts: (Vec core/LayoutDef)
+(def slice-layouts (Vec core/LayoutDef)
   [slice-i64-layout slice-tag-layout slice-bool-layout slice-pair-layout
    slice-shape-layout slice-ref-layout])
 
-(def slice-region: core/RegionDef
+(def slice-region core/RegionDef
   (core/->RegionDef (slice-id "reg-0-arena") (core/arena-region-kind) nil))
 
-(def slice-alloc-capability: core/CapabilityDef
+(def slice-alloc-capability core/CapabilityDef
   (core/->CapabilityDef (slice-id "cap-0-alloc") (core/->AllocateCapability true)
     (slice-id "reg-0-arena") true))
 
-(def slice-write-capability: core/CapabilityDef
+(def slice-write-capability core/CapabilityDef
   (core/->CapabilityDef (slice-id "cap-1-write") (core/write-capability-kind)
     (slice-id "reg-0-arena") true))
 
-(def slice-alloc-effect: core/EffectDef
+(def slice-alloc-effect core/EffectDef
   (core/->EffectDef (slice-id "eff-0-alloc")
     (core/->AllocateEffect (slice-id "reg-0-arena"))))
 
-(def slice-write-effect: core/EffectDef
+(def slice-write-effect core/EffectDef
   (core/->EffectDef (slice-id "eff-1-write")
     (core/write-effect-kind (slice-id "reg-0-arena"))))
 
-(def slice-add-block: core/BasicBlock
+(def slice-add-block core/BasicBlock
   (core/->BasicBlock (slice-id "add-b0-ent")
     []
     [(core/->CheckedInstruction
@@ -194,7 +194,7 @@
        (core/->CheckedAddI64V0 (slice-id "add-p0-lhs") (slice-id "add-p1-rhs")))]
     [(core/return-terminator (slice-id "add-s0-sum"))]))
 
-(def slice-add-function: core/FunctionDef
+(def slice-add-function core/FunctionDef
   (core/->FunctionDef (slice-id "fn-0-add") "add"
     [(core/->Parameter (slice-id "add-p0-lhs") (slice-id "type-0-i64"))
      (core/->Parameter (slice-id "add-p1-rhs") (slice-id "type-0-i64"))]
@@ -205,7 +205,7 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def slice-entry-block: core/BasicBlock
+(def slice-entry-block core/BasicBlock
   (core/->BasicBlock (slice-id "sli-b0-ent")
     []
     [(core/->AtomInstruction
@@ -223,7 +223,7 @@
     [(core/->BranchTerminator (slice-id "sli-p0-flg")
        (slice-id "sli-b1-thn") (slice-id "sli-b2-els"))]))
 
-(def slice-then-block: core/BasicBlock
+(def slice-then-block core/BasicBlock
   (core/->BasicBlock (slice-id "sli-b1-thn")
     []
     [(core/->CheckedInstruction
@@ -231,7 +231,7 @@
        (core/->CheckedAddI64V0 (slice-id "sli-p1-lhs") (slice-id "sli-p2-rhs")))]
     [(core/->JumpTerminator (slice-id "sli-b3-joi") [(slice-id "sli-s3-sum")])]))
 
-(def slice-else-block: core/BasicBlock
+(def slice-else-block core/BasicBlock
   (core/->BasicBlock (slice-id "sli-b2-els")
     []
     [(core/->CallInstruction
@@ -242,16 +242,16 @@
        (core/->TokenFlowV0 [] []))]
     [(core/->JumpTerminator (slice-id "sli-b3-joi") [(slice-id "sli-s4-cal")])]))
 
-(def slice-join-block: core/BasicBlock
+(def slice-join-block core/BasicBlock
   (core/->BasicBlock (slice-id "sli-b3-joi")
     [(core/->Parameter (slice-id "sli-b3-p0r") (slice-id "type-0-i64"))]
     []
     [(core/return-terminator (slice-id "sli-b3-p0r"))]))
 
-(def slice-blocks: (Vec core/BasicBlock)
+(def slice-blocks (Vec core/BasicBlock)
   [slice-entry-block slice-then-block slice-else-block slice-join-block])
 
-(def slice-function: core/FunctionDef
+(def slice-function core/FunctionDef
   (core/->FunctionDef (slice-id "fn-1-sli") "slice"
     [(core/->Parameter (slice-id "sli-p0-flg") (slice-id "type-2-bit"))
      (core/->Parameter (slice-id "sli-p1-lhs") (slice-id "type-0-i64"))
@@ -263,7 +263,7 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc") (slice-id "cap-1-write")]))
 
-(def slice-switch-entry-block: core/BasicBlock
+(def slice-switch-entry-block core/BasicBlock
   (core/->BasicBlock (slice-id "swt-b0-ent")
     []
     []
@@ -271,7 +271,7 @@
        [(core/->SwitchCaseV0 (slice-id "var-0-none") (slice-id "swt-b1-non") [])
         (core/->SwitchCaseV0 (slice-id "var-1-pair") (slice-id "swt-b2-som") [])])]))
 
-(def slice-switch-none-block: core/BasicBlock
+(def slice-switch-none-block core/BasicBlock
   (core/->BasicBlock (slice-id "swt-b1-non")
     []
     [(core/->AtomInstruction
@@ -279,7 +279,7 @@
        (core/->I64Atom 0))]
     [(core/return-terminator (slice-id "swt-s0-zro"))]))
 
-(def slice-switch-some-block: core/BasicBlock
+(def slice-switch-some-block core/BasicBlock
   (core/->BasicBlock (slice-id "swt-b2-som")
     []
     [(core/->AtomInstruction
@@ -287,10 +287,10 @@
        (core/->I64Atom 1))]
     [(core/return-terminator (slice-id "swt-s1-one"))]))
 
-(def slice-switch-blocks: (Vec core/BasicBlock)
+(def slice-switch-blocks (Vec core/BasicBlock)
   [slice-switch-entry-block slice-switch-none-block slice-switch-some-block])
 
-(def slice-switch-function: core/FunctionDef
+(def slice-switch-function core/FunctionDef
   (core/->FunctionDef (slice-id "fn-2-swt") "tag"
     [(core/->Parameter (slice-id "swt-p0-shp") (slice-id "type-2-shp"))]
     slice-switch-blocks
@@ -300,7 +300,7 @@
     []
     []))
 
-(def slice-bitwise-block: core/BasicBlock
+(def slice-bitwise-block core/BasicBlock
   (core/->BasicBlock (slice-id "bit-b0-ent")
     []
     [(core/->BitwiseInstructionV0
@@ -315,7 +315,7 @@
        (core/->BitXorI64V0 (slice-id "bit-s0-and") (slice-id "bit-s1-shl")))]
     [(core/return-terminator (slice-id "bit-s2-xor"))]))
 
-(def slice-bitwise-function: core/FunctionDef
+(def slice-bitwise-function core/FunctionDef
   (core/->FunctionDef (slice-id "fn-3-bit") "bitwise"
     [(core/->Parameter (slice-id "bit-p0-lhs") (slice-id "type-0-i64"))
      (core/->Parameter (slice-id "bit-p1-rhs") (slice-id "type-0-i64"))
@@ -327,7 +327,7 @@
     []
     []))
 
-(def slice-program: core/NativeCoreProgram
+(def slice-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "qbe-slice-program") nil "native-qbe-fixture-v0"
     slice-types
     [slice-alloc-effect slice-write-effect]
@@ -342,15 +342,15 @@
     []
     []))
 
-(def slice-function-permuted: core/FunctionDef
+(def slice-function-permuted core/FunctionDef
   (with slice-function
     [:blocks [slice-join-block slice-else-block slice-then-block slice-entry-block]]))
 
-(def slice-switch-function-permuted: core/FunctionDef
+(def slice-switch-function-permuted core/FunctionDef
   (with slice-switch-function
     [:blocks [slice-switch-some-block slice-switch-none-block slice-switch-entry-block]]))
 
-(def slice-program-permuted: core/NativeCoreProgram
+(def slice-program-permuted core/NativeCoreProgram
   (with slice-program
     [:types [slice-ref-type slice-shape-type slice-pair-type slice-bool-type
              slice-tag-type slice-i64-type]
@@ -361,23 +361,23 @@
 
 ;; --- vector concat program --------------------------------------------------
 
-(def concat-vector-type: core/TypeDef
+(def concat-vector-type core/TypeDef
   (core/->TypeDef (slice-id "vec-typ-i64") "I64Vector"
     (core/->VectorType (slice-id "type-0-i64"))))
 
-(def concat-arena-type: core/TypeDef
+(def concat-arena-type core/TypeDef
   (core/->TypeDef (slice-id "vec-typ-arn") "ArenaHandle"
     (core/->ReferenceType (slice-id "vec-typ-arn"))))
 
-(def concat-vector-layout: core/LayoutDef
+(def concat-vector-layout core/LayoutDef
   (core/->LayoutDef (slice-id "vec-lay-i64") (slice-id "vec-typ-i64") 8 8
     (core/->VectorShapeV0 (slice-id "type-0-i64") 8)))
 
-(def concat-arena-layout: core/LayoutDef
+(def concat-arena-layout core/LayoutDef
   (core/->LayoutDef (slice-id "vec-lay-arn") (slice-id "vec-typ-arn") 8 8
     (core/->ReferenceShapeV0 (slice-id "vec-typ-arn"))))
 
-(def concat-block: core/BasicBlock
+(def concat-block core/BasicBlock
   (core/->BasicBlock (slice-id "vec-b0-ent")
     []
     [(core/->ArenaInstruction
@@ -394,7 +394,7 @@
        (slice-id "vec-s0-arn"))]
     [(core/return-terminator (slice-id "vec-s1-out"))]))
 
-(def concat-function: core/FunctionDef
+(def concat-function core/FunctionDef
   (core/->FunctionDef (slice-id "vec-fn-cat") "concat"
     [(core/->Parameter (slice-id "vec-p0-lft") (slice-id "vec-typ-i64"))
      (core/->Parameter (slice-id "vec-p1-rgt") (slice-id "vec-typ-i64"))]
@@ -405,7 +405,7 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def reverse-block: core/BasicBlock
+(def reverse-block core/BasicBlock
   (core/->BasicBlock (slice-id "vec-b1-rev")
     []
     [(core/->ArenaInstruction
@@ -421,7 +421,7 @@
        (slice-id "vec-r0-arn"))]
     [(core/return-terminator (slice-id "vec-r1-out"))]))
 
-(def reverse-function: core/FunctionDef
+(def reverse-function core/FunctionDef
   (core/->FunctionDef (slice-id "vec-fn-rev") "reverse"
     [(core/->Parameter (slice-id "vec-rp-src") (slice-id "vec-typ-i64"))]
     [reverse-block]
@@ -431,7 +431,7 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def slice-vector-block: core/BasicBlock
+(def slice-vector-block core/BasicBlock
   (core/->BasicBlock (slice-id "vec-b2-slc")
     []
     [(core/->ArenaInstruction
@@ -449,7 +449,7 @@
        (slice-id "vec-c0-arn"))]
     [(core/return-terminator (slice-id "vec-c1-out"))]))
 
-(def slice-vector-function: core/FunctionDef
+(def slice-vector-function core/FunctionDef
   (core/->FunctionDef (slice-id "vec-fn-slc") "slice"
     [(core/->Parameter (slice-id "vec-cp-src") (slice-id "vec-typ-i64"))
      (core/->Parameter (slice-id "vec-cp-beg") (slice-id "type-0-i64"))
@@ -461,7 +461,7 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def concat-program: core/NativeCoreProgram
+(def concat-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "qbe-concat-program") nil "native-qbe-fixture-v0"
     [slice-i64-type concat-vector-type concat-arena-type]
     [slice-alloc-effect]
@@ -475,7 +475,7 @@
     []
     []))
 
-(def concat-program-permuted: core/NativeCoreProgram
+(def concat-program-permuted core/NativeCoreProgram
   (with concat-program
     [:types [concat-arena-type concat-vector-type slice-i64-type]
      :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]
@@ -486,7 +486,7 @@
 ;; Scalar function carriers isolate these gates from QBE's separate rejection
 ;; of unsupported parameter and return shapes, so each program has one cause.
 
-(def refusal-index-block: core/BasicBlock
+(def refusal-index-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-idx-blk")
     []
     [(core/->TextIndexOfInstruction
@@ -495,7 +495,7 @@
        (slice-id "ref-idx-ndl"))]
     [(core/return-terminator (slice-id "ref-idx-out"))]))
 
-(def refusal-index-function: core/FunctionDef
+(def refusal-index-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-idx-fn") "refuse-index"
     [(core/->Parameter (slice-id "ref-idx-src") (slice-id "type-0-i64"))
      (core/->Parameter (slice-id "ref-idx-ndl") (slice-id "type-0-i64"))]
@@ -506,7 +506,7 @@
     []
     []))
 
-(def refusal-index-program: core/NativeCoreProgram
+(def refusal-index-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-idx-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type]
     []
@@ -520,7 +520,7 @@
     []
     []))
 
-(def refusal-blank-block: core/BasicBlock
+(def refusal-blank-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-bln-blk")
     []
     [(core/->TextBlankInstruction
@@ -528,7 +528,7 @@
        (slice-id "ref-bln-src"))]
     [(core/return-terminator (slice-id "ref-bln-out"))]))
 
-(def refusal-blank-function: core/FunctionDef
+(def refusal-blank-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-bln-fn") "refuse-blank"
     [(core/->Parameter (slice-id "ref-bln-src") (slice-id "type-0-i64"))]
     [refusal-blank-block]
@@ -538,7 +538,7 @@
     []
     []))
 
-(def refusal-blank-program: core/NativeCoreProgram
+(def refusal-blank-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-bln-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-bool-type]
     []
@@ -552,7 +552,7 @@
     []
     []))
 
-(def refusal-parse-block: core/BasicBlock
+(def refusal-parse-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-prs-blk")
     []
     [(core/->TextParseI64Instruction
@@ -560,7 +560,7 @@
        (slice-id "ref-prs-src"))]
     [(core/return-terminator (slice-id "ref-prs-out"))]))
 
-(def refusal-parse-function: core/FunctionDef
+(def refusal-parse-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-prs-fn") "refuse-parse"
     [(core/->Parameter (slice-id "ref-prs-src") (slice-id "type-0-i64"))]
     [refusal-parse-block]
@@ -570,7 +570,7 @@
     []
     []))
 
-(def refusal-parse-program: core/NativeCoreProgram
+(def refusal-parse-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-prs-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type]
     []
@@ -584,7 +584,7 @@
     []
     []))
 
-(def refusal-text-builtin-block: core/BasicBlock
+(def refusal-text-builtin-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-txt-blk")
     []
     [(core/->TextBuiltinInstruction
@@ -593,7 +593,7 @@
          (slice-id "ref-txt-lft") (slice-id "ref-txt-rgt")))]
     [(core/return-terminator (slice-id "ref-txt-out"))]))
 
-(def refusal-text-builtin-function: core/FunctionDef
+(def refusal-text-builtin-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-txt-fn") "refuse-text-builtin"
     [(core/->Parameter (slice-id "ref-txt-lft") (slice-id "type-0-i64"))
      (core/->Parameter (slice-id "ref-txt-rgt") (slice-id "type-0-i64"))]
@@ -604,7 +604,7 @@
     []
     []))
 
-(def refusal-text-builtin-program: core/NativeCoreProgram
+(def refusal-text-builtin-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-txt-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type]
     []
@@ -618,19 +618,19 @@
     []
     []))
 
-(def refusal-map-type: core/TypeDef
+(def refusal-map-type core/TypeDef
   (core/->TypeDef (slice-id "ref-map-typ") "RefusalMap"
     (core/->MapTypeV0 (slice-id "type-0-i64") (slice-id "type-0-i64")
       (core/->InsertionOrderV0 true))))
 
-(def refusal-map-layout: core/LayoutDef
+(def refusal-map-layout core/LayoutDef
   (core/->LayoutDef (slice-id "ref-map-lay") (slice-id "ref-map-typ") 8 8
     (core/->MapShapeV0
       (slice-id "type-0-i64") 8 8
       (slice-id "type-0-i64") 8 8
       (core/->InsertionOrderV0 true))))
 
-(def refusal-map-block: core/BasicBlock
+(def refusal-map-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-map-blk")
     []
     [(core/->MapLiteralInstructionV0
@@ -644,7 +644,7 @@
        (core/->I64Atom 0))]
     [(core/return-terminator (slice-id "ref-map-zro"))]))
 
-(def refusal-map-function: core/FunctionDef
+(def refusal-map-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-map-fn") "refuse-map"
     [(core/->Parameter (slice-id "ref-map-key") (slice-id "type-0-i64"))
      (core/->Parameter (slice-id "ref-map-val") (slice-id "type-0-i64"))
@@ -656,7 +656,7 @@
     []
     []))
 
-(def refusal-map-program: core/NativeCoreProgram
+(def refusal-map-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-map-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type refusal-map-type]
     []
@@ -670,17 +670,17 @@
     []
     []))
 
-(def refusal-set-type: core/TypeDef
+(def refusal-set-type core/TypeDef
   (core/->TypeDef (slice-id "ref-set-typ") "RefusalSet"
     (core/->SetTypeV0 (slice-id "type-0-i64")
       (core/->InsertionOrderV0 true))))
 
-(def refusal-set-layout: core/LayoutDef
+(def refusal-set-layout core/LayoutDef
   (core/->LayoutDef (slice-id "ref-set-lay") (slice-id "ref-set-typ") 8 8
     (core/->SetShapeV0 (slice-id "type-0-i64") 8 8
       (core/->InsertionOrderV0 true))))
 
-(def refusal-set-block: core/BasicBlock
+(def refusal-set-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-set-blk")
     []
     [(core/->SetLiteralInstructionV0
@@ -693,7 +693,7 @@
        (core/->I64Atom 0))]
     [(core/return-terminator (slice-id "ref-set-zro"))]))
 
-(def refusal-set-function: core/FunctionDef
+(def refusal-set-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-set-fn") "refuse-set"
     [(core/->Parameter (slice-id "ref-set-val") (slice-id "type-0-i64"))
      (core/->Parameter (slice-id "ref-set-arn") (slice-id "type-0-i64"))]
@@ -704,7 +704,7 @@
     []
     []))
 
-(def refusal-set-program: core/NativeCoreProgram
+(def refusal-set-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-set-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type refusal-set-type]
     []
@@ -718,7 +718,7 @@
     []
     []))
 
-(def refusal-value-equal-block: core/BasicBlock
+(def refusal-value-equal-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-val-eq-blk")
     []
     [(core/->ValueSemanticsInstruction
@@ -727,7 +727,7 @@
          (slice-id "ref-val-eq-left") (slice-id "ref-val-eq-right")))]
     [(core/return-terminator (slice-id "ref-val-eq-out"))]))
 
-(def refusal-value-equal-function: core/FunctionDef
+(def refusal-value-equal-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-val-eq-fn") "refuse-value-equal"
     [(core/->Parameter (slice-id "ref-val-eq-left") (slice-id "type-3-par"))
      (core/->Parameter (slice-id "ref-val-eq-right") (slice-id "type-3-par"))]
@@ -738,7 +738,7 @@
     []
     []))
 
-(def refusal-value-equal-program: core/NativeCoreProgram
+(def refusal-value-equal-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-val-eq-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-bool-type slice-pair-type]
     []
@@ -752,7 +752,7 @@
     []
     []))
 
-(def refusal-value-hash-block: core/BasicBlock
+(def refusal-value-hash-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-val-hsh-blk")
     []
     [(core/->ValueSemanticsInstruction
@@ -761,7 +761,7 @@
          (slice-id "ref-val-hsh-val")))]
     [(core/return-terminator (slice-id "ref-val-hsh-out"))]))
 
-(def refusal-value-hash-function: core/FunctionDef
+(def refusal-value-hash-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-val-hsh-fn") "refuse-value-hash"
     [(core/->Parameter (slice-id "ref-val-hsh-val") (slice-id "type-3-par"))]
     [refusal-value-hash-block]
@@ -771,7 +771,7 @@
     []
     []))
 
-(def refusal-value-hash-program: core/NativeCoreProgram
+(def refusal-value-hash-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-val-hsh-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-pair-type]
     []
@@ -785,7 +785,7 @@
     []
     []))
 
-(def refusal-value-compare-block: core/BasicBlock
+(def refusal-value-compare-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-val-cmp-blk")
     []
     [(core/->ValueSemanticsInstruction
@@ -794,7 +794,7 @@
          (slice-id "ref-val-cmp-left") (slice-id "ref-val-cmp-right")))]
     [(core/return-terminator (slice-id "ref-val-cmp-out"))]))
 
-(def refusal-value-compare-function: core/FunctionDef
+(def refusal-value-compare-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-val-cmp-fn") "refuse-value-compare"
     [(core/->Parameter (slice-id "ref-val-cmp-left") (slice-id "type-3-par"))
      (core/->Parameter (slice-id "ref-val-cmp-right") (slice-id "type-3-par"))]
@@ -805,7 +805,7 @@
     []
     []))
 
-(def refusal-value-compare-program: core/NativeCoreProgram
+(def refusal-value-compare-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-val-cmp-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type slice-pair-type]
     []
@@ -819,16 +819,16 @@
     []
     []))
 
-(def refusal-value-text-type: core/TypeDef
+(def refusal-value-text-type core/TypeDef
   (core/->TypeDef (slice-id "ref-val-txt-typ") "Text"
     (core/->AtomType (core/->TextKind true))))
 
-(def refusal-value-text-layout: core/LayoutDef
+(def refusal-value-text-layout core/LayoutDef
   (core/->LayoutDef (slice-id "ref-val-txt-lay")
     (slice-id "ref-val-txt-typ") 8 8
     (core/->ScalarShapeV0 (core/->UnsignedIntReprV0 64))))
 
-(def refusal-value-to-text-block: core/BasicBlock
+(def refusal-value-to-text-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-val-txt-blk")
     []
     [(core/->ArenaInstruction
@@ -847,7 +847,7 @@
        (slice-id "ref-val-txt-arn"))]
     [(core/return-terminator (slice-id "ref-val-txt-out"))]))
 
-(def refusal-value-to-text-function: core/FunctionDef
+(def refusal-value-to-text-function core/FunctionDef
   (core/->FunctionDef (slice-id "ref-val-txt-fn") "refuse-value-to-text"
     [(core/->Parameter (slice-id "ref-val-txt-val") (slice-id "type-0-i64"))]
     [refusal-value-to-text-block]
@@ -857,7 +857,7 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
-(def refusal-value-to-text-program: core/NativeCoreProgram
+(def refusal-value-to-text-program core/NativeCoreProgram
   (core/->NativeCoreProgram (slice-id "ref-val-txt-wld") nil "native-qbe-fixture-v0"
     [slice-i64-type refusal-value-text-type concat-arena-type]
     [slice-alloc-effect]
@@ -875,84 +875,84 @@
 ;; This fixture is materialized by validation/atom through C17. QBE must reject
 ;; the same frozen program until it has a lock-aware state calling convention.
 
-(defn atom-fixture-id [name: String] -> core/NativeId
+(defn atom-fixture-id [(name String)] core/NativeId
   (core/canonical-id "native-atom-fixture-v0" [name]))
 
-(def atom-i64-type: core/TypeDef
+(def atom-i64-type core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
 
-(def atom-bool-type: core/TypeDef
+(def atom-bool-type core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-bool") "Bool"
     (core/->AtomType (core/->BoolKind true))))
 
-(def atom-cell-type: core/TypeDef
+(def atom-cell-type core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-cell") "AtomCell"
     (core/->AtomCellTypeV0 (atom-fixture-id "type-i64"))))
 
-(def atom-state-type: core/TypeDef
+(def atom-state-type core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-state") "AtomStateHandle"
     (core/->ReferenceType (atom-fixture-id "type-state"))))
 
-(def atom-arena-type: core/TypeDef
+(def atom-arena-type core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-arena") "ArenaHandle"
     (core/->ReferenceType (atom-fixture-id "type-arena"))))
 
-(def atom-i64-layout: core/LayoutDef
+(def atom-i64-layout core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-i64")
     (atom-fixture-id "type-i64") 8 8
     (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
-(def atom-bool-layout: core/LayoutDef
+(def atom-bool-layout core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-bool")
     (atom-fixture-id "type-bool") 1 1
     (core/->ScalarShapeV0 (core/->BoolReprV0 8))))
 
-(def atom-cell-layout: core/LayoutDef
+(def atom-cell-layout core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-cell")
     (atom-fixture-id "type-cell") 8 8
     (core/->AtomCellShapeV0 (atom-fixture-id "type-i64"))))
 
-(def atom-state-layout: core/LayoutDef
+(def atom-state-layout core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-state")
     (atom-fixture-id "type-state") 8 8
     (core/->ReferenceShapeV0 (atom-fixture-id "type-state"))))
 
-(def atom-arena-layout: core/LayoutDef
+(def atom-arena-layout core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-arena")
     (atom-fixture-id "type-arena") 8 8
     (core/->ReferenceShapeV0 (atom-fixture-id "type-arena"))))
 
-(def atom-arena-region: core/RegionDef
+(def atom-arena-region core/RegionDef
   (core/->RegionDef (atom-fixture-id "region-arena")
     (core/->ArenaRegion true) nil))
 
-(def atom-state-region: core/RegionDef
+(def atom-state-region core/RegionDef
   (core/->RegionDef (atom-fixture-id "region-state")
     (core/->ExternalRegion true) nil))
 
-(def atom-allocate-capability: core/CapabilityDef
+(def atom-allocate-capability core/CapabilityDef
   (core/->CapabilityDef (atom-fixture-id "cap-allocate")
     (core/->AllocateCapability true) (atom-fixture-id "region-arena") true))
 
-(def atom-state-capability: core/CapabilityDef
+(def atom-state-capability core/CapabilityDef
   (core/->CapabilityDef (atom-fixture-id "cap-state")
     (core/->WriteCapability true) (atom-fixture-id "region-state") true))
 
-(def atom-pure-effect: core/EffectDef
+(def atom-pure-effect core/EffectDef
   (core/->EffectDef (atom-fixture-id "effect-pure")
     (core/->PureEffect true)))
 
-(def atom-allocate-effect: core/EffectDef
+(def atom-allocate-effect core/EffectDef
   (core/->EffectDef (atom-fixture-id "effect-allocate")
     (core/->AllocateEffect (atom-fixture-id "region-arena"))))
 
-(def atom-state-effect: core/EffectDef
+(def atom-state-effect core/EffectDef
   (core/->EffectDef (atom-fixture-id "effect-state")
     (core/->AtomicEffect (atom-fixture-id "region-state")
       (atom-fixture-id "cap-state"))))
 
-(def atom-updater-function: core/FunctionDef
+(def atom-updater-function core/FunctionDef
   (core/->FunctionDef (atom-fixture-id "fn-0-upd") "replace-value"
     [(core/->Parameter (atom-fixture-id "upd-current")
        (atom-fixture-id "type-i64"))
@@ -970,7 +970,7 @@
     []
     []))
 
-(def atom-create-function: core/FunctionDef
+(def atom-create-function core/FunctionDef
   (core/->FunctionDef (atom-fixture-id "fn-1-new") "new-atom"
     [(core/->Parameter (atom-fixture-id "new-initial")
        (atom-fixture-id "type-i64"))]
@@ -1005,7 +1005,7 @@
     [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")]))
 
-(def atom-deref-function: core/FunctionDef
+(def atom-deref-function core/FunctionDef
   (core/->FunctionDef (atom-fixture-id "fn-2-get") "deref-atom"
     [(core/->Parameter (atom-fixture-id "get-cell")
        (atom-fixture-id "type-cell"))]
@@ -1030,7 +1030,7 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
-(def atom-swap-function: core/FunctionDef
+(def atom-swap-function core/FunctionDef
   (core/->FunctionDef (atom-fixture-id "fn-3-swp") "swap-atom"
     [(core/->Parameter (atom-fixture-id "swp-cell")
        (atom-fixture-id "type-cell"))
@@ -1059,7 +1059,7 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
-(def atom-reset-function: core/FunctionDef
+(def atom-reset-function core/FunctionDef
   (core/->FunctionDef (atom-fixture-id "fn-4-rst") "reset-atom"
     [(core/->Parameter (atom-fixture-id "rst-cell")
        (atom-fixture-id "type-cell"))
@@ -1087,7 +1087,7 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
-(def atom-cas-function: core/FunctionDef
+(def atom-cas-function core/FunctionDef
   (core/->FunctionDef (atom-fixture-id "fn-5-cas") "compare-exchange-atom"
     [(core/->Parameter (atom-fixture-id "cas-cell")
        (atom-fixture-id "type-cell"))
@@ -1118,7 +1118,7 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
-(def atom-program: core/NativeCoreProgram
+(def atom-program core/NativeCoreProgram
   (core/->NativeCoreProgram (atom-fixture-id "program") nil "native-atom-fixture-v0"
     [atom-i64-type atom-bool-type atom-cell-type atom-state-type atom-arena-type]
     [atom-pure-effect atom-allocate-effect atom-state-effect]
@@ -1137,12 +1137,12 @@
 
 ;; --- materialization ------------------------------------------------------
 
-(defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
+(defn require-artifact [(result qbe/QbeMaterialization)] qbe/QbeArtifact
   (match result
     [(QbeSuccess value) (qbe/qbesuccess-artifact result)]
     [(QbeFailure value) (throw (ex-info (qbe/qbefailure-detail result) {}))]))
 
-(defn explicitly-refused? [program: core/NativeCoreProgram] -> Bool
+(defn explicitly-refused? [(program core/NativeCoreProgram)] Bool
   (and (core/validationreport-passed (core/validate-program program))
     (match (qbe/materialize-program program 3 "lp64")
       [(QbeSuccess value) false]
@@ -1150,25 +1150,25 @@
        (= "native program uses a shape outside the QBE materializer's slice"
          value)])))
 
-(def refusal-index-proven?: Bool
+(def refusal-index-proven? Bool
   (explicitly-refused? refusal-index-program))
 
-(def refusal-blank-proven?: Bool
+(def refusal-blank-proven? Bool
   (explicitly-refused? refusal-blank-program))
 
-(def refusal-parse-proven?: Bool
+(def refusal-parse-proven? Bool
   (explicitly-refused? refusal-parse-program))
 
-(def refusal-text-builtin-proven?: Bool
+(def refusal-text-builtin-proven? Bool
   (explicitly-refused? refusal-text-builtin-program))
 
-(def refusal-map-proven?: Bool
+(def refusal-map-proven? Bool
   (explicitly-refused? refusal-map-program))
 
-(def refusal-set-proven?: Bool
+(def refusal-set-proven? Bool
   (explicitly-refused? refusal-set-program))
 
-(def refusal-value-equal-proven?: Bool
+(def refusal-value-equal-proven? Bool
   (and (core/validationreport-passed
          (core/validate-program refusal-value-equal-program))
     (match (qbe/materialize-program refusal-value-equal-program 3 "lp64")
@@ -1176,7 +1176,7 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: equal" value)])))
 
-(def refusal-value-hash-proven?: Bool
+(def refusal-value-hash-proven? Bool
   (and (core/validationreport-passed
          (core/validate-program refusal-value-hash-program))
     (match (qbe/materialize-program refusal-value-hash-program 3 "lp64")
@@ -1184,7 +1184,7 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: hash" value)])))
 
-(def refusal-value-compare-proven?: Bool
+(def refusal-value-compare-proven? Bool
   (and (core/validationreport-passed
          (core/validate-program refusal-value-compare-program))
     (match (qbe/materialize-program refusal-value-compare-program 3 "lp64")
@@ -1192,7 +1192,7 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: compare" value)])))
 
-(def refusal-value-to-text-proven?: Bool
+(def refusal-value-to-text-proven? Bool
   (and (core/validationreport-passed
          (core/validate-program refusal-value-to-text-program))
     (match (qbe/materialize-program refusal-value-to-text-program 3 "lp64")
@@ -1200,28 +1200,28 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: to-text" value)])))
 
-(def atom-refusal-proven?: Bool
+(def atom-refusal-proven? Bool
   (explicitly-refused? atom-program))
 
-(def fixture-artifact: qbe/QbeArtifact
+(def fixture-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program fixture-program 0 "lp64")))
 
-(def fixture-permuted-artifact: qbe/QbeArtifact
+(def fixture-permuted-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program fixture-program-permuted 0 "lp64")))
 
-(def slice-artifact: qbe/QbeArtifact
+(def slice-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program slice-program 1 "lp64")))
 
-(def slice-permuted-artifact: qbe/QbeArtifact
+(def slice-permuted-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program slice-program-permuted 1 "lp64")))
 
-(def concat-artifact: qbe/QbeArtifact
+(def concat-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program concat-program 2 "lp64")))
 
-(def concat-permuted-artifact: qbe/QbeArtifact
+(def concat-permuted-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program concat-program-permuted 2 "lp64")))
 
-(def fixture-deterministic?: Bool
+(def fixture-deterministic? Bool
   (and refusal-index-proven?
     refusal-blank-proven?
     refusal-parse-proven?
@@ -1242,7 +1242,7 @@
 
 ;; Declares the QBE exports directly rather than including the C backend's
 ;; header: the objects are linked by the shim ABI alone.
-(def fixture-main-text: String
+(def fixture-main-text String
   (str "/* Generated by native.qbe-validation-corpus; do not edit. */\n"
     "#include \"native_shim.h\"\n\n"
     "int64_t native_m0_fn_0(native_arena *arena, const native_capability *capability,\n"
@@ -1302,7 +1302,7 @@
     "  return 0;\n"
     "}\n"))
 
-(defn emit-fixture! [directory: String] -> Nil
+(defn emit-fixture! [(directory String)] Nil
   (if fixture-deterministic?
     (do
       (spit (str directory "/" (qbe/qbeartifact-module-name fixture-artifact))

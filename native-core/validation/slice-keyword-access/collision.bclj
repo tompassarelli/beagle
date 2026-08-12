@@ -2,4 +2,4 @@
 (ns native.keyword-access)
 (define-mode strict)
 
-(defrecord Pair [value: String])
+(defrecord Pair [(value String)])

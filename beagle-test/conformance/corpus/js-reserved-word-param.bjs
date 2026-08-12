@@ -7,4 +7,4 @@
 ;; regen the golden) when the emitter mangles reserved identifiers.
 (ns conformance.js-reserved-word-param)
 
-(js/export (defn use-private [private: Int] -> Int private))
+(js/export (defn use-private [(private Int)] Int private))

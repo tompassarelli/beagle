@@ -5,26 +5,26 @@
 
 ;; Inline fields, non-parametric — the shape the importer used to drop entirely.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Circle [(radius Int)])
+  (Rect [(width Int) (height String)]))
 
 ;; Members without fields (pre-declared / bare) still import.
 (defunion Flag On Off)
 
 ;; Parametric — field types must survive the boundary as the union's type params.
 (defunion (Result T E)
-  (Ok [value: T])
-  (Err [error: E]))
+  (Ok [(value T)])
+  (Err [(error E)]))
 
-(defn make-circle [r: Int] -> Shape (->Circle r))
+(defn make-circle [(r Int)] Shape (->Circle r))
 
 ;; Bare members naming SIBLING RECORDS — the union references those declarations
 ;; instead of redeclaring them, so their field arity must cross the boundary.
-(defrecord Elem [tag: String kids: Int])
-(defrecord Guard [prop: String kids: Int])
+(defrecord Elem [(tag String) (kids Int)])
+(defrecord Guard [(prop String) (kids Int)])
 (defunion Node Elem Guard)
 
 ;; Same shape with the union declared FIRST: registration is order-insensitive.
 (defunion Stmt Emit Skip)
-(defrecord Emit [text: String])
-(defrecord Skip [reason: String])
+(defrecord Emit [(text String)])
+(defrecord Skip [(reason String)])

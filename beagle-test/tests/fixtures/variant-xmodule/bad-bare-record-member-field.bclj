@@ -5,7 +5,7 @@
 ;; the member's field map.
 (require prov :as p)
 
-(defn tag [n: p/Node] -> Int
+(defn tag [(n p/Node)] Int
   (match n
     [(Elem t k) t]
     [(Guard pr k) pr]))

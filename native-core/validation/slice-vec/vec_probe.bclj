@@ -9,69 +9,69 @@
 
 (require fram.types :as t)
 
-(defn bucket-size [bucket: t/ActiveBucket] -> Int
+(defn bucket-size [(bucket t/ActiveBucket)] Int
   (count (t/activebucket-positions bucket)))
 
-(defn bucket-position-at [bucket: t/ActiveBucket position: Int] -> Int
+(defn bucket-position-at [(bucket t/ActiveBucket) (position Int)] Int
   (nth (t/activebucket-positions bucket) position))
 
 (defn bucket-with-position
-  [bucket: t/ActiveBucket
-   position: Int] -> t/ActiveBucket
+  [(bucket t/ActiveBucket)
+   (position Int)] t/ActiveBucket
   (t/->ActiveBucket (t/activebucket-triple-handle bucket)
                     (conj (t/activebucket-positions bucket) position)))
 
-(defn append-position [positions: (Vec Int) position: Int] -> (Vec Int)
+(defn append-position [(positions (Vec Int)) (position Int)] (Vec Int)
   (conj positions position))
 
-(defn position-pair [low: Int high: Int] -> (Vec Int) [low high])
+(defn position-pair [(low Int) (high Int)] (Vec Int) [low high])
 
-(defn empty-positions [] -> (Vec Int)
-  (let [seed: (Vec Int) []] seed))
+(defn empty-positions [] (Vec Int)
+  (let [(seed (Vec Int)) []] seed))
 
-(defn frame-operation-count [frame: t/TransactionFrame] -> Int
+(defn frame-operation-count [(frame t/TransactionFrame)] Int
   (count (t/transactionframe-operations frame)))
 
 (defn frame-operation-at
-  [frame: t/TransactionFrame
-   position: Int] -> t/CommitOperation
+  [(frame t/TransactionFrame)
+   (position Int)] t/CommitOperation
   (nth (t/transactionframe-operations frame) position))
 
-(defn any-values-equal? [left: (Vec Any) right: (Vec Any)] -> Bool
+(defn any-values-equal? [(left (Vec Any)) (right (Vec Any))] Bool
   (= left right))
 
-(defn increment-value [value: Int] -> Int
+(defn increment-value [(value Int)] Int
   (inc value))
 
-(defn decrement-value [value: Int] -> Int
+(defn decrement-value [(value Int)] Int
   (dec value))
 
-(defn mask-values [left: Int right: Int] -> Int
+(defn mask-values [(left Int) (right Int)] Int
   (bit-and left right))
 
-(defn xor-values [left: Int right: Int] -> Int
+(defn xor-values [(left Int) (right Int)] Int
   (bit-xor left right))
 
-(defn shifted-value [value: Int distance: Int] -> Int
+(defn shifted-value [(value Int) (distance Int)] Int
   (bit-shift-left value distance))
 
-(defn values-differ? [left: Int right: Int] -> Bool
+(defn values-differ? [(left Int) (right Int)] Bool
   (not= left right))
 
-(defn no-positions? [positions: (Vec Int)] -> Bool
+(defn no-positions? [(positions (Vec Int))] Bool
   (empty? positions))
 
 (defn position-slice
-  [positions: (Vec Int)
-   start: Int
-   end: Int] -> (Vec Int)
+  [(positions (Vec Int))
+   (start Int)
+   (end Int)] (Vec Int)
   (subvec positions start end))
 
-(defn position-tail [positions: (Vec Int) start: Int] -> (Vec Int)
+(defn position-tail [(positions (Vec Int)) (start Int)] (Vec Int)
   (subvec positions start))
 
-(defn reversed-positions [positions: (Vec Int)] -> (Vec Int)
+(defn reversed-positions [(positions (Vec Int))] (Vec Int)
   (reverse positions))
 
-(defn append-positions [left: (Vec Int) right: (Vec Int)] -> (Vec Int)
+(defn append-positions [(left (Vec Int)) (right (Vec Int))] (Vec Int)
   (into left right))

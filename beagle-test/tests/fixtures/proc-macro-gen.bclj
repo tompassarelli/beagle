@@ -3,14 +3,14 @@
 ;; Procedural macro: generates a typed getter function from a record + field name.
 (defmacro gen-getter [rec field]
   `(defn ~(format-symbol "get-~a" field)
-     [obj: ~rec] -> Any
+     [(obj ~rec)] Any
      (get obj ~(make-keyword field))))
 
-(defrecord Point [x: Int y: Int])
+(defrecord Point [(x Int) (y Int)])
 
 (gen-getter Point x)
 (gen-getter Point y)
 
-(def p: Point (->Point 3 7))
+(def p Point (->Point 3 7))
 (println (get-x p))
 (println (get-y p))

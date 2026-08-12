@@ -4,44 +4,44 @@
 (define-mode strict)
 
 (defunion ObligationVerdictV0
-  (ObligationPassV0 [code :- core/ObligationCode])
-  (ValidSsaDiagnosticV0 [function-id :- core/NativeId])
-  (ExhaustiveMatchesDiagnosticV0 [function-id :- core/NativeId])
-  (ClosedLayoutsDiagnosticV0 [type-id :- core/NativeId])
-  (CheckedArithmeticDiagnosticV0 [function-id :- core/NativeId])
-  (LegalAbiDiagnosticV0 [abi-id :- core/NativeId])
-  (DischargedTokensDiagnosticV0 [function-id :- core/NativeId])
-  (BoundedEffectsDiagnosticV0 [function-id :- core/NativeId])
-  (EpochSoundnessDiagnosticV0 [function-id :- core/NativeId])
-  (LeakFreedomDiagnosticV0 [region-id :- core/NativeId]))
+  (ObligationPassV0 [(code core/ObligationCode)])
+  (ValidSsaDiagnosticV0 [(function-id core/NativeId)])
+  (ExhaustiveMatchesDiagnosticV0 [(function-id core/NativeId)])
+  (ClosedLayoutsDiagnosticV0 [(type-id core/NativeId)])
+  (CheckedArithmeticDiagnosticV0 [(function-id core/NativeId)])
+  (LegalAbiDiagnosticV0 [(abi-id core/NativeId)])
+  (DischargedTokensDiagnosticV0 [(function-id core/NativeId)])
+  (BoundedEffectsDiagnosticV0 [(function-id core/NativeId)])
+  (EpochSoundnessDiagnosticV0 [(function-id core/NativeId)])
+  (LeakFreedomDiagnosticV0 [(region-id core/NativeId)]))
 
 (defrecord DefSiteV0
-  [found :- Bool
-   function-parameter :- Bool
-   block-id :- core/NativeId
-   position :- Int
-   type-id :- core/NativeId])
+  [(found Bool)
+   (function-parameter Bool)
+   (block-id core/NativeId)
+   (position Int)
+   (type-id core/NativeId)])
 
 (defrecord SsaValidationIndexV0
-  [definitions: (Map String DefSiteV0)
-   paths-avoiding: (Map String Bool)])
+  [(definitions (Map String DefSiteV0))
+   (paths-avoiding (Map String Bool))])
 
-(defrecord CheckedUseScanV0 [handled :- Bool legal :- Bool])
+(defrecord CheckedUseScanV0 [(handled Bool) (legal Bool)])
 
 (defrecord TokenStateV0
-  [live :- (Vec core/NativeId)
-   seen :- (Vec core/NativeId)
-   valid :- Bool])
+  [(live (Vec core/NativeId))
+   (seen (Vec core/NativeId))
+   (valid Bool)])
 
-(defn obligation-id [name :- String] :- core/NativeId
+(defn obligation-id [(name String)] core/NativeId
   (core/canonical-id "native-obligations-v0" [name]))
 
-(defn dynamic-id= [left :- Any right :- Any] :- Bool
+(defn dynamic-id= [(left Any) (right Any)] Bool
   (and (not (nil? left))
     (not (nil? right))
     (= (get left :value "left-missing") (get right :value "right-missing"))))
 
-(defn obligation-passed? [verdict :- ObligationVerdictV0] :- Bool
+(defn obligation-passed? [(verdict ObligationVerdictV0)] Bool
   (match verdict
     [(ObligationPassV0 code) true]
     [(ValidSsaDiagnosticV0 function-id) false]
@@ -56,7 +56,7 @@
 
 ;; Named tag per verdict variant, so a fixture can assert "failed with ITS
 ;; diagnostic" without repeating a ten-arm match at each call site.
-(defn verdict-tag [verdict :- ObligationVerdictV0] :- String
+(defn verdict-tag [(verdict ObligationVerdictV0)] String
   (match verdict
     [(ObligationPassV0 code) "pass"]
     [(ValidSsaDiagnosticV0 function-id) "valid-ssa"]
@@ -70,35 +70,35 @@
     [(LeakFreedomDiagnosticV0 region-id) "leak-freedom"]))
 
 (defn find-block
-  [blocks :- (Vec core/BasicBlock)
-   block-id :- core/NativeId] :- (U core/BasicBlock Nil)
-  (loop [index :- Int 0]
+  [(blocks (Vec core/BasicBlock))
+   (block-id core/NativeId)] (U core/BasicBlock Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count blocks)) nil
       (core/native-id= (core/basicblock-id (nth blocks index)) block-id)
       (nth blocks index)
       :else (recur (+ index 1)))))
 
-(defn missing-def-site [] -> DefSiteV0
+(defn missing-def-site [] DefSiteV0
   (->DefSiteV0 false false (obligation-id "missing-block") -1
     (obligation-id "missing-type")))
 
-(defn native-id-key [id: core/NativeId] -> String
+(defn native-id-key [(id core/NativeId)] String
   (core/nativeid-value id))
 
-(defn avoiding-path-key [avoided: core/NativeId target: core/NativeId] -> String
-  (let [avoided-value: String (native-id-key avoided)]
+(defn avoiding-path-key [(avoided core/NativeId) (target core/NativeId)] String
+  (let [(avoided-value String) (native-id-key avoided)]
     (str (count avoided-value) ":" avoided-value (native-id-key target))))
 
 (defn index-parameter-sites
-  [definitions: (Map String DefSiteV0)
-   parameters: (Vec core/Parameter)
-   function-parameter: Bool
-   block-id: core/NativeId] -> (Map String DefSiteV0)
-  (loop [index: Int 0 current: (Map String DefSiteV0) definitions]
+  [(definitions (Map String DefSiteV0))
+   (parameters (Vec core/Parameter))
+   (function-parameter Bool)
+   (block-id core/NativeId)] (Map String DefSiteV0)
+  (loop [(index Int) 0 (current (Map String DefSiteV0)) definitions]
     (if (>= index (count parameters))
       current
-      (let [parameter: core/Parameter (nth parameters index)]
+      (let [(parameter core/Parameter) (nth parameters index)]
         (recur (+ index 1)
           (assoc current
             (native-id-key (core/parameter-id parameter))
@@ -106,31 +106,31 @@
               (core/parameter-type-id parameter))))))))
 
 (defn index-instruction-sites
-  [definitions: (Map String DefSiteV0)
-   block: core/BasicBlock] -> (Map String DefSiteV0)
-  (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
-    (loop [index: Int 0 current: (Map String DefSiteV0) definitions]
+  [(definitions (Map String DefSiteV0))
+   (block core/BasicBlock)] (Map String DefSiteV0)
+  (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
+    (loop [(index Int) 0 (current (Map String DefSiteV0)) definitions]
       (if (>= index (count instructions))
         current
-        (let [result: core/SsaValueV0 (get (nth instructions index) :result)]
+        (let [(result core/SsaValueV0) (get (nth instructions index) :result)]
           (recur (+ index 1)
             (assoc current
               (native-id-key (core/ssavaluev0-id result))
               (->DefSiteV0 true false (core/basicblock-id block) index
                 (core/ssavaluev0-type-id result)))))))))
 
-(defn definition-index [function: core/FunctionDef] -> (Map String DefSiteV0)
-  (let [with-function-parameters: (Map String DefSiteV0)
+(defn definition-index [(function core/FunctionDef)] (Map String DefSiteV0)
+  (let [(with-function-parameters (Map String DefSiteV0))
         (index-parameter-sites {}
           (core/functiondef-parameters function)
           true
           (obligation-id "function-parameter"))
-        blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
-    (loop [index: Int 0 current: (Map String DefSiteV0) with-function-parameters]
+        (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+    (loop [(index Int) 0 (current (Map String DefSiteV0)) with-function-parameters]
       (if (>= index (count blocks))
         current
-        (let [block: core/BasicBlock (nth blocks index)
-              with-block-parameters: (Map String DefSiteV0)
+        (let [(block core/BasicBlock) (nth blocks index)
+              (with-block-parameters (Map String DefSiteV0))
               (index-parameter-sites current
                 (core/basicblock-parameters block)
                 false
@@ -139,111 +139,111 @@
             (index-instruction-sites with-block-parameters block)))))))
 
 (defn block-index
-  [blocks: (Vec core/BasicBlock)] -> (Map String core/BasicBlock)
-  (loop [index: Int 0 current: (Map String core/BasicBlock) {}]
+  [(blocks (Vec core/BasicBlock))] (Map String core/BasicBlock)
+  (loop [(index Int) 0 (current (Map String core/BasicBlock)) {}]
     (if (>= index (count blocks))
       current
-      (let [block: core/BasicBlock (nth blocks index)]
+      (let [(block core/BasicBlock) (nth blocks index)]
         (recur (+ index 1)
-          (let [key: String (native-id-key (core/basicblock-id block))]
+          (let [(key String) (native-id-key (core/basicblock-id block))]
             (if (nil? (get current key))
               (assoc current key block)
               current)))))))
 
 (defn parameter-site
-  [parameters :- (Vec core/Parameter)
-   value-id :- core/NativeId] :- DefSiteV0
-  (loop [index :- Int 0]
+  [(parameters (Vec core/Parameter))
+   (value-id core/NativeId)] DefSiteV0
+  (loop [(index Int) 0]
     (if (>= index (count parameters))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
-      (let [parameter :- core/Parameter (nth parameters index)]
+      (let [(parameter core/Parameter) (nth parameters index)]
         (if (core/native-id= (core/parameter-id parameter) value-id)
           (->DefSiteV0 true true (obligation-id "function-parameter") -1
             (core/parameter-type-id parameter))
           (recur (+ index 1)))))))
 
 (defn block-parameter-site
-  [block :- core/BasicBlock
-   value-id :- core/NativeId] :- DefSiteV0
-  (loop [index :- Int 0 parameters :- (Vec core/Parameter) (core/basicblock-parameters block)]
+  [(block core/BasicBlock)
+   (value-id core/NativeId)] DefSiteV0
+  (loop [(index Int) 0 (parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
     (if (>= index (count parameters))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
-      (let [parameter :- core/Parameter (nth parameters index)]
+      (let [(parameter core/Parameter) (nth parameters index)]
         (if (core/native-id= (core/parameter-id parameter) value-id)
           (->DefSiteV0 true false (core/basicblock-id block) -1
             (core/parameter-type-id parameter))
           (recur (+ index 1) parameters))))))
 
 (defn block-instruction-site
-  [block :- core/BasicBlock
-   value-id :- core/NativeId] :- DefSiteV0
-  (loop [index :- Int 0 instructions :- (Vec core/Instruction) (core/basicblock-instructions block)]
+  [(block core/BasicBlock)
+   (value-id core/NativeId)] DefSiteV0
+  (loop [(index Int) 0 (instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
     (if (>= index (count instructions))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
-      (let [instruction :- core/Instruction (nth instructions index)
-            result :- core/SsaValueV0 (get instruction :result)]
+      (let [(instruction core/Instruction) (nth instructions index)
+            (result core/SsaValueV0) (get instruction :result)]
         (if (core/native-id= (core/ssavaluev0-id result) value-id)
           (->DefSiteV0 true false (core/basicblock-id block) index
             (core/ssavaluev0-type-id result))
           (recur (+ index 1) instructions))))))
 
 (defn block-site
-  [block :- core/BasicBlock
-   value-id :- core/NativeId] :- DefSiteV0
-  (let [parameter-site-result :- DefSiteV0 (block-parameter-site block value-id)]
+  [(block core/BasicBlock)
+   (value-id core/NativeId)] DefSiteV0
+  (let [(parameter-site-result DefSiteV0) (block-parameter-site block value-id)]
     (if (defsitev0-found parameter-site-result)
       parameter-site-result
       (block-instruction-site block value-id))))
 
 (defn find-def-site
-  [function :- core/FunctionDef
-   value-id :- core/NativeId] :- DefSiteV0
-  (let [function-site :- DefSiteV0
+  [(function core/FunctionDef)
+   (value-id core/NativeId)] DefSiteV0
+  (let [(function-site DefSiteV0)
         (parameter-site (core/functiondef-parameters function) value-id)]
     (if (defsitev0-found function-site)
       function-site
-      (loop [index :- Int 0 blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+      (loop [(index Int) 0 (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
         (if (>= index (count blocks))
           (->DefSiteV0 false false (obligation-id "missing-block") -1
             (obligation-id "missing-type"))
-          (let [site :- DefSiteV0 (block-site (nth blocks index) value-id)]
+          (let [(site DefSiteV0) (block-site (nth blocks index) value-id)]
             (if (defsitev0-found site) site (recur (+ index 1) blocks))))))))
 
 (defn terminator-successors
-  [terminator :- core/Terminator] :- (Vec core/NativeId)
-  (let [jump-block :- Any (get terminator :block-id nil)
-        true-block :- Any (get terminator :true-block nil)
-        false-block :- Any (get terminator :false-block nil)
-        cases :- Any (get terminator :cases nil)]
+  [(terminator core/Terminator)] (Vec core/NativeId)
+  (let [(jump-block Any) (get terminator :block-id nil)
+        (true-block Any) (get terminator :true-block nil)
+        (false-block Any) (get terminator :false-block nil)
+        (cases Any) (get terminator :cases nil)]
     (cond
       (not (nil? jump-block)) [jump-block]
       (and (not (nil? true-block)) (not (nil? false-block)))
       [true-block false-block]
       (not (nil? cases))
-      (mapv (fn [switch-case :- core/SwitchCaseV0] :- core/NativeId
+      (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
               (core/switchcasev0-block-id switch-case))
         cases)
       :else [])))
 
-(defn block-successors [block :- core/BasicBlock] :- (Vec core/NativeId)
+(defn block-successors [(block core/BasicBlock)] (Vec core/NativeId)
   (if (= 1 (count (core/basicblock-terminators block)))
     (terminator-successors (nth (core/basicblock-terminators block) 0))
     []))
 
 (defn reachable-blocks-avoiding
-  [blocks: (Map String core/BasicBlock)
-   entry: core/NativeId
-   avoided: core/NativeId] -> (Map String Bool)
-  (loop [position: Int 0
-         pending: (Vec core/NativeId) [entry]
-         seen: (Map String Bool) {}]
+  [(blocks (Map String core/BasicBlock))
+   (entry core/NativeId)
+   (avoided core/NativeId)] (Map String Bool)
+  (loop [(position Int) 0
+         (pending (Vec core/NativeId)) [entry]
+         (seen (Map String Bool)) {}]
     (if (>= position (count pending))
       seen
-      (let [current: core/NativeId (nth pending position)
-            current-key: String (native-id-key current)]
+      (let [(current core/NativeId) (nth pending position)
+            (current-key String) (native-id-key current)]
         (cond
           (core/native-id= current avoided)
           (recur (+ position 1) pending seen)
@@ -252,31 +252,31 @@
           (recur (+ position 1) pending seen)
 
           :else
-          (let [block: (U core/BasicBlock Nil) (get blocks current-key)
-                next-pending: (Vec core/NativeId)
+          (let [(block (U core/BasicBlock Nil)) (get blocks current-key)
+                (next-pending (Vec core/NativeId))
                 (if (nil? block)
                   pending
                   (core/append-ids pending (block-successors block)))]
             (recur (+ position 1) next-pending (assoc seen current-key true))))))))
 
-(defn paths-avoiding-index [function: core/FunctionDef] -> (Map String Bool)
-  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
-        blocks-by-id: (Map String core/BasicBlock) (block-index blocks)
-        entry: core/NativeId (core/functiondef-entry-block function)]
-    (loop [avoided-position: Int 0 paths: (Map String Bool) {}]
+(defn paths-avoiding-index [(function core/FunctionDef)] (Map String Bool)
+  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+        (blocks-by-id (Map String core/BasicBlock)) (block-index blocks)
+        (entry core/NativeId) (core/functiondef-entry-block function)]
+    (loop [(avoided-position Int) 0 (paths (Map String Bool)) {}]
       (if (>= avoided-position (count blocks))
         paths
-        (let [avoided: core/NativeId
+        (let [(avoided core/NativeId)
               (core/basicblock-id (nth blocks avoided-position))]
           (if (core/native-id= avoided entry)
             (recur (+ avoided-position 1) paths)
-            (let [reachable: (Map String Bool)
+            (let [(reachable (Map String Bool))
                   (reachable-blocks-avoiding blocks-by-id entry avoided)
-                  next-paths: (Map String Bool)
-                  (loop [target-position: Int 0 current: (Map String Bool) paths]
+                  (next-paths (Map String Bool))
+                  (loop [(target-position Int) 0 (current (Map String Bool)) paths]
                     (if (>= target-position (count blocks))
                       current
-                      (let [target: core/NativeId
+                      (let [(target core/NativeId)
                             (core/basicblock-id (nth blocks target-position))]
                         (recur (+ target-position 1)
                           (if (= true (get reachable (native-id-key target)))
@@ -284,25 +284,25 @@
                             current)))))]
               (recur (+ avoided-position 1) next-paths))))))))
 
-(defn ssa-validation-index [function: core/FunctionDef] -> SsaValidationIndexV0
+(defn ssa-validation-index [(function core/FunctionDef)] SsaValidationIndexV0
   (->SsaValidationIndexV0
     (definition-index function)
     (paths-avoiding-index function)))
 
 (defn indexed-def-site
-  [index: SsaValidationIndexV0
-   value-id: core/NativeId] -> DefSiteV0
-  (let [site: (U DefSiteV0 Nil)
+  [(index SsaValidationIndexV0)
+   (value-id core/NativeId)] DefSiteV0
+  (let [(site (U DefSiteV0 Nil))
         (get (ssavalidationindexv0-definitions index) (native-id-key value-id))]
     (if (nil? site) (missing-def-site) site)))
 
 (defn value-dominates-use?
-  [index: SsaValidationIndexV0
-   function: core/FunctionDef
-   use-block: core/NativeId
-   use-position: Int
-   value-id: core/NativeId] -> Bool
-  (let [site: DefSiteV0 (indexed-def-site index value-id)]
+  [(index SsaValidationIndexV0)
+   (function core/FunctionDef)
+   (use-block core/NativeId)
+   (use-position Int)
+   (value-id core/NativeId)] Bool
+  (let [(site DefSiteV0) (indexed-def-site index value-id)]
     (cond
       (not (defsitev0-found site)) false
       (defsitev0-function-parameter site) true
@@ -316,12 +316,12 @@
           (avoiding-path-key (defsitev0-block-id site) use-block)))))))
 
 (defn refs-dominate?
-  [validation-index: SsaValidationIndexV0
-   function: core/FunctionDef
-   block-id: core/NativeId
-   position: Int
-   refs: (Vec core/NativeId)] -> Bool
-  (loop [ref-position: Int 0]
+  [(validation-index SsaValidationIndexV0)
+   (function core/FunctionDef)
+   (block-id core/NativeId)
+   (position Int)
+   (refs (Vec core/NativeId))] Bool
+  (loop [(ref-position Int) 0]
     (if (>= ref-position (count refs))
       true
       (if (value-dominates-use? validation-index function block-id position
@@ -330,39 +330,39 @@
         false))))
 
 (defn block-uses-dominated?
-  [validation-index: SsaValidationIndexV0
-   function: core/FunctionDef
-   block: core/BasicBlock] -> Bool
-  (let [instructions :- (Vec core/Instruction) (core/basicblock-instructions block)
-        block-id :- core/NativeId (core/basicblock-id block)]
+  [(validation-index SsaValidationIndexV0)
+   (function core/FunctionDef)
+   (block core/BasicBlock)] Bool
+  (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)
+        (block-id core/NativeId) (core/basicblock-id block)]
     (and
-      (loop [instruction-position: Int 0]
+      (loop [(instruction-position Int) 0]
         (if (>= instruction-position (count instructions))
           true
           (if (refs-dominate? validation-index function block-id instruction-position
                 (core/instruction-ssa-refs (nth instructions instruction-position)))
             (recur (+ instruction-position 1))
             false)))
-      (every? (fn [terminator :- core/Terminator] :- Bool
+      (every? (fn [(terminator core/Terminator)] Bool
                 (refs-dominate? validation-index function block-id (count instructions)
                   (core/terminator-ssa-refs terminator)))
         (core/basicblock-terminators block)))))
 
 (defn arguments-match-parameters?
-  [validation-index: SsaValidationIndexV0
-   function: core/FunctionDef
-   target-id: core/NativeId
-   arguments: (Vec core/NativeId)] -> Bool
-  (let [target :- (U core/BasicBlock Nil)
+  [(validation-index SsaValidationIndexV0)
+   (function core/FunctionDef)
+   (target-id core/NativeId)
+   (arguments (Vec core/NativeId))] Bool
+  (let [(target (U core/BasicBlock Nil))
         (find-block (core/functiondef-blocks function) target-id)]
     (if (nil? target)
       false
-      (let [parameters :- (Vec core/Parameter) (core/basicblock-parameters target)]
+      (let [(parameters (Vec core/Parameter)) (core/basicblock-parameters target)]
         (and (= (count parameters) (count arguments))
-          (loop [argument-position: Int 0]
+          (loop [(argument-position Int) 0]
             (if (>= argument-position (count arguments))
               true
-              (let [site :- DefSiteV0
+              (let [(site DefSiteV0)
                     (indexed-def-site validation-index
                       (nth arguments argument-position))]
                 (if (and (defsitev0-found site)
@@ -373,9 +373,9 @@
                   false)))))))))
 
 (defn terminator-arguments-valid?
-  [index: SsaValidationIndexV0
-   function: core/FunctionDef
-   terminator: core/Terminator] -> Bool
+  [(index SsaValidationIndexV0)
+   (function core/FunctionDef)
+   (terminator core/Terminator)] Bool
   (cond
     (instance? native.core.ReturnTerminator terminator) true
     (instance? native.core.JumpTerminator terminator)
@@ -389,97 +389,97 @@
       (arguments-match-parameters? index function
         (core/branchterminator-false-block terminator) []))
     (instance? native.core.SwitchTerminator terminator)
-    (every? (fn [switch-case: core/SwitchCaseV0] -> Bool
+    (every? (fn [(switch-case core/SwitchCaseV0)] Bool
               (arguments-match-parameters? index function
                 (core/switchcasev0-block-id switch-case)
                 (core/switchcasev0-arguments switch-case)))
       (core/switchterminator-cases terminator))
     :else true))
 
-(defn function-valid-ssa? [function :- core/FunctionDef] :- Bool
+(defn function-valid-ssa? [(function core/FunctionDef)] Bool
   (if (not (core/unique-ids? (core/function-value-ids function)))
     false
-    (let [index: SsaValidationIndexV0 (ssa-validation-index function)]
-      (every? (fn [block: core/BasicBlock] -> Bool
+    (let [(index SsaValidationIndexV0) (ssa-validation-index function)]
+      (every? (fn [(block core/BasicBlock)] Bool
                 (and (block-uses-dominated? index function block)
-                  (every? (fn [terminator: core/Terminator] -> Bool
+                  (every? (fn [(terminator core/Terminator)] Bool
                             (terminator-arguments-valid? index function terminator))
                     (core/basicblock-terminators block))))
         (core/functiondef-blocks function)))))
 
-(defn valid-ssa [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+(defn valid-ssa [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->ValidSsaObligation true))
-      (let [function :- core/FunctionDef (nth functions index)]
+      (let [(function core/FunctionDef) (nth functions index)]
         (if (function-valid-ssa? function)
           (recur (+ index 1) functions)
           (->ValidSsaDiagnosticV0 (core/functiondef-id function)))))))
 
 (defn find-type
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId] :- (U core/TypeDef Nil)
-  (loop [index :- Int 0]
+  [(types (Vec core/TypeDef))
+   (type-id core/NativeId)] (U core/TypeDef Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count types)) nil
       (core/native-id= (core/typedef-id (nth types index)) type-id)
       (nth types index)
       :else (recur (+ index 1)))))
 
-(defn unit-type? [types :- (Vec core/TypeDef) type-id :- core/NativeId] :- Bool
-  (let [type-def :- (U core/TypeDef Nil) (find-type types type-id)]
+(defn unit-type? [(types (Vec core/TypeDef)) (type-id core/NativeId)] Bool
+  (let [(type-def (U core/TypeDef Nil)) (find-type types type-id)]
     (if (nil? type-def)
       false
-      (let [shape :- core/TypeShape (core/typedef-shape type-def)]
+      (let [(shape core/TypeShape) (core/typedef-shape type-def)]
         (if (not (instance? native.core.UnionType shape))
           false
-          (let [variants :- (Vec core/TypeVariant)
+          (let [(variants (Vec core/TypeVariant))
                 (core/uniontype-variants shape)]
             (and (= 1 (count variants))
               (nil? (core/typevariant-payload-type (nth variants 0))))))))))
 
 (defn variant-ids-for-type
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId] :- (Vec core/NativeId)
-  (let [type-def :- (U core/TypeDef Nil) (find-type types type-id)]
+  [(types (Vec core/TypeDef))
+   (type-id core/NativeId)] (Vec core/NativeId)
+  (let [(type-def (U core/TypeDef Nil)) (find-type types type-id)]
     (if (nil? type-def)
       []
-      (let [shape :- Any (core/typedef-shape type-def)
-            variants :- Any (get shape :variants nil)
-            failure-type :- Any (get shape :failure-type nil)]
+      (let [(shape Any) (core/typedef-shape type-def)
+            (variants Any) (get shape :variants nil)
+            (failure-type Any) (get shape :failure-type nil)]
         (cond
           (not (nil? variants))
-          (mapv (fn [variant :- core/TypeVariant] :- core/NativeId
+          (mapv (fn [(variant core/TypeVariant)] core/NativeId
                   (core/typevariant-id variant)) variants)
           (not (nil? failure-type))
           (variant-ids-for-type types failure-type)
           :else [])))))
 
-(defn switch-case-ids [cases :- (Vec core/SwitchCaseV0)] :- (Vec core/NativeId)
-  (mapv (fn [switch-case :- core/SwitchCaseV0] :- core/NativeId
+(defn switch-case-ids [(cases (Vec core/SwitchCaseV0))] (Vec core/NativeId)
+  (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
           (core/switchcasev0-variant-id switch-case))
     cases))
 
 (defn switch-exhaustive?
-  [types :- (Vec core/TypeDef)
-   function :- core/FunctionDef
-   value-id :- core/NativeId
-   cases :- (Vec core/SwitchCaseV0)] :- Bool
-  (let [site :- DefSiteV0 (find-def-site function value-id)
-        variant-ids :- (Vec core/NativeId)
+  [(types (Vec core/TypeDef))
+   (function core/FunctionDef)
+   (value-id core/NativeId)
+   (cases (Vec core/SwitchCaseV0))] Bool
+  (let [(site DefSiteV0) (find-def-site function value-id)
+        (variant-ids (Vec core/NativeId))
         (variant-ids-for-type types (defsitev0-type-id site))]
     (if (or (not (defsitev0-found site)) (= 0 (count variant-ids)))
       false
-      (let [case-ids :- (Vec core/NativeId) (switch-case-ids cases)]
+      (let [(case-ids (Vec core/NativeId)) (switch-case-ids cases)]
         (and (= (count variant-ids) (count case-ids))
           (core/unique-ids? case-ids)
           (core/ids-in? variant-ids case-ids))))))
 
 (defn terminator-exhaustive?
-  [types: (Vec core/TypeDef)
-   function: core/FunctionDef
-   terminator: core/Terminator] -> Bool
+  [(types (Vec core/TypeDef))
+   (function core/FunctionDef)
+   (terminator core/Terminator)] Bool
   (if (instance? native.core.SwitchTerminator terminator)
     (switch-exhaustive? types function
       (core/switchterminator-value-id terminator)
@@ -487,30 +487,30 @@
     true))
 
 (defn function-exhaustive?
-  [types :- (Vec core/TypeDef)
-   function :- core/FunctionDef] :- Bool
-  (every? (fn [block :- core/BasicBlock] :- Bool
-            (every? (fn [terminator :- core/Terminator] :- Bool
+  [(types (Vec core/TypeDef))
+   (function core/FunctionDef)] Bool
+  (every? (fn [(block core/BasicBlock)] Bool
+            (every? (fn [(terminator core/Terminator)] Bool
                       (terminator-exhaustive? types function terminator))
               (core/basicblock-terminators block)))
     (core/functiondef-blocks function)))
 
 (defn exhaustive-matches
-  [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+  [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->ExhaustiveMatchesObligation true))
-      (let [function :- core/FunctionDef (nth functions index)]
+      (let [(function core/FunctionDef) (nth functions index)]
         (if (function-exhaustive? (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
           (->ExhaustiveMatchesDiagnosticV0
             (core/functiondef-id function)))))))
 
 (defn find-layout
-  [layouts :- (Vec core/LayoutDef)
-   type-id :- core/NativeId] :- (U core/LayoutDef Nil)
-  (loop [index :- Int 0]
+  [(layouts (Vec core/LayoutDef))
+   (type-id core/NativeId)] (U core/LayoutDef Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count layouts)) nil
       (core/native-id= (core/layoutdef-type-id (nth layouts index)) type-id)
@@ -518,9 +518,9 @@
       :else (recur (+ index 1)))))
 
 (defn layout-count
-  [layouts :- (Vec core/LayoutDef)
-   type-id :- core/NativeId] :- Int
-  (loop [index :- Int 0 found :- Int 0]
+  [(layouts (Vec core/LayoutDef))
+   (type-id core/NativeId)] Int
+  (loop [(index Int) 0 (found Int) 0]
     (if (>= index (count layouts))
       found
       (recur (+ index 1)
@@ -528,46 +528,46 @@
           (+ found 1)
           found)))))
 
-(defn aligned? [offset :- Int alignment :- Int] :- Bool
+(defn aligned? [(offset Int) (alignment Int)] Bool
   (and (> alignment 0) (= 0 (mod offset alignment))))
 
 (defn field-layout-valid?
-  [layouts :- (Vec core/LayoutDef)
-   parent-size :- Int
-   field :- core/FieldLayoutV0] :- Bool
-  (let [field-type :- core/NativeId (get field :type-id)
-        child :- (U core/LayoutDef Nil) (find-layout layouts field-type)
-        offset :- Int (get field :offset-bytes)
-        alignment :- Int (get field :align-bytes)]
+  [(layouts (Vec core/LayoutDef))
+   (parent-size Int)
+   (field core/FieldLayoutV0)] Bool
+  (let [(field-type core/NativeId) (get field :type-id)
+        (child (U core/LayoutDef Nil)) (find-layout layouts field-type)
+        (offset Int) (get field :offset-bytes)
+        (alignment Int) (get field :align-bytes)]
     (and (not (nil? child))
       (aligned? offset alignment)
       (= alignment (core/layoutdef-align-bytes child))
       (<= (+ offset (core/layoutdef-size-bytes child)) parent-size))))
 
 (defn fields-nonoverlapping?
-  [layouts :- (Vec core/LayoutDef)
-   fields :- (Vec core/FieldLayoutV0)] :- Bool
-  (loop [left-index :- Int 0]
+  [(layouts (Vec core/LayoutDef))
+   (fields (Vec core/FieldLayoutV0))] Bool
+  (loop [(left-index Int) 0]
     (if (>= left-index (count fields))
       true
-      (let [left :- core/FieldLayoutV0 (nth fields left-index)
-            left-layout :- (U core/LayoutDef Nil)
+      (let [(left core/FieldLayoutV0) (nth fields left-index)
+            (left-layout (U core/LayoutDef Nil))
             (find-layout layouts (get left :type-id))]
         (if (nil? left-layout)
           false
-          (let [left-start :- Int (get left :offset-bytes)
-                left-end :- Int (+ left-start (core/layoutdef-size-bytes left-layout))]
+          (let [(left-start Int) (get left :offset-bytes)
+                (left-end Int) (+ left-start (core/layoutdef-size-bytes left-layout))]
             (if
-              (loop [right-index :- Int (+ left-index 1)]
+              (loop [(right-index Int) (+ left-index 1)]
                 (if (>= right-index (count fields))
                   true
-                  (let [right :- core/FieldLayoutV0 (nth fields right-index)
-                        right-layout :- (U core/LayoutDef Nil)
+                  (let [(right core/FieldLayoutV0) (nth fields right-index)
+                        (right-layout (U core/LayoutDef Nil))
                         (find-layout layouts (get right :type-id))]
                     (if (nil? right-layout)
                       false
-                      (let [right-start :- Int (get right :offset-bytes)
-                            right-end :- Int
+                      (let [(right-start Int) (get right :offset-bytes)
+                            (right-end Int)
                             (+ right-start (core/layoutdef-size-bytes right-layout))]
                         (if (or (<= left-end right-start) (<= right-end left-start))
                           (recur (+ right-index 1))
@@ -575,44 +575,44 @@
               (recur (+ left-index 1))
               false)))))))
 
-(defn unique-ints? [values :- (Vec Int)] :- Bool
-  (loop [index :- Int 0 seen :- (Vec Int) []]
+(defn unique-ints? [(values (Vec Int))] Bool
+  (loop [(index Int) 0 (seen (Vec Int)) []]
     (if (>= index (count values))
       true
-      (let [value :- Int (nth values index)]
-        (if (some? (some (fn [prior :- Int] :- Bool (= prior value)) seen))
+      (let [(value Int) (nth values index)]
+        (if (some? (some (fn [(prior Int)] Bool (= prior value)) seen))
           false
           (recur (+ index 1) (conj seen value)))))))
 
 (defn record-layout-valid?
-  [type-shape :- Any
-   layout-shape :- Any
-   layouts :- (Vec core/LayoutDef)
-   parent-size :- Int] :- Bool
-  (let [type-fields :- (Vec core/TypeField) (get type-shape :fields [])
-        fields :- (Vec core/FieldLayoutV0) (get layout-shape :fields [])
-        expected-ids :- (Vec core/NativeId)
-        (mapv (fn [field :- core/TypeField] :- core/NativeId
+  [(type-shape Any)
+   (layout-shape Any)
+   (layouts (Vec core/LayoutDef))
+   (parent-size Int)] Bool
+  (let [(type-fields (Vec core/TypeField)) (get type-shape :fields [])
+        (fields (Vec core/FieldLayoutV0)) (get layout-shape :fields [])
+        (expected-ids (Vec core/NativeId))
+        (mapv (fn [(field core/TypeField)] core/NativeId
                 (core/typefield-id field)) type-fields)
-        field-ids :- (Vec core/NativeId)
-        (mapv (fn [field :- core/FieldLayoutV0] :- core/NativeId
+        (field-ids (Vec core/NativeId))
+        (mapv (fn [(field core/FieldLayoutV0)] core/NativeId
                 (get field :field-id)) fields)]
     (and (= (count expected-ids) (count field-ids))
       (core/unique-ids? field-ids)
       (core/ids-in? expected-ids field-ids)
-      (every? (fn [field :- core/FieldLayoutV0] :- Bool
+      (every? (fn [(field core/FieldLayoutV0)] Bool
                 (field-layout-valid? layouts parent-size field)) fields)
       (fields-nonoverlapping? layouts fields))))
 
 (defn union-payload-valid?
-  [layouts :- (Vec core/LayoutDef)
-   parent-size :- Int
-   variant :- core/UnionVariantLayoutV0] :- Bool
-  (let [payload-type :- (U core/NativeId Nil) (get variant :payload-type)
-        offset :- Int (get variant :payload-offset-bytes)]
+  [(layouts (Vec core/LayoutDef))
+   (parent-size Int)
+   (variant core/UnionVariantLayoutV0)] Bool
+  (let [(payload-type (U core/NativeId Nil)) (get variant :payload-type)
+        (offset Int) (get variant :payload-offset-bytes)]
     (if (nil? payload-type)
       (>= offset 0)
-      (let [payload-layout :- (U core/LayoutDef Nil)
+      (let [(payload-layout (U core/LayoutDef Nil))
             (find-layout layouts payload-type)]
         (and (not (nil? payload-layout))
           (aligned? offset (core/layoutdef-align-bytes payload-layout))
@@ -620,25 +620,25 @@
             parent-size))))))
 
 (defn union-layout-valid?
-  [type-shape :- Any
-   layout-shape :- Any
-   layouts :- (Vec core/LayoutDef)
-   parent-size :- Int] :- Bool
-  (let [type-variants :- (Vec core/TypeVariant) (get type-shape :variants [])
-        variants :- (Vec core/UnionVariantLayoutV0)
+  [(type-shape Any)
+   (layout-shape Any)
+   (layouts (Vec core/LayoutDef))
+   (parent-size Int)] Bool
+  (let [(type-variants (Vec core/TypeVariant)) (get type-shape :variants [])
+        (variants (Vec core/UnionVariantLayoutV0))
         (get layout-shape :variants [])
-        expected-ids :- (Vec core/NativeId)
-        (mapv (fn [variant :- core/TypeVariant] :- core/NativeId
+        (expected-ids (Vec core/NativeId))
+        (mapv (fn [(variant core/TypeVariant)] core/NativeId
                 (core/typevariant-id variant)) type-variants)
-        variant-ids :- (Vec core/NativeId)
-        (mapv (fn [variant :- core/UnionVariantLayoutV0] :- core/NativeId
+        (variant-ids (Vec core/NativeId))
+        (mapv (fn [(variant core/UnionVariantLayoutV0)] core/NativeId
                 (get variant :variant-id)) variants)
-        tags :- (Vec Int)
-        (mapv (fn [variant :- core/UnionVariantLayoutV0] :- Int
+        (tags (Vec Int))
+        (mapv (fn [(variant core/UnionVariantLayoutV0)] Int
                 (get variant :tag)) variants)
-        tag-type :- core/NativeId (get layout-shape :tag-type)
-        tag-layout :- (U core/LayoutDef Nil) (find-layout layouts tag-type)
-        tag-offset :- Int (get layout-shape :tag-offset-bytes)]
+        (tag-type core/NativeId) (get layout-shape :tag-type)
+        (tag-layout (U core/LayoutDef Nil)) (find-layout layouts tag-type)
+        (tag-offset Int) (get layout-shape :tag-offset-bytes)]
     (and (not (nil? tag-layout))
       (aligned? tag-offset (core/layoutdef-align-bytes tag-layout))
       (<= (+ tag-offset (core/layoutdef-size-bytes tag-layout)) parent-size)
@@ -646,24 +646,24 @@
       (core/unique-ids? variant-ids)
       (core/ids-in? expected-ids variant-ids)
       (unique-ints? tags)
-      (every? (fn [variant :- core/UnionVariantLayoutV0] :- Bool
+      (every? (fn [(variant core/UnionVariantLayoutV0)] Bool
                 (union-payload-valid? layouts parent-size variant))
         variants))))
 
-(defn collection-order-exact? [type-order :- Any layout-order :- Any] :- Bool
+(defn collection-order-exact? [(type-order Any) (layout-order Any)] Bool
   (and (not (nil? type-order))
     (not (nil? layout-order))
     (= (get type-order :token false) (get layout-order :token false))))
 
 (defn map-layout-valid?
-  [type-shape :- Any
-   layout-shape :- Any
-   layouts :- (Vec core/LayoutDef)
-   parent-size :- Int] :- Bool
-  (let [key-type :- core/NativeId (get type-shape :key-type)
-        value-type :- core/NativeId (get type-shape :value-type)
-        key-layout :- (U core/LayoutDef Nil) (find-layout layouts key-type)
-        value-layout :- (U core/LayoutDef Nil) (find-layout layouts value-type)]
+  [(type-shape Any)
+   (layout-shape Any)
+   (layouts (Vec core/LayoutDef))
+   (parent-size Int)] Bool
+  (let [(key-type core/NativeId) (get type-shape :key-type)
+        (value-type core/NativeId) (get type-shape :value-type)
+        (key-layout (U core/LayoutDef Nil)) (find-layout layouts key-type)
+        (value-layout (U core/LayoutDef Nil)) (find-layout layouts value-type)]
     (and (not (nil? key-layout))
       (not (nil? value-layout))
       (dynamic-id= key-type (get layout-shape :key-type nil))
@@ -681,12 +681,12 @@
       (> parent-size 0))))
 
 (defn set-layout-valid?
-  [type-shape :- Any
-   layout-shape :- Any
-   layouts :- (Vec core/LayoutDef)
-   parent-size :- Int] :- Bool
-  (let [element-type :- core/NativeId (get type-shape :element-type)
-        element-layout :- (U core/LayoutDef Nil)
+  [(type-shape Any)
+   (layout-shape Any)
+   (layouts (Vec core/LayoutDef))
+   (parent-size Int)] Bool
+  (let [(element-type core/NativeId) (get type-shape :element-type)
+        (element-layout (U core/LayoutDef Nil))
         (find-layout layouts element-type)]
     (and (not (nil? element-layout))
       (dynamic-id= element-type (get layout-shape :element-type nil))
@@ -699,20 +699,20 @@
       (> parent-size 0))))
 
 (defn layout-shape-exact?
-  [types :- (Vec core/TypeDef)
-   type-shape :- Any
-   layout-shape :- Any
-   layouts :- (Vec core/LayoutDef)
-   parent-size :- Int
-   abi :- core/AbiProfileV0] :- Bool
+  [(types (Vec core/TypeDef))
+   (type-shape Any)
+   (layout-shape Any)
+   (layouts (Vec core/LayoutDef))
+   (parent-size Int)
+   (abi core/AbiProfileV0)] Bool
   (cond
     (some? (get type-shape :kind nil))
-    (let [kind :- Any (get type-shape :kind nil)]
+    (let [(kind Any) (get type-shape :kind nil)]
       (if (instance? native.core.BytesKind kind)
         (and (instance? native.core.BytesShapeV0 layout-shape)
           (= parent-size (core/abi-bytes-span-size abi)))
-        (let [representation :- Any (get layout-shape :representation nil)
-              bit-width :- Int (get representation :bit-width 0)]
+        (let [(representation Any) (get layout-shape :representation nil)
+              (bit-width Int) (get representation :bit-width 0)]
           (and (not (nil? representation))
             (> bit-width 0)
             (= 0 (mod bit-width 8))
@@ -729,10 +729,10 @@
       (some? (get type-shape :iteration-order nil)))
     (set-layout-valid? type-shape layout-shape layouts parent-size)
     (some? (get type-shape :element-type nil))
-    (let [stride :- Int (get layout-shape :stride-bytes 0)
-          element-type :- core/NativeId (get type-shape :element-type)
-          layout-element :- Any (get layout-shape :element-type nil)
-          element-layout :- (U core/LayoutDef Nil)
+    (let [(stride Int) (get layout-shape :stride-bytes 0)
+          (element-type core/NativeId) (get type-shape :element-type)
+          (layout-element Any) (get layout-shape :element-type nil)
+          (element-layout (U core/LayoutDef Nil))
           (find-layout layouts element-type)]
       (and (not (nil? element-layout))
         (dynamic-id= element-type layout-element)
@@ -740,20 +740,20 @@
         (aligned? stride (core/layoutdef-align-bytes element-layout))
         (<= (core/layoutdef-size-bytes element-layout) stride)))
     (some? (get type-shape :target-type nil))
-    (let [target-type :- core/NativeId (get type-shape :target-type)
-          layout-target :- Any (get layout-shape :target-type nil)]
+    (let [(target-type core/NativeId) (get type-shape :target-type)
+          (layout-target Any) (get layout-shape :target-type nil)]
       (and (dynamic-id= target-type layout-target)
         (not (nil? (find-layout layouts target-type)))
         (> parent-size 0)))
     (some? (get type-shape :content-type nil))
-    (let [content-type :- core/NativeId (get type-shape :content-type)
-          layout-content :- Any (get layout-shape :content-type nil)]
+    (let [(content-type core/NativeId) (get type-shape :content-type)
+          (layout-content Any) (get layout-shape :content-type nil)]
       (and (dynamic-id= content-type layout-content)
         (not (nil? (find-layout layouts content-type)))
         (> parent-size 0)))
     (some? (get type-shape :value-type nil))
-    (let [failure-type :- core/NativeId (get type-shape :failure-type)
-          failure-def :- (U core/TypeDef Nil) (find-type types failure-type)]
+    (let [(failure-type core/NativeId) (get type-shape :failure-type)
+          (failure-def (U core/TypeDef Nil)) (find-type types failure-type)]
       (and (not (nil? failure-def))
         (some? (get layout-shape :variants nil))
         (union-layout-valid? (core/typedef-shape failure-def)
@@ -764,11 +764,11 @@
 ;; layout is exactly one pointer, and an owned byte span is {pointer, size_t}.
 ;; Measurement derives these; this checker asserts them from the profile alone.
 (defn abi-widths-declared?
-  [abi :- core/AbiProfileV0
-   layout :- core/LayoutDef] :- Bool
-  (let [shape :- core/LayoutShapeV0 (core/layoutdef-shape layout)
-        size :- Int (core/layoutdef-size-bytes layout)
-        alignment :- Int (core/layoutdef-align-bytes layout)]
+  [(abi core/AbiProfileV0)
+   (layout core/LayoutDef)] Bool
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)
+        (size Int) (core/layoutdef-size-bytes layout)
+        (alignment Int) (core/layoutdef-align-bytes layout)]
     (cond
       (or (instance? native.core.ReferenceShapeV0 shape)
         (instance? native.core.AtomCellShapeV0 shape)
@@ -785,12 +785,12 @@
       :else true)))
 
 (defn type-layout-closed?
-  [types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   type-def :- core/TypeDef
-   abi :- core/AbiProfileV0] :- Bool
-  (let [type-id :- core/NativeId (core/typedef-id type-def)
-        layout :- (U core/LayoutDef Nil) (find-layout layouts type-id)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (type-def core/TypeDef)
+   (abi core/AbiProfileV0)] Bool
+  (let [(type-id core/NativeId) (core/typedef-id type-def)
+        (layout (U core/LayoutDef Nil)) (find-layout layouts type-id)]
     (and (= 1 (layout-count layouts type-id))
       (not (nil? layout))
       (> (core/layoutdef-size-bytes layout) 0)
@@ -805,33 +805,33 @@
         abi))))
 
 (defn closed-layouts
-  [program :- core/NativeCoreProgram
-   abi :- core/AbiProfileV0] :- ObligationVerdictV0
-  (loop [index :- Int 0 types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)]
+  [(program core/NativeCoreProgram)
+   (abi core/AbiProfileV0)] ObligationVerdictV0
+  (loop [(index Int) 0 (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)]
     (if (>= index (count types))
       (->ObligationPassV0 (core/->ClosedLayoutsObligation true))
-      (let [type-def :- core/TypeDef (nth types index)]
+      (let [(type-def core/TypeDef) (nth types index)]
         (if (type-layout-closed? types (core/nativecoreprogram-layouts program) type-def
               abi)
           (recur (+ index 1) types)
           (->ClosedLayoutsDiagnosticV0 (core/typedef-id type-def)))))))
 
 (defn outcome-type?
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId] :- Bool
-  (let [type-def :- (U core/TypeDef Nil) (find-type types type-id)]
+  [(types (Vec core/TypeDef))
+   (type-id core/NativeId)] Bool
+  (let [(type-def (U core/TypeDef Nil)) (find-type types type-id)]
     (and (not (nil? type-def))
       (some? (get (core/typedef-shape type-def) :value-type nil))
       (some? (get (core/typedef-shape type-def) :failure-type nil)))))
 
 (defn checked-terminator-use
-  [function :- core/FunctionDef
-   result-id :- core/NativeId
-   result-type :- core/NativeId
-   terminator :- core/Terminator] :- CheckedUseScanV0
-  (let [switch-value :- Any (get terminator :value-id nil)
-        return-value :- Any (get terminator :value nil)
-        refs :- (Vec core/NativeId) (core/terminator-ssa-refs terminator)]
+  [(function core/FunctionDef)
+   (result-id core/NativeId)
+   (result-type core/NativeId)
+   (terminator core/Terminator)] CheckedUseScanV0
+  (let [(switch-value Any) (get terminator :value-id nil)
+        (return-value Any) (get terminator :value nil)
+        (refs (Vec core/NativeId)) (core/terminator-ssa-refs terminator)]
     (cond
       (dynamic-id= switch-value result-id) (->CheckedUseScanV0 true true)
       (dynamic-id= return-value result-id)
@@ -842,22 +842,22 @@
       :else (->CheckedUseScanV0 false true))))
 
 (defn checked-block-use-scan
-  [function :- core/FunctionDef
-   result-id :- core/NativeId
-   result-type :- core/NativeId
-   block :- core/BasicBlock] :- CheckedUseScanV0
+  [(function core/FunctionDef)
+   (result-id core/NativeId)
+   (result-type core/NativeId)
+   (block core/BasicBlock)] CheckedUseScanV0
   (if
-    (some? (some (fn [instruction :- core/Instruction] :- Bool
+    (some? (some (fn [(instruction core/Instruction)] Bool
                    (core/id-in? (core/instruction-ssa-refs instruction)
                      result-id))
              (core/basicblock-instructions block)))
     (->CheckedUseScanV0 false false)
-    (loop [term-index :- Int 0 handled :- Bool false
-           terminators :- (Vec core/Terminator)
+    (loop [(term-index Int) 0 (handled Bool) false
+           (terminators (Vec core/Terminator))
            (core/basicblock-terminators block)]
       (if (>= term-index (count terminators))
         (->CheckedUseScanV0 handled true)
-        (let [scan :- CheckedUseScanV0
+        (let [(scan CheckedUseScanV0)
               (checked-terminator-use function result-id result-type
                 (nth terminators term-index))]
           (if (checkedusescanv0-legal scan)
@@ -867,14 +867,14 @@
             (->CheckedUseScanV0 false false)))))))
 
 (defn checked-result-handled?
-  [function :- core/FunctionDef
-   result-id :- core/NativeId
-   result-type :- core/NativeId] :- Bool
-  (loop [block-index :- Int 0 handled :- Bool false
-         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+  [(function core/FunctionDef)
+   (result-id core/NativeId)
+   (result-type core/NativeId)] Bool
+  (loop [(block-index Int) 0 (handled Bool) false
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
     (if (>= block-index (count blocks))
       handled
-      (let [scan :- CheckedUseScanV0
+      (let [(scan CheckedUseScanV0)
             (checked-block-use-scan function result-id result-type
               (nth blocks block-index))]
         (if (checkedusescanv0-legal scan)
@@ -884,42 +884,42 @@
           false)))))
 
 (defn checked-instruction-valid?
-  [types :- (Vec core/TypeDef)
-   function :- core/FunctionDef
-   instruction :- core/Instruction] :- Bool
+  [(types (Vec core/TypeDef))
+   (function core/FunctionDef)
+   (instruction core/Instruction)] Bool
   (if (not (instance? native.core.CheckedInstruction instruction))
     true
-    (let [result :- core/SsaValueV0 (core/checkedinstruction-result instruction)
-          result-id :- core/NativeId (core/ssavaluev0-id result)
-          result-type :- core/NativeId (core/ssavaluev0-type-id result)]
+    (let [(result core/SsaValueV0) (core/checkedinstruction-result instruction)
+          (result-id core/NativeId) (core/ssavaluev0-id result)
+          (result-type core/NativeId) (core/ssavaluev0-type-id result)]
       (and (outcome-type? types result-type)
         (checked-result-handled? function result-id result-type)))))
 
 (defn function-checked-arithmetic?
-  [types :- (Vec core/TypeDef)
-   function :- core/FunctionDef] :- Bool
-  (every? (fn [block :- core/BasicBlock] :- Bool
-            (every? (fn [instruction :- core/Instruction] :- Bool
+  [(types (Vec core/TypeDef))
+   (function core/FunctionDef)] Bool
+  (every? (fn [(block core/BasicBlock)] Bool
+            (every? (fn [(instruction core/Instruction)] Bool
                       (checked-instruction-valid? types function instruction))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
 (defn checked-arithmetic
-  [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+  [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->CheckedOperationsObligation true))
-      (let [function :- core/FunctionDef (nth functions index)]
+      (let [(function core/FunctionDef) (nth functions index)]
         (if (function-checked-arithmetic? (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
           (->CheckedArithmeticDiagnosticV0
             (core/functiondef-id function)))))))
 
 (defn find-function
-  [functions :- (Vec core/FunctionDef)
-   function-id :- core/NativeId] :- (U core/FunctionDef Nil)
-  (loop [index :- Int 0]
+  [(functions (Vec core/FunctionDef))
+   (function-id core/NativeId)] (U core/FunctionDef Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count functions)) nil
       (core/native-id= (core/functiondef-id (nth functions index)) function-id)
@@ -927,9 +927,9 @@
       :else (recur (+ index 1)))))
 
 (defn find-abi
-  [abis :- (Vec core/AbiDeclV0)
-   abi-id :- core/NativeId] :- (U core/AbiDeclV0 Nil)
-  (loop [index :- Int 0]
+  [(abis (Vec core/AbiDeclV0))
+   (abi-id core/NativeId)] (U core/AbiDeclV0 Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count abis)) nil
       (core/native-id= (core/abideclv0-id (nth abis index)) abi-id)
@@ -937,21 +937,21 @@
       :else (recur (+ index 1)))))
 
 (defn abi-type-legal?
-  [types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   type-id :- core/NativeId] :- Bool
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (type-id core/NativeId)] Bool
   (and (not (nil? (find-type types type-id)))
     (= 1 (layout-count layouts type-id))))
 
 (defn abi-value-legal?
-  [types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   function :- core/FunctionDef
-   value :- core/AbiValueV0] :- Bool
-  (let [type-id :- core/NativeId (get value :type-id)
-        ownership :- Any (get value :ownership)
-        arena-region :- Any (get ownership :region nil)
-        lifetime :- Any (get value :lifetime-region nil)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
+   (value core/AbiValueV0)] Bool
+  (let [(type-id core/NativeId) (get value :type-id)
+        (ownership Any) (get value :ownership)
+        (arena-region Any) (get ownership :region nil)
+        (lifetime Any) (get value :lifetime-region nil)]
     (and (> (count (get value :name "")) 0)
       (abi-type-legal? types layouts type-id)
       (or (nil? arena-region)
@@ -960,16 +960,16 @@
         (core/id-in? (core/functiondef-regions function) lifetime)))))
 
 (defn abi-parameters-match?
-  [types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   function :- core/FunctionDef
-   values :- (Vec core/AbiValueV0)] :- Bool
-  (let [parameters :- (Vec core/Parameter) (core/functiondef-parameters function)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
+   (values (Vec core/AbiValueV0))] Bool
+  (let [(parameters (Vec core/Parameter)) (core/functiondef-parameters function)]
     (and (= (count parameters) (count values))
-      (loop [index :- Int 0]
+      (loop [(index Int) 0]
         (if (>= index (count values))
           true
-          (let [value :- core/AbiValueV0 (nth values index)]
+          (let [(value core/AbiValueV0) (nth values index)]
             (if (and (abi-value-legal? types layouts function value)
                   (core/native-id= (core/parameter-type-id (nth parameters index))
                     (get value :type-id)))
@@ -977,11 +977,11 @@
               false)))))))
 
 (defn abi-result-matches?
-  [types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   function :- core/FunctionDef
-   result :- (U core/AbiValueV0 Nil)] :- Bool
-  (let [return-type :- Any (get function :return-type nil)]
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
+   (result (U core/AbiValueV0 Nil))] Bool
+  (let [(return-type Any) (get function :return-type nil)]
     (cond
       (and (nil? result) (nil? return-type)) true
       (or (nil? result) (nil? return-type)) false
@@ -990,20 +990,20 @@
         (dynamic-id= (get result :type-id) return-type)))))
 
 (defn failure-type-legal?
-  [types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   failure-type :- core/NativeId] :- Bool
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (failure-type core/NativeId)] Bool
   (and (abi-type-legal? types layouts failure-type)
     (> (count (variant-ids-for-type types failure-type)) 0)))
 
 (defn import-abi-value-legal?
-  [program :- core/NativeCoreProgram
-   types :- (Vec core/TypeDef)
-   layouts :- (Vec core/LayoutDef)
-   value :- core/AbiValueV0] :- Bool
-  (let [ownership :- core/OwnershipRuleV0 (core/abivaluev0-ownership value)
-        arena-region :- Any (get ownership :region nil)
-        lifetime :- (U core/NativeId Nil)
+  [(program core/NativeCoreProgram)
+   (types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (value core/AbiValueV0)] Bool
+  (let [(ownership core/OwnershipRuleV0) (core/abivaluev0-ownership value)
+        (arena-region Any) (get ownership :region nil)
+        (lifetime (U core/NativeId Nil))
         (core/abivaluev0-lifetime-region value)]
     (and (> (count (core/abivaluev0-name value)) 0)
       (abi-type-legal? types layouts (core/abivaluev0-type-id value))
@@ -1013,53 +1013,53 @@
         (core/id-in? (core/nativecoreprogram-allowed-regions program) lifetime)))))
 
 (defn named-variant
-  [variants :- (Vec core/TypeVariant)
-   name :- String] :- (U core/TypeVariant Nil)
-  (loop [index :- Int 0]
+  [(variants (Vec core/TypeVariant))
+   (name String)] (U core/TypeVariant Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count variants)) nil
       (= name (core/typevariant-name (nth variants index)))
       (nth variants index)
       :else (recur (+ index 1)))))
 
-(defn i64-type? [types :- (Vec core/TypeDef) type-id :- core/NativeId] :- Bool
-  (let [definition :- (U core/TypeDef Nil) (find-type types type-id)]
+(defn i64-type? [(types (Vec core/TypeDef)) (type-id core/NativeId)] Bool
+  (let [(definition (U core/TypeDef Nil)) (find-type types type-id)]
     (if (nil? definition)
       false
-      (let [shape :- core/TypeShape (core/typedef-shape definition)]
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
         (and (instance? native.core.AtomType shape)
           (instance? native.core.I64Kind (core/atomtype-kind shape)))))))
 
 (defn optional-i64-type?
-  [types :- (Vec core/TypeDef)
-   type-id :- (U core/NativeId Nil)] :- Bool
+  [(types (Vec core/TypeDef))
+   (type-id (U core/NativeId Nil))] Bool
   (if (nil? type-id) false (i64-type? types type-id)))
 
 (defn socket-outcome-result-legal?
-  [types :- (Vec core/TypeDef)
-   result :- core/AbiValueV0] :- Bool
-  (let [outcome :- (U core/TypeDef Nil)
+  [(types (Vec core/TypeDef))
+   (result core/AbiValueV0)] Bool
+  (let [(outcome (U core/TypeDef Nil))
         (find-type types (core/abivaluev0-type-id result))]
     (if (nil? outcome)
       false
-      (let [shape :- core/TypeShape (core/typedef-shape outcome)]
+      (let [(shape core/TypeShape) (core/typedef-shape outcome)]
         (if (not (instance? native.core.OutcomeType shape))
           false
-          (let [value-type :- core/NativeId (core/outcometype-value-type shape)
-                failure :- (U core/TypeDef Nil)
+          (let [(value-type core/NativeId) (core/outcometype-value-type shape)
+                (failure (U core/TypeDef Nil))
                 (find-type types (core/outcometype-failure-type shape))]
             (if (nil? failure)
               false
-              (let [failure-shape :- core/TypeShape (core/typedef-shape failure)]
+              (let [(failure-shape core/TypeShape) (core/typedef-shape failure)]
                 (if (not (instance? native.core.UnionType failure-shape))
                   false
-                  (let [variants :- (Vec core/TypeVariant)
+                  (let [(variants (Vec core/TypeVariant))
                         (core/uniontype-variants failure-shape)
-                        ok :- (U core/TypeVariant Nil)
+                        (ok (U core/TypeVariant Nil))
                         (named-variant variants "ok")
-                        peer :- (U core/TypeVariant Nil)
+                        (peer (U core/TypeVariant Nil))
                         (named-variant variants "peer-closed")
-                        error :- (U core/TypeVariant Nil)
+                        (error (U core/TypeVariant Nil))
                         (named-variant variants "error")]
                     (and (= 3 (count variants))
                       (not (nil? ok)) (not (nil? peer)) (not (nil? error))
@@ -1072,12 +1072,12 @@
                         (core/typevariant-payload-type error)))))))))))))
 
 (defn abi-decl-legal?
-  [program :- core/NativeCoreProgram
-   abi :- core/AbiDeclV0] :- Bool
-  (let [function :- (U core/FunctionDef Nil)
+  [(program core/NativeCoreProgram)
+   (abi core/AbiDeclV0)] Bool
+  (let [(function (U core/FunctionDef Nil))
         (find-function (core/nativecoreprogram-functions program) (get abi :function-id))
-        types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)
-        layouts :- (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)]
+        (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
+        (layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)]
     (and (> (count (get abi :symbol "")) 0)
       (> (count (get abi :version "")) 0)
       (> (count (get abi :layout-digest "")) 0)
@@ -1085,7 +1085,7 @@
       (some? (get abi :convention nil))
       (failure-type-legal? types layouts (get abi :failure-type))
       (if (instance? native.core.AbiImportV0 (core/abideclv0-direction abi))
-        (let [result :- (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+        (let [(result (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)]
           (and
           (or (instance? native.core.RestrictedCAbiV0
                 (core/abideclv0-convention abi))
@@ -1093,7 +1093,7 @@
               (core/abideclv0-convention abi))
             (instance? native.core.RestrictedCOutcomeOutAbiV0
               (core/abideclv0-convention abi)))
-          (every? (fn [value :- core/AbiValueV0] :- Bool
+          (every? (fn [(value core/AbiValueV0)] Bool
                     (import-abi-value-legal? program types layouts value))
             (core/abideclv0-parameters abi))
           (cond
@@ -1127,32 +1127,32 @@
             (core/functiondef-capabilities function)))))))
 
 (defn extern-call-legal?
-  [program :- core/NativeCoreProgram
-   function :- core/FunctionDef
-   instruction :- core/Instruction] :- Bool
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)
+   (instruction core/Instruction)] Bool
   (if (not (instance? native.core.ExternCallInstruction instruction))
     true
-    (let [abi :- (U core/AbiDeclV0 Nil)
+    (let [(abi (U core/AbiDeclV0 Nil))
           (find-abi (core/nativecoreprogram-abis program)
             (core/externcallinstruction-abi-id instruction))]
       (if (nil? abi)
         false
-        (let [arguments :- (Vec core/NativeId)
+        (let [(arguments (Vec core/NativeId))
               (core/externcallinstruction-arguments instruction)
-              parameters :- (Vec core/AbiValueV0)
+              (parameters (Vec core/AbiValueV0))
               (core/abideclv0-parameters abi)
-              types :- (Vec core/TypeDef) (core/nativecoreprogram-types program)
-              result :- (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
-              arena :- (U core/NativeId Nil)
+              (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
+              (result (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)
+              (arena (U core/NativeId Nil))
               (core/externcallinstruction-arena-id instruction)]
           (and
             (instance? native.core.AbiImportV0
               (core/abideclv0-direction abi))
             (= (count arguments) (count parameters))
-            (loop [index :- Int 0]
+            (loop [(index Int) 0]
               (if (>= index (count arguments))
                 true
-                (let [site :- DefSiteV0
+                (let [(site DefSiteV0)
                       (find-def-site function (nth arguments index))]
                   (if (and (defsitev0-found site)
                         (core/native-id= (defsitev0-type-id site)
@@ -1171,7 +1171,7 @@
               (nil? arena)
               (if (instance? native.core.ArenaOwnedV0
                     (core/abivaluev0-ownership result))
-                (let [region :- (U core/NativeId Nil)
+                (let [(region (U core/NativeId Nil))
                       (get (core/abivaluev0-ownership result) :region nil)]
                   (and (not (nil? region))
                     (core/id-in? (core/functiondef-regions function) region)
@@ -1183,57 +1183,57 @@
             (core/ids-in? (core/abideclv0-required-capabilities abi)
               (core/functiondef-capabilities function))))))))
 
-(defn extern-calls-legal? [program :- core/NativeCoreProgram] :- Bool
-  (every? (fn [function :- core/FunctionDef] :- Bool
-            (every? (fn [block :- core/BasicBlock] :- Bool
-                      (every? (fn [instruction :- core/Instruction] :- Bool
+(defn extern-calls-legal? [(program core/NativeCoreProgram)] Bool
+  (every? (fn [(function core/FunctionDef)] Bool
+            (every? (fn [(block core/BasicBlock)] Bool
+                      (every? (fn [(instruction core/Instruction)] Bool
                                 (extern-call-legal? program function instruction))
                         (core/basicblock-instructions block)))
               (core/functiondef-blocks function)))
     (core/nativecoreprogram-functions program)))
 
-(defn legal-abi [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 abis :- (Vec core/AbiDeclV0)
+(defn legal-abi [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (abis (Vec core/AbiDeclV0))
          (core/nativecoreprogram-abis program)]
     (if (>= index (count abis))
       (if (extern-calls-legal? program)
         (->ObligationPassV0 (core/->LegalAbiObligation true))
         (->LegalAbiDiagnosticV0 (obligation-id "extern-call")))
-      (let [abi :- core/AbiDeclV0 (nth abis index)]
+      (let [(abi core/AbiDeclV0) (nth abis index)]
         (if (abi-decl-legal? program abi)
           (recur (+ index 1) abis)
           (->LegalAbiDiagnosticV0 (get abi :id)))))))
 
 (defn remove-id
-  [ids :- (Vec core/NativeId)
-   target :- core/NativeId] :- (Vec core/NativeId)
-  (filterv (fn [candidate :- core/NativeId] :- Bool
+  [(ids (Vec core/NativeId))
+   (target core/NativeId)] (Vec core/NativeId)
+  (filterv (fn [(candidate core/NativeId)] Bool
              (not (core/native-id= candidate target))) ids))
 
 (defn token-state-consume
-  [state :- TokenStateV0
-   consumed :- (Vec core/NativeId)] :- TokenStateV0
+  [(state TokenStateV0)
+   (consumed (Vec core/NativeId))] TokenStateV0
   (if (or (not (tokenstatev0-valid state))
         (not (core/unique-ids? consumed))
         (not (core/ids-in? consumed (tokenstatev0-live state))))
     (->TokenStateV0 (tokenstatev0-live state) (tokenstatev0-seen state) false)
-    (loop [index :- Int 0 live :- (Vec core/NativeId) (tokenstatev0-live state)]
+    (loop [(index Int) 0 (live (Vec core/NativeId)) (tokenstatev0-live state)]
       (if (>= index (count consumed))
         (->TokenStateV0 live (tokenstatev0-seen state) true)
         (recur (+ index 1) (remove-id live (nth consumed index)))))))
 
 (defn produced-token-ids
-  [produced :- (Vec core/ResourceTokenV0)] :- (Vec core/NativeId)
-  (mapv (fn [token :- core/ResourceTokenV0] :- core/NativeId
+  [(produced (Vec core/ResourceTokenV0))] (Vec core/NativeId)
+  (mapv (fn [(token core/ResourceTokenV0)] core/NativeId
           (get token :id)) produced))
 
 (defn token-state-produce
-  [state :- TokenStateV0
-   produced :- (Vec core/ResourceTokenV0)] :- TokenStateV0
-  (let [produced-ids :- (Vec core/NativeId) (produced-token-ids produced)]
+  [(state TokenStateV0)
+   (produced (Vec core/ResourceTokenV0))] TokenStateV0
+  (let [(produced-ids (Vec core/NativeId)) (produced-token-ids produced)]
     (if (or (not (tokenstatev0-valid state))
           (not (core/unique-ids? produced-ids))
-          (some? (some (fn [token-id :- core/NativeId] :- Bool
+          (some? (some (fn [(token-id core/NativeId)] Bool
                          (core/id-in? (tokenstatev0-seen state) token-id))
                    produced-ids)))
       (->TokenStateV0 (tokenstatev0-live state) (tokenstatev0-seen state) false)
@@ -1243,23 +1243,23 @@
         true))))
 
 (defn apply-token-flow
-  [state :- TokenStateV0
-   flow :- core/TokenFlowV0] :- TokenStateV0
+  [(state TokenStateV0)
+   (flow core/TokenFlowV0)] TokenStateV0
   (token-state-produce
     (token-state-consume state (get flow :consumed []))
     (get flow :produced [])))
 
 (defn instruction-token-state
-  [state :- TokenStateV0
-   instruction :- core/Instruction] :- TokenStateV0
-  (let [flow :- Any (get instruction :tokens nil)]
+  [(state TokenStateV0)
+   (instruction core/Instruction)] TokenStateV0
+  (let [(flow Any) (get instruction :tokens nil)]
     (if (nil? flow) state (apply-token-flow state flow))))
 
 (defn block-token-state
-  [state :- TokenStateV0
-   block :- core/BasicBlock] :- TokenStateV0
-  (loop [index :- Int 0 current :- TokenStateV0 state
-         instructions :- (Vec core/Instruction) (core/basicblock-instructions block)]
+  [(state TokenStateV0)
+   (block core/BasicBlock)] TokenStateV0
+  (loop [(index Int) 0 (current TokenStateV0) state
+         (instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
     (if (or (>= index (count instructions)) (not (tokenstatev0-valid current)))
       current
       (recur (+ index 1)
@@ -1267,19 +1267,19 @@
         instructions))))
 
 (defrecord TokenVisitV0
-  [block-id :- core/NativeId
-   live :- (Vec core/NativeId)
-   seen :- (Vec core/NativeId)])
+  [(block-id core/NativeId)
+   (live (Vec core/NativeId))
+   (seen (Vec core/NativeId))])
 
 (defrecord TokenWorkV0
-  [block-id: core/NativeId
-   state: TokenStateV0
-   path: (Vec TokenVisitV0)])
+  [(block-id core/NativeId)
+   (state TokenStateV0)
+   (path (Vec TokenVisitV0))])
 
 (defn token-visit
-  [visited :- (Vec TokenVisitV0)
-   block-id :- core/NativeId] :- (U TokenVisitV0 Nil)
-  (loop [index :- Int 0]
+  [(visited (Vec TokenVisitV0))
+   (block-id core/NativeId)] (U TokenVisitV0 Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count visited)) nil
       (core/native-id= (tokenvisitv0-block-id (nth visited index)) block-id)
@@ -1287,19 +1287,19 @@
       :else (recur (+ index 1)))))
 
 (defn token-sets-equal?
-  [left :- (Vec core/NativeId)
-   right :- (Vec core/NativeId)] :- Bool
+  [(left (Vec core/NativeId))
+   (right (Vec core/NativeId))] Bool
   (and (= (count left) (count right)) (core/ids-in? left right)))
 
-(defn token-visit-matches? [visit: TokenVisitV0 state: TokenStateV0] -> Bool
+(defn token-visit-matches? [(visit TokenVisitV0) (state TokenStateV0)] Bool
   (and (token-sets-equal? (tokenvisitv0-live visit) (tokenstatev0-live state))
     (token-sets-equal? (tokenvisitv0-seen visit) (tokenstatev0-seen state))))
 
 (defn token-state-visited?
-  [visited: (Vec TokenVisitV0)
-   block-id: core/NativeId
-   state: TokenStateV0] -> Bool
-  (loop [index: Int 0]
+  [(visited (Vec TokenVisitV0))
+   (block-id core/NativeId)
+   (state TokenStateV0)] Bool
+  (loop [(index Int) 0]
     (cond
       (>= index (count visited)) false
       (and (core/native-id= (tokenvisitv0-block-id (nth visited index)) block-id)
@@ -1307,21 +1307,21 @@
       :else (recur (+ index 1)))))
 
 (defn token-paths-valid?
-  [function :- core/FunctionDef
-   block-id :- core/NativeId
-   state :- TokenStateV0
-   visited :- (Vec TokenVisitV0)] :- Bool
+  [(function core/FunctionDef)
+   (block-id core/NativeId)
+   (state TokenStateV0)
+   (visited (Vec TokenVisitV0))] Bool
   ;; Memoized block states collapse diamonds; each work item retains the back-edge path.
-  (loop [position: Int 0
-         work: (Vec TokenWorkV0) [(->TokenWorkV0 block-id state visited)]
-         memo: (Vec TokenVisitV0) []]
+  (loop [(position Int) 0
+         (work (Vec TokenWorkV0)) [(->TokenWorkV0 block-id state visited)]
+         (memo (Vec TokenVisitV0)) []]
     (if (>= position (count work))
       true
-      (let [item: TokenWorkV0 (nth work position)
-            current-id: core/NativeId (tokenworkv0-block-id item)
-            current-state: TokenStateV0 (tokenworkv0-state item)
-            path: (Vec TokenVisitV0) (tokenworkv0-path item)
-            entered: (U TokenVisitV0 Nil) (token-visit path current-id)]
+      (let [(item TokenWorkV0) (nth work position)
+            (current-id core/NativeId) (tokenworkv0-block-id item)
+            (current-state TokenStateV0) (tokenworkv0-state item)
+            (path (Vec TokenVisitV0)) (tokenworkv0-path item)
+            (entered (U TokenVisitV0 Nil)) (token-visit path current-id)]
         (if (some? entered)
           (if (token-sets-equal? (tokenvisitv0-live entered)
                 (tokenstatev0-live current-state))
@@ -1329,19 +1329,19 @@
             false)
           (if (token-state-visited? memo current-id current-state)
             (recur (+ position 1) work memo)
-            (let [block: (U core/BasicBlock Nil)
+            (let [(block (U core/BasicBlock Nil))
                   (find-block (core/functiondef-blocks function) current-id)]
               (if (nil? block)
                 false
-                (let [next-state: TokenStateV0
+                (let [(next-state TokenStateV0)
                       (block-token-state current-state block)
-                      successors: (Vec core/NativeId) (block-successors block)
-                      visit: TokenVisitV0
+                      (successors (Vec core/NativeId)) (block-successors block)
+                      (visit TokenVisitV0)
                       (->TokenVisitV0 current-id
                         (tokenstatev0-live current-state)
                         (tokenstatev0-seen current-state))
-                      next-path: (Vec TokenVisitV0) (conj path visit)
-                      next-memo: (Vec TokenVisitV0) (conj memo visit)]
+                      (next-path (Vec TokenVisitV0)) (conj path visit)
+                      (next-memo (Vec TokenVisitV0)) (conj memo visit)]
                   (cond
                     (not (tokenstatev0-valid next-state)) false
                     (= 0 (count successors))
@@ -1349,18 +1349,18 @@
                       (recur (+ position 1) work next-memo)
                       false)
                     :else
-                    (let [next-work: (Vec TokenWorkV0)
+                    (let [(next-work (Vec TokenWorkV0))
                           (mapv
-                            (fn [successor: core/NativeId] -> TokenWorkV0
+                            (fn [(successor core/NativeId)] TokenWorkV0
                               (->TokenWorkV0 successor next-state next-path))
                             successors)]
                       (recur (+ position 1) (vec (concat work next-work))
                         next-memo))))))))))))
 
 (defn find-capability
-  [capabilities :- (Vec core/CapabilityDef)
-   capability-id :- core/NativeId] :- (U core/CapabilityDef Nil)
-  (loop [index :- Int 0]
+  [(capabilities (Vec core/CapabilityDef))
+   (capability-id core/NativeId)] (U core/CapabilityDef Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count capabilities)) nil
       (core/native-id= (core/capabilitydef-id (nth capabilities index))
@@ -1369,10 +1369,10 @@
       :else (recur (+ index 1)))))
 
 (defn affine-function-capabilities
-  [program :- core/NativeCoreProgram
-   function :- core/FunctionDef] :- (Vec core/NativeId)
-  (filterv (fn [capability-id :- core/NativeId] :- Bool
-             (let [capability :- (U core/CapabilityDef Nil)
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)] (Vec core/NativeId)
+  (filterv (fn [(capability-id core/NativeId)] Bool
+             (let [(capability (U core/CapabilityDef Nil))
                    (find-capability (core/nativecoreprogram-capabilities program)
                      capability-id)]
                (and (not (nil? capability))
@@ -1380,9 +1380,9 @@
     (core/functiondef-capabilities function)))
 
 (defn function-tokens-discharged?
-  [program :- core/NativeCoreProgram
-   function :- core/FunctionDef] :- Bool
-  (let [initial :- (Vec core/NativeId)
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)] Bool
+  (let [(initial (Vec core/NativeId))
         (core/append-ids (core/functiondef-regions function)
           (affine-function-capabilities program function))]
     (and (core/unique-ids? initial)
@@ -1390,21 +1390,21 @@
         (->TokenStateV0 initial initial true) []))))
 
 (defn discharged-tokens
-  [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+  [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->DischargedTokensObligation true))
-      (let [function :- core/FunctionDef (nth functions index)]
+      (let [(function core/FunctionDef) (nth functions index)]
         (if (function-tokens-discharged? program function)
           (recur (+ index 1) functions)
           (->DischargedTokensDiagnosticV0
             (core/functiondef-id function)))))))
 
 (defn find-effect
-  [effects :- (Vec core/EffectDef)
-   effect-id :- core/NativeId] :- (U core/EffectDef Nil)
-  (loop [index :- Int 0]
+  [(effects (Vec core/EffectDef))
+   (effect-id core/NativeId)] (U core/EffectDef Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count effects)) nil
       (core/native-id= (core/effectdef-id (nth effects index)) effect-id)
@@ -1412,29 +1412,29 @@
       :else (recur (+ index 1)))))
 
 (defn effect-covers-store?
-  [kind :- Any
-   region :- core/NativeId
-   capability :- core/NativeId] :- Bool
+  [(kind Any)
+   (region core/NativeId)
+   (capability core/NativeId)] Bool
   (or (= kind (core/->WriteEffect region))
     (= kind (core/->AtomicEffect region capability))))
 
-(defn effect-covers-allocation? [kind :- Any region :- core/NativeId] :- Bool
+(defn effect-covers-allocation? [(kind Any) (region core/NativeId)] Bool
   (= kind (core/->AllocateEffect region)))
 
 (defn effect-covers-atom-state?
-  [kind :- Any
-   region :- core/NativeId
-   capability :- core/NativeId] :- Bool
+  [(kind Any)
+   (region core/NativeId)
+   (capability core/NativeId)] Bool
   (= kind (core/->AtomicEffect region capability)))
 
 (defn declared-effect-covers?
-  [program :- core/NativeCoreProgram
-   function :- core/FunctionDef
-   region :- core/NativeId
-   capability :- core/NativeId
-   allocation :- Bool] :- Bool
-  (some? (some (fn [effect-id :- core/NativeId] :- Bool
-                 (let [effect :- (U core/EffectDef Nil)
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)
+   (region core/NativeId)
+   (capability core/NativeId)
+   (allocation Bool)] Bool
+  (some? (some (fn [(effect-id core/NativeId)] Bool
+                 (let [(effect (U core/EffectDef Nil))
                        (find-effect (core/nativecoreprogram-effects program) effect-id)]
                    (and (not (nil? effect))
                      (if allocation
@@ -1443,7 +1443,7 @@
                          region capability)))))
            (core/functiondef-effects function))))
 
-(defn store-resources [store :- core/StoreOp] :- (Vec core/NativeId)
+(defn store-resources [(store core/StoreOp)] (Vec core/NativeId)
   [(get store :region) (get store :capability)])
 
 ;; An epoch a callee opens closes before that callee returns — leak freedom
@@ -1451,12 +1451,12 @@
 ;; crosses the call boundary. A caller is required to declare only what it can
 ;; observe, which is the callee's effects minus its epoch-local ones.
 (defn epoch-local-region?
-  [regions :- (Vec core/RegionDef)
-   region-id :- Any] :- Bool
+  [(regions (Vec core/RegionDef))
+   (region-id Any)] Bool
   (and (some? region-id)
     (some?
       (some
-        (fn [region :- core/RegionDef] :- Bool
+        (fn [(region core/RegionDef)] Bool
           (and (= (get region-id :value "")
                  (get (core/regiondef-id region) :value ""))
             (instance? native.core.ArenaRegion (core/regiondef-kind region))
@@ -1464,11 +1464,11 @@
         regions))))
 
 (defn callee-exported-effects
-  [program :- core/NativeCoreProgram
-   callee :- core/FunctionDef] :- (Vec core/NativeId)
+  [(program core/NativeCoreProgram)
+   (callee core/FunctionDef)] (Vec core/NativeId)
   (filterv
-    (fn [effect-id :- core/NativeId] :- Bool
-      (let [effect :- (U core/EffectDef Nil)
+    (fn [(effect-id core/NativeId)] Bool
+      (let [(effect (U core/EffectDef Nil))
             (find-effect (core/nativecoreprogram-effects program) effect-id)]
         (or (nil? effect)
           (not (epoch-local-region? (core/nativecoreprogram-regions program)
@@ -1476,58 +1476,58 @@
     (core/functiondef-effects callee)))
 
 (defn instruction-effects-bounded?
-  [program :- core/NativeCoreProgram
-   function :- core/FunctionDef
-   instruction :- core/Instruction] :- Bool
-  (let [store :- Any (get instruction :store nil)
-        allocation-region :- Any (get instruction :region nil)
-        allocation-capability :- Any (get instruction :capability nil)
-        abi-id :- Any (get instruction :abi-id nil)
-        callee-id :- Any (get instruction :function-id nil)]
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)
+   (instruction core/Instruction)] Bool
+  (let [(store Any) (get instruction :store nil)
+        (allocation-region Any) (get instruction :region nil)
+        (allocation-capability Any) (get instruction :capability nil)
+        (abi-id Any) (get instruction :abi-id nil)
+        (callee-id Any) (get instruction :function-id nil)]
     (cond
       (instance? native.core.AtomStateInstruction instruction)
-      (let [region :- core/NativeId
+      (let [(region core/NativeId)
             (core/atomstateinstruction-region instruction)
-            capability :- core/NativeId
+            (capability core/NativeId)
             (core/atomstateinstruction-capability instruction)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
           (some?
             (some
-              (fn [effect-id :- core/NativeId] :- Bool
-                (let [effect :- (U core/EffectDef Nil)
+              (fn [(effect-id core/NativeId)] Bool
+                (let [(effect (U core/EffectDef Nil))
                       (find-effect (core/nativecoreprogram-effects program) effect-id)]
                   (and (not (nil? effect))
                     (effect-covers-atom-state? (core/effectdef-kind effect)
                       region capability))))
               (core/functiondef-effects function)))))
       (instance? native.core.AtomSwapInstruction instruction)
-      (let [updater :- (U core/FunctionDef Nil)
+      (let [(updater (U core/FunctionDef Nil))
             (find-function (core/nativecoreprogram-functions program)
               (core/atomswapinstruction-updater-id instruction))]
         (and (not (nil? updater))
           (= 0 (count (core/functiondef-regions updater)))
           (= 0 (count (core/functiondef-capabilities updater)))
           (every?
-            (fn [effect-id :- core/NativeId] :- Bool
-              (let [effect :- (U core/EffectDef Nil)
+            (fn [(effect-id core/NativeId)] Bool
+              (let [(effect (U core/EffectDef Nil))
                     (find-effect (core/nativecoreprogram-effects program) effect-id)]
                 (and (not (nil? effect))
                   (instance? native.core.PureEffect
                     (core/effectdef-kind effect)))))
             (core/functiondef-effects updater))))
       (not (nil? store))
-      (let [resources :- (Vec core/NativeId) (store-resources store)
-            region :- core/NativeId (nth resources 0)
-            capability :- core/NativeId (nth resources 1)]
+      (let [(resources (Vec core/NativeId)) (store-resources store)
+            (region core/NativeId) (nth resources 0)
+            (capability core/NativeId) (nth resources 1)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
           (declared-effect-covers? program function region capability false)))
       ;; A non-allocating writer acquires the arena under the write capability,
       ;; so the acquire is covered by a write effect as well as an allocate one.
       (instance? native.core.ArenaInstruction instruction)
-      (let [region :- core/NativeId (core/arenainstruction-region instruction)
-            capability :- core/NativeId
+      (let [(region core/NativeId) (core/arenainstruction-region instruction)
+            (capability core/NativeId)
             (core/arenainstruction-capability instruction)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
@@ -1540,7 +1540,7 @@
         (declared-effect-covers? program function allocation-region
           allocation-capability true))
       (not (nil? abi-id))
-      (let [abi :- (U core/AbiDeclV0 Nil)
+      (let [(abi (U core/AbiDeclV0 Nil))
             (find-abi (core/nativecoreprogram-abis program) abi-id)]
         (and (not (nil? abi))
           (instance? native.core.AbiImportV0
@@ -1550,7 +1550,7 @@
           (core/ids-in? (core/abideclv0-required-capabilities abi)
             (core/functiondef-capabilities function))))
       (not (nil? callee-id))
-      (let [callee :- (U core/FunctionDef Nil)
+      (let [(callee (U core/FunctionDef Nil))
             (find-function (core/nativecoreprogram-functions program) callee-id)]
         (and (not (nil? callee))
           (core/ids-in? (callee-exported-effects program callee)
@@ -1560,20 +1560,20 @@
       :else true)))
 
 (defn function-effects-bounded?
-  [program :- core/NativeCoreProgram
-   function :- core/FunctionDef] :- Bool
-  (every? (fn [block :- core/BasicBlock] :- Bool
-            (every? (fn [instruction :- core/Instruction] :- Bool
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)] Bool
+  (every? (fn [(block core/BasicBlock)] Bool
+            (every? (fn [(instruction core/Instruction)] Bool
                       (instruction-effects-bounded? program function instruction))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
-(defn bounded-effects [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+(defn bounded-effects [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->BoundedEffectsObligation true))
-      (let [function :- core/FunctionDef (nth functions index)]
+      (let [(function core/FunctionDef) (nth functions index)]
         (if (function-effects-bounded? program function)
           (recur (+ index 1) functions)
           (->BoundedEffectsDiagnosticV0
@@ -1591,9 +1591,9 @@
 ;; type carries no handle) pass every check.
 
 (defn find-region
-  [regions :- (Vec core/RegionDef)
-   region-id :- core/NativeId] :- (U core/RegionDef Nil)
-  (loop [index :- Int 0]
+  [(regions (Vec core/RegionDef))
+   (region-id core/NativeId)] (U core/RegionDef Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count regions)) nil
       (core/native-id= (core/regiondef-id (nth regions index)) region-id)
@@ -1601,31 +1601,31 @@
       :else (recur (+ index 1)))))
 
 (defn root-region?
-  [regions :- (Vec core/RegionDef)
-   region-id :- core/NativeId] :- Bool
-  (let [region :- (U core/RegionDef Nil) (find-region regions region-id)]
+  [(regions (Vec core/RegionDef))
+   (region-id core/NativeId)] Bool
+  (let [(region (U core/RegionDef Nil)) (find-region regions region-id)]
     (and (some? region) (nil? (core/regiondef-parent region)))))
 
 (defn epoch-region?
-  [regions :- (Vec core/RegionDef)
-   region-id :- core/NativeId] :- Bool
-  (let [region :- (U core/RegionDef Nil) (find-region regions region-id)]
+  [(regions (Vec core/RegionDef))
+   (region-id core/NativeId)] Bool
+  (let [(region (U core/RegionDef Nil)) (find-region regions region-id)]
     (and (some? region)
       (instance? native.core.ArenaRegion (core/regiondef-kind region))
       (some? (core/regiondef-parent region)))))
 
 (defn region-on-ancestor-chain?
-  [regions :- (Vec core/RegionDef)
-   target :- core/NativeId
-   chain-start :- core/NativeId] :- Bool
-  (loop [current :- core/NativeId chain-start
-         budget :- Int (+ 1 (count regions))]
+  [(regions (Vec core/RegionDef))
+   (target core/NativeId)
+   (chain-start core/NativeId)] Bool
+  (loop [(current core/NativeId) chain-start
+         (budget Int) (+ 1 (count regions))]
     (if (core/native-id= current target)
       true
-      (let [region :- (U core/RegionDef Nil) (find-region regions current)]
+      (let [(region (U core/RegionDef Nil)) (find-region regions current)]
         (if (nil? region)
           false
-          (let [parent :- (U core/NativeId Nil) (core/regiondef-parent region)]
+          (let [(parent (U core/NativeId Nil)) (core/regiondef-parent region)]
             (if (or (nil? parent) (<= budget 0))
               false
               (recur parent (- budget 1)))))))))
@@ -1635,16 +1635,16 @@
 ;; driver lifetime. Otherwise the value's epoch must sit on the destination's
 ;; parent chain; an unknown destination refuses conservatively.
 (defn epoch-write-legal?
-  [regions :- (Vec core/RegionDef)
-   value-epoch :- (U core/NativeId Nil)
-   destination-epoch :- (U core/NativeId Nil)] :- Bool
+  [(regions (Vec core/RegionDef))
+   (value-epoch (U core/NativeId Nil))
+   (destination-epoch (U core/NativeId Nil))] Bool
   (cond
     (nil? value-epoch) true
     (root-region? regions value-epoch) true
     (nil? destination-epoch) false
     :else (region-on-ancestor-chain? regions value-epoch destination-epoch)))
 
-(defn epoch-incomparable-id [] :- core/NativeId
+(defn epoch-incomparable-id [] core/NativeId
   (obligation-id "epoch-incomparable"))
 
 ;; Whether a value of this type can reference region storage: Text, Bytes,
@@ -1653,18 +1653,18 @@
 ;; and outcomes are treated as handle-carrying. Unknown types refuse
 ;; conservatively (treated as handles).
 (defn type-carries-handles-with-budget?
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId
-   budget :- Int] :- Bool
+  [(types (Vec core/TypeDef))
+   (type-id core/NativeId)
+   (budget Int)] Bool
   (if (<= budget 0)
     true
-    (let [definition :- (U core/TypeDef Nil) (find-type types type-id)]
+    (let [(definition (U core/TypeDef Nil)) (find-type types type-id)]
       (if (nil? definition)
         true
-        (let [shape :- core/TypeShape (core/typedef-shape definition)]
+        (let [(shape core/TypeShape) (core/typedef-shape definition)]
           (cond
             (instance? native.core.AtomType shape)
-            (let [kind :- core/AtomKind (core/atomtype-kind shape)]
+            (let [(kind core/AtomKind) (core/atomtype-kind shape)]
               (or (instance? native.core.TextKind kind)
                 (instance? native.core.BytesKind kind)
                 (instance? native.core.KeywordKind kind)
@@ -1673,7 +1673,7 @@
             (instance? native.core.RecordType shape)
             (some?
               (some
-                (fn [field :- core/TypeField] :- Bool
+                (fn [(field core/TypeField)] Bool
                   (type-carries-handles-with-budget? types
                     (core/typefield-type-id field) (- budget 1)))
                 (core/recordtype-fields shape)))
@@ -1681,8 +1681,8 @@
             (instance? native.core.UnionType shape)
             (some?
               (some
-                (fn [variant :- core/TypeVariant] :- Bool
-                  (let [payload :- (U core/NativeId Nil)
+                (fn [(variant core/TypeVariant)] Bool
+                  (let [(payload (U core/NativeId Nil))
                         (core/typevariant-payload-type variant)]
                     (and (some? payload)
                       (type-carries-handles-with-budget? types payload
@@ -1692,17 +1692,17 @@
             :else true))))))
 
 (defn type-carries-handles?
-  [types :- (Vec core/TypeDef)
-   type-id :- core/NativeId] :- Bool
+  [(types (Vec core/TypeDef))
+   (type-id core/NativeId)] Bool
   (type-carries-handles-with-budget? types type-id (+ 1 (count types))))
 
 ;; The arena SSA operand an instruction allocates through, wherever the
 ;; instruction family keeps it (top level, text builtin, codec operation).
 (defn instruction-arena-operand
-  [instruction :- core/Instruction] :- (U core/NativeId Nil)
-  (let [top :- Any (get instruction :arena-id nil)
-        operation :- Any (get instruction :operation nil)
-        builtin :- Any (get instruction :builtin nil)]
+  [(instruction core/Instruction)] (U core/NativeId Nil)
+  (let [(top Any) (get instruction :arena-id nil)
+        (operation Any) (get instruction :operation nil)
+        (builtin Any) (get instruction :builtin nil)]
     (cond
       (some? top) top
       (some? operation) (get operation :arena-id nil)
@@ -1710,19 +1710,19 @@
       :else nil)))
 
 (defn function-arena-region
-  [function :- core/FunctionDef
-   arena-value-id :- core/NativeId] :- (U core/NativeId Nil)
-  (loop [block-position :- Int 0
-         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+  [(function core/FunctionDef)
+   (arena-value-id core/NativeId)] (U core/NativeId Nil)
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
     (if (>= block-position (count blocks))
       nil
-      (let [instructions :- (Vec core/Instruction)
+      (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))
-            found :- (U core/NativeId Nil)
-            (loop [position :- Int 0]
+            (found (U core/NativeId Nil))
+            (loop [(position Int) 0]
               (if (>= position (count instructions))
                 nil
-                (let [instruction :- core/Instruction (nth instructions position)]
+                (let [(instruction core/Instruction) (nth instructions position)]
                   (if (and (instance? native.core.ArenaInstruction instruction)
                         (core/native-id= arena-value-id
                           (core/instruction-result-id instruction)))
@@ -1737,20 +1737,20 @@
 ;; AtomStateInstruction acquires. Built once per function so the epoch walk
 ;; resolves a destination by lookup instead of rescanning the blocks.
 (defn function-region-handles
-  [function :- core/FunctionDef] :- (Map String core/NativeId)
-  (loop [block-position :- Int 0
-         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)
-         handles :- (Map String core/NativeId) {}]
+  [(function core/FunctionDef)] (Map String core/NativeId)
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+         (handles (Map String core/NativeId)) {}]
     (if (>= block-position (count blocks))
       handles
-      (let [instructions :- (Vec core/Instruction)
+      (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
-          (loop [position :- Int 0
-                 inner :- (Map String core/NativeId) handles]
+          (loop [(position Int) 0
+                 (inner (Map String core/NativeId)) handles]
             (if (>= position (count instructions))
               inner
-              (let [instruction :- core/Instruction (nth instructions position)]
+              (let [(instruction core/Instruction) (nth instructions position)]
                 (recur (+ position 1)
                   (cond
                     (instance? native.core.ArenaInstruction instruction)
@@ -1770,18 +1770,18 @@
 ;; conflating the two is what made an atom deref (cell handle + state handle)
 ;; merge two unrelated roots into the incomparable sentinel.
 (defn region-handle?
-  [handles :- (Map String core/NativeId)
-   value-id :- core/NativeId] :- Bool
+  [(handles (Map String core/NativeId))
+   (value-id core/NativeId)] Bool
   (some? (get handles (native-id-key value-id))))
 
 (defn handle-region
-  [handles :- (Map String core/NativeId)
-   value-id :- core/NativeId] :- (U core/NativeId Nil)
+  [(handles (Map String core/NativeId))
+   (value-id core/NativeId)] (U core/NativeId Nil)
   (get handles (native-id-key value-id)))
 
 (defn epoch-of
-  [epochs :- (Map String core/NativeId)
-   value-id :- core/NativeId] :- (U core/NativeId Nil)
+  [(epochs (Map String core/NativeId))
+   (value-id core/NativeId)] (U core/NativeId Nil)
   (get epochs (native-id-key value-id)))
 
 ;; Merge keeps the YOUNGER of two comparable epochs — the conservative
@@ -1791,9 +1791,9 @@
 ;; lifetime, so every check below (write legality, closed-region escape,
 ;; root-or-free) answers the same for any of them.
 (defn merge-epochs
-  [regions :- (Vec core/RegionDef)
-   left :- (U core/NativeId Nil)
-   right :- (U core/NativeId Nil)] :- (U core/NativeId Nil)
+  [(regions (Vec core/RegionDef))
+   (left (U core/NativeId Nil))
+   (right (U core/NativeId Nil))] (U core/NativeId Nil)
   (cond
     (nil? left) right
     (nil? right) left
@@ -1804,23 +1804,23 @@
     :else (epoch-incomparable-id)))
 
 (defn merge-epoch-into
-  [regions :- (Vec core/RegionDef)
-   epochs :- (Map String core/NativeId)
-   value-id :- core/NativeId
-   epoch :- (U core/NativeId Nil)] :- (Map String core/NativeId)
+  [(regions (Vec core/RegionDef))
+   (epochs (Map String core/NativeId))
+   (value-id core/NativeId)
+   (epoch (U core/NativeId Nil))] (Map String core/NativeId)
   (if (nil? epoch)
     epochs
-    (let [key :- String (native-id-key value-id)
-          merged :- (U core/NativeId Nil)
+    (let [(key String) (native-id-key value-id)
+          (merged (U core/NativeId Nil))
           (merge-epochs regions (get epochs key) epoch)]
       (if (nil? merged) epochs (assoc epochs key merged)))))
 
 (defn instruction-epoch
-  [regions :- (Vec core/RegionDef)
-   types :- (Vec core/TypeDef)
-   handles :- (Map String core/NativeId)
-   epochs :- (Map String core/NativeId)
-   instruction :- core/Instruction] :- (U core/NativeId Nil)
+  [(regions (Vec core/RegionDef))
+   (types (Vec core/TypeDef))
+   (handles (Map String core/NativeId))
+   (epochs (Map String core/NativeId))
+   (instruction core/Instruction)] (U core/NativeId Nil)
   (cond
     (instance? native.core.ArenaInstruction instruction)
     (core/arenainstruction-region instruction)
@@ -1835,18 +1835,18 @@
     (core/allocateinstruction-region instruction)
 
     (some? (instruction-arena-operand instruction))
-    (let [arena :- Any (instruction-arena-operand instruction)
-          region :- (U core/NativeId Nil) (handle-region handles arena)]
+    (let [(arena Any) (instruction-arena-operand instruction)
+          (region (U core/NativeId Nil)) (handle-region handles arena)]
       (if (nil? region) (epoch-incomparable-id) region))
 
     :else
-    (let [result :- core/SsaValueV0 (get instruction :result)]
+    (let [(result core/SsaValueV0) (get instruction :result)]
       (if (not (type-carries-handles? types (core/ssavaluev0-type-id result)))
         nil
-        (loop [position :- Int 0
-               refs :- (Vec core/NativeId)
+        (loop [(position Int) 0
+               (refs (Vec core/NativeId))
                (core/instruction-ssa-refs instruction)
-               merged :- (U core/NativeId Nil) nil]
+               (merged (U core/NativeId Nil)) nil]
           (if (>= position (count refs))
             merged
             (recur (+ position 1) refs
@@ -1856,18 +1856,18 @@
                   (epoch-of epochs (nth refs position)))))))))))
 
 (defn block-parameter-epochs
-  [regions :- (Vec core/RegionDef)
-   function :- core/FunctionDef
-   epochs :- (Map String core/NativeId)
-   target-id :- core/NativeId
-   arguments :- (Vec core/NativeId)] :- (Map String core/NativeId)
-  (let [target :- (U core/BasicBlock Nil)
+  [(regions (Vec core/RegionDef))
+   (function core/FunctionDef)
+   (epochs (Map String core/NativeId))
+   (target-id core/NativeId)
+   (arguments (Vec core/NativeId))] (Map String core/NativeId)
+  (let [(target (U core/BasicBlock Nil))
         (find-block (core/functiondef-blocks function) target-id)]
     (if (nil? target)
       epochs
-      (let [parameters :- (Vec core/Parameter)
+      (let [(parameters (Vec core/Parameter))
             (core/basicblock-parameters target)]
-        (loop [position :- Int 0 current :- (Map String core/NativeId) epochs]
+        (loop [(position Int) 0 (current (Map String core/NativeId)) epochs]
           (if (or (>= position (count parameters))
                 (>= position (count arguments)))
             current
@@ -1877,10 +1877,10 @@
                 (epoch-of epochs (nth arguments position))))))))))
 
 (defn terminator-epoch-flow
-  [regions :- (Vec core/RegionDef)
-   function :- core/FunctionDef
-   epochs :- (Map String core/NativeId)
-   terminator :- core/Terminator] :- (Map String core/NativeId)
+  [(regions (Vec core/RegionDef))
+   (function core/FunctionDef)
+   (epochs (Map String core/NativeId))
+   (terminator core/Terminator)] (Map String core/NativeId)
   (cond
     (instance? native.core.JumpTerminator terminator)
     (block-parameter-epochs regions function epochs
@@ -1888,13 +1888,13 @@
       (core/jumpterminator-arguments terminator))
 
     (instance? native.core.SwitchTerminator terminator)
-    (loop [position :- Int 0
-           cases :- (Vec core/SwitchCaseV0)
+    (loop [(position Int) 0
+           (cases (Vec core/SwitchCaseV0))
            (core/switchterminator-cases terminator)
-           current :- (Map String core/NativeId) epochs]
+           (current (Map String core/NativeId)) epochs]
       (if (>= position (count cases))
         current
-        (let [switch-case :- core/SwitchCaseV0 (nth cases position)]
+        (let [(switch-case core/SwitchCaseV0) (nth cases position)]
           (recur (+ position 1) cases
             (block-parameter-epochs regions function current
               (core/switchcasev0-block-id switch-case)
@@ -1903,36 +1903,36 @@
     :else epochs))
 
 (defn function-epoch-map-pass
-  [regions :- (Vec core/RegionDef)
-   types :- (Vec core/TypeDef)
-   handles :- (Map String core/NativeId)
-   function :- core/FunctionDef
-   epochs :- (Map String core/NativeId)] :- (Map String core/NativeId)
-  (loop [block-position :- Int 0
-         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)
-         current :- (Map String core/NativeId) epochs]
+  [(regions (Vec core/RegionDef))
+   (types (Vec core/TypeDef))
+   (handles (Map String core/NativeId))
+   (function core/FunctionDef)
+   (epochs (Map String core/NativeId))] (Map String core/NativeId)
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+         (current (Map String core/NativeId)) epochs]
     (if (>= block-position (count blocks))
       current
-      (let [block :- core/BasicBlock (nth blocks block-position)
-            instructions :- (Vec core/Instruction)
+      (let [(block core/BasicBlock) (nth blocks block-position)
+            (instructions (Vec core/Instruction))
             (core/basicblock-instructions block)
-            with-instructions :- (Map String core/NativeId)
-            (loop [position :- Int 0
-                   inner :- (Map String core/NativeId) current]
+            (with-instructions (Map String core/NativeId))
+            (loop [(position Int) 0
+                   (inner (Map String core/NativeId)) current]
               (if (>= position (count instructions))
                 inner
-                (let [instruction :- core/Instruction (nth instructions position)
-                      result :- core/SsaValueV0 (get instruction :result)]
+                (let [(instruction core/Instruction) (nth instructions position)
+                      (result core/SsaValueV0) (get instruction :result)]
                   (recur (+ position 1)
                     (merge-epoch-into regions inner
                       (core/ssavaluev0-id result)
                       (instruction-epoch regions types handles inner
                         instruction))))))
-            with-terminators :- (Map String core/NativeId)
-            (loop [position :- Int 0
-                   terminators :- (Vec core/Terminator)
+            (with-terminators (Map String core/NativeId))
+            (loop [(position Int) 0
+                   (terminators (Vec core/Terminator))
                    (core/basicblock-terminators block)
-                   inner :- (Map String core/NativeId) with-instructions]
+                   (inner (Map String core/NativeId)) with-instructions]
               (if (>= position (count terminators))
                 inner
                 (recur (+ position 1) terminators
@@ -1941,20 +1941,20 @@
         (recur (+ block-position 1) blocks with-terminators)))))
 
 (defrecord EpochMapResultV0
-  [epochs :- (Map String core/NativeId)
-   converged :- Bool])
+  [(epochs (Map String core/NativeId))
+   (converged Bool)])
 
 ;; The epoch lattice is nil < region < incomparable, so the fixpoint is
 ;; monotone; the cap only guards against a defective walk, and hitting it
 ;; reads as non-convergence (the caller refuses).
 (defn function-epoch-map
-  [regions :- (Vec core/RegionDef)
-   types :- (Vec core/TypeDef)
-   function :- core/FunctionDef] :- EpochMapResultV0
-  (let [cap :- Int (+ 4 (* 3 (count (core/function-value-ids function))))
-        handles :- (Map String core/NativeId) (function-region-handles function)]
-    (loop [round :- Int 0 epochs :- (Map String core/NativeId) {}]
-      (let [next :- (Map String core/NativeId)
+  [(regions (Vec core/RegionDef))
+   (types (Vec core/TypeDef))
+   (function core/FunctionDef)] EpochMapResultV0
+  (let [(cap Int) (+ 4 (* 3 (count (core/function-value-ids function))))
+        (handles (Map String core/NativeId)) (function-region-handles function)]
+    (loop [(round Int) 0 (epochs (Map String core/NativeId)) {}]
+      (let [(next (Map String core/NativeId))
             (function-epoch-map-pass regions types handles function epochs)]
         (cond
           (= next epochs) (->EpochMapResultV0 next true)
@@ -1962,22 +1962,22 @@
           :else (recur (+ round 1) next))))))
 
 (defn function-closed-regions
-  [function :- core/FunctionDef] :- (Vec core/NativeId)
-  (loop [block-position :- Int 0
-         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)
-         closed :- (Vec core/NativeId) []]
+  [(function core/FunctionDef)] (Vec core/NativeId)
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+         (closed (Vec core/NativeId)) []]
     (if (>= block-position (count blocks))
       closed
-      (let [instructions :- (Vec core/Instruction)
+      (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
-          (loop [position :- Int 0 inner :- (Vec core/NativeId) closed]
+          (loop [(position Int) 0 (inner (Vec core/NativeId)) closed]
             (if (>= position (count instructions))
               inner
-              (let [instruction :- core/Instruction (nth instructions position)]
+              (let [(instruction core/Instruction) (nth instructions position)]
                 (recur (+ position 1)
                   (if (instance? native.core.ArenaCloseInstructionV0 instruction)
-                    (let [region :- (U core/NativeId Nil)
+                    (let [(region (U core/NativeId Nil))
                           (function-arena-region function
                             (core/arenacloseinstructionv0-source-id instruction))]
                       (if (nil? region) inner (conj inner region)))
@@ -1986,39 +1986,39 @@
 ;; True when no region closed inside this function is an ancestor-or-equal of
 ;; the value's epoch — a closed epoch's values may not leave the function.
 (defn value-outlives-closed-regions?
-  [regions :- (Vec core/RegionDef)
-   closed :- (Vec core/NativeId)
-   epochs :- (Map String core/NativeId)
-   value-id :- core/NativeId] :- Bool
-  (let [epoch :- (U core/NativeId Nil) (epoch-of epochs value-id)]
+  [(regions (Vec core/RegionDef))
+   (closed (Vec core/NativeId))
+   (epochs (Map String core/NativeId))
+   (value-id core/NativeId)] Bool
+  (let [(epoch (U core/NativeId Nil)) (epoch-of epochs value-id)]
     (if (nil? epoch)
       true
       (every?
-        (fn [closed-region :- core/NativeId] :- Bool
+        (fn [(closed-region core/NativeId)] Bool
           (not (region-on-ancestor-chain? regions closed-region epoch)))
         closed))))
 
 (defn root-or-free-epoch?
-  [regions :- (Vec core/RegionDef)
-   epochs :- (Map String core/NativeId)
-   value-id :- core/NativeId] :- Bool
-  (let [epoch :- (U core/NativeId Nil) (epoch-of epochs value-id)]
+  [(regions (Vec core/RegionDef))
+   (epochs (Map String core/NativeId))
+   (value-id core/NativeId)] Bool
+  (let [(epoch (U core/NativeId Nil)) (epoch-of epochs value-id)]
     (or (nil? epoch) (root-region? regions epoch))))
 
 ;; The epochs a call would hand a summary-less callee: every argument the
 ;; root-or-free rule refuses, by epoch. Empty means the plain rule already
 ;; admits the call.
 (defn call-retained-epochs
-  [regions :- (Vec core/RegionDef)
-   epochs :- (Map String core/NativeId)
-   arguments :- (Vec core/NativeId)] :- (Vec core/NativeId)
-  (loop [position :- Int 0 retained :- (Vec core/NativeId) []]
+  [(regions (Vec core/RegionDef))
+   (epochs (Map String core/NativeId))
+   (arguments (Vec core/NativeId))] (Vec core/NativeId)
+  (loop [(position Int) 0 (retained (Vec core/NativeId)) []]
     (if (>= position (count arguments))
       retained
       (recur (+ position 1)
         (if (root-or-free-epoch? regions epochs (nth arguments position))
           retained
-          (let [epoch :- (U core/NativeId Nil)
+          (let [(epoch (U core/NativeId Nil))
                 (epoch-of epochs (nth arguments position))]
             (if (nil? epoch) retained (conj retained epoch))))))))
 
@@ -2027,60 +2027,60 @@
 ;; the copy must land where it outlives the epoch the call ran in. An
 ;; unresolved destination or an incomparable retained epoch refuses.
 (defn promote-out-of-epochs?
-  [regions :- (Vec core/RegionDef)
-   handles :- (Map String core/NativeId)
-   retained :- (Vec core/NativeId)
-   result-id :- core/NativeId
-   instruction :- core/Instruction] :- Bool
+  [(regions (Vec core/RegionDef))
+   (handles (Map String core/NativeId))
+   (retained (Vec core/NativeId))
+   (result-id core/NativeId)
+   (instruction core/Instruction)] Bool
   (and (instance? native.core.PromoteInstructionV0 instruction)
     (core/native-id= (core/promoteinstructionv0-source-id instruction)
       result-id)
-    (let [destination :- (U core/NativeId Nil)
+    (let [(destination (U core/NativeId Nil))
           (handle-region handles
             (core/promoteinstructionv0-arena-id instruction))]
       (and (some? destination)
         (every?
-          (fn [epoch :- core/NativeId] :- Bool
+          (fn [(epoch core/NativeId)] Bool
             (region-on-ancestor-chain? regions destination epoch))
           retained)))))
 
 (defn call-result-only-promoted?
-  [regions :- (Vec core/RegionDef)
-   handles :- (Map String core/NativeId)
-   function :- core/FunctionDef
-   retained :- (Vec core/NativeId)
-   result-id :- core/NativeId] :- Bool
+  [(regions (Vec core/RegionDef))
+   (handles (Map String core/NativeId))
+   (function core/FunctionDef)
+   (retained (Vec core/NativeId))
+   (result-id core/NativeId)] Bool
   (every?
-    (fn [block :- core/BasicBlock] :- Bool
+    (fn [(block core/BasicBlock)] Bool
       (and
         (every?
-          (fn [instruction :- core/Instruction] :- Bool
+          (fn [(instruction core/Instruction)] Bool
             (or (not (core/id-in? (core/instruction-ssa-refs instruction)
                        result-id))
               (promote-out-of-epochs? regions handles retained result-id
                 instruction)))
           (core/basicblock-instructions block))
         (every?
-          (fn [terminator :- core/Terminator] :- Bool
+          (fn [(terminator core/Terminator)] Bool
             (not (core/id-in? (core/terminator-ssa-refs terminator)
                    result-id)))
           (core/basicblock-terminators block))))
     (core/functiondef-blocks function)))
 
 (defn call-result-promoted-somewhere?
-  [function :- core/FunctionDef
-   result-id :- core/NativeId] :- Bool
-  (loop [block-position :- Int 0
-         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+  [(function core/FunctionDef)
+   (result-id core/NativeId)] Bool
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
     (if (>= block-position (count blocks))
       false
-      (let [instructions :- (Vec core/Instruction)
+      (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))
-            found :- Bool
-            (loop [position :- Int 0]
+            (found Bool)
+            (loop [(position Int) 0]
               (if (>= position (count instructions))
                 false
-                (let [instruction :- core/Instruction
+                (let [(instruction core/Instruction)
                       (nth instructions position)]
                   (if (and
                         (instance? native.core.PromoteInstructionV0
@@ -2099,13 +2099,13 @@
 ;; store, another call, even a use that stays inside the epoch — refuses, and
 ;; a result no promote consumes proves nothing, so it refuses too.
 (defn call-epoch-legal?
-  [regions :- (Vec core/RegionDef)
-   handles :- (Map String core/NativeId)
-   epochs :- (Map String core/NativeId)
-   function :- core/FunctionDef
-   arguments :- (Vec core/NativeId)
-   result-id :- core/NativeId] :- Bool
-  (let [retained :- (Vec core/NativeId)
+  [(regions (Vec core/RegionDef))
+   (handles (Map String core/NativeId))
+   (epochs (Map String core/NativeId))
+   (function core/FunctionDef)
+   (arguments (Vec core/NativeId))
+   (result-id core/NativeId)] Bool
+  (let [(retained (Vec core/NativeId))
         (call-retained-epochs regions epochs arguments)]
     (or (= 0 (count retained))
       (and (call-result-only-promoted? regions handles function retained
@@ -2113,12 +2113,12 @@
         (call-result-promoted-somewhere? function result-id)))))
 
 (defn instruction-epoch-writes-legal?
-  [regions :- (Vec core/RegionDef)
-   handles :- (Map String core/NativeId)
-   epochs :- (Map String core/NativeId)
-   function :- core/FunctionDef
-   instruction :- core/Instruction] :- Bool
-  (let [store :- Any (get instruction :store nil)]
+  [(regions (Vec core/RegionDef))
+   (handles (Map String core/NativeId))
+   (epochs (Map String core/NativeId))
+   (function core/FunctionDef)
+   (instruction core/Instruction)] Bool
+  (let [(store Any) (get instruction :store nil)]
     (cond
       (some? store)
       (epoch-write-legal? regions
@@ -2137,7 +2137,7 @@
       ;; as a scalar. Cells stay root-pinned in v0, which is the separate
       ;; conjunct below.
       (instance? native.core.AtomCreateInstruction instruction)
-      (let [cell-region :- (U core/NativeId Nil)
+      (let [(cell-region (U core/NativeId Nil))
             (handle-region handles
               (core/atomcreateinstruction-arena-id instruction))]
         (and (epoch-write-legal? regions
@@ -2159,10 +2159,10 @@
           (core/atomcompareexchangeinstruction-cell-id instruction)))
 
       (instance? native.core.AtomSwapInstruction instruction)
-      (let [cell-epoch :- (U core/NativeId Nil)
+      (let [(cell-epoch (U core/NativeId Nil))
             (epoch-of epochs (core/atomswapinstruction-cell-id instruction))]
         (every?
-          (fn [argument :- core/NativeId] :- Bool
+          (fn [(argument core/NativeId)] Bool
             (epoch-write-legal? regions (epoch-of epochs argument) cell-epoch))
           (core/atomswapinstruction-arguments instruction)))
 
@@ -2183,10 +2183,10 @@
       ;; Arena-destination operations copy or reference every non-handle
       ;; operand from storage in the destination region.
       (some? (instruction-arena-operand instruction))
-      (let [arena :- Any (instruction-arena-operand instruction)
-            destination :- (U core/NativeId Nil) (handle-region handles arena)]
+      (let [(arena Any) (instruction-arena-operand instruction)
+            (destination (U core/NativeId Nil)) (handle-region handles arena)]
         (every?
-          (fn [operand :- core/NativeId] :- Bool
+          (fn [(operand core/NativeId)] Bool
             (or (region-handle? handles operand)
               (epoch-write-legal? regions
                 (epoch-of epochs operand) destination)))
@@ -2195,13 +2195,13 @@
       :else true)))
 
 (defn terminator-epoch-legal?
-  [regions :- (Vec core/RegionDef)
-   closed :- (Vec core/NativeId)
-   epochs :- (Map String core/NativeId)
-   terminator :- core/Terminator] :- Bool
+  [(regions (Vec core/RegionDef))
+   (closed (Vec core/NativeId))
+   (epochs (Map String core/NativeId))
+   (terminator core/Terminator)] Bool
   (cond
     (instance? native.core.ReturnTerminator terminator)
-    (let [value :- (U core/NativeId Nil)
+    (let [(value (U core/NativeId Nil))
           (core/returnterminator-value terminator)]
       (or (nil? value)
         (value-outlives-closed-regions? regions closed epochs value)))
@@ -2213,37 +2213,37 @@
     :else true))
 
 (defn function-epoch-sound?
-  [regions :- (Vec core/RegionDef)
-   types :- (Vec core/TypeDef)
-   function :- core/FunctionDef] :- Bool
-  (let [result :- EpochMapResultV0 (function-epoch-map regions types function)]
+  [(regions (Vec core/RegionDef))
+   (types (Vec core/TypeDef))
+   (function core/FunctionDef)] Bool
+  (let [(result EpochMapResultV0) (function-epoch-map regions types function)]
     (if (not (epochmapresultv0-converged result))
       false
-      (let [epochs :- (Map String core/NativeId)
+      (let [(epochs (Map String core/NativeId))
             (epochmapresultv0-epochs result)
-            handles :- (Map String core/NativeId)
+            (handles (Map String core/NativeId))
             (function-region-handles function)
-            closed :- (Vec core/NativeId) (function-closed-regions function)]
+            (closed (Vec core/NativeId)) (function-closed-regions function)]
         (every?
-          (fn [block :- core/BasicBlock] :- Bool
+          (fn [(block core/BasicBlock)] Bool
             (and
               (every?
-                (fn [instruction :- core/Instruction] :- Bool
+                (fn [(instruction core/Instruction)] Bool
                   (instruction-epoch-writes-legal? regions handles epochs
                     function instruction))
                 (core/basicblock-instructions block))
               (every?
-                (fn [terminator :- core/Terminator] :- Bool
+                (fn [(terminator core/Terminator)] Bool
                   (terminator-epoch-legal? regions closed epochs terminator))
                 (core/basicblock-terminators block))))
           (core/functiondef-blocks function))))))
 
-(defn epoch-soundness [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+(defn epoch-soundness [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->EpochSoundnessObligation true))
-      (let [function :- core/FunctionDef (nth functions index)]
+      (let [(function core/FunctionDef) (nth functions index)]
         (if (function-epoch-sound? (core/nativecoreprogram-regions program)
               (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
@@ -2256,42 +2256,42 @@
 ;; stack, and a loop header re-entered with a different stack refuses.
 
 (defrecord EpochStackVisitV0
-  [block-id :- core/NativeId
-   stack :- (Vec core/NativeId)])
+  [(block-id core/NativeId)
+   (stack (Vec core/NativeId))])
 
 (defrecord EpochStackWorkV0
-  [block-id :- core/NativeId
-   stack :- (Vec core/NativeId)
-   path :- (Vec EpochStackVisitV0)])
+  [(block-id core/NativeId)
+   (stack (Vec core/NativeId))
+   (path (Vec EpochStackVisitV0))])
 
 (defrecord EpochBlockStepV0
-  [stack :- (Vec core/NativeId)
-   violation :- (U core/NativeId Nil)])
+  [(stack (Vec core/NativeId))
+   (violation (U core/NativeId Nil))])
 
 (defn epoch-stacks-equal?
-  [left :- (Vec core/NativeId)
-   right :- (Vec core/NativeId)] :- Bool
+  [(left (Vec core/NativeId))
+   (right (Vec core/NativeId))] Bool
   (and (= (count left) (count right))
-    (loop [index :- Int 0]
+    (loop [(index Int) 0]
       (if (>= index (count left))
         true
         (if (core/native-id= (nth left index) (nth right index))
           (recur (+ index 1))
           false)))))
 
-(defn epoch-stack-top [stack :- (Vec core/NativeId)] :- (U core/NativeId Nil)
+(defn epoch-stack-top [(stack (Vec core/NativeId))] (U core/NativeId Nil)
   (if (= 0 (count stack)) nil (nth stack (- (count stack) 1))))
 
-(defn epoch-stack-pop [stack :- (Vec core/NativeId)] :- (Vec core/NativeId)
-  (loop [index :- Int 0 popped :- (Vec core/NativeId) []]
+(defn epoch-stack-pop [(stack (Vec core/NativeId))] (Vec core/NativeId)
+  (loop [(index Int) 0 (popped (Vec core/NativeId)) []]
     (if (>= index (- (count stack) 1))
       popped
       (recur (+ index 1) (conj popped (nth stack index))))))
 
 (defn epoch-stack-visit
-  [visited :- (Vec EpochStackVisitV0)
-   block-id :- core/NativeId] :- (U EpochStackVisitV0 Nil)
-  (loop [index :- Int 0]
+  [(visited (Vec EpochStackVisitV0))
+   (block-id core/NativeId)] (U EpochStackVisitV0 Nil)
+  (loop [(index Int) 0]
     (cond
       (>= index (count visited)) nil
       (core/native-id= (epochstackvisitv0-block-id (nth visited index)) block-id)
@@ -2299,10 +2299,10 @@
       :else (recur (+ index 1)))))
 
 (defn epoch-stack-visited?
-  [memo :- (Vec EpochStackVisitV0)
-   block-id :- core/NativeId
-   stack :- (Vec core/NativeId)] :- Bool
-  (loop [index :- Int 0]
+  [(memo (Vec EpochStackVisitV0))
+   (block-id core/NativeId)
+   (stack (Vec core/NativeId))] Bool
+  (loop [(index Int) 0]
     (cond
       (>= index (count memo)) false
       (and (core/native-id= (epochstackvisitv0-block-id (nth memo index))
@@ -2312,26 +2312,26 @@
       :else (recur (+ index 1)))))
 
 (defn epoch-block-step
-  [regions :- (Vec core/RegionDef)
-   function :- core/FunctionDef
-   block :- core/BasicBlock
-   stack :- (Vec core/NativeId)] :- EpochBlockStepV0
-  (loop [position :- Int 0
-         instructions :- (Vec core/Instruction)
+  [(regions (Vec core/RegionDef))
+   (function core/FunctionDef)
+   (block core/BasicBlock)
+   (stack (Vec core/NativeId))] EpochBlockStepV0
+  (loop [(position Int) 0
+         (instructions (Vec core/Instruction))
          (core/basicblock-instructions block)
-         current :- (Vec core/NativeId) stack]
+         (current (Vec core/NativeId)) stack]
     (if (>= position (count instructions))
       (->EpochBlockStepV0 current nil)
-      (let [instruction :- core/Instruction (nth instructions position)]
+      (let [(instruction core/Instruction) (nth instructions position)]
         (cond
           (and (instance? native.core.ArenaInstruction instruction)
             (epoch-region? regions
               (core/arenainstruction-region instruction)))
-          (let [region :- core/NativeId
+          (let [(region core/NativeId)
                 (core/arenainstruction-region instruction)
-                definition :- (U core/RegionDef Nil)
+                (definition (U core/RegionDef Nil))
                 (find-region regions region)
-                parent :- Any
+                (parent Any)
                 (if (nil? definition) nil (core/regiondef-parent definition))]
             (cond
               (core/id-in? current region)
@@ -2344,7 +2344,7 @@
               :else (recur (+ position 1) instructions (conj current region))))
 
           (instance? native.core.ArenaCloseInstructionV0 instruction)
-          (let [region :- (U core/NativeId Nil)
+          (let [(region (U core/NativeId Nil))
                 (function-arena-region function
                   (core/arenacloseinstructionv0-source-id instruction))]
             (cond
@@ -2362,56 +2362,56 @@
           :else (recur (+ position 1) instructions current))))))
 
 (defn function-leak-violation
-  [regions :- (Vec core/RegionDef)
-   function :- core/FunctionDef] :- (U core/NativeId Nil)
-  (loop [position :- Int 0
-         work :- (Vec EpochStackWorkV0)
+  [(regions (Vec core/RegionDef))
+   (function core/FunctionDef)] (U core/NativeId Nil)
+  (loop [(position Int) 0
+         (work (Vec EpochStackWorkV0))
          [(->EpochStackWorkV0 (core/functiondef-entry-block function) [] [])]
-         memo :- (Vec EpochStackVisitV0) []]
+         (memo (Vec EpochStackVisitV0)) []]
     (if (>= position (count work))
       nil
-      (let [item :- EpochStackWorkV0 (nth work position)
-            current-id :- core/NativeId (epochstackworkv0-block-id item)
-            current-stack :- (Vec core/NativeId) (epochstackworkv0-stack item)
-            path :- (Vec EpochStackVisitV0) (epochstackworkv0-path item)
-            entered :- (U EpochStackVisitV0 Nil)
+      (let [(item EpochStackWorkV0) (nth work position)
+            (current-id core/NativeId) (epochstackworkv0-block-id item)
+            (current-stack (Vec core/NativeId)) (epochstackworkv0-stack item)
+            (path (Vec EpochStackVisitV0)) (epochstackworkv0-path item)
+            (entered (U EpochStackVisitV0 Nil))
             (epoch-stack-visit path current-id)]
         (if (some? entered)
           (if (epoch-stacks-equal? (epochstackvisitv0-stack entered)
                 current-stack)
             (recur (+ position 1) work memo)
-            (let [top :- (U core/NativeId Nil) (epoch-stack-top current-stack)]
+            (let [(top (U core/NativeId Nil)) (epoch-stack-top current-stack)]
               (if (nil? top)
                 (epoch-stack-top (epochstackvisitv0-stack entered))
                 top)))
           (if (epoch-stack-visited? memo current-id current-stack)
             (recur (+ position 1) work memo)
-            (let [block :- (U core/BasicBlock Nil)
+            (let [(block (U core/BasicBlock Nil))
                   (find-block (core/functiondef-blocks function) current-id)]
               (if (nil? block)
                 (obligation-id "epoch-missing-block")
-                (let [step :- EpochBlockStepV0
+                (let [(step EpochBlockStepV0)
                       (epoch-block-step regions function block current-stack)
-                      violation :- (U core/NativeId Nil)
+                      (violation (U core/NativeId Nil))
                       (epochblockstepv0-violation step)]
                   (if (some? violation)
                     violation
-                    (let [next-stack :- (Vec core/NativeId)
+                    (let [(next-stack (Vec core/NativeId))
                           (epochblockstepv0-stack step)
-                          successors :- (Vec core/NativeId)
+                          (successors (Vec core/NativeId))
                           (block-successors block)
-                          visit :- EpochStackVisitV0
+                          (visit EpochStackVisitV0)
                           (->EpochStackVisitV0 current-id current-stack)
-                          next-path :- (Vec EpochStackVisitV0) (conj path visit)
-                          next-memo :- (Vec EpochStackVisitV0) (conj memo visit)]
+                          (next-path (Vec EpochStackVisitV0)) (conj path visit)
+                          (next-memo (Vec EpochStackVisitV0)) (conj memo visit)]
                       (if (= 0 (count successors))
                         (if (= 0 (count next-stack))
                           (recur (+ position 1) work next-memo)
                           (epoch-stack-top next-stack))
-                        (let [next-work :- (Vec EpochStackWorkV0)
+                        (let [(next-work (Vec EpochStackWorkV0))
                               (mapv
                                 (fn
-                                  [successor :- core/NativeId] :- EpochStackWorkV0
+                                  [(successor core/NativeId)] EpochStackWorkV0
                                   (->EpochStackWorkV0 successor next-stack
                                     next-path))
                                 successors)]
@@ -2419,56 +2419,56 @@
                             (vec (concat work next-work))
                             next-memo))))))))))))))
 
-(defn leak-freedom [program :- core/NativeCoreProgram] :- ObligationVerdictV0
-  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+(defn leak-freedom [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->LeakFreedomObligation true))
-      (let [violation :- (U core/NativeId Nil)
+      (let [(violation (U core/NativeId Nil))
             (function-leak-violation (core/nativecoreprogram-regions program)
               (nth functions index))]
         (if (nil? violation)
           (recur (+ index 1) functions)
           (->LeakFreedomDiagnosticV0 violation))))))
 
-(def fixture-i64-type :- core/TypeDef
+(def fixture-i64-type core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
 
-(def fixture-i64-layout :- core/LayoutDef
+(def fixture-i64-layout core/LayoutDef
   (core/->LayoutDef (obligation-id "layout-i64") (obligation-id "type-i64")
     8 8 (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
-(def fixture-left-variant :- core/TypeVariant
+(def fixture-left-variant core/TypeVariant
   (core/->TypeVariant (obligation-id "variant-left") "left" nil))
 
-(def fixture-right-variant :- core/TypeVariant
+(def fixture-right-variant core/TypeVariant
   (core/->TypeVariant (obligation-id "variant-right") "right" nil))
 
-(def fixture-union-type :- core/TypeDef
+(def fixture-union-type core/TypeDef
   (core/->TypeDef (obligation-id "type-choice") "Choice"
     (core/->UnionType [fixture-left-variant fixture-right-variant])))
 
-(def fixture-union-layout :- core/LayoutDef
+(def fixture-union-layout core/LayoutDef
   (core/->LayoutDef (obligation-id "layout-choice")
     (obligation-id "type-choice") 8 8
     (core/->UnionShapeV0 (obligation-id "type-i64") 0
       [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
        (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])))
 
-(def fixture-outcome-type :- core/TypeDef
+(def fixture-outcome-type core/TypeDef
   (core/->TypeDef (obligation-id "type-checked-i64") "CheckedI64"
     (core/->OutcomeType (obligation-id "type-i64")
       (obligation-id "type-choice"))))
 
-(def fixture-outcome-layout :- core/LayoutDef
+(def fixture-outcome-layout core/LayoutDef
   (core/->LayoutDef (obligation-id "layout-checked-i64")
     (obligation-id "type-checked-i64") 16 8
     (core/->UnionShapeV0 (obligation-id "type-i64") 0
       [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
        (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])))
 
-(def fixture-function :- core/FunctionDef
+(def fixture-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-copy") "copy"
     [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))
      (core/->Parameter (obligation-id "ssa-choice") (obligation-id "type-choice"))]
@@ -2491,7 +2491,7 @@
     (obligation-id "type-checked-i64")
     [] [] []))
 
-(def fixture-abi :- core/AbiDeclV0
+(def fixture-abi core/AbiDeclV0
   (core/->AbiDeclV0 (obligation-id "abi-checked-add")
     (obligation-id "function-copy") "native_checked_add"
     (core/->AbiExportV0 true) (core/->RestrictedCAbiV0 true)
@@ -2504,19 +2504,19 @@
     (obligation-id "type-choice") [] [] "v0"
     "sha256:fixture-layout"))
 
-(def fixture-region :- core/RegionDef
+(def fixture-region core/RegionDef
   (core/->RegionDef (obligation-id "region-fixture")
     (core/->ArenaRegion true) nil))
 
-(def fixture-capability :- core/CapabilityDef
+(def fixture-capability core/CapabilityDef
   (core/->CapabilityDef (obligation-id "capability-write")
     (core/->WriteCapability true) (obligation-id "region-fixture") true))
 
-(def fixture-write-effect :- core/EffectDef
+(def fixture-write-effect core/EffectDef
   (core/->EffectDef (obligation-id "effect-write")
     (core/->WriteEffect (obligation-id "region-fixture"))))
 
-(def fixture-token-function :- core/FunctionDef
+(def fixture-token-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-store") "store"
     [(core/->Parameter (obligation-id "ssa-address") (obligation-id "type-i64"))
      (core/->Parameter (obligation-id "ssa-value") (obligation-id "type-i64"))]
@@ -2538,7 +2538,7 @@
     [(obligation-id "region-fixture")]
     [(obligation-id "capability-write")]))
 
-(def valid-program :- core/NativeCoreProgram
+(def valid-program core/NativeCoreProgram
   (apply core/->NativeCoreProgram
     [(obligation-id "program-valid") nil "obligations-v0"
      [fixture-i64-type fixture-union-type fixture-outcome-type]
@@ -2550,7 +2550,7 @@
      [(obligation-id "capability-write")]
      [fixture-abi] []]))
 
-(def invalid-ssa-function :- core/FunctionDef
+(def invalid-ssa-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -2564,10 +2564,10 @@
            (core/->I64Atom 1))]
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def invalid-ssa-program :- core/NativeCoreProgram
+(def invalid-ssa-program core/NativeCoreProgram
   (with valid-program [:functions [invalid-ssa-function]]))
 
-(def nonexhaustive-function :- core/FunctionDef
+(def nonexhaustive-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -2584,17 +2584,17 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def nonexhaustive-program :- core/NativeCoreProgram
+(def nonexhaustive-program core/NativeCoreProgram
   (with valid-program [:functions [nonexhaustive-function]]))
 
-(def undersized-i64-layout :- core/LayoutDef
+(def undersized-i64-layout core/LayoutDef
   (with fixture-i64-layout [:size-bytes 4]))
 
-(def open-layout-program :- core/NativeCoreProgram
+(def open-layout-program core/NativeCoreProgram
   (with valid-program
     [:layouts [undersized-i64-layout fixture-union-layout fixture-outcome-layout]]))
 
-(def unchecked-result-function :- core/FunctionDef
+(def unchecked-result-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -2613,10 +2613,10 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator nil)])]]))
 
-(def unchecked-arithmetic-program :- core/NativeCoreProgram
+(def unchecked-arithmetic-program core/NativeCoreProgram
   (with valid-program [:functions [unchecked-result-function]]))
 
-(def invalid-abi :- core/AbiDeclV0
+(def invalid-abi core/AbiDeclV0
   (with fixture-abi
     [:parameters
      [(core/->AbiValueV0 "input" (obligation-id "type-missing")
@@ -2624,10 +2624,10 @@
       (core/->AbiValueV0 "choice" (obligation-id "type-choice")
         (core/->BorrowedV0 true) nil)]]))
 
-(def illegal-abi-program :- core/NativeCoreProgram
+(def illegal-abi-program core/NativeCoreProgram
   (with valid-program [:abis [invalid-abi]]))
 
-(def double-consume-token-function :- core/FunctionDef
+(def double-consume-token-function core/FunctionDef
   (with fixture-token-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-store") []
@@ -2645,83 +2645,83 @@
              []))]
         [(core/->ReturnTerminator nil)])]]))
 
-(def undischarged-token-program :- core/NativeCoreProgram
+(def undischarged-token-program core/NativeCoreProgram
   (with valid-program
     [:functions [fixture-function double-consume-token-function]]))
 
-(def unbounded-effect-function :- core/FunctionDef
+(def unbounded-effect-function core/FunctionDef
   (with fixture-token-function [:effects []]))
 
-(def unbounded-effect-program :- core/NativeCoreProgram
+(def unbounded-effect-program core/NativeCoreProgram
   (with valid-program
     [:functions [fixture-function unbounded-effect-function]]))
 
-(def valid-ssa-positive :- Bool
+(def valid-ssa-positive Bool
   (obligation-passed? (valid-ssa valid-program)))
 
-(def valid-ssa-negative :- Bool
+(def valid-ssa-negative Bool
   (= "valid-ssa" (verdict-tag (valid-ssa invalid-ssa-program))))
 
-(def exhaustive-matches-positive :- Bool
+(def exhaustive-matches-positive Bool
   (obligation-passed? (exhaustive-matches valid-program)))
 
-(def exhaustive-matches-negative :- Bool
+(def exhaustive-matches-negative Bool
   (= "exhaustive-matches" (verdict-tag (exhaustive-matches nonexhaustive-program))))
 
-(def closed-layouts-positive :- Bool
+(def closed-layouts-positive Bool
   (obligation-passed? (closed-layouts valid-program (core/abi-profile-lp64))))
 
-(def closed-layouts-negative :- Bool
+(def closed-layouts-negative Bool
   (= "closed-layouts"
     (verdict-tag (closed-layouts open-layout-program (core/abi-profile-lp64)))))
 
-(def checked-arithmetic-positive :- Bool
+(def checked-arithmetic-positive Bool
   (obligation-passed? (checked-arithmetic valid-program)))
 
-(def checked-arithmetic-negative :- Bool
+(def checked-arithmetic-negative Bool
   (= "checked-arithmetic"
     (verdict-tag (checked-arithmetic unchecked-arithmetic-program))))
 
-(def legal-abi-positive :- Bool
+(def legal-abi-positive Bool
   (obligation-passed? (legal-abi valid-program)))
 
-(def legal-abi-negative :- Bool
+(def legal-abi-negative Bool
   (= "legal-abi" (verdict-tag (legal-abi illegal-abi-program))))
 
-(def discharged-tokens-positive :- Bool
+(def discharged-tokens-positive Bool
   (obligation-passed? (discharged-tokens valid-program)))
 
-(def discharged-tokens-negative :- Bool
+(def discharged-tokens-negative Bool
   (= "discharged-tokens"
     (verdict-tag (discharged-tokens undischarged-token-program))))
 
-(def bounded-effects-positive :- Bool
+(def bounded-effects-positive Bool
   (obligation-passed? (bounded-effects valid-program)))
 
-(def bounded-effects-negative :- Bool
+(def bounded-effects-negative Bool
   (= "bounded-effects" (verdict-tag (bounded-effects unbounded-effect-program))))
 
 ;; --- Epoch fixture vocabulary: a child epoch region under the root fixture
 ;; region, an inner grandchild for LIFO fixtures, an arena-handle type, and a
 ;; Text type so young values are handle-carrying.
 
-(def fixture-epoch-region :- core/RegionDef
+(def fixture-epoch-region core/RegionDef
   (core/->RegionDef (obligation-id "region-epoch")
     (core/->ArenaRegion true) (obligation-id "region-fixture")))
 
-(def fixture-epoch-inner-region :- core/RegionDef
+(def fixture-epoch-inner-region core/RegionDef
   (core/->RegionDef (obligation-id "region-epoch-inner")
     (core/->ArenaRegion true) (obligation-id "region-epoch")))
 
-(def fixture-text-type :- core/TypeDef
+(def fixture-text-type core/TypeDef
   (core/->TypeDef (obligation-id "type-text") "Text"
     (core/->AtomType (core/->TextKind true))))
 
-(def fixture-arena-type :- core/TypeDef
+(def fixture-arena-type core/TypeDef
   (core/->TypeDef (obligation-id "type-arena") "ArenaHandle"
     (core/->ReferenceType (obligation-id "type-arena"))))
 
-(defn epoch-open-instruction [] :- core/Instruction
+(defn epoch-open-instruction [] core/Instruction
   (core/->ArenaInstruction
     (core/->SsaValueV0 (obligation-id "ssa-epoch-arena")
       (obligation-id "type-arena"))
@@ -2731,14 +2731,14 @@
       [(core/->ResourceTokenV0 (obligation-id "token-epoch")
          (core/->RegionTokenV0 (obligation-id "region-epoch")))])))
 
-(defn epoch-young-text-instruction [] :- core/Instruction
+(defn epoch-young-text-instruction [] core/Instruction
   (core/->TextConcatInstruction
     (core/->SsaValueV0 (obligation-id "ssa-young-text")
       (obligation-id "type-text"))
     (obligation-id "ssa-epoch-arena")
     []))
 
-(defn epoch-close-instruction [label :- String] :- core/Instruction
+(defn epoch-close-instruction [(label String)] core/Instruction
   (core/->ArenaCloseInstructionV0
     (core/->SsaValueV0 (obligation-id (str "ssa-epoch-close-" label))
       (obligation-id "type-i64"))
@@ -2746,7 +2746,7 @@
     (core/->TokenFlowV0 [(obligation-id "token-epoch")] [])))
 
 ;; Epoch-soundness positive: a young Text lives and dies inside its epoch.
-(def epoch-sound-function :- core/FunctionDef
+(def epoch-sound-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-epoch-sound") "epoch-sound"
     [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
     [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -2758,7 +2758,7 @@
     (obligation-id "type-i64")
     [] [(obligation-id "region-epoch")] [(obligation-id "capability-write")]))
 
-(def epoch-sound-program :- core/NativeCoreProgram
+(def epoch-sound-program core/NativeCoreProgram
   (with valid-program
     [:types [fixture-i64-type fixture-union-type fixture-outcome-type
              fixture-text-type fixture-arena-type]]
@@ -2767,7 +2767,7 @@
 
 ;; Epoch-soundness negative: a young-epoch Text stored into root-region
 ;; storage — the old-to-young reference obligation 8 exists to refuse.
-(def old-young-store-function :- core/FunctionDef
+(def old-young-store-function core/FunctionDef
   (with epoch-sound-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -2784,12 +2784,12 @@
          (epoch-close-instruction "store")]
         [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
 
-(def old-young-store-program :- core/NativeCoreProgram
+(def old-young-store-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [old-young-store-function]]))
 
 ;; Leak-freedom positive: the epoch opened in the entry block closes on both
 ;; branch exits.
-(def epoch-close-function :- core/FunctionDef
+(def epoch-close-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-epoch-close") "epoch-close"
     [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
     [(core/->BasicBlock (obligation-id "block-close-entry") []
@@ -2807,12 +2807,12 @@
     nil
     [] [(obligation-id "region-epoch")] [(obligation-id "capability-write")]))
 
-(def epoch-close-program :- core/NativeCoreProgram
+(def epoch-close-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [epoch-close-function]]))
 
 ;; Leak-freedom negative: opened on one branch, closed on the other — no path
 ;; both opens and closes the epoch (patterned on leak-token-function).
-(def branch-close-function :- core/FunctionDef
+(def branch-close-function core/FunctionDef
   (with epoch-close-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-leak-entry") []
@@ -2828,7 +2828,7 @@
         [(core/->ReturnTerminator nil)])]]
     [:entry-block (obligation-id "block-leak-entry")]))
 
-(def branch-close-program :- core/NativeCoreProgram
+(def branch-close-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [branch-close-function]]))
 
 ;; --- Atom-cell epoch fixtures. Cells are root-pinned in v0, so the question
@@ -2838,15 +2838,15 @@
 ;; legal, the same store from a minted epoch is not, and `promote` is what
 ;; makes the second one legal.
 
-(def fixture-atom-state-region :- core/RegionDef
+(def fixture-atom-state-region core/RegionDef
   (core/->RegionDef (obligation-id "region-atom-state")
     (core/->ExternalRegion true) nil))
 
-(def fixture-cell-type :- core/TypeDef
+(def fixture-cell-type core/TypeDef
   (core/->TypeDef (obligation-id "type-cell") "AtomCell"
     (core/->AtomCellTypeV0 (obligation-id "type-text"))))
 
-(defn root-arena-instruction [] :- core/Instruction
+(defn root-arena-instruction [] core/Instruction
   (core/->ArenaInstruction
     (core/->SsaValueV0 (obligation-id "ssa-root-arena")
       (obligation-id "type-arena"))
@@ -2854,7 +2854,7 @@
     (obligation-id "capability-write")
     (core/->TokenFlowV0 [(obligation-id "region-fixture")] [])))
 
-(defn atom-state-instruction [] :- core/Instruction
+(defn atom-state-instruction [] core/Instruction
   (core/->AtomStateInstruction
     (core/->SsaValueV0 (obligation-id "ssa-atom-state")
       (obligation-id "type-arena"))
@@ -2862,14 +2862,14 @@
     (obligation-id "capability-write")
     (core/->TokenFlowV0 [(obligation-id "region-atom-state")] [])))
 
-(defn root-text-instruction [label :- String] :- core/Instruction
+(defn root-text-instruction [(label String)] core/Instruction
   (core/->TextConcatInstruction
     (core/->SsaValueV0 (obligation-id (str "ssa-root-text-" label))
       (obligation-id "type-text"))
     (obligation-id "ssa-root-arena")
     []))
 
-(defn atom-create-instruction [] :- core/Instruction
+(defn atom-create-instruction [] core/Instruction
   (core/->AtomCreateInstruction
     (core/->SsaValueV0 (obligation-id "ssa-cell")
       (obligation-id "type-cell"))
@@ -2877,7 +2877,7 @@
     (obligation-id "ssa-root-arena")
     (obligation-id "ssa-atom-state")))
 
-(defn atom-reset-instruction [value-id :- core/NativeId] :- core/Instruction
+(defn atom-reset-instruction [(value-id core/NativeId)] core/Instruction
   (core/->AtomResetInstruction
     (core/->SsaValueV0 (obligation-id "ssa-cell-reset")
       (obligation-id "type-text"))
@@ -2890,7 +2890,7 @@
 ;; function — the program is epoch-0 throughout — so there is no old-to-young
 ;; edge to refuse, and the store's legality may not turn on the value owning
 ;; arena storage. This is the repro trio's `a-vec-loop` at IR level.
-(def atom-root-store-function :- core/FunctionDef
+(def atom-root-store-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-atom-root-store")
     "atom-root-store"
     [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
@@ -2907,7 +2907,7 @@
     [] [(obligation-id "region-fixture") (obligation-id "region-atom-state")]
     [(obligation-id "capability-write")]))
 
-(def atom-epoch-program :- core/NativeCoreProgram
+(def atom-epoch-program core/NativeCoreProgram
   (with valid-program
     [:types [fixture-i64-type fixture-union-type fixture-outcome-type
              fixture-text-type fixture-arena-type fixture-cell-type]]
@@ -2918,7 +2918,7 @@
 ;; Epoch-soundness negative #4: the true old-to-young store into a cell — the
 ;; value is allocated in a MINTED epoch that closes inside the function, and
 ;; the root-pinned cell would outlive it.
-(def atom-young-store-function :- core/FunctionDef
+(def atom-young-store-function core/FunctionDef
   (with atom-root-store-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-atom-young") []
@@ -2936,13 +2936,13 @@
                (obligation-id "region-atom-state")
                (obligation-id "region-epoch")]]))
 
-(def atom-young-store-program :- core/NativeCoreProgram
+(def atom-young-store-program core/NativeCoreProgram
   (with atom-epoch-program [:functions [atom-young-store-function]]))
 
 ;; Epoch-soundness positive #3: the same store, with the young value copied
 ;; into the root arena first. `promote` is the admission the negative above is
 ;; missing, and nothing else about the program changes.
-(defn promote-instruction [] :- core/Instruction
+(defn promote-instruction [] core/Instruction
   (core/->PromoteInstructionV0
     (core/->SsaValueV0 (obligation-id "ssa-promoted-text")
       (obligation-id "type-text"))
@@ -2950,7 +2950,7 @@
     (obligation-id "type-text")
     (obligation-id "ssa-root-arena")))
 
-(def atom-promoted-store-function :- core/FunctionDef
+(def atom-promoted-store-function core/FunctionDef
   (with atom-young-store-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-atom-promoted") []
@@ -2966,25 +2966,25 @@
         [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]
     [:entry-block (obligation-id "block-atom-promoted")]))
 
-(def atom-promoted-store-program :- core/NativeCoreProgram
+(def atom-promoted-store-program core/NativeCoreProgram
   (with atom-epoch-program [:functions [atom-promoted-store-function]]))
 
-(def epoch-soundness-positive :- Bool
+(def epoch-soundness-positive Bool
   (obligation-passed? (epoch-soundness epoch-sound-program)))
 
-(def epoch-soundness-positive-atom-root-store :- Bool
+(def epoch-soundness-positive-atom-root-store Bool
   (obligation-passed? (epoch-soundness atom-epoch-program)))
 
-(def epoch-soundness-positive-atom-promoted-store :- Bool
+(def epoch-soundness-positive-atom-promoted-store Bool
   (obligation-passed? (epoch-soundness atom-promoted-store-program)))
 
-(def epoch-soundness-negative :- Bool
+(def epoch-soundness-negative Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness old-young-store-program))))
 
-(def leak-freedom-positive :- Bool
+(def leak-freedom-positive Bool
   (obligation-passed? (leak-freedom epoch-close-program)))
 
-(def leak-freedom-negative :- Bool
+(def leak-freedom-negative Bool
   (= "leak-freedom" (verdict-tag (leak-freedom branch-close-program))))
 
 ;; --- Rejection-depth corpus: two additional corrupt-program fixtures per
@@ -2993,7 +2993,7 @@
 ;; valid-ssa #2: a value defined only in one switch arm, used from the
 ;; sibling arm — no path from entry to the use avoids the def block's
 ;; sibling, so the def never dominates the use.
-(def sibling-block-use-function :- core/FunctionDef
+(def sibling-block-use-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -3012,12 +3012,12 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-sibling-only"))])]]))
 
-(def sibling-block-use-program :- core/NativeCoreProgram
+(def sibling-block-use-program core/NativeCoreProgram
   (with valid-program [:functions [sibling-block-use-function]]))
 
 ;; valid-ssa #3: a jump terminator passes a different number of arguments
 ;; than the target block declares parameters.
-(def jump-mismatch-function :- core/FunctionDef
+(def jump-mismatch-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-jump-mismatch") "jump-mismatch"
     [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
     [(core/->BasicBlock (obligation-id "block-jump-entry") []
@@ -3030,12 +3030,12 @@
     nil
     [] [] []))
 
-(def jump-mismatch-program :- core/NativeCoreProgram
+(def jump-mismatch-program core/NativeCoreProgram
   (with valid-program [:functions [jump-mismatch-function]]))
 
 ;; exhaustive-matches #2: a switch that cases the same variant twice
 ;; instead of covering the union's two distinct variants.
-(def duplicate-case-function :- core/FunctionDef
+(def duplicate-case-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -3054,12 +3054,12 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def duplicate-case-program :- core/NativeCoreProgram
+(def duplicate-case-program core/NativeCoreProgram
   (with valid-program [:functions [duplicate-case-function]]))
 
 ;; exhaustive-matches #3: a switch that cases an unknown variant id in
 ;; place of one of the union's real variants.
-(def unknown-variant-function :- core/FunctionDef
+(def unknown-variant-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -3078,32 +3078,32 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def unknown-variant-program :- core/NativeCoreProgram
+(def unknown-variant-program core/NativeCoreProgram
   (with valid-program [:functions [unknown-variant-function]]))
 
 ;; closed-layouts #2: a layout whose size is zero (missing size).
-(def zero-size-i64-layout :- core/LayoutDef
+(def zero-size-i64-layout core/LayoutDef
   (with fixture-i64-layout [:size-bytes 0]))
 
-(def zero-size-layout-program :- core/NativeCoreProgram
+(def zero-size-layout-program core/NativeCoreProgram
   (with valid-program
     [:layouts [zero-size-i64-layout fixture-union-layout fixture-outcome-layout]]))
 
 ;; closed-layouts #3: a union layout whose tag offset is not aligned to
 ;; the tag type's own alignment (misaligned offset).
-(def misaligned-union-layout :- core/LayoutDef
+(def misaligned-union-layout core/LayoutDef
   (with fixture-union-layout
     [:shape (core/->UnionShapeV0 (obligation-id "type-i64") 3
               [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
                (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])]))
 
-(def misaligned-offset-program :- core/NativeCoreProgram
+(def misaligned-offset-program core/NativeCoreProgram
   (with valid-program
     [:layouts [fixture-i64-layout misaligned-union-layout fixture-outcome-layout]]))
 
 ;; checked-arithmetic #2: a checked result consumed directly by an
 ;; ordinary instruction instead of being dispatched through a switch.
-(def raw-consume-function :- core/FunctionDef
+(def raw-consume-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -3122,12 +3122,12 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator nil)])]]))
 
-(def raw-consume-program :- core/NativeCoreProgram
+(def raw-consume-program core/NativeCoreProgram
   (with valid-program [:functions [raw-consume-function]]))
 
 ;; checked-arithmetic #3: a checked operation whose result is typed as a
 ;; plain value instead of an Outcome type.
-(def non-outcome-result-function :- core/FunctionDef
+(def non-outcome-result-function core/FunctionDef
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
@@ -3146,30 +3146,30 @@
       (core/->BasicBlock (obligation-id "block-right") [] []
         [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
 
-(def non-outcome-result-program :- core/NativeCoreProgram
+(def non-outcome-result-program core/NativeCoreProgram
   (with valid-program [:functions [non-outcome-result-function]]))
 
 ;; legal-abi #2: the ABI result type does not match the function's own
 ;; declared return type.
-(def result-type-mismatch-abi :- core/AbiDeclV0
+(def result-type-mismatch-abi core/AbiDeclV0
   (with fixture-abi
     [:result (core/->AbiValueV0 "result" (obligation-id "type-i64")
                (core/->OwnedV0 true) nil)]))
 
-(def result-type-mismatch-program :- core/NativeCoreProgram
+(def result-type-mismatch-program core/NativeCoreProgram
   (with valid-program [:abis [result-type-mismatch-abi]]))
 
 ;; legal-abi #3: the ABI requires a capability the function never declares.
-(def missing-capability-abi :- core/AbiDeclV0
+(def missing-capability-abi core/AbiDeclV0
   (with fixture-abi
     [:required-capabilities [(obligation-id "capability-write")]]))
 
-(def missing-capability-abi-program :- core/NativeCoreProgram
+(def missing-capability-abi-program core/NativeCoreProgram
   (with valid-program [:abis [missing-capability-abi]]))
 
 ;; discharged-tokens #2: one branch of a two-way split never consumes the
 ;; tokens live at entry, so they leak on that path.
-(def leak-token-function :- core/FunctionDef
+(def leak-token-function core/FunctionDef
   (with fixture-token-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-token-entry") []
@@ -3194,14 +3194,14 @@
         [(core/->ReturnTerminator nil)])]]
     [:entry-block (obligation-id "block-token-entry")]))
 
-(def leak-token-program :- core/NativeCoreProgram
+(def leak-token-program core/NativeCoreProgram
   (with valid-program
     [:functions [fixture-function leak-token-function]]))
 
 ;; discharged-tokens #3: a consume names a token id that was never
 ;; produced or live (a phantom consume, distinct from double-consuming a
 ;; live one).
-(def phantom-consume-token-function :- core/FunctionDef
+(def phantom-consume-token-function core/FunctionDef
   (with fixture-token-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-store") []
@@ -3219,24 +3219,24 @@
              []))]
         [(core/->ReturnTerminator nil)])]]))
 
-(def phantom-consume-token-program :- core/NativeCoreProgram
+(def phantom-consume-token-program core/NativeCoreProgram
   (with valid-program
     [:functions [fixture-function phantom-consume-token-function]]))
 
 ;; bounded-effects #2: a store references a region absent from the
 ;; function's own declared regions (undeclared resource use, not merely
 ;; an uncovering effect).
-(def undeclared-region-function :- core/FunctionDef
+(def undeclared-region-function core/FunctionDef
   (with fixture-token-function [:regions []]))
 
-(def undeclared-region-program :- core/NativeCoreProgram
+(def undeclared-region-program core/NativeCoreProgram
   (with valid-program
     [:functions [fixture-function undeclared-region-function]]))
 
 ;; bounded-effects #3: a call to a callee whose declared effects and
 ;; capabilities are not a subset of the caller's (effect widening
 ;; through a call).
-(def unbounded-call-function :- core/FunctionDef
+(def unbounded-call-function core/FunctionDef
   (core/->FunctionDef (obligation-id "function-caller") "caller"
     [(core/->Parameter (obligation-id "ssa-address") (obligation-id "type-i64"))
      (core/->Parameter (obligation-id "ssa-value") (obligation-id "type-i64"))]
@@ -3253,13 +3253,13 @@
     nil
     [] [] []))
 
-(def unbounded-call-program :- core/NativeCoreProgram
+(def unbounded-call-program core/NativeCoreProgram
   (with valid-program
     [:functions [fixture-function fixture-token-function unbounded-call-function]]))
 
 ;; epoch-soundness #2: a young-epoch value RETURNED from the function that
 ;; closes its epoch (escape through the crossing set of a dead region).
-(def return-young-function :- core/FunctionDef
+(def return-young-function core/FunctionDef
   (with epoch-sound-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3268,13 +3268,13 @@
          (epoch-close-instruction "return")]
         [(core/->ReturnTerminator (obligation-id "ssa-young-text"))])]]))
 
-(def return-young-program :- core/NativeCoreProgram
+(def return-young-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [return-young-function]]))
 
 ;; epoch-soundness #3: a young-epoch value passed as a call argument — a
 ;; missing callee summary means retained, so the argument must carry driver
 ;; lifetime.
-(def call-young-function :- core/FunctionDef
+(def call-young-function core/FunctionDef
   (with epoch-sound-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3290,7 +3290,7 @@
          (epoch-close-instruction "call")]
         [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
 
-(def call-young-program :- core/NativeCoreProgram
+(def call-young-program core/NativeCoreProgram
   (with epoch-sound-program
     [:functions [fixture-token-function call-young-function]]))
 
@@ -3299,7 +3299,7 @@
 ;; result's only use; each negative keeps the promote and adds exactly one
 ;; more use of the raw result.
 
-(defn young-call-instruction [] :- core/Instruction
+(defn young-call-instruction [] core/Instruction
   (core/->CallInstruction
     (core/->SsaValueV0 (obligation-id "ssa-e3-call")
       (obligation-id "type-text"))
@@ -3308,7 +3308,7 @@
     nil
     (core/->TokenFlowV0 [] [])))
 
-(defn young-extern-call-instruction [] :- core/Instruction
+(defn young-extern-call-instruction [] core/Instruction
   (core/->ExternCallInstruction
     (core/->SsaValueV0 (obligation-id "ssa-e3-extern")
       (obligation-id "type-text"))
@@ -3318,8 +3318,8 @@
     (core/->TokenFlowV0 [] [])))
 
 (defn promote-result-instruction
-  [label :- String
-   source :- core/NativeId] :- core/Instruction
+  [(label String)
+   (source core/NativeId)] core/Instruction
   (core/->PromoteInstructionV0
     (core/->SsaValueV0 (obligation-id (str "ssa-e3-promoted-" label))
       (obligation-id "type-text"))
@@ -3329,7 +3329,7 @@
 
 ;; E3 positive: young argument, result promoted to the root arena, no other
 ;; use — admitted.
-(def call-promote-function :- core/FunctionDef
+(def call-promote-function core/FunctionDef
   (with epoch-sound-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3343,13 +3343,13 @@
     [:regions [(obligation-id "region-fixture")
                (obligation-id "region-epoch")]]))
 
-(def call-promote-program :- core/NativeCoreProgram
+(def call-promote-program core/NativeCoreProgram
   (with epoch-sound-program
     [:functions [fixture-token-function call-promote-function]]))
 
 ;; E3 negative #1: the promoted result ALSO resets a root-pinned cell raw —
 ;; a second escaping use, so the admission may not fire.
-(def call-promote-atom-escape-function :- core/FunctionDef
+(def call-promote-atom-escape-function core/FunctionDef
   (with call-promote-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3369,14 +3369,14 @@
                (obligation-id "region-atom-state")
                (obligation-id "region-epoch")]]))
 
-(def call-promote-atom-escape-program :- core/NativeCoreProgram
+(def call-promote-atom-escape-program core/NativeCoreProgram
   (with atom-epoch-program
     [:functions [fixture-token-function call-promote-atom-escape-function]]))
 
 ;; E3 negative #2: the raw result also feeds a Text build in the YOUNG arena.
 ;; That write is legal on its own (young into young), so this is the one
 ;; corruption only the escape walk itself refuses.
-(def call-promote-young-use-function :- core/FunctionDef
+(def call-promote-young-use-function core/FunctionDef
   (with call-promote-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3394,12 +3394,12 @@
          (epoch-close-instruction "e3-young-use")]
         [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
 
-(def call-promote-young-use-program :- core/NativeCoreProgram
+(def call-promote-young-use-program core/NativeCoreProgram
   (with epoch-sound-program
     [:functions [fixture-token-function call-promote-young-use-function]]))
 
 ;; E3 extern positive: the same admitted shape through an extern call.
-(def extern-promote-function :- core/FunctionDef
+(def extern-promote-function core/FunctionDef
   (with call-promote-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3412,11 +3412,11 @@
          (epoch-close-instruction "e3-extern")]
         [(core/->ReturnTerminator (obligation-id "ssa-input"))])]]))
 
-(def extern-promote-program :- core/NativeCoreProgram
+(def extern-promote-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [extern-promote-function]]))
 
 ;; E3 extern negative: the promoted extern result is ALSO returned raw.
-(def extern-promote-return-function :- core/FunctionDef
+(def extern-promote-return-function core/FunctionDef
   (with extern-promote-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-epoch-entry") []
@@ -3429,12 +3429,12 @@
          (epoch-close-instruction "e3-extern-return")]
         [(core/->ReturnTerminator (obligation-id "ssa-e3-extern"))])]]))
 
-(def extern-promote-return-program :- core/NativeCoreProgram
+(def extern-promote-return-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [extern-promote-return-function]]))
 
 ;; leak-freedom #2: LIFO violation — the outer epoch closes while its child
 ;; is still open (closes must run in reverse tree order).
-(def lifo-violation-function :- core/FunctionDef
+(def lifo-violation-function core/FunctionDef
   (with epoch-close-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-lifo-entry") []
@@ -3451,12 +3451,12 @@
         [(core/->ReturnTerminator nil)])]]
     [:entry-block (obligation-id "block-lifo-entry")]))
 
-(def lifo-violation-program :- core/NativeCoreProgram
+(def lifo-violation-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [lifo-violation-function]]))
 
 ;; leak-freedom #3: a double close — the second close finds its epoch already
 ;; popped (distinct from never closing at all).
-(def double-close-function :- core/FunctionDef
+(def double-close-function core/FunctionDef
   (with epoch-close-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-double-entry") []
@@ -3466,88 +3466,88 @@
         [(core/->ReturnTerminator nil)])]]
     [:entry-block (obligation-id "block-double-entry")]))
 
-(def double-close-program :- core/NativeCoreProgram
+(def double-close-program core/NativeCoreProgram
   (with epoch-sound-program [:functions [double-close-function]]))
 
-(def valid-ssa-negative-sibling :- Bool
+(def valid-ssa-negative-sibling Bool
   (= "valid-ssa" (verdict-tag (valid-ssa sibling-block-use-program))))
 
-(def valid-ssa-negative-jump-mismatch :- Bool
+(def valid-ssa-negative-jump-mismatch Bool
   (= "valid-ssa" (verdict-tag (valid-ssa jump-mismatch-program))))
 
-(def exhaustive-matches-negative-duplicate :- Bool
+(def exhaustive-matches-negative-duplicate Bool
   (= "exhaustive-matches" (verdict-tag (exhaustive-matches duplicate-case-program))))
 
-(def exhaustive-matches-negative-unknown-variant :- Bool
+(def exhaustive-matches-negative-unknown-variant Bool
   (= "exhaustive-matches" (verdict-tag (exhaustive-matches unknown-variant-program))))
 
-(def closed-layouts-negative-zero-size :- Bool
+(def closed-layouts-negative-zero-size Bool
   (= "closed-layouts"
     (verdict-tag (closed-layouts zero-size-layout-program (core/abi-profile-lp64)))))
 
-(def closed-layouts-negative-misaligned-offset :- Bool
+(def closed-layouts-negative-misaligned-offset Bool
   (= "closed-layouts"
     (verdict-tag
       (closed-layouts misaligned-offset-program (core/abi-profile-lp64)))))
 
-(def checked-arithmetic-negative-raw-consume :- Bool
+(def checked-arithmetic-negative-raw-consume Bool
   (= "checked-arithmetic" (verdict-tag (checked-arithmetic raw-consume-program))))
 
-(def checked-arithmetic-negative-non-outcome :- Bool
+(def checked-arithmetic-negative-non-outcome Bool
   (= "checked-arithmetic" (verdict-tag (checked-arithmetic non-outcome-result-program))))
 
-(def legal-abi-negative-result-mismatch :- Bool
+(def legal-abi-negative-result-mismatch Bool
   (= "legal-abi" (verdict-tag (legal-abi result-type-mismatch-program))))
 
-(def legal-abi-negative-missing-capability :- Bool
+(def legal-abi-negative-missing-capability Bool
   (= "legal-abi" (verdict-tag (legal-abi missing-capability-abi-program))))
 
-(def discharged-tokens-negative-leak :- Bool
+(def discharged-tokens-negative-leak Bool
   (= "discharged-tokens" (verdict-tag (discharged-tokens leak-token-program))))
 
-(def discharged-tokens-negative-phantom-consume :- Bool
+(def discharged-tokens-negative-phantom-consume Bool
   (= "discharged-tokens" (verdict-tag (discharged-tokens phantom-consume-token-program))))
 
-(def bounded-effects-negative-undeclared-region :- Bool
+(def bounded-effects-negative-undeclared-region Bool
   (= "bounded-effects" (verdict-tag (bounded-effects undeclared-region-program))))
 
-(def bounded-effects-negative-unbounded-call :- Bool
+(def bounded-effects-negative-unbounded-call Bool
   (= "bounded-effects" (verdict-tag (bounded-effects unbounded-call-program))))
 
-(def epoch-soundness-negative-return-young :- Bool
+(def epoch-soundness-negative-return-young Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness return-young-program))))
 
-(def epoch-soundness-negative-call-young :- Bool
+(def epoch-soundness-negative-call-young Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness call-young-program))))
 
-(def epoch-soundness-negative-atom-young-store :- Bool
+(def epoch-soundness-negative-atom-young-store Bool
   (= "epoch-soundness" (verdict-tag (epoch-soundness atom-young-store-program))))
 
-(def epoch-soundness-positive-call-promoted-result :- Bool
+(def epoch-soundness-positive-call-promoted-result Bool
   (obligation-passed? (epoch-soundness call-promote-program)))
 
-(def epoch-soundness-negative-call-promote-atom-escape :- Bool
+(def epoch-soundness-negative-call-promote-atom-escape Bool
   (= "epoch-soundness"
     (verdict-tag (epoch-soundness call-promote-atom-escape-program))))
 
-(def epoch-soundness-negative-call-promote-young-use :- Bool
+(def epoch-soundness-negative-call-promote-young-use Bool
   (= "epoch-soundness"
     (verdict-tag (epoch-soundness call-promote-young-use-program))))
 
-(def epoch-soundness-positive-extern-promoted-result :- Bool
+(def epoch-soundness-positive-extern-promoted-result Bool
   (obligation-passed? (epoch-soundness extern-promote-program)))
 
-(def epoch-soundness-negative-extern-promote-return :- Bool
+(def epoch-soundness-negative-extern-promote-return Bool
   (= "epoch-soundness"
     (verdict-tag (epoch-soundness extern-promote-return-program))))
 
-(def leak-freedom-negative-lifo :- Bool
+(def leak-freedom-negative-lifo Bool
   (= "leak-freedom" (verdict-tag (leak-freedom lifo-violation-program))))
 
-(def leak-freedom-negative-double-close :- Bool
+(def leak-freedom-negative-double-close Bool
   (= "leak-freedom" (verdict-tag (leak-freedom double-close-program))))
 
-(def rejection-depth-results :- (Vec Bool)
+(def rejection-depth-results (Vec Bool)
   [valid-ssa-negative-sibling
    valid-ssa-negative-jump-mismatch
    exhaustive-matches-negative-duplicate
@@ -3571,12 +3571,12 @@
    leak-freedom-negative-lifo
    leak-freedom-negative-double-close])
 
-(def twenty-two-rejection-depth-fixtures-named? :- Bool
-  (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
+(def twenty-two-rejection-depth-fixtures-named? Bool
+  (every? (fn [(passed Bool)] Bool passed) rejection-depth-results))
 
 (defn validate-native-core-program
-  [program :- core/NativeCoreProgram
-   abi :- core/AbiProfileV0] :- (Vec ObligationVerdictV0)
+  [(program core/NativeCoreProgram)
+   (abi core/AbiProfileV0)] (Vec ObligationVerdictV0)
   [(valid-ssa program)
    (exhaustive-matches program)
    (closed-layouts program abi)
@@ -3587,12 +3587,12 @@
    (epoch-soundness program)
    (leak-freedom program)])
 
-(def valid-fixture-results :- (Vec Bool)
-  (mapv (fn [verdict :- ObligationVerdictV0] :- Bool
+(def valid-fixture-results (Vec Bool)
+  (mapv (fn [(verdict ObligationVerdictV0)] Bool
           (obligation-passed? verdict))
     (validate-native-core-program valid-program (core/abi-profile-lp64))))
 
-(def negative-fixture-results :- (Vec Bool)
+(def negative-fixture-results (Vec Bool)
   [valid-ssa-negative
    exhaustive-matches-negative
    closed-layouts-negative
@@ -3603,8 +3603,8 @@
    epoch-soundness-negative
    leak-freedom-negative])
 
-(def nine-valid-passes? :- Bool
-  (and (every? (fn [passed :- Bool] :- Bool passed) valid-fixture-results)
+(def nine-valid-passes? Bool
+  (and (every? (fn [(passed Bool)] Bool passed) valid-fixture-results)
     epoch-soundness-positive
     epoch-soundness-positive-atom-root-store
     epoch-soundness-positive-atom-promoted-store
@@ -3612,5 +3612,5 @@
     epoch-soundness-positive-extern-promoted-result
     leak-freedom-positive))
 
-(def nine-negatives-named? :- Bool
-  (every? (fn [passed :- Bool] :- Bool passed) negative-fixture-results))
+(def nine-negatives-named? Bool
+  (every? (fn [(passed Bool)] Bool passed) negative-fixture-results))

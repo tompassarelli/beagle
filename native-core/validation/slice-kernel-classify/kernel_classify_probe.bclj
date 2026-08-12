@@ -4,11 +4,11 @@
 
 (require fram.kernel-classify :as kernel)
 
-(defn observed-fallback-single [] -> (Vec String)
+(defn observed-fallback-single [] (Vec String)
   kernel/fallback-single)
 
-(defn observed-key-sep [] -> String
+(defn observed-key-sep [] String
   kernel/key-sep)
 
-(defn observed-lease-schema-lines [] -> (Vec String)
+(defn observed-lease-schema-lines [] (Vec String)
   kernel/lease-schema-lines)

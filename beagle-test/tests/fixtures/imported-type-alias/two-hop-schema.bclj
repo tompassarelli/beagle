@@ -4,4 +4,4 @@
 (require alias-owner :as t)
 (define-mode strict)
 
-(def accepted: Bool (c/accepts? "ready"))
+(def accepted Bool (c/accepts? "ready"))

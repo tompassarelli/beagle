@@ -9,26 +9,26 @@
 (require native.body-c17 :as body)
 (require native.qbe :as qbe)
 
-(defn fixture-id [name: String] -> core/NativeId
+(defn fixture-id [(name String)] core/NativeId
   (core/canonical-id "native-socket-capability-fixture-v0" [name]))
 
-(defn fixture-types [] -> (Vec core/TypeDef)
+(defn fixture-types [] (Vec core/TypeDef)
   (lower/append-type-defs
     [(lower/lower-failure-type)
      (lower/arena-handle-type)
      (lower/union-tag-type)]
     (lower/socket-outcome-types)))
 
-(defn fixture-effects [] -> (Vec core/EffectDef)
+(defn fixture-effects [] (Vec core/EffectDef)
   [(core/->EffectDef (lower/allocate-effect-id)
      (core/->AllocateEffect (lower/arena-region-id)))
    (core/->EffectDef (lower/host-socket-effect-id)
      (core/->SocketEffect (lower/host-socket-capability-id)))])
 
-(defn fixture-regions [] -> (Vec core/RegionDef)
+(defn fixture-regions [] (Vec core/RegionDef)
   [(core/->RegionDef (lower/arena-region-id) (core/->ArenaRegion true) nil)])
 
-(defn fixture-capabilities [] -> (Vec core/CapabilityDef)
+(defn fixture-capabilities [] (Vec core/CapabilityDef)
   [(core/->CapabilityDef
      (lower/allocate-capability-id)
      (core/->AllocateCapability true)
@@ -40,18 +40,18 @@
      nil
      false)])
 
-(defn fixture-function [] -> core/FunctionDef
-  (let [function-id: core/NativeId (fixture-id "function")
-        block-id: core/NativeId (fixture-id "entry")
-        fd: core/NativeId (fixture-id "fd")
-        bound: core/NativeId (fixture-id "bound")
-        bytes: core/NativeId (fixture-id "bytes")
-        arena: core/NativeId (fixture-id "arena")
-        inherited: core/NativeId (fixture-id "inherited")
-        accepted: core/NativeId (fixture-id "accepted")
-        read: core/NativeId (fixture-id "read")
-        written: core/NativeId (fixture-id "written")
-        closed: core/NativeId (fixture-id "closed")]
+(defn fixture-function [] core/FunctionDef
+  (let [(function-id core/NativeId) (fixture-id "function")
+        (block-id core/NativeId) (fixture-id "entry")
+        (fd core/NativeId) (fixture-id "fd")
+        (bound core/NativeId) (fixture-id "bound")
+        (bytes core/NativeId) (fixture-id "bytes")
+        (arena core/NativeId) (fixture-id "arena")
+        (inherited core/NativeId) (fixture-id "inherited")
+        (accepted core/NativeId) (fixture-id "accepted")
+        (read core/NativeId) (fixture-id "read")
+        (written core/NativeId) (fixture-id "written")
+        (closed core/NativeId) (fixture-id "closed")]
     (core/->FunctionDef
       function-id
       "socket-capability-fixture"
@@ -99,14 +99,14 @@
       [(lower/arena-region-id)]
       [(lower/allocate-capability-id) (lower/host-socket-capability-id)])))
 
-(defn fixture-program [] -> core/NativeCoreProgram
-  (let [types: (Vec core/TypeDef) (fixture-types)
-        layouts: (Vec core/LayoutDef)
+(defn fixture-program [] core/NativeCoreProgram
+  (let [(types (Vec core/TypeDef)) (fixture-types)
+        (layouts (Vec core/LayoutDef))
         (lower/collect-layouts
           (lower/resolve-layouts types (core/abi-profile-lp64)))
-        effects: (Vec core/EffectDef) (fixture-effects)
-        regions: (Vec core/RegionDef) (fixture-regions)
-        capabilities: (Vec core/CapabilityDef) (fixture-capabilities)]
+        (effects (Vec core/EffectDef)) (fixture-effects)
+        (regions (Vec core/RegionDef)) (fixture-regions)
+        (capabilities (Vec core/CapabilityDef)) (fixture-capabilities)]
     (core/->NativeCoreProgram
       (fixture-id "program") nil "socket-capability-fixture-v0"
       types effects regions capabilities layouts
@@ -117,19 +117,19 @@
       (lower/host-socket-abis (lower/layout-digest layouts))
       [])))
 
-(defn obligations-pass? [program: core/NativeCoreProgram] -> Bool
+(defn obligations-pass? [(program core/NativeCoreProgram)] Bool
   (every? obligations/obligation-passed?
     (obligations/validate-native-core-program program (core/abi-profile-lp64))))
 
-(defn qbe-detail [result: qbe/QbeMaterialization] -> String
+(defn qbe-detail [(result qbe/QbeMaterialization)] String
   (if (instance? native.qbe.QbeFailure result)
     (qbe/qbefailure-detail result)
     "unexpected success"))
 
-(defn emit-fixture! [artifacts-dir: String] -> String
-  (let [program: core/NativeCoreProgram (fixture-program)
-        c-result: body/BodyMaterializationV0 (body/materialize-program program 0)
-        qbe-result: qbe/QbeMaterialization (qbe/materialize-program program 0 "lp64")]
+(defn emit-fixture! [(artifacts-dir String)] String
+  (let [(program core/NativeCoreProgram) (fixture-program)
+        (c-result body/BodyMaterializationV0) (body/materialize-program program 0)
+        (qbe-result qbe/QbeMaterialization) (qbe/materialize-program program 0 "lp64")]
     (if (or (not (obligations-pass? program))
             (not (body/materialization-ok? c-result)))
       (str "fixture REFUSED " (body/materialization-detail c-result) "\n"
@@ -152,7 +152,7 @@
         "effects "
         (str (obligations/obligation-passed?
           (obligations/bounded-effects program))) "\n")
-      (let [artifact: body/BodyArtifactV0
+      (let [(artifact body/BodyArtifactV0)
             (body/materialization-artifact c-result)]
         (do
           (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))

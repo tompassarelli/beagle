@@ -10,32 +10,32 @@
 (require native.c11 :as c11)
 
 (defrecord FactV0
-  [subject: Int
-   predicate: String
-   object: Any
-   reference: Bool])
+  [(subject Int)
+   (predicate String)
+   (object Any)
+   (reference Bool)])
 
-(defn slice-id [domain: String parts: (Vec String)] -> core/NativeId
+(defn slice-id [(domain String) (parts (Vec String))] core/NativeId
   (core/canonical-id (str "native-slice-types-v0/" domain) parts))
 
-(defn same-id? [left: core/NativeId right: core/NativeId] -> Bool
+(defn same-id? [(left core/NativeId) (right core/NativeId)] Bool
   (core/native-id= left right))
 
-(defn int-in? [values: (Vec Int) target: Int] -> Bool
-  (loop [index: Int 0]
+(defn int-in? [(values (Vec Int)) (target Int)] Bool
+  (loop [(index Int) 0]
     (if (>= index (count values))
       false
       (if (= (nth values index) target)
         true
         (recur (+ index 1))))))
 
-(defn node-id [source-id: Int] -> core/NativeId
+(defn node-id [(source-id Int)] core/NativeId
   (slice-id "source-node" [(str source-id)]))
 
-(defn fact-id [ordinal: Int] -> core/NativeId
+(defn fact-id [(ordinal Int)] core/NativeId
   (slice-id "source-fact" [(str ordinal)]))
 
-(defn literal-key [value: Any] -> String
+(defn literal-key [(value Any)] String
   (cond
     (string? value) (str "text:" value)
     (integer? value) (str "i64:" value)
@@ -43,10 +43,10 @@
     (boolean? value) (str "bool:" value)
     :else (str "text:" value)))
 
-(defn literal-id [value: Any] -> core/NativeId
+(defn literal-id [(value Any)] core/NativeId
   (slice-id "literal" [(literal-key value)]))
 
-(defn literal-term [value: Any] -> stages/TermV0
+(defn literal-term [(value Any)] stages/TermV0
   (cond
     (string? value) (stages/->TextTermV0 value)
     (integer? value) (stages/->I64TermV0 value)
@@ -55,38 +55,38 @@
     :else (stages/->TextTermV0 (str value))))
 
 (defn find-fact
-  [facts: (Vec Any)
-   subject: Int
-   predicate: String] -> (U Any Nil)
-  (loop [index: Int 0]
+  [(facts (Vec Any))
+   (subject Int)
+   (predicate String)] (U Any Nil)
+  (loop [(index Int) 0]
     (if (>= index (count facts))
       nil
-      (let [fact: Any (nth facts index)]
+      (let [(fact Any) (nth facts index)]
         (if (and (= subject (nth fact 0)) (= predicate (nth fact 1)))
           fact
           (recur (+ index 1)))))))
 
 (defn child-reference?
-  [facts: (Vec Any)
-   subject: Int
-   object: Any] -> Bool
+  [(facts (Vec Any))
+   (subject Int)
+   (object Any)] Bool
   (and (integer? object)
-    (loop [index: Int 0]
+    (loop [(index Int) 0]
       (if (>= index (count facts))
         false
-        (let [fact: Any (nth facts index)]
+        (let [(fact Any) (nth facts index)]
           (if (and (= subject (nth fact 0))
                    (= "child" (nth fact 1))
                    (= object (nth fact 2)))
             true
             (recur (+ index 1))))))))
 
-(defn instant-root [facts: (Vec Any)] -> Int
-  (loop [index: Int 0]
+(defn instant-root [(facts (Vec Any))] Int
+  (loop [(index Int) 0]
     (if (>= index (count facts))
       -1
-      (let [fact: Any (nth facts index)
-            subject: Int (nth fact 0)]
+      (let [(fact Any) (nth facts index)
+            (subject Int) (nth fact 0)]
         (if (and (= "form-kind" (nth fact 1))
                  (= "record" (nth fact 2))
                  (if-let [name-fact (find-fact facts subject "name")]
@@ -95,14 +95,14 @@
           subject
           (recur (+ index 1)))))))
 
-(defn child-ids [facts: (Vec Any) subjects: (Vec Int)] -> (Vec Int)
-  (loop [index: Int 0 children: (Vec Int) []]
+(defn child-ids [(facts (Vec Any)) (subjects (Vec Int))] (Vec Int)
+  (loop [(index Int) 0 (children (Vec Int)) []]
     (if (>= index (count facts))
       children
-      (let [fact: Any (nth facts index)
-            subject: Int (nth fact 0)
-            predicate: String (nth fact 1)
-            object: Any (nth fact 2)]
+      (let [(fact Any) (nth facts index)
+            (subject Int) (nth fact 0)
+            (predicate String) (nth fact 1)
+            (object Any) (nth fact 2)]
         (if (and (int-in? subjects subject)
                  (= "child" predicate)
                  (integer? object)
@@ -111,21 +111,21 @@
           (recur (+ index 1) (conj children object))
           (recur (+ index 1) children))))))
 
-(defn descendant-ids [facts: (Vec Any) root: Int] -> (Vec Int)
-  (loop [subjects: (Vec Int) [root]]
-    (let [children: (Vec Int) (child-ids facts subjects)]
+(defn descendant-ids [(facts (Vec Any)) (root Int)] (Vec Int)
+  (loop [(subjects (Vec Int)) [root]]
+    (let [(children (Vec Int)) (child-ids facts subjects)]
       (if (= 0 (count children))
         subjects
         (recur (vec (concat subjects children)))))))
 
-(defn select-facts [facts: (Vec Any) subjects: (Vec Int)] -> (Vec FactV0)
-  (loop [index: Int 0 selected: (Vec FactV0) []]
+(defn select-facts [(facts (Vec Any)) (subjects (Vec Int))] (Vec FactV0)
+  (loop [(index Int) 0 (selected (Vec FactV0)) []]
     (if (>= index (count facts))
       selected
-      (let [fact: Any (nth facts index)
-            subject: Int (nth fact 0)
-            predicate: String (nth fact 1)
-            object: Any (nth fact 2)]
+      (let [(fact Any) (nth facts index)
+            (subject Int) (nth fact 0)
+            (predicate String) (nth fact 1)
+            (object Any) (nth fact 2)]
         (if (int-in? subjects subject)
           (recur (+ index 1)
             (conj selected
@@ -133,8 +133,8 @@
                 (child-reference? facts subject object))))
           (recur (+ index 1) selected))))))
 
-(defn node-in? [nodes: (Vec stages/TermNodeV0) identity: core/NativeId] -> Bool
-  (loop [index: Int 0]
+(defn node-in? [(nodes (Vec stages/TermNodeV0)) (identity core/NativeId)] Bool
+  (loop [(index Int) 0]
     (if (>= index (count nodes))
       false
       (if (same-id? identity
@@ -143,41 +143,41 @@
         (recur (+ index 1))))))
 
 (defn append-node
-  [nodes: (Vec stages/TermNodeV0)
-   node: stages/TermNodeV0] -> (Vec stages/TermNodeV0)
+  [(nodes (Vec stages/TermNodeV0))
+   (node stages/TermNodeV0)] (Vec stages/TermNodeV0)
   (if (node-in? nodes (stages/termnodev0-identity node))
     nodes
     (conj nodes node)))
 
-(defn source-marker-node [source-id: Int] -> stages/TermNodeV0
+(defn source-marker-node [(source-id Int)] stages/TermNodeV0
   (stages/->TermNodeV0 (node-id source-id)
     (stages/->TextTermV0 "source-node-v0")))
 
-(defn literal-node [value: Any] -> stages/TermNodeV0
+(defn literal-node [(value Any)] stages/TermNodeV0
   (stages/->TermNodeV0 (literal-id value) (literal-term value)))
 
-(defn fact-object-id [fact: FactV0] -> core/NativeId
+(defn fact-object-id [(fact FactV0)] core/NativeId
   (if (factv0-reference fact)
     (node-id (factv0-object fact))
     (literal-id (factv0-object fact))))
 
-(defn fact-node [ordinal: Int fact: FactV0] -> stages/TermNodeV0
+(defn fact-node [(ordinal Int) (fact FactV0)] stages/TermNodeV0
   (stages/->TermNodeV0 (fact-id ordinal)
     (stages/->TripleTermV0
       (node-id (factv0-subject fact))
       (literal-id (factv0-predicate fact))
       (fact-object-id fact))))
 
-(defn source-nodes [facts: (Vec FactV0)] -> (Vec stages/TermNodeV0)
-  (loop [index: Int 0 nodes: (Vec stages/TermNodeV0) []]
+(defn source-nodes [(facts (Vec FactV0))] (Vec stages/TermNodeV0)
+  (loop [(index Int) 0 (nodes (Vec stages/TermNodeV0)) []]
     (if (>= index (count facts))
       nodes
-      (let [fact: FactV0 (nth facts index)
-            with-subject: (Vec stages/TermNodeV0)
+      (let [(fact FactV0) (nth facts index)
+            (with-subject (Vec stages/TermNodeV0))
             (append-node nodes (source-marker-node (factv0-subject fact)))
-            with-predicate: (Vec stages/TermNodeV0)
+            (with-predicate (Vec stages/TermNodeV0))
             (append-node with-subject (literal-node (factv0-predicate fact)))
-            with-object: (Vec stages/TermNodeV0)
+            (with-object (Vec stages/TermNodeV0))
             (if (factv0-reference fact)
               (append-node with-predicate
                 (source-marker-node (factv0-object fact)))
@@ -186,14 +186,14 @@
           (append-node with-object (fact-node index fact)))))))
 
 (defn source-program
-  [facts: (Vec Any)
-   source-text: String] -> stages/SourceStageV0
-  (let [root-number: Int (instant-root facts)
-        subjects: (Vec Int) (descendant-ids facts root-number)
-        selected: (Vec FactV0) (select-facts facts subjects)
-        root: core/NativeId (slice-id "source-root" ["fram.types"])
-        source-text-id: core/NativeId (slice-id "source-text" ["fram.types"])
-        nodes: (Vec stages/TermNodeV0)
+  [(facts (Vec Any))
+   (source-text String)] stages/SourceStageV0
+  (let [(root-number Int) (instant-root facts)
+        (subjects (Vec Int)) (descendant-ids facts root-number)
+        (selected (Vec FactV0)) (select-facts facts subjects)
+        (root core/NativeId) (slice-id "source-root" ["fram.types"])
+        (source-text-id core/NativeId) (slice-id "source-text" ["fram.types"])
+        (nodes (Vec stages/TermNodeV0))
         (conj
           (conj (source-nodes selected)
             (stages/->TermNodeV0 root
@@ -214,22 +214,22 @@
         []
         []))))
 
-(defn type-named? [definition: core/TypeDef name: String] -> Bool
+(defn type-named? [(definition core/TypeDef) (name String)] Bool
   (= name (core/typedef-name definition)))
 
-(defn selected-type? [definition: core/TypeDef] -> Bool
+(defn selected-type? [(definition core/TypeDef)] Bool
   (or (type-named? definition "I64")
       (type-named? definition "Instant")))
 
-(defn selected-types [program: core/NativeCoreProgram] -> (Vec core/TypeDef)
+(defn selected-types [(program core/NativeCoreProgram)] (Vec core/TypeDef)
   (filterv
-    (fn [definition: core/TypeDef] -> Bool (selected-type? definition))
+    (fn [(definition core/TypeDef)] Bool (selected-type? definition))
     (core/nativecoreprogram-types program)))
 
 (defn id-selected?
-  [definitions: (Vec core/TypeDef)
-   target: core/NativeId] -> Bool
-  (loop [index: Int 0]
+  [(definitions (Vec core/TypeDef))
+   (target core/NativeId)] Bool
+  (loop [(index Int) 0]
     (if (>= index (count definitions))
       false
       (if (same-id? target (core/typedef-id (nth definitions index)))
@@ -237,16 +237,16 @@
         (recur (+ index 1))))))
 
 (defn selected-layouts
-  [program: core/NativeCoreProgram
-   definitions: (Vec core/TypeDef)] -> (Vec core/LayoutDef)
+  [(program core/NativeCoreProgram)
+   (definitions (Vec core/TypeDef))] (Vec core/LayoutDef)
   (filterv
-    (fn [layout: core/LayoutDef] -> Bool
+    (fn [(layout core/LayoutDef)] Bool
       (id-selected? definitions (core/layoutdef-type-id layout)))
     (core/nativecoreprogram-layouts program)))
 
-(defn c17-projection [program: core/NativeCoreProgram] -> core/NativeCoreProgram
-  (let [definitions: (Vec core/TypeDef) (selected-types program)
-        layouts: (Vec core/LayoutDef) (selected-layouts program definitions)]
+(defn c17-projection [(program core/NativeCoreProgram)] core/NativeCoreProgram
+  (let [(definitions (Vec core/TypeDef)) (selected-types program)
+        (layouts (Vec core/LayoutDef)) (selected-layouts program definitions)]
     (core/->NativeCoreProgram
       (slice-id "c17-projection" [(core/nativeid-value (core/nativecoreprogram-id program))])
       (core/nativecoreprogram-id program)
@@ -263,7 +263,7 @@
       []
       [])))
 
-(def obligation-names: (Vec String)
+(def obligation-names (Vec String)
   ["VALID_SSA"
    "EXHAUSTIVE_MATCHES"
    "CLOSED_LAYOUTS"
@@ -274,27 +274,27 @@
    "EPOCH_SOUNDNESS"
    "LEAK_FREEDOM"])
 
-(defn obligation-lines [program: core/NativeCoreProgram] -> (Vec String)
-  (let [verdicts: (Vec obligations/ObligationVerdictV0)
+(defn obligation-lines [(program core/NativeCoreProgram)] (Vec String)
+  (let [(verdicts (Vec obligations/ObligationVerdictV0))
         (obligations/validate-native-core-program program (core/abi-profile-lp64))]
-    (loop [index: Int 0 lines: (Vec String) []]
+    (loop [(index Int) 0 (lines (Vec String)) []]
       (if (>= index (count verdicts))
         lines
-        (let [verdict: obligations/ObligationVerdictV0 (nth verdicts index)]
+        (let [(verdict obligations/ObligationVerdictV0) (nth verdicts index)]
           (if (obligations/obligation-passed? verdict)
             (recur (+ index 1)
               (conj lines (str (nth obligation-names index) " PASS")))
             (throw (ex-info
               (str (nth obligation-names index) " failed") {}))))))))
 
-(defn join-lines [lines: (Vec String)] -> String
-  (loop [index: Int 0 result: String ""]
+(defn join-lines [(lines (Vec String))] String
+  (loop [(index Int) 0 (result String) ""]
     (if (>= index (count lines))
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))
 
-(defn remove-extra-terminal-newline [value: String] -> String
-  (let [size: Int (count value)]
+(defn remove-extra-terminal-newline [(value String)] String
+  (let [(size Int) (count value)]
     (if (and (> size 1)
              (= "\n" (subs value (- size 1) size))
              (= "\n" (subs value (- size 2) (- size 1))))
@@ -302,23 +302,23 @@
       value)))
 
 (defn require-source-freeze
-  [result: lower/SourceFreezeResultV0] -> stages/FrozenSourceStageV0
+  [(result lower/SourceFreezeResultV0)] stages/FrozenSourceStageV0
   (if (instance? native.lower.SourceFreezeAcceptedV0 result)
     (lower/sourcefreezeacceptedv0-frozen result)
     (throw (ex-info "source program freezing failed" {}))))
 
-(defn require-typing [result: lower/TypingResultV0] -> stages/FrozenTypedStageV0
+(defn require-typing [(result lower/TypingResultV0)] stages/FrozenTypedStageV0
   (if (instance? native.lower.TypingAcceptedV0 result)
     (lower/typingacceptedv0-frozen result)
     (throw (ex-info "source-to-typed lowering failed" {}))))
 
-(defn require-slice [result: lower/TypingResultV0] -> lower/TypedSliceV0
+(defn require-slice [(result lower/TypingResultV0)] lower/TypedSliceV0
   (if (instance? native.lower.TypingAcceptedV0 result)
     (lower/typingacceptedv0-slice result)
     (throw (ex-info "source-to-typed lowering produced no slice" {}))))
 
 (defn require-native-freeze
-  [result: lower/NativeLoweringResultV0] -> stages/FrozenNativeStageV0
+  [(result lower/NativeLoweringResultV0)] stages/FrozenNativeStageV0
   (cond
     (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-frozen result)
@@ -328,21 +328,21 @@
 
     :else (throw (ex-info "typed-to-native lowering produced no program" {}))))
 
-(defn native-status [result: lower/NativeLoweringResultV0] -> String
+(defn native-status [(result lower/NativeLoweringResultV0)] String
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     "complete"
     "frozen-types-only-pending-no-function-abi"))
 
-(defn require-artifact [result: c11/C11Materialization] -> c11/C11Artifact
+(defn require-artifact [(result c11/C11Materialization)] c11/C11Artifact
   (if (instance? native.c11.C11Success result)
     (c11/c11success-artifact result)
     (throw (ex-info (c11/c11failure-detail result) {}))))
 
-(defn main-text [program: core/NativeCoreProgram] -> String
-  (let [types: (Vec core/TypeDef) (c11/ordered-types (core/nativecoreprogram-types program))
-        instant-index: Int
+(defn main-text [(program core/NativeCoreProgram)] String
+  (let [(types (Vec core/TypeDef)) (c11/ordered-types (core/nativecoreprogram-types program))
+        (instant-index Int)
         (c11/type-index types (lower/source-type-id "fram.types/Instant"))
-        instant-type: String (c11/type-name 0 instant-index)]
+        (instant-type String) (c11/type-name 0 instant-index)]
     (if (< instant-index 0)
       (throw (ex-info "Instant type is absent from C17 projection" {}))
       (str "/* Generated by native.slice-types-pipeline; do not edit. */\n"
@@ -356,37 +356,37 @@
         "}\n"))))
 
 (defn emit-slice!
-  [facts-path: String
-   source-path: String
-   output-directory: String] -> Nil
-  (let [facts: (Vec Any) (read-string (slurp facts-path))
-        source-text: String (slurp source-path)
-        configuration: (Vec String)
+  [(facts-path String)
+   (source-path String)
+   (output-directory String)] Nil
+  (let [(facts (Vec Any)) (read-string (slurp facts-path))
+        (source-text String) (slurp source-path)
+        (configuration (Vec String))
         ["profile=3" "module=fram.types" "slice=Instant"]
-        source: stages/SourceStageV0 (source-program facts source-text)
-        source-freeze: stages/FrozenSourceStageV0
+        (source stages/SourceStageV0) (source-program facts source-text)
+        (source-freeze stages/FrozenSourceStageV0)
         (require-source-freeze
           (lower/freeze-source-stage source "e50f806" configuration))
-        typing-result: lower/TypingResultV0
+        (typing-result lower/TypingResultV0)
         (lower/lower-typed-stage source-freeze "e50f806" configuration)
-        typed-freeze: stages/FrozenTypedStageV0 (require-typing typing-result)
-        typed-slice: lower/TypedSliceV0 (require-slice typing-result)
-        native-result: lower/NativeLoweringResultV0
+        (typed-freeze stages/FrozenTypedStageV0) (require-typing typing-result)
+        (typed-slice lower/TypedSliceV0) (require-slice typing-result)
+        (native-result lower/NativeLoweringResultV0)
         (lower/lower-native-stage typed-freeze typed-slice "e50f806" configuration
           (core/abi-profile-lp64))
-        native-freeze: stages/FrozenNativeStageV0 (require-native-freeze native-result)
-        epoch-freeze: stages/FrozenNativeStageV0
+        (native-freeze stages/FrozenNativeStageV0) (require-native-freeze native-result)
+        (epoch-freeze stages/FrozenNativeStageV0)
         (lower/epoch-result-frozen
           (lower/epoch-identity-stage native-freeze "e50f806" configuration
             (core/abi-profile-lp64)))
-        lowered-program: core/NativeCoreProgram
+        (lowered-program core/NativeCoreProgram)
         (stages/nativestagev0-program
           (stages/frozennativestagev0-stage epoch-freeze))
-        material-program: core/NativeCoreProgram (c17-projection lowered-program)
-        obligations-text: String (join-lines (obligation-lines material-program))
-        artifact: c11/C11Artifact
+        (material-program core/NativeCoreProgram) (c17-projection lowered-program)
+        (obligations-text String) (join-lines (obligation-lines material-program))
+        (artifact c11/C11Artifact)
         (require-artifact (c11/materialize-program material-program 0))
-        evidence: String
+        (evidence String)
         (join-lines
           [(str "source-path=" source-path)
            (str "source-bytes=" (count source-text))

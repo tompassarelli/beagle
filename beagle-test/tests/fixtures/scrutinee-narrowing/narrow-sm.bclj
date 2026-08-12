@@ -3,25 +3,25 @@
 ;; (a) Member accessor applied to the SCRUTINEE inside its matching arm. The
 ;; arm test is the runtime proof, so `s` is that member there.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Circle [(radius Int)])
+  (Rect [(width Int) (height String)]))
 
-(defn area [s: Shape] -> Int
+(defn area [(s Shape)] Int
   (match s
     [(Circle r) (circle-radius s)]
     [(Rect w h) (rect-width s)]))
 
 ;; The whole member value is passable where the member is required.
-(defn describe-circle [c: Circle] -> Int (circle-radius c))
+(defn describe-circle [(c Circle)] Int (circle-radius c))
 
-(defn describe [s: Shape] -> Int
+(defn describe [(s Shape)] Int
   (match s
     [(Circle r) (describe-circle s)]
     [(Rect w h) w]))
 
 ;; A local let binding is as stable as a parameter.
-(defn area-via-let [s0: Shape] -> Int
-  (let [s: Shape s0]
+(defn area-via-let [(s0 Shape)] Int
+  (let [(s Shape) s0]
     (match s
       [(Circle r) (circle-radius s)]
       [(Rect w h) w])))

@@ -3,11 +3,11 @@
 ;; (c) A `set!` anywhere in the binding's lexical lifetime makes it unstable, so
 ;; the arm sees the declared union — the accessor call stays an error.
 (defunion Shape
-  (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Circle [(radius Int)])
+  (Rect [(width Int) (height String)]))
 
-(defn area! [s0: Shape] -> Int
-  (let [s: Shape s0]
+(defn area! [(s0 Shape)] Int
+  (let [(s Shape) s0]
     (do
       (set! s s0)
       (match s

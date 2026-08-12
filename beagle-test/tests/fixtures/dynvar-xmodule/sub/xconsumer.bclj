@@ -6,5 +6,5 @@
 ;; resolvable case — a same-dir-only regression would turn this red).
 (require prov :as p)
 
-(defn u [] -> String
+(defn u [] String
   (binding [p/*v* "x"] (p/rd)))

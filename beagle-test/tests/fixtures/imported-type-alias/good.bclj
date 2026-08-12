@@ -3,4 +3,4 @@
 (require provider :as p)
 (define-mode strict)
 
-(def accepted: Bool (p/accepts? "ready"))
+(def accepted Bool (p/accepts? "ready"))

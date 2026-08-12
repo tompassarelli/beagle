@@ -3,45 +3,45 @@
 
 (define-mode strict)
 
-(def seed: Int 2)
+(def seed Int 2)
 
-(defrecord Box [value: Int])
+(defrecord Box [(value Int)])
 
-(defn box-value [box: Box] -> Int
+(defn box-value [(box Box)] Int
   (:value box))
 
-(defn helper [] -> Int
+(defn helper [] Int
   (box-value (->Box seed)))
 
 (def helper-alias helper)
 
-(defn entry [] -> Int
+(defn entry [] Int
   (helper))
 
-(defn second [] -> Int
+(defn second [] Int
   (+ (helper) 1))
 
-(defn alias-entry [] -> Int
+(defn alias-entry [] Int
   (helper-alias))
 
-(defn unreachable [] -> Int
-  ((fn [value: Int] -> Int value) 0))
+(defn unreachable [] Int
+  ((fn [(value Int)] Int value) 0))
 
-(defn bad-entry [] -> Int
+(defn bad-entry [] Int
   (unreachable))
 
-(defn try-body-helper [] -> Int 11)
+(defn try-body-helper [] Int 11)
 
-(defn try-catch-helper [] -> Int 12)
+(defn try-catch-helper [] Int 12)
 
-(defn try-finally-helper [] -> Int 13)
+(defn try-finally-helper [] Int 13)
 
-(defn try-entry [] -> Int
+(defn try-entry [] Int
   (try
     (try-body-helper)
-    (catch Exception problem
+    (catch (problem Exception)
       (try-catch-helper))
     (finally
       (try-finally-helper))))
 
-(defn- hidden [] -> Int 0)
+(defn- hidden [] Int 0)

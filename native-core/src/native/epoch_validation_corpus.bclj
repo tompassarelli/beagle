@@ -25,32 +25,32 @@
 (require native.obligations :as obligations)
 (require native.stages :as stages)
 
-(defn epoch-id [label: String] -> core/NativeId
+(defn epoch-id [(label String)] core/NativeId
   (core/canonical-id "native-epoch-fixture-v0" [label]))
 
-(defn epoch-types [] -> (Vec core/TypeDef)
+(defn epoch-types [] (Vec core/TypeDef)
   [(lower/i64-type) (lower/text-type) (lower/bool-type)
    (lower/arena-handle-type)])
 
-(defn epoch-region-id [] -> core/NativeId (epoch-id "region-epoch-0"))
+(defn epoch-region-id [] core/NativeId (epoch-id "region-epoch-0"))
 
-(defn epoch-inner-region-id [] -> core/NativeId (epoch-id "region-epoch-1"))
+(defn epoch-inner-region-id [] core/NativeId (epoch-id "region-epoch-1"))
 
-(defn epoch-effect-id [] -> core/NativeId (epoch-id "effect-epoch-0"))
+(defn epoch-effect-id [] core/NativeId (epoch-id "effect-epoch-0"))
 
-(defn epoch-inner-effect-id [] -> core/NativeId (epoch-id "effect-epoch-1"))
+(defn epoch-inner-effect-id [] core/NativeId (epoch-id "effect-epoch-1"))
 
-(defn root-effect [] -> core/EffectDef
+(defn root-effect [] core/EffectDef
   (core/->EffectDef (lower/allocate-effect-id)
     (core/->AllocateEffect (lower/arena-region-id))))
 
-(defn root-capability [] -> core/CapabilityDef
+(defn root-capability [] core/CapabilityDef
   (core/->CapabilityDef (lower/allocate-capability-id)
     (core/->AllocateCapability true)
     (lower/arena-region-id)
     true))
 
-(defn root-arena-instruction [label: String] -> core/Instruction
+(defn root-arena-instruction [(label String)] core/Instruction
   (core/->ArenaInstruction
     (core/->SsaValueV0 (epoch-id (str label "-arena"))
       (lower/arena-handle-type-id))
@@ -62,9 +62,9 @@
 ;; A hand-built epoch open: the shape lower/epoch-rewrite-function mints, so
 ;; the emitter sees no difference between an inferred and a written epoch.
 (defn epoch-open-instruction
-  [label: String
-   region: core/NativeId
-   token: core/NativeId] -> core/Instruction
+  [(label String)
+   (region core/NativeId)
+   (token core/NativeId)] core/Instruction
   (core/->ArenaInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/arena-handle-type-id))
     region
@@ -73,20 +73,20 @@
       [(core/->ResourceTokenV0 token (core/->RegionTokenV0 region))])))
 
 (defn epoch-close-instruction
-  [label: String
-   arena: core/NativeId
-   token: core/NativeId] -> core/Instruction
+  [(label String)
+   (arena core/NativeId)
+   (token core/NativeId)] core/Instruction
   (core/->ArenaCloseInstructionV0
     (core/->SsaValueV0 (epoch-id label) (lower/arena-handle-type-id))
     arena
     (core/->TokenFlowV0 [token] [])))
 
-(defn text-literal-instruction [label: String] -> core/Instruction
+(defn text-literal-instruction [(label String)] core/Instruction
   (core/->AtomInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/text-type-id))
     (core/->TextAtom "epoch")))
 
-(defn i64-literal-instruction [label: String value: Int] -> core/Instruction
+(defn i64-literal-instruction [(label String) (value Int)] core/Instruction
   (core/->AtomInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/int-type-id))
     (core/->I64Atom value)))
@@ -94,9 +94,9 @@
 ;; "epoch" twice: ten bytes, so a copy that shared the source's storage would
 ;; read freed memory the moment the epoch closes.
 (defn concat-instruction
-  [label: String
-   arena: core/NativeId
-   literal: core/NativeId] -> core/Instruction
+  [(label String)
+   (arena core/NativeId)
+   (literal core/NativeId)] core/Instruction
   (core/->TextConcatInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/text-type-id))
     arena
@@ -106,7 +106,7 @@
 ;; concatenated Text reaches only a length read and a branch condition, and a
 ;; branch condition is not an escape sink, so E1 assigns it a local epoch.
 
-(def probe-function: core/FunctionDef
+(def probe-function core/FunctionDef
   (core/->FunctionDef
     (epoch-id "function-probe") "epoch-probe"
     [(core/->Parameter (epoch-id "probe-n") (lower/int-type-id))]
@@ -147,14 +147,14 @@
 ;; on the arena being a per-call operand.
 
 (defn trim-instruction
-  [label: String
-   arena: core/NativeId
-   source: core/NativeId] -> core/Instruction
+  [(label String)
+   (arena core/NativeId)
+   (source core/NativeId)] core/Instruction
   (core/->TextBuiltinInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/text-type-id))
     (core/->TextTrimV0 arena source)))
 
-(def callee-function: core/FunctionDef
+(def callee-function core/FunctionDef
   (core/->FunctionDef
     (epoch-id "function-callee") "epoch-callee"
     [(core/->Parameter (epoch-id "callee-source") (lower/text-type-id))
@@ -185,7 +185,7 @@
     [(lower/arena-region-id)]
     [(lower/allocate-capability-id)]))
 
-(def caller-function: core/FunctionDef
+(def caller-function core/FunctionDef
   (core/->FunctionDef
     (epoch-id "function-caller") "epoch-caller"
     [(core/->Parameter (epoch-id "caller-n") (lower/int-type-id))]
@@ -222,7 +222,7 @@
 ;; into the root arena, and only then is the epoch destroyed; the returned
 ;; handle must point at the copy.
 
-(def promote-function: core/FunctionDef
+(def promote-function core/FunctionDef
   (core/->FunctionDef
     (epoch-id "function-promote") "epoch-promote"
     []
@@ -251,7 +251,7 @@
 ;; instead of the promoted copy — a reference out of a region this function
 ;; closed, which is exactly the old-to-young edge obligation 8 exists to
 ;; refuse.
-(def old-young-function: core/FunctionDef
+(def old-young-function core/FunctionDef
   (with promote-function
     [:id (epoch-id "function-old-young")]
     [:name "epoch-old-young"]
@@ -271,7 +271,7 @@
 ;; and the closes are LIFO, which is what leak freedom requires and what the
 ;; emitter must lay out as two independent stack-local arenas.
 
-(def nested-function: core/FunctionDef
+(def nested-function core/FunctionDef
   (core/->FunctionDef
     (epoch-id "function-nested") "epoch-nested"
     [(core/->Parameter (epoch-id "nested-n") (lower/int-type-id))]
@@ -300,11 +300,11 @@
 ;; --- Programs
 
 (defn epoch-program
-  [label: String
-   functions: (Vec core/FunctionDef)
-   regions: (Vec core/RegionDef)
-   effects: (Vec core/EffectDef)] -> core/NativeCoreProgram
-  (let [types: (Vec core/TypeDef) (epoch-types)]
+  [(label String)
+   (functions (Vec core/FunctionDef))
+   (regions (Vec core/RegionDef))
+   (effects (Vec core/EffectDef))] core/NativeCoreProgram
+  (let [(types (Vec core/TypeDef)) (epoch-types)]
     (core/->NativeCoreProgram
       (epoch-id label)
       nil
@@ -316,41 +316,41 @@
       (lower/collect-layouts
         (lower/resolve-layouts types (core/abi-profile-lp64)))
       functions
-      (mapv (fn [effect: core/EffectDef] -> core/NativeId
+      (mapv (fn [(effect core/EffectDef)] core/NativeId
               (core/effectdef-id effect))
         effects)
-      (mapv (fn [region: core/RegionDef] -> core/NativeId
+      (mapv (fn [(region core/RegionDef)] core/NativeId
               (core/regiondef-id region))
         regions)
       [(lower/allocate-capability-id)]
       []
       [])))
 
-(defn epoch-child-region [region: core/NativeId] -> core/RegionDef
+(defn epoch-child-region [(region core/NativeId)] core/RegionDef
   (core/->RegionDef region (core/->ArenaRegion true) (lower/arena-region-id)))
 
-(def probe-program: core/NativeCoreProgram
+(def probe-program core/NativeCoreProgram
   (epoch-program "program-probe" [probe-function] (lower/slice-regions)
     [(root-effect)]))
 
 ;; c11/ordered-functions sorts by id, so the caller/callee pair is materialized
 ;; as a pair and main.c calls whichever index the emitted header gives it; the
 ;; driver resolves the entry point out of the report rather than guessing.
-(def caller-program: core/NativeCoreProgram
+(def caller-program core/NativeCoreProgram
   (epoch-program "program-caller" [caller-function callee-function]
     (lower/slice-regions) [(root-effect)]))
 
-(def promote-program: core/NativeCoreProgram
+(def promote-program core/NativeCoreProgram
   (epoch-program "program-promote" [promote-function]
     (conj (lower/slice-regions) (epoch-child-region (epoch-region-id)))
     [(root-effect)
      (core/->EffectDef (epoch-effect-id)
        (core/->AllocateEffect (epoch-region-id)))]))
 
-(def old-young-program: core/NativeCoreProgram
+(def old-young-program core/NativeCoreProgram
   (with promote-program [:functions [old-young-function]]))
 
-(def nested-program: core/NativeCoreProgram
+(def nested-program core/NativeCoreProgram
   (epoch-program "program-nested" [nested-function]
     (conj (conj (lower/slice-regions) (epoch-child-region (epoch-region-id)))
       (core/->RegionDef (epoch-inner-region-id) (core/->ArenaRegion true)
@@ -364,10 +364,10 @@
 ;; --- The probe through the stage, under both assignments
 
 (defn frozen-of
-  [label: String
-   program: core/NativeCoreProgram] -> stages/FrozenNativeStageV0
-  (let [root: core/NativeId (epoch-id (str label "-terms"))
-        stage: stages/NativeStageV0
+  [(label String)
+   (program core/NativeCoreProgram)] stages/FrozenNativeStageV0
+  (let [(root core/NativeId) (epoch-id (str label "-terms"))
+        (stage stages/NativeStageV0)
         (stages/->NativeStageV0
           (stages/->TermGraphV0 root
             [(stages/->TermNodeV0 root
@@ -375,101 +375,101 @@
           (str "sha256:" label)
           program
           [])
-        encoding: String (stages/encode-native-stage stage)]
+        (encoding String) (stages/encode-native-stage stage)]
     (stages/->FrozenNativeStageV0 stage encoding
       (stages/content-digest encoding))))
 
 (defn staged-program
-  [result: lower/EpochLoweringResultV0] -> core/NativeCoreProgram
+  [(result lower/EpochLoweringResultV0)] core/NativeCoreProgram
   (stages/nativestagev0-program
     (stages/frozennativestagev0-stage (lower/epoch-result-frozen result))))
 
-(def probe-frozen: stages/FrozenNativeStageV0
+(def probe-frozen stages/FrozenNativeStageV0
   (frozen-of "probe" probe-program))
 
-(def probe-derived-result: lower/EpochLoweringResultV0
+(def probe-derived-result lower/EpochLoweringResultV0
   (lower/epoch-derived-stage probe-frozen "epoch-fixture-v0" ["profile=3"]
     (core/abi-profile-lp64)))
 
-(def probe-derived-program: core/NativeCoreProgram
+(def probe-derived-program core/NativeCoreProgram
   (staged-program probe-derived-result))
 
-(def probe-identity-program: core/NativeCoreProgram
+(def probe-identity-program core/NativeCoreProgram
   (staged-program
     (lower/epoch-identity-stage probe-frozen "epoch-fixture-v0" ["profile=3"]
       (core/abi-profile-lp64))))
 
-(def caller-frozen: stages/FrozenNativeStageV0
+(def caller-frozen stages/FrozenNativeStageV0
   (frozen-of "caller" caller-program))
 
-(def caller-derived-program: core/NativeCoreProgram
+(def caller-derived-program core/NativeCoreProgram
   (staged-program
     (lower/epoch-derived-stage caller-frozen "epoch-fixture-v0" ["profile=3"]
       (core/abi-profile-lp64))))
 
-(def caller-identity-program: core/NativeCoreProgram
+(def caller-identity-program core/NativeCoreProgram
   (staged-program
     (lower/epoch-identity-stage caller-frozen "epoch-fixture-v0" ["profile=3"]
       (core/abi-profile-lp64))))
 
 ;; --- Obligation verdicts
 
-(defn nine-pass? [program: core/NativeCoreProgram] -> Bool
+(defn nine-pass? [(program core/NativeCoreProgram)] Bool
   (every? obligations/obligation-passed?
     (obligations/validate-native-core-program program (core/abi-profile-lp64))))
 
-(defn epoch-sound? [program: core/NativeCoreProgram] -> Bool
+(defn epoch-sound? [(program core/NativeCoreProgram)] Bool
   (obligations/obligation-passed? (obligations/epoch-soundness program)))
 
-(def probe-derived-minted: Int
+(def probe-derived-minted Int
   (lower/program-minted-epoch-count probe-derived-program))
 
-(def probe-identity-minted: Int
+(def probe-identity-minted Int
   (lower/program-minted-epoch-count probe-identity-program))
 
-(def probe-derived-closes: Int
+(def probe-derived-closes Int
   (lower/program-close-count probe-derived-program))
 
-(def caller-derived-minted: Int
+(def caller-derived-minted Int
   (lower/program-minted-epoch-count caller-derived-program))
 
 ;; --- Materialization
 
 (defn require-artifact
-  [result: body/BodyMaterializationV0] -> body/BodyArtifactV0
+  [(result body/BodyMaterializationV0)] body/BodyArtifactV0
   (if (body/materialization-ok? result)
     (body/materialization-artifact result)
     (throw (ex-info (body/materialization-detail result) {}))))
 
-(def probe-derived-artifact: body/BodyArtifactV0
+(def probe-derived-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program probe-derived-program 0)))
 
-(def probe-identity-artifact: body/BodyArtifactV0
+(def probe-identity-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program probe-identity-program 1)))
 
-(def promote-artifact: body/BodyArtifactV0
+(def promote-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program promote-program 2)))
 
-(def nested-artifact: body/BodyArtifactV0
+(def nested-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program nested-program 3)))
 
-(def caller-derived-artifact: body/BodyArtifactV0
+(def caller-derived-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program caller-derived-program 4)))
 
-(def caller-identity-artifact: body/BodyArtifactV0
+(def caller-identity-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program caller-identity-program 5)))
 
-(defn write-artifact! [directory: String artifact: body/BodyArtifactV0] -> Nil
+(defn write-artifact! [(directory String) (artifact body/BodyArtifactV0)] Nil
   (do
     (spit (str directory "/" (body/bodyartifactv0-header-name artifact))
       (body/bodyartifactv0-header-text artifact))
     (spit (str directory "/" (body/bodyartifactv0-source-name artifact))
       (body/bodyartifactv0-source-text artifact))))
 
-(defn verdict-line [label: String passed: Bool] -> String
+(defn verdict-line [(label String) (passed Bool)] String
   (str label " " (if passed "PASS" "FAIL") "\n"))
 
-(def report-text: String
+(def report-text String
   (str
     "epoch-fixture probe-derived-minted-epochs " probe-derived-minted "\n"
     "epoch-fixture probe-derived-closes " probe-derived-closes "\n"
@@ -496,7 +496,7 @@
                (core/nativecoreprogram-functions caller-program))
           (get (epoch-id "function-callee") :value ""))))))
 
-(def gate-passes?: Bool
+(def gate-passes? Bool
   (and (= 1 probe-derived-minted)
     (= 0 probe-identity-minted)
     (> probe-derived-closes 0)
@@ -510,7 +510,7 @@
     (nine-pass? caller-derived-program)
     (nine-pass? caller-identity-program)))
 
-(defn emit-fixtures! [directory: String] -> Nil
+(defn emit-fixtures! [(directory String)] Nil
   (do
     (write-artifact! directory probe-derived-artifact)
     (write-artifact! directory probe-identity-artifact)

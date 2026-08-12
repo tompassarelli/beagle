@@ -1,7 +1,7 @@
 #lang beagle/js
 (ns selfhost.fixtures.js-parity-quote)
 
-(def suffix: String "!")
+(def suffix String "!")
 
 (js/quote
   (function render (input_value)

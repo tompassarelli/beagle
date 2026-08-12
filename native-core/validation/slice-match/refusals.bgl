@@ -2,11 +2,11 @@
 (ns native.match-refusals)
 (define-mode strict)
 
-(defn nonexhaustive [tag: Keyword?] -> Int
+(defn nonexhaustive [(tag Keyword?)] Int
   (match tag
     [:query/one 1]))
 
-(defn unsupported-or [tag: Keyword?] -> Int
+(defn unsupported-or [(tag Keyword?)] Int
   (match tag
     [(or :query/one :query/two) 1]
     [_ 0]))

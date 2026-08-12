@@ -3,6 +3,6 @@
 (require two-hop-provider :as c)
 (define-mode strict)
 
-(def value: Any "ready")
-(def accepted-string: Bool (c/accepts? "ready"))
-(def accepted-any: Bool (c/accepts? value))
+(def value Any "ready")
+(def accepted-string Bool (c/accepts? "ready"))
+(def accepted-any Bool (c/accepts? value))

@@ -3,17 +3,17 @@
 ;; (f) Subtracting every other member leaves exactly one, which the tail may
 ;; then use; and from Any the false branch stays Any (never subtracted).
 (defunion Op
-  (AddOp [left: Int])
-  (SubOp [left: Int])
-  (MulOp [left: Int]))
+  (AddOp [(left Int)])
+  (SubOp [(left Int)])
+  (MulOp [(left Int)]))
 
-(defn pick [op: Op] -> Int
+(defn pick [(op Op)] Int
   (cond
     (instance? AddOp op) (addop-left op)
     (instance? SubOp op) (subop-left op)
     :else (mulop-left op)))
 
-(defn from-any [op: Any] -> Int
+(defn from-any [(op Any)] Int
   (if (instance? AddOp op)
     (addop-left op)
     ;; still Any here — an open type is never narrowed by subtraction

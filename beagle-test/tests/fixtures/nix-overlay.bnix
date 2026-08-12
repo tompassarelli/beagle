@@ -3,5 +3,5 @@
 
 (nix/overlay [final prev]
   {:my-tool (prev.callPackage (p "./my-tool.nix") {})
-   :hello (prev.hello.overrideAttrs (fn [old: Any] -> Any
+   :hello (prev.hello.overrideAttrs (fn [(old Any)] Any
             {:version "9.99"}))})

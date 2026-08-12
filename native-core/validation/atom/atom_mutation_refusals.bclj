@@ -2,7 +2,7 @@
 (ns native.atom-mutation-refusals)
 (define-mode strict)
 
-(defrecord Counter [value: Int])
+(defrecord Counter [(value Int)])
 
-(defn dynamic-updater-refused! [cell: (Atom Counter)] -> Counter
-  (swap! cell (fn [current: Counter] -> Counter current)))
+(defn dynamic-updater-refused! [(cell (Atom Counter))] Counter
+  (swap! cell (fn [(current Counter)] Counter current)))

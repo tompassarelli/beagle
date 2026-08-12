@@ -3,5 +3,5 @@
 
 (define-mode strict)
 
-(defn entry [] -> Int
+(defn entry [] Int
   42)

@@ -3,7 +3,7 @@
 
 (define-mode strict)
 
-(defrecord Fighter [health: Int])
+(defrecord Fighter [(health Int)])
 
-(defn entry [] -> Fighter
+(defn entry [] Fighter
   (with (->Fighter 40) [:mana 12]))

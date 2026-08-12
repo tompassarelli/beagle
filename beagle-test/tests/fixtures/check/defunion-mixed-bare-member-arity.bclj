@@ -1,14 +1,14 @@
 ;; A union mixing an inline-field member with a BARE member must leave the bare
 ;; member's own defrecord arity intact.
-(defrecord Guard [prop: String kids: Int])
+(defrecord Guard [(prop String) (kids Int)])
 (defunion Node
-  (Elem [tag: String kids: Int])
+  (Elem [(tag String) (kids Int)])
   Guard)
 
-(defn build [] -> Node
+(defn build [] Node
   (->Guard "when" 2))
 
-(defn prop-of [n: Node] -> String
+(defn prop-of [(n Node)] String
   (match n
     [(Elem t k) t]
     [(Guard p k) p]))

@@ -2,15 +2,15 @@
 
 (ns native.host-capability-probe)
 
-(defn getenv [name: String] -> (U String Nil)
+(defn getenv [(name String)] (U String Nil)
   (System/getenv name))
 
-(defn getenv-present? [name: String] -> Bool
+(defn getenv-present? [(name String)] Bool
   (some? (getenv name)))
 
-(defn getenv-length [name: String] -> Int
+(defn getenv-length [(name String)] Int
   (let [value (getenv name)]
     (if (some? value) (count value) 0)))
 
-(defn monotonic-now [] -> Int
+(defn monotonic-now [] Int
   (monotonic-nanoseconds))

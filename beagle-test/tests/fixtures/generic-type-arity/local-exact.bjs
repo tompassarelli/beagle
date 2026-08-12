@@ -1,6 +1,6 @@
 #lang beagle/js
 
 (defunion (Box T)
-  (BoxValue [value: T]))
+  (BoxValue [(value T)]))
 
-(defn keep [value: (Box String)] -> (Box String) value)
+(defn keep [(value (Box String))] (Box String) value)

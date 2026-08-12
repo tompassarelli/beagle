@@ -1,9 +1,9 @@
 ;; mod_a — defines its OWN `helper`. The collision fixture: `helper` is ALSO
 ;; defined in mod_b. A bare-symbol call graph merges the two; a scope-correct
 ;; graph binds each call to the `helper` in its own module.
-(defn helper [x: Int] -> Int
+(defn helper [(x Int)] Int
   (+ x 1))
-(defn midA [x: Int] -> Int
+(defn midA [(x Int)] Int
   (helper x))
-(defn topA [x: Int] -> Int
+(defn topA [(x Int)] Int
   (midA x))

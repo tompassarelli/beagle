@@ -10,16 +10,16 @@
 ;; Run: self-host/verify-selfhost.sh self-host/fixtures/hvec-atom.bclj
 
 ;; Expected-directed HVec literal, validated positionally against (HVec Int String).
-(def pair: (HVec Int String) [1 "hi"])
+(def pair (HVec Int String) [1 "hi"])
 
 ;; first/second read the positional element types Int and String.
-(defn head [] -> Int (first pair))
-(defn tail [] -> String (second pair))
+(defn head [] Int (first pair))
+(defn tail [] String (second pair))
 
 ;; (HVec Int String) <: (Vec Any) — every position fits Any.
-(defn width [v: (Vec Any)] -> Int (count v))
-(defn use-width [] -> Int (width pair))
+(defn width [(v (Vec Any))] Int (count v))
+(defn use-width [] Int (width pair))
 
 ;; Atom element invariance: same element type is accepted.
-(defn sink [a: (Atom Int)] -> Nil nil)
-(defn use-atom [b: (Atom Int)] -> Nil (sink b))
+(defn sink [(a (Atom Int))] Nil nil)
+(defn use-atom [(b (Atom Int))] Nil (sink b))

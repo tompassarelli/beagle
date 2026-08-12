@@ -4,5 +4,5 @@
 ;; standard in Clojure, and now type-checks in beagle (G-A).
 (require prov :as p)
 
-(defn u [] -> String
+(defn u [] String
   (binding [p/*v* "x"] (p/rd)))

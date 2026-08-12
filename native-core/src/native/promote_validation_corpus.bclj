@@ -23,25 +23,25 @@
 (require native.stages :as stages)
 
 (defn native-of
-  [facts-path: String
-   abi: core/AbiProfileV0] -> (U stages/FrozenNativeStageV0 Nil)
-  (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
-        configuration: (Vec String)
+  [(facts-path String)
+   (abi core/AbiProfileV0)] (U stages/FrozenNativeStageV0 Nil)
+  (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
+        (configuration (Vec String))
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        source: stages/SourceStageV0
+        (source stages/SourceStageV0)
         (slice/source-program rows "native.promote-probe"
           "native-core/validation/slice-promote/promote_probe.bgl")
-        freeze-result: lower/SourceFreezeResultV0
+        (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source "promote-fixture-v0" configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       nil
-      (let [typing-result: lower/TypingResultV0
+      (let [(typing-result lower/TypingResultV0)
             (lower/lower-typed-stage
               (lower/sourcefreezeacceptedv0-frozen freeze-result)
               "promote-fixture-v0" configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           nil
-          (let [native-result: lower/NativeLoweringResultV0
+          (let [(native-result lower/NativeLoweringResultV0)
                 (lower/lower-native-stage
                   (lower/typingacceptedv0-frozen typing-result)
                   (lower/typingacceptedv0-slice typing-result)
@@ -52,15 +52,15 @@
               (lower/nativeloweringcompletev0-frozen native-result))))))))
 
 (defn require-native
-  [facts-path: String
-   abi: core/AbiProfileV0] -> stages/FrozenNativeStageV0
-  (let [frozen: (U stages/FrozenNativeStageV0 Nil) (native-of facts-path abi)]
+  [(facts-path String)
+   (abi core/AbiProfileV0)] stages/FrozenNativeStageV0
+  (let [(frozen (U stages/FrozenNativeStageV0 Nil)) (native-of facts-path abi)]
     (if (nil? frozen)
       (throw (ex-info "promote probe did not reach a frozen native program" {}))
       frozen)))
 
 (defn staged-program
-  [result: lower/EpochLoweringResultV0] -> core/NativeCoreProgram
+  [(result lower/EpochLoweringResultV0)] core/NativeCoreProgram
   (stages/nativestagev0-program
     (stages/frozennativestagev0-stage (lower/epoch-result-frozen result))))
 
@@ -68,21 +68,21 @@
 ;; it is asserted on the program: a collapsed promote is gone and a plain copy
 ;; stands where it was.
 
-(defn instruction-census [function: core/FunctionDef promotes: Bool] -> Int
-  (loop [block-position: Int 0
-         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
-         total: Int 0]
+(defn instruction-census [(function core/FunctionDef) (promotes Bool)] Int
+  (loop [(block-position Int) 0
+         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
+         (total Int) 0]
     (if (>= block-position (count blocks))
       total
       (recur (+ block-position 1) blocks
-        (loop [position: Int 0
-               instructions: (Vec core/Instruction)
+        (loop [(position Int) 0
+               (instructions (Vec core/Instruction))
                (core/basicblock-instructions (nth blocks block-position))
-               inner: Int total]
+               (inner Int) total]
           (if (>= position (count instructions))
             inner
-            (let [instruction: core/Instruction (nth instructions position)
-                  hit: Bool
+            (let [(instruction core/Instruction) (nth instructions position)
+                  (hit Bool)
                   (if promotes
                     (instance? native.core.PromoteInstructionV0 instruction)
                     (instance? native.core.CopyInstruction instruction))]
@@ -90,10 +90,10 @@
                 (if hit (+ inner 1) inner)))))))))
 
 (defn function-named
-  [program: core/NativeCoreProgram
-   name: String] -> (U core/FunctionDef Nil)
-  (loop [position: Int 0
-         functions: (Vec core/FunctionDef)
+  [(program core/NativeCoreProgram)
+   (name String)] (U core/FunctionDef Nil)
+  (loop [(position Int) 0
+         (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)]
     (if (>= position (count functions))
       nil
@@ -102,38 +102,38 @@
         (recur (+ position 1) functions)))))
 
 (defn count-in
-  [program: core/NativeCoreProgram
-   name: String
-   promotes: Bool] -> Int
-  (let [function: (U core/FunctionDef Nil) (function-named program name)]
+  [(program core/NativeCoreProgram)
+   (name String)
+   (promotes Bool)] Int
+  (let [(function (U core/FunctionDef Nil)) (function-named program name)]
     (if (nil? function) -1 (instruction-census function promotes))))
 
-(defn program-promotes [program: core/NativeCoreProgram] -> Int
-  (loop [position: Int 0
-         functions: (Vec core/FunctionDef)
+(defn program-promotes [(program core/NativeCoreProgram)] Int
+  (loop [(position Int) 0
+         (functions (Vec core/FunctionDef))
          (core/nativecoreprogram-functions program)
-         total: Int 0]
+         (total Int) 0]
     (if (>= position (count functions))
       total
       (recur (+ position 1) functions
         (+ total (instruction-census (nth functions position) true))))))
 
 (defn nine-pass?
-  [program: core/NativeCoreProgram
-   abi: core/AbiProfileV0] -> Bool
+  [(program core/NativeCoreProgram)
+   (abi core/AbiProfileV0)] Bool
   (every? obligations/obligation-passed?
     (obligations/validate-native-core-program program abi)))
 
-(defn verdict-line [label: String passed: Bool] -> String
+(defn verdict-line [(label String) (passed Bool)] String
   (str label " " (if passed "PASS" "FAIL") "\n"))
 
-(defn count-line [label: String value: Int] -> String
+(defn count-line [(label String) (value Int)] String
   (str label " " (str value) "\n"))
 
-(defn function-symbols [program: core/NativeCoreProgram] -> String
-  (let [ordered: (Vec core/FunctionDef)
+(defn function-symbols [(program core/NativeCoreProgram)] String
+  (let [(ordered (Vec core/FunctionDef))
         (c17/ordered-functions (core/nativecoreprogram-functions program))]
-    (loop [position: Int 0 report: String ""]
+    (loop [(position Int) 0 (report String) ""]
       (if (>= position (count ordered))
         report
         (recur (+ position 1)
@@ -141,55 +141,55 @@
             (core/functiondef-name (nth ordered position)) "\n"))))))
 
 (defrecord PromoteFixtureV0
-  [pre-stage: core/NativeCoreProgram
-   derived: core/NativeCoreProgram
-   identity: core/NativeCoreProgram
-   report: String
-   passes: Bool])
+  [(pre-stage core/NativeCoreProgram)
+   (derived core/NativeCoreProgram)
+   (identity core/NativeCoreProgram)
+   (report String)
+   (passes Bool)])
 
 (defn build-fixture
-  [facts-path: String
-   abi: core/AbiProfileV0] -> PromoteFixtureV0
-  (let [frozen: stages/FrozenNativeStageV0 (require-native facts-path abi)
-        configuration: (Vec String)
+  [(facts-path String)
+   (abi core/AbiProfileV0)] PromoteFixtureV0
+  (let [(frozen stages/FrozenNativeStageV0) (require-native facts-path abi)
+        (configuration (Vec String))
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        pre-stage: core/NativeCoreProgram
+        (pre-stage core/NativeCoreProgram)
         (body-slice/projected-program
           (stages/nativestagev0-program
             (stages/frozennativestagev0-stage frozen)))
-        derived: core/NativeCoreProgram
+        (derived core/NativeCoreProgram)
         (body-slice/projected-program
           (staged-program
             (lower/epoch-derived-stage frozen "promote-fixture-v0"
               configuration abi)))
-        identity: core/NativeCoreProgram
+        (identity core/NativeCoreProgram)
         (body-slice/projected-program
           (staged-program
             (lower/epoch-identity-stage frozen "promote-fixture-v0"
               configuration abi)))
-        derived-minted: Int (lower/program-minted-epoch-count derived)
-        derived-closes: Int (lower/program-close-count derived)
-        identity-minted: Int (lower/program-minted-epoch-count identity)
-        derived-nine: Bool (nine-pass? derived abi)
-        identity-nine: Bool (nine-pass? identity abi)
+        (derived-minted Int) (lower/program-minted-epoch-count derived)
+        (derived-closes Int) (lower/program-close-count derived)
+        (identity-minted Int) (lower/program-minted-epoch-count identity)
+        (derived-nine Bool) (nine-pass? derived abi)
+        (identity-nine Bool) (nine-pass? identity abi)
         ;; Lowering already refused to build a promote for an Int: an
         ;; epoch-free value owns no arena storage, so the copy is a register
         ;; move and the instruction never exists to be collapsed.
-        lowered-epoch-free: Int (count-in pre-stage "promoted-count" true)
-        lowered-epoch-free-copies: Int (count-in pre-stage "promoted-count" false)
+        (lowered-epoch-free Int) (count-in pre-stage "promoted-count" true)
+        (lowered-epoch-free-copies Int) (count-in pre-stage "promoted-count" false)
         ;; The stage's no-op rewrite: the parameter is the caller's, older than
         ;; anything this frame allocates, so its promote becomes a plain copy.
-        derived-parameter-promotes: Int
+        (derived-parameter-promotes Int)
         (count-in derived "promoted-parameter" true)
-        derived-parameter-copies: Int
+        (derived-parameter-copies Int)
         (count-in derived "promoted-parameter" false)
-        pre-stage-parameter-promotes: Int
+        (pre-stage-parameter-promotes Int)
         (count-in pre-stage "promoted-parameter" true)
         ;; The promote that must survive: its source is in the epoch the stage
         ;; minted and its destination is the arena the caller owns.
-        derived-text-promotes: Int (count-in derived "promoted-text" true)
-        identity-promotes: Int (program-promotes identity)
-        report: String
+        (derived-text-promotes Int) (count-in derived "promoted-text" true)
+        (identity-promotes Int) (program-promotes identity)
+        (report String)
         (str
           (function-symbols derived)
           (count-line "promote pre-stage-promotes" (program-promotes pre-stage))
@@ -216,7 +216,7 @@
           ;; no epoch can own it.
           (verdict-line "epoch promote-makes-allocation-interior"
             (= 1 derived-minted)))
-        passes: Bool
+        (passes Bool)
         (and (= 1 derived-minted)
           (> derived-closes 0)
           (= 0 identity-minted)
@@ -233,21 +233,21 @@
     (->PromoteFixtureV0 pre-stage derived identity report passes)))
 
 (defn require-artifact
-  [result: body/BodyMaterializationV0] -> body/BodyArtifactV0
+  [(result body/BodyMaterializationV0)] body/BodyArtifactV0
   (if (body/materialization-ok? result)
     (body/materialization-artifact result)
     (throw (ex-info (body/materialization-detail result) {}))))
 
-(defn write-artifact! [directory: String artifact: body/BodyArtifactV0] -> Nil
+(defn write-artifact! [(directory String) (artifact body/BodyArtifactV0)] Nil
   (do
     (spit (str directory "/" (body/bodyartifactv0-header-name artifact))
       (body/bodyartifactv0-header-text artifact))
     (spit (str directory "/" (body/bodyartifactv0-source-name artifact))
       (body/bodyartifactv0-source-text artifact))))
 
-(defn emit-fixtures! [facts-path: String directory: String] -> Bool
-  (let [abi: core/AbiProfileV0 (core/abi-profile-lp64)
-        fixture: PromoteFixtureV0 (build-fixture facts-path abi)]
+(defn emit-fixtures! [(facts-path String) (directory String)] Bool
+  (let [(abi core/AbiProfileV0) (core/abi-profile-lp64)
+        (fixture PromoteFixtureV0) (build-fixture facts-path abi)]
     (do
       (write-artifact! directory
         (require-artifact

@@ -3,11 +3,11 @@
 ;; (f) The false branch removes the member from a CLOSED union, so the tail of
 ;; an ordered cond is the remaining members — not a licence to pick one.
 (defunion Op
-  (AddOp [left: Int])
-  (SubOp [left: Int])
-  (MulOp [left: Int]))
+  (AddOp [(left Int)])
+  (SubOp [(left Int)])
+  (MulOp [(left Int)]))
 
-(defn pick [op: Op] -> Int
+(defn pick [(op Op)] Int
   (cond
     (instance? AddOp op) (addop-left op)
     :else (mulop-left op)))

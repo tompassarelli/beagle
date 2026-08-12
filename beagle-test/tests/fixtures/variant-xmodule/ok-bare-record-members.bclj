@@ -5,16 +5,16 @@
 ;; erase the record's fields.
 (require prov :as p)
 
-(defn build [] -> p/Node
+(defn build [] p/Node
   (p/->Elem "div" 2))
 
-(defn build-late [] -> p/Stmt
+(defn build-late [] p/Stmt
   (p/->Emit "hi"))
 
-(defn tag [n: p/Node] -> String
+(defn tag [(n p/Node)] String
   (match n
     [(Elem t k) t]
     [(Guard pr k) pr]))
 
-(defn accessor [] -> String
+(defn accessor [] String
   (p/elem-tag (p/->Elem "span" 0)))

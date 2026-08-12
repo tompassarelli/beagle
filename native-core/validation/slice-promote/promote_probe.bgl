@@ -7,23 +7,23 @@
 ;; is the only allocation, and the value that leaves the frame is the promoted
 ;; COPY — so the concatenation itself is interior and the epoch stage gives it
 ;; an arena it destroys before the return.
-(defn promoted-text [tail: String] -> String
+(defn promoted-text [(tail String)] String
   (bgl/promote (str "epoch" tail)))
 
 ;; The same function without the form. Now the concatenation is what leaves
 ;; the frame, no epoch can own it, and the stage mints none: the difference
 ;; between these two functions is the whole claim promote makes.
-(defn escaping-text [tail: String] -> String
+(defn escaping-text [(tail String)] String
   (str "epoch" tail))
 
 ;; Epoch-free. An Int owns no arena storage, so it is already as old as
 ;; anything that can name it and the promotion is a register move — asserted
 ;; on the emitted program, not on the C.
-(defn promoted-count [n: Int] -> Int
+(defn promoted-count [(n Int)] Int
   (bgl/promote (+ n 1)))
 
 ;; Already in the destination epoch. The parameter is the caller's, older than
 ;; anything this frame allocates, so the promote is a no-op the stage collapses
 ;; to the same plain copy.
-(defn promoted-parameter [tail: String] -> String
+(defn promoted-parameter [(tail String)] String
   (bgl/promote tail))

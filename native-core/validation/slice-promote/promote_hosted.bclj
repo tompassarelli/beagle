@@ -9,22 +9,22 @@
 ;; proves that twice — by running these, and by erasing every promotion from
 ;; this file and comparing the emitted Clojure byte for byte.
 
-(defn promoted-text [tail: String] -> String
+(defn promoted-text [(tail String)] String
   (bgl/promote (str "epoch" tail)))
 
-(defn promoted-count [n: Int] -> Int
+(defn promoted-count [(n Int)] Int
   (bgl/promote (+ n 1)))
 
-(defn promoted-parameter [tail: String] -> String
+(defn promoted-parameter [(tail String)] String
   (bgl/promote tail))
 
 ;; The claim in one expression: promotion in a hosted dialect does not copy,
 ;; because there is nothing for the copy to outlive.
-(defn same-object? [] -> Bool
-  (let [value: (Vec Int) [1 2 3]]
+(defn same-object? [] Bool
+  (let [(value (Vec Int)) [1 2 3]]
     (identical? value (bgl/promote value))))
 
-(defn report [] -> String
+(defn report [] String
   (str (promoted-text "-tail") " "
     (promoted-count 41) " "
     (promoted-parameter "-tail") " "

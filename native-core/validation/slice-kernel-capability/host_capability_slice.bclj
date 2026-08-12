@@ -12,19 +12,19 @@
 (require native.body-c17 :as body)
 (require native.qbe :as qbe)
 
-(defn host-function? [function: core/FunctionDef] -> Bool
+(defn host-function? [(function core/FunctionDef)] Bool
   (or (= "getenv" (core/functiondef-name function))
       (= "getenv-present?" (core/functiondef-name function))
       (= "getenv-length" (core/functiondef-name function))
       (= "monotonic-now" (core/functiondef-name function))))
 
-(defn host-program [program: core/NativeCoreProgram] -> core/NativeCoreProgram
-  (let [functions: (Vec core/FunctionDef)
+(defn host-program [(program core/NativeCoreProgram)] core/NativeCoreProgram
+  (let [(functions (Vec core/FunctionDef))
         (filterv host-function? (core/nativecoreprogram-functions program))
-        function-ids: (Vec core/NativeId) (core/function-ids functions)
-        abis: (Vec core/AbiDeclV0)
+        (function-ids (Vec core/NativeId)) (core/function-ids functions)
+        (abis (Vec core/AbiDeclV0))
         (filterv
-          (fn [abi: core/AbiDeclV0] -> Bool
+          (fn [(abi core/AbiDeclV0)] Bool
             (or (instance? native.core.AbiImportV0
                   (core/abideclv0-direction abi))
               (core/id-in? function-ids (core/abideclv0-function-id abi))))
@@ -45,59 +45,59 @@
       abis
       (core/nativecoreprogram-observations program))))
 
-(defn qbe-report [result: qbe/QbeMaterialization] -> String
+(defn qbe-report [(result qbe/QbeMaterialization)] String
   (if (instance? native.qbe.QbeSuccess result)
     "qbe UNEXPECTED-SUCCESS\n"
     (str "qbe REFUSED " (qbe/qbefailure-detail result) "\n")))
 
 (defn emit-slice!
-  [facts-path: String
-   artifacts-dir: String
-   compiler-commit: String] -> String
-  (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
-        configuration: (Vec String) ["profile=3"]
-        source: stages/SourceStageV0
+  [(facts-path String)
+   (artifacts-dir String)
+   (compiler-commit String)] String
+  (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
+        (configuration (Vec String)) ["profile=3"]
+        (source stages/SourceStageV0)
         (slice/source-program rows "fram.kernel" "fram:src/fram/kernel.bgl")
-        freeze-result: lower/SourceFreezeResultV0
+        (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [frozen-source: stages/FrozenSourceStageV0
+      (let [(frozen-source stages/FrozenSourceStageV0)
             (lower/sourcefreezeacceptedv0-frozen freeze-result)
-            typing-result: lower/TypingResultV0
+            (typing-result lower/TypingResultV0)
             (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"
-          (let [frozen-typed: stages/FrozenTypedStageV0
+          (let [(frozen-typed stages/FrozenTypedStageV0)
                 (lower/typingacceptedv0-frozen typing-result)
-                typed-slice: lower/TypedSliceV0
+                (typed-slice lower/TypedSliceV0)
                 (lower/typingacceptedv0-slice typing-result)
-                native-result: lower/NativeLoweringResultV0
+                (native-result lower/NativeLoweringResultV0)
                 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
                   configuration (core/abi-profile-lp64))
-                epoch-result: lower/EpochLoweringResultV0
+                (epoch-result lower/EpochLoweringResultV0)
                 (lower/epoch-derived-stage (slice/native-frozen native-result)
                   compiler-commit configuration (core/abi-profile-lp64))
-                frozen-native: stages/FrozenNativeStageV0
+                (frozen-native stages/FrozenNativeStageV0)
                 (lower/epoch-result-frozen epoch-result)
-                full: core/NativeCoreProgram
+                (full core/NativeCoreProgram)
                 (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
-                selected: core/NativeCoreProgram
+                (selected core/NativeCoreProgram)
                 (body-slice/projected-program (host-program full))
                 ;; QBE materializes epoch-0 only: it reads the identity
                 ;; program, not the derived one it would refuse.
-                qbe-selected: core/NativeCoreProgram
+                (qbe-selected core/NativeCoreProgram)
                 (body-slice/projected-program
                   (host-program
                     (lower/epoch-identity-program
                       (slice/native-frozen native-result) compiler-commit
                       configuration (core/abi-profile-lp64))))
-                c-result: body/BodyMaterializationV0
+                (c-result body/BodyMaterializationV0)
                 (body/materialize-program selected 0)
-                qbe-result: qbe/QbeMaterialization
+                (qbe-result qbe/QbeMaterialization)
                 (qbe/materialize-program qbe-selected 0 "lp64")
-                head: String
+                (head String)
                 (str "stage source-freeze ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
                   "stage typed-to-native "
@@ -128,7 +128,7 @@
               (str head "materialize REFUSED "
                 (body/materialization-detail c-result) "\n"
                 (qbe-report qbe-result))
-              (let [artifact: body/BodyArtifactV0
+              (let [(artifact body/BodyArtifactV0)
                     (body/materialization-artifact c-result)]
                 (do
                   (spit (str artifacts-dir "/"

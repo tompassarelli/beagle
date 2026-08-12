@@ -43,11 +43,11 @@
                          (let [moduleDirs
                                  (builtins/attrNames
                                    (nixpkgs.lib.filterAttrs
-                                     (fn [n: Any v: Any] -> Any
+                                     (fn [(n Any) (v Any)] Any
                                        (= v "directory"))
                                      (builtins/readDir (p "./modules"))))]
                            (builtins/map
-                             (fn [m: Any] -> Any
+                             (fn [(m Any)] Any
                                (s firnModules "/" m))
                              moduleDirs))})]
                    extraModules)}))
