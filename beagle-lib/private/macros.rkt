@@ -336,24 +336,17 @@
     [else '()]))
 
 (define (collect-param-binders! form macro-params add!)
-  ;; Walk in TRIPLES: `x: Int` is three flat datums, and gensym-renaming the
-  ;; marker or the type name (not just the binder) corrupts the template.
   (let loop ([items (unwrap-brackets* form)])
     (cond
       [(null? items) (void)]
-      [(and (symbol? (car items)) (pair? (cdr items))
-            (memq (cadr items) (list ANN-MARKER ':-)) (pair? (cddr items)))
-       (unless (or (eq? (car items) '&) (memq (car items) macro-params))
-         (add! (car items)))
-       (loop (cdddr items))]
+      [(and (list? (car items)) (= (length (car items)) 2)
+            (symbol? (caar items)))
+       (unless (memq (caar items) macro-params)
+         (add! (caar items)))
+       (loop (cdr items))]
       [(and (symbol? (car items)) (not (eq? (car items) '&))
             (not (memq (car items) macro-params)))
        (add! (car items))
-       (loop (cdr items))]
-      [(and (list? (car items)) (= (length (car items)) 3) (symbol? (caar items))
-            (memq (cadr (car items)) (list ANN-MARKER ':-))
-            (not (memq (caar items) macro-params)))
-       (add! (caar items))
        (loop (cdr items))]
       [else (loop (cdr items))])))
 
@@ -361,14 +354,8 @@
   (let loop ([rest (unwrap-brackets* form)])
     (cond
       [(or (null? rest) (null? (cdr rest))) (void)]
-      [(and (>= (length rest) 4)
-            (symbol? (car rest))
-            (memq (cadr rest) (list ANN-MARKER ':-)))
-       (unless (memq (car rest) macro-params)
-         (add! (car rest)))
-       (loop (list-tail rest 4))]
-      [(and (list? (car rest)) (= (length (car rest)) 3)
-            (symbol? (caar rest)) (memq (cadar rest) (list ANN-MARKER ':-))
+      [(and (list? (car rest)) (= (length (car rest)) 2)
+            (symbol? (caar rest))
             (not (memq (caar rest) macro-params)))
        (add! (caar rest))
        (loop (cddr rest))]

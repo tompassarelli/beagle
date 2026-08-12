@@ -13,7 +13,7 @@
          racket/match
          racket/string
          (only-in "tags.rkt"
-                  ANN-MARKER BRACKET-TAG MAP-TAG SET-TAG ann))
+                  BRACKET-TAG MAP-TAG SET-TAG ann))
 
 (provide macro-eval
          macro-eval-body
@@ -129,15 +129,13 @@
                [e env])
       (cond
         [(null? rest) e]
-        ;; typed: name: Type value ...
-        [(and (>= (length rest) 4) (symbol? (car rest))
-              (memq (cadr rest) (list ANN-MARKER ':-)))
-         (define name (car rest))
-         (define val (macro-eval (cadddr rest) e))
-         (loop (list-tail rest 4) (hash-set e name val))]
-        ;; simple: name value ...
-        [(symbol? (car rest))
-         (define name (car rest))
+        [(and (pair? (cdr rest))
+              (or (symbol? (car rest))
+                  (and (list? (car rest))
+                       (= (length (car rest)) 2)
+                       (symbol? (caar rest)))))
+         (define binding (car rest))
+         (define name (if (symbol? binding) binding (car binding)))
          (define val (macro-eval (cadr rest) e))
          (loop (cddr rest) (hash-set e name val))]
         [else (error 'macro-eval "bad let binding: ~v" (car rest))])))
@@ -193,13 +191,12 @@
 ;; --- fn ----------------------------------------------------------------------
 
 (define (eval-fn parts env)
+  (when (< (length parts) 2)
+    (error 'macro-eval "fn needs parameters and a return type"))
   (define raw-params (car parts))
-  (define rest (cdr parts))
-  ;; skip optional : RetType annotation
-  (define body
-    (if (and (pair? rest) (eq? (car rest) ':))
-        (cddr rest)
-        rest))
+  ;; The evaluator does not check types, but it consumes the mandatory
+  ;; positional return type before retaining the function body.
+  (define body (cddr parts))
   (define param-names
     (map (lambda (p)
            (cond
@@ -278,8 +275,7 @@
       (error 'macro-eval "mapcat: the function must return a list or vec, got: ~v" p)))
   (apply append (map (lambda (p) (macro-seq p "mapcat: function result")) parts)))
 
-;; `[x: Float z: Float]` reaches a macro flat, so walking it by field means
-;; regrouping it: (partition 3 fields) pairs each name with its type.
+;; Macros also use partition for ordinary flat data unrelated to bindings.
 (define (macro-partition n lst)
   (unless (and (exact-integer? n) (positive? n))
     (error 'macro-eval "partition: size must be a positive integer, got: ~v" n))
@@ -329,43 +325,42 @@
 
 ;; --- Syntax constructors -----------------------------------------------------
 
-(define (syntax-name s)
+(define (syntax-binding-datum s)
   (define datum
     (if (and (pair? s) (eq? (car s) BRACKET-TAG)) (cdr s) s))
+  (if (and (list? datum) (= (length datum) 1)
+           (list? (car datum)) (= (length (car datum)) 2))
+      (car datum)
+      datum))
+
+(define (syntax-name s)
+  (define datum (syntax-binding-datum s))
   (cond
     [(pair? datum) (car datum)]
     [(symbol? datum) datum]
     [else (error 'syntax-name "expected syntax, got: ~v" s)]))
 
 (define (syntax-type s)
-  (define datum
-    (if (and (pair? s) (eq? (car s) BRACKET-TAG)) (cdr s) s))
+  (define datum (syntax-binding-datum s))
   (cond
-    [(and (pair? datum) (>= (length datum) 3)
-          (memq (cadr datum) (list ANN-MARKER ':-)))
-     (caddr datum)]
-    [else (error 'syntax-type "expected a (name MARKER Type) triple datum, got: ~v" s)]))
+    [(and (list? datum) (= (length datum) 2) (symbol? (car datum)))
+     (cadr datum)]
+    [else (error 'syntax-type "expected a (name Type) binding datum, got: ~v" s)]))
 
-;; A typed binding is FLAT in its vector — `[v: Float]` is three items, not a
-;; nested triple. `vec` splices these, so (vec (make-param 'v 'Float)) is right.
 (define (make-param-form name type) (ann name type))
 
 (define (make-field name type) (ann name type))
 
-(define (annotation-triple? v)
-  (and (list? v) (= (length v) 3) (eq? (cadr v) ANN-MARKER)))
-
 ;; Tagged like the reader's own `[...]`, so the result is a vector in every
 ;; position — a binding vector AND an expression literal.
 (define (make-vec . items)
-  (cons BRACKET-TAG
-        (append* (map (lambda (v) (if (annotation-triple? v) v (list v))) items))))
+  (cons BRACKET-TAG items))
 
 (define (make-defrecord name fields)
   (list 'defrecord name fields))
 
 (define (make-defn name params ret-type . body)
-  (append (list 'defn name params '-> ret-type) body))
+  (append (list 'defn name params ret-type) body))
 
 (define (make-get target field)
   (list 'get target field))

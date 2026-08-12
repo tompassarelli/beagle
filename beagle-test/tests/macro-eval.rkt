@@ -5,7 +5,7 @@
 ;; the shapes the parser accepts.
 
 (require rackunit
-         (only-in beagle/private/tags ANN-MARKER BRACKET-TAG)
+         (only-in beagle/private/tags BRACKET-TAG)
          beagle/private/macro-eval)
 
 (define (ev expr) (macro-eval expr (make-macro-env)))
@@ -21,8 +21,8 @@
 ;; --- quasiquote --------------------------------------------------------------
 
 (test-case "quasiquote returns its template literally"
-  (check-equal? (ev '(quasiquote (defn f [] -> Float 1.0)))
-                '(defn f [] -> Float 1.0)))
+  (check-equal? (ev '(quasiquote (defn f [] Float 1.0)))
+                '(defn f [] Float 1.0)))
 
 (test-case "unquote evaluates in place"
   (check-equal? (ev-let '((x . 42)) '(quasiquote (+ (unquote x) 1)))
@@ -30,8 +30,8 @@
 
 (test-case "unquote splices a computed symbol into a definition head"
   (check-equal? (ev-let '((base . speed))
-                        '(quasiquote (defn (unquote (format-symbol "~a-get" base)) [] -> Float 1.0)))
-                '(defn speed-get [] -> Float 1.0)))
+                        '(quasiquote (defn (unquote (format-symbol "~a-get" base)) [] Float 1.0)))
+                '(defn speed-get [] Float 1.0)))
 
 (test-case "unquote-splicing flattens a list into the surrounding form"
   (check-equal? (ev-let '((xs . (1.0 2.0 3.0))) '(quasiquote (+ (unquote-splicing xs))))
@@ -53,49 +53,46 @@
   (check-exn #rx"outside a quasiquote"
              (lambda () (ev '(unquote x)))))
 
-;; --- typed bindings are FLAT in their vector ---------------------------------
+;; --- typed bindings are structural forms -------------------------------------
 
-(test-case "vec splices a param into the flat shape the parser accepts"
-  ;; `[v: Float]` is three items in the vector, never a nested triple:
-  ;; a nested `(v #%: Float)` is the retired parenthesized spelling.
+(test-case "vec preserves a typed parameter as one structural item"
   (check-equal? (ev '(vec (make-param (quote v) (quote Float))))
-                (list BRACKET-TAG 'v ANN-MARKER 'Float)))
+                (list BRACKET-TAG '(v Float))))
 
-(test-case "vec splices several params, staying flat"
+(test-case "vec preserves several typed parameters"
   (check-equal? (ev '(vec (make-param (quote a) (quote Float))
                           (make-param (quote b) (quote Int))))
-                (list BRACKET-TAG 'a ANN-MARKER 'Float 'b ANN-MARKER 'Int)))
+                (list BRACKET-TAG '(a Float) '(b Int))))
 
-(test-case "vec splices record fields the same way"
+(test-case "vec preserves record fields the same way"
   (check-equal? (ev '(vec (make-field (quote x) (quote Float))))
-                (list BRACKET-TAG 'x ANN-MARKER 'Float)))
+                (list BRACKET-TAG '(x Float))))
 
 (test-case "vec leaves ordinary values alone"
   (check-equal? (ev '(vec 1 2 3)) (list BRACKET-TAG 1 2 3)))
 
-(test-case "vec does not splice a same-shaped list that is not an annotation"
+(test-case "vec does not splice an ordinary list"
   (check-equal? (ev '(vec (list 1 2 3))) (list BRACKET-TAG '(1 2 3))))
 
 (test-case "syntax-name/type read one typed binder from its raw bracketed form"
   (check-equal?
-   (ev-let `((binding . (,BRACKET-TAG value ,ANN-MARKER sim/Player)))
+   (ev-let `((binding . (,BRACKET-TAG (value sim/Player))))
            '(list (syntax-name binding) (syntax-type binding)))
    '(value sim/Player)))
 
-(test-case "make-defn with a spliced param vector parses as a typed signature"
+(test-case "make-defn with a structural param vector builds a typed signature"
   (check-equal? (ev '(make-defn (quote f)
                                 (vec (make-param (quote v) (quote Float)))
                                 (quote Float)
                                 (quote v)))
-                (list 'defn 'f (list BRACKET-TAG 'v ANN-MARKER 'Float) '-> 'Float 'v)))
+                (list 'defn 'f (list BRACKET-TAG '(v Float)) 'Float 'v)))
 
 ;; --- codegen primitives ------------------------------------------------------
 ;; A macro body has no named recursion, so these must be enough on their own to
 ;; turn a field list into a form.
 
-(test-case "partition regroups a flat typed vector into fields"
-  (check-equal? (ev (list 'partition 3 (list 'quote (list 'x ANN-MARKER 'Float 'z ANN-MARKER 'Float))))
-                (list (list 'x ANN-MARKER 'Float) (list 'z ANN-MARKER 'Float))))
+(test-case "partition remains available for ordinary macro data"
+  (check-equal? (ev '(partition 2 (list 1 2 3 4))) '((1 2) (3 4))))
 
 (test-case "partition drops a trailing remainder rather than emitting a short group"
   (check-equal? (ev '(partition 2 (list 1 2 3))) '((1 2))))
@@ -111,13 +108,13 @@
   (check-exn #rx"must be a list" (lambda () (ev '(apply list 7)))))
 
 (test-case "mapcat flattens one level, which map cannot"
-  (check-equal? (ev '(mapcat (fn [x] (list x x)) (list 1 2))) '(1 1 2 2)))
+  (check-equal? (ev '(mapcat (fn [x] Any (list x x)) (list 1 2))) '(1 1 2 2)))
 
 (test-case "mapcat rejects a function that does not return a list"
-  (check-exn #rx"must return a list" (lambda () (ev '(mapcat (fn [x] x) (list 1 2))))))
+  (check-exn #rx"must return a list" (lambda () (ev '(mapcat (fn [x] Any x) (list 1 2))))))
 
 (test-case "map-indexed supplies the position a wire slot needs"
-  (check-equal? (ev '(map-indexed (fn [i x] (list i x)) (list (quote a) (quote b))))
+  (check-equal? (ev '(map-indexed (fn [i x] Any (list i x)) (list (quote a) (quote b))))
                 '((0 a) (1 b))))
 
 (test-case "range builds the index list"
@@ -137,21 +134,20 @@
 
 (test-case "collection operators see a raw bracketed vec as its elements"
   (check-equal?
-   (ev-let `((fields . (,BRACKET-TAG x ,ANN-MARKER Int y ,ANN-MARKER String)))
-           '(partition 3 fields))
-   `((x ,ANN-MARKER Int) (y ,ANN-MARKER String))))
+   (ev-let `((fields . (,BRACKET-TAG (x Int) (y String))))
+           '(map list fields))
+   '(((x Int)) ((y String)))))
 
 (test-case "distinct? sees duplicate names derived from a raw typed field vec"
   (check-false
-   (ev-let `((fields . (,BRACKET-TAG id ,ANN-MARKER String id ,ANN-MARKER String)))
-           '(let [parts (partition 3 fields)
-                  field-names (map first parts)]
+   (ev-let `((fields . (,BRACKET-TAG (id String) (id String))))
+           '(let [field-names (map first fields)]
               (distinct? field-names)))))
 
 (test-case "reduce preserves Clojure accumulator-item order"
-  (check-equal? (ev '(reduce (fn [acc item] (- acc item)) 10 (list 1 2 3))) 4)
+  (check-equal? (ev '(reduce (fn [acc item] Any (- acc item)) 10 (list 1 2 3))) 4)
   (check-exn #rx"non-empty collection"
-             (lambda () (ev '(reduce (fn [acc item] (+ acc item)) (list))))))
+             (lambda () (ev '(reduce (fn [acc item] Any (+ acc item)) (list))))))
 
 (test-case "nested quasiquote tracks depth and tagged vec splice strips its tag"
   (check-equal?

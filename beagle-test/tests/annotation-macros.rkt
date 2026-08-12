@@ -1,13 +1,7 @@
 #lang racket/base
 
-;; The brief's macro invariant: a template constructs a typed binding
-;; DYNAMICALLY, with no string surgery. `~` terminates the token before `:`
-;; fires, so `` `[~name: ~type] `` reads as
-;; (quasiquote (#%brackets (unquote name) #%: (unquote type))) — the marker is a
-;; sibling datum, not glued to either operand.
-;;
-;; Two construction paths are covered: the template spelling above, and the
-;; canonical constructor `(ann n t)` spliced with `~@`.
+;; A template constructs a typed binding dynamically, with no string surgery.
+;; Two construction paths are covered: direct structural syntax and `ann`.
 
 (require rackunit
          racket/string
@@ -35,19 +29,19 @@
   (parameterize ([current-check-profile 2]) (type-check! p))
   (clj-emit-program p))
 
-;; --- (1) template spelling: `[~name: ~type] --------------------------------
+;; --- (1) structural template spelling ---------------------------------------
 
 (define TEMPLATE-SRC
   (string-append
    "(defmacro deftyped [name type value]\n"
-   "  `(defn ~name [] -> ~type ~value))\n"
+   "  `(defn ~name [] ~type ~value))\n"
    "(deftyped answer Int 42)\n"))
 
-(test-case "template `[~name: ~type] reads as a FLAT marker sibling"
-  (check-equal? (beagle-read (open-input-string "`[~name: ~type]"))
+(test-case "template `[(~name ~type)] reads as one structural binding"
+  (check-equal? (beagle-read (open-input-string "`[(~name ~type)]"))
                 (list 'quasiquote
-                      (list '#%brackets (list 'unquote 'name)
-                            (string->symbol "#%:") (list 'unquote 'type)))))
+                      (list '#%brackets
+                            (list (list 'unquote 'name) (list 'unquote 'type))))))
 
 (test-case "a macro builds a typed defn from dynamic name + type"
   (define p (parse-src TEMPLATE-SRC))
@@ -59,7 +53,7 @@
 (define PARAM-TEMPLATE-SRC
   (string-append
    "(defmacro defid [name type]\n"
-   "  `(defn ~name [x: ~type] -> ~type x))\n"
+   "  `(defn ~name [(x ~type)] ~type x))\n"
    "(defid ident Int)\n"))
 
 (test-case "a template param vector carries an annotation and type-checks + emits"
@@ -69,13 +63,11 @@
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
 
-;; HYGIENE: gensym-renaming must touch the BINDER only — never the marker and
-;; never the type name. (Pre-existing bug: `[x: Int]` in a template became
-;; `x__0`, `:-__1`, `Int__2`.)
-(test-case "template param hygiene renames the binder, not the marker or type"
+;; HYGIENE: gensym-renaming must touch the binder only, never the type name.
+(test-case "template param hygiene renames the binder, not the type"
   (define src
     (string-append
-     "(defmacro mk [] `(defn h [x: Int] -> Int x))\n"
+     "(defmacro mk [] `(defn h [(x Int)] Int x))\n"
      "(mk)\n"))
   (define f (car (program-forms (parse-src src))))
   (check-true (defn-form? f))
@@ -83,22 +75,21 @@
   (check-eq? (type-prim-name (param-type p0)) 'Int
              "the TYPE datum must survive hygiene unrenamed")
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int)
-  (check-equal? (length (defn-form-params f)) 1
-                "the marker must not be collected as a third binder"))
+  (check-equal? (length (defn-form-params f)) 1))
 
 ;; --- (2) canonical constructor: ann in a procedural defmacro ----------------
 
 (define ANN-CTOR-SRC
   (string-append
    "(defmacro mk-field [name ty]\n"
-   "  (list 'defn name (vec) '-> ty 0))\n"
+   "  (list 'defn name (vec) ty 0))\n"
    "(mk-field zero Int)\n"))
 
 (test-case "defmacro exposes the typed-binding constructor"
   (define src
     (string-append
      "(defmacro mk-id [name ty]\n"
-     "  (list 'defn name (vec (ann 'x ty)) '-> ty 'x))\n"
+     "  (list 'defn name (vec (ann 'x ty)) ty 'x))\n"
      "(mk-id ident2 Int)\n"))
   (define f (car (program-forms (parse-src src))))
   (check-true (defn-form? f))
@@ -109,7 +100,7 @@
   (define src
     (string-append
      "(defmacro mk-id3 [name ty]\n"
-     "  (list 'defn name (vec (ann 'x ty)) '-> ty 'x))\n"
+     "  (list 'defn name (vec (ann 'x ty)) ty 'x))\n"
      "(mk-id3 ident3 Int)\n"))
   (define f (car (program-forms (parse-src src))))
   (check-true (defn-form? f))
@@ -117,9 +108,10 @@
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-eq? (param-name (car (defn-form-params f))) 'x))
 
-(test-case "Racket-side `ann` is exported and matches the reader's marker"
-  (check-equal? (ann 'x 'Int) (list 'x ANN-MARKER 'Int))
-  (check-equal? (ann 'x 'Int) (cdr (beagle-read (open-input-string "[x: Int]")))))
+(test-case "Racket-side `ann` is exported and matches structural source"
+  (check-equal? (ann 'x 'Int) '(x Int))
+  (check-equal? (ann 'x 'Int)
+                (cadr (beagle-read (open-input-string "[(x Int)]")))))
 
 (test-case "a constructor-built defn type-checks AND emits"
   (define out (check+emit ANN-CTOR-SRC))
