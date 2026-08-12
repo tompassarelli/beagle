@@ -132,6 +132,41 @@
       (check-not-equal? (hash-ref changed 'rootHash) old-root-hash))
     (lambda () (delete-directory/files root))))
 
+(test-case "semantic index checks consumers against inferred provider signatures"
+  (define root (make-temporary-file "beagle-semantic-index-inferred~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define provider (build-path root "inferred" "provider.bclj"))
+      (define consumer (build-path root "inferred" "consumer.bclj"))
+      (write-source
+       provider
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns inferred.provider)\n"
+        "(defn expect-string [value] String value)\n"))
+      (write-source
+       consumer
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns inferred.consumer (:require [inferred.provider :as p]))\n"
+        "(defn use-provider [] String (p/expect-string \"ok\"))\n"))
+      (define checked (build-semantic-index root (list root)))
+      (check-equal?
+       (map (lambda (entry) (hash-ref entry 'path))
+            (hash-ref checked 'files))
+       '("inferred/consumer.bclj" "inferred/provider.bclj"))
+      (write-source
+       consumer
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns inferred.consumer (:require [inferred.provider :as p]))\n"
+        "(defn use-provider [] String (p/expect-string 42))\n"))
+      (check-exn
+       #px"expected String, got Int"
+       (lambda () (build-semantic-index root (list root)))))
+    (lambda () (delete-directory/files root))))
+
 (test-case "invalid and unknown sources fail before writing output"
   (define root (make-temporary-file "beagle-semantic-index-bad~a" 'directory))
   (dynamic-wind

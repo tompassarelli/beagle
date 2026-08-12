@@ -7,19 +7,19 @@
          openssl/sha1
          racket/file
          racket/list
+         racket/match
          racket/path
          racket/port
          racket/string
          "extensions.rkt"
          "module-interface.rkt"
+         "module-overlay-check.rkt"
          "parse.rkt"
          "validate-nix.rkt")
 
 (define SEMANTIC-INDEX-SCHEMA-VERSION 1)
 (define INDEXED-EXTENSIONS
   (filter (lambda (ext) (not (equal? ext ".rkt"))) BEAGLE-EXTENSIONS))
-
-(struct indexed-file (entry interface) #:transparent)
 
 (define (sha256-hex bytes)
   (bytes->hex-string (sha256-bytes bytes)))
@@ -385,22 +385,51 @@
                                     (require-entry-ns candidate)))))])
     (symbol->string (require-entry-ns entry))))
 
-(define (build-indexed-file rel source)
+(define (stxs-declared-namespace stxs)
+  (for/first ([stx (in-list stxs)]
+              #:do [(define datum (syntax->datum stx))]
+              #:when
+              (match datum
+                [(list* 'ns (? symbol?) _) #t]
+                [_ #f]))
+    (cadr (syntax->datum stx))))
+
+(define (source-pair->module-source source-pair)
+  (define rel (car source-pair))
+  (define source (cdr source-pair))
   (define stxs (read-beagle-syntax source))
-  (define datums (map syntax->datum stxs))
-  (define prog (parse-program stxs #:source-path source))
-  (define interface
-    (program->module-interface prog #:source-id rel #:datums datums))
-  (indexed-file
-   (hasheq 'path rel
-           'sha256 (sha256-hex (file->bytes source))
-           'namespace (symbol->string (module-interface-namespace interface))
-           'target (symbol->string (module-interface-target interface))
-           'requires (requires->json interface)
-           'moduleMetadata (module-metadata rel prog)
-           'hostMetadata (host-metadata rel prog)
-           'optionRefs (program-option-refs prog source))
-   interface))
+  (module-source
+   (stxs-declared-namespace stxs)
+   rel
+   stxs
+   (map syntax->datum stxs)
+   #f))
+
+(define (overlay-failure->error result)
+  (define diagnostics (overlay-check-result-diagnostics result))
+  (define message
+    (if (null? diagnostics)
+        "module overlay did not check"
+        (string-join
+         (for/list ([diagnostic (in-list diagnostics)])
+           (format "~a: ~a: ~a"
+                   (or (overlay-diagnostic-source diagnostic) "<bundle>")
+                   (overlay-diagnostic-phase diagnostic)
+                   (overlay-diagnostic-message diagnostic)))
+         "\n")))
+  (error 'semantic-index "~a" message))
+
+(define (build-indexed-entry rel source module)
+  (define prog (checked-overlay-module-program module))
+  (define interface (checked-overlay-module-interface module))
+  (hasheq 'path rel
+          'sha256 (sha256-hex (file->bytes source))
+          'namespace (symbol->string (module-interface-namespace interface))
+          'target (symbol->string (module-interface-target interface))
+          'requires (requires->json interface)
+          'moduleMetadata (module-metadata rel prog)
+          'hostMetadata (host-metadata rel prog)
+          'optionRefs (program-option-refs prog source)))
 
 (define (root-hash entries)
   ;; Domain is the sorted sequence: UTF-8 path, NUL, lowercase file hash, LF.
@@ -418,14 +447,38 @@
   (define root-path (absolute-existing-path root))
   (unless (directory-exists? root-path)
     (error 'semantic-index "index root is not a directory: ~a" root))
-  (define indexed
-    (for/list ([source (in-list (collect-source-paths root-path inputs))])
-      (build-indexed-file (car source) (cdr source))))
-  ;; Use the compiler's canonical module/source/overlay digest boundary while all
-  ;; modules are still in memory. JSON v1 intentionally exposes only raw file
-  ;; hashes and its own root hash.
-  (module-interfaces-overlay-digest (map indexed-file-interface indexed))
-  (define entries (map indexed-file-entry indexed))
+  (define source-pairs (collect-source-paths root-path inputs))
+  (define module-sources (map source-pair->module-source source-pairs))
+  (define source-paths
+    (for/hash ([source-pair (in-list source-pairs)])
+      (values (car source-pair) (cdr source-pair))))
+  (define (parse-index-source source resolver)
+    (parse-program
+     (module-source-stxs source)
+     #:source-path
+     (hash-ref source-paths (format "~a" (module-source-source-id source)))
+     #:module-resolver resolver))
+  ;; Publication is authoritative only after every source has checked against
+  ;; the same candidate overlay and inferred interfaces have reached a fixed
+  ;; point. JSON v1 intentionally exposes only raw file hashes and its own root
+  ;; hash, while the checked overlay retains the compiler's interface digest.
+  (define checked
+    (check-module-overlay
+     module-sources
+     #:emit? #f
+     #:parse-source parse-index-source))
+  (unless (overlay-check-result-ok? checked)
+    (overlay-failure->error checked))
+  (define module-by-source
+    (for/hash ([module (in-list (overlay-check-result-modules checked))])
+      (values (format "~a" (checked-overlay-module-source module)) module)))
+  (define entries
+    (for/list ([source-pair (in-list source-pairs)])
+      (define rel (car source-pair))
+      (build-indexed-entry
+       rel
+       (cdr source-pair)
+       (hash-ref module-by-source rel))))
   (hasheq 'schemaVersion SEMANTIC-INDEX-SCHEMA-VERSION
           'rootHash (root-hash entries)
           'files entries))
