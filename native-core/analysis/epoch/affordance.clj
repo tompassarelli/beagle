@@ -166,6 +166,24 @@
       (str/replace #"([a-z0-9])([A-Z])" "$1-$2")
       (str/lower-case)))
 
+(defn binding-target-names [target]
+  (cond
+    (string? target) [target]
+    (not (map? target)) []
+    (= "map-destructure" (get target "type"))
+    (into (vec (get target "keys"))
+          (if-let [as-name (get target "as")] [as-name] []))
+    (= "seq-destructure" (get target "type"))
+    (into (vec (mapcat binding-target-names (get target "names")))
+          (if-let [rest-name (get target "rest")] [rest-name] []))
+    :else []))
+
+(defn parameter-bound-names [parameter]
+  (binding-target-names (get parameter "name")))
+
+(defn parameter-binds? [parameter name]
+  (some #(= name %) (parameter-bound-names parameter)))
+
 (defn record-accessor-map [records]
   (into {}
         (for [[rname fields] records
@@ -195,7 +213,7 @@
           "defn" (swap! modref assoc-in [:defns (get f "name")]
                         {:id id :m f
                          :private (= true (get f "private"))
-                         :params (mapv #(get % "name") (get f "params"))})
+                         :params (mapv parameter-bound-names (get f "params"))})
           "record" (swap! modref assoc-in [:records (get f "name")]
                           (get f "fields"))
           "defunion" (swap! modref assoc-in [:unions (get f "name")]
@@ -381,7 +399,8 @@
            (let [nm (get arg-json "name")
                  anns (atom [])]
              (doseq [p (get defn-m "params")]
-               (when (= nm (get p "name")) (swap! anns conj (get p "ann"))))
+               (when (parameter-binds? p nm)
+                 (swap! anns conj (get p "ann"))))
              (letfn [(scan [x]
                        (cond (map? x)
                              (do (when (= "let" (get x "node"))
@@ -448,7 +467,7 @@
                    (transient {}) @nodes))))
 
 (defn param-names [params]
-  (set (keep #(get % "name") params)))
+  (set (mapcat parameter-bound-names params)))
 
 (defn pattern-var-names [p acc]
   (cond
@@ -551,7 +570,8 @@
   (let [defn-id (:defn (nrec at-id))
         dm (when defn-id (:m (nrec defn-id)))]
     (when dm
-      (or (some #(when (= nm (get % "name")) (get % "ann")) (get dm "params"))
+      (or (some #(when (parameter-binds? % nm) (get % "ann"))
+                (get dm "params"))
           (let [found (atom nil)]
             (letfn [(scan [x]
                       (when-not @found
@@ -998,18 +1018,19 @@
   (let [all-params
         (vec (for [[ns- m] @modules
                    [dn d] (:defns m)
-                   [i pname] (map-indexed vector (:params d))]
-               [ns- dn i pname (:id d)]))]
+                   [i pnames] (map-indexed vector (:params d))]
+               [ns- dn i pnames (:id d)]))]
     ;; every (defn,param) is explicitly present before the fixpoint: the
     ;; ascent starts at :interior for named params, :unknown for unnamed —
     ;; after this, a MISSING key can only mean out-of-universe (summary-of
     ;; defaults it to :escapes)
-    (doseq [[ns- dn i pname _] all-params]
-      (swap! summaries assoc [ns- dn i] (if pname :interior :unknown)))
+    (doseq [[ns- dn i pnames _] all-params]
+      (swap! summaries assoc [ns- dn i]
+             (if (seq pnames) :interior :unknown)))
     (loop [iter 0]
       (let [changed (atom false)]
-        (doseq [[ns- dn i pname defn-id] all-params :when pname]
-          (let [uses (collect-uses pname defn-id)
+        (doseq [[ns- dn i pnames defn-id] all-params :when (seq pnames)]
+          (let [uses (mapcat #(collect-uses % defn-id) pnames)
                 captured? (some (fn [u]
                                   (crossing-fn-between u defn-id callback-fn?))
                                 uses)

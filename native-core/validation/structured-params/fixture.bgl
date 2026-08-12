@@ -1,0 +1,31 @@
+#lang beagle
+(ns native.structured-params)
+(define-mode strict)
+
+(defrecord Request [(host-name String) (port Int)])
+
+(defn request-host [({:keys [host-name]} Request)] String
+  host-name)
+
+(defn request-port-plus [({:keys [port] :as request} Request)] Int
+  (+ port (request-port request)))
+
+(defn pair-sum [([left right] (HVec Int Int))] Int
+  (+ left right))
+
+(defn nested-sum
+  [([[left right] [third fourth]]
+    (HVec (HVec Int Int) (HVec Int Int)))]
+  Int
+  (+ (+ left right) (+ third fourth)))
+
+(defn nested-request-port [([{:keys [port]}] (HVec Request))] Int
+  port)
+
+(defn map-port
+  [({:keys [port] :or {port 7}} (Map Keyword Int))]
+  Int
+  port)
+
+(defn request-ports [(requests (Vec Request))] (Vec Int)
+  (mapv (fn [({:keys [port]} Request)] Int port) requests))

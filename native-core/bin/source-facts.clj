@@ -35,7 +35,7 @@
     (swap! rows conj! [s p (if (and (= "t" k) (not= escaped o)) "e" k)
                        escaped])))
 
-(declare emit-ann emit-expr emit-pattern)
+(declare emit-ann emit-expr emit-pattern emit-binding-target)
 
 (defn emit-seq [items emit-one]
   (let [n (nid)]
@@ -75,9 +75,57 @@
 (defn emit-param [p]
   (let [n (nid)]
     (row! n "form-kind" "t" "param")
-    (row! n "name" "t" (get p "name"))
+    (let [target (get p "name")]
+      (if (string? target)
+        (row! n "name" "t" target)
+        (row! n "name" "n" (emit-binding-target target))))
     (when-let [a (get p "ann")] (row! n "ann" "n" (emit-ann a)))
     n))
+
+;; Binding targets keep their recursive structure in source facts.  A param is
+;; still one ABI slot: lowering projects these leaves from that slot at function
+;; entry instead of flattening the source parameter into several arguments.
+(defn emit-binding-name [name]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "binding-name")
+    (row! n "name" "t" name)
+    n))
+
+(defn emit-binding-default [entry]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "binding-default")
+    (row! n "name" "t" (get entry "key"))
+    (row! n "value" "n" (emit-expr (get entry "value")))
+    n))
+
+(defn emit-binding-target [target]
+  (if (string? target)
+    (emit-binding-name target)
+    (let [n (nid)
+          kind (get target "type")]
+      (case kind
+        "map-destructure"
+        (do
+          (row! n "form-kind" "t" "map-destructure")
+          (row! n "keys" "n"
+                (emit-seq (get target "keys") emit-binding-name))
+          (when-let [as-name (get target "as")]
+            (row! n "as" "t" as-name))
+          (row! n "defaults" "n"
+                (emit-seq (get target "or") emit-binding-default)))
+
+        "seq-destructure"
+        (do
+          (row! n "form-kind" "t" "seq-destructure")
+          (row! n "names" "n"
+                (emit-seq (get target "names") emit-binding-target))
+          (when-let [rest-name (get target "rest")]
+            (row! n "rest" "t" rest-name)))
+
+        (throw
+          (ex-info "unsupported checked-AST binding target"
+                   {:target target})))
+      n)))
 
 ;; A callee that is not a plain name keeps an empty spelling and its source
 ;; form, so native lowering can refuse indirect invocation without guessing.

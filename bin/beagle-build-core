@@ -438,8 +438,8 @@ bb -cp "$compiled" -e '
 
 (defn definition-bound-names [index definition]
   (if (= "defn" (definition-kind index definition))
-    (mapv #(lower/parameter-name-at index %)
-          (lower/function-parameter-items index definition))
+    (lower/source-parameters-bound-names
+     index (lower/function-parameter-items index definition))
     []))
 
 (defn dependency-nodes [definitions index definition]
