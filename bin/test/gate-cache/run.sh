@@ -234,6 +234,105 @@ out14c="$(misresolve)"
 [[ "$out14c" == *"REAL TOOL v2"* && "$out14c" != *cached-green* ]]
 check "an edit to the real tool is always reflected, never replayed stale" $?
 
+# t15: a proof earned in one checkout replays in another. Two throwaway
+# checkouts hold byte-identical content at different absolute paths, each with
+# its own copy of the wrapper (a copy, not a symlink: the wrapper resolves its
+# own realpath to find its repo root). Everything that pins a checkout — the
+# launch cwd, the --watch root, argv, and every stored record — is stored as
+# %R% and re-anchored onto whichever checkout looks the entry up.
+make_checkout() {  # DIR VALUE
+    local co="$1" value="$2"
+    mkdir -p "$co/bin" "$co/lib" "$co/data" "$co/fixtures"
+    cp "$WRAP" "$co/bin/_gate-cache-run"
+    chmod +x "$co/bin/_gate-cache-run"
+    echo 'mod_value="shared-v1"' > "$co/lib/mod.sh"
+    echo "$value" > "$co/data/in.txt"
+    echo "fx" > "$co/fixtures/one.txt"
+    cat > "$co/xgate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+d="$(cd "$(dirname "$0")" && pwd)"
+cat data/in.txt                              # relative: resolves against cwd
+source "$d/lib/mod.sh"; echo "mod: $mod_value"
+[ -f "$d/feature.flag" ] && echo "flag on" || true
+ls "$d" > /dev/null                          # the checkout ROOT, listed
+ls "$d/fixtures" | sort
+echo "xgate ok"
+EOF
+    chmod +x "$co/xgate.sh"
+}
+mkdir -p "$sandbox/coA" "$sandbox/coB"
+coA="$(cd "$sandbox/coA" && pwd -P)"; coB="$(cd "$sandbox/coB" && pwd -P)"
+make_checkout "$coA" "shared-input"
+make_checkout "$coB" "shared-input"
+cross() {  # CHECKOUT ID
+    ( cd "$1" && "$1/bin/_gate-cache-run" --domain test --id "$2" --watch "$1" -- \
+        "$1/xgate.sh" 2>&1 )
+}
+
+out15="$(cross "$coA" cross)"
+[[ "$out15" == *"xgate ok"* && "$out15" != *cached-green* ]]
+check "cross-checkout: checkout A runs cold and stores" $?
+
+entry_dir_for() {  # ID -> the single stored entry directory
+    grep -lx "id=$1" "$BEAGLE_GATE_CACHE"/test/*/*/meta 2>/dev/null | head -1 |
+        xargs -r dirname
+}
+eA="$(entry_dir_for cross)"
+leaked="$(cat "$eA"/files.sha256 "$eA"/dirs.list "$eA"/absent.list \
+              "$eA"/links.list 2>/dev/null | grep -cF "$coA")"
+[[ -n "$eA" && "$leaked" == 0 ]] && grep -qx 'LIST %R%' "$eA/dirs.list"
+check "cross-checkout: no record kind stores a bare checkout root" $?
+
+out15b="$(cross "$coB" cross)"
+[[ "$out15b" == *cached-green* && "$out15b" == *"xgate ok"* ]]
+check "cross-checkout: checkout B replays A's proof (cached-green)" $?
+
+# t16: the negative the sharing must never break — a RELATIVE input resolved
+# against B's launch cwd differs from A's, so A's proof must not be served.
+echo "diverged-input" > "$coB/data/in.txt"
+out16="$(cross "$coB" cross)"
+[[ "$out16" != *cached-green* && "$out16" == *"diverged-input"* ]]
+check "cross-checkout: a differing relative input in B never replays A" $?
+out16b="$(cross "$coA" cross)"
+[[ "$out16b" == *cached-green* && "$out16b" == *"shared-input"* ]]
+check "cross-checkout: B's divergence left A's own proof intact" $?
+echo "shared-input" > "$coB/data/in.txt"
+out16c="$(cross "$coB" cross)"
+[[ "$out16c" == *cached-green* && "$out16c" == *"shared-input"* ]]
+check "cross-checkout: B replays again once the input matches" $?
+
+# t17: an entry written under an older storage vocabulary must never be read
+# with today's dictionary. Two shapes, each planted as the ONLY entry for its
+# identity: an otherwise perfect entry that does not declare the vocabulary,
+# and the full pre-%R% shape (checkout A's absolute root, no declaration) —
+# which, believed, would validate B's run against A's files.
+cross "$coA" crossv > /dev/null
+eV="$(entry_dir_for crossv)"
+[[ -n "$eV" && -d "$eV" ]] &&
+    { cp -a "$eV" "$sandbox/entry.bak"; [[ "$(cross "$coB" crossv)" == *cached-green* ]]; }
+check "old-vocabulary: control — the current-vocabulary entry does replay" $?
+
+idV="$(dirname "$eV")"; nameV="$(basename "$eV")"
+replant() {  # restore the pristine entry as the identity's only one
+    rm -rf -- "${idV:?}"; mkdir -p "$idV"; cp -a "$sandbox/entry.bak" "$idV/$nameV"
+}
+replant
+grep -v '^vocab=' "$eV/meta" > "$eV/meta.tmp" && mv "$eV/meta.tmp" "$eV/meta"
+out17="$(cross "$coB" crossv)"
+[[ "$out17" != *cached-green* && "$out17" == *"xgate ok"* ]]
+check "old-vocabulary: an entry that declares no vocabulary never validates" $?
+
+replant
+for f in files.sha256 dirs.list absent.list links.list meta; do
+    [[ -f "$eV/$f" ]] || continue
+    sed -e "s|%R%|$coA|g" -e '/^vocab=/d' "$eV/$f" > "$eV/$f.tmp"
+    mv "$eV/$f.tmp" "$eV/$f"
+done
+out17b="$(cross "$coB" crossv)"
+[[ "$out17b" != *cached-green* && "$out17b" == *"xgate ok"* ]]
+check "old-vocabulary: a pre-%R% entry is never re-anchored into checkout B" $?
+
 echo
 if [[ $failures -gt 0 ]]; then
     echo "gate-cache tests: $failures FAILED"

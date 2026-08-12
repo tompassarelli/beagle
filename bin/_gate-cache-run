@@ -33,12 +33,17 @@
 # on a guess: it makes the run uncacheable. See the awk header below.
 #
 # Paths are stored repo-relative (%R%) and home-relative (%H%), so an entry
-# survives its checkout being moved or renamed. It does NOT make two checkouts
-# share proofs: identity pins the launch cwd, deliberately. A closure records
-# the absolute paths a run touched, and relative paths in that run resolve
-# against the launch cwd — so dropping cwd from identity would let a proof
-# earned in one directory be replayed in another whose same-named relative
-# inputs differ. That is a false green; a cold worktree is only a slow one.
+# survives its checkout being moved or renamed AND is replayable in a sibling
+# checkout: main and every worktree share proofs. Sharing is sound because the
+# rewrite is total — the bare repo root is a %R% too, in the identity (cwd,
+# argv, --watch, env) and in every stored record kind alike — so a lookup
+# re-anchors the WHOLE closure onto the checkout doing the lookup and then
+# revalidates it there. A relative input that resolved against checkout A's
+# launch cwd is revalidated against checkout B's file of the same name: same
+# bytes, same proof; different bytes, cache miss. An access that cannot be
+# placed at all is still class U and still makes the run uncacheable — never
+# guessed, never shared. The replayed stdout is the proving run's verbatim, so
+# absolute paths inside it name the checkout that earned the proof.
 # Scratch (the run's private TMPDIR, /tmp, /proc, /sys, /dev, caches) is
 # excluded; an explicit --watch root is exempt from those exclusions so tests
 # can sandbox the mechanism under /tmp.
@@ -47,6 +52,17 @@
 # no-op revalidation is stats, not re-hashing. A stat-identity change falls
 # back to a real hash; the memo can only cost an extra hash, never skip one.
 set -uo pipefail
+
+# Storage vocabulary version: what a stored path MEANS. Bumped whenever that
+# meaning changes, and load-bearing in two places at once — it namespaces every
+# identity (so entries written under an older vocabulary are never looked up)
+# and it is stamped into each entry's meta and required by validate_entry (so
+# one that is looked up anyway, by a stale directory or a hand-copied entry,
+# fails validation instead of being read with the wrong dictionary).
+#   1: %R%/ and %H%/ prefixes only; a bare repo root stayed absolute, so
+#      identities pinned to one checkout.
+#   2: bare roots rewritten too — identities and closures are checkout-relative.
+vocab=2
 
 die() { echo "_gate-cache-run: $*" >&2; exit 2; }
 
@@ -86,10 +102,57 @@ trap 'rm -rf "${scratch:?}"' EXIT
 # --- path normalization ------------------------------------------------------
 # Global (not line-anchored): env values and argv lines embed paths mid-line.
 # %R% before %H%: the repo lives under $HOME.
+#
+# The BARE root is rewritten as well as the prefixed one, so a record naming the
+# repo root itself — the launch cwd, a --watch root, a listed or existence-
+# checked directory, a symlink target — is stored re-anchorable like every other
+# path. It is rewritten only where the match ends at a path boundary: `$repo`
+# followed by `-` or a digit names a SIBLING checkout, and re-anchoring that
+# into this one would assert something about a directory the run never read.
+# Non-boundary matches are left absolute: a missed rewrite costs a cache hit,
+# a wrong one buys a false green.
+#
+# Substitution is literal (index/substr over ENVIRON), never regex: a checkout
+# path holding `.` or `[` must match itself and nothing else, and a replacement
+# holding `&` or `\` must arrive intact.
 
-normalize()   { sed -e "s|$repo/|%R%/|g" -e "s|$HOME/|%H%/|g"; }
-denormalize() { sed -e "s|%R%/|$repo/|g" -e "s|%H%/|$HOME/|g"; }
-n_denorm()    { local s="$1"; s=${s//"%R%/"/"$repo/"}; s=${s//"%H%/"/"$HOME/"}; printf '%s' "$s"; }
+_gc_bound=$'/ \t:,;=|<>()[]{}"\''
+
+normalize() {
+    _GC_REPO="$repo" _GC_HOME="$HOME" _GC_BOUND="$_gc_bound" awk '
+        function bound(s, i) {
+            return (i > length(s)) || index(bnd, substr(s, i, 1)) > 0
+        }
+        function retoken(s, root, tok,   out, i, n) {
+            n = length(root)
+            if (n == 0) return s
+            out = ""
+            while ((i = index(s, root)) > 0) {
+                out = out substr(s, 1, i - 1) (bound(s, i + n) ? tok : root)
+                s = substr(s, i + n)
+            }
+            return out s
+        }
+        BEGIN { repo = ENVIRON["_GC_REPO"]; home = ENVIRON["_GC_HOME"]
+                bnd = ENVIRON["_GC_BOUND"] }
+        { print retoken(retoken($0, repo, "%R%"), home, "%H%") }
+    '
+}
+denormalize() {
+    _GC_REPO="$repo" _GC_HOME="$HOME" awk '
+        function expand(s, tok, val,   out, i, n) {
+            n = length(tok); out = ""
+            while ((i = index(s, tok)) > 0) {
+                out = out substr(s, 1, i - 1) val
+                s = substr(s, i + n)
+            }
+            return out s
+        }
+        BEGIN { repo = ENVIRON["_GC_REPO"]; home = ENVIRON["_GC_HOME"] }
+        { print expand(expand($0, "%R%", repo), "%H%", home) }
+    '
+}
+n_denorm()    { local s="$1"; s=${s//"%R%"/"$repo"}; s=${s//"%H%"/"$HOME"}; printf '%s' "$s"; }
 
 # --- identity: which invocation is this? -------------------------------------
 # Filtered env: every var that plausibly steers a gate or the toolchain.
@@ -105,7 +168,7 @@ env_material() {
 }
 
 identity_material() {
-    echo "beagle-gate-cache/1"
+    echo "beagle-gate-cache/$vocab"
     echo "domain=$domain"
     echo "id=$id"
     printf '%s\n' "$launch_cwd" | normalize | sed 's/^/cwd=/'
@@ -175,9 +238,15 @@ dirs_stream() {
     while IFS= read -r nd; do
         d="$(n_denorm "$nd")"
         printf 'D %s\n' "$nd"
-        [[ -d "$d" ]] || continue
-        find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null |
-            LC_ALL=C sort | sed 's/^/E /'
+        # "no entries" and "not a directory at all" are different facts: a run
+        # that listed an empty dir must not revalidate where the dir is gone or
+        # is now a file (O_DIRECTORY would fail there), so absence is stated.
+        if [[ -d "$d" ]]; then
+            find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null |
+                LC_ALL=C sort | sed 's/^/E /'
+        else
+            printf 'M\n'
+        fi
     done
     return 0
 }
@@ -191,6 +260,10 @@ dirs_digest() {  # stdin: normalized LIST dir paths
 validate_entry() {
     local e="$1" p t resolved
     [[ -f "$e/meta" && -f "$e/stdout" ]] || return 1
+    # An entry is readable only under the vocabulary it was written in: its
+    # paths mean nothing without the dictionary that stored them, and an older
+    # one spells a bare repo root as this checkout's neighbour.
+    grep -qxF "vocab=$vocab" "$e/meta" || return 1
     # nix store inputs: immutable by construction; presence is identity.
     if [[ -s "$e/nixpaths.list" ]]; then
         while IFS= read -r p; do [[ -e "$p" ]] || return 1; done < "$e/nixpaths.list"
@@ -534,6 +607,7 @@ cp "$err_f" "$staging/stderr"
     echo "id=$id"
     echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "duration_s=$duration"
+    echo "vocab=$vocab"
     echo "identity=$identity_sha"
     printf '%s\n' "${cmd[@]}" | normalize | sed 's/^/argv=/'
 } > "$staging/meta"
