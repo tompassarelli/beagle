@@ -8,6 +8,7 @@
          racket/port
          racket/runtime-path
          racket/string
+         beagle/private/check
          beagle/private/facts-roundtrip
          beagle/private/module-interface
          beagle/private/parse
@@ -126,31 +127,31 @@
   (string-append
    "#lang beagle/clj\n"
    "(ns overlay.provider)\n"
-   "(defn f [x: String] -> String x)\n"))
+   "(defn f [(x String)] String x)\n"))
 
 (define consumer-string-call
   (string-append
    "#lang beagle/clj\n"
    "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-   "(defn use [x: String] -> String (p/f x))\n"))
+   "(defn use [(x String)] String (p/f x))\n"))
 
 (define duplicate-a-string
   (string-append
    "#lang beagle/clj\n"
    "(ns overlay.duplicate)\n"
-   "(defn f [x: String] -> String x)\n"))
+   "(defn f [(x String)] String x)\n"))
 
 (define duplicate-b-string
   (string-append
    "#lang beagle/clj\n"
    "(ns overlay.duplicate)\n"
-   "(defn g [x: String] -> String x)\n"))
+   "(defn g [(x String)] String x)\n"))
 
 (define duplicate-consumer-string
   (string-append
    "#lang beagle/clj\n"
    "(ns overlay.consumer (:require [overlay.duplicate :as duplicate]))\n"
-   "(defn use [x: String] -> String (duplicate/f x))\n"))
+   "(defn use [(x String)] String (duplicate/f x))\n"))
 
 (test-case "candidate provider overlays an older provider on disk"
   (with-overlay-files
@@ -162,7 +163,7 @@
       (string-append
        "#lang beagle/clj\n"
        "(ns overlay.provider)\n"
-       "(defn f [x: Int] -> Int x)\n"))
+       "(defn f [(x Int)] Int x)\n"))
      (write-text! consumer-source consumer-string-call)
      (define provider-edn
        (candidate!
@@ -192,8 +193,8 @@
         (string-append
          "#lang beagle/js\n"
          "(ns overlay.provider)\n"
-         "(defrecord Person [name: String])\n"
-         "(defunion Choice (Chosen [value: Int]))\n"
+         "(defrecord Person [(name String)])\n"
+         "(defunion Choice (Chosen [(value Int)]))\n"
          "(defscalar Checked Int :where (>= 0))\n")))
      (define consumer-edn
        (candidate!
@@ -202,9 +203,9 @@
          "#lang beagle/js\n"
          "(ns overlay.consumer\n"
          "  (:require [overlay.provider :refer [Person Choice Checked]]))\n"
-         "(defn keep-person [value: Person] -> Person value)\n"
-         "(defn keep-choice [value: Choice] -> Choice value)\n"
-         "(defn keep-checked [value: Checked] -> Checked value)\n")))
+         "(defn keep-person [(value Person)] Person value)\n"
+         "(defn keep-choice [(value Choice)] Choice value)\n"
+         "(defn keep-checked [(value Checked)] Checked value)\n")))
      (define result (check-edn-overlay (list consumer-edn provider-edn)))
      (check-true (overlay-check-result-ok? result)
                  (diagnostic-text result))
@@ -253,6 +254,132 @@
       (string-prefix?
        (overlay-check-result-overlay-digest result)
        "sha256:")))))
+
+(test-case "checked effective provider signatures reject an invalid consumer"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "inferred-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.provider)\n"
+         "(defn identity [value] Int value)\n")))
+     (define consumer-edn
+       (candidate!
+        root "invalid-inferred-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
+         "(defn use [] Int (p/identity \"wrong\"))\n")))
+     (define result
+       (check-edn-overlay (list consumer-edn provider-edn) #:emit? #f))
+     (check-false (overlay-check-result-ok? result))
+     (check-regexp-match #rx"expected Int, got String"
+                         (diagnostic-text result)))))
+
+(test-case "effective interfaces converge through a three-module chain"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define bridge-source (build-path root "overlay" "bridge.bclj"))
+     (define provider-edn
+       (candidate!
+        root "chain-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.provider)\n"
+         "(defn identity [value] Int value)\n")))
+     (define bridge-edn
+       (candidate!
+        root "chain-bridge" bridge-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.bridge (:require [overlay.provider :as p]))\n"
+         "(defn forward [value] Int (p/identity value))\n")))
+     (define consumer-edn
+       (candidate!
+        root "chain-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.consumer (:require [overlay.bridge :as b]))\n"
+         "(defn use [] Int (b/forward \"wrong\"))\n")))
+     (for ([order (in-list (list (list provider-edn bridge-edn consumer-edn)
+                                 (list consumer-edn bridge-edn provider-edn)))])
+       (define result (check-edn-overlay order #:emit? #f))
+       (check-false (overlay-check-result-ok? result))
+       (check-regexp-match #rx"expected Int, got String"
+                           (diagnostic-text result))))))
+
+(test-case "inferred public signatures in a module cycle fail closed"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define left-edn
+       (candidate!
+        root "cycle-left" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.left (:require [overlay.right :as right]))\n"
+         "(defn left [value] Int (right/right value))\n")))
+     (define right-edn
+       (candidate!
+        root "cycle-right" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.right (:require [overlay.left :as left]))\n"
+         "(defn right [value] Int (left/left value))\n")))
+     (define result (check-edn-overlay (list left-edn right-edn) #:emit? #f))
+     (check-false (overlay-check-result-ok? result))
+     (check-regexp-match
+      #rx"module cycle exports an inferred parameter signature.*annotate every public parameter"
+      (diagnostic-text result)))))
+
+(test-case "explicitly typed public signatures remain valid in a module cycle"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define left-edn
+       (candidate!
+        root "typed-cycle-left" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.left (:require [overlay.right :as right]))\n"
+         "(defn left [(value Int)] Int (right/right value))\n")))
+     (define right-edn
+       (candidate!
+        root "typed-cycle-right" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.right (:require [overlay.left :as left]))\n"
+         "(defn right [(value Int)] Int value)\n")))
+     (define result (check-edn-overlay (list left-edn right-edn) #:emit? #f))
+     (check-true (overlay-check-result-ok? result)
+                 (diagnostic-text result))
+     (check-equal? (length (overlay-check-result-modules result)) 2))))
+
+(test-case "module selectors still check the complete proof closure"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "selected-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.provider)\n"
+         "(defn broken [(value Int)] String value)\n")))
+     (define consumer-edn
+       (candidate!
+        root "selected-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
+         "(defn use [] String (p/broken 1))\n")))
+     (define result
+       (check-edn-overlay
+        (list provider-edn consumer-edn)
+        #:check-namespaces '(overlay.consumer)
+        #:emit? #f))
+     (check-false (overlay-check-result-ok? result))
+     (check-regexp-match #rx"expected return String, got Int"
+                         (diagnostic-text result)))))
 
 (test-case "an explicit checked namespace absent from the overlay fails closed"
   (with-overlay-files
@@ -341,11 +468,11 @@
      (source->edn!
       selected-edn
       "graph.fixture.selected"
-      "#lang beagle/clj\n(def answer: Int 42)\n")
+      "#lang beagle/clj\n(def answer Int 42)\n")
      (source->edn!
       context-edn
       "graph.fixture.context"
-      "#lang beagle/clj\n(def context: String \"ok\")\n")
+      "#lang beagle/clj\n(def context String \"ok\")\n")
      (define result
        (check-edn-overlay
         (list context-edn selected-edn)
@@ -367,7 +494,7 @@
      (source->edn!
       selected-edn
       "graph.fixture.selected"
-      "#lang beagle/clj\n(def answer: Int 42)\n")
+      "#lang beagle/clj\n(def answer Int 42)\n")
      ;; Match the stable IDs of the post-commit Fram regression so the old
      ;; hash-order root heuristic deterministically selects an orphan body.
      (shift-edn-node-ids! selected-edn 1543)
@@ -417,11 +544,11 @@
      (source->edn!
       selected-edn
       "graph.fixture.selected"
-      "#lang beagle/clj\n(def answer: Int 42)\n")
+      "#lang beagle/clj\n(def answer Int 42)\n")
      (source->edn!
       context-edn
       "graph.fixture.context"
-      "#lang beagle/clj\n(def context: String \"ok\")\n")
+      "#lang beagle/clj\n(def context String \"ok\")\n")
      (define-values (status out err)
        (run-overlay-cli
         "--check-source"
@@ -446,7 +573,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defn replacement [x: String] -> String x)\n")))
+         "(defn replacement [(x String)] String x)\n")))
      (define consumer-edn
        (candidate!
         root "consumer-candidate" consumer-source
@@ -472,7 +599,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defn replacement [x: String] -> String x)\n")))
+         "(defn replacement [(x String)] String x)\n")))
      (define consumer-edn
        (candidate!
         root "consumer-candidate" consumer-source
@@ -501,7 +628,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defrecord Replacement [name: String])\n")))
+         "(defrecord Replacement [(name String)])\n")))
      (for ([type-name (in-list '("p/User" "overlay.provider/User"))]
            [stem (in-list '("missing-alias-type" "missing-full-type"))])
        (define consumer-edn
@@ -511,7 +638,7 @@
            "#lang beagle/clj\n"
            "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
            (format
-            "(defn keep [x: ~a] -> ~a x)\n"
+            "(defn keep [(x ~a)] ~a x)\n"
             type-name
             type-name))))
        (define result
@@ -526,7 +653,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [x: p/User] -> p/User x)\n")))
+         "(defn keep [(x p/User)] p/User x)\n")))
      (define-values (status out err)
        (run-overlay-cli
         "--check"
@@ -549,14 +676,14 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defrecord User [name: String])\n")))
+         "(defrecord User [(name String)])\n")))
      (define consumer-edn
        (candidate!
         root "record-consumer" consumer-source
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [x: p/User] -> p/User x)\n")))
+         "(defn keep [(x p/User)] p/User x)\n")))
      (define result
        (check-edn-overlay (list consumer-edn provider-edn)))
      (check-true
@@ -590,8 +717,8 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn none [] -> p/MaybeText nil)\n"
-         "(defn full [] -> overlay.provider/Text \"ok\")\n")))
+         "(defn none [] p/MaybeText nil)\n"
+         "(defn full [] overlay.provider/Text \"ok\")\n")))
      (define result
        (check-edn-overlay (list provider-edn consumer-edn)))
      (check-true
@@ -607,7 +734,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defrecord User [name: String])\n"
+         "(defrecord User [(name String)])\n"
          "(defalias Users (Vec User))\n")))
      (define consumer-edn
        (candidate!
@@ -615,7 +742,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [xs: p/Users] -> p/Users xs)\n")))
+         "(defn keep [(xs p/Users)] p/Users xs)\n")))
      (define result
        (check-edn-overlay (list consumer-edn provider-edn)))
      (check-true (overlay-check-result-ok? result) (diagnostic-text result))
@@ -667,7 +794,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defunion (Box T) (BoxValue [value: T]))\n"
+         "(defunion (Box T) (BoxValue [(value T)]))\n"
          "(defalias TextBox (Box String))\n")))
      (define consumer-edn
        (candidate!
@@ -675,7 +802,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [box: p/TextBox] -> p/TextBox box)\n")))
+         "(defn keep [(box p/TextBox)] p/TextBox box)\n")))
      (define result
        (check-edn-overlay (list provider-edn consumer-edn)))
      (check-true (overlay-check-result-ok? result) (diagnostic-text result))
@@ -728,7 +855,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.origin)\n"
-         "(defrecord User [name: String])\n")))
+         "(defrecord User [(name String)])\n")))
      (define bridge-edn
        (candidate!
         root "record-bridge" bridge-source
@@ -742,7 +869,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.bridge :as b]))\n"
-         "(defn keep [xs: b/Users] -> b/Users xs)\n")))
+         "(defn keep [(xs b/Users)] b/Users xs)\n")))
      (define result
        (check-edn-overlay (list consumer-edn bridge-edn origin-edn)))
      (check-true (overlay-check-result-ok? result) (diagnostic-text result))
@@ -795,7 +922,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.origin)\n"
-         "(defunion (Box T) (BoxValue [value: T]))\n")))
+         "(defunion (Box T) (BoxValue [(value T)]))\n")))
      (define bridge-edn
        (candidate!
         root "param-bridge" bridge-source
@@ -809,7 +936,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.bridge :as b]))\n"
-         "(defn keep [box: b/TextBox] -> b/TextBox box)\n")))
+         "(defn keep [(box b/TextBox)] b/TextBox box)\n")))
      (define result
        (check-edn-overlay (list bridge-edn origin-edn consumer-edn)))
      (check-true (overlay-check-result-ok? result) (diagnostic-text result))
@@ -861,14 +988,14 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defunion (Box T) (BoxValue [value: T]))\n")))
+         "(defunion (Box T) (BoxValue [(value T)]))\n")))
      (define good-edn
        (candidate!
         root "param-good" consumer-source
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [x: (p/Box String)] -> (p/Box String) x)\n")))
+         "(defn keep [(x (p/Box String))] (p/Box String) x)\n")))
      (define good
        (check-edn-overlay (list good-edn provider-edn)))
      (check-true (overlay-check-result-ok? good) (diagnostic-text good))
@@ -878,7 +1005,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [x: (p/Missing String)] -> String \"no\")\n")))
+         "(defn keep [(x (p/Missing String))] String \"no\")\n")))
      (define missing
        (check-edn-overlay (list provider-edn missing-edn)))
      (check-false (overlay-check-result-ok? missing))
@@ -891,7 +1018,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [x: (p/Box String Int)] -> String \"no\")\n")))
+         "(defn keep [(x (p/Box String Int))] String \"no\")\n")))
      (define arity
        (check-edn-overlay (list provider-edn arity-edn)))
      (check-false (overlay-check-result-ok? arity))
@@ -904,7 +1031,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn keep [x: p/Box] -> String \"no\")\n")))
+         "(defn keep [(x p/Box)] String \"no\")\n")))
      (define unapplied
        (check-edn-overlay (list provider-edn unapplied-edn)))
      (check-false (overlay-check-result-ok? unapplied))
@@ -912,7 +1039,7 @@
       #rx"p/Box expects 1 argument, got 0"
       (diagnostic-text unapplied)))))
 
-(test-case "interface v2 rejects stale schemas and malformed export arity"
+(test-case "interface v3 rejects stale schemas and malformed export arity"
   (with-overlay-files
    (lambda (_root provider-source consumer-source)
      (write-text!
@@ -920,18 +1047,21 @@
       (string-append
        "#lang beagle/clj\n"
        "(ns overlay.provider)\n"
-       "(defunion (Box T) (BoxValue [value: T]))\n"))
+       "(defunion (Box T) (BoxValue [(value T)]))\n"))
      (write-text!
       consumer-source
       (string-append
        "#lang beagle/clj\n"
        "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-       "(defn keep [x: (p/Box String)] -> (p/Box String) x)\n"))
+       "(defn keep [(x (p/Box String))] (p/Box String) x)\n"))
      (define provider-stxs (read-beagle-syntax provider-source))
      (define provider-datums (map syntax->datum provider-stxs))
+     (define provider-program
+       (parse-program provider-stxs #:source-path provider-source))
+     (type-check! provider-program)
      (define valid-interface
        (program->module-interface
-        (parse-program provider-stxs #:source-path provider-source)
+        provider-program
         #:source-id (path->string provider-source)
         #:datums provider-datums))
      (define (parse-consumer interface)
@@ -954,7 +1084,7 @@
         valid-interface
         [schema-version 1]))
      (check-exn
-      #rx"uses interface schema v1; this compiler requires v2"
+      #rx"uses interface schema v1; this compiler requires v3"
       (lambda () (parse-consumer stale-interface)))
      (define valid-box
        (module-interface-type-export-ref valid-interface 'Box))
@@ -994,16 +1124,16 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.unrelated)\n"
-         "(defn accidental [] -> Leaked nil)\n")))
+         "(defn accidental [] Leaked nil)\n")))
      (define second (check-edn-overlay (list unrelated-edn)))
      (check-false
       (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
-(test-case "interface v2 forbids interface-only consumer pruning"
+(test-case "interface v3 forbids interface-only consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 2)
+     (check-equal? INTERFACE-SCHEMA-VERSION 3)
      (check-false INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!
@@ -1044,8 +1174,8 @@
    "#lang beagle/clj\n"
    "(ns overlay.provider)\n"
    "(defunion :throwable RewriteError\n"
-   "  (RewriteFailure [message: String path: String refusal: Bool]))\n"
-   "(defn classify [path: String] -> String\n"
+   "  (RewriteFailure [(message String) (path String) (refusal Bool)]))\n"
+   "(defn classify [(path String)] String\n"
    "  :raises RewriteError\n"
    "  (throw (ex-info \"missing\" {:path path :refusal true})))\n"))
 
@@ -1061,7 +1191,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn use [path: String] -> String (p/classify path))\n")))
+         "(defn use [(path String)] String (p/classify path))\n")))
      (define result
        (check-edn-overlay (list provider-edn consumer-edn)))
      (check-false (overlay-check-result-ok? result))
@@ -1081,7 +1211,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider]))\n"
-         "(defn use [path: String] -> String\n"
+         "(defn use [(path String)] String\n"
          "  (overlay.provider/classify path))\n")))
      (define result
        (check-edn-overlay (list provider-edn consumer-edn)))
@@ -1102,7 +1232,7 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
-         "(defn use [path: String] -> String\n"
+         "(defn use [(path String)] String\n"
          "  (rescue (p/classify path) err (:message err)))\n")))
      (define result
        (check-edn-overlay (list provider-edn consumer-edn)))
@@ -1122,14 +1252,14 @@
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defn f [x: String] -> String (str x))\n")))
+         "(defn f [(x String)] String (str x))\n")))
      (define changed
        (candidate!
         root "changed" provider-source
         (string-append
          "#lang beagle/clj\n"
          "(ns overlay.provider)\n"
-         "(defn f [x: Int] -> Int x)\n")))
+         "(defn f [(x Int)] Int x)\n")))
      (define schema-a
        (candidate!
         root "schema-a" provider-source

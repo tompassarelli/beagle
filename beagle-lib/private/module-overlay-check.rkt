@@ -3,10 +3,12 @@
 ;; Coherent multi-module checking for graph-authored candidates.
 ;;
 ;; Every candidate is reconstructed from its EDN datum projection.  A bootstrap
-;; parse lets modules import candidate datums independent of input order; the
-;; resulting public interfaces are then installed in a second, authoritative
-;; parse.  Type checking and emission happen only against that single overlay,
-;; and emitted bytes are returned only when the entire overlay succeeds.
+;; parse lets modules import candidate datums independent of input order.  The
+;; provisional interfaces from that parse are never authority: every module is
+;; reparsed and checked, checked interfaces are reminted, and the process
+;; repeats until the whole overlay reaches one fixed point.  Type checking and
+;; emission happen only against that coherent overlay, and emitted bytes are
+;; returned only when every module succeeds.
 
 (require racket/file
          racket/list
@@ -148,6 +150,123 @@
      (if (exn? value) (exn-message value) (format "~a" value))))
    #f))
 
+(define (parameter-inferred? parameter)
+  (and (param? parameter) (not (param-type parameter))))
+
+(define (callable-publishes-inference? form)
+  (cond
+    [(defn-form? form)
+     (and (not (defn-form-private? form))
+          (or (ormap parameter-inferred? (defn-form-params form))
+              (and (defn-form-rest-param form)
+                   (parameter-inferred? (defn-form-rest-param form)))))]
+    [(defn-multi? form)
+     (and
+      (not (defn-multi-private? form))
+      (for/or ([arity (in-list (defn-multi-arities form))])
+        (or (ormap parameter-inferred? (arity-clause-params arity))
+            (and (arity-clause-rest-param arity)
+                 (parameter-inferred?
+                  (arity-clause-rest-param arity))))))]
+    [else #f]))
+
+(define (program-publishes-inference? prog)
+  (for/or ([raw-form (in-list (program-forms prog))])
+    (callable-publishes-inference? (unwrap-definition-form raw-form))))
+
+;; Return deterministic strongly connected components for candidate requires.
+;; Namespace-free modules cannot satisfy requires and therefore have no inbound
+;; graph edge, but still participate as singleton source nodes.
+(define (candidate-source-sccs entries overlay)
+  (define source-ids
+    (map (lambda (entry) (module-source-id-string (car entry))) entries))
+  (define program-by-source
+    (for/hash ([entry (in-list entries)])
+      (values (module-source-id-string (car entry)) (cdr entry))))
+  (define edges
+    (for/hash ([source-id (in-list source-ids)])
+      (define prog (hash-ref program-by-source source-id))
+      (values
+       source-id
+       (sort
+        (remove-duplicates
+         (for*/list ([required (in-list (program-requires prog))]
+                     [providers
+                      (in-value
+                       (hash-ref
+                        (candidate-overlay-by-namespace overlay)
+                        (require-entry-ns required)
+                        '()))]
+                     #:when (= (length providers) 1))
+           (module-source-id-string (car providers))))
+        string<?))))
+  (define next-index 0)
+  (define indexes (make-hash))
+  (define lowlinks (make-hash))
+  (define stack '())
+  (define on-stack (make-hash))
+  (define components '())
+  (define (strongconnect source-id)
+    (hash-set! indexes source-id next-index)
+    (hash-set! lowlinks source-id next-index)
+    (set! next-index (add1 next-index))
+    (set! stack (cons source-id stack))
+    (hash-set! on-stack source-id #t)
+    (for ([provider-id (in-list (hash-ref edges source-id))])
+      (cond
+        [(not (hash-has-key? indexes provider-id))
+         (strongconnect provider-id)
+         (hash-set! lowlinks source-id
+                    (min (hash-ref lowlinks source-id)
+                         (hash-ref lowlinks provider-id)))]
+        [(hash-ref on-stack provider-id #f)
+         (hash-set! lowlinks source-id
+                    (min (hash-ref lowlinks source-id)
+                         (hash-ref indexes provider-id)))]))
+    (when (= (hash-ref lowlinks source-id) (hash-ref indexes source-id))
+      (define component '())
+      (let pop! ()
+        (define member (car stack))
+        (set! stack (cdr stack))
+        (hash-remove! on-stack member)
+        (set! component (cons member component))
+        (unless (equal? member source-id) (pop!)))
+      (set! components (cons (sort component string<?) components))))
+  (for ([source-id (in-list (sort source-ids string<?))])
+    (unless (hash-has-key? indexes source-id)
+      (strongconnect source-id)))
+  (values (reverse components) edges program-by-source))
+
+(define (reject-inferred-interface-cycles! entries overlay)
+  (define-values (components edges programs)
+    (candidate-source-sccs entries overlay))
+  (for ([component (in-list components)])
+    (define cyclic?
+      (or (pair? (cdr component))
+          (member (car component) (hash-ref edges (car component)))))
+    (when
+        (and cyclic?
+             (for/or ([source-id (in-list component)])
+               (program-publishes-inference?
+                (hash-ref programs source-id))))
+      (error
+       'check-module-overlay
+       (string-append
+        "module cycle exports an inferred parameter signature: ~a; "
+        "annotate every public parameter in the cycle explicitly")
+       (string-join component ", ")))))
+
+(define (interfaces-stable? current next)
+  (and
+   (= (length current) (length next))
+   (for/and ([left (in-list current)] [right (in-list next)])
+     (and
+      (equal? (module-source-id-string left)
+              (module-source-id-string right))
+      (equal?
+       (module-interface-digest (module-source-interface left))
+       (module-interface-digest (module-source-interface right)))))))
+
 (define (check-module-overlay sources
                               #:check-profile [check-profile 2]
                               #:check-namespaces [check-namespaces #f]
@@ -173,8 +292,10 @@
       (guard #f 'index (lambda () (source-overlay sources))))
     (define bootstrap-resolver
       (overlay-resolver bootstrap-overlay #:closed? closed?))
-    ;; Pass one is intentionally parse-only: it establishes canonical provider
-    ;; interfaces while every import already reads candidate datums.
+    ;; Pass one is intentionally parse-only. Its interfaces are marked
+    ;; provisional and may carry authored Any for omitted binders; they exist
+    ;; only to make every candidate namespace parseable in the first checked
+    ;; round.
     (define bootstrap-programs
       (for/list ([source (in-list sources)])
         (cons
@@ -183,7 +304,14 @@
           (module-source-source-id source)
           'parse
           (lambda () (parse-source* source bootstrap-resolver))))))
-    (define authoritative-sources
+    (guard
+     #f
+     'interface
+     (lambda ()
+       (reject-inferred-interface-cycles!
+        bootstrap-programs
+        bootstrap-overlay)))
+    (define provisional-sources
       (for/list ([entry (in-list bootstrap-programs)])
         (define source (car entry))
         (define prog (cdr entry))
@@ -194,9 +322,10 @@
           (program->module-interface
            prog
            #:source-id (module-source-source-id source)
-           #:datums (module-source-datums source))])))
-    (define authoritative-overlay
-      (guard #f 'index (lambda () (source-overlay authoritative-sources))))
+           #:datums (module-source-datums source)
+           #:provisional? #t)])))
+    (define provisional-overlay
+      (guard #f 'index (lambda () (source-overlay provisional-sources))))
     (define selected-namespaces
       (and
        check-namespaces
@@ -245,7 +374,7 @@
     (for ([namespace (in-list (or selected-namespaces '()))])
       (define sources
         (hash-ref
-         (candidate-overlay-by-namespace authoritative-overlay)
+         (candidate-overlay-by-namespace provisional-overlay)
          namespace
          '()))
       (cond
@@ -273,7 +402,7 @@
     (for ([source-id (in-list (or selected-sources '()))])
       (unless
           (hash-has-key?
-           (candidate-overlay-by-source authoritative-overlay)
+           (candidate-overlay-by-source provisional-overlay)
            source-id)
         (abort
          (failed-result
@@ -284,69 +413,105 @@
             "check-edn-overlay: checked source ~a is absent from the candidate overlay"
             source-id)
            (current-continuation-marks))))))
-    (define authoritative-resolver
-      (overlay-resolver authoritative-overlay #:closed? closed?))
-    (define all-programs
-      (for/list ([source (in-list authoritative-sources)])
-        (cons
-         source
-         (guard
-          (module-source-source-id source)
-          'parse
-          (lambda () (parse-source* source authoritative-resolver))))))
-    (define programs
-      (if (or selected-namespaces selected-sources)
-          (filter
-           (lambda (entry)
-             (define source (car entry))
-             (or
-              (and selected-namespaces
-                   (memq
-                    (module-source-namespace source)
-                    selected-namespaces))
-              (and selected-sources
-                   (member
-                    (format "~a" (module-source-source-id source))
-                    selected-sources))))
-           all-programs)
-          all-programs))
-    (define diagnostics '())
-    (parameterize ([current-check-profile check-profile])
-      (for ([entry (in-list programs)])
-        (define source (car entry))
-        (define prog (cdr entry))
-        (type-check-with-locs!
-         prog
-         (lambda (error _location)
-           (set!
-            diagnostics
+    (define (selected-entry? entry)
+      (define source (car entry))
+      (or
+       (not (or selected-namespaces selected-sources))
+       (and selected-namespaces
+            (memq (module-source-namespace source) selected-namespaces))
+       (and selected-sources
+            (member (module-source-id-string source) selected-sources))))
+    (define (select entries) (filter selected-entry? entries))
+    (define max-rounds (add1 (length sources)))
+    (define-values (final-programs final-sources)
+      (let stabilize ([current-sources provisional-sources] [round 1])
+        (when (> round max-rounds)
+          (abort
+           (failed-result
+            #f
+            'interface
+            (make-exn:fail
+             (format
+              "check-module-overlay: inferred interfaces did not converge after ~a checked rounds"
+              max-rounds)
+             (current-continuation-marks)))))
+        (define current-overlay
+          (guard #f 'index (lambda () (source-overlay current-sources))))
+        (define current-resolver
+          (overlay-resolver current-overlay #:closed? closed?))
+        (define round-programs
+          (for/list ([source (in-list current-sources)])
             (cons
-             (overlay-diagnostic
+             source
+             (guard
               (module-source-source-id source)
-              'check
-              (if (exn? error)
-                  (exn-message error)
-                  (format "~a" error)))
-             diagnostics)))
-         #:capture-types? capture-types?)))
-    (define interfaces
-      (map module-source-interface authoritative-sources))
-    (define overlay-digest
-      (module-interfaces-overlay-digest interfaces))
-    (when (pair? diagnostics)
-      (abort
-       (overlay-check-result
-        #f
-        (for/list ([entry (in-list programs)])
-          (define source (car entry))
-          (checked-overlay-module
-           (module-source-namespace source)
-           (module-source-source-id source)
-           (cdr entry)
-           (module-source-interface source)
-           #f))
-        (reverse diagnostics)
-        overlay-digest)))
+              'parse
+              (lambda () (parse-source* source current-resolver))))))
+        ;; Every provider in the candidate context is checked before any of its
+        ;; schema-v3 interface can become authority. Selectors affect only the
+        ;; returned/emitted module set, never the proof closure.
+        (define diagnostics '())
+        (parameterize ([current-check-profile check-profile])
+          (for ([entry (in-list round-programs)])
+            (define source (car entry))
+            (type-check-with-locs!
+             (cdr entry)
+             (lambda (error _location)
+               (set!
+                diagnostics
+                (cons
+                 (overlay-diagnostic
+                  (module-source-source-id source)
+                  'check
+                  (if (exn? error)
+                      (exn-message error)
+                      (format "~a" error)))
+                 diagnostics)))
+             #:capture-types? capture-types?)))
+        (define current-interfaces
+          (map module-source-interface current-sources))
+        (define current-digest
+          (module-interfaces-overlay-digest current-interfaces))
+        (when (pair? diagnostics)
+          (abort
+           (overlay-check-result
+            #f
+            (for/list ([entry (in-list (select round-programs))])
+              (define source (car entry))
+              (checked-overlay-module
+               (module-source-namespace source)
+               (module-source-source-id source)
+               (cdr entry)
+               (module-source-interface source)
+               #f))
+            (reverse diagnostics)
+            current-digest)))
+        (define next-sources
+          (for/list ([entry (in-list round-programs)])
+            (define source (car entry))
+            (define prog (cdr entry))
+            (struct-copy
+             module-source
+             source
+             [interface
+              (guard
+               (module-source-source-id source)
+               'interface
+               (lambda ()
+                 (program->module-interface
+                  prog
+                  #:source-id (module-source-source-id source)
+                  #:datums (module-source-datums source))))])))
+        (if (interfaces-stable? current-sources next-sources)
+            (values round-programs next-sources)
+            (stabilize next-sources (add1 round)))))
+    (define programs (select final-programs))
+    (define final-interface-by-source
+      (for/hash ([source (in-list final-sources)])
+        (values (module-source-id-string source)
+                (module-source-interface source))))
+    (define interfaces (map module-source-interface final-sources))
+    (define overlay-digest (module-interfaces-overlay-digest interfaces))
     ;; Emission is overlay-atomic: collect into local module results only after
     ;; every checker has passed.  Any emitter failure returns no partial bytes.
     (define modules
@@ -357,7 +522,8 @@
          (module-source-namespace source)
          (module-source-source-id source)
          prog
-         (module-source-interface source)
+         (hash-ref final-interface-by-source
+                   (module-source-id-string source))
          (and emit?
               (guard
                (module-source-source-id source)
