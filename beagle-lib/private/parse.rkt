@@ -433,11 +433,33 @@
     [tok (token-end tok)]
     [else #f]))
 
-(define (signature-end-offset tokens close)
-  (define after-close (next-significant-token tokens (token-end close)))
-  (or (expression-end-offset tokens after-close) (token-end close)))
+(define (signature-tail-end-offset tokens close return-slot?)
+  (cond
+    [(not return-slot?) (token-end close)]
+    [else
+     (define return-token
+       (next-significant-token tokens (token-end close)))
+     (define return-end
+       (or (expression-end-offset tokens return-token) (token-end close)))
+     (define maybe-raises
+       (next-significant-token tokens return-end))
+     (if (and maybe-raises (string=? (token-text maybe-raises) ":raises"))
+         (let ([error-type
+                (next-significant-token tokens (token-end maybe-raises))])
+           (or (expression-end-offset tokens error-type)
+               (token-end maybe-raises)))
+         return-end)]))
 
-(define (inline-signature-fits? tokens form-stx open close placement)
+(define (signature-continuation-col form-stx open placement tokens)
+  (case placement
+    [(owner) (+ (or (physical-syntax-column form-stx tokens) 0) 2)]
+    [(clause)
+     (define clause-open
+       (previous-significant-token tokens (token-offset open)))
+     (if clause-open (add1 (token-col clause-open)) (token-col open))]
+    [else (token-col open)]))
+
+(define (inline-signature-fits? tokens form-stx open signature-end placement)
   (define start
     (if (eq? placement 'bare)
         (token-offset open)
@@ -446,14 +468,20 @@
     (if (eq? placement 'bare)
         (token-col open)
         (or (physical-syntax-column form-stx tokens) 0)))
-  (define end (signature-end-offset tokens close))
-  (and start end
+  (and start signature-end
        (<= (+ start-col
               (string-length
-               (fragment->inline tokens start end)))
+               (fragment->inline tokens start signature-end)))
            SIGNATURE-LINE-WIDTH)))
 
-(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role)
+(define (signature-unit-fits? tokens open signature-end continuation-col)
+  (<= (+ continuation-col
+         (string-length
+          (fragment->inline tokens (token-offset open) signature-end)))
+      SIGNATURE-LINE-WIDTH))
+
+(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role
+                              [return-slot? #t])
   (define start (syntax-start-offset vector-stx))
   (define entries (and start (logical-entry-stxs vector-stx)))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
@@ -466,31 +494,64 @@
         [(owner) anchor-end]
         [(clause) (if clause-open (token-end clause-open) (token-offset open))]
         [else (token-offset open)]))
-    (define region-end (token-end close))
+    (define signature-end
+      (signature-tail-end-offset tokens close return-slot?))
     (define gap
       (and (eq? placement 'owner)
            (fragment->inline tokens anchor-end (token-offset open))))
-    (define form-col (or (physical-syntax-column form-stx tokens) 0))
-    (define vertical?
-      (not (inline-signature-fits? tokens form-stx open close placement)))
+    (define continuation-col
+      (signature-continuation-col form-stx open placement tokens))
+    (define layout
+      (cond
+        [(inline-signature-fits? tokens form-stx open signature-end placement)
+         'inline]
+        [(signature-unit-fits? tokens open signature-end continuation-col)
+         'unit]
+        [else 'expanded]))
     (define vector-col
-      (case placement
-        [(owner) (if vertical? (+ form-col 2) (token-col open))]
-        [(clause) (if clause-open (add1 (token-col clause-open)) (token-col open))]
-        [else (token-col open)]))
+      (if (eq? layout 'inline) (token-col open) continuation-col))
     (define vector-text
       (canonical-vector-text tokens open close entries (add1 vector-col)
-                             vertical?))
+                             (eq? layout 'expanded)))
+    (define tail-text
+      (if return-slot?
+          (fragment->inline tokens (token-end close) signature-end)
+          ""))
     (define prefix-text
-      (cond
-        [(not (eq? placement 'owner)) ""]
-        [(not vertical?)
-         (string-append " " (if (string=? gap "") "" (string-append gap " ")))]
-        [else
-         (string-append (if (string=? gap "") "" (string-append " " gap))
-                        "\n" (make-string vector-col #\space))]))
+      (case placement
+        [(owner)
+         (if (eq? layout 'inline)
+             (string-append " "
+                            (if (string=? gap "") "" (string-append gap " ")))
+             (string-append
+              (if (string=? gap "") "" (string-append " " gap))
+              "\n" (make-string vector-col #\space)))]
+        [(clause)
+         ;; The arity-clause opener is structural, not an owner/name. Keep it
+         ;; attached to the vector; an over-width unit expands after `(`.
+         ""]
+        [else ""]))
+    (define after-signature
+      (next-significant-token tokens signature-end))
+    (define body?
+      (and after-signature (not (closer? after-signature))))
+    (define region-end
+      (if (and (eq? layout 'expanded) return-slot? body?)
+          (token-offset after-signature)
+          signature-end))
     (define replacement
-      (string-append prefix-text vector-text))
+      (string-append
+       prefix-text
+       vector-text
+       (cond
+         [(not return-slot?) ""]
+         [(eq? layout 'expanded)
+          (string-append "\n" (make-string continuation-col #\space) tail-text
+                         (if body?
+                             (string-append "\n"
+                                            (make-string continuation-col #\space))
+                             ""))]
+         [else (string-append " " tail-text)])))
     (define before (substring source region-start region-end))
     (unless (string=? before replacement)
       (define path
@@ -513,7 +574,8 @@
   (define vector-stx (stx-ref subs vector-index))
   (define anchor (stx-ref subs anchor-index))
   (when (and (vector-stx? vector-stx) anchor)
-    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role)))
+    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role
+                          #f)))
 
 (define (inspect-method-form! source tokens method-stx [role "method parameter"])
   (define subs (stx-subs method-stx))

@@ -102,16 +102,80 @@
   (define name-81 (string-append name-80 "x"))
   (define out-81 (pp (string-append prefix name-81 suffix " 0)")))
   (check-equal? (car (string-split out-81 "\n")) (string-append prefix name-81))
-  (check-true (string-prefix? (cadr (string-split out-81 "\n")) "  [(x Int)")))
+  (check-equal? (cadr (string-split out-81 "\n"))
+                "  [(x Int) (y Int)] Int"))
 
-(test-case "over-width signatures put one binding form on each line"
+(test-case "an over-width owner moves a fitting signature as one unit"
   (define name (make-string 58 #\z))
   (define out
     (pp (format "(defn ~a [(alpha Int) (beta String)] Int alpha)" name)))
   (define lines (string-split out "\n"))
   (check-equal? (car lines) (format "(defn ~a" name))
-  (check-true (string-prefix? (cadr lines) "  [(alpha Int)"))
-  (check-true (string-prefix? (caddr lines) "   (beta String)] Int")))
+  (check-equal? (cadr lines) "  [(alpha Int) (beta String)] Int")
+  (check-equal? (caddr lines) "  alpha)"))
+
+(test-case "an over-width signature unit expands bindings and isolates return"
+  (define source
+    (string-append
+     "(defn complicated-distance "
+     "[(anchor Coordinate) (coord Coordinate) (world WorldState) "
+     "(options DistanceOptions)] Float world)"))
+  (check-equal?
+   (pp source)
+   (string-append
+    "(defn complicated-distance\n"
+    "  [(anchor Coordinate)\n"
+    "   (coord Coordinate)\n"
+    "   (world WorldState)\n"
+    "   (options DistanceOptions)]\n"
+    "  Float\n"
+    "  world)")))
+
+(test-case "typed destructuring is one structural binding form"
+  (check-equal?
+   (pp (string-append
+        "(defn distance [([x1 y1] (HVec Float Float)) "
+        "([x2 y2] (HVec Float Float))] Float "
+        "(+ x1 x2))"))
+   (string-append
+    "(defn distance [([x1 y1] (HVec Float Float)) "
+    "([x2 y2] (HVec Float Float))] Float\n"
+    "  (+ x1 x2))"))
+  (check-equal?
+   (src "(defn connect [({:keys [host port]} Config)] String host)")
+   "(defn connect [({:keys [host port]} Config)] String host)"))
+
+(test-case "all three signature layout tiers are idempotent"
+  (define sources
+    (list
+     "(defn distance [(a Point) (b Point)] Float a)"
+     (format "(defn ~a [(a Point) (b Point)] Float a)"
+             (make-string 62 #\h))
+     (string-append
+      "(defn complicated-distance "
+      "[(anchor Coordinate) (coord Coordinate) (world WorldState) "
+      "(options DistanceOptions)] Float world)")))
+  (for ([source (in-list sources)])
+    (define once (pp source))
+    (check-equal? (datum->pretty (rd once)) once source)))
+
+(test-case "multi-arity clauses expand the unit without orphaning their opener"
+  (define source
+    (string-append
+     "(defn f "
+     "([(anchor Coordinate) (coord Coordinate) (world WorldState) "
+     "(options DistanceOptions)] Float anchor) ([x] Int x))"))
+  (check-equal?
+   (pp source)
+   (string-append
+    "(defn f\n"
+    "  ([(anchor Coordinate)\n"
+    "    (coord Coordinate)\n"
+    "    (world WorldState)\n"
+    "    (options DistanceOptions)]\n"
+    "   Float\n"
+    "   anchor)\n"
+    "  ([x] Int x))")))
 
 (test-case "ordinary data and let binding vectors keep generic pretty-printing"
   (check-equal? (pp "[a b]") "[a b]")

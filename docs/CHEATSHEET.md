@@ -16,17 +16,17 @@ for the target list itself, `bin/beagle langs`.
 Product type with typed fields; generates a constructor and accessors.
 
 ```clojure
-(defrecord Point [x: Int y: Int])
+(defrecord Point [(x Int) (y Int)])
 ```
 
 ### defunion + match
 Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the authoring loop can auto-fill the clauses).
 
 ```clojure
-(defrecord Circle [r: Int])
-(defrecord Square [side: Int])
+(defrecord Circle [(r Int)])
+(defrecord Square [(side Int)])
 (defunion Shape Circle Square)
-(defn area [s: Shape] -> Int
+(defn area [(s Shape)] Int
   (match s [(Circle r) r] [(Square side) side]))
 ```
 
@@ -37,11 +37,11 @@ Enumeration of named constants.
 (defenum Color Red Green Blue)
 ```
 
-### postfix : annotations
-Types attach to NAMES: flat `name: Type` is the only annotation spelling, at every binding position (params, typed fields, `def`/`defonce`, `let`/`loop`); returns are `-> Ret`. One binding vector annotates every binding or none — `& rest` is exempt. A destructuring pattern is never annotated: bind a name and destructure in the body.
+### structural binding annotations
+A typed binding is `(binding-form Type)`: `(x Int)`, `([x y] (HVec Float Float))`, or `({:keys [host port]} Config)`; mixed vectors are direct, as in `[([x y] (HVec Float Float)) opts]`. Nesting represents the binding semantics. Bare simple binders request inference; a bare destructure in a strict typed signature is rejected without an aggregate type to project. Explicit `Any` marks a deliberately dynamic boundary. Executable signatures place their mandatory return type directly after the parameter vector; type-level function signatures retain `->` inside the type vector.
 
 ```clojure
-(defn clamp [n: Int] -> Int (if (> n 100) 100 n))
+(defn clamp [(n Int)] Int (if (> n 100) 100 n))
 ```
 
 
@@ -52,7 +52,7 @@ Refinement contract: a base type narrowed by predicates. Literal violations are 
 
 ```clojure
 (defscalar Percentage Int :where (>= 0) (<= 100))
-(def half: Percentage (->Percentage 50))
+(def half Percentage (->Percentage 50))
 ```
 
 
@@ -62,7 +62,7 @@ Refinement contract: a base type narrowed by predicates. Literal violations are 
 Typed top-level binding.
 
 ```clojure
-(def answer: Int 42)
+(def answer Int 42)
 ```
 
 
@@ -72,7 +72,7 @@ Typed top-level binding.
 Function with typed params and return. Params are a bracket vector.
 
 ```clojure
-(defn add [x: Int y: Int] -> Int
+(defn add [(x Int) (y Int)] Int
   (+ x y))
 ```
 
@@ -83,7 +83,7 @@ Function with typed params and return. Params are a bracket vector.
 Standard control flow; bindings use bracket vectors.
 
 ```clojure
-(defn sum-to [n: Int] -> Int
+(defn sum-to [(n Int)] Int
   (loop [i 0 acc 0]
     (cond [(> i n) acc]
           [:else (recur (+ i 1) (+ acc i))])))

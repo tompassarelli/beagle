@@ -572,6 +572,27 @@
                 (string-append "\n" pad (logical-elem->src item))))
        "]")))
 
+;; A function signature has three canonical width states. Keep the owner and
+;; signature together when they fit. If only the owner makes the line wide,
+;; move `[params] Return` as one unit. Expand the parameter vector only when
+;; that unit cannot fit at its continuation indentation; the positional return
+;; then owns the following line. This is purely width-driven--parameter count
+;; never changes the shape.
+(define (signature-unit->pretty elems col)
+  (define oneline (string-join (map datum->src elems) " "))
+  (cond
+    [(<= (+ col (string-length oneline)) PP-WIDTH) oneline]
+    [(and (pair? elems) (bracket-datum? (car elems)))
+     (define pad (make-string col #\space))
+     (define tail (cdr elems))
+     (string-append
+      (grammar-vector->pretty (car elems) col)
+      (if (null? tail)
+          ""
+          (string-append "\n" pad
+                         (string-join (map datum->src tail) " "))))]
+    [else oneline]))
+
 (define (list-elems d)
   (and (pair? d)
        (let-values ([(elems tail) (split-improper d)])
@@ -756,20 +777,35 @@
          (string-append out " " (datum->src e))))
      (define signature-over-width?
        (> (+ col (string-length inline-signature)) PP-WIDTH))
+     (define kept (take after keep))
+     (define signature-vector-index
+       (for/first ([e (in-list kept)] [i (in-naturals 1)]
+                   #:when (grammar-vector? e (grammar-child-context d ctx i e)))
+         (sub1 i)))
      (define signature
-       (for/fold ([out (string-append open (datum->src head))])
-                 ([e (in-list (take after keep))] [i (in-naturals 1)])
-         (define child-ctx (grammar-child-context d ctx i e))
-         (cond
-           [(and (grammar-vector? e child-ctx)
-                 (or (grammar-vector-break? e child-ctx)
-                     signature-over-width?))
-            (string-append out "\n" body-pad
-                           (grammar-vector->pretty e (+ col BODY-INDENT)))]
-           [(canonical-layout-needed? e child-ctx)
-            (define start-col (add1 (current-col out col)))
-            (string-append out " " (datum->pretty/context e start-col child-ctx))]
-           [else (string-append out " " (datum->src e))])))
+       (if (and signature-over-width? signature-vector-index)
+           (let* ([owner-elems (take kept signature-vector-index)]
+                  [unit-elems (drop kept signature-vector-index)]
+                  [owner
+                   (for/fold ([out (string-append open (datum->src head))])
+                             ([e (in-list owner-elems)])
+                     (string-append out " " (datum->src e)))])
+             (string-append
+              owner "\n" body-pad
+              (signature-unit->pretty unit-elems (+ col BODY-INDENT))))
+           (for/fold ([out (string-append open (datum->src head))])
+                     ([e (in-list kept)] [i (in-naturals 1)])
+             (define child-ctx (grammar-child-context d ctx i e))
+             (cond
+               [(and (grammar-vector? e child-ctx)
+                     (grammar-vector-break? e child-ctx))
+                (string-append out "\n" body-pad
+                               (grammar-vector->pretty e (+ col BODY-INDENT)))]
+               [(canonical-layout-needed? e child-ctx)
+                (define start-col (add1 (current-col out col)))
+                (string-append out " "
+                               (datum->pretty/context e start-col child-ctx))]
+               [else (string-append out " " (datum->src e))]))))
      (string-append
       signature
       (apply string-append (for/list ([e (in-list (drop after keep))]
@@ -779,24 +815,25 @@
                                             (datum->pretty/context e (+ col BODY-INDENT) child-ctx))))
       close)]
     [(and (eq? ctx 'arity-clause) (pair? elems) (bracket-datum? (car elems)))
-     (define vector-ctx 'params)
-     (define keep (min 2 (length elems)))
+     (define base-keep (min 2 (length elems)))
+     (define keep
+       (if (and (>= (length elems) 4)
+                (eq? (list-ref elems 2) ':raises))
+           4
+           base-keep))
      (define inner-col (+ col (string-length open)))
      (define pad (make-string inner-col #\space))
-     (define inline-signature
-       (string-append open
-                      (string-join (map datum->src (take elems keep)) " ")))
-     (define signature-over-width?
-       (> (+ col (string-length inline-signature)) PP-WIDTH))
+     (define signature-elems (take elems keep))
+     (define inline-unit
+       (string-join (map datum->src signature-elems) " "))
+     (define unit-fits?
+       (<= (+ inner-col (string-length inline-unit)) PP-WIDTH))
+     (define signature
+       (if unit-fits?
+           inline-unit
+           (signature-unit->pretty signature-elems inner-col)))
      (string-append
-      open (if (and (grammar-vector? (car elems) vector-ctx)
-                    (or (grammar-vector-break? (car elems) vector-ctx)
-                        signature-over-width?))
-               (grammar-vector->pretty (car elems) inner-col)
-               (datum->pretty/context (car elems) inner-col vector-ctx))
-      (apply string-append
-             (for/list ([e (in-list (take (cdr elems) (sub1 keep)))])
-               (string-append " " (datum->src e))))
+      open signature
       (apply string-append
              (for/list ([e (in-list (drop elems keep))])
                (string-append "\n" pad (datum->pretty/context e inner-col 'normal))))

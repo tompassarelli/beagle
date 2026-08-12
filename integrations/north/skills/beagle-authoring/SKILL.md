@@ -100,45 +100,84 @@ Beagle is Clojure plus types. Any divergence must be load-bearing for the type
 system or a backend. Bare names must behave as their Clojure namesake; qualify
 every target-specific meaning, such as `nix/assert`.
 
-Canonical annotations are flat `name: Type`. Keep up to two logical parameters inline
-when the complete signature fits 80 columns:
+Canonical typed bindings are structural `(binding-form Type)` forms. A bare
+simple binder requests inference; explicit `Any` marks a deliberately dynamic
+boundary. A bare destructure in a strict typed signature is rejected without
+an aggregate type to project. Typed and bare bindings may mix:
 
 ```clojure
-(def total: Int 0)
-(defn add [left: Int right: Int] -> Int
+(def total Int 0)
+(defn add [(left Int) (right Int)] Int
   (+ left right))
 ```
 
 - Type boundaries: `def`, `defonce`, `defn` parameters and return, and
   required `defrecord` fields. Infer interiors.
-- Types attach to NAMES: flat `name: Type` everywhere — parameter and typed-field
-  vectors, `def`, `defonce`, `let`, `loop`. Returns are `-> Return`.
-- One binding vector annotates every binding or none; `& rest` is exempt and
-  `x: Any` satisfies the rule when the type is not yet known.
-- Destructuring patterns are never annotated — bind a name and destructure in
-  the body.
-- Legacy `:-` is accepted only with a migration warning.
-- `[name : Type]`, `(name : Type)`, and `([a b] : Type)` are all rejected.
-- `: Return` is rejected; return annotations use `-> Return`.
+- Parameter grammar: `binding-form | (binding-form Type)`. A symbol, sequential
+  destructure, or associative destructure can be the binding form. The nesting
+  is semantic structure, not decoration. Mixed vectors need no special case:
+  `[([x y] (HVec Float Float)) opts]`.
+- Executable return types occupy one mandatory positional slot after the
+  parameter vector: `[params] Return body...`. Type-level function arrows such
+  as `[Int -> String]` remain.
+- `def`, `defonce`, `let`, `loop`, and typed record/union/error fields use the
+  same noun-then-type structure. A typed rest parameter is
+  `& (more (Vec Int))`.
+- `name: Type`, `name :- Type`, and executable `-> Return` are rejected; never
+  introduce compatibility syntax for them.
 
-For zero to two logical parameters/fields, keep the vector inline only when the
-complete owner signature through any `-> Return` fits 80 columns. With three or
-more, or when the full signature is over width, put `[` on the next line two
-columns past the owning form's opening parenthesis. Use one aligned logical
-entry per line; never partially wrap. Keep exactly one space between `]` and
-`-> Return`. Do not align colons or pad names. Typed bindings, destructures,
-and `& rest` each count as one entry. A `defmacro` param vector obeys the
-layout rules. This covers function/method/macro vectors
-and typed record/union/error fields, not ordinary data or `let` binding
-vectors. The reader accepts either physical layout; run `beagle fmt --write .`
+Typed destructuring annotates the binding operation rather than only an
+identifier. Use a positional type for sequential destructuring and a
+record/map-shaped type for associative destructuring, then verify the exact
+projection with `beagle check`:
+
+```clojure
+(defalias Point2 (HVec Float Float))
+(defrecord Config [(host String) (port Int)])
+(defrecord Point [(x Float) (y Float)])
+
+(defn distance [([x1 y1] Point2) ([x2 y2] Point2)] Float
+  ...)
+(defn endpoint [({:keys [host port]} Config)] String
+  ...)
+(defn point-x [({:keys [x y]} Point)] Float
+  x)
+```
+
+Canonical function layout is width-driven, with no parameter-count threshold:
+
+```clojure
+;; complete owner + signature fits
+(defn distance [(a Point) (b Point)] Float
+  ...)
+
+;; only the owner causes overflow: move [params] Return as one unit
+(defn horizontal-ring-distance
+  [(anchor WorldCoordinate) (coord WorldCoordinate)] Float
+  ...)
+
+;; the indented unit also overflows: one binding per line, then Return
+(defn complicated-distance
+  [(anchor Coordinate)
+   (coord Coordinate)
+   (world WorldState)
+   (options DistanceOptions)]
+  Float
+  ...)
+```
+
+The width boundary is inclusive at 80 columns. Never partially pack an expanded
+vector. The reader accepts any physical layout; run `beagle fmt --write .`
 instead of formatting by hand, and use `beagle fmt --check .` in CI/review.
 
 ## Treat `Any` as an explicit gap
 
 Express the real type first: a record, concrete collection, function, union, or
-error type. `Any` is allowed only when the real shape cannot be expressed and
-the reason is stateable. An `Any`-heavy `.bclj` should be typed properly or
-remain honestly in `.clj`.
+error type. Omit a binder annotation when Beagle should infer it. Write
+`(binding Any)` only when the boundary is deliberately dynamic or the real
+shape cannot be expressed and the reason is stateable. Explicit `Any` never
+means "please infer". An `Any`-heavy `.bclj` should be typed properly or remain
+honestly in `.clj`.
 
 Probe by substituting the intended type and running `beagle check`. Success
 gains safety; a rejection may mean bad source or a bad type choice. Only an

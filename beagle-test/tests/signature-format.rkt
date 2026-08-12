@@ -33,7 +33,7 @@
   (check-equal? actual source)
   (check-equal? edits '()))
 
-(test-case "an over-width signature puts one binding form on each line"
+(test-case "an over-width owner moves a fitting signature as one unit"
   (define name (make-string 52 #\f))
   (define source
     (format "(defn ~a [(value Int) (minimum Int) (maximum Int)] Int value)\n" name))
@@ -42,9 +42,26 @@
    actual
    (string-append
     (format "(defn ~a\n" name)
-    "  [(value Int)\n"
-    "   (minimum Int)\n"
-    "   (maximum Int)] Int value)\n"))
+    "  [(value Int) (minimum Int) (maximum Int)] Int value)\n"))
+  (check-equal? (length edits) 1))
+
+(test-case "an over-width signature unit expands bindings and isolates return"
+  (define source
+    (string-append
+     "(defn complicated-distance "
+     "[(anchor Coordinate) (coord Coordinate) (world WorldState) "
+     "(options DistanceOptions)] Float world)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal?
+   actual
+   (string-append
+    "(defn complicated-distance\n"
+    "  [(anchor Coordinate)\n"
+    "   (coord Coordinate)\n"
+    "   (world WorldState)\n"
+    "   (options DistanceOptions)]\n"
+    "  Float\n"
+    "  world)\n"))
   (check-equal? (length edits) 1))
 
 (test-case "structural bindings, bare destructuring, and data vectors are stable"
@@ -91,6 +108,40 @@
                         over-name))
   (check-equal? (length over-edits) 1))
 
+(test-case "raises metadata stays with the positional return signature"
+  (define name (make-string 58 #\f))
+  (define source
+    (string-append
+     "(defunion :throwable Boom (Boom [(message String)]))\n"
+     (format "(defn ~a [(x Int)] Int :raises Boom x)\n" name)))
+  (define-values (actual edits) (formatted source))
+  (check-true
+   (string-contains?
+    actual
+    (format "(defn ~a\n  [(x Int)] Int :raises Boom x)" name)))
+  (check-equal? (length edits) 1))
+
+(test-case "multi-arity clauses expand without orphaning their opener"
+  (define source
+    (string-append
+     "(defn f\n"
+     "  ([(anchor Coordinate) (coord Coordinate) (world WorldState) "
+     "(options DistanceOptions)] Float anchor)\n"
+     "  ([x] Int x))\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal?
+   actual
+   (string-append
+    "(defn f\n"
+    "  ([(anchor Coordinate)\n"
+    "    (coord Coordinate)\n"
+    "    (world WorldState)\n"
+    "    (options DistanceOptions)]\n"
+    "   Float\n"
+    "   anchor)\n"
+    "  ([x] Int x))\n"))
+  (check-equal? (length edits) 1))
+
 (test-case "defmacro uses the same structural parameter layout"
   (define-values (actual edits)
     (formatted "(defmacro m [(x Any)] `(do ~x))\n"))
@@ -120,6 +171,24 @@
   (check-true (string-contains? actual "(Pair [(left Int) (right Int)])"))
   (check-equal? (length edits) 5))
 
+(test-case "record fields and methods use the same width hierarchy"
+  (define record-name (make-string 58 #\R))
+  (define method-name (make-string 54 #\m))
+  (define source
+    (string-append
+     (format "(defrecord ~a [(left Int) (right Int)])\n" record-name)
+     (format "(defprotocol P (~a [(self P) (x Int)] Int))\n" method-name)))
+  (define-values (actual edits) (formatted source))
+  (check-true
+   (string-contains?
+    actual
+    (format "(defrecord ~a\n  [(left Int) (right Int)])" record-name)))
+  (check-true
+   (string-contains?
+    actual
+    (format "(~a\n                 [(self P) (x Int)] Int)" method-name)))
+  (check-equal? (length edits) 2))
+
 (test-case "line-comment reach makes a rewrite diagnostic-only"
   (define source
     "(defn f ; owner comment\n  [x ; first parameter\n   y] Any x)\n")
@@ -133,6 +202,22 @@
                 (lambda () (apply-signature-layout-edits source edits)))
      (check-equal? (format-signature-files 'write (list path)) 2)
      (check-equal? (file->string path) source))))
+
+(test-case "expanding a signature never moves a return-line comment"
+  (define source
+    (string-append
+     "(defn complicated-distance "
+     "[(anchor Coordinate) (coord Coordinate) (world WorldState) "
+     "(options DistanceOptions)] Float ; keep with return\n"
+     "  world)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (define edits (signature-layout-edits path))
+     (check-equal? (length edits) 1)
+     (check-false (layout-edit-safe? (car edits)))
+     (check-exn exn:fail?
+                (lambda () (apply-signature-layout-edits source edits))))))
 
 (test-case "check reports drift and write reaches an idempotent fixed point"
   (define source "(defn add\n  [x\n   y] Any (+ x y))\n")
@@ -156,5 +241,6 @@
      (check-equal? (format-signature-files 'check (list path)) 0)
      (check-true
       (string-contains? (file->string path)
-                        (format "y] ~a x)" return-type)))
+                        (format "y]\n                          ~a\n                          x)"
+                                return-type)))
      (check-true (string-contains? (file->string path) "(fn\n")))))

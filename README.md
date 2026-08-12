@@ -60,7 +60,7 @@ $ cat src/main.bclj
 #lang beagle/clj
 (ns main)
 
-(defn greet [name: String] -> String
+(defn greet [(name String)] String
   (str "hello " name))
 
 (println (greet "from Beagle"))
@@ -89,32 +89,63 @@ path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 
 ## One canonical source shape
 
-Zero-, one-, and two-entry parameter or typed-field vectors stay inline when
-the complete signature fits within 80 columns:
+A typed binding is `(binding-form Type)`. A symbol is the simplest binding
+form, while sequential and associative destructuring keep their ordinary
+Clojure shape:
 
 ```clojure
-(defn zero [] -> Int 0)
-(defn increment [x: Int] -> Int (+ x 1))
-(defn add [x: Int y: Int] -> Int (+ x y))
+[x y]                                  ; inferred bindings
+[(x Int) (y String)]                   ; typed names
+[([x y] (HVec Float Float)) options]   ; typed destructure + inferred name
+[({:keys [host port]} Config)]         ; typed map destructure
 ```
 
-Three or more entries always put the vector on the following line. An
-over-width zero-, one-, or two-entry signature does too. A vertical vector has
-one logical entry per line and is never partially packed. Binding names start
-in the same column; a typed entry is flat `name: Type`. Names and types are
-never padded into columns:
+The wrapper annotates the binding operation, not merely an identifier. Bare
+simple binders request inference. A bare destructuring form in a strict typed
+signature is rejected because there is no aggregate type to project; wrap it
+with that type. Explicit `(value Any)` remains available for a deliberately
+dynamic boundary; omission does not silently mean `Any`. Typed and bare
+bindings may mix in one vector. The nesting is semantic structure, not visual
+decoration. Executable signatures have a mandatory positional return type, so
+no annotation punctuation is needed:
 
 ```clojure
-(defn clamp
-  [long-name: Int
-   minimum: Int
-   maximum: Int] -> Int
+(defrecord Point [(x Float) (y Float)])
+
+(defn distance [(a Point) (b Point)] Float
+  ...)
+
+(defn point-x [({:keys [x y]} Point)] Float
+  x)
+```
+
+Layout is driven only by the 80-column width. When the complete owner and
+signature fit, they stay together. If the owner makes the line overflow but
+the indented `[params] Return` unit fits, that whole unit moves to the next
+line:
+
+```clojure
+(defn horizontal-ring-distance
+  [(anchor WorldCoordinate) (coord WorldCoordinate)] Float
   ...)
 ```
 
-Types attach to names, so flat `name: Type` is the only annotation spelling and
-one vector annotates every binding or none (`& rest` is exempt). The reader
-accepts either physical layout; `beagle fmt --write .` performs the token-aware
+Only when the indented signature unit itself exceeds the width does the vector
+expand to one binding form per line, with the mandatory return type on its own
+line:
+
+```clojure
+(defn complicated-distance
+  [(anchor Coordinate)
+   (coord Coordinate)
+   (world WorldState)
+   (options DistanceOptions)]
+  Float
+  ...)
+```
+
+There is no parameter-count threshold and no partial packing. The reader
+accepts any physical layout; `beagle fmt --write .` performs the token-aware
 mechanical rewrite and `beagle fmt --check .` gives people, CI, and agents the
 same answer without making whitespace part of language validity.
 
