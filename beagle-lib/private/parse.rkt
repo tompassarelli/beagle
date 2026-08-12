@@ -183,21 +183,29 @@
     [(regexp-match? #rx"^#lang[ ]+beagle[ ]*$" lang-line) 'core]
     [else #f]))
 
-(define (read-beagle-syntax path)
-  (define src (simplify-path (path->complete-path
-                (if (path? path) path (string->path path)))))
-  (with-input-from-file src
+(define (canonical-source-path path)
+  (simplify-path
+   (path->complete-path (if (path? path) path (string->path path)))))
+
+(define (read-beagle-syntax/bytes path source-bytes)
+  (unless (bytes? source-bytes)
+    (raise-argument-error 'read-beagle-syntax/bytes "bytes?" source-bytes))
+  (define src (canonical-source-path path))
+  (define snapshot (bytes->immutable-bytes source-bytes))
+  (define in (open-input-bytes snapshot))
+  (dynamic-wind
+    void
     (lambda ()
-      (port-count-lines! (current-input-port))
-      (define first-line (read-line))
+      (port-count-lines! in)
+      (define first-line (read-line in))
       (define has-lang? (and (string? first-line)
                              (regexp-match? #rx"^#lang " first-line)))
       (define target (and has-lang? (lang-line->target first-line)))
       (unless has-lang?
-        (file-position (current-input-port) 0)
+        (file-position in 0)
         ;; Rewinding bytes does not rewind Racket's line/position counter.
         ;; Reset it explicitly so source-less-header files retain true spans.
-        (set-port-next-location! (current-input-port) 1 0 1))
+        (set-port-next-location! in 1 0 1))
       ;; Target-specific readtable for surface forms the base reader
       ;; doesn't know about. Notably: nix's `~"…"` / `~''…''` reader
       ;; macros. Without this, beagle-build-all (and any other caller
@@ -213,7 +221,7 @@
       (parameterize ([current-readtable target-readtable])
         (define forms
           (let loop ([acc '()])
-            (define d (read-syntax src))
+            (define d (read-syntax src in))
             (if (eof-object? d) (reverse acc) (loop (cons d acc)))))
         (cond
           [target
@@ -232,7 +240,12 @@
               (error 'beagle
                      "~a: unknown Beagle language header — use #lang beagle for Core or an explicit hosted language such as #lang beagle/clj"
                      (path->string src))])]
-          [else forms])))))
+          [else forms])))
+    (lambda () (close-input-port in))))
+
+(define (read-beagle-syntax path)
+  (define src (canonical-source-path path))
+  (read-beagle-syntax/bytes src (file->bytes src)))
 
 ;; --- canonical parameter / field layout -----------------------------------
 
@@ -1487,6 +1500,11 @@
 ;; (cond-thread__N / some-thread__N / bind__N / macro-hygiene renames) depend
 ;; only on THIS module's content, never on what else the process parsed
 ;; before it (daemon, build-all, check-all). Byte-reproducible builds.
+(define PROGRAM->SOURCE-BYTES (make-weak-hasheq))
+
+(define (program-source-bytes prog)
+  (hash-ref PROGRAM->SOURCE-BYTES prog #f))
+
 (define (parse-program stxs*
                        #:source-path [source-path #f]
                        #:module-resolver [module-resolver #f])
@@ -1504,6 +1522,28 @@
     (parse-program* stxs*
                     #:source-path source-path
                     #:module-resolver module-resolver)))
+
+(define (parse-program/bytes source-bytes
+                             #:source-path source-path
+                             #:module-resolver [module-resolver #f])
+  (unless (bytes? source-bytes)
+    (raise-argument-error 'parse-program/bytes "bytes?" source-bytes))
+  (define snapshot (bytes->immutable-bytes source-bytes))
+  (define prog
+    (parse-program
+     (read-beagle-syntax/bytes source-path snapshot)
+     #:source-path source-path
+     #:module-resolver module-resolver))
+  (hash-set! PROGRAM->SOURCE-BYTES prog snapshot)
+  prog)
+
+(define (parse-program/file path
+                            #:module-resolver [module-resolver #f])
+  (define src (canonical-source-path path))
+  (parse-program/bytes
+   (file->bytes src)
+   #:source-path src
+   #:module-resolver module-resolver))
 
 (define (parse-program* stxs*
                         #:source-path [source-path #f]
@@ -5325,6 +5365,9 @@
  (all-from-out "parse-jst.rkt")
  (all-from-out "parse-js-quote.rkt")
  parse-program
+ parse-program/bytes
+ parse-program/file
+ program-source-bytes
  read-beagle-datums
  read-beagle-syntax
  strip-target-export

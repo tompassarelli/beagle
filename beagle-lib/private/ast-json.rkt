@@ -15,6 +15,7 @@
          "ast.rkt"
          "types.rkt"
          "macros.rkt"
+         (only-in "parse.rkt" program-source-bytes)
          (only-in "semantic-index.rkt" write-canonical-json)
          "js-emit-utils.rkt")
 
@@ -984,9 +985,7 @@
 (define (program->json-string prog)
   (jsexpr->string (program->json prog)))
 
-(define (checked-program->json prog
-                               #:source-id [source-id #f]
-                               #:source-bytes source-bytes)
+(define (checked-program->json prog #:source-id [source-id #f])
   (unless (eq? (program-mode prog) 'strict)
     (error 'beagle-ast-json
            "checked-program projection requires strict mode, got ~a"
@@ -995,9 +994,10 @@
   (unless type-table
     (error 'beagle-ast-json
            "checked-program projection requires type checking with #:capture-types? #t"))
-  (unless (bytes? source-bytes)
+  (define source-bytes (program-source-bytes prog))
+  (unless source-bytes
     (error 'beagle-ast-json
-           "checked-program projection requires exact source bytes"))
+           "checked-program projection requires a program parsed from an exact source-byte snapshot"))
   (define base
     (parameterize ([current-json-src-table (program-src-table prog)]
                    [current-json-type-table type-table]
@@ -1037,12 +1037,9 @@
 
 (define (write-checked-program-json prog
                                     [out (current-output-port)]
-                                    #:source-id [source-id #f]
-                                    #:source-bytes source-bytes)
+                                    #:source-id [source-id #f])
   (write-canonical-json
-   (checked-program->json prog
-                          #:source-id source-id
-                          #:source-bytes source-bytes)
+   (checked-program->json prog #:source-id source-id)
    out)
   (newline out))
 

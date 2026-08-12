@@ -46,10 +46,13 @@
   (sha256-prefixed (get-output-bytes out)))
 
 ;; Load parse + check + ast-json from worktree source files.
-(define-values (read-beagle-syntax parse-program)
+(define-values (read-beagle-syntax parse-program
+                                   parse-program/bytes parse-program/file)
   (values
    (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'read-beagle-syntax)
-   (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'parse-program)))
+   (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'parse-program)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'parse-program/bytes)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'parse-program/file)))
 
 (define-values (type-check! type-check-with-locs!)
   (values
@@ -78,8 +81,7 @@
         (lambda (out)
           (display "#lang beagle/clj\n" out)
           (display src-string out)))
-      (define forms (read-beagle-syntax tmp))
-      (define prog (parse-program forms #:source-path (path->string tmp)))
+      (define prog (parse-program/file tmp))
       (type-check! prog)
       (program->json prog))
     (lambda () (delete-file tmp))))
@@ -93,8 +95,7 @@
         (lambda (out)
           (display "#lang beagle/js\n" out)
           (display src-string out)))
-      (define forms (read-beagle-syntax tmp))
-      (define prog (parse-program forms #:source-path (path->string tmp)))
+      (define prog (parse-program/file tmp))
       (type-check! prog)
       (program->json prog))
     (lambda () (delete-file tmp))))
@@ -112,21 +113,18 @@
                        "#lang beagle/clj\n")
                    out)
           (display src-string out)))
-      (define forms (read-beagle-syntax tmp))
-      (define prog (parse-program forms #:source-path (path->string tmp)))
+      (define prog (parse-program/file tmp))
       (type-check-with-locs!
        prog
        (lambda (e _loc-stx) (raise e))
        #:capture-types? #t)
       (checked-program->json
        prog
-       #:source-id source-id
-       #:source-bytes (file->bytes tmp)))
+       #:source-id source-id))
     (lambda () (delete-file tmp))))
 
 (define (parse+checked-json/path path source-id)
-  (define forms (read-beagle-syntax path))
-  (define prog (parse-program forms #:source-path path))
+  (define prog (parse-program/file path))
   (type-check-with-locs!
    prog
    (lambda (e _loc-stx) (raise e))
@@ -134,8 +132,7 @@
   (values prog
           (checked-program->json
            prog
-           #:source-id source-id
-           #:source-bytes (file->bytes path))))
+           #:source-id source-id)))
 
 (define (find-form-node json node-name)
   (for/first ([form (in-list (hash-ref json 'forms))]
@@ -286,12 +283,10 @@
      (define second-out (open-output-string))
      (write-checked-program-json
       prog first-out
-      #:source-id "checked-projection/wiki.bjs"
-      #:source-bytes (file->bytes path))
+      #:source-id "checked-projection/wiki.bjs")
      (write-checked-program-json
       prog second-out
-      #:source-id "checked-projection/wiki.bjs"
-      #:source-bytes (file->bytes path))
+      #:source-id "checked-projection/wiki.bjs")
      (check-equal? (get-output-string first-out)
                    (get-output-string second-out)))
 
@@ -367,6 +362,48 @@
                        (projection-sha256 json-b)))
        (lambda () (delete-file source))))
 
+   (test-case "checked projection binds AST and digest to one immutable snapshot"
+     (define source-path
+       (root/ "beagle-test/tests/fixtures/checked-projection/snapshot.bjs"))
+     (define source-a
+       (string->bytes/utf-8
+        "#lang beagle/js\n(ns checked.snapshot-a)\n(def value: Int 1)\n"))
+     (define source-b
+       (string->bytes/utf-8
+        "#lang beagle/js\n(ns checked.snapshot-b)\n(def value: Int 2)\n"))
+     (define mutable-source (bytes-copy source-a))
+     (define prog
+       (parse-program/bytes mutable-source #:source-path source-path))
+     ;; A caller cannot change the program's retained snapshot after parsing,
+     ;; and the serializer has no detached source-bytes argument to substitute.
+     (bytes-copy! mutable-source 0 source-b)
+     (type-check-with-locs!
+      prog
+      (lambda (e _loc-stx) (raise e))
+      #:capture-types? #t)
+     (define json
+       (checked-program->json prog #:source-id "snapshot.bjs"))
+     (check-equal? (hash-ref json 'namespace) "checked.snapshot-a")
+     (check-equal? (hash-ref json 'sourceSha256)
+                   (sha256-prefixed source-a))
+     (check-not-equal? (hash-ref json 'sourceSha256)
+                       (sha256-prefixed source-b))
+     (check-equal? (hash-ref json 'projectionSha256)
+                   (projection-sha256 json)))
+
+   (test-case "checked projection rejects programs without parser-bound bytes"
+     (define path
+       (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
+     (define prog
+       (parse-program (read-beagle-syntax path) #:source-path path))
+     (type-check-with-locs!
+      prog
+      (lambda (e _loc-stx) (raise e))
+      #:capture-types? #t)
+     (check-exn #rx"parsed from an exact source-byte snapshot"
+                (lambda ()
+                  (checked-program->json prog #:source-id "wiki.bjs"))))
+
    (test-case "ast CLI emits no partial stdout on serialization failure"
      (define source (make-temporary-file "beagle-ast-non-json-~a.bclj"))
      (dynamic-wind
@@ -427,14 +464,10 @@
          (call-with-output-file tmp #:exists 'truncate
            (lambda (out)
              (display "#lang beagle/js\n(ns unchecked)\n(def x: Int 1)\n" out)))
-         (define prog
-           (parse-program (read-beagle-syntax tmp)
-                          #:source-path (path->string tmp)))
+         (define prog (parse-program/file tmp))
          (check-exn #rx"capture-types"
                     (lambda ()
-                      (checked-program->json
-                       prog
-                       #:source-bytes (file->bytes tmp)))))
+                      (checked-program->json prog))))
        (lambda () (delete-file tmp))))))
 
 (run-tests tests)
