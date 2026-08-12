@@ -78,6 +78,22 @@
 (define current-raising-functions (make-parameter (hasheq)))
 (define current-check-error-contract (make-parameter #f))
 
+;; Definition-local signature inference is a checker phase, not an AST rewrite.
+;; The authored tree keeps `#f` for an omitted simple parameter annotation;
+;; this table carries the finalized callable type to interfaces and emitters.
+(define PROGRAM->EFFECTIVE-DEFINITION-TYPES (make-weak-hasheq))
+(define (register-program-effective-definition-types! prog table)
+  (hash-set! PROGRAM->EFFECTIVE-DEFINITION-TYPES prog table))
+(define (program-effective-definition-types prog)
+  (hash-ref PROGRAM->EFFECTIVE-DEFINITION-TYPES prog #f))
+(define (program-effective-definition-type prog name [fallback #f])
+  (define table (program-effective-definition-types prog))
+  (if table (hash-ref table name fallback) fallback))
+
+;; Non-#f only while the whole-program definition solver is constraining one
+;; monomorphic SCC.  Normal checking sees only finalized signatures.
+(define current-definition-inference? (make-parameter #f))
+
 ;; --- target-form gating -----------------------------------------------------
 ;; Target-specific AST forms must only appear in their target.
 ;; Maps predicate → required target symbol.
@@ -748,7 +764,7 @@
     (hash-clear! PARAMETRIC-MEMBER-UNION)
     (define binder-type-tbl (make-hasheq))
     (register-program-binder-type-table! prog binder-type-tbl)
-    (define env (build-initial-env prog))
+    (define env #f)
     (define nix-schema
       (and (eq? (program-target prog) 'nix)
            (let ([src (program-source-file prog)])
@@ -764,30 +780,29 @@
                    [current-raising-functions (hasheq)]
                    [current-binder-type-table binder-type-tbl]
                    [current-nixos-schema nix-schema])
-      (define-values (regex-bindings regex-string-ops)
-        (prepare-regex-contracts! prog))
-      (prepare-dynamic-contracts! prog)
-      (prepare-collection-contracts! prog)
-      (prepare-allocation-contracts! prog)
-      (prepare-error-contracts! prog)
-      (parameterize ([current-regex-bindings regex-bindings]
-                     [current-regex-string-ops regex-string-ops])
-        (for ([form (in-list (program-forms prog))])
-          ;; Walk the form transitively — a top-level def-form may wrap a
-          ;; macro-derived value inside (def-form y "hello"). Setting the
-          ;; ctx on transitive matches lets raise-diag rebucket the error
-          ;; even when it fires on the outer def-form.
-          (define macro-ctx (form-macro-derived-ctx macro-tbl form))
-          (parameterize ([current-macro-expansion-ctx
-                          (if (eq? macro-ctx #f) #f macro-ctx)]
-                         [current-unstable-bindings (collect-set!-targets form)])
-            (check-target-form form)
-            (check-form form env)))
-        (check-module-interface-resolution! prog)
-        (check-qualified-resolution! prog env)
-        (check-scalar-provenance! prog)
-        (check-nix-free-dotted! prog)
-        (check-purity! prog)))))
+      (call-with-fresh-type-metas
+       (lambda ()
+         (set! env (build-initial-env prog))
+         (define-values (regex-bindings regex-string-ops)
+           (prepare-and-infer-definition-types! prog env))
+         (parameterize ([current-regex-bindings regex-bindings]
+                        [current-regex-string-ops regex-string-ops])
+           (for ([form (in-list (program-forms prog))])
+             ;; Walk the form transitively — a top-level def-form may wrap a
+             ;; macro-derived value inside (def-form y "hello"). Setting the
+             ;; ctx on transitive matches lets raise-diag rebucket the error
+             ;; even when it fires on the outer def-form.
+             (define macro-ctx (form-macro-derived-ctx macro-tbl form))
+             (parameterize ([current-macro-expansion-ctx
+                             (if (eq? macro-ctx #f) #f macro-ctx)]
+                            [current-unstable-bindings (collect-set!-targets form)])
+               (check-target-form form)
+               (check-form form env)))
+           (check-module-interface-resolution! prog)
+           (check-qualified-resolution! prog env)
+           (check-scalar-provenance! prog)
+           (check-nix-free-dotted! prog)
+           (check-purity! prog)))))))
 
 ;; --- concrete native boundaries ---------------------------------------------
 
@@ -1915,6 +1930,429 @@
     [(or (map-destructure? p) (seq-destructure? p)) ANY]
     [else (or (param-type p) ANY)]))
 
+(define (inference-param-type p)
+  (cond
+    [(or (map-destructure? p) (seq-destructure? p)) ANY]
+    [(and (param? p) (param-type p)) (param-type p)]
+    [(and (param? p) (symbol? (param-name p))) (fresh-type-meta)]
+    ;; Bare destructuring is rejected by the parser. Keep this fail-closed arm
+    ;; for hand-built ASTs and future binding variants.
+    [else ANY]))
+
+(define (rest-binding-aggregate-type callable-element-type)
+  (type-app 'Vec (list callable-element-type)))
+
+(define (rest-param-call-element-type rest-param [inference? #f])
+  (define authored (and (param? rest-param) (param-type rest-param)))
+  (cond
+    [(and authored (type-app? authored)
+          (eq? (type-app-ctor authored) 'Vec)
+     (= (length (type-app-args authored)) 1))
+     (car (type-app-args authored))]
+    [authored
+     (raise-diag
+      'rest-annotation
+      (format "rest parameter annotation must describe its aggregate body binding as (Vec Element), got ~a"
+              (type->string authored))
+      (hasheq 'actual (type->string authored)
+              'expected "(Vec Element)"
+              'repair "write & (name (Vec Element))")
+      #:src (src-for rest-param))]
+    [inference? (fresh-type-meta)]
+    [else ANY]))
+
+(define (rest-param-body-type rest-param callable-element-type)
+  (define authored (and (param? rest-param) (param-type rest-param)))
+  (if (and authored (type-app? authored)
+           (eq? (type-app-ctor authored) 'Vec)
+           (= (length (type-app-args authored)) 1))
+      authored
+      (rest-binding-aggregate-type callable-element-type)))
+
+(struct inference-clause (params rest-param return-type body owner) #:transparent)
+
+(define (definition-name form)
+  (cond
+    [(defn-form? form) (defn-form-name form)]
+    [(defn-multi? form) (defn-multi-name form)]
+    [else (error 'beagle "not a callable definition: ~v" form)]))
+
+(define (definition-clauses form)
+  (cond
+    [(defn-form? form)
+     (list (inference-clause
+            (defn-form-params form)
+            (defn-form-rest-param form)
+            (defn-form-return-type form)
+            (defn-form-body form)
+            (defn-form-name form)))]
+    [(defn-multi? form)
+     (for/list ([arity (in-list (defn-multi-arities form))])
+       (inference-clause
+        (arity-clause-params arity)
+        (arity-clause-rest-param arity)
+        (arity-clause-return-type arity)
+        (arity-clause-body arity)
+        (defn-multi-name form)))]
+    [else '()]))
+
+(define (inference-clause-effective-type clause)
+  (define rest-p (inference-clause-rest-param clause))
+  (type-fn
+   (map inference-param-type (inference-clause-params clause))
+   (and rest-p (rest-param-call-element-type rest-p #t))
+   (or (inference-clause-return-type clause) (fresh-type-meta))))
+
+(define (infer-local-clause-type clause env)
+  (define signature (inference-clause-effective-type clause))
+  (define actual
+    (parameterize ([current-definition-inference? #t])
+      (constrain-inference-clause! clause env signature)))
+  (define expected (inference-clause-return-type clause))
+  (when (and expected (not (declared-return-compatible? actual expected)))
+    (raise-diag
+     'return-type
+     (format "~a: expected return ~a, got ~a"
+             (inference-clause-owner clause)
+             (type->string expected)
+             (type->string actual))
+     (type-mismatch-details expected actual)
+     #:src (and (pair? (inference-clause-body clause))
+                (or (src-for (last (inference-clause-body clause)))
+                    (body-loc-at (inference-clause-body clause)
+                                 (sub1 (length (inference-clause-body clause))))))))
+  (finalized-definition-type signature))
+
+(define (definition-effective-type form)
+  (define alternatives
+    (map inference-clause-effective-type (definition-clauses form)))
+  (if (= (length alternatives) 1)
+      (car alternatives)
+      (type-union alternatives)))
+
+(define (top-level-definitions prog)
+  (for/list ([raw-form (in-list (program-forms prog))]
+             #:do [(define form (unwrap-definition-form raw-form))]
+             #:when (or (defn-form? form) (defn-multi? form)))
+    form))
+
+;; Collect calls to top-level definitions while respecting every lexical binder
+;; that can shadow one.  A scope-blind walk can invent an SCC edge from `(f x)`
+;; when `f` is a parameter or local letfn, accidentally monomorphizing otherwise
+;; independent definitions.
+(define (definition-local-callees form local-names)
+  (define called (mutable-seteq))
+  (define (scope-add-target scope target)
+    (for/fold ([out scope]) ([name (in-list (binding-target-bound-names target))])
+      (set-add out name)))
+  (define (scope-add-params scope params rest-p)
+    (for/fold ([out scope])
+              ([param (in-list (if rest-p
+                                   (append params (list rest-p))
+                                   params))])
+      (for ([default (in-list
+                      (destructure-or-default-exprs
+                       (param-binding-target param)))])
+        (walk default out))
+      (scope-add-target out param)))
+  (define (pattern-bound-names pattern)
+    (cond
+      [(pat-var? pattern) (list (pat-var-name pattern))]
+      [(pat-record? pattern) (pat-record-bindings pattern)]
+      [(pat-map? pattern)
+       (for/list ([entry (in-list (pat-map-entries pattern))]
+                  #:when (pat-var? (cdr entry)))
+         (pat-var-name (cdr entry)))]
+      ;; pat-or v1 permits no binding alternatives.
+      [(pat-or? pattern) '()]
+      [else '()]))
+  (define (scope-add-names scope names)
+    (for/fold ([out scope]) ([name (in-list names)])
+      (set-add out name)))
+  (define (walk-body body scope)
+    (for ([expr (in-list body)]) (walk expr scope)))
+  (define (walk-bindings bindings scope)
+    (for/fold ([inner scope]) ([binding (in-list bindings)])
+      (walk (let-binding-value binding) inner)
+      (for ([default (in-list
+                      (destructure-or-default-exprs
+                       (let-binding-name binding)))])
+        (walk default inner))
+      (scope-add-target inner (let-binding-name binding))))
+  (define (walk-for-clauses clauses scope)
+    (for/fold ([inner scope]) ([clause (in-list clauses)])
+      (cond
+        [(for-binding? clause)
+         (walk (for-binding-expr clause) inner)
+         (scope-add-target inner (for-binding-name clause))]
+        [(for-when? clause)
+         (walk (for-when-test clause) inner)
+         inner]
+        [(for-let? clause)
+         (walk-bindings (for-let-bindings clause) inner)]
+        [else inner])))
+  (define (walk value scope)
+    (cond
+      [(call-form? value)
+       (define callee (call-form-fn value))
+       (cond
+         [(symbol? callee)
+          (when (and (set-member? local-names callee)
+                     (not (set-member? scope callee)))
+            (set-add! called callee))]
+         [else (walk callee scope)])
+       (for ([arg (in-list (call-form-args value))]) (walk arg scope))]
+      [(fn-form? value)
+       (walk-body
+        (fn-form-body value)
+        (scope-add-params scope (fn-form-params value)
+                          (fn-form-rest-param value)))]
+      [(let-form? value)
+       (walk-body (let-form-body value)
+                  (walk-bindings (let-form-bindings value) scope))]
+      [(loop-form? value)
+       (walk-body (loop-form-body value)
+                  (walk-bindings (loop-form-bindings value) scope))]
+      [(letfn-form? value)
+       (define fn-scope
+         (scope-add-names scope (map letfn-fn-name (letfn-form-fns value))))
+       (for ([local-fn (in-list (letfn-form-fns value))])
+         (walk-body
+          (letfn-fn-body local-fn)
+          (scope-add-params fn-scope
+                            (letfn-fn-params local-fn)
+                            (letfn-fn-rest-param local-fn))))
+       (walk-body (letfn-form-body value) fn-scope)]
+      [(binding-form? value)
+       (for ([binding (in-list (binding-form-bindings value))])
+         (walk (let-binding-value binding) scope))
+       (walk-body (binding-form-body value) scope)]
+      [(for-form? value)
+       (walk-body (for-form-body value)
+                  (walk-for-clauses (for-form-clauses value) scope))]
+      [(doseq-form? value)
+       (walk-body (doseq-form-body value)
+                  (walk-for-clauses (doseq-form-clauses value) scope))]
+      [(when-let-form? value)
+       (walk (when-let-form-expr value) scope)
+       (walk-body (when-let-form-body value)
+                  (set-add scope (when-let-form-name value)))]
+      [(if-let-form? value)
+       (walk (if-let-form-expr value) scope)
+       (walk (if-let-form-then-body value)
+             (set-add scope (if-let-form-name value)))
+       (when (if-let-form-else-body value)
+         (walk (if-let-form-else-body value) scope))]
+      [(when-some-form? value)
+       (walk (when-some-form-expr value) scope)
+       (walk-body (when-some-form-body value)
+                  (set-add scope (when-some-form-name value)))]
+      [(if-some-form? value)
+       (walk (if-some-form-expr value) scope)
+       (walk (if-some-form-then-body value)
+             (set-add scope (if-some-form-name value)))
+       (walk (if-some-form-else-body value) scope)]
+      [(with-open-form? value)
+       (walk-body (with-open-form-body value)
+                  (walk-bindings (with-open-form-bindings value) scope))]
+      [(dotimes-form? value)
+       (walk (dotimes-form-count-expr value) scope)
+       (walk-body (dotimes-form-body value)
+                  (set-add scope (dotimes-form-name value)))]
+      [(try-form? value)
+       (walk-body (try-form-body value) scope)
+       (for ([catch (in-list (try-form-catches value))])
+         (walk-body (catch-clause-body catch)
+                    (set-add scope (catch-clause-name catch))))
+       (when (try-form-finally-body value)
+         (walk-body (try-form-finally-body value) scope))]
+      [(rescue-form? value)
+       (walk (rescue-form-expr value) scope)
+       (walk (rescue-form-fallback value)
+             (if (rescue-form-err-name value)
+                 (set-add scope (rescue-form-err-name value))
+                 scope))]
+      [(match-form? value)
+       (walk (match-form-target value) scope)
+       (for ([clause (in-list (match-form-clauses value))])
+         (walk-body
+          (match-clause-body clause)
+          (scope-add-names
+           scope (pattern-bound-names (match-clause-pattern clause)))))]
+      [(threading-marker? value)
+       (walk (threading-marker-desugared value) scope)]
+      [(quoted? value) (void)]
+      [(pair? value) (walk (car value) scope) (walk (cdr value) scope)]
+      [(vector? value) (for ([item (in-vector value)]) (walk item scope))]
+      [(hash? value)
+       (for ([(key item) (in-hash value)])
+         (walk key scope)
+         (walk item scope))]
+      [(struct? value)
+       (for ([item (in-list (cdr (vector->list (struct->vector value))))])
+         (walk item scope))]
+      [else (void)]))
+  (for ([clause (in-list (definition-clauses form))])
+    (walk-body
+     (inference-clause-body clause)
+     (scope-add-params (seteq)
+                       (inference-clause-params clause)
+                       (inference-clause-rest-param clause))))
+  (set->list called))
+
+;; Deterministic Tarjan SCCs. Definitions and edges are visited in source
+;; order; consumers are solved only after every local dependency they call.
+(define (definition-sccs defns)
+  (define names (map definition-name defns))
+  (define local-names (list->seteq names))
+  (define source-index
+    (for/hasheq ([name (in-list names)] [index (in-naturals)])
+      (values name index)))
+  (define edges
+    (for/hasheq ([form (in-list defns)])
+      (values
+       (definition-name form)
+       (sort (definition-local-callees form local-names)
+             < #:key (lambda (name) (hash-ref source-index name))))))
+  (define next-index 0)
+  (define indexes (make-hasheq))
+  (define lowlinks (make-hasheq))
+  (define stack '())
+  (define on-stack (mutable-seteq))
+  (define components '())
+  (define (strongconnect name)
+    (hash-set! indexes name next-index)
+    (hash-set! lowlinks name next-index)
+    (set! next-index (add1 next-index))
+    (set! stack (cons name stack))
+    (set-add! on-stack name)
+    (for ([callee (in-list (hash-ref edges name))])
+      (cond
+        [(not (hash-has-key? indexes callee))
+         (strongconnect callee)
+         (hash-set! lowlinks name
+                    (min (hash-ref lowlinks name)
+                         (hash-ref lowlinks callee)))]
+        [(set-member? on-stack callee)
+         (hash-set! lowlinks name
+                    (min (hash-ref lowlinks name)
+                         (hash-ref indexes callee)))]))
+    (when (= (hash-ref lowlinks name) (hash-ref indexes name))
+      (define component '())
+      (let pop! ()
+        (define member (car stack))
+        (set! stack (cdr stack))
+        (set-remove! on-stack member)
+        (set! component (cons member component))
+        (unless (eq? member name) (pop!)))
+      (set! components
+            (cons (sort component < #:key (lambda (member)
+                                           (hash-ref source-index member)))
+                  components))))
+  (for ([name (in-list names)])
+    (unless (hash-has-key? indexes name) (strongconnect name)))
+  (values (reverse components) edges))
+
+(define (raise-inference-type-error clause actual expected error)
+  (raise-diag
+   'type-mismatch
+   (format "defn ~a: cannot infer omitted parameter types because ~a"
+           (inference-clause-owner clause) (exn-message error))
+   (hasheq 'function (symbol->string (inference-clause-owner clause))
+           'actual (type->string actual)
+           'expected (type->string expected))
+   #:src (and (pair? (inference-clause-body clause))
+              (src-for (last (inference-clause-body clause))))))
+
+(define (constrain-inference-clause! clause env signature)
+  (define rest-p (inference-clause-rest-param clause))
+  (define all-params
+    (if rest-p
+        (append (inference-clause-params clause) (list rest-p))
+        (inference-clause-params clause)))
+  (define effective-param-types
+    (append (type-fn-params signature)
+            (if rest-p
+                (list (rest-param-body-type
+                       rest-p (type-fn-rest-type signature)))
+                '())))
+  (define body-env (extend-with-params env all-params effective-param-types))
+  (define actual (last-expr-type (inference-clause-body clause) body-env))
+  ;; A concrete mismatch remains the ordinary return-type diagnostic in the
+  ;; normal check pass. The solver only needs to run when a return constraint
+  ;; can actually solve a parameter metavariable.
+  (when (or (type-meta? (prune-type actual))
+            (pair? (free-type-metas actual))
+            (type-meta? (prune-type (type-fn-ret signature)))
+            (pair? (free-type-metas (type-fn-ret signature))))
+    (with-handlers ([exn:fail:type-unification?
+                     (lambda (error)
+                       (raise-inference-type-error
+                        clause actual (type-fn-ret signature) error))])
+      (unify-types! actual (type-fn-ret signature))))
+  actual)
+
+(define (signature-alternatives signature)
+  (define body
+    (if (and (type-poly? signature) (inferred-type-poly? signature))
+        (type-poly-body signature)
+        signature))
+  (if (type-union? body) (type-union-alts body) (list body)))
+
+(define (constrain-definition! form env signature)
+  (define clauses (definition-clauses form))
+  (define alternatives (signature-alternatives signature))
+  (unless (= (length clauses) (length alternatives))
+    (error 'beagle
+           "definition inference signature/arity mismatch for ~a: ~a clauses, ~a alternatives"
+           (definition-name form) (length clauses) (length alternatives)))
+  (for ([clause (in-list clauses)]
+        [alternative (in-list alternatives)])
+    (constrain-inference-clause! clause env alternative)))
+
+(define (finalized-definition-type type)
+  (define final (generalize-type type))
+  (when (pair? (free-type-metas final))
+    (error 'beagle
+           "unresolved inference metavariable escaped definition finalization: ~a"
+           (type->string final)))
+  final)
+
+(define (infer-definition-types! prog env)
+  (define defns (top-level-definitions prog))
+  (define by-name
+    (for/hasheq ([form (in-list defns)])
+      (values (definition-name form) form)))
+  (define signatures (make-hasheq))
+  (for ([form (in-list defns)])
+    (hash-set! signatures (definition-name form) (definition-effective-type form)))
+  (define-values (sccs _edges) (definition-sccs defns))
+  ;; Tarjan yields dependency-first components for caller -> callee edges.
+  (for ([component (in-list sccs)])
+    (for ([name (in-list component)])
+      (hash-set! env name (hash-ref signatures name)))
+    (parameterize ([current-definition-inference? #t])
+      (for ([name (in-list component)])
+        (constrain-definition! (hash-ref by-name name) env (hash-ref signatures name))))
+    (for ([name (in-list component)])
+      (define finalized (finalized-definition-type (hash-ref signatures name)))
+      (hash-set! signatures name finalized)
+      (hash-set! env name finalized)))
+  (register-program-effective-definition-types! prog signatures)
+  signatures)
+
+(define (prepare-and-infer-definition-types! prog env)
+  (define-values (regex-bindings regex-string-ops)
+    (prepare-regex-contracts! prog))
+  (prepare-dynamic-contracts! prog)
+  (prepare-collection-contracts! prog)
+  (prepare-allocation-contracts! prog)
+  (prepare-error-contracts! prog)
+  (parameterize ([current-regex-bindings regex-bindings]
+                 [current-regex-string-ops regex-string-ops])
+    (infer-definition-types! prog env))
+  (values regex-bindings regex-string-ops))
+
 ;; A typed destructuring binder annotates the value entering the pattern.  The
 ;; pattern's bound names receive projections of that aggregate type; they must
 ;; never inherit a blanket Any merely because the surface binder is not a
@@ -2203,7 +2641,25 @@
 
     [(defn-form name params rest-p expected-ret body _ _ _)
      (define all-params (if rest-p (append params (list rest-p)) params))
-     (define body-env (extend-with-params env all-params))
+     (define effective-signature (hash-ref env name #f))
+     (define monomorphic-signature
+       (cond
+         [(and (type-poly? effective-signature)
+               (inferred-type-poly? effective-signature))
+          ;; The normal post-solve body check needs the quantified variables as
+          ;; rigid locals, not fresh call-site metas.
+          (type-poly-body effective-signature)]
+         [else effective-signature]))
+     (define effective-param-types
+       (and (type-fn? monomorphic-signature)
+            (append
+             (type-fn-params monomorphic-signature)
+             (if rest-p
+                 (list (rest-param-body-type
+                        rest-p (type-fn-rest-type monomorphic-signature)))
+                 '()))))
+     (define body-env
+       (extend-with-params env all-params effective-param-types))
      (parameterize ([current-check-fn-name name]
                     [current-check-error-contract
                      (hash-ref (current-raising-functions) name #f)])
@@ -2228,14 +2684,36 @@
                                (body-loc-at body (sub1 (length body)))))))]
 
     [(defn-multi name arities _ _)
-     (for ([a (in-list arities)])
-       (define body-env (extend-with-params env (arity-clause-params a)))
+     (define effective-signature (hash-ref env name #f))
+     (define alternatives (signature-alternatives effective-signature))
+     (unless (= (length arities) (length alternatives))
+       (error 'beagle
+              "effective signature/arity mismatch for ~a: ~a clauses, ~a alternatives"
+              name (length arities) (length alternatives)))
+     (for ([a (in-list arities)]
+           [alternative (in-list alternatives)])
+       (unless (type-fn? alternative)
+         (error 'beagle "effective multi-arity signature for ~a is not a function: ~a"
+                name (type->string alternative)))
+       (define rest-p (arity-clause-rest-param a))
+       (define all-params
+         (if rest-p
+             (append (arity-clause-params a) (list rest-p))
+             (arity-clause-params a)))
+       (define effective-param-types
+         (append
+          (type-fn-params alternative)
+          (if rest-p
+              (list (rest-param-body-type
+                     rest-p (type-fn-rest-type alternative)))
+              '())))
+       (define body-env
+         (extend-with-params env all-params effective-param-types))
        (define a-body (arity-clause-body a))
        (define last-type (last-expr-type a-body body-env))
        (define expected-ret (arity-clause-return-type a))
        (unless (declared-return-compatible? last-type expected-ret)
-         (define sig (type->string
-                       (type-fn (map param-or-destr-type (arity-clause-params a)) #f expected-ret)))
+         (define sig (type->string alternative))
          (raise-diag 'return-type
                      (format "defn ~a (~a-arity): expected return ~a, got ~a"
                              name (length (arity-clause-params a))
@@ -2289,9 +2767,16 @@
 
     [_ (infer-expr form env)]))
 
-(define (extend-with-params env params)
+(define (extend-with-params env params [effective-types #f])
+  (when (and effective-types
+             (not (= (length params) (length effective-types))))
+    (error 'beagle
+           "parameter/effective-type mismatch: ~a parameters, ~a types"
+           (length params) (length effective-types)))
   (define out (mut-copy env))
-  (for ([p (in-list params)])
+  (for ([p (in-list params)]
+        [effective (in-list (or effective-types
+                                (map param-or-destr-type params)))])
     (cond
       [(or (map-destructure? p) (seq-destructure? p))
        ;; destructure-bound-names flattens nested patterns.
@@ -2303,7 +2788,7 @@
          (infer-expr dex out))]
       [else
        (define target (param-name p))
-       (define declared (or (param-type p) ANY))
+       (define declared effective)
        (if (or (map-destructure? target) (seq-destructure? target))
            (bind-destructure-type! out target declared "parameter" (src-for p) p)
            (begin
@@ -3445,32 +3930,52 @@
                        (hash-set acc k v))])
        (last-expr-type (let-form-body e) body-env))]
     [(letfn-form? e)
-     ;; First register all fn types so mutual recursion works
+     ;; All local signatures are monomorphic while their mutually recursive
+     ;; bodies constrain them. Only after the group is solved do unresolved
+     ;; slots become inferred forall variables at uses in the enclosing body.
      (define body-env (mut-copy env))
+     (define signatures (make-hasheq))
+     (define clauses (make-hasheq))
      (for ([f (in-list (letfn-form-fns e))])
-       (define p-types (map param-or-destr-type (letfn-fn-params f)))
-       (define rtype (and (letfn-fn-rest-param f) (param-or-destr-type (letfn-fn-rest-param f))))
-       (define ret (letfn-fn-return-type f))
-       (hash-set! body-env (letfn-fn-name f) (type-fn p-types rtype ret)))
-     ;; Then type-check each function body
+       (define clause
+         (inference-clause
+          (letfn-fn-params f)
+          (letfn-fn-rest-param f)
+          (letfn-fn-return-type f)
+          (letfn-fn-body f)
+          (letfn-fn-name f)))
+       (define signature (inference-clause-effective-type clause))
+       (hash-set! clauses (letfn-fn-name f) clause)
+       (hash-set! signatures (letfn-fn-name f) signature)
+       (hash-set! body-env (letfn-fn-name f) signature))
      (for ([f (in-list (letfn-form-fns e))])
-       (define fn-env (extend-with-params body-env (letfn-fn-params f)))
-       (when (letfn-fn-rest-param f)
-         (hash-set! fn-env (param-name (letfn-fn-rest-param f))
-                    (or (param-type (letfn-fn-rest-param f)) ANY)))
-       (define body (letfn-fn-body f))
-       (define actual-ret (last-expr-type body fn-env))
-       (define expected-ret (letfn-fn-return-type f))
-       (unless (declared-return-compatible? actual-ret expected-ret)
-         (raise-diag 'return-type
-                     (format "letfn ~a: expected return ~a, got ~a"
-                             (letfn-fn-name f)
-                             (type->string expected-ret)
-                             (type->string actual-ret))
-                     (hash-set* (type-mismatch-details expected-ret actual-ret)
-                                'name (symbol->string (letfn-fn-name f)))
-                     #:src (or (src-for (last body))
-                               (body-loc-at body (sub1 (length body)))))))
+       (define name (letfn-fn-name f))
+       (define clause (hash-ref clauses name))
+       (define actual-ret
+         (parameterize ([current-definition-inference? #t])
+           (constrain-inference-clause!
+            clause body-env (hash-ref signatures name))))
+       (define expected-ret (inference-clause-return-type clause))
+       (when (and expected-ret
+                  (not (declared-return-compatible? actual-ret expected-ret)))
+         (raise-diag
+          'return-type
+          (format "letfn ~a: expected return ~a, got ~a"
+                  name (type->string expected-ret) (type->string actual-ret))
+          (hash-set* (type-mismatch-details expected-ret actual-ret)
+                     'name (symbol->string name))
+          #:src (or (and (pair? (inference-clause-body clause))
+                         (src-for (last (inference-clause-body clause))))
+                    (and (pair? (inference-clause-body clause))
+                         (body-loc-at
+                          (inference-clause-body clause)
+                          (sub1 (length (inference-clause-body clause)))))))))
+     (for ([f (in-list (letfn-form-fns e))])
+       (define name (letfn-fn-name f))
+       (define finalized
+         (finalized-definition-type (hash-ref signatures name)))
+       (hash-set! signatures name finalized)
+       (hash-set! body-env name finalized))
      (last-expr-type (letfn-form-body e) body-env)]
     [(loop-form? e)
      (define body-env (extend-with-let-bindings env (loop-form-bindings e)))
@@ -3559,23 +4064,14 @@
        (type-app 'Vec (list ANY))
        (type-app 'Vec (list body-type)))]
     [(fn-form? e)
-     (define p-types (map param-or-destr-type (fn-form-params e)))
-     (define body-env (extend-with-params env (fn-form-params e)))
-     (define body (fn-form-body e))
-     (define actual-ret (last-expr-type body body-env))
-     (define expected-ret (fn-form-return-type e))
-     ;; Authored fn forms always declare a return type. Internal lowering may
-     ;; still use fn-form as a target AST node without one (notably nix/overlay).
-     (when (and expected-ret
-                (not (declared-return-compatible? actual-ret expected-ret)))
-       (raise-diag 'return-type
-                   (format "fn: expected return ~a, got ~a"
-                           (type->string expected-ret)
-                           (type->string actual-ret))
-                   (type-mismatch-details expected-ret actual-ret)
-                   #:src (or (src-for (last body))
-                             (body-loc-at body (sub1 (length body))))))
-     (type-fn p-types #f (or expected-ret actual-ret))]
+     (infer-local-clause-type
+      (inference-clause
+       (fn-form-params e)
+       (fn-form-rest-param e)
+       (fn-form-return-type e)
+       (fn-form-body e)
+       'fn)
+      env)]
     [(dynamic-var? e)
      (warn-target-exclude (dynamic-var-name e) e)
      (hash-ref env (dynamic-var-name e) ANY)]
@@ -3939,42 +4435,74 @@
         (hasheq 'function (symbol->string fn)
                 'suggestion (and suggestion (symbol->string suggestion)))
         #:src (src-for e)))
-     (define raw-type (hash-ref env (call-form-fn e) ANY))
+     (define raw-type
+       (if (symbol? (call-form-fn e))
+           (hash-ref env (call-form-fn e) ANY)
+           (infer-expr (call-form-fn e) env)))
+     (define call-name
+       (if (symbol? (call-form-fn e)) (call-form-fn e) '<function>))
      (define fn-type
-       (if (type-poly? raw-type)
-         (resolve-poly-call raw-type (call-form-args e) env)
-         raw-type))
+       (cond
+         [(inferred-type-poly? raw-type) (instantiate-type raw-type)]
+         [(type-poly? raw-type)
+          (resolve-poly-call raw-type (call-form-args e) env)]
+         [(and (current-definition-inference?)
+               (type-meta? (prune-type raw-type)))
+          ;; Calling an omitted binder is itself evidence that the binder is a
+          ;; function.  Give the call a monomorphic shape now; argument and
+          ;; enclosing-return constraints solve its fresh slots below.
+          (define inferred-call-type
+            (type-fn
+             (for/list ([arg (in-list (call-form-args e))])
+               (fresh-type-meta))
+             #f
+             (fresh-type-meta)))
+          (unify-types! raw-type inferred-call-type)
+          inferred-call-type]
+         [else raw-type]))
      (cond
        [(type-fn? fn-type)
         (define arg-types
-          (check-args (call-form-fn e) fn-type (call-form-args e) env e))
-        (when (>= (current-check-profile) 2)
-          (check-scalar-predicate-literal (call-form-fn e) (call-form-args e) e))
-        (numeric-refine (call-form-fn e) arg-types (type-fn-ret fn-type))]
+          (check-args call-name fn-type (call-form-args e) env e))
+        (when (and (symbol? (call-form-fn e))
+                   (>= (current-check-profile) 2))
+          (check-scalar-predicate-literal call-name (call-form-args e) e))
+        (zonk-type
+         (if (symbol? (call-form-fn e))
+             (numeric-refine call-name arg-types (type-fn-ret fn-type))
+             (type-fn-ret fn-type)))]
        [(and (type-union? fn-type)
              (andmap type-fn? (type-union-alts fn-type)))
         (define n-args (length (call-form-args e)))
         (define matching
           (for/first ([alt (in-list (type-union-alts fn-type))]
-                      #:when (= (length (type-fn-params alt)) n-args))
+                      #:when (if (type-fn-rest-type alt)
+                                 (>= n-args (length (type-fn-params alt)))
+                                 (= n-args (length (type-fn-params alt)))))
             alt))
         (cond
           [matching
-           (check-args (call-form-fn e) matching (call-form-args e) env e)
-           (type-fn-ret matching)]
+           (check-args call-name matching (call-form-args e) env e)
+           (zonk-type (type-fn-ret matching))]
           [else
-           (define arities (map (λ (a) (length (type-fn-params a)))
-                                (type-union-alts fn-type)))
+           (define arities
+             (map (lambda (alternative)
+                    (define fixed-count
+                      (length (type-fn-params alternative)))
+                    (if (type-fn-rest-type alternative)
+                        (format "~a+" fixed-count)
+                        (number->string fixed-count)))
+                  (type-union-alts fn-type)))
            (define sig-str (string-join
                              (map (λ (a) (type->string a)) (type-union-alts fn-type))
                              " | "))
            (raise-diag 'arity
                        (format "call to ~a: no arity accepts ~a arg(s), available: ~a"
-                               (call-form-fn e) n-args arities)
-                       (hasheq 'function (symbol->string (call-form-fn e))
-                               'signature (format "~a : ~a" (call-form-fn e) sig-str)
+                               call-name n-args arities)
+                       (hasheq 'function (symbol->string call-name)
+                               'signature (format "~a : ~a" call-name sig-str)
                                'actual-arity n-args
-                               'available-arities (map number->string arities))
+                               'available-arities arities)
                        #:src (src-for e))
            ANY])]
        [else
@@ -4388,7 +4916,8 @@
   (define rest-t  (type-fn-rest-type fn-type))
   (define n-fixed (length fixed))
   (define n-args  (length args))
-  (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
+  (define (signature-string)
+    (format "~a : ~a" fn-name (type->string fn-type)))
   (define call-src (src-for call-node))
   (when (and (memq fn-name '(= not=)) (= n-args 2))
     (check-enum-comparison args env call-src))
@@ -4403,7 +4932,7 @@
                     (format "call to ~a: expected at least ~a arg(s), got ~a"
                             fn-name n-fixed n-args)
                     (hasheq 'function (symbol->string fn-name)
-                            'signature sig-str
+                            'signature (signature-string)
                             'expected-arity n-fixed
                             'actual-arity n-args
                             'variadic #t
@@ -4436,7 +4965,7 @@
                     (format "call to ~a: expected ~a arg(s), got ~a"
                             fn-name n-fixed n-args)
                     (hasheq 'function (symbol->string fn-name)
-                            'signature sig-str
+                            'signature (signature-string)
                             'expected-arity n-fixed
                             'actual-arity n-args
                             'variadic #f
@@ -4513,8 +5042,19 @@
      (hasheq 'function (symbol->string fn-name)
              'declared (type->string a-type)
              'repair "guard the value with a type predicate before this operation")))
+  (define inference-evidence?
+    (or (pair? (free-type-metas a-type))
+        (pair? (free-type-metas expected-type))))
+  (define compatible?
+    (if inference-evidence?
+        (with-handlers ([exn:fail:type-unification? (lambda (_error) #f)])
+          (unify-types!
+           (if (inferred-type-poly? a-type) (instantiate-type a-type) a-type)
+           expected-type)
+          #t)
+        (type-compatible? a-type expected-type)))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
-              (type-compatible? a-type expected-type))
+              compatible?)
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
     (define suggestions (find-accessor-suggestions arg expected-type a-type env))
     (define arg-expr-str
@@ -4563,7 +5103,7 @@
 (define (type-check-with-locs! prog error-handler #:capture-types? [capture-types? #f])
   (when (and (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
-    (define env (build-initial-env prog))
+    (define env #f)
     (define nix-schema
       (and (eq? (program-target prog) 'nix)
            (let ([src (program-source-file prog)])
@@ -4595,36 +5135,43 @@
                    [current-parametric-members
                     (list->seteq (hash-keys PARAMETRIC-MEMBER-UNION))]
                    [current-nixos-schema nix-schema])
-      (define-values (regex-bindings regex-string-ops)
-        (with-handlers ([exn:fail?
-                         (lambda (e)
-                           (error-handler e #f)
-                           (values (hasheq) (seteq)))])
-          (define-values (bindings string-ops)
-            (prepare-regex-contracts! prog))
-          (prepare-dynamic-contracts! prog)
-          (prepare-collection-contracts! prog)
-          (prepare-allocation-contracts! prog)
-          (prepare-error-contracts! prog)
-          (values bindings string-ops)))
-      (parameterize ([current-regex-bindings regex-bindings]
-                     [current-regex-string-ops regex-string-ops])
-        (for ([form (in-list (program-forms prog))]
-              [orig-stx (in-list (program-form-stxs prog))])
-          (define macro-ctx (form-macro-derived-ctx macro-tbl form))
-          (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
-            (parameterize ([current-macro-expansion-ctx
-                            (if (eq? macro-ctx #f) #f macro-ctx)]
-                           [current-unstable-bindings (collect-set!-targets form)])
-              (check-form form env)
-              (when nix-free-bound
-                (check-nix-free-dotted-form! form nix-free-bound (program-src-table prog))))))
-        ;; Qualified-call resolution runs program-wide (it aggregates all
-        ;; violations into one diagnostic), so it reports through the same
-        ;; handler with no specific form stx.
-        (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
-          (check-module-interface-resolution! prog)
-          (check-qualified-resolution! prog env))))))
+      (call-with-fresh-type-metas
+       (lambda ()
+         (define inference-ok? #t)
+         (define regex-bindings (hasheq))
+         (define regex-string-ops (seteq))
+         (with-handlers ([exn:fail?
+                          (lambda (failure)
+                            (set! inference-ok? #f)
+                            (error-handler failure #f))])
+           (set! env (build-initial-env prog))
+           (define-values (bindings string-ops)
+             (prepare-and-infer-definition-types! prog env))
+           (set! regex-bindings bindings)
+           (set! regex-string-ops string-ops))
+         ;; One solver failure is one coherent rejection. Continuing with a
+         ;; partial or #f env only manufactures cascades and can publish an
+         ;; incomplete effective-signature table.
+         (when inference-ok?
+           (parameterize ([current-regex-bindings regex-bindings]
+                          [current-regex-string-ops regex-string-ops])
+             (for ([form (in-list (program-forms prog))]
+                   [orig-stx (in-list (program-form-stxs prog))])
+               (define macro-ctx (form-macro-derived-ctx macro-tbl form))
+               (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
+                 (parameterize ([current-macro-expansion-ctx
+                                 (if (eq? macro-ctx #f) #f macro-ctx)]
+                                [current-unstable-bindings (collect-set!-targets form)])
+                   (check-form form env)
+                   (when nix-free-bound
+                     (check-nix-free-dotted-form!
+                      form nix-free-bound (program-src-table prog))))))
+             ;; Qualified-call resolution runs program-wide (it aggregates all
+             ;; violations into one diagnostic), so it reports through the same
+             ;; handler with no specific form stx.
+             (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
+               (check-module-interface-resolution! prog)
+               (check-qualified-resolution! prog env)))))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass
@@ -5841,6 +6388,9 @@
                   #:src (caddr (car vs))))))
 
 (provide type-check! type-check-with-locs!
+         register-program-effective-definition-types!
+         program-effective-definition-types
+         program-effective-definition-type
          check-scalar-provenance!
          check-purity!
          beagle-diagnostic beagle-diagnostic?

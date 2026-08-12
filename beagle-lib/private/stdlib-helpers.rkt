@@ -10,6 +10,8 @@
 (define (p x)
   (cond
     [(hash-ref BUILTIN-UNION-ALIASES x #f) => (lambda (thunk) (thunk))]
+    [(and (pair? x) (eq? (car x) 'U) (pair? (cdr x)))
+     (type-union (map p (cdr x)))]
     [else (type-prim x)]))
 (define (tv x) (type-var x))
 
