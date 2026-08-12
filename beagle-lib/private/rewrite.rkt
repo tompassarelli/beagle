@@ -26,8 +26,7 @@
          racket/string
          ;; THE single beagle readtable — no bespoke subset reader to drift
          ;; (#19/#32). Datum mode (plain read) yields container/reader tags as data.
-         (only-in "../lang/reader-impl.rkt" beagle-readtable)
-         (only-in "tags.rkt" ANN-MARKER))
+         (only-in "../lang/reader-impl.rkt" beagle-readtable))
 
 (provide rewrite-rule
          rewrite-rule?
@@ -174,7 +173,6 @@
         (display ")" out)])]
     [(null? form) (display "()" out)]
     [(string? form) (write form out)]
-    [(eq? form ANN-MARKER) (display ":" out)]
     [(symbol? form) (display form out)]
     [(boolean? form) (display (if form "true" "false") out)]
     [(eq? form 'nil) (display "nil" out)]
@@ -183,14 +181,6 @@
 (define (write-items items out indent sep)
   (cond
     [(null? items) (void)]
-    ;; `NAME: TYPE` — marker glued to the name, one space before the type.
-    [(and (pair? items) (symbol? (car items)) (not (eq? (car items) ANN-MARKER))
-          (pair? (cdr items)) (eq? (cadr items) ANN-MARKER) (pair? (cddr items)))
-     (write-beagle-form (car items) out indent)
-     (display ": " out)
-     (write-beagle-form (caddr items) out indent)
-     (unless (null? (cdddr items)) (display sep out))
-     (write-items (cdddr items) out indent sep)]
     [(pair? items)
      (write-beagle-form (car items) out indent)
      (cond

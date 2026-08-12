@@ -4,8 +4,8 @@
 ;;
 ;; Phase 2's emit-facts is a LOSSY query projection (overlays drop types/params;
 ;; reconstruction needs an AST unparser that doesn't exist). Losslessness lives one
-;; layer down — at the READER DATUM tree, where type annotations (`:- Int`) are just
-;; tokens. This proves `datum -> facts -> datum` is the identity over a real corpus:
+;; layer down — at the READER DATUM tree. This proves `datum -> facts -> datum`
+;; is the identity over a real corpus:
 ;; the lossless occurrence projection is a faithful, regenerable representation of source.
 ;;
 ;;   racket beagle-lib/private/facts-roundtrip.rkt <file-or-dir> ...
@@ -416,22 +416,6 @@
 (define %set      (string->symbol "#%set"))
 (define %regex    (string->symbol "#%regex"))
 (define %ann      (string->symbol "#%:"))
-
-;; A `NAME: TYPE` triple prints as ONE atomic token run — colon glued to the
-;; name, exactly one space after, never broken across lines. Grouping the three
-;; flat datums into a unit is what makes both properties fall out of the
-;; generic joiner/breaker below.
-(struct ann-unit (name type) #:transparent)
-
-(define (group-anns elems)
-  (let loop ([es elems] [acc '()])
-    (cond
-      [(null? es) (reverse acc)]
-      [(and (symbol? (car es)) (not (eq? (car es) %ann))
-            (pair? (cdr es)) (eq? (cadr es) %ann)
-            (pair? (cddr es)))
-       (loop (cdddr es) (cons (ann-unit (car es) (caddr es)) acc))]
-      [else (loop (cdr es) (cons (car es) acc))])))
 (define %meta     (string->symbol "#%meta"))
 ;; #-reader markers whose text is glued to a single operand (G8/G10/G11). Same
 ;; interned symbols the reader mints in reader-impl.rkt.
@@ -474,13 +458,12 @@
 (define (datum->src d)
   (cond
     [(null? d) "()"]
-    ;; `name: Type` — glued colon, one space, never split (see group-anns).
-    [(ann-unit? d) (format "~a: ~a" (datum->src (ann-unit-name d)) (datum->src (ann-unit-type d)))]
-    ;; A marker with no name to glue to (`[: Int]`) still round-trips as `:`.
+    ;; Retained only so malformed legacy input can still be rendered for a
+    ;; pointed parser diagnostic. Valid source never contains this marker.
     [(eq? d %ann) ":"]
-    [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (group-anns (cdr d))) " "))]
-    [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (group-anns (cdr d))) " "))]
-    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (group-anns (cdr d))) " "))]
+    [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %regex) (pair? (cdr d)) (string? (cadr d))) (format "#\"~a\"" (cadr d))]
     ;; `^m form` — `^` glued to the meta datum, one space, then the target form.
     ;; Handles type hints (^String), flags (^:dynamic), maps (^{:private true}),
@@ -498,9 +481,9 @@
     [(pair? d)
      (let-values ([(elems tail) (split-improper d)])
        (if (null? tail)
-           (format "(~a)" (string-join (map datum->src (group-anns elems)) " "))
-           (format "(~a . ~a)" (string-join (map datum->src (group-anns elems)) " ") (datum->src tail))))]
-    [(vector? d) (format "[~a]" (string-join (map datum->src (group-anns (vector->list d))) " "))]
+           (format "(~a)" (string-join (map datum->src elems) " "))
+           (format "(~a . ~a)" (string-join (map datum->src elems) " ") (datum->src tail))))]
+    [(vector? d) (format "[~a]" (string-join (map datum->src (vector->list d)) " "))]
     ;; edn-string, NOT `~s`: Racket's write escapes control chars with Racket-only
     ;; sequences (ESC → `\e`, BEL → `\a`, …) that Clojure's reader REJECTS
     ;; ("Unsupported escape character: \e"). edn-string emits the Clojure/EDN-valid
@@ -533,30 +516,27 @@
 
 (define (pp-seq-parts d)        ; -> (values open close elems) or (values #f #f #f)
   (cond
-    [(ann-unit? d)                           (values #f #f #f)]   ; atomic: never broken
-    [(and (pair? d) (eq? (car d) %brackets)) (values "[" "]" (group-anns (cdr d)))]
-    [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (group-anns (cdr d)))]
-    [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (group-anns (cdr d)))]
+    [(and (pair? d) (eq? (car d) %brackets)) (values "[" "]" (cdr d))]
+    [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (cdr d))]
+    [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (cdr d))]
     [(and (pair? d) (eq? (car d) %regex))    (values #f #f #f)]   ; never break a regex
     [(rcond-form? d)        (values "#?(" ")" (cdr d))]           ; #?(…): breakable, tail spliced
     [(rcond-splice-form? d) (values "#?@(" ")" (cdr d))]          ; #?@(…): breakable
     [(hash-prefix d)                         (values #f #f #f)]   ; #_ / #js / ## : glued in datum->pretty
     [(or (meta-form? d) (prefix-macro d))    (values #f #f #f)]   ; reader macros: glued in datum->pretty, never broken generically
     [(pair? d) (let-values ([(elems tail) (split-improper d)])
-                 (if (null? tail) (values "(" ")" (group-anns elems)) (values #f #f #f)))] ; not dotted pairs
-    [(vector? d) (values "[" "]" (group-anns (vector->list d)))]
+                 (if (null? tail) (values "(" ")" elems) (values #f #f #f)))] ; not dotted pairs
+    [(vector? d) (values "[" "]" (vector->list d))]
     [else (values #f #f #f)]))
 
 (define BODY-INDENT 2)
-(define DASH (string->symbol ":-"))
-(define ARROW '->)
 
 (define (bracket-datum? d)
   (or (vector? d)
       (and (pair? d) (eq? (car d) %brackets))))
 
 (define (bracket-elems d)
-  (group-anns (if (vector? d) (vector->list d) (cdr d))))
+  (if (vector? d) (vector->list d) (cdr d)))
 
 ;; `& rest` is one logical parameter even though the reader exposes two datums.
 (define (logical-vector-elems d)
@@ -571,9 +551,7 @@
   (memq ctx '(params fields)))
 
 (define (grammar-vector-break? d ctx)
-  (and (grammar-vector-context? ctx)
-       (bracket-datum? d)
-       (>= (length (logical-vector-elems d)) 3)))
+  #f)
 
 (define (grammar-vector? d ctx)
   (and (grammar-vector-context? ctx) (bracket-datum? d)))
@@ -597,7 +575,7 @@
 (define (list-elems d)
   (and (pair? d)
        (let-values ([(elems tail) (split-improper d)])
-         (and (null? tail) (group-anns elems)))))
+         (and (null? tail) elems))))
 
 (define (arity-clause? d)
   (define elems (list-elems d))
@@ -626,7 +604,6 @@
      (define tail (drop elems start))
      (and (pair? tail)
           (bracket-datum? (car tail))
-          (not (ormap (lambda (item) (or (eq? item DASH) (eq? item ARROW))) tail))
           (let loop ([rest tail]
                      [index start]
                      [current? #f]
@@ -690,28 +667,33 @@
 (define (head-keep head after)
   (define na (length after))
   (define vector-index (first-bracket-index after))
-  ;; Return marker only: a binding annotation is already ONE ann-unit element,
-  ;; so the `else` arms below keep it on the signature line without extra slots.
-  (define (dash-at? i)
-    (and (> na i) (let ([e (list-ref after i)]) (or (eq? e DASH) (eq? e ARROW)))))
+  (define (raises-at? i)
+    (and (> na i) (eq? (list-ref after i) ':raises)))
+  (define (fixed-return-keep base)
+    (define through-return (min na (add1 base)))
+    (if (raises-at? through-return)
+        (min na (+ through-return 2))
+        through-return))
   (cond
-    [(memq head '(defn defn-))                  ; name + params [+ -> ret]
+    [(memq head '(defn defn-))                  ; name + params + return
      (cond [(not vector-index)
             (if (and (>= na 2) (arity-clause? (list-ref after 1))) 1 (min 1 na))]
            [else
-            (define base (add1 vector-index))
-            (if (dash-at? base) (+ base 2) base)])]
+            (fixed-return-keep (add1 vector-index))])]
     [(eq? head 'defmacro)                       ; name + params
      (if vector-index (add1 vector-index) (min 1 na))]
-    [(memq head '(def defonce))                 ; name [+ :- type]; value breaks
-     (cond [(< na 1) na] [(dash-at? 1) 3] [else 1])]
-    [(eq? head 'fn)                             ; [name] params [+ -> ret]
+    [(memq head '(def defonce))                 ; name [type] [doc]; value breaks
+     (cond
+       [(< na 2) na]
+       [(and (>= na 4) (string? (list-ref after 2))) 3]
+       [(and (>= na 3) (string? (list-ref after 1))) 2]
+       [(>= na 3) 2]
+       [else 1])]
+    [(eq? head 'fn)                             ; [name] params + return
      (cond
        [(and (pair? after) (arity-clause? (car after))) 0]
        [(and (>= na 2) (symbol? (car after)) (arity-clause? (cadr after))) 1]
-       [else
-        (define base (if vector-index (add1 vector-index) (min 1 na)))
-        (if (dash-at? base) (+ base 2) base)])]
+       [else (fixed-return-keep (add1 (or vector-index -1)))])]
     [(memq head '(defrecord deftype))             ; name + field vec
      (if vector-index (add1 vector-index) (min 1 na))]
     [(memq head '(let loop letfn binding for doseq with-open with-local-vars
@@ -726,11 +708,8 @@
 
 (define (context-head-keep ctx head after)
   (define na (length after))
-  (define (arrow-at? i)
-    (and (> na i)
-         (let ([e (list-ref after i)]) (or (eq? e DASH) (eq? e ARROW)))))
   (cond
-    [(eq? ctx 'method) (if (arrow-at? 1) (min 3 na) (min 1 na))]
+    [(eq? ctx 'method) (min 2 na)]
     [(eq? ctx 'variant) (min 1 na)]
     [else (head-keep head after)]))
 
@@ -786,7 +765,7 @@
                  (or (grammar-vector-break? e child-ctx)
                      signature-over-width?))
             (string-append out "\n" body-pad
-                           (datum->pretty/context e (+ col BODY-INDENT) child-ctx))]
+                           (grammar-vector->pretty e (+ col BODY-INDENT)))]
            [(canonical-layout-needed? e child-ctx)
             (define start-col (add1 (current-col out col)))
             (string-append out " " (datum->pretty/context e start-col child-ctx))]
@@ -801,9 +780,7 @@
       close)]
     [(and (eq? ctx 'arity-clause) (pair? elems) (bracket-datum? (car elems)))
      (define vector-ctx 'params)
-     (define return? (and (>= (length elems) 3)
-                          (or (eq? (cadr elems) DASH) (eq? (cadr elems) ARROW))))
-     (define keep (if return? 3 1))
+     (define keep (min 2 (length elems)))
      (define inner-col (+ col (string-length open)))
      (define pad (make-string inner-col #\space))
      (define inline-signature

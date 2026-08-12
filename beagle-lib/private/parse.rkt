@@ -471,10 +471,8 @@
       (and (eq? placement 'owner)
            (fragment->inline tokens anchor-end (token-offset open))))
     (define form-col (or (physical-syntax-column form-stx tokens) 0))
-    (define entry-count (length entries))
     (define vertical?
-      (or (>= entry-count 3)
-          (not (inline-signature-fits? tokens form-stx open close placement))))
+      (not (inline-signature-fits? tokens form-stx open close placement)))
     (define vector-col
       (case placement
         [(owner) (if vertical? (+ form-col 2) (token-col open))]
