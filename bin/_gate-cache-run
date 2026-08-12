@@ -295,11 +295,13 @@ hash_paths() {
         [[ -s "$raw" ]] &&
             { xargs -r -d '\n' sha256sum -- < "$raw" 2>/dev/null >> "$hashed" || true; }
         while IFS= read -r p; do
-            # readable is checked BEFORE the redirect: a failed `< "$p"` would
-            # still let sha256sum digest an empty stream and store that as the
-            # file's hash. Dropping the path instead trips the caller's count
-            # check, which refuses to cache.
-            [[ -r "$p" ]] || continue
+            # A regular readable file is required BEFORE the redirect: a failed
+            # `< "$p"` (gone, unreadable, now a directory) would still let
+            # sha256sum digest an empty stream and store that as the file's
+            # hash. Dropping the path instead trips the caller's count check,
+            # which refuses to cache — the same outcome sha256sum gives on the
+            # raw side.
+            [[ -f "$p" && -r "$p" ]] || continue
             h="$(normalize_content < "$p" | sha256sum | cut -d' ' -f1)"
             [[ -n "$h" ]] && printf '%s  %s\n' "$h" "$p" >> "$hashed"
         done < "$norm"
