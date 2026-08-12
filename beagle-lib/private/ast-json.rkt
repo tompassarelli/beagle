@@ -515,7 +515,8 @@
                              (cond
                                [(for-binding? c)
                                 (hasheq 'type "binding"
-                                        'name (symbol->string (for-binding-name c))
+                                        'name (binding-target->json
+                                               (for-binding-name c))
                                         'ann (type->json (for-binding-type c))
                                         'expr (expr->json (for-binding-expr c)))]
                                [(for-when? c)

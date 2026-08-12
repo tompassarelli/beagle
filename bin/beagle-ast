@@ -27,6 +27,16 @@ fi
 # collection link (which lacks it).
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+src_abs="$(realpath "$src")"
+source_root="$(git -C "$(dirname "$src_abs")" rev-parse --show-toplevel 2>/dev/null || true)"
+source_id="$src_abs"
+if [[ -n "$source_root" ]]; then
+    source_root="$(realpath "$source_root")"
+    case "$src_abs" in
+        "$source_root"/*) source_id="${src_abs#"$source_root"/}" ;;
+    esac
+fi
+
 "$RACKET" -e "
 (require (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
          (file \"$BEAGLE_ROOT/beagle-lib/private/check.rkt\")
@@ -42,5 +52,8 @@ BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
  prog
  (lambda (e _loc-stx) (raise e))
  #:capture-types? #t)
-(write-checked-program-json prog #:source-id src)
-" -- "$src"
+(define source-id (vector-ref (current-command-line-arguments) 1))
+(define output (open-output-string))
+(write-checked-program-json prog output #:source-id source-id)
+(display (get-output-string output))
+" -- "$src_abs" "$source_id"

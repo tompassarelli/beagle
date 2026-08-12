@@ -11,6 +11,8 @@
 
 (require rackunit
          rackunit/text-ui
+         racket/port
+         racket/system
          racket/string
          racket/file
          racket/path
@@ -23,7 +25,8 @@
    (simplify-path
     (if (file-exists? (build-path (current-directory) "beagle-lib/private/ast-json.rkt"))
         (current-directory)
-        (build-path (path-only (build-path (syntax-source #'here))) ".." "..")))))
+        (build-path (path-only (build-path (syntax-source #'here))) ".." ".."))
+    #t)))
 
 (define (root/ . parts) (apply string-append root "/" parts))
 
@@ -116,6 +119,16 @@
   (for/first ([form (in-list (hash-ref json 'forms))]
               #:when (equal? (hash-ref form 'node #f) node-name))
     form))
+
+(define (run-ast-cli source)
+  (parameterize ([current-directory root])
+    (define-values (process stdout stdin stderr)
+      (subprocess #f #f #f (root/ "bin/beagle") "ast" source))
+    (close-output-port stdin)
+    (define output (port->string stdout))
+    (define errors (port->string stderr))
+    (subprocess-wait process)
+    (values (subprocess-status process) output errors)))
 
 (define (first-let-binding json)
   ;; First binding of the first let node in the first defn's body.
@@ -251,6 +264,57 @@
       prog second-out #:source-id "checked-projection/wiki.bjs")
      (check-equal? (get-output-string first-out)
                    (get-output-string second-out)))
+
+   (test-case "checked-program serializes destructured for bindings"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.for-destructure)\n"
+         "(def result: (Vec Int) (for [[a b] [[1 2]]] a))\n")
+        ".bclj"
+        "checked-for-destructure.bclj"))
+     (define clause
+       (car (hash-ref (hash-ref (car (hash-ref json 'forms)) 'value)
+                      'clauses)))
+     (define name (hash-ref clause 'name))
+     (check-equal? (hash-ref name 'type) "seq-destructure")
+     (check-equal? (hash-ref name 'names) '("a" "b")))
+
+   (test-case "ast CLI canonicalizes equivalent checkout paths"
+     (define relative "beagle-test/tests/fixtures/checked-projection/wiki.bjs")
+     (define dotted (string-append "./" relative))
+     (define absolute (root/ relative))
+     (define-values (relative-status relative-output relative-error)
+       (run-ast-cli relative))
+     (define-values (dotted-status dotted-output dotted-error)
+       (run-ast-cli dotted))
+     (define-values (absolute-status absolute-output absolute-error)
+       (run-ast-cli absolute))
+     (check-equal? (list relative-status dotted-status absolute-status)
+                   '(0 0 0))
+     (check-equal? (list relative-error dotted-error absolute-error)
+                   '("" "" ""))
+     (check-equal? relative-output dotted-output)
+     (check-equal? relative-output absolute-output)
+     (check-equal? (hash-ref (string->jsexpr relative-output) 'sourceId)
+                   relative))
+
+   (test-case "ast CLI emits no partial stdout on serialization failure"
+     (define source (make-temporary-file "beagle-ast-non-json-~a.bclj"))
+     (dynamic-wind
+       void
+       (lambda ()
+         (call-with-output-file source #:exists 'truncate
+           (lambda (out)
+             (display
+              "#lang beagle/clj\n(ns checked.non-json)\n(def x: Float +nan.0)\n"
+              out)))
+         (define-values (status output errors)
+           (run-ast-cli (path->string source)))
+         (check-not-equal? status 0)
+         (check-equal? output "")
+         (check-regexp-match #rx"legal JSON value" errors))
+       (lambda () (delete-file source))))
 
    (test-case "checked-program preserves live protocol implementation nodes"
      (define json
