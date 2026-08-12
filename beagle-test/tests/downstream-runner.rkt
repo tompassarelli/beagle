@@ -38,8 +38,8 @@
 
 (define (commit-all! repo) (git! repo "add" "-A") (git! repo "commit" "-q" "-m" "x"))
 
-(define GOOD-JS "#lang beagle/js\n(ns fixture.good)\n(defn add\n  [a: Int\n   b: Int] -> Int\n  (+ a b))\n")
-(define BAD-JS  "#lang beagle/js\n(ns fixture.bad)\n(defn f [] -> Int \"not an int\")\n")
+(define GOOD-JS "#lang beagle/js\n(ns fixture.good)\n(defn add\n  [(a Int)\n   (b Int)]\n  Int\n  (+ a b))\n")
+(define BAD-JS  "#lang beagle/js\n(ns fixture.bad)\n(defn f [] Int \"not an int\")\n")
 
 ;; A glob consumer spec pointing at a fixture repo (no staging: name != north).
 (define (glob-consumer name repo root ext)
@@ -64,7 +64,7 @@
   (define repo (build-path base "repo"))
   (write-file! (build-path repo "js" "good.bjs") GOOD-JS)
   (write-file! (build-path repo "js" "also.bjs")
-               "#lang beagle/js\n(ns fixture.also)\n(defn g [x: Int] -> Int x)\n")
+               "#lang beagle/js\n(ns fixture.also)\n(defn g [(x Int)] Int x)\n")
   (init-repo! repo)
   (define consumers (list (glob-consumer "greenjs" repo "js" ".bjs")))
   (with-scratch
@@ -173,10 +173,10 @@
   (define fram-repo (build-path base "fram"))
   (define north-repo (build-path base "north"))
   (write-file! (build-path fram-repo "src" "fram" "thing.bclj")
-               "#lang beagle/clj\n(ns fram.thing)\n(defn double [x: Int] -> Int (* x 2))\n")
+               "#lang beagle/clj\n(ns fram.thing)\n(defn double [(x Int)] Int (* x 2))\n")
   (init-repo! fram-repo)
   (write-file! (build-path north-repo "src" "north" "main.bclj")
-               "#lang beagle/clj\n(ns north.main)\n(require fram.thing :as t)\n(defn go [] -> Int (t/double 21))\n")
+               "#lang beagle/clj\n(ns north.main)\n(require fram.thing :as t)\n(defn go [] Int (t/double 21))\n")
   (init-repo! north-repo)
   (check-false (directory-exists? (build-path north-repo "web-bjs"))
                "CLI/MCP-only North fixture has no retired web source tree")

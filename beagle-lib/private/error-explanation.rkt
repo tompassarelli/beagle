@@ -46,36 +46,36 @@
    (E "E001" "Arity mismatch"
       "Function call has wrong number of arguments."
       "Agents often miscount parameters, especially with variadic functions or threading macros."
-      "(defn greet\n  [name: String\n   age: Int] -> String\n  (str \"Hi \" name))\n(greet \"Tom\")  ;; ERROR: expected 2 arg(s), got 1"
+      "(defn greet\n  [(name String)\n   (age Int)]\n  String\n  (str \"Hi \" name))\n(greet \"Tom\")  ;; ERROR: expected 2 arg(s), got 1"
       "(greet \"Tom\" 30)"
       "Add missing arguments or remove extra ones. Check the signature with: beagle-sig <fn-name> <file>")
 
    (E "E002" "Type mismatch"
       "Argument type does not match the parameter annotation."
       "Common when agents confuse record accessors, pass the wrong field, or use Int where String is expected."
-      "(defn greet [name: String] -> String (str \"Hi \" name))\n(greet 42)  ;; ERROR: arg 1 expected String, got Int"
+      "(defn greet [(name String)] String (str \"Hi \" name))\n(greet 42)  ;; ERROR: arg 1 expected String, got Int"
       "(greet \"Tom\")"
       "Change the argument to match the expected type, or fix the annotation. Check suggestions in the diagnostic.")
 
    (E "E003" "Return type mismatch"
       "Function body returns a type that does not match the declared return type."
       "Agents sometimes forget to update return annotations after changing function bodies."
-      "(defn count-words [s: String] -> Int\n  (str/split s \" \"))  ;; ERROR: expected Int, got (Vec String)"
-      "(defn count-words [s: String] -> Int\n  (count (str/split s \" \")))"
+      "(defn count-words [(s String)] Int\n  (str/split s \" \"))  ;; ERROR: expected Int, got (Vec String)"
+      "(defn count-words [(s String)] Int\n  (count (str/split s \" \")))"
       "Either fix the return expression or update the return type annotation.")
 
    (E "E004" "Definition type mismatch"
       "A def binding has a type annotation that does not match the inferred value type."
       "Happens when agents copy-paste definitions and forget to update the annotation."
-      "(def greeting: Int \"hello\")  ;; ERROR: expected Int, got String"
-      "(def greeting: String \"hello\")"
+      "(def greeting Int \"hello\")  ;; ERROR: expected Int, got String"
+      "(def greeting String \"hello\")"
       "Fix the type annotation or the value expression.")
 
    (E "E005" "Let binding type mismatch"
       "A let binding has a declared type that does not match the inferred expression type."
       "Similar to E004 but inside let blocks. Often caused by chained transformations."
-      "(let [x: Int \"hello\"] x)  ;; ERROR: expected Int, got String"
-      "(let [x: String \"hello\"] x)"
+      "(let [(x Int) \"hello\"] x)  ;; ERROR: expected Int, got String"
+      "(let [(x String) \"hello\"] x)"
       "Fix the type annotation or the bound expression.")
 
    (E "E006" "Non-exhaustive match"
@@ -95,7 +95,7 @@
    (E "E008" "Type bound violation"
       "A polymorphic type variable was inferred to a type that does not satisfy its bound."
       "Happens with bounded polymorphism (forall [(T <: Bound)] ...) when the concrete type is incompatible."
-      "(defn show [x: (forall [(T <: String)] T)] -> String (str x))\n(show 42)  ;; ERROR: T inferred as Int, does not satisfy bound String"
+      "(defn show [(x (forall [(T <: String)] T))] String (str x))\n(show 42)  ;; ERROR: T inferred as Int, does not satisfy bound String"
       "(show \"hello\")"
       "Pass a value whose type satisfies the declared bound.")
 

@@ -285,8 +285,8 @@
 ;; recursively so nested forms parse the same way.
 ;;
 ;; When SRC is non-#f, items are read with read-syntax so container CONTENTS
-;; keep their true source positions. This matters for `[…]`: the type-view
-;; delaborator injects `:- T` at a let-binding value's syntax-position, which is
+;; keep their true source positions. This matters for `[…]`: a structural type
+;; view may rewrite a let binder at the bound value's syntax-position, which is
 ;; lost if the contents are read as bare data (the injection then lands at the
 ;; `let` head). parse.rkt's old readtable got real `[…]` content srclocs for
 ;; free via Racket's native read-square-bracket-with-tag; this explicit reader
@@ -535,17 +535,14 @@
 
 ;; `:` reader — ONE char serving two roles, split by the next character.
 ;;
-;;   `:` + delimiter/whitespace/EOF → ANN-MARKER, the postfix type-annotation
-;;       marker: `x: Int` and `x : Int` both read as the FLAT datums
-;;       `x` `#%:` `Int`, mirroring the legacy `x :- Int` triple exactly, so
-;;       every index/arity computation in parse.rkt stays valid.
+;;   `:` + delimiter/whitespace/EOF → ANN-MARKER. Executable punctuation
+;;       annotations are retired; preserving the marker lets parse.rkt reject
+;;       `x: Int` and `x : Int` with a structural `(x Int)` replacement.
 ;;   `:` + anything else            → today's keyword symbol, byte-identical
 ;;       (`:foo`, `:foo/bar`, `::kw`, `:-`).
 ;;
 ;; Terminating (unlike `.`/`#`/`'`) so it also fires MID-token: `x:` splits into
-;; the symbol `x` and the marker. That is what makes the postfix form work, and
-;; what makes `~name: ~type` compose in a macro template — `~` already
-;; terminated the token before `:` fires.
+;; the symbol `x` and the marker for the pointed retirement diagnostic.
 (define (colon-reader ch port src line col pos)
   (cond
     [(base-token-delimiter? (peek-char port))

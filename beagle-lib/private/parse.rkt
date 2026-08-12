@@ -2714,10 +2714,9 @@
   ;; success, or #f if `args` is not bare-vector multi-arity.
   (cond
     [(or (null? args) (not (bracketed? (car args)))) #f]
-    ;; A top-level marker is a single-arity RETURN annotation (`[params] -> ret
-    ;; body…`), never a multi-arity boundary — so a bracket fn-type return
-    ;; `-> [A -> B]` is NOT a second arity clause (#28). Bail to the single-arity
-    ;; return arm, or to the pointed rejection when the marker is wrong there.
+    ;; A retired top-level marker belongs to a malformed single-arity return,
+    ;; never a multi-arity boundary. Bail to its pointed rejection instead of
+    ;; misreading a later bracketed function type as another arity clause.
     ;; (Multi-arity clause params carry their marker INSIDE the bracket.)
     [(ormap any-marker? args) #f]
     [else
@@ -2963,8 +2962,8 @@
   (unless (>= (length items) 2)
     (error 'beagle
            "~a: bindings must be [binder expr], got: ~v" head bdatum))
-  ;; value = last item; binder-part = everything before it (a name, a typed
-  ;; `name :- Type`, or a single map/seq destructure datum).
+  ;; value = last item; binder-part = everything before it (a name, one
+  ;; structural `(binding-form Type)`, or one map/seq destructure datum).
   (define rev (reverse items))
   (define value (car rev))
   (define binder-part (reverse (cdr rev)))
@@ -3003,10 +3002,10 @@
         (list 'let binding (list 'if test (car rest-items) (cadr rest-items)))]
        [(when-let when-some)
         (list 'let binding (list 'if test (cons 'do rest-items)))])]
-    ;; Typed `[name :- Type expr]` or destructuring `[{:keys […]} expr]` / `[[a b]
+    ;; Typed `[(name Type) expr]` or destructuring `[{:keys […]} expr]` / `[[a b]
     ;; expr]`: bind a TEMP, test the temp, and bind the real binder inside the
     ;; SUCCESS branch only. The temp narrows non-nil in the then-branch, so a
-    ;; `:- Type` annotation applies to the narrowed value (not the raw nullable),
+    ;; the declared Type applies to the narrowed value (not the raw nullable),
     ;; and a destructure binder is out of scope on the false/else path (Clojure).
     [else
      (define g (fresh-lowered-sym 'bind))
@@ -5078,8 +5077,8 @@
 (define (parse-params p)
   (define d (->datum p))
   (define items (unwrap-items d "parameter list"))
-  ;; after-amp stays the raw item LIST: unwrapping a singleton would make
-  ;; `& more: Int` and the rejected `& (more : Int)` the same datum.
+  ;; after-amp stays the raw item LIST so retired flat punctuation remains
+  ;; distinguishable from the canonical singleton `& (more (Vec Int))`.
   (define-values (before-amp after-amp)
     (let loop ([remaining items] [acc '()])
       (cond
@@ -5435,7 +5434,7 @@
                "Type"))
   (raise-parse-error
    'inline-type-annotation
-   "`[~a]` is not a typed binding — `[...]` in binding position is sequential destructuring — write `~a: ~a`"
+   "`[~a]` is not a typed binding — `[...]` in binding position is sequential destructuring — write `(~a ~a)`"
    (string-join (map binding-datum->src body) " ")
    name ty))
 

@@ -7,8 +7,8 @@
 ;; The key gate (mirroring Lean's expansion-time validation that every named
 ;; error has an ErrorExplanation): every code that the checker can stamp via
 ;; raise-diag -> kind->error-code MUST have a registry entry. Plus a
-;; regression guard that no example reintroduces the now-rejected `:`
-;; annotation syntax the old bash DB shipped.
+;; regression guard that no example reintroduces the retired annotation
+;; punctuation the old bash DB shipped.
 
 (require rackunit
          racket/string
@@ -50,17 +50,20 @@
     (check-true (non-empty-string? (error-explanation-since e))
                 (format "~a: empty sinceVersion" code))))
 
-(test-case "examples do not use the rejected `:` annotation syntax"
+(test-case "examples do not use retired signature punctuation"
   ;; The bash DB shipped `(def x : Int 5)` / `[(name : String)]` etc. — the
-  ;; single-colon type annotation the parser now hard-rejects in favor of
-  ;; the postfix marker. ` : <Uppercase>` is the tell; `:keyword` does not match.
+  ;; parser now hard-rejects infix and postfix colons in favor of structural
+  ;; binders. Executable return arrows are retired too; type-level arrows remain.
   (for ([code (in-list (all-explanation-codes))])
     (define e (error-explanation-ref code))
     (define blob (string-append (error-explanation-bad e) "\n"
                                 (error-explanation-good e)))
-    (check-false (regexp-match? #rx" : [A-Z]" blob)
-                 (format "~a: example uses rejected `: Type` annotation: ~v"
-                         code blob))))
+    (define source-only (regexp-replace* #px";;[^\n]*" blob ""))
+    (check-false
+     (or (regexp-match? #px"\\s+:-?\\s+[A-Z]" source-only)
+         (regexp-match? #px"\\b[a-z_][A-Za-z0-9_?!*+/.-]*:\\s+[A-Z]" source-only)
+         (regexp-match? #px"\\]\\s*->\\s*[A-Z]" source-only))
+     (format "~a: example uses retired signature punctuation: ~v" code blob))))
 
 (test-case "ref is case/prefix insensitive"
   (check-eq? (error-explanation-ref "E002") (error-explanation-ref "e002"))

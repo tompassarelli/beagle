@@ -55,7 +55,7 @@
 ;;   return-type        : function body's inferred return doesn't
 ;;                        match declared return type.
 ;;   def-type           : top-level def's value type doesn't match its
-;;                        postfix `:` annotation.
+;;                        declared positional type.
 ;;   let-binding        : let-bound value type doesn't match its
 ;;                        annotation.
 ;;   type-bound         : type parameter violates its bound.
@@ -157,20 +157,18 @@
 ;;                         received a value of the wrong shape (bad
 ;;                         parameter list, unknown mode/target,
 ;;                         non-symbol name). Type-error.
-;;   inline-type-annotation : the annotation marker is in the wrong place
-;;                         or the wrong shape — a dangling `:`, a keyword
-;;                         where `name: Type` belongs, or `:` used in
-;;                         return position (which is `-> Ret`).
+;;   inline-type-annotation : retired punctuation or a malformed structural
+;;                         typed binding — a dangling `:`, `name: Type`,
+;;                         `name :- Type`, or executable `-> Ret`.
 ;;                         Surface-divergence.
-;;   legacy-annotation-marker : author wrote `:-`, the pre-postfix marker.
-;;                         Accepted during the dual-accept migration cut
-;;                         (warning only); the removal task flips
-;;                         legacy-annotation-marker-mode to 'error.
+;;   legacy-annotation-marker : author wrote retired `:-` punctuation.
+;;                         It is retained only as a diagnostic category and is
+;;                         never accepted as executable syntax.
 ;;                         Surface-divergence.
 ;;   claim-form-removed   : author wrote `(claim NAME TYPE)`. The claim
-;;                         form has been deleted entirely; postfix `:`
-;;                         annotations on def/defonce/defn are the only
-;;                         typed-binding surface. Surface-divergence.
+;;                         form has been deleted entirely; annotate the actual
+;;                         owner/binding with structural syntax instead.
+;;                         Surface-divergence.
 ;;   bare-nix-form       : author wrote a bare Nix-namespaced form
 ;;                         (`assert`, `with-cfg`, or Nix-scope `with`)
 ;;                         that has been hard-rejected. The canonical
