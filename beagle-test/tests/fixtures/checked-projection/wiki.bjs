@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns checked-projection.wiki
+  (:require [wake.dsl :as wake]))
+
+(wake/entity revision
+  [id: String
+   body: String])

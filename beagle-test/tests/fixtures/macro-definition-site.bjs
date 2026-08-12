@@ -1,0 +1,12 @@
+#lang beagle/js
+(ns macro-definition-site)
+(define-mode strict)
+
+(defmacro define-box [name value]
+  `(def ~name: Box
+     (->Box (normalize ~value))))
+
+(defrecord Box [value: String])
+
+(defn normalize [value: String] -> String
+  value)

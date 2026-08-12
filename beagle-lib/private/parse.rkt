@@ -835,6 +835,11 @@
     (for/list ([d (in-list raw-datums)])
       (strip-doc (strip-target-export d))))
   (define refer-set (and refer-syms (list->set refer-syms)))
+  ;; Imported macro templates need the provider's definition context. Build it
+  ;; while importing the provider surface, then register macros after the scan
+  ;; so references to definitions declared later in the file are known too.
+  (define provider-definition-names (make-hasheq))
+  (define pending-macros '())
   (define source-path
     (simplify-path (path->complete-path mod-path)))
   (define provider-import-aliases
@@ -884,6 +889,7 @@
   (define (referred? name)
     (or bare-all? (and refer-set (set-member? refer-set name))))
   (define (note-type! name)
+    (hash-set! provider-definition-names name #t)
     (when imp-type-names
       (set-add! imp-type-names (qualify-name prefix name))
       (when (referred? name)
@@ -908,6 +914,7 @@
       (when (referred? ctor)
         (hash-set! imp-scalar-preds name predicates))))
   (define (reg! name type)
+    (hash-set! provider-definition-names name #t)
     (hash-set! externs (qualify-name prefix name) type)
     (when (and (referred? name) (not (hash-has-key? externs name)))
       (hash-set! externs name type))
@@ -1018,9 +1025,8 @@
                     [(bracketed? params) (bracket-body params)]
                     [(list? params) params]
                     [else '()]))
-       (register-macro! registry (qualify-name prefix name) 'defmacro ps template)
-       (when (and (referred? name) (not (hash-has-key? registry name)))
-         (register-macro! registry name 'defmacro ps template))]
+       (hash-set! provider-definition-names name #t)
+       (set! pending-macros (cons (list name ps template) pending-macros))]
       [(list 'defrecord (? symbol? name) fields-form)
        (note-type! name)
        (define fields (parse-record-fields fields-form))
@@ -1165,7 +1171,16 @@
         [_ (void)])))
     (for ([entry (in-list (reverse deferred-bare-members))])
       (unless (declared-fielded-type? (car entry))
-        (reg-fielded-type! (car entry) '() (cdr entry))))))
+        (reg-fielded-type! (car entry) '() (cdr entry))))
+    (for ([pending (in-list (reverse pending-macros))])
+      (match-define (list name ps template) pending)
+      (define qualified-template
+        (qualify-imported-macro-template
+         template ps provider-definition-names prefix))
+      (register-macro! registry (qualify-name prefix name)
+                       'defmacro ps qualified-template)
+      (when (and (referred? name) (not (hash-has-key? registry name)))
+        (register-macro! registry name 'defmacro ps qualified-template)))))
 
 ;; --- reader-conditional resolution ----------------------------------------
 ;;

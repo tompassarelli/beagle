@@ -178,6 +178,10 @@ target is *for*).
 Four source profiles. Core produces the authoritative frozen native program; `--materializer c17|qbe` selects a projection. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
+`beagle ast FILE` is the canonical, versioned checked-program JSON projection
+for deterministic external consumers; it strictly checks but never executes
+the source.
+
 Core is a source profile, not a direct source emitter; its row names the frozen
 native program build product while the materializer remains an explicit build
 option.

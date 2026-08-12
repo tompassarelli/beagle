@@ -33,13 +33,22 @@
    (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'read-beagle-syntax)
    (dynamic-require `(file ,(root/ "beagle-lib/private/parse.rkt")) 'parse-program)))
 
-(define type-check!
-  (dynamic-require `(file ,(root/ "beagle-lib/private/check.rkt")) 'type-check!))
+(define-values (type-check! type-check-with-locs!)
+  (values
+   (dynamic-require `(file ,(root/ "beagle-lib/private/check.rkt")) 'type-check!)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/check.rkt"))
+                    'type-check-with-locs!)))
 
-(define-values (program->json program->json-string)
+(define-values (program->json program->json-string
+                             checked-program->json write-checked-program-json
+                             expr->json type->json)
   (values
    (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'program->json)
-   (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'program->json-string)))
+   (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'program->json-string)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'checked-program->json)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'write-checked-program-json)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'expr->json)
+   (dynamic-require `(file ,(root/ "beagle-lib/private/ast-json.rkt")) 'type->json)))
 
 ;; Parse + check a beagle/clj source string; return program->json result.
 (define (parse+check-json src-string)
@@ -71,6 +80,42 @@
       (type-check! prog)
       (program->json prog))
     (lambda () (delete-file tmp))))
+
+(define (parse+checked-json src-string extension source-id)
+  (define tmp (make-temporary-file
+               (string-append "beagle-checked-program-test-~a" extension)))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file tmp #:exists 'truncate
+        (lambda (out)
+          (display (if (string=? extension ".bjs")
+                       "#lang beagle/js\n"
+                       "#lang beagle/clj\n")
+                   out)
+          (display src-string out)))
+      (define forms (read-beagle-syntax tmp))
+      (define prog (parse-program forms #:source-path (path->string tmp)))
+      (type-check-with-locs!
+       prog
+       (lambda (e _loc-stx) (raise e))
+       #:capture-types? #t)
+      (checked-program->json prog #:source-id source-id))
+    (lambda () (delete-file tmp))))
+
+(define (parse+checked-json/path path source-id)
+  (define forms (read-beagle-syntax path))
+  (define prog (parse-program forms #:source-path path))
+  (type-check-with-locs!
+   prog
+   (lambda (e _loc-stx) (raise e))
+   #:capture-types? #t)
+  (values prog (checked-program->json prog #:source-id source-id)))
+
+(define (find-form-node json node-name)
+  (for/first ([form (in-list (hash-ref json 'forms))]
+              #:when (equal? (hash-ref form 'node #f) node-name))
+    form))
 
 (define (first-let-binding json)
   ;; First binding of the first let node in the first defn's body.
@@ -149,6 +194,112 @@
      (check-exn #rx"js/quote"
                 (lambda ()
                   (parse+check-json/js
-                   "(ns t)\n(js/quote (const x (object dangling-key)))"))))))
+                   "(ns t)\n(js/quote (const x (object dangling-key)))"))))
+
+   (test-case "checked-program v1 expands an imported typed declaration macro"
+     (define path
+       (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
+     (define-values (_prog json)
+       (parse+checked-json/path path "checked-projection/wiki.bjs"))
+     (check-equal? (hash-ref json 'kind) "beagle.checked-program")
+     (check-equal? (hash-ref json 'schemaVersion) 1)
+     (check-equal? (hash-ref json 'phase) "checked")
+     (check-equal? (hash-ref json 'sourceId) "checked-projection/wiki.bjs")
+     (define declaration (car (hash-ref json 'forms)))
+     (check-equal? (hash-ref declaration 'node) "def")
+     (check-equal? (hash-ref declaration 'name) "revision")
+     (check-equal? (hash-ref (hash-ref declaration 'ann) 'name)
+                   "wake/EntityDeclaration")
+     (define provenance (hash-ref declaration 'provenance))
+     (check-equal?
+      (hash-ref
+       (car (hash-ref (hash-ref provenance 'macroExpansion) 'chain))
+       'name)
+      "wake/entity")
+     (define source (hash-ref provenance 'source))
+     (check-equal? (hash-ref source 'origin) "synthetic")
+     (check-true (hash-ref source 'canonical))
+     (check-equal? (hash-ref source 'sourceId)
+                   "checked-projection/wiki.bjs")
+     (define constructor (hash-ref declaration 'value))
+     (check-equal? (hash-ref (hash-ref constructor 'fn) 'name)
+                   "wake/->EntityDeclaration")
+     (check-equal? (hash-ref (hash-ref constructor 'inferredType) 'name)
+                   "EntityDeclaration")
+     (define field-constructor
+       (car (hash-ref (cadr (hash-ref constructor 'args)) 'items)))
+     (check-equal? (hash-ref (hash-ref field-constructor 'fn) 'name)
+                   "wake/->FieldDeclaration")
+     (define encoded (jsexpr->string json))
+     (check-false (regexp-match? #rx"\\\"(?:node|kind|type)\\\":\\\"unknown\\\""
+                                 encoded))
+     (check-false (regexp-match? #rx"\\\"raw\\\":" encoded)))
+
+   (test-case "checked-program output is canonical and externs are sorted"
+     (define path
+       (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
+     (define-values (prog json)
+       (parse+checked-json/path path "checked-projection/wiki.bjs"))
+     (define names (map (lambda (entry) (hash-ref entry 'name))
+                        (hash-ref json 'externs)))
+     (check-equal? names (sort names string<?))
+     (define first-out (open-output-string))
+     (define second-out (open-output-string))
+     (write-checked-program-json
+      prog first-out #:source-id "checked-projection/wiki.bjs")
+     (write-checked-program-json
+      prog second-out #:source-id "checked-projection/wiki.bjs")
+     (check-equal? (get-output-string first-out)
+                   (get-output-string second-out)))
+
+   (test-case "checked-program preserves live protocol implementation nodes"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.protocol)\n"
+         "(defrecord Box [value: String])\n"
+         "(defprotocol Labelled (label [self] -> String))\n"
+         "(extend-type Box Labelled (label [self] -> String (:value self)))\n")
+        ".bclj"
+        "checked-protocol.bclj"))
+     (check-not-false (find-form-node json "defprotocol"))
+     (check-not-false (find-form-node json "extend-type")))
+
+   (test-case "checked-program preserves live typed JavaScript nodes"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.js)\n"
+         "(js/export (defn add [] -> Int (js/+ 1 2)))\n"
+         "(js/export (js/class App (constructor [] (js/return))))\n")
+        ".bjs"
+        "checked-js.bjs"))
+     (define exported-defn (car (hash-ref json 'forms)))
+     (check-equal? (hash-ref exported-defn 'node) "js-export")
+     (check-equal?
+      (hash-ref (car (hash-ref (hash-ref exported-defn 'form) 'body)) 'node)
+      "js-binary")
+     (check-not-false (find-form-node json "js-class")))
+
+   (test-case "checked-program fails closed for unsupported values"
+     (check-exn #rx"unsupported checked AST node"
+                (lambda () (expr->json (vector 'future-node))))
+     (check-exn #rx"unsupported checked type"
+                (lambda () (type->json (vector 'future-type)))))
+
+   (test-case "checked-program requires captured strict checking"
+     (define tmp (make-temporary-file "beagle-unchecked-program-~a.bjs"))
+     (dynamic-wind
+       void
+       (lambda ()
+         (call-with-output-file tmp #:exists 'truncate
+           (lambda (out)
+             (display "#lang beagle/js\n(ns unchecked)\n(def x: Int 1)\n" out)))
+         (define prog
+           (parse-program (read-beagle-syntax tmp)
+                          #:source-path (path->string tmp)))
+         (check-exn #rx"capture-types"
+                    (lambda () (checked-program->json prog))))
+       (lambda () (delete-file tmp))))))
 
 (run-tests tests)

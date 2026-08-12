@@ -33,6 +33,8 @@ beagle callers FN PATH...   # call sites
 beagle provides FILE        # exports
 beagle impact FN PATH...    # change-impact
 beagle expand FILE          # macro-expanded source
+beagle ast FILE             # canonical, versioned checked-program JSON;
+                            #  parses + strict-checks without execution
 beagle explain CODE         # diagnostic explanation (E001, …)
 beagle explain-type FILE    # inferred types as a view
 beagle facts-roundtrip MODE FILE   # program-lossless source↔fact projection

@@ -7,26 +7,39 @@
 ;;   Racket (parse + check) → JSON AST → beagle-written emitter (JS)
 
 (require racket/match
+         racket/list
          racket/string
          racket/format
          json
          "ast.rkt"
          "types.rkt"
+         "macros.rkt"
+         (only-in "semantic-index.rkt" write-canonical-json)
          "js-emit-utils.rkt")
 
 (define current-json-src-table (make-parameter #f))
+(define current-json-type-table (make-parameter #f))
+(define current-json-macro-table (make-parameter #f))
+(define current-json-macro-context (make-parameter #f))
+(define current-json-inherited-source (make-parameter #f))
+(define current-json-source-id (make-parameter #f))
+(define current-checked-projection? (make-parameter #f))
+
+(define CHECKED-PROGRAM-SCHEMA-VERSION 1)
 
 (define (node-source->json node)
   (define tbl (current-json-src-table))
   (define loc (and tbl (hash-ref tbl node #f)))
   (and loc
-       (hasheq 'line (src-loc-line loc)
-               'col (src-loc-col loc)
-               'source (~a (src-loc-source loc))
-               'origin (symbol->string (src-loc-origin loc))
-               'canonical (and (src-loc-canonical loc) #t)
-               'pos (or (src-loc-pos loc) #f)
-               'span (or (src-loc-span loc) #f))))
+       (hash-set
+        (hasheq 'line (src-loc-line loc)
+                'col (src-loc-col loc)
+                'origin (symbol->string (src-loc-origin loc))
+                'canonical (and (src-loc-canonical loc) #t)
+                'pos (or (src-loc-pos loc) #f)
+                'span (or (src-loc-span loc) #f))
+        (if (current-checked-projection?) 'sourceId 'source)
+        (or (current-json-source-id) (~a (src-loc-source loc))))))
 
 (define (type->json t)
   (cond
@@ -42,7 +55,24 @@
     [(type-union? t) (hasheq 'kind "union"
                              'members (map type->json (type-union-alts t)))]
     [(type-var? t) (hasheq 'kind "var" 'name (symbol->string (type-var-name t)))]
-    [else (hasheq 'kind "unknown" 'raw (~a t))]))
+    [(type-poly? t)
+     (define bounds (type-poly-bounds t))
+     (hasheq 'kind "poly"
+             'vars (map symbol->string (type-poly-vars t))
+             'body (type->json (type-poly-body t))
+             'bounds
+             (if bounds
+                 (for/list ([var (in-list (type-poly-vars t))]
+                            #:when (hash-has-key? bounds var))
+                   (hasheq 'var (symbol->string var)
+                           'type (type->json (hash-ref bounds var))))
+                 '()))]
+    [else (error 'beagle-ast-json "unsupported checked type: ~v" t)]))
+
+(define (destructure-defaults->json defaults)
+  (for/list ([entry (in-list defaults)])
+    (hasheq 'key (symbol->string (car entry))
+            'value (expr->json (cdr entry)))))
 
 (define (param->json p)
   (cond
@@ -54,13 +84,15 @@
      (hasheq 'type "map-destructure"
              'keys (map symbol->string (map-destructure-keys p))
              'as (and (map-destructure-as-name p)
-                      (symbol->string (map-destructure-as-name p))))]
+                      (symbol->string (map-destructure-as-name p)))
+             'or (destructure-defaults->json
+                  (map-destructure-or-defaults p)))]
     [(seq-destructure? p)
      (hasheq 'type "seq-destructure"
-             'names (map symbol->string (seq-destructure-names p))
+             'names (map binding-target->json (seq-destructure-names p))
              'rest (and (seq-destructure-rest-name p)
                         (symbol->string (seq-destructure-rest-name p))))]
-    [else (hasheq 'type "unknown" 'raw (~a p))]))
+    [else (error 'beagle-ast-json "unsupported parameter: ~v" p)]))
 
 ;; Serialize a let-binding target.  Simple bindings carry a symbol; destructure
 ;; positions carry a map-destructure or seq-destructure struct — dispatch rather
@@ -74,13 +106,15 @@
      (hasheq 'type "map-destructure"
              'keys (map symbol->string (map-destructure-keys target))
              'as (and (map-destructure-as-name target)
-                      (symbol->string (map-destructure-as-name target))))]
+                      (symbol->string (map-destructure-as-name target)))
+             'or (destructure-defaults->json
+                  (map-destructure-or-defaults target)))]
     [(seq-destructure? target)
      (hasheq 'type "seq-destructure"
              'names (map binding-target->json (seq-destructure-names target))
              'rest (and (seq-destructure-rest-name target)
                         (symbol->string (seq-destructure-rest-name target))))]
-    [else (~a target)]))
+    [else (error 'beagle-ast-json "unsupported binding target: ~v" target)]))
 
 (define (binding->json b)
   (hasheq 'name (binding-target->json (let-binding-name b))
@@ -101,7 +135,7 @@
     [(list? d) (map datum->json d)]
     [(pair? d) (list (datum->json (car d)) (datum->json (cdr d)))]
     [(void? d) 'null]
-    [else (~a d)]))
+    [else (error 'beagle-ast-json "unsupported quoted datum: ~v" d)]))
 
 ;; Preserve the complete js/quote tree across the Racket-AST -> self-host
 ;; bridge.  These keys are the wire contract consumed by selfhost.emit-js.
@@ -247,7 +281,66 @@
              'bexpr (expr->json (js-ast-splice-json-beagle-expr n)))]
     [else (error 'beagle-ast-json "unsupported js/quote AST node: ~v" n)]))
 
+(define (expansion-context->json ctx)
+  (hasheq
+   'chain
+   (let loop ([current ctx] [chain '()])
+     (if current
+         (loop (expansion-ctx-parent current)
+               (cons (hasheq 'name
+                             (symbol->string
+                              (expansion-ctx-macro-name current))
+                             'depth (expansion-ctx-depth current))
+                     chain))
+         chain))))
+
+(define (synthetic-source source)
+  (and source
+       (hash-set* source 'origin "synthetic" 'canonical #t)))
+
+;; Every checked-program AST node flows through one decorator. This keeps
+;; source, inferred type, and macro provenance available at declaration and
+;; nested-expression depth without duplicating metadata logic in each variant.
 (define (expr->json e)
+  (define macro-table (current-json-macro-table))
+  (define direct-context
+    (and macro-table (hash-ref macro-table e #f)))
+  (define context (or direct-context (current-json-macro-context)))
+  (define direct-source (node-source->json e))
+  (define source
+    (cond
+      [context
+       (synthetic-source
+        (or direct-source (current-json-inherited-source)))]
+      [else direct-source]))
+  (define inferred-table (current-json-type-table))
+  (define inferred
+    (and inferred-table (hash-ref inferred-table e #f)))
+  (parameterize ([current-json-macro-context context]
+                 [current-json-inherited-source
+                  (if context source #f)])
+    (define wire (expr->json/raw e))
+    (cond
+      [(not (current-checked-projection?)) wire]
+      [else
+       (define with-type
+         (if inferred
+             (hash-set wire 'inferredType (type->json inferred))
+             wire))
+       (define provenance
+         (cond
+           [(and source context)
+            (hasheq 'source source
+                    'macroExpansion (expansion-context->json context))]
+           [source (hasheq 'source source)]
+           [context
+            (hasheq 'macroExpansion (expansion-context->json context))]
+           [else #f]))
+       (if provenance
+           (hash-set with-type 'provenance provenance)
+           with-type)])))
+
+(define (expr->json/raw e)
   (cond
     [(string? e)  (hasheq 'node "literal" 'kind "string" 'value e)]
     ;; value is the integer code point: JSON has no char type, and the
@@ -283,7 +376,9 @@
              'rest (and (defn-form-rest-param e) (param->json (defn-form-rest-param e)))
              'ret (type->json (defn-form-return-type e))
              'body (map expr->json (defn-form-body e))
-             'private (defn-form-private? e))]
+             'private (defn-form-private? e)
+             'raises (type->json (defn-form-raises e))
+             'doc (or (defn-form-doc e) #f))]
 
     [(defn-multi? e)
      (hasheq 'node "defn-multi"
@@ -295,7 +390,8 @@
                                      'ret (type->json (arity-clause-return-type a))
                                      'body (map expr->json (arity-clause-body a))))
                            (defn-multi-arities e))
-             'private (defn-multi-private? e))]
+             'private (defn-multi-private? e)
+             'doc (or (defn-multi-doc e) #f))]
 
     [(fn-form? e)
      (hasheq 'node "fn"
@@ -420,12 +516,15 @@
                                [(for-binding? c)
                                 (hasheq 'type "binding"
                                         'name (symbol->string (for-binding-name c))
+                                        'ann (type->json (for-binding-type c))
                                         'expr (expr->json (for-binding-expr c)))]
                                [(for-when? c)
                                 (hasheq 'type "when" 'test (expr->json (for-when-test c)))]
                                [(for-let? c)
                                 (hasheq 'type "let" 'bindings (map binding->json (for-let-bindings c)))]
-                               [else (hasheq 'type "unknown")]))
+                               [else
+                                (error 'beagle-ast-json
+                                       "unsupported for clause: ~v" c)]))
                            (for-form-clauses e))
              'body (map expr->json (for-form-body e)))]
 
@@ -475,7 +574,14 @@
     [(defscalar-form? e)
      (hasheq 'node "defscalar"
              'name (symbol->string (defscalar-form-name e))
-             'backing (type->json (defscalar-form-backing-type e)))]
+             'backing
+             (type->json
+              (let ([backing (defscalar-form-backing-type e)])
+                (if (symbol? backing) (type-prim backing) backing)))
+             'predicates
+             (for/list ([pred (in-list (defscalar-form-predicates e))])
+               (hasheq 'op (symbol->string (scalar-predicate-op pred))
+                       'value (scalar-predicate-value pred))))]
 
     [(regex-lit? e)
      (hasheq 'node "regex" 'pattern (regex-lit-pattern e))]
@@ -564,7 +670,9 @@
                                 (hasheq 'type "when" 'test (expr->json (for-when-test c)))]
                                [(for-let? c)
                                 (hasheq 'type "let" 'bindings (map binding->json (for-let-bindings c)))]
-                               [else (hasheq 'type "unknown")]))
+                               [else
+                                (error 'beagle-ast-json
+                                       "unsupported doseq clause: ~v" c)]))
                            (doseq-form-clauses e))
              'body (map expr->json (doseq-form-body e)))]
 
@@ -613,12 +721,17 @@
              'tag (and (block-string-tag e) (symbol->string (block-string-tag e))))]
 
     [(with-meta? e)
-     (expr->json (with-meta-expr e))]
+     ;; Keep the underlying node discriminator for existing emitters while
+     ;; retaining the metadata that the checked projection promises.
+     (hash-set (expr->json (with-meta-expr e))
+               'metadata (expr->json (with-meta-metadata e)))]
 
     [(js-quote-form? e)
      (define wire (hasheq 'node "js-quote" 'body (js-ast->json (js-quote-form-body e))))
      (define source (node-source->json e))
-     (if source (hash-set wire 'source source) wire)]
+     (if (and source (not (current-checked-projection?)))
+         (hash-set wire 'source source)
+         wire)]
 
     ;; threading-marker: KIND + surface ARGS drive the clj emitter's
     ;; surface reconstruction; DESUGARED is what check (and emit-nix) walk.
@@ -629,6 +742,63 @@
              'kind (symbol->string (threading-marker-kind e))
              'args (map expr->json (threading-marker-orig-args e))
              'desugared (expr->json (threading-marker-desugared e)))]
+
+    ;; --- typed JavaScript forms ---
+    [(jst-return? e)
+     (hasheq 'node "js-return"
+             'expr (and (jst-return-expr e)
+                        (expr->json (jst-return-expr e))))]
+
+    [(jst-class? e)
+     (hasheq 'node "js-class"
+             'name (symbol->string (jst-class-name e))
+             'extends (and (jst-class-extends e)
+                           (expr->json (jst-class-extends e)))
+             'methods
+             (for/list ([method (in-list (jst-class-methods e))])
+               (hasheq 'name (symbol->string (jst-method-name method))
+                       'params (map param->json (jst-method-params method))
+                       'rest (and (jst-method-rest-param method)
+                                  (param->json
+                                   (jst-method-rest-param method)))
+                       'ret (type->json (jst-method-return-type method))
+                       'body (map expr->json (jst-method-body method))
+                       'static (and (jst-method-static? method) #t)
+                       'async (and (jst-method-async? method) #t)
+                       'kind (symbol->string (jst-method-kind method))))
+             'export (and (jst-class-export? e) #t))]
+
+    [(jst-dot? e)
+     (hasheq 'node "js-dot"
+             'object (expr->json (jst-dot-object e))
+             'property (symbol->string (jst-dot-property e)))]
+    [(jst-spread? e)
+     (hasheq 'node "js-spread" 'expr (expr->json (jst-spread-expr e)))]
+    [(jst-typeof? e)
+     (hasheq 'node "js-typeof" 'expr (expr->json (jst-typeof-expr e)))]
+    [(jst-template? e)
+     (hasheq 'node "js-template"
+             'parts
+             (for/list ([part (in-list (jst-template-parts e))])
+               (if (string? part)
+                   (hasheq 'type "text" 'value part)
+                   (hasheq 'type "expr" 'value (expr->json part)))))]
+    [(jst-binary? e)
+     (hasheq 'node "js-binary"
+             'op (symbol->string (jst-binary-op e))
+             'left (expr->json (jst-binary-left e))
+             'right (expr->json (jst-binary-right e)))]
+    [(jst-unary? e)
+     (hasheq 'node "js-unary"
+             'op (symbol->string (jst-unary-op e))
+             'expr (expr->json (jst-unary-expr e)))]
+    [(jst-export? e)
+     (hasheq 'node "js-export" 'form (expr->json (jst-export-form e)))]
+    [(jst-export-default? e)
+     (hasheq 'node "js-export-default"
+             'form (expr->json (jst-export-default-form e)))]
+    [(jst-import-meta? e)
+     (hasheq 'node "js-import-meta")]
 
     ;; --- Nix-specific forms ---
     [(nix-inherit? e)
@@ -732,7 +902,29 @@
              'namespace (symbol->string (flake-input-form-namespace e))
              'path-segments (map symbol->string (flake-input-form-path-segments e)))]
 
-    [else (hasheq 'node "unknown" 'raw (~a e))]))
+    [(protocol-form? e)
+     (hasheq 'node "defprotocol"
+             'name (symbol->string (protocol-form-name e))
+             'methods
+             (for/list ([method (in-list (protocol-form-methods e))])
+               (hasheq 'name (symbol->string (protocol-method-name method))
+                       'params (map param->json (protocol-method-params method))
+                       'ret (type->json (protocol-method-return-type method)))))]
+
+    [(extend-type-form? e)
+     (hasheq 'node "extend-type"
+             'type-name (symbol->string (extend-type-form-type-name e))
+             'impls
+             (for/list ([impl (in-list (extend-type-form-impls e))])
+               (hasheq
+                'protocol (symbol->string (type-impl-protocol-name impl))
+                'methods
+                (for/list ([method (in-list (type-impl-methods impl))])
+                  (hasheq 'name (symbol->string (impl-method-name method))
+                          'params (map param->json (impl-method-params method))
+                          'body (map expr->json (impl-method-body method)))))))]
+
+    [else (error 'beagle-ast-json "unsupported checked AST node: ~v" e)]))
 
 (define (pattern->json p)
   (cond
@@ -754,7 +946,7 @@
     [(pat-var? p)      (hasheq 'type "var" 'name (symbol->string (pat-var-name p)))]
     [(pat-or? p)       (hasheq 'type "or"
                                'alternatives (map pattern->json (pat-or-alternatives p)))]
-    [else (hasheq 'type "unknown" 'raw (~a p))]))
+    [else (error 'beagle-ast-json "unsupported match pattern: ~v" p)]))
 
 (define (program->json prog)
   (parameterize ([current-json-src-table (program-src-table prog)])
@@ -769,12 +961,70 @@
                                      'refer (and (require-entry-refer r)
                                                  (map symbol->string (require-entry-refer r)))))
                            (program-requires prog))
-            'externs (for/list ([(name type) (in-hash (program-externs prog))])
-                       (hasheq 'name (symbol->string name)
-                               'type (type->json type)))
+            'externs
+            (for/list ([name (in-list
+                              (sort (hash-keys (program-externs prog))
+                                    symbol<?))])
+              (hasheq 'name (symbol->string name)
+                      'type (type->json
+                             (hash-ref (program-externs prog) name))))
             'forms (map expr->json (program-forms prog)))))
 
 (define (program->json-string prog)
   (jsexpr->string (program->json prog)))
 
-(provide program->json program->json-string expr->json type->json)
+(define (checked-program->json prog #:source-id [source-id #f])
+  (unless (eq? (program-mode prog) 'strict)
+    (error 'beagle-ast-json
+           "checked-program projection requires strict mode, got ~a"
+           (program-mode prog)))
+  (define type-table (program-type-table prog))
+  (unless type-table
+    (error 'beagle-ast-json
+           "checked-program projection requires type checking with #:capture-types? #t"))
+  (parameterize ([current-json-src-table (program-src-table prog)]
+                 [current-json-type-table type-table]
+                 [current-json-macro-table
+                  (program-macro-derived-table prog)]
+                 [current-json-source-id source-id]
+                 [current-checked-projection? #t])
+    (hasheq
+     'kind "beagle.checked-program"
+     'schemaVersion CHECKED-PROGRAM-SCHEMA-VERSION
+     'phase "checked"
+     'target (symbol->string (program-target prog))
+     'namespace (symbol->string (program-namespace prog))
+     'sourceId (or source-id 'null)
+     'mode (symbol->string (program-mode prog))
+     'gen-class (program-gen-class? prog)
+     'requires
+     (map (lambda (r)
+            (hasheq 'ns (symbol->string (require-entry-ns r))
+                    'alias (and (require-entry-alias r)
+                                (symbol->string (require-entry-alias r)))
+                    'refer (and (require-entry-refer r)
+                                (map symbol->string
+                                     (require-entry-refer r)))))
+          (program-requires prog))
+     'externs
+     (for/list ([name (in-list
+                       (sort (hash-keys (program-externs prog)) symbol<?))])
+       (hasheq 'name (symbol->string name)
+               'type (type->json (hash-ref (program-externs prog) name))))
+     'forms (map expr->json (program-forms prog)))))
+
+(define (write-checked-program-json prog
+                                    [out (current-output-port)]
+                                    #:source-id [source-id #f])
+  (write-canonical-json
+   (checked-program->json prog #:source-id source-id)
+   out)
+  (newline out))
+
+(provide CHECKED-PROGRAM-SCHEMA-VERSION
+         program->json
+         program->json-string
+         checked-program->json
+         write-checked-program-json
+         expr->json
+         type->json)

@@ -435,6 +435,31 @@
            (rename-in-template (cdr template) renames))]
     [else template]))
 
+;; Imported macros expand in the consumer, but their free references were
+;; written in the provider. Resolve those references against the provider's
+;; exported definition set before registration. Macro parameters, generated
+;; binders, quoted data, and unquote payloads remain use-site syntax.
+(define (qualify-imported-macro-template template params provider-names prefix)
+  (define-values (fixed-params rest-param) (parse-macro-params params))
+  (define macro-params
+    (if rest-param (cons rest-param fixed-params) fixed-params))
+  (define binders (collect-template-binders template macro-params))
+  (define (provider-ref? datum)
+    (and (symbol? datum)
+         (hash-has-key? provider-names datum)
+         (not (memq datum macro-params))
+         (not (memq datum binders))))
+  (define (qualify name)
+    (string->symbol (format "~a/~a" prefix name)))
+  (let walk ([datum template])
+    (cond
+      [(provider-ref? datum) (qualify datum)]
+      [(pair? datum)
+       (cond
+         [(or (eq? (car datum) 'quote) (unquote-form? datum)) datum]
+         [else (cons (walk (car datum)) (walk (cdr datum)))])]
+      [else datum])))
+
 ;; Is `s` a top-level definition name of the program being compiled?
 (define (module-def-name? s)
   (define names (current-module-def-names))
@@ -527,6 +552,7 @@
  current-macro-expansion-ctx
  current-module-def-names
  current-hygiene-alias-table
+ qualify-imported-macro-template
  lowering-counter
  fresh-lowered-sym
  current-macro-derived-table

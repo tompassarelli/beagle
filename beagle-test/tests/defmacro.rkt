@@ -6,9 +6,11 @@
 ;; The reader wraps `` `X ``, `,X`, and `,@X` as `(quasiquote X)`,
 ;; `(unquote X)`, and `(unquote-splicing X)` for that evaluator.
 
-(require rackunit
+(require racket/list
+         rackunit
          (for-syntax racket/base)
          beagle/private/parse
+         beagle/private/check
          beagle/private/types
          beagle/private/macros)
 
@@ -327,6 +329,35 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "macrolib.bjs")))
 
+(define macro-definition-site-fixture-source
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "macro-definition-site.bjs")))
+
+(define (parse-imported-define-box require-spec invocation)
+  (parse-prog/source
+   macro-definition-site-fixture-source
+   '(define-target js)
+   (list 'ns 'test-consumer (list ':require require-spec))
+   (list 'defrecord 'Box (br 'value ANN-MARKER 'Int))
+   (list 'defn 'normalize (br 'value ANN-MARKER 'Int) '-> 'Int 'value)
+   invocation))
+
+(define (check-imported-define-box prog expected-prefix expected-name)
+  (check-not-exn (lambda () (type-check! prog)))
+  (define generated (last (program-forms prog)))
+  (check-true (def-form? generated))
+  (check-eq? (def-form-name generated) expected-name)
+  (check-eq? (type-prim-name (def-form-type generated))
+             (string->symbol (format "~a/Box" expected-prefix)))
+  (define ctor-call (def-form-value generated))
+  (check-true (call-form? ctor-call))
+  (check-eq? (call-form-fn ctor-call)
+             (string->symbol (format "~a/->Box" expected-prefix)))
+  (define helper-call (car (call-form-args ctor-call)))
+  (check-true (call-form? helper-call))
+  (check-eq? (call-form-fn helper-call)
+             (string->symbol (format "~a/normalize" expected-prefix))))
+
 (test-case "cross-file defmacro: qualified name works"
   (check-not-exn
     (lambda ()
@@ -350,3 +381,19 @@
        '(define-target js)
        (list 'ns 'test-consumer (list ':require (br 'macrolib ':as 'm)))
        '(def x (m/when-pos 5 42))))))
+
+(test-case "cross-file defmacro: :as keeps provider definition-site references"
+  (check-imported-define-box
+   (parse-imported-define-box
+    (br 'macro-definition-site ':as 'provider)
+    '(provider/define-box aliased "provider"))
+   'provider
+   'aliased))
+
+(test-case "cross-file defmacro: :refer keeps provider definition-site references"
+  (check-imported-define-box
+   (parse-imported-define-box
+    (br 'macro-definition-site ':refer (br 'define-box))
+    '(define-box referred "provider"))
+   'macro-definition-site
+   'referred))

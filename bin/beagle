@@ -47,6 +47,7 @@ Query (the compiler is the source of truth):
   ts-externs ENTRY.d.ts     Typed beagle wrappers from TypeScript declarations
   impact <fn> <path...>     Change-impact
   expand <file>             Macro-expanded source
+  ast <file>                Versioned checked-program JSON (no execution)
   explain <CODE>            Diagnostic explanation (E001, …)
   explain-type <file>       Inferred types as a view
   facts-roundtrip MODE FILE Lossless source/fact projection (--emit-edn|--render)
@@ -127,6 +128,9 @@ case "$cmd" in
         ;;
     fields)
         exec "$BIN/beagle-fields" "$@"
+        ;;
+    ast)
+        exec "$BIN/beagle-ast" "$@"
         ;;
     expand)
         exec "$BIN/beagle-expand" "$@"
