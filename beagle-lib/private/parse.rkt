@@ -1866,6 +1866,46 @@
              rn))
     candidate)
 
+  (define (register-bootstrap-candidate-aliases!
+           candidate namespace prefix refer-syms)
+    (define candidate-id
+      (format "~a" (module-source-source-id candidate)))
+    (define candidate-datums
+      (resolve-reader-conditional-datum-stream
+       (module-source-datums candidate)
+       #:source-path candidate-id))
+    (define imported-aliases
+      (collect-required-type-aliases
+       candidate-datums
+       candidate-id
+       (set (cons 'candidate candidate-id))
+       #:module-resolver module-resolver
+       #:source-id candidate-id))
+    (define local-aliases
+      (canonicalize-local-aliases
+       (collect-local-type-aliases candidate-datums imported-aliases)
+       namespace
+       candidate-datums))
+    (for ([(name expansion) (in-hash local-aliases)])
+      (define prefixed-name (qualify-name prefix name))
+      (define full-name (qualify-name namespace name))
+      (define visible-names
+        (append
+         (if (eq? prefixed-name full-name)
+             (list prefixed-name)
+             (list prefixed-name full-name))
+         (if (and refer-syms (memq name refer-syms))
+             (list name)
+             '())))
+      (for ([visible-name (in-list visible-names)])
+        (current-type-aliases
+         (hash-set
+          (current-type-aliases)
+          visible-name
+          (register-type-alias-display!
+           (copy-type expansion)
+           visible-name))))))
+
   (define (pre-register-require-types! rn alias refer-syms)
     (define candidate (candidate-for-require rn))
     (define prefix
@@ -1877,11 +1917,13 @@
           ;; Authoritative pass: aliases may expand imported aliases and must
           ;; fail closed against the exact provider type export set.
           (register-interface-types! interface prefix)
-          ;; Bootstrap pass: the provider namespace is already authoritative
-          ;; even though its export set is not built yet.  This is enough to
-          ;; canonicalize nested qualified identities before local aliases are
-          ;; captured in this module's interface.
+          ;; Bootstrap pass: transparent aliases must be expanded from the
+          ;; exact candidate closure before a provisional namespace marker can
+          ;; nominalize them. The marker remains authoritative for real nominal
+          ;; declarations until the second pass installs the full interface.
           (let ([prefixes (current-candidate-type-prefixes)])
+            (register-bootstrap-candidate-aliases!
+             candidate rn prefix refer-syms)
             (hash-set! prefixes (symbol->string prefix) rn)
             (hash-set! prefixes (symbol->string rn) rn)))]
       [else

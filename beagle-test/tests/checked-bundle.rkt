@@ -58,7 +58,7 @@
    "#lang beagle/js\n"
    "(ns shared.types)\n"
    "(define-mode strict)\n"
-   "(defalias Identifier String)\n"))
+   "(defalias Text String)\n"))
 
 (define nested-provider-source
   (string-append
@@ -67,15 +67,29 @@
    "  (:require #?@(:js [[shared.types :as shared]]\n"
    "                  :nix [[missing.types :as missing]])))\n"
    "(define-mode strict)\n"
-   "(defalias WakeId shared/Identifier)\n"
-   "(defn normalize [id: WakeId] -> WakeId id)\n"))
+   "(defalias WakeText shared/Text)\n"
+   "(defn pass [value: WakeText] -> WakeText value)\n"))
 
 (define nested-entry-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
    "(define-mode strict)\n"
-   "(defn go [id: wake/WakeId] -> wake/WakeId (wake/normalize id))\n"))
+   "(defn go [] -> String (wake/pass \"hello\"))\n"))
+
+(define nested-bad-argument-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns app.main (:require [wake.core :as wake]))\n"
+   "(define-mode strict)\n"
+   "(defn bad [] -> String (wake/pass 1))\n"))
+
+(define nested-bad-return-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns app.main (:require [wake.core :as wake]))\n"
+   "(define-mode strict)\n"
+   "(defn bad [] -> Int (wake/pass \"hello\"))\n"))
 
 (define cycle-a-source
   (string-append
@@ -192,7 +206,7 @@
      (check-not-equal? (hash-ref original 'selfSha256)
                        (hash-ref changed 'selfSha256)))
 
-   (test-case "resolves recursive supplied aliases and only active requires"
+   (test-case "erases recursive supplied aliases and only active requires"
      (define nested-entry
        (source "app/main.bjs" nested-entry-source "package"))
      (define nested-provider
@@ -202,6 +216,14 @@
      (define response
        (build-checked-bundle
         (request (list nested-entry nested-provider shared-types))))
+     (define entry-call
+       (car
+        (hash-ref
+         (car (hash-ref (hash-ref response 'entry) 'forms))
+         'body)))
+     (check-equal?
+      (hash-ref (hash-ref entry-call 'inferredType) 'name)
+      "String")
      (check-equal?
       (hash-ref (module-by-id response "wake/core.bjs") 'requires)
       (list
@@ -210,7 +232,25 @@
         'sourceId "shared/types.bjs")))
      (check-false
       (for/or ([module (in-list (hash-ref response 'modules))])
-        (equal? (hash-ref module 'namespace) "missing.types"))))
+        (equal? (hash-ref module 'namespace) "missing.types")))
+     (check-exn
+      #rx"arg 1 expected shared/Text, got Int"
+      (lambda ()
+        (build-checked-bundle
+         (request
+          (list
+           (source "app/main.bjs" nested-bad-argument-source "package")
+           nested-provider
+           shared-types)))))
+     (check-exn
+      #rx"expected return Int, got shared/Text"
+      (lambda ()
+        (build-checked-bundle
+         (request
+          (list
+           (source "app/main.bjs" nested-bad-return-source "package")
+           nested-provider
+           shared-types))))))
 
    (test-case "recursive supplied alias traversal terminates across cycles"
      (define response
