@@ -100,10 +100,7 @@
 (define-syntax-rule (check-fixture-silent name relpath)
   (test-case name
     (let ([output (open-output-string)])
-      ;; The legacy-marker migration notice is orthogonal to what this asserts (no
-      ;; CHECKER warning); silence it until the corpus finishes migrating.
-      (parameterize ([current-error-port output]
-                     [legacy-annotation-marker-mode 'quiet])
+      (parameterize ([current-error-port output])
         (check-fixture relpath))
       (check-equal? "" (get-output-string output)))))
 

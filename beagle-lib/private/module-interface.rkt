@@ -54,7 +54,7 @@
 (define (function-type params rest-param return-type)
   (type-fn (map param-interface-type params)
            (and rest-param (param-interface-type rest-param))
-           (or return-type ANY)))
+           return-type))
 
 (define (record-bindings name fields kind map-constructor?)
   (define record-type (type-prim name))

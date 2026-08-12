@@ -120,7 +120,7 @@
   (when (defn-form-private? x) (emit! id "private" #t))
   (field! id "params" (defn-form-params x))
   (when (defn-form-rest-param x) (field! id "rest" (defn-form-rest-param x)))
-  (when (defn-form-return-type x) (field! id "ret" (defn-form-return-type x)))
+  (field! id "ret" (defn-form-return-type x))
   (when (defn-form-raises x) (field! id "raises" (defn-form-raises x)))
   (when (defn-form-doc x) (emit! id "doc" (defn-form-doc x)))
   (define b (seq->id (defn-form-body x)))

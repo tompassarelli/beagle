@@ -39,18 +39,15 @@
 
 (define (jst-split-ret-body params-form body-forms)
   (define-values (param-list rest-param) ((current-parse-params) params-form))
-  (define-values (ret-type body-start)
-    (cond
-      ;; `:` is the postfix BINDING marker; a js/ method return is `-> Ret`.
-      [(and (>= (length body-forms) 2)
-            (eq? (->datum (car body-forms)) ANN-MARKER))
-       (error 'beagle
-              "`:` is not the return-type marker in a js/ method — write `-> Ret`")]
-      [(and (>= (length body-forms) 2)
-            (memq (->datum (car body-forms)) '(-> :- :)))
-       (values (parse-type (cadr body-forms)) (cddr body-forms))]
-      [else (values #f body-forms)]))
-  (values param-list rest-param ret-type (map (current-parse-expr) body-start)))
+  (when (< (length body-forms) 2)
+    (error 'beagle
+           "js/ method needs a return type and body — write `[params] ReturnType body...`"))
+  (when (memq (->datum (car body-forms)) (list '-> ':- ': ANN-MARKER))
+    (error 'beagle
+           "return arrows are not supported in a js/ method — write `[params] ReturnType body...`"))
+  (values param-list rest-param
+          (parse-type (->datum (car body-forms)))
+          (map (current-parse-expr) (cdr body-forms))))
 
 (define (parse-jst-class name-form rest)
   (define name (->datum name-form))

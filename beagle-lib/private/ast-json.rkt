@@ -934,6 +934,7 @@
                 (for/list ([method (in-list (type-impl-methods impl))])
                   (hasheq 'name (symbol->string (impl-method-name method))
                           'params (map param->json (impl-method-params method))
+                          'ret (type->json (impl-method-return-type method))
                           'body (map expr->json (impl-method-body method)))))))]
 
     [else (error 'beagle-ast-json "unsupported checked AST node: ~v" e)]))

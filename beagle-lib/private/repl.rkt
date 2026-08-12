@@ -47,7 +47,7 @@
          [(defn-form? last-form)
           (define params (defn-form-params last-form))
           (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) params))
-          (define ret (or (defn-form-return-type last-form) (type-prim 'Any)))
+          (define ret (defn-form-return-type last-form))
           (type->string (type-fn ptypes #f ret))]
          [(def-form? last-form)
           (type->string (or (def-form-type last-form)
@@ -96,7 +96,7 @@
      (define name (defn-form-name form))
      (define params (defn-form-params form))
      (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) params))
-     (define ret (or (defn-form-return-type form) (type-prim 'Any)))
+     (define ret (defn-form-return-type form))
      (hash-set! repl-env name (type-fn ptypes #f ret))]
     [(def-form? form)
      (define name (def-form-name form))

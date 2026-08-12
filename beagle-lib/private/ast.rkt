@@ -290,7 +290,7 @@
 (struct loop-form  (bindings body)                          #:transparent)
 (struct recur-form (args)                                   #:transparent)
 (struct for-form   (clauses body)                           #:transparent)
-(struct for-binding (name expr type)                        #:transparent)  ; G7: type = #f | a postfix `:` annotation
+(struct for-binding (name expr type)                        #:transparent)  ; G7: type = #f | a declared binding type
 (struct for-when   (test)                                   #:transparent)
 (struct record-form (name fields)                           #:transparent)
 (struct method-call (method-name target args)               #:transparent)
@@ -494,11 +494,11 @@
 
 ;; `claim-form` removed. The (claim NAME TYPE) surface was deleted under
 ;; the Zero-users rule — the parser now rejects it with a pointed error
-;; naming postfix `:` as the annotation replacement. There is no AST node
+;; naming typed definitions as the replacement. There is no AST node
 ;; for claim; downstream consumers must not pattern-match on one.
 
 (struct type-impl    (protocol-name methods)                 #:transparent)
-(struct impl-method  (name params body)                      #:transparent)
+(struct impl-method  (name params return-type body)          #:transparent)
 (struct let-binding (name type value)                       #:transparent)
 (struct require-entry (ns alias refer) #:transparent)
 

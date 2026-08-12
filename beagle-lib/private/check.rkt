@@ -694,8 +694,7 @@
     (when (defn-form? form)
       (define body (defn-form-body form))
       (define return-contract
-        (and (defn-form-return-type form)
-             (regex-contract-from-type (defn-form-return-type form) form)))
+        (regex-contract-from-type (defn-form-return-type form) form))
       (when (and return-contract (pair? body))
         (define value (last body))
         (when (and (call-form? value)
@@ -1697,10 +1696,10 @@
 
   ;; --- def/defn/defonce pre-pass --------------------------------------------
   ;;
-  ;; Inline `:-` annotations on def/defonce/defn forms are the sole source of
-  ;; pre-pass type information. The parser stores any declared type in the
+  ;; Declared types on def/defonce/defn forms are the source of pre-pass type
+  ;; information. The parser stores each declared type in the
   ;; form's type slot (def-form-type, defonce-form-type, defn-form-return-type)
-  ;; and per-param `:-` annotations in param-type. We walk the top-level forms
+  ;; and per-param declarations in param-type. We walk the top-level forms
   ;; once and seed `env` from those slots so callers can resolve typed
   ;; references in either direction (forward or backward).
   ;;
@@ -1725,24 +1724,17 @@
        (when dyn? (set-add! dyn-vars name))]
       [(defonce-form name (? type? t) _ _) (hash-set! env name t)]
       [(defonce-form name #f _ _) (hash-set! env name ANY)]
-      [(defn-form name params rest-p (? type? ret) _ _ _ _)
+      [(defn-form name params rest-p ret _ _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ret))]
-      [(defn-form name params rest-p #f _ _ _ _)
-       ;; No inline return-type: register a function type with ANY return so
-       ;; call sites still see the arity. Param types still flow from inline
-       ;; `:-` annotations via param-or-destr-type.
-       (define rtype (and rest-p (param-or-destr-type rest-p)))
-       (hash-set! env name
-                  (type-fn (map param-or-destr-type params) rtype ANY))]
       [(defn-multi name arities _ _)
        (define alt-types
          (for/list ([a (in-list arities)])
            (define rp (arity-clause-rest-param a))
            (type-fn (map param-or-destr-type (arity-clause-params a))
                     (and rp (param-or-destr-type rp))
-                    (or (arity-clause-return-type a) ANY))))
+                    (arity-clause-return-type a))))
        (hash-set! env name
                   (if (= 1 (length alt-types))
                     (car alt-types)
@@ -1768,10 +1760,9 @@
       [(protocol-form name methods)
        (for ([m (in-list methods)])
          (define m-params (protocol-method-params m))
-         (define m-ret (or (protocol-method-return-type m) ANY))
          (hash-set! env (protocol-method-name m)
                     (type-fn (map (lambda (p) (or (param-type p) ANY)) m-params)
-                             #f m-ret)))]
+                             #f (protocol-method-return-type m))))]
       [(defmulti-form name dispatch-fn)
        (hash-set! env name (type-fn (list ANY) (type-prim 'Any) ANY))]
       [(defmethod-form name _ params body)
@@ -1914,6 +1905,13 @@
     [(or (map-destructure? p) (seq-destructure? p)) ANY]
     [else (or (param-type p) ANY)]))
 
+(define (declared-return-compatible? actual expected)
+  (or (type-compatible? actual expected)
+      (and (type-app? expected)
+           (eq? (type-app-ctor expected) 'Promise)
+           (= 1 (length (type-app-args expected)))
+           (type-compatible? actual (car (type-app-args expected))))))
+
 ;; --- check a top-level form ------------------------------------------------
 
 ;; G3 — construct a typed tuple. A vector LITERAL checked against an expected
@@ -1964,8 +1962,8 @@
   (match form
     [(def-form name expected-type value _ _)
      (define inferred (infer-expr value env))
-     ;; Inline `:-` annotation lives in expected-type; the pre-pass mirrors
-     ;; it into env. Either lookup is fine — both point at the same type.
+     ;; The declared type lives in expected-type; the pre-pass mirrors it into
+     ;; env. Either lookup is fine — both point at the same type.
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
        (unless (or (check-hvec-literal value effective-type env (src-for value))
@@ -1993,40 +1991,28 @@
     [(defn-form name params rest-p expected-ret body _ _ _)
      (define all-params (if rest-p (append params (list rest-p)) params))
      (define body-env (extend-with-params env all-params))
-     ;; Inline `:-` return annotation lives in expected-ret; the pre-pass
-     ;; mirrors it into env as a type-fn. Either surface gives the same
-     ;; effective return type (or #f when the binding was untyped).
-     (define env-fn (hash-ref env name #f))
-     (define effective-ret
-       (or expected-ret
-           (and env-fn (type-fn? env-fn) (type-fn-ret env-fn))))
      (parameterize ([current-check-fn-name name]
                     [current-check-error-contract
                      (hash-ref (current-raising-functions) name #f)])
        (for ([expr (in-list body)])
          (check-error-expr! expr body-env))
        (define last-type (last-expr-type body body-env))
-       (when effective-ret
-         (unless (or (type-compatible? last-type effective-ret)
-                     (and (type-app? effective-ret)
-                          (eq? (type-app-ctor effective-ret) 'Promise)
-                          (= 1 (length (type-app-args effective-ret)))
-                          (type-compatible? last-type (car (type-app-args effective-ret)))))
-           (define rtype (and rest-p (param-or-destr-type rest-p)))
-           (define sig (type->string (type-fn (map param-or-destr-type params) rtype effective-ret)))
-           (raise-diag 'return-type
-                       (format "defn ~a: expected return ~a, got ~a"
-                               name (type->string effective-ret) (type->string last-type))
-                       (hash-set* (type-mismatch-details effective-ret last-type)
-                               'name (symbol->string name)
-                               'signature (format "~a : ~a" name sig))
-                       ;; Prefer the AST-level srcloc, but for bare-symbol /
-                       ;; literal tail positions (which store-src! refuses)
-                       ;; fall back to the parse-time positional anchor via
-                       ;; body-loc-at — the body list is fresh, so its
-                       ;; eq?-identity uniquely identifies this defn's body.
-                       #:src (or (src-for (last body))
-                                 (body-loc-at body (sub1 (length body))))))))]
+       (unless (declared-return-compatible? last-type expected-ret)
+         (define rtype (and rest-p (param-or-destr-type rest-p)))
+         (define sig (type->string (type-fn (map param-or-destr-type params) rtype expected-ret)))
+         (raise-diag 'return-type
+                     (format "defn ~a: expected return ~a, got ~a"
+                             name (type->string expected-ret) (type->string last-type))
+                     (hash-set* (type-mismatch-details expected-ret last-type)
+                             'name (symbol->string name)
+                             'signature (format "~a : ~a" name sig))
+                     ;; Prefer the AST-level srcloc, but for bare-symbol /
+                     ;; literal tail positions (which store-src! refuses)
+                     ;; fall back to the parse-time positional anchor via
+                     ;; body-loc-at — the body list is fresh, so its
+                     ;; eq?-identity uniquely identifies this defn's body.
+                     #:src (or (src-for (last body))
+                               (body-loc-at body (sub1 (length body)))))))]
 
     [(defn-multi name arities _ _)
      (for ([a (in-list arities)])
@@ -2034,23 +2020,18 @@
        (define a-body (arity-clause-body a))
        (define last-type (last-expr-type a-body body-env))
        (define expected-ret (arity-clause-return-type a))
-       (when expected-ret
-         (unless (or (type-compatible? last-type expected-ret)
-                     (and (type-app? expected-ret)
-                          (eq? (type-app-ctor expected-ret) 'Promise)
-                          (= 1 (length (type-app-args expected-ret)))
-                          (type-compatible? last-type (car (type-app-args expected-ret)))))
-           (define sig (type->string
-                         (type-fn (map param-or-destr-type (arity-clause-params a)) #f expected-ret)))
-           (raise-diag 'return-type
-                       (format "defn ~a (~a-arity): expected return ~a, got ~a"
-                               name (length (arity-clause-params a))
-                               (type->string expected-ret) (type->string last-type))
-                       (hash-set* (type-mismatch-details expected-ret last-type)
-                               'name (symbol->string name)
-                               'signature (format "~a : ~a" name sig))
-                       #:src (or (src-for (last a-body))
-                                 (body-loc-at a-body (sub1 (length a-body))))))))]
+       (unless (declared-return-compatible? last-type expected-ret)
+         (define sig (type->string
+                       (type-fn (map param-or-destr-type (arity-clause-params a)) #f expected-ret)))
+         (raise-diag 'return-type
+                     (format "defn ~a (~a-arity): expected return ~a, got ~a"
+                             name (length (arity-clause-params a))
+                             (type->string expected-ret) (type->string last-type))
+                     (hash-set* (type-mismatch-details expected-ret last-type)
+                             'name (symbol->string name)
+                             'signature (format "~a : ~a" name sig))
+                     #:src (or (src-for (last a-body))
+                               (body-loc-at a-body (sub1 (length a-body)))))))]
 
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
@@ -2058,7 +2039,19 @@
      (for ([impl (in-list impls)])
        (for ([m (in-list (type-impl-methods impl))])
          (define m-env (extend-with-params env (impl-method-params m)))
-         (last-expr-type (impl-method-body m) m-env)))]
+         (define body (impl-method-body m))
+         (define actual-ret (last-expr-type body m-env))
+         (define expected-ret (impl-method-return-type m))
+         (unless (declared-return-compatible? actual-ret expected-ret)
+           (raise-diag 'return-type
+                       (format "method ~a: expected return ~a, got ~a"
+                               (impl-method-name m)
+                               (type->string expected-ret)
+                               (type->string actual-ret))
+                       (hash-set* (type-mismatch-details expected-ret actual-ret)
+                                  'name (symbol->string (impl-method-name m)))
+                       #:src (or (src-for (last body))
+                                 (body-loc-at body (sub1 (length body))))))))]
     [(defmulti-form _ _) (void)]
     [(defmethod-form name _ params body)
      (define body-env (extend-with-params env params))
@@ -3238,7 +3231,7 @@
      (for ([f (in-list (letfn-form-fns e))])
        (define p-types (map param-or-destr-type (letfn-fn-params f)))
        (define rtype (and (letfn-fn-rest-param f) (param-or-destr-type (letfn-fn-rest-param f))))
-       (define ret (or (letfn-fn-return-type f) ANY))
+       (define ret (letfn-fn-return-type f))
        (hash-set! body-env (letfn-fn-name f) (type-fn p-types rtype ret)))
      ;; Then type-check each function body
      (for ([f (in-list (letfn-form-fns e))])
@@ -3246,7 +3239,19 @@
        (when (letfn-fn-rest-param f)
          (hash-set! fn-env (param-name (letfn-fn-rest-param f))
                     (or (param-type (letfn-fn-rest-param f)) ANY)))
-       (last-expr-type (letfn-fn-body f) fn-env))
+       (define body (letfn-fn-body f))
+       (define actual-ret (last-expr-type body fn-env))
+       (define expected-ret (letfn-fn-return-type f))
+       (unless (declared-return-compatible? actual-ret expected-ret)
+         (raise-diag 'return-type
+                     (format "letfn ~a: expected return ~a, got ~a"
+                             (letfn-fn-name f)
+                             (type->string expected-ret)
+                             (type->string actual-ret))
+                     (hash-set* (type-mismatch-details expected-ret actual-ret)
+                                'name (symbol->string (letfn-fn-name f)))
+                     #:src (or (src-for (last body))
+                               (body-loc-at body (sub1 (length body)))))))
      (last-expr-type (letfn-form-body e) body-env)]
     [(loop-form? e)
      (define body-env (extend-with-let-bindings env (loop-form-bindings e)))
@@ -3344,8 +3349,21 @@
     [(fn-form? e)
      (define p-types (map param-or-destr-type (fn-form-params e)))
      (define body-env (extend-with-params env (fn-form-params e)))
-     (define ret (or (fn-form-return-type e) (last-expr-type (fn-form-body e) body-env)))
-     (type-fn p-types #f ret)]
+     (define body (fn-form-body e))
+     (define actual-ret (last-expr-type body body-env))
+     (define expected-ret (fn-form-return-type e))
+     ;; Authored fn forms always declare a return type. Internal lowering may
+     ;; still use fn-form as a target AST node without one (notably nix/overlay).
+     (when (and expected-ret
+                (not (declared-return-compatible? actual-ret expected-ret)))
+       (raise-diag 'return-type
+                   (format "fn: expected return ~a, got ~a"
+                           (type->string expected-ret)
+                           (type->string actual-ret))
+                   (type-mismatch-details expected-ret actual-ret)
+                   #:src (or (src-for (last body))
+                             (body-loc-at body (sub1 (length body))))))
+     (type-fn p-types #f (or expected-ret actual-ret))]
     [(dynamic-var? e)
      (warn-target-exclude (dynamic-var-name e) e)
      (hash-ref env (dynamic-var-name e) ANY)]
@@ -3919,7 +3937,20 @@
       (hash-set! body-env (param-name p) (or (param-type p) ANY))))
   (when (jst-method-rest-param e)
     (hash-set! body-env (jst-method-rest-param e) (type-app 'Vec (list ANY))))
-  (jst-infer-body (jst-method-body e) body-env)
+  (define body (jst-method-body e))
+  (define actual-ret (jst-infer-body body body-env))
+  (define expected-ret (jst-method-return-type e))
+  (unless (declared-return-compatible? actual-ret expected-ret)
+    (raise-diag 'return-type
+                (format "js/method ~a: expected return ~a, got ~a"
+                        (jst-method-name e)
+                        (type->string expected-ret)
+                        (type->string actual-ret))
+                (hash-set* (type-mismatch-details expected-ret actual-ret)
+                           'name (symbol->string (jst-method-name e)))
+                #:src (or (and (pair? body) (src-for (last body)))
+                          (and (pair? body)
+                               (body-loc-at body (sub1 (length body)))))))
   ANY)
 
 ;; --- end Typed JS target inference helpers ---------------------------------

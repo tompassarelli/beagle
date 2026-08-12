@@ -19,9 +19,7 @@
 ;; --- datum-level extraction --------------------------------------------------
 
 ;; Docstrings are real surface ((defn name "doc" [params] ...)) —
-;; normalize them away before matching. Return marker is `->` (`:-` legacy);
-;; matching the wrong one here makes every annotated fn silently report
-;; `-> Any` rather than erroring, so it must stay in step with parse.rkt.
+;; normalize them away before matching.
 (define (strip-doc d)
   (match d
     [(list* head (? symbol? name) (? string? _doc) rest)
@@ -31,29 +29,22 @@
 (define (extract-defn-entry d0)
   (define d (strip-doc d0))
   (match d
-    [(list (or 'defn 'defn-) (? symbol? name) params-form (? return-marker? _) ret-type body ...)
+    [(list (or 'defn 'defn-) (? symbol? name) params-form ret-type body body-rest ...)
      (define-values (parsed rest-p) (parse-params params-form))
      (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
      (define pnames (map param-name parsed))
      (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
      (list name pnames (type-fn ptypes rtype (parse-type ret-type)))]
-    [(list (or 'defn 'defn-) (? symbol? name) params-form body ...)
-     #:when (or (null? body) (not (return-marker? (car body))))
-     (define-values (parsed rest-p) (parse-params params-form))
-     (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
-     (define pnames (map param-name parsed))
-     (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
-     (list name pnames (type-fn ptypes rtype (type-prim 'Any)))]
     [_ #f]))
 
 (define (extract-def-entry d0)
   (define d (match d0
-              ;; (def name: T "doc" v) — the doc sits AFTER the type
-              [(list 'def (? symbol? name) (? annotation-marker? m) type-expr (? string? _doc) v)
-               (list 'def name m type-expr v)]
+              ;; (def name T "doc" v) — the doc sits AFTER the type
+              [(list 'def (? symbol? name) type-expr (? string? _doc) v)
+               (list 'def name type-expr v)]
               [_ (strip-doc d0)]))
   (match d
-    [(list 'def (? symbol? name) (? annotation-marker? _) type-expr _)
+    [(list 'def (? symbol? name) type-expr _)
      (list name (parse-type type-expr))]
     [(list 'def (? symbol? name) _)
      (list name (type-prim 'Any))]

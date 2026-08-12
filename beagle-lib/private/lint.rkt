@@ -83,36 +83,29 @@
 
 (define (lint-def f)
   (unless (or (def-form-type f) (hygiene-alias-def? f))
-    (warn "untyped def ~a (consider adding `NAME: Type`)"
+    (warn "untyped def ~a (consider adding `NAME Type`)"
           (def-form-name f))))
 
 (define (lint-defonce f)
   (unless (defonce-form-type f)
-    (warn "untyped defonce ~a (consider adding `NAME: Type`)"
+    (warn "untyped defonce ~a (consider adding `NAME Type`)"
           (defonce-form-name f))))
 
 (define (lint-defn f)
   (define name (defn-form-name f))
   (define params (defn-form-params f))
-  (define ret (defn-form-return-type f))
-  (unless ret
-    (warn "defn ~a has no return type annotation (consider adding `-> ReturnType`)"
-          name))
   (define untyped-params
     (for/list ([p (in-list params)]
                #:when (and (param? p) (not (param-type p))))
       (param-name p)))
   (unless (null? untyped-params)
-    (warn "defn ~a has untyped parameter(s): ~a (consider adding `name: Type`)"
+    (warn "defn ~a has untyped parameter(s): ~a (consider adding `(name Type)`)"
           name
           (string-join (map symbol->string untyped-params) ", "))))
 
 (define (lint-defn-multi f)
   (define name (defn-multi-name f))
   (for ([a (in-list (defn-multi-arities f))])
-    (unless (arity-clause-return-type a)
-      (warn "defn ~a (arity ~a) has no return type annotation"
-            name (length (arity-clause-params a))))
     (define untyped-params
       (for/list ([p (in-list (arity-clause-params a))]
                  #:when (and (param? p) (not (param-type p))))
