@@ -64,8 +64,8 @@
         "#?(:clj 1 :nix 2)" "#?@(:clj [1 2] :default [])"
         "'x" "'(a b)" "`(a ~b ~@cs)" "true" "false"
         "(fn [%1] (inc %1))"
-        ;; the annotation glue guard: `a: Int`, one space after, none before
-        "(defn f [a: Int] -> Int a)" "(defn old [a: Int] -> Int a)"))
+        ;; Structural signatures round-trip without punctuation decoration.
+        "(defn f [(a Int)] Int a)" "(defn old [(a Int)] Int a)"))
 
 (for ([s (in-list RT-BATTERY)])
   (test-case (format "renderer round-trips: ~a" s)
@@ -84,9 +84,8 @@
   (check-equal? (render "`(a ~b ~@cs)")              "`(a ~b ~@cs)")
   (check-equal? (render "true")                      "true")
   (check-equal? (render "false")                     "false")
-  ;; postfix annotation: colon glued to the NAME, one space before the type
-  (check-equal? (render "(defn f [a: Int] -> Int a)") "(defn f [a: Int] -> Int a)")
-  (check-equal? (render "(a : Int)")                  "(a: Int)"))
+  (check-equal? (render "(defn f [(a Int)] Int a)")
+                "(defn f [(a Int)] Int a)"))
 
 ;; --- (3) macro expansion still works, output re-reads -----------------------
 

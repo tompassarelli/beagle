@@ -16,8 +16,8 @@
          beagle/private/check-all
          (only-in beagle/lang/reader-impl beagle-readtable))
 
-;; THE beagle readtable, not a bracket-tag approximation — a raw Racket read
-;; mis-tokenizes the postfix annotation marker (`x: Int` → the symbol `x:`).
+;; Use the Beagle readtable so brackets and other surface containers keep their
+;; language tags instead of becoming ordinary Racket lists.
 (define (read-forms str)
   (parameterize ([current-readtable beagle-readtable])
     (define in (open-input-string str))
@@ -37,15 +37,15 @@
 (ns test.shapes)
 (define-mode strict)
 (define-target clj)
-(defrecord Circle [r: Int])
-(defrecord Square [side: Int])
-(defrecord Triangle [base: Int height: Int])
+(defrecord Circle [(r Int)])
+(defrecord Square [(side Int)])
+(defrecord Triangle [(base Int) (height Int)])
 (defunion Shape Circle Square Triangle)
 ")
 
 (define SRC-MISSING-ONE
   (string-append PRELUDE "
-(defn describe [s: Shape] -> Int
+(defn describe [(s Shape)] Int
   (match s
     [(Circle r) r]
     [(Square side) side]))
@@ -53,14 +53,14 @@
 
 (define SRC-MISSING-MULTI
   (string-append PRELUDE "
-(defn describe [s: Shape] -> Int
+(defn describe [(s Shape)] Int
   (match s
     [(Circle r) r]))
 "))
 
 (define SRC-EXHAUSTIVE
   (string-append PRELUDE "
-(defn describe [s: Shape] -> Int
+(defn describe [(s Shape)] Int
   (match s
     [(Circle r) r]
     [(Square side) side]

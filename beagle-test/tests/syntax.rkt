@@ -64,7 +64,7 @@
 
     (test-case "real beagle defn"
       (define r (repair-structure
-        "(defn process-item [item: Item] -> Result\n  (let ([id (item-id item)]\n        [val (item-value item)])\n    (if (> val 0)\n      {:status :ok :id id}\n      {:status :error :reason \"negative\"})))"))
+        "(defn process-item [(item Item)] Result\n  (let ([id (item-id item)]\n        [val (item-value item)])\n    (if (> val 0)\n      {:status :ok :id id}\n      {:status :error :reason \"negative\"})))"))
       (check-false (repair-result-changed? r)))))
 
 ;; ============================================================================

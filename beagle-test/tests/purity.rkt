@@ -34,22 +34,22 @@
 ;; A non-`!` defn whose body resets an atom.
 (define non-bang-mutating
   (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-         '(defn save [box v] (reset! box v))))
+         '(defn save [box v] Any (reset! box v))))
 
 ;; The same body under a `!`-named defn.
 (define bang-mutating
   (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-         '(defn save! [box v] (reset! box v))))
+         '(defn save! [box v] Any (reset! box v))))
 
 ;; A non-`!` defn whose body is pure.
 (define pure-defn
   (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-         '(defn add [a b] (+ a b))))
+         '(defn add [a b] Any (+ a b))))
 
 ;; A non-`!` defn whose body uses set! (the AST-level mutation marker).
 (define non-bang-set!
   (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-         '(defn store [box v] (set! box v))))
+         '(defn store [box v] Any (set! box v))))
 
 ;; ============================================================================
 ;; (a) ENABLED: a non-`!` defn whose body mutates is flagged 'purity-leak
@@ -138,7 +138,7 @@
 (test-case "dynamic mode is exempt even with the flag on (mode gate)"
   (define dyn
     (prog* '(ns t.app) '(define-mode dynamic) '(define-target clj)
-           '(defn save [box v] (reset! box v))))
+           '(defn save [box v] Any (reset! box v))))
   (parameterize ([current-purity-enforcement 'warn])
     ;; dynamic mode short-circuits the whole checker; no purity output.
     (define o (check-output dyn))
@@ -147,7 +147,7 @@
 (test-case "warn: a mutation nested in let/if/do is still caught (descends)"
   (define nested
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-           '(defn refresh [box v]
+           '(defn refresh [box v] Any
               (let [x v]
                 (if x
                     (do (reset! box x) x)
@@ -160,9 +160,9 @@
 (test-case "warn: locally effectful defs propagate through every purity boundary"
   (define indirect
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-           '(defn write-cache [box v] (reset! box v))
-           '(defn refresh-cache [box v] (write-cache box v))
-           '(defn run-refresh [box v] (refresh-cache box v))))
+           '(defn write-cache [box v] Any (reset! box v))
+           '(defn refresh-cache [box v] Any (write-cache box v))
+           '(defn run-refresh [box v] Any (refresh-cache box v))))
   (parameterize ([current-purity-enforcement 'warn])
     (define o (check-output indirect))
     (check-equal? (length (regexp-match* #rx"warning: purity leak" o)) 3)
@@ -173,8 +173,8 @@
 (test-case "warn: calls through pure local defs remain pure"
   (define pure-chain
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-           '(defn add-one [x] (+ x 1))
-           '(defn add-two [x] (add-one (add-one x)))))
+           '(defn add-one [x] Any (+ x 1))
+           '(defn add-two [x] Any (add-one (add-one x)))))
   (parameterize ([current-purity-enforcement 'warn])
     (define o (check-output pure-chain))
     (check-false (regexp-match? #rx"purity leak" o))))
@@ -182,8 +182,8 @@
 (test-case "warn: a mutation inside an inner fn still counts (effects run in the call)"
   (define inner
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-           '(defn make-handler [box]
-              (fn [v] (reset! box v)))))
+           '(defn make-handler [box] Any
+              (fn [v] Any (reset! box v)))))
   (parameterize ([current-purity-enforcement 'warn])
     (define o (check-output inner))
     (check-regexp-match #rx"purity leak" o)
@@ -192,8 +192,8 @@
 (test-case "-main is exempt: the entry-point contract name cannot carry `!`"
   (define entry
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-           '(defn run! [v] (reset! (atom nil) v))
-           '(defn -main [& args] (run! args))))
+           '(defn run! [(v Any)] Any (reset! (atom nil) v))
+           '(defn -main [& (args (Vec String))] Any (run! args))))
   (parameterize ([current-purity-enforcement 'warn])
     (define o (check-output entry))
     (check-false (regexp-match? #rx"purity leak" o)))
@@ -205,8 +205,8 @@
 (test-case "plain Clojure main remains a checked purity boundary"
   (define non-entry
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
-           '(defn store-roundtrip?! [] -> Bool true)
-           '(defn main [] -> Nil (do (store-roundtrip?!) nil))))
+           '(defn store-roundtrip?! [] Bool true)
+           '(defn main [] Nil (do (store-roundtrip?!) nil))))
   (define e
     (with-handlers ([beagle-diagnostic? values])
       (parameterize ([current-purity-enforcement 'error])

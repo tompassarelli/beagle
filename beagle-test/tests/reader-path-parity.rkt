@@ -62,7 +62,7 @@
    (lambda ()
      (call-with-output-file tmp
        (lambda (out)
-         (display "#lang beagle\n(ns core.reader)\n(def value: Int 1)\n" out))
+         (display "#lang beagle\n(ns core.reader)\n(def value Int 1)\n" out))
        #:exists 'truncate/replace)
      (define forms (map syntax->datum (read-beagle-syntax tmp)))
      (check-equal? (car forms) '(define-target core)))
@@ -115,7 +115,7 @@
    "[a #?@(:clj [b c] :default []) d]"
    "{:a 1 #?@(:clj [:b 2] :default [])}"
    ;; realistic mixed form — typed defn with destructuring + threading + brackets
-   "(defn f [a: Int [x y] -> Vec] -> Int (-> a (+ x) (* y)))"))
+   "(defn f [(a Int) ([x y] (HVec Int Int))] Int (-> a (+ x) (* y)))"))
 
 (for ([form (in-list BATTERY)])
   (test-case (format "reader paths agree: ~a" form)

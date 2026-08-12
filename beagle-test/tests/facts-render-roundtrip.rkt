@@ -107,19 +107,19 @@
  (test-suite "facts render — #lang reconstruction (#17)"
 
    (test-case "render reconstructs #lang beagle/clj from leading (define-target clj)"
-     (define out (render-roundtrip "#lang beagle/clj\n\n;; hdr\n(def x: Int 42)\n"))
+     (define out (render-roundtrip "#lang beagle/clj\n\n;; hdr\n(def x Int 42)\n"))
      (check-true (string-prefix? out "#lang beagle/clj")
                  (format "rendered did not start with #lang:\n~a" out))
      (check-false (string-contains? out "(define-target")
                   "rendered still contains (define-target …)"))
 
    (test-case "render reconstructs #lang beagle/nix"
-     (define out (render-roundtrip "#lang beagle/nix\n(def x: Int 1)\n"))
+     (define out (render-roundtrip "#lang beagle/nix\n(def x Int 1)\n"))
      (check-true (string-prefix? out "#lang beagle/nix") out))
 
    (test-case "render reconstructs bare #lang beagle for Core"
      (define out
-       (render-roundtrip "#lang beagle\n(def x: Int 1)\n" ".bgl"))
+       (render-roundtrip "#lang beagle\n(def x Int 1)\n" ".bgl"))
      (check-true (string-prefix? out "#lang beagle\n") out))))
 
 ;; ---------------------------------------------------------------------------
@@ -302,8 +302,8 @@
 
 (define FIXTURES
   (list
-   (cons "plain #lang clj" "#lang beagle/clj\n\n;; hdr\n(def x: Int 42)\n")
-   (cons "plain #lang nix" "#lang beagle/nix\n(def x: Int 1)\n")
+   (cons "plain #lang clj" "#lang beagle/clj\n\n;; hdr\n(def x Int 42)\n")
+   (cons "plain #lang nix" "#lang beagle/nix\n(def x Int 1)\n")
    (cons "G1 type hint" "(defn f [^String s] s)\n")
    (cons "G1 flag" "(def ^:dynamic *x* 1)\n")
    (cons "G1 map" "(def ^{:private true} q 2)\n")
@@ -379,8 +379,8 @@
    ;; fresh! id counters and props tables inside facts-roundtrip.rkt are LOCAL
    ;; to each function call, not module-level state, so this is expected to
    ;; hold; the probe makes that a checked fact instead of an assumption.)
-   (let ([a (cons "leak-probe A" "(def a: Int 1)\n")]
-         [b (cons "leak-probe B" "(def b: Int 2)\n")])
+   (let ([a (cons "leak-probe A" "(def a Int 1)\n")]
+         [b (cons "leak-probe B" "(def b Int 2)\n")])
      (for ([i (in-range 5)])
        (check-cli-inprocess-identical (format "~a #~a" (car a) i) (cdr a))
        (check-cli-inprocess-identical (format "~a #~a" (car b) i) (cdr b))))
