@@ -770,52 +770,102 @@
       expansion namespace local-type-names))))
 
 ;; Provider-private type qualifiers must resolve while its signatures are read,
-;; but must not enter the consumer's alias namespace.
-(define (collect-required-type-aliases datums source-path seen)
+;; but must not enter the consumer's alias namespace. A candidate resolver is
+;; authoritative when present: nested imports recurse through the supplied
+;; module-source graph instead of probing sibling files.
+(define (collect-required-type-aliases
+         datums
+         source-path
+         seen
+         #:module-resolver [module-resolver #f]
+         #:source-id [source-id source-path])
   (for*/fold ([aliases (hasheq)])
              ([datum (in-list datums)]
               [spec (in-list (require-specs-in datum))])
     (match (decode-require-spec spec)
       [(list namespace prefix referred)
-       (define dependency-path (resolve-module-path namespace source-path))
-       (define canonical-path
-         (and dependency-path
-              (simplify-path (path->complete-path dependency-path))))
-       (if (or (not canonical-path) (set-member? seen canonical-path))
-           aliases
-           (with-handlers ([exn:fail? (lambda (_e) aliases)])
-             (define dependency-datums (read-beagle-datums canonical-path))
-             (define dependency-imports
-               (collect-required-type-aliases
-                dependency-datums canonical-path (set-add seen canonical-path)))
-             (define dependency-locals
-               (canonicalize-local-aliases
-                (collect-local-type-aliases
-                 dependency-datums dependency-imports)
-                namespace
-                dependency-datums))
-             (for/fold ([visible aliases])
-                       ([(name expansion) (in-hash dependency-locals)])
-               (define prefixed-name (qualify-name prefix name))
-               (define prefixed-expansion
-                 (register-type-alias-display! (copy-type expansion) prefixed-name))
-               (define with-prefixed
-                 (hash-set visible prefixed-name prefixed-expansion))
-               (define full-name (qualify-name namespace name))
-               (define with-full
-                 (if (eq? prefixed-name full-name)
-                     with-prefixed
-                     (hash-set
-                      with-prefixed
-                      full-name
-                      (register-type-alias-display!
-                       (copy-type expansion) full-name))))
-               (if (memq name referred)
-                   (hash-set
-                    with-full
-                    name
-                    (register-type-alias-display! (copy-type expansion) name))
-                   with-full))))]
+       (define candidate
+         (and module-resolver (module-resolver namespace source-id)))
+       (when (and candidate (not (module-source? candidate)))
+         (error
+          'beagle
+          "module resolver returned ~v for ~a; expected module-source or #f"
+          candidate
+          namespace))
+       (when (and candidate
+                  (not (eq? (module-source-namespace candidate) namespace)))
+         (error
+          'beagle
+          "module resolver returned namespace ~a for required module ~a"
+          (module-source-namespace candidate)
+          namespace))
+       (define (collect-dependency dependency-datums dependency-id next-seen)
+         (define active-dependency-datums
+           (resolve-reader-conditional-datum-stream
+            dependency-datums
+            #:source-path dependency-id))
+         (define dependency-imports
+           (collect-required-type-aliases
+            active-dependency-datums
+            dependency-id
+            next-seen
+            #:module-resolver module-resolver
+            #:source-id dependency-id))
+         (define dependency-locals
+           (canonicalize-local-aliases
+            (collect-local-type-aliases
+             active-dependency-datums dependency-imports)
+            namespace
+            active-dependency-datums))
+         (for/fold ([visible aliases])
+                   ([(name expansion) (in-hash dependency-locals)])
+           (define prefixed-name (qualify-name prefix name))
+           (define prefixed-expansion
+             (register-type-alias-display! (copy-type expansion) prefixed-name))
+           (define with-prefixed
+             (hash-set visible prefixed-name prefixed-expansion))
+           (define full-name (qualify-name namespace name))
+           (define with-full
+             (if (eq? prefixed-name full-name)
+                 with-prefixed
+                 (hash-set
+                  with-prefixed
+                  full-name
+                  (register-type-alias-display!
+                   (copy-type expansion) full-name))))
+           (if (memq name referred)
+               (hash-set
+                with-full
+                name
+                (register-type-alias-display! (copy-type expansion) name))
+               with-full)))
+       (cond
+         [candidate
+          (define dependency-id
+            (format "~a" (module-source-source-id candidate)))
+          (define dependency-key (cons 'candidate dependency-id))
+          (if (set-member? seen dependency-key)
+              aliases
+              (collect-dependency
+               (module-source-datums candidate)
+               dependency-id
+               (set-add seen dependency-key)))]
+         [else
+          (define dependency-path
+            (resolve-module-path namespace source-path))
+          (define canonical-path
+            (and dependency-path
+                 (simplify-path (path->complete-path dependency-path))))
+          (define dependency-key (and canonical-path (cons 'path canonical-path)))
+          (if (or (not canonical-path) (set-member? seen dependency-key))
+              aliases
+              (with-handlers ([exn:fail? (lambda (_error) aliases)])
+                (define dependency-datums
+                  (read-beagle-datums canonical-path))
+                (collect-dependency
+                 dependency-datums
+                 canonical-path
+                 (set-add seen dependency-key))))])]
       [_ aliases])))
 
 
@@ -830,7 +880,8 @@
                               #:dynamic-vars [imp-dyn-vars #f]
                               #:refer-syms [refer-syms #f]
                               #:bare-all? [bare-all? #f]
-                              #:datums [pre-datums #f])
+                              #:datums [pre-datums #f]
+                              #:module-resolver [module-resolver #f])
   ;; pre-datums lets a caller that already read this file (e.g. the sibling
   ;; scan, to gate on the ns) hand the datums in, avoiding a second read.
   (define raw-datums (or pre-datums (read-beagle-datums mod-path)))
@@ -854,7 +905,11 @@
   (define datums
     (for/list ([d (in-list raw-datums)])
       (strip-doc (strip-target-export d))))
-  (define parametric-arities (parametric-defunion-arities datums))
+  (define active-datums
+    (resolve-reader-conditional-datum-stream
+     datums
+     #:source-path mod-path))
+  (define parametric-arities (parametric-defunion-arities active-datums))
   (for ([entry (in-list parametric-arities)])
     (define name (car entry))
     (define arity (cdr entry))
@@ -901,16 +956,24 @@
   (define source-path
     (simplify-path (path->complete-path mod-path)))
   (define provider-import-aliases
-    (collect-required-type-aliases datums source-path (set source-path)))
+    (collect-required-type-aliases
+     active-datums
+     source-path
+     (set
+      (if module-resolver
+          (cons 'candidate (format "~a" mod-path))
+          (cons 'path source-path)))
+     #:module-resolver module-resolver
+     #:source-id mod-path))
   ;; The raw-source importer is the standalone-check counterpart to candidate
   ;; interfaces: collect provider aliases before importing provider signatures.
   (define raw-provider-aliases
     (parameterize
         ([current-user-parametric-arities provider-parametric-arities])
       (canonicalize-local-aliases
-       (collect-local-type-aliases datums provider-import-aliases)
+       (collect-local-type-aliases active-datums provider-import-aliases)
        mod-ns
-       datums)))
+       active-datums)))
   (define provider-aliases
     (for/hasheq ([(name expansion) (in-hash raw-provider-aliases)])
       (define displayed-expansion
@@ -1059,7 +1122,7 @@
   (parameterize ([current-type-aliases import-aliases]
                  [current-user-parametric-arities
                   provider-parametric-arities])
-    (for ([d (in-list datums)])
+    (for ([d (in-list active-datums)])
       ;; One unparseable form must not erase the rest of the module's
       ;; types — warn and continue per form.
       (with-handlers ([exn:fail?
@@ -1340,6 +1403,56 @@
        [else
         (rc-splice-children target d)])]
     [else d]))
+
+;; Datum-only counterpart to parse-program*'s syntax-preserving rewrite. Raw
+;; provider datums cross the module interface importer without their own parse
+;; pass, so candidate-overlay alias traversal must select the same target branch
+;; before it enumerates requires or declarations.
+(define (resolve-reader-conditional-datum-stream
+         datums
+         #:source-path [source-path #f])
+  (define target
+    (for/first ([datum (in-list datums)]
+                #:when
+                (and (pair? datum)
+                     (eq? (car datum) 'define-target)
+                     (pair? (cdr datum))
+                     (symbol? (cadr datum))))
+      (cadr datum)))
+  (define effective-target
+    (or target
+        (and source-path
+             (expected-target-for-extension (format "~a" source-path)))
+        DEFAULT-TARGET))
+  (if (not (for/or ([datum (in-list datums)])
+             (has-reader-conditional? datum)))
+      datums
+      (apply
+       append
+       (for/list ([datum (in-list datums)])
+         (cond
+           [(and (pair? datum)
+                 (eq? (car datum) 'reader-conditional-splice))
+            (define chosen
+              (rc-select effective-target (rc-pairs (cdr datum)) datum))
+            (define sequence
+              (cond
+                [(and (pair? chosen)
+                      (memq (car chosen) '(#%brackets #%map #%set)))
+                 (cdr chosen)]
+                [(list? chosen) chosen]
+                [else
+                 (raise-parse-error
+                  'reader-conditional-no-match
+                  "reader-conditional-splice: chosen branch is not a sequence: ~v"
+                  chosen)]))
+            (map
+             (lambda (item)
+               (resolve-reader-conditionals item effective-target))
+             sequence)]
+           [else
+            (list
+             (resolve-reader-conditionals datum effective-target))])))))
 
 ;; --- mode-2 hygiene: inject free-ref aliases ------------------------------
 ;; The top-level definition name of a form, or #f.
@@ -1829,7 +1942,8 @@
         #:parametric-unions imp-param-unions
         #:dynamic-vars imp-dyn-vars
         #:refer-syms refer-syms
-        #:datums (module-source-datums candidate))
+        #:datums (module-source-datums candidate)
+        #:module-resolver module-resolver)
        (define interface (module-source-interface candidate))
        (when interface
          (register-interface-types! interface prefix)

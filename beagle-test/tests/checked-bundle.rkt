@@ -53,6 +53,46 @@
    "(define-mode strict)\n"
    "(def value: Int 1)\n"))
 
+(define shared-types-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns shared.types)\n"
+   "(define-mode strict)\n"
+   "(defalias Identifier String)\n"))
+
+(define nested-provider-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns wake.core\n"
+   "  (:require #?@(:js [[shared.types :as shared]]\n"
+   "                  :nix [[missing.types :as missing]])))\n"
+   "(define-mode strict)\n"
+   "(defalias WakeId shared/Identifier)\n"
+   "(defn normalize [id: WakeId] -> WakeId id)\n"))
+
+(define nested-entry-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns app.main (:require [wake.core :as wake]))\n"
+   "(define-mode strict)\n"
+   "(defn go [id: wake/WakeId] -> wake/WakeId (wake/normalize id))\n"))
+
+(define cycle-a-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns cycle.a (:require [cycle.b :as b]))\n"
+   "(define-mode strict)\n"
+   "(defalias AName String)\n"
+   "(defn a [value: AName] -> AName value)\n"))
+
+(define cycle-b-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns cycle.b (:require [cycle.a :as a]))\n"
+   "(define-mode strict)\n"
+   "(defalias BName String)\n"
+   "(defn b [value: BName] -> BName value)\n"))
+
 (define (base64 text)
   (bytes->string/latin-1
    (base64-encode (string->bytes/utf-8 text) #"")))
@@ -151,6 +191,37 @@
                        (hash-ref changed 'closureSha256))
      (check-not-equal? (hash-ref original 'selfSha256)
                        (hash-ref changed 'selfSha256)))
+
+   (test-case "resolves recursive supplied aliases and only active requires"
+     (define nested-entry
+       (source "app/main.bjs" nested-entry-source "package"))
+     (define nested-provider
+       (source "wake/core.bjs" nested-provider-source "trusted"))
+     (define shared-types
+       (source "shared/types.bjs" shared-types-source "trusted"))
+     (define response
+       (build-checked-bundle
+        (request (list nested-entry nested-provider shared-types))))
+     (check-equal?
+      (hash-ref (module-by-id response "wake/core.bjs") 'requires)
+      (list
+       (hasheq
+        'namespace "shared.types"
+        'sourceId "shared/types.bjs")))
+     (check-false
+      (for/or ([module (in-list (hash-ref response 'modules))])
+        (equal? (hash-ref module 'namespace) "missing.types"))))
+
+   (test-case "recursive supplied alias traversal terminates across cycles"
+     (define response
+       (build-checked-bundle
+        (request
+         (list (source "cycle/a.bjs" cycle-a-source "package")
+               (source "cycle/b.bjs" cycle-b-source "package"))
+         "cycle/a.bjs")))
+     (check-equal? (map (lambda (module) (hash-ref module 'sourceId))
+                        (hash-ref response 'modules))
+                   '("cycle/a.bjs" "cycle/b.bjs")))
 
    (test-case "missing provider never falls through to an ambient file"
      (define directory (make-temporary-file "beagle-bundle-ambient-~a" 'directory))
