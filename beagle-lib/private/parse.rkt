@@ -935,7 +935,9 @@
                               #:refer-syms [refer-syms #f]
                               #:bare-all? [bare-all? #f]
                               #:datums [pre-datums #f]
-                              #:module-resolver [module-resolver #f])
+                              #:module-resolver [module-resolver #f]
+                              #:canonical-provider-types?
+                              [canonical-provider-types? #f])
   ;; pre-datums lets a caller that already read this file (e.g. the sibling
   ;; scan, to gate on the ns) hand the datums in, avoiding a second read.
   (define raw-datums (or pre-datums (read-beagle-datums mod-path)))
@@ -1129,14 +1131,42 @@
     (when imp-rec-ns
       (hash-set! imp-rec-ns name mod-ns)
       (hash-set! imp-rec-ns (qualify-name mod-ns name) mod-ns)))
-  ;; A use site names an imported union by its QUALIFIED spelling while the
+  ;; A checked module interface publishes provider-local nominal identities as
+  ;; fully qualified names.  The corresponding union registry entry must use
+  ;; the same identity on both sides: `provider/U` contains `provider/M`, never
+  ;; the provider-source spelling `M`.  Bootstrap and standalone source imports
+  ;; retain their bare member spellings until an authoritative interface exists.
+  (define (qualify-union-value value qualifier)
+    (define (qualify-member member)
+      (qualify-name qualifier member))
+    (cond
+      [(list? value) (map qualify-member value)]
+      [(hash? value)
+       (define members (hash-ref value 'members '()))
+       (define member-fields (hash-ref value 'member-fields (hasheq)))
+       (hash-set
+        (hash-set value 'members (map qualify-member members))
+        'member-fields
+        (for/hasheq ([(member fields) (in-hash member-fields)])
+          (values (qualify-member member) fields)))]
+      [else value]))
+
+  ;; A use site names an imported union by its qualified spelling while the
   ;; provider declares it bare; both keys must reach UNION-MEMBERS /
-  ;; PARAMETRIC-UNIONS or exhaustiveness and match narrowing silently miss.
+  ;; PARAMETRIC-UNIONS or assignability and match narrowing silently miss.
   (define (reg-union-table! table name value)
     (when table
       (hash-set! table name value)
-      (hash-set! table (qualify-name prefix name) value)
-      (hash-set! table (qualify-name mod-ns name) value)))
+      (hash-set! table
+                 (qualify-name prefix name)
+                 (if canonical-provider-types?
+                     (qualify-union-value value prefix)
+                     value))
+      (hash-set! table
+                 (qualify-name mod-ns name)
+                 (if canonical-provider-types?
+                     (qualify-union-value value mod-ns)
+                     value))))
   ;; A bare member NAMES an already-declared type; registering its nullary
   ;; surface is deferred past the datum scan so it can never overwrite a
   ;; sibling defrecord's fields, in either source order.
@@ -2008,6 +2038,7 @@
        (define candidate-prefixes (current-candidate-type-prefixes))
        (hash-set! candidate-prefixes (symbol->string prefix) rn)
        (hash-set! candidate-prefixes (symbol->string rn) rn)
+       (define interface (module-source-interface candidate))
        (import-module-types!
         (module-source-source-id candidate)
         prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
@@ -2020,8 +2051,8 @@
         #:dynamic-vars imp-dyn-vars
         #:refer-syms refer-syms
         #:datums (module-source-datums candidate)
-        #:module-resolver module-resolver)
-       (define interface (module-source-interface candidate))
+        #:module-resolver module-resolver
+        #:canonical-provider-types? (and interface #t))
        (when interface
          (register-interface-types! interface prefix)
          (for ([name (in-list (or refer-syms '()))])

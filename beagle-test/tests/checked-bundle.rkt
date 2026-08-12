@@ -46,6 +46,31 @@
    "(define-mode strict)\n"
    "(defn go [(name String)] String (wake/greeting name))\n"))
 
+(define closed-union-provider-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns union.provider)\n"
+   "(define-mode strict)\n"
+   "(defunion FieldValueType (StringField [(unit Nil)]))\n"
+   "(defrecord FieldSpec [(value-type FieldValueType)])\n"))
+
+(define closed-union-entry-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns union.consumer (:require [union.provider :as p]))\n"
+   "(define-mode strict)\n"
+   "(defn build [] p/FieldSpec\n"
+   "  (p/->FieldSpec (p/->StringField nil)))\n"))
+
+(define closed-union-collision-source
+  (string-append
+   "#lang beagle/js\n"
+   "(ns union.consumer (:require [union.provider :as p]))\n"
+   "(define-mode strict)\n"
+   "(defrecord StringField [(unit Nil)])\n"
+   "(defn build [] p/FieldSpec\n"
+   "  (p/->FieldSpec (->StringField nil)))\n"))
+
 (define unrelated-source
   (string-append
    "#lang beagle/js\n"
@@ -202,6 +227,25 @@
       response
       (build-checked-bundle (request (list provider entry)))))
 
+   (test-case "closed interfaces preserve provider-local union membership"
+     (define provider
+       (source "union/provider.bjs" closed-union-provider-source "trusted"))
+     (check-not-exn
+      (lambda ()
+        (build-checked-bundle
+         (request
+          (list
+           (source "app/main.bjs" closed-union-entry-source "package")
+           provider)))))
+     (check-exn
+      #rx"expected union.provider/FieldValueType, got StringField"
+      (lambda ()
+        (build-checked-bundle
+         (request
+          (list
+           (source "app/main.bjs" closed-union-collision-source "package")
+           provider))))))
+
    (test-case "same AST with different submitted bytes changes exact-byte receipts"
      (define original (build-checked-bundle (request (list entry provider))))
      (define changed-entry
@@ -249,7 +293,7 @@
       (for/or ([module (in-list (hash-ref response 'modules))])
         (equal? (hash-ref module 'namespace) "missing.types")))
      (check-exn
-      #rx"arg 1 expected shared/Text, got Int"
+      #rx"arg 1 expected String, got Int"
       (lambda ()
         (build-checked-bundle
          (request
@@ -258,7 +302,7 @@
            nested-provider
            shared-types)))))
      (check-exn
-      #rx"expected return Int, got shared/Text"
+      #rx"expected return Int, got String"
       (lambda ()
         (build-checked-bundle
          (request
