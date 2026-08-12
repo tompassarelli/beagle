@@ -1,0 +1,7 @@
+#lang beagle/js
+
+(ns zero-provider)
+
+(js/export
+  (defunion (Unit)
+    UnitValue))

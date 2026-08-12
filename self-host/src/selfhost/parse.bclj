@@ -348,8 +348,14 @@
 (def CLJ-ALIASES: (Map String String)
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
-;; user parametric-union names (defunion prescan) + defalias table
-(def USER-PARAMETRIC: Any (atom {}))
+;; user parametric-union names mapped to their exact declared arity
+(def USER-PARAMETRIC-ARITIES: Any (atom {}))
+
+;; One-shot import context installed by the IO-owning driver before the full
+;; parse. parse-program! consumes and clears it immediately, keeping ordinary
+;; parses isolated while making imported constructors available at every
+;; annotation's normal parse-type boundary.
+(def PRELOADED-PARAMETRIC-ARITIES: Any (atom {}))
 
 (def TYPE-ALIASES: Any (atom {}))
 
@@ -429,6 +435,23 @@
     :else
     nil))
 
+(defn- type-arity-error!
+  [name: String
+   expected: Int
+   actual: Int] -> Any
+  (err! (str "type " name " expects " expected " argument"
+          (if (= expected 1) "" "s") ", got " actual)))
+
+(defn- unqualified-type-name [name: String] -> String
+  (let [parts (str/split name #"/")]
+    (nth parts (- (count parts) 1))))
+
+(defn- zero-parametric-declaration-error! [name: String] -> Any
+  (let [display-name (unqualified-type-name name)]
+    (err! (str "parametric defunion " display-name
+            " requires at least one type parameter; use (defunion "
+            display-name " ...) for a non-parametric union"))))
+
 (defn parse-type [t: Any] -> Any
   (cond
     (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG))
@@ -452,10 +475,17 @@
       (> (count t) 0)
       (string? (nth t 0))
       (or (has-item? PARAMETRIC-CTORS (nth t 0))
-        (= true (get (deref USER-PARAMETRIC) (nth t 0)))))
-    (make-app (nth t 0) (mapv parse-type (subvec t 1)))
+        (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0)))))
+    (let [name (nth t 0) expected (get (deref USER-PARAMETRIC-ARITIES) name) actual (- (count t) 1)]
+      (if (and (some? expected) (not (= expected actual)))
+        (do (type-arity-error! name expected actual) (make-prim "Any"))
+        (make-app name (mapv parse-type (subvec t 1)))))
     (and (string? t) (some? (get (deref TYPE-ALIASES) t)))
     (get (deref TYPE-ALIASES) t)
+    (and (string? t) (some? (get (deref USER-PARAMETRIC-ARITIES) t)))
+    (let [expected (get (deref USER-PARAMETRIC-ARITIES) t)]
+      (type-arity-error! t expected 0)
+      (make-prim "Any"))
     (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?"))
     (let [base (subs t 0 (- (count t) 1))]
       (make-union [(parse-type base) (make-prim "Nil")]))
@@ -1454,7 +1484,7 @@
   [name: String
    type-vars: Any
    member-defs: Any] -> Any
-  (swap! USER-PARAMETRIC assoc name true)
+  (swap! USER-PARAMETRIC-ARITIES assoc name (count type-vars))
   (let [n (count member-defs)]
     (loop [i: Int 0 mnames: Any [] mf: Any {}]
       (if (>= i n)
@@ -2319,11 +2349,15 @@
         (vector? (nth rest-items 0))
         (not (bracketed? (nth rest-items 0))))
       (let [name-form (nth rest-items 0)]
-        (if (and (>= (count name-form) 2) (string? (nth name-form 0)))
+        (cond
+          (and (= (count name-form) 1) (string? (nth name-form 0)))
+          (zero-parametric-declaration-error! (nth name-form 0))
+          (and (>= (count name-form) 2) (string? (nth name-form 0)))
           (parse-parametric-defunion! (nth name-form 0)
             (subvec name-form 1)
             (subvec rest-items 1))
-          (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))))
+          :else
+          (err! (str "malformed defunion name: " (str name-form)))))
       (and (= head "defunion")
         (>= (count rest-items) 1)
         (string? (nth rest-items 0)))
@@ -2642,7 +2676,10 @@
 ;; --- require libspec registration ---------------------------------------------
 ;; libspec: lib | [lib] | [lib :as a] | [lib :refer [syms]] | [lib :as a :refer [syms]]
 ;; possibly quoted. Returns {"ns" .. "alias" ..|false "refer" [..]|false} or nil.
-(defn- parse-require-libspec! [spec: Any] -> Any
+;; REPORT? is false only for the driver's pure pre-parse dependency discovery;
+;; the authoritative parse immediately follows and reports the same malformed
+;; libspec through this one decoder.
+(defn- decode-require-libspec [spec: Any report?: Bool] -> Any
   (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
     (cond
       (string? unq)
@@ -2665,25 +2702,67 @@
                 (recur (+ i 2) alias (bracket-body (nth items (+ i 1))))
                 :else
                 (do
-                  (err! (str "require: unsupported libspec option " (str (nth items i)) " — supported: [lib], [lib :as alias], [lib :refer [syms]], [lib :as alias :refer [syms]]"))
+                  (when report?
+                    (err! (str "require: unsupported libspec option " (str (nth items i)) " — supported: [lib], [lib :as alias], [lib :refer [syms]], [lib :as alias :refer [syms]]")))
                   {"ns" rn "alias" alias "refer" refer}))))
           (do
-            (err! (str "require: libspec must start with a namespace symbol, got: " (str unq)))
+            (when report?
+              (err! (str "require: libspec must start with a namespace symbol, got: " (str unq))))
             nil)))
       :else
       (do
-        (err! (str "require: bad libspec " (str unq) " — expected a namespace symbol or [lib :as alias] / [lib :refer [syms]]"))
+        (when report?
+          (err! (str "require: bad libspec " (str unq) " — expected a namespace symbol or [lib :as alias] / [lib :refer [syms]]")))
         nil))))
+
+(defn- parse-require-libspec! [spec: Any] -> Any
+  (decode-require-libspec spec true))
+
+(defn discover-requires [datums: Any] -> Any
+  (let [requires (atom [])]
+    (doseq [d datums]
+      (when (and (vector? d) (not (bracketed? d)) (> (count d) 0))
+        (let [head (nth d 0)]
+          (cond
+            (and (= head "ns") (>= (count d) 2))
+            (doseq [clause (subvec d 2)]
+              (when (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":require"))
+                (doseq [spec (subvec clause 1)]
+                  (let [r (decode-require-libspec spec false)]
+                    (when (some? r) (swap! requires conj r))))))
+            (= head "require")
+            (let [specs (subvec d 1)]
+              (if (and (> (count specs) 0) (string? (nth specs 0)))
+                (let [r (decode-require-libspec (vec (concat [BRACKET-TAG] specs)) false)]
+                  (when (some? r) (swap! requires conj r)))
+                (doseq [spec specs]
+                  (let [r (decode-require-libspec spec false)]
+                    (when (some? r) (swap! requires conj r))))))
+            :else
+            nil))))
+    (deref requires)))
 
 ;; --- parse-program! -----------------------------------------------------------
 (defn parse-program! [datums: Any] -> Any
   (reset-errors!)
   (mac/reset-lowering-counter!)
   (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
+  (reset! USER-PARAMETRIC-ARITIES (deref PRELOADED-PARAMETRIC-ARITIES))
+  (reset! PRELOADED-PARAMETRIC-ARITIES {})
+  (reset! TYPE-ALIASES {})
+  ;; Import discovery retains arity zero so an invalid required declaration is
+  ;; rejected here, inside the ordinary parse error lifecycle, before any
+  ;; consumer annotation can silently treat it as a nominal type.
+  (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
+    (when (= (get (deref USER-PARAMETRIC-ARITIES) name) 0)
+      (zero-parametric-declaration-error! name)))
   (let [mode (atom "strict") mode-set (atom false) namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) gen-class (atom false) forms (atom [])]
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0)))
-        (swap! USER-PARAMETRIC assoc (nth (nth d 1) 0) true)))
+        (let [name-form (nth d 1)]
+          (if (= (count name-form) 1)
+            nil
+            (swap! USER-PARAMETRIC-ARITIES assoc (nth name-form 0) (- (count name-form) 1))))))
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (= (count d) 3) (= (nth d 0) "defalias") (string? (nth d 1)))
         (swap! TYPE-ALIASES assoc (nth d 1) (parse-type (nth d 2)))))
@@ -2830,6 +2909,12 @@
      "requires"
      (deref requires)}))
 
+(defn parse-program-with-parametric-arities!
+  [datums: Any
+   imported-arities: Any] -> Any
+  (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
+  (parse-program! datums))
+
 ;; --- module surface import (PURE) --------------------------------------------
 ;; Mirror of beagle-lib parse.rkt import-module-types! (the reg! calls that land
 ;; in the externs hash): given a required module's RAW datums, the import PREFIX
@@ -2842,6 +2927,13 @@
 ;; set). defenum contributes no externs; macros are not surfaced here (ast-json
 ;; externs carry none) — a documented remaining sub-gap for cross-module macros.
 ;; Strip a leading docstring so the arms below stay doc-blind (parse.rkt strip-doc).
+(defn- import-strip-export [d: Any] -> Any
+  (if (and (vector? d)
+        (= (count d) 2)
+        (or (= (nth d 0) "js/export") (= (nth d 0) "js/export-default")))
+    (import-strip-export (nth d 1))
+    d))
+
 (defn- import-strip-doc [d: Any] -> Any
   (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (string? (nth d 0)))
     (let [head (nth d 0)]
@@ -2867,6 +2959,36 @@
         d))
     d))
 
+(defn- import-normalize [d: Any] -> Any
+  (import-strip-doc (import-strip-export d)))
+
+(defn module-parametric-arities
+  [datums: Any
+   prefix: String
+   refer-syms: Any] -> Any
+  (let [refer-set (if (some? refer-syms) (reduce (fn [m: Any s: Any] -> Any (assoc m s true)) {} refer-syms) nil)]
+    (reduce
+      (fn [arities: Any d0: Any] -> Any
+        (let [d (import-normalize d0)]
+          (if (and (vector? d)
+                (not (bracketed? d))
+                (>= (count d) 2)
+                (= (nth d 0) "defunion")
+                (vector? (nth d 1))
+                (not (bracketed? (nth d 1)))
+                (> (count (nth d 1)) 0)
+                (string? (nth (nth d 1) 0)))
+            (let [name-form (nth d 1)
+                  name (nth name-form 0)
+                  arity (- (count name-form) 1)
+                  with-qualified (assoc arities (str prefix "/" name) arity)]
+              (if (and (some? refer-set) (= true (get refer-set name)))
+                (assoc with-qualified name arity)
+                with-qualified))
+            arities)))
+      {}
+      datums)))
+
 ;; Fn parameter/rest types for an imported defn signature.
 (defn- import-fn-ptypes [params-form: Any] -> Any
   (mapv (fn [p: Any] -> Any (let [a (get p "ann")] (if (some? a) a (make-prim "Any"))))
@@ -2882,12 +3004,18 @@
   [datums: Any
    prefix: String
    refer-syms: Any] -> Any
+  (doseq [d0 datums]
+    (let [d (import-normalize d0)]
+      (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0)))
+        (let [name-form (nth d 1) name (nth name-form 0) arity (- (count name-form) 1)]
+          (swap! USER-PARAMETRIC-ARITIES assoc name arity)
+          (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity)))))
   (let [refer-set (if (some? refer-syms) (reduce (fn [m: Any s: Any] -> Any (assoc m s true)) {} refer-syms) nil) referred? (fn
                                                                                                                               [nm: Any] -> Bool (and (some? refer-set) (= true (get refer-set nm)))) out (atom []) seen (atom {}) emit! (fn
                                                                                                                                                                                                                                           [nm: Any
                                                                                                                                                                                                                                            t: Any] -> Nil (let [q (str prefix "/" nm)] (when (not (= true (get (deref seen) q))) (swap! seen assoc q true) (swap! out conj {"name" q "type" t})) (when (and (referred? nm) (not (= true (get (deref seen) nm)))) (swap! seen assoc nm true) (swap! out conj {"name" nm "type" t}))) nil)]
     (doseq [d0 datums]
-      (let [d (import-strip-doc d0)]
+      (let [d (import-normalize d0)]
         (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (string? (nth d 0)))
           (let [head (nth d 0)]
             (cond
@@ -3463,6 +3591,44 @@
       (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
   (expect! "parse-type clj alias Long"
     (= (parse-type "Long") {"kind" "prim" "name" "Int"}))
+  (expect! "local parametric type accepts exact arity"
+    (let [_ (parse-program!
+              [["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG "value" ANN-MARKER "T"]]]
+               ["defn" "keep" [BRACKET-TAG "value" ANN-MARKER ["Box" "String"]] RETURN-MARKER ["Box" "String"] "value"]])]
+      (= (count (parse-errors)) 0)))
+  (expect! "local parametric type rejects bare use"
+    (let [_ (parse-program!
+              [["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG "value" ANN-MARKER "T"]]]
+               ["defn" "keep" [BRACKET-TAG "value" ANN-MARKER "Box"] RETURN-MARKER "String" ["#%string" "bad"]]])
+          errors (parse-errors)]
+      (and (= (count errors) 1)
+        (str/includes? (nth errors 0) "type Box expects 1 argument, got 0"))))
+  (expect! "exported module parametric arity keeps qualified spelling"
+    (= (module-parametric-arities
+         [["js/export" ["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG "value" ANN-MARKER "T"]]]]]
+         "p"
+         nil)
+      {"p/Box" 1}))
+  (expect! "zero-parameter imported declaration remains visible to validation"
+    (= (module-parametric-arities
+         [["js/export" ["defunion" ["Unit"] "UnitValue"]]]
+         "p"
+         nil)
+      {"p/Unit" 0}))
+  (expect! "preloaded imported parametric type rejects too many arguments"
+    (let [_ (parse-program-with-parametric-arities!
+              [["defn" "keep" [BRACKET-TAG "value" ANN-MARKER ["p/Box" "String" "Int"]] RETURN-MARKER "String" ["#%string" "bad"]]]
+              {"p/Box" 1})
+          errors (parse-errors)]
+      (and (= (count errors) 1)
+        (str/includes? (nth errors 0) "type p/Box expects 1 argument, got 2"))))
+  (expect! "preloaded zero-parameter declaration is rejected"
+    (let [_ (parse-program-with-parametric-arities!
+              [["defn" "keep" [BRACKET-TAG] RETURN-MARKER "String" ["#%string" "ok"]]]
+              {"p/Unit" 0})
+          errors (parse-errors)]
+      (and (= (count errors) 1)
+        (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction"
     (let [prog (parse-program! [["ns" "my.app"] ["define-mode" "strict"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
       (and (= (get prog "namespace") "my.app")
@@ -3493,6 +3659,11 @@
     (let [prog (parse-program! [["require" "my.lib" ":refer" ["#%brackets" "f" "g"]]])]
       (= (get prog "requires")
         [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
+  (expect! "require discovery matches authoritative require parsing"
+    (let [datums [["ns" "my.app" [":require" ["#%brackets" "my.lib" ":as" "m"]]]
+                  ["require" "other.lib" ":refer" ["#%brackets" "f"]]]]
+      (= (discover-requires datums)
+        (get (parse-program! datums) "requires"))))
   (expect! "parse-program! default mode strict + target clj + gen-class false"
     (let [prog (parse-program! [["ns" "x.y"]])]
       (and (= (get prog "mode") "strict")

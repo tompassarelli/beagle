@@ -164,6 +164,13 @@
     [(list (or 'js/export 'js/export-default) inner) (strip-target-export inner)]
     [_ d]))
 
+(define (parametric-defunion-arities datums)
+  (for/fold ([arities '()]) ([raw (in-list datums)])
+    (match (strip-target-export raw)
+      [(list 'defunion (list (? symbol? name) type-vars ...) _ ...)
+       (cons (cons name (length type-vars)) arities)]
+      [_ arities])))
+
 (define (read-beagle-datums path)
   (with-input-from-file path
     (lambda ()
@@ -847,7 +854,45 @@
   (define datums
     (for/list ([d (in-list raw-datums)])
       (strip-doc (strip-target-export d))))
+  (define parametric-arities (parametric-defunion-arities datums))
+  (for ([entry (in-list parametric-arities)])
+    (define name (car entry))
+    (define arity (cdr entry))
+    (when (zero? arity)
+      (error 'beagle
+             "parametric defunion ~a requires at least one type parameter; use (defunion ~a ...) for a non-parametric union"
+             name
+             name)))
   (define refer-set (and refer-syms (list->set refer-syms)))
+  ;; A provider's bare constructor names are required while parsing its own
+  ;; aliases and signatures. They do not become consumer names unless the
+  ;; require is explicitly bare/referred; otherwise a provider Box/1 could
+  ;; overwrite a consumer-local Box/2 registered by the program pre-scan.
+  (define (referred? name)
+    (or bare-all? (and refer-set (set-member? refer-set name))))
+  (define consumer-parametric-arities (current-user-parametric-arities))
+  (define provider-parametric-arities
+    (for/fold ([arities consumer-parametric-arities])
+              ([entry (in-list parametric-arities)])
+      (define name (car entry))
+      (define arity (cdr entry))
+      (hash-set
+       (hash-set
+        (hash-set arities name arity)
+        (qualify-name prefix name) arity)
+       (qualify-name mod-ns name) arity)))
+  (current-user-parametric-arities
+   (for/fold ([arities consumer-parametric-arities])
+             ([entry (in-list parametric-arities)])
+     (define name (car entry))
+     (define arity (cdr entry))
+     (define qualified-arities
+       (hash-set
+        (hash-set arities (qualify-name prefix name) arity)
+        (qualify-name mod-ns name) arity))
+     (if (referred? name)
+         (hash-set qualified-arities name arity)
+         qualified-arities)))
   ;; Imported macro templates need the provider's definition context. Build it
   ;; while importing the provider surface, then register macros after the scan
   ;; so references to definitions declared later in the file are known too.
@@ -860,10 +905,12 @@
   ;; The raw-source importer is the standalone-check counterpart to candidate
   ;; interfaces: collect provider aliases before importing provider signatures.
   (define raw-provider-aliases
-    (canonicalize-local-aliases
-     (collect-local-type-aliases datums provider-import-aliases)
-     mod-ns
-     datums))
+    (parameterize
+        ([current-user-parametric-arities provider-parametric-arities])
+      (canonicalize-local-aliases
+       (collect-local-type-aliases datums provider-import-aliases)
+       mod-ns
+       datums)))
   (define provider-aliases
     (for/hasheq ([(name expansion) (in-hash raw-provider-aliases)])
       (define displayed-expansion
@@ -894,13 +941,6 @@
     (for/fold ([aliases import-aliases-with-dependencies])
               ([(name expansion) (in-hash provider-aliases)])
       (hash-set aliases name expansion)))
-  ;; A name is bare-referred iff this is an all-bare import (same-ns sibling)
-  ;; or it is explicitly named in a :refer list. A plain `:as`/no-refer require
-  ;; exposes names QUALIFIED only — registering them bare here would let an
-  ;; imported accessor (e.g. a record field accessor `sym-name`) shadow a
-  ;; consumer's own local def of the same name at its call sites.
-  (define (referred? name)
-    (or bare-all? (and refer-set (set-member? refer-set name))))
   (define (note-type! name)
     (hash-set! provider-definition-names name #t)
     (when imp-type-names
@@ -1016,7 +1056,9 @@
                   (cons (cons mname type-vars) deferred-bare-members)))
         mname))
     (values mnames mf-hash))
-  (parameterize ([current-type-aliases import-aliases])
+  (parameterize ([current-type-aliases import-aliases]
+                 [current-user-parametric-arities
+                  provider-parametric-arities])
     (for ([d (in-list datums)])
       ;; One unparseable form must not erase the rest of the module's
       ;; types — warn and continue per form.
@@ -1109,12 +1151,6 @@
        ;; consumer annotation such as (api/Result String) can reach the
        ;; authoritative second pass, where the interface resolver proves the
        ;; export and validates arity.
-       (current-user-parametric
-        (set-add
-         (set-add
-          (set-add (current-user-parametric) name)
-          (qualify-name prefix name))
-         (qualify-name mod-ns name)))
        (reg! name (type-prim name))
        (define-values (mnames member-fields-hash)
          (reg-union-members! member-defs type-vars))
@@ -1513,7 +1549,7 @@
                  ;; program-local.  Freshening them here prevents one module
                  ;; parsed by a long-lived daemon/overlay gate from licensing an
                  ;; otherwise unknown type in the next module.
-                 [current-user-parametric (set)]
+                 [current-user-parametric-arities (hasheq)]
                  [current-type-aliases (hasheq)]
                  [current-candidate-type-bindings (make-hasheq)]
                  [current-candidate-type-prefixes (make-hash)]
@@ -1691,8 +1727,11 @@
             (interface-type-export-expansion export))))
         (when
             (eq? (interface-type-export-kind export) 'parametric-union)
-          (current-user-parametric
-           (set-add (current-user-parametric) qualified-name))))))
+          (current-user-parametric-arities
+           (hash-set
+            (current-user-parametric-arities)
+            qualified-name
+            (interface-type-export-arity export)))))))
 
   ;; Shared require registration: resolve sibling beagle modules for type
   ;; import, then record the require-entry. Used by the top-level
@@ -1714,11 +1753,12 @@
              rn))
     candidate)
 
-  (define (pre-register-require-types! rn alias _refer-syms)
+  (define (pre-register-require-types! rn alias refer-syms)
     (define candidate (candidate-for-require rn))
-    (when candidate
-      (define prefix
-        (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (define prefix
+      (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (cond
+      [candidate
       (define interface (module-source-interface candidate))
       (if interface
           ;; Authoritative pass: aliases may expand imported aliases and must
@@ -1730,7 +1770,35 @@
           ;; captured in this module's interface.
           (let ([prefixes (current-candidate-type-prefixes)])
             (hash-set! prefixes (symbol->string prefix) rn)
-            (hash-set! prefixes (symbol->string rn) rn)))))
+            (hash-set! prefixes (symbol->string rn) rn)))]
+      [else
+       ;; Standalone checking has no candidate interface. Read only the
+       ;; required source's constructor declarations here so local aliases are
+       ;; parsed against the same exact arities as later annotations. Full
+       ;; binding, macro, and type-surface import remains in register-require!.
+       (define mod-path (resolve-module-path rn source-path))
+       (when mod-path
+         (define refer-set (and refer-syms (list->seteq refer-syms)))
+         (for ([entry
+                (in-list
+                 (parametric-defunion-arities
+                  (read-beagle-datums mod-path)))])
+           (define name (car entry))
+           (define arity (cdr entry))
+           (when (zero? arity)
+             (error 'beagle
+                    "parametric defunion ~a requires at least one type parameter; use (defunion ~a ...) for a non-parametric union"
+                    name
+                    name))
+           (define arities (current-user-parametric-arities))
+           (define qualified-arities
+             (hash-set
+              (hash-set arities (qualify-name prefix name) arity)
+              (qualify-name rn name) arity))
+           (current-user-parametric-arities
+            (if (and refer-set (set-member? refer-set name))
+                (hash-set qualified-arities name arity)
+                qualified-arities))))]))
 
   (define (register-require! rn alias refer-syms)
     (define prefix (or alias (string->symbol (last-of (split-ns-segments rn)))))
@@ -1922,8 +1990,13 @@
   ;; Pre-scan: register parametric defunion names so parse-type can handle them
   (for ([d (in-list datums)])
     (match d
-      [(list 'defunion (list (? symbol? name) _ ...) _ ...)
-       (current-user-parametric (set-add (current-user-parametric) name))]
+      [(list 'defunion (list (? symbol? name) type-vars ...) _ ...)
+       #:when (pair? type-vars)
+       (current-user-parametric-arities
+        (hash-set
+         (current-user-parametric-arities)
+         name
+         (length type-vars)))]
       [_ (void)]))
 
   ;; G1 — Pre-scan: register type aliases (defalias Name <type-expr>) in SOURCE
@@ -2109,7 +2182,8 @@
                    [current-macro-derived-table macro-derived-table]
                    [current-module-def-names module-def-name-set]
                    [current-hygiene-alias-table hygiene-alias-table]
-                   [current-user-parametric (current-user-parametric)]
+                   [current-user-parametric-arities
+                    (current-user-parametric-arities)]
                    [current-type-aliases (current-type-aliases)])
       (apply append
         (for/list ([d (in-list datums)]
@@ -5122,7 +5196,14 @@
   (define tvars (map ->datum type-vars))
   (unless (andmap symbol? tvars)
     (error 'beagle "defunion type parameters must be symbols: ~v" tvars))
-  (current-user-parametric (set-add (current-user-parametric) name))
+  (when (null? tvars)
+    (raise-parse-error
+     'bad-defunion
+     "parametric defunion ~a requires at least one type parameter; use (defunion ~a ...) for a non-parametric union"
+     name
+     name))
+  (current-user-parametric-arities
+   (hash-set (current-user-parametric-arities) name (length tvars)))
   (define member-names '())
   (define mf-hash (make-hasheq))
   (for ([md (in-list (or (stx-tail subs 2) member-defs))])

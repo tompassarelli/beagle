@@ -1,0 +1,5 @@
+#lang beagle/js
+
+(require provider :as p)
+
+(defn keep [value: (p/Box)] -> String "bad")

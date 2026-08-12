@@ -65,8 +65,11 @@
 (define (member-view? t)
   (and (type-app? t)
        (set-member? (current-parametric-members) (type-app-ctor t))))
-;; Set by parser: user-defined parametric type names (e.g. Result from parametric defunion)
-(define current-user-parametric (make-parameter (set)))
+;; Set by parser: user-defined parametric type names and their exact arities
+;; (e.g. Result -> 2 from a parametric defunion).  A name-only set is not
+;; sufficient: it admits bare, empty, and over-applied constructors as distinct
+;; types and defers the malformed shape until it can silently degrade to Any.
+(define current-user-parametric-arities (make-parameter (hasheq)))
 ;; G1 — Set by parser: user type aliases (defalias Name <type>) -> already-parsed type.
 ;; Aliases erase to their expansion at parse-type; there is no alias type node, so
 ;; emit + the rest of the checker never see an alias (purely a front-end convenience).
@@ -156,10 +159,22 @@
           ((current-qualified-type-resolver) t))
      => (lambda (resolved) resolved)]
 
-    ;; (Vec T), (Map K V), (Result T E), etc.
+    ;; (Vec T), (Map K V), (Result T E), etc. Built-in constructors retain
+    ;; their established target-specific shapes; declared constructors have a
+    ;; source-authoritative exact arity.
     [(and (pair? t) (symbol? (car t))
           (or (memq (car t) PARAMETRIC-CTORS)
-              (set-member? (current-user-parametric) (car t))))
+              (hash-has-key? (current-user-parametric-arities) (car t))))
+     (define expected-arity
+       (hash-ref (current-user-parametric-arities) (car t) #f))
+     (when (and expected-arity
+                (not (= (length (cdr t)) expected-arity)))
+       (error 'beagle
+              "type ~a expects ~a argument~a, got ~a"
+              (car t)
+              expected-arity
+              (if (= expected-arity 1) "" "s")
+              (length (cdr t))))
      (type-app (car t) (map parse-type (cdr t)))]
 
     ;; type-level integer literal: used as size in (Arr 3 F32) → [3]f32
@@ -197,6 +212,19 @@
     [(and (qualified-type-symbol? t)
           ((current-qualified-type-resolver) t))
      => (lambda (resolved) resolved)]
+
+    ;; A declared constructor is not a type until all of its parameters are
+    ;; supplied.  Keep this after the authoritative qualified resolver so its
+    ;; canonical interface diagnostics continue to win for overlay imports.
+    [(and (symbol? t)
+          (hash-has-key? (current-user-parametric-arities) t))
+     (define expected-arity
+       (hash-ref (current-user-parametric-arities) t))
+     (error 'beagle
+            "type ~a expects ~a argument~a, got 0"
+            t
+            expected-arity
+            (if (= expected-arity 1) "" "s"))]
 
     ;; G2 — bare `Atom` resolves to (Atom Any): an untyped mutable cell. Atom is a
     ;; PARAMETRIC-CTOR, but a bare symbol would parse to (type-prim 'Atom), which a poly
@@ -641,7 +669,7 @@
  current-enum-types
  current-parametric-members
  member-view?
- current-user-parametric
+ current-user-parametric-arities
  current-type-aliases
  current-qualified-type-resolver
  register-type-alias-display!

@@ -65,17 +65,22 @@
    nm (get e "name")]
   (if (= true (get seen nm)) (recur (+ i 1) seen acc) (recur (+ i 1) (assoc seen nm true) (conj acc e)))))))
 
-(defn- resolve-imports! [prog ^String source-path]
-  (let [requires (get prog "requires")
-   own-externs (get prog "externs")
-   imported (reduce (fn [acc r] (let [ns (get r "ns")
+(defn- load-import-surfaces [requires ^String source-path]
+  (reduce (fn [surfaces r] (let [ns (get r "ns")
    alias (get r "alias")
    refer (get r "refer")
    prefix (if (and (some? alias) (not (= alias false))) alias (let [segs (split-dots ns)]
   (nth segs (- (count segs) 1))))
    refer-syms (if (and (some? refer) (not (= refer false))) refer nil)
    path (resolve-ns-path ns source-path)]
-  (if (some? path) (into acc (p/import-module-surface (rd/read-program (selfhost.rt/slurp-file path)) prefix refer-syms)) acc))) [] requires)]
+  (if (some? path) (conj surfaces {"datums" (rd/read-program (selfhost.rt/slurp-file path)) "prefix" prefix "refer" refer-syms}) surfaces))) [] requires))
+
+(defn- import-parametric-arities [surfaces]
+  (reduce (fn [arities surface] (into arities (p/module-parametric-arities (get surface "datums") (get surface "prefix") (get surface "refer")))) {} surfaces))
+
+(defn- resolve-imports! [prog surfaces]
+  (let [own-externs (get prog "externs")
+   imported (reduce (fn [acc surface] (into acc (p/import-module-surface (get surface "datums") (get surface "prefix") (get surface "refer")))) [] surfaces)]
   (assoc prog "externs" (dedup-externs (into own-externs imported)))))
 
 (defn- ^Boolean has-define-target? [datums]
@@ -84,7 +89,9 @@
 (defn- parse-file-target! [^String path ^String target]
   (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
    datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
-   prog (resolve-imports! (p/parse-program! datums) path)
+   surfaces (load-import-surfaces (p/discover-requires datums) path)
+   imported-arities (import-parametric-arities surfaces)
+   prog (resolve-imports! (p/parse-program-with-parametric-arities! datums imported-arities) surfaces)
    perrs (p/parse-errors)]
   (if (> (count perrs) 0) (do
   (selfhost.rt/exit 1)

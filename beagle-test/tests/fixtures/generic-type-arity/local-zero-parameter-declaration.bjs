@@ -1,0 +1,4 @@
+#lang beagle/js
+
+(defunion (Unit)
+  UnitValue)

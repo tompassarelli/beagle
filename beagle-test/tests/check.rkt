@@ -978,14 +978,14 @@
   (check-not-exn
    (lambda ()
      (check-prog/source result-fixture-source
-                        '(require result)
+                        `(require result :refer ,(br 'Result))
                         `(defn handle ,(br 'r '#%: '(Result String String)) -> String
                            (match r
                              ,(br '(Ok v) "ok")
                              ,(br '(Err e) 'e)))))))
 
 (check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
-  '(require result)
+  `(require result :refer ,(br 'Result))
   `(defn handle ,(br 'r '#%: '(Result String String)) -> String
      (match r
        ,(br '(Ok v) "ok"))))

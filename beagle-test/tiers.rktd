@@ -59,6 +59,7 @@
              "export-xmodule.rkt"       ; a js/export'd definition keeps its signature across modules + on the query surface
              "ts-externs.rkt"           ; TypeScript declarations -> typed beagle wrappers (beagle ts-externs)
              "variant-xmodule.rkt"      ; an imported defunion's ctor/accessor/field/exhaustiveness surface == same-module
+             "generic-type-arity.rkt"   ; local/imported parametric constructors require their exact argument count
              "scrutinee-narrowing.rkt"  ; match/instance? narrow a stable scrutinee to the proven member; binders still bind fields
              "module-overlay-check.rkt"  ; coherent multi-EDN candidate overlay + cross-module interfaces
              "defmacro.rkt"

@@ -1,0 +1,5 @@
+#lang beagle/js
+
+(require provider :as p)
+
+(defalias BadBox (p/Box String Int))
