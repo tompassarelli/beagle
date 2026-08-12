@@ -27,7 +27,7 @@
 (define current-json-source-id (make-parameter #f))
 (define current-checked-projection? (make-parameter #f))
 
-(define CHECKED-PROGRAM-SCHEMA-VERSION 1)
+(define CHECKED-PROGRAM-SCHEMA-VERSION 2)
 
 (define (sha256-prefixed bytes)
   (string-append "sha256:"
@@ -89,7 +89,7 @@
   (cond
     [(param? p)
      (hasheq 'type "param"
-             'name (symbol->string (param-name p))
+             'name (binding-target->json (param-name p))
              'ann (type->json (param-type p)))]
     [(map-destructure? p)
      (hasheq 'type "map-destructure"

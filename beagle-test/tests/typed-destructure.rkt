@@ -7,7 +7,8 @@
          beagle/lang/reader-impl
          beagle/private/parse
          beagle/private/check
-         beagle/private/emit)
+         beagle/private/emit
+         beagle/private/emit-facts)
 
 (define (read-forms source)
   (parameterize ([current-readtable beagle-readtable])
@@ -28,6 +29,17 @@
   (parameterize ([current-check-profile 3])
     (type-check! program))
   (emit-program program))
+
+(define (compile-facts source)
+  (define program
+    (parse-program
+     (read-forms
+      (string-append
+       "(ns typed.destructure)\n(define-mode strict)\n(define-target clj)\n"
+       source))))
+  (parameterize ([current-check-profile 3])
+    (type-check! program))
+  (facts-emit-program program))
 
 (test-case "Clojure keeps one aggregate parameter and native nested pattern"
   (define output
@@ -89,6 +101,15 @@
      'nix
      "(defn host [({:keys [host] :or {host \"localhost\"}} (Map Keyword String))] String host)"))
   (check-true (string-contains? output "{ host ? \"localhost\", ... }:")))
+
+(test-case "facts preserve one parameter whose name is a structured binding"
+  (define output
+    (compile-facts
+     "(defn first-coordinate [([x y] (HVec Float Float))] Float x)"))
+  (check-true (string-contains? output "\"form-kind\" \"param\""))
+  (check-true (string-contains? output "\"form-kind\" \"seq-destructure\""))
+  (check-true (regexp-match? #rx"\\[[0-9]+ \"name\" [0-9]+\\]" output))
+  (check-false (string-contains? output "\"binding\"")))
 
 (define (nix-error source)
   (with-handlers ([exn:fail? exn-message])

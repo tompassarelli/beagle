@@ -161,12 +161,12 @@
 
    (test-case "plain symbol binding still works"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] -> String (let [x \"hello\"] x))"))
+       (parse+check-json "(ns t)\n(defn f [] String (let [x \"hello\"] x))"))
      (check-equal? (hash-ref (first-let-binding json) 'name) "x"))
 
    (test-case "seq-destructure let target"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] -> String (let [[a b] [\"x\" \"y\"]] (str a b)))"))
+       (parse+check-json "(ns t)\n(defn f [] String (let [[a b] [\"x\" \"y\"]] (str a b)))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type)  "seq-destructure")
      (check-equal? (hash-ref name 'names) '("a" "b"))
@@ -174,7 +174,7 @@
 
    (test-case "map-destructure let target"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] -> String (let [{:keys [x y]} {:x \"a\" :y \"b\"}] (str x y)))"))
+       (parse+check-json "(ns t)\n(defn f [] String (let [{:keys [x y]} {:x \"a\" :y \"b\"}] (str x y)))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type) "map-destructure")
      (check-equal? (hash-ref name 'keys) '("x" "y"))
@@ -182,14 +182,16 @@
 
    (test-case "map-destructure with :as"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] -> String (let [{:keys [x] :as m} {:x \"z\"}] x))"))
+       (parse+check-json
+        "(ns t)\n(defn f [] String (let [({:keys [x] :or {x \"\"} :as m} (Map Keyword String)) {:x \"z\"}] x))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type) "map-destructure")
      (check-equal? (hash-ref name 'as)   "m"))
 
    (test-case "nested seq-destructure"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] -> String (let [[[a b] c] [[\"p\" \"q\"] \"r\"]] (str a b c)))"))
+       (parse+check-json
+        "(ns t)\n(defn f [] String (let [([[a b] c] (HVec (Vec String) String)) [[\"p\" \"q\"] \"r\"]] (str a b c)))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type) "seq-destructure")
      (define inner (car (hash-ref name 'names)))
@@ -228,13 +230,13 @@
                   (parse+check-json/js
                    "(ns t)\n(js/quote (const x (object dangling-key)))"))))
 
-   (test-case "checked-program v1 expands an imported typed declaration macro"
+   (test-case "checked-program v2 expands an imported typed declaration macro"
      (define path
        (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
      (define-values (_prog json)
        (parse+checked-json/path path "checked-projection/wiki.bjs"))
      (check-equal? (hash-ref json 'kind) "beagle.checked-program")
-     (check-equal? (hash-ref json 'schemaVersion) 1)
+     (check-equal? (hash-ref json 'schemaVersion) 2)
      (check-equal? (hash-ref json 'phase) "checked")
      (check-equal? (hash-ref json 'sourceId) "checked-projection/wiki.bjs")
      (check-equal? (hash-ref json 'sourceSha256)
@@ -295,7 +297,7 @@
        (parse+checked-json
         (string-append
          "(ns checked.for-destructure)\n"
-         "(def result: (Vec Int) (for [[a b] [[1 2]]] a))\n")
+         "(def result (Vec (U Int Nil)) (for [([a b] (Vec Int)) [[1 2]]] a))\n")
         ".bclj"
         "checked-for-destructure.bclj"))
      (define clause
@@ -304,6 +306,22 @@
      (define name (hash-ref clause 'name))
      (check-equal? (hash-ref name 'type) "seq-destructure")
      (check-equal? (hash-ref name 'names) '("a" "b")))
+
+   (test-case "checked-program v2 keeps one aggregate parameter with a structural name"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.typed-destructure)\n"
+         "(defn first-coordinate [([x y] (HVec Float Float))] Float x)\n")
+        ".bclj"
+        "checked-typed-destructure.bclj"))
+     (define parameter
+       (car (hash-ref (car (hash-ref json 'forms)) 'params)))
+     (define binding (hash-ref parameter 'name))
+     (check-equal? (hash-ref json 'schemaVersion) 2)
+     (check-equal? (hash-ref binding 'type) "seq-destructure")
+     (check-equal? (hash-ref binding 'names) '("x" "y"))
+     (check-equal? (hash-ref (hash-ref parameter 'ann) 'name) "HVec"))
 
    (test-case "ast CLI canonicalizes equivalent checkout paths"
      (define relative "beagle-test/tests/fixtures/checked-projection/wiki.bjs")
@@ -327,9 +345,9 @@
    (test-case "ast CLI binds same-length source changes to both digests"
      (define source (make-temporary-file "beagle-ast-source-digest-~a.bjs"))
      (define source-a
-       "#lang beagle/js\n(ns checked.digest)\n(def x: Int 1) ; a\n")
+       "#lang beagle/js\n(ns checked.digest)\n(def x Int 1) ; a\n")
      (define source-b
-       "#lang beagle/js\n(ns checked.digest)\n(def x: Int 1) ; b\n")
+       "#lang beagle/js\n(ns checked.digest)\n(def x Int 1) ; b\n")
      (check-equal? (string-length source-a) (string-length source-b))
      (dynamic-wind
        void
@@ -367,10 +385,10 @@
        (root/ "beagle-test/tests/fixtures/checked-projection/snapshot.bjs"))
      (define source-a
        (string->bytes/utf-8
-        "#lang beagle/js\n(ns checked.snapshot-a)\n(def value: Int 1)\n"))
+        "#lang beagle/js\n(ns checked.snapshot-a)\n(def value Int 1)\n"))
      (define source-b
        (string->bytes/utf-8
-        "#lang beagle/js\n(ns checked.snapshot-b)\n(def value: Int 2)\n"))
+        "#lang beagle/js\n(ns checked.snapshot-b)\n(def value Int 2)\n"))
      (define mutable-source (bytes-copy source-a))
      (define prog
        (parse-program/bytes mutable-source #:source-path source-path))
@@ -412,7 +430,7 @@
          (call-with-output-file source #:exists 'truncate
            (lambda (out)
              (display
-              "#lang beagle/clj\n(ns checked.non-json)\n(def x: Float +nan.0)\n"
+              "#lang beagle/clj\n(ns checked.non-json)\n(def x Float +nan.0)\n"
               out)))
          (define-values (status output errors)
            (run-ast-cli (path->string source)))
@@ -426,9 +444,9 @@
        (parse+checked-json
         (string-append
          "(ns checked.protocol)\n"
-         "(defrecord Box [value: String])\n"
-         "(defprotocol Labelled (label [self] -> String))\n"
-         "(extend-type Box Labelled (label [self] -> String (:value self)))\n")
+         "(defrecord Box [(value String)])\n"
+         "(defprotocol Labelled (label [self] String))\n"
+         "(extend-type Box Labelled (label [self] String (:value self)))\n")
         ".bclj"
         "checked-protocol.bclj"))
      (check-not-false (find-form-node json "defprotocol"))
@@ -439,8 +457,8 @@
        (parse+checked-json
         (string-append
          "(ns checked.js)\n"
-         "(js/export (defn add [] -> Int (js/+ 1 2)))\n"
-         "(js/export (js/class App (constructor [] (js/return))))\n")
+         "(js/export (defn add [] Int (js/+ 1 2)))\n"
+         "(js/export (js/class App (constructor [] Nil (js/return))))\n")
         ".bjs"
         "checked-js.bjs"))
      (define exported-defn (car (hash-ref json 'forms)))
@@ -463,7 +481,7 @@
        (lambda ()
          (call-with-output-file tmp #:exists 'truncate
            (lambda (out)
-             (display "#lang beagle/js\n(ns unchecked)\n(def x: Int 1)\n" out)))
+             (display "#lang beagle/js\n(ns unchecked)\n(def x Int 1)\n" out)))
          (define prog (parse-program/file tmp))
          (check-exn #rx"capture-types"
                     (lambda ()

@@ -120,7 +120,7 @@
 (define (request sources [entry-source-id "app/main.bjs"])
   (hasheq
    'kind "beagle.checked-bundle.request"
-   'schemaVersion 1
+   'schemaVersion 2
    'entrySourceId entry-source-id
    'sources sources))
 
@@ -163,7 +163,7 @@
    (test-case "projects a deterministic checked closure and all three digests"
      (define response (build-checked-bundle (request (list entry provider))))
      (check-equal? (hash-ref response 'kind) "beagle.checked-bundle")
-     (check-equal? (hash-ref response 'schemaVersion) 1)
+     (check-equal? (hash-ref response 'schemaVersion) 2)
      (check-equal? (hash-ref response 'entrySourceId) "app/main.bjs")
      (check-equal?
       (sorted-keys response)

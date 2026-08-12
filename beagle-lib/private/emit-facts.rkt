@@ -103,13 +103,15 @@
     [(param? x)       (emit-param! x)]
     [else             (emit-generic! x)]))
 
-;; Signature vocabulary mirrors ast-json.rkt's param->json / defn-form case
-;; (params[].name+ann, ret) so downstream Datalog consumers can query either
-;; the AST-JSON or the CNF facts projection with the same predicate names.
+;; Signature vocabulary mirrors ast-json.rkt's param->json / defn-form case.
+;; `name` is one discriminated value: text for a scalar binding, a structured
+;; binding-target node for destructuring. Either way the param owns one ABI slot.
 (define (emit-param! x)
   (define id (fresh-id!))
   (emit! id "form-kind" "param")
-  (emit! id "name" (symbol->string (param-name x)))
+  (if (symbol? (param-name x))
+      (emit! id "name" (symbol->string (param-name x)))
+      (field! id "name" (param-name x)))
   (when (param-type x) (field! id "ann" (param-type x)))
   id)
 

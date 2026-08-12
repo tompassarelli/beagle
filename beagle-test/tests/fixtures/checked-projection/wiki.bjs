@@ -3,5 +3,5 @@
   (:require [wake.dsl :as wake]))
 
 (wake/entity revision
-  [id: String
-   body: String])
+  [(id String)
+   (body String)])
