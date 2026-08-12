@@ -24,7 +24,7 @@
 (defmacro field-count [fields]
   (cond
     [(empty? fields) 0]
-    [:else (count (partition 3 fields))]))
+    [:else (count fields)]))
 
 (defmacro define-pair [left right]
   (list 'do
@@ -34,7 +34,7 @@
 (define-pair alpha beta)
 
 (def FIELD-COUNT Int
-  (field-count [x: Int y: String]))
+  (field-count [(x Int) (y String)]))
 
 ;; bind__0 mints here (before the macro use-site advances the counter)
 (defn bound-before [(xs (Vec Int))] Int

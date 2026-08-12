@@ -1,21 +1,20 @@
 #lang beagle/clj
 
-;; Procedural macro: generates a record and accessors from one flat field spec.
+;; Procedural macro: generates a record and accessors from structured fields.
 (defmacro defentity [name fields]
-  (let [triples (partition 3 fields)]
-    `(do
-       (defrecord ~name ~fields)
-       ~@(map (fn [field]
-                (let [fname (first field)
-                      ftype (third field)]
-                  `(defn ~(format-symbol "~a-~a" (lower-case name) fname)
-                     [obj: ~name] -> ~ftype
-                     (get obj ~(make-keyword fname)))))
-              triples))))
+  `(do
+     (defrecord ~name ~fields)
+     ~@(map (fn [field]
+              (let [fname (first field)
+                    ftype (second field)]
+                `(defn ~(format-symbol "~a-~a" (lower-case name) fname)
+                   [(obj ~name)] ~ftype
+                   (get obj ~(make-keyword fname)))))
+            fields)))
 
-(defentity User [name: String age: Int active: Bool])
+(defentity User [(name String) (age Int) (active Bool)])
 
-(def u: User (->User "alice" 30 true))
+(def u User (->User "alice" 30 true))
 (println (user-name u))
 (println (user-age u))
 (println (user-active u))

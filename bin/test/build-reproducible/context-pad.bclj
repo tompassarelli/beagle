@@ -4,6 +4,6 @@
 ;; lowering temps so a process-global counter would shift the fixture's names.
 
 (defn pad [m]
-  (if-let [v: Int (get m :k)]
+  (if-let [(v Int) (get m :k)]
     v
     0))

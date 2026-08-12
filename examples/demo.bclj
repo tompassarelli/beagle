@@ -4,9 +4,9 @@
 
 ;; Records — typed data with constructors and accessors
 (defrecord Product
-  [name: String
-   price: Int
-   stock: Int])
+  [(name String)
+   (price Int)
+   (stock Int)])
 
 ;; Scalars — nominal types preventing same-type confusion
 (defscalar OrderId Int)
@@ -14,46 +14,46 @@
 
 ;; Tagged unions — exhaustive match required
 (defunion (Result T E)
-  (Ok [value: T])
-  (Err [error: E]))
+  (Ok [(value T)])
+  (Err [(error E)]))
 
 (defenum OrderStatus :pending :confirmed :shipped)
 
 ;; Typed function with defunion return
 ;; if-let removed; using interim let+if until typed nullable-narrowing form lands
-(defn find-product [id: Int catalog: (Vec Product)] -> (Result Product String)
+(defn find-product [(id Int) (catalog (Vec Product))] (Result Product String)
   (let [p (first (filterv (fn [item] (= (product-stock item) id)) catalog))]
     (if p
       (->Ok p)
       (->Err "not found"))))
 
 ;; Match with exhaustive pattern coverage
-(defn describe-result [r: (Result Product String)] -> String
+(defn describe-result [(r (Result Product String))] String
   (match r
     [(Ok product) (str "Found: " (product-name product))]
     [(Err msg)    (str "Error: " msg)]))
 
 ;; Flow-sensitive narrowing
-(defn safe-name [x: String?] -> String
+(defn safe-name [(x String?)] String
   (if (nil? x) "unknown" x))
 
 ;; Threading + higher-order functions
 (defn expensive-products
-  [products: (Vec Product)
-   min-price: Int] -> (Vec String)
+  [(products (Vec Product))
+   (min-price Int)] (Vec String)
   (->> products
        (filterv (fn [p] (>= (product-price p) min-price)))
        (mapv product-name)))
 
 ;; Multi-arity
 (defn greet
-  ([name: String] -> String
+  ([(name String)] String
     (str "Hello, " name))
-  ([name: String title: String] -> String
+  ([(name String) (title String)] String
     (str "Hello, " title " " name)))
 
 ;; Entry point
-(def catalog: (Vec Product)
+(def catalog (Vec Product)
   [(->Product "Widget" 999 100)
    (->Product "Gadget" 2499 50)
    (->Product "Gizmo" 499 200)])
