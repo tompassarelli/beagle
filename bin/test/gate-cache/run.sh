@@ -333,6 +333,80 @@ out17b="$(cross "$coB" crossv)"
 [[ "$out17b" != *cached-green* && "$out17b" == *"xgate ok"* ]]
 check "old-vocabulary: a pre-%R% entry is never re-anchored into checkout B" $?
 
+# t18: a file whose BYTES name the checkout. A Racket `compiled/*.dep` records
+# the absolute path of every dependency that is not collection-relative, so two
+# checkouts with identical sources hold differing .dep bytes and a closure that
+# read one could never replay in the other. The wrapper hashes such a file over
+# its NORMALIZED content: the checkout spelling goes, every other bit stays.
+# Two throwaway checkouts again, each with its own copy of the wrapper.
+make_dep_checkout() {  # DIR DEP-BODY
+    local co="$1" body="$2"
+    mkdir -p "$co/bin" "$co/compiled"
+    cp "$WRAP" "$co/bin/_gate-cache-run"
+    chmod +x "$co/bin/_gate-cache-run"
+    printf '%s\n' "$body" > "$co/compiled/mod_rkt.dep"
+    cat > "$co/dgate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+d="$(cd "$(dirname "$0")" && pwd)"
+cat "$d/compiled/mod_rkt.dep" > /dev/null
+echo "dgate ok"
+EOF
+    chmod +x "$co/dgate.sh"
+}
+dep_body() {  # ROOT-SPELLING [DEPENDENCY-LEAF] [COLLECTION-LEAF]
+    printf '("9.1" ta6le ("srcsha" . "depsha") #"%s/lib/%s" (collects #"racket" #"%s"))' \
+        "$1" "${2:-one.rkt}" "${3:-base.rkt}"
+}
+mkdir -p "$sandbox/coC" "$sandbox/coD"
+coC="$(cd "$sandbox/coC" && pwd -P)"; coD="$(cd "$sandbox/coD" && pwd -P)"
+make_dep_checkout "$coC" "$(dep_body "$coC")"
+make_dep_checkout "$coD" "$(dep_body "$coD")"
+dcross() {  # CHECKOUT ID
+    ( cd "$1" && "$1/bin/_gate-cache-run" --domain test --id "$2" --watch "$1" -- \
+        "$1/dgate.sh" 2>&1 )
+}
+
+out18="$(dcross "$coC" dep)"
+[[ "$out18" == *"dgate ok"* && "$out18" != *cached-green* ]]
+check ".dep: checkout C runs cold and stores" $?
+
+eD="$(entry_dir_for dep)"
+stored_dep="$(grep -F '/compiled/mod_rkt.dep' "$eD/files.sha256" | cut -c1-64)"
+own_dep="$(sha256sum "$coC/compiled/mod_rkt.dep" | cut -c1-64)"
+[[ -n "$stored_dep" && "$stored_dep" != "$own_dep" ]]
+check ".dep: the stored hash is over normalized content, not the file's own" $?
+
+out18b="$(dcross "$coD" dep)"
+[[ "$out18b" == *cached-green* && "$out18b" == *"dgate ok"* ]]
+check ".dep: one differing only by checkout root replays cross-checkout" $?
+
+# The negatives: everything the .dep says apart from where the checkout lives
+# is still keying material, so a genuinely different dependency must re-run.
+printf '%s\n' "$(dep_body "$coD" TWO.rkt)" > "$coD/compiled/mod_rkt.dep"
+out18c="$(dcross "$coD" dep)"
+[[ "$out18c" != *cached-green* && "$out18c" == *"dgate ok"* ]]
+check ".dep: one naming a different dependency never replays" $?
+
+printf '%s\n' "$(dep_body "$coD" one.rkt list.rkt)" > "$coD/compiled/mod_rkt.dep"
+out18d="$(dcross "$coD" dep)"
+[[ "$out18d" != *cached-green* ]]
+check ".dep: a changed collection dependency never replays" $?
+
+# The rewrite is escaped, so it is injective: a .dep that literally spells the
+# token cannot hash equal to one spelling the checkout root. Without the
+# escape these two files collide and D is served C's proof — a false green,
+# since the run genuinely read different bytes.
+printf '%s\n' "$(dep_body '%R%')" > "$coD/compiled/mod_rkt.dep"
+out18e="$(dcross "$coD" dep)"
+[[ "$out18e" != *cached-green* ]]
+check ".dep: a literal %R% never collides with the checkout root" $?
+
+printf '%s\n' "$(dep_body "$coD")" > "$coD/compiled/mod_rkt.dep"
+out18f="$(dcross "$coD" dep)"
+[[ "$out18f" == *cached-green* ]]
+check ".dep: D replays again once the .dep matches; no negative poisoned it" $?
+
 echo
 if [[ $failures -gt 0 ]]; then
     echo "gate-cache tests: $failures FAILED"

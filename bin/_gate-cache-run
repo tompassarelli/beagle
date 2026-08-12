@@ -29,6 +29,10 @@
 #   absent.list     paths probed and not found (as spelled) -> still absent
 #   nixpaths.list   /nix/store inputs (immutable by path)   -> still present
 #
+# A file whose BYTES name the checkout is hashed over its NORMALIZED content
+# (see `normalize_content`), so the same file in two checkouts hashes alike.
+# It stays a full member of the closure; only the location spelling is dropped.
+#
 # An access the trace cannot place at a definite absolute path is never keyed
 # on a guess: it makes the run uncacheable. See the awk header below.
 #
@@ -62,7 +66,9 @@ set -uo pipefail
 #   1: %R%/ and %H%/ prefixes only; a bare repo root stayed absolute, so
 #      identities pinned to one checkout.
 #   2: bare roots rewritten too — identities and closures are checkout-relative.
-vocab=2
+#   3: a .dep is hashed over normalized CONTENT, so its stored hash means
+#      something different from the file's own sha256.
+vocab=3
 
 die() { echo "_gate-cache-run: $*" >&2; exit 2; }
 
@@ -154,6 +160,62 @@ denormalize() {
 }
 n_denorm()    { local s="$1"; s=${s//"%R%"/"$repo"}; s=${s//"%H%"/"$HOME"}; printf '%s' "$s"; }
 
+# --- content normalization ---------------------------------------------------
+# Some inputs spell the checkout inside their own bytes. A Racket
+# `compiled/*.dep` records the absolute path of every dependency that is not
+# collection-relative, so two checkouts with byte-identical sources hold
+# .dep files that differ — and a closure that reads one can never replay in
+# the other. Such a file is hashed over its content with the SAME %R%/%H%
+# vocabulary a path record gets: that drops the checkout-location spelling and
+# keeps every other bit, so a .dep naming a genuinely different dependency
+# still hashes differently and still busts the key. Dropping .dep from the
+# closure would have bought the same hits by giving up the dependency
+# information; re-anchoring keeps it. An input that cannot be placed at all is
+# still class U and still uncacheable — unchanged.
+#
+# Unlike the path rewrite, this one is INJECTIVE by construction. A path record
+# is denormalized and re-read at lookup, so a token that fails to round-trip
+# costs a cache miss; a content hash is never re-anchored, so two different
+# files hashing alike would be a false green. `%` is therefore doubled before
+# the tokens are introduced: a file that literally spells `%R%` can never hash
+# equal to one that spells the checkout root.
+#
+# LC_ALL=C: the bytes are hashed as bytes, never re-encoded.
+#
+# The set is named by suffix — `*.dep` — in hash_paths, in the shell and in the
+# awk alike. Normalizing a file that needs no normalizing is harmless (the
+# rewrite is injective), so the test is deliberately a spelling rule and not a
+# probe of the contents.
+
+normalize_content() {
+    LC_ALL=C _GC_REPO="$repo" _GC_HOME="$HOME" _GC_BOUND="$_gc_bound" awk '
+        function bound(s, i) {
+            return (i > length(s)) || index(bnd, substr(s, i, 1)) > 0
+        }
+        function retoken(s, root, tok,   out, i, n) {
+            n = length(root)
+            if (n == 0) return s
+            out = ""
+            while ((i = index(s, root)) > 0) {
+                out = out substr(s, 1, i - 1) (bound(s, i + n) ? tok : root)
+                s = substr(s, i + n)
+            }
+            return out s
+        }
+        function escape(s,   out, i) {
+            out = ""
+            while ((i = index(s, "%")) > 0) {
+                out = out substr(s, 1, i - 1) "%%"
+                s = substr(s, i + 1)
+            }
+            return out s
+        }
+        BEGIN { repo = ENVIRON["_GC_REPO"]; home = ENVIRON["_GC_HOME"]
+                bnd = ENVIRON["_GC_BOUND"] }
+        { print retoken(retoken(escape($0), repo, "%R%"), home, "%H%") }
+    '
+}
+
 # --- identity: which invocation is this? -------------------------------------
 # Filtered env: every var that plausibly steers a gate or the toolchain.
 # BEAGLE_GATE_* stays out (the cache's own controls are not the run's inputs).
@@ -205,25 +267,46 @@ stat_batch() {  # stdin: abs paths; stdout: "key<TAB>path" (key has no tabs)
 
 # hash_paths: stdin abs paths -> stdout "sha256  path", memo-accelerated.
 # Paths that cannot be statted or hashed are dropped; callers compare counts.
+# A `*.dep` path (see normalize_content) is digested over its normalized
+# bytes instead of its own; its memo key carries an `n:` prefix, because the
+# stat identity is the same but the hash it stands for is not, and serving a
+# raw hash where a normalized one is meant is a wrong answer, not a slow one.
 hash_paths() {
     local stats="$scratch/hp.stats" need="$scratch/hp.need" out="$scratch/hp.out"
     : > "$need"
     stat_batch > "$stats" || true
     [[ -f "$memo" ]] || { mkdir -p "$cache_root" 2>/dev/null; touch "$memo" 2>/dev/null; } || true
     awk -F'\t' -v memofile="$memo" -v need="$need" '
+        function memokey(stat, path) { return (path ~ /\.dep$/) ? "n:" stat : stat }
         BEGIN {
             while ((getline l < memofile) > 0) {
                 t = index(l, "\t"); if (t) m[substr(l, 1, t-1)] = substr(l, t+1)
             }
             close(memofile)
         }
-        { if ($1 in m) print m[$1] "  " $2; else print $2 > need }
+        { k = memokey($1, $2); if (k in m) print m[k] "  " $2; else print $2 > need }
     ' "$stats" > "$out"
     if [[ -s "$need" ]]; then
-        local hashed="$scratch/hp.hashed"
-        xargs -r -d '\n' sha256sum -- < "$need" 2>/dev/null > "$hashed" || true
+        local hashed="$scratch/hp.hashed" raw="$scratch/hp.raw" norm="$scratch/hp.norm"
+        local p h
+        : > "$hashed"
+        grep -v '\.dep$' "$need" > "$raw" || true
+        grep    '\.dep$' "$need" > "$norm" || true
+        [[ -s "$raw" ]] &&
+            { xargs -r -d '\n' sha256sum -- < "$raw" 2>/dev/null >> "$hashed" || true; }
+        while IFS= read -r p; do
+            # readable is checked BEFORE the redirect: a failed `< "$p"` would
+            # still let sha256sum digest an empty stream and store that as the
+            # file's hash. Dropping the path instead trips the caller's count
+            # check, which refuses to cache.
+            [[ -r "$p" ]] || continue
+            h="$(normalize_content < "$p" | sha256sum | cut -d' ' -f1)"
+            [[ -n "$h" ]] && printf '%s  %s\n' "$h" "$p" >> "$hashed"
+        done < "$norm"
         awk -F'\t' 'NR==FNR { key[$2] = $1; next }
-             { p = substr($0, 67); if (p in key) print key[p] "\t" substr($0, 1, 64) }
+             { p = substr($0, 67)
+               if (p in key)
+                   print ((p ~ /\.dep$/) ? "n:" : "") key[p] "\t" substr($0, 1, 64) }
         ' "$stats" "$hashed" >> "$memo" 2>/dev/null || true
         cat "$hashed" >> "$out"
     fi
