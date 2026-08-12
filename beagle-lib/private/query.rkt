@@ -5,6 +5,7 @@
          "parse.rkt"
          "types.rkt"
          "ast.rkt"
+         "check.rkt"
          "extensions.rkt"
          "expand-tool.rkt")
 
@@ -74,25 +75,136 @@
 
 ;; --- beagle-sig: print function signature ------------------------------------
 
+(define (callable-form? form)
+  (or (defn-form? form) (defn-multi? form)))
+
+(define (callable-name form)
+  (cond
+    [(defn-form? form) (defn-form-name form)]
+    [(defn-multi? form) (defn-multi-name form)]
+    [else (error 'beagle-sig "not a callable definition: ~v" form)]))
+
+(define (callable-clauses form)
+  (cond
+    [(defn-form? form)
+     (list (list (defn-form-params form)
+                 (defn-form-rest-param form)
+                 (defn-form-return-type form)))]
+    [(defn-multi? form)
+     (for/list ([clause (in-list (defn-multi-arities form))])
+       (list (arity-clause-params clause)
+             (arity-clause-rest-param clause)
+             (arity-clause-return-type clause)))]
+    [else '()]))
+
+;; An inferred scheme belongs in the headline.  Parameter detail, however,
+;; describes each executable clause, so it reads the function body beneath
+;; the quantifier and (for multi-arity definitions) beneath the union.
+(define (callable-signature-alternatives signature)
+  (define body
+    (if (type-poly? signature) (type-poly-body signature) signature))
+  (if (type-union? body) (type-union-alts body) (list body)))
+
+(define (binding-target->string target)
+  (cond
+    [(symbol? target) (symbol->string target)]
+    [(seq-destructure? target)
+     (define fixed
+       (map binding-target->string (seq-destructure-names target)))
+     (define items
+       (if (seq-destructure-rest-name target)
+           (append fixed
+                   (list "&"
+                         (symbol->string
+                          (seq-destructure-rest-name target))))
+           fixed))
+     (format "[~a]" (string-join* items " "))]
+    [(map-destructure? target)
+     (define keys
+       (map symbol->string (map-destructure-keys target)))
+     (format "{:keys [~a]~a}"
+             (string-join* keys " ")
+             (if (map-destructure-as-name target)
+                 (format " :as ~a" (map-destructure-as-name target))
+                 ""))]
+    [else (format "~a" target)]))
+
+(define (print-callable-clause-details clauses alternatives)
+  (unless (= (length clauses) (length alternatives))
+    (error 'beagle-sig
+           "effective signature has ~a clause~a for ~a source clause~a"
+           (length alternatives) (if (= (length alternatives) 1) "" "s")
+           (length clauses) (if (= (length clauses) 1) "" "s")))
+  (define multi? (> (length clauses) 1))
+  (for ([clause (in-list clauses)]
+        [signature (in-list alternatives)])
+    (unless (type-fn? signature)
+      (error 'beagle-sig
+             "effective clause signature is not a function: ~a"
+             (type->string signature)))
+    (define params (car clause))
+    (define rest-param (cadr clause))
+    (define prefix (if multi? "    " "  "))
+    (when multi?
+      (printf "  arity ~a~a:\n"
+              (length params)
+              (if rest-param "+" "")))
+    (unless (= (length params) (length (type-fn-params signature)))
+      (error 'beagle-sig
+             "effective clause has ~a fixed parameter~a for ~a source parameter~a"
+             (length (type-fn-params signature))
+             (if (= (length (type-fn-params signature)) 1) "" "s")
+             (length params)
+             (if (= (length params) 1) "" "s")))
+    (for ([param (in-list params)]
+          [param-type (in-list (type-fn-params signature))])
+      (printf "~a~a : ~a\n"
+              prefix
+              (binding-target->string (param-binding-target param))
+              (type->string param-type)))
+    (when rest-param
+      (printf "~a& ~a : ~a\n"
+              prefix
+              (binding-target->string (param-binding-target rest-param))
+              (type->string (type-fn-rest-type signature))))
+    (printf "~a-> ~a\n" prefix (type->string (type-fn-ret signature)))))
+
+(define (authored-callable-type form)
+  (define alternatives
+    (for/list ([clause (in-list (callable-clauses form))])
+      (define params (car clause))
+      (define rest-param (cadr clause))
+      (define return-type (caddr clause))
+      (type-fn
+       (map (lambda (param) (or (param-type param) (type-prim 'Any))) params)
+       (and rest-param (or (param-type rest-param) (type-prim 'Any)))
+       return-type)))
+  (if (= (length alternatives) 1)
+      (car alternatives)
+      (type-union alternatives)))
+
 (define (query-sig name files)
   (define target (if (string? name) (string->symbol name) name))
   (for ([f (in-list files)])
-    (with-handlers ([exn:fail? (lambda (e) (void))])
-      (define datums (read-expanded-datums f))
-      (for ([d (in-list datums)])
-        (define entry (extract-defn-entry d))
-        (when (and entry (eq? (car entry) target))
-          (define pnames (cadr entry))
-          (define ftype (caddr entry))
-          (printf "~a : ~a\n" target (type->string ftype))
-          (define params (type-fn-params ftype))
-          (for ([pn (in-list pnames)]
-                [pt (in-list params)])
-            (printf "  ~a : ~a\n" pn (type->string pt)))
-          (printf "  -> ~a\n" (type->string (type-fn-ret ftype))))
-        (for ([ext (in-list (extract-extern-entry d))])
-          (when (eq? (car ext) target)
-            (printf "~a : ~a  (extern)\n" target (type->string (cadr ext)))))))))
+    (define program (parse-program/file f))
+    (type-check! program)
+    (for ([raw-form (in-list (program-forms program))])
+      (define form (unwrap-definition-form raw-form))
+      (when (and (callable-form? form)
+                 (eq? (callable-name form) target))
+        (define signature
+          (or (program-effective-definition-type program target #f)
+              ;; Dynamic-mode programs deliberately skip checking.  Their
+              ;; authored signature remains queryable, but strict programs
+              ;; always take the finalized checker result above.
+              (authored-callable-type form)))
+        (printf "~a : ~a\n" target (type->string signature))
+        (print-callable-clause-details
+         (callable-clauses form)
+         (callable-signature-alternatives signature))))
+    (define extern-type (hash-ref (program-externs program) target #f))
+    (when extern-type
+      (printf "~a : ~a  (extern)\n" target (type->string extern-type)))))
 
 ;; --- beagle-fields: print record fields + accessors --------------------------
 

@@ -9,6 +9,7 @@
 (require rackunit
          racket/file
          racket/port
+         racket/string
          beagle/private/query)
 
 (define (with-query-file source proc)
@@ -31,14 +32,19 @@
 (define SRC
   (string-append
    "(ns q)\n"
-   "(def plain: Int 42)\n"
-   "(def doced: Int \"the answer\" 42)\n"
-   "(defrecord R\n  [a: Int\n   b: Bool])\n"
+   "(def plain Int 42)\n"
+   "(def doced Int \"the answer\" 42)\n"
+   "(defrecord R\n  [(a Int)\n   (b Bool)])\n"
    "(declare-extern host/get [Int -> Int])\n"
-   "(defn typed\n  [x: Int\n   y: Bool] -> Int\n  x)\n"
-   "(defn doced-fn \"docs are surface\" [x: Int] -> Bool (> x 0))\n"
-   "(defn- private-fn [x: Int] -> Int (typed x true))\n"
-   "(defn untyped [x] x)\n"))
+   "(defn typed\n  [(x Int)\n   (y Bool)]\n  Int\n  x)\n"
+   "(defn doced-fn \"docs are surface\" [(x Int)] Bool (> x 0))\n"
+   "(defn- private-fn [(x Int)] Int (typed x true))\n"
+   "(defn one [x] Int 1)\n"
+   "(defn dynamic [(x Any)] Any x)\n"
+   "(defn pair-head [([x y] (HVec Int String))] Int x)\n"
+   "(defn overloaded\n"
+   "  ([(x Int)] Int x)\n"
+   "  ([(x String) (n Int)] String x))\n"))
 
 (test-case "sig: annotated defn reports real types (not Any)"
   (define out (query-output SRC '("sig" "typed")))
@@ -52,9 +58,33 @@
   (define out (query-output SRC '("sig" "private-fn")))
   (check-regexp-match #rx"private-fn : \\[Int -> Int\\]" out))
 
-(test-case "sig: untyped defn reports Any return"
-  (define out (query-output SRC '("sig" "untyped")))
-  (check-regexp-match #rx"untyped : \\[Any -> Any\\]" out))
+(test-case "sig: inferred scheme is the headline and its body drives detail"
+  (define out (query-output SRC '("sig" "one")))
+  (check-regexp-match #rx"one : \\(forall \\[A\\] \\[A -> Int\\]\\)" out)
+  (check-regexp-match #rx"  x : A" out)
+  (check-regexp-match #rx"  -> Int" out)
+  (check-false (regexp-match? #rx"\\?[0-9]+" out) out))
+
+(test-case "sig: explicit Any remains authored Any"
+  (define out (query-output SRC '("sig" "dynamic")))
+  (check-regexp-match #rx"dynamic : \\[Any -> Any\\]" out)
+  (check-false (string-contains? out "forall") out)
+  (check-false (regexp-match? #rx"\\?[0-9]+" out) out))
+
+(test-case "sig: aggregate parameter detail preserves one binding operation"
+  (define out (query-output SRC '("sig" "pair-head")))
+  (check-regexp-match
+   #rx"pair-head : \\[\\(HVec Int String\\) -> Int\\]"
+   out)
+  (check-regexp-match #rx"  \\[x y\\] : \\(HVec Int String\\)" out))
+
+(test-case "sig: multi-arity headline and clause details use effective types"
+  (define out (query-output SRC '("sig" "overloaded")))
+  (check-regexp-match
+   #rx"overloaded : \\(U \\[Int -> Int\\] \\[String Int -> String\\]\\)"
+   out)
+  (check-regexp-match #rx"arity 1:[\n ]+x : Int" out)
+  (check-regexp-match #rx"arity 2:[\n ]+x : String[\n ]+n : Int" out))
 
 (test-case "sig: declare-extern entries are found"
   (define out (query-output SRC '("sig" "host/get")))
@@ -93,3 +123,11 @@
 (test-case "callers: finds call sites inside defn bodies"
   (define out (query-output SRC '("callers" "typed")))
   (check-regexp-match #rx"in private-fn" out))
+
+(test-case "sig: checking rejects an invalid definition instead of publishing it"
+  (check-exn
+   #rx"expected return String, got Int"
+   (lambda ()
+     (query-output
+      "(ns q)\n(defn broken [(x Int)] String x)\n"
+      '("sig" "broken")))))

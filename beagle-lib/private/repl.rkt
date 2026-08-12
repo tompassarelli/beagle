@@ -33,43 +33,82 @@
   (for ([(k v) (in-hash STDLIB-TYPES)])
     (hash-set! repl-env k v)))
 
+;; REPL bindings are real inputs to the next whole-program check.  Carry them
+;; through the program's extern table so definition inference, ordinary form
+;; checking, and emission all observe one environment instead of three
+;; hand-maintained approximations.  Declarations in the current input win.
+(define (merge-repl-externs! prog)
+  (define externs (program-externs prog))
+  (for ([(name type) (in-hash repl-env)])
+    (unless (hash-has-key? externs name)
+      (hash-set! externs name type)))
+  prog)
+
+(define (parse-repl-program expr-str)
+  (define stxs (read-repl-stxs expr-str))
+  (define parsed (parse-program stxs))
+  ;; Keep the exact parsed program identity: parse/check side tables (macro
+  ;; provenance and source/body locations) are keyed by that identity.
+  (define input-externs (hash-copy (program-externs parsed)))
+  (values input-externs (merge-repl-externs! parsed)))
+
+(define (checked-repl-env prog)
+  (define env (build-initial-env prog))
+  (define effective (program-effective-definition-types prog))
+  (when effective
+    (for ([(name type) (in-hash effective)])
+      (hash-set! env name type)))
+  env)
+
+(define (definition-form-type form prog)
+  (define definition (unwrap-definition-form form))
+  (define name
+    (cond
+      [(defn-form? definition) (defn-form-name definition)]
+      [(defn-multi? definition) (defn-multi-name definition)]
+      [else #f]))
+  (and name (program-effective-definition-type prog name #f)))
+
 (define (repl-type-of expr-str)
   (with-handlers ([exn:fail? (lambda (e) (format "error: ~a" (exn-message e)))])
-    (define stxs (read-repl-stxs expr-str))
-    (define prog (parse-program stxs))
-    (define env (build-repl-check-env prog))
+    (define-values (_input-externs prog) (parse-repl-program expr-str))
+    (type-check! prog)
+    (define env (checked-repl-env prog))
     (define forms (program-forms prog))
     (cond
       [(null? forms) "()"]
       [else
-       (define last-form (last forms))
+       (define raw-last-form (last forms))
+       (define last-form (unwrap-definition-form raw-last-form))
        (cond
-         [(defn-form? last-form)
-          (define params (defn-form-params last-form))
-          (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) params))
-          (define ret (defn-form-return-type last-form))
-          (type->string (type-fn ptypes #f ret))]
+         [(or (defn-form? last-form) (defn-multi? last-form))
+          (define effective (definition-form-type last-form prog))
+          (unless effective
+            (error 'beagle-repl "checked definition has no effective signature"))
+          (type->string effective)]
          [(def-form? last-form)
           (type->string (or (def-form-type last-form)
                             (infer-in-env (def-form-value last-form) env)))]
+         [(defonce-form? last-form)
+          (type->string (or (defonce-form-type last-form)
+                            (infer-in-env (defonce-form-value last-form) env)))]
          [else
-          (type->string (infer-in-env last-form env))])])))
+          (type->string (infer-in-env raw-last-form env))])])))
 
 (define (repl-compile expr-str)
   (with-handlers ([exn:fail? (lambda (e) (values #f (exn-message e)))])
-    (define stxs (read-repl-stxs expr-str))
-    (define prog (parse-program stxs))
-    (define env (build-repl-check-env prog))
-    ;; Type check
-    (for ([form (in-list (program-forms prog))])
-      (check-form form env))
+    (define-values (input-externs prog) (parse-repl-program expr-str))
+    ;; Definition inference is whole-program: checking forms one by one loses
+    ;; SCC solving and can persist unsolved/Any-shaped signatures.
+    (type-check! prog)
+    (define env (checked-repl-env prog))
     ;; Persist imported types from require into repl-env
-    (for ([(k v) (in-hash (program-externs prog))])
+    (for ([(k v) (in-hash input-externs)])
       (unless (hash-has-key? repl-env k)
         (hash-set! repl-env k v)))
     ;; Register any new defs/defns/records in persistent env
     (for ([form (in-list (program-forms prog))])
-      (register-form! form env))
+      (register-form! form prog env))
     ;; Emit and strip ns boilerplate
     (define clj (emit-program prog))
     (define lines (string-split clj "\n"))
@@ -82,26 +121,29 @@
        "\n"))
     (values stripped #f)))
 
-(define (build-repl-check-env prog)
-  (define env (make-hash))
-  (for ([(k v) (in-hash repl-env)])
-    (hash-set! env k v))
-  (for ([(k v) (in-hash (program-externs prog))])
-    (hash-set! env k v))
-  env)
-
-(define (register-form! form env)
+(define (register-form! raw-form prog env)
+  (define form (unwrap-definition-form raw-form))
   (cond
-    [(defn-form? form)
-     (define name (defn-form-name form))
-     (define params (defn-form-params form))
-     (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) params))
-     (define ret (defn-form-return-type form))
-     (hash-set! repl-env name (type-fn ptypes #f ret))]
+    [(or (defn-form? form) (defn-multi? form))
+     (define name
+       (if (defn-form? form)
+           (defn-form-name form)
+           (defn-multi-name form)))
+     (define effective (program-effective-definition-type prog name #f))
+     (unless effective
+       (error 'beagle-repl
+              "checked definition ~a has no effective signature"
+              name))
+     (hash-set! repl-env name effective)]
     [(def-form? form)
      (define name (def-form-name form))
      (define t (or (def-form-type form)
                    (infer-in-env (def-form-value form) env)))
+     (hash-set! repl-env name t)]
+    [(defonce-form? form)
+     (define name (defonce-form-name form))
+     (define t (or (defonce-form-type form)
+                   (infer-in-env (defonce-form-value form) env)))
      (hash-set! repl-env name t)]
     [(record-form? form)
      (define name (record-form-name form))
