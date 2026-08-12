@@ -37,21 +37,21 @@
    "#lang beagle/js\n"
    "(ns wake.core)\n"
    "(define-mode strict)\n"
-   "(defn greeting [name: String] -> String name)\n"))
+   "(defn greeting [(name String)] String name)\n"))
 
 (define entry-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
    "(define-mode strict)\n"
-   "(defn go [name: String] -> String (wake/greeting name))\n"))
+   "(defn go [(name String)] String (wake/greeting name))\n"))
 
 (define unrelated-source
   (string-append
    "#lang beagle/js\n"
    "(ns unused.module)\n"
    "(define-mode strict)\n"
-   "(def value: Int 1)\n"))
+   "(def value Int 1)\n"))
 
 (define shared-types-source
   (string-append
@@ -68,28 +68,28 @@
    "                  :nix [[missing.types :as missing]])))\n"
    "(define-mode strict)\n"
    "(defalias WakeText shared/Text)\n"
-   "(defn pass [value: WakeText] -> WakeText value)\n"))
+   "(defn pass [(value WakeText)] WakeText value)\n"))
 
 (define nested-entry-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
    "(define-mode strict)\n"
-   "(defn go [] -> String (wake/pass \"hello\"))\n"))
+   "(defn go [] String (wake/pass \"hello\"))\n"))
 
 (define nested-bad-argument-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
    "(define-mode strict)\n"
-   "(defn bad [] -> String (wake/pass 1))\n"))
+   "(defn bad [] String (wake/pass 1))\n"))
 
 (define nested-bad-return-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
    "(define-mode strict)\n"
-   "(defn bad [] -> Int (wake/pass \"hello\"))\n"))
+   "(defn bad [] Int (wake/pass \"hello\"))\n"))
 
 (define cycle-a-source
   (string-append
@@ -97,7 +97,7 @@
    "(ns cycle.a (:require [cycle.b :as b]))\n"
    "(define-mode strict)\n"
    "(defalias AName String)\n"
-   "(defn a [value: AName] -> AName value)\n"))
+   "(defn a [(value AName)] AName value)\n"))
 
 (define cycle-b-source
   (string-append
@@ -105,7 +105,7 @@
    "(ns cycle.b (:require [cycle.a :as a]))\n"
    "(define-mode strict)\n"
    "(defalias BName String)\n"
-   "(defn b [value: BName] -> BName value)\n"))
+   "(defn b [(value BName)] BName value)\n"))
 
 (define (base64 text)
   (bytes->string/latin-1
@@ -360,7 +360,7 @@
          "#lang beagle/js\n"
          "(ns dynamic.main)\n"
          "(define-mode dynamic)\n"
-         "(def value: Int 1)\n")
+         "(def value Int 1)\n")
         "package"))
      (check-exn
       #rx"must use \\(define-mode strict\\)"
@@ -374,7 +374,7 @@
          "#lang beagle/js\n"
          "(ns mismatch.main)\n"
          "(define-mode strict)\n"
-         "(def value: Int 1)\n")
+         "(def value Int 1)\n")
         "package"))
      (check-exn
       #rx"extension requires #lang beagle/clj, got #lang beagle/js"
