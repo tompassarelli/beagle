@@ -102,6 +102,26 @@ Fields remain required to carry types. A typed rest parameter is
 `& (more (Vec Int))`. Top-level `def` and `defonce` are already structural
 owner forms, so their type is the positional slot after the name.
 
+Each outer parameter-vector entry is an independent binding. `[a (b Point)]`
+contains a bare binding and a typed binding; `([x y] Point)` is one typed
+destructuring binding. Never reinterpret an adjacent outer entry as the type,
+constraint, or metadata of the preceding binding.
+
+Macro-owned declaration DSLs may give one declaration more local metadata:
+
+```clojure
+[(id String validator?)
+ (name String validator?)]
+```
+
+In such a DSL, every outer entry must contain the complete declaration. Iterate
+the entries directly. First reject anything that is not a declaration form,
+then check its exact arity, and only then destructure and handle its fields
+locally. Never `partition`, pair, or otherwise reconstruct declarations from
+adjacent tokens. Reject a flattened form such as `[(id String) validator?]` in
+that macro with a targeted field diagnostic; do not make the parameter parser
+reject it, because there it denotes two independent bindings.
+
 Top-level typed definitions use noun then type:
 
 ```clojure

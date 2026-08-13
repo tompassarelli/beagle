@@ -118,6 +118,9 @@ to project. Typed and bare bindings may mix:
   destructure, or associative destructure can be the binding form. The nesting
   is semantic structure, not decoration. Mixed vectors need no special case:
   `[([x y] (HVec Float Float)) opts]`.
+- Treat each outer parameter-vector entry independently. `[a (b Point)]` is a
+  bare binding followed by a typed binding; `([x y] Point)` is one typed
+  destructuring binding. Never attach an adjacent entry to its predecessor.
 - Executable return types occupy one mandatory positional slot after the
   parameter vector: `[params] Return body...`. Type-level function arrows such
   as `[Int -> String]` remain.
@@ -126,6 +129,15 @@ to project. Typed and bare bindings may mix:
   `& (more (Vec Int))`.
 - `name: Type`, `name :- Type`, and executable `-> Return` are rejected; never
   introduce compatibility syntax for them.
+
+For macro DSLs with field-local metadata, put the entire declaration in one
+form, such as `[(id String validator?)]`. Iterate those forms directly. First
+guard a possible stray token (for example with `pair?`), then check the exact
+arity, and only then call `first`, `nth`, or another destructuring operation on
+that entry. Never `partition`, pair, or normalize adjacent tokens into a field.
+Reject `[(id String) validator?]` at macro expansion with a targeted declaration
+diagnostic. This rejection is contextual: in a parameter vector those outer
+entries remain two independent bindings.
 
 Typed destructuring annotates the binding operation rather than only an
 identifier. Use a positional type for sequential destructuring and a
