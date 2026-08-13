@@ -35,12 +35,12 @@ int main(void) {
                              (size_t)8);
   native_set_trap_reporter(expect_invalid_argument);
 #if BUFFER_CAPABILITY_OP == 0
-  (void)native_buffer_length(buffer, &forged);
+  (void)native_buffer_length(&arena, buffer, &forged);
 #elif BUFFER_CAPABILITY_OP == 1
-  (void)native_buffer_at(buffer, &forged, INT64_C(0), INT64_C(8),
+  (void)native_buffer_at(&arena, buffer, &forged, INT64_C(0), INT64_C(8),
                          (size_t)8U);
 #elif BUFFER_CAPABILITY_OP == 2
-  native_buffer_set(buffer, &forged, INT64_C(0), &value, INT64_C(8),
+  native_buffer_set(&arena, buffer, &forged, INT64_C(0), &value, INT64_C(8),
                     (size_t)8U);
 #else
 #error "unknown BUFFER_CAPABILITY_OP"

@@ -20,12 +20,17 @@
 #define NATIVE_HOST_SOCKET_MAX_IO INT64_C(1048576)
 
 typedef struct native_arena_chunk native_arena_chunk;
+typedef struct native_buffer_registry native_buffer_registry;
 
 typedef struct native_arena {
   uint8_t *bytes;
   size_t capacity;
   size_t offset;
   native_arena_chunk *chunks;
+  /* Heap-stable identity, registrations, and allocation generation for this
+     arena's Buffers. Metadata retains this registry, never a raw native_arena
+     pointer that can dangle. It is allocated lazily on the first Buffer. */
+  native_buffer_registry *buffer_registry;
   size_t growth_floor;
   bool growable;
   /* Arena-local instrumentation avoids cross-arena races. Counts and current
@@ -71,9 +76,11 @@ typedef struct native_vec {
   int64_t *watermark;
 } native_vec;
 
-/* Fixed-length mutable dense storage owned by the arena that allocated it.
-   This is deliberately not native_vec: length never changes, reads and writes
-   are checked, and updates mutate the shared buffer identity in place. */
+/* Durable handle for fixed-length mutable dense storage owned by an arena.
+   The public fields mirror immutable registration facts and are checked on
+   every access; the backing span is invalidated by arena reset. This is
+   deliberately not native_vec: length never changes, reads and writes are
+   checked, and updates mutate the shared buffer identity in place. */
 typedef struct native_buffer {
   void *elements;
   int64_t length;
@@ -85,7 +92,7 @@ typedef struct native_buffer {
 } native_buffer;
 
 /* native_buffer is a public runtime handle shared with generated C17. Pin its
-   field sequence for every target and the supported 64-bit/wasm32 profiles. */
+   field sequence generically and for native64, wasm32, and i386 profiles. */
 #define NATIVE_ABI_ALIGN_UP(value, alignment) \
   (((value) + (alignment) - (size_t)1U) & ~((alignment) - (size_t)1U))
 #define NATIVE_ABI_MAX_ALIGN(left, right) \
@@ -151,6 +158,20 @@ _Static_assert(offsetof(native_buffer, elements) == 0U &&
                    offsetof(native_buffer, alignment) == 24U &&
                    offsetof(native_buffer, owner_capability_token) == 32U,
                "native_buffer wasm32 ABI offsets");
+#endif
+#if defined(__i386__)
+_Static_assert(sizeof(void *) == 4U && sizeof(size_t) == 4U &&
+                   _Alignof(int64_t) == 4U && _Alignof(uint64_t) == 4U,
+               "native_buffer i386 scalar ABI");
+_Static_assert(sizeof(native_buffer) == 32U, "native_buffer i386 ABI size");
+_Static_assert(_Alignof(native_buffer) == 4U,
+               "native_buffer i386 ABI alignment");
+_Static_assert(offsetof(native_buffer, elements) == 0U &&
+                   offsetof(native_buffer, length) == 4U &&
+                   offsetof(native_buffer, stride) == 12U &&
+                   offsetof(native_buffer, alignment) == 20U &&
+                   offsetof(native_buffer, owner_capability_token) == 24U,
+               "native_buffer i386 ABI offsets");
 #endif
 #undef NATIVE_ABI_MAX_ALIGN
 #undef NATIVE_ABI_ALIGN_UP
@@ -359,14 +380,16 @@ native_buffer *native_buffer_new(native_arena *arena,
                                  const native_capability *capability,
                                  int64_t length, int64_t stride,
                                  size_t alignment);
-int64_t native_buffer_length(const native_buffer *buffer,
+int64_t native_buffer_length(const native_arena *arena,
+                             const native_buffer *buffer,
                              const native_capability *capability);
 /* Both accessors trap NATIVE_TRAP_OUT_OF_RANGE unless 0 <= index < length. */
-const void *native_buffer_at(const native_buffer *buffer,
+const void *native_buffer_at(const native_arena *arena,
+                             const native_buffer *buffer,
                              const native_capability *capability,
                              int64_t index, int64_t stride,
                              size_t alignment);
-void native_buffer_set(native_buffer *buffer,
+void native_buffer_set(const native_arena *arena, native_buffer *buffer,
                        const native_capability *capability,
                        int64_t index, const void *value, int64_t stride,
                        size_t alignment);

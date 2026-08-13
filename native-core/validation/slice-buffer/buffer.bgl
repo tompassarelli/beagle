@@ -37,8 +37,9 @@
 (defn write-at! [(buffer (Buffer Float)) (index Int)] Float
   (aset-double! buffer index 4.0))
 
-;; Both Buffer constructions occur before the time-step loop. The loop only
-;; swaps handles; each cell update is a checked in-place scalar write.
+;; Both Buffer constructions occur before the time-step loop. Each allocates
+;; one dense arena span and one durable checked handle outside resettable arena
+;; storage. The loop only swaps handles and performs checked scalar writes.
 (defn run-stencil! [(steps Int)] Float
   (if (neg? steps)
     0.0

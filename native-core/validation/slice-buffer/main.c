@@ -39,7 +39,7 @@ int main(void) {
   if (arena.buffer_storage_allocation_count - before != UINT64_C(2)) {
     return 3;
   }
-  if (arena.allocation_count - arena_before != UINT64_C(4)) {
+  if (arena.allocation_count - arena_before != UINT64_C(2)) {
     return 7;
   }
   if (arena.buffer_storage_current_bytes != (size_t)128U ||
@@ -47,6 +47,7 @@ int main(void) {
     return 8;
   }
   before = arena.buffer_storage_allocation_count;
+  arena_before = arena.allocation_count;
   if (BUFFER_RUN_FN(&arena, &capability, INT64_C(-1)) != 0.0 ||
       arena.buffer_storage_allocation_count != before) {
     return 4;
@@ -55,7 +56,8 @@ int main(void) {
                                  (size_t)8);
   empty_right = native_buffer_new(&arena, &capability, INT64_C(0), INT64_C(8),
                                   (size_t)8);
-  if (arena.buffer_storage_allocation_count != before ||
+  if (arena.allocation_count != arena_before ||
+      arena.buffer_storage_allocation_count != before ||
       arena.buffer_storage_current_bytes != (size_t)128U) {
     return 9;
   }
@@ -65,7 +67,8 @@ int main(void) {
   }
   one = native_buffer_new(&arena, &capability, INT64_C(1), INT64_C(8),
                           (size_t)8);
-  if (arena.buffer_storage_allocation_count != before + UINT64_C(1) ||
+  if (arena.allocation_count != arena_before + UINT64_C(1) ||
+      arena.buffer_storage_allocation_count != before + UINT64_C(1) ||
       arena.buffer_storage_current_bytes != (size_t)136U ||
       arena.buffer_storage_high_water_bytes != (size_t)136U) {
     return 10;
@@ -78,7 +81,8 @@ int main(void) {
   }
   (void)native_buffer_new(&other_arena, &capability, INT64_C(2), INT64_C(8),
                           (size_t)8U);
-  if (other_arena.buffer_storage_allocation_count != UINT64_C(1) ||
+  if (other_arena.allocation_count != UINT64_C(1) ||
+      other_arena.buffer_storage_allocation_count != UINT64_C(1) ||
       other_arena.buffer_storage_current_bytes != (size_t)16U ||
       other_arena.buffer_storage_high_water_bytes != (size_t)16U ||
       arena.buffer_storage_current_bytes != (size_t)136U) {

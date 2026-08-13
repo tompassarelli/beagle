@@ -21,13 +21,18 @@ phase() {
   printf 'drive.sh: %s\n' "$1"
 }
 
+bounded_outcome='uninitialized'
+bounded_status=125
+
 # The shared supervisor runs as PID 1 in a private namespace, owns the deadline,
 # and does not return until every descendant is gone. Its completion receipt is
 # checked per invocation so a stale success cannot masquerade as this outcome.
 run_bounded() {
   local label="$1" seconds="$2" kill_grace="$3"
   shift 3
-  local receipt rc expected
+  local receipt receipt_line rc
+  bounded_outcome='harness'
+  bounded_status=125
   receipt="$(mktemp "$scratch/bounded-receipt.XXXXXX")"
   printf 'drive.sh: %s bounded START deadline=%ss kill-grace=%ss\n' \
     "$label" "$seconds" "$kill_grace" >&2
@@ -39,24 +44,33 @@ run_bounded() {
   else
     rc=$?
   fi
-  case "$rc" in
-    124)
-      expected='subtree-reaped-v0 timeout status=124'
+  bounded_status=$rc
+  if [[ -f "$receipt" ]]; then
+    receipt_line="$(<"$receipt")"
+  else
+    receipt_line=''
+  fi
+  case "$receipt_line" in
+    "subtree-reaped-v0 exit status=$rc")
+      bounded_outcome='exit'
       ;;
-    2)
-      printf 'drive.sh: %s HARNESS-FAIL status=2\n' "$label" >&2
-      return 2
-      ;;
-    *)
-      expected="subtree-reaped-v0 exit status=$rc"
+    'subtree-reaped-v0 timeout status=124')
+      if [[ "$rc" == "124" ]]; then
+        bounded_outcome='timeout'
+      else
+        bounded_status=125
+      fi
       ;;
   esac
-  if ! grep -Fqx "$expected" "$receipt"; then
+  if [[ "$bounded_outcome" == 'harness' ]]; then
     printf 'drive.sh: %s HARNESS-FAIL missing completion receipt status=%s\n' \
       "$label" "$rc" >&2
-    return 125
+    if [[ "$rc" == "0" ]]; then
+      bounded_status=125
+    fi
+    return "$bounded_status"
   fi
-  if [[ "$rc" == "124" ]]; then
+  if [[ "$bounded_outcome" == 'timeout' ]]; then
     printf 'drive.sh: %s TIMEOUT status=124\n' "$label" >&2
   else
     printf 'drive.sh: %s bounded END status=%s\n' "$label" "$rc" >&2
@@ -87,11 +101,11 @@ expect_bounded_rejection() {
   else
     rc=$?
   fi
-  case "$rc" in
-    2|124|125) return "$rc" ;;
-  esac
-  printf 'drive.sh: %s EXPECTED-REJECTION status=%s\n' "$label" "$rc" >&2
-  return 0
+  if [[ "$bounded_outcome" == 'exit' ]]; then
+    printf 'drive.sh: %s EXPECTED-REJECTION status=%s\n' "$label" "$rc" >&2
+    return 0
+  fi
+  return "$rc"
 }
 
 expect_bounded_rejection_logged() {
@@ -108,6 +122,40 @@ expect_bounded_rejection_logged() {
   printf 'drive.sh: %s REJECTION-FAIL status=%s\n' "$label" "$rc" >&2
   return "$rc"
 }
+
+run_bounded_protocol_self_test() {
+  local rc
+  phase "bounded supervisor receipt protocol"
+  expect_bounded_rejection "receipt child exit 2" 5 1 /bin/sh -c 'exit 2'
+  [[ "$bounded_outcome" == 'exit' && "$bounded_status" == '2' ]]
+  expect_bounded_rejection "receipt child exit 124" 5 1 /bin/sh -c 'exit 124'
+  [[ "$bounded_outcome" == 'exit' && "$bounded_status" == '124' ]]
+  if expect_bounded_rejection "receipt deadline" 1 1 /bin/sh -c \
+      'trap "" TERM; sleep 30 & wait "$!"'; then
+    return 91
+  else
+    rc=$?
+  fi
+  [[ "$rc" == '124' && "$bounded_outcome" == 'timeout' &&
+      "$bounded_status" == '124' ]]
+  if expect_bounded_rejection "receipt setup failure" 5 1 \
+      "$scratch/command-that-does-not-exist"; then
+    return 92
+  else
+    rc=$?
+  fi
+  [[ "$rc" == '2' && "$bounded_outcome" == 'harness' &&
+      "$bounded_status" == '2' ]]
+}
+
+if [[ "${1:-}" == '--bounded-self-test' ]]; then
+  run_bounded_protocol_self_test
+  echo "drive.sh: bounded supervisor receipt protocol pass"
+  exit 0
+elif [[ $# -ne 0 ]]; then
+  echo "drive.sh: unknown argument: $1" >&2
+  exit 2
+fi
 
 build_once() {
   local output="$1"
@@ -205,6 +253,21 @@ compile_wrong_alignment_probe() {
   observed="$(run_bounded "$suffix wrong alignment execute" 10 2 \
     "$scratch/wrong-alignment-$suffix")"
   [[ "$observed" == 'alignment-trap: invalid-argument' ]]
+}
+
+compile_ownership_probe() {
+  local compiler="$1" output="$2" suffix="$3" operation="$4"
+  phase "$suffix ownership operation $operation compile"
+  run_bounded "$suffix ownership operation $operation compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
+    "-DBUFFER_OWNERSHIP_OP=$operation" -I "$output" \
+    "$output/native_shim.c" "$here/ownership_main.c" \
+    -o "$scratch/ownership-$suffix"
+  phase "$suffix ownership operation $operation execute"
+  local observed
+  observed="$(run_bounded "$suffix ownership operation $operation execute" \
+    10 2 "$scratch/ownership-$suffix")"
+  [[ "$observed" == 'ownership-trap: invalid-argument' ]]
 }
 
 compile_wasm32_overflow_probe() {
@@ -360,6 +423,7 @@ expect_qbe_refusal() {
   test ! -e "$output/module_0.ssa"
 }
 
+run_bounded_protocol_self_test
 phase "source API check"
 run_bounded "source API check" 60 5 "$repo/bin/beagle" check --agent \
   "$here/buffer.bgl" "$here/holder.bgl" "$here/native_exe.bgl"
@@ -384,8 +448,8 @@ rg -q 'arena-write' "$program"
 rg -q 'arena-allocate' "$program"
 
 # There are two syntactic Buffer constructions. Each nonempty construction
-# performs two raw arena allocations (header + element span), for four total;
-# no allocation occurs inside either cell/time loop.
+# performs one raw arena allocation for its element span; durable checked
+# handles live outside resettable arena storage. Neither loop allocates.
 test "$(token_count native_buffer_new "$scratch/first/module_0.c")" = 2
 rg -q 'mutable region-owned buffer.*stride 8, alignment 8' \
   "$scratch/first/module_0.h"
@@ -421,6 +485,10 @@ for operation in 0 1 2 3; do
   compile_wrong_alignment_probe gcc "$scratch/first" \
     "gcc-operation-$operation" "$operation"
 done
+for operation in {0..9}; do
+  compile_ownership_probe gcc "$scratch/first" \
+    "gcc-operation-$operation" "$operation"
+done
 compile_wasm32_overflow_probe gcc "$scratch/first" gcc
 
 clang_bin="$(command -v clang 2>/dev/null || \
@@ -444,6 +512,10 @@ if [[ -n "$clang_bin" ]]; then
   done
   for operation in 0 1 2 3; do
     compile_wrong_alignment_probe "$clang_bin" "$scratch/first" \
+      "clang-operation-$operation" "$operation"
+  done
+  for operation in {0..9}; do
+    compile_ownership_probe "$clang_bin" "$scratch/first" \
       "clang-operation-$operation" "$operation"
   done
   compile_wasm32_overflow_probe "$clang_bin" "$scratch/first" clang
@@ -529,4 +601,4 @@ expect_qbe_refusal
 expect_check_refusal "$here/purity_refusal.bgl" \
   'purity leak.*overwrite.*overwrite-buffer!' purity
 
-echo "drive.sh: frozen IR typing/provenance, C17 Holder, checked bounds/capability/size, recursive refusals, QBE refusal, and ping-pong allocation proof pass"
+echo "drive.sh: frozen IR typing/provenance, C17 Holder, checked bounds/capability/arena-generation/size, recursive refusals, QBE refusal, and ping-pong allocation proof pass"

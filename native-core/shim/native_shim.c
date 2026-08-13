@@ -3510,6 +3510,30 @@ struct native_arena_chunk {
   size_t capacity;
 };
 
+/* Registrations outlive arena resets. Each stores immutable allocation facts;
+   the public header is only a checked ABI projection and is never trusted as
+   allocation authority. */
+typedef struct native_buffer_registration native_buffer_registration;
+
+struct native_buffer_registry {
+  uint64_t generation;
+  native_buffer_registration *registrations;
+};
+
+struct native_buffer_registration {
+  native_buffer handle;
+  native_buffer_registry *owner;
+  uint64_t generation;
+  const native_capability *owner_capability;
+  uint64_t owner_capability_token;
+  void *elements;
+  int64_t length;
+  int64_t stride;
+  size_t alignment;
+  size_t byte_length;
+  native_buffer_registration *next;
+};
+
 uint64_t native_vec_storage_allocations = UINT64_C(0);
 
 /* Smallest capacity a first push takes; every later growth doubles, which is
@@ -3521,12 +3545,23 @@ static void native_arena_clear(native_arena *arena) {
   arena->capacity = 0U;
   arena->offset = 0U;
   arena->chunks = NULL;
+  arena->buffer_registry = NULL;
   arena->growth_floor = 0U;
   arena->growable = false;
   arena->allocation_count = UINT64_C(0);
   arena->buffer_storage_allocation_count = UINT64_C(0);
   arena->buffer_storage_current_bytes = 0U;
   arena->buffer_storage_high_water_bytes = 0U;
+}
+
+static native_buffer_registry *native_buffer_registry_new(void) {
+  native_buffer_registry *registry =
+      (native_buffer_registry *)malloc(sizeof(*registry));
+  if (registry != NULL) {
+    registry->generation = UINT64_C(1);
+    registry->registrations = NULL;
+  }
+  return registry;
 }
 
 static bool native_arena_add_chunk(native_arena *arena, size_t required) {
@@ -3580,7 +3615,11 @@ bool native_arena_init_growable(native_arena *arena, size_t growth_floor) {
   native_arena_clear(arena);
   arena->growth_floor = growth_floor;
   arena->growable = true;
-  return growth_floor == 0U || native_arena_add_chunk(arena, growth_floor);
+  if ((growth_floor != 0U) && !native_arena_add_chunk(arena, growth_floor)) {
+    native_arena_clear(arena);
+    return false;
+  }
+  return true;
 }
 
 void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment) {
@@ -3635,6 +3674,15 @@ void native_arena_reset(native_arena *arena) {
   if (arena == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  /* Invalidate every registered handle before fixed storage can be reused or
+     growable chunks can be freed. Stale validation reads only the durable
+     registration and generation, never the old public header or backing span. */
+  if (arena->buffer_registry != NULL) {
+    if (arena->buffer_registry->generation == UINT64_MAX) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    arena->buffer_registry->generation += UINT64_C(1);
+  }
   if (arena->growable) {
     native_arena_chunk *chunk = arena->chunks;
 
@@ -3655,10 +3703,20 @@ void native_arena_reset(native_arena *arena) {
 }
 
 void native_arena_destroy(native_arena *arena) {
+  native_buffer_registration *registration;
   if (arena == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_arena_reset(arena);
+  if (arena->buffer_registry != NULL) {
+    registration = arena->buffer_registry->registrations;
+    while (registration != NULL) {
+      native_buffer_registration *next = registration->next;
+      free(registration);
+      registration = next;
+    }
+    free(arena->buffer_registry);
+  }
   native_arena_clear(arena);
 }
 
@@ -3801,22 +3859,66 @@ static size_t native_dense_bytes(int64_t capacity, int64_t stride) {
   return (size_t)((uint64_t)capacity * (uint64_t)stride);
 }
 
-static void native_buffer_require(const native_buffer *buffer,
-                                  const native_capability *capability,
-                                  int64_t stride, size_t alignment) {
-  if ((buffer == NULL) || (capability == NULL) ||
-      (capability->token == UINT64_C(0)) || (stride <= INT64_C(0)) ||
-      (capability->token != buffer->owner_capability_token) ||
-      (buffer->length < INT64_C(0)) || (buffer->stride != stride) ||
-      (alignment == 0U) || ((alignment & (alignment - 1U)) != 0U) ||
-      (buffer->alignment != alignment) ||
-      (((uint64_t)stride % (uint64_t)alignment) != UINT64_C(0)) ||
-      ((buffer->elements != NULL) &&
-       (((uintptr_t)buffer->elements & ((uintptr_t)alignment - 1U)) != 0U)) ||
-      ((buffer->length > INT64_C(0)) && (buffer->elements == NULL))) {
+static const native_buffer_registration *native_buffer_require(
+    const native_arena *arena, const native_buffer *buffer,
+    const native_capability *capability, int64_t stride, size_t alignment) {
+  const native_buffer_registration *registration;
+  size_t bytes;
+
+  if ((arena == NULL) || (arena->buffer_registry == NULL) ||
+      (buffer == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (stride < INT64_C(0)) ||
+      ((alignment != 0U) &&
+       ((alignment & (alignment - (size_t)1U)) != 0U))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  (void)native_dense_bytes(buffer->length, stride);
+  registration = arena->buffer_registry->registrations;
+  while ((registration != NULL) && (&registration->handle != buffer)) {
+    registration = registration->next;
+  }
+  if ((registration == NULL) ||
+      (registration->owner != arena->buffer_registry) ||
+      (registration->generation != arena->buffer_registry->generation) ||
+      (registration->owner_capability != capability) ||
+      (registration->owner_capability_token != capability->token)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+
+  /* Only a live registration authorizes reading the public header. Every
+     mutable ABI field must still equal its immutable allocation fact. */
+  if ((buffer->elements != registration->elements) ||
+      (buffer->length != registration->length) ||
+      (buffer->stride != registration->stride) ||
+      (buffer->alignment != registration->alignment) ||
+      (buffer->owner_capability_token !=
+       registration->owner_capability_token) ||
+      ((stride != INT64_C(0)) && (stride != registration->stride)) ||
+      ((alignment != 0U) && (alignment != registration->alignment))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  bytes = native_dense_bytes(registration->length, registration->stride);
+  if ((bytes != registration->byte_length) ||
+      ((bytes == 0U) != (registration->elements == NULL)) ||
+      ((registration->elements != NULL) &&
+       (((uintptr_t)registration->elements &
+         ((uintptr_t)registration->alignment - 1U)) != 0U))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return registration;
+}
+
+static size_t native_buffer_checked_offset(
+    const native_buffer_registration *registration, int64_t index) {
+  size_t offset;
+  if ((index < INT64_C(0)) || (index >= registration->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  offset = (size_t)index * (size_t)registration->stride;
+  if ((offset > registration->byte_length) ||
+      ((size_t)registration->stride > registration->byte_length - offset)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return offset;
 }
 
 native_buffer *native_buffer_new(native_arena *arena,
@@ -3824,6 +3926,7 @@ native_buffer *native_buffer_new(native_arena *arena,
                                  int64_t length, int64_t stride,
                                  size_t alignment) {
   native_buffer *buffer;
+  native_buffer_registration *registration;
   size_t bytes;
 
   if ((arena == NULL) || (capability == NULL) ||
@@ -3838,10 +3941,31 @@ native_buffer *native_buffer_new(native_arena *arena,
        (arena->buffer_storage_current_bytes > SIZE_MAX - bytes))) {
     native_trap(NATIVE_TRAP_OVERFLOW);
   }
-  buffer = (native_buffer *)native_arena_alloc(
-      arena, sizeof(*buffer), _Alignof(native_buffer));
-  buffer->elements =
+  if (arena->buffer_registry == NULL) {
+    arena->buffer_registry = native_buffer_registry_new();
+    if (arena->buffer_registry == NULL) {
+      native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+    }
+  }
+  registration =
+      (native_buffer_registration *)malloc(sizeof(*registration));
+  if (registration == NULL) {
+    native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+  }
+  buffer = &registration->handle;
+  registration->elements =
       (bytes == 0U) ? NULL : native_arena_alloc(arena, bytes, alignment);
+  registration->owner = arena->buffer_registry;
+  registration->generation = arena->buffer_registry->generation;
+  registration->owner_capability = capability;
+  registration->owner_capability_token = capability->token;
+  registration->length = length;
+  registration->stride = stride;
+  registration->alignment = alignment;
+  registration->byte_length = bytes;
+  registration->next = arena->buffer_registry->registrations;
+  arena->buffer_registry->registrations = registration;
+  buffer->elements = registration->elements;
   buffer->length = length;
   buffer->stride = stride;
   buffer->alignment = alignment;
@@ -3858,39 +3982,38 @@ native_buffer *native_buffer_new(native_arena *arena,
   return buffer;
 }
 
-int64_t native_buffer_length(const native_buffer *buffer,
+int64_t native_buffer_length(const native_arena *arena,
+                             const native_buffer *buffer,
                              const native_capability *capability) {
-  native_buffer_require(buffer, capability,
-                        buffer == NULL ? INT64_C(0) : buffer->stride,
-                        buffer == NULL ? 0U : buffer->alignment);
-  return buffer->length;
+  const native_buffer_registration *registration = native_buffer_require(
+      arena, buffer, capability, INT64_C(0), 0U);
+  return registration->length;
 }
 
-const void *native_buffer_at(const native_buffer *buffer,
+const void *native_buffer_at(const native_arena *arena,
+                             const native_buffer *buffer,
                              const native_capability *capability,
                              int64_t index, int64_t stride,
                              size_t alignment) {
-  native_buffer_require(buffer, capability, stride, alignment);
-  if ((index < INT64_C(0)) || (index >= buffer->length)) {
-    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
-  }
-  return (const void *)((const uint8_t *)buffer->elements +
-                        ((size_t)index * (size_t)stride));
+  const native_buffer_registration *registration =
+      native_buffer_require(arena, buffer, capability, stride, alignment);
+  size_t offset = native_buffer_checked_offset(registration, index);
+  return (const void *)((const uint8_t *)registration->elements + offset);
 }
 
-void native_buffer_set(native_buffer *buffer,
+void native_buffer_set(const native_arena *arena, native_buffer *buffer,
                        const native_capability *capability,
                        int64_t index, const void *value, int64_t stride,
                        size_t alignment) {
-  native_buffer_require(buffer, capability, stride, alignment);
+  const native_buffer_registration *registration =
+      native_buffer_require(arena, buffer, capability, stride, alignment);
+  size_t offset;
   if (value == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  if ((index < INT64_C(0)) || (index >= buffer->length)) {
-    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
-  }
-  memcpy((uint8_t *)buffer->elements + ((size_t)index * (size_t)stride), value,
-         (size_t)stride);
+  offset = native_buffer_checked_offset(registration, index);
+  memcpy((uint8_t *)registration->elements + offset, value,
+         (size_t)registration->stride);
 }
 
 /* A second header over storage already handed out: the source header keeps its

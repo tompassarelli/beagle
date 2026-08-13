@@ -2538,7 +2538,7 @@
           (buffer-element-alignment layouts buffer-type) ");\n"))
 
       (instance? native.core.BufferLengthInstructionV0 instruction)
-      (str "  " target " = native_buffer_length("
+      (str "  " target " = native_buffer_length((const native_arena *)arena, "
         (value-name function slots
           (core/bufferlengthinstructionv0-source-id instruction))
         ", capability);\n")
@@ -2549,8 +2549,8 @@
             (buffer-type core/NativeId) (slot-type function slots source)]
         (str "  " target " = *(const "
           (c17/c-type types module-index (core/ssavaluev0-type-id result))
-          " *)native_buffer_at(" (value-name function slots source)
-          ", capability, "
+          " *)native_buffer_at((const native_arena *)arena, "
+          (value-name function slots source) ", capability, "
           (value-name function slots
             (core/buffergetcheckedinstructionv0-index-id instruction))
           ", INT64_C(" (buffer-stride layouts buffer-type) "), (size_t)"
@@ -2563,8 +2563,8 @@
             (value String)
             (value-name function slots
               (core/buffersetcheckedinstructionv0-value-id instruction))]
-        (str "  native_buffer_set(" (value-name function slots source)
-          ", capability, "
+        (str "  native_buffer_set((const native_arena *)arena, "
+          (value-name function slots source) ", capability, "
           (value-name function slots
             (core/buffersetcheckedinstructionv0-index-id instruction))
           ", &" value ", INT64_C(" (buffer-stride layouts buffer-type)

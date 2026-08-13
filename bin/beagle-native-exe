@@ -404,6 +404,7 @@ EOF
 EOF
         if [[ "$needs_arena" == "1" ]]; then
             cat <<'EOF'
+  native_arena_destroy(&arena);
   free(arena_storage);
 EOF
         fi
@@ -421,6 +422,7 @@ EOF
 EOF
         if [[ "$needs_arena" == "1" ]]; then
             cat <<'EOF'
+  native_arena_destroy(&arena);
   free(arena_storage);
 EOF
         fi

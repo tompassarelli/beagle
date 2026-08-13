@@ -21,7 +21,7 @@ int main(void) {
     return 2;
   }
   value = *(const double *)native_buffer_at(
-      buffer, &capability, INT64_C(1), INT64_C(8), (size_t)8U);
+      &arena, buffer, &capability, INT64_C(1), INT64_C(8), (size_t)8U);
   if (value != 6.0) {
     return 3;
   }
