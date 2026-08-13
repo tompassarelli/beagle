@@ -183,6 +183,10 @@
    (fallback-path String)] stages/SourceModuleV0
   (let [(declared-name (U String Nil)) (row-first-text rows root-name "namespace")
         (declared-path (U String Nil)) (row-first-text rows root-name "relative-path")
+        (source-digest (U String Nil))
+        (row-first-text rows root-name "source-sha256")
+        (interface-digest (U String Nil))
+        (row-first-text rows root-name "checked-projection-sha256")
         (module-name String)
         (if (or (nil? declared-name) (= "" declared-name)) fallback-name declared-name)
         (relative-path String)
@@ -191,10 +195,8 @@
       (slice-id "module" [module-name relative-path])
       module-name
       relative-path
-      (stages/content-digest
-        (str "slice-source-v0/" module-name "/" relative-path "/" root-name))
-      (stages/content-digest
-        (str "slice-interface-v0/" module-name "/" root-name))
+      (if (nil? source-digest) "" source-digest)
+      (if (nil? interface-digest) "" interface-digest)
       (node-id root-name))))
 
 (defn source-modules

@@ -14,6 +14,40 @@ set -euo pipefail
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
+AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
+FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
+SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
+source "$BIN/_beagle-racket"
+
+core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
+[[ "$core_kill_grace" =~ ^[1-9][0-9]*$ ]] || {
+    echo "beagle build: BEAGLE_CORE_KILL_GRACE_SECONDS must be a positive integer" >&2
+    exit 2
+}
+[[ -f "$SUPERVISOR" ]] || {
+    echo "beagle build: bounded supervisor is unavailable: $SUPERVISOR" >&2
+    exit 2
+}
+command -v unshare >/dev/null 2>&1 || {
+    echo "beagle build: required command is unavailable: unshare" >&2
+    exit 2
+}
+
+# One private PID namespace owns the entire build tree. Individual phases use
+# nested namespaces with tighter deadlines, so every boundary adopts and reaps
+# descendants instead of waiting on a shell or a GNU-timeout process group.
+if [[ "${BEAGLE_CORE_SUPERVISED:-0}" != "1" ]]; then
+    overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
+    [[ "$overall_timeout" =~ ^[1-9][0-9]*$ ]] || {
+        echo "beagle build: BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS must be a positive integer" >&2
+        exit 2
+    }
+    exec unshare --user --map-current-user --pid --fork --kill-child \
+        --forward-signals "$RACKET" "$SUPERVISOR" \
+        "$overall_timeout" "$core_kill_grace" -- \
+        env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
+fi
+
 source "$BEAGLE_DIR/share/targets.sh"
 
 usage() {
@@ -23,6 +57,38 @@ usage() {
 die() {
     echo "beagle build: $*" >&2
     exit 2
+}
+
+run_bounded() {
+    local seconds="$1"
+    local kill_grace="$2"
+    shift 2
+    unshare --user --map-current-user --pid --fork --kill-child \
+        --forward-signals "$RACKET" "$SUPERVISOR" \
+        "$seconds" "$kill_grace" -- "$@"
+}
+
+run_phase_with_grace() {
+    local name="$1"
+    local seconds="$2"
+    local kill_grace="$3"
+    shift 3
+    echo "beagle build: phase $name START" >&2
+    local rc=0
+    run_bounded "$seconds" "$kill_grace" "$@" || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "beagle build: phase $name END" >&2
+    else
+        echo "beagle build: phase $name ERROR ($rc)" >&2
+    fi
+    return "$rc"
+}
+
+run_phase() {
+    local name="$1"
+    local seconds="$2"
+    shift 2
+    run_phase_with_grace "$name" "$seconds" "$core_kill_grace" "$@"
 }
 
 out=""
@@ -114,7 +180,8 @@ if $wasm_selected && [[ ${#entries[@]} -gt 1 ]]; then
         "(got ${#entries[@]}); omit --entry for a non-executable projection"
 fi
 for entry in "${entries[@]}"; do
-    [[ "$entry" == */* ]] || die "--entry must be qualified as NS/NAME: $entry"
+    [[ "$entry" =~ ^[^[:space:]/]+/[^[:space:]/]+$ ]] ||
+        die "--entry must be one whitespace-free NS/NAME: $entry"
     entry_namespace="${entry%/*}"
     entry_name="${entry##*/}"
     [[ -n "$entry_namespace" && -n "$entry_name" && "$entry_namespace" != */* ]] ||
@@ -131,10 +198,12 @@ for source in "${sources[@]}"; do
         die "$source must begin with bare #lang beagle"
 done
 
-for command in bb sha256sum; do
+for command in bb flock sha256sum sync unshare; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
+[[ -f "$AST_VERIFIER" ]] || die "checked-AST verifier is unavailable: $AST_VERIFIER"
+[[ -f "$FINALIZER" ]] || die "build finalizer is unavailable: $FINALIZER"
 
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
@@ -146,6 +215,10 @@ managed_artifacts=(
     module.native-program.sha256
     module.simd-plan-v0
     module.simd-plan-v0.sha256
+    native.receipts
+    native.entry-map
+    c17.receipt
+    wasm.receipt
     module_0.h
     module_0.c
     module_0.ssa
@@ -154,6 +227,19 @@ managed_artifacts=(
     module_0.wasm.seams
     wasm-report.txt
     wasm-audit.txt
+    wasm.retention.c
+    wasm.adapter.c
+    wasm.entry-contract.clj
+    wasm.seams.clj
+    wasm.ast-verifier.rkt
+    wasm.receipt-finalizer.clj
+    wasm.materializer.sh
+    wasm.supervisor.rkt
+    wasm.cc-identity.txt
+    wasm.ld-identity.txt
+    wasm.runtime-identity.txt
+    build.manifest
+    build.manifest.sha256
     native_shim.h
     native_shim.c
     native_parallel.h
@@ -161,29 +247,66 @@ managed_artifacts=(
     native_unicode15_data.h
     UNICODE-LICENSE.txt
 )
-for artifact in "${managed_artifacts[@]}"; do
-    rm -f -- "$out/$artifact"
-done
-work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-core-build.XXXXXX")"
-cleanup() { rm -rf "${work:?}"; }
+work="$(mktemp -d "$out/.beagle-stage.XXXXXX")"
+marker_pending="$out/.build.manifest.sha256.pending.$$"
+build_committed=0
+commit_started=0
+work_cleaned=0
+cleanup() {
+    local rc=$?
+    if [[ "$commit_started" == "1" && "$build_committed" != "1" ]]; then
+        rm -f -- "$out/build.manifest.sha256"
+        for artifact in "${managed_artifacts[@]}"; do
+            rm -f -- "$out/$artifact"
+        done
+        sync -f "$out" 2>/dev/null || true
+    fi
+    if [[ "$build_committed" != "1" ]]; then
+        rm -f -- "$marker_pending"
+        if [[ "$work_cleaned" != "1" ]]; then
+            rm -rf "${work:?}"
+        fi
+    fi
+    return "$rc"
+}
+interrupted() { exit 143; }
 trap cleanup EXIT
+trap interrupted HUP INT TERM
 mkdir -p "$work/artifacts"
 
 facts="$work/source.facts"
 projector_args=()
-wasm_entry_evidence=()
+wasm_checked_sources=()
+source_snapshot_paths=()
+source_snapshot_digests=()
 source_index=0
 for source in "${sources[@]}"; do
+    source="$(realpath "$source")"
     ast="$work/source_${source_index}.ast.json"
-    "$BIN/beagle-ast" "$source" >"$ast"
-    logical_path="${source#./}"
+    source_digest_before="$(sha256sum "$source" | awk '{print $1}')"
+    run_phase "ast-$source_index" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
+        "$BIN/beagle-ast" "$source" >"$ast"
+    source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
+    [[ "$source_digest_before" == "$source_digest_after" ]] ||
+        die "source changed while its checked projection was captured: $source"
+    ast_metadata="$work/source_${source_index}.metadata"
+    run_phase "ast-verify-$source_index" \
+        "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+        "$RACKET" "$AST_VERIFIER" "$ast" "$source" >"$ast_metadata"
+    mapfile -d '' -t checked_fields <"$ast_metadata"
+    [[ ${#checked_fields[@]} -eq 4 ]] ||
+        die "checked AST verifier returned malformed metadata for $source"
+    logical_path="${checked_fields[0]}"
     projector_args+=(--input "$ast=$logical_path")
-    if $wasm_selected && [[ ${#entries[@]} -eq 1 ]]; then
-        wasm_entry_evidence+=(--entry-ast "$logical_path" "$ast")
+    if $wasm_selected; then
+        wasm_checked_sources+=(--checked-source "$source" "$ast")
     fi
+    source_snapshot_paths+=("$source")
+    source_snapshot_digests+=("$source_digest_after")
     source_index=$((source_index + 1))
 done
-bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
+run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
+    bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 
 core_modules=(
     native-core/src/native/core.bclj
@@ -233,7 +356,8 @@ if [[ ! -f "$cache_entry/.complete" ]]; then
     for relative in "${core_modules[@]}"; do
         build_all_args+=("$BEAGLE_DIR/$relative")
     done
-    "$BIN/beagle-build-all" "${build_all_args[@]}" \
+    run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
+        "$BIN/beagle-build-all" "${build_all_args[@]}" \
         --out "$compiled" >"$work/build.log" 2>&1 || {
             sed -n '1,200p' "$work/build.log" >&2
             exit 1
@@ -277,7 +401,7 @@ export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
 export BEAGLE_CORE_ABI="$abi"
 export BEAGLE_CORE_SIMD_REQUIRED="$simd_required"
-export BEAGLE_CORE_REPORT="$out/report.txt"
+export BEAGLE_CORE_REPORT="$work/progress.txt"
 printf '%s\n' "${entries[@]}" >"$work/entries"
 export BEAGLE_CORE_ENTRIES="$work/entries"
 printf '%s\n' "${materializers[@]}" >"$work/materializers"
@@ -285,6 +409,7 @@ export BEAGLE_CORE_MATERIALIZERS="$work/materializers"
 export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
 
 set +e
+run_phase core-lowering "${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}" \
 bb -cp "$compiled" -e '
 (require (quote [native.core :as core])
          (quote [native.stages :as stages])
@@ -346,8 +471,7 @@ bb -cp "$compiled" -e '
 (defn stage-progress-text []
   (apply str
          (for [{:keys [name status elapsed-ms]} @stage-progress]
-           (str "stage-progress " name " " status
-                " elapsed-ms " elapsed-ms "\n"))))
+           (str "stage-progress " name " " status "\n"))))
 
 (defn publish-progress! []
   (durable-write! report-path
@@ -582,10 +706,28 @@ bb -cp "$compiled" -e '
           {:ok? false :detail (str "entry is not a source function: " entry)}
 
           (= "true" (lower/fact-text index (first matches) "private"))
-          {:ok? false :detail (str "entry is private, not exported: " entry)}
+          {:ok? false
+           :detail (str "entry " entry " must be a public source function")}
 
           (not= "false" (lower/fact-text index (first matches) "private"))
           {:ok? false :detail (str "entry export visibility is unavailable: " entry)}
+
+          (not= 0 (count (lower/function-parameter-items index (first matches))))
+          {:ok? false
+           :detail
+           (str "entry " entry " must have zero source parameters (got "
+                (count (lower/function-parameter-items index (first matches))) ")")}
+
+          (some? (lower/index-first-object index (first matches) "rest"))
+          {:ok? false
+           :detail (str "entry " entry " must not have a rest parameter")}
+
+          (let [return-type (lower/index-first-object index (first matches) "ret")]
+            (or (nil? return-type)
+                (not= "type-prim" (lower/fact-text index return-type "form-kind"))
+                (not= "Int" (lower/fact-text index return-type "name"))))
+          {:ok? false
+           :detail (str "entry " entry " must have an explicit Int return")}
 
           :else
           (recur (rest remaining) (conj seeds (first matches))))))))
@@ -690,6 +832,63 @@ bb -cp "$compiled" -e '
                       "parallel-worker-count excluded-from-program-identity\n"))))
            plans))))
 
+(defn epoch-result-receipt [epoch-result]
+  (if (instance? native.lower.EpochLoweringCompleteV0 epoch-result)
+    (lower/epochloweringcompletev0-receipt epoch-result)
+    (lower/epochloweringpendingv0-receipt epoch-result)))
+
+(defn native-provenance-report
+  [source-receipt frozen-source typing-result frozen-typed native-result native-frozen
+   epoch-result frozen-native compiler-commit configuration]
+  (let [source-digest (stages/frozensourcestagev0-digest frozen-source)
+        typing-receipt (lower/typingacceptedv0-receipt typing-result)
+        typed-digest (stages/frozentypedstagev0-digest frozen-typed)
+        native-receipt (lower/nativeloweringcompletev0-receipt native-result)
+        native-digest (stages/frozennativestagev0-digest native-frozen)
+        epoch-receipt (epoch-result-receipt epoch-result)
+        epoch-digest (stages/frozennativestagev0-digest frozen-native)
+        receipts [source-receipt typing-receipt native-receipt epoch-receipt]
+        receipt-context-ok?
+        (every?
+         (fn [receipt]
+           (and (= compiler-commit (core/passreceiptv0-compiler-commit receipt))
+                (= configuration (core/passreceiptv0-configuration receipt))
+                (= (stages/configuration-digest configuration)
+                   (core/passreceiptv0-configuration-digest receipt))))
+         receipts)]
+    (when-not (and receipt-context-ok?
+                   (= source-digest
+                      (core/passreceiptv0-input-digest source-receipt))
+                   (= source-digest
+                      (core/passreceiptv0-output-digest source-receipt))
+                   (= (core/passreceiptv0-output-digest source-receipt)
+                      (core/passreceiptv0-input-digest typing-receipt))
+                   (= typed-digest
+                      (core/passreceiptv0-output-digest typing-receipt))
+                   (= typed-digest
+                      (core/passreceiptv0-input-digest native-receipt))
+                   (= native-digest
+                      (core/passreceiptv0-output-digest native-receipt))
+                   (= native-digest
+                      (core/passreceiptv0-input-digest epoch-receipt))
+                   (= epoch-digest
+                      (core/passreceiptv0-output-digest epoch-receipt)))
+      (throw (ex-info "Native Core provenance receipt chain is broken"
+                      {:source source-digest
+                       :typed typed-digest
+                       :native native-digest
+                       :epoch epoch-digest})))
+    (str "native-provenance-v0 source " source-digest "\n"
+         "native-provenance-v0 typed " typed-digest "\n"
+         "native-provenance-v0 native " native-digest "\n"
+         "native-provenance-v0 epoch " epoch-digest "\n")))
+
+(defn write-native-receipts!
+  [artifacts-dir source-receipt typing-receipt native-receipt epoch-receipt]
+  (let [receipts [source-receipt typing-receipt native-receipt epoch-receipt]
+        encoding (stages/encode-pass-receipts receipts)]
+    (spit (str artifacts-dir "/native.receipts") encoding)))
+
 (defn native-report-head
   [rows entries source program projected native-program epoch-result abi]
   (str (apply str (map #(str "source-entry " % "\n") entries))
@@ -718,22 +917,43 @@ bb -cp "$compiled" -e '
        (slice/obligation-report "obligation-projection" projected abi)
        (body-slice/failing-obligations projected abi)))
 
-(defn emit-c17-materialization! [result artifacts-dir stage-name report]
+(defn emit-c17-materialization!
+  [result artifacts-dir stage-name report-name report input-digest
+   compiler-commit configuration]
   (if-not (body/materialization-ok? result)
     (do
       (finish-stage! stage-name "REFUSED")
       {:ok? false
        :report report})
-    (let [artifact (body/materialization-artifact result)]
+    (let [artifact (body/materialization-artifact result)
+          entry-map-path (str artifacts-dir "/native.entry-map")
+          entry-map-text (slurp entry-map-path)
+          hashes (conj (body/artifact-hashes artifact)
+                   (core/->ArtifactHashV0 "native.entry-map"
+                     (stages/content-digest entry-map-text)))
+          receipt (stages/make-artifact-receipt
+                    input-digest compiler-commit "native-to-c17" configuration
+                    "c17" "restricted-c17-v0" hashes)
+          artifact-report
+          (apply str
+                 (map (fn [hash]
+                        (str report-name "-artifact "
+                             (core/artifacthashv0-name hash) " "
+                             (core/artifacthashv0-digest hash) "\n"))
+                      hashes))]
       (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
             (body/bodyartifactv0-header-text artifact))
       (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
             (body/bodyartifactv0-source-text artifact))
+      (spit (str artifacts-dir "/c17.receipt")
+            (stages/encode-pass-receipt receipt))
       (finish-stage! stage-name "OK")
       {:ok? true
-       :report report})))
+       :report (str report artifact-report)})))
 
-(defn materialize-c17! [projected artifacts-dir plan simd-required? abi-id]
+(defn materialize-c17!
+  [projected artifacts-dir plan simd-required? abi-id input-digest
+   compiler-commit configuration]
   (start-stage! "materialization-c17")
   (let [result (cond
                  (not simd-required?)
@@ -761,14 +981,16 @@ bb -cp "$compiled" -e '
                         (str "REFUSED " (body/materialization-detail result)))
                       "\n"))]
     (emit-c17-materialization! result artifacts-dir "materialization-c17"
-                               report)))
+                               "materialize-c17" report input-digest
+                               compiler-commit configuration)))
 
 ;; The first live Wasm materializer deliberately reuses the Restricted C17
 ;; projection. The external wasi-clang step is a separate shell seam below, so
 ;; a future direct emitter replaces this wrapper without changing Core freeze.
 ;; SIMD never reaches here: the shell pins this materializer to wasm32, and the
 ;; SIMD backend refuses every ABI but lp64.
-(defn materialize-wasm-bootstrap-c17! [projected artifacts-dir abi-id]
+(defn materialize-wasm-bootstrap-c17!
+  [projected artifacts-dir abi-id input-digest compiler-commit configuration]
   (start-stage! "materialization-wasm-bootstrap-c17")
   (let [result (body/materialize-program-for-abi projected 0 abi-id)
         ok? (body/materialization-ok? result)
@@ -781,7 +1003,9 @@ bb -cp "$compiled" -e '
                       (str "REFUSED " (body/materialization-detail result)))
                     "\n")]
     (emit-c17-materialization! result artifacts-dir
-                               "materialization-wasm-bootstrap-c17" report)))
+                               "materialization-wasm-bootstrap-c17"
+                               "materialize-wasm-bootstrap-c17" report
+                               input-digest compiler-commit configuration)))
 
 (defn materialize-qbe! [projected artifacts-dir abi-id plan simd-required?]
   (start-stage! "materialization-qbe")
@@ -813,18 +1037,20 @@ bb -cp "$compiled" -e '
 
 (defn materialize-programs!
   [projected qbe-projected artifacts-dir materializers abi-id plan
-   simd-required?]
+   simd-required? input-digest compiler-commit configuration]
   (loop [remaining materializers reports []]
     (if (empty? remaining)
       {:ok? true :report (str (apply str reports) "result PASS\n")}
       (let [materializer (first remaining)
             result (case materializer
                      "c17" (materialize-c17! projected artifacts-dir plan
-                             simd-required? abi-id)
+                             simd-required? abi-id input-digest
+                             compiler-commit configuration)
                      "qbe" (materialize-qbe! qbe-projected artifacts-dir abi-id
                              plan simd-required?)
                      "wasm" (materialize-wasm-bootstrap-c17!
-                              projected artifacts-dir abi-id))
+                              projected artifacts-dir abi-id input-digest
+                              compiler-commit configuration))
             next-reports (conj reports (:report result))]
         (if (:ok? result)
           (recur (rest remaining) next-reports)
@@ -846,8 +1072,11 @@ bb -cp "$compiled" -e '
                       "entry-error " (:detail projection) "\n"
                       "result FAIL entry projection\n")})
       (let [rows (:rows projection)
-            _ (spit projected-facts-path (rows-text rows))
-            configuration ["profile=3" (str "abi=" abi-id)]
+            projected-facts (rows-text rows)
+            _ (spit projected-facts-path projected-facts)
+            configuration ["profile=3" (str "abi=" abi-id)
+                           (str "source-facts-sha256="
+                                (subs (stages/content-digest projected-facts) 7))]
             _finish-projection (finish-stage! "source-projection" "ACCEPTED")
             _start-freeze (start-stage! "source-freeze")
             source (slice/source-program rows "beagle.core" "source.facts")
@@ -859,6 +1088,7 @@ bb -cp "$compiled" -e '
              :report "stage source-freeze REJECTED\nresult FAIL source freeze\n"})
           (let [_finish-freeze (finish-stage! "source-freeze" "ACCEPTED")
                 frozen-source (lower/sourcefreezeacceptedv0-frozen freeze-result)
+                source-receipt (lower/sourcefreezeacceptedv0-receipt freeze-result)
                 _start-typing (start-stage! "source-to-typed")
                 typing-result (lower/lower-typed-stage frozen-source compiler-commit configuration)]
             (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
@@ -896,6 +1126,11 @@ bb -cp "$compiled" -e '
                         ;; The seam every materializer crosses: what a
                         ;; materializer sees is what the epoch stage froze.
                         frozen-native (lower/epoch-result-frozen epoch-result)
+                        typing-receipt (lower/typingacceptedv0-receipt typing-result)
+                        native-receipt (lower/nativeloweringcompletev0-receipt
+                                        native-result)
+                        epoch-receipt (epoch-result-receipt epoch-result)
+                        epoch-digest (stages/frozennativestagev0-digest frozen-native)
                         native-encoding (stages/frozennativestagev0-encoding frozen-native)
                         _write-native
                         (spit (str artifacts-dir "/module.native-program") native-encoding)
@@ -920,8 +1155,24 @@ bb -cp "$compiled" -e '
                             (simd/simdplanv0-encoding simd-plan)))
                         _start-obligations (start-stage! "native-obligations")
                         verdicts (obligations/validate-native-core-program projected abi)
-                        head (native-report-head rows entries source program projected
-                                                 native-program epoch-result abi)]
+                        head (str
+                              (native-report-head rows entries source program projected
+                                                  native-program epoch-result abi)
+                              (native-provenance-report
+                               source-receipt frozen-source typing-result frozen-typed
+                               native-result native-frozen epoch-result frozen-native
+                               compiler-commit configuration))
+                        _write-receipts
+                        (write-native-receipts!
+                         artifacts-dir source-receipt typing-receipt native-receipt
+                         epoch-receipt)
+                        _write-entry-map
+                        (spit (str artifacts-dir "/native.entry-map")
+                          (str (apply str
+                                 (map (fn [entry] (str "source-entry " entry "\n"))
+                                   entries))
+                               (body-slice/function-report
+                                (core/nativecoreprogram-functions projected))))]
                     (cond
                       ;; Pending with no named pending row is the epoch stage
                       ;; refusing its own ten obligations, never a frontier.
@@ -946,7 +1197,9 @@ bb -cp "$compiled" -e '
                               (materialize-programs! projected qbe-projected
                                                      artifacts-dir materializers
                                                      abi-id simd-plan
-                                                     simd-required?)]
+                                                     simd-required? epoch-digest
+                                                     compiler-commit
+                                                     configuration)]
                           (assoc materialization
                                  :report (str head
                                            (if simd-required?
@@ -989,37 +1242,54 @@ bb -cp "$compiled" -e '
 runner_rc=$?
 set -e
 
-if [[ -f "$work/artifacts/module.native-program" ]]; then
-    sha256sum "$work/artifacts/module.native-program" | awk '{print $1}' \
-        >"$work/artifacts/module.native-program.sha256"
-fi
-if [[ -f "$work/artifacts/module.simd-plan-v0" ]]; then
-    sha256sum "$work/artifacts/module.simd-plan-v0" | awk '{print $1}' \
-        >"$work/artifacts/module.simd-plan-v0.sha256"
-fi
-
-if [[ -f "$work/artifacts/source.facts" ]]; then
-    cp "$work/artifacts/source.facts" "$out/source.facts"
-else
-    cp "$facts" "$out/source.facts"
-fi
-if [[ -f "$work/artifacts/report.txt" ]]; then
-    cp "$work/artifacts/report.txt" "$out/report.txt"
-fi
-for program_artifact in module.native-program module.native-program.sha256 \
-                        module.simd-plan-v0 module.simd-plan-v0.sha256; do
-    if [[ -f "$work/artifacts/$program_artifact" ]]; then
-        cp "$work/artifacts/$program_artifact" "$out/$program_artifact"
-    fi
-done
 if [[ $runner_rc -ne 0 ]]; then
-    if [[ -f "$out/report.txt" ]]; then
-        cat "$out/report.txt" >&2
+    if [[ -f "$work/artifacts/report.txt" ]]; then
+        cat "$work/artifacts/report.txt" >&2
     else
         sed -n '1,200p' "$work/run.log" >&2
     fi
     exit "$runner_rc"
 fi
+
+for required in source.facts report.txt module.native-program native.receipts \
+                native.entry-map; do
+    [[ -f "$work/artifacts/$required" ]] ||
+        die "successful Core runner omitted $required"
+done
+if $wasm_selected || [[ -n "${seen_materializers[c17]:-}" ]]; then
+    for required in module_0.h module_0.c; do
+        [[ -f "$work/artifacts/$required" ]] ||
+            die "successful Core runner omitted $required"
+    done
+fi
+
+run_phase native-receipts "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+    bb -cp "$compiled" "$FINALIZER" native-index "$work/native.receipts.index" \
+    "$work/artifacts/native.receipts" "$work/artifacts/module.native-program" \
+    >"$work/native-receipts.log" 2>&1 || {
+        sed -n '1,120p' "$work/native-receipts.log" >&2
+        die "canonical Native Core receipt validation failed"
+    }
+native_digest="$(sha256sum "$work/artifacts/module.native-program" | awk '{print $1}')"
+printf '%s\n' "$native_digest" \
+    >"$work/artifacts/module.native-program.sha256"
+if [[ $simd_required -eq 1 ]]; then
+    [[ -f "$work/artifacts/module.simd-plan-v0" ]] ||
+        die "successful SIMD runner omitted module.simd-plan-v0"
+    sha256sum "$work/artifacts/module.simd-plan-v0" | awk '{print $1}' \
+        >"$work/artifacts/module.simd-plan-v0.sha256"
+fi
+
+source_facts_digest="$(sha256sum "$work/artifacts/source.facts" | awk '{print $1}')"
+report_with_files="$work/artifacts/report.with-file-provenance.txt"
+sed '$d' "$work/artifacts/report.txt" >"$report_with_files"
+printf '%s\n' \
+    "source-facts-sha256 $source_facts_digest" \
+    "native-program-file-sha256 $native_digest" \
+    "native-receipts-file-sha256 $(sha256sum "$work/artifacts/native.receipts" | awk '{print $1}')" \
+    >>"$report_with_files"
+tail -n 1 "$work/artifacts/report.txt" >>"$report_with_files"
+mv -f -- "$report_with_files" "$work/artifacts/report.txt"
 
 merge_wasm_report() {
     local final_result="$1"
@@ -1031,12 +1301,21 @@ merge_wasm_report() {
 }
 
 if $wasm_selected; then
-    wasm_args=(--artifacts "$work/artifacts")
+    wasm_args=(--artifacts "$work/artifacts" --compiled "$compiled"
+               "${wasm_checked_sources[@]}")
     if [[ ${#entries[@]} -eq 1 ]]; then
-        wasm_args+=(--entry "${entries[0]}" "${wasm_entry_evidence[@]}")
+        wasm_args+=(--entry "${entries[0]}")
     fi
+    materializer_timeout="${BEAGLE_WASM_MATERIALIZER_TIMEOUT_SECONDS:-180}"
+    materializer_kill_grace="${BEAGLE_WASM_KILL_GRACE_SECONDS:-5}"
+    [[ "$materializer_timeout" =~ ^[1-9][0-9]*$ ]] ||
+        die "BEAGLE_WASM_MATERIALIZER_TIMEOUT_SECONDS must be a positive integer"
+    [[ "$materializer_kill_grace" =~ ^[1-9][0-9]*$ ]] ||
+        die "BEAGLE_WASM_KILL_GRACE_SECONDS must be a positive integer"
     set +e
-    "$BIN/beagle-materialize-wasm" "${wasm_args[@]}"
+    run_phase_with_grace wasm-materializer "$materializer_timeout" \
+        "$materializer_kill_grace" \
+        "$BIN/beagle-materialize-wasm" "${wasm_args[@]}"
     wasm_rc=$?
     set -e
     if [[ ! -f "$work/artifacts/wasm-report.txt" ]]; then
@@ -1049,62 +1328,187 @@ if $wasm_selected; then
     fi
     if [[ $wasm_rc -ne 0 ]]; then
         merge_wasm_report "FAIL wasm materialization"
-        cp "$work/artifacts/wasm-report.txt" "$out/wasm-report.txt"
-        [[ ! -f "$work/artifacts/wasm-audit.txt" ]] ||
-            cp "$work/artifacts/wasm-audit.txt" "$out/wasm-audit.txt"
-        cp "$work/artifacts/report.txt" "$out/report.txt"
-        cat "$out/report.txt" >&2
+        cat "$work/artifacts/report.txt" >&2
         exit "$wasm_rc"
     fi
     merge_wasm_report "PASS"
 fi
 
-for artifact in module.native-program module.native-program.sha256 report.txt; do
-    [[ -f "$work/artifacts/$artifact" ]] || die "successful runner omitted $artifact"
-    cp "$work/artifacts/$artifact" "$out/$artifact"
+install="$work/install"
+mkdir -p "$install"
+declare -A staged_names=()
+stage_file() {
+    local source="$1"
+    local name="$2"
+    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "unsafe managed artifact name: $name"
+    if [[ -n "${staged_names[$name]:-}" ]]; then
+        cmp -s "$source" "$install/$name" ||
+            die "two materializers produced different bytes for $name"
+        return
+    fi
+    cp -- "$source" "$install/$name"
+    staged_names["$name"]=1
+}
+
+for artifact in source.facts module.native-program module.native-program.sha256 \
+                native.receipts native.entry-map; do
+    stage_file "$work/artifacts/$artifact" "$artifact"
 done
 if [[ $simd_required -eq 1 ]]; then
     for artifact in module.simd-plan-v0 module.simd-plan-v0.sha256; do
-        [[ -f "$work/artifacts/$artifact" ]] || die "successful SIMD runner omitted $artifact"
-        cp "$work/artifacts/$artifact" "$out/$artifact"
+        stage_file "$work/artifacts/$artifact" "$artifact"
     done
 fi
+receipt_names=(native.receipts)
 for materializer in "${materializers[@]}"; do
     case "$materializer" in
       c17)
-        for artifact in module_0.h module_0.c; do
-            [[ -f "$work/artifacts/$artifact" ]] || die "successful C17 projection omitted $artifact"
-            cp "$work/artifacts/$artifact" "$out/$artifact"
+        for artifact in module_0.h module_0.c c17.receipt; do
+            [[ -f "$work/artifacts/$artifact" ]] ||
+                die "successful C17 projection omitted $artifact"
+            stage_file "$work/artifacts/$artifact" "$artifact"
         done
-        cp "$BEAGLE_DIR/native-core/shim/native_shim.c" "$out/native_shim.c"
-        cp "$BEAGLE_DIR/native-core/shim/native_shim.h" "$out/native_shim.h"
-        if grep -q '^parallel-plan ' "$out/report.txt"; then
-            cp "$BEAGLE_DIR/native-core/shim/native_parallel.c" \
-                "$out/native_parallel.c"
-            cp "$BEAGLE_DIR/native-core/shim/native_parallel.h" \
-                "$out/native_parallel.h"
+        receipt_names+=(c17.receipt)
+        stage_file "$BEAGLE_DIR/native-core/shim/native_shim.c" native_shim.c
+        stage_file "$BEAGLE_DIR/native-core/shim/native_shim.h" native_shim.h
+        if grep -q '^parallel-plan ' "$work/artifacts/report.txt"; then
+            stage_file "$BEAGLE_DIR/native-core/shim/native_parallel.c" \
+                native_parallel.c
+            stage_file "$BEAGLE_DIR/native-core/shim/native_parallel.h" \
+                native_parallel.h
         fi
-        cp "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h" \
-            "$out/native_unicode15_data.h"
-        cp "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \
-            "$out/UNICODE-LICENSE.txt"
+        stage_file "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h" \
+            native_unicode15_data.h
+        stage_file "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \
+            UNICODE-LICENSE.txt
         ;;
       qbe)
-        [[ -f "$work/artifacts/module_0.ssa" ]] || die "successful QBE projection omitted module_0.ssa"
-        cp "$work/artifacts/module_0.ssa" "$out/module_0.ssa"
+        [[ -f "$work/artifacts/module_0.ssa" ]] ||
+            die "successful QBE projection omitted module_0.ssa"
+        stage_file "$work/artifacts/module_0.ssa" module_0.ssa
         ;;
       wasm)
-        for artifact in module_0.wasm module_0.wasm.sha256 module_0.wasm.seams \
-                        wasm-report.txt wasm-audit.txt; do
+        for artifact in module_0.wasm module_0.wasm.sha256 \
+                        module_0.wasm.seams wasm.receipt wasm-audit.txt \
+                        wasm-report.txt c17.receipt module_0.h module_0.c \
+                        native_shim.h native_shim.c native_unicode15_data.h \
+                        wasm.retention.c wasm.adapter.c wasm.entry-contract.clj \
+                        wasm.seams.clj wasm.ast-verifier.rkt \
+                        wasm.receipt-finalizer.clj wasm.materializer.sh \
+                        wasm.supervisor.rkt \
+                        wasm.cc-identity.txt wasm.ld-identity.txt \
+                        wasm.runtime-identity.txt; do
             [[ -f "$work/artifacts/$artifact" ]] ||
                 die "successful Wasm bootstrap omitted $artifact"
-            cp "$work/artifacts/$artifact" "$out/$artifact"
+            stage_file "$work/artifacts/$artifact" "$artifact"
         done
+        published_wasm_digest="$(sed -n '1p' \
+            "$work/artifacts/module_0.wasm.sha256")"
+        actual_wasm_digest="$(sha256sum "$work/artifacts/module_0.wasm" | \
+            awk '{print $1}')"
+        [[ "$published_wasm_digest" == "$actual_wasm_digest" ]] ||
+            die "successful Wasm artifact does not match its digest"
+        receipt_names+=(c17.receipt wasm.receipt)
+        stage_file "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \
+            UNICODE-LICENSE.txt
         ;;
     esac
 done
 
-cat "$out/report.txt"
-materializer_list="$(IFS=,; printf '%s' "${materializers[*]}")"
-printf 'beagle build: wrote frozen native program + %s projections to %s\n' \
-    "$materializer_list" "$out"
+for source_index in "${!source_snapshot_paths[@]}"; do
+    [[ "$(sha256sum "${source_snapshot_paths[$source_index]}" | awk '{print $1}')" == \
+       "${source_snapshot_digests[$source_index]}" ]] ||
+        die "source changed before generation publication: ${source_snapshot_paths[$source_index]}"
+done
+stage_file "$work/artifacts/report.txt" report.txt
+
+manifest_args=(manifest "$install/build.manifest")
+declare -A receipt_seen=()
+for receipt in "${receipt_names[@]}"; do
+    [[ -z "${receipt_seen[$receipt]:-}" ]] || continue
+    receipt_seen["$receipt"]=1
+    manifest_args+=(--receipt "$receipt" "$install/$receipt")
+done
+while IFS= read -r staged_name; do
+    [[ -n "${receipt_seen[$staged_name]:-}" ]] && continue
+    manifest_args+=(--artifact "$staged_name" "$install/$staged_name")
+done < <(printf '%s\n' "${!staged_names[@]}" | LC_ALL=C sort)
+run_phase staged-manifest "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+    bb -cp "$compiled" "$FINALIZER" "${manifest_args[@]}" \
+    >"$work/manifest.log" 2>&1 || {
+        sed -n '1,120p' "$work/manifest.log" >&2
+        die "could not construct canonical build manifest"
+    }
+run_phase staged-verifier "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+    bb -cp "$compiled" "$FINALIZER" verify-staged "$install" \
+    >"$work/staged-manifest.digest" 2>"$work/staged-verifier.log" || {
+        sed -n '1,120p' "$work/staged-verifier.log" >&2
+        die "staged generation did not verify"
+    }
+mapfile -t staged_manifest_digests <"$work/staged-manifest.digest"
+[[ ${#staged_manifest_digests[@]} -eq 1 &&
+   "${staged_manifest_digests[0]}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die "staged verifier returned malformed manifest identity"
+marker_digest="${staged_manifest_digests[0]}"
+printf '%s\n' "$marker_digest" >"$install/build.manifest.sha256"
+
+exec {publish_lock_fd}>"$out/.beagle-publish.lock"
+run_phase publish-lock "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+    flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" "$publish_lock_fd" ||
+    die "timed out acquiring the output commit lock"
+for source_index in "${!source_snapshot_paths[@]}"; do
+    [[ "$(sha256sum "${source_snapshot_paths[$source_index]}" | awk '{print $1}')" == \
+       "${source_snapshot_digests[$source_index]}" ]] ||
+        die "source changed while waiting for the output commit lock"
+done
+run_phase locked-staged-verifier "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+    bb -cp "$compiled" "$FINALIZER" verify-staged "$install" \
+    >"$work/locked-manifest.digest" 2>"$work/locked-verifier.log" || {
+        sed -n '1,120p' "$work/locked-verifier.log" >&2
+        die "staged generation changed before publication"
+    }
+mapfile -t locked_manifest_digests <"$work/locked-manifest.digest"
+[[ ${#locked_manifest_digests[@]} -eq 1 &&
+   "${locked_manifest_digests[0]}" == "$marker_digest" ]] ||
+    die "staged manifest identity changed before publication"
+
+commit_started=1
+rm -f -- "$out/build.manifest.sha256"
+sync -f "$out"
+[[ "${BEAGLE_CORE_PUBLISH_FAILPOINT:-}" != "after-invalidation" ]] || kill -TERM "$$"
+installed_count=0
+while IFS= read -r staged_name; do
+    [[ "$staged_name" == "build.manifest" ||
+       "$staged_name" == "build.manifest.sha256" ||
+       "$staged_name" == "report.txt" ||
+       "$staged_name" == "wasm-report.txt" ]] && continue
+    mv -f -- "$install/$staged_name" "$out/$staged_name"
+    sync -f "$out/$staged_name"
+    installed_count=$((installed_count + 1))
+    if [[ $installed_count -eq 1 &&
+          "${BEAGLE_CORE_PUBLISH_FAILPOINT:-}" == "after-one-artifact" ]]; then
+        kill -TERM "$$"
+    fi
+done < <(printf '%s\n' "${!staged_names[@]}" | LC_ALL=C sort)
+for artifact in "${managed_artifacts[@]}"; do
+    [[ "$artifact" == "build.manifest" ||
+       "$artifact" == "build.manifest.sha256" ]] && continue
+    [[ -n "${staged_names[$artifact]:-}" ]] || rm -f -- "$out/$artifact"
+done
+if [[ -n "${staged_names[wasm-report.txt]:-}" ]]; then
+    mv -f -- "$install/wasm-report.txt" "$out/wasm-report.txt"
+    sync -f "$out/wasm-report.txt"
+fi
+mv -f -- "$install/report.txt" "$out/report.txt"
+sync -f "$out/report.txt"
+mv -f -- "$install/build.manifest" "$out/build.manifest"
+sync -f "$out/build.manifest"
+sync -f "$out"
+[[ "${BEAGLE_CORE_PUBLISH_FAILPOINT:-}" != "before-marker" ]] || kill -TERM "$$"
+mv -f -- "$install/build.manifest.sha256" "$marker_pending"
+sync -f "$marker_pending"
+sync -f "$out"
+rm -rf "${work:?}"
+work_cleaned=1
+mv -f -- "$marker_pending" "$out/build.manifest.sha256"
+build_committed=1

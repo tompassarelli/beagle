@@ -24,6 +24,11 @@
   (let [[length after] (uleb data index)]
     [(String. data after length "UTF-8") (+ after length)]))
 
+(defn utf8-hex [text]
+  (apply str
+         (map #(format "%02x" (bit-and (int %) 0xff))
+              (.getBytes ^String text "UTF-8"))))
+
 ;; A limits field is a flag byte plus one or two LEB128 counts.
 (defn skip-limits [^bytes data index]
   (let [flags (ubyte data index)
@@ -49,13 +54,16 @@
                 [field after-field] (read-name data after-module)
                 [kind after-desc] (read-import-desc data after-field)]
             (recur after-desc (dec remaining)
-                   (conj out (format "import %s %s.%s"
-                                     (kind-names kind) module field))))
+                   (conj out (format "import %s %s %s"
+                                     (kind-names kind)
+                                     (utf8-hex module)
+                                     (utf8-hex field)))))
           (let [[field after-field] (read-name data i)
                 kind (ubyte data after-field)
                 [_ after-index] (uleb data (inc after-field))]
             (recur after-index (dec remaining)
-                   (conj out (format "export %s %s" (kind-names kind) field)))))))))
+                   (conj out (format "export %s %s"
+                                     (kind-names kind) (utf8-hex field))))))))))
 
 (defn seams [^bytes data]
   (loop [i 8 out []]

@@ -424,9 +424,13 @@
          (graph-reference-closed-in? graph identities)
          (every?
            (fn [(module stages/SourceModuleV0)] Bool
-             (= true
-               (get identities
-                 (id-value (stages/sourcemodulev0-root-term module)))))
+             (and (= true
+                    (get identities
+                      (id-value (stages/sourcemodulev0-root-term module))))
+                  (stages/sha256-digest?
+                    (stages/sourcemodulev0-source-digest module))
+                  (stages/sha256-digest?
+                    (stages/sourcemodulev0-interface-digest module))))
            modules))))
 
 (defn source-failure [(stage stages/SourceStageV0)] LowerFailureV0
@@ -445,7 +449,8 @@
       (->UnclosedTermReferenceV0 root root)
 
       :else
-      (->InvalidSourceModuleV0 root "a module root is absent from the source Term graph"))))
+      (->InvalidSourceModuleV0 root
+        "a module root or its checked source/projection digest is invalid"))))
 
 (defn encode-configuration [(configuration (Vec String))] String
   (stages/canonical-set "configuration" configuration))

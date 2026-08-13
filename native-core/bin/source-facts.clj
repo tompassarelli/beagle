@@ -627,7 +627,35 @@
               "defprotocol" "extend-type"} (get form "node"))
            (and include-defs? (= "def" (get form "node"))))))
 
+(def sha256-pattern #"sha256:[0-9a-f]{64}")
+
+(defn require-checked-program! [ast relative-path]
+  (let [required {"kind" "beagle.checked-program"
+                  "schemaVersion" 2
+                  "phase" "checked"
+                  "target" "core"
+                  "mode" "strict"}]
+    (doseq [[field expected] required]
+      (when (not= expected (get ast field))
+        (throw
+          (ex-info "source facts require a strict checked Core projection"
+                   {:field field :expected expected :actual (get ast field)
+                    :relative-path relative-path}))))
+    (when (not= relative-path (get ast "sourceId"))
+      (throw
+        (ex-info "checked projection sourceId does not match its logical path"
+                 {:expected relative-path :actual (get ast "sourceId")})))
+    (doseq [field ["sourceSha256" "projectionSha256"]]
+      (let [digest (get ast field)]
+        (when-not (and (string? digest)
+                       (re-matches sha256-pattern digest))
+          (throw
+            (ex-info "checked projection carries a malformed SHA-256 digest"
+                     {:field field :value digest
+                      :relative-path relative-path})))))))
+
 (defn emit-module [ast relative-path include-defs? selected-names]
+  (require-checked-program! ast relative-path)
   (let [selected-forms (filterv
                          #(selected-form? include-defs? selected-names %)
                          (get ast "forms"))
@@ -639,6 +667,8 @@
     (row! root "form-kind" "t" "module-root")
     (row! root "namespace" "t" (get ast "namespace"))
     (row! root "relative-path" "t" relative-path)
+    (row! root "source-sha256" "t" (get ast "sourceSha256"))
+    (row! root "checked-projection-sha256" "t" (get ast "projectionSha256"))
     (row! root "definitions" "n" (emit-node-seq definitions))
     (row! root "imports" "n" (emit-node-seq imports))
     (let [emitted-constraints (- @constraint-emissions constraints-before)]
@@ -684,44 +714,52 @@
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
-  (let [inputs
+  (let [parsed
         (mapv
           (fn [input-spec]
             (let [[in relative-path] (parse-input-spec input-spec)
                   ast (json/parse-string (slurp in))]
               (require-native-compatible-ast! ast relative-path)
-              [ast relative-path]))
+              {:path in :relative-path relative-path :ast ast}))
           input-specs)
-        selected-counts
-        (frequencies
-          (for [[ast _] inputs
-                form (get ast "forms")
-                :let [name (get form "name")]
-                :when (and (contains? selected-names name)
-                           (selected-form? include-defs? #{} form))]
-            name))
-        missing-names
-        (filterv #(zero? (get selected-counts % 0)) (sort selected-names))
-        ambiguous-names
-        (filterv #(< 1 (get selected-counts % 0)) (sort selected-names))
-        missing-check (when (seq missing-names)
-            (throw
-              (ex-info
-                (str "native source-fact projection could not select forms "
-                     (clojure.string/join ", " missing-names))
-                {:missing-form-names missing-names})))
-        ambiguity-check (when (seq ambiguous-names)
-            (throw
-              (ex-info
-                (str "native source-fact projection form selection is ambiguous: "
-                     (clojure.string/join ", " ambiguous-names))
-                {:ambiguous-form-names ambiguous-names})))
-        modules
-        (mapv
-          (fn [[ast relative-path]]
-            (emit-module ast relative-path include-defs? selected-names))
-          inputs)]
-    (row! "0" "form-kind" "t" "program-root")
-    (row! "0" "modules" "n" (emit-node-seq modules)))
+        source-ids (mapv #(get (:ast %) "sourceId") parsed)
+        namespaces (mapv #(get (:ast %) "namespace") parsed)]
+    (when (not= (count source-ids) (count (distinct source-ids)))
+      (throw (ex-info "checked projections contain duplicate sourceId values"
+                      {:sourceIds source-ids})))
+    (when (not= (count namespaces) (count (distinct namespaces)))
+      (throw (ex-info "checked projections contain duplicate namespaces"
+                      {:namespaces namespaces})))
+    (let [selected-counts
+          (frequencies
+            (for [{:keys [ast]} parsed
+                  form (get ast "forms")
+                  :let [name (get form "name")]
+                  :when (and (contains? selected-names name)
+                             (selected-form? include-defs? #{} form))]
+              name))
+          missing-names
+          (filterv #(zero? (get selected-counts % 0)) (sort selected-names))
+          ambiguous-names
+          (filterv #(< 1 (get selected-counts % 0)) (sort selected-names))]
+      (when (seq missing-names)
+        (throw
+          (ex-info
+            (str "native source-fact projection could not select forms "
+                 (clojure.string/join ", " missing-names))
+            {:missing-form-names missing-names})))
+      (when (seq ambiguous-names)
+        (throw
+          (ex-info
+            (str "native source-fact projection form selection is ambiguous: "
+                 (clojure.string/join ", " ambiguous-names))
+            {:ambiguous-form-names ambiguous-names})))
+      (let [modules
+            (mapv
+              (fn [{:keys [ast relative-path]}]
+                (emit-module ast relative-path include-defs? selected-names))
+              parsed)]
+        (row! "0" "form-kind" "t" "program-root")
+        (row! "0" "modules" "n" (emit-node-seq modules)))))
   (spit out (apply str (for [[s p k o] (persistent! @rows)]
                          (str s "\t" p "\t" k "\t" o "\n")))))

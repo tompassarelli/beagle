@@ -9,6 +9,7 @@
 (require native.core :as core)
 (require native.fold-c17 :as c17)
 (require native.simd :as simd)
+(require native.stages :as stages)
 
 (defrecord BodyArtifactV0
   [(header-name String)
@@ -138,6 +139,15 @@
   (match result
     [(BodySuccessV0 artifact) artifact]
     [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
+
+(defn artifact-hashes
+  [(artifact BodyArtifactV0)] (Vec core/ArtifactHashV0)
+  [(core/->ArtifactHashV0
+     (bodyartifactv0-header-name artifact)
+     (stages/content-digest (bodyartifactv0-header-text artifact)))
+   (core/->ArtifactHashV0
+     (bodyartifactv0-source-name artifact)
+     (stages/content-digest (bodyartifactv0-source-text artifact)))])
 
 ;; Bounds checks have no i64 Outcome shape here, so only the three arithmetic
 ;; operations materialize; anything else is refused rather than approximated.

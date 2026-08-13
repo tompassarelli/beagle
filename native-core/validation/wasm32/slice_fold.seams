@@ -1,7 +1,7 @@
-export func _start
-export memory memory
-import func wasi_snapshot_preview1.fd_close
-import func wasi_snapshot_preview1.fd_fdstat_get
-import func wasi_snapshot_preview1.fd_seek
-import func wasi_snapshot_preview1.fd_write
-import func wasi_snapshot_preview1.proc_exit
+export func 5f7374617274
+export memory 6d656d6f7279
+import func 776173695f736e617073686f745f7072657669657731 66645f636c6f7365
+import func 776173695f736e617073686f745f7072657669657731 66645f6664737461745f676574
+import func 776173695f736e617073686f745f7072657669657731 66645f7365656b
+import func 776173695f736e617073686f745f7072657669657731 66645f7772697465
+import func 776173695f736e617073686f745f7072657669657731 70726f635f65786974

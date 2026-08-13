@@ -74,6 +74,10 @@
    (encoding String)
    (digest String)])
 
+(defrecord BuildManifestV0
+  [(receipts (Vec core/ArtifactHashV0))
+   (artifacts (Vec core/ArtifactHashV0))])
+
 (defn canonical-record [(tag String) (fields (Vec String))] String
   (str (count tag) ":" tag ":" (core/canonical-parts fields)))
 
@@ -128,6 +132,15 @@
 ;; the digest needs no separate domain prefix.
 (defn content-digest [(encoding String)] String
   (str "sha256:" (sha256-bytes (utf8-bytes encoding))))
+
+(defn lowercase-hex-digit? [(character Any)] Bool
+  (some? (some (fn [(allowed Any)] Bool (= allowed character))
+           (vec "0123456789abcdef"))))
+
+(defn sha256-digest? [(digest String)] Bool
+  (and (= 71 (count digest))
+       (= "sha256:" (subs digest 0 7))
+       (every? lowercase-hex-digit? (vec (subs digest 7 71)))))
 
 (defn canonical-vector [(tag String) (items (Vec String))] String
   (canonical-record tag items))
@@ -259,3 +272,113 @@
     (canonical-set "configuration-v0"
       (mapv (fn [(entry String)] String (encode-string entry))
         configuration))))
+
+(defn encode-obligation-code [(code core/ObligationCode)] String
+  (cond
+    (instance? native.core.ValidSsaObligation code) "valid-ssa"
+    (instance? native.core.ExhaustiveMatchesObligation code) "exhaustive-matches"
+    (instance? native.core.ClosedLayoutsObligation code) "closed-layouts"
+    (instance? native.core.CheckedOperationsObligation code) "checked-operations"
+    (instance? native.core.LegalAbiObligation code) "legal-abi"
+    (instance? native.core.DischargedTokensObligation code) "discharged-tokens"
+    (instance? native.core.BoundedEffectsObligation code) "bounded-effects"
+    (instance? native.core.EpochSoundnessObligation code) "epoch-soundness"
+    :else "leak-freedom"))
+
+(defn encode-diagnostic [(diagnostic core/DiagnosticV0)] String
+  (canonical-record "diagnostic-v0"
+    [(encode-string (core/diagnosticv0-code diagnostic))
+     (encode-string (core/diagnosticv0-detail diagnostic))]))
+
+(defn encode-receipt-obligation
+  [(obligation core/ReceiptObligationV0)] String
+  (canonical-record "receipt-obligation-v0"
+    [(encode-string (encode-obligation-code
+                      (core/receiptobligationv0-code obligation)))
+     (encode-string (core/receiptobligationv0-version obligation))
+     (encode-string (core/receiptobligationv0-subject-digest obligation))
+     (encode-bool (core/receiptobligationv0-passed obligation))
+     (encode-string (core/receiptobligationv0-detail obligation))]))
+
+(defn encode-artifact-hash [(artifact core/ArtifactHashV0)] String
+  (canonical-record "artifact-hash-v0"
+    [(encode-string (core/artifacthashv0-name artifact))
+     (encode-string (core/artifacthashv0-digest artifact))]))
+
+(defn artifact-set-digest [(artifacts (Vec core/ArtifactHashV0))] String
+  (content-digest
+    (canonical-set "artifact-set-v0"
+      (mapv (fn [(artifact core/ArtifactHashV0)] String
+              (encode-artifact-hash artifact))
+        artifacts))))
+
+(defn encode-pass-receipt [(receipt core/PassReceiptV0)] String
+  (canonical-record "pass-receipt-v0"
+    [(encode-id (core/passreceiptv0-id receipt))
+     (encode-string (core/passreceiptv0-input-digest receipt))
+     (encode-string (core/passreceiptv0-compiler-commit receipt))
+     (encode-string (core/passreceiptv0-pass-id receipt))
+     (encode-string (core/passreceiptv0-pass-version receipt))
+     (canonical-set "configuration-v0"
+       (mapv (fn [(entry String)] String (encode-string entry))
+         (core/passreceiptv0-configuration receipt)))
+     (encode-string (core/passreceiptv0-configuration-digest receipt))
+     (canonical-vector "diagnostics-v0"
+       (mapv (fn [(diagnostic core/DiagnosticV0)] String
+               (encode-diagnostic diagnostic))
+         (core/passreceiptv0-diagnostics receipt)))
+     (canonical-vector "obligations-v0"
+       (mapv (fn [(obligation core/ReceiptObligationV0)] String
+               (encode-receipt-obligation obligation))
+         (core/passreceiptv0-obligations receipt)))
+     (encode-string (core/passreceiptv0-output-digest receipt))
+     (encode-string (core/passreceiptv0-backend receipt))
+     (encode-string (core/passreceiptv0-backend-version receipt))
+     (canonical-set "artifacts-v0"
+       (mapv (fn [(artifact core/ArtifactHashV0)] String
+               (encode-artifact-hash artifact))
+         (core/passreceiptv0-artifacts receipt)))]))
+
+(defn encode-pass-receipts [(receipts (Vec core/PassReceiptV0))] String
+  (canonical-vector "pass-receipts-v0"
+    (mapv (fn [(receipt core/PassReceiptV0)] String
+            (encode-pass-receipt receipt))
+      receipts)))
+
+(defn make-artifact-receipt
+  [(input-digest String)
+   (compiler-commit String)
+   (pass-id String)
+   (configuration (Vec String))
+   (backend String)
+   (backend-version String)
+   (artifacts (Vec core/ArtifactHashV0))] core/PassReceiptV0
+  (let [(output-digest String) (artifact-set-digest artifacts)]
+    (core/->PassReceiptV0
+      (core/->NativeId
+        (content-digest
+          (canonical-record "artifact-receipt-id-v0"
+            [pass-id input-digest output-digest])))
+      input-digest
+      compiler-commit
+      pass-id
+      "v0"
+      configuration
+      (configuration-digest configuration)
+      []
+      []
+      output-digest
+      backend
+      backend-version
+      artifacts)))
+
+(defn encode-build-manifest [(manifest BuildManifestV0)] String
+  (canonical-record "build-manifest-v0"
+    [(canonical-set "receipts-v0"
+       (mapv (fn [(receipt core/ArtifactHashV0)] String
+               (encode-artifact-hash receipt))
+         (buildmanifestv0-receipts manifest)))
+     (canonical-set "managed-artifacts-v0"
+       (mapv (fn [(artifact core/ArtifactHashV0)] String
+               (encode-artifact-hash artifact))
+         (buildmanifestv0-artifacts manifest)))]))

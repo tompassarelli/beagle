@@ -27,6 +27,23 @@
                           (fail! entry
                                  (str "checked AST is unreadable: "
                                       (.getMessage error)))))]
+              (doseq [[field expected]
+                      {"kind" "beagle.checked-program"
+                       "schemaVersion" 2
+                       "phase" "checked"
+                       "target" "core"
+                       "mode" "strict"}]
+                (when (not= expected (get ast field))
+                  (fail! entry
+                         (str "checked AST " field " must equal " expected))))
+              (doseq [field ["sourceSha256" "projectionSha256"]]
+                (when-not (and (string? (get ast field))
+                               (re-matches #"sha256:[0-9a-f]{64}"
+                                           (get ast field)))
+                  (fail! entry (str "checked AST " field " is malformed"))))
+              (when-not (and (string? (get ast "sourceId"))
+                             (not (str/blank? (get ast "sourceId"))))
+                (fail! entry "checked AST sourceId is unavailable"))
               (if (= namespace (get ast "namespace"))
                 (for [form (get ast "forms" [])
                       :when (and (= "defn" (get form "node"))
@@ -42,6 +59,9 @@
           parameters (get form "params")
           return-type (get form "ret")]
       (when-not (false? (get form "private"))
+        ;; Visibility is frozen by the earlier Core entry projection. Keep the
+        ;; same wording here for standalone validation; no later boundary gets
+        ;; to invent a competing refusal contract.
         (fail! entry "must be a public source function"))
       (when-not (and (vector? parameters) (empty? parameters))
         (fail! entry

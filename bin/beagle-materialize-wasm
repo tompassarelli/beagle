@@ -9,19 +9,24 @@
 set -euo pipefail
 
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$BEAGLE_DIR/bin/_beagle-racket"
 TOOLS="$BEAGLE_DIR/bin/beagle-wasm-tools"
 SHIM="$BEAGLE_DIR/native-core/shim"
 SEAMS="$BEAGLE_DIR/native-core/validation/wasm32/seams.clj"
 ENTRY_CONTRACT="$BEAGLE_DIR/native-core/validation/wasm32/entry-contract.clj"
+AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
+FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
+SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
 
 usage() {
     echo "usage: beagle-materialize-wasm --artifacts DIR" \
-        "[--entry NS/NAME [--entry-ast SOURCE AST]...]" >&2
+        "--compiled DIR --checked-source SOURCE AST... [--entry NS/NAME]" >&2
 }
 
 artifacts=""
+compiled=""
 entry=""
-entry_ast_args=()
+checked_source_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --artifacts)
@@ -50,9 +55,18 @@ while [[ $# -gt 0 ]]; do
             entry="${1#*=}"
             shift
             ;;
-        --entry-ast)
+        --compiled)
+            [[ $# -ge 2 ]] || { usage; exit 2; }
+            compiled="$2"
+            shift 2
+            ;;
+        --compiled=*)
+            compiled="${1#*=}"
+            shift
+            ;;
+        --checked-source)
             [[ $# -ge 3 ]] || { usage; exit 2; }
-            entry_ast_args+=("$2" "$3")
+            checked_source_args+=("$2" "$3")
             shift 3
             ;;
         --help|-h)
@@ -68,17 +82,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$artifacts" ]] || { usage; exit 2; }
+[[ -n "$compiled" && -f "$compiled/native/core.clj" &&
+   -f "$compiled/native/stages.clj" ]] || {
+    echo "beagle wasm: --compiled must name the generated Native Core classpath" >&2
+    exit 2
+}
+compiled="$(cd "$compiled" && pwd -P)"
 if [[ -n "$entry" ]]; then
-    [[ "$entry" == */* ]] || {
-        echo "beagle wasm: --entry must be qualified as NS/NAME: $entry" >&2
+    [[ "$entry" =~ ^[^[:space:]/]+/[^[:space:]/]+$ ]] || {
+        echo "beagle wasm: --entry must be one whitespace-free NS/NAME" >&2
         exit 2
     }
-    [[ ${#entry_ast_args[@]} -gt 0 ]] || {
-        echo "beagle wasm: --entry requires checked AST evidence" >&2
-        exit 2
-    }
-elif [[ ${#entry_ast_args[@]} -gt 0 ]]; then
-    echo "beagle wasm: --entry-ast requires --entry" >&2
+fi
+if (( ${#checked_source_args[@]} == 0 || ${#checked_source_args[@]} % 2 != 0 )); then
+    echo "beagle wasm: at least one complete --checked-source pair is required" >&2
     exit 2
 fi
 [[ -d "$artifacts" ]] || {
@@ -96,11 +113,53 @@ audit="$artifacts/wasm-audit.txt"
 artifact="$artifacts/module_0.wasm"
 digest_file="$artifacts/module_0.wasm.sha256"
 seams="$artifacts/module_0.wasm.seams"
-rm -f -- "$artifact" "$digest_file" "$seams" "$report" "$audit"
+wasm_receipt="$artifacts/wasm.receipt"
+artifact_temporary="$artifacts/.module_0.wasm.$$"
+digest_temporary="$artifacts/.module_0.wasm.sha256.$$"
+seams_temporary="$artifacts/.module_0.wasm.seams.$$"
+report_temporary="$artifacts/.wasm-report.txt.$$"
+audit_temporary="$artifacts/.wasm-audit.txt.$$"
+wasm_receipt_temporary="$artifacts/.wasm.receipt.$$"
+wasm_aux_names=(
+    native_shim.h native_shim.c native_unicode15_data.h
+    wasm.retention.c wasm.adapter.c wasm.entry-contract.clj wasm.seams.clj
+    wasm.ast-verifier.rkt wasm.receipt-finalizer.clj wasm.materializer.sh
+    wasm.supervisor.rkt
+    wasm.cc-identity.txt wasm.ld-identity.txt wasm.runtime-identity.txt
+)
+rm -f -- "$artifact" "$digest_file" "$seams" "$report" "$audit" \
+    "$wasm_receipt" \
+    "$artifact_temporary" "$digest_temporary" "$seams_temporary" \
+    "$report_temporary" "$audit_temporary" "$wasm_receipt_temporary"
+for wasm_aux_name in "${wasm_aux_names[@]}"; do
+    rm -f -- "$artifacts/$wasm_aux_name" "$artifacts/.$wasm_aux_name.$$"
+done
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-wasm-materialize.XXXXXX")"
-cleanup() { rm -rf "${work:?}"; }
+output_committed=0
+failure_receipt_published=0
+cleanup() {
+    local rc=$?
+    if [[ "$output_committed" != "1" ]]; then
+        rm -f -- "$artifact" "$digest_file" "$seams" "$wasm_receipt" \
+            "$artifact_temporary" "$digest_temporary" \
+            "$seams_temporary" "$wasm_receipt_temporary"
+        if [[ "$failure_receipt_published" != "1" ]]; then
+            rm -f -- "$report" "$audit"
+        fi
+        rm -f -- "$report_temporary" "$audit_temporary"
+    fi
+    if [[ "$output_committed" != "1" ]]; then
+        for wasm_aux_name in "${wasm_aux_names[@]}"; do
+            rm -f -- "$artifacts/$wasm_aux_name" "$artifacts/.$wasm_aux_name.$$"
+        done
+    fi
+    rm -rf "${work:?}"
+    return "$rc"
+}
+interrupted() { exit 143; }
 trap cleanup EXIT
+trap interrupted HUP INT TERM
 
 report_lines=()
 report_lines+=("wasm-materializer bootstrap-c17-wasi-clang")
@@ -121,67 +180,313 @@ report_lines+=("wasm-audit wasm-audit.txt environment-specific-tool-paths")
 audit_lines=()
 audit_lines+=("wasm-audit-scope environment-specific-tool-resolution")
 
-publish_reports() {
-    local report_temporary="$work/wasm-report.txt"
-    local audit_temporary="$work/wasm-audit.txt"
+write_report_temporaries() {
     printf '%s\n' "${report_lines[@]}" >"$report_temporary"
     printf '%s\n' "${audit_lines[@]}" >"$audit_temporary"
-    cp "$report_temporary" "$report"
-    cp "$audit_temporary" "$audit"
+}
+
+publish_receipts() {
+    write_report_temporaries
+    mv -f -- "$audit_temporary" "$audit"
+    mv -f -- "$report_temporary" "$report"
 }
 
 fail() {
     local code="$1"
     shift
+    rm -f -- "$artifact" "$digest_file" "$seams" \
+        "$wasm_receipt" \
+        "$artifact_temporary" "$digest_temporary" "$seams_temporary" \
+        "$report" "$audit" "$report_temporary" "$audit_temporary" \
+        "$wasm_receipt_temporary"
+    for wasm_aux_name in "${wasm_aux_names[@]}"; do
+        rm -f -- "$artifacts/$wasm_aux_name" "$artifacts/.$wasm_aux_name.$$"
+    done
     report_lines+=("wasm-result FAIL $code")
-    publish_reports
+    publish_receipts
+    failure_receipt_published=1
     echo "beagle wasm: $*" >&2
     exit 1
 }
 
 for required in \
+    "$artifacts/source.facts" \
+    "$artifacts/module.native-program" \
     "$artifacts/module.native-program.sha256" \
-    "$artifacts/report.txt" \
+    "$artifacts/native.receipts" \
+    "$artifacts/native.entry-map" \
+    "$artifacts/c17.receipt" \
     "$artifacts/module_0.c" \
     "$artifacts/module_0.h" \
     "$SHIM/native_shim.c" \
     "$SHIM/native_shim.h" \
     "$SHIM/native_unicode15_data.h" \
-    "$SEAMS"; do
+    "$SEAMS" \
+    "$AST_VERIFIER" \
+    "$FINALIZER" \
+    "$SUPERVISOR"; do
     [[ -f "$required" ]] || fail missing-input "bootstrap input is unavailable: $required"
 done
 if [[ -n "$entry" && ! -f "$ENTRY_CONTRACT" ]]; then
     fail missing-input "entry contract validator is unavailable: $ENTRY_CONTRACT"
 fi
 
-native_digest="$(sed -n '1p' "$artifacts/module.native-program.sha256")"
-[[ "$native_digest" =~ ^[0-9a-f]{64}$ ]] ||
-    fail invalid-input "module.native-program.sha256 is not one lowercase SHA-256 digest"
-report_lines+=("wasm-input-sha256 $native_digest")
-
-for command in awk bb cmp cp grep mktemp mv sed sha256sum sort timeout tr; do
+for command in awk bb cmp cp grep mktemp mv sed sha256sum sort tr unshare wc; do
     command -v "$command" >/dev/null 2>&1 ||
         fail missing-tool "required command is unavailable: $command"
 done
+
+compile_timeout="${BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS:-60}"
+instantiate_timeout="${BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS:-10}"
+identity_timeout="${BEAGLE_WASM_TOOL_IDENTITY_TIMEOUT_SECONDS:-5}"
+validation_timeout="${BEAGLE_WASM_VALIDATION_TIMEOUT_SECONDS:-10}"
+kill_grace="${BEAGLE_WASM_KILL_GRACE_SECONDS:-5}"
+[[ "$compile_timeout" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS must be a positive integer"
+[[ "$instantiate_timeout" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS must be a positive integer"
+[[ "$identity_timeout" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_TOOL_IDENTITY_TIMEOUT_SECONDS must be a positive integer"
+[[ "$validation_timeout" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_VALIDATION_TIMEOUT_SECONDS must be a positive integer"
+[[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_KILL_GRACE_SECONDS must be a positive integer"
+
+# A private PID namespace makes the supervised command's root PID 1.  The
+# kernel reparents every orphaned descendant to that root. The pinned Racket
+# supervisor owns the explicit TERM/KILL deadline and reaps the whole namespace.
+# Returning therefore means the complete command tree is gone, not merely that
+# an intermediate shell exited.
+run_bounded() {
+    local seconds="$1"
+    shift
+    unshare --user --map-current-user --pid --fork --kill-child \
+        --forward-signals "$RACKET" "$SUPERVISOR" \
+        "$seconds" "$kill_grace" -- "$@"
+}
+
+read_single_printable_line() {
+    local path="$1"
+    local destination="$2"
+    local description="$3"
+    local lines=()
+    mapfile -t lines <"$path"
+    [[ ${#lines[@]} -eq 1 && "${lines[0]}" =~ ^[[:print:]]+$ ]] ||
+        fail unsafe-field "$description must be exactly one printable line"
+    printf -v "$destination" '%s' "${lines[0]}"
+}
+
+read_native_receipt() {
+    local pass="$1"
+    local input_destination="$2"
+    local output_destination="$3"
+    local commit_destination="$4"
+    local configuration_destination="$5"
+    local rows=()
+    mapfile -t rows < <(
+        awk -F '\t' -v pass="$pass" \
+            '$1 == pass && NF == 5 { print $2 "\t" $3 "\t" $4 "\t" $5 }' \
+            "$work/native.receipts.index"
+    )
+    [[ ${#rows[@]} -eq 1 ]] ||
+        fail provenance "native receipt index has no unique $pass receipt"
+    IFS=$'\t' read -r receipt_input receipt_output receipt_commit receipt_configuration \
+        <<<"${rows[0]}"
+    [[ "$receipt_input" =~ ^sha256:[0-9a-f]{64}$ &&
+       "$receipt_output" =~ ^sha256:[0-9a-f]{64}$ &&
+       "$receipt_configuration" =~ ^sha256:[0-9a-f]{64}$ &&
+       "$receipt_commit" =~ ^[[:print:]]+$ ]] ||
+        fail provenance "native receipt index carries malformed $pass fields"
+    printf -v "$input_destination" '%s' "$receipt_input"
+    printf -v "$output_destination" '%s' "$receipt_output"
+    printf -v "$commit_destination" '%s' "$receipt_commit"
+    printf -v "$configuration_destination" '%s' "$receipt_configuration"
+}
+
+if ! run_bounded "$validation_timeout" \
+        bb -cp "$compiled" "$FINALIZER" native-index \
+        "$work/native.receipts.index" "$artifacts/native.receipts" \
+        "$artifacts/module.native-program" >"$work/native-receipts.out" \
+        2>"$work/native-receipts.err"; then
+    sed -n '1,80p' "$work/native-receipts.err" >&2
+    fail provenance "Native Core canonical receipt validation failed"
+fi
+[[ "$(awk -F '\t' 'NF == 5 { count += 1 } END { print count + 0 }' \
+       "$work/native.receipts.index")" == "4" ]] ||
+    fail provenance "native receipt index must contain exactly four receipts"
+read_native_receipt source-freeze source_input source_output source_commit source_config
+read_native_receipt source-to-typed typed_input typed_output typed_commit typed_config
+read_native_receipt typed-to-native native_input native_output native_commit native_config
+read_native_receipt native-to-epoch epoch_input epoch_output epoch_commit epoch_config
+[[ "$source_input" == "$source_output" &&
+   "$source_output" == "$typed_input" &&
+   "$typed_output" == "$native_input" &&
+   "$native_output" == "$epoch_input" &&
+   "$source_commit" == "$typed_commit" &&
+   "$typed_commit" == "$native_commit" &&
+   "$native_commit" == "$epoch_commit" &&
+   "$source_config" == "$typed_config" &&
+   "$typed_config" == "$native_config" &&
+   "$native_config" == "$epoch_config" ]] ||
+    fail provenance "Native Core PassReceiptV0 chain is broken"
+
+declare -A checked_source_ids=()
+declare -A checked_namespaces=()
+for ((source_index = 0; source_index < ${#checked_source_args[@]}; source_index += 2)); do
+    checked_source="${checked_source_args[$source_index]}"
+    checked_ast="${checked_source_args[$((source_index + 1))]}"
+    [[ -f "$checked_source" && -f "$checked_ast" ]] ||
+        fail missing-input \
+            "checked source evidence is unavailable: $checked_source / $checked_ast"
+    ast_metadata="$work/checked-$source_index.metadata"
+    if ! run_bounded "$validation_timeout" \
+            "$RACKET" "$AST_VERIFIER" "$checked_ast" "$checked_source" \
+            >"$ast_metadata" 2>"$work/checked-$source_index.err"; then
+        fail provenance "checked AST digest validation failed for $checked_source"
+    fi
+    mapfile -d '' -t checked_fields <"$ast_metadata"
+    [[ ${#checked_fields[@]} -eq 4 ]] ||
+        fail provenance "checked AST metadata is malformed for $checked_source"
+    [[ -z "${checked_source_ids[${checked_fields[0]}]:-}" ]] ||
+        fail provenance "checked sourceId is duplicated: ${checked_fields[0]}"
+    [[ -z "${checked_namespaces[${checked_fields[1]}]:-}" ]] ||
+        fail provenance "checked namespace is duplicated: ${checked_fields[1]}"
+    checked_source_ids["${checked_fields[0]}"]=1
+    checked_namespaces["${checked_fields[1]}"]=1
+    mapfile -t fact_roots < <(
+        awk -F '\t' -v source_id="${checked_fields[0]}" \
+            '$2 == "relative-path" && $3 == "t" && $4 == source_id { print $1 }' \
+            "$artifacts/source.facts"
+    )
+    [[ ${#fact_roots[@]} -eq 1 ]] ||
+        fail provenance \
+            "source.facts has no unique module for ${checked_fields[0]}"
+    fact_root="${fact_roots[0]}"
+    for fact_pair in \
+        "relative-path=${checked_fields[0]}" \
+        "namespace=${checked_fields[1]}" \
+        "source-sha256=${checked_fields[2]}" \
+        "checked-projection-sha256=${checked_fields[3]}"; do
+        fact_predicate="${fact_pair%%=*}"
+        fact_value="${fact_pair#*=}"
+        fact_total="$(awk -F '\t' -v root="$fact_root" \
+            -v predicate="$fact_predicate" \
+            '$1 == root && $2 == predicate && $3 == "t" { count += 1 }
+             END { print count + 0 }' "$artifacts/source.facts")"
+        fact_count="$(awk -F '\t' -v root="$fact_root" \
+            -v predicate="$fact_predicate" -v value="$fact_value" \
+            '$1 == root && $2 == predicate && $3 == "t" && $4 == value { count += 1 }
+             END { print count + 0 }' "$artifacts/source.facts")"
+        [[ "$fact_total" == "1" && "$fact_count" == "1" ]] ||
+            fail provenance \
+                "source.facts does not preserve $fact_predicate for ${checked_fields[0]}"
+    done
+    checked_source_digest="$(sha256sum "$checked_source" | awk '{print $1}')"
+    checked_ast_digest="$(sha256sum "$checked_ast" | awk '{print $1}')"
+    report_lines+=("wasm-input-source-sha256 $checked_source_digest")
+    report_lines+=("wasm-input-checked-ast-sha256 $checked_ast_digest")
+done
+facts_module_count="$(awk -F '\t' \
+    '$2 == "form-kind" && $3 == "t" && $4 == "module-root" { count += 1 }
+     END { print count + 0 }' "$artifacts/source.facts")"
+[[ "$facts_module_count" == "${#checked_source_ids[@]}" &&
+   "$facts_module_count" == "${#checked_namespaces[@]}" ]] ||
+    fail provenance \
+        "checked source/AST evidence does not cover every source.facts module root"
+
+source_facts_actual="$(sha256sum "$artifacts/source.facts" | awk '{print $1}')"
+mapfile -t facts_configuration < <(
+    awk -F '\t' '$1 == "configuration" &&
+                  $2 ~ /^source-facts-sha256=[0-9a-f]{64}$/ { print $2 }' \
+        "$work/native.receipts.index"
+)
+[[ ${#facts_configuration[@]} -eq 1 &&
+   "${facts_configuration[0]}" == "source-facts-sha256=$source_facts_actual" ]] ||
+    fail provenance "source.facts does not match the Native Core receipt configuration"
+
+read_single_printable_line "$artifacts/module.native-program.sha256" \
+    native_digest "module.native-program.sha256"
+[[ "$native_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    fail invalid-input "module.native-program.sha256 is not one lowercase SHA-256 digest"
+native_actual="$(sha256sum "$artifacts/module.native-program" | awk '{print $1}')"
+[[ "$native_actual" == "$native_digest" &&
+   "sha256:$native_actual" == "$epoch_output" ]] ||
+    fail provenance "frozen Native Core bytes, digest file, and epoch receipt disagree"
+
+read_c17_field() {
+    local kind="$1"
+    local name="$2"
+    local destination="$3"
+    local rows=()
+    if [[ "$kind" == "artifact" ]]; then
+        mapfile -t rows < <(
+            awk -F '\t' -v name="$name" \
+                '$1 == "artifact" && $2 == name && NF == 3 { print $3 }' \
+                "$work/c17.receipt.index"
+        )
+    else
+        mapfile -t rows < <(
+            awk -F '\t' -v kind="$kind" \
+                '$1 == kind && NF == 2 { print $2 }' \
+                "$work/c17.receipt.index"
+        )
+    fi
+    [[ ${#rows[@]} -eq 1 && "${rows[0]}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        fail provenance "C17 receipt has no unique $kind ${name:-digest}"
+    printf -v "$destination" '%s' "${rows[0]}"
+}
+if ! run_bounded "$validation_timeout" \
+        bb -cp "$compiled" "$FINALIZER" c17-index \
+        "$work/c17.receipt.index" "$artifacts/c17.receipt" \
+        "$artifacts/native.receipts" "$artifacts/module.native-program" \
+        "$artifacts" >"$work/c17-receipt.out" \
+        2>"$work/c17-receipt.err"; then
+    sed -n '1,80p' "$work/c17-receipt.err" >&2
+    fail provenance "canonical C17 receipt validation failed"
+fi
+read_c17_field input "" c17_input
+read_c17_field output "" c17_output
+read_c17_field artifact module_0.h c17_header_expected
+read_c17_field artifact module_0.c c17_source_expected
+[[ "$c17_input" == "$epoch_output" ]] ||
+    fail provenance "C17 receipt input does not equal the epoch receipt output"
+
+c17_header_actual="$(sha256sum "$artifacts/module_0.h" | awk '{print $1}')"
+c17_source_actual="$(sha256sum "$artifacts/module_0.c" | awk '{print $1}')"
+[[ "sha256:$c17_header_actual" == "$c17_header_expected" ]] ||
+    fail provenance "module_0.h does not match the compiler-owned C17 receipt"
+[[ "sha256:$c17_source_actual" == "$c17_source_expected" ]] ||
+    fail provenance "module_0.c does not match the compiler-owned C17 receipt"
+
+report_lines+=("wasm-input-source-facts-sha256 $source_facts_actual")
+report_lines+=("wasm-input-native-program-sha256 $native_actual")
+report_lines+=("wasm-input-c17-header-sha256 $c17_header_actual")
+report_lines+=("wasm-input-c17-source-sha256 $c17_source_actual")
+report_lines+=("wasm-input-native-receipts-sha256 $(sha256sum "$artifacts/native.receipts" | awk '{print $1}')")
+report_lines+=("wasm-input-c17-receipt-sha256 $(sha256sum "$artifacts/c17.receipt" | awk '{print $1}')")
+report_lines+=("wasm-provenance PASS checked-projection-to-native-receipts-to-c17-receipt")
 
 entry_export="beagle_wasm_entry_v0"
 entry_compile_sources=()
 entry_link_flags=()
 if [[ -n "$entry" ]]; then
     entry_contract_error="$work/entry-contract.err"
-    if ! entry_return="$(bb "$ENTRY_CONTRACT" "$entry" "${entry_ast_args[@]}" \
-            2>"$entry_contract_error")"; then
+    if ! run_bounded "$validation_timeout" \
+            bb "$ENTRY_CONTRACT" "$entry" "${checked_source_args[@]}" \
+            >"$work/entry-contract.out" 2>"$entry_contract_error"; then
         report_lines+=("wasm-entry-contract REFUSED")
         entry_detail="$(sed -n '1s/^beagle wasm: //p' "$entry_contract_error")"
         fail unsupported-entry "${entry_detail:-entry '$entry' failed source contract validation}"
     fi
+    read_single_printable_line "$work/entry-contract.out" entry_return \
+        "entry contract result"
     [[ "$entry_return" == "Int" ]] || {
         report_lines+=("wasm-entry-contract REFUSED")
         fail unsupported-entry "entry '$entry' has unsupported source return '$entry_return'"
     }
 
     source_entry_count="$(grep -Fxc -- "source-entry $entry" \
-        "$artifacts/report.txt" || true)"
+        "$artifacts/native.entry-map" || true)"
     [[ "$source_entry_count" == "1" ]] || {
         report_lines+=("wasm-entry-contract REFUSED")
         fail unsupported-entry \
@@ -191,7 +496,7 @@ if [[ -n "$entry" ]]; then
     mapfile -t entry_rows < <(
         awk -v name="$entry_name" \
             '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == name { print $2 }' \
-            "$artifacts/report.txt"
+            "$artifacts/native.entry-map"
     )
     [[ ${#entry_rows[@]} -eq 1 ]] || {
         report_lines+=("wasm-entry-contract REFUSED")
@@ -230,7 +535,7 @@ if [[ -n "$entry" ]]; then
                 "entry '$entry' Int result is not represented by the generated int64 ABI"
         }
 
-    cat >"$work/entry-adapter.c" <<EOF
+    cat >"$work/wasm.adapter.c" <<EOF
 /* Generated stable wasm-callable adapter for one validated Beagle Int entry. */
 #include "module_0.h"
 
@@ -240,84 +545,85 @@ int64_t $entry_export(void) {
   return (int64_t)$entry_symbol();
 }
 EOF
-    entry_compile_sources+=("$work/entry-adapter.c")
+    entry_compile_sources+=("$work/wasm.adapter.c")
     entry_link_flags+=("-Wl,--export=$entry_export")
     report_lines+=("wasm-entry-contract PASS source-ast-to-lowered-header")
     report_lines+=("wasm-entry-symbol $entry_symbol")
     report_lines+=("wasm-entry-export $entry_export")
     report_lines+=("wasm-entry-abi parameterless-int-to-i64-v0")
+else
+    printf '%s\n' '/* No executable source entry was requested. */' \
+        >"$work/wasm.adapter.c"
 fi
 
 tool_error="$work/tool-error.txt"
-if ! cc="$("$TOOLS" cc 2>"$tool_error")"; then
+tool_error_detail() {
+    awk '!/^beagle supervisor:/ { print; exit }' "$tool_error"
+}
+tool_resolver="${BEAGLE_WASM_TOOL_RESOLVER:-$TOOLS}"
+[[ -f "$tool_resolver" && -x "$tool_resolver" ]] ||
+    fail missing-tool "Wasm tool resolver is unavailable: $tool_resolver"
+if ! run_bounded "$validation_timeout" "$tool_resolver" cc \
+        >"$work/cc-path.txt" 2>"$tool_error"; then
     report_lines+=("wasm-tool-cc unavailable")
     report_lines+=("wasm-tool-ld unresolved")
     report_lines+=("wasm-tool-runtime unresolved")
-    fail missing-tool "$(sed -n '1p' "$tool_error")"
+    fail missing-tool "$(tool_error_detail)"
 fi
-audit_lines+=("wasm-tool-cc-path $cc")
+read_single_printable_line "$work/cc-path.txt" cc "wasm32-wasi compiler path"
+printf -v cc_audit '%q' "$cc"
+audit_lines+=("wasm-tool-cc-path-shell $cc_audit")
 
-if ! ld="$("$TOOLS" ld 2>"$tool_error")"; then
+if ! run_bounded "$validation_timeout" "$tool_resolver" ld \
+        >"$work/ld-path.txt" 2>"$tool_error"; then
     report_lines+=("wasm-tool-ld unavailable")
     report_lines+=("wasm-tool-runtime unresolved")
-    fail missing-tool "$(sed -n '1p' "$tool_error")"
+    fail missing-tool "$(tool_error_detail)"
 fi
-audit_lines+=("wasm-tool-ld-path $ld")
+read_single_printable_line "$work/ld-path.txt" ld "wasm linker path"
+printf -v ld_audit '%q' "$ld"
+audit_lines+=("wasm-tool-ld-path-shell $ld_audit")
 
-if ! runtime="$("$TOOLS" runtime 2>"$tool_error")"; then
+if ! run_bounded "$validation_timeout" "$tool_resolver" runtime \
+        >"$work/runtime-path.txt" 2>"$tool_error"; then
     report_lines+=("wasm-tool-runtime unavailable")
-    fail missing-tool "$(sed -n '1p' "$tool_error")"
+    fail missing-tool "$(tool_error_detail)"
 fi
-audit_lines+=("wasm-tool-runtime-path $runtime")
-
-compile_timeout="${BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS:-60}"
-instantiate_timeout="${BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS:-10}"
-identity_timeout="${BEAGLE_WASM_TOOL_IDENTITY_TIMEOUT_SECONDS:-5}"
-kill_grace="${BEAGLE_WASM_KILL_GRACE_SECONDS:-5}"
-[[ "$compile_timeout" =~ ^[1-9][0-9]*$ ]] ||
-    fail invalid-timeout "BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS must be a positive integer"
-[[ "$instantiate_timeout" =~ ^[1-9][0-9]*$ ]] ||
-    fail invalid-timeout "BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS must be a positive integer"
-[[ "$identity_timeout" =~ ^[1-9][0-9]*$ ]] ||
-    fail invalid-timeout "BEAGLE_WASM_TOOL_IDENTITY_TIMEOUT_SECONDS must be a positive integer"
-[[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] ||
-    fail invalid-timeout "BEAGLE_WASM_KILL_GRACE_SECONDS must be a positive integer"
-
-# GNU timeout owns a fresh foreground process group unless --foreground is
-# requested. Keeping that default is what lets each bound terminate the whole
-# compiler, linker, or runtime tree before returning to this supervisor.
-run_bounded() {
-    local seconds="$1"
-    shift
-    timeout --signal=TERM --kill-after="${kill_grace}s" "${seconds}s" "$@"
-}
+read_single_printable_line "$work/runtime-path.txt" runtime \
+    "WebAssembly runtime path"
+printf -v runtime_audit '%q' "$runtime"
+audit_lines+=("wasm-tool-runtime-path-shell $runtime_audit")
 
 if ! run_bounded "$identity_timeout" "$cc" --version \
         >"$work/cc-version.txt" 2>"$work/cc-version.err"; then
     fail tool-identity \
         "wasm32-wasi compiler did not report its identity within ${identity_timeout}s"
 fi
-cc_version="$(sed -n '1p' "$work/cc-version.txt" | tr -d '\r')"
-[[ -n "$cc_version" ]] || fail tool-identity "wasm32-wasi compiler reported an empty identity"
-report_lines+=("wasm-tool-cc-version $cc_version")
+[[ -s "$work/cc-version.txt" && $(wc -c <"$work/cc-version.txt") -le 16384 ]] ||
+    fail tool-identity "wasm32-wasi compiler identity is empty or exceeds 16 KiB"
+cc_version="$(sha256sum "$work/cc-version.txt" | awk '{print $1}')"
+report_lines+=("wasm-tool-cc-identity-sha256 $cc_version")
 
 if ! run_bounded "$identity_timeout" "$ld" --version \
         >"$work/ld-version.txt" 2>"$work/ld-version.err"; then
     fail tool-identity \
         "wasm linker did not report its identity within ${identity_timeout}s"
 fi
-ld_version="$(sed -n '1p' "$work/ld-version.txt" | tr -d '\r')"
-[[ -n "$ld_version" ]] || fail tool-identity "wasm linker reported an empty identity"
-report_lines+=("wasm-tool-ld-version $ld_version")
+[[ -s "$work/ld-version.txt" && $(wc -c <"$work/ld-version.txt") -le 16384 ]] ||
+    fail tool-identity "wasm linker identity is empty or exceeds 16 KiB"
+ld_version="$(sha256sum "$work/ld-version.txt" | awk '{print $1}')"
+report_lines+=("wasm-tool-ld-identity-sha256 $ld_version")
 
 if ! run_bounded "$identity_timeout" "$runtime" --version \
         >"$work/runtime-version.txt" 2>"$work/runtime-version.err"; then
     fail tool-identity \
         "WebAssembly runtime did not report its identity within ${identity_timeout}s"
 fi
-runtime_version="$(sed -n '1p' "$work/runtime-version.txt" | tr -d '\r')"
-[[ -n "$runtime_version" ]] || fail tool-identity "WebAssembly runtime reported an empty identity"
-report_lines+=("wasm-tool-runtime-version $runtime_version")
+[[ -s "$work/runtime-version.txt" &&
+   $(wc -c <"$work/runtime-version.txt") -le 16384 ]] ||
+    fail tool-identity "WebAssembly runtime identity is empty or exceeds 16 KiB"
+runtime_version="$(sha256sum "$work/runtime-version.txt" | awk '{print $1}')"
+report_lines+=("wasm-tool-runtime-identity-sha256 $runtime_version")
 
 # Keep every generated Native Core function in the reactor. A constructor holds
 # exact-type function pointers, making the generated functions (and only their
@@ -344,24 +650,71 @@ mapfile -t native_symbols < <(
         native_index=$((native_index + 1))
     done
     printf '}\n'
-} >"$work/retain-native-functions.c"
+} >"$work/wasm.retention.c"
 report_lines+=("wasm-retained-native-functions ${#native_symbols[@]}")
 report_lines+=("wasm-retention constructor-function-pointers")
+
+compiler_input_names=(
+    c17.receipt module_0.h module_0.c native.entry-map
+    native_shim.h native_shim.c native_unicode15_data.h
+    wasm.retention.c wasm.adapter.c wasm.entry-contract.clj wasm.seams.clj
+    wasm.ast-verifier.rkt wasm.receipt-finalizer.clj wasm.materializer.sh
+    wasm.supervisor.rkt
+    wasm.cc-identity.txt wasm.ld-identity.txt wasm.runtime-identity.txt
+)
+compiler_input_paths=(
+    "$artifacts/c17.receipt" "$artifacts/module_0.h" "$artifacts/module_0.c"
+    "$artifacts/native.entry-map" "$SHIM/native_shim.h" "$SHIM/native_shim.c"
+    "$SHIM/native_unicode15_data.h" "$work/wasm.retention.c"
+    "$work/wasm.adapter.c" "$ENTRY_CONTRACT" "$SEAMS" "$AST_VERIFIER"
+    "$FINALIZER" "$0" "$SUPERVISOR" "$work/cc-version.txt" "$work/ld-version.txt"
+    "$work/runtime-version.txt"
+)
+wasm_aux_names=("${compiler_input_names[@]}")
+compiler_snapshot_dir="$work/compiler-inputs"
+mkdir -p "$compiler_snapshot_dir"
+compiler_snapshot_paths=()
+for input_index in "${!compiler_input_paths[@]}"; do
+    compiler_snapshot_path="$compiler_snapshot_dir/${compiler_input_names[$input_index]}"
+    cp -- "${compiler_input_paths[$input_index]}" "$compiler_snapshot_path"
+    compiler_snapshot_paths+=("$compiler_snapshot_path")
+done
+compiler_input_digests=()
+for input_index in "${!compiler_input_paths[@]}"; do
+    compiler_input_digests+=("$(sha256sum "${compiler_snapshot_paths[$input_index]}" | awk '{print $1}')")
+    [[ "$(sha256sum "${compiler_input_paths[$input_index]}" | awk '{print $1}')" == \
+       "${compiler_input_digests[$input_index]}" ]] ||
+        fail input-splice \
+            "compiler input ${compiler_input_names[$input_index]} changed while snapshotted"
+done
+
+verify_compiler_inputs() {
+    local input_index actual
+    for input_index in "${!compiler_snapshot_paths[@]}"; do
+        actual="$(sha256sum "${compiler_snapshot_paths[$input_index]}" | awk '{print $1}')"
+        [[ "$actual" == "${compiler_input_digests[$input_index]}" ]] ||
+            fail input-splice \
+                "compiler snapshot ${compiler_input_names[$input_index]} changed during materialization"
+    done
+}
 
 compile_once() {
     local ordinal="$1"
     local log="$work/compile-$ordinal.log"
     echo "beagle wasm: bootstrap compile $ordinal/2" >&2
+    verify_compiler_inputs
     if ! run_bounded "$compile_timeout" \
         "$cc" \
         "-fuse-ld=$ld" \
         -mexec-model=reactor \
         -std=c17 -pedantic -Wall -Wextra -Werror \
         "${entry_link_flags[@]}" \
-        -I "$artifacts" -I "$SHIM" \
+        -I "$compiler_snapshot_dir" \
         -o "$work/module_0.wasm" \
-        "$artifacts/module_0.c" "$SHIM/native_shim.c" \
-        "$work/retain-native-functions.c" "${entry_compile_sources[@]}" \
+        "$compiler_snapshot_dir/module_0.c" \
+        "$compiler_snapshot_dir/native_shim.c" \
+        "$compiler_snapshot_dir/wasm.retention.c" \
+        "$compiler_snapshot_dir/wasm.adapter.c" \
         >"$log" 2>&1; then
         sed -n '1,80p' "$log" >&2
         fail "compile-$ordinal" \
@@ -378,7 +731,8 @@ cmp -s "$work/module_0-1.wasm" "$work/module_0-2.wasm" ||
     fail nondeterministic "two identical bootstrap builds produced different WebAssembly bytes"
 report_lines+=("wasm-determinism PASS repeated-identical-build")
 
-if ! bb "$SEAMS" "$work/module_0-1.wasm" >"$work/module_0.wasm.seams" \
+if ! run_bounded "$validation_timeout" \
+        bb "$SEAMS" "$work/module_0-1.wasm" >"$work/module_0.wasm.seams" \
         2>"$work/seams.err"; then
     sed -n '1,80p' "$work/seams.err" >&2
     fail invalid-artifact "could not read the WebAssembly import/export seam"
@@ -387,14 +741,14 @@ awk '$1 == "export" { print }' "$work/module_0.wasm.seams" \
     >"$work/actual-exports.txt"
 if [[ -n "$entry" ]]; then
     printf '%s\n' \
-        "export func _initialize" \
-        "export func $entry_export" \
-        "export memory memory" \
+        "export func 5f696e697469616c697a65" \
+        "export func 626561676c655f7761736d5f656e7472795f7630" \
+        "export memory 6d656d6f7279" \
         >"$work/expected-exports.txt"
 else
     printf '%s\n' \
-        "export func _initialize" \
-        "export memory memory" \
+        "export func 5f696e697469616c697a65" \
+        "export memory 6d656d6f7279" \
         >"$work/expected-exports.txt"
 fi
 if ! cmp -s "$work/expected-exports.txt" "$work/actual-exports.txt"; then
@@ -402,10 +756,21 @@ if ! cmp -s "$work/expected-exports.txt" "$work/actual-exports.txt"; then
     fail export-policy \
         "bootstrap reactor exported a surface beyond _initialize and memory"
 fi
-while read -r seam_kind _ seam_name; do
-    if [[ "$seam_kind" == "import" &&
-          "$seam_name" != wasi_snapshot_preview1.* ]]; then
-        fail import-policy "bootstrap reactor imported non-WASI symbol $seam_name"
+while read -r seam_kind seam_type seam_module seam_field seam_extra; do
+    [[ "$seam_kind" =~ ^(import|export)$ &&
+       "$seam_type" =~ ^(func|table|memory|global)$ ]] ||
+        fail invalid-artifact "bootstrap seam carries an invalid kind tuple"
+    if [[ "$seam_kind" == "import" ]]; then
+        [[ -z "$seam_extra" && "$seam_module" =~ ^[0-9a-f]+$ &&
+           "$seam_field" =~ ^[0-9a-f]+$ ]] ||
+            fail invalid-artifact "bootstrap import seam is not a structured tuple"
+        [[ "$seam_module" == "776173695f736e617073686f745f7072657669657731" ]] ||
+            fail import-policy \
+                "bootstrap reactor imported a module other than wasi_snapshot_preview1"
+    else
+        [[ -z "$seam_field" && -z "$seam_extra" &&
+           "$seam_module" =~ ^[0-9a-f]+$ ]] ||
+            fail invalid-artifact "bootstrap export seam is not a structured tuple"
     fi
 done <"$work/module_0.wasm.seams"
 import_count="$(awk '$1 == "import" { count += 1 } END { print count + 0 }' \
@@ -460,17 +825,74 @@ fi
 wasm_digest="$(sha256sum "$work/module_0-1.wasm" | awk '{print $1}')"
 report_lines+=("wasm-artifact module_0.wasm")
 report_lines+=("wasm-artifact-sha256 $wasm_digest")
+verify_compiler_inputs
+for input_index in "${!compiler_input_paths[@]}"; do
+    cp -- "${compiler_snapshot_paths[$input_index]}" \
+        "$artifacts/.${compiler_input_names[$input_index]}.$$"
+done
+verify_compiler_inputs
+wasm_receipt_args=(
+    wasm-receipt "$work/wasm.receipt" "$epoch_commit"
+    --configuration "c17-output=$c17_output"
+    --configuration "abi=wasm32"
+    --configuration "entry=${entry:-none}"
+    --configuration "cc-identity-sha256=sha256:$cc_version"
+    --configuration "ld-identity-sha256=sha256:$ld_version"
+    --configuration "runtime-identity-sha256=sha256:$runtime_version"
+    --configuration "export-policy=$(if [[ -n "$entry" ]]; then
+        printf entry-v0
+    else
+        printf reactor-v0
+    fi)"
+)
+for input_index in "${!compiler_input_paths[@]}"; do
+    wasm_receipt_args+=(--input "${compiler_input_names[$input_index]}" \
+                       "$artifacts/.${compiler_input_names[$input_index]}.$$")
+done
+wasm_receipt_args+=(
+    --artifact module_0.wasm "$work/module_0-1.wasm"
+    --artifact module_0.wasm.seams "$work/module_0.wasm.seams"
+)
+if ! run_bounded "$validation_timeout" \
+        bb -cp "$compiled" "$FINALIZER" "${wasm_receipt_args[@]}" \
+        >"$work/wasm-receipt.out" 2>"$work/wasm-receipt.err"; then
+    sed -n '1,80p' "$work/wasm-receipt.err" >&2
+    fail receipt-finalization "could not construct canonical Wasm PassReceiptV0"
+fi
+[[ -s "$work/wasm.receipt" ]] ||
+    fail receipt-finalization "Wasm receipt finalizer produced no receipt"
+wasm_receipt_digest="$(sha256sum "$work/wasm.receipt" | awk '{print $1}')"
+report_lines+=("wasm-receipt wasm.receipt")
+report_lines+=("wasm-receipt-sha256 $wasm_receipt_digest")
 report_lines+=("wasm-result PASS")
 
-artifact_temporary="$artifacts/.module_0.wasm.$$"
-digest_temporary="$artifacts/.module_0.wasm.sha256.$$"
-seams_temporary="$artifacts/.module_0.wasm.seams.$$"
 cp "$work/module_0-1.wasm" "$artifact_temporary"
 printf '%s\n' "$wasm_digest" >"$digest_temporary"
 cp "$work/module_0.wasm.seams" "$seams_temporary"
-mv "$artifact_temporary" "$artifact"
-mv "$digest_temporary" "$digest_file"
-mv "$seams_temporary" "$seams"
-publish_reports
+cp "$work/wasm.receipt" "$wasm_receipt_temporary"
+write_report_temporaries
 
-echo "beagle wasm: wrote deterministic bootstrap reactor $artifact" >&2
+publish_wasm_file() {
+    local temporary="$1"
+    local destination="$2"
+    local boundary="$3"
+    mv -f -- "$temporary" "$destination"
+    if [[ "${BEAGLE_WASM_PUBLISH_FAILPOINT:-}" == "$boundary" ]]; then
+        kill -TERM "$$"
+    fi
+}
+
+publish_wasm_file "$artifact_temporary" "$artifact" after-artifact
+publish_wasm_file "$digest_temporary" "$digest_file" after-digest
+publish_wasm_file "$seams_temporary" "$seams" after-seams
+publish_wasm_file "$wasm_receipt_temporary" "$wasm_receipt" after-receipt
+for input_index in "${!compiler_input_names[@]}"; do
+    publish_wasm_file "$artifacts/.${compiler_input_names[$input_index]}.$$" \
+        "$artifacts/${compiler_input_names[$input_index]}" \
+        "after-input-${compiler_input_names[$input_index]}"
+done
+publish_wasm_file "$audit_temporary" "$audit" after-audit
+publish_wasm_file "$report_temporary" "$report" after-report
+output_committed=1
+
+echo "beagle wasm: wrote deterministic bootstrap reactor $artifact" >&2 || true
