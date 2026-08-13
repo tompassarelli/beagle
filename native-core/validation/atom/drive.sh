@@ -257,7 +257,7 @@ run_phase atom-gcc-link 60 gcc "${strict[@]}" -I"$scratch/c" \
   -o "$scratch/c/atom_gcc" "$scratch/c/module_4.c" \
   "$scratch/c/native_shim.c" "$scratch/c/main.c"
 run_phase atom-gcc-run 30 "$scratch/c/atom_gcc"
-echo "drive.sh: nine obligations + QBE refusal + gcc strict C17 run ok"
+echo "drive.sh: ten obligations + QBE refusal + gcc strict C17 run ok"
 
 clang_bin="$(command -v clang || true)"
 if [[ -z "$clang_bin" ]]; then

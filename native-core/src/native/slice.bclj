@@ -389,7 +389,7 @@
 (defn obligation-names [] (Vec String)
   ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
    "legal-abi" "discharged-tokens" "bounded-effects" "epoch-soundness"
-   "leak-freedom"])
+   "leak-freedom" "deterministic-parallelism"])
 
 (defn obligation-report
   [(label String)

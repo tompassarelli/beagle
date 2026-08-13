@@ -341,6 +341,25 @@
           (function-types-supported? function types layouts))
         functions))))
 
+(defn program-has-parallel-v0? [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (or
+                      (instance? native.core.TiledStepF64InstructionV0
+                        instruction)
+                      (instance? native.core.F64BufferSumInstructionV0
+                        instruction)))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      (core/nativecoreprogram-functions program))))
+
 (defn module-prefix [(module-index Int)] String
   (str "native_m" module-index))
 
@@ -700,6 +719,9 @@
       (not (core/program-epoch-0? program))
       (->C11Failure
         "native program carries a minted epoch: the restricted C17 reference slice materializes epoch-0 only")
+      (program-has-parallel-v0? program)
+      (->C11Failure
+        "C11 deterministic parallel F64 instructions are unsupported")
       (not (program-supported? program))
       (->C11Failure "native program uses a shape outside the restricted C17 reference slice")
       :else

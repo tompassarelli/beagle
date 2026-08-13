@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Projects the complete fram.rt-core module through the native program pipeline.
 # Pending semantics remain a named frontier; the normal gate accepts only all
-# 25 functions, all nine obligations, and an executable C17 materialization.
+# 25 functions, all ten obligations, and an executable C17 materialization.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -192,7 +192,7 @@ rg -Fx 'stage typed-to-native COMPLETE' "$generated/report.txt" >/dev/null \
   || complete=0
 rg -Fx 'program-functions 25' "$generated/report.txt" >/dev/null || complete=0
 rg -Fx 'program-abis 25' "$generated/report.txt" >/dev/null || complete=0
-[[ "$(rg -c '^obligation-projection PASS ' "$generated/report.txt")" -eq 9 ]] \
+[[ "$(rg -c '^obligation-projection PASS ' "$generated/report.txt")" -eq 10 ]] \
   || complete=0
 if rg -n '^pending ' "$generated/report.txt" >/dev/null; then
   complete=0

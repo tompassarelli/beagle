@@ -105,8 +105,8 @@ for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-host PASS $obligation" "$report" >/dev/null \
     || die "validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-host PASS ' "$report")" -eq 9 ]] \
-  || die "report did not contain exactly nine passing validators"
+[[ "$(rg -c '^obligation-host PASS ' "$report")" -eq 10 ]] \
+  || die "report did not contain exactly ten passing validators"
 
 map="$scratch/generated/function_map.h"
 printf '%s\n' \

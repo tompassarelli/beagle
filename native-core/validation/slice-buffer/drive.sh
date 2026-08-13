@@ -169,7 +169,7 @@ build_once() {
   grep -qx 'stage typed-to-native COMPLETE' "$output/report.txt"
   grep -qx 'stage native-to-epoch COMPLETE' "$output/report.txt"
   grep -qx 'epoch-regions-minted 0' "$output/report.txt"
-  test "$(grep -c '^obligation-projection PASS ' "$output/report.txt")" = 9
+  test "$(grep -c '^obligation-projection PASS ' "$output/report.txt")" = 10
   test "$(grep -c '^obligation-projection FAIL ' "$output/report.txt")" = 0
 }
 

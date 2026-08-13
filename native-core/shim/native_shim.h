@@ -13,6 +13,7 @@
 #define NATIVE_TRAP_ARENA_EXHAUSTED UINT32_C(3)
 #define NATIVE_TRAP_OUT_OF_RANGE UINT32_C(4)
 #define NATIVE_TRAP_IO UINT32_C(5)
+#define NATIVE_TRAP_PARALLEL UINT32_C(6)
 
 #define NATIVE_HOST_SOCKET_OK INT32_C(0)
 #define NATIVE_HOST_SOCKET_PEER_CLOSED INT32_C(-1)
@@ -42,9 +43,36 @@ typedef struct native_arena {
   size_t buffer_storage_high_water_bytes;
 } native_arena;
 
+typedef struct native_buffer native_buffer;
+
 typedef struct native_capability {
   uint64_t token;
 } native_capability;
+
+#define NATIVE_PARALLEL_PERMISSION_READ_CURRENT UINT32_C(1)
+#define NATIVE_PARALLEL_PERMISSION_WRITE_NEXT UINT32_C(2)
+
+typedef struct native_parallel_access_v0 {
+  const native_buffer *current;
+  const native_buffer *next;
+  const native_buffer *shadow;
+  uint64_t generation;
+  int64_t partition_id;
+  int64_t read_lo_0;
+  int64_t read_hi_0;
+  int64_t read_lo_1;
+  int64_t read_hi_1;
+  int64_t write_lo;
+  int64_t write_hi;
+  uint8_t *write_coverage;
+  uint32_t permissions;
+} native_parallel_access_v0;
+
+/* Set only around one generated tile callback. A TLS scope keeps ordinary
+   native_capability ABI values one word wide and gives every worker its own
+   exact buffer/range proof. */
+extern _Thread_local const native_parallel_access_v0
+    *native_parallel_access_current;
 
 /* Atom storage is opaque: generated programs can only access a cell while
    presenting the dedicated state capability. */
@@ -81,7 +109,7 @@ typedef struct native_vec {
    every access; the backing span is invalidated by arena reset. This is
    deliberately not native_vec: length never changes, reads and writes are
    checked, and updates mutate the shared buffer identity in place. */
-typedef struct native_buffer {
+struct native_buffer {
   void *elements;
   int64_t length;
   int64_t stride;
@@ -89,7 +117,7 @@ typedef struct native_buffer {
   /* Every read/write capability may be a distinct IR capability definition,
      but the host token identifies the one authority that created this Buffer. */
   uint64_t owner_capability_token;
-} native_buffer;
+};
 
 /* native_buffer is a public runtime handle shared with generated C17. Pin its
    field sequence generically and for native64, wasm32, and i386 profiles. */

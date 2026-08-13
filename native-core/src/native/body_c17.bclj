@@ -194,6 +194,8 @@
     (instance? native.core.BufferLengthInstructionV0 instruction) true
     (instance? native.core.BufferGetCheckedInstructionV0 instruction) true
     (instance? native.core.BufferSetCheckedInstructionV0 instruction) true
+    (instance? native.core.TiledStepF64InstructionV0 instruction) true
+    (instance? native.core.F64BufferSumInstructionV0 instruction) true
     (instance? native.core.VecSortInstructionV0 instruction) true
     (instance? native.core.MapLiteralInstructionV0 instruction) true
     (instance? native.core.SetLiteralInstructionV0 instruction) true
@@ -2605,6 +2607,52 @@
           ");\n"
           "  " target " = " value ";\n"))
 
+      (instance? native.core.TiledStepF64InstructionV0 instruction)
+      (let [(report-name String) (str "native_parallel_report_" target)
+            (kernel-index Int)
+            (function-index-of functions
+              (core/tiledstepf64instructionv0-kernel-id instruction))
+            (boundary String)
+            (if (instance? native.core.ParallelPeriodicV0
+                  (core/tiledstepf64instructionv0-boundary instruction))
+              "NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0"
+              "NATIVE_PARALLEL_BOUNDARY_BOUNDED_V0")]
+        (str "  native_parallel_report_v0 " report-name " =\n"
+          "      native_parallel_tiled_step_f64_default_v0("
+          (value-name function slots
+            (core/tiledstepf64instructionv0-current-id instruction))
+          ", "
+          (value-name function slots
+            (core/tiledstepf64instructionv0-next-id instruction))
+          ", capability, INT64_C("
+          (core/tiledstepf64instructionv0-tile-width instruction)
+          "), INT64_C("
+          (core/tiledstepf64instructionv0-left-halo instruction)
+          "), INT64_C("
+          (core/tiledstepf64instructionv0-right-halo instruction)
+          "), " boundary ", native_parallel_kernel_" kernel-index
+          ", NULL);\n"
+          "  if (" report-name ".outcome == NATIVE_PARALLEL_CANCELLED_V0) {\n"
+          "    " target " = false;\n"
+          "  } else if (" report-name ".outcome != NATIVE_PARALLEL_OK_V0) {\n"
+          "    native_trap(NATIVE_TRAP_PARALLEL);\n"
+          "  } else {\n"
+          "    " target " = true;\n"
+          "  }\n"))
+
+      (instance? native.core.F64BufferSumInstructionV0 instruction)
+      (let [(report-name String) (str "native_parallel_report_" target)]
+        (str "  native_parallel_report_v0 " report-name " =\n"
+          "      native_parallel_f64_buffer_sum_default_v0("
+          (value-name function slots
+            (core/f64buffersuminstructionv0-source-id instruction))
+          ", capability, INT64_C("
+          (core/f64buffersuminstructionv0-tile-width instruction)
+          "), &" target ");\n"
+          "  if (" report-name ".outcome != NATIVE_PARALLEL_OK_V0) {\n"
+          "    native_trap(NATIVE_TRAP_PARALLEL);\n"
+          "  }\n"))
+
       (instance? native.core.VecSortInstructionV0 instruction)
       (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)
             (element-type core/NativeId)
@@ -3159,6 +3207,78 @@
           (emit-function types layouts regions functions abis module-index pool
             position (nth functions position)))))))
 
+(defn function-has-tiled-kernel?
+  [(functions (Vec core/FunctionDef))
+   (kernel core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (and
+                      (instance? native.core.TiledStepF64InstructionV0
+                        instruction)
+                      (core/native-id=
+                        (core/tiledstepf64instructionv0-kernel-id instruction)
+                        kernel)))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      functions)))
+
+(defn functions-use-parallel? [(functions (Vec core/FunctionDef))] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (or
+                      (instance? native.core.TiledStepF64InstructionV0
+                        instruction)
+                      (instance? native.core.F64BufferSumInstructionV0
+                        instruction)))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      functions)))
+
+(defn emit-parallel-adapters
+  [(types (Vec core/TypeDef))
+   (functions (Vec core/FunctionDef))
+   (module-index Int)] String
+  (loop [(position Int) 0 (result String) ""]
+    (if (>= position (count functions))
+      result
+      (let [(kernel core/FunctionDef) (nth functions position)]
+        (recur (+ position 1)
+          (if (not (function-has-tiled-kernel? functions
+                     (core/functiondef-id kernel)))
+            result
+            (str result
+              "static int32_t native_parallel_kernel_" position "(\n"
+              "    const native_buffer *current, native_buffer *next,\n"
+              "    int64_t partition_id, int64_t write_lo, int64_t write_hi,\n"
+              "    const native_capability *capability, void *context) {\n"
+              "  (void)context;\n"
+              "  (void)" (function-name module-index position)
+              "(NULL, capability, ("
+              (c17/c-type types module-index
+                (core/parameter-type-id
+                  (nth (core/functiondef-parameters kernel) 0)))
+              ")current, ("
+              (c17/c-type types module-index
+                (core/parameter-type-id
+                  (nth (core/functiondef-parameters kernel) 1)))
+              ")next, partition_id, write_lo, write_hi);\n"
+              "  return INT32_C(0);\n"
+              "}\n\n")))))))
+
 (defn emit-source
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
@@ -3169,18 +3289,28 @@
    (pool ConstantPoolV0)
    (header-name String)] String
   (str "/* Generated by native.body-c17; do not edit. */\n"
-    "#include \"" header-name "\"\n\n"
+    "#include \"" header-name "\"\n"
+    (if (functions-use-parallel? functions)
+      "#include \"native_parallel.h\"\n" "")
+    "\n"
     (emit-text-pool module-index pool)
     (emit-value-descriptors types layouts functions module-index)
+    (emit-parallel-adapters types functions module-index)
     (emit-functions types layouts regions functions abis module-index pool)))
 
-(defn materialize-program
+(defn materialize-program-for-abi
   [(program core/NativeCoreProgram)
-   (module-index Int)] BodyMaterializationV0
+   (module-index Int)
+   (abi-id String)] BodyMaterializationV0
   (let [(validation core/ValidationReport) (core/validate-program program)]
     (cond
       (< module-index 0)
       (->BodyFailureV0 "module index must be nonnegative")
+
+      (and (not (= abi-id "lp64"))
+        (functions-use-parallel? (core/nativecoreprogram-functions program)))
+      (->BodyFailureV0
+        "shared-memory-worker-host-envelope-unavailable")
 
       (not (core/validationreport-passed validation))
       (->BodyFailureV0 "native program is not frozen: validation obligations failed")
@@ -3209,3 +3339,8 @@
             (str "module_" module-index ".c")
             (emit-source types layouts (core/nativecoreprogram-regions program)
               functions abis module-index pool header-name)))))))
+
+(defn materialize-program
+  [(program core/NativeCoreProgram)
+   (module-index Int)] BodyMaterializationV0
+  (materialize-program-for-abi program module-index "lp64"))

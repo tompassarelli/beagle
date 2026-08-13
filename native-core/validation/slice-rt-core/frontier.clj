@@ -30,8 +30,8 @@
       (fail! "functions are both lowered and pending" {:functions overlap}))
     (when (seq unreported)
       (fail! "functions are absent from the native frontier" {:functions unreported}))
-    (when-not (= 9 (count obligation-lines))
-      (fail! "native report does not contain exactly nine obligations"
+    (when-not (= 10 (count obligation-lines))
+      (fail! "native report does not contain exactly ten obligations"
         {:actual (count obligation-lines)}))
     (spit output-path
       (str

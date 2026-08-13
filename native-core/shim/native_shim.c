@@ -3535,6 +3535,8 @@ struct native_buffer_registration {
 };
 
 uint64_t native_vec_storage_allocations = UINT64_C(0);
+_Thread_local const native_parallel_access_v0 *native_parallel_access_current =
+    NULL;
 
 /* Smallest capacity a first push takes; every later growth doubles, which is
    what keeps a run of n pushes at O(log n) storage allocations. */
@@ -3921,6 +3923,29 @@ static size_t native_buffer_checked_offset(
   return offset;
 }
 
+static bool native_parallel_read_allowed(const native_buffer *buffer,
+                                         const native_capability *capability,
+                                         int64_t index) {
+  const native_parallel_access_v0 *access = native_parallel_access_current;
+  return access != NULL && capability != NULL &&
+         access->current == buffer &&
+         (access->permissions &
+          NATIVE_PARALLEL_PERMISSION_READ_CURRENT) != UINT32_C(0) &&
+         ((access->read_lo_0 <= index && index < access->read_hi_0) ||
+          (access->read_lo_1 <= index && index < access->read_hi_1));
+}
+
+static bool native_parallel_write_allowed(const native_buffer *buffer,
+                                          const native_capability *capability,
+                                          int64_t index) {
+  const native_parallel_access_v0 *access = native_parallel_access_current;
+  return access != NULL && capability != NULL &&
+         access->shadow == buffer && access->next != NULL &&
+         (access->permissions &
+          NATIVE_PARALLEL_PERMISSION_WRITE_NEXT) != UINT32_C(0) &&
+         access->write_lo <= index && index < access->write_hi;
+}
+
 native_buffer *native_buffer_new(native_arena *arena,
                                  const native_capability *capability,
                                  int64_t length, int64_t stride,
@@ -3987,6 +4012,12 @@ int64_t native_buffer_length(const native_arena *arena,
                              const native_capability *capability) {
   const native_buffer_registration *registration = native_buffer_require(
       arena, buffer, capability, INT64_C(0), 0U);
+  if (native_parallel_access_current != NULL) {
+    if (buffer != native_parallel_access_current->current &&
+        buffer != native_parallel_access_current->shadow) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+  }
   return registration->length;
 }
 
@@ -3998,6 +4029,10 @@ const void *native_buffer_at(const native_arena *arena,
   const native_buffer_registration *registration =
       native_buffer_require(arena, buffer, capability, stride, alignment);
   size_t offset = native_buffer_checked_offset(registration, index);
+  if (native_parallel_access_current != NULL &&
+      !native_parallel_read_allowed(buffer, capability, index)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
   return (const void *)((const uint8_t *)registration->elements + offset);
 }
 
@@ -4012,8 +4047,16 @@ void native_buffer_set(const native_arena *arena, native_buffer *buffer,
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   offset = native_buffer_checked_offset(registration, index);
+  if (native_parallel_access_current != NULL &&
+      !native_parallel_write_allowed(buffer, capability, index)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
   memcpy((uint8_t *)registration->elements + offset, value,
          (size_t)registration->stride);
+  if (native_parallel_access_current != NULL &&
+      native_parallel_access_current->write_coverage != NULL) {
+    native_parallel_access_current->write_coverage[index] = UINT8_C(1);
+  }
 }
 
 /* A second header over storage already handed out: the source header keeps its

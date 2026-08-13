@@ -13,7 +13,8 @@
   (DischargedTokensDiagnosticV0 [(function-id core/NativeId)])
   (BoundedEffectsDiagnosticV0 [(function-id core/NativeId)])
   (EpochSoundnessDiagnosticV0 [(function-id core/NativeId)])
-  (LeakFreedomDiagnosticV0 [(region-id core/NativeId)]))
+  (LeakFreedomDiagnosticV0 [(region-id core/NativeId)])
+  (DeterministicParallelismDiagnosticV0 [(function-id core/NativeId)]))
 
 (defrecord DefSiteV0
   [(found Bool)
@@ -52,7 +53,8 @@
     [(DischargedTokensDiagnosticV0 function-id) false]
     [(BoundedEffectsDiagnosticV0 function-id) false]
     [(EpochSoundnessDiagnosticV0 function-id) false]
-    [(LeakFreedomDiagnosticV0 region-id) false]))
+    [(LeakFreedomDiagnosticV0 region-id) false]
+    [(DeterministicParallelismDiagnosticV0 function-id) false]))
 
 ;; Named tag per verdict variant, so a fixture can assert "failed with ITS
 ;; diagnostic" without repeating a ten-arm match at each call site.
@@ -67,7 +69,9 @@
     [(DischargedTokensDiagnosticV0 function-id) "discharged-tokens"]
     [(BoundedEffectsDiagnosticV0 function-id) "bounded-effects"]
     [(EpochSoundnessDiagnosticV0 function-id) "epoch-soundness"]
-    [(LeakFreedomDiagnosticV0 region-id) "leak-freedom"]))
+    [(LeakFreedomDiagnosticV0 region-id) "leak-freedom"]
+    [(DeterministicParallelismDiagnosticV0 function-id)
+     "deterministic-parallelism"]))
 
 (defn find-block
   [(blocks (Vec core/BasicBlock))
@@ -2530,6 +2534,185 @@
           (recur (+ index 1) functions)
           (->LeakFreedomDiagnosticV0 violation))))))
 
+(defn find-function-by-id
+  [(functions (Vec core/FunctionDef))
+   (target core/NativeId)] (U core/FunctionDef Nil)
+  (loop [(position Int) 0]
+    (if (>= position (count functions))
+      nil
+      (let [(function core/FunctionDef) (nth functions position)]
+        (if (core/native-id= (core/functiondef-id function) target)
+          function
+          (recur (+ position 1)))))))
+
+(defn f64-buffer-type-id?
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)] Bool
+  (let [(element (U core/NativeId Nil))
+        (core/buffer-element-type types target)]
+    (and (some? element) (core/type-id-is-f64? types element))))
+
+(defn tile-kernel-signature-valid?
+  [(types (Vec core/TypeDef))
+   (kernel core/FunctionDef)] Bool
+  (let [(parameters (Vec core/Parameter))
+        (core/functiondef-parameters kernel)
+        (result (U core/NativeId Nil)) (core/functiondef-return-type kernel)]
+    (and (= 5 (count parameters))
+      (f64-buffer-type-id? types
+        (core/parameter-type-id (nth parameters 0)))
+      (f64-buffer-type-id? types
+        (core/parameter-type-id (nth parameters 1)))
+      (core/type-id-is-i64? types
+        (core/parameter-type-id (nth parameters 2)))
+      (core/type-id-is-i64? types
+        (core/parameter-type-id (nth parameters 3)))
+      (core/type-id-is-i64? types
+        (core/parameter-type-id (nth parameters 4)))
+      (some? result)
+      (if (nil? result)
+        false
+        (let [(definition (U core/TypeDef Nil))
+              (core/type-definition-with-id types result)]
+          (and (some? definition)
+            (= "Nil" (core/typedef-name definition))))))))
+
+(defn tile-kernel-instruction-valid?
+  [(kernel core/FunctionDef)
+   (instruction core/Instruction)] Bool
+  (let [(parameters (Vec core/Parameter))
+        (core/functiondef-parameters kernel)
+        (current core/NativeId) (core/parameter-id (nth parameters 0))
+        (next core/NativeId) (core/parameter-id (nth parameters 1))]
+    (cond
+      (instance? native.core.AtomInstruction instruction)
+      (not (instance? native.core.RefAtom
+             (core/atominstruction-atom instruction)))
+      (instance? native.core.CopyInstruction instruction) true
+      (instance? native.core.AddF64Instruction instruction) true
+      (instance? native.core.SubF64InstructionV0 instruction) true
+      (instance? native.core.MulF64InstructionV0 instruction) true
+      (instance? native.core.DivF64InstructionV0 instruction) true
+      (instance? native.core.I64ToF64InstructionV0 instruction) true
+      (instance? native.core.CheckedInstruction instruction) true
+      (instance? native.core.BitwiseInstructionV0 instruction) true
+      (instance? native.core.CompareInstruction instruction) true
+      (instance? native.core.BufferLengthInstructionV0 instruction)
+      (let [(source core/NativeId)
+            (core/bufferlengthinstructionv0-source-id instruction)]
+        (or (core/native-id= source current) (core/native-id= source next)))
+      (instance? native.core.BufferGetCheckedInstructionV0 instruction)
+      (core/native-id=
+        (core/buffergetcheckedinstructionv0-source-id instruction) current)
+      (instance? native.core.BufferSetCheckedInstructionV0 instruction)
+      (core/native-id=
+        (core/buffersetcheckedinstructionv0-source-id instruction) next)
+      :else false)))
+
+(defn tile-kernel-leaf-valid? [(kernel core/FunctionDef)] Bool
+  (every?
+    (fn [(block core/BasicBlock)] Bool
+      (every?
+        (fn [(instruction core/Instruction)] Bool
+          (tile-kernel-instruction-valid? kernel instruction))
+        (core/basicblock-instructions block)))
+    (core/functiondef-blocks kernel)))
+
+(defn function-id-abi-visible?
+  [(abis (Vec core/AbiDeclV0))
+   (target core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(abi core/AbiDeclV0)] Bool
+        (core/native-id= (core/abideclv0-function-id abi) target))
+      abis)))
+
+(defn function-id-ordinary-reachable?
+  [(functions (Vec core/FunctionDef))
+   (target core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (or
+                      (and (instance? native.core.CallInstruction instruction)
+                        (core/native-id=
+                          (core/callinstruction-function-id instruction)
+                          target))
+                      (and (instance? native.core.AtomSwapInstruction instruction)
+                        (core/native-id=
+                          (core/atomswapinstruction-updater-id instruction)
+                          target))))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      functions)))
+
+(defn parallel-instruction-valid?
+  [(program core/NativeCoreProgram)
+   (owner core/FunctionDef)
+   (instruction core/Instruction)] Bool
+  (cond
+    (instance? native.core.TiledStepF64InstructionV0 instruction)
+    (let [(kernel (U core/FunctionDef Nil))
+          (find-function-by-id (core/nativecoreprogram-functions program)
+            (core/tiledstepf64instructionv0-kernel-id instruction))]
+      (and (core/buffer-instruction-valid?
+             (core/nativecoreprogram-types program)
+             (core/nativecoreprogram-regions program)
+             (core/nativecoreprogram-capabilities program)
+             owner instruction)
+        (some? kernel)
+        (if (nil? kernel)
+          false
+          (and
+            (tile-kernel-signature-valid?
+              (core/nativecoreprogram-types program) kernel)
+            (tile-kernel-leaf-valid? kernel)
+            (not (function-id-abi-visible?
+                   (core/nativecoreprogram-abis program)
+                   (core/functiondef-id kernel)))
+            (not (function-id-ordinary-reachable?
+                   (core/nativecoreprogram-functions program)
+                   (core/functiondef-id kernel)))))))
+
+    (instance? native.core.F64BufferSumInstructionV0 instruction)
+    (and (instance? native.core.F64AdjacentPairwiseV0
+           (core/f64buffersuminstructionv0-policy instruction))
+      (core/buffer-instruction-valid?
+        (core/nativecoreprogram-types program)
+        (core/nativecoreprogram-regions program)
+        (core/nativecoreprogram-capabilities program)
+        owner instruction))
+
+    :else true))
+
+(defn deterministic-parallelism
+  [(program core/NativeCoreProgram)] ObligationVerdictV0
+  (loop [(position Int) 0
+         (functions (Vec core/FunctionDef))
+         (core/nativecoreprogram-functions program)]
+    (if (>= position (count functions))
+      (->ObligationPassV0
+        (core/->DeterministicParallelismObligationV0 true))
+      (let [(function core/FunctionDef) (nth functions position)
+            (valid Bool)
+            (every?
+              (fn [(block core/BasicBlock)] Bool
+                (every?
+                  (fn [(instruction core/Instruction)] Bool
+                    (parallel-instruction-valid? program function instruction))
+                  (core/basicblock-instructions block)))
+              (core/functiondef-blocks function))]
+        (if valid
+          (recur (+ position 1) functions)
+          (->DeterministicParallelismDiagnosticV0
+            (core/functiondef-id function)))))))
+
 (def fixture-i64-type core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
@@ -3684,7 +3867,8 @@
    (discharged-tokens program)
    (bounded-effects program)
    (epoch-soundness program)
-   (leak-freedom program)])
+   (leak-freedom program)
+   (deterministic-parallelism program)])
 
 (def valid-fixture-results (Vec Bool)
   (mapv (fn [(verdict ObligationVerdictV0)] Bool
@@ -3700,7 +3884,8 @@
    discharged-tokens-negative
    bounded-effects-negative
    epoch-soundness-negative
-   leak-freedom-negative])
+   leak-freedom-negative
+   true])
 
 (def nine-valid-passes? Bool
   (and (every? (fn [(passed Bool)] Bool passed) valid-fixture-results)

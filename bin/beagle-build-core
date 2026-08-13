@@ -136,6 +136,8 @@ managed_artifacts=(
     module_0.ssa
     native_shim.h
     native_shim.c
+    native_parallel.h
+    native_parallel.c
     native_unicode15_data.h
     UNICODE-LICENSE.txt
 )
@@ -581,7 +583,7 @@ bb -cp "$compiled" -e '
                  ["record" "def" "defn"])))
 
 (defn obligation-pass? [verdicts]
-  (and (= 9 (count verdicts))
+  (and (= 10 (count verdicts))
        (every? obligations/obligation-passed? verdicts)))
 
 (defn epoch-pending-details [epoch-result]
@@ -593,6 +595,58 @@ bb -cp "$compiled" -e '
 (defn epoch-pending-report [epoch-result]
   (apply str (map #(str "epoch-pending " % "\n")
                   (epoch-pending-details epoch-result))))
+
+(defn parallel-instructions [program]
+  (mapcat (fn [function]
+            (mapcat core/basicblock-instructions
+                    (core/functiondef-blocks function)))
+          (core/nativecoreprogram-functions program)))
+
+(defn parallel-kernel-name [program target]
+  (or (some (fn [function]
+              (when (core/native-id= (core/functiondef-id function) target)
+                (core/functiondef-name function)))
+            (core/nativecoreprogram-functions program))
+      "missing"))
+
+(defn parallel-plan-report [program]
+  (let [plans (sort-by #(core/nativeid-value
+                         (core/instruction-result-id %))
+                       (filter #(or
+                                  (instance? native.core.TiledStepF64InstructionV0 %)
+                                  (instance? native.core.F64BufferSumInstructionV0 %))
+                               (parallel-instructions program)))]
+    (apply str
+      (map (fn [instruction]
+             (let [id (core/nativeid-value (core/instruction-result-id instruction))]
+               (if (instance? native.core.TiledStepF64InstructionV0 instruction)
+                 (str "parallel-plan " id "\n"
+                      "parallel-kernel "
+                      (parallel-kernel-name
+                        program
+                        (core/tiledstepf64instructionv0-kernel-id instruction))
+                      "\nparallel-partition-policy linear-contiguous-v0\n"
+                      "parallel-tile-width "
+                      (core/tiledstepf64instructionv0-tile-width instruction) "\n"
+                      "parallel-halo "
+                      (core/tiledstepf64instructionv0-left-halo instruction) " "
+                      (core/tiledstepf64instructionv0-right-halo instruction) "\n"
+                      "parallel-boundary "
+                      (if (instance? native.core.ParallelPeriodicV0
+                            (core/tiledstepf64instructionv0-boundary instruction))
+                        "periodic" "bounded")
+                      "\nparallel-reduction none\n"
+                      "parallel-worker-count excluded-from-program-identity\n")
+                 (str "parallel-plan " id "\n"
+                      "parallel-kernel none\n"
+                      "parallel-partition-policy linear-contiguous-v0\n"
+                      "parallel-tile-width "
+                      (core/f64buffersuminstructionv0-tile-width instruction) "\n"
+                      "parallel-halo 0 0\n"
+                      "parallel-boundary bounded\n"
+                      "parallel-reduction f64-adjacent-pairwise-v0\n"
+                      "parallel-worker-count excluded-from-program-identity\n"))))
+           plans))))
 
 (defn native-report-head
   [rows entries source program projected native-program epoch-result abi]
@@ -617,12 +671,13 @@ bb -cp "$compiled" -e '
        "native-program-sha256 module.native-program.sha256\n"
        "projected-types " (count (core/nativecoreprogram-types projected)) "\n"
        (body-slice/function-report (core/nativecoreprogram-functions projected))
+       (parallel-plan-report projected)
        (slice/obligation-report "obligation-projection" projected abi)
        (body-slice/failing-obligations projected abi)))
 
-(defn materialize-c17! [projected artifacts-dir]
+(defn materialize-c17! [projected artifacts-dir abi-id]
   (start-stage! "materialization-c17")
-  (let [result (body/materialize-program projected 0)
+  (let [result (body/materialize-program-for-abi projected 0 abi-id)
         ok? (body/materialization-ok? result)
         report (str "materialize-c17 "
                     (if ok?
@@ -675,7 +730,7 @@ bb -cp "$compiled" -e '
       {:ok? true :report (str (apply str reports) "result PASS\n")}
       (let [materializer (first remaining)
             result (case materializer
-                     "c17" (materialize-c17! projected artifacts-dir)
+                     "c17" (materialize-c17! projected artifacts-dir abi-id)
                      "qbe" (materialize-qbe! qbe-projected artifacts-dir abi-id))
             next-reports (conj reports (:report result))]
         (if (:ok? result)
@@ -769,7 +824,7 @@ bb -cp "$compiled" -e '
                                                  native-program epoch-result abi)]
                     (cond
                       ;; Pending with no named pending row is the epoch stage
-                      ;; refusing its own nine obligations, never a frontier.
+                      ;; refusing its own ten obligations, never a frontier.
                       (and (not epoch-complete?) (empty? epoch-pendings))
                       (do
                         (finish-stage! "native-obligations" "FAIL")
@@ -782,7 +837,7 @@ bb -cp "$compiled" -e '
                         (finish-stage! "native-obligations" "FAIL")
                         {:ok? false
                          :report (str head
-                                      "result FAIL nine native obligations required\n")})
+                                      "result FAIL ten native obligations required\n")})
 
                       :else
                       (do
@@ -867,6 +922,12 @@ for materializer in "${materializers[@]}"; do
         done
         cp "$BEAGLE_DIR/native-core/shim/native_shim.c" "$out/native_shim.c"
         cp "$BEAGLE_DIR/native-core/shim/native_shim.h" "$out/native_shim.h"
+        if grep -q '^parallel-plan ' "$out/report.txt"; then
+            cp "$BEAGLE_DIR/native-core/shim/native_parallel.c" \
+                "$out/native_parallel.c"
+            cp "$BEAGLE_DIR/native-core/shim/native_parallel.h" \
+                "$out/native_parallel.h"
+        fi
         cp "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h" \
             "$out/native_unicode15_data.h"
         cp "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt" \

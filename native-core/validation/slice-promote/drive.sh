@@ -85,8 +85,8 @@ echo "drive.sh: hosted run '$hosted_report' — promote returned the same object
   }
 grep -qx 'result PASS' "$work/core/report.txt" \
   || { cat "$work/core/report.txt" >&2; echo "drive.sh: surface build did not pass" >&2; exit 1; }
-[ "$(grep -c '^obligation-projection PASS ' "$work/core/report.txt")" = 9 ] \
-  || { echo "drive.sh: surface build did not clear nine obligations" >&2; exit 1; }
+[ "$(grep -c '^obligation-projection PASS ' "$work/core/report.txt")" = 10 ] \
+  || { echo "drive.sh: surface build did not clear ten obligations" >&2; exit 1; }
 # The surface path crosses the derived epoch stage, so the probe's four
 # functions are the whole promote taxonomy in one C file:
 #   promoted-text       interior concatenation -> minted epoch + a real promote

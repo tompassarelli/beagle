@@ -174,6 +174,13 @@
    (align-bytes Int)
    (shape LayoutShapeV0)])
 
+(defunion ParallelBoundaryV0
+  (ParallelBoundedV0 [(token Bool)])
+  (ParallelPeriodicV0 [(token Bool)]))
+
+(defunion ParallelReductionPolicyV0
+  (F64AdjacentPairwiseV0 [(token Bool)]))
+
 ;; The target-ABI numbers layout measurement consumes. Deliberately NOT a
 ;; NativeCoreProgram field and never encoded: a program's LayoutDefs already
 ;; carry the ABI in their digested numbers, so one frozen program exists per
@@ -540,6 +547,27 @@
      (value-id NativeId)
      (region NativeId)
      (capability NativeId)])
+  ;; Stable logical partitions are frozen here; worker count is host state and
+  ;; never enters this instruction or the native-program digest.
+  (TiledStepF64InstructionV0
+    [(result SsaValueV0)
+     (current-id NativeId)
+     (next-id NativeId)
+     (tile-width Int)
+     (left-halo Int)
+     (right-halo Int)
+     (boundary ParallelBoundaryV0)
+     (kernel-id NativeId)
+     (region NativeId)
+     (read-capability NativeId)
+     (write-capability NativeId)])
+  (F64BufferSumInstructionV0
+    [(result SsaValueV0)
+     (source-id NativeId)
+     (tile-width Int)
+     (policy ParallelReductionPolicyV0)
+     (region NativeId)
+     (read-capability NativeId)])
   ;; A byte source is a borrowed read-only octet range: one handle, no owned
   ;; storage. Length is a header read, get zero-extends one octet to I64, and
   ;; slice aliases the same octets behind a fresh handle.
@@ -795,7 +823,8 @@
   (DischargedTokensObligation [(token Bool)])
   (BoundedEffectsObligation [(token Bool)])
   (EpochSoundnessObligation [(token Bool)])
-  (LeakFreedomObligation [(token Bool)]))
+  (LeakFreedomObligation [(token Bool)])
+  (DeterministicParallelismObligationV0 [(token Bool)]))
 
 (defrecord ObligationResult
   [(code ObligationCode)
@@ -1024,6 +1053,12 @@
      (ssavaluev0-id result)]
     [(BufferSetCheckedInstructionV0 result source-id index-id value-id region
        capability)
+     (ssavaluev0-id result)]
+    [(TiledStepF64InstructionV0 result current-id next-id tile-width left-halo
+       right-halo boundary kernel-id region read-capability write-capability)
+     (ssavaluev0-id result)]
+    [(F64BufferSumInstructionV0 result source-id tile-width policy region
+       read-capability)
      (ssavaluev0-id result)]
     [(ByteSourceLengthInstructionV0 result source-id) (ssavaluev0-id result)]
     [(ByteSourceGetInstructionV0 result source-id index-id)
@@ -1299,6 +1334,22 @@
         (and (instance? native.core.AtomType shape)
           (instance? native.core.I64Kind (atomtype-kind shape)))))))
 
+(defn type-id-is-f64? [(types (Vec TypeDef)) (target NativeId)] Bool
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
+    (if (nil? definition)
+      false
+      (let [(shape TypeShape) (typedef-shape definition)]
+        (and (instance? native.core.AtomType shape)
+          (instance? native.core.F64Kind (atomtype-kind shape)))))))
+
+(defn type-id-is-bool? [(types (Vec TypeDef)) (target NativeId)] Bool
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
+    (if (nil? definition)
+      false
+      (let [(shape TypeShape) (typedef-shape definition)]
+        (and (instance? native.core.AtomType shape)
+          (instance? native.core.BoolKind (atomtype-kind shape)))))))
+
 (defn type-id-is-arena-handle? [(types (Vec TypeDef)) (target NativeId)] Bool
   (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
@@ -1490,6 +1541,58 @@
         (buffer-function-resource-valid? function region capability)
         (buffer-capability-valid? capabilities capability region "write")))
 
+    (instance? native.core.TiledStepF64InstructionV0 instruction)
+    (let [(result SsaValueV0) (tiledstepf64instructionv0-result instruction)
+          (current-type (U NativeId Nil))
+          (function-value-type function
+            (tiledstepf64instructionv0-current-id instruction))
+          (next-type (U NativeId Nil))
+          (function-value-type function
+            (tiledstepf64instructionv0-next-id instruction))
+          (region NativeId) (tiledstepf64instructionv0-region instruction)
+          (read NativeId)
+          (tiledstepf64instructionv0-read-capability instruction)
+          (write NativeId)
+          (tiledstepf64instructionv0-write-capability instruction)]
+      (and (some? current-type)
+        (some? next-type)
+        (native-id= current-type next-type)
+        (not (native-id=
+               (tiledstepf64instructionv0-current-id instruction)
+               (tiledstepf64instructionv0-next-id instruction)))
+        (let [(element (U NativeId Nil))
+              (if (nil? current-type) nil
+                (buffer-element-type types current-type))]
+          (and (some? element) (type-id-is-f64? types element)))
+        (type-id-is-bool? types (ssavaluev0-type-id result))
+        (> (tiledstepf64instructionv0-tile-width instruction) 0)
+        (>= (tiledstepf64instructionv0-left-halo instruction) 0)
+        (>= (tiledstepf64instructionv0-right-halo instruction) 0)
+        (root-arena-region? regions region)
+        (buffer-function-resource-valid? function region read)
+        (buffer-function-resource-valid? function region write)
+        (buffer-capability-valid? capabilities read region "read")
+        (buffer-capability-valid? capabilities write region "write")))
+
+    (instance? native.core.F64BufferSumInstructionV0 instruction)
+    (let [(result SsaValueV0) (f64buffersuminstructionv0-result instruction)
+          (source-type (U NativeId Nil))
+          (function-value-type function
+            (f64buffersuminstructionv0-source-id instruction))
+          (region NativeId) (f64buffersuminstructionv0-region instruction)
+          (read NativeId)
+          (f64buffersuminstructionv0-read-capability instruction)]
+      (and (some? source-type)
+        (let [(element (U NativeId Nil))
+              (if (nil? source-type) nil
+                (buffer-element-type types source-type))]
+          (and (some? element) (type-id-is-f64? types element)))
+        (type-id-is-f64? types (ssavaluev0-type-id result))
+        (> (f64buffersuminstructionv0-tile-width instruction) 0)
+        (root-arena-region? regions region)
+        (buffer-function-resource-valid? function region read)
+        (buffer-capability-valid? capabilities read region "read")))
+
     :else true))
 
 (defn function-buffer-instructions-valid?
@@ -1517,6 +1620,10 @@
     (buffergetcheckedinstructionv0-region instruction)
     (instance? native.core.BufferSetCheckedInstructionV0 instruction)
     (buffersetcheckedinstructionv0-region instruction)
+    (instance? native.core.TiledStepF64InstructionV0 instruction)
+    (tiledstepf64instructionv0-region instruction)
+    (instance? native.core.F64BufferSumInstructionV0 instruction)
+    (f64buffersuminstructionv0-region instruction)
     :else nil))
 
 (defn function-buffer-regions [(function FunctionDef)] (Vec NativeId)
@@ -1899,6 +2006,16 @@
        capability)
      (and (id-in? known-regions region)
        (id-in? known-capabilities capability))]
+    [(TiledStepF64InstructionV0 result current-id next-id tile-width left-halo
+       right-halo boundary kernel-id region read-capability write-capability)
+     (and (id-in? known-functions kernel-id)
+       (id-in? known-regions region)
+       (id-in? known-capabilities read-capability)
+       (id-in? known-capabilities write-capability))]
+    [(F64BufferSumInstructionV0 result source-id tile-width policy region
+       read-capability)
+     (and (id-in? known-regions region)
+       (id-in? known-capabilities read-capability))]
     [(ByteSourceLengthInstructionV0 result source-id) true]
     [(ByteSourceGetInstructionV0 result source-id index-id) true]
     [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)
@@ -2183,6 +2300,12 @@
     [(BufferSetCheckedInstructionV0 result source-id index-id value-id region
        capability)
      [source-id index-id value-id]]
+    [(TiledStepF64InstructionV0 result current-id next-id tile-width left-halo
+       right-halo boundary kernel-id region read-capability write-capability)
+     [current-id next-id]]
+    [(F64BufferSumInstructionV0 result source-id tile-width policy region
+       read-capability)
+     [source-id]]
     [(ByteSourceLengthInstructionV0 result source-id) [source-id]]
     [(ByteSourceGetInstructionV0 result source-id index-id)
      [source-id index-id]]
@@ -2360,6 +2483,15 @@
        capability)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
+    [(TiledStepF64InstructionV0 result current-id next-id tile-width left-halo
+       right-halo boundary kernel-id region read-capability write-capability)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities read-capability)
+       (id-in? allowed-capabilities write-capability))]
+    [(F64BufferSumInstructionV0 result source-id tile-width policy region
+       read-capability)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities read-capability))]
     [(ByteSourceLengthInstructionV0 result source-id) true]
     [(ByteSourceGetInstructionV0 result source-id index-id) true]
     [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)

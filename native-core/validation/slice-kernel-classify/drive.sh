@@ -124,10 +124,10 @@ for obligation in "${obligations[@]}"; do
   rg -Fx "qbe-obligation PASS $obligation" "$report" >/dev/null \
     || die "QBE projection validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$report")" -eq 9 ]] \
-  || die "report did not contain exactly nine passing validators"
-[[ "$(rg -c '^qbe-obligation PASS ' "$report")" -eq 9 ]] \
-  || die "report did not contain exactly nine passing QBE validators"
+[[ "$(rg -c '^obligation-projection PASS ' "$report")" -eq 10 ]] \
+  || die "report did not contain exactly ten passing validators"
+[[ "$(rg -c '^qbe-obligation PASS ' "$report")" -eq 10 ]] \
+  || die "report did not contain exactly ten passing QBE validators"
 [[ "$(rg -c '^lowered fn_[0-9]+ ' "$report")" -eq 19 ]] \
   || die "report did not contain exactly nineteen lowered functions"
 

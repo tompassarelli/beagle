@@ -31,6 +31,27 @@
     (list (type-app 'Buffer (list (p 'Float))) (p 'Int) (p 'Float))
     #f
     (p 'Float))
+   ;; Bulk-synchronous Native Core surface. The policy operands are literals at
+   ;; lowering time; the function type keeps the statically named tile kernel
+   ;; exact at source checking too.
+   'native/tiled-step!
+   (type-fn
+    (list (type-app 'Buffer (list (p 'Float)))
+          (type-app 'Buffer (list (p 'Float)))
+          (p 'Int) (p 'Int) (p 'Int) (p 'Keyword)
+          (type-fn
+           (list (type-app 'Buffer (list (p 'Float)))
+                 (type-app 'Buffer (list (p 'Float)))
+                 (p 'Int) (p 'Int) (p 'Int))
+           #f
+           (p 'Nil)))
+    #f
+    (p 'Bool))
+   'native/f64-buffer-sum
+   (type-fn
+    (list (type-app 'Buffer (list (p 'Float))) (p 'Int))
+    #f
+    (p 'Float))
    'native.bytes/from-ints-bounded
    (type-fn
     (list (type-app 'Vec (list (p 'Int))) (p 'Int))

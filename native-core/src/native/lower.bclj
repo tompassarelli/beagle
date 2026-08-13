@@ -5339,6 +5339,44 @@
     (fact-text index node "value")
     nil))
 
+(defn source-int-literal-value
+  [(index SourceIndexV0)
+   (node core/NativeId)] (U Int Nil)
+  (if (and (= "literal" (fact-text index node "form-kind"))
+        (or (= "int" (fact-text index node "literal-kind"))
+          (= "number" (fact-text index node "literal-kind"))))
+    (parse-int-text (fact-text index node "value"))
+    nil))
+
+(defn source-keyword-literal-value
+  [(index SourceIndexV0)
+   (node core/NativeId)] (U String Nil)
+  (if (and (= "literal" (fact-text index node "form-kind"))
+        (= "keyword" (fact-text index node "literal-kind")))
+    (fact-text index node "value")
+    nil))
+
+(defn f64-buffer-type?
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)] Bool
+  (and (buffer-type? types target)
+    (same-id? (buffer-element-of types target) (float-type-id))))
+
+(defn tiled-kernel-signature?
+  [(types (Vec core/TypeDef))
+   (signature TypedFunctionV0)] Bool
+  (let [(parameters (Vec core/Parameter))
+        (typedfunctionv0-parameters signature)]
+    (and (= 5 (count parameters))
+      (f64-buffer-type? types
+        (core/parameter-type-id (nth parameters 0)))
+      (f64-buffer-type? types
+        (core/parameter-type-id (nth parameters 1)))
+      (same-id? (core/parameter-type-id (nth parameters 2)) (int-type-id))
+      (same-id? (core/parameter-type-id (nth parameters 3)) (int-type-id))
+      (same-id? (core/parameter-type-id (nth parameters 4)) (int-type-id))
+      (same-id? (typedfunctionv0-return-type signature) (type-id "Nil")))))
+
 (defn text-vector-value?
   [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (and (vector-type? types target)
@@ -12915,6 +12953,114 @@
                     (exprresultv0-type-id value)
                     record-type (widen-budget)))))
 
+            (= "native/tiled-step!" callee)
+            (if (not (= 7 (count args)))
+              (fail-result state
+                "TODO-NATIVE-TILED-STEP-ARITY: native/tiled-step! takes current, next, tile width, left/right halo, boundary, and a named kernel")
+              (let [(current ExprResultV0)
+                    (lower-expr env owner state (nth args 0))
+                    (next ExprResultV0)
+                    (if (or (exprresultv0-terminated current)
+                          (state-blocked? (exprresultv0-state current)))
+                      current
+                      (lower-expr env owner (exprresultv0-state current)
+                        (nth args 1)))
+                    (settled BodyStateV0) (exprresultv0-state next)
+                    (tile-width (U Int Nil))
+                    (source-int-literal-value index (nth args 2))
+                    (left-halo (U Int Nil))
+                    (source-int-literal-value index (nth args 3))
+                    (right-halo (U Int Nil))
+                    (source-int-literal-value index (nth args 4))
+                    (boundary-name (U String Nil))
+                    (source-keyword-literal-value index (nth args 5))
+                    (kernel-node core/NativeId) (nth args 6)
+                    (kernel-name String) (fact-text index kernel-node "name")
+                    (signature (U TypedFunctionV0 Nil))
+                    (if (= "ref" (fact-text index kernel-node "form-kind"))
+                      (find-signature env kernel-node kernel-name)
+                      nil)]
+                (cond
+                  (exprresultv0-terminated current) current
+                  (exprresultv0-terminated next) next
+                  (state-blocked? settled) (dead-result settled)
+                  (or (not (f64-buffer-type? types
+                             (exprresultv0-type-id current)))
+                    (not (f64-buffer-type? types
+                           (exprresultv0-type-id next))))
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-BUFFER: current and next must be (Buffer Float)")
+                  (nil? tile-width)
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-TILE: tile width must be a positive compile-time Int literal")
+                  (<= tile-width 0)
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-TILE: tile width must be positive")
+                  (or (nil? left-halo) (nil? right-halo)
+                    (< left-halo 0) (< right-halo 0))
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-HALO: halo widths must be nonnegative compile-time Int literals")
+                  (and (not (= boundary-name "bounded"))
+                    (not (= boundary-name "periodic")))
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-BOUNDARY: boundary must be :bounded or :periodic")
+                  (nil? signature)
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-KERNEL: tile kernel must be a statically named native function")
+                  (not (tiled-kernel-signature? types signature))
+                  (fail-result settled
+                    "TODO-NATIVE-TILED-STEP-KERNEL: tile kernel signature must be [(Buffer Float) (Buffer Float) Int Int Int -> Nil]")
+                  :else
+                  (let [(result-id core/NativeId)
+                        (state-id settled owner "tiled-step-f64")]
+                    (->ExprResultV0
+                      (state-emit (state-bump settled)
+                        (core/->TiledStepF64InstructionV0
+                          (core/->SsaValueV0 result-id (bool-type-id))
+                          (exprresultv0-value-id current)
+                          (exprresultv0-value-id next)
+                          tile-width left-halo right-halo
+                          (if (= boundary-name "periodic")
+                            (core/->ParallelPeriodicV0 true)
+                            (core/->ParallelBoundedV0 true))
+                          (typedfunctionv0-id signature)
+                          (arena-region-id)
+                          (read-capability-id)
+                          (write-capability-id)))
+                      result-id (bool-type-id) false)))))
+
+            (= "native/f64-buffer-sum" callee)
+            (if (not (= 2 (count args)))
+              (fail-result state
+                "TODO-NATIVE-F64-SUM-ARITY: native/f64-buffer-sum takes a Buffer and compile-time tile width")
+              (let [(source ExprResultV0)
+                    (lower-expr env owner state (nth args 0))
+                    (settled BodyStateV0) (exprresultv0-state source)
+                    (tile-width (U Int Nil))
+                    (source-int-literal-value index (nth args 1))]
+                (cond
+                  (exprresultv0-terminated source) source
+                  (state-blocked? settled) (dead-result settled)
+                  (not (f64-buffer-type? types (exprresultv0-type-id source)))
+                  (fail-result settled
+                    "TODO-NATIVE-F64-SUM-BUFFER: native/f64-buffer-sum requires (Buffer Float)")
+                  (or (nil? tile-width) (<= tile-width 0))
+                  (fail-result settled
+                    "TODO-NATIVE-F64-SUM-TILE: tile width must be a positive compile-time Int literal")
+                  :else
+                  (let [(result-id core/NativeId)
+                        (state-id settled owner "f64-buffer-sum")]
+                    (->ExprResultV0
+                      (state-emit (state-bump settled)
+                        (core/->F64BufferSumInstructionV0
+                          (core/->SsaValueV0 result-id (float-type-id))
+                          (exprresultv0-value-id source)
+                          tile-width
+                          (core/->F64AdjacentPairwiseV0 true)
+                          (arena-region-id)
+                          (read-capability-id)))
+                      result-id (float-type-id) false)))))
+
             (= "swap!" (unqualified-name callee))
             (if (< (count args) 2)
               (fail-result state
@@ -15637,7 +15783,10 @@
             (fn [(instruction core/Instruction)] Bool
               (or
                 (instance? native.core.BufferLengthInstructionV0 instruction)
-                (instance? native.core.BufferGetCheckedInstructionV0 instruction)))
+                (or (instance? native.core.BufferGetCheckedInstructionV0 instruction)
+                  (or (instance? native.core.TiledStepF64InstructionV0 instruction)
+                    (instance? native.core.F64BufferSumInstructionV0
+                      instruction)))))
             (core/basicblock-instructions block))))
       blocks)))
 
@@ -15648,7 +15797,8 @@
         (some?
           (some
             (fn [(instruction core/Instruction)] Bool
-              (instance? native.core.BufferSetCheckedInstructionV0 instruction))
+              (or (instance? native.core.BufferSetCheckedInstructionV0 instruction)
+                (instance? native.core.TiledStepF64InstructionV0 instruction)))
             (core/basicblock-instructions block))))
       blocks)))
 
@@ -15825,6 +15975,8 @@
     (core/callinstruction-function-id instruction)
     (instance? native.core.AtomSwapInstruction instruction)
     (core/atomswapinstruction-updater-id instruction)
+    (instance? native.core.TiledStepF64InstructionV0 instruction)
+    (core/tiledstepf64instructionv0-kernel-id instruction)
     :else nil))
 
 (defn body-call-targets [(function TypedFunctionV0)] (Vec core/NativeId)
@@ -17861,6 +18013,34 @@
        (id-value (core/buffersetcheckedinstructionv0-region instruction))
        (id-value (core/buffersetcheckedinstructionv0-capability instruction))])
 
+    (instance? native.core.TiledStepF64InstructionV0 instruction)
+    (stages/canonical-record "tiled-step-f64-instruction-v0"
+      [(encode-ssa-value (core/tiledstepf64instructionv0-result instruction))
+       (id-value (core/tiledstepf64instructionv0-current-id instruction))
+       (id-value (core/tiledstepf64instructionv0-next-id instruction))
+       (str (core/tiledstepf64instructionv0-tile-width instruction))
+       (str (core/tiledstepf64instructionv0-left-halo instruction))
+       (str (core/tiledstepf64instructionv0-right-halo instruction))
+       (if (instance? native.core.ParallelPeriodicV0
+             (core/tiledstepf64instructionv0-boundary instruction))
+         "periodic" "bounded")
+       (id-value (core/tiledstepf64instructionv0-kernel-id instruction))
+       (id-value (core/tiledstepf64instructionv0-region instruction))
+       (id-value
+         (core/tiledstepf64instructionv0-read-capability instruction))
+       (id-value
+         (core/tiledstepf64instructionv0-write-capability instruction))])
+
+    (instance? native.core.F64BufferSumInstructionV0 instruction)
+    (stages/canonical-record "f64-buffer-sum-instruction-v0"
+      [(encode-ssa-value (core/f64buffersuminstructionv0-result instruction))
+       (id-value (core/f64buffersuminstructionv0-source-id instruction))
+       (str (core/f64buffersuminstructionv0-tile-width instruction))
+       "f64-adjacent-pairwise-v0"
+       (id-value (core/f64buffersuminstructionv0-region instruction))
+       (id-value
+         (core/f64buffersuminstructionv0-read-capability instruction))])
+
     (instance? native.core.VecSortInstructionV0 instruction)
     (stages/canonical-record "vec-sort-instruction-v0"
       [(encode-ssa-value (core/vecsortinstructionv0-result instruction))
@@ -18421,7 +18601,8 @@
    (tokens-discharged Bool)
    (effects-bounded Bool)
    (epoch-sound Bool)
-   (leak-free Bool)]
+   (leak-free Bool)
+   (parallel-deterministic Bool)]
   (Vec core/ObligationResult)
   [(core/->ObligationResult (core/->ValidSsaObligation true) valid-ssa
      "typed SSA definitions and uses are closed")
@@ -18440,7 +18621,11 @@
    (core/->ObligationResult (core/->EpochSoundnessObligation true) epoch-sound
      "no reference points from an older epoch into a younger one")
    (core/->ObligationResult (core/->LeakFreedomObligation true) leak-free
-     "every opened epoch region provably closes on all paths in tree order")])
+     "every opened epoch region provably closes on all paths in tree order")
+   (core/->ObligationResult
+     (core/->DeterministicParallelismObligationV0 true)
+     parallel-deterministic
+     "parallel plans use stable partitions, leaf kernels, and fixed reductions")])
 
 (defn encode-obligation-result [(result core/ObligationResult)] String
   (stages/canonical-record "native-obligation-v0"
@@ -18479,7 +18664,8 @@
    (tokens-discharged Bool)
    (clean Bool)
    (epoch-sound Bool)
-   (leak-free Bool)]
+   (leak-free Bool)
+   (parallel-deterministic Bool)]
   (Vec core/ReceiptObligationV0)
   [(core/->ReceiptObligationV0
      (core/->ValidSsaObligation true) "v0" digest core-valid
@@ -18508,6 +18694,10 @@
    (core/->ReceiptObligationV0
      (core/->LeakFreedomObligation true) "v0" digest leak-free
      "every opened epoch region provably closes on all paths in tree order")
+   (core/->ReceiptObligationV0
+     (core/->DeterministicParallelismObligationV0 true) "v0" digest
+     parallel-deterministic
+     "parallel plans use stable partitions, leaf kernels, and fixed reductions")
    (core/->ReceiptObligationV0
      (core/->ValidSsaObligation true) "v0" digest clean
      "native Terms contain no raw Any, host exception, host collection, or target syntax")])
@@ -18601,9 +18791,13 @@
         ;; epoch instructions, so obligations 8/9 hold by construction; this
         ;; is the witness of that construction, not a re-derivation.
         (epoch-inert Bool) (core/program-epoch-0? program)
+        (parallel-deterministic Bool)
+        (obligations/obligation-passed?
+          (obligations/deterministic-parallelism program))
         (obligation-results (Vec core/ObligationResult))
         (native-obligation-results core-valid true closed-layouts true legal-abi
-          tokens-discharged core-valid epoch-inert epoch-inert)
+          tokens-discharged core-valid epoch-inert epoch-inert
+          parallel-deterministic)
         (root core/NativeId) (lower-id "native-terms" [typed-digest])
         (obligation-roots (Vec core/NativeId))
         (mapv
@@ -18632,7 +18826,8 @@
         (obligations (Vec core/ReceiptObligationV0))
         (vec (concat
                (native-receipt-obligations digest core-valid closed-layouts
-                 legal-abi tokens-discharged clean epoch-inert epoch-inert)
+                 legal-abi tokens-discharged clean epoch-inert epoch-inert
+                 parallel-deterministic)
                pending-layouts
                pending-functions))
         (diagnostics (Vec core/DiagnosticV0))
@@ -18641,7 +18836,8 @@
         (make-receipt typed-digest compiler-commit "typed-to-native"
           configuration diagnostics obligations digest)
         (complete Bool)
-        (and core-valid closed-layouts functions-ready legal-abi tokens-discharged clean)]
+        (and core-valid closed-layouts functions-ready legal-abi
+          tokens-discharged clean parallel-deterministic)]
     (if complete
       (->NativeLoweringCompleteV0 frozen receipt)
       (->NativeLoweringPendingV0 frozen receipt
@@ -19288,8 +19484,12 @@
                   (instance? native.core.BufferLengthInstructionV0 instruction)
                   (or
                     (instance? native.core.BufferGetCheckedInstructionV0 instruction)
-                    (instance? native.core.BufferSetCheckedInstructionV0
-                      instruction)))))
+                    (or (instance? native.core.BufferSetCheckedInstructionV0
+                          instruction)
+                      (or (instance? native.core.TiledStepF64InstructionV0
+                            instruction)
+                        (instance? native.core.F64BufferSumInstructionV0
+                          instruction)))))))
             (core/basicblock-instructions block))))
       (core/functiondef-blocks function))))
 
@@ -19528,7 +19728,8 @@
          (core/->DischargedTokensObligation true)
          (core/->BoundedEffectsObligation true)
          (core/->EpochSoundnessObligation true)
-         (core/->LeakFreedomObligation true)]]
+         (core/->LeakFreedomObligation true)
+         (core/->DeterministicParallelismObligationV0 true)]]
     (loop [(position Int) 0 (rows (Vec core/ReceiptObligationV0)) []]
       (if (or (>= position (count verdicts)) (>= position (count codes)))
         rows

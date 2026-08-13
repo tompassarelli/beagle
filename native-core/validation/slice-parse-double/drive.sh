@@ -90,8 +90,8 @@ for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-projection PASS $obligation" "$scratch/report.txt" >/dev/null \
     || die "validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$scratch/report.txt")" -eq 9 ]] \
-  || die "report did not contain exactly nine passing validators"
+[[ "$(rg -c '^obligation-projection PASS ' "$scratch/report.txt")" -eq 10 ]] \
+  || die "report did not contain exactly ten passing validators"
 
 function_index() {
   local name="$1"

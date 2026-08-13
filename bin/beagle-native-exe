@@ -289,8 +289,8 @@ for required in \
 done
 
 obligation_count="$(grep -c '^obligation-projection PASS ' "$report" || true)"
-[[ "$obligation_count" == "9" ]] ||
-    die "Core build report has $obligation_count/9 passing obligations"
+[[ "$obligation_count" == "10" ]] ||
+    die "Core build report has $obligation_count/10 passing obligations"
 
 mapfile -t program_counts < <(awk '$1 == "program-functions" && NF == 2 { print $2 }' "$report")
 [[ ${#program_counts[@]} -eq 1 && "${program_counts[0]}" =~ ^[0-9]+$ ]] ||
@@ -437,8 +437,16 @@ EOF
 
 linked="$work/native-executable"
 link_flags=()
+parallel_sources=()
+if grep -q '^parallel-plan ' "$report"; then
+    for name in native_parallel.h native_parallel.c; do
+        [[ -f "$module_dir/$name" ]] || die "parallel Core build omitted $name"
+    done
+    parallel_sources=("$module_dir/native_parallel.c")
+    link_flags+=(-pthread -ffp-contract=off)
+fi
 if [[ $static_link -eq 1 ]]; then
-    link_flags=(-static)
+    link_flags+=(-static)
 fi
 set +e
 "$cc_path" -std=c17 -pedantic -Wall -Wextra -Werror \
@@ -446,6 +454,7 @@ set +e
     -I "$module_dir" \
     "$module_dir/module_0.c" \
     "$module_dir/native_shim.c" \
+    "${parallel_sources[@]}" \
     "$entry_source" \
     -o "$linked" >"$work/native-exe.log" 2>&1
 link_rc=$?
@@ -461,6 +470,10 @@ for name in source.facts report.txt module.native-program module.native-program.
     native_unicode15_data.h UNICODE-LICENSE.txt; do
     cp -- "$module_dir/$name" "$artifacts/$name"
 done
+if [[ ${#parallel_sources[@]} -gt 0 ]]; then
+    cp -- "$module_dir/native_parallel.h" "$artifacts/native_parallel.h"
+    cp -- "$module_dir/native_parallel.c" "$artifacts/native_parallel.c"
+fi
 cp -- "$entry_source" "$artifacts/entry.c"
 cp -- "$work/native-exe.log" "$artifacts/native-exe.log"
 

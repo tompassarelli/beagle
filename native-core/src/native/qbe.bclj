@@ -293,6 +293,10 @@
      (core/buffergetcheckedinstructionv0-result instruction)]
     [(BufferSetCheckedInstructionV0 value)
      (core/buffersetcheckedinstructionv0-result instruction)]
+    [(TiledStepF64InstructionV0 value)
+     (core/tiledstepf64instructionv0-result instruction)]
+    [(F64BufferSumInstructionV0 value)
+     (core/f64buffersuminstructionv0-result instruction)]
     [(VecSortInstructionV0 value)
      (core/vecsortinstructionv0-result instruction)]
     [(MapLiteralInstructionV0 value)
@@ -1080,6 +1084,8 @@
     [(BufferLengthInstructionV0 value) false]
     [(BufferGetCheckedInstructionV0 value) false]
     [(BufferSetCheckedInstructionV0 value) false]
+    [(TiledStepF64InstructionV0 value) false]
+    [(F64BufferSumInstructionV0 value) false]
     [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
@@ -1711,6 +1717,8 @@
       [(BufferLengthInstructionV0 value) ""]
       [(BufferGetCheckedInstructionV0 value) ""]
       [(BufferSetCheckedInstructionV0 value) ""]
+      [(TiledStepF64InstructionV0 value) ""]
+      [(F64BufferSumInstructionV0 value) ""]
       [(ByteSourceLengthInstructionV0 value) ""]
       [(ByteSourceGetInstructionV0 value) ""]
       [(ByteSourceSliceInstructionV0 value) ""]
@@ -2157,6 +2165,8 @@
     [(BufferLengthInstructionV0 value) false]
     [(BufferGetCheckedInstructionV0 value) false]
     [(BufferSetCheckedInstructionV0 value) false]
+    [(TiledStepF64InstructionV0 value) false]
+    [(F64BufferSumInstructionV0 value) false]
     [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
@@ -2478,6 +2488,25 @@
           (core/typedef-shape definition)))
       (core/nativecoreprogram-types program))))
 
+(defn program-has-parallel-v0? [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (or
+                      (instance? native.core.TiledStepF64InstructionV0
+                        instruction)
+                      (instance? native.core.F64BufferSumInstructionV0
+                        instruction)))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      (core/nativecoreprogram-functions program))))
+
 (defn program-has-host-extern? [(program core/NativeCoreProgram)] Bool
   (some?
     (some (fn [(abi core/AbiDeclV0)] Bool
@@ -2570,6 +2599,9 @@
       (not (core/program-epoch-0? program))
       (->QbeFailure
         "native program carries a minted epoch: the QBE materializer emits epoch-0 only")
+      (program-has-parallel-v0? program)
+      (->QbeFailure
+        "QBE deterministic parallel F64 instructions are unsupported")
       (program-has-buffer-v0? program)
       (->QbeFailure
         "QBE Buffer v0 is unsupported: mutable region-owned storage has no QBE runtime representation")

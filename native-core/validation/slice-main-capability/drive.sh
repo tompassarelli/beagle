@@ -93,8 +93,8 @@ for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-main PASS $obligation" "$report" >/dev/null \
     || die "validator did not pass: $obligation"
 done
-[[ "$(rg -c '^obligation-main PASS ' "$report")" -eq 9 ]] \
-  || die "report did not contain exactly nine passing validators"
+[[ "$(rg -c '^obligation-main PASS ' "$report")" -eq 10 ]] \
+  || die "report did not contain exactly ten passing validators"
 
 index="$(awk '$1 == "lowered" && $3 == "-main" { sub(/^fn_/, "", $2); print $2 }' "$report")"
 [[ "$index" =~ ^[0-9]+$ ]] || die "missing or duplicate lowered function: -main"
