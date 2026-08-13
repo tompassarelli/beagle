@@ -13,7 +13,7 @@
 (define SRC
   (string-append
    "#lang beagle/clj\n"
-   "(defn process [n: Int] -> Int\n"
+   "(defn process [(n Int)] Int\n"
    "  (let [a (* n 2)\n"
    "        b (+ a 1)]\n"
    "    (- b n)))\n"))
@@ -35,19 +35,19 @@
       (check-true (string-contains? SRC out)
                   "clean view must be verbatim source text")
       (check-true (string-contains? out "(* n 2)"))
-      (check-false (string-contains? out "a: Int (* n 2)")
+      (check-false (string-contains? out "(a Int) (* n 2)")
                    "clean must NOT inject inferred annotations"))))
 
-(test-case "inferred view injects `: T` on un-annotated let-bindings"
+(test-case "inferred view wraps unannotated let bindings as `(name Type)`"
   (with-fixture SRC
     (lambda (f)
       (define out (explain-type f #:name "process" #:level "inferred"))
-      (check-true (string-contains? out "a: Int (* n 2)")
+      (check-true (string-contains? out "(a Int) (* n 2)")
                   (format "expected inferred annotation on `a`; got:\n~a" out))
-      (check-true (string-contains? out "b: Int (+ a 1)")
+      (check-true (string-contains? out "(b Int) (+ a 1)")
                   (format "expected inferred annotation on `b`; got:\n~a" out))
       ;; the authored boundary annotation is preserved verbatim, not doubled
-      (check-true (string-contains? out "[n: Int]")))))
+      (check-true (string-contains? out "[(n Int)]")))))
 
 (test-case "all view prefixes every typed interior node with ^T"
   (with-fixture SRC
@@ -76,20 +76,18 @@
     (lambda (f)
       (define clean (explain-type f #:name "process" #:level "clean"))
       (define inferred (explain-type f #:name "process" #:level "inferred"))
-      (check-false (string-contains? clean "a: Int (* n 2)"))
-      (check-true  (string-contains? inferred "a: Int (* n 2)"))
-      ;; inferred is exactly clean + `: Int` injections: stripping them
-      ;; recovers clean byte-for-byte (proves pure projection, no rewrite).
-      ;; strip only the INJECTED `: Int` (always followed by the value's
-      ;; original space); the authored `[n: Int]` is followed by `]`.
-      (check-equal? (regexp-replace* #px": Int(?= )" inferred "") clean))))
+      (check-false (string-contains? clean "(a Int) (* n 2)"))
+      (check-true  (string-contains? inferred "(a Int) (* n 2)"))
+      ;; Inferred is exactly clean plus structural wrappers: unwrapping the two
+      ;; inferred binders recovers clean byte-for-byte (pure projection).
+      (check-equal? (regexp-replace* #px"\\(([ab]) Int\\)" inferred "\\1") clean))))
 
 ;; --- edge cases the first fixture hid (from adversarial review) --------------
 
 (define MIXED
   (string-append
    "#lang beagle/clj\n"
-   "(defn process [n: Int] -> String\n"
+   "(defn process [(n Int)] String\n"
    "  (let [a (* n 2)\n"
    "        s (str a)]\n"
    "    s))\n"))
@@ -98,8 +96,8 @@
   (with-fixture MIXED
     (lambda (f)
       (define out (explain-type f #:name "process" #:level "inferred"))
-      (check-true (string-contains? out "a: Int (* n 2)") out)
-      (check-true (string-contains? out "s: String (str a)") out))))
+      (check-true (string-contains? out "(a Int) (* n 2)") out)
+      (check-true (string-contains? out "(s String) (str a)") out))))
 
 (test-case "inferred output re-parses (round-trips through the reader)"
   (for ([src (in-list (list SRC MIXED))])
@@ -107,7 +105,7 @@
       (lambda (f)
         (define out (explain-type f #:name "process" #:level "inferred"))
         ;; write the rendered view back out and confirm it still parses —
-        ;; the injected `: T` is real beagle surface, not a debug artifact.
+        ;; the injected `(binding Type)` is real Beagle surface, not a debug artifact.
         (define g (make-temporary-file "type-view-rt-~a.bclj"))
         (call-with-output-file g (lambda (o) (display out o)) #:exists 'truncate/replace)
         (check-not-exn (lambda () (parse-program (read-beagle-syntax g)))
@@ -120,19 +118,19 @@
   ;; tab is handled correctly.
   (define tabbed
     (string-append "#lang beagle/clj\n"
-                   "(defn process [n: Int] -> Int\n"
+                   "(defn process [(n Int)] Int\n"
                    "\t(let [a (* n 2)]\n"
                    "\t  a))\n"))
   (with-fixture tabbed
     (lambda (f)
       (define out (explain-type f #:name "process" #:level "inferred"))
-      (check-true (string-contains? out "a: Int (* n 2)")
+      (check-true (string-contains? out "(a Int) (* n 2)")
                   (format "tab-indented injection mis-placed:\n~a" out)))))
 
 (test-case "CRLF source: clean is not truncated/shifted; inferred still works"
   (define crlf
     (string-append "#lang beagle/clj\r\n"
-                   "(defn process [n: Int] -> Int\r\n"
+                   "(defn process [(n Int)] Int\r\n"
                    "  (let [a (* n 2)]\r\n"
                    "    a))\r\n"))
   (with-fixture crlf
@@ -145,28 +143,26 @@
       (check-true (string-suffix? (string-trim clean) "a))")
                   (format "CRLF clean view truncated:\n~v" clean))
       (define inferred (explain-type f #:name "process" #:level "inferred"))
-      (check-true (string-contains? inferred "a: Int (* n 2)") inferred))))
+      (check-true (string-contains? inferred "(a Int) (* n 2)") inferred))))
 
 (test-case "promote (--write) materializes inferred types into the file, idempotently"
   (with-fixture SRC
     (lambda (f)
       ;; before: no interior annotations
-      (check-false (string-contains? (file->string f) "a: Int (* n 2)"))
+      (check-false (string-contains? (file->string f) "(a Int) (* n 2)"))
       (explain-type f #:name "process" #:level "inferred" #:write? #t)
       (define after (file->string f))
       ;; after: the inferred types are now in the file
-      (check-true (string-contains? after "a: Int (* n 2)") after)
-      (check-true (string-contains? after "b: Int (+ a 1)") after)
+      (check-true (string-contains? after "(a Int) (* n 2)") after)
+      (check-true (string-contains? after "(b Int) (+ a 1)") after)
       ;; and it still parses (we wrote real surface, not a debug view)
       (define g (make-temporary-file "promote-rt-~a.bclj"))
       (call-with-output-file g (lambda (o) (display after o)) #:exists 'truncate/replace)
       (check-not-exn (lambda () (parse-program (read-beagle-syntax g))))
       (delete-file g)
-      ;; idempotent: promoting again is a no-op (bindings are now annotated,
-      ;; so annotate-inferred skips them) — no double `: Int: Int`.
+      ;; idempotent: promoting again is a no-op because the bindings are now typed.
       (explain-type f #:name "process" #:level "inferred" #:write? #t)
-      (check-equal? (file->string f) after)
-      (check-false (string-contains? (file->string f) ": Int: Int")))))
+      (check-equal? (file->string f) after))))
 
 (test-case "promote refuses the non-round-tripping `all` level"
   (with-fixture SRC
