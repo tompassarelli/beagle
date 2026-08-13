@@ -6,20 +6,117 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-buffer.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
+source "$repo/bin/_beagle-racket"
+supervisor="$repo/native-core/bin/run-bounded.rkt"
+[[ -f "$supervisor" ]] || {
+  echo "drive.sh: bounded subtree supervisor is unavailable: $supervisor" >&2
+  exit 2
+}
+command -v unshare >/dev/null 2>&1 || {
+  echo "drive.sh: util-linux unshare is unavailable" >&2
+  exit 2
+}
 
 phase() {
   printf 'drive.sh: %s\n' "$1"
+}
+
+# The shared supervisor runs as PID 1 in a private namespace, owns the deadline,
+# and does not return until every descendant is gone. Its completion receipt is
+# checked per invocation so a stale success cannot masquerade as this outcome.
+run_bounded() {
+  local label="$1" seconds="$2" kill_grace="$3"
+  shift 3
+  local receipt rc expected
+  receipt="$(mktemp "$scratch/bounded-receipt.XXXXXX")"
+  printf 'drive.sh: %s bounded START deadline=%ss kill-grace=%ss\n' \
+    "$label" "$seconds" "$kill_grace" >&2
+  if BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
+      unshare --user --map-current-user --pid --fork --kill-child \
+        --forward-signals "$RACKET" "$supervisor" \
+        "$seconds" "$kill_grace" -- "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  case "$rc" in
+    124)
+      expected='subtree-reaped-v0 timeout status=124'
+      ;;
+    2)
+      printf 'drive.sh: %s HARNESS-FAIL status=2\n' "$label" >&2
+      return 2
+      ;;
+    *)
+      expected="subtree-reaped-v0 exit status=$rc"
+      ;;
+  esac
+  if ! grep -Fqx "$expected" "$receipt"; then
+    printf 'drive.sh: %s HARNESS-FAIL missing completion receipt status=%s\n' \
+      "$label" "$rc" >&2
+    return 125
+  fi
+  if [[ "$rc" == "124" ]]; then
+    printf 'drive.sh: %s TIMEOUT status=124\n' "$label" >&2
+  else
+    printf 'drive.sh: %s bounded END status=%s\n' "$label" "$rc" >&2
+  fi
+  return "$rc"
+}
+
+run_bounded_logged() {
+  local label="$1" seconds="$2" kill_grace="$3" log="$4"
+  shift 4
+  local rc
+  if run_bounded "$label" "$seconds" "$kill_grace" "$@" \
+      >"$log" 2>&1; then
+    return 0
+  else
+    rc=$?
+  fi
+  sed -n '1,240p' "$log" >&2
+  return "$rc"
+}
+
+expect_bounded_rejection() {
+  local label="$1" seconds="$2" kill_grace="$3"
+  shift 3
+  local rc
+  if run_bounded "$label" "$seconds" "$kill_grace" "$@"; then
+    return 1
+  else
+    rc=$?
+  fi
+  case "$rc" in
+    2|124|125) return "$rc" ;;
+  esac
+  printf 'drive.sh: %s EXPECTED-REJECTION status=%s\n' "$label" "$rc" >&2
+  return 0
+}
+
+expect_bounded_rejection_logged() {
+  local label="$1" seconds="$2" kill_grace="$3" log="$4"
+  shift 4
+  local rc
+  if expect_bounded_rejection "$label" "$seconds" "$kill_grace" "$@" \
+      >"$log" 2>&1; then
+    return 0
+  else
+    rc=$?
+  fi
+  sed -n '1,240p' "$log" >&2
+  printf 'drive.sh: %s REJECTION-FAIL status=%s\n' "$label" "$rc" >&2
+  return "$rc"
 }
 
 build_once() {
   local output="$1"
   phase "C17 build $(basename "$output")"
   mkdir -p "$output"
-  timeout -k 5s 60s "$repo/bin/beagle" build --materializer c17 --out "$output" \
-    "$here/buffer.bgl" >"$output/build.log" 2>&1 || {
-      sed -n '1,240p' "$output/build.log" >&2
-      exit 1
-    }
+  run_bounded_logged "C17 build $(basename "$output")" 60 5 \
+    "$output/build.log" \
+    "$repo/bin/beagle" build --materializer c17 --out "$output" \
+    "$here/buffer.bgl"
   grep -qx 'result PASS' "$output/report.txt"
   grep -qx 'stage typed-to-native COMPLETE' "$output/report.txt"
   grep -qx 'stage native-to-epoch COMPLETE' "$output/report.txt"
@@ -41,76 +138,87 @@ function_index() {
 compile_probe() {
   local compiler="$1" output="$2" suffix="$3"; shift 3
   phase "$suffix kernel compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror "$@" -I "$output" \
+  run_bounded "$suffix kernel compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror "$@" -I "$output" \
     "$output/module_0.c" "$output/native_shim.c" \
     "$here/main.c" -o "$scratch/probe-$suffix"
   phase "$suffix kernel execute"
-  timeout -k 2s 10s "$scratch/probe-$suffix"
+  run_bounded "$suffix kernel execute" 10 2 "$scratch/probe-$suffix"
 }
 
 compile_bounds_probe() {
   local compiler="$1" output="$2" suffix="$3" function="$4" index="$5"
   phase "$suffix bounds compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+  run_bounded "$suffix bounds compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
     "-DBUFFER_BOUND_FN=$function" -I "$output" \
     "-DBUFFER_BOUND_INDEX=$index" \
     "$output/module_0.c" "$output/native_shim.c" \
     "$here/bounds_main.c" -o "$scratch/bounds-$suffix"
   phase "$suffix bounds execute"
   local observed
-  observed="$(timeout -k 2s 10s "$scratch/bounds-$suffix")"
+  observed="$(run_bounded "$suffix bounds execute" 10 2 \
+    "$scratch/bounds-$suffix")"
   [[ "$observed" == 'bounds-trap: out-of-range' ]]
 }
 
 compile_negative_length_probe() {
   local compiler="$1" output="$2" suffix="$3" function="$4"
   phase "$suffix negative length compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+  run_bounded "$suffix negative length compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
     "-DBUFFER_ALLOCATE_FN=$function" -I "$output" \
     "$output/module_0.c" "$output/native_shim.c" \
     "$here/negative_length_main.c" -o "$scratch/negative-length-$suffix"
   phase "$suffix negative length execute"
   local observed
-  observed="$(timeout -k 2s 10s "$scratch/negative-length-$suffix")"
+  observed="$(run_bounded "$suffix negative length execute" 10 2 \
+    "$scratch/negative-length-$suffix")"
   [[ "$observed" == 'length-trap: invalid-argument' ]]
 }
 
 compile_wrong_capability_probe() {
   local compiler="$1" output="$2" suffix="$3" operation="$4"
   phase "$suffix wrong capability compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+  run_bounded "$suffix wrong capability compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
     "-DBUFFER_CAPABILITY_OP=$operation" -I "$output" \
     "$output/native_shim.c" "$here/wrong_capability_main.c" \
     -o "$scratch/wrong-capability-$suffix"
   phase "$suffix wrong capability execute"
   local observed
-  observed="$(timeout -k 2s 10s "$scratch/wrong-capability-$suffix")"
+  observed="$(run_bounded "$suffix wrong capability execute" 10 2 \
+    "$scratch/wrong-capability-$suffix")"
   [[ "$observed" == 'capability-trap: invalid-argument' ]]
 }
 
 compile_wrong_alignment_probe() {
   local compiler="$1" output="$2" suffix="$3" operation="$4"
   phase "$suffix wrong alignment compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+  run_bounded "$suffix wrong alignment compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
     "-DBUFFER_ALIGNMENT_OP=$operation" -I "$output" \
     "$output/native_shim.c" "$here/wrong_alignment_main.c" \
     -o "$scratch/wrong-alignment-$suffix"
   phase "$suffix wrong alignment execute"
   local observed
-  observed="$(timeout -k 2s 10s "$scratch/wrong-alignment-$suffix")"
+  observed="$(run_bounded "$suffix wrong alignment execute" 10 2 \
+    "$scratch/wrong-alignment-$suffix")"
   [[ "$observed" == 'alignment-trap: invalid-argument' ]]
 }
 
 compile_wasm32_overflow_probe() {
   local compiler="$1" output="$2" suffix="$3"
   phase "$suffix wasm32-sized overflow compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+  run_bounded "$suffix wasm32-sized overflow compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
     -DNATIVE_DENSE_SIZE_MAX=UINT32_MAX -I "$output" \
     "$output/native_shim.c" "$here/wasm32_overflow_main.c" \
     -o "$scratch/wasm32-overflow-$suffix"
   phase "$suffix wasm32-sized overflow execute"
   local observed
-  observed="$(timeout -k 2s 10s "$scratch/wasm32-overflow-$suffix")"
+  observed="$(run_bounded "$suffix wasm32-sized overflow execute" 10 2 \
+    "$scratch/wasm32-overflow-$suffix")"
   [[ "$observed" == 'wasm32-size-trap: overflow' ]]
 }
 
@@ -118,14 +226,12 @@ run_frozen_ir_corpus() {
   local output="$scratch/frozen-ir-corpus"
   phase "frozen IR Buffer typing/provenance corpus"
   mkdir -p "$output"
-  timeout -k 5s 90s "$repo/bin/beagle-build-all" \
+  run_bounded_logged "frozen IR corpus build" 90 5 "$output/build.log" \
+    "$repo/bin/beagle-build-all" \
     "$repo/native-core/src/native/core.bclj" \
     "$repo/native-core/src/native/validation_corpus.bclj" \
     "$repo/native-core/src/native/obligations.bclj" \
-    --out "$output" >"$output/build.log" 2>&1 || {
-      sed -n '1,240p' "$output/build.log" >&2
-      exit 1
-    }
+    --out "$output"
   local records
   records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
     "$output/native/core.clj" | tr '\n' ' ')"
@@ -140,7 +246,8 @@ run_frozen_ir_corpus() {
     mv "$output/native/$generated.clj.tmp" \
       "$output/native/$generated.clj"
   done
-  timeout -k 5s 30s bb -cp "$output" -e \
+  phase "frozen IR Buffer corpus execute"
+  run_bounded "frozen IR corpus execute" 30 5 bb -cp "$output" -e \
     "(require '[native.core :as core]
               '[native.obligations :as obligations]
               '[native.validation-corpus :as corpus])
@@ -184,12 +291,13 @@ run_frozen_ir_corpus() {
 compile_holder_probe() {
   local compiler="$1" output="$2" suffix="$3" function="$4"
   phase "$suffix Holder compile"
-  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+  run_bounded "$suffix Holder compile" 60 5 \
+    "$compiler" -std=c17 -Wall -Wextra -Werror \
     "-DBUFFER_HOLDER_FN=$function" -I "$output" \
     "$output/module_0.c" "$output/native_shim.c" \
     "$here/holder_main.c" -o "$scratch/holder-$suffix"
   phase "$suffix Holder execute"
-  timeout -k 2s 10s "$scratch/holder-$suffix"
+  run_bounded "$suffix Holder execute" 10 2 "$scratch/holder-$suffix"
 }
 
 expect_native_refusal() {
@@ -197,12 +305,9 @@ expect_native_refusal() {
   local output="$scratch/refusal-$label"
   phase "$label refusal build"
   mkdir -p "$output"
-  if timeout -k 5s 60s "$repo/bin/beagle" build --materializer c17 \
-      --out "$output" "$source" \
-      >"$output/build.log" 2>&1; then
-    echo "drive.sh: $label unexpectedly materialized" >&2
-    exit 1
-  fi
+  expect_bounded_rejection_logged "$label refusal build" 60 5 \
+    "$output/build.log" "$repo/bin/beagle" build --materializer c17 \
+    --out "$output" "$source"
   rg -q "$pattern" "$output/report.txt" "$output/build.log"
 }
 
@@ -211,11 +316,8 @@ expect_source_refusal() {
   local output="$scratch/source-refusal-$label"
   phase "$label source refusal"
   mkdir -p "$output"
-  if timeout -k 5s 60s "$repo/bin/beagle" check --agent "$source" \
-      >"$output/check.log" 2>&1; then
-    echo "drive.sh: $label unexpectedly passed source checking" >&2
-    exit 1
-  fi
+  expect_bounded_rejection_logged "$label source refusal" 60 5 \
+    "$output/check.log" "$repo/bin/beagle" check --agent "$source"
   grep -Fq "$pattern" "$output/check.log"
 }
 
@@ -224,11 +326,8 @@ expect_check_refusal() {
   local output="$scratch/refusal-$label"
   phase "$label refusal check"
   mkdir -p "$output"
-  if timeout -k 5s 60s "$repo/bin/beagle" check --agent "$source" \
-      >"$output/check.log" 2>&1; then
-    echo "drive.sh: $label unexpectedly passed source checking" >&2
-    exit 1
-  fi
+  expect_bounded_rejection_logged "$label refusal check" 60 5 \
+    "$output/check.log" "$repo/bin/beagle" check --agent "$source"
   rg -q "$pattern" "$output/check.log"
 }
 
@@ -237,11 +336,9 @@ expect_buffer_value_refusal() {
   local output="$scratch/refusal-$label"
   phase "$label recursive value-semantics refusal build"
   mkdir -p "$output"
-  if timeout -k 5s 60s "$repo/bin/beagle" build --materializer c17 \
-      --out "$output" "$source" >"$output/build.log" 2>&1; then
-    echo "drive.sh: $label value semantics unexpectedly materialized" >&2
-    exit 1
-  fi
+  expect_bounded_rejection_logged "$label value-semantics refusal build" 60 5 \
+    "$output/build.log" "$repo/bin/beagle" build --materializer c17 \
+    --out "$output" "$source"
   test "$(grep -c 'TODO-NATIVE-BUFFER-VALUE-SEMANTICS-V0' \
     "$output/report.txt")" = 3
   local function
@@ -254,11 +351,9 @@ expect_qbe_refusal() {
   local output="$scratch/refusal-qbe"
   phase "QBE Buffer refusal build"
   mkdir -p "$output"
-  if timeout -k 5s 60s "$repo/bin/beagle" build --materializer qbe \
-      --out "$output" "$here/buffer.bgl" >"$output/build.log" 2>&1; then
-    echo "drive.sh: QBE unexpectedly materialized Buffer" >&2
-    exit 1
-  fi
+  expect_bounded_rejection_logged "QBE Buffer refusal build" 60 5 \
+    "$output/build.log" "$repo/bin/beagle" build --materializer qbe \
+    --out "$output" "$here/buffer.bgl"
   grep -Fqx \
     'materialize-qbe REFUSED QBE Buffer v0 is unsupported: mutable region-owned storage has no QBE runtime representation' \
     "$output/report.txt"
@@ -266,7 +361,7 @@ expect_qbe_refusal() {
 }
 
 phase "source API check"
-timeout -k 5s 60s "$repo/bin/beagle" check --agent \
+run_bounded "source API check" 60 5 "$repo/bin/beagle" check --agent \
   "$here/buffer.bgl" "$here/holder.bgl" "$here/native_exe.bgl"
 run_frozen_ir_corpus
 build_once "$scratch/first"
@@ -357,12 +452,10 @@ fi
 negative_length_output="$scratch/negative-length"
 phase "negative length C17 build"
 mkdir -p "$negative_length_output"
-timeout -k 5s 60s "$repo/bin/beagle" build --materializer c17 \
-  --out "$negative_length_output" "$here/negative_length.bgl" \
-  >"$negative_length_output/build.log" 2>&1 || {
-    sed -n '1,240p' "$negative_length_output/build.log" >&2
-    exit 1
-  }
+run_bounded_logged "negative length C17 build" 60 5 \
+  "$negative_length_output/build.log" "$repo/bin/beagle" build \
+  --materializer c17 --out "$negative_length_output" \
+  "$here/negative_length.bgl"
 negative_length_index="$(function_index 'allocate-length' \
   "$negative_length_output/report.txt")"
 test -n "$negative_length_index"
@@ -376,12 +469,9 @@ fi
 holder_output="$scratch/holder"
 phase "Holder C17 build"
 mkdir -p "$holder_output"
-timeout -k 5s 60s "$repo/bin/beagle" build --materializer c17 \
-  --out "$holder_output" "$here/holder.bgl" \
-  >"$holder_output/build.log" 2>&1 || {
-    sed -n '1,240p' "$holder_output/build.log" >&2
-    exit 1
-  }
+run_bounded_logged "Holder C17 build" 60 5 "$holder_output/build.log" \
+  "$repo/bin/beagle" build --materializer c17 --out "$holder_output" \
+  "$here/holder.bgl"
 grep -qx 'result PASS' "$holder_output/report.txt"
 grep -qx 'obligation-projection PASS closed-layouts' \
   "$holder_output/report.txt"
@@ -399,22 +489,19 @@ native_exe_output="$scratch/native-exe"
 native_exe="$native_exe_output/buffer-entry"
 phase "native-exe Buffer build"
 mkdir -p "$native_exe_output"
-timeout -k 5s 90s "$repo/bin/beagle-native-exe" \
+run_bounded_logged "native-exe Buffer build" 90 5 \
+  "$native_exe_output/build.log" "$repo/bin/beagle-native-exe" \
   --out "$native_exe" \
   --artifacts "$native_exe_output/artifacts" \
   --entry 'native.buffer-executable/buffer-entry!' \
-  --cc gcc "$here/native_exe.bgl" \
-  >"$native_exe_output/build.log" 2>&1 || {
-    sed -n '1,240p' "$native_exe_output/build.log" >&2
-    exit 1
-  }
+  --cc gcc "$here/native_exe.bgl"
 grep -Fqx '  const native_capability capability = { UINT64_C(1) };' \
   "$native_exe_output/artifacts/entry.c"
 grep -Fq \
   'return=Int abi=arena+capability' \
   "$native_exe_output/artifacts/native-exe.report.txt"
 phase "native-exe Buffer execute"
-timeout -k 2s 10s "$native_exe"
+run_bounded "native-exe Buffer execute" 10 2 "$native_exe"
 
 expect_native_refusal "$here/wrong_element.bgl" \
   'stage source-to-typed REJECTED' element
