@@ -6087,7 +6087,8 @@
              ;; handler with no specific form stx.
              (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
                (check-module-interface-resolution! prog)
-               (check-qualified-resolution! prog env)))))))))
+               (check-qualified-resolution! prog env)
+               (check-purity! prog)))))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass

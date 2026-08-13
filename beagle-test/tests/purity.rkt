@@ -216,6 +216,17 @@
               (format "expected beagle-diagnostic, got ~v" e))
   (check-eq? (beagle-diagnostic-kind e) 'purity-leak))
 
+(test-case "checked-program projection applies the purity boundary"
+  (define diagnostics '())
+  (parameterize ([current-purity-enforcement 'error])
+    (type-check-with-locs!
+     non-bang-mutating
+     (lambda (e _loc-stx)
+       (set! diagnostics (cons e diagnostics)))))
+  (check-equal? (length diagnostics) 1)
+  (check-pred beagle-diagnostic? (car diagnostics))
+  (check-eq? (beagle-diagnostic-kind (car diagnostics)) 'purity-leak))
+
 ;; ============================================================================
 ;; Diagnostic-kind wiring
 ;; ============================================================================

@@ -11,6 +11,13 @@ scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-atom.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 mkdir -p "$scratch/source-art" "$scratch/refusal-art"
+if BEAGLE_PURITY=error "$repo/bin/beagle" build --materializer c17 \
+    --out "$scratch/purity-leak-art" "$here/purity_leak.bgl" \
+    >"$scratch/purity-leak.log" 2>&1; then
+  echo "drive.sh: Core build admitted a pure-named Atom mutation" >&2
+  exit 1
+fi
+rg -q "purity leak: 'save'.*reset!" "$scratch/purity-leak.log"
 "$repo/bin/beagle-ast" "$here/atom_mutations.bclj" \
   >"$scratch/atom_mutations.ast.json"
 "$repo/bin/beagle-ast" "$here/atom_mutation_refusals.bclj" \

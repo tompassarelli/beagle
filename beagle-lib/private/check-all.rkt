@@ -498,9 +498,13 @@
                      (lang-for-target-id expected-tgt)
                      (lang-for-target-id (program-target prog)))))
 
-    (type-check-with-locs! prog
-      (lambda (e loc-stx)
-        (report-error e loc-stx)))
+    ;; type-check-with-locs! owns the shared purity gate for every checked
+    ;; projection. This command retains its post-pass below only so agent mode
+    ;; can suppress warn-level purity output without hiding type diagnostics.
+    (parameterize ([current-purity-enforcement 'off])
+      (type-check-with-locs! prog
+        (lambda (e loc-stx)
+          (report-error e loc-stx))))
 
     ;; In agent mode, suppress notes/warnings from provenance and semantic
     ;; analysis — they go directly to stderr and would pollute agent output.
