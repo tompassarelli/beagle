@@ -18,7 +18,7 @@ phase() {
   echo "scalar-numerics: phase $1"
 }
 
-for command in awk gcc rg sed sort tail timeout tr; do
+for command in awk bash cmp gcc rg sed sort tail timeout tr; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -42,6 +42,69 @@ fixture="$here/fixture.bgl"
 artifacts="$scratch/artifacts"
 build_log="$scratch/build.log"
 
+trap_evidence_exact() {
+  local status="$1" expected="$2" stderr_path="$3" stdout_path="$4"
+  [[ "$status" -eq 134 && ! -s "$stdout_path" ]] || return 1
+  cmp -s "$stderr_path" <(printf 'trap\t%s\n' "$expected")
+}
+
+run_with_isolated_stderr() {
+  local deadline="$1" kill_after="$2" stdout_path="$3"
+  local child_stderr="$4" supervisor_stderr="$5"
+  shift 5
+  (ulimit -c 0; timeout --foreground --kill-after="$kill_after" "$deadline" \
+    bash -c 'child_stderr=$1; shift; exec "$@" 2>"$child_stderr"' \
+      _ "$child_stderr" "$@" >"$stdout_path" 2>"$supervisor_stderr") \
+    2>>"$supervisor_stderr"
+}
+
+harness_regression() {
+  local forged_stdout="$scratch/forged.stdout"
+  local forged_stderr="$scratch/forged.stderr"
+  local forged_shell_stderr="$scratch/forged.shell-stderr"
+  local term_stdout="$scratch/term-ignore.stdout"
+  local term_stderr="$scratch/term-ignore.stderr"
+  local term_shell_stderr="$scratch/term-ignore.shell-stderr"
+  local term_pid_file="$scratch/term-ignore.pid"
+  local status term_pid
+
+  phase "harness regression (deadline 0.2s, kill-after 0.2s)"
+  set +e
+  run_with_isolated_stderr 0.2s 0.2s "$forged_stdout" "$forged_stderr" \
+    "$forged_shell_stderr" bash -c \
+    'printf "trap\t2\n" >&2; kill -s SEGV "$$"'
+  status=$?
+  set -e
+  [[ $status -eq 139 ]] \
+    || die "forged-trap regression did not terminate by SIGSEGV (status $status)"
+  cmp -s "$forged_stderr" <(printf 'trap\t2\n') \
+    || die "forged-trap regression did not produce exact forged evidence"
+  if trap_evidence_exact "$status" 2 "$forged_stderr" "$forged_stdout"; then
+    die "harness accepted forged trap evidence from SIGSEGV"
+  fi
+
+  set +e
+  run_with_isolated_stderr 0.2s 0.2s "$term_stdout" "$term_stderr" \
+    "$term_shell_stderr" bash -c \
+    'trap "" TERM; printf "%s\n" "$$" >"$1"; while :; do :; done' \
+    _ "$term_pid_file"
+  status=$?
+  set -e
+  [[ $status -ne 0 ]] || die "TERM-ignore regression escaped its deadline"
+  if trap_evidence_exact "$status" 2 "$term_stderr" "$term_stdout"; then
+    die "harness accepted a timed-out TERM-ignoring process as a trap"
+  fi
+  [[ -s "$term_pid_file" ]] \
+    || die "TERM-ignore regression did not publish its child pid"
+  read -r term_pid <"$term_pid_file"
+  [[ "$term_pid" =~ ^[0-9]+$ ]] || die "TERM-ignore regression published an invalid pid"
+  if kill -0 "$term_pid" 2>/dev/null; then
+    kill -KILL "$term_pid" 2>/dev/null || true
+    die "TERM-ignore regression left child $term_pid alive"
+  fi
+  echo "scalar-numerics: forged SIGSEGV rejected; TERM-ignore rejected and reaped"
+}
+
 awk -F '\t' '
   !/^#/ && NF > 0 && NF != 9 {
     printf "corpus.tsv:%d: expected 9 tab-separated fields, got %d\n", NR, NF
@@ -50,8 +113,10 @@ awk -F '\t' '
   END { exit bad }
 ' "$corpus" || die "malformed corpus"
 
-phase "freeze + C17 materialization (deadline 180s)"
-if ! timeout --foreground 180s "$repo/bin/beagle" build \
+harness_regression
+
+phase "freeze + C17 materialization (deadline 180s, kill-after 10s)"
+if ! timeout --foreground --kill-after=10s 180s "$repo/bin/beagle" build \
     --materializer c17 --out "$artifacts" "$fixture" \
     >"$build_log" 2>&1; then
   sed -n '1,240p' "$build_log" >&2
@@ -127,8 +192,8 @@ run_corpus() {
     : >"$stderr"
     case "$guarantee" in
       i64-exact|f64-bits-exact|bool-exact)
-        if ! timeout --foreground 5s "$runner" "$operation" "$arg0" "$arg1" \
-            "$arg2" >"$stdout" 2>"$stderr"; then
+        if ! timeout --foreground --kill-after=1s 5s "$runner" "$operation" \
+            "$arg0" "$arg1" "$arg2" >"$stdout" 2>"$stderr"; then
           sed -n '1,20p' "$stderr" >&2
           die "$label case $id failed or exceeded 5s"
         fi
@@ -140,23 +205,19 @@ run_corpus() {
         ;;
       trap-exact)
         set +e
-        (ulimit -c 0; timeout --foreground 5s "$runner" "$operation" "$arg0" \
-          "$arg1" "$arg2" >"$stdout" 2>"$stderr") 2>"$shell_stderr"
+        run_with_isolated_stderr 5s 1s "$stdout" "$stderr" "$shell_stderr" \
+          "$runner" "$operation" "$arg0" "$arg1" "$arg2"
         status=$?
         set -e
-        [[ $status -ne 0 && $status -ne 124 && $status -ne 125 && \
-           $status -ne 126 && $status -ne 127 ]] \
-          || { sed -n '1,20p' "$shell_stderr" >&2
-               die "$label case $id did not terminate through the expected trap"; }
-        rg -Fx $'trap\t'"$expected" "$stderr" >/dev/null \
+        trap_evidence_exact "$status" "$expected" "$stderr" "$stdout" \
           || { sed -n '1,20p' "$stderr" >&2
-               die "$label case $id omitted trap code $expected"; }
-        [[ ! -s "$stdout" ]] || die "$label case $id emitted a value before trap"
+               sed -n '1,20p' "$shell_stderr" >&2
+               die "$label case $id requires exit 134 and exact trap code $expected"; }
         traps=$((traps + 1))
         ;;
       f64-tolerance)
-        if ! timeout --foreground 5s "$runner" "$operation" "$arg0" "$arg1" \
-            "$arg2" >"$stdout" 2>"$stderr"; then
+        if ! timeout --foreground --kill-after=1s 5s "$runner" "$operation" \
+            "$arg0" "$arg1" "$arg2" >"$stdout" 2>"$stderr"; then
           sed -n '1,20p' "$stderr" >&2
           die "$label case $id failed or exceeded 5s"
         fi
@@ -182,8 +243,8 @@ run_corpus() {
 compile_and_run() {
   local label="$1" compiler="$2"
   local runner="$scratch/scalar-$label"
-  phase "$label strict compile (deadline 60s)"
-  timeout --foreground 60s "$compiler" \
+  phase "$label strict compile (deadline 60s, kill-after 5s)"
+  timeout --foreground --kill-after=5s 60s "$compiler" \
     -std=c17 -pedantic -Wall -Wextra -Werror -O2 \
     -fno-fast-math -ffp-contract=off \
     "${definitions[@]}" -I"$artifacts" -o "$runner" \

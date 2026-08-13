@@ -15,8 +15,9 @@ The exact guarantees are:
 - `bool-exact`: the comparison result is exactly `0` or `1`. F64 comparisons
   are IEEE ordered comparisons: either NaN operand makes `=`, `<`, and `<=`
   false; positive and negative zero compare equal.
-- `trap-exact`: execution terminates through `native_trap` with the exact code
-  in `expected`. Code 1 is invalid argument; code 2 is overflow.
+- `trap-exact`: execution terminates through `native_trap` with abort status
+  `134` and byte-exact reporter output `trap<TAB>CODE<LF>`, where `CODE` is the
+  value in `expected`. Code 1 is invalid argument; code 2 is overflow.
 
 `f64-tolerance` is deliberately narrower. It checks a finite derived kernel by
 `abs(actual - expected) <= abs-tol + rel-tol * abs(expected)`. It does not
