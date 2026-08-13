@@ -15,6 +15,9 @@
          (file "../../beagle-lib/private/types.rkt"))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+;; Canonical function-type datum: (Fn [P ...] R).
+;; `params` may carry a `&` tail for a variadic extern.
+(define (fn-ty params ret) (list 'Fn (apply br params) ret))
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
 
@@ -564,7 +567,7 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- async/await ---------------------------------------------------------
 
    (check-js-output "async/await basic"
-     (list `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     (list `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
            '(defn f [(x String)] (Promise String) (js/await (fetch-data x))))
      "
 globalThis.fetch_data = async (x) => 'got:' + x;
@@ -573,7 +576,7 @@ f('hello').then(r => console.log(r));
      "got:hello")
 
    (check-js-output "await in nested let"
-     (list `(declare-extern get-val ,(br 'Int '-> '(Promise Int)))
+     (list `(declare-extern get-val ,(fn-ty '(Int) '(Promise Int)))
            '(defn f [(n Int)] (Promise Int)
               (let [a (js/await (get-val n))
                     b (js/await (get-val (+ n 1)))]

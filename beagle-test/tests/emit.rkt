@@ -14,6 +14,9 @@
 (define (matches? rx out) (regexp-match? rx out))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+;; Canonical function-type datum: (Fn [P ...] R).
+;; `params` may carry a `&` tail for a variadic extern.
+(define (fn-ty params ret) (list 'Fn (apply br params) ret))
 
 (test-case "ns declaration"
   (define out (compile '(def x 1)))
@@ -170,7 +173,7 @@
 ;; --- declare-extern does not emit code ------------------------------------
 
 (test-case "declare-extern is a type-only declaration; emits nothing"
-  (define out (compile `(declare-extern foo ,(br 'Int '-> 'Int))
+  (define out (compile `(declare-extern foo ,(fn-ty '(Int) 'Int))
                        '(def x 1)))
   (check-false (matches? #rx"foo" out)))
 

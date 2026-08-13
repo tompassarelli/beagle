@@ -403,8 +403,8 @@
   (and (= (nth result 0) "defrecord") (= (nth result 1) "Point") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int" "y" ":-" "Int"]))))
   (expect! "def with string value" (let [result (rd1 "(def greeting :- String \"hello\")")]
   (and (= (nth result 0) "def") (= (nth result 1) "greeting") (= (nth result 2) ":-") (= (nth result 3) "String") (= (nth result 4) [STRING-TAG "hello"]))))
-  (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch [String -> (Promise Any)])")]
-  (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) [BRACKET-TAG "String" "->" ["Promise" "Any"]]))))
+  (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
+  (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) ["Fn" [BRACKET-TAG "String"] ["Promise" "Any"]]))))
   (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
   (expect! "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
   (expect! "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))

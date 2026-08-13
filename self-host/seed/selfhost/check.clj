@@ -70,7 +70,7 @@
    rest-t (get t "rest")
    ret (get t "ret")
    param-strs (mapv (fn [p] (type->string p)) params)]
-  (if (not (nil? rest-t)) (str "[" (str/join " " param-strs) " & " (type->string rest-t) " -> " (type->string ret) "]") (str "[" (str/join " " param-strs) " -> " (type->string ret) "]")))
+  (if (not (nil? rest-t)) (str "(Fn [" (str/join " " param-strs) " & " (type->string rest-t) "] " (type->string ret) ")") (str "(Fn [" (str/join " " param-strs) "] " (type->string ret) ")")))
   (app-type? t) (let [ctor (get t "name")
    args (get t "args")
    arg-strs (mapv (fn [a] (type->string a)) args)]
@@ -119,7 +119,7 @@
    er (get expected "rest")
    an (count ap)
    en (count ep)]
-  (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ap i) (nth ep i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? ar p)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? ar er))) (type-compatible? (get actual "ret") (get expected "ret"))))
+  (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ep i) (nth ap i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? p ar)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? er ar))) (type-compatible? (get actual "ret") (get expected "ret"))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
@@ -1408,7 +1408,7 @@
   (> (count (check-program! prog)) 0)))
   (expect! "hvec-literal: element mismatch rejected" (let [prog (make-prog [(make-def-node "pair" (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-vec-node [(make-lit "string" "x") (make-lit "string" "hi")]))])]
   (> (count (check-program! prog)) 0)))
-  (expect! "bound: render (forall [(T <: Number)] [T -> T])" (= (type->string (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE})) "(forall [(T <: Number)] [T -> T])"))
+  (expect! "bound: render (forall [(T <: Number)] (Fn [T] T))" (= (type->string (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE})) "(forall [(T <: Number)] (Fn [T] T))"))
   (expect! "bound: violating call rejected" (do
   (swap! STATE assoc "diagnostics" [])
   (resolve-poly-call! (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE}) [(make-lit "string" "no")] {})

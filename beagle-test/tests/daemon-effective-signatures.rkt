@@ -115,7 +115,7 @@
         (car (run-commands (list (format "sig collect ~a" path)))))
       (define result (car (hash-ref response 'results)))
       (check-true (hash-ref response 'ok))
-      (check-equal? (hash-ref result 'signature) "[Int & Int -> Int]")
+      (check-equal? (hash-ref result 'signature) "(Fn [Int & Int] Int)")
       (check-equal? (hash-ref (hash-ref result 'rest) 'type) "Int"))
     (lambda () (delete-file path))))
 
@@ -147,8 +147,8 @@
        "Float")
       (check-equal?
        (result-signature accessor-response)
-       "[Reading -> Float]")
+       "(Fn [Reading] Float)")
       (check-equal?
        (result-signature constructor-response)
-       "[Float -> Reading]"))
+       "(Fn [Float] Reading)"))
     (lambda () (delete-file path))))

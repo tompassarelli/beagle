@@ -28,6 +28,49 @@
   (selfhost.rt/eprint (str "beagle: " msg "\n"))
   {"node" "literal" "kind" "nil"})
 
+(defn- invalid-type [^String message]
+  {"kind" "invalid" "message" message})
+
+(defn- type-error! [^String message]
+  (err! message)
+  (invalid-type message))
+
+(defn- reject-reserved-type-name! [^String name ^String where]
+  (if (= name "Fn") (do
+  (err! (str where " cannot declare `Fn`; Fn is the built-in function type constructor"))))
+  nil)
+
+(defn- validate-reserved-type-declaration! [d]
+  (if (and (vector? d) (not (and (> (count d) 0) (= (nth d 0) BRACKET-TAG))) (> (count d) 1)) (do
+  (let [head (nth d 0)]
+  (cond
+  (and (or (= head "defalias") (= head "defrecord") (= head "defprotocol") (= head "defenum") (= head "defscalar")) (string? (nth d 1))) (reject-reserved-type-name! (nth d 1) head)
+  (and (= head "defunion") (= (nth d 1) ":throwable") (> (count d) 2) (string? (nth d 2))) (do
+  (reject-reserved-type-name! (nth d 2) "defunion :throwable")
+  (doseq [member (subvec d 3)]
+  (cond
+  (string? member) (reject-reserved-type-name! member "defunion :throwable member")
+  (and (vector? member) (> (count member) 0) (string? (nth member 0))) (reject-reserved-type-name! (nth member 0) "defunion :throwable member")
+  :else nil)))
+  (and (= head "defunion") (vector? (nth d 1)) (not (and (> (count (nth d 1)) 0) (= (nth (nth d 1) 0) BRACKET-TAG))) (> (count (nth d 1)) 0)) (let [name-form (nth d 1)]
+  (if (string? (nth name-form 0)) (do
+  (reject-reserved-type-name! (nth name-form 0) "parametric defunion")))
+  (doseq [type-var (subvec name-form 1)]
+  (if (string? type-var) (do
+  (reject-reserved-type-name! type-var "defunion type parameter"))))
+  (doseq [member (subvec d 2)]
+  (if (and (vector? member) (> (count member) 0) (string? (nth member 0))) (do
+  (reject-reserved-type-name! (nth member 0) "defunion member")))))
+  (and (= head "defunion") (string? (nth d 1))) (do
+  (reject-reserved-type-name! (nth d 1) "defunion")
+  (doseq [member (subvec d 2)]
+  (cond
+  (string? member) (reject-reserved-type-name! member "defunion member")
+  (and (vector? member) (> (count member) 0) (string? (nth member 0))) (reject-reserved-type-name! (nth member 0) "defunion member")
+  :else nil)))
+  :else nil))))
+  nil)
+
 (defn- ^String char-at [^String s i]
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
@@ -193,12 +236,11 @@
 (defn make-type-var [^String name]
   {"kind" "var" "name" name})
 
-(defn parse-fn-type-items [items]
-  (let [arrow-pos (index-of-item items "->")]
-  (if (= arrow-pos -1) (make-prim "Any") (let [before (subvec items 0 arrow-pos)
-   after (subvec items (+ arrow-pos 1))]
-  (if (not (= (count after) 1)) (make-prim "Any") (let [amp-pos (index-of-item before "&")]
-  (if (> amp-pos -1) (make-fn-type (mapv parse-type* (subvec before 0 amp-pos)) (parse-type* (nth (subvec before (+ amp-pos 1)) 0)) (parse-type* (nth after 0))) (make-fn-type (mapv parse-type* before) nil (parse-type* (nth after 0))))))))))
+(defn parse-fn-type-items! [items ret]
+  (let [amp-pos (index-of-item items "&")]
+  (if (> amp-pos -1) (if (= amp-pos (- (count items) 2)) (make-fn-type (mapv parse-type* (subvec items 0 amp-pos)) (parse-type* (nth items (+ amp-pos 1))) (parse-type* ret)) (do
+  (err! "function type: `&` must be followed by exactly one final rest type")
+  (invalid-type "malformed function rest type"))) (make-fn-type (mapv parse-type* items) nil (parse-type* ret)))))
 
 (defn varize-type [t vars]
   (cond
@@ -228,9 +270,15 @@
 
 (defn parse-type [t]
   (cond
-  (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG)) (parse-fn-type-items (subvec t 1))
+  (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG)) (type-error! (if (has-item? (subvec t 1) "->") "arrow function types are not supported; write (Fn [ParamType ...] ReturnType)" "a vector is not a type expression; write (Fn [ParamType ...] ReturnType) for a function type"))
+  (and (vector? t) (> (count t) 0) (= (nth t 0) "Fn")) (if (and (= (count t) 3) (bracketed? (nth t 1))) (parse-fn-type-items! (bracket-body (nth t 1)) (nth t 2)) (do
+  (type-error! "function type requires exactly (Fn [ParamType ...] ReturnType)")))
   (and (vector? t) (= (count t) 3) (= (nth t 0) "forall")) (let [vars-form (nth t 1)
    raw-vars (if (and (vector? vars-form) (> (count vars-form) 0) (= (nth vars-form 0) BRACKET-TAG)) (subvec vars-form 1) vars-form)
+   _ (doseq [entry raw-vars]
+  (let [name (if (string? entry) entry (if (and (vector? entry) (> (count entry) 0) (string? (nth entry 0))) (nth entry 0) nil))]
+  (if (some? name) (do
+  (reject-reserved-type-name! name "forall type parameter")))))
    vars (vec (filter (fn [x] (not (nil? x))) (mapv forall-entry-var raw-vars)))
    bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars)) acc)) {} raw-vars)]
   {"kind" "poly" "vars" vars "body" (varize-type (parse-type (nth t 2)) vars) "bounds" (if (= (count bounds) 0) nil bounds)})
@@ -241,6 +289,7 @@
   (if (and (some? expected) (not (= expected actual))) (do
   (type-arity-error! name expected actual)
   (make-prim "Any")) (make-app name (mapv parse-type (subvec t 1)))))
+  (and (string? t) (= t "Fn")) (type-error! "bare Fn is an incomplete function type; write (Fn [ParamType ...] ReturnType)")
   (and (string? t) (some? (get (deref TYPE-ALIASES) t))) (get (deref TYPE-ALIASES) t)
   (and (string? t) (some? (get (deref USER-PARAMETRIC-ARITIES) t))) (let [expected (get (deref USER-PARAMETRIC-ARITIES) t)]
   (type-arity-error! t expected 0)
@@ -913,6 +962,7 @@
   (if if-form? ["let" [BRACKET-TAG g value] ["if" test ["let" inner (nth rest-items 0)] (nth rest-items 1)]] ["let" [BRACKET-TAG g value] ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
 
 (defn parse-simple-defunion [^String name raw-members]
+  (reject-reserved-type-name! name "defunion")
   (validate-identifier! name "defunion")
   (let [n (count raw-members)]
   (loop [i 0
@@ -920,27 +970,44 @@
    mf {}
    has-fields false]
   (if (>= i n) (make-defunion name mnames nil (if has-fields mf nil)) (let [m (nth raw-members i)]
+  (if (string? m) (do
+  (reject-reserved-type-name! m "defunion member")))
+  (if (and (vector? m) (> (count m) 0) (string? (nth m 0))) (do
+  (reject-reserved-type-name! (nth m 0) "defunion member")))
   (if (and (vector? m) (not (bracketed? m)) (> (count m) 0)) (if (and (>= (count m) 2) (vector? (nth m 1))) (recur (+ i 1) (conj mnames (nth m 0)) (assoc mf (nth m 0) (parse-record-fields! (nth m 1))) true) (recur (+ i 1) (conj mnames (nth m 0)) mf has-fields)) (recur (+ i 1) (conj mnames m) mf has-fields)))))))
 
 (defn parse-parametric-defunion! [^String name type-vars member-defs]
   (validate-identifier! name "defunion")
+  (reject-reserved-type-name! name "parametric defunion")
+  (doseq [type-var type-vars]
+  (if (string? type-var) (do
+  (reject-reserved-type-name! type-var "defunion type parameter"))))
   (swap! USER-PARAMETRIC-ARITIES assoc name (count type-vars))
   (let [n (count member-defs)]
   (loop [i 0
    mnames []
    mf {}]
   (if (>= i n) (make-defunion name mnames type-vars mf) (let [md (nth member-defs i)]
+  (if (string? md) (do
+  (reject-reserved-type-name! md "defunion member")))
+  (if (and (vector? md) (> (count md) 0) (string? (nth md 0))) (do
+  (reject-reserved-type-name! (nth md 0) "defunion member")))
   (if (and (vector? md) (>= (count md) 2) (string? (nth md 0))) (let [fields (parse-record-fields! (nth md 1))
    typed-fields (mapv (fn [p] (assoc p "ann" (varize-type (get p "ann") type-vars))) fields)]
   (recur (+ i 1) (conj mnames (nth md 0)) (assoc mf (nth md 0) typed-fields))) (recur (+ i 1) mnames mf)))))))
 
 (defn parse-deferror-form [^String name member-defs]
+  (reject-reserved-type-name! name "defunion :throwable")
   (validate-identifier! name "deferror")
   (let [n (count member-defs)]
   (loop [i 0
    mnames []
    mf {}]
   (if (>= i n) (make-deferror name mnames mf) (let [md (nth member-defs i)]
+  (if (string? md) (do
+  (reject-reserved-type-name! md "defunion :throwable member")))
+  (if (and (vector? md) (> (count md) 0) (string? (nth md 0))) (do
+  (reject-reserved-type-name! (nth md 0) "defunion :throwable member")))
   (cond
   (string? md) (recur (+ i 1) (conj mnames md) (assoc mf md []))
   (and (vector? md) (>= (count md) 2) (string? (nth md 0))) (recur (+ i 1) (conj mnames (nth md 0)) (assoc mf (nth md 0) (parse-record-fields! (nth md 1))))
@@ -1328,9 +1395,11 @@
   (string? (nth rest-items 0)) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail! (nth rest-items 0) (subvec rest-items 2) true) (parse-defn-tail! (nth rest-items 0) (subvec rest-items 1) true))
   :else (err! (str "malformed defn-: " (str d))))
   (and (= head "defrecord") (= (count rest-items) 2)) (do
+  (reject-reserved-type-name! (nth rest-items 0) "defrecord")
   (validate-identifier! (nth rest-items 0) "defrecord")
   (make-defrecord (nth rest-items 0) (parse-record-fields! (nth rest-items 1))))
   (and (= head "defenum") (>= (count rest-items) 1)) (do
+  (reject-reserved-type-name! (nth rest-items 0) "defenum")
   (validate-identifier! (nth rest-items 0) "defenum")
   (make-defenum (nth rest-items 0) (subvec rest-items 1)))
   (and (= head "defunion") (>= (count rest-items) 2) (= (nth rest-items 0) ":throwable") (string? (nth rest-items 1))) (parse-deferror-form (nth rest-items 1) (subvec rest-items 2))
@@ -1342,9 +1411,11 @@
   (and (= head "defunion") (>= (count rest-items) 1) (string? (nth rest-items 0))) (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))
   (and (= head "deferror") (>= (count rest-items) 1)) (parse-deferror-form (nth rest-items 0) (subvec rest-items 1))
   (and (= head "defscalar") (>= (count rest-items) 2)) (do
+  (reject-reserved-type-name! (nth rest-items 0) "defscalar")
   (validate-identifier! (nth rest-items 0) "defscalar")
   (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1))))
   (and (= head "defprotocol") (>= (count rest-items) 1) (string? (nth rest-items 0))) (do
+  (reject-reserved-type-name! (nth rest-items 0) "defprotocol")
   (validate-identifier! (nth rest-items 0) "defprotocol")
   {"node" "defprotocol" "name" (nth rest-items 0) "methods" (mapv parse-protocol-method! (subvec rest-items 1))})
   (= head "deftype") (err! "deftype removed — use defrecord for the data shape and extend-type for protocol implementations")
@@ -1540,6 +1611,8 @@
   (reset! USER-PARAMETRIC-ARITIES (deref PRELOADED-PARAMETRIC-ARITIES))
   (reset! PRELOADED-PARAMETRIC-ARITIES {})
   (reset! TYPE-ALIASES {})
+  (doseq [datum datums]
+  (validate-reserved-type-declaration! datum))
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
   (if (= (get (deref USER-PARAMETRIC-ARITIES) name) 0) (do
   (zero-parametric-declaration-error! name))))
@@ -1673,6 +1746,8 @@
   (import-strip-doc (import-strip-export d)))
 
 (defn module-parametric-arities [datums ^String prefix refer-syms]
+  (doseq [datum datums]
+  (validate-reserved-type-declaration! (import-normalize datum)))
   (let [refer-set (if (some? refer-syms) (reduce (fn [m s] (assoc m s true)) {} refer-syms) nil)]
   (reduce (fn [arities d0] (let [d (import-normalize d0)]
   (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0))) (let [name-form (nth d 1)
@@ -1691,6 +1766,8 @@
   (if (some? a) a (make-prim "Any"))) nil)))
 
 (defn import-module-surface [datums ^String prefix refer-syms]
+  (doseq [datum datums]
+  (validate-reserved-type-declaration! (import-normalize datum)))
   (doseq [d0 datums]
   (let [d (import-normalize d0)]
   (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0))) (do
@@ -2037,7 +2114,7 @@
   (expect! "parse-type primitive" (= (parse-type "Int") {"kind" "prim" "name" "Int"}))
   (expect! "parse-type nullable" (let [t (parse-type "String?")]
   (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
-  (expect! "parse-type fn" (let [t (parse-type [BRACKET-TAG "Int" "->" "String"])]
+  (expect! "parse-type fn" (let [t (parse-type ["Fn" [BRACKET-TAG "Int"] "String"])]
   (and (= (get t "kind") "fn") (= (count (get t "params")) 1))))
   (expect! "parse-type Vec app" (let [t (parse-type ["Vec" "String"])]
   (and (= (get t "kind") "app") (= (get t "name") "Vec"))))

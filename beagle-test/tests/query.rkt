@@ -149,7 +149,7 @@
       "(define-mode dynamic)\n"
       "(defn collect [(first Int) & (more (Vec Int))] Int first)\n")
      '("sig" "collect")))
-  (check-regexp-match #rx"collect : \\[Int & Int -> Int\\]" out)
+  (check-regexp-match #rx"collect : \\(Fn \\[Int & Int\\] Int\\)" out)
   (check-regexp-match #rx"& more : Int" out))
 
 (test-case "sig: aggregate parameter detail preserves one binding operation"
@@ -162,7 +162,7 @@
 (test-case "sig: associative destructuring comes from the checked AST"
   (define out
     (fixture-query-output CANONICAL-FIXTURE '("sig" "point-x")))
-  (check-regexp-match #rx"point-x : \\[Point -> Float\\]" out)
+  (check-regexp-match #rx"point-x : \\(Fn \\[Point\\] Float\\)" out)
   (check-regexp-match #rx"  \\{:keys \\[x y\\]\\} : Point" out))
 
 (test-case "sig: multi-arity headline and clause details use effective types"
@@ -208,13 +208,13 @@
      CANONICAL-FIXTURE
      '("sig" "terraininterest-position")))
   (check-regexp-match
-   #rx"terraininterest-position : \\[TerrainInterest -> \\(Vec Float\\)\\]"
+   #rx"terraininterest-position : \\(Fn \\[TerrainInterest\\] \\(Vec Float\\)\\)"
    accessor-out)
   (check-regexp-match #rx"  r : TerrainInterest" accessor-out)
   (define constructor-out
     (fixture-query-output CANONICAL-FIXTURE '("sig" "->World")))
   (check-regexp-match
-   #rx"->World : \\[\\(Vec String\\) Float -> World\\]"
+   #rx"->World : \\(Fn \\[\\(Vec String\\) Float\\] World\\)"
    constructor-out))
 
 (test-case "sig: qualified lookup is nonempty and preserves source metadata"
@@ -227,7 +227,7 @@
   (check-equal? (hash-ref match 'namespace) 'query.fixture)
   (check-equal? (hash-ref match 'line) 18)
   (check-regexp-match
-   #rx"query.fixture/player-collision-radius : \\[ -> Float\\]"
+   #rx"query.fixture/player-collision-radius : \\(Fn \\[\\] Float\\)"
    (fixture-query-output
     CANONICAL-FIXTURE
     '("sig" "query.fixture/player-collision-radius"))))
@@ -283,7 +283,7 @@
       (define-values (status out err)
         (run-daemon-cli-against-dead-port scratch (path->string source-path)))
       (check-equal? status 0)
-      (check-true (string-contains? out "\"signature\":\"[ -> Int]\""))
+      (check-true (string-contains? out "\"signature\":\"(Fn [] Int)\""))
       (check-equal? err ""))
     (lambda () (delete-directory/files scratch))))
 

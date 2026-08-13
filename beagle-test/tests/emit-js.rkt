@@ -11,6 +11,9 @@
          (file "../../beagle-lib/private/types.rkt"))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+;; Canonical function-type datum: (Fn [P ...] R).
+;; `params` may carry a `&` tail for a variadic extern.
+(define (fn-ty params ret) (list 'Fn (apply br params) ret))
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
 
@@ -271,17 +274,17 @@
 
    (check-js-contains "await -> await keyword"
      "await"
-     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      '(defn f [url #%: String] -> (Promise String) (js/await (fetch-data url))))
 
    (check-js-contains "defn with await -> async function"
      "async function"
-     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      '(defn f [url #%: String] -> (Promise String) (js/await (fetch-data url))))
 
    (check-js-contains "fn with await -> async arrow"
      "async ("
-     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      '(def f #%: Any (fn [url #%: String] -> (Promise String) (js/await (fetch-data url)))))
 
    (check-js-contains "defn without await -> no async"
@@ -318,7 +321,7 @@
 
    (check-js-contains "async loop/recur -> async IIFE with while"
      "async () =>"
-     `(declare-extern read-next ,(br 'Any '-> '(Promise Any)))
+     `(declare-extern read-next ,(fn-ty '(Any) '(Promise Any)))
      '(defn read-all [r #%: Any] -> Any
        (loop [buf nil]
          (let [v (js/await (read-next r))]
@@ -326,7 +329,7 @@
 
    (check-js-contains "async loop/recur -> await inside while body"
      "await read_next"
-     `(declare-extern read-next ,(br 'Any '-> '(Promise Any)))
+     `(declare-extern read-next ,(fn-ty '(Any) '(Promise Any)))
      '(defn read-all [r #%: Any] -> Any
        (loop [buf nil]
          (let [v (js/await (read-next r))]
@@ -434,7 +437,7 @@
 
    (check-js-contains "await in nested let propagates async"
      "async"
-     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      '(defn f [url #%: String] -> (Promise String)
        (let [x "prefix"]
          (let [result (js/await (fetch-data url))]
@@ -442,7 +445,7 @@
 
    (check-js-contains "multi-arity with await -> async dispatch"
      "async function"
-     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      `(defn load
        (,(br 'url '#%: 'String) -> (Promise String) (js/await (fetch-data url)))
        (,(br 'url '#%: 'String 'fallback '#%: 'String) -> (Promise String)
@@ -947,14 +950,14 @@
 
    (check-js-contains "let :as in expression position binds whole map"
      "const whole ="
-     `(declare-extern mk ,(br 'Any '-> 'Any))
+     `(declare-extern mk ,(fn-ty '(Any) 'Any))
      `(defn f (m #%: Any) -> Any
         ,(br `(let (,(mt ':keys (br 'a) ':as 'whole) (mk m)) whole))))
 
    (test-case "let :as single-evaluates its value (no double call)"
      (define result
        (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
-                      `(declare-extern mk ,(br 'Any '-> 'Any))
+                      `(declare-extern mk ,(fn-ty '(Any) 'Any))
                       `(defn f (m #%: Any) -> Any
                          ,(br `(let (,(mt ':keys (br 'a) ':as 'whole) (mk m)) whole))))))
      (define n (length (regexp-match* #rx"mk\\(" result)))

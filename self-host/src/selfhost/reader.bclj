@@ -715,7 +715,7 @@
     (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
       (and (= (nth result 0) "declare-extern")
            (= (nth result 1) "fetch")
-           (= (nth result 2) [BRACKET-TAG "String" "->" ["Promise" "Any"]]))))
+           (= (nth result 2) ["Fn" [BRACKET-TAG "String"] ["Promise" "Any"]]))))
   (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
   (expect! "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
   (expect! "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))

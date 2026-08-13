@@ -16,6 +16,9 @@
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+;; Canonical function-type datum: (Fn [P ...] R).
+;; `params` may carry a `&` tail for a variadic extern.
+(define (fn-ty params ret) (list 'Fn (apply br params) ret))
 
 ;; Equivalent to `list`; the alias keeps structurally assembled source forms
 ;; legible when nested binding/type pairs would otherwise become quote-heavy.
@@ -570,13 +573,13 @@
 ;; --- declare-extern --------------------------------------------------------
 
 (test-case "declare-extern registered in externs hash"
-  (define p (parse-prog `(declare-extern foo ,(br 'Int '-> 'Int))))
+  (define p (parse-prog `(declare-extern foo ,(fn-ty '(Int) 'Int))))
   (check-equal? (hash-count (program-externs p)) 1)
   (check-true (hash-has-key? (program-externs p) 'foo)))
 
 (parse-err "duplicate declare-extern errors"
-  `(declare-extern foo ,(br 'Int '-> 'Int))
-  `(declare-extern foo ,(br 'String '-> 'String)))
+  `(declare-extern foo ,(fn-ty '(Int) 'Int))
+  `(declare-extern foo ,(fn-ty '(String) 'String)))
 
 ;; --- require ---------------------------------------------------------------
 

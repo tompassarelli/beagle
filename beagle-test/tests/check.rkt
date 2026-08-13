@@ -22,6 +22,9 @@
   (type-check! prog))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+;; Canonical function-type datum: (Fn [P ...] R).
+;; `params` may carry a `&` tail for a variadic extern.
+(define (fn-ty params ret) (list 'Fn (apply br params) ret))
 (define MT MAP-TAG)
 (define (mt . xs) (cons MT xs))
 (define ST SET-TAG)
@@ -234,17 +237,17 @@
 (test-case "declare-extern makes the function callable with type checking"
   (check-not-exn
    (lambda ()
-     (check-prog `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
+     (check-prog `(declare-extern my-add ,(fn-ty '(Int Int) 'Int))
                  '(def x Int (my-add 1 2))))))
 
 (check-err "declare-extern: arg type error caught"
-  `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
+  `(declare-extern my-add ,(fn-ty '(Int Int) 'Int))
   '(def x Int (my-add "a" 2)))
 
 (test-case "declare-extern with variadic"
   (check-not-exn
    (lambda ()
-     (check-prog `(declare-extern join ,(br 'String '& 'String '-> 'String))
+     (check-prog `(declare-extern join ,(fn-ty '(String & String) 'String))
                  '(def x String (join "a" "b" "c"))))))
 
 ;; =============================================================================
@@ -460,11 +463,11 @@
 (test-case "static method with declared type passes"
   (check-not-exn
    (lambda ()
-     (check-prog `(declare-extern System/getProperty ,(br 'String '-> 'String))
+     (check-prog `(declare-extern System/getProperty ,(fn-ty '(String) 'String))
                  '(def x String (System/getProperty "user.home"))))))
 
 (check-err "static method with wrong arg type errors"
-  `(declare-extern System/getProperty ,(br 'String '-> 'String))
+  `(declare-extern System/getProperty ,(fn-ty '(String) 'String))
   '(def x (System/getProperty 42)))
 
 (check-ok "instance method with declared type passes"
@@ -1161,25 +1164,25 @@
 (test-case "await on (Promise T) type-checks"
   (check-not-exn
    (lambda ()
-     (check-js-prog `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     (check-js-prog `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
                     '(defn f [(url String)] (Promise String) (js/await (fetch-data url)))))))
 
 (test-case "Promise return with unwrapped body type accepted"
   (check-not-exn
    (lambda ()
-     (check-js-prog `(declare-extern load ,(br '-> '(Promise Int)))
+     (check-js-prog `(declare-extern load ,(fn-ty '() '(Promise Int)))
                     '(defn f [] (Promise Int) (js/await (load)))))))
 
 (test-case "nested await in let type-checks"
   (check-not-exn
    (lambda ()
-     (check-js-prog `(declare-extern fetch-name ,(br 'Int '-> '(Promise String)))
+     (check-js-prog `(declare-extern fetch-name ,(fn-ty '(Int) '(Promise String)))
                     '(defn f [(id Int)] (Promise String)
                        (let [name (js/await (fetch-name id))]
                          (str "Hello " name)))))))
 
 (check-js-err "Promise return type mismatch caught"
-  `(declare-extern load ,(br '-> '(Promise Int)))
+  `(declare-extern load ,(fn-ty '() '(Promise Int)))
   '(defn f [] (Promise String) (js/await (load))))
 
 ;; =============================================================================
@@ -1188,12 +1191,12 @@
 ;; await rejected outside beagle/js
 (check-err/rx "await rejected in beagle/clj"
   #rx"js/await is only supported in beagle/js"
-  `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+  `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
   '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
 
 (check-nix-err/rx "await rejected in beagle/nix"
   #rx"js/await is only supported in beagle/js"
-  `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+  `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
   '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
 
 ;; Nix forms rejected outside beagle/nix
@@ -1575,21 +1578,21 @@
 
 (check-ok "qualified JVM instance method excludes receiver from declared arity"
   `(ns test.jvm-instance (:import ,(br 'java.net 'Socket)))
-  `(declare-extern Socket/connect ,(br 'Any 'Int '-> 'Nil))
+  `(declare-extern Socket/connect ,(fn-ty '(Any Int) 'Nil))
   '(defn f [(sock Socket) (addr Any) (timeout-ms Int)] Nil
      (Socket/connect sock addr timeout-ms)))
 
 (check-err/rx "qualified JVM instance method still rejects wrong Java arity"
   #rx"no overload accepts 3 argument"
   `(ns test.jvm-instance-wrong (:import ,(br 'java.net 'Socket)))
-  `(declare-extern Socket/connect ,(br 'Any 'Int '-> 'Nil))
+  `(declare-extern Socket/connect ,(fn-ty '(Any Int) 'Nil))
   '(defn f [(sock Socket) (addr Any) (timeout-ms Int)] Nil
      (Socket/connect sock addr timeout-ms timeout-ms)))
 
 (check-err/rx "declared unknown JVM static keeps all arguments in arity"
   #rx"expected 1 arg.*got 2"
   `(ns test.jvm-static (:import ,(br 'java.util.regex 'Pattern)))
-  `(declare-extern Pattern/quote ,(br 'String '-> 'String))
+  `(declare-extern Pattern/quote ,(fn-ty '(String) 'String))
   '(def quoted String (Pattern/quote "x" "y")))
 
 ;; typed arrays: container sigs carry precise element types; the gap-listed
