@@ -10,18 +10,18 @@
   `(let [tmp ~e]
      (+ tmp tmp)))
 
-(defn use-macro [(x Int)]
+(defn use-macro [(x Int)] Int
   (twice (+ x 1)))
 
-(defn threaded [(x Int)]
+(defn threaded [(x Int)] Int
   (cond-> x
     (pos? x) (+ 1)
     (neg? x) (- 1)))
 
-(defn maybe-chain [m]
+(defn maybe-chain [m] Any
   (some-> m :a :b))
 
-(defn bound [m]
+(defn bound [m] Int
   (if-let [(v Int) (get m :k)]
     (+ v 1)
     0))
