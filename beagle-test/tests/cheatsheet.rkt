@@ -16,8 +16,8 @@
 
 (define-runtime-path cheatsheet-md "../../docs/CHEATSHEET.md")
 
-;; Read with THE beagle readtable — a raw Racket read would mis-tokenize the
-;; postfix annotation marker (`x: Int` → the single symbol `x:`).
+;; Read with THE Beagle readtable so container tags and reader forms have the
+;; same phase-stable semantics here as they do in real Beagle source.
 (define (read-forms str)
   (parameterize ([current-readtable beagle-readtable])
     (define in (open-input-string str))

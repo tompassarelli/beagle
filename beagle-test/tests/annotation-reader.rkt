@@ -1,16 +1,18 @@
 #lang racket/base
 
-;; Reader half of the flat type-annotation surface.
+;; Reader compatibility diagnostics for retired annotation punctuation.
 ;;
-;; `:` is a TERMINATING macro registered inside beagle-readtable itself (not a
-;; layer on top — the bracket/quasiquote/unquote/meta readers re-parameterize to
-;; beagle-readtable, so a layered entry vanishes inside every container and
-;; template). Split by the next character:
+;; `:` remains a TERMINATING macro inside beagle-readtable so the parser can
+;; recognize an old spelling and issue a pointed structural replacement. This
+;; is lexical diagnostic machinery, not accepted or canonical Beagle syntax.
+;; It must live in the readtable itself: the bracket/quasiquote/unquote/meta
+;; readers re-parameterize to beagle-readtable, so a layered entry would vanish
+;; inside containers and templates. Split by the next character:
 ;;   `:` + delimiter/whitespace/EOF → ANN-MARKER (`#%:`)
 ;;   `:` + anything else            → today's keyword symbol, byte-identical
 ;;
-;; Datum shape is FLAT: `a: Int` is the three datums `a` `#%:` `Int`, mirroring
-;; the legacy `a :- Int` triple so every index/arity constant in parse.rkt holds.
+;; The retired flat spelling `a: Int` intentionally reads as the three datums
+;; `a` `#%:` `Int`. The parser then rejects it and points to `(a Int)`.
 
 (require rackunit
          racket/file
@@ -21,11 +23,11 @@
 
 (define A (string->symbol "#%:"))
 
-(test-case "ANN-MARKER is the interned reader-internal symbol #%:"
+(test-case "retired colon spelling produces the interned diagnostic marker #%:"
   (check-eq? ANN-MARKER A)
   (check-eq? (rd ":") ANN-MARKER))
 
-;; --- the observed table -----------------------------------------------------
+;; --- lexical compatibility observations ------------------------------------
 
 (define TABLE
   (list
@@ -37,13 +39,13 @@
    (cons ":foo/bar"                  ':foo/bar)
    (cons "::kw"                      '::kw)
    (cons "{:k 1 :j 2}"               (list '#%map ':k 1 ':j 2))
-   ;; noncanonical spacing is ACCEPTED — same datum as the glued form
+   ;; spacing does not hide the retired marker; the parser rejects either form
    (cons "(a : Int)"                 (list 'a A 'Int))
    ;; colon glued to the TYPE is a keyword, not the marker (parser rejects it)
    (cons "(a :Int)"                  (list 'a ':Int))
    ;; dangling marker survives the reader; the parser gives the pointed error
    (cons "[: Int]"                   (list '#%brackets A 'Int))
-   ;; legacy marker stays a plain symbol, so a migration diagnostic is possible
+   ;; the older marker stays visible so the parser can issue a pointed rejection
    (cons ":-"                        ':-)
    (cons "\"a: not syntax\""         "a: not syntax")
    (cons "`[~name: ~type]"
@@ -58,9 +60,9 @@
 (test-case "reader: a `;` comment containing a colon is untouched"
   (check-equal? (beagle-read (open-input-string ";; a: comment\n(ok)")) '(ok)))
 
-;; --- containers + reader macros keep the marker (the layering trap) ---------
+;; --- containers + reader macros preserve diagnostic visibility --------------
 
-(test-case "marker survives every container reader"
+(test-case "retired marker remains visible to rejection diagnostics in containers"
   (check-equal? (rd "#{a: Int}")        (list '#%set 'a A 'Int))
   (check-equal? (rd "{k: Int 1}")       (list '#%map 'k A 'Int 1))
   (check-equal? (rd "#(f %: Int)")      (list 'fn (list '#%brackets '%1) (list 'f '%1 A 'Int)))
@@ -93,7 +95,7 @@
 (test-case "dot-token reader terminates on `:`"
   (check-equal? (rd "(.foo: Int)") (list '.foo A 'Int)))
 
-;; --- reader-path parity (#19) ----------------------------------------------
+;; --- lexical diagnostic parity through the source reader (#19) -------------
 
 (define (parse-path form-str)
   (define tmp (make-temporary-file "pa-~a.bclj"))
@@ -112,5 +114,5 @@
                     "(defrecord P [x: Int y: Int])"
                     "(defn g [cb: [Int -> String]] -> String (cb 1))"
                     "(let [v: Int 1] v)"))])
-  (test-case (format "reader-path parity: ~a" s)
+  (test-case (format "retired-spelling reader-path parity: ~a" s)
     (check-equal? (parse-path s) (rd s))))
