@@ -13,6 +13,7 @@ export class Box<
     scale(factor: number): this;
     scale(x: number, y: number, z: number): this;
     add(...children: Box[]): this;
+    set(...args: [color: Box] | [r: number, g: number, b: number]): this;
     describe(): string;
     private hidden(): void;
     static of(width: number): Box;

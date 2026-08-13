@@ -456,13 +456,21 @@
   (define required (length (takef params (lambda (p) (not (ts-param-optional? p))))))
   (for/list ([n (in-range required (add1 (length params)))]) (take params n)))
 
+(define (rest-type->beagle t)
+  ;; A TypeScript tuple-union rest type degrades to Any, but a Beagle rest
+  ;; binding always receives the aggregate collection.
+  (if (regexp-match? #rx"^\\(Vec .+\\)$" t)
+      t
+      (format "(Vec ~a)" t)))
+
 (define (params->beagle params)
   (string-join
    (for/list ([p (in-list params)] [i (in-naturals)])
      (format "~a(~a ~a)"
              (if (ts-param-rest? p) "& " "")
              (param-name-for p i)
-             (ts-type->beagle (ts-param-type p))))
+             (let ([type (ts-type->beagle (ts-param-type p))])
+               (if (ts-param-rest? p) (rest-type->beagle type) type))))
    " "))
 
 (define (arg-refs params)

@@ -83,6 +83,10 @@
       ;; A variadic signature becomes a rest param forwarded with js/spread.
       (check-regexp-match #rx"box-add \\[\\(self Any\\) & \\(children \\(Vec Any\\)\\)\\]" text)
       (check-regexp-match #rx"js/spread children" text)
+      ;; A tuple-union rest type degrades to Any, but the rest binding remains
+      ;; the aggregate that js/spread consumes.
+      (check-regexp-match #rx"box-set \\[\\(self Any\\) & \\(args \\(Vec Any\\)\\)\\]" text)
+      (check-regexp-match #rx"js/spread args" text)
       ;; A primitive property gets a reader and a writer; a non-primitive gets neither.
       (check-regexp-match #rx"defn box-width \\[\\(self Any\\)\\] Float" text)
       (check-regexp-match #rx"defn set-box-width!" text)
