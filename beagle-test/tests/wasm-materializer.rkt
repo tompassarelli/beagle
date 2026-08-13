@@ -13,6 +13,12 @@
 (define materialize-wasm (build-path repo-root "bin" "beagle-materialize-wasm"))
 (define beagle (build-path repo-root "bin" "beagle"))
 (define beagle-ast (build-path repo-root "bin" "beagle-ast"))
+(define timeout-command
+  (or (find-executable-path "timeout")
+      (error 'wasm-materializer-test "GNU timeout is required")))
+(define bb-command
+  (or (find-executable-path "bb")
+      (error 'wasm-materializer-test "babashka is required")))
 
 (define (write-text path text)
   (make-parent-directory* path)
@@ -23,99 +29,65 @@
   (write-text path text)
   (file-or-directory-permissions path #o755))
 
-(define (sha256-hex bytes)
-  (bytes->hex-string (sha256-bytes bytes)))
+(define base-fixture #f)
 
-(define (file-sha256 path)
-  (sha256-hex (file->bytes path)))
+(define (run-bounded program . arguments)
+  (parameterize ([current-directory repo-root])
+    (apply system*/exit-code timeout-command "--kill-after=5s" "120s" program arguments)))
 
-(define (digest-of-text text)
-  (string-append "sha256:" (sha256-hex (string->bytes/utf-8 text))))
-
-(define (write-native-receipts artifacts native-digest)
-  ;; The materializer only accepts the compiler's receipt-index wire format.
-  ;; These are intentionally distinct digest links, ending in the exact frozen
-  ;; Native bytes, so a splice cannot become an accidentally coherent fixture.
-  (define source (digest-of-text "fixture-source"))
-  (define typed (digest-of-text "fixture-typed"))
-  (define native (digest-of-text "fixture-native"))
-  (define configuration (digest-of-text "fixture-configuration"))
-  (define commit "fixture-commit")
-  (define rows
-    (list (list "source-freeze" source source commit configuration)
-          (list "source-to-typed" source typed commit configuration)
-          (list "typed-to-native" typed native commit configuration)
-          (list "native-to-epoch" native native-digest commit configuration)))
-  (define text
-    (apply string-append
-           (for/list ([row (in-list rows)])
-             (string-append (string-join row "\t") "\n"))))
-  (write-text (build-path artifacts "native.receipts.index") text)
-  (write-text (build-path artifacts "native.receipts") text)
-  native-digest)
-
-(define (write-c17-receipts artifacts native-digest)
-  (define header-digest (string-append "sha256:" (file-sha256 (build-path artifacts "module_0.h"))))
-  (define source-digest (string-append "sha256:" (file-sha256 (build-path artifacts "module_0.c"))))
-  (define output (digest-of-text "fixture-c17-output"))
-  (define index
-    (string-append
-     "input\t" native-digest "\n"
-     "output\t" output "\n"
-     "artifact\tmodule_0.h\t" header-digest "\n"
-     "artifact\tmodule_0.c\t" source-digest "\n"))
-  (write-text (build-path artifacts "c17.receipt.index") index)
-  (write-text (build-path artifacts "c17.receipt") index))
-
-(define (make-checked-source scratch source-text)
-  (define source (build-path scratch "fixture.bgl"))
-  (define ast (build-path scratch "fixture.ast.json"))
-  (write-text source source-text)
-  (define stdout (open-output-string))
-  (define stderr (open-output-string))
-  (define code
-    (parameterize ([current-directory repo-root]
-                   [current-output-port stdout]
-                   [current-error-port stderr])
-      (system*/exit-code beagle-ast (path->string source))))
-  (check-equal? code 0 (string-append (get-output-string stdout)
-                                       (get-output-string stderr)))
-  (write-text ast (get-output-string stdout))
-  (values source ast))
+(define (canonical-base-fixture)
+  ;; Generate the compiler-owned evidence once. Tests copy this immutable C17
+  ;; generation, rather than forging a second receipt or a fake classpath.
+  (unless base-fixture
+    (define root (make-temporary-file "beagle-wasm-canonical-fixture-~a" 'directory))
+    (define source (build-path root "fixture.bgl"))
+    (define ast (build-path root "fixture.ast.json"))
+    (define artifacts (build-path root "artifacts"))
+    (define compiled (build-path root "compiled"))
+    (write-text source
+                (string-append "#lang beagle\n"
+                               "(ns fixture.core)\n"
+                               "(define-mode strict)\n"
+                               "(defn entry [] Int 42)\n"))
+    (check-equal?
+     (run-bounded beagle "build" "--materializer" "c17" "--abi" "wasm32"
+                  "--out" (path->string artifacts) (path->string source))
+     0 "canonical C17 fixture build failed")
+    (check-equal?
+     (run-bounded (build-path repo-root "bin" "beagle-build-all")
+                  (build-path repo-root "native-core/src/native/core.bclj")
+                  (build-path repo-root "native-core/src/native/stages.bclj")
+                  "--out" (path->string compiled))
+     0 "canonical receipt classpath build failed")
+    (define ast-output (open-output-string))
+    (define ast-error (open-output-string))
+    (define ast-code
+      (parameterize ([current-directory repo-root]
+                     [current-output-port ast-output]
+                     [current-error-port ast-error])
+        (system*/exit-code timeout-command "--kill-after=5s" "120s"
+                           beagle-ast (path->string source))))
+    (check-equal? ast-code 0 (string-append (get-output-string ast-output)
+                                             (get-output-string ast-error)))
+    (write-text ast (get-output-string ast-output))
+    (set! base-fixture
+          (hasheq 'root root 'artifacts artifacts 'compiled compiled
+                  'source source 'ast ast)))
+  base-fixture)
 
 (define (make-artifacts scratch)
+  (define base (canonical-base-fixture))
   (define artifacts (build-path scratch "artifacts"))
-  (define compiled (build-path scratch "compiled"))
-  (make-directory* artifacts)
-  (make-directory* (build-path compiled "native"))
-  ;; --compiled is an explicit boundary. The materializer only needs this
-  ;; generated classpath to exist; its validators run as their own tools.
-  (write-text (build-path compiled "native" "core.clj") "")
-  (write-text (build-path compiled "native" "stages.clj") "")
-  (write-text (build-path artifacts "module_0.c") "int native_m0_fn_0(void) { return 42; }\n")
-  (write-text (build-path artifacts "module_0.h") "int native_m0_fn_0(void);\n")
-  (write-text (build-path artifacts "source.facts") "fixture-source-facts\n")
-  (write-text (build-path artifacts "module.native-program") "fixture-frozen-native-program\n")
-  (define native-digest (file-sha256 (build-path artifacts "module.native-program")))
-  (write-text (build-path artifacts "module.native-program.sha256")
-              (string-append native-digest "\n"))
-  (write-native-receipts artifacts (string-append "sha256:" native-digest))
-  (write-c17-receipts artifacts (string-append "sha256:" native-digest))
-  (write-text (build-path artifacts "report.txt")
-              (string-append
-               "program-functions 1\n"
-               "lowered fn_0 entry 1\n"
-               "result PASS\n"))
-  (write-text (build-path artifacts "native.entry-map")
-              "lowered fn_0 entry 1\n")
-  (define-values (source ast)
-    (make-checked-source
-     scratch
-     (string-append "#lang beagle\n"
-                    "(ns fixture.core)\n"
-                    "(define-mode strict)\n"
-                    "(defn entry [] Int 42)\n")))
-  (hasheq 'artifacts artifacts 'compiled compiled 'source source 'ast ast))
+  (copy-directory/files (fixture-path base 'artifacts) artifacts)
+  ;; A standalone materialization starts after Core's private C17 staging. Its
+  ;; old public generation marker must never make a partial Wasm set appear
+  ;; committed.
+  (for ([name (in-list '("build.manifest" "build.manifest.sha256"))])
+    (delete-file (build-path artifacts name)))
+  (hasheq 'artifacts artifacts
+          'compiled (fixture-path base 'compiled)
+          'source (fixture-path base 'source)
+          'ast (fixture-path base 'ast)))
 
 (define (fixture-path fixture field)
   (hash-ref fixture field))
@@ -152,6 +124,29 @@
                     (path->string (fixture-path fixture 'ast)))
               (if entry (list "--entry" entry) '())))))
   (values exit-code (get-output-string stdout) (get-output-string stderr)))
+
+(define (run-core-wasm source out cc ld runtime extra-env)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (for ([pair (in-list (list (cons #"BEAGLE_WASI_CC" cc)
+                             (cons #"BEAGLE_WASM_LD" ld)
+                             (cons #"BEAGLE_WASMTIME" runtime)
+                             (cons #"WASMTIME" runtime)))])
+    (environment-variables-set! env (car pair)
+                                (string->bytes/utf-8 (path->string (cdr pair)))))
+  (for ([(name value) (in-hash extra-env)])
+    (environment-variables-set! env name value))
+  (parameterize ([current-directory repo-root]
+                 [current-environment-variables env])
+    (system*/exit-code timeout-command "--kill-after=5s" "120s"
+                       beagle "build" "--materializer" "wasm" "--abi" "wasm32"
+                       "--out" (path->string out) (path->string source))))
+
+(define (verify-generation artifacts compiled)
+  (parameterize ([current-directory repo-root])
+    (system*/exit-code timeout-command "--kill-after=5s" "30s" bb-command
+                       "-cp" (path->string compiled)
+                       (build-path repo-root "native-core/validation/build-finalize.clj")
+                       "verify-generation" (path->string artifacts))))
 
 (define (supported-tool name variables fallback)
   (or (for/or ([variable (in-list variables)])
@@ -254,7 +249,16 @@ SH
                          "module_0.wasm.sha256"
                          "module_0.wasm.seams"
                          "wasm.receipt"
-                         "wasm.receipt.index"
+                         "native_shim.h"
+                         "native_shim.c"
+                         "native_unicode15_data.h"
+                         "wasm.retention.c"
+                         "wasm.adapter.c"
+                         "wasm.entry-contract.clj"
+                         "wasm.seams.clj"
+                         "wasm.ast-verifier.rkt"
+                         "wasm.receipt-finalizer.clj"
+                         "wasm.materializer.sh"
                          "build.manifest.sha256"))])
     (check-false (file-exists? (build-path artifacts name)) name)))
 
@@ -272,7 +276,7 @@ SH
        (parameterize ([current-directory repo-root]
                       [current-output-port stdout]
                       [current-error-port stderr])
-         (system*/exit-code beagle "build"
+         (system*/exit-code timeout-command "--kill-after=5s" "120s" beagle "build"
                             "--materializer" "wasm"
                             "--abi" "wasm32"
                             "--entry" entry
@@ -323,9 +327,6 @@ SH
                    "wasm-projection-kind non-executable-projection"
                    "wasm-export-policy reactor-initialize-and-memory-only"
                    "wasm-report-determinism pinned-tool-identities-no-environment-paths"
-                   "wasm-tool-cc-version fake-wasi-clang 1.0"
-                   "wasm-tool-ld-version fake-wasm-ld 1.0"
-                   "wasm-tool-runtime-version fake-wasmtime 1.0"
                    "wasm-retained-native-functions 1"
                    "wasm-retention constructor-function-pointers"
                    "wasm-determinism PASS repeated-identical-build"
@@ -336,6 +337,13 @@ SH
                    (format "wasm-artifact-sha256 ~a" digest)
                    "wasm-result PASS"))])
        (check-true (string-contains? report (string-append line "\n")) line))
+     (for ([identity (in-list '("wasm-tool-cc-identity-sha256"
+                                "wasm-tool-ld-identity-sha256"
+                                "wasm-tool-runtime-identity-sha256"))])
+       (check-true
+        (regexp-match?
+         (pregexp (string-append "(?m:^" identity " [0-9a-f]{64}$)")) report)
+        identity))
      (define audit (file->string (build-path artifacts "wasm-audit.txt")))
      (check-true
       (string-contains? audit (format "wasm-tool-cc-path-shell ~a\n" (path->string cc))))
@@ -515,11 +523,11 @@ SH
                                                  "module.native-program")
                                      #:exists 'append
                                      (lambda (out) (display "spliced\n" out)))))
-     (cons "native receipt index" (lambda (fixture)
+     (cons "native receipt" (lambda (fixture)
                                     (write-text
                                      (build-path (fixture-path fixture 'artifacts)
-                                                 "native.receipts.index")
-                                     "source-freeze\tsha256:0000000000000000000000000000000000000000000000000000000000000000\tsha256:0000000000000000000000000000000000000000000000000000000000000000\tother\tsha256:0000000000000000000000000000000000000000000000000000000000000000\n")))
+                                                 "native.receipts")
+                                     "1:bad:")))
      (cons "C17 header" (lambda (fixture)
                            (call-with-output-file
                             (build-path (fixture-path fixture 'artifacts) "module_0.h")
@@ -530,11 +538,10 @@ SH
                           (build-path (fixture-path fixture 'artifacts) "module_0.c")
                           #:exists 'append
                           (lambda (out) (display "/* spliced */\n" out)))))
-     ;; The frozen report is an authority too: a substituted lowered mapping
-     ;; must not be accepted merely because its text is syntactically valid.
-     (cons "lowered report" (lambda (fixture)
+     ;; The entry map is compiler-owned evidence, not a report hint.
+     (cons "lowered entry map" (lambda (fixture)
                               (write-text
-                               (build-path (fixture-path fixture 'artifacts) "report.txt")
+                               (build-path (fixture-path fixture 'artifacts) "native.entry-map")
                                "program-functions 1\nlowered fn_9 entry 1\nresult PASS\n")))))
   (for ([case (in-list cases)])
     (define scratch (make-temporary-file "beagle-wasm-provenance-splice-~a" 'directory))
@@ -555,12 +562,12 @@ SH
 (test-case "publication failpoints never leave an unmarked Wasm generation"
   ;; Every publication boundary is independently killable. The implementation
   ;; must stage private data and make build.manifest.sha256 the final commit.
-  (for ([point (in-list '("after-wasm"
+  (for ([point (in-list '("after-artifact"
                           "after-digest"
                           "after-seams"
+                          "after-receipt"
                           "after-audit"
-                          "after-report"
-                          "after-receipt"))])
+                          "after-report"))])
     (define scratch (make-temporary-file "beagle-wasm-publish-failpoint-~a" 'directory))
     (dynamic-wind
      void
@@ -578,6 +585,75 @@ SH
                                  point stdout stderr))
        (assert-no-published-generation artifacts))
      (lambda () (delete-directory/files scratch)))))
+
+(test-case "Core publication preserves an old generation until invalidation and cleans interrupted commits"
+  (define scratch (make-temporary-file "beagle-wasm-core-publication-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define base (canonical-base-fixture))
+     (define source (fixture-path base 'source))
+     (define compiled (fixture-path base 'compiled))
+     (define seeded (build-path scratch "seeded"))
+     (define-values (cc ld runtime env) (make-fake-toolchain scratch))
+     (check-equal? (run-core-wasm source seeded cc ld runtime env) 0)
+     (check-equal? (verify-generation seeded compiled) 0)
+     (define old-marker (file->string (build-path seeded "build.manifest.sha256")))
+
+     ;; A tool failure occurs before commit-start, so the prior marker remains
+     ;; authoritative and the finalizer can still verify that old generation.
+     (define bad-env
+       (hash-set env #"BEAGLE_WASI_CC"
+                 (string->bytes/utf-8 (path->string (build-path scratch "missing-cc")))))
+     (check-not-equal? (run-core-wasm source seeded cc ld runtime bad-env) 0)
+     (check-equal? (file->string (build-path seeded "build.manifest.sha256")) old-marker)
+     (check-equal? (verify-generation seeded compiled) 0)
+
+     ;; Once invalidation begins, a failure must leave neither an old marker nor
+     ;; a mixed managed tree. Each boundary is exercised from the same seed.
+     (for ([point (in-list '("after-invalidation" "after-one-artifact" "before-marker"))])
+       (define out (build-path scratch (string-append "fault-" point)))
+       (copy-directory/files seeded out)
+       (define fault-env
+         (hash-set env #"BEAGLE_CORE_PUBLISH_FAILPOINT"
+                   (string->bytes/utf-8 point)))
+       (check-not-equal? (run-core-wasm source out cc ld runtime fault-env) 0 point)
+       (check-false (file-exists? (build-path out "build.manifest.sha256")) point)
+       (for ([name (in-list '("source.facts" "report.txt" "module.native-program"
+                              "module.native-program.sha256" "native.receipts"
+                              "native.entry-map" "c17.receipt" "wasm.receipt"
+                              "module_0.h" "module_0.c" "module_0.wasm"
+                              "module_0.wasm.sha256" "module_0.wasm.seams"
+                              "wasm-report.txt" "wasm-audit.txt"))])
+         (check-false (file-exists? (build-path out name))
+                      (format "~a left ~a" point name)))))
+   (lambda () (delete-directory/files scratch))))
+
+(test-case "generation verifier detects independent receipt and artifact splices"
+  (define scratch (make-temporary-file "beagle-wasm-generation-splice-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define base (canonical-base-fixture))
+     (define source (fixture-path base 'source))
+     (define compiled (fixture-path base 'compiled))
+     (define seed (build-path scratch "seed"))
+     (define-values (cc ld runtime env) (make-fake-toolchain scratch))
+     (check-equal? (run-core-wasm source seed cc ld runtime env) 0)
+     (check-equal? (verify-generation seed compiled) 0)
+     (for ([case (in-list
+                  (list (cons "wasm receipt" "wasm.receipt")
+                        (cons "Wasm artifact" "module_0.wasm")
+                        (cons "C17 receipt" "c17.receipt")
+                        (cons "frozen native bytes" "module.native-program")
+                        (cons "lowered entry map" "native.entry-map")
+                        (cons "final report" "report.txt")))])
+       (define out (build-path scratch (string-append "splice-" (car case))))
+       (copy-directory/files seed out)
+       (call-with-output-file (build-path out (cdr case)) #:exists 'append
+         (lambda (port) (display "splice" port)))
+       (check-not-equal? (verify-generation out compiled) 0 (car case))))
+   (lambda () (delete-directory/files scratch))))
 
 (test-case "tool resolver timeout reaps its descendants before publication"
   (define scratch (make-temporary-file "beagle-wasm-resolver-tree-~a" 'directory))
@@ -627,26 +703,35 @@ SH
      (define bin-dir (build-path scratch "bin"))
      (define fake-bb (build-path bin-dir "bb"))
      (define child-pid (build-path scratch "seams-child.pid"))
+     (define real-bb (find-executable-path "bb"))
+     (check-true real-bb "the test requires the pinned babashka executable")
      (make-directory* bin-dir)
      (write-executable
-      fake-bb
+     fake-bb
       #<<SH
 #!/usr/bin/env bash
 set -euo pipefail
-trap '' TERM
-sleep 300 &
-child=$!
-printf '%s\n' "$child" >"${TREE_CHILD_PID:?}"
-wait "$child"
+for argument in "$@"; do
+  if [[ "$argument" == *wasm32/seams.clj ]]; then
+    trap '' TERM
+    sleep 300 &
+    child=$!
+    printf '%s\n' "$child" >"${TREE_CHILD_PID:?}"
+    wait "$child"
+  fi
+done
+exec "${REAL_BB:?}" "$@"
 SH
       )
      (define-values (cc ld runtime env) (make-fake-toolchain scratch))
      (define path-value (or (getenv "PATH") ""))
      (define timeout-env
        (hash-set
-        (hash-set env #"PATH"
-                  (string->bytes/utf-8
-                   (string-append (path->string bin-dir) ":" path-value)))
+        (hash-set
+         (hash-set env #"PATH"
+                   (string->bytes/utf-8
+                    (string-append (path->string bin-dir) ":" path-value)))
+         #"REAL_BB" (string->bytes/utf-8 (path->string real-bb)))
         #"BEAGLE_WASM_VALIDATION_TIMEOUT_SECONDS" #"1"))
      (define full-env
        (hash-set timeout-env #"TREE_CHILD_PID"
@@ -677,13 +762,15 @@ SH
       #<<SH
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == *entry-contract.clj ]]; then
-  trap '' TERM
-  sleep 300 &
-  child=$!
-  printf '%s\n' "$child" >"${TREE_CHILD_PID:?}"
-  wait "$child"
-fi
+for argument in "$@"; do
+  if [[ "$argument" == *entry-contract.clj ]]; then
+    trap '' TERM
+    sleep 300 &
+    child=$!
+    printf '%s\n' "$child" >"${TREE_CHILD_PID:?}"
+    wait "$child"
+  fi
+done
 exec "${REAL_BB:?}" "$@"
 SH
       )
