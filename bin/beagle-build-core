@@ -109,6 +109,10 @@ for materializer in "${materializers[@]}"; do
 done
 $wasm_selected && [[ "$abi" != "wasm32" ]] &&
     die "materializer 'wasm' requires --abi wasm32 (got '$abi')"
+if $wasm_selected && [[ ${#entries[@]} -gt 1 ]]; then
+    die "materializer 'wasm' supports at most one executable --entry" \
+        "(got ${#entries[@]}); omit --entry for a non-executable projection"
+fi
 for entry in "${entries[@]}"; do
     [[ "$entry" == */* ]] || die "--entry must be qualified as NS/NAME: $entry"
     entry_namespace="${entry%/*}"
@@ -167,12 +171,16 @@ mkdir -p "$work/artifacts"
 
 facts="$work/source.facts"
 projector_args=()
+wasm_entry_evidence=()
 source_index=0
 for source in "${sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
     "$BIN/beagle-ast" "$source" >"$ast"
     logical_path="${source#./}"
     projector_args+=(--input "$ast=$logical_path")
+    if $wasm_selected && [[ ${#entries[@]} -eq 1 ]]; then
+        wasm_entry_evidence+=(--entry-ast "$logical_path" "$ast")
+    fi
     source_index=$((source_index + 1))
 done
 bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
@@ -1023,8 +1031,12 @@ merge_wasm_report() {
 }
 
 if $wasm_selected; then
+    wasm_args=(--artifacts "$work/artifacts")
+    if [[ ${#entries[@]} -eq 1 ]]; then
+        wasm_args+=(--entry "${entries[0]}" "${wasm_entry_evidence[@]}")
+    fi
     set +e
-    "$BIN/beagle-materialize-wasm" --artifacts "$work/artifacts"
+    "$BIN/beagle-materialize-wasm" "${wasm_args[@]}"
     wasm_rc=$?
     set -e
     if [[ ! -f "$work/artifacts/wasm-report.txt" ]]; then

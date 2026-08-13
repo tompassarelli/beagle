@@ -32,7 +32,7 @@ resolve_executable() {
     printf '%s\n' "$resolved"
 }
 
-[[ $# -eq 1 ]] || die "usage: beagle-wasm-tools cc|runtime"
+[[ $# -eq 1 ]] || die "usage: beagle-wasm-tools cc|ld|runtime"
 
 case "$1" in
     cc)
@@ -41,6 +41,12 @@ case "$1" in
             "wasm32-wasi compiler" \
             "set BEAGLE_WASI_CC (or WASI_CC) to an executable"
         ;;
+    ld)
+        resolve_executable \
+            "${BEAGLE_WASM_LD:-${WASM_LD:-wasm-ld}}" \
+            "wasm linker" \
+            "set BEAGLE_WASM_LD (or WASM_LD) to an executable"
+        ;;
     runtime)
         resolve_executable \
             "${BEAGLE_WASMTIME:-${WASMTIME:-wasmtime}}" \
@@ -48,6 +54,6 @@ case "$1" in
             "set BEAGLE_WASMTIME (or WASMTIME) to an executable"
         ;;
     *)
-        die "unknown tool '$1' (expected cc or runtime)"
+        die "unknown tool '$1' (expected cc, ld, or runtime)"
         ;;
 esac

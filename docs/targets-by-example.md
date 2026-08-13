@@ -5,9 +5,11 @@ container for a later target choice. `beagle build --materializer c17|qbe|wasm
 --out DIR FILE.bgl` first freezes `module.native-program`, then writes only the
 selected projection. `wasm` requires `--abi wasm32`; it is currently the named
 Restricted-C17-to-wasi-clang bootstrap rather than a direct emitter. Its reactor
-exports only `_initialize` and `memory`, and `module_0.wasm.seams` records the
-exact import/export surface. That frozen native program is backend-neutral even
-though its source profile is native. Hosted Clojure is explicit
+without an entry exports only `_initialize` and `memory`. One public,
+parameterless `Int` entry exports the stable `beagle_wasm_entry_v0 : () -> i64`
+adapter and is invoked under Wasmtime; `module_0.wasm.seams` records either exact
+surface. That frozen native program is backend-neutral even though its source
+profile is native. Hosted Clojure is explicit
 `#lang beagle/clj` on `.bclj`; JavaScript and Nix keep their explicit language
 paths below.
 

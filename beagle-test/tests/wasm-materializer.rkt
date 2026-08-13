@@ -28,18 +28,27 @@
   (write-text (build-path artifacts "module_0.h") "int native_m0_fn_0(void);\n")
   (write-text (build-path artifacts "module.native-program.sha256")
               (string-append (make-string 64 #\a) "\n"))
+  (write-text (build-path artifacts "report.txt")
+              (string-append
+               "program-functions 1\n"
+               "lowered fn_0 entry 1\n"
+               "result PASS\n"))
   artifacts)
 
-(define (run-materializer artifacts cc runtime extra-env)
+(define (run-materializer artifacts cc ld runtime extra-env)
   (define env (environment-variables-copy (current-environment-variables)))
   (environment-variables-set! env #"BEAGLE_WASI_CC"
                               (string->bytes/utf-8 (path->string cc)))
+  (environment-variables-set! env #"BEAGLE_WASM_LD"
+                              (string->bytes/utf-8 (path->string ld)))
   (environment-variables-set! env #"BEAGLE_WASMTIME"
                               (string->bytes/utf-8 (path->string runtime)))
   (environment-variables-set! env #"WASMTIME"
                               (string->bytes/utf-8 (path->string runtime)))
   (environment-variables-set! env #"BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS" #"2")
   (environment-variables-set! env #"BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS" #"2")
+  (environment-variables-set! env #"BEAGLE_WASM_TOOL_IDENTITY_TIMEOUT_SECONDS" #"2")
+  (environment-variables-set! env #"BEAGLE_WASM_KILL_GRACE_SECONDS" #"1")
   (for ([(name value) (in-hash extra-env)])
     (environment-variables-set! env name value))
   (define stdout (open-output-string))
@@ -63,11 +72,17 @@
       (let ([path (find-executable-path fallback)])
         (and path (path->string path)))))
 
-(define (path-prepend-directory env path)
-  (define current (or (environment-variables-ref env #"PATH") #""))
-  (environment-variables-set!
-   env #"PATH"
-   (bytes-append (string->bytes/utf-8 (path->string path)) #":" current)))
+(define (wait-for-child-reaped pid-file)
+  (and (file-exists? pid-file)
+       (let* ([pid (string-trim (file->string pid-file))]
+              [proc-path (string->path (string-append "/proc/" pid))])
+         (let loop ([remaining 40])
+           (cond
+             [(not (directory-exists? proc-path)) #t]
+             [(zero? remaining) #f]
+             [else
+              (sleep 0.05)
+              (loop (sub1 remaining))])))))
 
 (define fake-cc-source
   #<<SH
@@ -77,6 +92,14 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'fake-wasi-clang 1.0\n'
   exit 0
 fi
+expected_ld="${FAKE_EXPECTED_LD:?}"
+seen_ld=0
+for argument in "$@"; do
+  if [[ "$argument" == "-fuse-ld=$expected_ld" ]]; then
+    seen_ld=1
+  fi
+done
+[[ "$seen_ld" == "1" ]]
 count=0
 if [[ -f "${FAKE_CC_COUNT:?}" ]]; then
   read -r count <"$FAKE_CC_COUNT"
@@ -93,6 +116,15 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$output" ]]
 printf '\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x05\x03\x01\x00\x01\x07\x18\x02\x06\x6d\x65\x6d\x6f\x72\x79\x02\x00\x0b\x5f\x69\x6e\x69\x74\x69\x61\x6c\x69\x7a\x65\x00\x00\x0a\x04\x01\x02\x00\x0b' >"$output"
+SH
+)
+
+(define fake-ld-source
+  #<<SH
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "--version" ]]
+printf 'fake-wasm-ld 1.0\n'
 SH
 )
 
@@ -116,15 +148,18 @@ SH
    (lambda ()
      (define artifacts (make-artifacts scratch))
      (define cc (build-path scratch "fake-wasi-clang"))
+     (define ld (build-path scratch "fake-wasm-ld"))
      (define runtime (build-path scratch "fake-wasmtime"))
      (define cc-count (build-path scratch "cc-count"))
      (define runtime-marker (build-path scratch "runtime-marker"))
      (write-executable cc fake-cc-source)
+     (write-executable ld fake-ld-source)
      (write-executable runtime fake-runtime-source)
      (define-values (exit-code stdout stderr)
        (run-materializer
-        artifacts cc runtime
+        artifacts cc ld runtime
         (hasheq #"FAKE_CC_COUNT" (string->bytes/utf-8 (path->string cc-count))
+                #"FAKE_EXPECTED_LD" (string->bytes/utf-8 (path->string ld))
                 #"FAKE_RUNTIME_MARKER"
                 (string->bytes/utf-8 (path->string runtime-marker)))))
      (check-equal? exit-code 0 (string-append stdout stderr))
@@ -143,9 +178,11 @@ SH
                    "wasm-materializer bootstrap-c17-wasi-clang"
                    "wasm-materializer-direct false"
                    "wasm-abi wasm32"
+                   "wasm-projection-kind non-executable-projection"
                    "wasm-export-policy reactor-initialize-and-memory-only"
                    "wasm-report-determinism pinned-tool-identities-no-environment-paths"
                    "wasm-tool-cc-version fake-wasi-clang 1.0"
+                   "wasm-tool-ld-version fake-wasm-ld 1.0"
                    "wasm-tool-runtime-version fake-wasmtime 1.0"
                    "wasm-retained-native-functions 1"
                    "wasm-retention constructor-function-pointers"
@@ -153,13 +190,15 @@ SH
                    "wasm-export func _initialize"
                    "wasm-export memory memory"
                    "wasm-validation PASS reactor-instantiate-initialize-only"
-                   "wasm-validation-boundary no-source-entry-invoked"
+                   "wasm-validation-boundary no-source-entry-requested"
                    (format "wasm-artifact-sha256 ~a" digest)
                    "wasm-result PASS"))])
        (check-true (string-contains? report (string-append line "\n")) line))
      (define audit (file->string (build-path artifacts "wasm-audit.txt")))
      (check-true
       (string-contains? audit (format "wasm-tool-cc-path ~a\n" (path->string cc))))
+     (check-true
+      (string-contains? audit (format "wasm-tool-ld-path ~a\n" (path->string ld))))
      (check-true
       (string-contains? audit
                         (format "wasm-tool-runtime-path ~a\n"
@@ -173,10 +212,12 @@ SH
    (lambda ()
      (define artifacts (make-artifacts scratch))
      (define missing-cc (build-path scratch "missing-wasi-clang"))
+     (define ld (build-path scratch "fake-wasm-ld"))
      (define runtime (build-path scratch "fake-wasmtime"))
+     (write-executable ld fake-ld-source)
      (write-executable runtime fake-runtime-source)
      (define-values (exit-code stdout stderr)
-       (run-materializer artifacts missing-cc runtime (hasheq)))
+       (run-materializer artifacts missing-cc ld runtime (hasheq)))
      (check-not-equal? exit-code 0 stdout)
      (check-true (string-contains? stderr "required wasm32-wasi compiler is unavailable")
                  stderr)
@@ -193,6 +234,7 @@ SH
    (lambda ()
      (define artifacts (make-artifacts scratch))
      (define cc (build-path scratch "failing-wasi-clang"))
+     (define ld (build-path scratch "fake-wasm-ld"))
      (define runtime (build-path scratch "fake-wasmtime"))
      (write-executable
       cc
@@ -201,9 +243,10 @@ SH
        "if [[ \"${1:-}\" == \"--version\" ]]; then echo 'failing-wasi-clang 1.0'; exit 0; fi\n"
        "echo 'synthetic compiler failure' >&2\n"
        "exit 23\n"))
+     (write-executable ld fake-ld-source)
      (write-executable runtime fake-runtime-source)
      (define-values (exit-code stdout stderr)
-       (run-materializer artifacts cc runtime (hasheq)))
+       (run-materializer artifacts cc ld runtime (hasheq)))
      (check-not-equal? exit-code 0 stdout)
      (check-true (string-contains? stderr "synthetic compiler failure") stderr)
      (check-true (string-contains? stderr "bootstrap C17-to-Wasm compile 1 failed")
@@ -213,15 +256,146 @@ SH
      (check-true (string-contains? report "wasm-result FAIL compile-1\n")))
    (lambda () (delete-directory/files scratch))))
 
+(test-case "compiler timeout owns and reaps the compiler process group"
+  (define scratch (make-temporary-file "beagle-wasm-compiler-tree-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define artifacts (make-artifacts scratch))
+     (define cc (build-path scratch "hanging-wasi-clang"))
+     (define ld (build-path scratch "fake-wasm-ld"))
+     (define runtime (build-path scratch "fake-wasmtime"))
+     (define child-pid (build-path scratch "compiler-child.pid"))
+     (write-executable
+      cc
+      #<<SH
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'hanging-wasi-clang 1.0\n'
+  exit 0
+fi
+trap '' TERM
+sleep 300 &
+child=$!
+printf '%s\n' "$child" >"${TREE_CHILD_PID:?}"
+wait "$child"
+SH
+      )
+     (write-executable ld fake-ld-source)
+     (write-executable runtime fake-runtime-source)
+     (define-values (exit-code stdout stderr)
+       (run-materializer
+        artifacts cc ld runtime
+        (hasheq #"BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS" #"1"
+                #"TREE_CHILD_PID" (string->bytes/utf-8 (path->string child-pid)))))
+     (check-not-equal? exit-code 0 stdout)
+     (check-true (string-contains? stderr "bootstrap C17-to-Wasm compile 1 failed")
+                 stderr)
+     (check-true (wait-for-child-reaped child-pid)
+                 "compiler child escaped its bounded process group")
+     (check-true
+      (string-contains? (file->string (build-path artifacts "wasm-report.txt"))
+                        "wasm-result FAIL compile-1\n")))
+   (lambda () (delete-directory/files scratch))))
+
+(test-case "runtime timeout owns and reaps the runtime process group"
+  (define scratch (make-temporary-file "beagle-wasm-runtime-tree-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define artifacts (make-artifacts scratch))
+     (define cc (build-path scratch "fake-wasi-clang"))
+     (define ld (build-path scratch "fake-wasm-ld"))
+     (define runtime (build-path scratch "hanging-wasmtime"))
+     (define cc-count (build-path scratch "cc-count"))
+     (define child-pid (build-path scratch "runtime-child.pid"))
+     (write-executable cc fake-cc-source)
+     (write-executable ld fake-ld-source)
+     (write-executable
+      runtime
+      #<<SH
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'hanging-wasmtime 1.0\n'
+  exit 0
+fi
+trap '' TERM
+sleep 300 &
+child=$!
+printf '%s\n' "$child" >"${TREE_CHILD_PID:?}"
+wait "$child"
+SH
+      )
+     (define-values (exit-code stdout stderr)
+       (run-materializer
+        artifacts cc ld runtime
+        (hasheq #"BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS" #"1"
+                #"FAKE_CC_COUNT" (string->bytes/utf-8 (path->string cc-count))
+                #"FAKE_EXPECTED_LD" (string->bytes/utf-8 (path->string ld))
+                #"TREE_CHILD_PID" (string->bytes/utf-8 (path->string child-pid)))))
+     (check-not-equal? exit-code 0 stdout)
+     (check-true (string-contains? stderr "reactor instantiation failed") stderr)
+     (check-true (wait-for-child-reaped child-pid)
+                 "runtime child escaped its bounded process group")
+     (check-true
+      (string-contains? (file->string (build-path artifacts "wasm-report.txt"))
+                        "wasm-result FAIL instantiate\n")))
+   (lambda () (delete-directory/files scratch))))
+
+(test-case "unsupported callable entry is refused by qualified source name"
+  (define scratch (make-temporary-file "beagle-wasm-entry-refusal-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define source (build-path scratch "entry.bgl"))
+     (define out (build-path scratch "out"))
+     (write-text source
+                 (string-append
+                  "#lang beagle\n"
+                  "(ns native.wasm-refusal)\n"
+                  "(define-mode strict)\n"
+                  "(defn entry [(value Int)] Int value)\n"))
+     (define stdout (open-output-string))
+     (define stderr (open-output-string))
+     (define exit-code
+       (parameterize ([current-directory repo-root]
+                      [current-output-port stdout]
+                      [current-error-port stderr])
+         (system*/exit-code
+          beagle "build"
+          "--materializer" "wasm"
+          "--abi" "wasm32"
+          "--entry" "native.wasm-refusal/entry"
+          "--out" (path->string out)
+          (path->string source))))
+     (check-not-equal? exit-code 0 (get-output-string stdout))
+     (check-true
+      (string-contains? (get-output-string stderr)
+                        "entry 'native.wasm-refusal/entry' must have zero source parameters")
+      (get-output-string stderr))
+     (check-false (file-exists? (build-path out "module_0.wasm")))
+     (define report (file->string (build-path out "wasm-report.txt")))
+     (check-true (string-contains? report
+                                  "wasm-entry-name native.wasm-refusal/entry\n"))
+     (check-true (string-contains? report "wasm-entry-contract REFUSED\n"))
+     (check-true (string-contains? report
+                                  "wasm-result FAIL unsupported-entry\n")))
+   (lambda () (delete-directory/files scratch))))
+
 (test-case "supported toolchain builds a tiny Core entry end to end"
   (define cc (supported-tool "wasm32-wasi compiler"
                              '("BEAGLE_WASI_CC" "WASI_CC")
                              "wasm32-unknown-wasi-clang"))
+  (define ld (supported-tool "wasm linker"
+                             '("BEAGLE_WASM_LD" "WASM_LD")
+                             "wasm-ld"))
   (define runtime (supported-tool "WebAssembly runtime"
                                   '("BEAGLE_WASMTIME" "WASMTIME")
                                   "wasmtime"))
   (cond
-    [(not (and cc runtime))
+    [(not (and cc ld runtime))
      (printf "  (skipped — supported wasm toolchain is not in this environment)\n")
      (check-true #t)]
     [else
@@ -240,14 +414,10 @@ SH
         (define env (environment-variables-copy (current-environment-variables)))
         (environment-variables-set! env #"BEAGLE_WASI_CC"
                                     (string->bytes/utf-8 cc))
+        (environment-variables-set! env #"BEAGLE_WASM_LD"
+                                    (string->bytes/utf-8 ld))
         (environment-variables-set! env #"BEAGLE_WASMTIME"
                                     (string->bytes/utf-8 runtime))
-        ;; Nix's clang wrapper execs its sibling wasm-ld by bare name. The
-        ;; pinned devshell normally supplies it; add its resolved directory
-        ;; when this test is invoked with explicit absolute tools.
-        (define wasm-ld (find-executable-path "wasm-ld"))
-        (when wasm-ld
-          (path-prepend-directory env (path-only wasm-ld)))
         (define stdout (open-output-string))
         (define stderr (open-output-string))
         (define (run-build)
@@ -276,19 +446,36 @@ SH
                                "report.txt"))])
           (check-true (file-exists? (build-path out name)) name))
         (check-equal? (file->string (build-path out "module_0.wasm.seams"))
-                      "export func _initialize\nexport memory memory\n")
-        (check-true
-         (regexp-match? #rx#"native_m0_fn_0"
-                        (file->bytes (build-path out "module_0.wasm")))
-         "the reactor must retain the lowered entry without exporting it")
+                      (string-append
+                       "export func _initialize\n"
+                       "export func beagle_wasm_entry_v0\n"
+                       "export memory memory\n"))
         (define report (file->string (build-path out "report.txt")))
         (check-true (string-contains? report
                                      "source-entry native.wasm-e2e/entry\n"))
         (check-true (string-contains? report
-                                     "wasm-validation PASS reactor-instantiate-initialize-only\n"))
+                                     "wasm-projection-kind executable-entry-v0\n"))
         (check-true (string-contains? report
-                                     "wasm-validation-boundary no-source-entry-invoked\n"))
+                                     "wasm-entry-contract PASS source-ast-to-lowered-header\n"))
+        (check-true (string-contains? report
+                                     "wasm-entry-abi parameterless-int-to-i64-v0\n"))
+        (check-true (string-contains? report
+                                     "wasm-validation PASS source-entry-invoked\n"))
+        (check-true (string-contains? report "wasm-entry-result 42\n"))
         (check-true (string-suffix? report "result PASS\n"))
+        (define invoke-stdout (open-output-string))
+        (define invoke-stderr (open-output-string))
+        (define invoke-exit-code
+          (parameterize ([current-directory repo-root]
+                         [current-environment-variables env]
+                         [current-output-port invoke-stdout]
+                         [current-error-port invoke-stderr])
+            (system*/exit-code
+             runtime "run" "--invoke" "beagle_wasm_entry_v0"
+             (path->string (build-path out "module_0.wasm")))))
+        (check-equal? invoke-exit-code 0 (get-output-string invoke-stderr))
+        (check-equal? (get-output-string invoke-stdout) "42\n"
+                      "Wasmtime must observe the declared Beagle Int result")
         (define deterministic-names
           '("module_0.wasm"
             "module_0.wasm.sha256"

@@ -88,7 +88,11 @@ separately: `beagle build --materializer c17|qbe|wasm --out DIR FILE.bgl`. The
 build always writes `module.native-program` and its digest; only explicitly
 selected artifacts are projected beside it. Wasm requires `--abi wasm32` and
 writes a reactor, digest, import/export seam inventory, deterministic report,
-and environment-specific tool-path audit.
+and environment-specific tool-path audit. With no `--entry`, that reactor is a
+clearly named non-executable projection. One public, parameterless `Int` entry
+earns the narrow `beagle_wasm_entry_v0 : () -> i64` export and is invoked under
+the resolved Wasmtime during the build; other callable shapes are refused by the
+qualified entry name.
 Run `beagle doctor --deep` before authoring to verify the complete diagnostic
 path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 --hooks` makes a project invoke it on each edit.
@@ -257,7 +261,10 @@ Fram's files remain Beagle; they are not rewritten as C or another systems
 language. The Core path is `beagle build --materializer c17|qbe|wasm`: it
 accepts canonical `.bgl`, freezes one native program, and materializes only the
 selected projection. The Wasm projection currently passes through Restricted
-C17 and wasi-clang; it does not claim direct Native-Core-to-Wasm emission. The generated
+C17 and wasi-clang; it does not claim direct Native-Core-to-Wasm emission. Its
+first executable contract is deliberately only one parameterless `Int` entry;
+the materializer validates the source-to-lowered-to-generated-symbol chain
+before exporting and invoking it. The generated
 [`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
 is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
 bodies lower into one validated Native Core program and execute through the

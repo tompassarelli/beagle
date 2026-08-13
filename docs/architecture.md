@@ -18,7 +18,9 @@ Native Core and produces an immutable validated Native Core program.
 extension. C17, QBE, and a C17/WASI Wasm bootstrap are the current
 materializers. The Wasm path is explicitly a bootstrap, not a direct emitter;
 its toolchain step is isolated behind `bin/beagle-materialize-wasm` so a future
-direct emitter can replace it without moving the frozen-program boundary. The
+direct emitter can replace it without moving the frozen-program boundary. Its
+first executable seam exports and runs only a validated parameterless `Int`
+entry; an entryless build remains an explicitly non-executable projection. The
 lowering tool may run from hosted `.bclj` during compiler bootstrapping without
 making `.bgl` a hosted or target-neutral source profile.
 

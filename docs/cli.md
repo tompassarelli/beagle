@@ -76,9 +76,13 @@ unselected source profile. Its build always publishes
 `--materializer qbe` adds `module_0.ssa`. `--materializer wasm --abi wasm32`
 adds `module_0.wasm`, its SHA-256 digest, `module_0.wasm.seams`, and two reports:
 `wasm-report.txt` contains the deterministic bootstrap/tool-identity contract;
-`wasm-audit.txt` records environment-specific resolved tool paths. The reactor
-exports only `_initialize` and `memory`; the bounded validation instantiates and
-initializes it but invokes no source entry. No materializer is implicit, and
+`wasm-audit.txt` records environment-specific resolved compiler, linker, and
+runtime paths. With no `--entry`, the reactor is classified as a non-executable
+projection and exports only `_initialize` and `memory`. With exactly one public,
+parameterless `Int` entry, the build proves its qualified source definition,
+unique lowered function, and generated C symbol are one chain, exports
+`beagle_wasm_entry_v0 : () -> i64`, and invokes it under Wasmtime. Other entry
+shapes and multiple Wasm entries are refused. No materializer is implicit, and
 hosted `.bclj` is not accepted by the Core build path.
 
 Without an explicit `OUT` argument, `beagle build` writes to
