@@ -34,6 +34,15 @@
   (syntax-case stx ()
     [(_ form ...)
      (let ()
+       (define source-forms (syntax->list #'(form ...)))
+       (define forms
+         (if (for/or ([form (in-list source-forms)])
+               (define datum (syntax->datum form))
+               (and (pair? datum) (eq? (car datum) 'define-target)))
+             source-forms
+             (cons (datum->syntax stx '(define-target core) stx stx)
+                   source-forms)))
+
        (define (handle-error e [loc-stx #f])
          (define parse-location
            (and (beagle-parse-error? e)
@@ -46,7 +55,32 @@
                   (and source line col position
                        (datum->syntax #f 'layout
                                       (list source line col position (or span 1)))))))
-         (define target (or loc-stx parse-location stx))
+         ;; Inference can reject before the per-form checking pass supplies
+         ;; LOC-STX. Structured diagnostics still carry the authored source
+         ;; and line; recover the enclosing top-level form instead of blaming
+         ;; this target wrapper's module-begin template.
+         (define diagnostic-form-location
+           (and (beagle-diagnostic? e)
+                (let* ([details (beagle-diagnostic-details e)]
+                       [source (hash-ref details 'error-file #f)]
+                       [line (hash-ref details 'error-line #f)])
+                  (and source line
+                       (for/fold ([candidate #f])
+                                 ([form (in-list source-forms)])
+                         (define form-source (syntax-source form))
+                         (define form-line (syntax-line form))
+                         (if (and form-line
+                                  (<= form-line line)
+                                  (equal? source
+                                          (cond
+                                            [(path? form-source)
+                                             (path->string form-source)]
+                                            [(string? form-source) form-source]
+                                            [else #f])))
+                             form
+                             candidate))))))
+         (define target
+           (or loc-stx diagnostic-form-location parse-location stx))
          (cond
            [(json-error-mode?)
             (write-json-error e target)
@@ -54,14 +88,6 @@
            [else
             (raise-syntax-error 'beagle (augment-with-hint (exn-message e)) target)]))
 
-       (define source-forms (syntax->list #'(form ...)))
-       (define forms
-         (if (for/or ([form (in-list source-forms)])
-               (define datum (syntax->datum form))
-               (and (pair? datum) (eq? (car datum) 'define-target)))
-             source-forms
-             (cons (datum->syntax stx '(define-target core) stx stx)
-                   source-forms)))
        ;; Source path of the USER's file. Target wrappers (beagle/clj's
        ;; clj-module-begin etc.) re-template the module-begin form, so
        ;; (syntax-source stx) is the wrapper module (beagle-lib/clj/main.rkt)

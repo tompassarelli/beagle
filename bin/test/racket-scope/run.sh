@@ -70,6 +70,19 @@ copy_checkout "$sibling"
 
     "$RACO" test "$linked/beagle-test/tests/checked-bundle.rkt" >/dev/null
 
+    # The conformance reject goldens pin authored fixture paths. Loading the
+    # language through a second, symlink-scoped collection identity instead of
+    # the exact package link changes both diagnostics to */{clj,js}/main.rkt.
+    # Certifying both hosted targets therefore guards source provenance as well
+    # as the package-identity decision above.
+    conformance_output="$scratch/conformance.out"
+    if ! "$linked/bin/beagle-certify" --target js,clj >"$conformance_output"; then
+        cat "$conformance_output" >&2
+        exit 1
+    fi
+    grep -Fq "reject-match        2" "$conformance_output"
+    grep -Fq "conformance gate: OK" "$conformance_output"
+
     unset PLTCOLLECTS _BEAGLE_SCOPE_ROOT _BEAGLE_ZO_GATE_PID BEAGLE_ROOT
     source "$sibling/bin/_beagle-racket"
 
