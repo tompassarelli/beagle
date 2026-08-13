@@ -15,10 +15,11 @@ beagle syntax FILE          # parse check (+ --ledger, --repair --emit-patch)
 beagle check [PATH...]      # type-check without emitting (--profile N)
 beagle validate [FILE...]   # parse + check + schema validation
 beagle build [--target T] PATH [OUT]  # explicit hosted source emission
-beagle build --materializer c17|qbe --out DIR [--abi lp64|wasm32]
+beagle build --materializer c17|qbe|wasm --out DIR [--abi lp64|wasm32]
              [--entry NS/NAME]... PATH.bgl...
                                       # frozen native program + one projection;
-                                      #  --abi picks the layout profile (lp64)
+                                      #  wasm is the C17/WASI bootstrap and
+                                      #  requires --abi wasm32
 beagle fix [--dry-run] [PATH...]                # high-confidence auto-fixes
 beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
 beagle doctor [--deep]      # is the authoring loop online and working?
@@ -72,7 +73,12 @@ Bare `#lang beagle` on `.bgl` is Native Core, never a target-neutral or
 unselected source profile. Its build always publishes
 `module.native-program`, `module.native-program.sha256`, `source.facts`, and
 `report.txt`; `--materializer c17` adds `module_0.h`/`module_0.c`, while
-`--materializer qbe` adds `module_0.ssa`. No materializer is implicit, and
+`--materializer qbe` adds `module_0.ssa`. `--materializer wasm --abi wasm32`
+adds `module_0.wasm`, its SHA-256 digest, `module_0.wasm.seams`, and two reports:
+`wasm-report.txt` contains the deterministic bootstrap/tool-identity contract;
+`wasm-audit.txt` records environment-specific resolved tool paths. The reactor
+exports only `_initialize` and `memory`; the bounded validation instantiates and
+initializes it but invokes no source entry. No materializer is implicit, and
 hosted `.bclj` is not accepted by the Core build path.
 
 Without an explicit `OUT` argument, `beagle build` writes to

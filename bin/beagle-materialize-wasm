@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# Finish the live Wasm bootstrap after Native Core has projected Restricted C17.
+#
+# This is intentionally a replaceable seam. It consumes module_0.c emitted from
+# the already-frozen Native Core program, builds a wasm32-WASI reactor twice,
+# proves byte identity, and performs bounded reactor instantiation. It is NOT a
+# direct Native-Core-to-Wasm emitter and never reports itself as one.
+
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TOOLS="$BEAGLE_DIR/bin/beagle-wasm-tools"
+SHIM="$BEAGLE_DIR/native-core/shim"
+SEAMS="$BEAGLE_DIR/native-core/validation/wasm32/seams.clj"
+
+usage() {
+    echo "usage: beagle-materialize-wasm --artifacts DIR" >&2
+}
+
+artifacts=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --artifacts)
+            [[ $# -ge 2 ]] || { usage; exit 2; }
+            artifacts="$2"
+            shift 2
+            ;;
+        --artifacts=*)
+            artifacts="${1#*=}"
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "beagle wasm: unknown option: $1" >&2
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+[[ -n "$artifacts" ]] || { usage; exit 2; }
+[[ -d "$artifacts" ]] || {
+    echo "beagle wasm: artifacts directory is unavailable: $artifacts" >&2
+    exit 2
+}
+artifacts="$(cd "$artifacts" && pwd -P)"
+[[ "$artifacts" != "/" ]] || {
+    echo "beagle wasm: artifacts directory may not be the filesystem root" >&2
+    exit 2
+}
+
+report="$artifacts/wasm-report.txt"
+audit="$artifacts/wasm-audit.txt"
+artifact="$artifacts/module_0.wasm"
+digest_file="$artifacts/module_0.wasm.sha256"
+seams="$artifacts/module_0.wasm.seams"
+rm -f -- "$artifact" "$digest_file" "$seams" "$report" "$audit"
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-wasm-materialize.XXXXXX")"
+cleanup() { rm -rf "${work:?}"; }
+trap cleanup EXIT
+
+report_lines=()
+report_lines+=("wasm-materializer bootstrap-c17-wasi-clang")
+report_lines+=("wasm-materializer-direct false")
+report_lines+=("wasm-abi wasm32")
+report_lines+=("wasm-input module.native-program")
+report_lines+=("wasm-bootstrap-input module_0.c")
+report_lines+=("wasm-export-policy reactor-initialize-and-memory-only")
+report_lines+=("wasm-report-determinism pinned-tool-identities-no-environment-paths")
+report_lines+=("wasm-audit wasm-audit.txt environment-specific-tool-paths")
+audit_lines=()
+audit_lines+=("wasm-audit-scope environment-specific-tool-resolution")
+
+publish_reports() {
+    local report_temporary="$work/wasm-report.txt"
+    local audit_temporary="$work/wasm-audit.txt"
+    printf '%s\n' "${report_lines[@]}" >"$report_temporary"
+    printf '%s\n' "${audit_lines[@]}" >"$audit_temporary"
+    cp "$report_temporary" "$report"
+    cp "$audit_temporary" "$audit"
+}
+
+fail() {
+    local code="$1"
+    shift
+    report_lines+=("wasm-result FAIL $code")
+    publish_reports
+    echo "beagle wasm: $*" >&2
+    exit 1
+}
+
+for required in \
+    "$artifacts/module.native-program.sha256" \
+    "$artifacts/module_0.c" \
+    "$artifacts/module_0.h" \
+    "$SHIM/native_shim.c" \
+    "$SHIM/native_shim.h" \
+    "$SHIM/native_unicode15_data.h" \
+    "$SEAMS"; do
+    [[ -f "$required" ]] || fail missing-input "bootstrap input is unavailable: $required"
+done
+
+native_digest="$(sed -n '1p' "$artifacts/module.native-program.sha256")"
+[[ "$native_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    fail invalid-input "module.native-program.sha256 is not one lowercase SHA-256 digest"
+report_lines+=("wasm-input-sha256 $native_digest")
+
+for command in awk bb cmp cp grep mktemp mv sed sha256sum sort timeout tr; do
+    command -v "$command" >/dev/null 2>&1 ||
+        fail missing-tool "required command is unavailable: $command"
+done
+
+tool_error="$work/tool-error.txt"
+if ! cc="$("$TOOLS" cc 2>"$tool_error")"; then
+    report_lines+=("wasm-tool-cc unavailable")
+    report_lines+=("wasm-tool-runtime unresolved")
+    fail missing-tool "$(sed -n '1p' "$tool_error")"
+fi
+audit_lines+=("wasm-tool-cc-path $cc")
+
+if ! runtime="$("$TOOLS" runtime 2>"$tool_error")"; then
+    report_lines+=("wasm-tool-runtime unavailable")
+    fail missing-tool "$(sed -n '1p' "$tool_error")"
+fi
+audit_lines+=("wasm-tool-runtime-path $runtime")
+
+compile_timeout="${BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS:-60}"
+instantiate_timeout="${BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS:-10}"
+[[ "$compile_timeout" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS must be a positive integer"
+[[ "$instantiate_timeout" =~ ^[1-9][0-9]*$ ]] ||
+    fail invalid-timeout "BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS must be a positive integer"
+
+if ! timeout --foreground --kill-after=5s 5s "$cc" --version \
+        >"$work/cc-version.txt" 2>"$work/cc-version.err"; then
+    fail tool-identity "wasm32-wasi compiler did not report its identity within 5 seconds"
+fi
+cc_version="$(sed -n '1p' "$work/cc-version.txt" | tr -d '\r')"
+[[ -n "$cc_version" ]] || fail tool-identity "wasm32-wasi compiler reported an empty identity"
+report_lines+=("wasm-tool-cc-version $cc_version")
+
+if ! timeout --foreground --kill-after=5s 5s "$runtime" --version \
+        >"$work/runtime-version.txt" 2>"$work/runtime-version.err"; then
+    fail tool-identity "WebAssembly runtime did not report its identity within 5 seconds"
+fi
+runtime_version="$(sed -n '1p' "$work/runtime-version.txt" | tr -d '\r')"
+[[ -n "$runtime_version" ]] || fail tool-identity "WebAssembly runtime reported an empty identity"
+report_lines+=("wasm-tool-runtime-version $runtime_version")
+
+# Keep every generated Native Core function in the reactor without publishing
+# it. The C ABI has not yet earned a stable wasm-callable export contract; the
+# only live exports are reactor initialization and memory. A constructor holds
+# exact-type function pointers, making the generated functions (and only their
+# reachable shim surface) linker roots. This avoids both dead-code elimination
+# of the program and --export-all's publication of wasi-libc and the whole shim.
+mapfile -t native_symbols < <(
+    sed -nE 's/.* (native_m0_fn_[0-9]+)\(.*/\1/p' \
+        "$artifacts/module_0.h" | LC_ALL=C sort -u
+)
+{
+    printf '#include "module_0.h"\n'
+    native_index=0
+    for native_symbol in "${native_symbols[@]}"; do
+        printf 'static __typeof__(%s) *volatile beagle_wasm_root_%s = %s;\n' \
+            "$native_symbol" "$native_index" "$native_symbol"
+        native_index=$((native_index + 1))
+    done
+    printf '__attribute__((constructor)) static void beagle_wasm_retain_native_functions(void) {\n'
+    native_index=0
+    for _native_symbol in "${native_symbols[@]}"; do
+        printf '  (void)beagle_wasm_root_%s;\n' "$native_index"
+        native_index=$((native_index + 1))
+    done
+    printf '}\n'
+} >"$work/retain-native-functions.c"
+report_lines+=("wasm-retained-native-functions ${#native_symbols[@]}")
+report_lines+=("wasm-retention constructor-function-pointers")
+
+compile_once() {
+    local ordinal="$1"
+    local log="$work/compile-$ordinal.log"
+    echo "beagle wasm: bootstrap compile $ordinal/2" >&2
+    if ! timeout --foreground --kill-after=5s "${compile_timeout}s" \
+        "$cc" \
+        -mexec-model=reactor \
+        -std=c17 -pedantic -Wall -Wextra -Werror \
+        -I "$artifacts" -I "$SHIM" \
+        -o "$work/module_0.wasm" \
+        "$artifacts/module_0.c" "$SHIM/native_shim.c" \
+        "$work/retain-native-functions.c" \
+        >"$log" 2>&1; then
+        sed -n '1,80p' "$log" >&2
+        fail "compile-$ordinal" \
+            "bootstrap C17-to-Wasm compile $ordinal failed or exceeded ${compile_timeout}s"
+    fi
+    [[ -s "$work/module_0.wasm" ]] ||
+        fail "compile-$ordinal" "bootstrap compiler produced no WebAssembly artifact"
+    cp "$work/module_0.wasm" "$work/module_0-$ordinal.wasm"
+}
+
+compile_once 1
+compile_once 2
+cmp -s "$work/module_0-1.wasm" "$work/module_0-2.wasm" ||
+    fail nondeterministic "two identical bootstrap builds produced different WebAssembly bytes"
+report_lines+=("wasm-determinism PASS repeated-identical-build")
+
+if ! bb "$SEAMS" "$work/module_0-1.wasm" >"$work/module_0.wasm.seams" \
+        2>"$work/seams.err"; then
+    sed -n '1,80p' "$work/seams.err" >&2
+    fail invalid-artifact "could not read the WebAssembly import/export seam"
+fi
+awk '$1 == "export" { print }' "$work/module_0.wasm.seams" \
+    >"$work/actual-exports.txt"
+printf '%s\n' \
+    "export func _initialize" \
+    "export memory memory" \
+    >"$work/expected-exports.txt"
+if ! cmp -s "$work/expected-exports.txt" "$work/actual-exports.txt"; then
+    sed -n '1,80p' "$work/module_0.wasm.seams" >&2
+    fail export-policy \
+        "bootstrap reactor exported a surface beyond _initialize and memory"
+fi
+while read -r seam_kind _ seam_name; do
+    if [[ "$seam_kind" == "import" &&
+          "$seam_name" != wasi_snapshot_preview1.* ]]; then
+        fail import-policy "bootstrap reactor imported non-WASI symbol $seam_name"
+    fi
+done <"$work/module_0.wasm.seams"
+import_count="$(awk '$1 == "import" { count += 1 } END { print count + 0 }' \
+    "$work/module_0.wasm.seams")"
+seams_digest="$(sha256sum "$work/module_0.wasm.seams" | awk '{print $1}')"
+report_lines+=("wasm-seams module_0.wasm.seams")
+report_lines+=("wasm-seams-sha256 $seams_digest")
+report_lines+=("wasm-import-count $import_count")
+report_lines+=("wasm-export-count 2")
+report_lines+=("wasm-export func _initialize")
+report_lines+=("wasm-export memory memory")
+
+echo "beagle wasm: bounded reactor instantiation" >&2
+if ! timeout --foreground --kill-after=5s "${instantiate_timeout}s" \
+    "$runtime" run "$work/module_0-1.wasm" \
+    >"$work/runtime.log" 2>&1; then
+    sed -n '1,80p' "$work/runtime.log" >&2
+    fail instantiate \
+        "reactor instantiation failed or exceeded ${instantiate_timeout}s"
+fi
+report_lines+=("wasm-validation PASS reactor-instantiate-initialize-only")
+report_lines+=("wasm-validation-boundary no-source-entry-invoked")
+
+wasm_digest="$(sha256sum "$work/module_0-1.wasm" | awk '{print $1}')"
+report_lines+=("wasm-artifact module_0.wasm")
+report_lines+=("wasm-artifact-sha256 $wasm_digest")
+report_lines+=("wasm-result PASS")
+
+artifact_temporary="$artifacts/.module_0.wasm.$$"
+digest_temporary="$artifacts/.module_0.wasm.sha256.$$"
+seams_temporary="$artifacts/.module_0.wasm.seams.$$"
+cp "$work/module_0-1.wasm" "$artifact_temporary"
+printf '%s\n' "$wasm_digest" >"$digest_temporary"
+cp "$work/module_0.wasm.seams" "$seams_temporary"
+mv "$artifact_temporary" "$artifact"
+mv "$digest_temporary" "$digest_file"
+mv "$seams_temporary" "$seams"
+publish_reports
+
+echo "beagle wasm: wrote deterministic bootstrap reactor $artifact" >&2

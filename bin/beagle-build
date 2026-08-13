@@ -12,7 +12,7 @@
 #
 # --target retargets a source through the production in-process
 # reader → parser → checker → emitter path without rewriting the source file.
-# Core is not a source emitter: use `beagle build --materializer c17|qbe`.
+# Core is not a source emitter: use `beagle build --materializer M`.
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
@@ -30,7 +30,7 @@ if [[ "${1:-}" == "--target" ]]; then
     target="$2"
     shift 2
     if ! beagle_known_hosted_target "$target"; then
-        echo "beagle-build: unsupported hosted --target '$target' (expected clj, js, or nix); Core uses --materializer c17|qbe" >&2
+        echo "beagle-build: unsupported hosted --target '$target' (expected clj, js, or nix); Core uses --materializer ($BEAGLE_MATERIALIZER_IDS_LIST)" >&2
         exit 2
     fi
 fi
@@ -49,7 +49,7 @@ if [[ ! -f "$src" ]]; then
 fi
 
 if [[ -z "$target" && "$src" == *.bgl ]]; then
-    echo "beagle-build: .bgl is Beagle Core; use: beagle build --materializer c17|qbe --out DIR $src" >&2
+    echo "beagle-build: .bgl is Beagle Core; use: beagle build --materializer M --out DIR $src ($BEAGLE_MATERIALIZER_IDS_LIST)" >&2
     exit 2
 fi
 

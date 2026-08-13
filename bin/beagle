@@ -36,7 +36,8 @@ Author:
   validate [FILE...]        Parse + check + schema validation
   build [--target T] PATH   Emit an explicit hosted target
   build --materializer M... --out DIR [--entry NS/NAME]... PATH.bgl...
-                            Freeze Core once, then project each c17|qbe materializer
+                            Freeze Core once, then project each selected materializer
+                            ($BEAGLE_MATERIALIZER_IDS_LIST; wasm requires --abi wasm32)
   fmt --check|--write PATH...  Check or rewrite canonical source layout
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)

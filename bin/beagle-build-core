@@ -2,7 +2,7 @@
 # Build dependency-first Beagle Core modules through the frozen native program.
 #
 # Usage:
-#   beagle build --materializer c17 [--materializer qbe] --out DIR
+#   beagle build --materializer c17|qbe|wasm [...] --out DIR
 #     [--abi lp64|wasm32] [--entry NS/NAME]... [--simd] SOURCE.bgl...
 #
 # A successful run always writes the authoritative frozen native program encoding
@@ -98,13 +98,17 @@ done
 [[ -n "$out" ]] || die "--out DIR is required"
 [[ ${#materializers[@]} -gt 0 ]] || die "at least one --materializer is required"
 declare -A seen_materializers=()
+wasm_selected=false
 for materializer in "${materializers[@]}"; do
     beagle_known_materializer "$materializer" ||
         die "unknown materializer '$materializer' (expected $BEAGLE_MATERIALIZER_IDS_LIST)"
     [[ -z "${seen_materializers[$materializer]:-}" ]] ||
         die "duplicate materializer: $materializer"
     seen_materializers["$materializer"]=1
+    [[ "$materializer" == "wasm" ]] && wasm_selected=true
 done
+$wasm_selected && [[ "$abi" != "wasm32" ]] &&
+    die "materializer 'wasm' requires --abi wasm32 (got '$abi')"
 for entry in "${entries[@]}"; do
     [[ "$entry" == */* ]] || die "--entry must be qualified as NS/NAME: $entry"
     entry_namespace="${entry%/*}"
@@ -141,6 +145,11 @@ managed_artifacts=(
     module_0.h
     module_0.c
     module_0.ssa
+    module_0.wasm
+    module_0.wasm.sha256
+    module_0.wasm.seams
+    wasm-report.txt
+    wasm-audit.txt
     native_shim.h
     native_shim.c
     native_parallel.h
@@ -701,6 +710,21 @@ bb -cp "$compiled" -e '
        (slice/obligation-report "obligation-projection" projected abi)
        (body-slice/failing-obligations projected abi)))
 
+(defn emit-c17-materialization! [result artifacts-dir stage-name report]
+  (if-not (body/materialization-ok? result)
+    (do
+      (finish-stage! stage-name "REFUSED")
+      {:ok? false
+       :report report})
+    (let [artifact (body/materialization-artifact result)]
+      (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
+            (body/bodyartifactv0-header-text artifact))
+      (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
+            (body/bodyartifactv0-source-text artifact))
+      (finish-stage! stage-name "OK")
+      {:ok? true
+       :report report})))
+
 (defn materialize-c17! [projected artifacts-dir plan simd-required? abi-id]
   (start-stage! "materialization-c17")
   (let [result (cond
@@ -728,19 +752,28 @@ bb -cp "$compiled" -e '
                                  "")))
                         (str "REFUSED " (body/materialization-detail result)))
                       "\n"))]
-    (if-not ok?
-      (do
-        (finish-stage! "materialization-c17" "REFUSED")
-        {:ok? false
-         :report report})
-      (let [artifact (body/materialization-artifact result)]
-        (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
-              (body/bodyartifactv0-header-text artifact))
-        (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
-              (body/bodyartifactv0-source-text artifact))
-        (finish-stage! "materialization-c17" "OK")
-        {:ok? true
-         :report report}))))
+    (emit-c17-materialization! result artifacts-dir "materialization-c17"
+                               report)))
+
+;; The first live Wasm materializer deliberately reuses the Restricted C17
+;; projection. The external wasi-clang step is a separate shell seam below, so
+;; a future direct emitter replaces this wrapper without changing Core freeze.
+;; SIMD never reaches here: the shell pins this materializer to wasm32, and the
+;; SIMD backend refuses every ABI but lp64.
+(defn materialize-wasm-bootstrap-c17! [projected artifacts-dir abi-id]
+  (start-stage! "materialization-wasm-bootstrap-c17")
+  (let [result (body/materialize-program-for-abi projected 0 abi-id)
+        ok? (body/materialization-ok? result)
+        report (str "materialize-wasm-bootstrap-c17 "
+                    (if ok?
+                      (let [artifact (body/materialization-artifact result)]
+                        (str "OK "
+                             (body/bodyartifactv0-header-name artifact) " "
+                             (body/bodyartifactv0-source-name artifact)))
+                      (str "REFUSED " (body/materialization-detail result)))
+                    "\n")]
+    (emit-c17-materialization! result artifacts-dir
+                               "materialization-wasm-bootstrap-c17" report)))
 
 (defn materialize-qbe! [projected artifacts-dir abi-id plan simd-required?]
   (start-stage! "materialization-qbe")
@@ -781,7 +814,9 @@ bb -cp "$compiled" -e '
                      "c17" (materialize-c17! projected artifacts-dir plan
                              simd-required? abi-id)
                      "qbe" (materialize-qbe! qbe-projected artifacts-dir abi-id
-                             plan simd-required?))
+                             plan simd-required?)
+                     "wasm" (materialize-wasm-bootstrap-c17!
+                              projected artifacts-dir abi-id))
             next-reports (conj reports (:report result))]
         (if (:ok? result)
           (recur (rest remaining) next-reports)
@@ -978,6 +1013,40 @@ if [[ $runner_rc -ne 0 ]]; then
     exit "$runner_rc"
 fi
 
+merge_wasm_report() {
+    local final_result="$1"
+    local merged="$work/artifacts/report.with-wasm.txt"
+    sed '$d' "$work/artifacts/report.txt" >"$merged"
+    cat "$work/artifacts/wasm-report.txt" >>"$merged"
+    printf 'result %s\n' "$final_result" >>"$merged"
+    mv "$merged" "$work/artifacts/report.txt"
+}
+
+if $wasm_selected; then
+    set +e
+    "$BIN/beagle-materialize-wasm" --artifacts "$work/artifacts"
+    wasm_rc=$?
+    set -e
+    if [[ ! -f "$work/artifacts/wasm-report.txt" ]]; then
+        printf '%s\n' \
+            "wasm-materializer bootstrap-c17-wasi-clang" \
+            "wasm-materializer-direct false" \
+            "wasm-abi wasm32" \
+            "wasm-result FAIL driver-error" \
+            >"$work/artifacts/wasm-report.txt"
+    fi
+    if [[ $wasm_rc -ne 0 ]]; then
+        merge_wasm_report "FAIL wasm materialization"
+        cp "$work/artifacts/wasm-report.txt" "$out/wasm-report.txt"
+        [[ ! -f "$work/artifacts/wasm-audit.txt" ]] ||
+            cp "$work/artifacts/wasm-audit.txt" "$out/wasm-audit.txt"
+        cp "$work/artifacts/report.txt" "$out/report.txt"
+        cat "$out/report.txt" >&2
+        exit "$wasm_rc"
+    fi
+    merge_wasm_report "PASS"
+fi
+
 for artifact in module.native-program module.native-program.sha256 report.txt; do
     [[ -f "$work/artifacts/$artifact" ]] || die "successful runner omitted $artifact"
     cp "$work/artifacts/$artifact" "$out/$artifact"
@@ -1011,6 +1080,14 @@ for materializer in "${materializers[@]}"; do
       qbe)
         [[ -f "$work/artifacts/module_0.ssa" ]] || die "successful QBE projection omitted module_0.ssa"
         cp "$work/artifacts/module_0.ssa" "$out/module_0.ssa"
+        ;;
+      wasm)
+        for artifact in module_0.wasm module_0.wasm.sha256 module_0.wasm.seams \
+                        wasm-report.txt wasm-audit.txt; do
+            [[ -f "$work/artifacts/$artifact" ]] ||
+                die "successful Wasm bootstrap omitted $artifact"
+            cp "$work/artifacts/$artifact" "$out/$artifact"
+        done
         ;;
     esac
 done

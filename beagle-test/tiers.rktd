@@ -56,6 +56,7 @@
              "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
              "docfill.rkt"              ; every compiler-owned doc span vs beagle-lib/private/targets.rkt (fix: bin/beagle doc-fill)
+             "wasm-materializer.rkt"    ; registered bootstrap artifact/digest/report + visible tool failures
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "export-xmodule.rkt"       ; a js/export'd definition keeps its signature across modules + on the query surface

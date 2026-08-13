@@ -65,10 +65,14 @@
   (check-equal? (core-profile-id CORE-PROFILE) 'core)
   (check-equal? (core-profile-source-ext CORE-PROFILE) ".bgl")
   (check-equal? (core-profile-lang CORE-PROFILE) "beagle")
-  (check-equal? (materializer-ids) '(c17 qbe))
+  (check-equal? (materializer-ids) '(c17 qbe wasm))
   (for ([materializer (in-list MATERIALIZERS)])
     (check-true (string-prefix? (materializer-out-ext materializer) "."))
-    (check-true (> (string-length (materializer-note materializer)) 20))))
+    (check-true (> (string-length (materializer-note materializer)) 20)))
+  (define wasm (materializer-by-id 'wasm))
+  (check-equal? (materializer-artifact wasm) "module_0.wasm")
+  (check-true (string-contains? (materializer-name wasm) "bootstrap"))
+  (check-true (string-contains? (materializer-note wasm) "not a direct Wasm emitter")))
 
 (test-case "target ids and extensions are unique"
   (define ids (source-profile-ids))

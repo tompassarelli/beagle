@@ -68,7 +68,9 @@
    "- `native-core/src/native/{stages,lower,obligations}.bclj` — the hosted "
    "implementation that lowers Core into one immutable validated Native Core "
    "program; "
-   "`native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.\n"
+   "`native-core/src/native/body_c17.bclj` implements C17 and the explicit "
+   "C17/WASI Wasm bootstrap; `native-core/src/native/qbe.bclj` implements "
+   "the direct QBE materializer.\n"
    "- `beagle-lib/private/emit-{"
    (string-join (map id-str TARGETS) ",")
    "}.rkt` — the live target emitters (one row each in\n"

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Resolve the external tools used by the Wasm bootstrap materializer.
+#
+# Toolchain packaging is deliberately outside the materializer. The Beagle
+# devshell may pin these paths, while tests and downstream builds can provide
+# the same contract explicitly.
+
+set -euo pipefail
+
+die() {
+    echo "beagle wasm: $*" >&2
+    exit 2
+}
+
+resolve_executable() {
+    local candidate="$1"
+    local description="$2"
+    local guidance="$3"
+    local resolved=""
+
+    if [[ "$candidate" == */* ]]; then
+        [[ -f "$candidate" && -x "$candidate" ]] ||
+            die "required $description is unavailable at '$candidate'; $guidance"
+        resolved="$(cd "$(dirname "$candidate")" && pwd -P)/$(basename "$candidate")"
+    else
+        resolved="$(command -v "$candidate" 2>/dev/null || true)"
+        [[ -n "$resolved" && -f "$resolved" && -x "$resolved" ]] ||
+            die "required $description is unavailable ('$candidate'); $guidance"
+        resolved="$(cd "$(dirname "$resolved")" && pwd -P)/$(basename "$resolved")"
+    fi
+
+    printf '%s\n' "$resolved"
+}
+
+[[ $# -eq 1 ]] || die "usage: beagle-wasm-tools cc|runtime"
+
+case "$1" in
+    cc)
+        resolve_executable \
+            "${BEAGLE_WASI_CC:-${WASI_CC:-wasm32-unknown-wasi-clang}}" \
+            "wasm32-wasi compiler" \
+            "set BEAGLE_WASI_CC (or WASI_CC) to an executable"
+        ;;
+    runtime)
+        resolve_executable \
+            "${BEAGLE_WASMTIME:-${WASMTIME:-wasmtime}}" \
+            "WebAssembly runtime" \
+            "set BEAGLE_WASMTIME (or WASMTIME) to an executable"
+        ;;
+    *)
+        die "unknown tool '$1' (expected cc or runtime)"
+        ;;
+esac

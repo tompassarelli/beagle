@@ -48,7 +48,9 @@
    (materializer 'c17 "Restricted C17" ".c" "module_0.c"
                  "bootstrap/reference projection with strict C17 compilation")
    (materializer 'qbe "QBE IL" ".ssa" "module_0.ssa"
-                 "direct-native projection and anti-C-capture check")))
+                 "direct-native projection and anti-C-capture check")
+   (materializer 'wasm "WebAssembly (C17/WASI bootstrap)" ".wasm" "module_0.wasm"
+                 "bootstrap projection through Restricted C17 and wasi-clang; not a direct Wasm emitter")))
 
 ;; Bare `#lang beagle` is the canonical Core language. Its build product is a
 ;; frozen native program; MATERIALIZERS names the separate projections available
@@ -59,7 +61,7 @@
 (define CORE-PROFILE
   (core-profile
    'core "Beagle Native Core" ".bgl" "beagle" 'live
-   "native pipeline: frozen native program; select C17 or QBE materializer"
+   "native pipeline: frozen native program; select C17, QBE, or Wasm bootstrap materializer"
    "Native system-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
    MATERIALIZERS))
 

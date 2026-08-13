@@ -15,8 +15,10 @@ them: `.bgl` with bare `#lang beagle` always targets Native Core and lowers to
 an immutable validated Native Core program. The `.bgl` source is not
 target-neutral and does not mean "no target selected"; the resulting frozen
 native program is backend-neutral so it can be materialized as native code.
-C17 and QBE are the current materializers; Wasm belongs at that same
-materializer layer rather than becoming another source profile.
+C17, QBE, and a C17/WASI WebAssembly bootstrap are the current materializers.
+The Wasm bootstrap is named as such and is not a direct emitter; a future
+direct Wasm emitter replaces that projection behind the same frozen-program
+seam rather than becoming another source profile.
 
 Hosted profiles emit source for a runtime or evaluator that remains part of the
 system: `.bclj`, `.bjs`, and `.bnix` select Clojure, JavaScript, and Nix
@@ -82,9 +84,11 @@ hello from Beagle
 `beagle init --target TARGET DIR` scaffolds a project for any live target;
 `beagle build FILE OUT` writes the target's source instead of linking a binary.
 For Core, author `.bgl` with bare `#lang beagle` and select the projection
-separately: `beagle build --materializer c17|qbe --out DIR FILE.bgl`. The build
-always writes `module.native-program` and its digest; only the selected C17 or QBE
-artifact is projected beside it.
+separately: `beagle build --materializer c17|qbe|wasm --out DIR FILE.bgl`. The
+build always writes `module.native-program` and its digest; only explicitly
+selected artifacts are projected beside it. Wasm requires `--abi wasm32` and
+writes a reactor, digest, import/export seam inventory, deterministic report,
+and environment-specific tool-path audit.
 Run `beagle doctor --deep` before authoring to verify the complete diagnostic
 path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 --hooks` makes a project invoke it on each edit.
@@ -240,7 +244,7 @@ Native Core is the `.bgl` lowering path, not another idiomatic source emitter:
 .bgl + #lang beagle  →  source stage  →  typed stage  →  frozen native program
                                                                    ├─→ restricted C reference
                                                                    ├─→ QBE IL → native object
-                                                                   └─→ Wasm (materializer)
+                                                                   └─→ Wasm (C17/WASI bootstrap)
 ```
 
 The frozen native program owns typed operations, effects, regions, layouts,
@@ -250,9 +254,10 @@ independent agreement, not by whether a human would maintain the generated C or
 QBE.
 
 Fram's files remain Beagle; they are not rewritten as C or another systems
-language. The Core path is `beagle build --materializer c17|qbe`: it accepts
-canonical `.bgl`, freezes one native program, and materializes only the selected
-projection. The generated
+language. The Core path is `beagle build --materializer c17|qbe|wasm`: it
+accepts canonical `.bgl`, freezes one native program, and materializes only the
+selected projection. The Wasm projection currently passes through Restricted
+C17 and wasi-clang; it does not claim direct Native-Core-to-Wasm emission. The generated
 [`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
 is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
 bodies lower into one validated Native Core program and execute through the
@@ -277,12 +282,12 @@ target is *for*).
 <!-- beagle:langs table -->
 | target | language | source | `#lang` | output | status |
 |---|---|---|---|---|---|
-| `core` | Beagle Native Core | `.bgl` | `#lang beagle` | frozen native program | live — native pipeline: frozen native program; select C17 or QBE materializer |
+| `core` | Beagle Native Core | `.bgl` | `#lang beagle` | frozen native program | live — native pipeline: frozen native program; select C17, QBE, or Wasm bootstrap materializer |
 | `clj` | Clojure | `.bclj` | `#lang beagle/clj` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `js` | JavaScript | `.bjs` | `#lang beagle/js` | `.js` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
 
-Four source profiles. Core produces the authoritative frozen native program; `--materializer c17|qbe` selects a projection. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
+Four source profiles. Core produces the authoritative frozen native program; `--materializer c17|qbe|wasm` selects a projection. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
 `beagle ast FILE` is the canonical, versioned checked-program JSON projection

@@ -4,7 +4,7 @@
 
 <!-- beagle:langs pipeline -->
 ```
-.bgl  ──▶ parse ──▶ check ──▶ freeze native program ──▶ --materializer c17|qbe
+.bgl  ──▶ parse ──▶ check ──▶ freeze native program ──▶ --materializer c17|qbe|wasm
 .bclj / .bjs / .bnix  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix
                                        ▲
                          macros, schema, stdlib, type narrowing
@@ -15,10 +15,12 @@
 `.bgl` is a compilation-path decision: bare `#lang beagle` always enters
 Native Core and produces an immutable validated Native Core program.
 "Backend-neutral" describes that frozen native program, not the `.bgl`
-extension. C17 and QBE are the current
-materializers; Wasm belongs at the same materializer layer. The lowering tool
-may run from hosted `.bclj` during compiler bootstrapping without making `.bgl`
-a hosted or target-neutral source profile.
+extension. C17, QBE, and a C17/WASI Wasm bootstrap are the current
+materializers. The Wasm path is explicitly a bootstrap, not a direct emitter;
+its toolchain step is isolated behind `bin/beagle-materialize-wasm` so a future
+direct emitter can replace it without moving the frozen-program boundary. The
+lowering tool may run from hosted `.bclj` during compiler bootstrapping without
+making `.bgl` a hosted or target-neutral source profile.
 
 `check` is where the NixOS option schema (loaded from a cache at compile time)
 becomes typed context: unknown option paths fail at parse time, wrong-typed
@@ -34,7 +36,7 @@ position — not a desugared intermediate.
   materializer registry; every inventory in this repo is a rendered view of it
   (`bin/beagle langs`).
 <!-- beagle:langs emitters -->
-- `native-core/src/native/{stages,lower,obligations}.bclj` — the hosted implementation that lowers Core into one immutable validated Native Core program; `native-core/src/native/{body_c17,qbe}.bclj` implement its materializers.
+- `native-core/src/native/{stages,lower,obligations}.bclj` — the hosted implementation that lowers Core into one immutable validated Native Core program; `native-core/src/native/body_c17.bclj` implements C17 and the explicit C17/WASI Wasm bootstrap; `native-core/src/native/qbe.bclj` implements the direct QBE materializer.
 - `beagle-lib/private/emit-{clj,js,nix}.rkt` — the live target emitters (one row each in
   `beagle-lib/private/targets.rkt`, the canonical target table).
 - `beagle-lib/private/emit-facts.rkt` — the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
