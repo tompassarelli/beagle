@@ -9,10 +9,9 @@
 # slice-rt-core, which cannot run here without per-ABI goldens and a wasm
 # managed-oracle comparison.
 # Toolchain, declared: BEAGLE_WASI_CC (or WASI_CC), WASMTIME, and wasm-ld on
-# PATH (the clang wrapper spawns it by bare name). None of the three ships with
-# the repo or its flake, so their absence is a named SKIP at exit 0 — a machine
-# without a wasm32 cross toolchain has nothing to say about the wasm32 ABI. Any
-# failure AFTER the toolchain is in hand stays a hard failure.
+# PATH (the clang wrapper spawns it by bare name). The supported flake devshell
+# supplies all three and sets BEAGLE_WASI=1; a missing component there is a hard
+# failure. Outside that environment, absence remains a named diagnostic skip.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,14 +30,21 @@ skip() {
   exit 0
 }
 
+missing-tool() {
+  if [[ "${BEAGLE_WASI:-}" == 1 ]]; then
+    die "$*"
+  fi
+  skip "$*"
+}
+
 cc="${BEAGLE_WASI_CC:-${WASI_CC:-}}"
 [[ -n "$cc" && -x "$cc" ]] \
-  || skip "no wasm32-wasi clang; set BEAGLE_WASI_CC (or WASI_CC) to an executable"
+  || missing-tool "no wasm32-wasi clang; set BEAGLE_WASI_CC (or WASI_CC) to an executable"
 wasmtime="${WASMTIME:-$(command -v wasmtime || true)}"
 [[ -n "$wasmtime" && -x "$wasmtime" ]] \
-  || skip "no wasmtime; set WASMTIME to an executable"
+  || missing-tool "no wasmtime; set WASMTIME to an executable"
 command -v wasm-ld >/dev/null 2>&1 \
-  || skip "no wasm-ld on PATH; the wasi clang wrapper spawns it by bare name"
+  || missing-tool "no wasm-ld on PATH; the wasi clang wrapper spawns it by bare name"
 for command in bb cmp sha256sum; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"

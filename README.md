@@ -187,6 +187,12 @@ is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
 bodies lower into one validated Native Core program and execute through the
 reference materializer.
 
+The default flake development shell also pins the WASI C compiler, `wasm-ld`,
+and Wasmtime for the wasm32 ABI validation. Run
+`direnv exec . bin/beagle-test --include-gated`; its wasm32 gate runs
+instead of accepting a missing-toolchain skip. Outside that shell, invoking the
+driver without the toolchain remains a named diagnostic skip.
+
 ## Targets
 
 The table below is the compiler's live direct-emitter inventory, not a strategic

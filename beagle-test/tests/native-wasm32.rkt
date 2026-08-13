@@ -1,7 +1,9 @@
 #lang racket/base
 
-;; Gated runner for native-core/validation/wasm32/drive.sh. Opt in with
-;; BEAGLE_WASI=1 plus BEAGLE_WASI_CC/WASI_CC and WASMTIME.
+;; Gated runner for native-core/validation/wasm32/drive.sh. The supported flake
+;; devshell sets BEAGLE_WASI=1 and supplies BEAGLE_WASI_CC, wasm-ld, and
+;; WASMTIME. With that flag, the driver turns any missing component into a
+;; failure rather than accepting a toolchain skip.
 
 (require rackunit
          racket/system
@@ -13,18 +15,11 @@
   (define value (getenv name))
   (and value (not (string=? value ""))))
 
-(define (toolchain-present?)
-  (and (or (env-set? "BEAGLE_WASI_CC") (env-set? "WASI_CC"))
-       (or (env-set? "WASMTIME")
-           (system "command -v wasmtime >/dev/null 2>&1"))))
-
 (test-case "wasm32 ABI profile materializes, compiles ungated, and runs"
   (cond
     [(not (env-set? "BEAGLE_WASI"))
-     (printf "  (skipped — set BEAGLE_WASI=1 with BEAGLE_WASI_CC/WASI_CC + WASMTIME)\n")
+     (printf "  (skipped — enter the flake devshell, which sets BEAGLE_WASI=1)\n")
      (check-true #t)]
-    [(not (toolchain-present?))
-     (fail "BEAGLE_WASI=1 but no wasm32-wasi clang / wasmtime in the environment")]
     [else
      (check-true (system (path->string drive))
                  "native-core/validation/wasm32/drive.sh failed")]))

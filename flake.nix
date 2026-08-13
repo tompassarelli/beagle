@@ -44,6 +44,7 @@
         # LOADS it at runtime — the skew can never recur regardless of the
         # ambient/system racket. Bump deliberately via `nix flake update`.
         racket = pkgs.racket;
+        wasiCC = pkgs.pkgsCross.wasi32.stdenv.cc;
 
         # Runtime tools the bin/* scripts shell out to. Kept minimal but
         # complete for the core CLIs (build/validate/syntax/doctor): racket for
@@ -236,6 +237,13 @@
           NATIVE_SPECIAL_CASING15 = specialCasing15;
           NATIVE_DERIVED_CORE_PROPERTIES15 = derivedCoreProperties15;
 
+          # The wasm32 Native Core validation is a supported devshell gate, not
+          # an ambient-toolchain probe. Keep the compiler, its bare-name linker,
+          # and runtime in the same locked nixpkgs closure.
+          BEAGLE_WASI = "1";
+          BEAGLE_WASI_CC = "${wasiCC}/bin/${wasiCC.targetPrefix}cc";
+          WASMTIME = "${pkgs.wasmtime}/bin/wasmtime";
+
           # slice-unicode-text is the one driver whose oracle IS a JVM: it
           # compares the native Unicode 15 tables against a JDK that implements
           # Unicode 15. Name that JDK here so the oracle is pinned by this
@@ -251,6 +259,9 @@
             pkgs.clojure
             pkgs.bun
             pkgs.qbe
+            wasiCC
+            pkgs.llvmPackages.lld
+            pkgs.wasmtime
             # Rust toolchain for tools/nix-parse-json (the rnix-backed Nix
             # importer helper). The nix-import-roundtrip test bootstraps this
             # helper via `cargo build --locked` from tracked source; pinning
