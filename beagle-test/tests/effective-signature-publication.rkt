@@ -63,7 +63,7 @@
        (program->module-interface prog #:provisional? #t))
      (check-equal? (module-interface-schema-version interface) 3)
      (check-equal? (type->string (binding-type interface 'identity))
-                   "[Any -> Int]"))
+                   "(Fn [Any] Int)"))
 
    (test-case "dynamic publication remains authored and non-inferred"
      (define interface
@@ -75,7 +75,7 @@
           "(define-target clj)\n"
           "(defn identity [value] Int value)\n"))))
      (check-equal? (type->string (binding-type interface 'identity))
-                   "[Any -> Int]"))
+                   "(Fn [Any] Int)"))
 
    (test-case "checked single and multi arity definitions publish inference"
      (define interface
@@ -90,7 +90,7 @@
      (define identity (binding-type interface 'identity))
      (define choose (binding-type interface 'choose))
      (check-equal? INTERFACE-SCHEMA-VERSION 3)
-     (check-equal? (type->string identity) "[Int -> Int]")
+     (check-equal? (type->string identity) "(Fn [Int] Int)")
      (check-true (inferred-type-poly? choose))
      (check-equal? (free-type-metas identity) '())
      (check-equal? (free-type-metas choose) '()))
@@ -106,9 +106,9 @@
           "(defrecord Point [(x Float)])\n"
           "(defn echo [point] Point point)\n"))))
      (check-equal? (type->string (binding-type interface 'echo))
-                   "[signature.provider/Point -> signature.provider/Point]")
+                   "(Fn [signature.provider/Point] signature.provider/Point)")
      (check-equal? (type->string (binding-type interface '->Point))
-                   "[Float -> signature.provider/Point]"))
+                   "(Fn [Float] signature.provider/Point)"))
 
    (test-case "interface publication rejects missing and unresolved entries"
      (define missing

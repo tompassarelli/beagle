@@ -815,6 +815,49 @@
        (add-members (set-add names name) members)]
       [_ names])))
 
+(define (reject-reserved-type-name! name where)
+  (when (eq? name 'Fn)
+    (raise-parse-error
+     'reserved-type-name
+     "~a cannot declare `Fn`; Fn is the built-in function type constructor"
+     where)))
+
+(define (validate-reserved-type-declarations! datums)
+  (define (reject-member! member where)
+    (cond
+      [(symbol? member) (reject-reserved-type-name! member where)]
+      [(and (pair? member) (symbol? (car member)))
+       (reject-reserved-type-name! (car member) where)]
+      [else (void)]))
+  (for ([datum (in-list datums)])
+    (match datum
+      [(list 'defalias (? symbol? name) _)
+       (reject-reserved-type-name! name "defalias")]
+      [(list 'defrecord (? symbol? name) _)
+       (reject-reserved-type-name! name "defrecord")]
+      [(list* 'defprotocol (? symbol? name) _)
+       (reject-reserved-type-name! name "defprotocol")]
+      [(list* 'defenum (? symbol? name) _)
+       (reject-reserved-type-name! name "defenum")]
+      [(list* 'defscalar (? symbol? name) _)
+       (reject-reserved-type-name! name "defscalar")]
+      [(list* 'defunion ':throwable (? symbol? name) members)
+       (reject-reserved-type-name! name "defunion :throwable")
+       (for ([member (in-list members)])
+         (reject-member! member "defunion :throwable member"))]
+      [(list* 'defunion (? symbol? name) members)
+       (reject-reserved-type-name! name "defunion")
+       (for ([member (in-list members)])
+         (reject-member! member "defunion member"))]
+      [(list* 'defunion (list (? symbol? name) type-vars ...) members)
+       (reject-reserved-type-name! name "parametric defunion")
+       (for ([type-var (in-list type-vars)])
+         (when (symbol? type-var)
+           (reject-reserved-type-name! type-var "defunion type parameter")))
+       (for ([member (in-list members)])
+         (reject-member! member "defunion member"))]
+      [_ (void)])))
+
 (define (canonicalize-local-aliases aliases namespace datums)
   (define local-type-names (raw-local-type-names datums))
   (for/hasheq ([(name expansion) (in-hash aliases)])
@@ -858,6 +901,7 @@
            (resolve-reader-conditional-datum-stream
             dependency-datums
             #:source-path dependency-id))
+         (validate-reserved-type-declarations! active-dependency-datums)
          (define dependency-imports
            (collect-required-type-aliases
             active-dependency-datums
@@ -965,6 +1009,7 @@
     (resolve-reader-conditional-datum-stream
      datums
      #:source-path mod-path))
+  (validate-reserved-type-declarations! active-datums)
   (define parametric-arities (parametric-defunion-arities active-datums))
   (for ([entry (in-list parametric-arities)])
     (define name (car entry))
@@ -1737,7 +1782,10 @@
                  [current-candidate-type-bindings (make-hasheq)]
                  [current-candidate-type-prefixes (make-hash)]
                  [current-qualified-type-resolver
-                  resolve-candidate-qualified-type])
+                  resolve-candidate-qualified-type]
+                 [current-type-surface-error
+                  (lambda (kind fmt . args)
+                    (apply raise-parse-error kind fmt args))])
     (parse-program* stxs*
                     #:source-path source-path
                     #:module-resolver module-resolver)))
@@ -1830,6 +1878,7 @@
                 [else (list (datum->syntax s resolved s))])])))]))
 
   (define datums (if needs-rewrite? (map syntax->datum stxs) raw-datums))
+  (validate-reserved-type-declarations! datums)
 
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
   (define mode      DEFAULT-MODE)
@@ -1939,6 +1988,7 @@
       (resolve-reader-conditional-datum-stream
        (module-source-datums candidate)
        #:source-path candidate-id))
+    (validate-reserved-type-declarations! candidate-datums)
     (define imported-aliases
       (collect-required-type-aliases
        candidate-datums
@@ -1998,11 +2048,13 @@
        ;; binding, macro, and type-surface import remains in register-require!.
        (define mod-path (resolve-module-path rn source-path))
        (when mod-path
+         (define provider-datums (read-beagle-datums mod-path))
+         (validate-reserved-type-declarations! provider-datums)
          (define refer-set (and refer-syms (list->seteq refer-syms)))
          (for ([entry
                 (in-list
                  (parametric-defunion-arities
-                  (read-beagle-datums mod-path)))])
+                  provider-datums))])
            (define name (car entry))
            (define arity (cdr entry))
            (when (zero? arity)
@@ -3291,6 +3343,7 @@
   (lambda (d subs)
     (match d
       [(list 'defrecord (? symbol? name) fields-form)
+       (reject-reserved-type-name! name "defrecord")
        (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
       [_ (parse-list-form* d subs)])))
 
@@ -3299,6 +3352,7 @@
   (lambda (d subs)
     (match d
       [(list 'defenum (? symbol? name) values ...)
+       (reject-reserved-type-name! name "defenum")
        (defenum-form name (map ->datum (or (stx-tail subs 2) values)))]
       [_ (parse-list-form* d subs)])))
 
@@ -3308,8 +3362,10 @@
   (lambda (d subs)
     (match d
       [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
+       (reject-reserved-type-name! name "defscalar")
        (defscalar-form name (->datum backing) (map parse-scalar-predicate preds))]
       [(list 'defscalar (? symbol? name) (? symbol? backing))
+       (reject-reserved-type-name! name "defscalar")
        (defscalar-form name (->datum backing) '())]
       [_ (parse-list-form* d subs)])))
 
@@ -3645,6 +3701,7 @@
   (lambda (d subs)
     (match d
       [(list 'defprotocol (? symbol? name) sigs ...)
+       (reject-reserved-type-name! name "defprotocol")
        (protocol-form name (map parse-protocol-method (or (stx-tail subs 2) sigs)))]
       [_ (parse-list-form* d subs)])))
 
@@ -3658,16 +3715,19 @@
       ;; semantics live in the type checker's union-as-error logic). Inlined
       ;; rather than calling parse-deferror because subs offset differs by 1.
       [(list 'defunion ':throwable (? symbol? name) member-defs ...)
+       (reject-reserved-type-name! name "defunion :throwable")
        (define member-names '())
        (define mf-hash (make-hasheq))
        (for ([md (in-list (or (stx-tail subs 3) member-defs))])
          (define d (->datum md))
          (cond
            [(symbol? d)
+            (reject-reserved-type-name! d "defunion :throwable member")
             (set! member-names (cons d member-names))
             (hash-set! mf-hash d '())]
            [(and (list? d) (>= (length d) 2) (symbol? (car d)))
             (define mname (car d))
+            (reject-reserved-type-name! mname "defunion :throwable member")
             (set! member-names (cons mname member-names))
             (hash-set! mf-hash mname (parse-record-fields (cadr d)))]
            [else
@@ -3676,8 +3736,12 @@
        (deferror-form name (reverse member-names) mf-hash)]
 
       [(list 'defunion (? symbol? name) members ...)
+       (reject-reserved-type-name! name "defunion")
        (define raw (map ->datum (or (stx-tail subs 2) members)))
        (define mnames (map (lambda (m) (if (pair? m) (car m) m)) raw))
+       (for ([member-name (in-list mnames)])
+         (when (symbol? member-name)
+           (reject-reserved-type-name! member-name "defunion member")))
        (define mf-hash (make-hasheq))
        (for ([m (in-list raw)])
          (when (and (pair? m) (>= (length m) 2))
@@ -5314,6 +5378,7 @@
   parsed)
 
 (define (parse-parametric-defunion name type-vars member-defs subs)
+  (reject-reserved-type-name! name "parametric defunion")
   (define tvars (map ->datum type-vars))
   (unless (andmap symbol? tvars)
     (error 'beagle "defunion type parameters must be symbols: ~v" tvars))
@@ -5323,6 +5388,8 @@
      "parametric defunion ~a requires at least one type parameter; use (defunion ~a ...) for a non-parametric union"
      name
      name))
+  (for ([type-var (in-list tvars)])
+    (reject-reserved-type-name! type-var "defunion type parameter"))
   (current-user-parametric-arities
    (hash-set (current-user-parametric-arities) name (length tvars)))
   (define member-names '())
@@ -5332,6 +5399,7 @@
     (unless (and (list? d) (>= (length d) 2) (symbol? (car d)))
       (error 'beagle "parametric defunion member must be (Name [fields...]): ~v" d))
     (define mname (car d))
+    (reject-reserved-type-name! mname "defunion member")
     (set! member-names (cons mname member-names))
     (define fields-datum (cadr d))
     (define fields

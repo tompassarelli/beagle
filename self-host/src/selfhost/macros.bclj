@@ -8,7 +8,7 @@
 (require clojure.string :as str)
 (require selfhost.rt)
 
-(declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
 ;; --- constants ---------------------------------------------------------------
 

@@ -2,14 +2,14 @@
 (ns selfhost.check
   "Self-hosted type checker — matches beagle-lib/private/check.rkt semantics on
   the program AST JSON (string-keyed maps per ast-json.rkt). Public entry:
-  check-program! [Any -> Any] returning a vector of error strings (empty =
+  check-program! (Fn [Any] Any) returning a vector of error strings (empty =
   accepted). Ported from ~/code/beagle/.worktrees/driftlab/self-host/check.bjs
   (.bjs target): JS mutable env objects -> threaded immutable maps; the global
   registry + diagnostics -> a module-level atom (STATE); mutating fns get a `!`.")
 (define-mode strict)
 
 (require selfhost.rt)
-(declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
 (require clojure.string :as str)
 
@@ -111,8 +111,8 @@
             ret (get t "ret")
             param-strs (mapv (fn [(p Any)] String (type->string p)) params)]
         (if (not (nil? rest-t))
-          (str "[" (str/join " " param-strs) " & " (type->string rest-t) " -> " (type->string ret) "]")
-          (str "[" (str/join " " param-strs) " -> " (type->string ret) "]")))
+          (str "(Fn [" (str/join " " param-strs) " & " (type->string rest-t) "] " (type->string ret) ")")
+          (str "(Fn [" (str/join " " param-strs) "] " (type->string ret) ")")))
     (app-type? t)
       (let [ctor (get t "name")
             args (get t "args")
@@ -235,13 +235,13 @@
             en (count ep)]
         (and (<= an en)
              (or (= an en) (some? ar))
-             (every? (fn [(i Int)] Bool (type-compatible? (nth ap i) (nth ep i)))
+             (every? (fn [(i Int)] Bool (type-compatible? (nth ep i) (nth ap i)))
                      (range an))
              (or (nil? ar)
-                 (every? (fn [(p Any)] Bool (type-compatible? ar p))
+                 (every? (fn [(p Any)] Bool (type-compatible? p ar))
                          (drop an ep)))
              (or (nil? er)
-                 (and (some? ar) (type-compatible? ar er)))
+                 (and (some? ar) (type-compatible? er ar)))
              (type-compatible? (get actual "ret") (get expected "ret"))))
 
     ;; Atom is a MUTABLE cell, so it is INVARIANT in its element type: (Atom A) is
@@ -2856,11 +2856,11 @@
       (> (count (check-program! prog)) 0)))
 
   ;; Bounded forall: render + reject/accept a call by inferred binding.
-  (expect! "bound: render (forall [(T <: Number)] [T -> T])"
+  (expect! "bound: render (forall [(T <: Number)] (Fn [T] T))"
     (= (type->string (make-poly ["T"]
                        (make-fn [(make-var "T")] nil (make-var "T"))
                        {"T" NUMBER-TYPE}))
-       "(forall [(T <: Number)] [T -> T])"))
+       "(forall [(T <: Number)] (Fn [T] T))"))
   (expect! "bound: violating call rejected"
     (do (swap! STATE assoc "diagnostics" [])
         (resolve-poly-call!

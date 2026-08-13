@@ -12,11 +12,11 @@
 
 (require selfhost.ast :as ast)
 
-(declare-extern selfhost.rt/slurp-file [String -> String])
+(declare-extern selfhost.rt/slurp-file (Fn [String] String))
 
-(declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
-(declare-extern selfhost.rt/exit [Int -> Nil])
+(declare-extern selfhost.rt/exit (Fn [Int] Nil))
 
 (def EXACT-NUMBER-TAG String "#%exact-number")
 

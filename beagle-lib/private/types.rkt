@@ -3,8 +3,8 @@
 ;; Beagle's type system.
 ;;
 ;;   primitives:   String, Int, Float, Bool, Keyword, Symbol, Nil, Any
-;;   function:     [A B -> R]              fixed arity
-;;                 [A B & T -> R]           variadic; tail args of type T
+;;   function:     (Fn [A B] R)             fixed arity
+;;                 (Fn [A B & T] R)          variadic; tail args of type T
 ;;   parametric:   (Vec T), (List T), (Set T), (Map K V)
 ;;   union:        (U String Nil)
 ;;
@@ -99,6 +99,18 @@
 (define current-qualified-type-resolver
   (make-parameter (lambda (_type-datum) #f)))
 
+;; The type parser is shared outside the source parser, so surface failures
+;; default to ordinary exceptions. parse.rkt installs its structured error
+;; boundary for whole-program parsing; this avoids a module cycle while keeping
+;; function-type removals machine-classifiable at the authored source boundary.
+(define current-type-surface-error
+  (make-parameter
+   (lambda (_kind fmt . args)
+     (apply error 'beagle fmt args))))
+
+(define (raise-type-surface-error kind fmt . args)
+  (apply (current-type-surface-error) kind fmt args))
+
 ;; Imported aliases still erase semantically, but diagnostics retain the
 ;; boundary name that introduced an exact expansion.
 (define TYPE-ALIAS-DISPLAYS (make-weak-hasheq))
@@ -122,12 +134,20 @@
     (cond
       [(null? rest) (values (reverse vars) bounds)]
       [(symbol? (car rest))
+       (when (eq? (car rest) 'Fn)
+         (raise-type-surface-error
+          'reserved-type-name
+          "Fn is the built-in function type constructor and cannot be a forall variable"))
        (loop (cdr rest) (cons (car rest) vars) bounds)]
       [(and (list? (car rest))
             (= (length (car rest)) 3)
             (symbol? (car (car rest)))
             (eq? (cadr (car rest)) '<:))
        (define var-name (car (car rest)))
+       (when (eq? var-name 'Fn)
+         (raise-type-surface-error
+          'reserved-type-name
+          "Fn is the built-in function type constructor and cannot be a forall variable"))
        (define bound-expr (caddr (car rest)))
        (define bound-type
          (parameterize ([current-type-vars (append (map car (filter list? entries))
@@ -140,9 +160,36 @@
 
 (define (parse-type t)
   (cond
-    ;; [A B [& T] -> R] form (function, possibly variadic)
+    ;; A vector is never a type expression.  Retired arrow vectors receive a
+    ;; pointed replacement instead of falling through to a generic bad-type
+    ;; diagnostic; accepting them here would create a second language surface.
     [(and (pair? t) (eq? (car t) BRACKET-TAG))
-     (parse-fn-type (cdr t))]
+     (if (memq '-> (cdr t))
+         (raise-type-surface-error
+          'legacy-function-type
+          "arrow function types are not supported: ~v; write (Fn [ParamType ...] ReturnType)"
+          t)
+         (raise-type-surface-error
+          'malformed-function-type
+          "a vector is not a type expression: ~v; write (Fn [ParamType ...] ReturnType) for a function type"
+          t))]
+
+    ;; (Fn [A B [& T]] R) form (function, possibly variadic).
+    [(and (pair? t) (eq? (car t) 'Fn))
+     (unless (= (length t) 3)
+       (raise-type-surface-error
+        'malformed-function-type
+        "function type requires exactly (Fn [ParamType ...] ReturnType): ~v"
+        t))
+     (define params-form (cadr t))
+     (unless (and (pair? params-form) (eq? (car params-form) BRACKET-TAG))
+       (raise-type-surface-error
+        'malformed-function-type
+        "function type parameters must be a vector: ~v; write (Fn [ParamType ...] ReturnType)"
+        t))
+     (define-values (fixed-params rest-type)
+       (parse-fn-params (cdr params-form)))
+     (type-fn fixed-params rest-type (parse-type (caddr t)))]
 
     ;; (forall (A B) body-type) or (forall [(T <: Bound) U] body-type)
     [(and (pair? t) (eq? (car t) 'forall))
@@ -197,6 +244,12 @@
     [(and (exact-integer? t) (>= t 0))
      (type-prim (string->symbol (number->string t)))]
 
+    ;; Fn is a constructor, never a nominal/bare type.
+    [(eq? t 'Fn)
+     (raise-type-surface-error
+      'malformed-function-type
+      "bare Fn is an incomplete function type; write (Fn [ParamType ...] ReturnType)")]
+
     ;; type variable (in scope from enclosing forall)
     [(and (symbol? t) (memq t (current-type-vars)))
      (type-var t)]
@@ -244,7 +297,7 @@
 
     ;; G2 — bare `Atom` resolves to (Atom Any): an untyped mutable cell. Atom is a
     ;; PARAMETRIC-CTOR, but a bare symbol would parse to (type-prim 'Atom), which a poly
-    ;; deref [(Atom A) -> A] can't match. (Atom Any) keeps bare Atom working (deref -> Any,
+    ;; deref (Fn [(Atom A)] A) can't match. (Atom Any) keeps bare Atom working (deref -> Any,
     ;; no regression) while a typed (Atom T) reads precisely.
     [(eq? t 'Atom) (type-app 'Atom (list (type-prim 'Any)))]
 
@@ -270,45 +323,28 @@
                  ;; so a `.` is unambiguously a JVM FQCN.
                  (regexp-match? #rx"\\.[A-Z][A-Za-z0-9_]*$" s))
        (error 'beagle
-              "unknown type: ~a~nexpected primitive, [A B -> R], (Vec T)/(Map K V)/etc., or (U ...)"
+              "unknown type: ~a~nexpected primitive, (Fn [A B] R), (Vec T)/(Map K V)/etc., or (U ...)"
               t))
      (type-prim canonical)]
 
     [else
      (error 'beagle "bad type expression: ~v" t)]))
 
-(define (parse-fn-type bracket-contents)
-  ;; Split on `->` to find params vs return.
-  (define arrow-pos
-    (let loop ([rest bracket-contents] [i 0])
-      (cond
-        [(null? rest)
-         (error 'beagle "function type missing `->`: ~v"
-                (cons BRACKET-TAG bracket-contents))]
-        [(eq? (car rest) '->) i]
-        [else (loop (cdr rest) (+ i 1))])))
-  (define before-arrow (take* bracket-contents arrow-pos))
-  (define after-arrow  (drop* bracket-contents (+ arrow-pos 1)))
-  (unless (= (length after-arrow) 1)
-    (error 'beagle "function type must have exactly one return type: ~v"
-           (cons BRACKET-TAG bracket-contents)))
-  ;; Detect `& T` for variadic: if `&` appears, the type after it is the
-  ;; rest-type; before it are fixed params.
+(define (parse-fn-params params)
+  ;; Detect `& T` for variadic functions.  The rest type is the final entry;
+  ;; every preceding entry is one fixed parameter type.
   (define-values (fixed-params rest-type)
-    (let loop ([rest before-arrow] [acc '()])
+    (let loop ([rest params] [acc '()])
       (cond
         [(null? rest) (values (reverse acc) #f)]
         [(eq? (car rest) '&)
          (when (not (= (length (cdr rest)) 1))
-           (error 'beagle "function type: `&` must be followed by exactly one rest-type"))
+           (raise-type-surface-error
+            'malformed-function-type
+            "function type: `&` must be followed by exactly one final rest type"))
          (values (reverse acc) (parse-type (cadr rest)))]
         [else (loop (cdr rest) (cons (parse-type (car rest)) acc))])))
-  (type-fn fixed-params rest-type (parse-type (car after-arrow))))
-
-(define (take* xs n)
-  (if (or (zero? n) (null? xs)) '() (cons (car xs) (take* (cdr xs) (- n 1)))))
-(define (drop* xs n)
-  (if (or (zero? n) (null? xs)) xs (drop* (cdr xs) (- n 1))))
+  (values fixed-params rest-type))
 
 ;; --- compatibility ---------------------------------------------------------
 
@@ -412,8 +448,8 @@
     ;; Function compatibility with variadic subsumption: an actual fn is
     ;; usable where the expected fn type is required iff it accepts every
     ;; call shape the expected type permits. In particular a variadic
-    ;; actual ([& Any -> String], e.g. `str`) satisfies a fixed-arity
-    ;; expected ([Any -> String], e.g. mapv's fn position) — the rest
+    ;; actual ((Fn [& Any] String), e.g. `str`) satisfies a fixed-arity
+    ;; expected ((Fn [Any] String), e.g. mapv's fn position) — the rest
     ;; param absorbs the trailing expected params. (Fixed 2026-06-12:
     ;; (mapv str xs) was a false type error.)
     [(and (type-fn? actual) (type-fn? expected))
@@ -428,13 +464,13 @@
         (<= a-n e-n)
         ;; Expected params beyond actual's fixed prefix need a rest to land in.
         (or (= a-n e-n) (and a-rest #t))
-        (andmap type-compatible? a-params (take e-params a-n))
+        (andmap type-compatible? (take e-params a-n) a-params)
         (or (not a-rest)
-            (andmap (lambda (p) (type-compatible? a-rest p))
+            (andmap (lambda (p) (type-compatible? p a-rest))
                     (drop e-params a-n)))
         ;; A variadic expectation can only be met by a variadic actual.
         (or (not e-rest)
-            (and a-rest (type-compatible? a-rest e-rest)))
+            (and a-rest (type-compatible? e-rest a-rest)))
         (type-compatible? (type-fn-ret actual) (type-fn-ret expected))))]
 
     ;; G2 — Atom is a MUTABLE cell, so it is INVARIANT in its element type: (Atom A) is
@@ -443,7 +479,7 @@
     ;; (Atom Int) while a deref at the original site still statically promises Int). We
     ;; compare with `equal?` rather than mutual type-compatible? precisely because Any is
     ;; compatible with everything — mutual-compat would still admit (Atom Int) ~ (Atom Any).
-    ;; "Any atom" is written polymorphic [(Atom A) -> ..]; the tvar binds via
+    ;; "Any atom" is written polymorphic (Fn [(Atom A)] ..); the tvar binds via
     ;; infer-type-var-bindings (resolve-poly-call), NOT this arm — by the time
     ;; type-compatible? runs, the element is concrete, so deref on a typed atom still resolves.
     [(and (type-app? actual) (type-app? expected)
@@ -899,7 +935,7 @@
 (register-type-delab! 'fn
   (lambda (t recur)
     (define rest (type-fn-rest-type t))
-    (format "[~a~a -> ~a]"
+    (format "(Fn [~a~a] ~a)"
             (string-join (map recur (type-fn-params t)) " ")
             (if rest (format " & ~a" (recur rest)) "")
             (recur (type-fn-ret t)))))
@@ -1083,6 +1119,7 @@
  current-user-parametric-arities
  current-type-aliases
  current-qualified-type-resolver
+ current-type-surface-error
  register-type-alias-display!
  type?
  any-type?

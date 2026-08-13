@@ -8,7 +8,7 @@
 ;; Ported from ~/code/beagle/.worktrees/driftlab/self-host/ast.bjs (.bjs target).
 
 (require selfhost.rt)
-(declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
 (require clojure.string :as str)
 

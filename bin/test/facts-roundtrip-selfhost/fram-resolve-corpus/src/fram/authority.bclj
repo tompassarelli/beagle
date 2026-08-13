@@ -8,17 +8,17 @@
 
 (require fram.authority-json :as authority-json)
 
-(declare-extern java.text.Normalizer/isNormalized [String Any -> Bool])
+(declare-extern java.text.Normalizer/isNormalized (Fn [String Any] Bool))
 
 (declare-extern java.text.Normalizer$Form/NFC Any)
 
-(declare-extern java.security.MessageDigest/getInstance [String -> Any])
+(declare-extern java.security.MessageDigest/getInstance (Fn [String] Any))
 
 (declare-extern java.nio.charset.StandardCharsets/UTF_8 Any)
 
 (declare-extern java.util.Locale/ROOT Any)
 
-(declare-extern fram.authority-json/decode-strict [String -> Any])
+(declare-extern fram.authority-json/decode-strict (Fn [String] Any))
 
 (def u64-max String "18446744073709551615")
 

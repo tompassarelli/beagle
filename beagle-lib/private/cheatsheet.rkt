@@ -85,7 +85,7 @@
 
    (cheat "declare-extern" "Interop"
           "Declare a host function/value with a type so typed code can call into the target runtime."
-          "(declare-extern host/now [-> Int])")))
+          "(declare-extern host/now (Fn [] Int))")))
 
 (define (cheat-categories)
   ;; preserve first-appearance order

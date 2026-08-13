@@ -106,5 +106,5 @@ Hygienic macros. Quasiquote `` ` ``, unquote `~`, splice `~@`. Free references r
 Declare a host function/value with a type so typed code can call into the target runtime.
 
 ```clojure
-(declare-extern host/now [-> Int])
+(declare-extern host/now (Fn [] Int))
 ```

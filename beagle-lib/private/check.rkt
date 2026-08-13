@@ -426,7 +426,7 @@
                      accessor-name))
                (hasheq 'replace orig-str
                        'with qualified
-                       'signature (format "~a : [~a -> ~a]"
+                       'signature (format "~a : (Fn [~a] ~a)"
                                           qualified
                                           (type->string record-type)
                                           (type->string field-type))
@@ -1889,13 +1889,13 @@
     (define m-type (type-prim m))
     (define m-str (symbol->string m))
     (define m-lower (string-downcase m-str))
-    ;; Constructor: ->Ok is polymorphic [T -> Ok] (forall over union's type params)
+    ;; Constructor: ->Ok is polymorphic (Fn [T] Ok) (forall over union's type params)
     (define ctor-fn (type-fn (map param-type fields) #f m-type))
     (hash-set! env (string->symbol (string-append "->" m-str))
                (if (null? type-params)
                  ctor-fn
                  (type-poly type-params ctor-fn #f)))
-    ;; Accessors: ok-value is [Ok -> T]
+    ;; Accessors: ok-value is (Fn [Ok] T)
     (define field-map (make-hash))
     (for ([f (in-list fields)])
       (define acc-fn (type-fn (list m-type) #f (param-type f)))

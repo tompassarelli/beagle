@@ -21,7 +21,7 @@
   '("(def answer Int 42)"
     "(defonce once Int 1)"
     "(defn add [(x Int) (y Int)] Int (+ x y))"
-    "(defn hof [(cb [Int -> String])] String (cb 1))"
+    "(defn hof [(cb (Fn [Int] String))] String (cb 1))"
     "(defrecord P [(x Int) (y (Vec Int))])"
     "(let [(v Int) e] v)"
     "(fn [(b Int)] Int b)"
@@ -34,8 +34,8 @@
     (check-equal? (datum->beagle-src (rd s)) s)))
 
 (test-case "function-type arrows remain data inside types"
-  (check-equal? (src "(defn hof [(cb [Int -> String])] String (cb 1))")
-                "(defn hof [(cb [Int -> String])] String (cb 1))"))
+  (check-equal? (src "(defn hof [(cb (Fn [Int] String))] String (cb 1))")
+                "(defn hof [(cb (Fn [Int] String))] String (cb 1))"))
 
 (test-case "structural source writers emit no annotation punctuation"
   (for ([s (in-list STRUCTURAL-BATTERY)])

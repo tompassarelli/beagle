@@ -3,7 +3,7 @@
 (define-mode strict)
 
 (declare-extern java.util.Locale/ROOT Any)
-(declare-extern .toLowerCase [String Any -> String])
+(declare-extern .toLowerCase (Fn [String Any] String))
 
 (defn lower-root [(value String)] String
   (.toLowerCase value java.util.Locale/ROOT))

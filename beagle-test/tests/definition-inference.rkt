@@ -31,7 +31,7 @@
 
 (test-case "mandatory return constrains a bare identity parameter"
   (define program (checked "(defn identity [x] Int x)"))
-  (check-equal? (type->string (signature program 'identity)) "[Int -> Int]")
+  (check-equal? (type->string (signature program 'identity)) "(Fn [Int] Int)")
   ;; Source authority remains annotation-free.
   (define function (car (program-forms program)))
   (check-false (param-type (car (defn-form-params function)))))
@@ -40,13 +40,13 @@
   (define program (checked "(defn one [x] Int 1)"))
   (define inferred (signature program 'one))
   (check-true (inferred-type-poly? inferred))
-  (check-equal? (type->string inferred) "(forall [A] [A -> Int])"))
+  (check-equal? (type->string inferred) "(forall [A] (Fn [A] Int))"))
 
 (test-case "explicit Any remains authored Any and is not generalized"
   (define program (checked "(defn one [(x Any)] Int 1)"))
   (define declared (signature program 'one))
   (check-false (type-poly? declared))
-  (check-equal? (type->string declared) "[Any -> Int]"))
+  (check-equal? (type->string declared) "(Fn [Any] Int)"))
 
 (test-case "inferred polymorphic calls instantiate independently"
   (define program
@@ -56,12 +56,12 @@
       "(defn from-string [] Int (one \"s\"))\n"
       "(defn from-int [] Int (one 42))")))
   (check-equal? (type->string (signature program 'one))
-                "(forall [A] [A -> Int])"))
+                "(forall [A] (Fn [A] Int))"))
 
 (test-case "calling a bare higher-order parameter infers its function shape"
   (define program (checked "(defn apply-one [f] Int (f 1))"))
   (check-equal? (type->string (signature program 'apply-one))
-                "[[Int -> Int] -> Int]"))
+                "(Fn [(Fn [Int] Int)] Int)"))
 
 (test-case "anonymous functions infer bare binders before call checking"
   (check-not-exn
@@ -92,14 +92,14 @@
   (define after
     (checked
      "(defn forward [x] Int (consume x))\n(defn consume [(x Int)] Int x)"))
-  (check-equal? (type->string (signature before 'forward)) "[Int -> Int]")
-  (check-equal? (type->string (signature after 'forward)) "[Int -> Int]"))
+  (check-equal? (type->string (signature before 'forward)) "(Fn [Int] Int)")
+  (check-equal? (type->string (signature after 'forward)) "(Fn [Int] Int)"))
 
 (test-case "direct recursion solves through its monomorphic provisional signature"
   (define program
     (checked
      "(defn recur-id [x] Int (if true x (recur-id x)))"))
-  (check-equal? (type->string (signature program 'recur-id)) "[Int -> Int]"))
+  (check-equal? (type->string (signature program 'recur-id)) "(Fn [Int] Int)"))
 
 (test-case "mutual recursive SCC is source-order independent"
   (define first
@@ -114,17 +114,17 @@
       "(defn evenish [x] Int (if true x (oddish x)))")))
   (for ([program (in-list (list first second))]
         [unused (in-naturals)])
-    (check-equal? (type->string (signature program 'evenish)) "[Int -> Int]")
-    (check-equal? (type->string (signature program 'oddish)) "[Int -> Int]")))
+    (check-equal? (type->string (signature program 'evenish)) "(Fn [Int] Int)")
+    (check-equal? (type->string (signature program 'oddish)) "(Fn [Int] Int)")))
 
 (test-case "unconstrained mutual recursion generalizes deterministically"
   (define program
     (checked
      "(defn left [x] Int (right x))\n(defn right [y] Int 1)"))
   (check-equal? (type->string (signature program 'left))
-                "(forall [A] [A -> Int])")
+                "(forall [A] (Fn [A] Int))")
   (check-equal? (type->string (signature program 'right))
-                "(forall [A] [A -> Int])"))
+                "(forall [A] (Fn [A] Int))"))
 
 (test-case "multi-arity definitions infer and generalize their whole union"
   (define program
@@ -135,7 +135,7 @@
       "(defn use-two [] String (choose true \"ok\"))")))
   (define inferred (signature program 'choose))
   (check-equal? (type->string inferred)
-                "(forall [A] (U [Int -> Int] [A String -> String]))")
+                "(forall [A] (U (Fn [Int] Int) (Fn [A String] String)))")
   (check-equal? (free-type-metas inferred) '()))
 
 (test-case "multi-arity variadic calls derive callable elements from rest vectors"
@@ -147,7 +147,7 @@
       "(defn use [] (Vec Int) (collect true 1 2))")))
   (define inferred (signature program 'collect))
   (check-equal? (type->string inferred)
-                "(forall [A] (U [ -> (Vec Int)] [A & Int -> (Vec Int)]))")
+                "(forall [A] (U (Fn [] (Vec Int)) (Fn [A & Int] (Vec Int))))")
   (check-equal? (free-type-metas inferred) '()))
 
 (test-case "lexical shadowing does not invent a top-level SCC edge"
@@ -159,13 +159,13 @@
       "     (shadow (fn [(x Int)] String \"s\"))))\n"
       "(defn shadow [caller] Int (do (caller 1) 1))")))
   (check-equal? (type->string (signature program 'shadow))
-                "(forall [A] [[Int -> A] -> Int])"))
+                "(forall [A] (Fn [(Fn [Int] A)] Int))"))
 
 (test-case "typed destructuring remains aggregate-typed"
   (define program
     (checked "(defn first-of [([x y] (HVec Int String))] Int x)"))
   (check-equal? (type->string (signature program 'first-of))
-                "[(HVec Int String) -> Int]"))
+                "(Fn [(HVec Int String)] Int)"))
 
 (test-case "typed rest aggregate separates body Vec from call element type"
   (define program
@@ -174,7 +174,7 @@
       "(defn count-more [& (more (Vec Int))] Int (count more))\n"
       "(defn use [] Int (count-more 1 2 3))")))
   (check-equal? (type->string (signature program 'count-more))
-                "[ & Int -> Int]"))
+                "(Fn [ & Int] Int)"))
 
 (test-case "scalar rest annotations are rejected instead of reinterpreted"
   (check-exn
@@ -186,7 +186,7 @@
   (define program
     (checked "(defn count-more [& more] Int (count more))"))
   (check-equal? (type->string (signature program 'count-more))
-                "(forall [A] [ & A -> Int])"))
+                "(forall [A] (Fn [ & A] Int))"))
 
 (test-case "every finalized definition signature is meta-free"
   (define program
@@ -203,7 +203,7 @@
   (check-equal? (map type-prim-name (type-union-alts pattern-type))
                 '(String Regex))
   (check-equal? (type->string replace-type)
-                "[String (U String Regex) String -> String]")
+                "(Fn [String (U String Regex) String] String)")
   (check-not-exn
    (lambda ()
      (checked

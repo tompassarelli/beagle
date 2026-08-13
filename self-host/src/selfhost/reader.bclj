@@ -20,7 +20,7 @@
 ;;   true/false -> booleans; number -> int unless TEXT has "."/exponent.
 
 (require selfhost.rt)
-(declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
 (require clojure.string :as str)
 
@@ -712,7 +712,7 @@
            (= (nth result 3) "String")
            (= (nth result 4) [STRING-TAG "hello"]))))
   (expect! "declare-extern with fn type"
-    (let [result (rd1 "(declare-extern fetch [String -> (Promise Any)])")]
+    (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
       (and (= (nth result 0) "declare-extern")
            (= (nth result 1) "fetch")
            (= (nth result 2) [BRACKET-TAG "String" "->" ["Promise" "Any"]]))))

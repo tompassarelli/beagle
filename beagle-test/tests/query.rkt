@@ -105,7 +105,7 @@
    "(def plain Int 42)\n"
    "(def doced Int \"the answer\" 42)\n"
    "(defrecord R\n  [(a Int)\n   (b Bool)])\n"
-   "(declare-extern host/get [Int -> Int])\n"
+   "(declare-extern host/get (Fn [Int] Int))\n"
    "(defn typed\n  [(x Int)\n   (y Bool)]\n  Int\n  x)\n"
    "(defn doced-fn \"docs are surface\" [(x Int)] Bool (> x 0))\n"
    "(defn- private-fn [(x Int)] Int (typed x true))\n"
@@ -118,26 +118,26 @@
 
 (test-case "sig: annotated defn reports real types (not Any)"
   (define out (query-output SRC '("sig" "typed")))
-  (check-regexp-match #rx"typed : \\[Int Bool -> Int\\]" out))
+  (check-regexp-match #rx"typed : \\(Fn \\[Int Bool\\] Int\\)" out))
 
 (test-case "sig: docstring-bearing defn is visible"
   (define out (query-output SRC '("sig" "doced-fn")))
-  (check-regexp-match #rx"doced-fn : \\[Int -> Bool\\]" out))
+  (check-regexp-match #rx"doced-fn : \\(Fn \\[Int\\] Bool\\)" out))
 
 (test-case "sig: defn- is visible"
   (define out (query-output SRC '("sig" "private-fn")))
-  (check-regexp-match #rx"private-fn : \\[Int -> Int\\]" out))
+  (check-regexp-match #rx"private-fn : \\(Fn \\[Int\\] Int\\)" out))
 
 (test-case "sig: inferred scheme is the headline and its body drives detail"
   (define out (query-output SRC '("sig" "one")))
-  (check-regexp-match #rx"one : \\(forall \\[A\\] \\[A -> Int\\]\\)" out)
+  (check-regexp-match #rx"one : \\(forall \\[A\\] \\(Fn \\[A\\] Int\\)\\)" out)
   (check-regexp-match #rx"  x : A" out)
   (check-regexp-match #rx"  -> Int" out)
   (check-false (regexp-match? #rx"\\?[0-9]+" out) out))
 
 (test-case "sig: explicit Any remains authored Any"
   (define out (query-output SRC '("sig" "dynamic")))
-  (check-regexp-match #rx"dynamic : \\[Any -> Any\\]" out)
+  (check-regexp-match #rx"dynamic : \\(Fn \\[Any\\] Any\\)" out)
   (check-false (string-contains? out "forall") out)
   (check-false (regexp-match? #rx"\\?[0-9]+" out) out))
 
@@ -155,7 +155,7 @@
 (test-case "sig: aggregate parameter detail preserves one binding operation"
   (define out (query-output SRC '("sig" "pair-head")))
   (check-regexp-match
-   #rx"pair-head : \\[\\(HVec Int String\\) -> Int\\]"
+   #rx"pair-head : \\(Fn \\[\\(HVec Int String\\)\\] Int\\)"
    out)
   (check-regexp-match #rx"  \\[x y\\] : \\(HVec Int String\\)" out))
 
@@ -168,14 +168,14 @@
 (test-case "sig: multi-arity headline and clause details use effective types"
   (define out (query-output SRC '("sig" "overloaded")))
   (check-regexp-match
-   #rx"overloaded : \\(U \\[Int -> Int\\] \\[String Int -> String\\]\\)"
+   #rx"overloaded : \\(U \\(Fn \\[Int\\] Int\\) \\(Fn \\[String Int\\] String\\)\\)"
    out)
   (check-regexp-match #rx"arity 1:[\n ]+x : Int" out)
   (check-regexp-match #rx"arity 2:[\n ]+x : String[\n ]+n : Int" out))
 
 (test-case "sig: declare-extern entries are found"
   (define out (query-output SRC '("sig" "host/get")))
-  (check-regexp-match #rx"host/get : \\[Int -> Int\\]  .extern." out))
+  (check-regexp-match #rx"host/get : \\(Fn \\[Int\\] Int\\)  .extern." out))
 
 (test-case "fields: record fields with types"
   (define out (query-output SRC '("fields" "R")))

@@ -5,7 +5,7 @@
 ;; violates the bound. Here T is inferred String from the argument, which is
 ;; not a subtype of Number — the oracle raises a bound diagnostic. A self-host
 ;; that drops the bound entry would wrongly accept.
-(def pick (forall [(T <: Number)] [T -> T])
+(def pick (forall [(T <: Number)] (Fn [T] T))
   (fn [(x Any)] Any x))
 
 (defn run [] String

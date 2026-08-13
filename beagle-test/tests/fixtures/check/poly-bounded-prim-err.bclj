@@ -1,2 +1,2 @@
-(declare-extern stringify (forall [(T <: (U String Int))] [T -> String]))
+(declare-extern stringify (forall [(T <: (U String Int))] (Fn [T] String)))
 (def oops String (stringify true))

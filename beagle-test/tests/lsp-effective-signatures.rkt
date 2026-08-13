@@ -29,14 +29,14 @@
         "(defn add-one [x] Int x)\n"))
       (define hover (lookup-symbol-info (path->string path) "add-one"))
       (check-true (string? hover))
-      (check-true (regexp-match? #rx"\\[Int -> Int\\]" hover))
+      (check-true (regexp-match? #rx"\\(Fn \\[Int\\] Int\\)" hover))
       (check-false (regexp-match? #rx"Any|\\?[0-9]+" hover))
       (define completion
         (completion-by-label
          (collect-completions (path->string path) "add")
          "add-one"))
       (check-not-false completion)
-      (check-equal? (hash-ref completion 'detail) "[Int -> Int]")
+      (check-equal? (hash-ref completion 'detail) "(Fn [Int] Int)")
       (check-false
        (regexp-match? #rx"Any|\\?[0-9]+" (hash-ref completion 'detail))))
     (lambda () (delete-file path))))

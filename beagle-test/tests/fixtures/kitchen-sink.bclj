@@ -78,7 +78,7 @@
   (with p [:x (+ (point-x p) 1)]))
 
 ;; higher-order
-(defn apply-twice [(f [Int -> Int]) (x Int)] Int
+(defn apply-twice [(f (Fn [Int] Int)) (x Int)] Int
   (f (f x)))
 
 ;; doseq

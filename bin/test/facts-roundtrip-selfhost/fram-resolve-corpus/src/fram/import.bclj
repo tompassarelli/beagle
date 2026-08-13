@@ -12,11 +12,11 @@
 (require clojure.string :as str)
 (require fram.rt)
 
-(declare-extern fram.rt/slurp [String -> String])
-(declare-extern fram.rt/list-md [String -> (Vec String)])
-(declare-extern fram.rt/split-on [String String -> (Vec String)])
-(declare-extern fram.rt/split-kv [String -> (Vec String)])
-(declare-extern fram.rt/edn-unquote [String -> String])
+(declare-extern fram.rt/slurp (Fn [String] String))
+(declare-extern fram.rt/list-md (Fn [String] (Vec String)))
+(declare-extern fram.rt/split-on (Fn [String String] (Vec String)))
+(declare-extern fram.rt/split-kv (Fn [String] (Vec String)))
+(declare-extern fram.rt/edn-unquote (Fn [String] String))
 
 (defrecord Doc [(head String) (body String)])
 

@@ -3,7 +3,7 @@
 (ns selfhost.repro.jvm-instance-method-arity
   (:import [java.net Socket InetSocketAddress]))
 
-(declare-extern Socket/connect [Any Int -> Nil])
+(declare-extern Socket/connect (Fn [Any Int] Nil))
 
 (defn connect-with-timeout
   [(sock Socket)

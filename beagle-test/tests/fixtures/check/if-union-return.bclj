@@ -1,6 +1,6 @@
 (defrecord Product [(id Int) (name String)])
 
-(declare-extern lookup-product [Int -> Product])
+(declare-extern lookup-product (Fn [Int] Product))
 
 ;; if with divergent branches returns (U Product Nil)
 (defn find-product [(id Int)] (U Product Nil)

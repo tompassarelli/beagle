@@ -4,5 +4,5 @@
 
 (defrecord Car [(make String) (year Int)])
 
-(declare-extern get-name (forall [(T <: Pet)] [T -> String]))
+(declare-extern get-name (forall [(T <: Pet)] (Fn [T] String)))
 (def oops String (get-name (->Car "Toyota" 2024)))

@@ -30,7 +30,7 @@
 (def nix-record-types-ref Any (atom {}))
 
 (defn emit-expr* [(e Any) (depth Int)] String
-  (let [(f [Any Int -> String]) (deref emit-expr-ref)] (f e depth)))
+  (let [(f (Fn [Any Int] String)) (deref emit-expr-ref)] (f e depth)))
 
 ;; --- indentation --------------------------------------------------------------
 (defn indent [(n Int)] String

@@ -114,7 +114,7 @@
    (list 'match            "(defn f [(x Int)] String (match x [1 \"one\"] [2 \"two\"] [_ \"many\"]))")
    (list 'tilde-string     "(def s ~\"line\")")
    (list 'defmacro         "(defmacro twice [x] `(do ~x ~x))\n(def y Int (twice 21))")
-   (list 'declare-extern   "(declare-extern host/thing [Int -> Int])\n(defn f [(x Int)] Int (host/thing x))")
+   (list 'declare-extern   "(declare-extern host/thing (Fn [Int] Int))\n(defn f [(x Int)] Int (host/thing x))")
    (list 'comment-form     "(comment \"ignored entirely\")\n(def x Int 1)")
    (list 'condp-default    "(defn f [(x Int)] String (condp = x 1 \"one\" \"other\"))")
    (list 'dotimes-doseq    "(defn f [(n Int)] Any (loop [i 0] (when (< i n) (recur (+ i 1)))))")

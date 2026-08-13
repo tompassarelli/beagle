@@ -1,4 +1,4 @@
-(declare-extern parse-long [String -> Int])
+(declare-extern parse-long (Fn [String] Int))
 
 ;; try returns Int when body and catch both return Int
 (defn safe-parse [(s String)] Int

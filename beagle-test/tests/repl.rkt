@@ -11,13 +11,13 @@
 
 (test-case "type-of publishes the finalized inferred scheme"
   (define result (repl-type-of "(defn repl-one [x] Int 1)"))
-  (check-equal? result "(forall [A] [A -> Int])")
+  (check-equal? result "(forall [A] (Fn [A] Int))")
   (check-false (regexp-match? #rx"\\?[0-9]+" result)))
 
 (test-case "type-of preserves an explicit Any annotation"
   (define result
     (repl-type-of "(defn repl-dynamic [(x Any)] Any x)"))
-  (check-equal? result "[Any -> Any]")
+  (check-equal? result "(Fn [Any] Any)")
   (check-false (string-contains? result "forall"))
   (check-false (regexp-match? #rx"\\?[0-9]+" result)))
 
@@ -26,7 +26,7 @@
    #rx"\\(defn repl-saved"
    (compile-ok "(defn repl-saved [x] Int 1)"))
   (check-equal? (repl-type-of "repl-saved")
-                "(forall [A] [A -> Int])")
+                "(forall [A] (Fn [A] Int))")
   (check-equal? (repl-type-of "(repl-saved 42)") "Int")
   (check-equal? (repl-type-of "(repl-saved \"value\")") "Int"))
 
@@ -37,7 +37,7 @@
     "  ([(x Int)] Int x) "
     "  ([(x String) (n Int)] String x))"))
   (check-equal? (repl-type-of "repl-overloaded")
-                "(U [Int -> Int] [String Int -> String])")
+                "(U (Fn [Int] Int) (Fn [String Int] String))")
   (check-equal? (repl-type-of "(repl-overloaded 42)") "Int")
   (check-equal? (repl-type-of "(repl-overloaded \"value\" 2)") "String"))
 

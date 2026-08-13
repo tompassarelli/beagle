@@ -39,26 +39,26 @@
 (def form-ref Any (atom nil))
 
 (defn emit-expr* [(e Any)] String
-  (let [(f [Any -> String]) (deref emit-expr-ref)]
+  (let [(f (Fn [Any] String)) (deref emit-expr-ref)]
     (reset! ctx "expr")
     (f e)))
 
 (defn emit-body-return* [(exprs Any) (indent String)] String
-  (let [(f [Any String -> String]) (deref body-return-ref)] (f exprs indent)))
+  (let [(f (Fn [Any String] String)) (deref body-return-ref)] (f exprs indent)))
 
 ;; forward ref: emit-body-stmts (defined earlier) recurses into emit-stmt-inline
 (defn emit-stmt-inline* [(e Any) (indent String)] String
-  (let [(f [Any String -> String]) (deref stmt-inline-ref)] (f e indent)))
+  (let [(f (Fn [Any String] String)) (deref stmt-inline-ref)] (f e indent)))
 
 (defn emit-form* [(f Any)] String
-  (let [(g [Any -> String]) (deref form-ref)] (g f)))
+  (let [(g (Fn [Any] String)) (deref form-ref)] (g f)))
 
 ;; js/quote (js-ast) recursion hubs
 (def ajs-expr-ref Any (atom nil))
 (def ajs-stmt-ref Any (atom nil))
 (def ajs-block-ref Any (atom nil))
-(defn ajs-stmt* [(n Any) (depth Int)] String (let [(f [Any Int -> String]) (deref ajs-stmt-ref)] (f n depth)))
-(defn ajs-block* [(n Any) (depth Int)] String (let [(f [Any Int -> String]) (deref ajs-block-ref)] (f n depth)))
+(defn ajs-stmt* [(n Any) (depth Int)] String (let [(f (Fn [Any Int] String)) (deref ajs-stmt-ref)] (f n depth)))
+(defn ajs-block* [(n Any) (depth Int)] String (let [(f (Fn [Any Int] String)) (deref ajs-block-ref)] (f n depth)))
 
 ;; --- bound-var / inline-scope helpers -----------------------------------------
 
@@ -1144,7 +1144,7 @@
 (defn emit-loop-stmt-with
   [(e Any)
    (bind-names Any)
-   (emit-value [String -> String])] String
+   (emit-value (Fn [String] String))] String
   (if (not (map? e))
     (emit-value (emit-expr* e))
     (let [node (get e "node")]

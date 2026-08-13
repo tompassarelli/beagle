@@ -425,7 +425,7 @@
               name-lower
               (param-name fld)))
     (define ctor-types (map (lambda (fld) (type->string (param-type fld))) fields))
-    (printf "  constructor: ->~a : [~a -> ~a]\n"
+    (printf "  constructor: ->~a : (Fn [~a] ~a)\n"
             name-str
             (string-join* ctor-types " ")
             name-str)))

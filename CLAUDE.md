@@ -140,7 +140,7 @@ parameter vector. No arrow decorates that slot:
 
 The mandatory slot prevents a type-shaped first body expression from becoming
 ambiguous. Function types are data, so their type-level arrow remains:
-`[Int String -> Bool]`. `declare-extern` uses that type-level form too.
+`(Fn [Int String] Bool)`. `declare-extern` uses that type-level form too.
 
 ### Typed destructuring
 

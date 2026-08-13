@@ -65,7 +65,7 @@
     [(regexp-match? #rx"unknown beagle form" msg)
      "the form may have been removed; check parse.rkt or run bin/beagle-provides on a working file for the current form set"]
     [(regexp-match? #rx"unknown type" msg)
-     "primitives: String Int Float Bool Keyword Symbol Nil Any; or [A B -> R], (Vec T), (U A B)"]
+     "primitives: String Int Float Bool Keyword Symbol Nil Any; or (Fn [A B] R), (Vec T), (U A B)"]
     [(regexp-match? #rx"bad field spec" msg)
      "field spec must be (name Type) inside the field vector"]
     [(regexp-match? #rx"bad binding spec" msg)
@@ -87,7 +87,7 @@
     [(regexp-match? #rx"unknown mode" msg)
      "valid modes: strict (default) or dynamic"]
     [(regexp-match? #rx"function type missing" msg)
-     "function types use the form [Arg1 Arg2 -> Ret]"]
+     "function types use the form (Fn [Arg1 Arg2] Ret)"]
     [(regexp-match? #rx"unsafe.*string" msg)
      "(unsafe ...) takes a single string literal: (unsafe \"raw clojure\")"]
     [(regexp-match? #rx"violates constraint" msg)

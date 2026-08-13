@@ -35,6 +35,28 @@
 (define-syntax-rule (check-err/rx name rx src)
   (test-case name (check-exn rx (lambda () (check-src src)))))
 
+(test-case "retired function type reports a stable structured kind"
+  (with-handlers ([beagle-parse-error?
+                   (lambda (error)
+                     (check-eq? (beagle-parse-error-kind error)
+                                'legacy-function-type)
+                     (check-equal?
+                      (hash-ref (beagle-parse-error-details error) 'cause)
+                      "surface-divergence"))])
+    (parse-src "(def value [Int -> Int] nil)")
+    (fail "expected retired function type rejection")))
+
+(test-case "malformed Fn reports a stable structured kind"
+  (with-handlers ([beagle-parse-error?
+                   (lambda (error)
+                     (check-eq? (beagle-parse-error-kind error)
+                                'malformed-function-type)
+                     (check-equal?
+                      (hash-ref (beagle-parse-error-details error) 'cause)
+                      "surface-divergence"))])
+    (parse-src "(def value (Fn Int Bool) nil)")
+    (fail "expected malformed function type rejection")))
+
 ;; Every binding-bearing surface uses `(name Type)` as one structural datum.
 (ok "def"                     "(def answer Int 42)")
 (ok "def + docstring"         "(def answer Int \"doc\" 42)")
@@ -57,7 +79,15 @@
     "(defn f [({:keys [x] :or {x 0}} (Map Keyword Int))] Int x)")
 (ok "typed rest param"        "(defn r [(x Int) & (more (Vec Int))] Int x)")
 (ok "bare rest param"         "(defn r [x & more] Any more)")
-(ok "function type param"     "(defn hof [(cb [Int -> String])] String (cb 1))")
+(ok "function type param"     "(defn hof [(cb (Fn [Int] String))] String (cb 1))")
+(ok "zero-argument function type"
+    "(declare-extern host/now (Fn [] Int))")
+(ok "multi-argument function type"
+    "(declare-extern host/compare (Fn [String String] Bool))")
+(ok "variadic function type"
+    "(declare-extern host/join (Fn [String & String] String))")
+(ok "nested function type"
+    "(defn compose [(outer (Fn [String] Bool)) (inner (Fn [Int] String))] (Fn [Int] Bool) (fn [(value Int)] Bool (outer (inner value))))")
 (ok "let and loop bindings"
     "(defn f [(x Int)] Int (let [(y Int) x z y] (loop [(n Int) z] n)))")
 (ok "conditional binding"     "(defn f [(x Int)] Int (if-let [(y Int) x] y 0))")
@@ -192,6 +222,31 @@
 (err/rx "legacy binding rejected"
         #rx"punctuation annotations are not supported"
         "(defn f [x :- Int] Int x)")
+(err/rx "arrow function type rejected"
+        #rx"arrow function types are not supported.*Fn"
+        "(defn f [(callback [Int -> Int])] Int (callback 1))")
+(err/rx "bare Fn type rejected"
+        #rx"bare Fn is an incomplete function type"
+        "(def value Fn nil)")
+(err/rx "malformed Fn type rejected"
+        #rx"function type parameters must be a vector"
+        "(def value (Fn Int Bool) nil)")
+(err/rx "defrecord cannot shadow Fn in the type namespace"
+        #rx"defrecord cannot declare `Fn`"
+        "(defrecord Fn [(value Int)])")
+(err/rx "defalias cannot shadow Fn in the type namespace"
+        #rx"defalias cannot declare `Fn`"
+        "(defalias Fn Int)")
+(err/rx "defunion member cannot shadow Fn in the type namespace"
+        #rx"defunion member cannot declare `Fn`"
+        "(defunion Result Fn Ok)")
+(err/rx "forall variable cannot shadow Fn"
+        #rx"Fn is the built-in function type constructor"
+        "(def value (forall [Fn] Fn) nil)")
+(test-case "qualified nominal api/Fn remains legal"
+  (check-not-exn (lambda () (parse-src "(def value api/Fn nil)"))))
+(ok "value-level Fn binding remains legal"
+    "(defn value-level [(Fn Int)] Int Fn)")
 (err/rx "return arrow rejected"
         #rx"return arrows are not supported"
         "(defn f [(x Int)] -> Int x)")
@@ -224,4 +279,4 @@
   (check-not-exn
    (lambda ()
      (check-src
-      "(defn f [(cb [Int -> Int]) (x Int)] Int (-> x cb))"))))
+      "(defn f [(cb (Fn [Int] Int)) (x Int)] Int (-> x cb))"))))

@@ -5,7 +5,7 @@
 (defrecord Order [(id Int) (name String)])
 (defrecord OrderError [(code Int) (message String)])
 
-(declare-extern find-order [Int -> (Result Order OrderError)])
+(declare-extern find-order (Fn [Int] (Result Order OrderError)))
 
 (defn handle [(r (Result Order OrderError))] String
   (match r

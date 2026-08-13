@@ -50,7 +50,7 @@
   (println (str "Hello, " name "!")))
 
 ;; async/await
-(declare-extern fetch-product [Int -> (Promise Product)])
+(declare-extern fetch-product (Fn [Int] (Promise Product)))
 
 (defn load-and-classify [(id Int)] (Promise String)
   (let [p (js/await (fetch-product id))]

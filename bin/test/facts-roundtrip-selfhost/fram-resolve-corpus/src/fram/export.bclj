@@ -9,7 +9,7 @@
 (require clojure.string :as str)
 (require fram.rt)
 
-(declare-extern fram.rt/edn-quote [String -> String])
+(declare-extern fram.rt/edn-quote (Fn [String] String))
 
 (defrecord PredicateRegistry
   [(by-name (Map String String))

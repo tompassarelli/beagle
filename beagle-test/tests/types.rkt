@@ -2,6 +2,7 @@
 
 (require rackunit
          json
+         racket/match
          beagle/private/types)
 
 ;; --- parse-type ------------------------------------------------------------
@@ -29,9 +30,8 @@
     (check-not-false (memq 'Int names))
     (check-not-false (memq 'Float names))))
 
-(test-case "parse function type from bracketed expression"
-  ;; #%brackets-tagged form: [A B -> R]
-  (define t (parse-type `(,BRACKET-TAG Int Int -> Bool)))
+(test-case "parse canonical Fn type"
+  (define t (parse-type `(Fn (,BRACKET-TAG Int Int) Bool)))
   (check-true (type-fn? t))
   (check-equal? (length (type-fn-params t)) 2)
   (check-eq? (type-prim-name (type-fn-ret t)) 'Bool))
@@ -43,7 +43,7 @@
   (check-eq? (type-prim-name (car (type-app-args t))) 'String))
 
 (test-case "parse nested parametric / function types"
-  (define t (parse-type `(Map String ,(list BRACKET-TAG 'Int '-> 'Int))))
+  (define t (parse-type `(Map String (Fn (,BRACKET-TAG Int) Int))))
   (check-true (type-app? t))
   (check-eq? (type-app-ctor t) 'Map)
   (check-eq? (type-prim-name (car (type-app-args t))) 'String)
@@ -56,9 +56,21 @@
 (test-case "user-defined capitalized type accepted"
   (check-eq? (type-prim-name (parse-type 'Employee)) 'Employee))
 
-(test-case "function type without arrow errors"
-  (check-exn exn:fail?
-             (lambda () (parse-type `(,BRACKET-TAG Int Int Int)))))
+(test-case "retired arrow function type is rejected with canonical replacement"
+  (check-exn #rx"arrow function types are not supported.*\\(Fn \\[ParamType"
+             (lambda () (parse-type `(,BRACKET-TAG Int -> Int)))))
+
+(test-case "bare type vector is rejected with canonical replacement"
+  (check-exn #rx"vector is not a type expression.*\\(Fn \\[ParamType"
+             (lambda () (parse-type `(,BRACKET-TAG Int Int)))))
+
+(test-case "Fn requires a parameter vector"
+  (check-exn #rx"parameters must be a vector"
+             (lambda () (parse-type '(Fn Int Int)))))
+
+(test-case "Fn has one return type"
+  (check-exn #rx"requires exactly"
+             (lambda () (parse-type `(Fn (,BRACKET-TAG Int) Int String)))))
 
 ;; --- type-compatible? ------------------------------------------------------
 
@@ -72,15 +84,49 @@
   (check-false (type-compatible? (type-prim 'String) (type-prim 'Int)))
   (check-false (type-compatible? (type-prim 'Bool) (type-prim 'Int))))
 
-(test-case "function type compatibility (v0 invariant params + return)"
-  (define a (type-fn (list (type-prim 'Int)) #f (type-prim 'Bool)))
-  (define b (type-fn (list (type-prim 'Int)) #f (type-prim 'Bool)))
-  (define c (type-fn (list (type-prim 'String)) #f (type-prim 'Bool)))
-  (check-true  (type-compatible? a b))
-  (check-false (type-compatible? a c)))
+(test-case "function compatibility preserves call shapes, contravariant inputs, and covariant results"
+  (define string (type-prim 'String))
+  (define nullable-string (type-union (list string (type-prim 'Nil))))
+  (define int (type-prim 'Int))
+  (define float (type-prim 'Float))
+  (define any (type-prim 'Any))
+  (define bool (type-prim 'Bool))
+  (define (fn-type params [rest #f] [ret bool]) (type-fn params rest ret))
+  (define narrow-fn (fn-type (list string)))
+  (define wide-fn (fn-type (list nullable-string)))
+  (for ([case
+         (in-list
+          (list
+           (list "same fixed shape" (fn-type (list string)) (fn-type (list string)) #t)
+           (list "actual requires too many args" (fn-type (list string string)) (fn-type (list string)) #f)
+           (list "actual accepts too few fixed args" (fn-type (list string)) (fn-type (list string string)) #f)
+           (list "rest-only actual accepts zero args" (fn-type '() string) (fn-type '()) #t)
+           (list "fixed-plus-rest actual absorbs expected tail" (fn-type (list string) string) (fn-type (list string string)) #t)
+           (list "actual fixed prefix cannot exceed expected" (fn-type (list string string) string) (fn-type (list string)) #f)
+           (list "fixed actual cannot satisfy variadic expected" (fn-type (list string)) (fn-type (list string) string) #f)
+           (list "rest-only actual satisfies fixed-plus-rest expected" (fn-type '() string) (fn-type (list string) string) #t)
+           (list "longer actual prefix cannot satisfy shorter variadic expected" (fn-type (list string string) string) (fn-type (list string) string) #f)
+           (list "wider nullable actual parameter domain" (fn-type (list nullable-string)) (fn-type (list string)) #t)
+           (list "narrower actual parameter domain" (fn-type (list string)) (fn-type (list nullable-string)) #f)
+           (list "wider nullable actual rest domain" (fn-type '() nullable-string) (fn-type '() string) #t)
+           (list "narrower actual rest domain" (fn-type '() string) (fn-type '() nullable-string) #f)
+           (list "nullable rest absorbs nonnullable fixed tail" (fn-type (list string) nullable-string) (fn-type (list string string)) #t)
+           (list "covariant nullable result widening" (fn-type '() #f string) (fn-type '() #f nullable-string) #t)
+           (list "covariant result rejects narrowing" (fn-type '() #f nullable-string) (fn-type '() #f string) #f)
+           (list "numeric parameter contravariance" (fn-type (list float)) (fn-type (list int)) #t)
+           (list "numeric parameter rejects reverse widening" (fn-type (list int)) (fn-type (list float)) #f)
+           (list "numeric result covariance" (fn-type '() #f int) (fn-type '() #f float) #t)
+           (list "numeric result rejects reverse widening" (fn-type '() #f float) (fn-type '() #f int) #f)
+           (list "Any parameter remains an explicit escape" (fn-type (list any)) (fn-type (list string)) #t)
+           (list "Any expected parameter remains an explicit escape" (fn-type (list string)) (fn-type (list any)) #t)
+           (list "Any does not erase arity" (fn-type (list any) #f any) (fn-type (list any any) #f any) #f)
+           (list "nested function parameter contravariance" (fn-type (list narrow-fn)) (fn-type (list wide-fn)) #t)
+           (list "nested function parameter rejects reverse" (fn-type (list wide-fn)) (fn-type (list narrow-fn)) #f)))])
+    (match-define (list label actual expected wanted) case)
+    (check-equal? (type-compatible? actual expected) wanted label)))
 
 (test-case "variadic function type parses & checks"
-  (define t (parse-type `(,BRACKET-TAG Int & Int -> Int)))
+  (define t (parse-type `(Fn (,BRACKET-TAG Int & Int) Int)))
   (check-true  (type-fn? t))
   (check-equal? (length (type-fn-params t)) 1)
   (check-true  (type? (type-fn-rest-type t)))
@@ -108,7 +154,7 @@
 ;; --- polymorphic types (forall) --------------------------------------------
 
 (test-case "parse forall type"
-  (define t (parse-type `(forall (A) (,BRACKET-TAG A -> A))))
+  (define t (parse-type `(forall (A) (Fn (,BRACKET-TAG A) A))))
   (check-true (type-poly? t))
   (check-equal? (type-poly-vars t) '(A))
   (define body (type-poly-body t))

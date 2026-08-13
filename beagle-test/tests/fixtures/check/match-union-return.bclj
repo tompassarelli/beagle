@@ -1,7 +1,7 @@
 (defrecord Cat [(name String)])
 (defrecord Dog [(name String)])
 
-(declare-extern get-pet [-> (U Cat Dog)])
+(declare-extern get-pet (Fn [] (U Cat Dog)))
 
 ;; match positional destructure: c and d are String (name field)
 ;; both arms return String, so match infers String

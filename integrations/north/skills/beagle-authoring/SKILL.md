@@ -123,7 +123,7 @@ to project. Typed and bare bindings may mix:
   destructuring binding. Never attach an adjacent entry to its predecessor.
 - Executable return types occupy one mandatory positional slot after the
   parameter vector: `[params] Return body...`. Type-level function arrows such
-  as `[Int -> String]` remain.
+  as `(Fn [Int] String)` remain.
 - `def`, `defonce`, `let`, `loop`, and typed record/union/error fields use the
   same noun-then-type structure. A typed rest parameter is
   `& (more (Vec Int))`.

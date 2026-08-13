@@ -112,7 +112,7 @@
 (for ([s (in-list '("(def x: Int 42)"
                     "(defn f [a: Int b: (Vec Int)] -> Int a)"
                     "(defrecord P [x: Int y: Int])"
-                    "(defn g [cb: [Int -> String]] -> String (cb 1))"
+                    "(defn g [cb: (Fn [Int] String)] -> String (cb 1))"
                     "(let [v: Int 1] v)"))])
   (test-case (format "retired-spelling reader-path parity: ~a" s)
     (check-equal? (parse-path s) (rd s))))

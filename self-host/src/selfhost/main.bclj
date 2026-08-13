@@ -19,14 +19,14 @@
 (require selfhost.emit-js :as ejs)
 (require selfhost.facts-roundtrip :as fr)
 
-(declare-extern selfhost.rt/slurp-file [String -> String])
-(declare-extern selfhost.rt/read-stdin [-> String])
-(declare-extern selfhost.rt/to-json [Any -> String])
-(declare-extern selfhost.rt/parse-json [String -> Any])
-(declare-extern selfhost.rt/exit [Int -> Nil])
-(declare-extern selfhost.rt/eprint [String -> Nil])
-(declare-extern selfhost.rt/file-exists? [String -> Bool])
-(declare-extern selfhost.rt/abs-path [String -> String])
+(declare-extern selfhost.rt/slurp-file (Fn [String] String))
+(declare-extern selfhost.rt/read-stdin (Fn [] String))
+(declare-extern selfhost.rt/to-json (Fn [Any] String))
+(declare-extern selfhost.rt/parse-json (Fn [String] Any))
+(declare-extern selfhost.rt/exit (Fn [Int] Nil))
+(declare-extern selfhost.rt/eprint (Fn [String] Nil))
+(declare-extern selfhost.rt/file-exists? (Fn [String] Bool))
+(declare-extern selfhost.rt/abs-path (Fn [String] String))
 
 ;; --- module resolution (driver-level; parse stays pure) ----------------------
 ;; Mirror of beagle-lib parse.rkt resolve-module-path + register-require!: for

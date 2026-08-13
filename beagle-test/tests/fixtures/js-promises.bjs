@@ -2,8 +2,8 @@
 
 (ns js-promises)
 
-(declare-extern fetch [String -> (Promise Any)])
-(declare-extern parse-json [String -> Any])
+(declare-extern fetch (Fn [String] (Promise Any)))
+(declare-extern parse-json (Fn [String] Any))
 
 (defn fetch-text [(url String)] (Promise String)
   (let [resp (js/await (fetch url))]

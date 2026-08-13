@@ -47,15 +47,15 @@
       (define provides-response (list-ref responses 1))
       (define impact-response (list-ref responses 2))
       (check-true (hash-ref sig-response 'ok))
-      (check-equal? (result-signature sig-response) "[Int -> Int]")
+      (check-equal? (result-signature sig-response) "(Fn [Int] Int)")
       (check-equal?
        (hash-ref (car (hash-ref (car (hash-ref sig-response 'results)) 'params))
                  'type)
        "Int")
       (check-equal?
        (hash-ref (car (hash-ref provides-response 'functions)) 'signature)
-       "[Int -> Int]")
-      (check-equal? (hash-ref impact-response 'signature) "[Int -> Int]")
+       "(Fn [Int] Int)")
+      (check-equal? (hash-ref impact-response 'signature) "(Fn [Int] Int)")
       (define rendered
         (jsexpr->string (take responses 3)))
       (check-false (regexp-match? #rx"Any|\\?[0-9]+" rendered)))

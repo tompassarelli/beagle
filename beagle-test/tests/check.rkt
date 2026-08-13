@@ -221,7 +221,7 @@
   '(def x Int (+)))
 
 (check-err "variadic call rejects wrong rest-type"
-  '(declare-extern strict-sum [Int & Int -> Int])
+  '(declare-extern strict-sum (Fn [Int & Int] Int))
   '(def x Int (strict-sum 1 "two" 3)))
 
 (check-err "variadic call rejects below minimum fixed args"

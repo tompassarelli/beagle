@@ -27,7 +27,7 @@
 
 (require clojure.string :as str)
 
-(declare-extern fram.rt/parse-edn [String -> Any])
+(declare-extern fram.rt/parse-edn (Fn [String] Any))
 
 (def evidence-pred String "claim.evidence")
 

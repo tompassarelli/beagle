@@ -216,6 +216,9 @@
    'unknown-form           'surface-divergence
    'inline-type-annotation 'surface-divergence
    'legacy-annotation-marker 'surface-divergence
+   'legacy-function-type     'surface-divergence
+   'malformed-function-type  'surface-divergence
+   'reserved-type-name       'surface-divergence
    'claim-form-removed     'surface-divergence
    'bare-nix-form          'surface-divergence
    'legacy-macro-form      'surface-divergence

@@ -98,7 +98,7 @@
      (check-true (inferred-type-poly? scheme))
      (check-equal? (type-poly-origin scheme) 'inferred)
      (check-equal? (type-poly-vars scheme) '(A B))
-     (check-equal? (type->string scheme) "(forall [A B] [A B -> A])"))))
+     (check-equal? (type->string scheme) "(forall [A B] (Fn [A B] A))"))))
 
 (test-case "generalization avoids capture by authored variable names"
   (call-with-fresh-type-metas
@@ -107,7 +107,7 @@
      (define scheme
        (generalize-type (type-fn (list (type-var 'A) meta) #f meta)))
      (check-equal? (type-poly-vars scheme) '(B))
-     (check-equal? (type->string scheme) "(forall [B] [A B -> B])"))))
+     (check-equal? (type->string scheme) "(forall [B] (Fn [A B] B))"))))
 
 (test-case "environment-owned metas remain monomorphic during generalization"
   (call-with-fresh-type-metas

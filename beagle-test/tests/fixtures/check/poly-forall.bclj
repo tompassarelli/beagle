@@ -1,2 +1,2 @@
-(declare-extern my-id (forall (T) [T -> T]))
+(declare-extern my-id (forall (T) (Fn [T] T)))
 (def x Int (my-id 42))

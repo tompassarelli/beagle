@@ -34,7 +34,7 @@
 (def emit-expr-ref Any (atom nil))
 
 (defn emit-expr* [(e Any)] String
-  (let [(f [Any -> String]) (deref emit-expr-ref)]
+  (let [(f (Fn [Any] String)) (deref emit-expr-ref)]
     (f e)))
 
 ;; --- Racket-~v-compatible string writer --------------------------------------
