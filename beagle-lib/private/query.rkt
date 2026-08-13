@@ -17,6 +17,29 @@
 (define (str-downcase s)
   (list->string (map char-downcase (string->list s))))
 
+;; Query surfaces consume the same parsed and checked program as `beagle check`.
+;; Keeping this seam here prevents the daemon and one-shot tools from growing
+;; independent source grammars.
+(define (checked-program/file path)
+  (define prog (parse-program/file path))
+  (type-check! prog)
+  prog)
+
+(define (query-target-local-name target namespace)
+  (define target-string (symbol->string target))
+  (define namespace-string (symbol->string namespace))
+  (define qualified
+    (regexp-match #rx"^(.+)/([^/]+)$" target-string))
+  (if (and qualified
+           (string=? (cadr qualified) namespace-string))
+      (string->symbol (caddr qualified))
+      target))
+
+(define (definition-location program form [raw-form #f])
+  (define table (program-src-table program))
+  (or (hash-ref table form #f)
+      (and raw-form (hash-ref table raw-form #f))))
+
 ;; --- datum-level extraction --------------------------------------------------
 
 ;; Docstrings are real surface ((defn name "doc" [params] ...)) —
@@ -129,26 +152,20 @@
                  ""))]
     [else (format "~a" target)]))
 
-(define (print-callable-clause-details clauses alternatives)
+(define (callable-clause-details clauses alternatives)
   (unless (= (length clauses) (length alternatives))
     (error 'beagle-sig
            "effective signature has ~a clause~a for ~a source clause~a"
            (length alternatives) (if (= (length alternatives) 1) "" "s")
            (length clauses) (if (= (length clauses) 1) "" "s")))
-  (define multi? (> (length clauses) 1))
-  (for ([clause (in-list clauses)]
-        [signature (in-list alternatives)])
+  (for/list ([clause (in-list clauses)]
+             [signature (in-list alternatives)])
     (unless (type-fn? signature)
       (error 'beagle-sig
              "effective clause signature is not a function: ~a"
              (type->string signature)))
     (define params (car clause))
     (define rest-param (cadr clause))
-    (define prefix (if multi? "    " "  "))
-    (when multi?
-      (printf "  arity ~a~a:\n"
-              (length params)
-              (if rest-param "+" "")))
     (unless (= (length params) (length (type-fn-params signature)))
       (error 'beagle-sig
              "effective clause has ~a fixed parameter~a for ~a source parameter~a"
@@ -156,18 +173,40 @@
              (if (= (length (type-fn-params signature)) 1) "" "s")
              (length params)
              (if (= (length params) 1) "" "s")))
-    (for ([param (in-list params)]
-          [param-type (in-list (type-fn-params signature))])
+    (hasheq
+     'params
+     (for/list ([param (in-list params)]
+                [param-type (in-list (type-fn-params signature))])
+       (cons (binding-target->string (param-binding-target param)) param-type))
+     'rest
+     (and rest-param
+          (cons (binding-target->string (param-binding-target rest-param))
+                (type-fn-rest-type signature)))
+     'return (type-fn-ret signature))))
+
+(define (print-signature-clause-details clauses)
+  (define multi? (> (length clauses) 1))
+  (for ([clause (in-list clauses)])
+    (define params (hash-ref clause 'params))
+    (define rest-param (hash-ref clause 'rest))
+    (define prefix (if multi? "    " "  "))
+    (when multi?
+      (printf "  arity ~a~a:\n"
+              (length params)
+              (if rest-param "+" "")))
+    (for ([param (in-list params)])
       (printf "~a~a : ~a\n"
               prefix
-              (binding-target->string (param-binding-target param))
-              (type->string param-type)))
+              (car param)
+              (type->string (cdr param))))
     (when rest-param
       (printf "~a& ~a : ~a\n"
               prefix
-              (binding-target->string (param-binding-target rest-param))
-              (type->string (type-fn-rest-type signature))))
-    (printf "~a-> ~a\n" prefix (type->string (type-fn-ret signature)))))
+              (car rest-param)
+              (type->string (cdr rest-param))))
+    (printf "~a-> ~a\n"
+            prefix
+            (type->string (hash-ref clause 'return)))))
 
 (define (authored-callable-type form)
   (define alternatives
@@ -183,28 +222,112 @@
       (car alternatives)
       (type-union alternatives)))
 
-(define (query-sig name files)
+(define (signature-match name file program signature clauses
+                         #:extern? [extern? #f]
+                         #:loc [loc #f])
+  (hasheq 'name name
+          'file file
+          'namespace (program-namespace program)
+          'signature signature
+          'clauses clauses
+          'extern? extern?
+          'line (and loc (src-loc-line loc))
+          'col (and loc (src-loc-col loc))))
+
+(define (generated-signature-clause params signature)
+  (callable-clause-details
+   (list (list params #f #f))
+   (list signature)))
+
+(define (query-signature-matches name files)
   (define target (if (string? name) (string->symbol name) name))
-  (for ([f (in-list files)])
-    (define program (parse-program/file f))
-    (type-check! program)
+  (apply
+   append
+   (for/list ([f (in-list files)])
+    (define program (checked-program/file f))
+    (define local-target
+      (query-target-local-name target (program-namespace program)))
+    (define matches '())
     (for ([raw-form (in-list (program-forms program))])
       (define form (unwrap-definition-form raw-form))
       (when (and (callable-form? form)
-                 (eq? (callable-name form) target))
+                 (eq? (callable-name form) local-target))
         (define signature
-          (or (program-effective-definition-type program target #f)
+          (or (program-effective-definition-type program local-target #f)
               ;; Dynamic-mode programs deliberately skip checking.  Their
               ;; authored signature remains queryable, but strict programs
               ;; always take the finalized checker result above.
               (authored-callable-type form)))
-        (printf "~a : ~a\n" target (type->string signature))
-        (print-callable-clause-details
-         (callable-clauses form)
-         (callable-signature-alternatives signature))))
-    (define extern-type (hash-ref (program-externs program) target #f))
+        (set! matches
+              (cons
+               (signature-match
+                target f program signature
+                (callable-clause-details
+                 (callable-clauses form)
+                 (callable-signature-alternatives signature))
+                #:loc (definition-location program form raw-form))
+               matches)))
+      ;; Record constructors and accessors are real emitted functions.  They
+      ;; have no authored defn node, so expose their checker-owned signatures
+      ;; from the checked record form instead of returning an empty success.
+      (when (record-form? form)
+        (define record-name (record-form-name form))
+        (define record-type (type-prim record-name))
+        (define fields (record-form-fields form))
+        (define constructor-name
+          (string->symbol (string-append "->" (symbol->string record-name))))
+        (when (eq? local-target constructor-name)
+          (define signature
+            (type-fn (map param-type fields) #f record-type))
+          (set! matches
+                (cons
+                 (signature-match
+                  target f program signature
+                  (generated-signature-clause fields signature)
+                  #:loc (definition-location program form raw-form))
+                 matches)))
+        (for ([field (in-list fields)])
+          (define accessor-name
+            (string->symbol
+             (format "~a-~a"
+                     (str-downcase (symbol->string record-name))
+                     (param-name field))))
+          (when (eq? local-target accessor-name)
+            (define signature
+              (type-fn (list record-type) #f (param-type field)))
+            (set! matches
+                  (cons
+                   (signature-match
+                    target f program signature
+                    (list
+                     (hasheq 'params (list (cons "r" record-type))
+                             'rest #f
+                             'return (param-type field)))
+                    #:loc (definition-location program form raw-form))
+                   matches))))))
+    (define extern-type (hash-ref (program-externs program) local-target #f))
     (when extern-type
-      (printf "~a : ~a  (extern)\n" target (type->string extern-type)))))
+      (set! matches
+            (cons
+             (signature-match target f program extern-type '() #:extern? #t)
+             matches)))
+    (reverse matches))))
+
+(define (query-sig name files)
+  (define target (if (string? name) (string->symbol name) name))
+  (define matches (query-signature-matches target files))
+  (when (null? matches)
+    (raise-user-error 'beagle-sig
+                      "callable ~a not found in provided files"
+                      target))
+  (for ([match (in-list matches)])
+    (define signature (hash-ref match 'signature))
+    (printf "~a : ~a~a\n"
+            target
+            (type->string signature)
+            (if (hash-ref match 'extern?) "  (extern)" ""))
+    (unless (hash-ref match 'extern?)
+      (print-signature-clause-details (hash-ref match 'clauses)))))
 
 ;; --- beagle-fields: print record fields + accessors --------------------------
 
@@ -235,24 +358,36 @@
   files)
 
 (define (query-field-matches rec-name files
-                             #:read-datums [read-datums read-expanded-datums])
+                             #:load-program [load-program checked-program/file])
   (when (null? files)
     (raise-user-error 'beagle-fields "no Beagle source files were provided"))
   (define target (if (string? rec-name) (string->symbol rec-name) rec-name))
   (define matches
-    (for*/list ([f (in-list files)]
-                [d (in-list
-                    (with-handlers ([exn:fail?
-                                     (lambda (e)
-                                       (raise-user-error
-                                        'beagle-fields
-                                        "failed to read ~a: ~a"
-                                        f
-                                        (exn-message e)))])
-                      (read-datums f)))]
-                #:do [(define entry (extract-record-entry d))]
-                #:when (and entry (eq? (car entry) target)))
-      (cons f entry)))
+    (apply
+     append
+     (for/list ([f (in-list files)])
+       (define program
+         (with-handlers ([exn:fail?
+                          (lambda (e)
+                            (raise-user-error
+                             'beagle-fields
+                             "failed to check ~a: ~a"
+                             f
+                             (exn-message e)))])
+           (load-program f)))
+       (define local-target
+         (query-target-local-name target (program-namespace program)))
+       (for/list ([raw-form (in-list (program-forms program))]
+                  #:do [(define form (unwrap-definition-form raw-form))]
+                  #:when (and (record-form? form)
+                              (eq? (record-form-name form) local-target)))
+         (define loc (definition-location program form raw-form))
+         (list f
+               (record-form-name form)
+               (record-form-fields form)
+               (program-namespace program)
+               (and loc (src-loc-line loc))
+               (and loc (src-loc-col loc)))))))
   (when (null? matches)
     (raise-user-error 'beagle-fields
                       "record ~a not found in provided files"
@@ -262,8 +397,9 @@
 (define (query-fields rec-name files)
   (define target (if (string? rec-name) (string->symbol rec-name) rec-name))
   (for ([match (in-list (query-field-matches target files))])
+    (define record-name (cadr match))
     (define fields (caddr match))
-    (define name-str (symbol->string target))
+    (define name-str (symbol->string record-name))
     (define name-lower (str-downcase name-str))
     (printf "~a\n" target)
     (for ([fld (in-list fields)])
@@ -495,6 +631,7 @@
         (list a)))))
 
 (provide query-sig query-fields query-callers query-provides query-impact
+         query-signature-matches checked-program/file query-target-local-name
          run-query find-rkt-files expand-fields-file-args query-field-matches
          extract-defn-entry extract-def-entry extract-record-entry
          extract-extern-entry extract-ns find-calls-in format-call)

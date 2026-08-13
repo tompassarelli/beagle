@@ -101,16 +101,15 @@ else
     [[ "$STATUS" == "ok" ]] && STATUS="warning"
 fi
 
-# Daemon — liveness, with --revive self-heal. Probe the endpoint directly:
-# `beagle-daemon status` also inspects PID/runtime-file environment shape,
-# which sandboxed clones cannot always observe when TCP is reachable.
+# Daemon — liveness plus compiler-closure identity, with --revive self-heal.
+# A TCP endpoint from an older checkout is not a healthy authoring loop.
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DAEMON_REACHABLE=0
 DAEMON_REVIVED=0
 daemon_responding() {
     local port response
-    port="$(beagle_daemon_port 2>/dev/null || true)"
-    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || return 1
+    port="$(beagle_daemon_compatible_port 2>/dev/null || true)"
+    [[ -n "$port" ]] || return 1
     exec 3<>"/dev/tcp/127.0.0.1/$port" 2>/dev/null || return 1
     printf 'ping\n' >&3 || { exec 3>&-; return 1; }
     IFS= read -r -t 2 response <&3 || { exec 3>&-; return 1; }

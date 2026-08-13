@@ -14,8 +14,29 @@ _beagle_runtime_dir="${XDG_RUNTIME_DIR:-/var/tmp}"
 
 BEAGLE_DAEMON_PORTFILE_PRIMARY="${BEAGLE_DAEMON_PORTFILE:-${_beagle_runtime_dir}/beagle-daemon.port}"
 BEAGLE_DAEMON_PIDFILE_PRIMARY="${BEAGLE_DAEMON_PIDFILE:-${_beagle_runtime_dir}/beagle-daemon.pid}"
+BEAGLE_DAEMON_IDENTITYFILE_PRIMARY="${BEAGLE_DAEMON_IDENTITYFILE:-${BEAGLE_DAEMON_PORTFILE_PRIMARY}.identity}"
 BEAGLE_DAEMON_PORTFILE_MIRROR="$BEAGLE_DAEMON_RUN_LOCAL/daemon.port"
 BEAGLE_DAEMON_PIDFILE_MIRROR="$BEAGLE_DAEMON_RUN_LOCAL/daemon.pid"
+BEAGLE_DAEMON_IDENTITYFILE_MIRROR="$BEAGLE_DAEMON_RUN_LOCAL/daemon.identity"
+
+# A resident Racket process cannot reload a compiler checkout after that
+# checkout advances. Bind every daemon to the exact compiler closure that
+# launched it. Clean worktrees at the same commit may share; an edited Racket
+# closure is keyed by the freshness gate stamp produced by _beagle-racket.
+beagle_compiler_identity() {
+    local head stamp
+    head="$(git -C "$_BEAGLE_FILES_ROOT" rev-parse HEAD 2>/dev/null || true)"
+    [[ -n "$head" ]] || return 1
+    if git -C "$_BEAGLE_FILES_ROOT" diff --quiet -- '*.rkt' \
+       && git -C "$_BEAGLE_FILES_ROOT" diff --cached --quiet -- '*.rkt'; then
+        printf '%s\n' "$head"
+        return 0
+    fi
+    [[ -f "$_BEAGLE_FILES_ROOT/.beagle/zo-fresh" ]] || return 1
+    stamp="$(stat -c '%y:%s' "$_BEAGLE_FILES_ROOT/.beagle/zo-fresh" 2>/dev/null || true)"
+    [[ -n "$stamp" ]] || return 1
+    printf '%s+worktree-%s\n' "$head" "$(printf '%s' "$stamp" | sha256sum | cut -d' ' -f1)"
+}
 
 # Print the first readable portfile, or nothing. (A masked /run/user/<uid>
 # makes the primary unreadable, not merely absent — test -r covers both.)
@@ -32,4 +53,25 @@ beagle_daemon_port() {
     local f
     f="$(beagle_daemon_portfile_read)"
     [[ -n "$f" ]] && cat "$f"
+}
+
+# Print the daemon port only when its launch identity matches this compiler
+# closure. Missing metadata means an older daemon and deliberately falls back
+# to the current checkout's one-shot compiler.
+beagle_daemon_compatible_port() {
+    local portfile identityfile expected actual port
+    portfile="$(beagle_daemon_portfile_read || true)"
+    [[ -n "$portfile" ]] || return 1
+    if [[ "$portfile" == "$BEAGLE_DAEMON_PORTFILE_PRIMARY" ]]; then
+        identityfile="$BEAGLE_DAEMON_IDENTITYFILE_PRIMARY"
+    else
+        identityfile="$BEAGLE_DAEMON_IDENTITYFILE_MIRROR"
+    fi
+    [[ -r "$identityfile" ]] || return 1
+    expected="$(beagle_compiler_identity || true)"
+    actual="$(cat "$identityfile" 2>/dev/null || true)"
+    [[ -n "$expected" && "$actual" == "$expected" ]] || return 1
+    port="$(cat "$portfile" 2>/dev/null || true)"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || return 1
+    printf '%s\n' "$port"
 }

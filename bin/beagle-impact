@@ -8,10 +8,9 @@ if [[ $# -lt 2 ]]; then
     exit 2
 fi
 
-# Route through daemon if running
-PORTFILE="$(beagle_daemon_portfile_read || true)"
-if [[ -f "$PORTFILE" ]]; then
-    port=$(cat "$PORTFILE")
+# Route through a daemon only when it was launched by this compiler closure.
+port="$(beagle_daemon_compatible_port || true)"
+if [[ -n "$port" ]]; then
     if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
         exec 3<>/dev/tcp/127.0.0.1/"$port"
         echo "impact $*" >&3

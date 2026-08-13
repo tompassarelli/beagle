@@ -346,11 +346,6 @@
 
 ;; --- Command handlers --------------------------------------------------------
 
-(define (checked-program/file path)
-  (define prog (parse-program/file path))
-  (type-check! prog)
-  prog)
-
 (define (callable-form? form)
   (or (defn-form? form) (defn-multi? form)))
 
@@ -495,47 +490,68 @@
         (hash-set result key value))
       (hash-set base 'arities details)))
 
+(define (signature-clause-detail->jsexpr detail)
+  (define result
+    (hasheq
+     'params
+     (for/list ([param (in-list (hash-ref detail 'params))])
+       (hasheq 'name (car param)
+               'type (public-type->string (cdr param))))
+     'return (public-type->string (hash-ref detail 'return))))
+  (define rest-param (hash-ref detail 'rest))
+  (if rest-param
+      (hash-set result 'rest
+                (hasheq 'name (car rest-param)
+                        'type (public-type->string (cdr rest-param))))
+      result))
+
+(define (signature-match->jsexpr match)
+  (define details
+    (map signature-clause-detail->jsexpr (hash-ref match 'clauses)))
+  (define base
+    (hasheq 'name (symbol->string (hash-ref match 'name))
+            'file (hash-ref match 'file)
+            'namespace (symbol->string (hash-ref match 'namespace))
+            'line (or (hash-ref match 'line) 'null)
+            'col (or (hash-ref match 'col) 'null)
+            'signature (public-type->string (hash-ref match 'signature))))
+  (cond
+    [(hash-ref match 'extern?) (hash-set base 'extern #t)]
+    [(= (length details) 1)
+     (for/fold ([result base]) ([(key value) (in-hash (car details))])
+       (hash-set result key value))]
+    [else (hash-set base 'arities details)]))
+
 (define (handle-sig args)
   (when (< (length args) 2)
     (error "sig requires: <fn-name> <file-or-dir>..."))
   (define name (car args))
   (define files (find-rkt-in (cdr args)))
-  (define results '())
-  (define target (string->symbol name))
-  (for ([f (in-list files)])
-    (define prog (checked-program/file f))
-    (for ([raw-form (in-list (program-forms prog))])
-      (define form (unwrap-definition-form raw-form))
-      (when (and (callable-form? form)
-                 (eq? (callable-name form) target))
-        (define signature (effective-callable-type prog form))
-        (set! results
-              (cons (callable-result name f form signature) results))))
-    (define extern-type (hash-ref (program-externs prog) target #f))
-    (when extern-type
-      (set! results
-            (cons (hasheq 'name name
-                          'file f
-                          'signature (public-type->string extern-type)
-                          'extern #t)
-                  results))))
-  (hasheq 'ok #t 'results (reverse results)))
+  (define results (query-signature-matches name files))
+  (when (null? results)
+    (raise-user-error 'beagle-sig
+                      "callable ~a not found in provided files"
+                      name))
+  (hasheq 'ok #t 'results (map signature-match->jsexpr results)))
 
 (define (handle-fields args)
   (when (< (length args) 2)
     (error "fields requires: <record-name> <file-or-dir>..."))
   (define rec-name (car args))
   (define files (expand-fields-file-args (cdr args)))
-  (define matches
-    (query-field-matches rec-name files #:read-datums get-datums))
-  (define name-lower (string-downcase rec-name))
+  (define matches (query-field-matches rec-name files))
   (hasheq
    'ok #t
    'results
    (for/list ([match (in-list matches)])
+     (define record-name (cadr match))
      (define fields (caddr match))
-     (hasheq 'record rec-name
+     (define name-lower (string-downcase (symbol->string record-name)))
+     (hasheq 'record (symbol->string record-name)
              'file (car match)
+             'namespace (symbol->string (cadddr match))
+             'line (or (list-ref match 4) 'null)
+             'col (or (list-ref match 5) 'null)
              'fields (for/list ([fld (in-list fields)])
                        (hasheq 'name (symbol->string (param-name fld))
                                'type (type->string (param-type fld))

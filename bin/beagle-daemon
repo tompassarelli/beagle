@@ -5,6 +5,7 @@ source "$(dirname "$0")/_beagle-daemon-files"
 
 PORTFILE="$BEAGLE_DAEMON_PORTFILE_PRIMARY"
 PIDFILE="$BEAGLE_DAEMON_PIDFILE_PRIMARY"
+IDENTITYFILE="$BEAGLE_DAEMON_IDENTITYFILE_PRIMARY"
 export BEAGLE_DAEMON_PORTFILE="$PORTFILE"
 
 # Mirror the runtime files into the repo (.beagle/run) so sandboxed processes
@@ -13,11 +14,13 @@ mirror_runtime_files() {
     mkdir -p "$BEAGLE_DAEMON_RUN_LOCAL" 2>/dev/null || return 0
     cp -f "$PORTFILE" "$BEAGLE_DAEMON_PORTFILE_MIRROR" 2>/dev/null || true
     cp -f "$PIDFILE" "$BEAGLE_DAEMON_PIDFILE_MIRROR" 2>/dev/null || true
+    cp -f "$IDENTITYFILE" "$BEAGLE_DAEMON_IDENTITYFILE_MIRROR" 2>/dev/null || true
 }
 
 clean_runtime_files() {
-    rm -f "$PORTFILE" "$PIDFILE" \
-          "$BEAGLE_DAEMON_PORTFILE_MIRROR" "$BEAGLE_DAEMON_PIDFILE_MIRROR"
+    rm -f "$PORTFILE" "$PIDFILE" "$IDENTITYFILE" \
+          "$BEAGLE_DAEMON_PORTFILE_MIRROR" "$BEAGLE_DAEMON_PIDFILE_MIRROR" \
+          "$BEAGLE_DAEMON_IDENTITYFILE_MIRROR"
 }
 
 usage() {
@@ -73,8 +76,8 @@ get_port() {
 
 send_query() {
     local port
-    port=$(get_port)
-    if [[ -z "$port" ]] || ! is_running; then
+    port="$(beagle_daemon_compatible_port || true)"
+    if [[ -z "$port" ]]; then
         # Fallback: one-shot mode (no persistent daemon)
         echo -e "$*\nquit" | "$RACKET" -e '(require beagle/private/daemon) (run-daemon)' 2>/dev/null | head -1
         return
@@ -88,13 +91,38 @@ send_query() {
     echo "$response"
 }
 
+stop_running_daemon() {
+    local pid port
+    pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+    port="$(get_port)"
+    if [[ -n "$port" ]]; then
+        (exec 3<>/dev/tcp/127.0.0.1/"$port" && echo "quit" >&3 && exec 3>&-) 2>/dev/null || true
+        sleep 0.2
+    fi
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+    clean_runtime_files
+}
+
 cmd_start() {
-    if is_running; then
+    local compatible_port identity
+    compatible_port="$(beagle_daemon_compatible_port || true)"
+    if [[ -n "$compatible_port" ]] && is_running; then
         echo "Daemon already running (pid $(cat "$PIDFILE"), port $(get_port))" >&2
         exit 0
     fi
 
+    if is_running; then
+        echo "Replacing daemon from a different compiler closure." >&2
+        stop_running_daemon
+    fi
+
     clean_runtime_files
+    identity="$(beagle_compiler_identity)" || {
+        echo "Cannot identify this Beagle compiler closure." >&2
+        exit 1
+    }
 
     "$RACKET" -e '(require beagle/private/daemon) (run-daemon-tcp)' &
     local pid=$!
@@ -129,6 +157,8 @@ cmd_start() {
 
     local port
     port=$(get_port)
+    printf '%s\n' "$identity" > "$IDENTITYFILE"
+    chmod 0600 "$IDENTITYFILE"
     mirror_runtime_files
     echo "Daemon started (pid $pid, port $port)" >&2
 }
@@ -141,28 +171,16 @@ cmd_stop() {
     fi
 
     local pid
-    pid=$(cat "$PIDFILE")
-
-    # Try graceful quit first
-    local port
-    port=$(get_port)
-    if [[ -n "$port" ]]; then
-        (exec 3<>/dev/tcp/127.0.0.1/"$port" && echo "quit" >&3 && exec 3>&-) 2>/dev/null || true
-        sleep 0.2
-    fi
-
-    # Force if still alive
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null || true
-    fi
-
-    clean_runtime_files
+    pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+    stop_running_daemon
     echo "Daemon stopped (pid $pid)" >&2
 }
 
 cmd_status() {
-    if is_running; then
+    if [[ -n "$(beagle_daemon_compatible_port || true)" ]] && is_running; then
         send_query "ping"
+    elif is_running; then
+        echo '{"ok":false,"status":"stale","message":"daemon compiler closure does not match this checkout"}'
     else
         echo '{"ok":false,"status":"stopped"}'
         # Only clean when we can actually SEE the primary location: a sandboxed

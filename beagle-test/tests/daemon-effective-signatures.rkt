@@ -79,3 +79,56 @@
       (check-false
        (regexp-match? #rx"Any|\\?[0-9]+" (jsexpr->string response))))
     (lambda () (delete-file path))))
+
+(test-case "daemon reports a missing callable with the direct-query error"
+  (define path (make-temporary-file "beagle-daemon-missing-~a.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (write-source!
+       path
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns daemon.missing)\n"
+        "(defn present [] Int 1)\n"))
+      (define response
+        (car (run-commands (list (format "sig missing ~a" path)))))
+      (check-false (hash-ref response 'ok))
+      (check-equal?
+       (hash-ref response 'error)
+       "beagle-sig: callable missing not found in provided files"))
+    (lambda () (delete-file path))))
+
+(test-case "daemon fields and generated signatures share the checked AST"
+  (define path (make-temporary-file "beagle-daemon-query-~a.bjs"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (write-source!
+       path
+       (string-append
+        "#lang beagle/js\n"
+        "(ns daemon.query)\n"
+        "(js/export (defrecord Reading [(value Float)]))\n"))
+      (define responses
+        (run-commands
+         (list (format "fields daemon.query/Reading ~a" path)
+               (format "sig reading-value ~a" path)
+               (format "sig daemon.query/->Reading ~a" path))))
+      (define fields-response (list-ref responses 0))
+      (define accessor-response (list-ref responses 1))
+      (define constructor-response (list-ref responses 2))
+      (check-true (hash-ref fields-response 'ok))
+      (define record-result (car (hash-ref fields-response 'results)))
+      (check-equal? (hash-ref record-result 'namespace) "daemon.query")
+      (check-equal? (hash-ref record-result 'line) 3)
+      (check-equal?
+       (hash-ref (car (hash-ref record-result 'fields)) 'type)
+       "Float")
+      (check-equal?
+       (result-signature accessor-response)
+       "[Reading -> Float]")
+      (check-equal?
+       (result-signature constructor-response)
+       "[Float -> Reading]"))
+    (lambda () (delete-file path))))

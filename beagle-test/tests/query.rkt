@@ -9,8 +9,15 @@
 (require rackunit
          racket/file
          racket/port
+         racket/runtime-path
          racket/string
+         racket/system
          beagle/private/query)
+
+(define-runtime-path CANONICAL-FIXTURE "fixtures/query/canonical.bjs")
+(define-runtime-path RETIRED-FLAT-FIXTURE
+  "fixtures/query/invalid/retired-flat.bjs")
+(define-runtime-path DAEMON-FILES "../../bin/_beagle-daemon-files")
 
 (define (with-query-file source proc)
   (define f (make-temporary-file "query~a.bgl"))
@@ -28,6 +35,34 @@
    (lambda (f)
      (with-output-to-string
        (lambda () (run-query (append args (list f))))))))
+
+(define (fixture-query-output fixture args)
+  (with-output-to-string
+    (lambda ()
+      (run-query
+       (append args (list (path->string fixture)))))))
+
+(define (run-daemon-files-helper scratch command)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define script
+    (string-append
+     "export BEAGLE_DAEMON_PORTFILE=\"$1/daemon.port\"; "
+     "export BEAGLE_DAEMON_PIDFILE=\"$1/daemon.pid\"; "
+     "export BEAGLE_DAEMON_IDENTITYFILE=\"$1/daemon.identity\"; "
+     "source \"$2\"; "
+     command))
+  (define status
+    (parameterize ([current-output-port out]
+                   [current-error-port err])
+      (system*/exit-code
+       (find-executable-path "bash")
+       "-c"
+       script
+       "daemon-routing-test"
+       (path->string scratch)
+       (path->string DAEMON-FILES))))
+  (values status (get-output-string out) (get-output-string err)))
 
 (define SRC
   (string-append
@@ -78,6 +113,12 @@
    out)
   (check-regexp-match #rx"  \\[x y\\] : \\(HVec Int String\\)" out))
 
+(test-case "sig: associative destructuring comes from the checked AST"
+  (define out
+    (fixture-query-output CANONICAL-FIXTURE '("sig" "point-x")))
+  (check-regexp-match #rx"point-x : \\[Point -> Float\\]" out)
+  (check-regexp-match #rx"  \\{:keys \\[x y\\]\\} : Point" out))
+
 (test-case "sig: multi-arity headline and clause details use effective types"
   (define out (query-output SRC '("sig" "overloaded")))
   (check-regexp-match
@@ -95,6 +136,97 @@
   (check-regexp-match #rx"a : Int" out)
   (check-regexp-match #rx"b : Bool" out))
 
+(test-case "fields: exported records use the checked canonical AST"
+  (define out
+    (fixture-query-output CANONICAL-FIXTURE '("fields" "World")))
+  (check-regexp-match #rx"players : \\(Vec String\\)" out)
+  (check-regexp-match #rx"elapsed : Float" out)
+  (check-regexp-match #rx"constructor: ->World" out))
+
+(test-case "fields: a qualified target selects its source namespace"
+  (define out
+    (fixture-query-output
+     CANONICAL-FIXTURE
+     '("fields" "query.fixture/TerrainInterest")))
+  (check-regexp-match #rx"position : \\(Vec Float\\)" out)
+  (define match
+    (car (query-field-matches
+          "query.fixture/TerrainInterest"
+          (list (path->string CANONICAL-FIXTURE)))))
+  (check-equal? (cadddr match) 'query.fixture)
+  (check-equal? (list-ref match 4) 6))
+
+(test-case "sig: generated record accessor and constructor are queryable"
+  (define accessor-out
+    (fixture-query-output
+     CANONICAL-FIXTURE
+     '("sig" "terraininterest-position")))
+  (check-regexp-match
+   #rx"terraininterest-position : \\[TerrainInterest -> \\(Vec Float\\)\\]"
+   accessor-out)
+  (check-regexp-match #rx"  r : TerrainInterest" accessor-out)
+  (define constructor-out
+    (fixture-query-output CANONICAL-FIXTURE '("sig" "->World")))
+  (check-regexp-match
+   #rx"->World : \\[\\(Vec String\\) Float -> World\\]"
+   constructor-out))
+
+(test-case "sig: qualified lookup is nonempty and preserves source metadata"
+  (define matches
+    (query-signature-matches
+     "query.fixture/player-collision-radius"
+     (list (path->string CANONICAL-FIXTURE))))
+  (check-equal? (length matches) 1)
+  (define match (car matches))
+  (check-equal? (hash-ref match 'namespace) 'query.fixture)
+  (check-equal? (hash-ref match 'line) 18)
+  (check-regexp-match
+   #rx"query.fixture/player-collision-radius : \\[ -> Float\\]"
+   (fixture-query-output
+    CANONICAL-FIXTURE
+    '("sig" "query.fixture/player-collision-radius"))))
+
+(test-case "sig: a missing callable fails instead of exiting successfully empty"
+  (check-exn
+   #rx"beagle-sig: callable missing not found in provided files"
+   (lambda ()
+     (fixture-query-output CANONICAL-FIXTURE '("sig" "missing")))))
+
+(test-case "query routing rejects a daemon from another compiler closure"
+  (define scratch (make-temporary-file "beagle-daemon-routing-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define-values (identity-status identity _identity-error)
+        (run-daemon-files-helper scratch "beagle_compiler_identity"))
+      (check-equal? identity-status 0)
+      (call-with-output-file (build-path scratch "daemon.port")
+        #:exists 'truncate/replace
+        (lambda (out) (display "4242\n" out)))
+      (call-with-output-file (build-path scratch "daemon.identity")
+        #:exists 'truncate/replace
+        (lambda (out) (display identity out)))
+      (define-values (matching-status matching-port _matching-error)
+        (run-daemon-files-helper scratch "beagle_daemon_compatible_port"))
+      (check-equal? matching-status 0)
+      (check-equal? matching-port "4242\n")
+      (call-with-output-file (build-path scratch "daemon.identity")
+        #:exists 'truncate/replace
+        (lambda (out) (display "stale\n" out)))
+      (define-values (stale-status stale-port _stale-error)
+        (run-daemon-files-helper scratch "beagle_daemon_compatible_port"))
+      (check-not-equal? stale-status 0)
+      (check-equal? stale-port ""))
+    (lambda () (delete-directory/files scratch))))
+
+(test-case "fields: retired flat fields are refused by the canonical parser"
+  (check-exn
+   #rx"use \\[\\(name Type\\) \\(name2 Type2\\) \\.\\.\\.\\]"
+   (lambda ()
+     (fixture-query-output
+      RETIRED-FLAT-FIXTURE
+      '("fields" "Retired")))))
+
 (test-case "fields: empty source fails with the missing record"
   (check-exn
    #rx"beagle-fields: record Missing not found in provided files"
@@ -103,14 +235,14 @@
       ""
       (lambda (f) (run-query (list "fields" "Missing" f)))))))
 
-(test-case "fields: reader failure reports its path"
+(test-case "fields: checked-program failure reports its path"
   (check-exn
-   #rx"beagle-fields: failed to read /unreadable[.]bgl: reader: denied"
+   #rx"beagle-fields: failed to check /unreadable[.]bgl: reader: denied"
    (lambda ()
      (query-field-matches
       "Missing"
       '("/unreadable.bgl")
-      #:read-datums (lambda (_f) (error 'reader "denied"))))))
+      #:load-program (lambda (_f) (error 'reader "denied"))))))
 
 (test-case "fields: missing input path fails pointedly"
   (define missing (make-temporary-file "query-missing~a.bgl"))
