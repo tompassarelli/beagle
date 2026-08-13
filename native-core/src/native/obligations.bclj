@@ -2575,10 +2575,11 @@
         (let [(definition (U core/TypeDef Nil))
               (core/type-definition-with-id types result)]
           (and (some? definition)
-            (= "Nil" (core/typedef-name definition))))))))
+            (= "Unit" (core/typedef-name definition))))))))
 
 (defn tile-kernel-instruction-valid?
-  [(kernel core/FunctionDef)
+  [(types (Vec core/TypeDef))
+   (kernel core/FunctionDef)
    (instruction core/Instruction)] Bool
   (let [(parameters (Vec core/Parameter))
         (core/functiondef-parameters kernel)
@@ -2588,6 +2589,7 @@
       (instance? native.core.AtomInstruction instruction)
       (not (instance? native.core.RefAtom
              (core/atominstruction-atom instruction)))
+      (instance? native.core.ArenaInstruction instruction) true
       (instance? native.core.CopyInstruction instruction) true
       (instance? native.core.AddF64Instruction instruction) true
       (instance? native.core.SubF64InstructionV0 instruction) true
@@ -2597,6 +2599,21 @@
       (instance? native.core.CheckedInstruction instruction) true
       (instance? native.core.BitwiseInstructionV0 instruction) true
       (instance? native.core.CompareInstruction instruction) true
+      ;; Checked integer arithmetic lowers to an outcome followed by its
+      ;; statically known success projection. Kernel parameters cannot carry an
+      ;; arbitrary union, so this remains confined to scalar checked results.
+      (instance? native.core.VariantValueInstruction instruction) true
+      ;; Nil is represented by the payload-free Unit variant.
+      (instance? native.core.UnionConstructInstruction instruction)
+      (let [(definition (U core/TypeDef Nil))
+            (core/type-definition-with-id types
+              (core/ssavaluev0-type-id
+                (core/unionconstructinstruction-result instruction)))]
+        (and (nil? (core/unionconstructinstruction-payload-id instruction))
+          (some? definition)
+          (if (nil? definition)
+            false
+            (= "Unit" (core/typedef-name definition)))))
       (instance? native.core.BufferLengthInstructionV0 instruction)
       (let [(source core/NativeId)
             (core/bufferlengthinstructionv0-source-id instruction)]
@@ -2609,12 +2626,14 @@
         (core/buffersetcheckedinstructionv0-source-id instruction) next)
       :else false)))
 
-(defn tile-kernel-leaf-valid? [(kernel core/FunctionDef)] Bool
+(defn tile-kernel-leaf-valid?
+  [(types (Vec core/TypeDef))
+   (kernel core/FunctionDef)] Bool
   (every?
     (fn [(block core/BasicBlock)] Bool
       (every?
         (fn [(instruction core/Instruction)] Bool
-          (tile-kernel-instruction-valid? kernel instruction))
+          (tile-kernel-instruction-valid? types kernel instruction))
         (core/basicblock-instructions block)))
     (core/functiondef-blocks kernel)))
 
@@ -2672,7 +2691,8 @@
           (and
             (tile-kernel-signature-valid?
               (core/nativecoreprogram-types program) kernel)
-            (tile-kernel-leaf-valid? kernel)
+            (tile-kernel-leaf-valid?
+              (core/nativecoreprogram-types program) kernel)
             (not (function-id-abi-visible?
                    (core/nativecoreprogram-abis program)
                    (core/functiondef-id kernel)))

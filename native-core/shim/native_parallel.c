@@ -471,9 +471,8 @@ static native_parallel_report_v0 native_parallel_run(
     const native_buffer *current, native_buffer *next,
     const native_capability *owner, int64_t tile_width, int64_t left_halo,
     int64_t right_halo, native_parallel_boundary_v0 boundary,
-    native_parallel_f64_tile_fn_v0 kernel, void *context, double *partials,
-    int32_t *statuses, uint8_t *coverage, native_buffer *shadow,
-    int64_t partition_count) {
+    native_parallel_f64_tile_fn_v0 kernel, void *context,
+    native_buffer *shadow, int64_t partition_count) {
   int64_t partition;
   native_parallel_report_v0 report;
   (void)pthread_mutex_lock(&runtime->mutex);
@@ -511,9 +510,6 @@ static native_parallel_report_v0 native_parallel_run(
   runtime->boundary = boundary;
   runtime->kernel = kernel;
   runtime->context = context;
-  runtime->partials = partials;
-  runtime->statuses = statuses;
-  runtime->coverage = coverage;
   if (partition_count == INT64_C(0)) {
     runtime->active = false;
     report = native_parallel_report(NATIVE_PARALLEL_OK_V0, runtime->workers,
@@ -526,7 +522,7 @@ static native_parallel_report_v0 native_parallel_run(
     (void)pthread_mutex_unlock(&runtime->mutex);
     for (partition = 0; partition < partition_count; ++partition) {
       int32_t status = native_parallel_execute_partition(runtime, partition);
-      statuses[partition] = status;
+      runtime->statuses[partition] = status;
       runtime->claimed++;
       runtime->completed++;
       if (status != 0) {
@@ -603,8 +599,7 @@ native_parallel_report_v0 native_parallel_tiled_step_f64_v0(
   shadow.elements = runtime->shadow_elements;
   report = native_parallel_run(
       runtime, NATIVE_PARALLEL_JOB_STEP, current, next, owner, tile_width,
-      left_halo, right_halo, boundary, kernel, context, NULL,
-      runtime->statuses, runtime->coverage, &shadow, partitions);
+      left_halo, right_halo, boundary, kernel, context, &shadow, partitions);
   if (report.outcome == NATIVE_PARALLEL_OK_V0) {
     for (index = 0; index < current->length; ++index) {
       if (runtime->coverage[index] == UINT8_C(0)) {
@@ -647,7 +642,7 @@ native_parallel_report_v0 native_parallel_f64_buffer_sum_v0(
   report = native_parallel_run(
       runtime, NATIVE_PARALLEL_JOB_SUM, source, NULL, owner, tile_width,
       INT64_C(0), INT64_C(0), NATIVE_PARALLEL_BOUNDARY_BOUNDED_V0, NULL, NULL,
-      runtime->partials, runtime->statuses, NULL, NULL, partitions);
+      NULL, partitions);
   if (report.outcome == NATIVE_PARALLEL_OK_V0 && partitions != INT64_C(0)) {
     active = partitions;
     while (active > INT64_C(1)) {

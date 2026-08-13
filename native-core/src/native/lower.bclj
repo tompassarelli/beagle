@@ -17321,15 +17321,48 @@
     "v0"
     layouts-digest))
 
+(defn function-id-is-tiled-kernel?
+  [(functions (Vec core/FunctionDef))
+   (target core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (and
+                      (instance? native.core.TiledStepF64InstructionV0
+                        instruction)
+                      (core/native-id=
+                        (core/tiledstepf64instructionv0-kernel-id instruction)
+                        target)))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      functions)))
+
+(defn public-ready-functions
+  [(typed-functions (Vec TypedFunctionV0))
+   (functions (Vec core/FunctionDef))] (Vec TypedFunctionV0)
+  (filterv
+    (fn [(function TypedFunctionV0)] Bool
+      (and (ready-function? function)
+        (not (function-id-is-tiled-kernel? functions
+               (typedfunctionv0-id function)))))
+    typed-functions))
+
 (defn function-abis
   [(functions (Vec TypedFunctionV0))
+   (native-functions (Vec core/FunctionDef))
    (layouts (Vec core/LayoutDef))]
   (Vec core/AbiDeclV0)
   (let [(digest String) (layout-digest layouts)]
     (mapv
       (fn [(function TypedFunctionV0)] core/AbiDeclV0
         (function-abi function digest))
-      (ready-functions functions))))
+      (public-ready-functions functions native-functions))))
 
 (defn host-environment-abi
   [(result-type core/NativeId) (layouts-digest String)] core/AbiDeclV0
@@ -17461,11 +17494,13 @@
 
 (defn slice-abis
   [(functions (Vec TypedFunctionV0))
+   (native-functions (Vec core/FunctionDef))
    (types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))]
   (Vec core/AbiDeclV0)
   (let [(digest String) (layout-digest layouts)
-        (exports (Vec core/AbiDeclV0)) (function-abis functions layouts)
+        (exports (Vec core/AbiDeclV0))
+        (function-abis functions native-functions layouts)
         (with-environment (Vec core/AbiDeclV0))
         (if (not (any-function-uses-environment? functions))
           exports
@@ -18746,7 +18781,7 @@
         (typed-functions (Vec TypedFunctionV0)) (typedslicev0-functions slice)
         (functions (Vec core/FunctionDef)) (lower-ready-functions typed-functions)
         (abis (Vec core/AbiDeclV0))
-        (slice-abis typed-functions types layouts)
+        (slice-abis typed-functions functions types layouts)
         (effects (Vec core/EffectDef)) (typedslicev0-effects slice)
         (regions (Vec core/RegionDef)) (typedslicev0-regions slice)
         (capabilities (Vec core/CapabilityDef)) (typedslicev0-capabilities slice)
@@ -18776,7 +18811,7 @@
         (functions-ready Bool) (all-functions-ready? typed-functions)
         (legal-abi Bool)
         (and (> (count functions) 0)
-          (= (+ (count functions)
+          (= (+ (count (public-ready-functions typed-functions functions))
                (if (any-function-uses-environment? typed-functions) 1 0)
                (if (any-function-uses-stdout? typed-functions) 1 0)
                (if (any-function-uses-host-clock? typed-functions) 1 0)

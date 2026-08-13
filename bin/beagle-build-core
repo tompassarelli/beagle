@@ -265,6 +265,7 @@ bb -cp "$compiled" -e '
          (quote [native.lower :as lower])
          (quote [native.obligations :as obligations])
          (quote [native.slice :as slice])
+         (quote [native.c11 :as c11])
          (quote [native.body-c17 :as body])
          (quote [native.body-slice :as body-slice])
          (quote [native.qbe :as qbe])
@@ -602,6 +603,20 @@ bb -cp "$compiled" -e '
                     (core/functiondef-blocks function)))
           (core/nativecoreprogram-functions program)))
 
+(defn program-has-parallel? [program]
+  (some? (some #(or
+                  (instance? native.core.TiledStepF64InstructionV0 %)
+                  (instance? native.core.F64BufferSumInstructionV0 %))
+               (parallel-instructions program))))
+
+(defn c11-parallel-refusal-report [program]
+  (if-not (program-has-parallel? program)
+    ""
+    (let [result (c11/materialize-program program 0)]
+      (if (instance? native.c11.C11Failure result)
+        (str "c11-parallel REFUSED " (c11/c11failure-detail result) "\n")
+        "c11-parallel INVALID accepted\n"))))
+
 (defn parallel-kernel-name [program target]
   (or (some (fn [function]
               (when (core/native-id= (core/functiondef-id function) target)
@@ -672,6 +687,7 @@ bb -cp "$compiled" -e '
        "projected-types " (count (core/nativecoreprogram-types projected)) "\n"
        (body-slice/function-report (core/nativecoreprogram-functions projected))
        (parallel-plan-report projected)
+       (c11-parallel-refusal-report projected)
        (slice/obligation-report "obligation-projection" projected abi)
        (body-slice/failing-obligations projected abi)))
 
@@ -679,14 +695,20 @@ bb -cp "$compiled" -e '
   (start-stage! "materialization-c17")
   (let [result (body/materialize-program-for-abi projected 0 abi-id)
         ok? (body/materialization-ok? result)
-        report (str "materialize-c17 "
-                    (if ok?
-                      (let [artifact (body/materialization-artifact result)]
-                        (str "OK "
-                             (body/bodyartifactv0-header-name artifact) " "
-                             (body/bodyartifactv0-source-name artifact)))
-                      (str "REFUSED " (body/materialization-detail result)))
-                    "\n")]
+        parallel-wasm-refusal? (and (= abi-id "wasm32")
+                                    (program-has-parallel? projected)
+                                    (not ok?))
+        report (if parallel-wasm-refusal?
+                 (str "wasm-parallel REFUSED "
+                      (body/materialization-detail result) "\n")
+                 (str "materialize-c17 "
+                      (if ok?
+                        (let [artifact (body/materialization-artifact result)]
+                          (str "OK "
+                               (body/bodyartifactv0-header-name artifact) " "
+                               (body/bodyartifactv0-source-name artifact)))
+                        (str "REFUSED " (body/materialization-detail result)))
+                      "\n"))]
     (if-not ok?
       (do
         (finish-stage! "materialization-c17" "REFUSED")
@@ -705,12 +727,16 @@ bb -cp "$compiled" -e '
   (start-stage! "materialization-qbe")
   (let [result (qbe/materialize-program projected 0 abi-id)
         ok? (instance? native.qbe.QbeSuccess result)
-        report (str "materialize-qbe "
-                    (if ok?
-                      (let [artifact (qbe/qbesuccess-artifact result)]
-                        (str "OK " (qbe/qbeartifact-module-name artifact)))
-                      (str "REFUSED " (qbe/qbefailure-detail result)))
-                    "\n")]
+        parallel-refusal? (and (program-has-parallel? projected) (not ok?))
+        report (if parallel-refusal?
+                 (str "qbe-parallel REFUSED "
+                      (qbe/qbefailure-detail result) "\n")
+                 (str "materialize-qbe "
+                      (if ok?
+                        (let [artifact (qbe/qbesuccess-artifact result)]
+                          (str "OK " (qbe/qbeartifact-module-name artifact)))
+                        (str "REFUSED " (qbe/qbefailure-detail result)))
+                      "\n"))]
     (if-not ok?
       (do
         (finish-stage! "materialization-qbe" "REFUSED")

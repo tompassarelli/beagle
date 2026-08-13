@@ -1,0 +1,25 @@
+#lang beagle
+(ns native.parallel-source)
+(define-mode strict)
+
+(defn advect-tile!
+  [(current (Buffer Float))
+   (next (Buffer Float))
+   (partition-id Int)
+   (write-lo Int)
+   (write-hi Int)]
+  Nil
+  (do
+    partition-id
+    (loop [(index Int) write-lo]
+      (if (< index write-hi)
+        (do
+          (aset-double! next index (+ (aget current index) 1.0))
+          (recur (+ index 1)))
+        nil))))
+
+(defn parallel-entry! [] Float
+  (let [current (double-array 8)
+        next (double-array 8)]
+    (native/tiled-step! current next 2 1 0 :periodic advect-tile!)
+    (native/f64-buffer-sum next 2)))
