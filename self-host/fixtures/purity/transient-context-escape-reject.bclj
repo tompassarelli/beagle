@@ -1,0 +1,23 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.transient-context-escape-reject)
+(define-mode strict)
+
+(defn container-escape [(xs Any)] Any
+  (let [owned (transient xs)]
+    [owned]))
+
+(defn unknown-call-escape [(sink Any) (xs Any)] Any
+  (let [owned (transient xs)]
+    (sink owned)
+    (persistent! owned)))
+
+(defn default-alias-escape [(input Any) (xs Any)] Any
+  (let [owned (transient xs)
+        {:keys [value] :or {value (conj! owned 1)}} input]
+    (persistent! owned)))
+
+(defn nested-definition-escape [(xs Any)] Any
+  (let [owned (transient xs)]
+    (defn publish [] Any
+      (conj! owned 1))
+    (persistent! owned)))

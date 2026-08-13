@@ -203,9 +203,49 @@ purity_verdict() { # purity_verdict <oracle|selfhost> <fixture> <stdout+stderr p
     sh_main check "$2" >"$3" 2>&1
   fi
 }
+purity_names() { # purity_names <stdout+stderr path>
+  python3 - "$1" <<'EOF'
+import re, sys
+with open(sys.argv[1], encoding="utf-8", errors="replace") as stream:
+    print("\n".join(re.findall(r"purity leak: '([^']+)'", stream.read())))
+EOF
+}
+purity_expected_names() { # purity_expected_names <fixture stem>
+  case "$1" in
+    borrowed-transient-reject) printf '%s\n' append-one ;;
+    destructure-shadow-default-reject) printf '%s\n' default-then-shadow ;;
+    direct-bang-reject) printf '%s\n' store ;;
+    direct-set-reject) printf '%s\n' replace-local ;;
+    export-reject) printf '%s\n' store ;;
+    mixed-transient-reject) printf '%s\n' mixed ;;
+    multi-arity-reject) printf '%s\n' write ;;
+    nested-reject) printf '%s\n' make-writer ;;
+    source-order-reject) printf '%s\n' outer middle inner ;;
+    target-case-reject) printf '%s\n' route ;;
+    transient-after-persistent-reject) printf '%s\n' mutate-after-persistent ;;
+    transient-alias-reject) printf '%s\n' alias-result ;;
+    transient-closure-reject) printf '%s\n' escape-closure ;;
+    transient-conditional-reject) printf '%s\n' conditional-owned ;;
+    transient-context-escape-reject)
+      printf '%s\n' container-escape unknown-call-escape default-alias-escape nested-definition-escape
+      ;;
+    transient-default-reject) printf '%s\n' default-effect ;;
+    transient-direct-escape-reject) printf '%s\n' expose ;;
+    transient-escape-reject) printf '%s\n' escape ;;
+    transient-lifetime-reject)
+      printf '%s\n' borrowed global-mutation consumed-in-one-branch shadowed-allocator shadowed-owner
+      ;;
+    transient-propagation-reject) printf '%s\n' caller wrapper borrowed-mutator ;;
+    transient-result-escape-reject) printf '%s\n' expose-result ;;
+    *-accept) : ;;
+    *) return 1 ;;
+  esac
+}
 if [ -d "$PURITY_DIR" ]; then
-  for fixture in "$PURITY_DIR"/*.bclj; do
-    pname="$(basename "$fixture" .bclj)"
+  for fixture in "$PURITY_DIR"/*.bclj "$PURITY_DIR"/*.bjs; do
+    [ -e "$fixture" ] || continue
+    pname="$(basename "$fixture")"
+    pname="${pname%.*}"
     case "$pname" in
       *-accept) expected=A ;;
       *-reject) expected=R ;;
@@ -221,23 +261,34 @@ if [ -d "$PURITY_DIR" ]; then
     ); s_exit=$?
     [ $o_exit -eq 0 ] && o_verdict=A || o_verdict=R
     [ $s_exit -eq 0 ] && s_verdict=A || s_verdict=R
+    o_names="$(purity_names "$LAB/$pname-purity-o.err")"
+    s_names="$(purity_names "$LAB/$pname-purity-s.err")"
+    expected_names="$(purity_expected_names "$pname")" || {
+      bad "$pname has no expected purity boundary list"
+      continue
+    }
     if [ "$o_verdict" != "$expected" ] || [ "$s_verdict" != "$expected" ]; then
       bad "$pname purity verdict (expected=$expected oracle=$o_verdict selfhost=$s_verdict)"
     elif [ "$expected" = R ] &&
          (! grep -q "purity leak" "$LAB/$pname-purity-o.err" ||
           ! grep -q "purity leak" "$LAB/$pname-purity-s.err"); then
       bad "$pname rejected for a non-purity reason"
+    elif [ "$o_names" != "$s_names" ]; then
+      bad "$pname purity definitions diverge | O: $o_names | S: $s_names"
+    elif [ "$o_names" != "$expected_names" ]; then
+      bad "$pname purity definitions differ from contract | expected: $expected_names | got: $o_names"
     else
-      ok "$pname purity parity ($expected)"
+      ok "$pname purity boundary parity ($expected)"
     fi
   done
 
   dial_fixture="$PURITY_DIR/direct-bang-reject.bclj"
-  for dial in off warn-profile-2 warn-profile-3; do
+  for dial in off warn-profile-2 warn-profile-3 error-profile-0; do
     case "$dial" in
       off) purity=off; profile=2; expected=A; warning=0 ;;
       warn-profile-2) purity=warn; profile=2; expected=A; warning=1 ;;
       warn-profile-3) purity=warn; profile=3; expected=R; warning=0 ;;
+      error-profile-0) purity=error; profile=0; expected=A; warning=0 ;;
     esac
     BEAGLE_PURITY="$purity" BEAGLE_CHECK_PROFILE="$profile" \
       purity_verdict oracle "$dial_fixture" "$LAB/$dial-purity-o.err"; o_exit=$?
@@ -245,12 +296,16 @@ if [ -d "$PURITY_DIR" ]; then
       purity_verdict selfhost "$dial_fixture" "$LAB/$dial-purity-s.err"; s_exit=$?
     [ $o_exit -eq 0 ] && o_verdict=A || o_verdict=R
     [ $s_exit -eq 0 ] && s_verdict=A || s_verdict=R
+    o_names="$(purity_names "$LAB/$dial-purity-o.err")"
+    s_names="$(purity_names "$LAB/$dial-purity-s.err")"
     if [ "$o_verdict" != "$expected" ] || [ "$s_verdict" != "$expected" ]; then
       bad "$dial purity dial (expected=$expected oracle=$o_verdict selfhost=$s_verdict)"
     elif [ "$warning" -eq 1 ] &&
          (! grep -q "warning: purity leak" "$LAB/$dial-purity-o.err" ||
           ! grep -q "warning: purity leak" "$LAB/$dial-purity-s.err"); then
       bad "$dial accepted without matching purity warnings"
+    elif [ "$o_names" != "$s_names" ]; then
+      bad "$dial purity definitions diverge | O: $o_names | S: $s_names"
     else
       ok "$dial purity dial parity ($expected)"
     fi

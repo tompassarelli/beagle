@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.transient-conditional-reject)
+(define-mode strict)
+
+(defn conditional-owned [(condition Bool) (xs Any)] Any
+  (let [owned (if condition (transient xs) xs)]
+    (conj! owned 1)
+    (persistent! owned)))

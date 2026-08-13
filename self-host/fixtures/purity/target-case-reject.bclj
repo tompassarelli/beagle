@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.target-case-reject)
+(define-mode strict)
+
+(defn route [(cell Any)] Any
+  (target-case :clj (reset! cell nil)))

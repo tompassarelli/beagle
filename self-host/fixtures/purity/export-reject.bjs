@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns selfhost.fixtures.purity.export-reject)
+(define-mode strict)
+
+(js/export
+  (defn store [(cell Any) (value Any)] Any
+    (reset! cell value)))

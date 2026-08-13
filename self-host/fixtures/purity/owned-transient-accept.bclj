@@ -1,0 +1,55 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.owned-transient-accept)
+(define-mode strict)
+
+(defn all-operations [(xs Any)] Any
+  (let [owned (transient xs)]
+    (assoc! owned 0 1)
+    (conj! owned 2)
+    (dissoc! owned 0)
+    (disj! owned 2)
+    (pop! owned)
+    (persistent! owned)))
+
+(defn both-branches [(condition Bool) (xs Any)] Any
+  (let [owned (transient xs)]
+    (if condition
+      (conj! owned 1)
+      (assoc! owned 0 2))
+    (persistent! owned)))
+
+(defn neutral-default [(input Any) (xs Any)] Any
+  (let [owned (transient xs)
+        {:keys [value] :or {value 0}} input]
+    (conj! owned value)
+    (persistent! owned)))
+
+(defn restored-owner-after-shadow [(xs Any)] Any
+  (let [owned (transient xs)]
+    (let [owned xs]
+      owned)
+    (conj! owned 1)
+    (persistent! owned)))
+
+(defn local-lifecycle
+  ([(xs Any)] Any
+    (let [owned (transient xs)]
+      (persistent! owned)))
+  ([(xs Any) (value Any)] Any
+    (let [owned (transient xs)]
+      (conj! owned value)
+      (persistent! owned))))
+
+(defn call-later-helper [(xs Any)] Any
+  (later-helper xs))
+
+(defn later-helper [(xs Any)] Any
+  (let [owned (transient xs)]
+    (conj! owned 1)
+    (persistent! owned)))
+
+(defn direct-freeze [(xs Any)] Any
+  (persistent! (transient xs)))
+
+(defn direct-pipeline [(xs Any)] Any
+  (persistent! (conj! (transient xs) 1)))

@@ -1,0 +1,11 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.destructure-shadow-default-reject)
+(define-mode strict)
+
+(defn writer! [(cell Any) (value Any)] Any
+  (reset! cell value))
+
+(defn default-then-shadow [(input Any) (cell Any)] Any
+  (let [{:keys [writer!]
+         :or {writer! (writer! cell nil)}} input]
+    (writer! nil)))

@@ -1,0 +1,17 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.shadowing-accept)
+(define-mode strict)
+
+(defn writer! [(cell Any) (value Any)] Any
+  (reset! cell value))
+
+(defn invoke [(writer! Any) (value Any)] Any
+  (writer! value))
+
+(defn invoke-nested [(writer! Any) (value Any)] Any
+  (let [writer! (fn [(item Any)] Any item)]
+    (writer! value)))
+
+(defn invoke-letfn [(value Any)] Any
+  (letfn [(writer! [(item Any)] Any item)]
+    (writer! value)))
