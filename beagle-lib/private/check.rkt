@@ -760,8 +760,6 @@
     (define macro-tbl (program-macro-derived-table prog))
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
-                   [current-parametric-members
-                    (list->seteq (hash-keys PARAMETRIC-MEMBER-UNION))]
                    [current-check-target (program-target prog)]
                    [current-semantic-contracts (program-semantic-contracts prog)]
                    [current-error-definitions (hasheq)]
@@ -771,26 +769,32 @@
       (call-with-fresh-type-metas
        (lambda ()
          (set! env (build-initial-env prog))
-         (define-values (regex-bindings regex-string-ops)
-           (prepare-and-infer-definition-types! prog env))
-         (parameterize ([current-regex-bindings regex-bindings]
-                        [current-regex-string-ops regex-string-ops])
-           (for ([form (in-list (program-forms prog))])
-             ;; Walk the form transitively — a top-level def-form may wrap a
-             ;; macro-derived value inside (def-form y "hello"). Setting the
-             ;; ctx on transitive matches lets raise-diag rebucket the error
-             ;; even when it fires on the outer def-form.
-             (define macro-ctx (form-macro-derived-ctx macro-tbl form))
-             (parameterize ([current-macro-expansion-ctx
-                             (if (eq? macro-ctx #f) #f macro-ctx)]
-                            [current-unstable-bindings (collect-set!-targets form)])
-               (check-target-form form)
-               (check-form form env)))
-           (check-module-interface-resolution! prog)
-           (check-qualified-resolution! prog env)
-           (check-scalar-provenance! prog)
-           (check-nix-free-dotted! prog)
-           (check-purity! prog)))))))
+         ;; Unlike the mutable union registries above, this parameter carries a
+         ;; snapshot.  Build the environment first so local and imported
+         ;; parametric members are present when the snapshot is taken.
+         (parameterize
+             ([current-parametric-members
+               (list->seteq (hash-keys PARAMETRIC-MEMBER-UNION))])
+           (define-values (regex-bindings regex-string-ops)
+             (prepare-and-infer-definition-types! prog env))
+           (parameterize ([current-regex-bindings regex-bindings]
+                          [current-regex-string-ops regex-string-ops])
+             (for ([form (in-list (program-forms prog))])
+               ;; Walk the form transitively — a top-level def-form may wrap a
+               ;; macro-derived value inside (def-form y "hello"). Setting the
+               ;; ctx on transitive matches lets raise-diag rebucket the error
+               ;; even when it fires on the outer def-form.
+               (define macro-ctx (form-macro-derived-ctx macro-tbl form))
+               (parameterize ([current-macro-expansion-ctx
+                               (if (eq? macro-ctx #f) #f macro-ctx)]
+                              [current-unstable-bindings (collect-set!-targets form)])
+                 (check-target-form form)
+                 (check-form form env)))
+             (check-module-interface-resolution! prog)
+             (check-qualified-resolution! prog env)
+             (check-scalar-provenance! prog)
+             (check-nix-free-dotted! prog)
+             (check-purity! prog))))))))
 
 ;; --- concrete native boundaries ---------------------------------------------
 
