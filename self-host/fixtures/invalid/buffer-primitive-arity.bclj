@@ -1,0 +1,8 @@
+#lang beagle
+(ns buffer-primitive-arity.test)
+
+(defn reject-double-array [] Any (double-array))
+(defn reject-alength [(buffer (Buffer Float))] Any (alength buffer 1))
+(defn reject-aget [(buffer (Buffer Float))] Any (aget buffer))
+(defn reject-aset-double! [(buffer (Buffer Float))] Any
+  (aset-double! buffer 0))

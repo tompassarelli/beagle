@@ -139,6 +139,7 @@
    en (count ep)]
   (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ep i) (nth ap i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? p ar)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? er ar))) (type-compatible? (get actual "ret") (get expected "ret"))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
+  (and (app-type? actual) (app-type? expected) (= (get actual "name") "Buffer") (= (get expected "name") "Buffer")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (dynamic-type? expected) (if (dynamic-type? actual) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args"))))) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "args"))))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
@@ -269,6 +270,10 @@
   nil)
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] ANY ANY) "-" (make-fn [ANY] ANY ANY) "*" (make-fn [] ANY ANY) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
+
+(def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
+
+(def CORE-STDLIB {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)})
 
 (def JVM-INSTANCE-POSITION-METHODS {"Socket/connect" true "java.net.Socket/connect" true})
 
@@ -1255,7 +1260,8 @@
 (defn build-initial-env! [prog]
   (let [externs (get prog "externs")
    forms (get prog "forms")
-   env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) STDLIB externs) STDLIB)
+   target-stdlib (if (= (get prog "target") "core") (merge STDLIB CORE-STDLIB) STDLIB)
+   env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
    dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
    env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
@@ -2138,6 +2144,14 @@
   (expect! "call: wrong arity" (let [prog {"mode" "strict" "namespace" "test" "target" "js" "forms" [(make-def-node "r" nil (make-call "add" [(make-lit "number" 1)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
+  (expect! "buffer primitive: double-array wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "double-array" []))]) "target" "core")]
+  (> (get (type-check! prog) "count") 0)))
+  (expect! "buffer primitive: alength wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "alength" []))]) "target" "core")]
+  (> (get (type-check! prog) "count") 0)))
+  (expect! "buffer primitive: aget wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "aget" [(make-ref "missing")]))]) "target" "core")]
+  (> (get (type-check! prog) "count") 0)))
+  (expect! "buffer primitive: aset-double! wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "aset-double!" [(make-ref "missing") (make-lit "number" 0)]))]) "target" "core")]
+  (> (get (type-check! prog) "count") 0)))
   (expect! "JVM instance-position: receiver excluded from declared arity" (let [prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-timeout" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket/connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
    result (type-check! prog)]
   (= (get result "count") 0)))
@@ -2264,6 +2278,9 @@
   (expect! "atom: (Atom Int) NOT ~ (Atom Any)" (not (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [ANY]))))
   (expect! "atom: (Atom Any) NOT ~ (Atom Int)" (not (type-compatible? (make-app "Atom" [ANY]) (make-app "Atom" [(make-prim "Int")]))))
   (expect! "atom: (Atom Int) NOT ~ (Atom String)" (not (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "String")]))))
+  (expect! "buffer: (Buffer Float) ~ (Buffer Float)" (type-compatible? (make-app "Buffer" [(make-prim "Float")]) (make-app "Buffer" [(make-prim "Float")])))
+  (expect! "buffer: (Buffer Float) NOT ~ (Buffer Any)" (not (type-compatible? (make-app "Buffer" [(make-prim "Float")]) (make-app "Buffer" [ANY]))))
+  (expect! "buffer: (Buffer Any) NOT ~ (Buffer Float)" (not (type-compatible? (make-app "Buffer" [ANY]) (make-app "Buffer" [(make-prim "Float")]))))
   (expect! "hvec: (HVec Int String) <: (Vec Any)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [ANY])))
   (expect! "hvec: (HVec Int Int) <: (Vec Int)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "Int")]) (make-app "Vec" [(make-prim "Int")])))
   (expect! "hvec: (HVec Int String) NOT <: (Vec Int)" (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Int")]))))

@@ -211,7 +211,7 @@
   (selfhost.rt/eprint (str "warning [capitalized-binding-name] `" (str name) "` bound as a " where " name — possible missing `(name Type)` wrapper?\n")))))))
   nil)
 
-(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
+(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Buffer"])
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
@@ -291,7 +291,7 @@
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (= (nth t 0) "Dyn")) (make-app "Dyn" (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (has-item? PARAMETRIC-CTORS (nth t 0)) (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0))))) (let [name (nth t 0)
-   expected (get (deref USER-PARAMETRIC-ARITIES) name)
+   expected (or (get (deref USER-PARAMETRIC-ARITIES) name) (if (= name "Buffer") 1 nil))
    actual (- (count t) 1)]
   (if (and (some? expected) (not (= expected actual))) (do
   (type-arity-error! name expected actual)
@@ -300,6 +300,9 @@
   (and (string? t) (some? (get (deref TYPE-ALIASES) t))) (get (deref TYPE-ALIASES) t)
   (and (string? t) (some? (get (deref USER-PARAMETRIC-ARITIES) t))) (let [expected (get (deref USER-PARAMETRIC-ARITIES) t)]
   (type-arity-error! t expected 0)
+  (make-prim "Any"))
+  (and (string? t) (= t "Buffer")) (do
+  (type-arity-error! t 1 0)
   (make-prim "Any"))
   (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?")) (let [base (subs t 0 (- (count t) 1))]
   (make-union [(parse-type! base) (make-prim "Nil")]))
@@ -2293,6 +2296,16 @@
   (expect! "parse-type! Vec app" (let [t (parse-type! ["Vec" "String"])]
   (and (= (get t "kind") "app") (= (get t "name") "Vec"))))
   (expect! "parse-type! Dyn preserves ordered alternatives" (= (parse-type! ["Dyn" "String" "Int"]) {"kind" "app" "name" "Dyn" "args" [{"kind" "prim" "name" "String"} {"kind" "prim" "name" "Int"}]}))
+  (expect! "parse-type! Buffer exact arity" (let [t (parse-type! ["Buffer" "Float"])]
+  (and (= (get t "kind") "app") (= (get t "name") "Buffer") (= (count (get t "args")) 1))))
+  (expect! "parse-type! Buffer rejects bare use" (do
+  (reset-errors!)
+  (parse-type! "Buffer")
+  (and (= (count (parse-errors)) 1) (str/includes? (nth (parse-errors) 0) "type Buffer expects 1 argument, got 0"))))
+  (expect! "parse-type! Buffer rejects too many arguments" (do
+  (reset-errors!)
+  (parse-type! ["Buffer" "Float" "Int"])
+  (and (= (count (parse-errors)) 1) (str/includes? (nth (parse-errors) 0) "type Buffer expects 1 argument, got 2"))))
   (expect! "parse-type! union" (let [t (parse-type! ["U" "Int" "String"])]
   (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
   (expect! "parse-type! clj alias Long" (= (parse-type! "Long") {"kind" "prim" "name" "Int"}))

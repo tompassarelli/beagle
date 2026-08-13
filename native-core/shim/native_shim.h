@@ -72,6 +72,9 @@ typedef struct native_buffer {
   int64_t length;
   int64_t stride;
   size_t alignment;
+  /* Every read/write capability may be a distinct IR capability definition,
+     but the host token identifies the one authority that created this Buffer. */
+  uint64_t owner_capability_token;
 } native_buffer;
 
 /* Borrowed octets. Distinct from native_bytes because nothing here owns or may
@@ -213,6 +216,10 @@ extern uint64_t native_vec_storage_allocations;
 /* Counts successful non-empty Buffer element-storage allocations. Checked
    reads and writes never change it. */
 extern uint64_t native_buffer_storage_allocations;
+
+/* Counts successful calls to native_arena_alloc. Two non-empty Buffer
+   constructions contribute four: one header and one dense element span each. */
+extern uint64_t native_arena_allocations;
 
 /* Text and Keyword handles are addresses of length-prefixed strict-UTF-8 blobs:
    an 8-byte native-endian uint64_t length, then exactly that many bytes.

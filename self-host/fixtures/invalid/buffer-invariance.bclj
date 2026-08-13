@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns buffer-invariance.test)
+
+(defn accept-any-buffer [(buffer (Buffer Any))] Nil nil)
+
+(defn reject-buffer-widening [(buffer (Buffer Float))] Nil
+  (accept-any-buffer buffer))

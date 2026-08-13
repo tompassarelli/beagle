@@ -3512,6 +3512,7 @@ struct native_arena_chunk {
 
 uint64_t native_vec_storage_allocations = UINT64_C(0);
 uint64_t native_buffer_storage_allocations = UINT64_C(0);
+uint64_t native_arena_allocations = UINT64_C(0);
 
 /* Smallest capacity a first push takes; every later growth doubles, which is
    what keeps a run of n pushes at O(log n) storage allocations. */
@@ -3621,6 +3622,7 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment) {
     aligned_offset = (size_t)(aligned - base);
   }
   arena->offset = aligned_offset + size;
+  native_arena_allocations += UINT64_C(1);
   return arena->bytes + aligned_offset;
 }
 
@@ -3771,14 +3773,24 @@ bool native_atom_compare_exchange(native_atom *atom,
   return matches;
 }
 
-static size_t native_vec_bytes(int64_t capacity, int64_t stride) {
+/* Tests may lower this ceiling to UINT32_MAX to exercise wasm32-sized counts
+   deterministically on a 64-bit host. Production always uses SIZE_MAX. */
+#ifndef NATIVE_DENSE_SIZE_MAX
+#define NATIVE_DENSE_SIZE_MAX SIZE_MAX
+#endif
+
+static size_t native_dense_bytes(int64_t capacity, int64_t stride) {
   if ((capacity < INT64_C(0)) || (stride <= INT64_C(0))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   if (capacity > (INT64_MAX / stride)) {
     native_trap(NATIVE_TRAP_OVERFLOW);
   }
-  return (size_t)(capacity * stride);
+  if ((uint64_t)capacity >
+      ((uint64_t)NATIVE_DENSE_SIZE_MAX / (uint64_t)stride)) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  return (size_t)((uint64_t)capacity * (uint64_t)stride);
 }
 
 static void native_buffer_require(const native_buffer *buffer,
@@ -3786,6 +3798,7 @@ static void native_buffer_require(const native_buffer *buffer,
                                   int64_t stride) {
   if ((buffer == NULL) || (capability == NULL) ||
       (capability->token == UINT64_C(0)) || (stride <= INT64_C(0)) ||
+      (capability->token != buffer->owner_capability_token) ||
       (buffer->length < INT64_C(0)) || (buffer->stride != stride) ||
       ((buffer->length > INT64_C(0)) && (buffer->elements == NULL))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -3803,7 +3816,7 @@ native_buffer *native_buffer_new(native_arena *arena,
       (alignment == 0U)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  bytes = native_vec_bytes(length, stride);
+  bytes = native_dense_bytes(length, stride);
   buffer = (native_buffer *)native_arena_alloc(
       arena, sizeof(*buffer), _Alignof(native_buffer));
   buffer->elements =
@@ -3811,6 +3824,7 @@ native_buffer *native_buffer_new(native_arena *arena,
   buffer->length = length;
   buffer->stride = stride;
   buffer->alignment = alignment;
+  buffer->owner_capability_token = capability->token;
   if (bytes != 0U) {
     memset(buffer->elements, 0, bytes);
     native_buffer_storage_allocations += UINT64_C(1);
@@ -3880,7 +3894,7 @@ native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride
                            size_t alignment) {
   native_vec *header =
       (native_vec *)native_arena_alloc(arena, sizeof(native_vec), _Alignof(native_vec));
-  size_t bytes = native_vec_bytes(capacity, stride);
+  size_t bytes = native_dense_bytes(capacity, stride);
   header->elements = (bytes == 0U) ? NULL : native_arena_alloc(arena, bytes, alignment);
   header->length = INT64_C(0);
   header->capacity = capacity;
@@ -3925,7 +3939,7 @@ native_vec *native_vec_assoc(native_arena *arena, const native_vec *vector,
   }
   result = native_vec_new(arena, vector->length, stride, alignment);
   memcpy(result->elements, vector->elements,
-         native_vec_bytes(vector->length, stride));
+         native_dense_bytes(vector->length, stride));
   memcpy((uint8_t *)result->elements + (size_t)(index * stride), value,
          (size_t)stride);
   native_vec_set_length(result, vector->length);
@@ -4010,8 +4024,8 @@ native_vec *native_vec_slice(native_arena *arena, const native_vec *source,
     native_trap(NATIVE_TRAP_OUT_OF_RANGE);
   }
   length = end - start;
-  source_offset = native_vec_bytes(start, stride);
-  byte_count = native_vec_bytes(length, stride);
+  source_offset = native_dense_bytes(start, stride);
+  byte_count = native_dense_bytes(length, stride);
   result = native_vec_new(arena, length, stride, alignment);
   if (byte_count != 0U) {
     memcpy(result->elements,
@@ -4032,9 +4046,9 @@ native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
   result = native_vec_new(arena, source->length, stride, alignment);
   for (position = INT64_C(0); position < source->length; ++position) {
     int64_t source_position = source->length - position - INT64_C(1);
-    memcpy((uint8_t *)result->elements + native_vec_bytes(position, stride),
+    memcpy((uint8_t *)result->elements + native_dense_bytes(position, stride),
            (const uint8_t *)source->elements +
-               native_vec_bytes(source_position, stride),
+               native_dense_bytes(source_position, stride),
            (size_t)stride);
   }
   native_vec_set_length(result, source->length);
@@ -5901,21 +5915,21 @@ native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
     int64_t insertion = position;
     memcpy(held,
            (const uint8_t *)result->elements +
-               native_vec_bytes(position, stride),
+               native_dense_bytes(position, stride),
            (size_t)stride);
     while (insertion > INT64_C(0)) {
       const void *previous =
           (const uint8_t *)result->elements +
-          native_vec_bytes(insertion - INT64_C(1), stride);
+          native_dense_bytes(insertion - INT64_C(1), stride);
       if (native_value_compare(element, previous, held) <= INT64_C(0)) {
         break;
       }
       memmove((uint8_t *)result->elements +
-                  native_vec_bytes(insertion, stride),
+                  native_dense_bytes(insertion, stride),
               previous, (size_t)stride);
       insertion -= INT64_C(1);
     }
-    memcpy((uint8_t *)result->elements + native_vec_bytes(insertion, stride),
+    memcpy((uint8_t *)result->elements + native_dense_bytes(insertion, stride),
            held, (size_t)stride);
   }
   return result;

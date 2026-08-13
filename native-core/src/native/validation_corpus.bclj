@@ -332,6 +332,365 @@
     (not (core/validationreport-passed
       (core/validate-program record-assoc-bad-source-program)))))
 
+;; Buffer instruction typing is frozen IR law, not an emitter assumption. The
+;; valid graph fixes the Buffer element type and native Int length/index. Each
+;; named negative changes one SSA type fact while keeping every ID closed.
+(def buffer-type core/TypeDef
+  (core/->TypeDef (corpus-id "buffer-type-f64") "BufferF64"
+    (core/->BufferTypeV0 (corpus-id "type-f64"))))
+
+(def buffer-i64-type core/TypeDef
+  (core/->TypeDef (corpus-id "buffer-type-i64") "BufferI64"
+    (core/->BufferTypeV0 (corpus-id "type-i64"))))
+
+(def buffer-layout core/LayoutDef
+  (core/->LayoutDef (corpus-id "buffer-layout-f64")
+    (corpus-id "buffer-type-f64") 8 8
+    (core/->BufferShapeV0 (corpus-id "type-f64") 8 8)))
+
+(def buffer-i64-layout core/LayoutDef
+  (core/->LayoutDef (corpus-id "buffer-layout-i64")
+    (corpus-id "buffer-type-i64") 8 8
+    (core/->BufferShapeV0 (corpus-id "type-i64") 8 8)))
+
+(def buffer-read-capability core/CapabilityDef
+  (core/->CapabilityDef (corpus-id "buffer-capability-read")
+    (core/->ReadCapability true) (corpus-id "assoc-region") true))
+
+(def buffer-write-capability core/CapabilityDef
+  (core/->CapabilityDef (corpus-id "buffer-capability-write")
+    (core/->WriteCapability true) (corpus-id "assoc-region") true))
+
+(def buffer-read-effect core/EffectDef
+  (core/->EffectDef (corpus-id "buffer-effect-read")
+    (core/->ReadEffect (corpus-id "assoc-region"))))
+
+(def buffer-write-effect core/EffectDef
+  (core/->EffectDef (corpus-id "buffer-effect-write")
+    (core/->WriteEffect (corpus-id "assoc-region"))))
+
+(def buffer-arena-instruction core/Instruction
+  (core/->ArenaInstruction
+    (core/->SsaValueV0 (corpus-id "buffer-ssa-arena")
+      (corpus-id "assoc-type-arena"))
+    (corpus-id "assoc-region")
+    (corpus-id "assoc-capability")
+    (core/->TokenFlowV0
+      [(corpus-id "assoc-region") (corpus-id "assoc-capability")]
+      [])))
+
+(def buffer-allocate-instruction core/Instruction
+  (core/->BufferAllocateInstructionV0
+    (core/->SsaValueV0 (corpus-id "buffer-ssa-buffer")
+      (corpus-id "buffer-type-f64"))
+    (corpus-id "buffer-ssa-length")
+    (corpus-id "buffer-ssa-arena")
+    (corpus-id "assoc-region")
+    (corpus-id "assoc-capability")))
+
+(def buffer-length-instruction core/Instruction
+  (core/->BufferLengthInstructionV0
+    (core/->SsaValueV0 (corpus-id "buffer-ssa-observed-length")
+      (corpus-id "type-i64"))
+    (corpus-id "buffer-ssa-buffer")
+    (corpus-id "assoc-region")
+    (corpus-id "buffer-capability-read")))
+
+(def buffer-get-instruction core/Instruction
+  (core/->BufferGetCheckedInstructionV0
+    (core/->SsaValueV0 (corpus-id "buffer-ssa-read")
+      (corpus-id "type-f64"))
+    (corpus-id "buffer-ssa-buffer")
+    (corpus-id "buffer-ssa-index")
+    (corpus-id "assoc-region")
+    (corpus-id "buffer-capability-read")))
+
+(def buffer-set-instruction core/Instruction
+  (core/->BufferSetCheckedInstructionV0
+    (core/->SsaValueV0 (corpus-id "buffer-ssa-written")
+      (corpus-id "type-f64"))
+    (corpus-id "buffer-ssa-buffer")
+    (corpus-id "buffer-ssa-index")
+    (corpus-id "buffer-ssa-value")
+    (corpus-id "assoc-region")
+    (corpus-id "buffer-capability-write")))
+
+(def buffer-instructions (Vec core/Instruction)
+  [buffer-arena-instruction buffer-allocate-instruction
+   buffer-length-instruction buffer-get-instruction buffer-set-instruction])
+
+(def buffer-block core/BasicBlock
+  (core/->BasicBlock (corpus-id "buffer-block") [] buffer-instructions
+    [(core/return-terminator (corpus-id "buffer-ssa-written"))]))
+
+(def buffer-function core/FunctionDef
+  (core/->FunctionDef (corpus-id "buffer-function") "buffer-round-trip"
+    [(core/->Parameter (corpus-id "buffer-ssa-length")
+       (corpus-id "type-i64"))
+     (core/->Parameter (corpus-id "buffer-ssa-index")
+       (corpus-id "type-i64"))
+     (core/->Parameter (corpus-id "buffer-ssa-value")
+       (corpus-id "type-f64"))
+     (core/->Parameter (corpus-id "buffer-ssa-i64-buffer")
+       (corpus-id "buffer-type-i64"))]
+    [buffer-block]
+    (corpus-id "buffer-block")
+    (corpus-id "type-f64")
+    [(corpus-id "assoc-effect") (corpus-id "buffer-effect-read")
+     (corpus-id "buffer-effect-write")]
+    [(corpus-id "assoc-region")]
+    [(corpus-id "assoc-capability") (corpus-id "buffer-capability-read")
+     (corpus-id "buffer-capability-write")]))
+
+(def buffer-program core/NativeCoreProgram
+  (core/->NativeCoreProgram (corpus-id "buffer-program") nil
+    "native-core-v0-buffer"
+    [buffer-type buffer-i64-type assoc-arena-type corpus-i64-type
+     corpus-f64-type]
+    [assoc-effect buffer-read-effect buffer-write-effect]
+    [assoc-region]
+    [assoc-capability buffer-read-capability buffer-write-capability]
+    [buffer-layout buffer-i64-layout assoc-arena-layout corpus-i64-layout
+     corpus-f64-layout]
+    [buffer-function]
+    [(corpus-id "assoc-effect") (corpus-id "buffer-effect-read")
+     (corpus-id "buffer-effect-write")]
+    [(corpus-id "assoc-region")]
+    [(corpus-id "assoc-capability") (corpus-id "buffer-capability-read")
+     (corpus-id "buffer-capability-write")]
+    []
+    []))
+
+(defn buffer-program-with-instructions
+  [(instructions (Vec core/Instruction))] core/NativeCoreProgram
+  (with buffer-program
+    [:functions
+     [(with buffer-function
+        [:blocks [(with buffer-block [:instructions instructions])]])]]))
+
+(def buffer-non-buffer-source-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction
+     (with buffer-get-instruction
+       [:source-id (corpus-id "buffer-ssa-value")])
+     buffer-set-instruction]))
+
+(def buffer-length-non-buffer-source-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     (with buffer-length-instruction
+       [:source-id (corpus-id "buffer-ssa-value")])
+     buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-set-non-buffer-source-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction buffer-get-instruction
+     (with buffer-set-instruction
+       [:source-id (corpus-id "buffer-ssa-value")])]))
+
+(def buffer-non-int-length-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction
+     (with buffer-allocate-instruction
+       [:length-id (corpus-id "buffer-ssa-value")])
+     buffer-length-instruction buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-non-int-index-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction
+     (with buffer-get-instruction
+       [:index-id (corpus-id "buffer-ssa-value")])
+     buffer-set-instruction]))
+
+(def buffer-set-non-int-index-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction buffer-get-instruction
+     (with buffer-set-instruction
+       [:index-id (corpus-id "buffer-ssa-value")])]))
+
+(def buffer-wrong-allocate-result-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction
+     (with buffer-allocate-instruction
+       [:result (core/->SsaValueV0 (corpus-id "buffer-ssa-buffer")
+                  (corpus-id "type-f64"))])
+     buffer-length-instruction buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-wrong-length-result-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     (with buffer-length-instruction
+       [:result (core/->SsaValueV0 (corpus-id "buffer-ssa-observed-length")
+                  (corpus-id "type-f64"))])
+     buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-wrong-get-result-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction
+     (with buffer-get-instruction
+       [:result (core/->SsaValueV0 (corpus-id "buffer-ssa-read")
+                  (corpus-id "type-i64"))])
+     buffer-set-instruction]))
+
+(def buffer-wrong-set-result-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction buffer-get-instruction
+     (with buffer-set-instruction
+       [:result (core/->SsaValueV0 (corpus-id "buffer-ssa-written")
+                  (corpus-id "type-i64"))])]))
+
+(def buffer-wrong-set-value-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction buffer-get-instruction
+     (with buffer-set-instruction
+       [:value-id (corpus-id "buffer-ssa-length")])]))
+
+(def buffer-mismatched-element-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction
+     (with buffer-get-instruction
+       [:source-id (corpus-id "buffer-ssa-i64-buffer")])
+     buffer-set-instruction]))
+
+(def buffer-forged-external-root-program core/NativeCoreProgram
+  (with buffer-program
+    [:regions
+     [(with assoc-region [:kind (core/->ExternalRegion true)])]]))
+
+(def buffer-mismatched-arena-producer-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [(with buffer-arena-instruction
+       [:capability (corpus-id "buffer-capability-read")])
+     buffer-allocate-instruction buffer-length-instruction
+     buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-wrong-arena-handle-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [(with buffer-arena-instruction
+       [:result (core/->SsaValueV0 (corpus-id "buffer-ssa-arena")
+                  (corpus-id "type-i64"))])
+     buffer-allocate-instruction buffer-length-instruction
+     buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-wrong-allocate-capability-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [(with buffer-arena-instruction
+       [:capability (corpus-id "buffer-capability-read")])
+     (with buffer-allocate-instruction
+       [:capability (corpus-id "buffer-capability-read")])
+     buffer-length-instruction buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-wrong-read-capability-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     (with buffer-length-instruction
+       [:capability (corpus-id "assoc-capability")])
+     buffer-get-instruction buffer-set-instruction]))
+
+(def buffer-wrong-write-capability-program core/NativeCoreProgram
+  (buffer-program-with-instructions
+    [buffer-arena-instruction buffer-allocate-instruction
+     buffer-length-instruction buffer-get-instruction
+     (with buffer-set-instruction
+       [:capability (corpus-id "buffer-capability-read")])]))
+
+(def buffer-second-region core/RegionDef
+  (core/->RegionDef (corpus-id "buffer-second-region")
+    (core/arena-region-kind) nil))
+
+(def buffer-second-read-capability core/CapabilityDef
+  (core/->CapabilityDef (corpus-id "buffer-second-read-capability")
+    (core/->ReadCapability true) (corpus-id "buffer-second-region") true))
+
+(def buffer-incoherent-root-function core/FunctionDef
+  (with
+    (with
+      (with buffer-function
+        [:regions
+         [(corpus-id "assoc-region") (corpus-id "buffer-second-region")]])
+      [:capabilities
+       [(corpus-id "assoc-capability") (corpus-id "buffer-capability-read")
+        (corpus-id "buffer-capability-write")
+        (corpus-id "buffer-second-read-capability")]])
+    [:blocks
+     [(with buffer-block
+        [:instructions
+         [buffer-arena-instruction buffer-allocate-instruction
+          buffer-length-instruction
+          (with
+            (with buffer-get-instruction
+              [:region (corpus-id "buffer-second-region")])
+            [:capability (corpus-id "buffer-second-read-capability")])
+          buffer-set-instruction]])]]))
+
+(def buffer-incoherent-root-program core/NativeCoreProgram
+  (with
+    (with
+      (with
+        (with
+          (with buffer-program
+            [:regions [assoc-region buffer-second-region]])
+          [:capabilities
+           [assoc-capability buffer-read-capability buffer-write-capability
+            buffer-second-read-capability]])
+        [:functions [buffer-incoherent-root-function]])
+      [:allowed-regions
+       [(corpus-id "assoc-region") (corpus-id "buffer-second-region")]])
+    [:allowed-capabilities
+     [(corpus-id "assoc-capability") (corpus-id "buffer-capability-read")
+      (corpus-id "buffer-capability-write")
+      (corpus-id "buffer-second-read-capability")]]))
+
+(def buffer-instruction-corpus-passes? Bool
+  (and
+    (core/validationreport-passed (core/validate-program buffer-program))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-non-buffer-source-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-length-non-buffer-source-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-set-non-buffer-source-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-non-int-length-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-non-int-index-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-set-non-int-index-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-allocate-result-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-length-result-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-get-result-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-set-result-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-set-value-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-mismatched-element-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-forged-external-root-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-mismatched-arena-producer-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-arena-handle-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-allocate-capability-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-read-capability-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-wrong-write-capability-program)))
+    (not (core/validationreport-passed
+      (core/validate-program buffer-incoherent-root-program)))))
+
 (def corpus-result CorpusResult
   (->CorpusResult (core/validationreport-passed (core/validate-program valid-program))
     (not (core/validationreport-passed (core/validate-program duplicate-id-program)))
@@ -356,4 +715,5 @@
     (corpusresult-canonical-deterministic corpus-result)
     (corpusresult-canonical-separated corpus-result)
     (corpusresult-i64-f64-distinct corpus-result)
-    record-assoc-corpus-passes?))
+    record-assoc-corpus-passes?
+    buffer-instruction-corpus-passes?))

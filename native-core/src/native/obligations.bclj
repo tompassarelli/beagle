@@ -408,14 +408,23 @@
         (core/functiondef-blocks function)))))
 
 (defn valid-ssa [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
-         (core/nativecoreprogram-functions program)]
-    (if (>= index (count functions))
-      (->ObligationPassV0 (core/->ValidSsaObligation true))
-      (let [(function core/FunctionDef) (nth functions index)]
-        (if (function-valid-ssa? function)
-          (recur (+ index 1) functions)
-          (->ValidSsaDiagnosticV0 (core/functiondef-id function)))))))
+  (let [(functions (Vec core/FunctionDef))
+        (core/nativecoreprogram-functions program)
+        (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
+        (regions (Vec core/RegionDef)) (core/nativecoreprogram-regions program)
+        (capabilities (Vec core/CapabilityDef))
+        (core/nativecoreprogram-capabilities program)]
+    (loop [(index Int) 0]
+      (if (>= index (count functions))
+        (if (core/program-buffer-root-coherent? program)
+          (->ObligationPassV0 (core/->ValidSsaObligation true))
+          (->ValidSsaDiagnosticV0 (core/nativecoreprogram-id program)))
+        (let [(function core/FunctionDef) (nth functions index)]
+          (if (and (function-valid-ssa? function)
+                (core/function-buffer-instructions-valid? types regions
+                  capabilities function))
+            (recur (+ index 1))
+            (->ValidSsaDiagnosticV0 (core/functiondef-id function))))))))
 
 (defn find-type
   [(types (Vec core/TypeDef))
@@ -1497,7 +1506,8 @@
     (some
       (fn [(region core/RegionDef)] Bool
         (and (core/native-id= (core/regiondef-id region) region-id)
-          (nil? (core/regiondef-parent region))))
+          (nil? (core/regiondef-parent region))
+          (instance? native.core.ArenaRegion (core/regiondef-kind region))))
       (core/nativecoreprogram-regions program))))
 
 (defn store-resources [(store core/StoreOp)] (Vec core/NativeId)

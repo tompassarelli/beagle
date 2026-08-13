@@ -672,6 +672,16 @@
     (not (type-compatible? (make-app "Atom" [(make-prim "Any")])
                            (make-app "Atom" [(make-prim "Int")]))))
 
+  (expect! "tc: (Buffer Float) ~ (Buffer Float)"
+    (type-compatible? (make-app "Buffer" [(make-prim "Float")])
+                      (make-app "Buffer" [(make-prim "Float")])))
+  (expect! "tc: (Buffer Float) NOT ~ (Buffer Any)"
+    (not (type-compatible? (make-app "Buffer" [(make-prim "Float")])
+                           (make-app "Buffer" [(make-prim "Any")]))))
+  (expect! "tc: (Buffer Any) NOT ~ (Buffer Float)"
+    (not (type-compatible? (make-app "Buffer" [(make-prim "Any")])
+                           (make-app "Buffer" [(make-prim "Float")]))))
+
   ;; --- ML soundness: HVec <: Vec width subtyping ---
   (expect! "tc: (HVec Int String) <: (Vec Any)"
     (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")])

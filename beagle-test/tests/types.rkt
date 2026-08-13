@@ -42,6 +42,15 @@
   (check-eq? (type-app-ctor t) 'Vec)
   (check-eq? (type-prim-name (car (type-app-args t))) 'String))
 
+(test-case "Buffer requires exactly one type argument"
+  (define t (parse-type '(Buffer Float)))
+  (check-true (type-app? t))
+  (check-eq? (type-app-ctor t) 'Buffer)
+  (check-exn #rx"type Buffer expects 1 argument, got 0"
+             (lambda () (parse-type 'Buffer)))
+  (check-exn #rx"type Buffer expects 1 argument, got 2"
+             (lambda () (parse-type '(Buffer Float Int)))))
+
 (test-case "parse nested parametric / function types"
   (define t (parse-type `(Map String (Fn (,BRACKET-TAG Int) Int))))
   (check-true (type-app? t))
@@ -150,6 +159,13 @@
   (define vl (type-app 'Vec (list (type-prim 'Int))))
   (check-true  (type-compatible? vs vs2))
   (check-false (type-compatible? vs vl)))
+
+(test-case "Buffer element type is invariant"
+  (define bf (type-app 'Buffer (list (type-prim 'Float))))
+  (define ba (type-app 'Buffer (list (type-prim 'Any))))
+  (check-true (type-compatible? bf bf))
+  (check-false (type-compatible? bf ba))
+  (check-false (type-compatible? ba bf)))
 
 ;; --- polymorphic types (forall) --------------------------------------------
 

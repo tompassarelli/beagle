@@ -15,6 +15,23 @@
 
 (define-mode strict)
 
+(defn typing-rejection-report [(result lower/TypingResultV0)] String
+  (if (not (instance? native.lower.TypingRejectedV0 result))
+    ""
+    (let [(diagnostics (Vec core/DiagnosticV0))
+          (core/passreceiptv0-diagnostics
+            (lower/typingrejectedv0-receipt result))]
+      (loop [(position Int) 0
+             (report String)
+             "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"]
+        (if (>= position (count diagnostics))
+          report
+          (let [(diagnostic core/DiagnosticV0) (nth diagnostics position)]
+            (recur (+ position 1)
+              (str report "typing-diagnostic "
+                (core/diagnosticv0-code diagnostic) " "
+                (core/diagnosticv0-detail diagnostic) "\n"))))))))
+
 (defn union-tag-type-id [] core/NativeId
   (core/typedef-id (lower/union-tag-type)))
 
@@ -39,6 +56,9 @@
 
       (instance? native.core.VectorType shape)
       [(core/vectortype-element-type shape)]
+
+      (instance? native.core.BufferTypeV0 shape)
+      [(core/buffertypev0-element-type shape)]
 
       (instance? native.core.MapTypeV0 shape)
       [(core/maptypev0-key-type shape) (core/maptypev0-value-type shape)]
@@ -330,7 +350,7 @@
             (typing-result lower/TypingResultV0)
             (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
-          "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"
+          (typing-rejection-report typing-result)
           (let [(frozen-typed stages/FrozenTypedStageV0)
                 (lower/typingacceptedv0-frozen typing-result)
                 (typed-slice lower/TypedSliceV0)
@@ -425,7 +445,7 @@
             (typing-result lower/TypingResultV0)
             (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
-          "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"
+          (typing-rejection-report typing-result)
           (let [(frozen-typed stages/FrozenTypedStageV0)
                 (lower/typingacceptedv0-frozen typing-result)
                 (typed-slice lower/TypedSliceV0)

@@ -4276,6 +4276,24 @@
        "name" "Dyn"
        "args" [{"kind" "prim" "name" "String"}
                {"kind" "prim" "name" "Int"}]}))
+  (expect! "parse-type! Buffer exact arity"
+    (let [t (parse-type! ["Buffer" "Float"])]
+      (and (= (get t "kind") "app") (= (get t "name") "Buffer")
+        (= (count (get t "args")) 1))))
+  (expect! "parse-type! Buffer rejects bare use"
+    (do
+      (reset-errors!)
+      (parse-type! "Buffer")
+      (and (= (count (parse-errors)) 1)
+        (str/includes? (nth (parse-errors) 0)
+          "type Buffer expects 1 argument, got 0"))))
+  (expect! "parse-type! Buffer rejects too many arguments"
+    (do
+      (reset-errors!)
+      (parse-type! ["Buffer" "Float" "Int"])
+      (and (= (count (parse-errors)) 1)
+        (str/includes? (nth (parse-errors) 0)
+          "type Buffer expects 1 argument, got 2"))))
   (expect! "parse-type! union"
     (let [t (parse-type! ["U" "Int" "String"])]
       (and (= (get t "kind") "union") (= (count (get t "members")) 2))))

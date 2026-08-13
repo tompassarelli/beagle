@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns buffer-type-arity.test)
+
+(defn reject-bare-buffer [(buffer Buffer)] Nil nil)
+(defn reject-wide-buffer [(buffer (Buffer Float Int))] Nil nil)

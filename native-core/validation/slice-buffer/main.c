@@ -10,10 +10,17 @@
 #error "drive.sh must name the generated stencil symbol"
 #endif
 
+_Static_assert(sizeof(native_buffer *) == sizeof(void *),
+               "Buffer values use the pointer-sized handle ABI");
+_Static_assert(sizeof(((native_buffer *)0)->owner_capability_token) ==
+                   sizeof(uint64_t),
+               "Buffer headers bind their creator capability token");
+
 int main(void) {
   native_arena arena;
   native_capability capability = { .token = UINT64_C(1) };
   uint64_t before;
+  uint64_t arena_before;
   double result;
   native_buffer *empty_left;
   native_buffer *empty_right;
@@ -23,12 +30,16 @@ int main(void) {
     return 1;
   }
   before = native_buffer_storage_allocations;
+  arena_before = native_arena_allocations;
   result = BUFFER_RUN_FN(&arena, &capability, INT64_C(6));
   if (result != 3.0) {
     return 2;
   }
   if (native_buffer_storage_allocations - before != UINT64_C(2)) {
     return 3;
+  }
+  if (native_arena_allocations - arena_before != UINT64_C(4)) {
+    return 7;
   }
   before = native_buffer_storage_allocations;
   if (BUFFER_RUN_FN(&arena, &capability, INT64_C(-1)) != 0.0 ||

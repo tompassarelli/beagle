@@ -4345,15 +4345,122 @@
           (core/settypev0-element-type shape)
           (type-id "LowerFailure"))))))
 
-(defn value-semantics-type?
-  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+(defn value-semantics-atom-kind? [(kind core/AtomKind)] Bool
+  (or (instance? native.core.BoolKind kind)
+    (or (instance? native.core.I64Kind kind)
+      (or (instance? native.core.F64Kind kind)
+        (or (instance? native.core.TextKind kind)
+          (or (instance? native.core.BytesKind kind)
+            (instance? native.core.KeywordKind kind)))))))
+
+(defrecord ValueSemanticsStatusV0 [(admitted Bool) (reason String)])
+
+(defn value-semantics-pass [] ValueSemanticsStatusV0
+  (->ValueSemanticsStatusV0 true ""))
+
+(defn value-semantics-refuse [(reason String)] ValueSemanticsStatusV0
+  (->ValueSemanticsStatusV0 false reason))
+
+(defn merge-value-semantics-status
+  [(left ValueSemanticsStatusV0)
+   (right ValueSemanticsStatusV0)] ValueSemanticsStatusV0
+  (cond
+    (and (valuesemanticsstatusv0-admitted left)
+      (valuesemanticsstatusv0-admitted right))
+    (value-semantics-pass)
+    (or (= "buffer" (valuesemanticsstatusv0-reason left))
+      (= "buffer" (valuesemanticsstatusv0-reason right)))
+    (value-semantics-refuse "buffer")
+    :else (value-semantics-refuse "unsupported")))
+
+;; Structural operations are admitted only when the complete descriptor graph
+;; has faithful value semantics. A semantic record reference may close a type
+;; cycle through Any; revisiting that already-checked edge is safe and prevents
+;; compiler recursion. Opaque self-references, cells, maps, sets, functions and
+;; mutable Buffer identities are not value leaves.
+(defn value-semantics-type-inner
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)
+   (visiting (Vec core/NativeId))] ValueSemanticsStatusV0
+  (if (core/id-in? visiting target)
+    (value-semantics-pass)
+    (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
+      (if (nil? definition)
+        (value-semantics-refuse "unsupported")
+        (let [(shape core/TypeShape) (core/typedef-shape definition)
+              (next (Vec core/NativeId)) (conj visiting target)]
+          (cond
+            (instance? native.core.AtomType shape)
+            (if (value-semantics-atom-kind? (core/atomtype-kind shape))
+              (value-semantics-pass)
+              (value-semantics-refuse "unsupported"))
+
+            (instance? native.core.BufferTypeV0 shape)
+            (value-semantics-refuse "buffer")
+
+            (instance? native.core.RecordType shape)
+            (reduce
+              (fn [(status ValueSemanticsStatusV0)
+                   (field core/TypeField)] ValueSemanticsStatusV0
+                (merge-value-semantics-status status
+                  (value-semantics-type-inner types
+                    (core/typefield-type-id field) next)))
+              (value-semantics-pass)
+              (core/recordtype-fields shape))
+
+            (instance? native.core.UnionType shape)
+            (reduce
+              (fn [(status ValueSemanticsStatusV0)
+                   (variant core/TypeVariant)] ValueSemanticsStatusV0
+                (let [(payload (U core/NativeId Nil))
+                      (core/typevariant-payload-type variant)]
+                  (merge-value-semantics-status status
+                    (if (nil? payload)
+                      (value-semantics-pass)
+                      (value-semantics-type-inner types payload next)))))
+              (value-semantics-pass)
+              (core/uniontype-variants shape))
+
+            (instance? native.core.VectorType shape)
+            (value-semantics-type-inner types
+              (core/vectortype-element-type shape) next)
+
+            (instance? native.core.ReferenceType shape)
+            (let [(pointee core/NativeId)
+                  (core/referencetype-target-type shape)
+                  (pointee-definition (U core/TypeDef Nil))
+                  (lookup-type types pointee)]
+              (if (and (not (nil? pointee-definition))
+                    (instance? native.core.RecordType
+                      (core/typedef-shape pointee-definition)))
+                (value-semantics-type-inner types pointee next)
+                (value-semantics-refuse "unsupported")))
+
+            :else (value-semantics-refuse "unsupported")))))))
+
+(defn value-semantics-status
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)] ValueSemanticsStatusV0
   (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
     (if (nil? definition)
-      false
+      (value-semantics-refuse "unsupported")
       (let [(shape core/TypeShape) (core/typedef-shape definition)]
-        (or (instance? native.core.RecordType shape)
+        (if
+          (or (instance? native.core.RecordType shape)
             (or (instance? native.core.UnionType shape)
-                (instance? native.core.VectorType shape)))))))
+              (instance? native.core.VectorType shape)))
+          (value-semantics-type-inner types target [])
+          (if (instance? native.core.BufferTypeV0 shape)
+            (value-semantics-refuse "buffer")
+            (value-semantics-refuse "unsupported")))))))
+
+(defn value-semantics-type?
+  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (valuesemanticsstatusv0-admitted (value-semantics-status types target)))
+
+(defn value-semantics-refusal-reason
+  [(types (Vec core/TypeDef)) (target core/NativeId)] String
+  (valuesemanticsstatusv0-reason (value-semantics-status types target)))
 
 (defn nil-value-variant?
   [(definition core/TypeDef) (variant core/TypeVariant)] Bool
@@ -14288,7 +14395,8 @@
                   (some?
                     (some
                       (fn [(value-type core/NativeId)] Bool
-                        (buffer-type? types value-type))
+                        (= "buffer"
+                          (value-semantics-refusal-reason types value-type)))
                       value-types)))
                 (fail-result current
                   "TODO-NATIVE-BUFFER-VALUE-SEMANTICS-V0: mutable Buffer has no structural equality, hash, comparison, or persistent value semantics")

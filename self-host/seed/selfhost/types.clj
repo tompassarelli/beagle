@@ -21,7 +21,7 @@
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
-(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
+(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Buffer"])
 
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
@@ -139,6 +139,7 @@
    en (count ep)]
   (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ep i) (nth ap i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? p ar)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? er ar))) (type-compatible? (get actual "ret") (get expected "ret"))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
+  (and (app-type? actual) (app-type? expected) (= (get actual "name") "Buffer") (= (get expected "name") "Buffer")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (and (app-type? expected) (= (get expected "name") "Dyn")) (if (and (app-type? actual) (= (get actual "name") "Dyn")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args"))))) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "args"))))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? identity (map-indexed (fn [i a] (type-compatible? a (nth (get expected "args") i))) (get actual "args"))))
@@ -309,6 +310,9 @@
   (expect! "tc: (Atom Int) ~ (Atom Int)" (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "Int")])))
   (expect! "tc: (Atom Int) NOT ~ (Atom Any)" (not (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "Any")]))))
   (expect! "tc: (Atom Any) NOT ~ (Atom Int)" (not (type-compatible? (make-app "Atom" [(make-prim "Any")]) (make-app "Atom" [(make-prim "Int")]))))
+  (expect! "tc: (Buffer Float) ~ (Buffer Float)" (type-compatible? (make-app "Buffer" [(make-prim "Float")]) (make-app "Buffer" [(make-prim "Float")])))
+  (expect! "tc: (Buffer Float) NOT ~ (Buffer Any)" (not (type-compatible? (make-app "Buffer" [(make-prim "Float")]) (make-app "Buffer" [(make-prim "Any")]))))
+  (expect! "tc: (Buffer Any) NOT ~ (Buffer Float)" (not (type-compatible? (make-app "Buffer" [(make-prim "Any")]) (make-app "Buffer" [(make-prim "Float")]))))
   (expect! "tc: (HVec Int String) <: (Vec Any)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Any")])))
   (expect! "tc: (HVec Int String) NOT <: (Vec Int)" (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Int")]))))
   (expect! "tc: (Vec Int) NOT <: (HVec Int)" (not (type-compatible? (make-app "Vec" [(make-prim "Int")]) (make-app "HVec" [(make-prim "Int")]))))

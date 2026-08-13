@@ -197,7 +197,7 @@
 
 ;; --- type-invariant-equal? ---------------------------------------------------
 
-;; Structural equality for INVARIANT positions (the Atom element). Symmetric and
+;; Structural equality for INVARIANT positions (Atom/Buffer elements). Symmetric and
 ;; does NOT treat Any as a wildcard (Any ≡ Any only, never Any ≡ Int) — that is
 ;; what keeps the mutable-cell invariance hole closed. Unqualifies prim names so
 ;; a record referenced through an alias still equals itself. Mirrors the oracle
@@ -298,6 +298,14 @@
     ;; wildcard), NOT type-compatible?. Mirrors the oracle G2 arm (types.rkt).
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
+      (and (= (count (get actual "args")) (count (get expected "args")))
+           (every? (fn [(i Int)] Bool
+                     (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
+                   (range (count (get actual "args")))))
+
+    ;; Buffer is mutable and invariant in its element type.
+    (and (app-type? actual) (app-type? expected)
+         (= (get actual "name") "Buffer") (= (get expected "name") "Buffer"))
       (and (= (count (get actual "args")) (count (get expected "args")))
            (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
@@ -614,6 +622,16 @@
    "remove"   (make-fn [ANY ANY] nil ANY)
    "some"     (make-fn [ANY ANY] nil ANY)
    "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))})
+
+(def BUFFER-FLOAT-TYPE Any
+  (make-app "Buffer" [FLOAT-TYPE]))
+
+(def CORE-STDLIB Any
+  {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
+   "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
+   "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
+   "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
+                     nil FLOAT-TYPE)})
 
 ;; Clojure 1.12 Class/method instance-position calls carry the receiver as the
 ;; first surface element, while declare-extern describes only the Java method
@@ -2640,11 +2658,14 @@
 (defn build-initial-env! [(prog Any)] Any
   (let [externs (get prog "externs")
         forms (get prog "forms")
+        target-stdlib (if (= (get prog "target") "core")
+                        (merge STDLIB CORE-STDLIB)
+                        STDLIB)
         env-with-externs (if (not (nil? externs))
                            (reduce (fn [(env Any) (ext Any)] Any
                                      (assoc env (get ext "name") (get ext "type")))
-                                   STDLIB externs)
-                           STDLIB)
+                                   target-stdlib externs)
+                           target-stdlib)
         ;; ^:dynamic registry (check.rkt dyn-vars): names of `(def ^:dynamic
         ;; …)` forms, consulted by `binding` to reject non-dynamic targets.
         ;; Stashed under a #% sentinel key that no surface ref can collide
@@ -4506,6 +4527,29 @@
                 "requires" []}
           result (type-check! prog)]
       (> (get result "count") 0)))
+  (expect! "buffer primitive: double-array wrong arity"
+    (let [prog (assoc (make-prog [(make-def-node "r" nil
+                                  (make-call "double-array" []))])
+                 "target" "core")]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "buffer primitive: alength wrong arity"
+    (let [prog (assoc (make-prog [(make-def-node "r" nil
+                                  (make-call "alength" []))])
+                 "target" "core")]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "buffer primitive: aget wrong arity"
+    (let [prog (assoc (make-prog [(make-def-node "r" nil
+                                  (make-call "aget" [(make-ref "missing")]))])
+                 "target" "core")]
+      (> (get (type-check! prog) "count") 0)))
+  (expect! "buffer primitive: aset-double! wrong arity"
+    (let [prog (assoc
+                 (make-prog [(make-def-node "r" nil
+                              (make-call "aset-double!"
+                                [(make-ref "missing")
+                                 (make-lit "number" 0)]))])
+                 "target" "core")]
+      (> (get (type-check! prog) "count") 0)))
 
   ;; --- qualified JVM instance-position interop ---
   (expect! "JVM instance-position: receiver excluded from declared arity"
@@ -4840,6 +4884,16 @@
   (expect! "atom: (Atom Int) NOT ~ (Atom String)"
     (not (type-compatible? (make-app "Atom" [(make-prim "Int")])
                            (make-app "Atom" [(make-prim "String")]))))
+
+  (expect! "buffer: (Buffer Float) ~ (Buffer Float)"
+    (type-compatible? (make-app "Buffer" [(make-prim "Float")])
+                      (make-app "Buffer" [(make-prim "Float")])))
+  (expect! "buffer: (Buffer Float) NOT ~ (Buffer Any)"
+    (not (type-compatible? (make-app "Buffer" [(make-prim "Float")])
+                           (make-app "Buffer" [ANY]))))
+  (expect! "buffer: (Buffer Any) NOT ~ (Buffer Float)"
+    (not (type-compatible? (make-app "Buffer" [ANY])
+                           (make-app "Buffer" [(make-prim "Float")]))))
 
   ;; HVec <: Vec width subtyping, one direction only.
   (expect! "hvec: (HVec Int String) <: (Vec Any)"

@@ -1,0 +1,16 @@
+#lang beagle
+(ns native.buffer-union-value-semantics)
+(define-mode strict)
+
+(defn buffer-or-int-equal?
+  [(left (U (Buffer Float) Int))
+   (right (U (Buffer Float) Int))] Bool
+  (= left right))
+
+(defn buffer-or-int-hash [(value (U (Buffer Float) Int))] Int
+  (hash value))
+
+(defn buffer-or-int-compare
+  [(left (U (Buffer Float) Int))
+   (right (U (Buffer Float) Int))] Int
+  (compare left right))

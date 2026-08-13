@@ -2467,6 +2467,14 @@
     (every? (fn [(function core/FunctionDef)] Bool (function-supported? types layouts function))
       (core/nativecoreprogram-functions program))))
 
+(defn program-has-buffer-v0? [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some
+      (fn [(definition core/TypeDef)] Bool
+        (instance? native.core.BufferTypeV0
+          (core/typedef-shape definition)))
+      (core/nativecoreprogram-types program))))
+
 (defn program-has-host-extern? [(program core/NativeCoreProgram)] Bool
   (some?
     (some (fn [(abi core/AbiDeclV0)] Bool
@@ -2559,6 +2567,9 @@
       (not (core/program-epoch-0? program))
       (->QbeFailure
         "native program carries a minted epoch: the QBE materializer emits epoch-0 only")
+      (program-has-buffer-v0? program)
+      (->QbeFailure
+        "QBE Buffer v0 is unsupported: mutable region-owned storage has no QBE runtime representation")
       (program-has-socket-extern? program)
       (->QbeFailure
         "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")

@@ -1,0 +1,13 @@
+#lang beagle
+(ns native.buffer-holder)
+(define-mode strict)
+
+;; Explicit structure-of-buffers composition is ordinary semantic structure:
+;; the record stores a Buffer handle without changing record or Vec layout.
+(defrecord Holder [(buffer (Buffer Float))])
+
+(defn make-holder-buffer! [] (Buffer Float)
+  (let [buffer (double-array 2)
+        holder (->Holder buffer)]
+    (aset-double! buffer 1 6.0)
+    (holder-buffer holder)))

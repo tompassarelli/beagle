@@ -1,0 +1,14 @@
+#lang beagle
+(ns native.buffer-record-value-semantics)
+(define-mode strict)
+
+(defrecord Holder [(buffer (Buffer Float))])
+
+(defn holder-equal? [(left Holder) (right Holder)] Bool
+  (= left right))
+
+(defn holder-hash [(value Holder)] Int
+  (hash value))
+
+(defn holder-compare [(left Holder) (right Holder)] Int
+  (compare left right))

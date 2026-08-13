@@ -717,8 +717,7 @@ bb -cp "$compiled" -e '
               (do
                 (finish-stage! "source-to-typed" "REJECTED")
                 {:ok? false
-                 :report (str "stage source-freeze ACCEPTED\n"
-                              "stage source-to-typed REJECTED\n"
+                 :report (str (body-slice/typing-rejection-report typing-result)
                               "result FAIL source typing\n")})
               (let [_finish-typing (finish-stage! "source-to-typed" "ACCEPTED")
                     frozen-typed (lower/typingacceptedv0-frozen typing-result)

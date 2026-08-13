@@ -5,6 +5,9 @@
 #ifndef BUFFER_BOUND_FN
 #error "drive.sh must name a generated checked-access symbol"
 #endif
+#ifndef BUFFER_BOUND_INDEX
+#define BUFFER_BOUND_INDEX INT64_C(1)
+#endif
 
 static void expect_out_of_range(uint32_t code) {
   if (code == NATIVE_TRAP_OUT_OF_RANGE) {
@@ -26,6 +29,6 @@ int main(void) {
   buffer = native_buffer_new(&arena, &capability, INT64_C(1), INT64_C(8),
                              (size_t)8);
   native_set_trap_reporter(expect_out_of_range);
-  (void)BUFFER_BOUND_FN(&arena, &capability, buffer, INT64_C(1));
+  (void)BUFFER_BOUND_FN(&arena, &capability, buffer, BUFFER_BOUND_INDEX);
   return 98;
 }

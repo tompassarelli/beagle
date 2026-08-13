@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.buffer-arity-alength)
+(define-mode strict)
+
+(defn bad-alength [(buffer (Buffer Float))] Int
+  (alength buffer 1))
