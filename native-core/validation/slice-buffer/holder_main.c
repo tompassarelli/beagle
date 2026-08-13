@@ -14,14 +14,14 @@ int main(void) {
   if (!native_arena_init_growable(&arena, (size_t)4096U)) {
     return 1;
   }
-  before = native_buffer_storage_allocations;
+  before = arena.buffer_storage_allocation_count;
   buffer = BUFFER_HOLDER_FN(&arena, &capability);
   if (buffer == NULL ||
-      native_buffer_storage_allocations - before != UINT64_C(1)) {
+      arena.buffer_storage_allocation_count - before != UINT64_C(1)) {
     return 2;
   }
   value = *(const double *)native_buffer_at(
-      buffer, &capability, INT64_C(1), INT64_C(8));
+      buffer, &capability, INT64_C(1), INT64_C(8), (size_t)8U);
   if (value != 6.0) {
     return 3;
   }

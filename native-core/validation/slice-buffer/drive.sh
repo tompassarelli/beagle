@@ -88,6 +88,19 @@ compile_wrong_capability_probe() {
   [[ "$observed" == 'capability-trap: invalid-argument' ]]
 }
 
+compile_wrong_alignment_probe() {
+  local compiler="$1" output="$2" suffix="$3" operation="$4"
+  phase "$suffix wrong alignment compile"
+  timeout -k 5s 60s "$compiler" -std=c17 -Wall -Wextra -Werror \
+    "-DBUFFER_ALIGNMENT_OP=$operation" -I "$output" \
+    "$output/native_shim.c" "$here/wrong_alignment_main.c" \
+    -o "$scratch/wrong-alignment-$suffix"
+  phase "$suffix wrong alignment execute"
+  local observed
+  observed="$(timeout -k 2s 10s "$scratch/wrong-alignment-$suffix")"
+  [[ "$observed" == 'alignment-trap: invalid-argument' ]]
+}
+
 compile_wasm32_overflow_probe() {
   local compiler="$1" output="$2" suffix="$3"
   phase "$suffix wasm32-sized overflow compile"
@@ -254,7 +267,7 @@ expect_qbe_refusal() {
 
 phase "source API check"
 timeout -k 5s 60s "$repo/bin/beagle" check --agent \
-  "$here/buffer.bgl" "$here/holder.bgl"
+  "$here/buffer.bgl" "$here/holder.bgl" "$here/native_exe.bgl"
 run_frozen_ir_corpus
 build_once "$scratch/first"
 build_once "$scratch/second"
@@ -309,6 +322,10 @@ for operation in 0 1 2; do
   compile_wrong_capability_probe gcc "$scratch/first" \
     "gcc-operation-$operation" "$operation"
 done
+for operation in 0 1 2 3; do
+  compile_wrong_alignment_probe gcc "$scratch/first" \
+    "gcc-operation-$operation" "$operation"
+done
 compile_wasm32_overflow_probe gcc "$scratch/first" gcc
 
 clang_bin="$(command -v clang 2>/dev/null || \
@@ -328,6 +345,10 @@ if [[ -n "$clang_bin" ]]; then
     "native_m0_fn_${write_index}" '(-INT64_C(1))'
   for operation in 0 1 2; do
     compile_wrong_capability_probe "$clang_bin" "$scratch/first" \
+      "clang-operation-$operation" "$operation"
+  done
+  for operation in 0 1 2 3; do
+    compile_wrong_alignment_probe "$clang_bin" "$scratch/first" \
       "clang-operation-$operation" "$operation"
   done
   compile_wasm32_overflow_probe "$clang_bin" "$scratch/first" clang
@@ -373,6 +394,27 @@ if [[ -n "$clang_bin" ]]; then
   compile_holder_probe "$clang_bin" "$holder_output" clang-holder \
     "native_m0_fn_${holder_index}"
 fi
+
+native_exe_output="$scratch/native-exe"
+native_exe="$native_exe_output/buffer-entry"
+phase "native-exe Buffer build"
+mkdir -p "$native_exe_output"
+timeout -k 5s 90s "$repo/bin/beagle-native-exe" \
+  --out "$native_exe" \
+  --artifacts "$native_exe_output/artifacts" \
+  --entry 'native.buffer-executable/buffer-entry!' \
+  --cc gcc "$here/native_exe.bgl" \
+  >"$native_exe_output/build.log" 2>&1 || {
+    sed -n '1,240p' "$native_exe_output/build.log" >&2
+    exit 1
+  }
+grep -Fqx '  const native_capability capability = { UINT64_C(1) };' \
+  "$native_exe_output/artifacts/entry.c"
+grep -Fq \
+  'return=Int abi=arena+capability' \
+  "$native_exe_output/artifacts/native-exe.report.txt"
+phase "native-exe Buffer execute"
+timeout -k 2s 10s "$native_exe"
 
 expect_native_refusal "$here/wrong_element.bgl" \
   'stage source-to-typed REJECTED' element

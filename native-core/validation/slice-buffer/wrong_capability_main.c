@@ -37,9 +37,11 @@ int main(void) {
 #if BUFFER_CAPABILITY_OP == 0
   (void)native_buffer_length(buffer, &forged);
 #elif BUFFER_CAPABILITY_OP == 1
-  (void)native_buffer_at(buffer, &forged, INT64_C(0), INT64_C(8));
+  (void)native_buffer_at(buffer, &forged, INT64_C(0), INT64_C(8),
+                         (size_t)8U);
 #elif BUFFER_CAPABILITY_OP == 2
-  native_buffer_set(buffer, &forged, INT64_C(0), &value, INT64_C(8));
+  native_buffer_set(buffer, &forged, INT64_C(0), &value, INT64_C(8),
+                    (size_t)8U);
 #else
 #error "unknown BUFFER_CAPABILITY_OP"
 #endif

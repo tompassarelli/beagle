@@ -28,6 +28,13 @@ typedef struct native_arena {
   native_arena_chunk *chunks;
   size_t growth_floor;
   bool growable;
+  /* Arena-local instrumentation avoids cross-arena races. Counts and current
+     Buffer bytes cover the current allocation epoch; high-water survives reset
+     and is cleared by init/destroy. */
+  uint64_t allocation_count;
+  uint64_t buffer_storage_allocation_count;
+  size_t buffer_storage_current_bytes;
+  size_t buffer_storage_high_water_bytes;
 } native_arena;
 
 typedef struct native_capability {
@@ -76,6 +83,77 @@ typedef struct native_buffer {
      but the host token identifies the one authority that created this Buffer. */
   uint64_t owner_capability_token;
 } native_buffer;
+
+/* native_buffer is a public runtime handle shared with generated C17. Pin its
+   field sequence for every target and the supported 64-bit/wasm32 profiles. */
+#define NATIVE_ABI_ALIGN_UP(value, alignment) \
+  (((value) + (alignment) - (size_t)1U) & ~((alignment) - (size_t)1U))
+#define NATIVE_ABI_MAX_ALIGN(left, right) \
+  ((left) > (right) ? (left) : (right))
+enum {
+  NATIVE_BUFFER_ABI_ALIGNMENT = NATIVE_ABI_MAX_ALIGN(
+      NATIVE_ABI_MAX_ALIGN(_Alignof(void *), _Alignof(int64_t)),
+      NATIVE_ABI_MAX_ALIGN(_Alignof(size_t), _Alignof(uint64_t))),
+  NATIVE_BUFFER_ABI_ELEMENTS_OFFSET = 0,
+  NATIVE_BUFFER_ABI_LENGTH_OFFSET =
+      NATIVE_ABI_ALIGN_UP(sizeof(void *), _Alignof(int64_t)),
+  NATIVE_BUFFER_ABI_STRIDE_OFFSET = NATIVE_ABI_ALIGN_UP(
+      NATIVE_BUFFER_ABI_LENGTH_OFFSET + sizeof(int64_t), _Alignof(int64_t)),
+  NATIVE_BUFFER_ABI_ALIGNMENT_OFFSET = NATIVE_ABI_ALIGN_UP(
+      NATIVE_BUFFER_ABI_STRIDE_OFFSET + sizeof(int64_t), _Alignof(size_t)),
+  NATIVE_BUFFER_ABI_OWNER_TOKEN_OFFSET = NATIVE_ABI_ALIGN_UP(
+      NATIVE_BUFFER_ABI_ALIGNMENT_OFFSET + sizeof(size_t), _Alignof(uint64_t)),
+  NATIVE_BUFFER_ABI_SIZE = NATIVE_ABI_ALIGN_UP(
+      NATIVE_BUFFER_ABI_OWNER_TOKEN_OFFSET + sizeof(uint64_t),
+      NATIVE_BUFFER_ABI_ALIGNMENT)
+};
+_Static_assert(_Alignof(native_buffer) == NATIVE_BUFFER_ABI_ALIGNMENT,
+               "native_buffer target ABI alignment");
+_Static_assert(offsetof(native_buffer, elements) ==
+                   NATIVE_BUFFER_ABI_ELEMENTS_OFFSET,
+               "native_buffer elements ABI offset");
+_Static_assert(offsetof(native_buffer, length) ==
+                   NATIVE_BUFFER_ABI_LENGTH_OFFSET,
+               "native_buffer length ABI offset");
+_Static_assert(offsetof(native_buffer, stride) ==
+                   NATIVE_BUFFER_ABI_STRIDE_OFFSET,
+               "native_buffer stride ABI offset");
+_Static_assert(offsetof(native_buffer, alignment) ==
+                   NATIVE_BUFFER_ABI_ALIGNMENT_OFFSET,
+               "native_buffer alignment ABI offset");
+_Static_assert(offsetof(native_buffer, owner_capability_token) ==
+                   NATIVE_BUFFER_ABI_OWNER_TOKEN_OFFSET,
+               "native_buffer owner token ABI offset");
+_Static_assert(sizeof(native_buffer) == NATIVE_BUFFER_ABI_SIZE,
+               "native_buffer target ABI size");
+#if UINTPTR_MAX == UINT64_MAX && SIZE_MAX == UINT64_MAX
+_Static_assert(sizeof(native_buffer) == 40U,
+               "native_buffer supported 64-bit C ABI size");
+_Static_assert(_Alignof(native_buffer) == 8U,
+               "native_buffer supported 64-bit C ABI alignment");
+_Static_assert(offsetof(native_buffer, elements) == 0U &&
+                   offsetof(native_buffer, length) == 8U &&
+                   offsetof(native_buffer, stride) == 16U &&
+                   offsetof(native_buffer, alignment) == 24U &&
+                   offsetof(native_buffer, owner_capability_token) == 32U,
+               "native_buffer supported 64-bit C ABI offsets");
+#endif
+#if defined(__wasm32__)
+_Static_assert(sizeof(void *) == 4U && sizeof(size_t) == 4U &&
+                   _Alignof(int64_t) == 8U,
+               "native_buffer wasm32 scalar ABI");
+_Static_assert(sizeof(native_buffer) == 40U, "native_buffer wasm32 ABI size");
+_Static_assert(_Alignof(native_buffer) == 8U,
+               "native_buffer wasm32 ABI alignment");
+_Static_assert(offsetof(native_buffer, elements) == 0U &&
+                   offsetof(native_buffer, length) == 8U &&
+                   offsetof(native_buffer, stride) == 16U &&
+                   offsetof(native_buffer, alignment) == 24U &&
+                   offsetof(native_buffer, owner_capability_token) == 32U,
+               "native_buffer wasm32 ABI offsets");
+#endif
+#undef NATIVE_ABI_MAX_ALIGN
+#undef NATIVE_ABI_ALIGN_UP
 
 /* Borrowed octets. Distinct from native_bytes because nothing here owns or may
    free `data`, and distinct from a Text handle because the octets are arbitrary
@@ -213,14 +291,6 @@ struct native_value_descriptor {
    push sequence's reallocation count is observable from a test. */
 extern uint64_t native_vec_storage_allocations;
 
-/* Counts successful non-empty Buffer element-storage allocations. Checked
-   reads and writes never change it. */
-extern uint64_t native_buffer_storage_allocations;
-
-/* Counts successful calls to native_arena_alloc. Two non-empty Buffer
-   constructions contribute four: one header and one dense element span each. */
-extern uint64_t native_arena_allocations;
-
 /* Text and Keyword handles are addresses of length-prefixed strict-UTF-8 blobs:
    an 8-byte native-endian uint64_t length, then exactly that many bytes.
    Handles are program-local addresses and never cross a program boundary. */
@@ -294,10 +364,12 @@ int64_t native_buffer_length(const native_buffer *buffer,
 /* Both accessors trap NATIVE_TRAP_OUT_OF_RANGE unless 0 <= index < length. */
 const void *native_buffer_at(const native_buffer *buffer,
                              const native_capability *capability,
-                             int64_t index, int64_t stride);
+                             int64_t index, int64_t stride,
+                             size_t alignment);
 void native_buffer_set(native_buffer *buffer,
                        const native_capability *capability,
-                       int64_t index, const void *value, int64_t stride);
+                       int64_t index, const void *value, int64_t stride,
+                       size_t alignment);
 
 /* A read-only alias of octets this shim did not allocate: one header, never a
    copy of the data. The caller keeps `data` live and unmodified for as long as

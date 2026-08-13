@@ -2553,7 +2553,8 @@
           ", capability, "
           (value-name function slots
             (core/buffergetcheckedinstructionv0-index-id instruction))
-          ", INT64_C(" (buffer-stride layouts buffer-type) "));\n"))
+          ", INT64_C(" (buffer-stride layouts buffer-type) "), (size_t)"
+          (buffer-element-alignment layouts buffer-type) ");\n"))
 
       (instance? native.core.BufferSetCheckedInstructionV0 instruction)
       (let [(source core/NativeId)
@@ -2567,7 +2568,8 @@
           (value-name function slots
             (core/buffersetcheckedinstructionv0-index-id instruction))
           ", &" value ", INT64_C(" (buffer-stride layouts buffer-type)
-          "));\n"
+          "), (size_t)" (buffer-element-alignment layouts buffer-type)
+          ");\n"
           "  " target " = " value ";\n"))
 
       (instance? native.core.VecSortInstructionV0 instruction)

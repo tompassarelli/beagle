@@ -3511,8 +3511,6 @@ struct native_arena_chunk {
 };
 
 uint64_t native_vec_storage_allocations = UINT64_C(0);
-uint64_t native_buffer_storage_allocations = UINT64_C(0);
-uint64_t native_arena_allocations = UINT64_C(0);
 
 /* Smallest capacity a first push takes; every later growth doubles, which is
    what keeps a run of n pushes at O(log n) storage allocations. */
@@ -3525,6 +3523,10 @@ static void native_arena_clear(native_arena *arena) {
   arena->chunks = NULL;
   arena->growth_floor = 0U;
   arena->growable = false;
+  arena->allocation_count = UINT64_C(0);
+  arena->buffer_storage_allocation_count = UINT64_C(0);
+  arena->buffer_storage_current_bytes = 0U;
+  arena->buffer_storage_high_water_bytes = 0U;
 }
 
 static bool native_arena_add_chunk(native_arena *arena, size_t required) {
@@ -3585,6 +3587,9 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment) {
   if ((arena == NULL) || (alignment == 0U) || ((alignment & (alignment - 1U)) != 0U)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  if (arena->allocation_count == UINT64_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
   if ((arena->offset > arena->capacity) || (arena->offset > (SIZE_MAX - size))) {
     native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
   }
@@ -3622,7 +3627,7 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment) {
     aligned_offset = (size_t)(aligned - base);
   }
   arena->offset = aligned_offset + size;
-  native_arena_allocations += UINT64_C(1);
+  arena->allocation_count += UINT64_C(1);
   return arena->bytes + aligned_offset;
 }
 
@@ -3644,6 +3649,9 @@ void native_arena_reset(native_arena *arena) {
     arena->chunks = NULL;
   }
   arena->offset = 0U;
+  arena->allocation_count = UINT64_C(0);
+  arena->buffer_storage_allocation_count = UINT64_C(0);
+  arena->buffer_storage_current_bytes = 0U;
 }
 
 void native_arena_destroy(native_arena *arena) {
@@ -3795,14 +3803,20 @@ static size_t native_dense_bytes(int64_t capacity, int64_t stride) {
 
 static void native_buffer_require(const native_buffer *buffer,
                                   const native_capability *capability,
-                                  int64_t stride) {
+                                  int64_t stride, size_t alignment) {
   if ((buffer == NULL) || (capability == NULL) ||
       (capability->token == UINT64_C(0)) || (stride <= INT64_C(0)) ||
       (capability->token != buffer->owner_capability_token) ||
       (buffer->length < INT64_C(0)) || (buffer->stride != stride) ||
+      (alignment == 0U) || ((alignment & (alignment - 1U)) != 0U) ||
+      (buffer->alignment != alignment) ||
+      (((uint64_t)stride % (uint64_t)alignment) != UINT64_C(0)) ||
+      ((buffer->elements != NULL) &&
+       (((uintptr_t)buffer->elements & ((uintptr_t)alignment - 1U)) != 0U)) ||
       ((buffer->length > INT64_C(0)) && (buffer->elements == NULL))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  (void)native_dense_bytes(buffer->length, stride);
 }
 
 native_buffer *native_buffer_new(native_arena *arena,
@@ -3812,11 +3826,18 @@ native_buffer *native_buffer_new(native_arena *arena,
   native_buffer *buffer;
   size_t bytes;
 
-  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
-      (alignment == 0U)) {
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (alignment == 0U) ||
+      ((alignment & (alignment - 1U)) != 0U) || (stride <= INT64_C(0)) ||
+      (((uint64_t)stride % (uint64_t)alignment) != UINT64_C(0))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   bytes = native_dense_bytes(length, stride);
+  if ((bytes != 0U) &&
+      ((arena->buffer_storage_allocation_count == UINT64_MAX) ||
+       (arena->buffer_storage_current_bytes > SIZE_MAX - bytes))) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
   buffer = (native_buffer *)native_arena_alloc(
       arena, sizeof(*buffer), _Alignof(native_buffer));
   buffer->elements =
@@ -3826,8 +3847,13 @@ native_buffer *native_buffer_new(native_arena *arena,
   buffer->alignment = alignment;
   buffer->owner_capability_token = capability->token;
   if (bytes != 0U) {
+    size_t live_bytes = arena->buffer_storage_current_bytes + bytes;
     memset(buffer->elements, 0, bytes);
-    native_buffer_storage_allocations += UINT64_C(1);
+    arena->buffer_storage_allocation_count += UINT64_C(1);
+    arena->buffer_storage_current_bytes = live_bytes;
+    if (live_bytes > arena->buffer_storage_high_water_bytes) {
+      arena->buffer_storage_high_water_bytes = live_bytes;
+    }
   }
   return buffer;
 }
@@ -3835,32 +3861,35 @@ native_buffer *native_buffer_new(native_arena *arena,
 int64_t native_buffer_length(const native_buffer *buffer,
                              const native_capability *capability) {
   native_buffer_require(buffer, capability,
-                        buffer == NULL ? INT64_C(0) : buffer->stride);
+                        buffer == NULL ? INT64_C(0) : buffer->stride,
+                        buffer == NULL ? 0U : buffer->alignment);
   return buffer->length;
 }
 
 const void *native_buffer_at(const native_buffer *buffer,
                              const native_capability *capability,
-                             int64_t index, int64_t stride) {
-  native_buffer_require(buffer, capability, stride);
+                             int64_t index, int64_t stride,
+                             size_t alignment) {
+  native_buffer_require(buffer, capability, stride, alignment);
   if ((index < INT64_C(0)) || (index >= buffer->length)) {
     native_trap(NATIVE_TRAP_OUT_OF_RANGE);
   }
   return (const void *)((const uint8_t *)buffer->elements +
-                        (size_t)(index * stride));
+                        ((size_t)index * (size_t)stride));
 }
 
 void native_buffer_set(native_buffer *buffer,
                        const native_capability *capability,
-                       int64_t index, const void *value, int64_t stride) {
-  native_buffer_require(buffer, capability, stride);
+                       int64_t index, const void *value, int64_t stride,
+                       size_t alignment) {
+  native_buffer_require(buffer, capability, stride, alignment);
   if (value == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   if ((index < INT64_C(0)) || (index >= buffer->length)) {
     native_trap(NATIVE_TRAP_OUT_OF_RANGE);
   }
-  memcpy((uint8_t *)buffer->elements + (size_t)(index * stride), value,
+  memcpy((uint8_t *)buffer->elements + ((size_t)index * (size_t)stride), value,
          (size_t)stride);
 }
 

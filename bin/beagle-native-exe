@@ -393,7 +393,9 @@ EOF
     fi
     if [[ "$needs_capability" == "1" ]]; then
         cat <<'EOF'
-  const native_capability capability = { UINT64_C(0) };
+  /* One process-local nonzero authority backs the root region capabilities
+     projected into this zero-argument executable. */
+  const native_capability capability = { UINT64_C(1) };
 EOF
     fi
     if [[ "$entry_return" == "Int" ]]; then
