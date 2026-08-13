@@ -450,7 +450,7 @@
       (format "a~a" index)
       cleaned))
 
-;; TS optional params have no beagle counterpart, so each prefix length becomes a
+;; TS optional params have no Beagle counterpart, so each prefix length becomes a
 ;; clause of one multi-arity defn. Overloads that share an arity keep the first.
 (define (fixed-arities params)
   (define required (length (takef params (lambda (p) (not (ts-param-optional? p))))))
@@ -459,17 +459,11 @@
 (define (params->beagle params)
   (string-join
    (for/list ([p (in-list params)] [i (in-naturals)])
-     (format "~a~a: ~a"
+     (format "~a(~a ~a)"
              (if (ts-param-rest? p) "& " "")
              (param-name-for p i)
-             (let ([t (ts-type->beagle (ts-param-type p))])
-               ;; A beagle rest param is typed by its element.
-               (if (ts-param-rest? p) (vec-element t) t))))
+             (ts-type->beagle (ts-param-type p))))
    " "))
-
-(define (vec-element t)
-  (define m (regexp-match #rx"^\\(Vec (.*)\\)$" t))
-  (if m (cadr m) t))
 
 (define (arg-refs params)
   (string-join
@@ -482,11 +476,11 @@
 ;; clause: (list params ret-type body-format), body-format taking the argument list.
 (define (emit-clauses name clauses)
   (define (clause-text params ret body)
-    (format "[~a] -> ~a\n     ~a" (params->beagle params) ret body))
+    (format "[~a] ~a\n     ~a" (params->beagle params) ret body))
   (cond
     [(= (length clauses) 1)
      (match-define (list params ret body) (car clauses))
-     (format "(js/export\n  (defn ~a [~a] -> ~a\n    ~a))\n" name (params->beagle params) ret body)]
+     (format "(js/export\n  (defn ~a [~a] ~a\n    ~a))\n" name (params->beagle params) ret body)]
     [else
      (string-append
       (format "(js/export\n  (defn ~a\n" name)

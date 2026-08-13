@@ -72,19 +72,19 @@
       (check-regexp-match #rx"make-thing" text)
       ;; Optional params become clauses of one multi-arity defn, not suffixed names.
       (check-regexp-match #rx"defn make-box\n" text)
-      (check-regexp-match #rx"\\(\\[\\] -> Any" text)
-      (check-regexp-match #rx"\\(\\[width: Float\\] -> Any" text)
-      (check-regexp-match #rx"\\(\\[width: Float height: Float\\] -> Any" text)
+      (check-regexp-match #rx"\\(\\[\\] Any" text)
+      (check-regexp-match #rx"\\(\\[\\(width Float\\)\\] Any" text)
+      (check-regexp-match #rx"\\(\\[\\(width Float\\) \\(height Float\\)\\] Any" text)
       (check-false (regexp-match? #rx"make-box-2" text))
       ;; Own and inherited declarations keep their receiver and argument arity.
-      (check-regexp-match #rx"\\(\\[self: Any factor: Float\\] -> Any" text)
-      (check-regexp-match #rx"\\(\\[self: Any x: Float y: Float z: Float\\] -> Any" text)
-      (check-regexp-match #rx"defn thing-inherited \\[self: Any level: Float\\] -> Bool" text)
+      (check-regexp-match #rx"\\(\\[\\(self Any\\) \\(factor Float\\)\\] Any" text)
+      (check-regexp-match #rx"\\(\\[\\(self Any\\) \\(x Float\\) \\(y Float\\) \\(z Float\\)\\] Any" text)
+      (check-regexp-match #rx"defn thing-inherited \\[\\(self Any\\) \\(level Float\\)\\] Bool" text)
       ;; A variadic signature becomes a rest param forwarded with js/spread.
-      (check-regexp-match #rx"box-add \\[self: Any & children: Any\\]" text)
+      (check-regexp-match #rx"box-add \\[\\(self Any\\) & \\(children \\(Vec Any\\)\\)\\]" text)
       (check-regexp-match #rx"js/spread children" text)
       ;; A primitive property gets a reader and a writer; a non-primitive gets neither.
-      (check-regexp-match #rx"defn box-width \\[self: Any\\] -> Float" text)
+      (check-regexp-match #rx"defn box-width \\[\\(self Any\\)\\] Float" text)
       (check-regexp-match #rx"defn set-box-width!" text)
       (check-false (regexp-match? #rx"defn box-nested" text))
       ;; A readonly property gets a reader only.
@@ -93,7 +93,7 @@
       ;; A type-only re-export keeps its instance wrappers but nothing that
       ;; names the class at runtime: no import, no constructor, no statics.
       (check-regexp-match #rx"defn ghost-fade" text)
-      (check-regexp-match #rx"defn ghost-fade \\[self: Any amount: Float\\] -> Nil" text)
+      (check-regexp-match #rx"defn ghost-fade \\[\\(self Any\\) \\(amount Float\\)\\] Nil" text)
       (check-regexp-match #rx"defn ghost-opacity" text)
       (check-regexp-match #rx"defn set-ghost-opacity!" text)
       (check-false (regexp-match? #rx"make-ghost" text))
