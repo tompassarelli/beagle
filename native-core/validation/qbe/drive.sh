@@ -105,11 +105,39 @@ cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h"
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c qbe_main.c -o qbe_main.o )
 ( cd "$build" && cc module_0.s module_1.s module_2.s module_3.s qbe_main.o native_shim.o -o probe_qbe )
 ( cd "$build" && ./probe_qbe )
-for mode in sub-overflow sub-overflow-positive \
-  mul-overflow mul-overflow-negative quot-zero rem-zero mod-zero; do
-  if (cd "$build" && ulimit -c 0 && ./probe_qbe "$mode") 2>/dev/null; then
-    echo "drive.sh: QBE accepted trapped scalar operation: $mode" >&2
+
+assert_trap() {
+  local mode="$1"
+  local expected_code="$2"
+  local stdout="$build/$mode.stdout"
+  local stderr="$build/$mode.stderr"
+  local status
+
+  set +e
+  bash -c 'timeout --signal=TERM --kill-after=1s 2s "$1" "$2"; status=$?; exit "$status"' \
+    qbe-trap-probe "$build/probe_qbe" "$mode" >"$stdout" 2>"$stderr"
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 134 ]]; then
+    echo "drive.sh: $mode exited $status; expected native_trap abort status 134" >&2
+    sed -n '1,80p' "$stderr" >&2
     exit 1
   fi
+  if ! cmp -s "$stdout" <(printf 'qbe-scalar-trap %s\n' "$expected_code"); then
+    echo "drive.sh: $mode did not report exact native_trap code $expected_code" >&2
+    sed -n '1,80p' "$stdout" >&2
+    exit 1
+  fi
+}
+
+ulimit -c 0
+for mode in sub-overflow sub-overflow-positive mul-overflow \
+  mul-overflow-negative mul-overflow-positive-negative \
+  mul-overflow-negative-negative; do
+  assert_trap "$mode" 2
+done
+for mode in quot-zero rem-zero mod-zero; do
+  assert_trap "$mode" 1
 done
 echo "drive.sh: qbe assemble + link + run ok"
