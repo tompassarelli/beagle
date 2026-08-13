@@ -12,12 +12,14 @@
          racket/runtime-path
          racket/string
          racket/system
+         racket/tcp
          beagle/private/query)
 
 (define-runtime-path CANONICAL-FIXTURE "fixtures/query/canonical.bjs")
 (define-runtime-path RETIRED-FLAT-FIXTURE
   "fixtures/query/invalid/retired-flat.bjs")
 (define-runtime-path DAEMON-FILES "../../bin/_beagle-daemon-files")
+(define-runtime-path DAEMON-CLI "../../bin/beagle-daemon")
 
 (define (with-query-file source proc)
   (define f (make-temporary-file "query~a.bgl"))
@@ -64,6 +66,39 @@
        (path->string DAEMON-FILES))))
   (values status (get-output-string out) (get-output-string err)))
 
+(define (closed-local-port)
+  (define listener (tcp-listen 0 1 #t "127.0.0.1"))
+  (define addresses (call-with-values (lambda () (tcp-addresses listener #t)) list))
+  (tcp-close listener)
+  (cadr addresses))
+
+(define (run-daemon-cli-against-dead-port scratch source-path)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define script
+    (string-append
+     "export BEAGLE_DAEMON_PORTFILE=\"$1/daemon.port\"; "
+     "export BEAGLE_DAEMON_PIDFILE=\"$1/daemon.pid\"; "
+     "export BEAGLE_DAEMON_IDENTITYFILE=\"$1/daemon.identity\"; "
+     "source \"$2\"; "
+     "beagle_compiler_identity > \"$1/daemon.identity\"; "
+     "printf '%s\\n' \"$3\" > \"$1/daemon.port\"; "
+     "exec \"$4\" query sig present \"$5\""))
+  (define status
+    (parameterize ([current-output-port out]
+                   [current-error-port err])
+      (system*/exit-code
+       (find-executable-path "bash")
+       "-c"
+       script
+       "daemon-dead-port-test"
+       (path->string scratch)
+       (path->string DAEMON-FILES)
+       (number->string (closed-local-port))
+       (path->string DAEMON-CLI)
+       source-path)))
+  (values status (get-output-string out) (get-output-string err)))
+
 (define SRC
   (string-append
    "(ns q)\n"
@@ -105,6 +140,17 @@
   (check-regexp-match #rx"dynamic : \\[Any -> Any\\]" out)
   (check-false (string-contains? out "forall") out)
   (check-false (regexp-match? #rx"\\?[0-9]+" out) out))
+
+(test-case "sig: dynamic typed rest publishes the element type"
+  (define out
+    (query-output
+     (string-append
+      "(ns q.dynamic-rest)\n"
+      "(define-mode dynamic)\n"
+      "(defn collect [(first Int) & (more (Vec Int))] Int first)\n")
+     '("sig" "collect")))
+  (check-regexp-match #rx"collect : \\[Int & Int -> Int\\]" out)
+  (check-regexp-match #rx"& more : Int" out))
 
 (test-case "sig: aggregate parameter detail preserves one binding operation"
   (define out (query-output SRC '("sig" "pair-head")))
@@ -217,6 +263,28 @@
         (run-daemon-files-helper scratch "beagle_daemon_compatible_port"))
       (check-not-equal? stale-status 0)
       (check-equal? stale-port ""))
+    (lambda () (delete-directory/files scratch))))
+
+(test-case "daemon CLI falls back one-shot from a compatible dead endpoint"
+  (define scratch (make-temporary-file "beagle-daemon-dead-port-~a" 'directory))
+  (define source-path (build-path scratch "present.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file source-path
+        #:exists 'truncate/replace
+        (lambda (out)
+          (display
+           (string-append
+            "#lang beagle/clj\n"
+            "(ns daemon.dead-port)\n"
+            "(defn present [] Int 1)\n")
+           out)))
+      (define-values (status out err)
+        (run-daemon-cli-against-dead-port scratch (path->string source-path)))
+      (check-equal? status 0)
+      (check-true (string-contains? out "\"signature\":\"[ -> Int]\""))
+      (check-equal? err ""))
     (lambda () (delete-directory/files scratch))))
 
 (test-case "fields: retired flat fields are refused by the canonical parser"

@@ -99,6 +99,26 @@
        "beagle-sig: callable missing not found in provided files"))
     (lambda () (delete-file path))))
 
+(test-case "daemon dynamic typed rest publishes the element type"
+  (define path (make-temporary-file "beagle-daemon-dynamic-rest-~a.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (write-source!
+       path
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns daemon.dynamic-rest)\n"
+        "(define-mode dynamic)\n"
+        "(defn collect [(first Int) & (more (Vec Int))] Int first)\n"))
+      (define response
+        (car (run-commands (list (format "sig collect ~a" path)))))
+      (define result (car (hash-ref response 'results)))
+      (check-true (hash-ref response 'ok))
+      (check-equal? (hash-ref result 'signature) "[Int & Int -> Int]")
+      (check-equal? (hash-ref (hash-ref result 'rest) 'type) "Int"))
+    (lambda () (delete-file path))))
+
 (test-case "daemon fields and generated signatures share the checked AST"
   (define path (make-temporary-file "beagle-daemon-query-~a.bjs"))
   (dynamic-wind

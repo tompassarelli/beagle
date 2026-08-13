@@ -75,20 +75,26 @@ get_port() {
 }
 
 send_query() {
-    local port
+    local port response
     port="$(beagle_daemon_compatible_port || true)"
-    if [[ -z "$port" ]]; then
-        # Fallback: one-shot mode (no persistent daemon)
-        echo -e "$*\nquit" | "$RACKET" -e '(require beagle/private/daemon) (run-daemon)' 2>/dev/null | head -1
-        return
+    if [[ -n "$port" ]]; then
+        # A compatible port file can outlive its daemon. Bound the complete
+        # request so a refused or wedged endpoint falls through to this
+        # checkout's one-shot compiler instead of hanging the authoring loop.
+        response="$(timeout --kill-after=1s 2s bash -c '
+            exec 3<>/dev/tcp/127.0.0.1/"$1" 2>/dev/null || exit 1
+            printf "%s\\n" "$2" >&3 || exit 1
+            IFS= read -r reply <&3 || exit 1
+            printf "%s\\n" "$reply"
+        ' beagle-daemon-query "$port" "$*" 2>/dev/null)" || response=""
+        if [[ -n "$response" ]]; then
+            printf '%s\n' "$response"
+            return
+        fi
     fi
-    # Send via TCP
-    exec 3<>/dev/tcp/127.0.0.1/"$port"
-    echo "$*" >&3
-    local response
-    read -r response <&3
-    exec 3>&-
-    echo "$response"
+
+    # Fallback: no compatible daemon, or its endpoint did not answer in time.
+    printf '%s\nquit\n' "$*" | "$RACKET" -e '(require beagle/private/daemon) (run-daemon)' 2>/dev/null | head -1
 }
 
 stop_running_daemon() {

@@ -209,6 +209,15 @@
             (type->string (hash-ref clause 'return)))))
 
 (define (authored-callable-type form)
+  (define (rest-element-type rest-param)
+    (define aggregate (and rest-param (param-type rest-param)))
+    (cond
+      [(and (type-app? aggregate)
+            (eq? (type-app-ctor aggregate) 'Vec)
+            (= (length (type-app-args aggregate)) 1))
+       (car (type-app-args aggregate))]
+      [aggregate aggregate]
+      [else (type-prim 'Any)]))
   (define alternatives
     (for/list ([clause (in-list (callable-clauses form))])
       (define params (car clause))
@@ -216,7 +225,7 @@
       (define return-type (caddr clause))
       (type-fn
        (map (lambda (param) (or (param-type param) (type-prim 'Any))) params)
-       (and rest-param (or (param-type rest-param) (type-prim 'Any)))
+       (and rest-param (rest-element-type rest-param))
        return-type)))
   (if (= (length alternatives) 1)
       (car alternatives)
@@ -253,11 +262,18 @@
       (when (and (callable-form? form)
                  (eq? (callable-name form) local-target))
         (define signature
-          (or (program-effective-definition-type program local-target #f)
-              ;; Dynamic-mode programs deliberately skip checking.  Their
-              ;; authored signature remains queryable, but strict programs
-              ;; always take the finalized checker result above.
-              (authored-callable-type form)))
+          (let ([effective
+                 (program-effective-definition-type program local-target #f)])
+            (cond
+              [effective effective]
+              ;; Dynamic programs deliberately do not publish inferred types.
+              ;; Their canonical annotations remain useful authoring facts.
+              [(eq? (program-mode program) 'dynamic)
+               (authored-callable-type form)]
+              [else
+               (error 'beagle-sig
+                      "checked program is missing the effective signature for ~a"
+                      local-target)])))
         (set! matches
               (cons
                (signature-match
