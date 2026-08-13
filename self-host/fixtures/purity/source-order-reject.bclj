@@ -1,0 +1,12 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.source-order-reject)
+(define-mode strict)
+
+(defn outer [(cell (Atom Any)) (value Any)] Any
+  (middle cell value))
+
+(defn middle [(cell (Atom Any)) (value Any)] Any
+  (inner cell value))
+
+(defn inner [(cell (Atom Any)) (value Any)] Any
+  (reset! cell value))

@@ -1,0 +1,14 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.strict-accept)
+(define-mode strict)
+
+(defn copy-with-one [(values Any)] Any
+  (let [work (transient values)]
+    (conj! work 1)
+    (persistent! work)))
+
+(defn store! [(cell Any) (value Any)] Any
+  (reset! cell value))
+
+(defn -main [& (args (Vec String))] Any
+  (store! (atom nil) args))

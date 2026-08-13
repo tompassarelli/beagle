@@ -80,7 +80,7 @@
 
 (defn- resolve-imports! [prog surfaces]
   (let [own-externs (get prog "externs")
-   imported (reduce (fn [acc surface] (into acc (p/import-module-surface (get surface "datums") (get surface "prefix") (get surface "refer")))) [] surfaces)]
+   imported (reduce (fn [acc surface] (into acc (p/import-module-surface! (get surface "datums") (get surface "prefix") (get surface "refer")))) [] surfaces)]
   (assoc prog "externs" (dedup-externs (into own-externs imported)))))
 
 (defn- ^Boolean has-define-target? [datums]
@@ -89,7 +89,7 @@
 (defn- parse-file-target! [^String path ^String target]
   (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
    datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
-   surfaces (load-import-surfaces (p/discover-requires datums) path)
+   surfaces (load-import-surfaces (p/discover-requires! datums) path)
    imported-arities (import-parametric-arities surfaces)
    prog (resolve-imports! (p/parse-program-with-parametric-arities! datums imported-arities) surfaces)
    perrs (p/parse-errors)]
@@ -105,7 +105,7 @@
   (selfhost.rt/exit 1)
   prog) prog)))
 
-(defn- ^String emit-for-target [^String target prog]
+(defn- ^String emit-for-target! [^String target prog]
   (cond
   (= target "js") (ejs/emit-program! prog)
   (= target "nix") (en/emit-program! prog)
@@ -119,10 +119,10 @@
   (selfhost.rt/eprint "ok\n"))
 
 (defn- cmd-emit! [^String path ^String target]
-  (print (emit-for-target target (check-or-die! (parse-file-target! path target)))))
+  (print (emit-for-target! target (check-or-die! (parse-file-target! path target)))))
 
 (defn- cmd-emit-from-ast! [^String target]
-  (print (emit-for-target target (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+  (print (emit-for-target! target (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
 
 (defn- ^String flag-value [args ^String flag ^String default]
   (loop [i 0]

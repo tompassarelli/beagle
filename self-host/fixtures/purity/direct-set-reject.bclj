@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.direct-set-reject)
+(define-mode strict)
+
+(defn replace-local [(value Any)] Any
+  (let [current value]
+    (set! current value)))

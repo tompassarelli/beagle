@@ -194,6 +194,69 @@ if [ -d "$TAIL_DIR" ]; then
   done
 fi
 
+echo "=== 5c. purity contract — oracle/selfhost verdict parity ==="
+PURITY_DIR=self-host/fixtures/purity
+purity_verdict() { # purity_verdict <oracle|selfhost> <fixture> <stdout+stderr path>
+  if [ "$1" = oracle ]; then
+    bin/beagle check --profile "${BEAGLE_CHECK_PROFILE:-3}" "$2" >"$3" 2>&1
+  else
+    sh_main check "$2" >"$3" 2>&1
+  fi
+}
+if [ -d "$PURITY_DIR" ]; then
+  for fixture in "$PURITY_DIR"/*.bclj; do
+    pname="$(basename "$fixture" .bclj)"
+    case "$pname" in
+      *-accept) expected=A ;;
+      *-reject) expected=R ;;
+      *) bad "$pname purity fixture name must end in -accept or -reject"; continue ;;
+    esac
+    (
+      unset BEAGLE_PURITY BEAGLE_CHECK_PROFILE
+      purity_verdict oracle "$fixture" "$LAB/$pname-purity-o.err"
+    ); o_exit=$?
+    (
+      unset BEAGLE_PURITY BEAGLE_CHECK_PROFILE
+      purity_verdict selfhost "$fixture" "$LAB/$pname-purity-s.err"
+    ); s_exit=$?
+    [ $o_exit -eq 0 ] && o_verdict=A || o_verdict=R
+    [ $s_exit -eq 0 ] && s_verdict=A || s_verdict=R
+    if [ "$o_verdict" != "$expected" ] || [ "$s_verdict" != "$expected" ]; then
+      bad "$pname purity verdict (expected=$expected oracle=$o_verdict selfhost=$s_verdict)"
+    elif [ "$expected" = R ] &&
+         (! grep -q "purity leak" "$LAB/$pname-purity-o.err" ||
+          ! grep -q "purity leak" "$LAB/$pname-purity-s.err"); then
+      bad "$pname rejected for a non-purity reason"
+    else
+      ok "$pname purity parity ($expected)"
+    fi
+  done
+
+  dial_fixture="$PURITY_DIR/direct-bang-reject.bclj"
+  for dial in off warn-profile-2 warn-profile-3; do
+    case "$dial" in
+      off) purity=off; profile=2; expected=A; warning=0 ;;
+      warn-profile-2) purity=warn; profile=2; expected=A; warning=1 ;;
+      warn-profile-3) purity=warn; profile=3; expected=R; warning=0 ;;
+    esac
+    BEAGLE_PURITY="$purity" BEAGLE_CHECK_PROFILE="$profile" \
+      purity_verdict oracle "$dial_fixture" "$LAB/$dial-purity-o.err"; o_exit=$?
+    BEAGLE_PURITY="$purity" BEAGLE_CHECK_PROFILE="$profile" \
+      purity_verdict selfhost "$dial_fixture" "$LAB/$dial-purity-s.err"; s_exit=$?
+    [ $o_exit -eq 0 ] && o_verdict=A || o_verdict=R
+    [ $s_exit -eq 0 ] && s_verdict=A || s_verdict=R
+    if [ "$o_verdict" != "$expected" ] || [ "$s_verdict" != "$expected" ]; then
+      bad "$dial purity dial (expected=$expected oracle=$o_verdict selfhost=$s_verdict)"
+    elif [ "$warning" -eq 1 ] &&
+         (! grep -q "warning: purity leak" "$LAB/$dial-purity-o.err" ||
+          ! grep -q "warning: purity leak" "$LAB/$dial-purity-s.err"); then
+      bad "$dial accepted without matching purity warnings"
+    else
+      ok "$dial purity dial parity ($expected)"
+    fi
+  done
+fi
+
 echo "=== 6. multi-module fixtures (driver: require resolution + externs import) ==="
 # The driver (selfhost.main) resolves (require ...) across sibling files and
 # imports each dep's typed surface as externs — the module-resolution port.

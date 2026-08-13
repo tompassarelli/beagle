@@ -1,0 +1,11 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.nested-reject)
+(define-mode strict)
+
+(defn make-writer [(cell (Atom Any))] Any
+  (let [enabled true]
+    (if enabled
+      (do
+        (fn [(value Any)] Any
+          (reset! cell value)))
+      nil)))

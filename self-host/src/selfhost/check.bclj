@@ -10,6 +10,7 @@
 
 (require selfhost.rt)
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
+(declare-extern selfhost.rt/getenv (Fn [String] Any))
 
 (require clojure.string :as str)
 
@@ -3021,6 +3022,159 @@
                    "\nAdd the missing (require NS :as ALIAS) form(s), or fix the alias."))))))
     nil))
 
+;; === `!`-purity enforcement ==================================================
+;; A strict-mode definition without a trailing `!` is a checked pure boundary.
+;; Direct mutation and calls to module-local effectful definitions propagate to
+;; a source-order-independent fixed point. This is the self-hosted projection of
+;; check.rkt's canonical pass; the dense AST maps are walked at the same semantic
+;; edges rather than by fixture names or emitted Clojure text.
+
+(def TRANSIENT-MARKER-SET Any
+  {"persistent!" true
+   "assoc!" true
+   "conj!" true
+   "dissoc!" true
+   "disj!" true
+   "pop!" true})
+
+(defn bang-name? [(name Any)] Bool
+  (and (string? name) (str/ends-with? name "!")))
+
+(defn marker-add [(markers Any) (marker Any)] Any
+  (if (or (nil? marker)
+          (boolean (some (fn [(present Any)] Bool (= present marker)) markers)))
+    markers
+    (conj markers marker)))
+
+(declare collect-markers-walk)
+
+(defn collect-map-child-markers
+  [(x Any)
+   (known Any)
+   (markers Any)] Any
+  (reduce (fn [(acc Any) (child Any)] Any
+            (collect-markers-walk child known acc))
+          markers (vals x)))
+
+(defn collect-markers-walk
+  [(x Any)
+   (known Any)
+   (markers Any)] Any
+  (cond
+    (vector? x)
+      (reduce (fn [(acc Any) (item Any)] Any
+                (collect-markers-walk item known acc))
+              markers x)
+    (not (map? x)) markers
+    :else
+      (let [node (get x "node")]
+        (cond
+          ;; Quoted data and nested definitions are not executed by this
+          ;; definition boundary. Inner anonymous and letfn functions remain
+          ;; ordinary child maps and therefore are traversed.
+          (or (= node "quoted") (= node "def") (= node "defonce")
+              (= node "defn") (= node "defn-multi"))
+            markers
+          (= node "set!")
+            (collect-map-child-markers x known (marker-add markers "set!"))
+          (= node "call")
+            (let [name (call-fn-name x)
+                  marked (if (or (bang-name? name) (= true (get known name)))
+                           (marker-add markers name)
+                           markers)]
+              (collect-map-child-markers x known marked))
+          ;; The generic child descent is intentionally the default. Every
+          ;; string-keyed parsed expression node (including rescue, doto,
+          ;; threading, binding, target-case, JS forms, and future nodes) is a
+          ;; composition of maps/vectors, so a new form cannot silently hide a
+          ;; marker by being omitted from a hand-maintained case list.
+          :else (collect-map-child-markers x known markers)))))
+
+(defn collect-markers [(body Any) (known Any)] Any
+  (collect-markers-walk body known []))
+
+(defn effective-markers [(body Any) (known Any)] Any
+  (let [collected (collect-markers body known)
+        opens-transient (boolean
+                          (some (fn [(marker Any)] Bool (= marker "transient"))
+                                (collect-markers body {"transient" true})))]
+    (if opens-transient
+      (filterv (fn [(marker Any)] Bool
+                 (not (= true (get TRANSIENT-MARKER-SET marker))))
+               collected)
+      collected)))
+
+(defn collect-purity-defs [(prog Any)] Any
+  (reduce
+    (fn [(defs Any) (form Any)] Any
+      (let [node (get form "node")]
+        (cond
+          (= node "defn")
+            (conj defs {"name" (get form "name") "body" (get form "body")})
+          (= node "defn-multi")
+            (reduce (fn [(acc Any) (arity Any)] Any
+                      (conj acc {"name" (get form "name")
+                                 "body" (get arity "body")}))
+                    defs (get form "arities"))
+          (or (= node "js-export") (= node "js-export-default"))
+            (let [inner (get form "form") inner-node (get inner "node")]
+              (cond
+                (= inner-node "defn")
+                  (conj defs {"name" (get inner "name") "body" (get inner "body")})
+                (= inner-node "defn-multi")
+                  (reduce (fn [(acc Any) (arity Any)] Any
+                            (conj acc {"name" (get inner "name")
+                                       "body" (get arity "body")}))
+                          defs (get inner "arities"))
+                :else defs))
+          :else defs)))
+    [] (get prog "forms")))
+
+(defn derive-effectful-defs [(defs Any)] Any
+  (loop [known {}]
+    (let [next (reduce (fn [(acc Any) (definition Any)] Any
+                         (if (> (count (effective-markers (get definition "body") known)) 0)
+                           (assoc acc (get definition "name") true)
+                           acc))
+                       known defs)]
+      (if (= next known) known (recur next)))))
+
+(defn purity-severity-for [(mode Any) (profile Any)] String
+  (cond
+    (= mode "off") "off"
+    (= mode "warn") (if (= profile "3") "error" "warn")
+    :else "error"))
+
+(defn purity-severity [] String
+  (purity-severity-for
+    (selfhost.rt/getenv "BEAGLE_PURITY")
+    (selfhost.rt/getenv "BEAGLE_CHECK_PROFILE")))
+
+(defn purity-message [(name String) (markers Any)] String
+  (str "purity leak: '" name "' has no '!' suffix but its body uses "
+       (str/join ", " markers) " — rename to '" name "!' or remove the effect"))
+
+(defn check-purity-with-severity! [(prog Any) (severity String)] Nil
+  (when (and (= (get prog "mode") "strict") (not (= severity "off")))
+    (let [defs (collect-purity-defs prog)
+          effectful (derive-effectful-defs defs)]
+      (doseq [definition defs]
+        (let [name (get definition "name")
+              known (dissoc effectful name)
+              markers (if (= name "-main")
+                        []
+                        (effective-markers (get definition "body") known))]
+          (when (and (not (bang-name? name)) (> (count markers) 0))
+            (let [message (purity-message name markers)]
+              (if (= severity "warn")
+                (selfhost.rt/eprint (str "warning: " message "\n"))
+                (emit-diag! message))))))))
+  nil)
+
+(defn check-purity! [(prog Any)] Nil
+  (check-purity-with-severity! prog (purity-severity))
+  nil)
+
 ;; === type-check! (mutates STATE; returns {diagnostics count}) =================
 
 (defn tag-semantic-node-ids-from [(value Any) (next-id Int)] Any
@@ -3150,7 +3304,8 @@
         (doseq [form (get checked-input "forms")]
           (check-form! form env))
         (check-nix-free-dotted! checked-input)
-        (check-qualified-resolution! checked-input env)))
+        (check-qualified-resolution! checked-input env)
+        (check-purity! checked-input)))
     (swap! STATE assoc "checked-program"
       (decorate-tagged-value
         checked-input
@@ -3317,6 +3472,9 @@
 (defn make-map-pair [(key Any) (val Any)] Any
   {"key" key "val" val})
 
+(defn make-set!-node [(target Any) (value Any)] Any
+  {"node" "set!" "target" target "value" value})
+
 (defn make-prog [(forms (Vec Any))] Any
   {"mode" "strict" "namespace" "test" "target" "js"
    "forms" forms "externs" [] "requires" []})
@@ -3400,6 +3558,91 @@
                   [(make-ref "x")])])
           result (type-check! prog)]
       (> (get result "count") 0)))
+
+  ;; --- fixed-point `!`-purity parity ---
+  (expect! "purity: default enforcement is a hard error"
+    (= (purity-severity-for nil nil) "error"))
+  (expect! "purity: warn escalates at profile 3"
+    (and (= (purity-severity-for "warn" "2") "warn")
+         (= (purity-severity-for "warn" "3") "error")))
+  (expect! "purity: direct bang call and set! are markers"
+    (let [markers (collect-markers
+                    [(make-call "reset!" [(make-ref "cell") (make-lit "number" 1)])
+                     (make-set!-node (make-ref "slot") (make-lit "number" 2))]
+                    {})]
+      (and (boolean (some (fn [(m Any)] Bool (= m "reset!")) markers))
+           (boolean (some (fn [(m Any)] Bool (= m "set!")) markers)))))
+  (expect! "purity: nested let/if/do/fn forms are traversed"
+    (let [nested (make-let-node
+                   [(make-let-binding "x" nil (make-lit "number" 1))]
+                   [(make-if-node
+                      (make-lit "bool" true)
+                      {"node" "do"
+                       "body" [{"node" "fn" "params" [] "rest" false
+                                "ret" ANY
+                                "body" [(make-call "swap!" [(make-ref "cell")])]}]}
+                      (make-lit "nil" nil))])]
+      (boolean (some (fn [(m Any)] Bool (= m "swap!"))
+                     (collect-markers [nested] {})))))
+  (expect! "purity: rescue/doto and future node children cannot hide markers"
+    (let [wrapped {"node" "future-node"
+                   "payload" {"node" "rescue"
+                              "expr" {"node" "doto"
+                                      "target" (make-ref "cell")
+                                      "forms" [(make-call "reset!" [])]}
+                              "fallback" (make-lit "nil" nil)
+                              "err" false}}]
+      (boolean (some (fn [(m Any)] Bool (= m "reset!"))
+                     (collect-markers [wrapped] {})))))
+  (expect! "purity: local effects reach a source-order-independent fixed point"
+    (let [forward [{"name" "outer" "body" [(make-call "middle" [])]}
+                   {"name" "middle" "body" [(make-call "inner" [])]}
+                   {"name" "inner" "body" [(make-call "reset!" [])]}]
+          reverse (vec (reverse forward))
+          forward-effectful (derive-effectful-defs forward)
+          reverse-effectful (derive-effectful-defs reverse)]
+      (and (= forward-effectful reverse-effectful)
+           (= true (get forward-effectful "outer"))
+           (= true (get forward-effectful "middle"))
+           (= true (get forward-effectful "inner")))))
+  (expect! "purity: an owned transient is externally pure"
+    (= 0 (count (effective-markers
+                  [(make-call "transient" [(make-vec-node [])])
+                   (make-call "conj!" [(make-ref "work") (make-lit "number" 1)])
+                   (make-call "persistent!" [(make-ref "work")])]
+                  {}))))
+  (expect! "purity: mutation of a received transient still leaks"
+    (> (count (effective-markers
+                [(make-call "conj!" [(make-ref "work") (make-lit "number" 1)])]
+                {}))
+       0))
+  (expect! "purity: strict non-bang boundary rejects an indirect effect"
+    (do
+      (swap! STATE assoc "diagnostics" [])
+      (check-purity-with-severity!
+        (make-prog
+          [(make-defn-node "caller" [] ANY [(make-call "writer" [])])
+           (make-defn-node "writer" [] ANY [(make-call "reset!" [])])])
+        "error")
+      (= 2 (count (get (deref STATE) "diagnostics")))))
+  (expect! "purity: bang boundary and -main ABI boundary are accepted"
+    (do
+      (swap! STATE assoc "diagnostics" [])
+      (check-purity-with-severity!
+        (make-prog
+          [(make-defn-node "writer!" [] ANY [(make-call "reset!" [])])
+           (make-defn-node "-main" [] ANY [(make-call "writer!" [])])])
+        "error")
+      (= 0 (count (get (deref STATE) "diagnostics")))))
+  (expect! "purity: dynamic mode is outside the enforcement contract"
+    (do
+      (swap! STATE assoc "diagnostics" [])
+      (check-purity-with-severity!
+        (assoc (make-prog
+                 [(make-defn-node "writer" [] ANY [(make-call "reset!" [])])])
+               "mode" "dynamic")
+        "error")
+      (= 0 (count (get (deref STATE) "diagnostics")))))
 
   ;; --- structural typed destructuring projection ---
   (expect! "destructure: HVec projects positions"

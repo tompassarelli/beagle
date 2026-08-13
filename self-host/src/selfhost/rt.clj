@@ -41,6 +41,9 @@
         (.toString (.relativize (.toPath dir) (.toPath source)))
         :else (recur (.getParentFile dir))))))
 
+(defn getenv [name] (System/getenv name))
+
+
 ;; --- JSON (string keys preserved — AST/datum values are string-keyed) ----------
 
 (defn to-json [x] (cheshire/generate-string x))

@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns selfhost.fixtures.purity.direct-bang-reject)
+(define-mode strict)
+
+(defn store [(cell (Atom Any)) (value Any)] Any
+  (reset! cell value))
