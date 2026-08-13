@@ -498,10 +498,11 @@
                      (lang-for-target-id expected-tgt)
                      (lang-for-target-id (program-target prog)))))
 
-    ;; type-check-with-locs! owns the shared purity gate for every checked
-    ;; projection. This command retains its post-pass below only so agent mode
-    ;; can suppress warn-level purity output without hiding type diagnostics.
-    (parameterize ([current-purity-enforcement 'off])
+    ;; The shared checked projection owns purity enforcement. Agent mode routes
+    ;; only warn-level purity output to a sink; hard errors still reach the
+    ;; ordinary callback and remain visible.
+    (define purity-warning-sink (and agent? (open-output-string)))
+    (parameterize ([current-purity-warning-port purity-warning-sink])
       (type-check-with-locs! prog
         (lambda (e loc-stx)
           (report-error e loc-stx))))
@@ -514,12 +515,10 @@
           (let ([sink (open-output-string)])
             (parameterize ([current-error-port sink])
               (check-scalar-provenance! prog)
-              (check-purity! prog)
               (run-semantic-analysis! prog #:file path))
             (set! lint-count (count-lint-warnings prog)))
           (begin
             (check-scalar-provenance! prog)
-            (check-purity! prog)
             (run-semantic-analysis! prog #:file path)))))
 
   (values error-count lint-count (reverse agent-errors)))

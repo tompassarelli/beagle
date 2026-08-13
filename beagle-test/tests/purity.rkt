@@ -15,6 +15,7 @@
 ;;     guarantee that keeps the live consumers green.
 
 (require rackunit
+         racket/file
          beagle/private/parse
          beagle/private/check
          beagle/private/diagnostic-kind)
@@ -189,6 +190,42 @@
     (check-regexp-match #rx"purity leak" o)
     (check-regexp-match #rx"'make-handler'" o)))
 
+(test-case "warn: structural descent finds effects in rescue, doto, and threading"
+  (define structural
+    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+           '(defn rescue-primary [box v] Any
+              (rescue (reset! box v) nil))
+           '(defn rescue-fallback [box v] Any
+              (rescue v (reset! box v)))
+           '(defn touch [box v] Any
+              (doto box (reset! v)))
+           '(defn threaded [box v] Any
+              (-> box (reset! v)))
+           '(defn routed [box] Any
+              (target-case :clj (reset! box nil)))))
+  (parameterize ([current-purity-enforcement 'warn])
+    (define o (check-output structural))
+    (check-equal? (length (regexp-match* #rx"warning: purity leak" o)) 5)
+    (for ([name '(rescue-primary rescue-fallback touch threaded routed)])
+      (check-regexp-match (regexp (format "'~a'" name)) o))))
+
+(test-case "quoted mutation syntax is data, not an effect"
+  (define quoted-mutation
+    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+           '(defn mutation-data [box v] Any
+              (quote (reset! box v)))))
+  (parameterize ([current-purity-enforcement 'warn])
+    (check-false
+     (regexp-match? #rx"purity leak" (check-output quoted-mutation)))))
+
+(test-case "profile zero keeps purity analysis disabled"
+  (parameterize ([current-check-profile 0]
+                 [current-purity-enforcement 'warn])
+    (define out (open-output-string))
+    (parameterize ([current-error-port out])
+      (check-purity! non-bang-mutating))
+    (check-equal? (get-output-string out) "")))
+
 (test-case "-main is exempt: the entry-point contract name cannot carry `!`"
   (define entry
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
@@ -217,15 +254,116 @@
   (check-eq? (beagle-diagnostic-kind e) 'purity-leak))
 
 (test-case "checked-program projection applies the purity boundary"
+  (define located-mutating
+    (parse-program
+     (list
+      (datum->syntax #f '(ns t.app) (vector "purity-location.bclj" 1 0 #f #f))
+      (datum->syntax #f '(define-mode strict)
+                     (vector "purity-location.bclj" 2 0 #f #f))
+      (datum->syntax #f '(define-target clj)
+                     (vector "purity-location.bclj" 3 0 #f #f))
+      (datum->syntax #f '(defn save [box v] Any (reset! box v))
+                     (vector "purity-location.bclj" 4 2 #f #f)))))
   (define diagnostics '())
+  (define locations '())
   (parameterize ([current-purity-enforcement 'error])
     (type-check-with-locs!
-     non-bang-mutating
-     (lambda (e _loc-stx)
-       (set! diagnostics (cons e diagnostics)))))
+     located-mutating
+     (lambda (e loc-stx)
+       (set! diagnostics (cons e diagnostics))
+       (set! locations (cons loc-stx locations)))))
   (check-equal? (length diagnostics) 1)
   (check-pred beagle-diagnostic? (car diagnostics))
-  (check-eq? (beagle-diagnostic-kind (car diagnostics)) 'purity-leak))
+  (check-eq? (beagle-diagnostic-kind (car diagnostics)) 'purity-leak)
+  (check-true (syntax? (car locations)))
+  (check-equal? (syntax-source (car locations)) "purity-location.bclj")
+  (check-equal? (syntax-line (car locations)) 4)
+  (check-equal? (syntax-column (car locations)) 2))
+
+(test-case "purity analysis returns ordered definitions and exact witnesses"
+  (define path (make-temporary-file "beagle-purity-witness-~a.bgl"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file path
+        (lambda (out)
+          (display
+           (string-append
+            "#lang beagle\n"
+            "(ns t.witness)\n"
+            "\n"
+            "(defn save [(cell (Atom Int)) (value Int)] Int\n"
+            "  (store cell value))\n"
+            "\n"
+            "(defn store [(cell (Atom Int)) (value Int)] Int\n"
+            "  (reset! cell value))\n"
+            "\n"
+            "(defn write\n"
+            "  ([(cell (Atom Int))] Int (reset! cell 0))\n"
+            "  ([(cell (Atom Int)) (value Int)] Int (reset! cell value)))\n")
+           out))
+        #:exists 'truncate/replace)
+      (define violations (purity-violations (parse-program/file path)))
+      (check-equal? (map purity-violation-name violations)
+                    '(save store write))
+      (check-equal?
+       (map (lambda (violation)
+              (syntax-line (purity-violation-definition-stx violation)))
+            violations)
+       '(4 7 10))
+      ;; Multi-arity `write` remains one boundary and duplicate reset! markers
+      ;; retain the first source-order witness only.
+      (check-equal?
+       (map (lambda (violation)
+              (length (purity-violation-witnesses violation)))
+            violations)
+       '(1 1 1))
+      (define witnesses
+        (map (lambda (violation)
+               (purity-witness-stx
+                (car (purity-violation-witnesses violation))))
+             violations))
+      (check-equal? (map syntax->datum witnesses)
+                    '((store cell value)
+                      (reset! cell value)
+                      (reset! cell 0)))
+      (check-equal? (map syntax-line witnesses) '(5 8 11))
+      (check-equal? (map syntax-column witnesses) '(2 2 27))
+      (for ([witness (in-list witnesses)])
+        (check-true (exact-positive-integer? (syntax-position witness)))
+        (check-true (exact-positive-integer? (syntax-span witness)))))
+    (lambda () (delete-file path))))
+
+(test-case "source-less purity analysis does not fabricate witness syntax"
+  (define violations (purity-violations non-bang-mutating))
+  (check-equal? (length violations) 1)
+  (check-false
+   (purity-witness-stx
+    (car (purity-violation-witnesses (car violations))))))
+
+(test-case "export wrappers retain their authored purity boundary"
+  (define source
+    (string-append
+     "#lang beagle/js\n"
+     "(ns t.exported)\n"
+     "(js/export\n"
+     "  (defn save [(cell (Atom Int)) (value Int)] Int\n"
+     "    (reset! cell value)))\n"))
+  (define prog
+    (parse-program/bytes (string->bytes/utf-8 source)
+                         #:source-path "purity-export.bjs"))
+  (define violations (purity-violations prog))
+  (check-equal? (length violations) 1)
+  (define violation (car violations))
+  (check-equal? (purity-violation-name violation) 'save)
+  (check-equal? (syntax-line (purity-violation-definition-stx violation)) 3)
+  (check-equal? (car (syntax->datum
+                      (purity-violation-definition-stx violation)))
+                'js/export)
+  (define witness
+    (purity-witness-stx (car (purity-violation-witnesses violation))))
+  (check-equal? (syntax->datum witness) '(reset! cell value))
+  (check-equal? (syntax-line witness) 5))
 
 ;; ============================================================================
 ;; Diagnostic-kind wiring

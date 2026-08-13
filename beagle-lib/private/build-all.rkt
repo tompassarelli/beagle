@@ -40,12 +40,13 @@
 ;; (#:source-path), the extension/header check, in-place output naming, and error
 ;; locations. The two front-ends differ ONLY in how they obtain `stxs`.
 (define (build-from-stxs stxs path out-dir json? warn? in-place? export-plan)
-  (define type-errors 0)
+  (let/ec reject-build
+    (define type-errors 0)
 
   (define (handle-error e [loc-stx #f])
     (cond
       [json?
-       (write-json-error (exn-message e) loc-stx)
+       (write-json-error e loc-stx)
        #f]
       [else
        (define loc
@@ -83,7 +84,10 @@
         (set! type-errors (+ type-errors 1))
         (handle-error e loc-stx))
       #:capture-types? #t)  ; emit-path: feed type table to emit-program below
-    (unless (or ok? warn?) (error "type errors"))
+    ;; Each check error has already been reported. Stop before lint/emission
+    ;; without throwing a second generic exception that would duplicate and
+    ;; erase the structured diagnostic in JSON mode.
+    (unless (or ok? warn?) (reject-build #f))
 
     (unless (getenv "BEAGLE_NO_LINT")
       (lint-program! prog))
@@ -120,14 +124,14 @@
           #t)
         (begin
           (eprintf "  ~a -> ~a\n" path (path->string out-path))
-          #t))))
+          #t)))))
 
 ;; Text front-end: read source text → syntax → shared compile tail.
 (define (build-one-file path out-dir json? export-plan
                         #:warn? [warn? #f] #:in-place? [in-place? #f])
   (with-handlers
     ([exn:fail? (lambda (e)
-                  (if json? (write-json-error (exn-message e) #f)
+                  (if json? (write-json-error e #f)
                       (eprintf "  ~a: ~a\n" path (exn-message e)))
                   #f)])
     (build-from-stxs
@@ -140,7 +144,7 @@
 (define (build-one-file-target path out-dir json? target)
   (with-handlers
     ([exn:fail? (lambda (e)
-                  (if json? (write-json-error (exn-message e) #f)
+                  (if json? (write-json-error e #f)
                       (eprintf "  ~a: ~a\n" path (exn-message e)))
                   #f)])
     (define source (compile-source-for-target path target))
@@ -170,7 +174,7 @@
                        #:warn? [warn? #f] #:in-place? [in-place? #f])
   (with-handlers
     ([exn:fail? (lambda (e)
-                  (if json? (write-json-error (exn-message e) #f)
+                  (if json? (write-json-error e #f)
                       (eprintf "  ~a: ~a\n" triples-path (exn-message e)))
                   #f)])
     (define src-path (or (edn-file-source triples-path) triples-path))

@@ -729,28 +729,35 @@
   (for ([f (in-list files)])
     (with-handlers ([exn:fail? (lambda (e)
                                  (set! error-list
-                                       (cons (hasheq 'file f 'error (exn-message e))
+                                       (cons (diagnostic->json e #f f)
                                              error-list)))])
       (define stxs (read-beagle-syntax f))
       (define prog (parse-program stxs #:source-path f))
 
-      (define type-errs 0)
+      (define check-errors '())
       (type-check-with-locs! prog
         (lambda (e loc-stx)
-          (set! type-errs (+ type-errs 1)))
+          (set! check-errors
+                (cons (diagnostic->json e loc-stx f) check-errors)))
         #:capture-types? #t)  ; emit-path: feed type table to emit-program below
 
-      (define source (emit-program prog))
-      (define ns (program-namespace prog))
-      (define target (program-target prog))
-      (define rel (ns->out-path ns target))
-      (define out-path (build-path out-dir rel))
+      (if (pair? check-errors)
+          ;; The callback accumulates in reverse source order; the response is
+          ;; reversed once below, so append this batch directly to the global
+          ;; reverse accumulator and skip emission for the rejected file.
+          (set! error-list (append check-errors error-list))
+          (let ()
+            (define source (emit-program prog))
+            (define ns (program-namespace prog))
+            (define target (program-target prog))
+            (define rel (ns->out-path ns target))
+            (define out-path (build-path out-dir rel))
 
-      (make-parent-directory* out-path)
-      (with-output-to-file out-path #:exists 'replace
-        (lambda () (display source)))
+            (make-parent-directory* out-path)
+            (with-output-to-file out-path #:exists 'replace
+              (lambda () (display source)))
 
-      (set! built (+ built 1))))
+            (set! built (+ built 1))))))
 
   (hasheq 'ok (null? error-list)
           'built built

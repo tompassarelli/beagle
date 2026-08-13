@@ -1,0 +1,7 @@
+#lang beagle
+(ns native.atom-purity-valid)
+
+(defn save! [(cell (Atom Int)) (value Int)] Int
+  (do
+    (reset! cell value)
+    value))

@@ -314,9 +314,12 @@
                            (lambda (e stx)
                              (define loc (and (syntax? stx)
                                               (syntax-line stx)))
+                             (define col (and (syntax? stx)
+                                              (syntax-column stx)))
                              (define line (if loc (sub1 loc) 0))
                              (set! errors
-                                   (cons (make-diag line 0 1 (exn-message e))
+                                   (cons (make-diag line (or col 0) 1
+                                                    (exn-message e))
                                          errors))))
     (reverse errors)))
 
@@ -364,6 +367,7 @@
     (lambda ()
       (parameterize ([read-square-bracket-with-tag BRACKET-TAG]
                      [current-readtable lsp-readtable])
+        (port-count-lines! (current-input-port))
         (read-line)
         (let loop ([acc '()])
           (define stx (read-syntax (string->path path)))
@@ -416,6 +420,7 @@
                                (vector src line col pos #f))]
                [else (error 'beagle "unexpected dispatch: #~a" next)]))))
   (define in (open-input-string content))
+  (port-count-lines! in)
   (parameterize ([read-square-bracket-with-tag BRACKET-TAG]
                  [current-readtable lsp-readtable])
     (read-line in)
@@ -698,4 +703,5 @@
         [else (void)])
       (loop 0))))
 
-(provide run-lsp lookup-symbol-info collect-completions)
+(provide run-lsp lookup-symbol-info collect-completions
+         check-file-for-diagnostics)

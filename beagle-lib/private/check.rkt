@@ -55,6 +55,10 @@
       [("warn")  'warn]
       [else      'error])))
 
+;; Diagnostic consumers may suppress purity warnings without suppressing hard
+;; errors, which still travel through their ordinary error callback.
+(define current-purity-warning-port (make-parameter #f))
+
 (define (merge-types . ts)
   (define non-any (filter (λ (t) (not (any-type? t))) ts))
   (cond
@@ -6087,8 +6091,12 @@
              ;; handler with no specific form stx.
              (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
                (check-module-interface-resolution! prog)
-               (check-qualified-resolution! prog env)
-               (check-purity! prog)))))))))
+               (check-qualified-resolution! prog env))
+             ;; Purity owns one boundary per definition. Its reporter receives
+             ;; the original authored declaration syntax and continues after a
+             ;; violation, rather than letting one aggregate handler truncate
+             ;; the remaining definitions.
+             (check-purity! prog error-handler))))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass
@@ -7060,162 +7068,70 @@
          (and (> (string-length s) 0)
               (char=? (string-ref s (sub1 (string-length s))) #\!)))))
 
-;; Collect every mutation marker (the symbol 'set!, or the head symbol of a
-;; `!`-headed call) lexically present in an AST subtree. Reuses the same
-;; sub-expression descent as walk-for-provenance/symbols-in so it tracks new
-;; forms automatically; it does NOT recurse across nested defn/def boundaries.
+;; A witness retains both the semantic marker and its compound AST node. The
+;; latter is joined back to the authored syntax by source position below.
+(struct purity-witness (marker stx) #:transparent)
+(struct purity-violation (name definition-stx witnesses) #:transparent)
+(struct purity-definition (name bodies node definition-stx) #:transparent)
+(struct marker-node (marker node) #:transparent)
+
+;; Collect every mutation marker (set!, a `!`-headed call, or a call to a
+;; locally tracked effectful definition) in source order. This is deliberately
+;; a barrier-aware structural descent: the AST has many transparent forms and
+;; adding one must not create a new place where mutation can hide. Quoted data
+;; and nested definitions are semantic boundaries and are never descended.
 (define (collect-markers node [effectful-defs (set)])
   (define markers '())
-  (define (note! m) (set! markers (cons m markers)))
-  (define (walk-constraint constraint)
-    (when constraint
-      ;; A constraint is not only evaluated: the resulting predicate is
-      ;; invoked by the binding guard.  Preserve that implicit call for the
-      ;; purity walk so a `!` predicate cannot hide behind declaration syntax.
-      (walk (call-form constraint '()))))
-  (define (walk-param-constraints params [rest-param #f])
-    (for ([p (in-list (if rest-param
-                          (append params (list rest-param))
-                          params))])
-      (when (param? p)
-        (walk-constraint (param-constraint p)))))
-  (define (walk-bindings bindings)
-    (for ([b (in-list bindings)])
-      (walk (let-binding-value b))
-      (walk-constraint (let-binding-constraint b))))
-  (define (walk-for-clauses clauses)
-    (for ([clause (in-list clauses)])
-      (cond
-        [(for-binding? clause)
-         (walk (for-binding-expr clause))
-         (walk-constraint (for-binding-constraint clause))]
-        [(for-when? clause) (walk (for-when-test clause))]
-        [(for-let? clause) (walk-bindings (for-let-bindings clause))])))
+  (define seen (make-hasheq))
+  (define (note! marker witness)
+    (unless (for/or ([prior (in-list markers)])
+              (eq? marker (marker-node-marker prior)))
+      (set! markers (cons (marker-node marker witness) markers))))
   (define (walk e)
-    (cond
-      [(set!-form? e)
-       (note! 'set!)
-       (walk (set!-form-target e))
-       (walk (set!-form-value e))]
-      [(call-form? e)
-       (define fn (call-form-fn e))
-       (when (or (bang-name? fn)
-                 (and (symbol? fn) (set-member? effectful-defs fn)))
-         (note! fn))
-       (walk fn)
-       (for-each walk (call-form-args e))]
-      [(let-form? e)
-       (walk-bindings (let-form-bindings e))
-       (for-each walk (let-form-body e))]
-      [(if-form? e)
-       (walk (if-form-cond-expr e))
-       (walk (if-form-then-expr e))
-       (when (if-form-else-expr e) (walk (if-form-else-expr e)))]
-      [(when-form? e)
-       (walk (when-form-cond-expr e))
-       (for-each walk (when-form-body e))]
-      [(do-form? e)
-       (for-each walk (do-form-body e))]
-      ;; Inner fns count — their effects execute in this function's call.
-      [(fn-form? e)
-       (walk-param-constraints (fn-form-params e) (fn-form-rest-param e))
-       (for-each walk (fn-form-body e))]
-      [(letfn-form? e)
-       (for ([local-fn (in-list (letfn-form-fns e))])
-         (walk-param-constraints (letfn-fn-params local-fn)
-                                 (letfn-fn-rest-param local-fn))
-         (for-each walk (letfn-fn-body local-fn)))
-       (for-each walk (letfn-form-body e))]
-      [(cond-form? e)
-       (for ([c (in-list (cond-form-clauses e))])
-         (walk (cond-clause-test c))
-         (for-each walk (cond-clause-body c)))]
-      [(for-form? e)
-       (walk-for-clauses (for-form-clauses e))
-       (for-each walk (for-form-body e))]
-      [(doseq-form? e)
-       (walk-for-clauses (doseq-form-clauses e))
-       (for-each walk (doseq-form-body e))]
-      [(case-form? e)
-       (walk (case-form-test e))
-       (for ([c (in-list (case-form-clauses e))]) (walk (case-clause-body c)))
-       (when (case-form-default e) (walk (case-form-default e)))]
-      [(loop-form? e)
-       (walk-bindings (loop-form-bindings e))
-       (for-each walk (loop-form-body e))]
-      [(binding-form? e)
-       (walk-bindings (binding-form-bindings e))
-       (for-each walk (binding-form-body e))]
-      [(with-open-form? e)
-       (walk-bindings (with-open-form-bindings e))
-       (for-each walk (with-open-form-body e))]
-      [(jst-class? e)
-       (when (jst-class-extends e) (walk (jst-class-extends e)))
-       (for ([method (in-list (jst-class-methods e))])
-         (walk-param-constraints (jst-method-params method)
-                                 (jst-method-rest-param method))
-         (for-each walk (jst-method-body method)))]
-      [(match-form? e)
-       (walk (match-form-target e))
-       (for ([c (in-list (match-form-clauses e))])
-         (for-each walk (match-clause-body c)))]
-      [(try-form? e)
-       (for-each walk (try-form-body e))
-       (for ([c (in-list (try-form-catches e))]) (for-each walk (catch-clause-body c)))
-       (when (try-form-finally-body e) (for-each walk (try-form-finally-body e)))]
-      [(with-form? e)
-       (walk (with-form-target e))
-       (for ([u (in-list (with-form-updates e))]) (walk (with-update-value u)))]
-      [(vec-form? e)
-       (for-each walk (vec-form-items e))]
-      [(map-form? e)
-       (for ([p (in-list (map-form-pairs e))]) (walk (car p)) (walk (cdr p)))]
-      ;; Stop at nested definitions — those are separate (intraprocedural rule).
-      [(defn-form? e)  (void)]
-      [(defn-multi? e) (void)]
-      [(def-form? e)   (void)]
-      [(pair? e)       (for-each walk e)]
-      [else (void)]))
+    (unless (and (or (pair? e) (vector? e) (hash? e) (struct? e))
+                 (hash-ref seen e #f))
+      (when (or (pair? e) (vector? e) (hash? e) (struct? e))
+        (hash-set! seen e #t))
+      (cond
+        [(or (quoted? e) (defn-form? e) (defn-multi? e)
+             (def-form? e) (defonce-form? e))
+         (void)]
+        [else
+         (when (set!-form? e) (note! 'set! e))
+         (when (call-form? e)
+           (define fn (call-form-fn e))
+           (when (or (bang-name? fn)
+                     (and (symbol? fn) (set-member? effectful-defs fn)))
+             (note! fn e)))
+         (cond
+           [(pair? e) (walk (car e)) (walk (cdr e))]
+           [(vector? e) (for ([item (in-vector e)]) (walk item))]
+           [(hash? e)
+            (for ([(key value) (in-hash e)])
+              (walk key)
+              (walk value))]
+           [(struct? e)
+            (for ([field (in-list (cdr (vector->list (struct->vector e))))])
+              (walk field))]
+           [else (void)])])))
   (for-each walk (if (list? node) node (list node)))
-  (remove-duplicates (reverse markers)))
+  (reverse markers))
 
-;; Collect each checkable definition once, including definitions carried by
-;; export/target wrappers. A vector keeps NAME, BODY, and the source-bearing
-;; definition node together; multi-arity defs contribute one entry per body.
+;; Collect each checkable definition once, pairing the normalized AST with the
+;; original top-level syntax. A multi-arity definition is one purity boundary,
+;; not one boundary per clause.
 (define (collect-purity-defs prog)
-  (define defs '())
-  (define (note! name body node)
-    (set! defs (cons (vector name body node) defs)))
-  (define (constraint-invocations params [rest-param #f])
-    (for/list ([p (in-list (if rest-param
-                               (append params (list rest-param))
-                               params))]
-               #:when (and (param? p) (param-constraint p)))
-      (call-form (param-constraint p) '())))
-  (define (walk f)
-    (cond
-      [(defn-form? f)
-       (note! (defn-form-name f)
-              (append
-               (constraint-invocations
-                (defn-form-params f) (defn-form-rest-param f))
-               (defn-form-body f))
-              f)]
-      [(defn-multi? f)
-       (for ([a (in-list (defn-multi-arities f))])
-         (note! (defn-multi-name f)
-                (append
-                 (constraint-invocations
-                  (arity-clause-params a) (arity-clause-rest-param a))
-                 (arity-clause-body a))
-                f))]
-      [(with-meta? f) (walk (with-meta-expr f))]
-      [(jst-export? f) (walk (jst-export-form f))]
-      [(jst-export-default? f) (walk (jst-export-default-form f))]
-      [(and (pair? f) (list? f)) (for-each walk (filter pair? (cdr f)))]
-      [else (void)]))
-  (for-each walk (program-forms prog))
-  (reverse defs))
+  (for/list ([raw-form (in-list (program-forms prog))]
+             [form-stx (in-list (program-form-stxs prog))]
+             #:do [(define form (unwrap-definition-form raw-form))]
+             #:when (or (defn-form? form) (defn-multi? form)))
+    (if (defn-form? form)
+        (purity-definition (defn-form-name form)
+                           (list (defn-form-body form)) form form-stx)
+        (purity-definition
+         (defn-multi-name form)
+         (map arity-clause-body (defn-multi-arities form))
+         form form-stx))))
 
 ;; Least fixed point of module-local defs whose bodies reach a direct marker or
 ;; another effectful local def. Repeating from the previous complete set makes
@@ -7227,18 +7143,74 @@
 
 (define (effective-markers body known)
   (define collected (collect-markers body known))
-  (if (memq 'transient (collect-markers body (set 'transient)))
-      (filter (lambda (m) (not (set-member? transient-marker-set m))) collected)
+  (if (for/or ([w (in-list (collect-markers body (set 'transient)))])
+        (eq? (marker-node-marker w) 'transient))
+      (filter (lambda (w)
+                (not (set-member? transient-marker-set
+                                  (marker-node-marker w))))
+              collected)
       collected))
 
 (define (derive-effectful-defs defs)
   (let loop ([known (set)])
     (define next
       (for/fold ([acc known]) ([d (in-list defs)])
-        (if (pair? (effective-markers (vector-ref d 1) known))
-            (set-add acc (vector-ref d 0))
+        (if (pair? (effective-markers (purity-definition-bodies d) known))
+            (set-add acc (purity-definition-name d))
             acc)))
     (if (set=? known next) known (loop next))))
+
+(define (same-source? left right)
+  (cond
+    [(and (path? left) (path? right))
+     (equal? (simplify-path left) (simplify-path right))]
+    [else (equal? (and left (format "~a" left))
+                  (and right (format "~a" right)))]))
+
+;; Find the exact authored syntax node corresponding to an AST witness. Position
+;; and span are the parser's lossless AST↔syntax join key. If either side lacks
+;; that key (for example generated source), return #f rather than fabricating a
+;; source form from line/column alone.
+(define (syntax-at-src-loc form-stx loc)
+  (and loc (src-loc-pos loc) (src-loc-span loc)
+       (let walk ([value form-stx])
+         (cond
+           [(syntax? value)
+            (if (and (equal? (syntax-position value) (src-loc-pos loc))
+                     (equal? (syntax-span value) (src-loc-span loc))
+                     (same-source? (syntax-source value) (src-loc-source loc)))
+                value
+                (walk (syntax-e value)))]
+           [(pair? value) (or (walk (car value)) (walk (cdr value)))]
+           [(vector? value)
+            (for/or ([item (in-vector value)]) (walk item))]
+           [else #f]))))
+
+;; Pure analysis result, independent of warning/error policy. The fixed point
+;; identifies every effectful local definition; each returned boundary retains
+;; its authored declaration and exact first-occurrence witnesses where possible.
+(define (purity-violations prog)
+  (define defs (collect-purity-defs prog))
+  (define effectful-defs (derive-effectful-defs defs))
+  (define src-table (program-src-table prog))
+  (for/list ([d (in-list defs)]
+             #:unless (eq? (purity-definition-name d) '-main)
+             #:do [(define markers
+                     (effective-markers
+                      (purity-definition-bodies d)
+                      (set-remove effectful-defs
+                                  (purity-definition-name d))))]
+             #:when (and (not (bang-name? (purity-definition-name d)))
+                         (pair? markers)))
+    (purity-violation
+     (purity-definition-name d)
+     (purity-definition-definition-stx d)
+     (for/list ([marker (in-list markers)])
+       (define node (marker-node-node marker))
+       (define loc (and src-table (hash-ref src-table node #f)))
+       (purity-witness
+        (marker-node-marker marker)
+        (syntax-at-src-loc (purity-definition-definition-stx d) loc))))))
 
 ;; Effective severity from the two enforcement dials.
 ;;   'off  flag           -> 'off  (nothing fires; the pass is dark)
@@ -7252,45 +7224,36 @@
     [(warn)  (if (>= (current-check-profile) 3) 'error 'warn)]
     [else    'off]))
 
-(define (check-defn-purity _target name body src-table node effectful-defs)
-  ;; Runtime entry-point names are host ABI contracts, so they cannot carry `!`.
-  (define entry-point? (eq? name '-main))
-  (define markers
-    (if entry-point?
-        '()
-        (effective-markers body (set-remove effectful-defs name))))
-  (when (and (not (bang-name? name)) (pair? markers))
-    (define src (and src-table (hash-ref src-table node #f)))
-    (define msg
-      (format "purity leak: '~a' has no '!' suffix but its body uses ~a — rename to '~a!' or remove the effect"
-              name
-              (string-join (map (lambda (m) (format "~a" m)) markers) ", ")
-              name))
-    (case (purity-severity)
-      [(warn)
-       (fprintf (current-error-port)
-                "warning: ~a~a\n"
-                msg
-                (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))]
-      [(error)
-       (raise-diag 'purity-leak msg (hasheq) #:src src)]
-      [else (void)])))
-
-(define (check-purity! prog)
+(define (check-purity! prog [error-handler #f])
   (when (and (eq? (program-mode prog) 'strict)
+             (>= (current-check-profile) 1)
              (not (eq? (current-purity-enforcement) 'off)))
-    ;; Mode + flag gate passed; per-diagnostic severity is decided by
-    ;; purity-severity (warn below profile 3, hard error at >= 3).
-    (define st (program-src-table prog))
-    (define defs (collect-purity-defs prog))
-    (define effectful-defs (derive-effectful-defs defs))
-    (for ([d (in-list defs)])
-      (check-defn-purity (program-target prog)
-                         (vector-ref d 0)
-                         (vector-ref d 1)
-                         st
-                         (vector-ref d 2)
-                         effectful-defs))))
+    (for ([violation (in-list (purity-violations prog))])
+      (define name (purity-violation-name violation))
+      (define definition-stx (purity-violation-definition-stx violation))
+      (define markers
+        (map purity-witness-marker (purity-violation-witnesses violation)))
+      (define src (and definition-stx (stx->src-loc definition-stx)))
+      (define msg
+        (format "purity leak: '~a' has no '!' suffix but its body uses ~a — rename to '~a!' or remove the effect"
+                name
+                (string-join (map (lambda (m) (format "~a" m)) markers) ", ")
+                name))
+      (case (purity-severity)
+        [(warn)
+         (fprintf (or (current-purity-warning-port) (current-error-port))
+                  "warning: ~a~a\n"
+                  msg
+                  (if src (format "\n  --> ~a:~a"
+                                  (or (src-loc-source src) "?")
+                                  (src-loc-line src)) ""))]
+        [(error)
+         (if error-handler
+             (with-handlers ([beagle-diagnostic?
+                              (lambda (e) (error-handler e definition-stx))])
+               (raise-diag 'purity-leak msg (hasheq) #:src src))
+             (raise-diag 'purity-leak msg (hasheq) #:src src))]
+        [else (void)]))))
 
 ;; --- qualified-call resolution (hosted targets) -----------------------------
 ;;
@@ -7660,9 +7623,13 @@
 (provide type-check! type-check-with-locs!
          check-scalar-provenance!
          check-purity!
+         purity-violations
+         (struct-out purity-witness)
+         (struct-out purity-violation)
          beagle-diagnostic beagle-diagnostic?
          beagle-diagnostic-kind beagle-diagnostic-details
          kind->error-code
          current-check-profile
          current-purity-enforcement
+         current-purity-warning-port
          check-form infer-expr build-initial-env)
