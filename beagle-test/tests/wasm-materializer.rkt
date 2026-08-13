@@ -711,7 +711,7 @@ SH
 (test-case "entry contract matrix rejects unsupported source declarations"
   ;; This is deliberately source-level: private/rest/return ambiguity cannot be
   ;; repaired by the C header or the Wasm adapter after lowering.
-  (define prefix "#lang beagle\n(define-mode strict)\n")
+  (define prefix "#lang beagle\n")
   (for ([case
          (in-list
           (list
@@ -731,7 +731,9 @@ SH
                  "(defn entry [] Int 1)\n(defn entry [] Int 2)\n"
                  "is ambiguous across the checked source set")))])
     (define namespace (list-ref case 1))
-    (define source-text (string-append prefix "(ns " namespace ")\n" (list-ref case 2)))
+    (define source-text (string-append prefix "(ns " namespace ")\n"
+                                       "(define-mode strict)\n"
+                                       (list-ref case 2)))
     (define-values (code stdout stderr marker?)
       (run-entry-build source-text (string-append namespace "/entry")))
     (check-not-equal? code 0 (format "unsupported ~a entry built: ~a~a"
