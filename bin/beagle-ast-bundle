@@ -2,6 +2,7 @@
 # beagle-ast-bundle: exact-byte, closed multi-module checked projection.
 
 set -euo pipefail
+export BEAGLE_ZO_GATE_QUIET=1
 source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

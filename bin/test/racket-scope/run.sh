@@ -32,6 +32,29 @@ copy_checkout "$sibling"
 
     test -f "$linked/beagle-test/tests/compiled/checked-bundle_rkt.zo"
 
+    first_gate_errors="$scratch/first-gate.err"
+    second_gate_errors="$scratch/second-gate.err"
+    for errors in "$first_gate_errors" "$second_gate_errors"; do
+        env -u BEAGLE_NO_ZO_GATE -u PLTCOLLECTS -u _BEAGLE_SCOPE_ROOT \
+            -u _BEAGLE_ZO_GATE_PID \
+            PLTUSERHOME="$PLTUSERHOME" _BEAGLE_RACKET="$RACKET" \
+            bash -c 'source "$1"' bash "$linked/bin/_beagle-racket" \
+            2>"$errors"
+    done
+    grep -Fq "beagle: bytecode current." "$first_gate_errors"
+    [[ ! -s "$second_gate_errors" ]]
+
+    rm -f "$linked/.beagle/zo-fresh"
+    quiet_gate_errors="$scratch/quiet-gate.err"
+    env -u BEAGLE_NO_ZO_GATE -u PLTCOLLECTS -u _BEAGLE_SCOPE_ROOT \
+        -u _BEAGLE_ZO_GATE_PID \
+        PLTUSERHOME="$PLTUSERHOME" _BEAGLE_RACKET="$RACKET" \
+        BEAGLE_ZO_GATE_QUIET=1 \
+        bash -c 'source "$1"' bash "$linked/bin/_beagle-racket" \
+        2>"$quiet_gate_errors"
+    [[ ! -s "$quiet_gate_errors" ]]
+    test -f "$linked/.beagle/zo-fresh"
+
     export _BEAGLE_RACKET="$RACKET"
     export BEAGLE_NO_ZO_GATE=1
     source "$linked/bin/_beagle-racket"

@@ -129,10 +129,7 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
 
     _beagle_zo_rebuild() {
         _beagle_zo_stale || return 0          # a lock holder already fixed it
-        # The stamp inherits this file's mtime, so its precision is the
-        # filesystem's own: a source touched from here on reads as newer.
         local ref="$_zo_stamp.start" f
-        : > "$ref" || return 1
         local roots=()
         while IFS= read -r -d '' f; do
             [[ "$f" == bin/* ]] && continue              # shebang scripts, no .zo
@@ -143,12 +140,35 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
                 < <(find "${_zo_scan[@]}" -name compiled -prune -o -name '*.rkt' -print0)
         fi
         [[ ${#roots[@]} -gt 0 ]] || return 1
-        echo "beagle: source changed; recompiling bytecode (${#roots[@]} modules)…" >&2
-        "$RACO" make -j "$(nproc 2>/dev/null || echo 4)" "${roots[@]}" >&2 || return 1
+        # Creating a first compiled/ directory changes its source directory's
+        # mtime. Do that before the reference point so our own build cannot
+        # make the next invocation look stale.
+        for f in "${roots[@]}"; do
+            mkdir -p "$(dirname "$f")/compiled" || return 1
+        done
+        # The stamp inherits this file's mtime, so its precision is the
+        # filesystem's own: a source touched from here on reads as newer.
+        : > "$ref" || return 1
+        local make_log=""
+        if [[ "${BEAGLE_ZO_GATE_QUIET:-0}" == 1 ]]; then
+            make_log="$(mktemp "$BEAGLE_ROOT/.beagle/zo-make.XXXXXX")" || return 1
+            if ! "$RACO" make -j "$(nproc 2>/dev/null || echo 4)" "${roots[@]}" \
+                >"$make_log" 2>&1; then
+                cat "$make_log" >&2
+                rm -f "$make_log"
+                return 1
+            fi
+            rm -f "$make_log"
+        else
+            echo "beagle: source changed; recompiling bytecode (${#roots[@]} modules)…" >&2
+            "$RACO" make -j "$(nproc 2>/dev/null || echo 4)" "${roots[@]}" >&2 || return 1
+        fi
         printf '%s' "$_BEAGLE_RACKET" > "$_zo_stamp" || return 1
         touch -r "$ref" "$_zo_stamp" || return 1
         rm -f "$ref"
-        echo "beagle: bytecode current." >&2
+        if [[ "${BEAGLE_ZO_GATE_QUIET:-0}" != 1 ]]; then
+            echo "beagle: bytecode current." >&2
+        fi
     }
 
     _zo_ok=1

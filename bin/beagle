@@ -6,6 +6,9 @@ BIN="$BEAGLE_DIR/bin"
 
 # Pin racket for the whole dispatch tree (incl. bare-shebang racket scripts like
 # beagle-syntax) so `beagle <cmd>` is robust outside the direnv shell.
+if [[ "${1:-}" == "ast-bundle" ]]; then
+    export BEAGLE_ZO_GATE_QUIET=1
+fi
 source "$BIN/_beagle-racket"
 
 # Generated target projection of beagle-lib/private/targets.rkt (the canonical
