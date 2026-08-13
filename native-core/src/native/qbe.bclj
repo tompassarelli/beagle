@@ -1241,6 +1241,152 @@
       continue-label "\n"
       "  " result-name " =" result-letter " add " left ", " right "\n")))
 
+(defn emit-checked-sub
+  [(context QbeFn)
+   (block-index-value Int)
+   (position Int)
+   (result-name String)
+   (result-letter String)
+   (left-id core/NativeId)
+   (right-id core/NativeId)] String
+  (let [(left String) (value-name context left-id)
+        (right String) (value-name context right-id)
+        (trap-label String) (str (block-label block-index-value) "_t" position)
+        (continue-label String) (str (block-label block-index-value) "_c" position)]
+    (str
+      "  " (temp-name block-index-value position 0) " =w csgtl " right ", 0\n"
+      "  " (temp-name block-index-value position 1) " =l add -9223372036854775807, " right "\n"
+      "  " (temp-name block-index-value position 2) " =l sub " (temp-name block-index-value position 1) ", 1\n"
+      "  " (temp-name block-index-value position 3) " =w csltl " left ", " (temp-name block-index-value position 2) "\n"
+      "  " (temp-name block-index-value position 4) " =w and " (temp-name block-index-value position 0) ", " (temp-name block-index-value position 3) "\n"
+      "  " (temp-name block-index-value position 5) " =w csltl " right ", 0\n"
+      "  " (temp-name block-index-value position 6) " =l add 9223372036854775807, " right "\n"
+      "  " (temp-name block-index-value position 7) " =w csgtl " left ", " (temp-name block-index-value position 6) "\n"
+      "  " (temp-name block-index-value position 8) " =w and " (temp-name block-index-value position 5) ", " (temp-name block-index-value position 7) "\n"
+      "  " (temp-name block-index-value position 9) " =w or " (temp-name block-index-value position 4) ", " (temp-name block-index-value position 8) "\n"
+      "  jnz " (temp-name block-index-value position 9) ", " trap-label ", " continue-label "\n"
+      (emit-trap-block trap-label trap-overflow)
+      continue-label "\n"
+      "  " result-name " =" result-letter " sub " left ", " right "\n")))
+
+(defn emit-checked-mul
+  [(context QbeFn)
+   (block-index-value Int)
+   (position Int)
+   (result-name String)
+   (result-letter String)
+   (left-id core/NativeId)
+   (right-id core/NativeId)] String
+  (let [(left String) (value-name context left-id)
+        (right String) (value-name context right-id)
+        (prefix String) (str (block-label block-index-value) "_m" position)
+        (trap-label String) (str (block-label block-index-value) "_t" position)
+        (continue-label String) (str (block-label block-index-value) "_c" position)]
+    (str
+      "  " (temp-name block-index-value position 0) " =l sub -9223372036854775807, 1\n"
+      "  " (temp-name block-index-value position 1) " =w ceql " left ", 0\n"
+      "  " (temp-name block-index-value position 2) " =w ceql " right ", 0\n"
+      "  " (temp-name block-index-value position 3) " =w or " (temp-name block-index-value position 1) ", " (temp-name block-index-value position 2) "\n"
+      "  jnz " (temp-name block-index-value position 3) ", " continue-label ", " prefix "_left_minus_one\n"
+      prefix "_left_minus_one\n"
+      "  " (temp-name block-index-value position 4) " =w ceql " left ", -1\n"
+      "  jnz " (temp-name block-index-value position 4) ", " prefix "_check_right_min, " prefix "_right_minus_one\n"
+      prefix "_check_right_min\n"
+      "  " (temp-name block-index-value position 5) " =w ceql " right ", " (temp-name block-index-value position 0) "\n"
+      "  jnz " (temp-name block-index-value position 5) ", " trap-label ", " continue-label "\n"
+      prefix "_right_minus_one\n"
+      "  " (temp-name block-index-value position 6) " =w ceql " right ", -1\n"
+      "  jnz " (temp-name block-index-value position 6) ", " prefix "_check_left_min, " prefix "_left_sign\n"
+      prefix "_check_left_min\n"
+      "  " (temp-name block-index-value position 7) " =w ceql " left ", " (temp-name block-index-value position 0) "\n"
+      "  jnz " (temp-name block-index-value position 7) ", " trap-label ", " continue-label "\n"
+      prefix "_left_sign\n"
+      "  " (temp-name block-index-value position 8) " =w csgtl " left ", 0\n"
+      "  jnz " (temp-name block-index-value position 8) ", " prefix "_left_positive, " prefix "_left_negative\n"
+      prefix "_left_positive\n"
+      "  " (temp-name block-index-value position 9) " =w csgtl " right ", 0\n"
+      "  jnz " (temp-name block-index-value position 9) ", " prefix "_both_positive, " prefix "_positive_negative\n"
+      prefix "_both_positive\n"
+      "  " (temp-name block-index-value position 10) " =l div 9223372036854775807, " right "\n"
+      "  " (temp-name block-index-value position 11) " =w csgtl " left ", " (temp-name block-index-value position 10) "\n"
+      "  jnz " (temp-name block-index-value position 11) ", " trap-label ", " continue-label "\n"
+      prefix "_positive_negative\n"
+      "  " (temp-name block-index-value position 12) " =l div " (temp-name block-index-value position 0) ", " left "\n"
+      "  " (temp-name block-index-value position 13) " =w csltl " right ", " (temp-name block-index-value position 12) "\n"
+      "  jnz " (temp-name block-index-value position 13) ", " trap-label ", " continue-label "\n"
+      prefix "_left_negative\n"
+      "  " (temp-name block-index-value position 14) " =w csgtl " right ", 0\n"
+      "  jnz " (temp-name block-index-value position 14) ", " prefix "_negative_positive, " prefix "_both_negative\n"
+      prefix "_negative_positive\n"
+      "  " (temp-name block-index-value position 15) " =l div " (temp-name block-index-value position 0) ", " right "\n"
+      "  " (temp-name block-index-value position 16) " =w csltl " left ", " (temp-name block-index-value position 15) "\n"
+      "  jnz " (temp-name block-index-value position 16) ", " trap-label ", " continue-label "\n"
+      prefix "_both_negative\n"
+      "  " (temp-name block-index-value position 17) " =l div 9223372036854775807, " right "\n"
+      "  " (temp-name block-index-value position 18) " =w csltl " left ", " (temp-name block-index-value position 17) "\n"
+      "  jnz " (temp-name block-index-value position 18) ", " trap-label ", " continue-label "\n"
+      (emit-trap-block trap-label trap-overflow)
+      continue-label "\n"
+      "  " result-name " =" result-letter " mul " left ", " right "\n")))
+
+(defn checked-division-mnemonic
+  [(operation core/CheckedOperationV0)] String
+  (if (instance? native.core.CheckedQuotI64V0 operation) "div" "rem"))
+
+(defn emit-checked-division
+  [(context QbeFn)
+   (block-index-value Int)
+   (position Int)
+   (result-name String)
+   (result-letter String)
+   (operation core/CheckedOperationV0)
+   (left-id core/NativeId)
+   (right-id core/NativeId)] String
+  (let [(left String) (value-name context left-id)
+        (right String) (value-name context right-id)
+        (prefix String) (str (block-label block-index-value) "_d" position)
+        (trap-label String) (str (block-label block-index-value) "_t" position)
+        (continue-label String) (str (block-label block-index-value) "_c" position)
+        (edge-value String)
+        (if (instance? native.core.CheckedQuotI64V0 operation)
+          (temp-name block-index-value position 1)
+          "0")]
+    (str
+      "  " (temp-name block-index-value position 0) " =w ceql " right ", 0\n"
+      "  jnz " (temp-name block-index-value position 0) ", " trap-label ", " prefix "_edge_check\n"
+      (emit-trap-block trap-label trap-invalid-argument)
+      prefix "_edge_check\n"
+      "  " (temp-name block-index-value position 1) " =l sub -9223372036854775807, 1\n"
+      "  " (temp-name block-index-value position 2) " =w ceql " left ", " (temp-name block-index-value position 1) "\n"
+      "  " (temp-name block-index-value position 3) " =w ceql " right ", -1\n"
+      "  " (temp-name block-index-value position 4) " =w and " (temp-name block-index-value position 2) ", " (temp-name block-index-value position 3) "\n"
+      "  jnz " (temp-name block-index-value position 4) ", " prefix "_edge, " prefix "_ordinary\n"
+      prefix "_edge\n"
+      "  " (temp-name block-index-value position 5) " =l copy " edge-value "\n"
+      "  jmp " continue-label "\n"
+      prefix "_ordinary\n"
+      "  " (temp-name block-index-value position 6) " =l "
+      (checked-division-mnemonic operation) " " left ", " right "\n"
+      (if (instance? native.core.CheckedModI64V0 operation)
+        (str
+          "  " (temp-name block-index-value position 7) " =w cnel " (temp-name block-index-value position 6) ", 0\n"
+          "  " (temp-name block-index-value position 8) " =w csltl " (temp-name block-index-value position 6) ", 0\n"
+          "  " (temp-name block-index-value position 9) " =w csltl " right ", 0\n"
+          "  " (temp-name block-index-value position 10) " =w xor " (temp-name block-index-value position 8) ", " (temp-name block-index-value position 9) "\n"
+          "  " (temp-name block-index-value position 11) " =w and " (temp-name block-index-value position 7) ", " (temp-name block-index-value position 10) "\n"
+          "  " (temp-name block-index-value position 12) " =l extuw " (temp-name block-index-value position 11) "\n"
+          "  " (temp-name block-index-value position 13) " =l mul " (temp-name block-index-value position 12) ", " right "\n"
+          "  " (temp-name block-index-value position 14) " =l add " (temp-name block-index-value position 6) ", " (temp-name block-index-value position 13) "\n")
+        "")
+      "  jmp " continue-label "\n"
+      continue-label "\n"
+      "  " result-name " =" result-letter " phi " prefix "_edge "
+      (temp-name block-index-value position 5) ", " prefix "_ordinary "
+      (if (instance? native.core.CheckedModI64V0 operation)
+        (temp-name block-index-value position 14)
+        (temp-name block-index-value position 6))
+      "\n")))
+
 (defn emit-checked-bounds
   [(context QbeFn)
    (block-index-value Int)
@@ -1406,11 +1552,21 @@
            [(CheckedAddI64V0 operation)
             (emit-checked-add context block-index-value position result-name result-letter
               (core/checkedaddi64v0-left-id checked) (core/checkedaddi64v0-right-id checked))]
-           [(CheckedSubI64V0 operation) ""]
-           [(CheckedMulI64V0 operation) ""]
-           [(CheckedQuotI64V0 operation) ""]
-           [(CheckedRemI64V0 operation) ""]
-           [(CheckedModI64V0 operation) ""]
+           [(CheckedSubI64V0 operation)
+            (emit-checked-sub context block-index-value position result-name result-letter
+              (core/checkedsubi64v0-left-id checked) (core/checkedsubi64v0-right-id checked))]
+           [(CheckedMulI64V0 operation)
+            (emit-checked-mul context block-index-value position result-name result-letter
+              (core/checkedmuli64v0-left-id checked) (core/checkedmuli64v0-right-id checked))]
+           [(CheckedQuotI64V0 operation)
+            (emit-checked-division context block-index-value position result-name result-letter checked
+              (core/checkedquoti64v0-left-id checked) (core/checkedquoti64v0-right-id checked))]
+           [(CheckedRemI64V0 operation)
+            (emit-checked-division context block-index-value position result-name result-letter checked
+              (core/checkedremi64v0-left-id checked) (core/checkedremi64v0-right-id checked))]
+           [(CheckedModI64V0 operation)
+            (emit-checked-division context block-index-value position result-name result-letter checked
+              (core/checkedmodi64v0-left-id checked) (core/checkedmodi64v0-right-id checked))]
            [(CheckedBoundsV0 operation)
             (emit-checked-bounds context block-index-value position result-name result-letter
               (core/checkedboundsv0-index-id checked) (core/checkedboundsv0-length-id checked))]))]
@@ -1936,6 +2092,11 @@
      (let [(operation core/CheckedOperationV0)
            (core/checkedinstruction-operation instruction)]
        (or (instance? native.core.CheckedAddI64V0 operation)
+           (instance? native.core.CheckedSubI64V0 operation)
+           (instance? native.core.CheckedMulI64V0 operation)
+           (instance? native.core.CheckedQuotI64V0 operation)
+           (instance? native.core.CheckedRemI64V0 operation)
+           (instance? native.core.CheckedModI64V0 operation)
            (instance? native.core.CheckedBoundsV0 operation)))]
     [(BitwiseInstructionV0 value) true]
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
@@ -2003,6 +2164,8 @@
     [(ValueToTextInstructionV0 value) false]
     [(CodecPrimitiveInstructionV0 value) false]))
 
+;; Source lowering represents division as the canonical Outcome and still needs
+;; aggregate extraction in QBE. Scalar frozen-IR operations are emitted below.
 (defn unsupported-checked-division-name
   [(operation core/CheckedOperationV0)] (U String Nil)
   (cond
@@ -2022,8 +2185,15 @@
           (if (instance? native.core.CheckedInstruction instruction)
             (let [(name (U String Nil))
                   (unsupported-checked-division-name
-                    (core/checkedinstruction-operation instruction))]
-              (if (nil? name) (recur (+ position 1)) name))
+                    (core/checkedinstruction-operation instruction))
+                  (result-type core/NativeId)
+                  (core/ssavaluev0-type-id
+                    (core/checkedinstruction-result instruction))]
+              (if (or (nil? name)
+                    (not (core/native-id= result-type
+                      (core/checked-division-i64-type-id))))
+                (recur (+ position 1))
+                name))
             (recur (+ position 1))))))))
 
 (defn unsupported-function-checked-division

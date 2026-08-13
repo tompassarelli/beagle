@@ -1135,6 +1135,67 @@
     []
     []))
 
+;; Scalar checked arithmetic is shared frozen-IR vocabulary. This program keeps
+;; the result scalar so each materializer must implement the operation itself;
+;; lowered source programs retain their Outcome-valued control-flow contract.
+(defn numeric-id [(name String)] core/NativeId
+  (core/canonical-id "native-qbe-numeric-v0" [name]))
+
+(def numeric-i64-type core/TypeDef
+  (core/->TypeDef (numeric-id "type-i64") "I64"
+    (core/atom-type-shape (core/i64-kind))))
+
+(def numeric-i64-layout core/LayoutDef
+  (core/->LayoutDef (numeric-id "layout-i64") (numeric-id "type-i64") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(defn numeric-operation
+  [(name String)
+   (left core/NativeId)
+   (right core/NativeId)] core/CheckedOperationV0
+  (cond
+    (= name "sub") (core/->CheckedSubI64V0 left right)
+    (= name "mul") (core/->CheckedMulI64V0 left right)
+    (= name "quot") (core/->CheckedQuotI64V0 left right)
+    (= name "rem") (core/->CheckedRemI64V0 left right)
+    :else (core/->CheckedModI64V0 left right)))
+
+(defn numeric-function
+  [(position String)
+   (name String)] core/FunctionDef
+  (let [(left core/NativeId) (numeric-id (str position "-left"))
+        (right core/NativeId) (numeric-id (str position "-right"))
+        (result core/NativeId) (numeric-id (str position "-result"))
+        (block core/NativeId) (numeric-id (str position "-block"))]
+    (core/->FunctionDef (numeric-id (str "fn-" position)) name
+      [(core/->Parameter left (numeric-id "type-i64"))
+       (core/->Parameter right (numeric-id "type-i64"))]
+      [(core/->BasicBlock block []
+         [(core/->CheckedInstruction
+            (core/->SsaValueV0 result (numeric-id "type-i64"))
+            (numeric-operation name left right))]
+         [(core/return-terminator result)])]
+      block (numeric-id "type-i64") [] [] [])))
+
+(def numeric-sub-function core/FunctionDef (numeric-function "0" "sub"))
+(def numeric-mul-function core/FunctionDef (numeric-function "1" "mul"))
+(def numeric-quot-function core/FunctionDef (numeric-function "2" "quot"))
+(def numeric-rem-function core/FunctionDef (numeric-function "3" "rem"))
+(def numeric-mod-function core/FunctionDef (numeric-function "4" "mod"))
+
+(def numeric-program core/NativeCoreProgram
+  (core/->NativeCoreProgram (numeric-id "program") nil "native-qbe-numeric-v0"
+    [numeric-i64-type] [] [] [] [numeric-i64-layout]
+    [numeric-sub-function numeric-mul-function numeric-quot-function
+     numeric-rem-function numeric-mod-function]
+    [] [] [] [] []))
+
+(def numeric-program-permuted core/NativeCoreProgram
+  (with numeric-program
+    [:functions
+     [numeric-mod-function numeric-rem-function numeric-quot-function
+      numeric-mul-function numeric-sub-function]]))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [(result qbe/QbeMaterialization)] qbe/QbeArtifact
@@ -1221,6 +1282,12 @@
 (def concat-permuted-artifact qbe/QbeArtifact
   (require-artifact (qbe/materialize-program concat-program-permuted 2 "lp64")))
 
+(def numeric-artifact qbe/QbeArtifact
+  (require-artifact (qbe/materialize-program numeric-program 3 "lp64")))
+
+(def numeric-permuted-artifact qbe/QbeArtifact
+  (require-artifact (qbe/materialize-program numeric-program-permuted 3 "lp64")))
+
 (def fixture-deterministic? Bool
   (and refusal-index-proven?
     refusal-blank-proven?
@@ -1238,7 +1305,9 @@
     (= (qbe/qbeartifact-module-text slice-artifact)
       (qbe/qbeartifact-module-text slice-permuted-artifact))
     (= (qbe/qbeartifact-module-text concat-artifact)
-      (qbe/qbeartifact-module-text concat-permuted-artifact))))
+      (qbe/qbeartifact-module-text concat-permuted-artifact))
+    (= (qbe/qbeartifact-module-text numeric-artifact)
+      (qbe/qbeartifact-module-text numeric-permuted-artifact))))
 
 ;; Declares the QBE exports directly rather than including the C backend's
 ;; header: the objects are linked by the shim ABI alone.
@@ -1254,7 +1323,30 @@
     "                           const native_vec *source);\n"
     "native_vec *native_m2_fn_2(native_arena *arena, const native_capability *capability,\n"
     "                           const native_vec *source, int64_t start, int64_t end);\n\n"
-    "int main(void) {\n"
+    "int64_t native_m3_fn_0(int64_t left, int64_t right);\n"
+    "int64_t native_m3_fn_1(int64_t left, int64_t right);\n"
+    "int64_t native_m3_fn_2(int64_t left, int64_t right);\n"
+    "int64_t native_m3_fn_3(int64_t left, int64_t right);\n"
+    "int64_t native_m3_fn_4(int64_t left, int64_t right);\n\n"
+    "int main(int argc, char **argv) {\n"
+    "  if (argc == 2) {\n"
+    "    if (strcmp(argv[1], \"sub-overflow\") == 0) {\n"
+    "      (void)native_m3_fn_0(INT64_MIN, INT64_C(1));\n"
+    "    } else if (strcmp(argv[1], \"sub-overflow-positive\") == 0) {\n"
+    "      (void)native_m3_fn_0(INT64_MAX, -INT64_C(1));\n"
+    "    } else if (strcmp(argv[1], \"mul-overflow\") == 0) {\n"
+    "      (void)native_m3_fn_1(INT64_MAX, INT64_C(2));\n"
+    "    } else if (strcmp(argv[1], \"mul-overflow-negative\") == 0) {\n"
+    "      (void)native_m3_fn_1(INT64_MIN, -INT64_C(1));\n"
+    "    } else if (strcmp(argv[1], \"quot-zero\") == 0) {\n"
+    "      (void)native_m3_fn_2(INT64_C(1), INT64_C(0));\n"
+    "    } else if (strcmp(argv[1], \"rem-zero\") == 0) {\n"
+    "      (void)native_m3_fn_3(INT64_C(1), INT64_C(0));\n"
+    "    } else {\n"
+    "      (void)native_m3_fn_4(INT64_C(1), INT64_C(0));\n"
+    "    }\n"
+    "    return 20;\n"
+    "  }\n"
     "  uint8_t storage[256];\n"
     "  native_arena arena;\n"
     "  native_capability capability = { UINT64_C(1) };\n"
@@ -1298,6 +1390,35 @@
     "      || (memcmp(middle->elements, middle_expected, sizeof(middle_expected)) != 0)) {\n"
     "    return 7;\n"
     "  }\n"
+    "  if (native_m3_fn_0(INT64_MIN, INT64_C(0)) != INT64_MIN\n"
+    "      || native_m3_fn_0(INT64_MAX, INT64_C(0)) != INT64_MAX\n"
+    "      || native_m3_fn_0(INT64_MIN, -INT64_C(1)) != (INT64_MIN + INT64_C(1))\n"
+    "      || native_m3_fn_0(INT64_MAX, INT64_C(1)) != (INT64_MAX - INT64_C(1))\n"
+    "      || native_m3_fn_1(INT64_MIN, INT64_C(1)) != INT64_MIN\n"
+    "      || native_m3_fn_1(INT64_MAX, INT64_C(1)) != INT64_MAX\n"
+    "      || native_m3_fn_1(INT64_MIN, INT64_C(0)) != INT64_C(0)\n"
+    "      || native_m3_fn_1(INT64_C(3037000499), INT64_C(3037000499))\n"
+    "           != INT64_C(9223372030926249001)\n"
+    "      || native_m3_fn_1(-INT64_C(3037000499), INT64_C(3037000499))\n"
+    "           != -INT64_C(9223372030926249001)) {\n"
+    "    return 8;\n"
+    "  }\n"
+    "  if (native_m3_fn_2(-INT64_C(7), INT64_C(3)) != -INT64_C(2)\n"
+    "      || native_m3_fn_2(INT64_C(7), -INT64_C(3)) != -INT64_C(2)\n"
+    "      || native_m3_fn_2(-INT64_C(7), -INT64_C(3)) != INT64_C(2)\n"
+    "      || native_m3_fn_3(-INT64_C(7), INT64_C(3)) != -INT64_C(1)\n"
+    "      || native_m3_fn_3(INT64_C(7), -INT64_C(3)) != INT64_C(1)\n"
+    "      || native_m3_fn_3(-INT64_C(7), -INT64_C(3)) != -INT64_C(1)\n"
+    "      || native_m3_fn_4(-INT64_C(7), INT64_C(3)) != INT64_C(2)\n"
+    "      || native_m3_fn_4(INT64_C(7), -INT64_C(3)) != -INT64_C(2)\n"
+    "      || native_m3_fn_4(-INT64_C(7), -INT64_C(3)) != -INT64_C(1)) {\n"
+    "    return 9;\n"
+    "  }\n"
+    "  if (native_m3_fn_2(INT64_MIN, -INT64_C(1)) != INT64_MIN\n"
+    "      || native_m3_fn_3(INT64_MIN, -INT64_C(1)) != INT64_C(0)\n"
+    "      || native_m3_fn_4(INT64_MIN, -INT64_C(1)) != INT64_C(0)) {\n"
+    "    return 10;\n"
+    "  }\n"
     "  native_arena_reset(&arena);\n"
     "  return 0;\n"
     "}\n"))
@@ -1311,5 +1432,7 @@
         (qbe/qbeartifact-module-text slice-artifact))
       (spit (str directory "/" (qbe/qbeartifact-module-name concat-artifact))
         (qbe/qbeartifact-module-text concat-artifact))
+      (spit (str directory "/" (qbe/qbeartifact-module-name numeric-artifact))
+        (qbe/qbeartifact-module-text numeric-artifact))
       (spit (str directory "/qbe_main.c") fixture-main-text))
     (throw (ex-info "permuted program changed QBE materialization" {}))))

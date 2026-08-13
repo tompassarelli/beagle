@@ -51,22 +51,23 @@ emit() {
 emit "$work/run-a"
 emit "$work/run-b"
 
-for name in module_0.ssa module_1.ssa module_2.ssa qbe_main.c; do
+for name in module_0.ssa module_1.ssa module_2.ssa module_3.ssa qbe_main.c; do
   cmp -s "$work/run-a/$name" "$work/run-b/$name" \
     || { echo "drive.sh: re-emission is not byte-identical for $name" >&2; exit 1; }
   cp "$work/run-a/$name" "$artifacts/$name"
 done
 
-( cd "$artifacts" && sha256sum module_0.ssa module_1.ssa module_2.ssa > determinism.txt )
+( cd "$artifacts" && sha256sum module_0.ssa module_1.ssa module_2.ssa module_3.ssa > determinism.txt )
 cat > "$artifacts/provenance.txt" <<'PROV'
 module_0.ssa  native.qbe over the native.c11-validation-corpus fixture program (module 0)
 module_1.ssa  native.qbe over the native.qbe-validation-corpus control-flow and bitwise program (module 1)
 module_2.ssa  native.qbe over the native.qbe-validation-corpus immutable vector transform program (module 2)
-qbe_main.c    C driver for modules 0 and 2; links by the native_shim ABI only
+module_3.ssa  native.qbe over the scalar checked I64 arithmetic program (module 3)
+qbe_main.c    C driver for modules 0 through 3; links by the native_shim ABI only
 determinism   two independent emitter runs compared byte-for-byte, plus a
               permuted-program equality assertion inside the corpus
 PROV
-echo "drive.sh: emitted $artifacts/module_0.ssa $artifacts/module_1.ssa $artifacts/module_2.ssa (two runs, byte-identical)"
+echo "drive.sh: emitted $artifacts/module_0.ssa $artifacts/module_1.ssa $artifacts/module_2.ssa $artifacts/module_3.ssa (two runs, byte-identical)"
 cat "$artifacts/determinism.txt"
 
 qbe_bin=""
@@ -96,11 +97,19 @@ mkdir -p "$build"
 run_qbe "$artifacts/module_0.ssa" > "$build/module_0.s"
 run_qbe "$artifacts/module_1.ssa" > "$build/module_1.s"
 run_qbe "$artifacts/module_2.ssa" > "$build/module_2.s"
+run_qbe "$artifacts/module_3.ssa" > "$build/module_3.s"
 cp "$artifacts/qbe_main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c native_shim.c -o native_shim.o )
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c qbe_main.c -o qbe_main.o )
-( cd "$build" && cc module_0.s module_1.s module_2.s qbe_main.o native_shim.o -o probe_qbe )
+( cd "$build" && cc module_0.s module_1.s module_2.s module_3.s qbe_main.o native_shim.o -o probe_qbe )
 ( cd "$build" && ./probe_qbe )
+for mode in sub-overflow sub-overflow-positive \
+  mul-overflow mul-overflow-negative quot-zero rem-zero mod-zero; do
+  if (cd "$build" && ulimit -c 0 && ./probe_qbe "$mode") 2>/dev/null; then
+    echo "drive.sh: QBE accepted trapped scalar operation: $mode" >&2
+    exit 1
+  fi
+done
 echo "drive.sh: qbe assemble + link + run ok"

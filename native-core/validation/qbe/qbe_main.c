@@ -11,7 +11,31 @@ native_vec *native_m2_fn_1(native_arena *arena, const native_capability *capabil
 native_vec *native_m2_fn_2(native_arena *arena, const native_capability *capability,
                            const native_vec *source, int64_t start, int64_t end);
 
-int main(void) {
+int64_t native_m3_fn_0(int64_t left, int64_t right);
+int64_t native_m3_fn_1(int64_t left, int64_t right);
+int64_t native_m3_fn_2(int64_t left, int64_t right);
+int64_t native_m3_fn_3(int64_t left, int64_t right);
+int64_t native_m3_fn_4(int64_t left, int64_t right);
+
+int main(int argc, char **argv) {
+  if (argc == 2) {
+    if (strcmp(argv[1], "sub-overflow") == 0) {
+      (void)native_m3_fn_0(INT64_MIN, INT64_C(1));
+    } else if (strcmp(argv[1], "sub-overflow-positive") == 0) {
+      (void)native_m3_fn_0(INT64_MAX, -INT64_C(1));
+    } else if (strcmp(argv[1], "mul-overflow") == 0) {
+      (void)native_m3_fn_1(INT64_MAX, INT64_C(2));
+    } else if (strcmp(argv[1], "mul-overflow-negative") == 0) {
+      (void)native_m3_fn_1(INT64_MIN, -INT64_C(1));
+    } else if (strcmp(argv[1], "quot-zero") == 0) {
+      (void)native_m3_fn_2(INT64_C(1), INT64_C(0));
+    } else if (strcmp(argv[1], "rem-zero") == 0) {
+      (void)native_m3_fn_3(INT64_C(1), INT64_C(0));
+    } else {
+      (void)native_m3_fn_4(INT64_C(1), INT64_C(0));
+    }
+    return 20;
+  }
   uint8_t storage[256];
   native_arena arena;
   native_capability capability = { UINT64_C(1) };
@@ -54,6 +78,35 @@ int main(void) {
       || (memcmp(reversed->elements, reverse_expected, sizeof(reverse_expected)) != 0)
       || (memcmp(middle->elements, middle_expected, sizeof(middle_expected)) != 0)) {
     return 7;
+  }
+  if (native_m3_fn_0(INT64_MIN, INT64_C(0)) != INT64_MIN
+      || native_m3_fn_0(INT64_MAX, INT64_C(0)) != INT64_MAX
+      || native_m3_fn_0(INT64_MIN, -INT64_C(1)) != (INT64_MIN + INT64_C(1))
+      || native_m3_fn_0(INT64_MAX, INT64_C(1)) != (INT64_MAX - INT64_C(1))
+      || native_m3_fn_1(INT64_MIN, INT64_C(1)) != INT64_MIN
+      || native_m3_fn_1(INT64_MAX, INT64_C(1)) != INT64_MAX
+      || native_m3_fn_1(INT64_MIN, INT64_C(0)) != INT64_C(0)
+      || native_m3_fn_1(INT64_C(3037000499), INT64_C(3037000499))
+           != INT64_C(9223372030926249001)
+      || native_m3_fn_1(-INT64_C(3037000499), INT64_C(3037000499))
+           != -INT64_C(9223372030926249001)) {
+    return 8;
+  }
+  if (native_m3_fn_2(-INT64_C(7), INT64_C(3)) != -INT64_C(2)
+      || native_m3_fn_2(INT64_C(7), -INT64_C(3)) != -INT64_C(2)
+      || native_m3_fn_2(-INT64_C(7), -INT64_C(3)) != INT64_C(2)
+      || native_m3_fn_3(-INT64_C(7), INT64_C(3)) != -INT64_C(1)
+      || native_m3_fn_3(INT64_C(7), -INT64_C(3)) != INT64_C(1)
+      || native_m3_fn_3(-INT64_C(7), -INT64_C(3)) != -INT64_C(1)
+      || native_m3_fn_4(-INT64_C(7), INT64_C(3)) != INT64_C(2)
+      || native_m3_fn_4(INT64_C(7), -INT64_C(3)) != -INT64_C(2)
+      || native_m3_fn_4(-INT64_C(7), -INT64_C(3)) != -INT64_C(1)) {
+    return 9;
+  }
+  if (native_m3_fn_2(INT64_MIN, -INT64_C(1)) != INT64_MIN
+      || native_m3_fn_3(INT64_MIN, -INT64_C(1)) != INT64_C(0)
+      || native_m3_fn_4(INT64_MIN, -INT64_C(1)) != INT64_C(0)) {
+    return 10;
   }
   native_arena_reset(&arena);
   return 0;
