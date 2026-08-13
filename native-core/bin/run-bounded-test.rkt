@@ -52,6 +52,51 @@
     (string-contains? (bytes->string/utf-8 (get-output-bytes timeout-err))
                       "TIMEOUT status=124\n"))
 
+   ;; Exit 124 is also a valid child status. The outcome receipt—not the
+   ;; shell status alone—keeps that semantic rejection distinct from timeout.
+   (define semantic-124-out (open-output-bytes))
+   (define semantic-124-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace env semantic-124-out semantic-124-err
+                      "5" "1" "--" "/bin/sh" "-c" "exit 124")
+    124)
+   (check-equal? (file->string receipt)
+                 "subtree-reaped-v0 exit status=124\n")
+   (check-true
+    (string-contains?
+     (bytes->string/utf-8 (get-output-bytes semantic-124-err))
+     "END status=124\n"))
+
+   (define semantic-reject-out (open-output-bytes))
+   (define semantic-reject-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace env semantic-reject-out semantic-reject-err
+                      "5" "1" "--" "/bin/sh" "-c" "exit 1")
+    1)
+   (check-equal? (file->string receipt)
+                 "subtree-reaped-v0 exit status=1\n")
+
+   ;; A contract failure exits 2 before a child exists and therefore publishes
+   ;; no completion receipt. Callers can distinguish it from an expected child
+   ;; rejection without guessing from the shell status.
+   (define deadline-receipt (build-path scratch "deadline.receipt"))
+   (define deadline-env
+     (environment-variables-copy (current-environment-variables)))
+   (environment-variables-set!
+    deadline-env #"BEAGLE_BOUNDED_COMPLETION_RECEIPT"
+    (string->bytes/utf-8 (path->string deadline-receipt)))
+   (define deadline-out (open-output-bytes))
+   (define deadline-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace deadline-env deadline-out deadline-err
+                      "0" "1" "--" "/bin/sh" "-c" "exit 1")
+    2)
+   (check-false (file-exists? deadline-receipt))
+   (check-true
+    (string-contains?
+     (bytes->string/utf-8 (get-output-bytes deadline-err))
+     "deadline must be a positive integer"))
+
    (define child-two-out (open-output-bytes))
    (define child-two-err (open-output-bytes))
    (check-equal?

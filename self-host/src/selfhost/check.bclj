@@ -3514,8 +3514,14 @@
                 (purity-restore-scope (get result "state") outer-scope)
                 (get result "origins")))
           (= node "binding")
-            (let [after-bindings (purity-analyze-bindings
-                                   (get value "bindings") state false)]
+            ;; Dynamic rebinding evaluates each value, but it does not create a
+            ;; lexical binding. Calls in the body therefore retain their normal
+            ;; module/local resolution and effect propagation.
+            (let [after-bindings (reduce
+                                   (fn [(next Any) (binding Any)] Any
+                                     (purity-analyze-and-escape
+                                       (get binding "value") next binding))
+                                   state (get value "bindings"))]
               (purity-analyze-sequence (get value "body") after-bindings))
           (= node "with-open")
             (let [outer-scope (get state "scope")
@@ -3734,7 +3740,10 @@
   [(definition Any) (known Any) (globals Any)] Any
   (reduce
     (fn [(markers Any) (clause Any)] Any
-      (reduce marker-add markers
+      ;; One multi-arity definition is one purity boundary, but each clause is
+      ;; analyzed independently and retains its own ordered witnesses. Do not
+      ;; deduplicate equal markers across clauses.
+      (into markers
         (analyze-expression-effects
           (get clause "body") known
           (get clause "params") (get clause "rest")
@@ -4223,6 +4232,22 @@
            (= true (get forward-effectful "outer"))
            (= true (get forward-effectful "middle"))
            (= true (get forward-effectful "inner")))))
+  (expect! "purity: dynamic binding retains ordinary effect resolution"
+    (let [dynamic-call {"node" "binding"
+                        "bindings" [(make-let-binding
+                                      "writer!" nil (make-ref "replacement"))]
+                        "body" [(make-call "writer!" [(make-ref "value")])]}]
+      (= ["writer!"]
+         (analyze-expression-effects
+           [dynamic-call] {} [] nil {"writer!" true} true))))
+  (expect! "purity: multi-arity clauses retain repeated witnesses in order"
+    (let [definition {"name" "write-twice"
+                      "clauses" [{"params" [] "rest" nil
+                                  "body" [(make-call "reset!" [])]}
+                                 {"params" [] "rest" nil
+                                  "body" [(make-call "reset!" [])]}]}]
+      (= ["reset!" "reset!"]
+         (definition-effect-markers definition {} {}))))
   (expect! "purity: an owned transient is externally pure"
     (= 0 (count (effective-markers
                   [(make-let-node
