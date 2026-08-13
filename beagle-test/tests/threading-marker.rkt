@@ -129,14 +129,14 @@
 ;; ============================================================================
 
 (test-case "type check sees through threading-marker (happy path)"
-  ;; (defn id [x] x) (-> 5 id id) — both ids should be applicable.
+  ;; (defn id [x] Any x) (-> 5 id id) — both ids should be applicable.
   ;; If the checker fails to walk through the marker, it would type the
   ;; outer form as an unknown, but no test-assertion is needed: we just
   ;; need parse + check to complete without error.
   (check-not-exn
    (lambda ()
      (parse-program
-      (list (datum->syntax #f '(defn id [x] x))
+      (list (datum->syntax #f '(defn id [x] Any x))
             (datum->syntax #f '(-> 5 id id)))))))
 
 ;; ============================================================================

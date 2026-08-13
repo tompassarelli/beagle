@@ -96,7 +96,7 @@
        "(nix/module\n"
        "  [config\n"
        "   ...]\n"
-       "  (let [f (fn [line] line)]\n"
+       "  (let [f (fn [line] Any line)]\n"
        "    (f config)))\n")))))
 
 (test-case "nix/fn-set parses to nix-fn-set with rest? false"
