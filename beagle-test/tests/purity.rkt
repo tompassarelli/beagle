@@ -226,6 +226,141 @@
       (check-purity! non-bang-mutating))
     (check-equal? (get-output-string out) "")))
 
+(test-case "transient ownership is lexical, linear, and escape-safe"
+  (define (violations . forms)
+    (map purity-violation-name
+         (purity-violations
+          (apply prog* '(ns t.owner) '(define-mode strict)
+                 '(define-target clj) forms))))
+  ;; An established owner may flow through nested transient-family calls, and
+  ;; a fresh origin may be consumed immediately without first being bound.
+  (check-equal?
+   (violations
+    '(defn build [xs flag] Any
+       (let [owned (transient xs)]
+         (if flag (conj! owned 1) (conj! owned 2))
+         (persistent!
+          (pop! (disj! (conj! owned 1) 1))))))
+   '())
+  (check-equal?
+   (violations '(defn direct-freeze [xs] Any (persistent! (transient xs))))
+   '())
+  (check-equal?
+   (violations
+    '(defn direct-pipeline [xs] Any
+       (persistent! (conj! (transient xs) 1))))
+   '())
+  (check-equal?
+   (violations
+    '(defn map-build [xs] Any
+       (let [owned (transient xs)]
+         (persistent! (dissoc! (assoc! owned :k 1) :k)))))
+   '())
+  ;; Borrowed receivers remain effects even beside a valid local owner.
+  (check-equal?
+   (violations
+    '(defn mixed [borrowed xs] Any
+       (let [owned (transient xs)]
+         (conj! borrowed 1)
+         (persistent! (conj! owned 2)))))
+   '(mixed))
+  ;; Owners cannot escape directly, through alias/result bindings, closures,
+  ;; containers, unknown calls, or conditional acquisition.
+  (for ([form
+         (in-list
+          '((defn direct [xs] Any (transient xs))
+            (defn result [xs] Any
+              (let [owned (transient xs)] (conj! owned 1)))
+            (defn alias [xs] Any
+              (let [owned (transient xs)
+                    alias owned]
+                (persistent! alias)))
+            (defn mutator-alias [xs] Any
+              (let [owned (transient xs)
+                    changed (conj! owned 1)]
+                (persistent! changed)))
+            (defn closure [xs] Any
+              (let [owned (transient xs)]
+                (fn [] Any (conj! owned 1))))
+            (defn container [xs] Any
+              (let [owned (transient xs)] [owned]))
+            (defn unknown [xs] Any
+              (let [owned (transient xs)] (consume owned)))
+            (defn branch-acquire [xs flag] Any
+              (let [selected (if flag (transient xs) (transient xs))]
+                (persistent! selected)))))])
+    (check-equal? (violations form) (list (cadr form))))
+  ;; persistent! consumes the owner; subsequent mutation is invalid.
+  (check-equal?
+   (violations
+    '(defn after-freeze [xs] Any
+       (let [owned (transient xs)
+             frozen (persistent! owned)]
+         (conj! owned 1)
+         frozen)))
+   '(after-freeze)))
+
+(test-case "module effect edges honor lexical binding identity"
+  (define p
+    (prog* '(ns t.scope) '(define-mode strict) '(define-target clj)
+           '(defn writer [cell] Any (reset! cell nil))
+           '(defn sink! [value] Any (reset! value nil))
+           '(defn parameter-shadow [writer value] Any (writer value))
+           '(defn bang-parameter-shadow [sink! value] Any (sink! value))
+           '(defn let-shadow [value] Any
+              (let [writer (fn [x] Any x)] (writer value)))
+           '(defn comprehension-shadow [values] Any
+              (for [writer values] (writer nil)))
+           '(defn side-effect-loop-shadow [values] Any
+              (doseq [writer values] (writer nil)))
+           '(defn catch-shadow [] Any
+              (try nil (catch (writer Exception) (writer nil))))))
+  (check-equal? (map purity-violation-name (purity-violations p)) '(writer))
+  ;; Use the source reader here: Racket datum brackets cannot represent a
+  ;; Beagle map destructuring target faithfully.
+  (define destructure-p
+    (parse-program/bytes
+     (string->bytes/utf-8
+      (string-append
+       "#lang beagle/clj\n"
+       "(ns t.scope.destructure)\n"
+       "(define-mode strict)\n"
+       "(defn writer [(cell Any)] Any (reset! cell nil))\n"
+       "(defn destructure-shadow [(m (Map Keyword Any))] Any\n"
+       "  (let [{:keys [writer] :or {writer writer}} m]\n"
+       "    (writer nil)))\n"))
+     #:source-path "purity-destructure.bgl"))
+  (check-equal? (map purity-violation-name (purity-violations destructure-p))
+                '(writer)))
+
+(test-case "primitive transient recognition honors module and external bindings"
+  (define module-shadow
+    (prog* '(ns t.owner.module-shadow) '(define-mode strict) '(define-target clj)
+           '(defn transient [value] Any value)
+           '(defn expose [xs] Any (persistent! (transient xs)))))
+  (check-equal? (map purity-violation-name (purity-violations module-shadow))
+                '(expose))
+  (define external-shadow
+    (prog* '(ns t.owner.external-shadow) '(define-mode strict)
+           '(define-target clj) '(declare-extern transient Any)
+           '(defn expose [xs] Any (persistent! (transient xs)))))
+  (check-equal? (map purity-violation-name (purity-violations external-shadow))
+                '(expose)))
+
+(test-case "nested publishing definitions are effects and cannot retain owners"
+  (define p
+    (prog* '(ns t.owner.publish) '(define-mode strict) '(define-target clj)
+           '(defn publish [xs] Any
+              (let [owned (transient xs)]
+                (defn retained [] Any owned)
+                nil))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations) '(publish))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(definition-publication transient-escape)))
+
 (test-case "-main is exempt: the entry-point contract name cannot carry `!`"
   (define entry
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
@@ -311,13 +446,13 @@
               (syntax-line (purity-violation-definition-stx violation)))
             violations)
        '(4 7 10))
-      ;; Multi-arity `write` remains one boundary and duplicate reset! markers
-      ;; retain the first source-order witness only.
+      ;; Multi-arity `write` remains one boundary. Its two authored clauses
+      ;; retain their distinct witnesses in source order.
       (check-equal?
        (map (lambda (violation)
               (length (purity-violation-witnesses violation)))
             violations)
-       '(1 1 1))
+       '(1 1 2))
       (define witnesses
         (map (lambda (violation)
                (purity-witness-stx

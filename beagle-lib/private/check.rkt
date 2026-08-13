@@ -7072,50 +7072,531 @@
 ;; latter is joined back to the authored syntax by source position below.
 (struct purity-witness (marker stx) #:transparent)
 (struct purity-violation (name definition-stx witnesses) #:transparent)
-(struct purity-definition (name bodies node definition-stx) #:transparent)
-(struct marker-node (marker node) #:transparent)
+(struct purity-definition (name clauses node definition-stx) #:transparent)
+(struct effect-witness (marker node) #:transparent)
+(struct purity-binding (id origins lambda-depth) #:transparent)
+(struct purity-state (scope owners lambda-depth) #:transparent)
 
-;; Collect every mutation marker (set!, a `!`-headed call, or a call to a
-;; locally tracked effectful definition) in source order. This is deliberately
-;; a barrier-aware structural descent: the AST has many transparent forms and
-;; adding one must not create a new place where mutation can hide. Quoted data
-;; and nested definitions are semantic boundaries and are never descended.
-(define (collect-markers node [effectful-defs (set)])
-  (define markers '())
-  (define seen (make-hasheq))
-  (define (note! marker witness)
-    (unless (for/or ([prior (in-list markers)])
-              (eq? marker (marker-node-marker prior)))
-      (set! markers (cons (marker-node marker witness) markers))))
-  (define (walk e)
-    (unless (and (or (pair? e) (vector? e) (hash? e) (struct? e))
-                 (hash-ref seen e #f))
-      (when (or (pair? e) (vector? e) (hash? e) (struct? e))
-        (hash-set! seen e #t))
+(define transient-mutators
+  (set 'assoc! 'conj! 'dissoc! 'disj! 'pop!))
+(define transient-family
+  (set-add transient-mutators 'persistent!))
+
+(define (pattern-bound-names pattern)
+  (cond
+    [(pat-var? pattern) (list (pat-var-name pattern))]
+    [(pat-record? pattern) (pat-record-bindings pattern)]
+    [(pat-map? pattern)
+     (for/list ([entry (in-list (pat-map-entries pattern))]
+                #:when (pat-var? (cdr entry)))
+       (pat-var-name (cdr entry)))]
+    [(pat-or? pattern) '()]
+    [else '()]))
+
+;; Lexical abstract interpretation for expression effects and transient
+;; ownership. Scope entries are distinct binding identities, while result
+;; values carry the owner origins they may denote. Only the transient family
+;; may consume those origins without escape; persistent! consumes them, and
+;; mutators return them for nested pipelines. Unknown calls/storage, capture,
+;; and a definition's final result all escape and kill their origins.
+(define (analyze-expression-effects expressions effectful-defs
+                                    #:params [params '()]
+                                    #:rest-param [rest-param #f]
+                                    #:global-bindings [global-bindings (seteq)]
+                                    #:result-escapes? [result-escapes? #t])
+  (define witnesses '())
+  (define (note! marker node)
+    (unless (for/or ([prior (in-list witnesses)])
+              (eq? marker (effect-witness-marker prior)))
+      (set! witnesses (cons (effect-witness marker node) witnesses))))
+  (define (bind-name state name origins)
+    (struct-copy
+     purity-state state
+     [scope
+      (hash-set (purity-state-scope state) name
+                (purity-binding (gensym name) origins
+                                (purity-state-lambda-depth state)))]))
+  (define (direct-transient-call? value state)
+    (and (call-form? value)
+         (eq? (call-form-fn value) 'transient)
+         (not (hash-has-key? (purity-state-scope state) 'transient))
+         (not (set-member? global-bindings 'transient))))
+  (define (bind-target state target origins node #:acquire? [acquire? #f])
+    (define names (binding-target-bound-names target))
+    (define simple? (and (symbol? target) (= (length names) 1)))
+    (define prepared
+      (if (and (not (and simple? acquire?)) (not (set-empty? origins)))
+          (escape-origins state origins node)
+          state))
+    (for/fold ([next prepared]) ([name (in-list names)])
+      (bind-name next name (if (and simple? acquire?) origins (seteq)))))
+  (define (owner-status state origin)
+    (hash-ref (purity-state-owners state) origin 'absent))
+  (define (origins-live? state origins)
+    (and (not (set-empty? origins))
+         (for/and ([origin (in-set origins)])
+           (eq? (owner-status state origin) 'live))))
+  (define (set-origin-status state origins status)
+    (struct-copy
+     purity-state state
+     [owners
+      (for/fold ([owners (purity-state-owners state)])
+                ([origin (in-set origins)])
+        (hash-set owners origin status))]))
+  (define (escape-origins state origins node)
+    (if (set-empty? origins)
+        state
+        (begin
+          (note! 'transient-escape node)
+          (set-origin-status state origins 'dead))))
+  (define (join-states base states)
+    (define owner-ids
+      (for/fold ([ids (seteq)]) ([state (in-list states)])
+        (for/fold ([next ids]) ([origin (in-hash-keys (purity-state-owners state))])
+          (set-add next origin))))
+    (struct-copy
+     purity-state base
+     [owners
+      (for/fold ([owners (hasheq)]) ([origin (in-set owner-ids)])
+        (hash-set
+         owners origin
+         (if (for/and ([state (in-list states)])
+               (eq? (owner-status state origin) 'live))
+             'live
+             'dead)))]))
+  (define (analyze-sequence body state)
+    (cond
+      [(null? body) (values state (seteq))]
+      [else
+       (let loop ([remaining body] [current state])
+         (define-values (next origins) (analyze (car remaining) current))
+         (if (null? (cdr remaining))
+             (values next origins)
+             (loop (cdr remaining) next))) ]))
+  (define (analyze-and-discard value state)
+    (define-values (next _origins) (analyze value state))
+    next)
+  (define (analyze-and-escape value state [node value])
+    (define-values (next origins) (analyze value state))
+    (escape-origins next origins node))
+  (define (analyze-defaults state target)
+    (for/fold ([next state])
+              ([default (in-list (destructure-or-default-exprs target))])
+      (analyze-and-escape default next default)))
+  (define (analyze-bindings bindings state)
+    (for/fold ([next state]) ([binding (in-list bindings)])
+      (define target (let-binding-name binding))
+      (define acquire? (and (symbol? target)
+                            (direct-transient-call?
+                             (let-binding-value binding) next)))
+      (define-values (after-value origins)
+        (analyze (let-binding-value binding) next))
+      (define after-defaults (analyze-defaults after-value target))
+      (bind-target after-defaults target origins binding #:acquire? acquire?)))
+  ;; Only a simple-symbol let/loop binding may acquire a fresh transient.
+  ;; Every other binding surface receives an ordinary value, so an owner on
+  ;; its RHS escapes rather than silently widening the ownership grammar.
+  (define (analyze-nonowning-bindings bindings state)
+    (for/fold ([next state]) ([binding (in-list bindings)])
+      (define target (let-binding-name binding))
+      (define-values (after-value origins)
+        (analyze (let-binding-value binding) next))
+      (define escaped (escape-origins after-value origins binding))
+      (define after-defaults (analyze-defaults escaped target))
+      (bind-target after-defaults target (seteq) binding)))
+  (define (bind-params state ps rest-p)
+    (for/fold ([next state])
+              ([p (in-list (if rest-p (append ps (list rest-p)) ps))])
+      (define target (param-binding-target p))
+      (define with-defaults (analyze-defaults next target))
+      (bind-target with-defaults target (seteq) p)))
+  (define (analyze-branches branches state)
+    (define results
+      (for/list ([branch (in-list branches)])
+        (call-with-values (lambda () (analyze-sequence branch state)) list)))
+    (define branch-states (map car results))
+    (define origins
+      (for/fold ([out (seteq)]) ([result (in-list results)])
+        (set-union out (cadr result))))
+    (values (join-states state branch-states) origins))
+  (define (analyze-cond-clauses clauses state)
+    ;; Each failed test flows into the next clause, while a successful test
+    ;; flows only into its own body. This preserves effects in evaluated tests
+    ;; without pretending mutually exclusive bodies execute sequentially.
+    (let loop ([remaining clauses]
+               [fallthrough state]
+               [results '()])
       (cond
-        [(or (quoted? e) (defn-form? e) (defn-multi? e)
-             (def-form? e) (defonce-form? e))
-         (void)]
+        [(null? remaining)
+         (define all-results (cons (list fallthrough (seteq)) results))
+         (values
+          (join-states state (map car all-results))
+          (for/fold ([origins (seteq)]) ([result (in-list all-results)])
+            (set-union origins (cadr result))))]
         [else
-         (when (set!-form? e) (note! 'set! e))
-         (when (call-form? e)
-           (define fn (call-form-fn e))
-           (when (or (bang-name? fn)
-                     (and (symbol? fn) (set-member? effectful-defs fn)))
-             (note! fn e)))
-         (cond
-           [(pair? e) (walk (car e)) (walk (cdr e))]
-           [(vector? e) (for ([item (in-vector e)]) (walk item))]
-           [(hash? e)
-            (for ([(key value) (in-hash e)])
-              (walk key)
-              (walk value))]
-           [(struct? e)
-            (for ([field (in-list (cdr (vector->list (struct->vector e))))])
-              (walk field))]
-           [else (void)])])))
-  (for-each walk (if (list? node) node (list node)))
-  (reverse markers))
+         (define clause (car remaining))
+         (define test (cond-clause-test clause))
+         (if (eq? test 'else)
+             (let ([result
+                    (call-with-values
+                     (lambda ()
+                       (analyze-sequence (cond-clause-body clause) fallthrough))
+                     list)])
+               (define all-results (cons result results))
+               (values
+                (join-states state (map car all-results))
+                (for/fold ([origins (seteq)]) ([item (in-list all-results)])
+                  (set-union origins (cadr item)))))
+             (let* ([after-test (analyze-and-escape test fallthrough clause)]
+                    [result
+                     (call-with-values
+                      (lambda ()
+                        (analyze-sequence (cond-clause-body clause) after-test))
+                      list)])
+               (loop (cdr remaining) after-test (cons result results))))])))
+  (define (analyze-comprehension clauses body state #:collects? collects?)
+    (define outer-scope (purity-state-scope state))
+    (define bound
+      (for/fold ([next state]) ([clause (in-list clauses)])
+        (cond
+          [(for-binding? clause)
+           (define-values (after-expr origins)
+             (analyze (for-binding-expr clause) next))
+           (define escaped (escape-origins after-expr origins clause))
+           (bind-target escaped (for-binding-name clause) (seteq) clause)]
+          [(for-let? clause)
+           (analyze-nonowning-bindings (for-let-bindings clause) next)]
+          [(for-when? clause)
+           (analyze-and-escape (for-when-test clause) next clause)]
+          [else next])))
+    (define-values (after-body origins) (analyze-sequence body bound))
+    (define completed
+      (if collects? (escape-origins after-body origins body) after-body))
+    (values (struct-copy purity-state completed [scope outer-scope]) (seteq)))
+  (define (analyze-unknown-children value state)
+    (define children
+      (cond
+        [(pair? value) (list (car value) (cdr value))]
+        [(vector? value) (vector->list value)]
+        [(hash? value)
+         (apply append
+                (for/list ([(key item) (in-hash value)]) (list key item)))]
+        [(struct? value) (cdr (vector->list (struct->vector value)))]
+        [else '()]))
+    (values
+     (for/fold ([next state]) ([child (in-list children)])
+       (analyze-and-escape child next value))
+     (seteq)))
+  (define (analyze-call call state)
+    (define fn (call-form-fn call))
+    (define args (call-form-args call))
+    (define lexically-shadowed?
+      (and (symbol? fn) (hash-has-key? (purity-state-scope state) fn)))
+    (define primitive-shadowed?
+      (and (symbol? fn)
+           (or lexically-shadowed? (set-member? global-bindings fn))))
+    (cond
+      [(and (eq? fn 'transient) (not primitive-shadowed?))
+       (define after-args
+         (for/fold ([next state]) ([arg (in-list args)])
+           (analyze-and-escape arg next call)))
+       (define origin (gensym 'transient-owner))
+       (values (set-origin-status after-args (seteq origin) 'live)
+               (seteq origin))]
+      [(and (symbol? fn) (set-member? transient-family fn)
+            (not primitive-shadowed?))
+       (define-values (after-owner owner-origins)
+         (if (pair? args)
+             (analyze (car args) state)
+             (values state (seteq))))
+       (define valid-owner? (origins-live? after-owner owner-origins))
+       (unless valid-owner? (note! fn call))
+       (define after-rest
+         (for/fold ([next after-owner]) ([arg (in-list (if (pair? args) (cdr args) '()))])
+           (analyze-and-escape arg next call)))
+       (cond
+         [(not valid-owner?)
+          (values (escape-origins after-rest owner-origins call) (seteq))]
+         [(eq? fn 'persistent!)
+          (values (set-origin-status after-rest owner-origins 'dead) (seteq))]
+         [else (values after-rest owner-origins)])]
+      [else
+       (when (and (not lexically-shadowed?)
+                  (or (bang-name? fn)
+                      (and (symbol? fn)
+                           (set-member? effectful-defs fn))))
+         (note! fn call))
+       (define after-callee
+         ;; A symbolic callee is normally a module/global name, but a lexical
+         ;; binding in function position is still an evaluated value. If that
+         ;; binding carries a transient owner, calling through it publishes the
+         ;; owner to an unknown callee just like passing it as an argument.
+         (if (and (symbol? fn) (not lexically-shadowed?))
+             state
+             (analyze-and-escape fn state call)))
+       (values
+        (for/fold ([next after-callee]) ([arg (in-list args)])
+          (analyze-and-escape arg next call))
+        (seteq))]))
+  (define (analyze value state)
+    (cond
+      [(quoted? value) (values state (seteq))]
+      [(symbol? value)
+       (define binding (hash-ref (purity-state-scope state) value #f))
+       (cond
+         [(not binding) (values state (seteq))]
+         [(and (not (set-empty? (purity-binding-origins binding)))
+               (< (purity-binding-lambda-depth binding)
+                  (purity-state-lambda-depth state)))
+          (values
+           (escape-origins state (purity-binding-origins binding) value)
+           (seteq))]
+         [else (values state (purity-binding-origins binding))])]
+      ;; Bare collection values are containers, not evaluator sequencing. Any
+      ;; transient origin stored in them escapes the lexical owner immediately.
+      [(pair? value) (analyze-unknown-children value state)]
+      [(vector? value) (analyze-unknown-children value state)]
+      [(hash? value) (analyze-unknown-children value state)]
+      [(call-form? value) (analyze-call value state)]
+      [(threading-marker? value)
+       (analyze (threading-marker-desugared value) state)]
+      [(let-form? value)
+       (define outer-scope (purity-state-scope state))
+       (define bound (analyze-bindings (let-form-bindings value) state))
+       (define-values (after-body origins)
+         (analyze-sequence (let-form-body value) bound))
+       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+      [(loop-form? value)
+       (define outer-scope (purity-state-scope state))
+       (define bound (analyze-bindings (loop-form-bindings value) state))
+       (define-values (after-body origins)
+         (analyze-sequence (loop-form-body value) bound))
+       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+      [(fn-form? value)
+       (define nested
+         (struct-copy purity-state state
+                      [lambda-depth (add1 (purity-state-lambda-depth state))]))
+       (define bound
+         (bind-params nested (fn-form-params value) (fn-form-rest-param value)))
+       (define-values (after-body origins)
+         (analyze-sequence (fn-form-body value) bound))
+       (define escaped (escape-origins after-body origins value))
+       (values
+        (struct-copy purity-state state [owners (purity-state-owners escaped)])
+        (seteq))]
+      [(if-form? value)
+       (define after-test (analyze-and-escape (if-form-cond-expr value) state value))
+       (analyze-branches
+        (list (list (if-form-then-expr value))
+              (if (if-form-else-expr value)
+                  (list (if-form-else-expr value))
+                  '()))
+        after-test)]
+      [(when-form? value)
+       (define after-test (analyze-and-escape (when-form-cond-expr value) state value))
+       (analyze-branches (list (when-form-body value) '()) after-test)]
+      [(do-form? value) (analyze-sequence (do-form-body value) state)]
+      [(cond-form? value)
+       (analyze-cond-clauses (cond-form-clauses value) state)]
+      [(condp-form? value)
+       (define after-predicate
+         (analyze-and-escape (condp-form-pred-fn value) state value))
+       (define after-target
+         (analyze-and-escape (condp-form-test-expr value) after-predicate value))
+       (define-values (fallthrough results)
+         (for/fold ([next after-target] [out '()])
+                   ([clause (in-list (condp-form-clauses value))])
+           (define after-test (analyze-and-escape (car clause) next value))
+           (define result
+             (call-with-values (lambda () (analyze (cdr clause) after-test)) list))
+           (values after-test (cons result out))))
+       (define all-results
+         (if (condp-form-default value)
+             (cons (call-with-values
+                    (lambda () (analyze (condp-form-default value) fallthrough))
+                    list)
+                   results)
+             (cons (list fallthrough (seteq)) results)))
+       (values
+        (join-states state (map car all-results))
+        (for/fold ([origins (seteq)]) ([result (in-list all-results)])
+          (set-union origins (cadr result))))]
+      [(target-case-form? value)
+       (analyze-branches
+        (for/list ([branch (in-hash-values (target-case-form-cases value))])
+          (list branch))
+        state)]
+      [(rescue-form? value)
+       (define fallback-state
+         (if (rescue-form-err-name value)
+             (bind-name state (rescue-form-err-name value) (seteq))
+             state))
+       (define-values (primary-state primary-origins)
+         (analyze (rescue-form-expr value) state))
+       (define-values (fallback-result fallback-origins)
+         (analyze (rescue-form-fallback value) fallback-state))
+       (values
+        (join-states state (list primary-state fallback-result))
+        (set-union primary-origins fallback-origins))]
+      [(letfn-form? value)
+       (define outer-scope (purity-state-scope state))
+       (define fn-scope
+         (for/fold ([next state]) ([fn (in-list (letfn-form-fns value))])
+           (bind-name next (letfn-fn-name fn) (seteq))))
+       (define after-fns
+         (for/fold ([next fn-scope]) ([fn (in-list (letfn-form-fns value))])
+           (define nested
+             (struct-copy purity-state next
+                          [lambda-depth (add1 (purity-state-lambda-depth next))]))
+           (define bound
+             (bind-params nested (letfn-fn-params fn) (letfn-fn-rest-param fn)))
+           (define-values (after-body origins)
+             (analyze-sequence (letfn-fn-body fn) bound))
+           (define escaped (escape-origins after-body origins fn))
+           (struct-copy purity-state next [owners (purity-state-owners escaped)])))
+       (define-values (after-body origins)
+         (analyze-sequence (letfn-form-body value) after-fns))
+       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+      [(binding-form? value)
+       (define after-bindings
+         (for/fold ([next state]) ([binding (in-list (binding-form-bindings value))])
+           (analyze-and-escape (let-binding-value binding) next binding)))
+       (analyze-sequence (binding-form-body value) after-bindings)]
+      [(with-open-form? value)
+       (define outer-scope (purity-state-scope state))
+       (define bound
+         (analyze-nonowning-bindings (with-open-form-bindings value) state))
+       (define-values (after-body origins)
+         (analyze-sequence (with-open-form-body value) bound))
+       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+      [(when-let-form? value)
+       (define-values (after-expr origins) (analyze (when-let-form-expr value) state))
+       (define escaped (escape-origins after-expr origins value))
+       (define bound (bind-name escaped (when-let-form-name value) (seteq)))
+       (define-values (body-state body-origins)
+         (analyze-sequence (when-let-form-body value) bound))
+       (values (join-states state (list body-state escaped)) body-origins)]
+      [(if-let-form? value)
+       (define-values (after-expr origins) (analyze (if-let-form-expr value) state))
+       (define escaped (escape-origins after-expr origins value))
+       (define then-state (bind-name escaped (if-let-form-name value) (seteq)))
+       (define-values (then-result then-origins)
+         (analyze (if-let-form-then-body value) then-state))
+       (define-values (else-result else-origins)
+         (if (if-let-form-else-body value)
+             (analyze (if-let-form-else-body value) escaped)
+             (values escaped (seteq))))
+       (values (join-states state (list then-result else-result))
+               (set-union then-origins else-origins))]
+      [(when-some-form? value)
+       (define-values (after-expr origins) (analyze (when-some-form-expr value) state))
+       (define escaped (escape-origins after-expr origins value))
+       (define bound (bind-name escaped (when-some-form-name value) (seteq)))
+       (define-values (body-state body-origins)
+         (analyze-sequence (when-some-form-body value) bound))
+       (values (join-states state (list body-state escaped)) body-origins)]
+      [(if-some-form? value)
+       (define-values (after-expr origins) (analyze (if-some-form-expr value) state))
+       (define escaped (escape-origins after-expr origins value))
+       (define then-state (bind-name escaped (if-some-form-name value) (seteq)))
+       (define-values (then-result then-origins)
+         (analyze (if-some-form-then-body value) then-state))
+       (define-values (else-result else-origins)
+         (analyze (if-some-form-else-body value) escaped))
+       (values (join-states state (list then-result else-result))
+               (set-union then-origins else-origins))]
+      [(set!-form? value)
+       (note! 'set! value)
+       (define after-target (analyze-and-escape (set!-form-target value) state value))
+       (values (analyze-and-escape (set!-form-value value) after-target value)
+               (seteq))]
+      [(or (vec-form? value) (set-form? value) (map-form? value)
+           (with-form? value) (doto-form? value))
+       (analyze-unknown-children value state)]
+      [(for-form? value)
+       (analyze-comprehension (for-form-clauses value) (for-form-body value)
+                              state #:collects? #t)]
+      [(doseq-form? value)
+       (analyze-comprehension (doseq-form-clauses value) (doseq-form-body value)
+                              state #:collects? #f)]
+      [(dotimes-form? value)
+       (define after-count
+         (analyze-and-escape (dotimes-form-count-expr value) state value))
+       (define bound
+         (bind-name after-count (dotimes-form-name value) (seteq)))
+       (define-values (after-body _origins)
+         (analyze-sequence (dotimes-form-body value) bound))
+       (values
+        (struct-copy purity-state after-body [scope (purity-state-scope state)])
+        (seteq))]
+      [(case-form? value)
+       (define after-test
+         (analyze-and-escape (case-form-test value) state value))
+       (define branches
+         (append
+          (for/list ([clause (in-list (case-form-clauses value))])
+            (list (case-clause-body clause)))
+          (if (case-form-default value)
+              (list (list (case-form-default value)))
+              (list '()))))
+       (analyze-branches branches after-test)]
+      [(try-form? value)
+       (define outer-scope (purity-state-scope state))
+       (define normal
+         (call-with-values
+          (lambda () (analyze-sequence (try-form-body value) state)) list))
+       (define catches
+         (for/list ([clause (in-list (try-form-catches value))])
+           (define caught
+             (bind-name (car normal) (catch-clause-name clause) (seteq)))
+           (call-with-values
+            (lambda () (analyze-sequence (catch-clause-body clause) caught)) list)))
+       (define branch-results (cons normal catches))
+       (define joined
+         (join-states state (map car branch-results)))
+       (define after-finally
+         (if (try-form-finally-body value)
+             (let-values ([(next _origins)
+                           (analyze-sequence (try-form-finally-body value) joined)])
+               next)
+             joined))
+       (values
+        (struct-copy purity-state after-finally [scope outer-scope])
+        (for/fold ([origins (seteq)]) ([result (in-list branch-results)])
+          (set-union origins (cadr result))))]
+      [(match-form? value)
+       (define after-target (analyze-and-escape (match-form-target value) state value))
+       (define results
+         (for/list ([clause (in-list (match-form-clauses value))])
+           (define bound
+             (for/fold ([next after-target])
+                       ([name (in-list (pattern-bound-names
+                                        (match-clause-pattern clause)))])
+               (bind-name next name (seteq))))
+           (call-with-values
+            (lambda () (analyze-sequence (match-clause-body clause) bound)) list)))
+       (values (join-states after-target (map car results))
+               (for/fold ([origins (seteq)]) ([result (in-list results)])
+                 (set-union origins (cadr result))))]
+      [(or (defn-form? value) (defn-multi? value)
+           (def-form? value) (defonce-form? value))
+       (note! 'definition-publication value)
+       ;; A nested publishing definition is itself an effect and may retain
+       ;; any live lexical owner. Kill those owners without reflectively
+       ;; walking the nested definition's binders as outer expressions.
+       (define live-origins
+         (for/seteq ([(origin status) (in-hash (purity-state-owners state))]
+                     #:when (eq? status 'live))
+           origin))
+       (values (escape-origins state live-origins value) (seteq))]
+      [else (analyze-unknown-children value state)]))
+  (define initial
+    (bind-params (purity-state (hasheq) (hasheq) 0) params rest-param))
+  (define-values (final origins) (analyze-sequence expressions initial))
+  (when result-escapes? (escape-origins final origins (if (pair? expressions)
+                                                          (last expressions)
+                                                          expressions)))
+  (reverse witnesses))
 
 ;; Collect each checkable definition once, pairing the normalized AST with the
 ;; original top-level syntax. A multi-arity definition is one purity boundary,
@@ -7127,35 +7608,30 @@
              #:when (or (defn-form? form) (defn-multi? form)))
     (if (defn-form? form)
         (purity-definition (defn-form-name form)
-                           (list (defn-form-body form)) form form-stx)
+                           (definition-clauses form) form form-stx)
         (purity-definition
          (defn-multi-name form)
-         (map arity-clause-body (defn-multi-arities form))
+         (definition-clauses form)
          form form-stx))))
 
 ;; Least fixed point of module-local defs whose bodies reach a direct marker or
 ;; another effectful local def. Repeating from the previous complete set makes
 ;; the result independent of source order.
-;; A body that opens its own transient mutates nothing observable; one that only
-;; mutates a received transient still leaks. `transient` carries no bang.
-(define transient-marker-set
-  (set 'persistent! 'assoc! 'conj! 'dissoc! 'disj! 'pop!))
+(define (definition-effect-witnesses definition known global-bindings)
+  (apply append
+         (for/list ([clause (in-list (purity-definition-clauses definition))])
+           (analyze-expression-effects
+            (inference-clause-body clause)
+            known
+            #:params (inference-clause-params clause)
+            #:rest-param (inference-clause-rest-param clause)
+            #:global-bindings global-bindings))))
 
-(define (effective-markers body known)
-  (define collected (collect-markers body known))
-  (if (for/or ([w (in-list (collect-markers body (set 'transient)))])
-        (eq? (marker-node-marker w) 'transient))
-      (filter (lambda (w)
-                (not (set-member? transient-marker-set
-                                  (marker-node-marker w))))
-              collected)
-      collected))
-
-(define (derive-effectful-defs defs)
+(define (derive-effectful-defs defs global-bindings)
   (let loop ([known (set)])
     (define next
       (for/fold ([acc known]) ([d (in-list defs)])
-        (if (pair? (effective-markers (purity-definition-bodies d) known))
+        (if (pair? (definition-effect-witnesses d known global-bindings))
             (set-add acc (purity-definition-name d))
             acc)))
     (if (set=? known next) known (loop next))))
@@ -7191,25 +7667,35 @@
 ;; its authored declaration and exact first-occurrence witnesses where possible.
 (define (purity-violations prog)
   (define defs (collect-purity-defs prog))
-  (define effectful-defs (derive-effectful-defs defs))
+  (define global-bindings
+    (for/fold ([names (list->seteq (hash-keys (program-externs prog)))])
+              ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (cond
+        [(defn-form? form) (set-add names (defn-form-name form))]
+        [(defn-multi? form) (set-add names (defn-multi-name form))]
+        [(def-form? form) (set-add names (def-form-name form))]
+        [(defonce-form? form) (set-add names (defonce-form-name form))]
+        [else names])))
+  (define effectful-defs (derive-effectful-defs defs global-bindings))
   (define src-table (program-src-table prog))
   (for/list ([d (in-list defs)]
              #:unless (eq? (purity-definition-name d) '-main)
              #:do [(define markers
-                     (effective-markers
-                      (purity-definition-bodies d)
-                      (set-remove effectful-defs
-                                  (purity-definition-name d))))]
+                     (definition-effect-witnesses
+                      d (set-remove effectful-defs
+                                    (purity-definition-name d))
+                      global-bindings))]
              #:when (and (not (bang-name? (purity-definition-name d)))
                          (pair? markers)))
     (purity-violation
      (purity-definition-name d)
      (purity-definition-definition-stx d)
      (for/list ([marker (in-list markers)])
-       (define node (marker-node-node marker))
+       (define node (effect-witness-node marker))
        (define loc (and src-table (hash-ref src-table node #f)))
        (purity-witness
-        (marker-node-marker marker)
+        (effect-witness-marker marker)
         (syntax-at-src-loc (purity-definition-definition-stx d) loc))))))
 
 ;; Effective severity from the two enforcement dials.
@@ -7624,6 +8110,8 @@
          check-scalar-provenance!
          check-purity!
          purity-violations
+         analyze-expression-effects
+         (struct-out effect-witness)
          (struct-out purity-witness)
          (struct-out purity-violation)
          beagle-diagnostic beagle-diagnostic?
