@@ -12,10 +12,6 @@
 
 (def ^String SPLICE-MARKER "splice")
 
-(def ^String ANN-MARKER "#%:")
-
-(def ^String LEGACY-MARKER ":-")
-
 (def MAX-EXPANSION-DEPTH 64)
 
 (def MACRO-ERRORS (atom []))
@@ -200,7 +196,7 @@
    e env]
   (cond
   (= (count items) 0) e
-  (and (>= (count items) 4) (string? (nth items 0)) (or (= (nth items 1) ANN-MARKER) (= (nth items 1) LEGACY-MARKER))) (recur (subvec items 4) (assoc e (nth items 0) (macro-eval! (nth items 3) e)))
+  (and (>= (count items) 2) (vector? (nth items 0)) (= (count (nth items 0)) 2) (string? (nth (nth items 0) 0))) (recur (subvec items 2) (assoc e (nth (nth items 0) 0) (macro-eval! (nth items 1) e)))
   (and (>= (count items) 2) (string? (nth items 0))) (recur (subvec items 2) (assoc e (nth items 0) (macro-eval! (nth items 1) e)))
   :else (macro-eval-fail! (str "bad let binding: " (str (nth items 0))))))]
   (macro-eval-body! body bound))))
@@ -237,11 +233,12 @@
   (cond
   (= (count rest-items) 0) params
   (= (nth rest-items 0) "&") (macro-eval-fail! "fn variadic parameters are not supported in macro bodies")
+  (and (vector? (nth rest-items 0)) (= (count (nth rest-items 0)) 2) (string? (nth (nth rest-items 0) 0))) (recur (subvec rest-items 1) (conj params (nth (nth rest-items 0) 0)))
   (string? (nth rest-items 0)) (recur (subvec rest-items 1) (conj params (nth rest-items 0)))
   :else (macro-eval-fail! (str "bad fn param: " (str (nth rest-items 0))))))))
 
 (defn macro-eval-fn! [parts env]
-  (if (< (count parts) 2) (macro-eval-fail! "fn needs a parameter vector and body") (macro-closure (macro-fn-params! (nth parts 0)) (subvec parts 1) env)))
+  (if (< (count parts) 3) (macro-eval-fail! "fn needs a parameter vector, return type, and body") (macro-closure (macro-fn-params! (nth parts 0)) (subvec parts 2) env)))
 
 (defn macro-eval! [expr env]
   (cond
@@ -330,7 +327,7 @@
   (= name "cons") (do
   (macro-require-arity! name args 2)
   (datum-cons (nth args 0) (nth args 1)))
-  (= name "vec") (into [BRACKET-TAG] (reduce (fn [items value] (if (and (vector? value) (= (count value) 3) (= (nth value 1) ANN-MARKER)) (into items value) (conj items value))) [] args))
+  (= name "vec") (into [BRACKET-TAG] args)
   (or (= name "append") (= name "concat")) (reduce (fn [items value] (into items (macro-seq! value name))) [] args)
   (or (= name "first") (= name "second") (= name "third")) (let [index (cond
   (= name "first") 0
@@ -428,22 +425,24 @@
   (mod (nth args 0) (nth args 1)))
   (= name "syntax-name") (do
   (macro-require-arity! name args 1)
-  (let [syntax (nth args 0)]
+  (let [raw (nth args 0)
+   syntax (if (and (vector? raw) (> (count raw) 0) (= (nth raw 0) BRACKET-TAG) (= (count raw) 2) (vector? (nth raw 1)) (= (count (nth raw 1)) 2)) (nth raw 1) raw)]
   (cond
   (datum-pair? syntax) (datum-car syntax)
   (string? syntax) syntax
   :else (macro-eval-fail! (str "syntax-name expected syntax, got: " (str syntax))))))
   (= name "syntax-type") (do
   (macro-require-arity! name args 1)
-  (let [syntax (nth args 0)]
-  (if (and (vector? syntax) (>= (count syntax) 3) (or (= (nth syntax 1) ANN-MARKER) (= (nth syntax 1) LEGACY-MARKER))) (nth syntax 2) (macro-eval-fail! (str "syntax-type expected a (name MARKER Type) triple datum, got: " (str syntax))))))
+  (let [raw (nth args 0)
+   syntax (if (and (vector? raw) (> (count raw) 0) (= (nth raw 0) BRACKET-TAG) (= (count raw) 2) (vector? (nth raw 1)) (= (count (nth raw 1)) 2)) (nth raw 1) raw)]
+  (if (and (vector? syntax) (= (count syntax) 2) (string? (nth syntax 0))) (nth syntax 1) (macro-eval-fail! (str "syntax-type expected a (name Type) binding datum, got: " (str syntax))))))
   (or (= name "make-param") (= name "make-field") (= name "ann")) (do
   (macro-require-arity! name args 2)
-  [(nth args 0) ANN-MARKER (nth args 1)])
+  [(nth args 0) (nth args 1)])
   (= name "make-defrecord") (do
   (macro-require-arity! name args 2)
   ["defrecord" (nth args 0) (nth args 1)])
-  (= name "make-defn") (if (< (count args) 3) (macro-eval-fail! "make-defn expected a name, params, return type, and body") (into ["defn" (nth args 0) (nth args 1) "->" (nth args 2)] (subvec args 3)))
+  (= name "make-defn") (if (< (count args) 3) (macro-eval-fail! "make-defn expected a name, params, return type, and body") (into ["defn" (nth args 0) (nth args 1) (nth args 2)] (subvec args 3)))
   (= name "make-get") (do
   (macro-require-arity! name args 2)
   ["get" (nth args 0) (nth args 1)])
@@ -479,6 +478,34 @@
   (vector? form) form
   :else []))
 
+(defn ^Boolean typed-binding-datum? [item]
+  (and (vector? item) (= (count item) 2) (not (= (nth item 0) BRACKET-TAG)) (not (= (nth item 0) MAP-TAG)) (or (string? (nth item 0)) (and (vector? (nth item 0)) (> (count (nth item 0)) 0) (or (= (nth (nth item 0) 0) BRACKET-TAG) (= (nth (nth item 0) 0) MAP-TAG))))))
+
+(defn collect-binding-form-binders [form]
+  (cond
+  (string? form) (if (= form "&") [] [form])
+  (and (vector? form) (> (count form) 0) (= (nth form 0) BRACKET-TAG)) (let [items (subvec form 1)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i (count items)) acc
+  (= (nth items i) "&") (if (< (+ i 1) (count items)) (into acc (collect-binding-form-binders (nth items (+ i 1)))) acc)
+  :else (recur (+ i 1) (into acc (collect-binding-form-binders (nth items i)))))))
+  (and (vector? form) (> (count form) 0) (= (nth form 0) MAP-TAG)) (let [items (subvec form 1)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i (count items)) acc
+  (and (= (nth items i) ":keys") (< (+ i 1) (count items))) (recur (+ i 2) (into acc (collect-binding-form-binders (nth items (+ i 1)))))
+  (and (= (nth items i) ":as") (< (+ i 1) (count items)) (string? (nth items (+ i 1)))) (recur (+ i 2) (conj acc (nth items (+ i 1))))
+  (= (nth items i) ":or") (recur (+ i 2) acc)
+  :else (recur (+ i 1) acc))))
+  :else []))
+
+(defn remove-macro-param-binders [names macro-params]
+  (let [mp (set macro-params)]
+  (filterv (fn [name] (not (clojure.core/contains? mp name))) names)))
+
 (defn collect-param-binders [form macro-params]
   (let [items (unwrap-brackets form)
    n (count items)
@@ -487,9 +514,9 @@
    acc []]
   (cond
   (>= i n) acc
-  (and (string? (nth items i)) (< (+ i 2) n) (or (= (nth items (+ i 1)) ANN-MARKER) (= (nth items (+ i 1)) LEGACY-MARKER))) (recur (+ i 3) (if (or (= (nth items i) "&") (clojure.core/contains? mp (nth items i))) acc (conj acc (nth items i))))
+  (typed-binding-datum? (nth items i)) (recur (+ i 1) (into acc (remove-macro-param-binders (collect-binding-form-binders (nth (nth items i) 0)) macro-params)))
+  (and (vector? (nth items i)) (> (count (nth items i)) 0) (or (= (nth (nth items i) 0) BRACKET-TAG) (= (nth (nth items i) 0) MAP-TAG))) (recur (+ i 1) (into acc (remove-macro-param-binders (collect-binding-form-binders (nth items i)) macro-params)))
   (and (string? (nth items i)) (not= (nth items i) "&") (not (clojure.core/contains? mp (nth items i)))) (recur (+ i 1) (conj acc (nth items i)))
-  (and (vector? (nth items i)) (= (count (nth items i)) 3) (string? (nth (nth items i) 0)) (or (= (nth (nth items i) 1) ANN-MARKER) (= (nth (nth items i) 1) LEGACY-MARKER)) (not (clojure.core/contains? mp (nth (nth items i) 0)))) (recur (+ i 1) (conj acc (nth (nth items i) 0)))
   :else (recur (+ i 1) acc)))))
 
 (defn collect-let-binders [form macro-params]
@@ -498,7 +525,8 @@
    acc []]
   (cond
   (>= i (count items)) acc
-  (and (< (+ i 3) (count items)) (string? (nth items i)) (or (= (nth items (+ i 1)) ANN-MARKER) (= (nth items (+ i 1)) LEGACY-MARKER))) (recur (+ i 4) (if (clojure.core/contains? (set macro-params) (nth items i)) acc (conj acc (nth items i))))
+  (and (< (+ i 1) (count items)) (typed-binding-datum? (nth items i))) (recur (+ i 2) (into acc (remove-macro-param-binders (collect-binding-form-binders (nth (nth items i) 0)) macro-params)))
+  (and (< (+ i 1) (count items)) (vector? (nth items i)) (> (count (nth items i)) 0) (or (= (nth (nth items i) 0) BRACKET-TAG) (= (nth (nth items i) 0) MAP-TAG))) (recur (+ i 2) (into acc (remove-macro-param-binders (collect-binding-form-binders (nth items i)) macro-params)))
   (and (< (+ i 1) (count items)) (string? (nth items i))) (recur (+ i 2) (if (clojure.core/contains? (set macro-params) (nth items i)) acc (conj acc (nth items i))))
   :else (recur (+ i 1) acc)))))
 
@@ -638,13 +666,26 @@
   (expect! "hygiene: user ref to tmp preserved" (= (nth result 2) ["println" "tmp"]))))
   (let [reg (make-macro-registry)]
   (reset-lowering-counter!)
-  (register-macro! reg "with-fn" "safe" ["body"] ["fn" ["x"] "body"])
+  (register-macro! reg "with-fn" "safe" ["body"] ["fn" ["x"] "Any" "body"])
   (let [result (expand-macro! reg "with-fn" [["println" "x"]] nil)
    params (nth result 1)
    param-name (nth params 0)]
   (expect! "hygiene: fn result is fn form" (= (nth result 0) "fn"))
   (expect! "hygiene: fn param renamed to deterministic temp x__0" (= param-name "x__0"))
-  (expect! "hygiene: user ref to x preserved" (= (nth result 2) ["println" "x"]))))
+  (expect! "hygiene: user ref to x preserved" (= (nth result 3) ["println" "x"]))))
+  (expect! "hygiene: recursive structural binder collection" (= (collect-param-binders [BRACKET-TAG [[BRACKET-TAG "a" [MAP-TAG ":keys" [BRACKET-TAG "b"] ":as" "whole"]] ["HVec" "Int" "Config"]] "&" ["rest" ["Vec" "Any"]]] []) ["a" "b" "whole" "rest"]))
+  (let [reg (make-macro-registry)]
+  (reset-lowering-counter!)
+  (register-macro! reg "with-pattern" "safe" ["body"] ["fn" [BRACKET-TAG [[BRACKET-TAG "x" [MAP-TAG ":keys" [BRACKET-TAG "y"]]] ["HVec" "Int" "Config"]]] "Any" ["list" "x" "y" "body"]])
+  (let [result (expand-macro! reg "with-pattern" ["user"] nil)
+   typed (nth (nth result 1) 1)
+   pattern (nth typed 0)
+   x-name (nth pattern 1)
+   y-name (nth (nth (nth pattern 2) 2) 1)
+   body (nth result 3)]
+  (expect! "hygiene: structural sequence leaf renamed" (and (not= x-name "x") (= (nth body 1) x-name)))
+  (expect! "hygiene: structural map leaf renamed" (and (not= y-name "y") (= (nth body 2) y-name)))
+  (expect! "hygiene: structural aggregate type untouched" (= (nth typed 1) ["HVec" "Int" "Config"]))))
   (let [reg (make-macro-registry)]
   (reset-lowering-counter!)
   (register-macro! reg "two-lets" "safe" ["body"] ["let" ["a" 1] ["let" ["b" 2] "body"]])
@@ -668,16 +709,16 @@
   (let [reg (make-macro-registry)]
   (register-macro! reg "inc-built" "defmacro" ["x"] ["list" ["quote" "+"] "x" 1])
   (expect! "defmacro body evaluates pure list construction" (= (expand-macro! reg "inc-built" [5] nil) ["+" 5 1])))
-  (let [env (assoc (make-macro-env) "fields" [BRACKET-TAG "x" ANN-MARKER "Int" "y" ANN-MARKER "String"])]
-  (expect! "collection operators unwrap raw bracketed arguments" (= (macro-eval! ["partition" 3 "fields"] env) [["x" ANN-MARKER "Int"] ["y" ANN-MARKER "String"]]))
-  (expect! "closures map over evaluator collections" (= (macro-eval! ["map" ["fn" [BRACKET-TAG "field"] ["first" "field"]] ["partition" 3 "fields"]] env) ["x" "y"])))
+  (let [env (assoc (make-macro-env) "fields" [BRACKET-TAG ["x" "Int"] ["y" "String"]])]
+  (expect! "collection operators unwrap raw bracketed arguments" (= (macro-eval! ["partition" 1 "fields"] env) [[["x" "Int"]] [["y" "String"]]]))
+  (expect! "closures map over evaluator collections" (= (macro-eval! ["map" ["fn" [BRACKET-TAG "field"] "Any" ["first" "field"]] "fields"] env) ["x" "y"])))
   (expect! "nested quasiquote evaluates only the matching depth" (= (macro-eval! ["quasiquote" ["quasiquote" ["a" ["unquote" ["unquote" "x"]]]]] (assoc (make-macro-env) "x" 9)) ["quasiquote" ["a" ["unquote" 9]]]))
   (expect! "cond evaluates canonical flat pairs" (= (macro-eval! ["cond" "false" 1 ["=" 2 2] 2 ":else" 3] (make-macro-env)) 2))
   (expect! "cond evaluates all-bracket clauses and bare else" (= (macro-eval! ["cond" [BRACKET-TAG "false" 1] [BRACKET-TAG ["=" 2 3] 2] [BRACKET-TAG "else" 3]] (make-macro-env)) 3))
   (expect! "distinct? reads one raw bracketed collection" (and (macro-eval! ["distinct?" ["quote" [BRACKET-TAG "x" "y"]]] (make-macro-env)) (not (macro-eval! ["distinct?" ["quote" [BRACKET-TAG "x" "x"]]] (make-macro-env)))))
   (let [reg (make-macro-registry)]
   (reset-lowering-counter!)
-  (register-macro! reg "quoted-local" "defmacro" [] ["let" [BRACKET-TAG "shifted" ANN-MARKER "Int" 1] ["list" ["quote" "nth"] ["quote" "shifted"] 0]])
+  (register-macro! reg "quoted-local" "defmacro" [] ["let" [BRACKET-TAG ["shifted" "Int"] 1] ["list" ["quote" "nth"] ["quote" "shifted"] 0]])
   (expect! "quoted computed references follow typed local hygiene" (= (expand-macro! reg "quoted-local" [] nil) ["nth" "shifted__0" 0])))
   (let [reg (make-macro-registry)]
   (reset-lowering-counter!)

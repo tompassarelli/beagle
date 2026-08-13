@@ -63,20 +63,28 @@
   (let [tag (clj-tag-for-type t)]
   (if (nil? tag) "" (str "^" tag " "))))
 
-(defn ^String emit-param [p]
-  (let [t (get p "type")]
+(defn param-binding-target [p]
+  (if (= (get p "type") "param") (get p "name") p))
+
+(defn ^String emit-binding-form [target]
+  (if (string? target) target (let [t (get target "type")]
   (cond
-  (= t "param") (get p "name")
-  (= t "map-destructure") (let [keys-str (str/join " " (get p "keys"))
-   as (get p "as")]
-  (if as (str "{:keys [" keys-str "] :as " as "}") (str "{:keys [" keys-str "]}")))
-  (= t "seq-destructure") (let [names (str/join " " (get p "names"))
-   rest-name (get p "rest")]
+  (= t "map-destructure") (let [keys-str (str/join " " (get target "keys"))
+   as (get target "as")
+   defaults (get target "or")
+   default-str (if (> (count defaults) 0) (str " :or {" (str/join " " (mapv (fn [entry] (str (get entry "key") " " (emit-expr* (get entry "value")))) defaults)) "}") "")]
+  (str "{:keys [" keys-str "]" default-str (if as (str " :as " as) "") "}"))
+  (= t "seq-destructure") (let [names (str/join " " (mapv emit-binding-form (get target "names")))
+   rest-name (get target "rest")]
   (if rest-name (str "[" names " & " rest-name "]") (str "[" names "]")))
-  :else "_")))
+  :else "_"))))
+
+(defn ^String emit-param [p]
+  (emit-binding-form (param-binding-target p)))
 
 (defn ^String emit-param-tagged [p]
-  (if (= (get p "type") "param") (str (clj-tag-prefix (get p "ann")) (get p "name")) (emit-param p)))
+  (let [target (param-binding-target p)]
+  (if (and (= (get p "type") "param") (string? target)) (str (clj-tag-prefix (get p "ann")) target) (emit-binding-form target))))
 
 (defn ^String emit-params [params]
   (str/join " " (mapv emit-param params)))
@@ -90,7 +98,7 @@
   (if rest-p (if (= fixed "") (str "& " (emit-param rest-p)) (str fixed " & " (emit-param rest-p))) fixed)))
 
 (defn ^String emit-binding-target [target]
-  (if (string? target) target (emit-param target)))
+  (emit-binding-form (param-binding-target target)))
 
 (defn ^String emit-let-bindings [bindings]
   (str/join "\n   " (mapv (fn [b] (str (emit-binding-target (get b "name")) " " (emit-expr* (get b "value")))) bindings)))
@@ -98,7 +106,7 @@
 (defn ^String emit-for-clauses [clauses]
   (str/join "\n   " (mapv (fn [c] (let [t (get c "type")]
   (cond
-  (= t "binding") (str (get c "name") " " (emit-expr* (get c "expr")))
+  (= t "binding") (str (emit-binding-target (get c "name")) " " (emit-expr* (get c "expr")))
   (= t "when") (str ":when " (emit-expr* (get c "test")))
   (= t "let") (str ":let [" (emit-let-bindings (get c "bindings")) "]")
   :else ""))) clauses)))
@@ -492,6 +500,8 @@
   (expect! "binding-target: plain name passes through" (= (emit-binding-target "x") "x"))
   (expect! "binding-target: seq-destructure -> [a b]" (= (emit-binding-target {"type" "seq-destructure" "names" ["a" "b"] "rest" false}) "[a b]"))
   (expect! "binding-target: map-destructure -> {:keys [id b]}" (= (emit-binding-target {"type" "map-destructure" "keys" ["id" "b"] "as" false}) "{:keys [id b]}"))
+  (expect! "param: typed sequential aggregate unwraps to binding form" (= (emit-param-tagged {"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" [{"kind" "prim" "name" "Int"} {"kind" "prim" "name" "String"}]}}) "[x y]"))
+  (expect! "param: nested map defaults and as survive aggregate annotation" (= (emit-param-tagged {"type" "param" "name" {"type" "seq-destructure" "names" ["x" {"type" "map-destructure" "keys" ["y"] "or" [{"key" "y" "value" {"node" "literal" "kind" "number" "value" 3}}] "as" "row"}] "rest" false} "ann" {"kind" "any"}}) "[x {:keys [y] :or {y 3} :as row}]"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)" (= (emit-let-bindings [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false} "value" {"node" "ref" "name" "p"}}]) "[a b] p"))
   (expect! "let-bindings: map-destructure binder (no raw JSON leak)" (= (emit-let-bindings [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false} "value" {"node" "ref" "name" "m"}}]) "{:keys [id b]} m"))
   (doseq [f (deref failures)]

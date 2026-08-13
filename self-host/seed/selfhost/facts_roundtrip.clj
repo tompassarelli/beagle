@@ -586,19 +586,8 @@
   (= head "#%symbolic-val") "##"
   :else nil)) nil))
 
-(def ^String ANN-UNIT-TAG "#%ann-unit")
-
-(defn- ^Boolean ann-unit? [datum]
-  (and (vector? datum) (= (count datum) 3) (= (nth datum 0) ANN-UNIT-TAG)))
-
 (defn- group-anns [items]
-  (let [n (count items)]
-  (loop [i 0
-   out []]
-  (cond
-  (>= i n) out
-  (and (string? (nth items i)) (not= (nth items i) rd/ANN-MARKER) (< (+ i 2) n) (= (nth items (+ i 1)) rd/ANN-MARKER)) (recur (+ i 3) (conj out [ANN-UNIT-TAG (nth items i) (nth items (+ i 2))]))
-  :else (recur (+ i 1) (conj out (nth items i)))))))
+  items)
 
 (declare datum-source)
 
@@ -607,7 +596,6 @@
 
 (defn ^String datum-source [datum]
   (cond
-  (ann-unit? datum) (str (datum-source (nth datum 1)) ": " (datum-source (nth datum 2)))
   (= datum rd/ANN-MARKER) ":"
   (tagged-string? datum) (edn-string (nth datum 1))
   (and (vector? datum) (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)) (nth datum 1)
@@ -628,7 +616,6 @@
 
 (defn- sequence-parts [datum]
   (cond
-  (ann-unit? datum) nil
   (ast/bracketed? datum) {"open" "[" "close" "]" "items" (group-anns (ast/bracket-body datum))}
   (ast/map-tagged? datum) {"open" "{" "close" "}" "items" (group-anns (ast/map-body datum))}
   (ast/set-tagged? datum) {"open" "#{" "close" "}" "items" (group-anns (ast/set-body datum))}
@@ -686,7 +673,7 @@
   (bracket-datum? (nth items i)) i
   :else (recur (+ i 1)))))
 
-(defn- ^Boolean contains-return-marker? [items]
+(defn- ^Boolean contains-retired-return-marker? [items]
   (loop [i 0]
   (cond
   (>= i (count items)) false
@@ -704,14 +691,14 @@
   (if (or (< (count items) 4) (not (some? (get #{"defn" "defn-"} (nth items 0))))) [] (let [docstring? (and (> (count items) 2) (string? (nth items 2)))
    start (if docstring? 3 2)
    tail (subvec items start)]
-  (if (or (= (count tail) 0) (not (bracket-datum? (nth tail 0))) (contains-return-marker? tail)) [] (loop [offset 0
+  (if (or (= (count tail) 0) (not (bracket-datum? (nth tail 0))) (contains-retired-return-marker? tail)) [] (loop [offset 0
    current? false
-   body? false
+   forms-after 0
    indexes []]
-  (if (>= offset (count tail)) (if (and current? body? (>= (count indexes) 2)) indexes []) (let [item (nth tail offset)]
+  (if (>= offset (count tail)) (if (and current? (>= forms-after 2) (>= (count indexes) 2)) indexes []) (let [item (nth tail offset)]
   (cond
-  (bracket-datum? item) (if (and current? (not body?)) [] (recur (+ offset 1) true false (conj indexes (+ start offset))))
-  current? (recur (+ offset 1) true true indexes)
+  (bracket-datum? item) (if (and current? (< forms-after 2)) [] (recur (+ offset 1) true 0 (conj indexes (+ start offset))))
+  current? (recur (+ offset 1) true (+ forms-after 1) indexes)
   :else []))))))))
 
 (defn- ^Boolean symbol-owner-vector? [datum]
@@ -755,27 +742,22 @@
   :else (let [parts (sequence-parts datum)]
   (and (some? parts) (children-need-layout? datum ctx (get parts "items"))))))
 
-(defn- ^Boolean dash-at? [items idx]
-  (and (> (count items) idx) (or (= (nth items idx) ":-") (= (nth items idx) "->"))))
-
 (defn- head-keep [^String head after]
   (let [n (count after)
    vector-index (first-bracket-index after 0)]
   (cond
   (or (= head "defn") (= head "defn-")) (cond
   (nil? vector-index) (if (and (>= n 2) (arity-clause? (nth after 1))) 1 (min 1 n))
-  :else (let [base (+ vector-index 1)]
-  (if (dash-at? after base) (+ base 2) base)))
+  :else (min (+ vector-index 2) n))
   (= head "defmacro") (if (some? vector-index) (+ vector-index 1) (min 1 n))
   (or (= head "def") (= head "defonce")) (cond
   (< n 1) n
-  (dash-at? after 1) 3
+  (>= n 3) 2
   :else 1)
   (= head "fn") (cond
   (and (> n 0) (arity-clause? (nth after 0))) 0
   (and (>= n 2) (string? (nth after 0)) (arity-clause? (nth after 1))) 1
-  :else (let [base (if (some? vector-index) (+ vector-index 1) (min 1 n))]
-  (if (dash-at? after base) (+ base 2) base)))
+  :else (if (some? vector-index) (min (+ vector-index 2) n) (min 1 n)))
   (or (= head "defrecord") (= head "deftype")) (if (some? vector-index) (+ vector-index 1) (min 1 n))
   (some? (get #{"let" "loop" "letfn" "binding" "for" "doseq" "with-open" "with-local-vars" "when-let" "if-let" "when-some" "if-some"} head)) (min 1 n)
   (= head "defunion") (if (and (> n 0) (= (nth after 0) ":throwable")) (min 2 n) (min 1 n))
@@ -790,10 +772,9 @@
   (if (>= i n) out (recur (+ i 1) (str out " ")))))
 
 (defn- context-head-keep [^String ctx ^String head after]
-  (let [n (count after)
-   arrow? (and (> n 1) (or (= (nth after 1) ":-") (= (nth after 1) "->")))]
+  (let [n (count after)]
   (cond
-  (= ctx "method") (if arrow? (min 3 n) (min 1 n))
+  (= ctx "method") (min 2 n)
   (= ctx "variant") (min 1 n)
   :else (head-keep head after))))
 
@@ -847,8 +828,7 @@
    pad (spaces (+ col 2))]
   (str (signature-pretty datum ctx after keep col pad) (pretty-context-items datum ctx body (+ keep 1) pad (+ col 2)) (get parts "close")))
   (and (= ctx "arity-clause") (> (count (get parts "items")) 0) (bracket-datum? (nth (get parts "items") 0))) (let [items (get parts "items")
-   return? (and (>= (count items) 3) (or (= (nth items 1) ":-") (= (nth items 1) "->")))
-   keep (if return? 3 1)
+   keep (min 2 (count items))
    inner-col (+ col (count (get parts "open")))
    pad (spaces inner-col)
    inline-signature (str (get parts "open") (joined-source (subvec items 0 keep)))

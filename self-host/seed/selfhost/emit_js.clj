@@ -79,7 +79,7 @@
   (if (or (nil? ann) (false? ann)) acc (assoc acc name ann)))) m entries))
 
 (defn param-type-entries [params rest-p]
-  (let [base (filterv (fn [p] (= (get p "type") "param")) params)]
+  (let [base (filterv (fn [p] (and (= (get p "type") "param") (string? (get p "name")))) params)]
   (if (or (nil? rest-p) (false? rest-p)) base (conj base rest-p))))
 
 (defn binding-type-entries [bindings]
@@ -228,42 +228,77 @@
   (= n "map") "map"
   :else "unknown")) "unknown"))
 
+(defn param-binding-target [p]
+  (if (= (get p "type") "param") (get p "name") p))
+
 (defn emit-destructure [p]
-  (let [t (get p "type")]
+  (let [target (param-binding-target p)
+   t (get target "type")]
   (cond
-  (= t "map-destructure") (str "{" (str/join ", " (mapv mangle-name (get p "keys"))) "}")
-  (= t "seq-destructure") (let [names (str/join ", " (mapv mangle-name (get p "names")))
-   rest-name (get p "rest")]
+  (= t "map-destructure") (let [defaults (get target "or")
+   fields (mapv (fn [name] (let [entry (first (filterv (fn [d] (= (get d "key") name)) defaults))]
+  (str (mangle-prop name) ": " (mangle-name name) (if (nil? entry) "" (str " = " (emit-expr* (get entry "value"))))))) (get target "keys"))]
+  (str "{" (str/join ", " fields) "}"))
+  (= t "seq-destructure") (let [names (str/join ", " (mapv (fn [name] (if (string? name) (mangle-name name) (emit-destructure name))) (get target "names")))
+   rest-name (get target "rest")]
   (if (absent? rest-name) (str "[" names "]") (str "[" names ", ..." (mangle-name rest-name) "]")))
   :else nil)))
 
 (defn ^String emit-js-param [p]
-  (let [d (emit-destructure p)]
-  (if (nil? d) (mangle-name (get p "name")) d)))
+  (let [target (param-binding-target p)
+   d (emit-destructure target)]
+  (if (nil? d) (mangle-name target) d)))
 
 (defn ^String emit-binding-target [name]
-  (if (string? name) (mangle-name name) (let [d (emit-destructure name)]
-  (if (nil? d) (mangle-name (get name "name")) d))))
+  (let [target (param-binding-target name)]
+  (if (string? target) (mangle-name target) (let [d (emit-destructure target)]
+  (if (nil? d) (mangle-name (get target "name")) d)))))
 
 (defn ^String emit-js-params [params rest-p]
-  (let [fixed (str/join ", " (mapv emit-js-param params))]
+  (let [fixed (str/join ", " (map-indexed (fn [i p] (let [target (param-binding-target p)]
+  (if (string? target) (emit-js-param p) (str "$beagle$param$" i)))) params))]
   (if (absent? rest-p) fixed (if (= fixed "") (str "..." (emit-js-param rest-p)) (str fixed ", ..." (emit-js-param rest-p))))))
 
-(defn names-from-target [name]
-  (if (string? name) [name] (let [t (get name "type")]
+(defn emit-pattern-binding-statements [target ^String source]
   (cond
-  (= t "map-destructure") (let [as (get name "as")]
-  (if (absent? as) (get name "keys") (conj (vec (get name "keys")) as)))
-  (= t "seq-destructure") (let [r (get name "rest")]
-  (if (absent? r) (get name "names") (conj (vec (get name "names")) r)))
-  :else []))))
+  (string? target) [(str "let " (mangle-name target) " = " source ";")]
+  (= (get target "type") "seq-destructure") (let [fixed (vec (apply concat (map-indexed (fn [i item] (emit-pattern-binding-statements item (str source "[" i "]"))) (get target "names"))))
+   rest-name (get target "rest")]
+  (if (absent? rest-name) fixed (conj fixed (str "const " (mangle-name rest-name) " = " source ".slice(" (count (get target "names")) ");"))))
+  (= (get target "type") "map-destructure") (let [defaults (get target "or")
+   as-name (get target "as")
+   with-as (if (absent? as-name) [] [(str "let " (mangle-name as-name) " = " source ";")])
+   fields (mapv (fn [name] (let [entry (first (filterv (fn [d] (= (get d "key") name)) defaults))
+   value (str source "[" (js-string-lit (kw->prop name)) "]")]
+  (str "let " (mangle-name name) " = " (if (nil? entry) value (str "(" value " ?? " (emit-expr* (get entry "value")) ")")) ";"))) (get target "keys"))]
+  (into with-as fields))
+  :else []))
+
+(defn emit-js-binding-parameter [binding ^String source]
+  (let [target (param-binding-target binding)]
+  (if (string? target) {"arg" (emit-binding-target target) "setup" []} {"arg" "$beagle$item" "setup" (emit-pattern-binding-statements target source)})))
+
+(defn emit-js-param-setup [params]
+  (vec (apply concat (map-indexed (fn [i p] (let [target (param-binding-target p)]
+  (if (string? target) [] (emit-pattern-binding-statements target (str "$beagle$param$" i))))) params))))
+
+(defn names-from-target [name]
+  (let [target (param-binding-target name)]
+  (if (string? target) [target] (let [t (get target "type")]
+  (cond
+  (= t "map-destructure") (let [as (get target "as")]
+  (if (absent? as) (get target "keys") (conj (vec (get target "keys")) as)))
+  (= t "seq-destructure") (let [base (vec (apply concat (mapv names-from-target (get target "names"))))
+   r (get target "rest")]
+  (if (absent? r) base (conj base r)))
+  :else [])))))
 
 (defn names-from-param [p]
-  (if (= (get p "type") "param") [(get p "name")] (names-from-target p)))
+  (names-from-target p))
 
 (defn binding-names-from-params [params rest-p]
   (let [base (vec (apply concat (mapv names-from-param params)))]
-  (if (absent? rest-p) base (conj base (get rest-p "name")))))
+  (if (absent? rest-p) base (into base (names-from-param rest-p)))))
 
 (defn field-names-of [fields]
   (mapv (fn [f] (get f "name")) fields))
@@ -527,11 +562,9 @@
 (defn collect-set!-syms [body]
   (walk-set! body []))
 
-(defn emit-let-binding-stmts [target ^String val-str ^Boolean mutable?]
-  (let [kw (if mutable? "let" "const")
-   as-name (if (and (map? target) (= (get target "type") "map-destructure")) (get target "as") false)]
-  (if (and (not (absent? as-name)) (not (false? as-name))) (let [as-js (mangle-name (str as-name))]
-  [(str "const " as-js " = " val-str ";") (str kw " " (emit-binding-target target) " = " as-js ";")]) [(str kw " " (emit-binding-target target) " = " val-str ";")])))
+(defn emit-let-binding-stmts [target ^String val-str ^Boolean mutable? ^String aggregate-slot]
+  (let [kw (if mutable? "let" "const")]
+  (if (string? target) [(str kw " " (emit-binding-target target) " = " val-str ";")] (into [(str "const " aggregate-slot " = " val-str ";")] (emit-pattern-binding-statements target aggregate-slot)))))
 
 (defn let-names-of [bindings]
   (vec (apply concat (mapv (fn [b] (names-from-target (get b "name"))) bindings))))
@@ -541,10 +574,10 @@
 
 (defn emit-let-bind-strs [bindings body]
   (let [mutated (collect-set!-syms body)]
-  (vec (apply concat (mapv (fn [b] (let [val-str (await-async-iife (emit-expr* (get b "value")))
+  (vec (apply concat (map-indexed (fn [i b] (let [val-str (await-async-iife (emit-expr* (get b "value")))
    new-names (names-from-target (get b "name"))
    mutable? (> (count (filterv (fn [nm] (> (count (filterv (fn [x] (= x nm)) mutated)) 0)) new-names)) 0)]
-  (emit-let-binding-stmts (get b "name") val-str mutable?))) bindings)))))
+  (emit-let-binding-stmts (get b "name") val-str mutable? (str "$beagle$binding$" i)))) bindings)))))
 
 (defn ^String emit-expr-stmt [e]
   (reset! ctx "stmt")
@@ -567,13 +600,21 @@
    rest-cl (subvec clauses 1)
    t (get c "type")]
   (cond
-  (= t "binding") (if (and (> (count rest-cl) 0) (= (get (nth rest-cl 0) "type") "when")) (let [test (get (nth rest-cl 0) "test")
+  (= t "binding") (let [binding-info (emit-js-binding-parameter (get c "name") "$beagle$item")
+   arg (get binding-info "arg")
+   setup (get binding-info "setup")]
+  (if (and (> (count rest-cl) 0) (= (get (nth rest-cl 0) "type") "when")) (let [test (get (nth rest-cl 0) "test")
    after (subvec rest-cl 1)
-   inner (if (= 0 (count after)) body-str (emit-for-clauses after body-str))]
-  (str (emit-expr* (get c "expr")) ".filter((" (emit-binding-target (get c "name")) ") => " (emit-expr* test) ").map((" (emit-binding-target (get c "name")) ") => " inner ")")) (let [inner (if (= 0 (count rest-cl)) body-str (emit-for-clauses rest-cl body-str))]
-  (str (emit-expr* (get c "expr")) ".map((" (emit-binding-target (get c "name")) ") => " inner ")")))
+   inner (if (= 0 (count after)) body-str (emit-for-clauses after body-str))
+   filter-body (if (= 0 (count setup)) (emit-expr* test) (str "{ " (str/join " " setup) " return " (emit-expr* test) "; }"))
+   map-body (if (= 0 (count setup)) inner (str "{ " (str/join " " setup) " return " inner "; }"))]
+  (str (emit-expr* (get c "expr")) ".filter((" arg ") => " filter-body ").map((" arg ") => " map-body ")")) (let [inner (if (= 0 (count rest-cl)) body-str (emit-for-clauses rest-cl body-str))
+   map-body (if (= 0 (count setup)) inner (str "{ " (str/join " " setup) " return " inner "; }"))]
+  (str (emit-expr* (get c "expr")) ".map((" arg ") => " map-body ")"))))
   (= t "let") (let [binds (get c "bindings")
-   let-strs (mapv (fn [b] (str "const " (mangle-name (get b "name")) " = " (await-async-iife (emit-expr* (get b "value"))))) binds)
+   let-strs (vec (apply concat (map-indexed (fn [i b] (let [target (get b "name")
+   value (await-async-iife (emit-expr* (get b "value")))]
+  (if (string? target) [(str "const " (mangle-name target) " = " value)] (into [(str "const $beagle$let$" i " = " value)] (emit-pattern-binding-statements target (str "$beagle$let$" i)))))) binds)))
    inner (if (= 0 (count rest-cl)) body-str (emit-for-clauses rest-cl body-str))]
   (str "(() => { " (str/join "; " let-strs) "; return " inner "; })()"))
   :else body-str))))
@@ -582,7 +623,7 @@
   (vec (apply concat (mapv (fn [c] (let [t (get c "type")]
   (cond
   (= t "binding") (names-from-target (get c "name"))
-  (= t "let") (mapv (fn [b] (get b "name")) (get c "bindings"))
+  (= t "let") (vec (apply concat (mapv (fn [b] (names-from-target (get b "name"))) (get c "bindings"))))
   :else []))) clauses))))
 
 (defn ^String emit-for [e]
@@ -597,8 +638,13 @@
    c (nth clauses 0)
    name (get c "name")
    expr (get c "expr")]
-  (with-bound (names-from-target name) (fn [] (let [body-str (emit-body-stmts body "  ")]
-  (if (contains-await? body) (str "for (const " (emit-binding-target name) " of " (emit-expr* expr) ") {\n  " body-str "\n}") (str (emit-expr* expr) ".forEach((" (emit-binding-target name) ") => {\n  " body-str "\n});")))))))
+  (with-bound (names-from-target name) (fn [] (let [body-str (emit-body-stmts body "  ")
+   binding-info (emit-js-binding-parameter name "$beagle$item")
+   arg (get binding-info "arg")
+   setup (get binding-info "setup")
+   setup-str (str/join "\n  " setup)
+   inner-body (if (= 0 (count setup)) body-str (str setup-str "\n  " body-str))]
+  (if (contains-await? body) (str "for (const " arg " of " (emit-expr* expr) ") {\n  " inner-body "\n}") (str (emit-expr* expr) ".forEach((" arg ") => {\n  " inner-body "\n});")))))))
 
 (defn ^String emit-stmt-inline [e ^String indent]
   (if (not (map? e)) (emit-expr-stmt e) (let [node (get e "node")
@@ -888,8 +934,9 @@
    async? (contains-await? body)
    prefix (if async? "async " "")
    bound (binding-names-from-params (get e "params") (get e "rest"))]
-  (with-bound-types bound (param-type-entries (get e "params") (get e "rest")) (fn [] (if (and (= 1 (count body)) (not (stmt-inline? (nth body 0)))) (let [body-str (emit-expr* (nth body 0))]
-  (if (leading-brace? body-str) (str prefix "(" params ") => (" body-str ")") (str prefix "(" params ") => " body-str))) (str prefix "(" params ") => { " (emit-body-return* body "") " }"))))))
+  (with-bound-types bound (param-type-entries (get e "params") (get e "rest")) (fn [] (let [setup (emit-js-param-setup (get e "params"))]
+  (if (and (= 0 (count setup)) (= 1 (count body)) (not (stmt-inline? (nth body 0)))) (let [body-str (emit-expr* (nth body 0))]
+  (if (leading-brace? body-str) (str prefix "(" params ") => (" body-str ")") (str prefix "(" params ") => " body-str))) (str prefix "(" params ") => { " (str/join " " (into setup [(emit-body-return* body "")])) " }")))))))
 
 (defn ^String emit-eq-pairs [args]
   (let [n (count args)]
@@ -972,11 +1019,14 @@
    body (get e "body")
    has-await (or (contains-await? (mapv (fn [b] (get b "value")) bindings)) (contains-await? body))
    lnames (let-names-of bindings)
-   bind-names (mapv (fn [b] (emit-binding-target (get b "name"))) bindings)
-   bind-strs (mapv (fn [b] (str "let " (emit-binding-target (get b "name")) " = " (await-async-iife (emit-expr* (get b "value"))) ";")) bindings)]
+   bind-names (map-indexed (fn [i b] (let [target (get b "name")]
+  (if (string? target) (emit-binding-target target) (str "$beagle$loop$" i)))) bindings)
+   bind-strs (map-indexed (fn [i b] (str "let " (nth bind-names i) " = " (await-async-iife (emit-expr* (get b "value"))) ";")) bindings)
+   projection-strs (vec (apply concat (map-indexed (fn [i b] (let [target (get b "name")]
+  (if (string? target) [] (emit-pattern-binding-statements target (nth bind-names i))))) bindings)))]
   (with-bound-types lnames (binding-type-entries bindings) (fn [] (let [body-str (str/join "\n    " (mapv (fn [x] (emit-loop-stmt x bind-names)) body))
    prefix (if has-await "async " "")]
-  (str "(" prefix "() => { " (str/join " " bind-strs) " while (true) {\n    " body-str "\n  } })()")))))
+  (str "(" prefix "() => { " (str/join " " bind-strs) " while (true) {\n    " (str/join " " projection-strs) (if (= (count projection-strs) 0) "" "\n    ") body-str "\n  } })()")))))
   (= node "recur") (str (str/join "; " (loop [i 0
    acc []]
   (if (>= i (count (get e "args"))) acc (recur (+ i 1) (conj acc (str "_recur_" i " = " (emit-expr* (nth (get e "args") i)))))))) "; continue")
@@ -1038,7 +1088,8 @@
    has-await (or (> (count (filterv (fn [f] (contains-await? (get f "body"))) fns)) 0) (contains-await? body))]
   (with-bound fn-names (fn [] (let [fn-strs (mapv (fn [f] (let [fb (binding-names-from-params (get f "params") (get f "rest"))
    fa? (contains-await? (get f "body"))]
-  (with-bound-types fb (param-type-entries (get f "params") (get f "rest")) (fn [] (str (if fa? "async " "") "function " (mangle-name (get f "name")) "(" (emit-js-params (get f "params") (get f "rest")) ") { " (emit-body-return* (get f "body") "") " }"))))) fns)]
+  (with-bound-types fb (param-type-entries (get f "params") (get f "rest")) (fn [] (let [setup (emit-js-param-setup (get f "params"))]
+  (str (if fa? "async " "") "function " (mangle-name (get f "name")) "(" (emit-js-params (get f "params") (get f "rest")) ") { " (str/join " " (into setup [(emit-body-return* (get f "body") "")])) " }")))))) fns)]
   (iife (str (str/join " " fn-strs) " " (emit-body-return* body "")) has-await)))))
   (= node "target-case") (let [cases (vec (get e "cases"))
    js-branch (first (filterv (fn [c] (= (get c "target") "js")) cases))]
@@ -1065,23 +1116,22 @@
   (= node "defn") (let [params (emit-js-params (get f "params") (get f "rest"))
    async? (contains-await? (get f "body"))
    bound (binding-names-from-params (get f "params") (get f "rest"))]
-  (str (if async? "async " "") "function " (mangle-name (get f "name")) "(" params ") {\n  " (with-bound-types bound (param-type-entries (get f "params") (get f "rest")) (fn [] (emit-body-return* (get f "body") "  "))) "\n}"))
+  (str (if async? "async " "") "function " (mangle-name (get f "name")) "(" params ") {\n  " (with-bound-types bound (param-type-entries (get f "params") (get f "rest")) (fn [] (str/join "\n  " (into (emit-js-param-setup (get f "params")) [(emit-body-return* (get f "body") "  ")])))) "\n}"))
   (= node "defn-multi") (let [name (mangle-name (get f "name"))
    arities (get f "arities")
    async? (> (count (filterv (fn [a] (contains-await? (get a "body"))) arities)) 0)
    branches (mapv (fn [a] (let [ps (get a "params")
    np (count ps)
    rest? (get a "rest")
-   dstrs (loop [i 0
-   acc []]
-  (if (>= i np) acc (recur (+ i 1) (conj acc (str "const " (emit-js-param (nth ps i)) " = _args[" i "];")))))
-   rest-str (if (absent? rest?) [] [(str "const " (emit-js-param rest?) " = _args.slice(" np ");")])
+   abound (binding-names-from-params ps rest?)]
+  (with-bound-types abound (param-type-entries ps rest?) (fn [] (let [dstrs (vec (apply concat (map-indexed (fn [i p] (let [target (param-binding-target p)]
+  (if (string? target) [(str "const " (emit-js-param p) " = $beagle$args[" i "];")] (emit-pattern-binding-statements target (str "$beagle$args[" i "]"))))) ps)))
+   rest-str (if (absent? rest?) [] [(str "const " (emit-js-param rest?) " = $beagle$args.slice(" np ");")])
    allb (into dstrs rest-str)
-   abound (binding-names-from-params ps rest?)
-   body (with-bound-types abound (param-type-entries ps rest?) (fn [] (emit-body-return* (get a "body") "    ")))
+   body (emit-body-return* (get a "body") "    ")
    inner (if (= 0 (count allb)) body (str (str/join "\n    " allb) "\n    " body))]
-  (if (absent? rest?) (str "  if (arguments.length === " np ") {\n    " inner "\n  }") (str "  if (arguments.length >= " np ") {\n    " inner "\n  }")))) arities)]
-  (str (if async? "async " "") "function " name "(..._args) {\n" (str/join "\n" branches) "\n  throw new Error('No matching arity: ' + _args.length);\n}"))
+  (if (absent? rest?) (str "  if (arguments.length === " np ") {\n    " inner "\n  }") (str "  if (arguments.length >= " np ") {\n    " inner "\n  }"))))))) arities)]
+  (str (if async? "async " "") "function " name "(...$beagle$args) {\n" (str/join "\n" branches) "\n  throw new Error('No matching arity: ' + $beagle$args.length);\n}"))
   (= node "record") (emit-record f)
   (= node "defenum") (emit-defenum f)
   (= node "defunion") (emit-defunion f)
@@ -1242,6 +1292,29 @@
   (= (emit-ref-name "name") "((_x) => String(_x))")))
   (expect! "require: dotted npm subpath remains exact" (= (emit-require-line "fixture.app" {"ns" "three/addons/loaders/GLTFLoader.js" "alias" "loader" "refer" false} {}) "import * as loader from 'three/addons/loaders/GLTFLoader.js';"))
   (expect! "require: dotted Beagle namespace remains importer-relative" (= (emit-require-line "fixture.app" {"ns" "fixture.shared.loader" "alias" "loader" "refer" false} {}) "import * as loader from './shared/loader.js';"))
+  (expect! "typed sequential param owns one synthetic JS slot" (= (emit-js-params [{"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" []}}] false) "$beagle$param$0"))
+  (expect! "typed sequential param projects each leaf" (= (emit-js-param-setup [{"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" []}}]) ["let x = $beagle$param$0[0];" "let y = $beagle$param$0[1];"]))
+  (expect! "typed nested map param preserves defaults and aggregate alias" (= (emit-js-param-setup [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [{"key" "x" "value" {"node" "literal" "kind" "number" "value" 4}}] "as" "whole"} "ann" {"kind" "any"}}]) ["let whole = $beagle$param$0;" "let x = ($beagle$param$0[\"x\"] ?? 4);"]))
+  (expect! "destructured let owns one hidden aggregate slot" (= (emit-let-binding-stmts {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "value()" false "$beagle$binding$0") ["const $beagle$binding$0 = value();" "let x = $beagle$binding$0[0];" "let y = $beagle$binding$0[1];"]))
+  (expect! "destructured loop keeps recur arity at one aggregate slot" (let [emitted (emit-expr! {"node" "loop" "bindings" [{"name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "app" "name" "HVec" "args" []} "value" {"node" "vec" "items" [{"node" "literal" "kind" "number" "value" 1} {"node" "literal" "kind" "number" "value" 2}]}}] "body" [{"node" "ref" "name" "x"}]})]
+  (and (str/includes? emitted "let $beagle$loop$0 = [1, 2];") (str/includes? emitted "let x = $beagle$loop$0[0];"))))
+  (expect! "typed pattern setup is wired into defn, fn, and letfn" (let [target {"type" "seq-destructure" "names" ["x" "y"] "rest" false}
+   param {"type" "param" "name" target "ann" {"kind" "app" "name" "HVec" "args" []}}
+   body [{"node" "ref" "name" "x"}]
+   defn-out (emit-form {"node" "defn" "name" "f" "params" [param] "rest" false "body" body "private" false})
+   fn-out (emit-expr! {"node" "fn" "params" [param] "rest" false "body" body})
+   letfn-out (emit-expr! {"node" "letfn" "fns" [{"name" "f" "params" [param] "rest" false "body" body}] "body" [{"node" "call" "fn" {"node" "ref" "name" "f"} "args" [{"node" "vec" "items" []}]}]})]
+  (and (str/includes? defn-out "function f($beagle$param$0)") (str/includes? defn-out "let x = $beagle$param$0[0];") (str/includes? fn-out "let y = $beagle$param$0[1];") (str/includes? letfn-out "function f($beagle$param$0)"))))
+  (expect! "typed pattern setup is wired into multi-arity dispatch" (let [target {"type" "seq-destructure" "names" ["x"] "rest" false}
+   param {"type" "param" "name" target "ann" {"kind" "app" "name" "HVec" "args" []}}
+   emitted (emit-form {"node" "defn-multi" "name" "f" "arities" [{"params" [param] "rest" false "body" [{"node" "ref" "name" "x"}]}] "private" false})]
+  (and (str/includes? emitted "function f(...$beagle$args)") (str/includes? emitted "let x = $beagle$args[0][0];"))))
+  (expect! "typed pattern setup is wired into for and doseq" (let [seq-target {"type" "seq-destructure" "names" ["x" "y"] "rest" false}
+   map-target {"type" "map-destructure" "keys" ["x"] "or" [] "as" false}
+   coll {"node" "ref" "name" "rows"}
+   for-out (emit-expr! {"node" "for" "clauses" [{"type" "binding" "name" seq-target "ann" {"kind" "app" "name" "HVec" "args" []} "expr" coll}] "body" [{"node" "ref" "name" "x"}]})
+   doseq-out (emit-doseq {"node" "doseq" "clauses" [{"type" "binding" "name" map-target "ann" {"kind" "prim" "name" "Any"} "expr" coll}] "body" [{"node" "ref" "name" "x"}]})]
+  (and (str/includes? for-out ".map(($beagle$item) => {") (str/includes? for-out "let y = $beagle$item[1];") (str/includes? doseq-out "forEach(($beagle$item) =>") (str/includes? doseq-out "let x = $beagle$item[\"x\"]"))))
   (doseq [f (deref failures)]
   (println (str "  FAIL: " f)))
   (println (str "  EMIT-JS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

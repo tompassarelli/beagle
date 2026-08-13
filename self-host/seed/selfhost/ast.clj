@@ -205,16 +205,16 @@
 (defn make-block-string [^String text ^String tag]
   {"node" "block-string" "text" text "tag" tag})
 
-(defn make-param [^String name ann]
+(defn make-param [name ann]
   {"type" "param" "name" name "ann" ann})
 
-(defn make-map-destructure [keys as-name]
-  {"type" "map-destructure" "keys" keys "as" as-name})
+(defn make-map-destructure [keys as-name or-defaults]
+  {"type" "map-destructure" "keys" keys "as" as-name "or" or-defaults})
 
 (defn make-seq-destructure [names rest-name]
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
-(defn make-let-binding [^String name ann value]
+(defn make-let-binding [name ann value]
   {"name" name "ann" ann "value" value})
 
 (defn make-pat-wildcard []
@@ -285,7 +285,7 @@
 
 (defn ^Boolean validate-identifier [^String sym]
   (let [bad-chars ";'\"` (){}[],"]
-  (every? (fn [c] (nil? (str/index-of bad-chars c))) (map str (seq sym)))))
+  (and (not (str/starts-with? sym "$beagle$")) (every? (fn [c] (nil? (str/index-of bad-chars c))) (map str (seq sym))))))
 
 (defn ^Boolean validate-module-path [^String path]
   (and (every? (fn [c] (let [code (int (.charAt c 0))]
@@ -323,6 +323,8 @@
   (expect! "constructor: not point." (not (constructor-sym? "point.")))
   (expect! "keyword: :name" (keyword-sym? ":name"))
   (expect! "keyword: not name" (not (keyword-sym? "name")))
+  (expect! "identifier: compiler prefix reserved" (not (validate-identifier "$beagle$param$0")))
+  (expect! "identifier: ordinary dollar name remains valid" (validate-identifier "$value"))
   (let [node (make-def "x" nil (make-literal "number" 42))]
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))
@@ -344,12 +346,15 @@
   (expect! "param type" (= (get p "type") "param"))
   (expect! "param name" (= (get p "name") "x"))
   (expect! "param ann" (= (get (get p "ann") "name") "Int")))
-  (let [d (make-map-destructure ["a" "b"] "m")]
+  (let [d (make-map-destructure ["a" "b"] "m" [])]
   (expect! "map-destructure type" (= (get d "type") "map-destructure"))
   (expect! "map-destructure keys" (= (count (get d "keys")) 2)))
   (let [d (make-seq-destructure ["x" "y"] "rest")]
   (expect! "seq-destructure type" (= (get d "type") "seq-destructure"))
   (expect! "seq-destructure rest" (= (get d "rest") "rest")))
+  (let [target (make-seq-destructure ["x" (make-map-destructure ["y"] false [])] false)
+   p (make-param target {"kind" "app" "name" "HVec" "args" []})]
+  (expect! "param accepts structural binding target" (= (get (get p "name") "type") "seq-destructure")))
   (expect! "pat-wildcard" (= (get (make-pat-wildcard) "pattern") "wildcard"))
   (expect! "pat-literal" (= (get (make-pat-literal 42) "value") 42))
   (expect! "pat-record" (= (get (make-pat-record "Circle" ["r"]) "type-name") "Circle"))
