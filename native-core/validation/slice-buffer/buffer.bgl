@@ -1,0 +1,55 @@
+#lang beagle
+(ns native.buffer-stencil)
+(define-mode strict)
+
+;; Buffer v0 is the mutable dense carrier; every persistent aggregate remains
+;; an ordinary Vec/record and is never transposed into this representation.
+(defn fill! [(buffer (Buffer Float))] Float
+  (if (zero? (alength buffer))
+    0.0
+    (loop [(index Int) 0]
+      (if (< index (alength buffer))
+        (do
+          (aset-double! buffer index 3.0)
+          (recur (+ index 1)))
+        (aget buffer 0)))))
+
+(defn stencil! [(source (Buffer Float)) (destination (Buffer Float))] Float
+  (let [length (alength source)]
+    (if (or (zero? length) (not= length (alength destination)))
+      0.0
+      (let [last-index (- length 1)]
+        (aset-double! destination 0 (aget source 0))
+        (aset-double! destination last-index (aget source last-index))
+        (loop [(index Int) 1]
+          (if (< index last-index)
+            (do
+              (aset-double! destination index
+                ;; A one-cell upwind stencil is enough to prove the dense
+                ;; mutable path without extending scalar semantics here.
+                (aget source (- index 1)))
+              (recur (+ index 1)))
+            (aget destination 0)))))))
+
+(defn read-at [(buffer (Buffer Float)) (index Int)] Float
+  (aget buffer index))
+
+(defn write-at! [(buffer (Buffer Float)) (index Int)] Float
+  (aset-double! buffer index 4.0))
+
+;; Exactly two region allocations occur before the time-step loop. The loop
+;; only swaps handles; each cell update is a checked in-place scalar write.
+(defn run-stencil! [(steps Int)] Float
+  (if (neg? steps)
+    0.0
+    (let [left (double-array 8)
+          right (double-array 8)]
+      (fill! left)
+      (loop [(source (Buffer Float)) left
+             (destination (Buffer Float)) right
+             (remaining Int) steps]
+        (if (zero? remaining)
+          (aget source 3)
+          (do
+            (stencil! source destination)
+            (recur destination source (- remaining 1))))))))

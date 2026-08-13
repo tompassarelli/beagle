@@ -1,0 +1,7 @@
+#lang beagle
+(ns native.buffer-value-semantics)
+(define-mode strict)
+
+;; Mutable buffer identity is deliberately outside generic value semantics.
+(defn same-buffer? [(buffer (Buffer Float))] Bool
+  (= buffer buffer))

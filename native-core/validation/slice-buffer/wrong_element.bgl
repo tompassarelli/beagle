@@ -1,0 +1,7 @@
+#lang beagle
+(ns native.buffer-wrong-element)
+(define-mode strict)
+
+;; The general source constructor parses, but Native Buffer v0 admits only F64.
+(defn identity-buffer [(buffer (Buffer Int))] (Buffer Int)
+  buffer)

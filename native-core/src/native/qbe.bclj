@@ -285,6 +285,14 @@
      (core/bytesourcesliceinstructionv0-result instruction)]
     [(VecReverseInstructionV0 value)
      (core/vecreverseinstructionv0-result instruction)]
+    [(BufferAllocateInstructionV0 value)
+     (core/bufferallocateinstructionv0-result instruction)]
+    [(BufferLengthInstructionV0 value)
+     (core/bufferlengthinstructionv0-result instruction)]
+    [(BufferGetCheckedInstructionV0 value)
+     (core/buffergetcheckedinstructionv0-result instruction)]
+    [(BufferSetCheckedInstructionV0 value)
+     (core/buffersetcheckedinstructionv0-result instruction)]
     [(VecSortInstructionV0 value)
      (core/vecsortinstructionv0-result instruction)]
     [(MapLiteralInstructionV0 value)
@@ -511,6 +519,7 @@
     [(RecordType value) true]
     [(UnionType value) true]
     [(VectorType value) false]
+    [(BufferTypeV0 value) false]
     [(MapTypeV0 value) false]
     [(SetTypeV0 value) false]
     [(ReferenceType value) false]
@@ -524,6 +533,7 @@
     [(RecordType value) nil]
     [(UnionType value) nil]
     [(VectorType value) nil]
+    [(BufferTypeV0 value) nil]
     [(MapTypeV0 value) nil]
     [(SetTypeV0 value) nil]
     [(ReferenceType value) nil]
@@ -537,6 +547,7 @@
     [(RecordType value) nil]
     [(UnionType value) nil]
     [(VectorType value) nil]
+    [(BufferTypeV0 value) nil]
     [(MapTypeV0 value) nil]
     [(SetTypeV0 value) nil]
     [(ReferenceType value) (core/referencetype-target-type shape)]
@@ -643,6 +654,7 @@
     [(RecordShapeV0 value) []]
     [(UnionShapeV0 value) (core/unionshapev0-variants shape)]
     [(VectorShapeV0 value) []]
+    [(BufferShapeV0 value) []]
     [(MapShapeV0 value) []]
     [(SetShapeV0 value) []]
     [(ReferenceShapeV0 value) []]
@@ -656,6 +668,7 @@
       [(RecordShapeV0 value) true]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
+      [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
@@ -669,6 +682,7 @@
       [(RecordShapeV0 value) false]
       [(UnionShapeV0 value) true]
       [(VectorShapeV0 value) false]
+      [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
@@ -682,6 +696,7 @@
       [(RecordShapeV0 value) (ordered-field-layouts (core/recordshapev0-fields shape))]
       [(UnionShapeV0 value) []]
       [(VectorShapeV0 value) []]
+      [(BufferShapeV0 value) []]
       [(MapShapeV0 value) []]
       [(SetShapeV0 value) []]
       [(ReferenceShapeV0 value) []]
@@ -695,6 +710,7 @@
       [(RecordShapeV0 value) nil]
       [(UnionShapeV0 value) (core/unionshapev0-tag-type shape)]
       [(VectorShapeV0 value) nil]
+      [(BufferShapeV0 value) nil]
       [(MapShapeV0 value) nil]
       [(SetShapeV0 value) nil]
       [(ReferenceShapeV0 value) nil]
@@ -708,6 +724,7 @@
       [(RecordShapeV0 value) -1]
       [(UnionShapeV0 value) (core/unionshapev0-tag-offset-bytes shape)]
       [(VectorShapeV0 value) -1]
+      [(BufferShapeV0 value) -1]
       [(MapShapeV0 value) -1]
       [(SetShapeV0 value) -1]
       [(ReferenceShapeV0 value) -1]
@@ -825,6 +842,7 @@
              (recur (+ index 1)
                (if (nil? payload) references (conj references payload)))))))]
     [(VectorType value) []]
+    [(BufferTypeV0 value) []]
     [(MapTypeV0 value) []]
     [(SetTypeV0 value) []]
     [(ReferenceType value) []]
@@ -1058,6 +1076,10 @@
     [(ByteSourceGetInstructionV0 value) false]
     [(ByteSourceSliceInstructionV0 value) false]
     [(VecReverseInstructionV0 value) false]
+    [(BufferAllocateInstructionV0 value) false]
+    [(BufferLengthInstructionV0 value) false]
+    [(BufferGetCheckedInstructionV0 value) false]
+    [(BufferSetCheckedInstructionV0 value) false]
     [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
@@ -1685,6 +1707,10 @@
              (core/vecreverseinstructionv0-source-id instruction))
            ", l " (vector-stride context vector-type)
            ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(BufferAllocateInstructionV0 value) ""]
+      [(BufferLengthInstructionV0 value) ""]
+      [(BufferGetCheckedInstructionV0 value) ""]
+      [(BufferSetCheckedInstructionV0 value) ""]
       [(ByteSourceLengthInstructionV0 value) ""]
       [(ByteSourceGetInstructionV0 value) ""]
       [(ByteSourceSliceInstructionV0 value) ""]
@@ -2054,6 +2080,9 @@
                    (> (if (nil? element-layout) 0
                         (core/layoutdef-align-bytes element-layout))
                      0)))))]
+          ;; Buffer is a C17-only carrier in v0. QBE refuses the frozen program
+          ;; instead of treating the mutable identity as a vector/reference.
+          [(BufferTypeV0 value) false]
           [(MapTypeV0 value) false]
           [(SetTypeV0 value) false]
           [(ReferenceType value) false]
@@ -2124,6 +2153,10 @@
     [(ByteSourceGetInstructionV0 value) false]
     [(ByteSourceSliceInstructionV0 value) false]
     [(VecReverseInstructionV0 value) true]
+    [(BufferAllocateInstructionV0 value) false]
+    [(BufferLengthInstructionV0 value) false]
+    [(BufferGetCheckedInstructionV0 value) false]
+    [(BufferSetCheckedInstructionV0 value) false]
     [(VecSortInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]

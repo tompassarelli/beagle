@@ -64,6 +64,16 @@ typedef struct native_vec {
   int64_t *watermark;
 } native_vec;
 
+/* Fixed-length mutable dense storage owned by the arena that allocated it.
+   This is deliberately not native_vec: length never changes, reads and writes
+   are checked, and updates mutate the shared buffer identity in place. */
+typedef struct native_buffer {
+  void *elements;
+  int64_t length;
+  int64_t stride;
+  size_t alignment;
+} native_buffer;
+
 /* Borrowed octets. Distinct from native_bytes because nothing here owns or may
    free `data`, and distinct from a Text handle because the octets are arbitrary
    binary with no encoding obligation. */
@@ -200,6 +210,10 @@ struct native_value_descriptor {
    push sequence's reallocation count is observable from a test. */
 extern uint64_t native_vec_storage_allocations;
 
+/* Counts successful non-empty Buffer element-storage allocations. Checked
+   reads and writes never change it. */
+extern uint64_t native_buffer_storage_allocations;
+
 /* Text and Keyword handles are addresses of length-prefixed strict-UTF-8 blobs:
    an 8-byte native-endian uint64_t length, then exactly that many bytes.
    Handles are program-local addresses and never cross a program boundary. */
@@ -263,6 +277,20 @@ native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
 native_vec *native_vec_sort(native_arena *arena, const native_vec *source,
                             const native_value_descriptor *element,
                             int64_t stride, size_t alignment);
+
+native_buffer *native_buffer_new(native_arena *arena,
+                                 const native_capability *capability,
+                                 int64_t length, int64_t stride,
+                                 size_t alignment);
+int64_t native_buffer_length(const native_buffer *buffer,
+                             const native_capability *capability);
+/* Both accessors trap NATIVE_TRAP_OUT_OF_RANGE unless 0 <= index < length. */
+const void *native_buffer_at(const native_buffer *buffer,
+                             const native_capability *capability,
+                             int64_t index, int64_t stride);
+void native_buffer_set(native_buffer *buffer,
+                       const native_capability *capability,
+                       int64_t index, const void *value, int64_t stride);
 
 /* A read-only alias of octets this shim did not allocate: one header, never a
    copy of the data. The caller keeps `data` live and unmodified for as long as

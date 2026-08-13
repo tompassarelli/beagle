@@ -40,7 +40,8 @@
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
 (def PARAMETRIC-CTORS (Vec String)
-  ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
+  ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"
+   "Buffer"])
 
 ;; --- type constructors (same JSON format as ast-json.rkt) --------------------
 
@@ -244,6 +245,14 @@
     ;; invariant-equal (Any is NOT a wildcard), never covariantly.
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
+      (and (= (count (get actual "args")) (count (get expected "args")))
+           (every? (fn [(i Int)] Bool
+                     (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
+                   (range (count (get actual "args")))))
+
+    ;; Buffer is mutable and invariant in its element type.
+    (and (app-type? actual) (app-type? expected)
+         (= (get actual "name") "Buffer") (= (get expected "name") "Buffer"))
       (and (= (count (get actual "args")) (count (get expected "args")))
            (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))

@@ -38,7 +38,7 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -229,7 +229,8 @@
           (or (memq (car t) PARAMETRIC-CTORS)
               (hash-has-key? (current-user-parametric-arities) (car t))))
      (define expected-arity
-       (hash-ref (current-user-parametric-arities) (car t) #f))
+       (or (hash-ref (current-user-parametric-arities) (car t) #f)
+           (and (eq? (car t) 'Buffer) 1)))
      (when (and expected-arity
                 (not (= (length (cdr t)) expected-arity)))
        (error 'beagle
@@ -294,6 +295,9 @@
             t
             expected-arity
             (if (= expected-arity 1) "" "s"))]
+
+    [(eq? t 'Buffer)
+     (error 'beagle "type Buffer expects 1 argument, got 0")]
 
     ;; G2 — bare `Atom` resolves to (Atom Any): an untyped mutable cell. Atom is a
     ;; PARAMETRIC-CTOR, but a bare symbol would parse to (type-prim 'Atom), which a poly
@@ -486,6 +490,14 @@
           (eq? (type-app-ctor actual) 'Atom) (eq? (type-app-ctor expected) 'Atom))
      (and (= (length (type-app-args actual)) (length (type-app-args expected)))
           (andmap type-invariant-equal? (type-app-args actual) (type-app-args expected)))]
+
+    ;; Mutable dense buffers are invariant for the same aliasing reason as Atom.
+    [(and (type-app? actual) (type-app? expected)
+          (eq? (type-app-ctor actual) 'Buffer)
+          (eq? (type-app-ctor expected) 'Buffer))
+     (and (= (length (type-app-args actual)) (length (type-app-args expected)))
+          (andmap type-invariant-equal? (type-app-args actual)
+                  (type-app-args expected)))]
 
     ;; G3 — a heterogeneous tuple IS a vector: (HVec a b c) <: (Vec T) when every
     ;; position is compatible with T (immutable, so this widening is sound). One

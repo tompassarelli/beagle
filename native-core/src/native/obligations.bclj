@@ -728,6 +728,18 @@
     (and (some? (get type-shape :element-type nil))
       (some? (get type-shape :iteration-order nil)))
     (set-layout-valid? type-shape layout-shape layouts parent-size)
+    (instance? native.core.BufferTypeV0 type-shape)
+    (let [(element-type core/NativeId) (get type-shape :element-type)
+          (element-layout (U core/LayoutDef Nil))
+          (find-layout layouts element-type)]
+      (and (instance? native.core.BufferShapeV0 layout-shape)
+        (not (nil? element-layout))
+        (dynamic-id= element-type (get layout-shape :element-type nil))
+        (= (get layout-shape :stride-bytes 0)
+          (core/layoutdef-size-bytes element-layout))
+        (= (get layout-shape :align-bytes 0)
+          (core/layoutdef-align-bytes element-layout))
+        (> parent-size 0)))
     (some? (get type-shape :element-type nil))
     (let [(stride Int) (get layout-shape :stride-bytes 0)
           (element-type core/NativeId) (get type-shape :element-type)
@@ -773,6 +785,7 @@
       (or (instance? native.core.ReferenceShapeV0 shape)
         (instance? native.core.AtomCellShapeV0 shape)
         (instance? native.core.VectorShapeV0 shape)
+        (instance? native.core.BufferShapeV0 shape)
         (instance? native.core.MapShapeV0 shape)
         (instance? native.core.SetShapeV0 shape))
       (and (= size (core/abiprofilev0-pointer-bytes abi))
@@ -1418,6 +1431,9 @@
   (or (= kind (core/->WriteEffect region))
     (= kind (core/->AtomicEffect region capability))))
 
+(defn effect-covers-read? [(kind Any) (region core/NativeId)] Bool
+  (= kind (core/->ReadEffect region)))
+
 (defn effect-covers-allocation? [(kind Any) (region core/NativeId)] Bool
   (= kind (core/->AllocateEffect region)))
 
@@ -1442,6 +1458,47 @@
                        (effect-covers-store? (core/effectdef-kind effect)
                          region capability)))))
            (core/functiondef-effects function))))
+
+(defn declared-read-effect-covers?
+  [(program core/NativeCoreProgram)
+   (function core/FunctionDef)
+   (region core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(effect-id core/NativeId)] Bool
+        (let [(effect (U core/EffectDef Nil))
+              (find-effect (core/nativecoreprogram-effects program) effect-id)]
+          (and (not (nil? effect))
+            (effect-covers-read? (core/effectdef-kind effect) region))))
+      (core/functiondef-effects function))))
+
+(defn capability-authorizes?
+  [(program core/NativeCoreProgram)
+   (capability-id core/NativeId)
+   (region core/NativeId)
+   (mode String)] Bool
+  (let [(capability (U core/CapabilityDef Nil))
+        (find-capability (core/nativecoreprogram-capabilities program)
+          capability-id)]
+    (and (not (nil? capability))
+      (some? (core/capabilitydef-region capability))
+      (dynamic-id= region (core/capabilitydef-region capability))
+      (let [(kind core/CapabilityKind) (core/capabilitydef-kind capability)]
+        (cond
+          (= mode "read") (instance? native.core.ReadCapability kind)
+          (= mode "write") (instance? native.core.WriteCapability kind)
+          (= mode "allocate") (instance? native.core.AllocateCapability kind)
+          :else false)))))
+
+(defn buffer-root-region?
+  [(program core/NativeCoreProgram)
+   (region-id core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(region core/RegionDef)] Bool
+        (and (core/native-id= (core/regiondef-id region) region-id)
+          (nil? (core/regiondef-parent region))))
+      (core/nativecoreprogram-regions program))))
 
 (defn store-resources [(store core/StoreOp)] (Vec core/NativeId)
   [(get store :region) (get store :capability)])
@@ -1485,6 +1542,36 @@
         (abi-id Any) (get instruction :abi-id nil)
         (callee-id Any) (get instruction :function-id nil)]
     (cond
+      (instance? native.core.BufferAllocateInstructionV0 instruction)
+      (and
+        (buffer-root-region? program allocation-region)
+        (core/id-in? (core/functiondef-regions function) allocation-region)
+        (core/id-in? (core/functiondef-capabilities function)
+          allocation-capability)
+        (capability-authorizes? program allocation-capability
+          allocation-region "allocate")
+        (declared-effect-covers? program function allocation-region
+          allocation-capability true))
+      (or (instance? native.core.BufferLengthInstructionV0 instruction)
+        (instance? native.core.BufferGetCheckedInstructionV0 instruction))
+      (and
+        (buffer-root-region? program allocation-region)
+        (core/id-in? (core/functiondef-regions function) allocation-region)
+        (core/id-in? (core/functiondef-capabilities function)
+          allocation-capability)
+        (capability-authorizes? program allocation-capability
+          allocation-region "read")
+        (declared-read-effect-covers? program function allocation-region))
+      (instance? native.core.BufferSetCheckedInstructionV0 instruction)
+      (and
+        (buffer-root-region? program allocation-region)
+        (core/id-in? (core/functiondef-regions function) allocation-region)
+        (core/id-in? (core/functiondef-capabilities function)
+          allocation-capability)
+        (capability-authorizes? program allocation-capability
+          allocation-region "write")
+        (declared-effect-covers? program function allocation-region
+          allocation-capability false))
       (instance? native.core.AtomStateInstruction instruction)
       (let [(region core/NativeId)
             (core/atomstateinstruction-region instruction)
@@ -1532,7 +1619,8 @@
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
           (or (declared-effect-covers? program function region capability true)
-            (declared-effect-covers? program function region capability false))))
+            (or (declared-effect-covers? program function region capability false)
+              (declared-read-effect-covers? program function region)))))
       (and (not (nil? allocation-region)) (not (nil? allocation-capability)))
       (and (core/id-in? (core/functiondef-regions function) allocation-region)
         (core/id-in? (core/functiondef-capabilities function)

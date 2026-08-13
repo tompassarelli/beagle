@@ -152,6 +152,9 @@
 (defn layout-vector? [(layout core/LayoutDef)] Bool
   (instance? native.core.VectorShapeV0 (core/layoutdef-shape layout)))
 
+(defn layout-buffer? [(layout core/LayoutDef)] Bool
+  (instance? native.core.BufferShapeV0 (core/layoutdef-shape layout)))
+
 (defn layout-map? [(layout core/LayoutDef)] Bool
   (instance? native.core.MapShapeV0 (core/layoutdef-shape layout)))
 
@@ -333,6 +336,8 @@
 
           (instance? native.core.VectorType shape) (layout-vector? layout-value)
 
+          (instance? native.core.BufferTypeV0 shape) (layout-buffer? layout-value)
+
           (instance? native.core.MapTypeV0 shape) (layout-map? layout-value)
 
           (instance? native.core.SetTypeV0 shape) (layout-set? layout-value)
@@ -365,6 +370,10 @@
     (instance? native.core.SubF64InstructionV0 instruction) true
     (instance? native.core.MulF64InstructionV0 instruction) true
     (instance? native.core.DivF64InstructionV0 instruction) true
+    (instance? native.core.BufferAllocateInstructionV0 instruction) true
+    (instance? native.core.BufferLengthInstructionV0 instruction) true
+    (instance? native.core.BufferGetCheckedInstructionV0 instruction) true
+    (instance? native.core.BufferSetCheckedInstructionV0 instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
     :else false))
@@ -462,6 +471,22 @@
         (str "/* vector of " element ", stride "
           (core/vectorshapev0-stride-bytes shape) " */\n"
           "typedef native_vec *" type-name-value ";\n"
+          (join-lines (size-align-assertions type-name-value layout))))
+      "")))
+
+(defn emit-buffer-type
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (type-name-value String)
+   (layout core/LayoutDef)] String
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
+    (if (instance? native.core.BufferShapeV0 shape)
+      (let [(element String)
+            (c-type types module-index (core/buffershapev0-element-type shape))]
+        (str "/* mutable region-owned buffer of " element ", stride "
+          (core/buffershapev0-stride-bytes shape) ", alignment "
+          (core/buffershapev0-align-bytes shape) " */\n"
+          "typedef native_buffer *" type-name-value ";\n"
           (join-lines (size-align-assertions type-name-value layout))))
       "")))
 
@@ -594,6 +619,8 @@
         (emit-union-type types module-index type-name-value layout-value)
         (layout-vector? layout-value)
         (emit-vector-type types module-index type-name-value layout-value)
+        (layout-buffer? layout-value)
+        (emit-buffer-type types module-index type-name-value layout-value)
         (layout-map? layout-value)
         (emit-map-type types module-index type-name-value layout-value)
         (layout-set? layout-value)

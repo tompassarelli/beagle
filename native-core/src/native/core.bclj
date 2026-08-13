@@ -54,6 +54,10 @@
   (RecordType [(fields (Vec TypeField))])
   (UnionType [(variants (Vec TypeVariant))])
   (VectorType [(element-type NativeId)])
+  ;; A Buffer is a fixed-length mutable dense span. It is never a persistent
+  ;; Vec and never participates in record-to-SoA rewriting. Allocation and
+  ;; access instructions name the owning region and capability explicitly.
+  (BufferTypeV0 [(element-type NativeId)])
   (MapTypeV0
     [(key-type NativeId)
      (value-type NativeId)
@@ -141,6 +145,12 @@
   ;; handle on the header, so a (Vec T) record field is 8 bytes for every T.
   ;; Region-lifetime law applies: that handle may not outlive the header's region.
   (VectorShapeV0 [(element-type NativeId) (stride-bytes Int)])
+  ;; The Buffer value is a pointer-sized handle. Element storage is contiguous
+  ;; in the owning region with this exact scalar stride and alignment.
+  (BufferShapeV0
+    [(element-type NativeId)
+     (stride-bytes Int)
+     (align-bytes Int)])
   ;; Map and Set values are arena-owned header handles. Their exact element
   ;; storage ABI and deterministic iteration policy stay in the native program.
   (MapShapeV0
@@ -500,6 +510,33 @@
     [(result SsaValueV0)
      (source-id NativeId)
      (arena-id NativeId)])
+  ;; Dynamic fixed-length dense storage. Allocate zero-fills exactly `length`
+  ;; elements in the named region. Get/set trap outside [0, length); set mutates
+  ;; the shared Buffer identity and returns the assigned scalar, as aset-double!.
+  (BufferAllocateInstructionV0
+    [(result SsaValueV0)
+     (length-id NativeId)
+     (arena-id NativeId)
+     (region NativeId)
+     (capability NativeId)])
+  (BufferLengthInstructionV0
+    [(result SsaValueV0)
+     (source-id NativeId)
+     (region NativeId)
+     (capability NativeId)])
+  (BufferGetCheckedInstructionV0
+    [(result SsaValueV0)
+     (source-id NativeId)
+     (index-id NativeId)
+     (region NativeId)
+     (capability NativeId)])
+  (BufferSetCheckedInstructionV0
+    [(result SsaValueV0)
+     (source-id NativeId)
+     (index-id NativeId)
+     (value-id NativeId)
+     (region NativeId)
+     (capability NativeId)])
   ;; A byte source is a borrowed read-only octet range: one handle, no owned
   ;; storage. Length is a header read, get zero-extends one octet to I64, and
   ;; slice aliases the same octets behind a fresh handle.
@@ -976,6 +1013,15 @@
      (ssavaluev0-id result)]
     [(VecReverseInstructionV0 result source-id arena-id)
      (ssavaluev0-id result)]
+    [(BufferAllocateInstructionV0 result length-id arena-id region capability)
+     (ssavaluev0-id result)]
+    [(BufferLengthInstructionV0 result source-id region capability)
+     (ssavaluev0-id result)]
+    [(BufferGetCheckedInstructionV0 result source-id index-id region capability)
+     (ssavaluev0-id result)]
+    [(BufferSetCheckedInstructionV0 result source-id index-id value-id region
+       capability)
+     (ssavaluev0-id result)]
     [(ByteSourceLengthInstructionV0 result source-id) (ssavaluev0-id result)]
     [(ByteSourceGetInstructionV0 result source-id index-id)
      (ssavaluev0-id result)]
@@ -1228,6 +1274,7 @@
      (mapv (fn [(variant TypeVariant)] NativeId (typevariant-id variant))
        variants)]
     [(VectorType element-type) []]
+    [(BufferTypeV0 element-type) []]
     [(MapTypeV0 key-type value-type iteration-order) []]
     [(SetTypeV0 element-type iteration-order) []]
     [(ReferenceType target-type) []]
@@ -1336,6 +1383,7 @@
     [(RecordType fields) (type-fields-refs-closed? fields known-types)]
     [(UnionType variants) (type-variants-refs-closed? variants known-types)]
     [(VectorType element-type) (id-in? known-types element-type)]
+    [(BufferTypeV0 element-type) (id-in? known-types element-type)]
     [(MapTypeV0 key-type value-type iteration-order)
      (and (id-in? known-types key-type) (id-in? known-types value-type))]
     [(SetTypeV0 element-type iteration-order) (id-in? known-types element-type)]
@@ -1420,6 +1468,10 @@
        (every? (fn [(variant UnionVariantLayoutV0)] Bool (union-variant-layout-refs-closed? variant known-members known-types)) variants))]
     [(VectorShapeV0 element-type stride-bytes)
      (and (id-in? known-types element-type) (> stride-bytes 0))]
+    [(BufferShapeV0 element-type stride-bytes align-bytes)
+     (and (id-in? known-types element-type)
+       (> stride-bytes 0)
+       (> align-bytes 0))]
     [(MapShapeV0 key-type key-stride-bytes key-align-bytes
        value-type value-stride-bytes value-align-bytes iteration-order)
      (and (id-in? known-types key-type)
@@ -1531,6 +1583,19 @@
     [(VecConcatInstruction result left-id right-id arena-id) true]
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
     [(VecReverseInstructionV0 result source-id arena-id) true]
+    [(BufferAllocateInstructionV0 result length-id arena-id region capability)
+     (and (id-in? known-regions region)
+       (id-in? known-capabilities capability))]
+    [(BufferLengthInstructionV0 result source-id region capability)
+     (and (id-in? known-regions region)
+       (id-in? known-capabilities capability))]
+    [(BufferGetCheckedInstructionV0 result source-id index-id region capability)
+     (and (id-in? known-regions region)
+       (id-in? known-capabilities capability))]
+    [(BufferSetCheckedInstructionV0 result source-id index-id value-id region
+       capability)
+     (and (id-in? known-regions region)
+       (id-in? known-capabilities capability))]
     [(ByteSourceLengthInstructionV0 result source-id) true]
     [(ByteSourceGetInstructionV0 result source-id index-id) true]
     [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)
@@ -1800,6 +1865,14 @@
      [arena-id source-id start-id end-id]]
     [(VecReverseInstructionV0 result source-id arena-id)
      [arena-id source-id]]
+    [(BufferAllocateInstructionV0 result length-id arena-id region capability)
+     [arena-id length-id]]
+    [(BufferLengthInstructionV0 result source-id region capability) [source-id]]
+    [(BufferGetCheckedInstructionV0 result source-id index-id region capability)
+     [source-id index-id]]
+    [(BufferSetCheckedInstructionV0 result source-id index-id value-id region
+       capability)
+     [source-id index-id value-id]]
     [(ByteSourceLengthInstructionV0 result source-id) [source-id]]
     [(ByteSourceGetInstructionV0 result source-id index-id)
      [source-id index-id]]
@@ -1960,6 +2033,19 @@
     [(VecConcatInstruction result left-id right-id arena-id) true]
     [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
     [(VecReverseInstructionV0 result source-id arena-id) true]
+    [(BufferAllocateInstructionV0 result length-id arena-id region capability)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities capability))]
+    [(BufferLengthInstructionV0 result source-id region capability)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities capability))]
+    [(BufferGetCheckedInstructionV0 result source-id index-id region capability)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities capability))]
+    [(BufferSetCheckedInstructionV0 result source-id index-id value-id region
+       capability)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities capability))]
     [(ByteSourceLengthInstructionV0 result source-id) true]
     [(ByteSourceGetInstructionV0 result source-id index-id) true]
     [(ByteSourceSliceInstructionV0 result source-id start-id end-id arena-id)

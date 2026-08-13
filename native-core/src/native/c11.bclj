@@ -10,9 +10,9 @@
 ;; what makes the cross-module arms below legal without a post-emit rewrite.
 (import (native.core
           BoolKind I64Kind F64Kind TextKind BytesKind KeywordKind RefKind
-          ScalarShapeV0 BytesShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
+          ScalarShapeV0 BytesShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 BufferShapeV0 ReferenceShapeV0
           MapShapeV0 SetShapeV0 AtomCellShapeV0
-          AtomType RecordType UnionType VectorType MapTypeV0 SetTypeV0
+          AtomType RecordType UnionType VectorType BufferTypeV0 MapTypeV0 SetTypeV0
           ReferenceType AtomCellTypeV0 FunctionType OutcomeType
           BoolAtom I64Atom F64Atom TextAtom KeywordAtom RefAtom
           CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0
@@ -72,6 +72,7 @@
          (core/recordtype-fields shape))]
       [(UnionType value) []]
       [(VectorType value) []]
+      [(BufferTypeV0 value) []]
       [(MapTypeV0 value) []]
       [(SetTypeV0 value) []]
       [(ReferenceType value) []]
@@ -203,6 +204,7 @@
       [(RecordShapeV0 value) false]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
+      [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
@@ -216,6 +218,7 @@
       [(RecordShapeV0 value) true]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
+      [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
@@ -229,6 +232,7 @@
       [(RecordShapeV0 value) (core/recordshapev0-fields shape)]
       [(UnionShapeV0 value) []]
       [(VectorShapeV0 value) []]
+      [(BufferShapeV0 value) []]
       [(MapShapeV0 value) []]
       [(SetShapeV0 value) []]
       [(ReferenceShapeV0 value) []]
@@ -244,6 +248,7 @@
       [(RecordType value) (and (some? layout-value) (layout-record? layout-value))]
       [(UnionType value) false]
       [(VectorType value) false]
+      [(BufferTypeV0 value) false]
       [(MapTypeV0 value) false]
       [(SetTypeV0 value) false]
       [(ReferenceType value) false]
@@ -427,6 +432,7 @@
              (emit-layout-assertions type-name-value layout-value fields)))]
         [(UnionType value) ""]
         [(VectorType value) ""]
+        [(BufferTypeV0 value) ""]
         [(MapTypeV0 value) ""]
         [(SetTypeV0 value) ""]
         [(ReferenceType value) ""]

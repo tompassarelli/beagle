@@ -1084,6 +1084,13 @@
   (core/->TypeDef (closed-vector-type-id element-type) "Vector"
     (core/->VectorType element-type)))
 
+(defn closed-buffer-type-id [(element-type core/NativeId)] core/NativeId
+  (lower-id "buffer-type-v0" [(id-value element-type)]))
+
+(defn closed-buffer-type [(element-type core/NativeId)] core/TypeDef
+  (core/->TypeDef (closed-buffer-type-id element-type) "Buffer"
+    (core/->BufferTypeV0 element-type)))
+
 (defn homogeneous-type-ids? [(ids (Vec core/NativeId))] Bool
   (if (= 0 (count ids))
     false
@@ -1119,6 +1126,25 @@
             (closed-vector-type (nth ids 0)))
           diagnostics
           true))
+
+      (and (= "Buffer" constructor)
+        (= 1 (count ids))
+        (same-id? (nth ids 0) (type-id "Float")))
+      (let [(id core/NativeId) (closed-buffer-type-id (nth ids 0))]
+        (->TypeResolutionV0 id
+          (append-type-def definitions (closed-buffer-type (nth ids 0)))
+          diagnostics
+          true))
+
+      (= "Buffer" constructor)
+      (->TypeResolutionV0
+        (type-id "LowerFailure")
+        [(lower-failure-type)]
+        (conj diagnostics
+          (core/->DiagnosticV0
+            "LOWER-BUFFER-ELEMENT-V0"
+            "Native Buffer v0 requires exactly one Float element type"))
+        false)
 
       ;; Native Core's vector carrier is homogeneous.  A homogeneous HVec
       ;; retains its positional source identity while sharing that carrier;
@@ -1720,6 +1746,11 @@
 (defn write-capability-id [] core/NativeId
   (lower-id "capability" ["arena-write"]))
 
+(defn read-effect-id [] core/NativeId (lower-id "effect" ["arena-read"]))
+
+(defn read-capability-id [] core/NativeId
+  (lower-id "capability" ["arena-read"]))
+
 (defn allocate-effect-id [] core/NativeId
   (lower-id "effect" ["arena-allocate"]))
 
@@ -1820,6 +1851,7 @@
   (Vec core/EffectDef)
   (let [(base (Vec core/EffectDef))
         [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
+         (core/->EffectDef (read-effect-id) (core/->ReadEffect (arena-region-id)))
          (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))
          (core/->EffectDef (allocate-effect-id)
            (core/->AllocateEffect (arena-region-id)))
@@ -4189,6 +4221,11 @@
     (and (not (nil? definition))
       (instance? native.core.VectorType (core/typedef-shape definition)))))
 
+(defn buffer-type? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
+    (and (not (nil? definition))
+      (instance? native.core.BufferTypeV0 (core/typedef-shape definition)))))
+
 (defn record-type? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
     (and (not (nil? definition))
@@ -4229,6 +4266,17 @@
       (let [(shape core/TypeShape) (core/typedef-shape definition)]
         (if (instance? native.core.VectorType shape)
           (core/vectortype-element-type shape)
+          (type-id "LowerFailure"))))))
+
+(defn buffer-element-of
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)] core/NativeId
+  (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
+    (if (nil? definition)
+      (type-id "LowerFailure")
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
+        (if (instance? native.core.BufferTypeV0 shape)
+          (core/buffertypev0-element-type shape)
           (type-id "LowerFailure"))))))
 
 (defn map-type? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
@@ -4502,6 +4550,19 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
+(defn buffer-type-of
+  [(types (Vec core/TypeDef))
+   (element core/NativeId)] (U core/NativeId Nil)
+  (loop [(position Int) 0]
+    (if (>= position (count types))
+      nil
+      (let [(definition core/TypeDef) (nth types position)
+            (shape core/TypeShape) (core/typedef-shape definition)]
+        (if (and (instance? native.core.BufferTypeV0 shape)
+              (same-id? (core/buffertypev0-element-type shape) element))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
 (defn text-vector-type-of [(types (Vec core/TypeDef))] (U core/NativeId Nil)
   (loop [(position Int) 0]
     (if (>= position (count types))
@@ -4652,6 +4713,7 @@
 
 (defn allocating-instruction? [(instruction core/Instruction)] Bool
   (or (instance? native.core.VecAssocInstructionV0 instruction)
+      (instance? native.core.BufferAllocateInstructionV0 instruction)
       (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
@@ -13629,6 +13691,88 @@
                 (fail-result current
                   "TODO-NATIVE-EMPTY-ARITY: empty? takes one operand")
 
+                (and (= "double-array" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (int-type-id)))
+                (let [(buffer-type (U core/NativeId Nil))
+                      (buffer-type-of types (float-type-id))]
+                  (if (nil? buffer-type)
+                    (fail-result current
+                      "TODO-NATIVE-BUFFER-TYPE-V0: double-array requires a declared (Buffer Float) result")
+                    (let [(result-id core/NativeId)
+                          (state-id current owner "buffer-allocate")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->BufferAllocateInstructionV0
+                            (core/->SsaValueV0 result-id buffer-type)
+                            (nth values 0)
+                            (arena-value-id owner)
+                            (arena-region-id)
+                            (allocate-capability-id)))
+                        result-id buffer-type false))))
+
+                (= "double-array" callee)
+                (fail-result current
+                  "TODO-NATIVE-BUFFER-ALLOCATE-V0: double-array takes one native Int length")
+
+                (and (= "alength" callee) (= 1 (count values))
+                  (buffer-type? types (nth value-types 0)))
+                (let [(result-id core/NativeId)
+                      (state-id current owner "buffer-length")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->BufferLengthInstructionV0
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (nth values 0)
+                        (arena-region-id)
+                        (read-capability-id)))
+                    result-id (int-type-id) false))
+
+                (= "alength" callee)
+                (fail-result current
+                  "TODO-NATIVE-BUFFER-LENGTH-V0: alength takes one native Buffer")
+
+                (and (= "aget" callee) (= 2 (count values))
+                  (buffer-type? types (nth value-types 0))
+                  (same-id? (nth value-types 1) (int-type-id)))
+                (let [(element core/NativeId)
+                      (buffer-element-of types (nth value-types 0))
+                      (result-id core/NativeId)
+                      (state-id current owner "buffer-get-checked")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->BufferGetCheckedInstructionV0
+                        (core/->SsaValueV0 result-id element)
+                        (nth values 0)
+                        (nth values 1)
+                        (arena-region-id)
+                        (read-capability-id)))
+                    result-id element false))
+
+                (= "aget" callee)
+                (fail-result current
+                  "TODO-NATIVE-BUFFER-GET-V0: aget takes a native Buffer and Int index")
+
+                (and (= "aset-double!" callee) (= 3 (count values))
+                  (buffer-type? types (nth value-types 0))
+                  (same-id? (nth value-types 1) (int-type-id))
+                  (same-id? (nth value-types 2) (float-type-id)))
+                (let [(result-id core/NativeId)
+                      (state-id current owner "buffer-set-checked")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->BufferSetCheckedInstructionV0
+                        (core/->SsaValueV0 result-id (float-type-id))
+                        (nth values 0)
+                        (nth values 1)
+                        (nth values 2)
+                        (arena-region-id)
+                        (write-capability-id)))
+                    result-id (float-type-id) false))
+
+                (= "aset-double!" callee)
+                (fail-result current
+                  "TODO-NATIVE-BUFFER-SET-V0: aset-double! takes (Buffer Float), Int, and Float")
+
                 (and (= "count" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
                 (let [(result-id core/NativeId) (state-id current owner "vec-length")]
@@ -14137,6 +14281,17 @@
                 (= "vec" callee)
                 (fail-result current
                   "TODO-NATIVE-VEC-OPERAND: vec lowers a native vector or a closed insertion-order set")
+
+                (and (or (= "hash" callee)
+                       (or (= "compare" callee)
+                         (or (= "=" callee) (= "not=" callee))))
+                  (some?
+                    (some
+                      (fn [(value-type core/NativeId)] Bool
+                        (buffer-type? types value-type))
+                      value-types)))
+                (fail-result current
+                  "TODO-NATIVE-BUFFER-VALUE-SEMANTICS-V0: mutable Buffer has no structural equality, hash, comparison, or persistent value semantics")
 
                 (and (= "hash" callee) (= 1 (count values))
                   (value-semantics-type? types (nth value-types 0)))
@@ -15279,6 +15434,30 @@
             (core/basicblock-instructions block))))
       blocks)))
 
+(defn blocks-use-buffer-read? [(blocks (Vec core/BasicBlock))] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (or
+                (instance? native.core.BufferLengthInstructionV0 instruction)
+                (instance? native.core.BufferGetCheckedInstructionV0 instruction)))
+            (core/basicblock-instructions block))))
+      blocks)))
+
+(defn blocks-use-buffer-write? [(blocks (Vec core/BasicBlock))] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (instance? native.core.BufferSetCheckedInstructionV0 instruction))
+            (core/basicblock-instructions block))))
+      blocks)))
+
 ;; Checked-arithmetic types enter the program only where a body lowered a checked
 ;; operation, so a slice without arithmetic keeps its type set — and the C type
 ;; indices its committed artifacts already name.
@@ -15300,6 +15479,9 @@
 
 (defn function-writes? [(function TypedFunctionV0)] Bool
   (core/id-in? (typedfunctionv0-effects function) (write-effect-id)))
+
+(defn function-reads? [(function TypedFunctionV0)] Bool
+  (core/id-in? (typedfunctionv0-effects function) (read-effect-id)))
 
 (defn function-allocates? [(function TypedFunctionV0)] Bool
   (core/id-in? (typedfunctionv0-effects function) (allocate-effect-id)))
@@ -15342,7 +15524,8 @@
   (some?
     (some
       (fn [(function TypedFunctionV0)] Bool
-        (or (function-writes? function) (function-allocates? function)))
+        (or (function-reads? function)
+          (or (function-writes? function) (function-allocates? function))))
       functions)))
 (defn attach-body
   [(env BodyEnvV0)
@@ -15368,10 +15551,18 @@
         (if (blocks-allocate? (readiness-blocks readiness))
           (with-effect prior-effects (allocate-effect-id))
           prior-effects)
+        (read-effects (Vec core/NativeId))
+        (if (blocks-use-buffer-read? (readiness-blocks readiness))
+          (with-effect allocated-effects (read-effect-id))
+          allocated-effects)
+        (write-effects (Vec core/NativeId))
+        (if (blocks-use-buffer-write? (readiness-blocks readiness))
+          (with-effect read-effects (write-effect-id))
+          read-effects)
         (atom-effects (Vec core/NativeId))
         (if (blocks-use-atom-state? (readiness-blocks readiness))
-          (with-effect allocated-effects (atom-state-effect-id))
-          allocated-effects)
+          (with-effect write-effects (atom-state-effect-id))
+          write-effects)
         (environment-effects (Vec core/NativeId))
         (if (blocks-use-host-environment? (readiness-blocks readiness))
           (with-effect atom-effects (host-environment-effect-id))
@@ -15562,7 +15753,9 @@
           (settle-effect
             (settle-effect
               (settle-effect
-                (settle-effect pure-settled (write-effect-id))
+                (settle-effect
+                  (settle-effect pure-settled (read-effect-id))
+                  (write-effect-id))
                 (allocate-effect-id))
               (atom-state-effect-id))
             (host-environment-effect-id))
@@ -15582,6 +15775,11 @@
   (Vec core/CapabilityDef)
   (let [(base (Vec core/CapabilityDef))
         [(core/->CapabilityDef
+           (read-capability-id)
+           (core/->ReadCapability true)
+           (arena-region-id)
+           true)
+         (core/->CapabilityDef
            (write-capability-id)
            (core/->WriteCapability true)
            (arena-region-id)
@@ -15639,7 +15837,7 @@
    (include-clock Bool)]
   (Vec core/NativeId)
   (let [(base (Vec core/NativeId))
-        [(write-capability-id) (allocate-capability-id)
+        [(read-capability-id) (write-capability-id) (allocate-capability-id)
          (atom-state-capability-id)]
         (with-environment (Vec core/NativeId))
         (if include-environment
@@ -15766,6 +15964,10 @@
     (instance? native.core.VectorType shape)
     (stages/canonical-record "vector"
       [(id-value (core/vectortype-element-type shape))])
+
+    (instance? native.core.BufferTypeV0 shape)
+    (stages/canonical-record "buffer-v0"
+      [(id-value (core/buffertypev0-element-type shape))])
 
     (instance? native.core.MapTypeV0 shape)
     (stages/canonical-record "map-v0"
@@ -16193,6 +16395,14 @@
               (->LayoutMeasureV0 pointer-bytes pointer-align true
                 "vector header reference")
 
+              (instance? native.core.BufferTypeV0 shape)
+              (let [(element-measure LayoutMeasureV0)
+                    (measure-type types (core/buffertypev0-element-type shape)
+                      (+ depth 1) abi)]
+                (->LayoutMeasureV0 pointer-bytes pointer-align
+                  (layoutmeasurev0-closed element-measure)
+                  "mutable buffer header reference"))
+
               (instance? native.core.FunctionType shape)
               (->LayoutMeasureV0 pointer-bytes pointer-align false
                 "TODO-NATIVE-FUNCTION-LAYOUT: callable signatures have no closure layout or indirect-call ABI")
@@ -16375,6 +16585,13 @@
             (measure LayoutMeasureV0) (measure-type types element 0 abi)]
         (core/->VectorShapeV0 element (layoutmeasurev0-size-bytes measure)))
 
+      (instance? native.core.BufferTypeV0 shape)
+      (let [(element core/NativeId) (core/buffertypev0-element-type shape)
+            (measure LayoutMeasureV0) (measure-type types element 0 abi)]
+        (core/->BufferShapeV0 element
+          (layoutmeasurev0-size-bytes measure)
+          (layoutmeasurev0-align-bytes measure)))
+
       (instance? native.core.MapTypeV0 shape)
       (let [(key-type core/NativeId) (core/maptypev0-key-type shape)
             (value-type core/NativeId) (core/maptypev0-value-type shape)
@@ -16467,8 +16684,12 @@
 
 
 (defn function-capabilities [(function TypedFunctionV0)] (Vec core/NativeId)
-  (let [(written (Vec core/NativeId))
-        (if (function-writes? function) [(write-capability-id)] [])
+  (let [(read (Vec core/NativeId))
+        (if (function-reads? function) [(read-capability-id)] [])
+        (written (Vec core/NativeId))
+        (if (function-writes? function)
+          (conj read (write-capability-id))
+          read)
         (allocated (Vec core/NativeId))
         (if (function-allocates? function)
           (conj written (allocate-capability-id))
@@ -16508,7 +16729,8 @@
 
 (defn function-regions [(function TypedFunctionV0)] (Vec core/NativeId)
   (let [(arena (Vec core/NativeId))
-        (if (or (function-writes? function) (function-allocates? function))
+        (if (or (function-reads? function)
+              (or (function-writes? function) (function-allocates? function)))
           [(arena-region-id)]
           [])]
     (if (function-uses-atom-state? function)
@@ -16516,8 +16738,12 @@
       arena)))
 
 (defn arena-function-tokens [(function TypedFunctionV0)] (Vec core/NativeId)
-  (let [(written (Vec core/NativeId))
-        (if (function-writes? function) [(write-capability-id)] [])
+  (let [(read (Vec core/NativeId))
+        (if (function-reads? function) [(read-capability-id)] [])
+        (written (Vec core/NativeId))
+        (if (function-writes? function)
+          (conj read (write-capability-id))
+          read)
         (capabilities (Vec core/NativeId))
         (if (function-allocates? function)
           (conj written (allocate-capability-id))
@@ -16533,7 +16759,9 @@
     (arena-region-id)
     (if (function-allocates? function)
       (allocate-capability-id)
-      (write-capability-id))
+      (if (function-writes? function)
+        (write-capability-id)
+        (read-capability-id)))
     (core/->TokenFlowV0 (arena-function-tokens function) [])))
 
 (defn atom-state-acquire-instruction
@@ -16635,7 +16863,8 @@
              (lower-function-instructions function)
              [(core/->ReturnTerminator (lower-function-return function))])])
         (arena-blocks (Vec core/BasicBlock))
-        (if (or (function-writes? function) (function-allocates? function))
+        (if (or (function-reads? function)
+              (or (function-writes? function) (function-allocates? function)))
           (with-arena-acquire entry-id (arena-acquire-instruction function)
             body-blocks)
           body-blocks)
@@ -16645,7 +16874,8 @@
             (atom-state-acquire-instruction function) arena-blocks)
           arena-blocks)
         (with-call-arenas (Vec core/BasicBlock))
-        (if (or (function-writes? function) (function-allocates? function))
+        (if (or (function-reads? function)
+              (or (function-writes? function) (function-allocates? function)))
           (attach-call-arenas blocks
             (arena-value-id (typedfunctionv0-id function)))
           blocks)]
@@ -16970,6 +17200,12 @@
     (stages/canonical-record "vector-layout"
       [(id-value (core/vectorshapev0-element-type shape))
        (str (core/vectorshapev0-stride-bytes shape))])
+
+    (instance? native.core.BufferShapeV0 shape)
+    (stages/canonical-record "buffer-layout-v0"
+      [(id-value (core/buffershapev0-element-type shape))
+       (str (core/buffershapev0-stride-bytes shape))
+       (str (core/buffershapev0-align-bytes shape))])
 
     (instance? native.core.MapShapeV0 shape)
     (stages/canonical-record "map-layout-v0"
@@ -17382,6 +17618,41 @@
       [(encode-ssa-value (core/vecreverseinstructionv0-result instruction))
        (id-value (core/vecreverseinstructionv0-source-id instruction))
        (id-value (core/vecreverseinstructionv0-arena-id instruction))])
+
+    (instance? native.core.BufferAllocateInstructionV0 instruction)
+    (stages/canonical-record "buffer-allocate-instruction-v0"
+      [(encode-ssa-value
+         (core/bufferallocateinstructionv0-result instruction))
+       (id-value (core/bufferallocateinstructionv0-length-id instruction))
+       (id-value (core/bufferallocateinstructionv0-arena-id instruction))
+       (id-value (core/bufferallocateinstructionv0-region instruction))
+       (id-value (core/bufferallocateinstructionv0-capability instruction))])
+
+    (instance? native.core.BufferLengthInstructionV0 instruction)
+    (stages/canonical-record "buffer-length-instruction-v0"
+      [(encode-ssa-value (core/bufferlengthinstructionv0-result instruction))
+       (id-value (core/bufferlengthinstructionv0-source-id instruction))
+       (id-value (core/bufferlengthinstructionv0-region instruction))
+       (id-value (core/bufferlengthinstructionv0-capability instruction))])
+
+    (instance? native.core.BufferGetCheckedInstructionV0 instruction)
+    (stages/canonical-record "buffer-get-checked-instruction-v0"
+      [(encode-ssa-value
+         (core/buffergetcheckedinstructionv0-result instruction))
+       (id-value (core/buffergetcheckedinstructionv0-source-id instruction))
+       (id-value (core/buffergetcheckedinstructionv0-index-id instruction))
+       (id-value (core/buffergetcheckedinstructionv0-region instruction))
+       (id-value (core/buffergetcheckedinstructionv0-capability instruction))])
+
+    (instance? native.core.BufferSetCheckedInstructionV0 instruction)
+    (stages/canonical-record "buffer-set-checked-instruction-v0"
+      [(encode-ssa-value
+         (core/buffersetcheckedinstructionv0-result instruction))
+       (id-value (core/buffersetcheckedinstructionv0-source-id instruction))
+       (id-value (core/buffersetcheckedinstructionv0-index-id instruction))
+       (id-value (core/buffersetcheckedinstructionv0-value-id instruction))
+       (id-value (core/buffersetcheckedinstructionv0-region instruction))
+       (id-value (core/buffersetcheckedinstructionv0-capability instruction))])
 
     (instance? native.core.VecSortInstructionV0 instruction)
     (stages/canonical-record "vec-sort-instruction-v0"
@@ -18242,6 +18513,15 @@
                 (let [(instruction core/Instruction) (nth instructions position)]
                   (recur (+ position 1) instructions
                     (cond
+                      ;; Buffer v0 is explicitly root-region-owned. Marking its
+                      ;; identity as escaping prevents the derived epoch pass
+                      ;; from silently retargeting only the arena operand while
+                      ;; leaving its frozen region/capability contract behind.
+                      (instance? native.core.BufferAllocateInstructionV0
+                        instruction)
+                      (epoch-mark-ids current
+                        [(core/instruction-result-id instruction)])
+
                       (instance? native.core.StoreInstruction instruction)
                       (epoch-mark-ids current
                         (core/instruction-ssa-refs instruction))
@@ -18788,6 +19068,24 @@
   (str code ": " (id-value (core/instruction-result-id instruction))
     " keeps the parent epoch in " (id-value (core/functiondef-id function))))
 
+(defn function-uses-buffer-v0? [(function core/FunctionDef)] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (or
+                (instance? native.core.BufferAllocateInstructionV0 instruction)
+                (or
+                  (instance? native.core.BufferLengthInstructionV0 instruction)
+                  (or
+                    (instance? native.core.BufferGetCheckedInstructionV0 instruction)
+                    (instance? native.core.BufferSetCheckedInstructionV0
+                      instruction)))))
+            (core/basicblock-instructions block))))
+      (core/functiondef-blocks function))))
+
 ;; An epoch-safe callee that declares a region may take one of the caller's
 ;; epoch arenas: its allocations then die at that epoch's close. The call's own
 ;; result must stay interior too — a call whose value leaves the function keeps
@@ -18803,6 +19101,10 @@
             (core/callinstruction-function-id instruction))]
       (and (some? callee)
         (> (count (core/functiondef-regions callee)) 0)
+        ;; Buffer v0's explicit ownership contract is root-only. Redirecting a
+        ;; buffer callee's arena to a child epoch would make the runtime handle
+        ;; disagree with its frozen region/capability operands.
+        (not (function-uses-buffer-v0? callee))
         (= true
           (get safe
             (id-value

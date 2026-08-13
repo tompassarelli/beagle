@@ -190,6 +190,10 @@
     (instance? native.core.ByteSourceGetInstructionV0 instruction) true
     (instance? native.core.ByteSourceSliceInstructionV0 instruction) true
     (instance? native.core.VecReverseInstructionV0 instruction) true
+    (instance? native.core.BufferAllocateInstructionV0 instruction) true
+    (instance? native.core.BufferLengthInstructionV0 instruction) true
+    (instance? native.core.BufferGetCheckedInstructionV0 instruction) true
+    (instance? native.core.BufferSetCheckedInstructionV0 instruction) true
     (instance? native.core.VecSortInstructionV0 instruction) true
     (instance? native.core.MapLiteralInstructionV0 instruction) true
     (instance? native.core.SetLiteralInstructionV0 instruction) true
@@ -1283,6 +1287,30 @@
       (let [(element (U core/LayoutDef Nil))
             (c17/layout-for-type layouts (core/vectorshapev0-element-type shape))]
         (if (nil? element) 1 (core/layoutdef-align-bytes element))))))
+
+(defn buffer-layout-of
+  [(layouts (Vec core/LayoutDef))
+   (buffer-type core/NativeId)] core/LayoutShapeV0
+  (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts buffer-type)]
+    (if (nil? layout)
+      (core/->BufferShapeV0 buffer-type 0 0)
+      (core/layoutdef-shape layout))))
+
+(defn buffer-stride
+  [(layouts (Vec core/LayoutDef))
+   (buffer-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (buffer-layout-of layouts buffer-type)]
+    (if (instance? native.core.BufferShapeV0 shape)
+      (core/buffershapev0-stride-bytes shape)
+      0)))
+
+(defn buffer-element-alignment
+  [(layouts (Vec core/LayoutDef))
+   (buffer-type core/NativeId)] Int
+  (let [(shape core/LayoutShapeV0) (buffer-layout-of layouts buffer-type)]
+    (if (instance? native.core.BufferShapeV0 shape)
+      (core/buffershapev0-align-bytes shape)
+      0)))
 
 (defn collection-layout-of
   [(layouts (Vec core/LayoutDef))
@@ -2497,6 +2525,50 @@
             (core/vecreverseinstructionv0-source-id instruction))
           ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
           (vector-element-alignment layouts vector-type) ");\n"))
+
+      (instance? native.core.BufferAllocateInstructionV0 instruction)
+      (let [(buffer-type core/NativeId) (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_buffer_new((native_arena *)"
+          (value-name function slots
+            (core/bufferallocateinstructionv0-arena-id instruction))
+          ", capability, "
+          (value-name function slots
+            (core/bufferallocateinstructionv0-length-id instruction))
+          ", INT64_C(" (buffer-stride layouts buffer-type) "), (size_t)"
+          (buffer-element-alignment layouts buffer-type) ");\n"))
+
+      (instance? native.core.BufferLengthInstructionV0 instruction)
+      (str "  " target " = native_buffer_length("
+        (value-name function slots
+          (core/bufferlengthinstructionv0-source-id instruction))
+        ", capability);\n")
+
+      (instance? native.core.BufferGetCheckedInstructionV0 instruction)
+      (let [(source core/NativeId)
+            (core/buffergetcheckedinstructionv0-source-id instruction)
+            (buffer-type core/NativeId) (slot-type function slots source)]
+        (str "  " target " = *(const "
+          (c17/c-type types module-index (core/ssavaluev0-type-id result))
+          " *)native_buffer_at(" (value-name function slots source)
+          ", capability, "
+          (value-name function slots
+            (core/buffergetcheckedinstructionv0-index-id instruction))
+          ", INT64_C(" (buffer-stride layouts buffer-type) "));\n"))
+
+      (instance? native.core.BufferSetCheckedInstructionV0 instruction)
+      (let [(source core/NativeId)
+            (core/buffersetcheckedinstructionv0-source-id instruction)
+            (buffer-type core/NativeId) (slot-type function slots source)
+            (value String)
+            (value-name function slots
+              (core/buffersetcheckedinstructionv0-value-id instruction))]
+        (str "  native_buffer_set(" (value-name function slots source)
+          ", capability, "
+          (value-name function slots
+            (core/buffersetcheckedinstructionv0-index-id instruction))
+          ", &" value ", INT64_C(" (buffer-stride layouts buffer-type)
+          "));\n"
+          "  " target " = " value ";\n"))
 
       (instance? native.core.VecSortInstructionV0 instruction)
       (let [(vector-type core/NativeId) (core/ssavaluev0-type-id result)

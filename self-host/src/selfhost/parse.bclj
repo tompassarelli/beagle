@@ -305,7 +305,8 @@
 
 ;; --- type constructors ---------------------------------------------------------
 (def PARAMETRIC-CTORS (Vec String)
-  ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
+  ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"
+   "Buffer"])
 
 (def CLJ-ALIASES (Map String String)
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
@@ -452,7 +453,10 @@
       (string? (nth t 0))
       (or (has-item? PARAMETRIC-CTORS (nth t 0))
         (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0)))))
-    (let [name (nth t 0) expected (get (deref USER-PARAMETRIC-ARITIES) name) actual (- (count t) 1)]
+    (let [name (nth t 0)
+          expected (or (get (deref USER-PARAMETRIC-ARITIES) name)
+                     (if (= name "Buffer") 1 nil))
+          actual (- (count t) 1)]
       (if (and (some? expected) (not (= expected actual)))
         (do (type-arity-error! name expected actual) (make-prim "Any"))
         (make-app name (mapv parse-type! (subvec t 1)))))
@@ -464,6 +468,8 @@
     (let [expected (get (deref USER-PARAMETRIC-ARITIES) t)]
       (type-arity-error! t expected 0)
       (make-prim "Any"))
+    (and (string? t) (= t "Buffer"))
+    (do (type-arity-error! t 1 0) (make-prim "Any"))
     (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?"))
     (let [base (subs t 0 (- (count t) 1))]
       (make-union [(parse-type! base) (make-prim "Nil")]))
