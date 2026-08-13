@@ -58,19 +58,40 @@ fi
 # roots, so each half resolves to this root. Idempotent symlinks under the
 # gitignored .beagle/; touches no global pkg state; the trailing default keeps
 # every OTHER collection (base, rackunit, cnf-*, …) resolving via the pkg links.
+# An exact package link already has the right identity. Replacing it would mix
+# setup-compiled package identities with symlink-scoped identities in one load.
 if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT" ]]; then
-    _bscope="$BEAGLE_ROOT/.beagle/scope"
-    if mkdir -p "$_bscope/lib" "$_bscope/test" 2>/dev/null; then
-        ln -sfn "$BEAGLE_ROOT/beagle-lib" "$_bscope/lib/beagle" 2>/dev/null || true
-        [[ -d "$BEAGLE_ROOT/beagle-test" ]] && ln -sfn "$BEAGLE_ROOT/beagle-test" "$_bscope/test/beagle" 2>/dev/null || true
-        if [[ -n "${PLTCOLLECTS:-}" ]]; then
-            export PLTCOLLECTS="$_bscope/lib:$_bscope/test:$PLTCOLLECTS"
-        else
-            export PLTCOLLECTS="$_bscope/lib:$_bscope/test:"   # trailing : => append the default search
-        fi
+    _beagle_scope_probe="$("$RACKET" -e '
+      (displayln (path->string (collection-file-path "parse.rkt" "beagle" "private")))
+      (displayln (path->string (collection-path "beagle" "tests")))
+    ' 2>/dev/null || true)"
+    _beagle_scope_lib="${_beagle_scope_probe%%$'\n'*}"
+    _beagle_scope_test="${_beagle_scope_probe#*$'\n'}"
+    _beagle_scope_lib="$(realpath "$_beagle_scope_lib" 2>/dev/null || true)"
+    _beagle_scope_test="$(realpath "$_beagle_scope_test" 2>/dev/null || true)"
+    _beagle_expected_lib="$(realpath "$BEAGLE_ROOT/beagle-lib/private/parse.rkt" 2>/dev/null || true)"
+    _beagle_expected_test="$(realpath "$BEAGLE_ROOT/beagle-test/tests" 2>/dev/null || true)"
+
+    if [[ -n "$_beagle_expected_lib" && -n "$_beagle_expected_test" \
+          && "$_beagle_scope_lib" == "$_beagle_expected_lib" \
+          && "$_beagle_scope_test" == "$_beagle_expected_test" ]]; then
         export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
+    else
+        _bscope="$BEAGLE_ROOT/.beagle/scope"
+        if mkdir -p "$_bscope/lib" "$_bscope/test" 2>/dev/null; then
+            ln -sfn "$BEAGLE_ROOT/beagle-lib" "$_bscope/lib/beagle" 2>/dev/null || true
+            [[ -d "$BEAGLE_ROOT/beagle-test" ]] && ln -sfn "$BEAGLE_ROOT/beagle-test" "$_bscope/test/beagle" 2>/dev/null || true
+            if [[ -n "${PLTCOLLECTS:-}" ]]; then
+                export PLTCOLLECTS="$_bscope/lib:$_bscope/test:$PLTCOLLECTS"
+            else
+                export PLTCOLLECTS="$_bscope/lib:$_bscope/test:"   # trailing : => append the default search
+            fi
+            export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
+        fi
+        unset _bscope
     fi
-    unset _bscope
+    unset _beagle_scope_probe _beagle_scope_lib _beagle_scope_test
+    unset _beagle_expected_lib _beagle_expected_test
 fi
 
 # --- Compiled-closure freshness gate -----------------------------------------
