@@ -10,5 +10,5 @@
 (defn greet [(name String)] String
   (str "hello " name))
 
-(defn untyped-inc [x]
+(defn untyped-inc [x] Any
   (+ x 1))
