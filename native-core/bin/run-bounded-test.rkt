@@ -52,6 +52,26 @@
     (string-contains? (bytes->string/utf-8 (get-output-bytes timeout-err))
                       "TIMEOUT status=124\n"))
 
+   (define child-two-out (open-output-bytes))
+   (define child-two-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace env child-two-out child-two-err
+                      "5" "1" "--" "/bin/sh" "-c" "exit 2")
+    2)
+   (check-equal? (file->string receipt)
+                 "subtree-reaped-v0 exit status=2\n")
+
+   (define setup-out (open-output-bytes))
+   (define setup-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace env setup-out setup-err
+                      "5" "1" "--" "/definitely/missing/beagle-command")
+    2)
+   (check-false (file-exists? receipt))
+   (check-true
+    (string-contains? (bytes->string/utf-8 (get-output-bytes setup-err))
+                      "command is unavailable"))
+
    (define reject-out (open-output-bytes))
    (define reject-err (open-output-bytes))
    (check-equal?

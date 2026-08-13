@@ -11,11 +11,12 @@
 ;;
 ;; These tests pin BOTH halves of the Phase 6.0 contract:
 ;;   * the pass FIRES correctly when enabled (warn/error, under strict mode);
-;;   * the pass is INERT when off (the shipped default) — the dark-by-default
-;;     guarantee that keeps the live consumers green.
+;;   * the pass is INERT only when explicitly off. The shipped default is
+;;     error, so a strict checked build cannot publish an impure boundary.
 
 (require rackunit
          racket/file
+         racket/set
          beagle/private/parse
          beagle/private/check
          beagle/private/diagnostic-kind)
@@ -116,9 +117,7 @@
        (type-check! pure-defn)))))
 
 ;; ============================================================================
-;; (d) DARK BY DEFAULT: with BEAGLE_PURITY off, nothing is flagged (inert).
-;;     This is the Phase 6.0 ship guarantee — the pass cannot turn into a new
-;;     diagnostic for any consumer until a later phase raises the default.
+;; (d) EXPLICITLY OFF: with BEAGLE_PURITY off, nothing is flagged (inert).
 ;; ============================================================================
 
 (test-case "off: non-`!` mutating defn produces no purity output (inert)"
@@ -360,6 +359,143 @@
    (map purity-witness-marker
         (purity-violation-witnesses (car violations)))
    '(definition-publication transient-escape)))
+
+(test-case "every namespace publication form is an ownership barrier"
+  (define publications
+    (list
+     (def-form 'value #f 'nil #f #f)
+     (defonce-form 'once #f 'nil #f)
+     (defn-form 'f '() #f #f '(nil) #f #f #f)
+     (defn-multi 'multi '() #f #f)
+     (record-form 'Record '())
+     (protocol-form 'Protocol '())
+     (defenum-form 'Enum '(:one))
+     (defunion-form 'Union '(Variant) '() #f)
+     (deferror-form 'Failure '(Broken) (hasheq 'Broken '()))
+     (defscalar-form 'Scalar 'Int '())
+     (extend-type-form 'Record '())
+     (defmulti-form 'legacy-multi 'dispatch)
+     (defmethod-form 'legacy-multi ':case '() '(nil))
+     (with-meta (hasheq) (record-form 'Wrapped '()))))
+  (for ([publication (in-list publications)])
+    (define witnesses
+      (analyze-expression-effects
+       (list (call-form 'transient (list 'xs)) publication)
+       (seteq)))
+    (check-equal? (map effect-witness-marker witnesses)
+                  '(definition-publication transient-escape)
+                  (format "publication form was not a barrier: ~v" publication))))
+
+(test-case "rescue fallback starts from every primary exceptional edge"
+  (define p
+    (prog* '(ns t.owner.rescue) '(define-mode strict) '(define-target clj)
+           '(defn freeze-then-fallback [xs] Any
+              (let [owned (transient xs)]
+                (rescue
+                 (do (persistent! owned) (throw "boom"))
+                 (persistent! owned))))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations)
+                '(freeze-then-fallback))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(persistent! transient-escape)))
+
+(test-case "implicit calls use explicit-call lexical and ownership semantics"
+  (define first-binding (let-binding 'guard! #f 1))
+  (define second-binding (let-binding 'value #f 2))
+  (define form
+    (let-form (list first-binding second-binding) '(value)))
+  (define events
+    (list
+     ;; The first binding does not shadow its own guard: events execute in the
+     ;; pre-binding scope. Multiple events at one node execute by ORDER.
+     (implicit-call-event 'later! '(1) first-binding 'pre-binding 1)
+     (implicit-call-event 'guard! '(1) first-binding 'pre-binding 0)
+     ;; Once guard! is bound, the same callee spelling is lexical and pure.
+     (implicit-call-event 'guard! '(2) second-binding 'pre-binding 0)))
+  (define witnesses
+    (analyze-expression-effects (list form) (seteq)
+                                #:implicit-call-events events))
+  (check-equal? (map effect-witness-marker witnesses) '(guard! later!)))
+
+(test-case "condp predicate invocations use the implicit-call seam"
+  (define p
+    (prog* '(ns t.condp) '(define-mode strict) '(define-target clj)
+           '(defn pred! [expected actual] Bool (= expected actual))
+           '(defn classify [value] String
+              (condp pred! value 1 "one" 2 "two" "other"))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations) '(classify))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(pred!)))
+
+(test-case "condp in binding zero resolves its predicate before that binding"
+  (define p
+    (prog* '(ns t.condp.binding-zero)
+           '(define-mode strict)
+           '(define-target clj)
+           '(defn pred! [expected actual] Bool (= expected actual))
+           '(defn classify [value] String
+              (let [pred! (condp pred! value 1 "one" "other")]
+                pred!))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations) '(classify))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(pred!)))
+
+(test-case "condp respects an already-bound lexical predicate"
+  (define p
+    (prog* '(ns t.condp.lexical)
+           '(define-mode strict)
+           '(define-target clj)
+           '(defn pred! [expected actual] Bool (= expected actual))
+           '(defn classify [pred! value] String
+              (condp pred! value 1 "one" "other"))))
+  (check-equal? (purity-violations p) '()))
+
+(test-case "protocol methods participate in global primitive shadowing"
+  (define p
+    (prog* '(ns t.protocol-shadow) '(define-mode strict) '(define-target clj)
+           '(defprotocol P (transient [self] Any))
+           '(defn expose [value] Any (persistent! (transient value)))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations) '(expose))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(persistent!)))
+
+(test-case "protocol names participate in global primitive shadowing"
+  (define p
+    (prog* '(ns t.protocol-name-shadow)
+           '(define-mode strict)
+           '(define-target clj)
+           '(defprotocol transient (value [self] Any))
+           '(defn expose [item] Any (persistent! (transient item)))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations) '(expose))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(persistent!)))
+
+(test-case "JS class names participate in global primitive shadowing"
+  (define p
+    (prog* '(ns t.class-shadow) '(define-mode strict) '(define-target js)
+           '(js/class transient)
+           '(defn expose [value] Any (persistent! (transient value)))))
+  (define violations (purity-violations p))
+  (check-equal? (map purity-violation-name violations) '(expose))
+  (check-equal?
+   (map purity-witness-marker
+        (purity-violation-witnesses (car violations)))
+   '(persistent!)))
 
 (test-case "-main is exempt: the entry-point contract name cannot carry `!`"
   (define entry

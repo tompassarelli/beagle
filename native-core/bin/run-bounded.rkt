@@ -44,6 +44,12 @@
     (fail (format "~a must be a positive integer" name)))
   parsed)
 
+(define completion-receipt (getenv "BEAGLE_BOUNDED_COMPLETION_RECEIPT"))
+(when (and completion-receipt (file-exists? completion-receipt))
+  ;; A setup failure must not leave a prior invocation's successful outcome
+  ;; looking current to the caller.
+  (delete-file completion-receipt))
+
 (define arguments (vector->list (current-command-line-arguments)))
 (unless (and (>= (length arguments) 4)
              (string=? "--" (list-ref arguments 2)))
@@ -74,9 +80,6 @@
   (or (find-executable-path command)
       (and (file-exists? command) command)
       (fail (format "command is unavailable: ~a" command))))
-(define completion-receipt (getenv "BEAGLE_BOUNDED_COMPLETION_RECEIPT"))
-(when (and completion-receipt (file-exists? completion-receipt))
-  (delete-file completion-receipt))
 (define command-label
   (let ([path (string-split (path->string executable) "/")])
     (if (null? path) command (last path))))

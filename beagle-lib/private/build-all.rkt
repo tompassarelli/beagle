@@ -42,6 +42,7 @@
 (define (build-from-stxs stxs path out-dir json? warn? in-place? export-plan)
   (let/ec reject-build
     (define type-errors 0)
+    (define hard-errors 0)
 
   (define (handle-error e [loc-stx #f])
     (cond
@@ -82,12 +83,20 @@
       (lambda (e loc-stx)
         (set! ok? #f)
         (set! type-errors (+ type-errors 1))
+        ;; --warn deliberately keeps ordinary type-error emission available to
+        ;; repair/oracle consumers. A purity diagnostic whose configured
+        ;; severity reached `error` is different: publishing that program would
+        ;; break the checked no-unmarked-effects contract.
+        (when (and (beagle-diagnostic? e)
+                   (eq? (beagle-diagnostic-kind e) 'purity-leak))
+          (set! hard-errors (+ hard-errors 1)))
         (handle-error e loc-stx))
       #:capture-types? #t)  ; emit-path: feed type table to emit-program below
     ;; Each check error has already been reported. Stop before lint/emission
     ;; without throwing a second generic exception that would duplicate and
     ;; erase the structured diagnostic in JSON mode.
-    (unless (or ok? warn?) (reject-build #f))
+    (unless (or ok? (and warn? (zero? hard-errors)))
+      (reject-build #f))
 
     (unless (getenv "BEAGLE_NO_LINT")
       (lint-program! prog))
@@ -120,7 +129,8 @@
 
     (if (and warn? (not ok?))
         (begin
-          (eprintf "  ~a -> ~a [~a warning(s)]\n" path (path->string out-path) type-errors)
+          (eprintf "  ~a -> ~a [~a warning(s)]\n"
+                   path (path->string out-path) type-errors)
           #t)
         (begin
           (eprintf "  ~a -> ~a\n" path (path->string out-path))

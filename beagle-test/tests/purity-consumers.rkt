@@ -130,3 +130,64 @@
       (check-false
        (file-exists? (build-path out-dir "batch" "purity.js"))))
     (lambda () (delete-directory/files scratch #:must-exist? #f))))
+
+(test-case "build-all --warn cannot publish a purity error"
+  (define scratch
+    (make-temporary-file "beagle-build-all-purity-warn-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define source (build-path scratch "src" "purity.bjs"))
+      (define out-dir (build-path scratch "out"))
+      (write-source!
+       source
+       (string-append
+        "#lang beagle/js\n"
+        "(ns batch.purity.warn)\n"
+        "(defn save [(cell (Atom Int)) (value Int)] Int\n"
+        "  (do (reset! cell value) value))\n"))
+      (define err (open-output-string))
+      (define status
+        (let/ec return
+          (parameterize ([current-error-port err]
+                         [current-purity-enforcement 'error]
+                         [exit-handler return])
+            (run-build-all
+             (list (path->string source) "--warn"
+                   "--out" (path->string out-dir))))
+          0))
+      (check-equal? status 1)
+      (check-regexp-match #rx"purity leak" (get-output-string err))
+      (check-false
+       (file-exists? (build-path out-dir "batch" "purity" "warn.js"))))
+    (lambda () (delete-directory/files scratch #:must-exist? #f))))
+
+(test-case "build-all --warn still publishes ordinary type-error output"
+  (define scratch
+    (make-temporary-file "beagle-build-all-type-warn-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define source (build-path scratch "src" "warn.bjs"))
+      (define out-dir (build-path scratch "out"))
+      (define output (build-path out-dir "batch" "type" "warn.js"))
+      (write-source!
+       source
+       (string-append
+        "#lang beagle/js\n"
+        "(ns batch.type.warn)\n"
+        "(def answer Int \"wrong\")\n"))
+      (define err (open-output-string))
+      (define status
+        (let/ec return
+          (parameterize ([current-error-port err]
+                         [current-purity-enforcement 'error]
+                         [exit-handler return])
+            (run-build-all
+             (list (path->string source) "--warn"
+                   "--out" (path->string out-dir))))
+          0))
+      (check-equal? status 0)
+      (check-regexp-match #rx"warning\\(s\\)" (get-output-string err))
+      (check-true (file-exists? output)))
+    (lambda () (delete-directory/files scratch #:must-exist? #f))))

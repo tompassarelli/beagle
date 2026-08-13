@@ -10,8 +10,8 @@
 # invocation can't dump ns-shaped dirs into a tracked tree. Override the
 # default root with BEAGLE_OUT.
 #
-# --warn: emit Clojure despite type errors (diagnostics printed as warnings).
-#         Parse errors and unresolvable bindings still fail.
+# --warn: emit despite ordinary type errors (diagnostics printed as warnings).
+#         Parse errors, unresolvable bindings, and hard purity errors still fail.
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"

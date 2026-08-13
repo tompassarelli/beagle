@@ -81,7 +81,7 @@
              "annotation-parse.rkt"   ; every annotatable position + the four migration diagnostics
              "annotation-printer.rkt" ; glue/no-break/round-trip across all four beagle-source writers
              "annotation-macros.rkt"  ; dynamic typed-binding construction (template + `ann` constructor)
-             "purity.rkt"               ; `!`-purity enforcement (Phase 6, dark by default)
+             "purity.rkt"               ; `!`-purity enforcement (Phase 6, hard by default)
              "purity-consumers.rkt"     ; checked projections keep locations; daemon emission fails closed
              "quasi-quote-reader.rkt"
              "reader-conditionals.rkt"

@@ -7055,12 +7055,12 @@
 ;; module boundary and introduces no effect rows; the converse (a `!`-named
 ;; defn with a pure body) is allowed.
 ;;
-;; GATING (so it never breaks the live consumers):
+;; GATING:
 ;;   * mode gate    — runs only under (define-mode strict);
 ;;   * env/feature flag — current-purity-enforcement, seeded from BEAGLE_PURITY,
-;;     default 'off. 'off short-circuits the whole pass: it ships DARK.
-;;   * severity is profile-keyed: profile < 3 => warn-only (never blocks the
-;;     build); profile >= 3 => hard error via raise-diag. 'off overrides both.
+;;     defaults to 'error. 'off explicitly disables the pass.
+;;   * an explicit 'error is a hard diagnostic at every checking profile;
+;;     explicit 'warn remains advisory below profile 3 and escalates at 3.
 
 (define (bang-name? sym)
   (and (symbol? sym)
@@ -7074,6 +7074,7 @@
 (struct purity-violation (name definition-stx witnesses) #:transparent)
 (struct purity-definition (name clauses node definition-stx) #:transparent)
 (struct effect-witness (marker node) #:transparent)
+(struct implicit-call-event (callee arguments node phase order) #:transparent)
 (struct purity-binding (id origins lambda-depth) #:transparent)
 (struct purity-state (scope owners lambda-depth) #:transparent)
 
@@ -7081,6 +7082,83 @@
   (set 'assoc! 'conj! 'dissoc! 'disj! 'pop!))
 (define transient-family
   (set-add transient-mutators 'persistent!))
+
+;; Runtime namespace publication is broader than value binding: extend-type and
+;; defmethod mutate published dispatch tables even though they introduce no
+;; callable name. Keep this closed list table-driven so every AST definition
+;; family is audited together, including legacy/macro-produced forms whose
+;; surface syntax is no longer accepted.
+(define namespace-publication-predicates
+  (list def-form? defonce-form? defn-form? defn-multi?
+        record-form? protocol-form? defenum-form? defunion-form?
+        deferror-form? defscalar-form? extend-type-form?
+        defmulti-form? defmethod-form?))
+
+(define (namespace-publication-form? value)
+  (define form (unwrap-definition-form value))
+  (for/or ([predicate (in-list namespace-publication-predicates)])
+    (predicate form)))
+
+(define (record-value-bindings name fields target)
+  (define spelling (symbol->string name))
+  (define lower (string-downcase spelling))
+  (append
+   (list (string->symbol (string-append "->" spelling)))
+   (if (eq? target 'clj)
+       (list (string->symbol (string-append "map->" spelling)))
+       '())
+   (for/list ([field (in-list fields)])
+     (string->symbol
+      (string-append lower "-" (symbol->string (param-name field)))))))
+
+;; Every callable/value binding introduced by one top-level definition. Type
+;; names are intentionally absent: they do not shadow expression primitives.
+(define (definition-value-bindings raw-form target)
+  (define form (unwrap-definition-form raw-form))
+  (cond
+    [(def-form? form) (list (def-form-name form))]
+    [(defonce-form? form) (list (defonce-form-name form))]
+    [(defn-form? form) (list (defn-form-name form))]
+    [(defn-multi? form) (list (defn-multi-name form))]
+    [(record-form? form)
+     (record-value-bindings (record-form-name form)
+                            (record-form-fields form) target)]
+    [(protocol-form? form)
+     (cons (protocol-form-name form)
+           (map protocol-method-name (protocol-form-methods form)))]
+    [(defmulti-form? form) (list (defmulti-form-name form))]
+    [(defenum-form? form)
+     (list
+      (string->symbol
+       (string-append (symbol->string (defenum-form-name form)) "-values")))]
+    [(defunion-form? form)
+     (if (defunion-form-member-fields form)
+         (append-map
+          (lambda (member)
+            (record-value-bindings
+             member
+             (hash-ref (defunion-form-member-fields form) member '())
+             target))
+          (defunion-form-members form))
+         '())]
+    [(deferror-form? form)
+     (append-map
+      (lambda (member)
+        (record-value-bindings
+         member
+         (hash-ref (deferror-form-member-fields form) member '())
+         target))
+      (deferror-form-members form))]
+    [(defscalar-form? form)
+     (define spelling (symbol->string (defscalar-form-name form)))
+     (list (string->symbol (string-append "->" spelling))
+           (string->symbol
+            (string-append (string-downcase spelling) "-value")))]
+    ;; A top-level JS class is a lexical module binding. Nested classes remain
+    ;; local and are therefore not namespace-publication effects, but the
+    ;; module binding still shadows a primitive at every function body.
+    [(jst-class? form) (list (jst-class-name form))]
+    [else '()]))
 
 (define (pattern-bound-names pattern)
   (cond
@@ -7103,8 +7181,17 @@
                                     #:params [params '()]
                                     #:rest-param [rest-param #f]
                                     #:global-bindings [global-bindings (seteq)]
+                                    #:implicit-call-events [implicit-events '()]
                                     #:result-escapes? [result-escapes? #t])
   (define witnesses '())
+  ;; Event producers own evaluation placement. They attach one or more ordered
+  ;; events to the exact containing AST node; this analyzer owns lexical scope,
+  ;; primitive shadowing, fixed-point edges, and transient argument semantics.
+  (define implicit-events-by-node
+    (for/fold ([index (hasheq)]) ([event (in-list implicit-events)])
+      (hash-update index (implicit-call-event-node event)
+                   (lambda (prior) (cons event prior)) '())))
+  (define current-exception-sink (make-parameter #f))
   (define (note! marker node)
     (unless (for/or ([prior (in-list witnesses)])
               (eq? marker (effect-witness-marker prior)))
@@ -7192,7 +7279,9 @@
       (define-values (after-value origins)
         (analyze (let-binding-value binding) next))
       (define after-defaults (analyze-defaults after-value target))
-      (bind-target after-defaults target origins binding #:acquire? acquire?)))
+      (define after-events
+        (analyze-implicit-events binding 'pre-binding after-defaults))
+      (bind-target after-events target origins binding #:acquire? acquire?)))
   ;; Only a simple-symbol let/loop binding may acquire a fresh transient.
   ;; Every other binding surface receives an ordinary value, so an owner on
   ;; its RHS escapes rather than silently widening the ownership grammar.
@@ -7203,13 +7292,17 @@
         (analyze (let-binding-value binding) next))
       (define escaped (escape-origins after-value origins binding))
       (define after-defaults (analyze-defaults escaped target))
-      (bind-target after-defaults target (seteq) binding)))
+      (define after-events
+        (analyze-implicit-events binding 'pre-binding after-defaults))
+      (bind-target after-events target (seteq) binding)))
   (define (bind-params state ps rest-p)
     (for/fold ([next state])
               ([p (in-list (if rest-p (append ps (list rest-p)) ps))])
       (define target (param-binding-target p))
       (define with-defaults (analyze-defaults next target))
-      (bind-target with-defaults target (seteq) p)))
+      (define after-events
+        (analyze-implicit-events p 'pre-binding with-defaults))
+      (bind-target after-events target (seteq) p)))
   (define (analyze-branches branches state)
     (define results
       (for/list ([branch (in-list branches)])
@@ -7287,9 +7380,10 @@
      (for/fold ([next state]) ([child (in-list children)])
        (analyze-and-escape child next value))
      (seteq)))
-  (define (analyze-call call state)
-    (define fn (call-form-fn call))
-    (define args (call-form-args call))
+  (define (record-exception-state! state)
+    (define sink (current-exception-sink))
+    (when sink (sink state)))
+  (define (analyze-call-parts fn args call-site state)
     (define lexically-shadowed?
       (and (symbol? fn) (hash-has-key? (purity-state-scope state) fn)))
     (define primitive-shadowed?
@@ -7299,10 +7393,12 @@
       [(and (eq? fn 'transient) (not primitive-shadowed?))
        (define after-args
          (for/fold ([next state]) ([arg (in-list args)])
-           (analyze-and-escape arg next call)))
+           (analyze-and-escape arg next call-site)))
        (define origin (gensym 'transient-owner))
-       (values (set-origin-status after-args (seteq origin) 'live)
-               (seteq origin))]
+       (define result-state
+         (set-origin-status after-args (seteq origin) 'live))
+       (record-exception-state! result-state)
+       (values result-state (seteq origin))]
       [(and (symbol? fn) (set-member? transient-family fn)
             (not primitive-shadowed?))
        (define-values (after-owner owner-origins)
@@ -7310,22 +7406,30 @@
              (analyze (car args) state)
              (values state (seteq))))
        (define valid-owner? (origins-live? after-owner owner-origins))
-       (unless valid-owner? (note! fn call))
+       (unless valid-owner? (note! fn call-site))
        (define after-rest
          (for/fold ([next after-owner]) ([arg (in-list (if (pair? args) (cdr args) '()))])
-           (analyze-and-escape arg next call)))
+           (analyze-and-escape arg next call-site)))
        (cond
          [(not valid-owner?)
-          (values (escape-origins after-rest owner-origins call) (seteq))]
+          (define result-state
+            (escape-origins after-rest owner-origins call-site))
+          (record-exception-state! result-state)
+          (values result-state (seteq))]
          [(eq? fn 'persistent!)
-          (values (set-origin-status after-rest owner-origins 'dead) (seteq))]
-         [else (values after-rest owner-origins)])]
+          (define result-state
+            (set-origin-status after-rest owner-origins 'dead))
+          (record-exception-state! result-state)
+          (values result-state (seteq))]
+         [else
+          (record-exception-state! after-rest)
+          (values after-rest owner-origins)])]
       [else
        (when (and (not lexically-shadowed?)
                   (or (bang-name? fn)
                       (and (symbol? fn)
                            (set-member? effectful-defs fn))))
-         (note! fn call))
+         (note! fn call-site))
        (define after-callee
          ;; A symbolic callee is normally a module/global name, but a lexical
          ;; binding in function position is still an evaluated value. If that
@@ -7333,11 +7437,39 @@
          ;; owner to an unknown callee just like passing it as an argument.
          (if (and (symbol? fn) (not lexically-shadowed?))
              state
-             (analyze-and-escape fn state call)))
-       (values
-        (for/fold ([next after-callee]) ([arg (in-list args)])
-          (analyze-and-escape arg next call))
-        (seteq))]))
+             (analyze-and-escape fn state call-site)))
+       (define result-state
+         (for/fold ([next after-callee]) ([arg (in-list args)])
+           (analyze-and-escape arg next call-site)))
+       (record-exception-state! result-state)
+       (values result-state (seteq))]))
+  (define (analyze-call call state)
+    (analyze-call-parts (call-form-fn call) (call-form-args call) call state))
+  (define (analyze-implicit-event event state)
+    (analyze-call-parts (implicit-call-event-callee event)
+                        (implicit-call-event-arguments event)
+                        (implicit-call-event-node event)
+                        state))
+  (define (analyze-implicit-events node phase state [additional '()])
+    (define events
+      (sort
+       (append
+        (filter (lambda (event)
+                  (eq? (implicit-call-event-phase event) phase))
+                (hash-ref implicit-events-by-node node '()))
+        additional)
+       < #:key implicit-call-event-order))
+    (for/fold ([next state]) ([event (in-list events)])
+      (define-values (after origins) (analyze-implicit-event event next))
+      (escape-origins after origins (implicit-call-event-node event))))
+  (define (analyze-with-exception-states thunk)
+    (define exceptional '())
+    (define-values (state origins)
+      (parameterize ([current-exception-sink
+                      (lambda (edge-state)
+                        (set! exceptional (cons edge-state exceptional)))])
+        (thunk)))
+    (values state origins (reverse exceptional)))
   (define (analyze value state)
     (cond
       [(quoted? value) (values state (seteq))]
@@ -7405,11 +7537,20 @@
          (analyze-and-escape (condp-form-test-expr value) after-predicate value))
        (define-values (fallthrough results)
          (for/fold ([next after-target] [out '()])
-                   ([clause (in-list (condp-form-clauses value))])
+                   ([clause (in-list (condp-form-clauses value))]
+                    [order (in-naturals)])
            (define after-test (analyze-and-escape (car clause) next value))
+           (define after-call
+             (analyze-implicit-events
+              value 'clause-predicate after-test
+              (list
+               (implicit-call-event
+                (condp-form-pred-fn value)
+                (list (car clause) (condp-form-test-expr value))
+                value 'clause-predicate order))))
            (define result
-             (call-with-values (lambda () (analyze (cdr clause) after-test)) list))
-           (values after-test (cons result out))))
+             (call-with-values (lambda () (analyze (cdr clause) after-call)) list))
+           (values after-call (cons result out))))
        (define all-results
          (if (condp-form-default value)
              (cons (call-with-values
@@ -7427,12 +7568,19 @@
           (list branch))
         state)]
       [(rescue-form? value)
+       (define-values (primary-state primary-origins exceptional-states)
+         (analyze-with-exception-states
+          (lambda () (analyze (rescue-form-expr value) state))))
+       ;; The fallback begins after every potentially throwing point in the
+       ;; primary, never from its pre-evaluation state. Including the normal
+       ;; result keeps fallback effects checked even for a statically trivial
+       ;; primary while preserving the conservative owner join.
+       (define fallback-base
+         (join-states state (cons primary-state exceptional-states)))
        (define fallback-state
          (if (rescue-form-err-name value)
-             (bind-name state (rescue-form-err-name value) (seteq))
-             state))
-       (define-values (primary-state primary-origins)
-         (analyze (rescue-form-expr value) state))
+             (bind-name fallback-base (rescue-form-err-name value) (seteq))
+             fallback-base))
        (define-values (fallback-result fallback-origins)
          (analyze (rescue-form-fallback value) fallback-state))
        (values
@@ -7542,13 +7690,16 @@
        (analyze-branches branches after-test)]
       [(try-form? value)
        (define outer-scope (purity-state-scope state))
-       (define normal
-         (call-with-values
-          (lambda () (analyze-sequence (try-form-body value) state)) list))
+       (define-values (normal-state normal-origins exceptional-states)
+         (analyze-with-exception-states
+          (lambda () (analyze-sequence (try-form-body value) state))))
+       (define normal (list normal-state normal-origins))
+       (define catch-base
+         (join-states state (cons normal-state exceptional-states)))
        (define catches
          (for/list ([clause (in-list (try-form-catches value))])
            (define caught
-             (bind-name (car normal) (catch-clause-name clause) (seteq)))
+             (bind-name catch-base (catch-clause-name clause) (seteq)))
            (call-with-values
             (lambda () (analyze-sequence (catch-clause-body clause) caught)) list)))
        (define branch-results (cons normal catches))
@@ -7578,8 +7729,7 @@
        (values (join-states after-target (map car results))
                (for/fold ([origins (seteq)]) ([result (in-list results)])
                  (set-union origins (cadr result))))]
-      [(or (defn-form? value) (defn-multi? value)
-           (def-form? value) (defonce-form? value))
+      [(namespace-publication-form? value)
        (note! 'definition-publication value)
        ;; A nested publishing definition is itself an effect and may retain
        ;; any live lexical owner. Kill those owners without reflectively
@@ -7670,13 +7820,11 @@
   (define global-bindings
     (for/fold ([names (list->seteq (hash-keys (program-externs prog)))])
               ([raw-form (in-list (program-forms prog))])
-      (define form (unwrap-definition-form raw-form))
-      (cond
-        [(defn-form? form) (set-add names (defn-form-name form))]
-        [(defn-multi? form) (set-add names (defn-multi-name form))]
-        [(def-form? form) (set-add names (def-form-name form))]
-        [(defonce-form? form) (set-add names (defonce-form-name form))]
-        [else names])))
+      (for/fold ([next names])
+                ([name (in-list
+                        (definition-value-bindings
+                         raw-form (program-target prog)))])
+        (set-add next name))))
   (define effectful-defs (derive-effectful-defs defs global-bindings))
   (define src-table (program-src-table prog))
   (for/list ([d (in-list defs)]
@@ -8112,6 +8260,7 @@
          purity-violations
          analyze-expression-effects
          (struct-out effect-witness)
+         (struct-out implicit-call-event)
          (struct-out purity-witness)
          (struct-out purity-violation)
          beagle-diagnostic beagle-diagnostic?

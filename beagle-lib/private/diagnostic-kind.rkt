@@ -106,7 +106,8 @@
 ;;                        to compile-time-evaluate / reorder); a leak breaks
 ;;                        the static-reasoning guarantee. Type-error: the form
 ;;                        parses fine; the rejection is a name/body
-;;                        consistency check. Off by default (BEAGLE_PURITY).
+;;                        consistency check. Hard by default; BEAGLE_PURITY
+;;                        may explicitly select off or warn.
 ;;   regex-contract     : a regex construction or consumer cannot preserve the
 ;;                        checked Regex match-shape contract.
 ;;   dynamic-contract   : a closed Dyn declaration or use violates its finite

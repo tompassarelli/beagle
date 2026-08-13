@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Materialize the frozen Atom fixture through C17, prove all Native Core
 # obligations, prove QBE's explicit refusal, then compile and run the result.
+# Exit 1 is semantic rejection, 2 is supervisor/setup failure, and 124 is a
+# phase deadline after the supervised subtree has been reaped.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -11,6 +13,60 @@ scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-atom.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 mkdir -p "$scratch/source-art" "$scratch/refusal-art"
+exec 3>&2
+
+# Every phase that can launch a compiler, materializer, native toolchain, or
+# generated program runs as a supervised PID-namespace subtree. A receipt
+# proves the supervisor reached cleanup: no receipt is setup failure, while a
+# receipt distinguishes its deadline from the child's own semantic exit code.
+source "$repo/bin/_beagle-racket"
+supervisor="$repo/native-core/bin/run-bounded.rkt"
+unshare_bin="$(command -v unshare || true)"
+if [[ -z "$unshare_bin" ]]; then
+  echo "drive.sh: Atom validation SETUP-FAILURE status=2: unshare unavailable" >&2
+  exit 2
+fi
+
+run_phase() {
+  local phase="$1"
+  local deadline="$2"
+  shift 2
+  local receipt="$scratch/$phase.receipt"
+  local status
+  local outcome
+
+  echo "drive.sh: $phase START deadline=${deadline}s" >&3
+  set +e
+  BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
+    "$unshare_bin" --user --map-current-user --pid --fork --kill-child \
+      --forward-signals "$RACKET" "$supervisor" "$deadline" 5 -- "$@"
+  status=$?
+  set -e
+
+  if [[ ! -f "$receipt" ]]; then
+    echo "drive.sh: $phase SETUP-FAILURE status=2 observed=$status" >&3
+    exit 2
+  fi
+  outcome="$(<"$receipt")"
+  if [[ "$outcome" == "subtree-reaped-v0 timeout status=124" && \
+        "$status" -eq 124 ]]; then
+    echo "drive.sh: $phase TIMEOUT status=124" >&3
+    exit 124
+  fi
+  if [[ "$outcome" =~ ^subtree-reaped-v0\ exit\ status=([0-9]+)$ && \
+        "${BASH_REMATCH[1]}" -eq "$status" ]]; then
+    if [[ "$status" -eq 0 ]]; then
+      echo "drive.sh: $phase PASS status=0" >&3
+      return 0
+    else
+      echo "drive.sh: $phase SEMANTIC-REJECTION status=1 child-status=$status" >&3
+      return 1
+    fi
+  fi
+
+  echo "drive.sh: $phase SETUP-FAILURE status=2: invalid outcome '$outcome' observed=$status" >&3
+  exit 2
+}
 
 expect-purity-rejection() {
   local name="$1"
@@ -19,8 +75,8 @@ expect-purity-rejection() {
   shift 3
   local check_log="$scratch/$name-check.log"
   local build_log="$scratch/$name-build.log"
-  if BEAGLE_PURITY=error "$repo/bin/beagle" check --agent "$source" \
-      >"$check_log" 2>&1; then
+  if run_phase "$name-check" 60 env BEAGLE_PURITY=error \
+      "$repo/bin/beagle" check --agent "$source" >"$check_log" 2>&1; then
     echo "drive.sh: checker admitted $name" >&2
     exit 1
   fi
@@ -32,8 +88,9 @@ expect-purity-rejection() {
   for expected in "$@"; do
     rg -q "$expected" "$check_log"
   done
-  if BEAGLE_PURITY=error "$repo/bin/beagle" build --materializer c17 \
-      --out "$scratch/$name-art" "$source" >"$build_log" 2>&1; then
+  if run_phase "$name-build" 180 env BEAGLE_PURITY=error \
+      "$repo/bin/beagle" build --materializer c17 \
+        --out "$scratch/$name-art" "$source" >"$build_log" 2>&1; then
     echo "drive.sh: Core build admitted $name" >&2
     exit 1
   fi
@@ -47,21 +104,26 @@ expect-purity-rejection "transitive-purity-leak" \
   "purity_transitive_leak.bgl:4.*purity leak: 'save'.*store" \
   "purity_transitive_leak.bgl:7.*purity leak: 'store'.*reset!"
 
-BEAGLE_PURITY=error "$repo/bin/beagle" build --materializer c17 \
-  --out "$scratch/purity-valid-art" "$here/purity_valid.bgl"
+run_phase purity-valid-build 180 env BEAGLE_PURITY=error \
+  "$repo/bin/beagle" build --materializer c17 \
+    --out "$scratch/purity-valid-art" "$here/purity_valid.bgl"
 rg -q '^result PASS$' "$scratch/purity-valid-art/report.txt"
-"$repo/bin/beagle-ast" "$here/atom_mutations.bclj" \
+run_phase atom-mutations-ast 60 "$repo/bin/beagle-ast" \
+  "$here/atom_mutations.bclj" \
   >"$scratch/atom_mutations.ast.json"
-"$repo/bin/beagle-ast" "$here/atom_mutation_refusals.bclj" \
+run_phase atom-refusals-ast 60 "$repo/bin/beagle-ast" \
+  "$here/atom_mutation_refusals.bclj" \
   >"$scratch/atom_mutation_refusals.ast.json"
-bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+run_phase atom-mutations-facts 60 bb \
+  "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   --input "$scratch/atom_mutations.ast.json=beagle:native-core/validation/atom/atom_mutations.bclj" \
   --output "$scratch/atom_mutations.facts"
-bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+run_phase atom-refusals-facts 60 bb \
+  "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   --input "$scratch/atom_mutation_refusals.ast.json=beagle:native-core/validation/atom/atom_mutation_refusals.bclj" \
   --output "$scratch/atom_mutation_refusals.facts"
 
-"$repo/bin/beagle-build-all" \
+run_phase native-compiler-build 300 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
@@ -100,7 +162,7 @@ sed -i 's/\[native\.qbe :as qbe\]/[native.qbe :as qbe :refer :all]/' \
 sed -i "4i(import '[native.qbe $qbe_records])" \
   "$scratch/out/native/qbe_validation_corpus.clj"
 
-bb -cp "$scratch/out" -e "
+run_phase atom-source-materialization 180 bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$scratch/source-report.txt\"
   (native.body-slice/emit-slice!
@@ -131,7 +193,7 @@ rg -q 'TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure nat
   "$scratch/refusal-report.txt"
 
 mkdir -p "$scratch/c"
-bb -cp "$scratch/out" -e "
+run_phase atom-native-validation 180 bb -cp "$scratch/out" -e "
 (require 'native.body-c17 'native.core 'native.obligations 'native.qbe-validation-corpus)
 (let [program native.qbe-validation-corpus/atom-program
       verdicts [(native.obligations/valid-ssa program)
@@ -188,10 +250,13 @@ int main(void) {
 printf '%s' "$main_source" >"$scratch/c/main.c"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
-(cd "$scratch/source-art" && gcc "${strict[@]}" -I"$repo/native-core/shim" \
-  -c module_0.c -o source_mutations.o)
-(cd "$scratch/c" && gcc "${strict[@]}" -o atom_gcc \
-  module_4.c native_shim.c main.c && ./atom_gcc)
+run_phase source-mutations-gcc 60 gcc "${strict[@]}" \
+  -I"$repo/native-core/shim" -c "$scratch/source-art/module_0.c" \
+  -o "$scratch/source-art/source_mutations.o"
+run_phase atom-gcc-link 60 gcc "${strict[@]}" -I"$scratch/c" \
+  -o "$scratch/c/atom_gcc" "$scratch/c/module_4.c" \
+  "$scratch/c/native_shim.c" "$scratch/c/main.c"
+run_phase atom-gcc-run 30 "$scratch/c/atom_gcc"
 echo "drive.sh: nine obligations + QBE refusal + gcc strict C17 run ok"
 
 clang_bin="$(command -v clang || true)"
@@ -200,10 +265,13 @@ if [[ -z "$clang_bin" ]]; then
     sort -V | tail -1)"
 fi
 if [[ -n "$clang_bin" ]]; then
-  (cd "$scratch/source-art" && "$clang_bin" "${strict[@]}" \
-    -I"$repo/native-core/shim" -c module_0.c -o source_mutations_clang.o)
-  (cd "$scratch/c" && "$clang_bin" "${strict[@]}" -o atom_clang \
-    module_4.c native_shim.c main.c && ./atom_clang)
+  run_phase source-mutations-clang 60 "$clang_bin" "${strict[@]}" \
+    -I"$repo/native-core/shim" -c "$scratch/source-art/module_0.c" \
+    -o "$scratch/source-art/source_mutations_clang.o"
+  run_phase atom-clang-link 60 "$clang_bin" "${strict[@]}" -I"$scratch/c" \
+    -o "$scratch/c/atom_clang" "$scratch/c/module_4.c" \
+    "$scratch/c/native_shim.c" "$scratch/c/main.c"
+  run_phase atom-clang-run 30 "$scratch/c/atom_clang"
   echo "drive.sh: clang strict C17 run ok"
 else
   echo "drive.sh: clang not found — second frontend not exercised" >&2
