@@ -34,8 +34,8 @@ qbe_bin="$(find_qbe || true)"
 
 "$repo/bin/beagle-ast" "$here/fixture.bclj" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json=beagle:native-core/validation/slice-bitwise-roots/fixture.bclj" \
-  "$scratch/fixture.facts"
+  --input "$scratch/fixture.ast.json=beagle:native-core/validation/slice-bitwise-roots/fixture.bclj" \
+  --output "$scratch/fixture.facts"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \

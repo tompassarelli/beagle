@@ -960,8 +960,7 @@
 
 (defn source-type-spelling
   [(index SourceIndexV0) (source-type core/NativeId)] (U String Nil)
-  (let [(name (U String Nil)) (index-first-text index source-type "name")]
-    (if (some? name) name (index-first-text index source-type "f0"))))
+  (index-first-text index source-type "name"))
 
 (defn primitive-resolution
   [(index SourceIndexV0)
@@ -1030,9 +1029,8 @@
 
 (defn source-type-arguments
   [(index SourceIndexV0) (source-type core/NativeId)] (Vec core/NativeId)
-  (let [(direct (U core/NativeId Nil)) (index-first-object index source-type "args")
-        (legacy (U core/NativeId Nil)) (index-first-object index source-type "f1")
-        (arguments (U core/NativeId Nil)) (if (some? direct) direct legacy)]
+  (let [(arguments (U core/NativeId Nil))
+        (index-first-object index source-type "args")]
     (if (nil? arguments) [] (index-sequence-items index arguments))))
 
 (defn resolution-ids [(resolutions (Vec TypeResolutionV0))] (Vec core/NativeId)
@@ -1395,16 +1393,11 @@
 
 (defn field-name-at
   [(index SourceIndexV0) (source-field core/NativeId)] (U String Nil)
-  (let [(name (U String Nil)) (index-first-text index source-field "name")]
-    (if (some? name) name (index-first-text index source-field "f0"))))
+  (index-first-text index source-field "name"))
 
 (defn field-type-at
   [(index SourceIndexV0) (source-field core/NativeId)] (U core/NativeId Nil)
-  (let [(annotation (U core/NativeId Nil))
-        (index-first-object index source-field "ann")]
-    (if (some? annotation)
-      annotation
-      (index-first-object index source-field "f1"))))
+  (index-first-object index source-field "ann"))
 
 (defn record-field-items
   [(index SourceIndexV0) (source-record core/NativeId)] (Vec core/NativeId)
@@ -1590,13 +1583,11 @@
 (defn parameter-name-at
   [(index SourceIndexV0) (source-parameter core/NativeId) (position Int)] String
   (let [(name (U String Nil)) (index-first-text index source-parameter "name")
-        (legacy (U String Nil)) (index-first-text index source-parameter "f0")
         (target (U core/NativeId Nil))
         (parameter-target-at index source-parameter)]
     (cond
       (some? target) (aggregate-parameter-name position)
       (some? name) name
-      (some? legacy) legacy
       :else (str "parameter-" (id-value source-parameter)))))
 
 (defn function-parameter-items
@@ -2990,13 +2981,11 @@
 (defn source-parameter-bound-names
   [(index SourceIndexV0) (source-parameter core/NativeId)] (Vec String)
   (let [(name (U String Nil)) (index-first-text index source-parameter "name")
-        (legacy (U String Nil)) (index-first-text index source-parameter "f0")
         (target (U core/NativeId Nil))
         (parameter-target-at index source-parameter)]
     (cond
       (some? target) (binding-target-bound-names index target)
       (some? name) [name]
-      (some? legacy) [legacy]
       :else [])))
 
 (defn source-parameters-bound-names
@@ -20194,7 +20183,7 @@
         (parameters core/NativeId) (fixture-marker-id "parameters")
         (parameter core/NativeId) (fixture-marker-id "parameter")
         (text-values (Vec String))
-        ["form-kind" "name" "fields" "f0" "f1" "params" "ret"
+        ["form-kind" "name" "fields" "f0" "ann" "params" "ret"
          "native-op" "abi-symbol" "record" "seq" "param" "type-prim"
          "defn" "FixtureBox" "value" "Int" "fixture-probe-identity"
          "identity" "fixture_probe_identity"]
@@ -20212,10 +20201,10 @@
          (fixture-fact-node 3 fields "form-kind" (fixture-text-id "seq"))
          (fixture-fact-node 4 fields "f0" field)
          (fixture-fact-node 5 field "form-kind" (fixture-text-id "param"))
-         (fixture-fact-node 6 field "f0" (fixture-text-id "value"))
-         (fixture-fact-node 7 field "f1" int-type)
+         (fixture-fact-node 6 field "name" (fixture-text-id "value"))
+         (fixture-fact-node 7 field "ann" int-type)
          (fixture-fact-node 8 int-type "form-kind" (fixture-text-id "type-prim"))
-         (fixture-fact-node 9 int-type "f0" (fixture-text-id "Int"))
+         (fixture-fact-node 9 int-type "name" (fixture-text-id "Int"))
          (fixture-fact-node 10 function "form-kind" (fixture-text-id "defn"))
          (fixture-fact-node 11 function "name"
            (fixture-text-id "fixture-probe-identity"))
@@ -20227,8 +20216,8 @@
          (fixture-fact-node 16 parameters "form-kind" (fixture-text-id "seq"))
          (fixture-fact-node 17 parameters "f0" parameter)
          (fixture-fact-node 18 parameter "form-kind" (fixture-text-id "param"))
-         (fixture-fact-node 19 parameter "f0" (fixture-text-id "value"))
-         (fixture-fact-node 20 parameter "f1" int-type)]
+         (fixture-fact-node 19 parameter "name" (fixture-text-id "value"))
+         (fixture-fact-node 20 parameter "ann" int-type)]
         (nodes (Vec stages/TermNodeV0))
         (vec (concat marker-nodes text-nodes facts))]
     (stages/->SourceStageV0
@@ -20251,7 +20240,7 @@
         (parameters core/NativeId) (fixture-id "fold" "parameters")
         (int-type core/NativeId) (fixture-id "fold" "int-type")
         (text-values (Vec String))
-        ["form-kind" "name" "params" "ret" "native-op" "abi-symbol" "f0"
+        ["form-kind" "name" "params" "ret" "native-op" "abi-symbol"
          "source-node-v0" "defn" "seq" "type-prim" "Int"
          "max-sequence" "const-zero-i64" "fram_fold_max_sequence_empty"]
         (text-nodes (Vec stages/TermNodeV0))
@@ -20286,7 +20275,7 @@
          (fact 5 function "abi-symbol" (text-id "fram_fold_max_sequence_empty"))
          (fact 6 parameters "form-kind" (text-id "seq"))
          (fact 7 int-type "form-kind" (text-id "type-prim"))
-         (fact 8 int-type "f0" (text-id "Int"))]
+         (fact 8 int-type "name" (text-id "Int"))]
         (nodes (Vec stages/TermNodeV0))
         (vec (concat marker-nodes text-nodes facts))]
     (stages/->SourceStageV0

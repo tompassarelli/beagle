@@ -54,12 +54,12 @@ fi
 
 "$repo/bin/beagle-ast" "$here/fixture.bclj" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json=beagle:native-core/validation/slice-int-division/fixture.bclj" \
-  "$scratch/fixture.facts"
+  --input "$scratch/fixture.ast.json=beagle:native-core/validation/slice-int-division/fixture.bclj" \
+  --output "$scratch/fixture.facts"
 "$repo/bin/beagle-ast" "$here/ratio_refusal.bclj" >"$scratch/ratio.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/ratio.ast.json=beagle:native-core/validation/slice-int-division/ratio_refusal.bclj" \
-  "$scratch/ratio.facts"
+  --input "$scratch/ratio.ast.json=beagle:native-core/validation/slice-int-division/ratio_refusal.bclj" \
+  --output "$scratch/ratio.facts"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \

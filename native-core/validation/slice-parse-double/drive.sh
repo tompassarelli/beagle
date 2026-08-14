@@ -29,8 +29,8 @@ fi
   "$here/fixture.bgl" "$here/managed_fixture.bclj"
 "$repo/bin/beagle-ast" "$here/fixture.bgl" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json=native-core/validation/slice-parse-double/fixture.bgl" \
-  "$scratch/fixture.facts" --include-defs
+  --input "$scratch/fixture.ast.json=native-core/validation/slice-parse-double/fixture.bgl" \
+  --output "$scratch/fixture.facts" --include-defs
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \

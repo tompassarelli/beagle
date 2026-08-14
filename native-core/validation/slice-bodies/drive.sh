@@ -32,8 +32,8 @@ fi
 logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 bb "$here/ast-facts.clj" \
-  "$scratch/types.ast.json=$logical" \
-  "$generated/types.facts" \
+  --input "$scratch/types.ast.json=$logical" \
+  --output "$generated/types.facts" \
   --include-defs
 sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
 

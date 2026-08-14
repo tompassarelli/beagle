@@ -694,20 +694,12 @@
 (defn option-value [arguments option]
   (first (option-values arguments option)))
 
-(let [explicit? (some #{"--input"} *command-line-args*)
-      [legacy-input legacy-out & legacy-arguments] *command-line-args*
-      input-specs (if explicit?
-                    (option-values *command-line-args* "--input")
-                    [legacy-input])
-      out (if explicit?
-            (option-value *command-line-args* "--output")
-            legacy-out)
-      arguments (if explicit? *command-line-args* legacy-arguments)
+(let [arguments *command-line-args*
+      input-specs (option-values arguments "--input")
+      out (option-value arguments "--output")
       include-defs? (some #{"--include-defs"} arguments)
       selected-names (set (option-values arguments "--form"))
-      annotations (if explicit?
-                    (option-values arguments "--native-op")
-                    (remove #{"--include-defs"} arguments))]
+      annotations (option-values arguments "--native-op")]
   (when (or (empty? input-specs) (nil? out))
     (throw (ex-info "expected at least one --input and one --output" {})))
   (reset! native-ops

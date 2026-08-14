@@ -17,8 +17,8 @@ trap 'rm -rf "${scratch:?}"' EXIT
 
 "$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json" \
-  "$scratch/fixture.facts"
+  --input "$scratch/fixture.ast.json" \
+  --output "$scratch/fixture.facts"
 if [[ -f "$art/fixture.facts" ]] && ! cmp -s "$scratch/fixture.facts" "$art/fixture.facts"; then
   echo "drive.sh: regenerated projection differs from the committed fixture.facts" >&2
   exit 1
@@ -88,8 +88,8 @@ mkdir -p "$refusal"
 "$repo/bin/beagle-ast" "$here/mixed_value_refusal.bclj" \
   >"$refusal/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$refusal/fixture.ast.json" \
-  "$refusal/fixture.facts"
+  --input "$refusal/fixture.ast.json" \
+  --output "$refusal/fixture.facts"
 bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$refusal/report.txt\"

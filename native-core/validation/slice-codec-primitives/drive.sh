@@ -13,8 +13,8 @@ trap 'rm -rf "${scratch:?}"' EXIT
 
 "$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json=beagle:native-core/validation/slice-codec-primitives/fixture.bclj" \
-  "$scratch/fixture.facts"
+  --input "$scratch/fixture.ast.json=beagle:native-core/validation/slice-codec-primitives/fixture.bclj" \
+  --output "$scratch/fixture.facts"
 if [[ -f "$art/fixture.facts" ]] && ! cmp -s "$scratch/fixture.facts" "$art/fixture.facts"; then
   echo "drive.sh: regenerated projection differs from fixture.facts" >&2
   exit 1

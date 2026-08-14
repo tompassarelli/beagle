@@ -16,7 +16,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
 facts_of() { # facts_of <source> <relative-path> <out.facts>
   "$repo/bin/beagle-ast" "$1" >"$scratch/ast.json"
   bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-    "$scratch/ast.json=$2" "$3" --include-defs
+    --input "$scratch/ast.json=$2" --output "$3" --include-defs
 }
 
 # --- corpus projection: the source is in this repo, so always regenerate ----
