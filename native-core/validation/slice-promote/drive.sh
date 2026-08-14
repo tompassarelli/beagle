@@ -24,7 +24,6 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-source "$repo/native-core/validation/publish-verified-set.sh"
 probe="$here/promote_probe.bgl"
 
 command -v bb >/dev/null 2>&1 || { echo "drive.sh: babashka (bb) is required" >&2; exit 2; }
@@ -150,7 +149,11 @@ done
 cat "$work/run-a/report.txt"
 
 publish_results() {
-  publish_verified_set "$work/run-a" "$art" "${generated[@]}"
+  local name
+  mkdir -p "$art"
+  for name in "${generated[@]}"; do
+    cp -- "$work/run-a/$name" "$art/$name"
+  done
 }
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then

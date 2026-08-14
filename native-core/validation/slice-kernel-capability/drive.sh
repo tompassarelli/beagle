@@ -4,7 +4,6 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-source "$repo/native-core/validation/publish-verified-set.sh"
 # Upstream fram sources are vendored under native-core/validation/upstream/fram
 # (its MANIFEST records the fram revision and digests); a FRAM_* override still
 # points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
@@ -156,7 +155,11 @@ for name in "${generated_names[@]}"; do
 done
 
 publish_results() {
-  publish_verified_set "$scratch/generated" "$art" "${generated_names[@]}"
+  local name
+  mkdir -p "$art"
+  for name in "${generated_names[@]}"; do
+    cp -- "$scratch/generated/$name" "$art/$name"
+  done
 }
 
 cat "$report"

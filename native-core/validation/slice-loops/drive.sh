@@ -12,7 +12,6 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-source "$repo/native-core/validation/publish-verified-set.sh"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-loops.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -145,12 +144,15 @@ for expected in \
     { echo "drive.sh: refusals/ omitted expected evidence: $expected" >&2; exit 1; }
 done
 publish_results() {
-  publish_verified_set "$main_generated" "$art" \
-    loops.facts source.sha256 report.txt module_0.h module_0.c
-  publish_verified_set "$counted_generated" "$art/counted" \
-    loops.facts source.sha256 report.txt module_0.h module_0.c
-  publish_verified_set "$refusal_generated" "$art/refusals" \
-    loops.facts source.sha256 report.txt
+  mkdir -p "$art" "$art/counted" "$art/refusals"
+  cp -- "$main_generated/loops.facts" "$main_generated/source.sha256" \
+    "$main_generated/report.txt" "$main_generated/module_0.h" \
+    "$main_generated/module_0.c" "$art/"
+  cp -- "$counted_generated/loops.facts" "$counted_generated/source.sha256" \
+    "$counted_generated/report.txt" "$counted_generated/module_0.h" \
+    "$counted_generated/module_0.c" "$art/counted/"
+  cp -- "$refusal_generated/loops.facts" "$refusal_generated/source.sha256" \
+    "$refusal_generated/report.txt" "$art/refusals/"
 }
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
