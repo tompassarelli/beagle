@@ -22,7 +22,7 @@
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
-     #:source-path "test.rkt"))
+     #:source-path "test.bjs"))
   ;; Mirror the real emit path (build-all/daemon pass #:capture-types? #t):
   ;; bind current-type-table during check so store-type! populates per-node
   ;; types, then register it on the program so emit reads it. Without this the

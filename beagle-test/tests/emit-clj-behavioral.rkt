@@ -29,7 +29,7 @@
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
-     #:source-path "test.rkt"))
+     #:source-path "test.bclj"))
   (type-check-with-locs!
    prog
    (lambda (failure _stx) (raise failure))

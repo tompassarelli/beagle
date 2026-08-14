@@ -15,14 +15,14 @@
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
-     #:source-path "test.rkt"))
+     #:source-path "test.bjs"))
   (type-check! prog)
   (emit-program prog))
 
 (define (jst-parse src-forms)
   (parse-program
    (map (lambda (f) (datum->syntax #f f)) src-forms)
-   #:source-path "test.rkt"))
+   #:source-path "test.bjs"))
 
 (define (jst-preamble . forms)
   (append '((ns test.app) (define-mode strict) (define-target js)) forms))

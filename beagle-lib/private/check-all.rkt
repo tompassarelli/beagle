@@ -528,7 +528,7 @@
     (apply append
       (for/list ([a (in-list args)])
         (cond
-          [(directory-exists? a) (find-rkt-files a)]
+          [(directory-exists? a) (find-beagle-files a)]
           [(regexp-match? BEAGLE-FILE-RX a) (list a)]
           [else
            (eprintf "beagle-check-all: skipping non-beagle file: ~a\n" a)

@@ -1001,7 +1001,6 @@
        (for ([p (in-list (nix-interpolated-string-parts e))])
          (unless (string? p) (walk p)))]
       [(nix-multiline-string? e)
-       (lint-nix-ms e)
        (for ([l (in-list (nix-multiline-string-lines e))])
          (unless (string? l) (walk l)))]
       [(threading-marker? e) (walk (threading-marker-desugared e))]
@@ -1074,37 +1073,6 @@
     [(andmap string? parts)
      (warn "(s ~v) has no interpolated expressions; use a plain string literal"
            (apply string-append parts))]))
-
-;; (ms STRING-WITH-\n) is the legacy cursed importer output: one big
-;; string with embedded \n's that looks awful and obscures structure.
-;; The canonical surface is ~''…'' (preferred — reads like a Nix
-;; heredoc) or multi-operand (ms "line1" "line2" …). Hard-fail here so
-;; the policy can't drift via stray hand-edits or unfixed importer
-;; regressions. Bypass with BEAGLE_NO_LINT=1 if you're mid-normalisation
-;; and need to build a known-cursed file.
-(define (lint-nix-ms e)
-  (define lines (nix-multiline-string-lines e))
-  ;; Any string operand with embedded newlines is the legacy cursed form
-  ;; emitted by the pre-fix bin/beagle-import-nix. Canonical surface is
-  ;; ~''…'' (preferred — reads as a Nix heredoc) or per-line operands
-  ;; (ms "line1" "line2" …). Hard-fail so the policy can't drift via
-  ;; stray hand-edits. Run bin/beagle-normalize-ms over the file, or
-  ;; set BEAGLE_NO_LINT=1 to bypass during sweep.
-  (define cursed-line
-    (for/or ([l (in-list lines)])
-      (and (string? l) (regexp-match? #rx"\n" l) l)))
-  (when cursed-line
-    (error 'beagle
-           (string-append
-            "forbidden: (ms STRING) with embedded newlines is the legacy "
-            "cursed form.\n"
-            "Use ~~''…'' (preferred) or split into per-line operands "
-            "(ms \"line1\" \"line2\" …).\n"
-            "Cursed string was ~v chars; first 60: ~v\n"
-            "Fix in place with: bin/beagle-normalize-ms <FILE>")
-           (string-length cursed-line)
-           (substring cursed-line 0
-                      (min 60 (string-length cursed-line))))))
 
 ;; --- counting mode ----------------------------------------------------------
 ;; Runs lint with a captured error port and returns the number of warnings

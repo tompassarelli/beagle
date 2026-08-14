@@ -5,8 +5,6 @@
 (define pkg-desc "Agent-native typed authoring layer — emits Clojure, ClojureScript, JavaScript, or Nix.")
 (define pkg-authors '(tom))
 (define license '(Apache-2.0 OR MIT))
-(define raco-commands
-  '(("beagle" beagle/private/raco-cmd "build, check, expand" #f)))
 (define pkg-tags '("language" "compiler" "clojure" "javascript" "type-checking"))
 
 (define compile-omit-paths '())

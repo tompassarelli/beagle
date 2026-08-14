@@ -368,7 +368,7 @@
 
 (define fixture-source
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "app.rkt")))
+    (build-path dir "fixtures" "app.bclj")))
 
 (check-ok/source "cross-file import: typed defn callable with prefix" fixture-source
   '(require mathlib)

@@ -194,7 +194,7 @@
 
 ;; --- file expansion ---
 
-(define (find-rkt-files-in dir)
+(define (find-beagle-files-in dir)
   (for/list ([p (in-directory dir)]
              #:when (regexp-match? BEAGLE-FILE-RX (path->string p)))
     (path->string p)))
@@ -204,7 +204,7 @@
     (apply append
       (for/list ([a (in-list args)])
         (cond
-          [(directory-exists? a) (find-rkt-files-in a)]
+          [(directory-exists? a) (find-beagle-files-in a)]
           [(regexp-match? BEAGLE-FILE-RX a) (list a)]
           [else '()])))
     string<?))

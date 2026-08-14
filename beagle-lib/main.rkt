@@ -107,6 +107,8 @@
              wrapper-src))
        (define prog
          (with-handlers ([exn:fail? handle-error])
+           (when user-src-path
+             (require-beagle-source-extension! user-src-path))
            (parse-program forms #:source-path user-src-path)))
 
        ;; Extension/header mismatch check

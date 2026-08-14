@@ -22,7 +22,7 @@
 
 (declare parse-file-target!)
 
-(def BEAGLE-EXTENSIONS [".bclj" ".bjs" ".bnix" ".bgl" ".rkt"])
+(def BEAGLE-EXTENSIONS [".bclj" ".bjs" ".bnix" ".bgl"])
 
 (defn- split-dots [^String s]
   (loop [i 0

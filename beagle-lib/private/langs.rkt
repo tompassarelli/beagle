@@ -127,9 +127,7 @@
                             (core-profile-lang CORE-PROFILE) "`)")))
     (for/list ([t (in-list TARGETS)])
       (md-row (string-append "`" (target-source-ext t) "`")
-              (string-append "`" (id-str t) "` (`#lang " (target-lang t) "`)")))
-    (for/list ([p (in-list NEUTRAL-EXTENSIONS)])
-      (md-row (string-append "`" (car p) "`") (cdr p))))
+              (string-append "`" (id-str t) "` (`#lang " (target-lang t) "`)"))))
    "\n"))
 
 (define (view-domains)

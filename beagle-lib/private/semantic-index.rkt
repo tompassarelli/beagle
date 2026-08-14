@@ -18,15 +18,13 @@
          "validate-nix.rkt")
 
 (define SEMANTIC-INDEX-SCHEMA-VERSION 1)
-(define INDEXED-EXTENSIONS
-  (filter (lambda (ext) (not (equal? ext ".rkt"))) BEAGLE-EXTENSIONS))
 
 (define (sha256-hex bytes)
   (bytes->hex-string (sha256-bytes bytes)))
 
 (define (indexed-source-file? path)
   (define s (path->string path))
-  (ormap (lambda (ext) (string-suffix? s ext)) INDEXED-EXTENSIONS))
+  (ormap (lambda (ext) (string-suffix? s ext)) BEAGLE-EXTENSIONS))
 
 (define (absolute-existing-path path)
   (simplify-path (path->complete-path path) #t))

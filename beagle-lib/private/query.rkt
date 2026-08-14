@@ -360,7 +360,7 @@
                                "failed to read input path ~a: ~a"
                                a
                                (exn-message e)))])
-             (find-rkt-files a))]
+             (find-beagle-files a))]
           [(file-exists? a) (list a)]
           [else
            (raise-user-error 'beagle-fields
@@ -586,7 +586,7 @@
     [(null? (cdr xs)) (car xs)]
     [else (string-append (car xs) sep (string-join* (cdr xs) sep))]))
 
-(define (find-rkt-files dir)
+(define (find-beagle-files dir)
   (for/list ([p (in-directory dir)]
              #:when (regexp-match? BEAGLE-FILE-RX (path->string p)))
     (path->string p)))
@@ -623,7 +623,7 @@
      (query-callers name files)]
     [("provides")
      (when (< (length rest) 1)
-       (fprintf (current-error-port) "usage: beagle-provides <file.rkt>\n")
+       (fprintf (current-error-port) "usage: beagle-provides <source-file>\n")
        (exit 2))
      (for ([f (in-list (expand-file-args rest))])
        (query-provides f)
@@ -643,11 +643,11 @@
   (apply append
     (for/list ([a (in-list args)])
       (if (directory-exists? a)
-        (find-rkt-files a)
+        (find-beagle-files a)
         (list a)))))
 
 (provide query-sig query-fields query-callers query-provides query-impact
          query-signature-matches checked-program/file query-target-local-name
-         run-query find-rkt-files expand-fields-file-args query-field-matches
+         run-query find-beagle-files expand-fields-file-args query-field-matches
          extract-defn-entry extract-def-entry extract-record-entry
          extract-extern-entry extract-ns find-calls-in format-call)

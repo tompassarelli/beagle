@@ -11,6 +11,7 @@
          racket/format
          racket/list
          "parse.rkt"
+         "extensions.rkt"
          "macros.rkt"
          "types.rkt"
          ;; THE single beagle readtable — no bespoke subset reader to drift
@@ -56,6 +57,7 @@
          (newline)]))))
 
 (define (read-file-datums path)
+  (require-beagle-source-extension! path 'beagle-expand)
   ;; Read with THE canonical beagle readtable (datum mode) so the full surface
   ;; — [..] {..} #{..} #"re" #(..) ^meta #?(..) #?@(..) ' ` ~ ~@ #r"" — is read
   ;; exactly as the compiler reads it. No bespoke subset reader to drift (#32).

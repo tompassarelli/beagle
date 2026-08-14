@@ -40,5 +40,4 @@ Bare `#lang beagle` on `.bgl` names the Native Core profile and always lowers
 to a frozen native program. `.bgl` never means target-neutral or "no target
 selected"; only the resulting native program is backend-neutral. Hosted profiles
 use their explicit language paths and extensions, such as `#lang beagle/clj`
-on `.bclj`. Only `.rkt` remains legacy and exempt from extension/header
-validation.
+on `.bclj`.

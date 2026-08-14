@@ -81,10 +81,6 @@
            "Nix expressions type-checked against the NixOS option schema: system and package configuration.")
    ))
 
-;; Extensions that are real Beagle sources but name no profile.
-(define NEUTRAL-EXTENSIONS
-  '((".rkt" . "legacy — no extension/header validation")))
-
 ;; Not language targets. A projection consumes the same AST and emits a
 ;; non-program artifact.
 (struct projection (id name emitter note) #:transparent)
@@ -129,7 +125,6 @@
          CORE-PROFILE
          MATERIALIZERS
          TARGETS
-         NEUTRAL-EXTENSIONS
          PROJECTIONS
          target-ids
          target-count

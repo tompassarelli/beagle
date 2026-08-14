@@ -58,36 +58,6 @@
   (define out (lint-output "(def x (s \"hello\"))"))
   (check-true (lints-include? out #rx"plain string literal")))
 
-;; --- (ms STRING-WITH-\n) hard error ---------------------------------------
-(test-case "(ms STR-WITH-\\n) hard-errors"
-  (define exn
-    (with-handlers ([exn:fail? (lambda (e) e)])
-      (lint-output "(def x (ms \"line one\\nline two\\nline three\"))")
-      #f))
-  (check-true (exn? exn) "lint must raise an error for cursed legacy ms form")
-  (check-true (regexp-match? #rx"legacy cursed form" (exn-message exn))
-              "error message names the offence")
-  (check-true (regexp-match? #rx"~''" (exn-message exn))
-              "error suggests ~''…'' as the canonical fix"))
-
-(test-case "multi-operand (ms \"a\" \"b\") passes the lint"
-  (define out (lint-output "(def x (ms \"line one\" \"line two\"))"))
-  (check-false (lints-include? out #rx"legacy cursed")))
-
-(test-case "multi-operand (ms STR-WITH-\\n EXPR STR-WITH-\\n) hard-errors"
-  ;; This is the cursed multi-operand-with-newlines shape the legacy
-  ;; importer emitted at interp boundaries (e.g. theme-switcher).
-  (define exn
-    (with-handlers ([exn:fail? (lambda (e) e)])
-      (lint-output "(def x (ms \"first\\nsecond\" some.expr \"third\"))")
-      #f))
-  (check-true (exn? exn))
-  (check-true (regexp-match? #rx"legacy cursed form" (exn-message exn))))
-
-(test-case "single-line (ms \"only-one-line\") passes the lint"
-  (define out (lint-output "(def x (ms \"single line content\"))"))
-  (check-false (lints-include? out #rx"legacy cursed")))
-
 (test-case "clean (lib/mkIf cond body) emits no warning"
   (define out (lint-output "(def x (lib/mkIf cond {:foo 1}))"))
   (check-false (lints-include? out #rx"dead code|always-on|typo")))

@@ -14,7 +14,7 @@ import sys
 import time
 
 BEAGLE_EXTENSIONS = frozenset({
-    ".bgl", ".bclj", ".bjs", ".bnix", ".bsql", ".bpy", ".rkt",
+    ".bgl", ".bclj", ".bjs", ".bnix", ".bsql", ".bpy",
 })
 
 PORT_FILE = os.environ.get("BEAGLE_DAEMON_PORTFILE", "/var/tmp/beagle-daemon.port")

@@ -130,6 +130,7 @@
     (expand-datums path)))
 
 (define (lsp-checked-program path)
+  (require-beagle-source-extension! path 'beagle-lsp)
   (define content (hash-ref open-docs (path->uri path) #f))
   (define prog
     (if content
@@ -288,7 +289,7 @@
   (define diags
     (with-handlers ([exn:fail? (lambda (e) (list (make-diag 0 0 1 (exn-message e))))])
       (cond
-        [(not (regexp-match? #rx"\\.(bgl|rkt)$" path)) '()]
+        [(not (beagle-source-file? path)) '()]
         [(and (not content) (not (file-exists? path))) '()]
         [else (check-file-for-diagnostics path content)])))
   (send-notification out "textDocument/publishDiagnostics"
@@ -304,6 +305,7 @@
 (define (check-file-for-diagnostics path [content #f])
   (with-handlers ([exn:fail? (lambda (e)
                                 (list (make-diag 0 0 1 (exn-message e))))])
+    (require-beagle-source-extension! path 'beagle-lsp)
     (define stxs
       (if content
           (read-beagle-stxs-from-string path content)
@@ -501,7 +503,7 @@
   ;; First search current file
   (define local (search-file origin-path))
   (or local
-      ;; Then search .rkt files in same directory
+      ;; Then search Beagle sources in the same directory.
       (let ([dir (path->string (let-values ([(base _name _must-be-dir?) (split-path (string->path origin-path))])
                                  base))])
         (for/first ([f (in-directory dir)]
@@ -590,7 +592,7 @@
                   (let-values ([(base _name _dir?) (split-path (string->path path))])
                     base)))
     (for ([f (in-directory dir)]
-          #:when (regexp-match? #rx"\\.(bclj|bjs|bnix|bpy|bgl|rkt)$" (path->string f))
+          #:when (beagle-source-file? (path->string f))
           #:when (not (equal? (path->string f) path)))
       (define mod-name
         (path->string (let-values ([(_base name _dir?) (split-path f)]) name)))

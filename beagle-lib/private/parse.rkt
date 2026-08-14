@@ -260,6 +260,7 @@
       [_ arities])))
 
 (define (read-beagle-datums path)
+  (require-beagle-source-extension! path 'read-beagle-datums)
   (with-input-from-file path
     (lambda ()
       (define first-line (read-line))
@@ -340,6 +341,7 @@
 
 (define (read-beagle-syntax path)
   (define src (canonical-source-path path))
+  (require-beagle-source-extension! src 'read-beagle-syntax)
   (read-beagle-syntax/bytes src (file->bytes src)))
 
 ;; --- canonical parameter / field layout -----------------------------------
@@ -1978,6 +1980,7 @@
 (define (parse-program/file path
                             #:module-resolver [module-resolver #f])
   (define src (canonical-source-path path))
+  (require-beagle-source-extension! src 'parse-program/file)
   (parse-program/bytes
    (file->bytes src)
    #:source-path src

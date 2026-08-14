@@ -62,7 +62,7 @@
 ;; its calls type as Any — exactly the oracle's behavior.
 
 (def BEAGLE-EXTENSIONS (Vec String)
-  [".bclj" ".bjs" ".bnix" ".bgl" ".rkt"])
+  [".bclj" ".bjs" ".bnix" ".bgl"])
 
 (defn- split-dots [(s String)] Any
   (loop [(i Int) 0 (start Int) 0 (acc Any) []]

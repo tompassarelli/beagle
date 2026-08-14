@@ -14,7 +14,7 @@
 #
 # Useful for fast feedback in iteration — no need to write a .clj file.
 # Pair with BEAGLE_ERROR_FORMAT=json for parseable error output:
-#   BEAGLE_ERROR_FORMAT=json bin/beagle-check examples/foo.rkt
+#   BEAGLE_ERROR_FORMAT=json bin/beagle-check examples/demo.bclj
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
@@ -41,16 +41,11 @@ if [[ -z "$FILE" ]]; then
     exit 2
 fi
 
-if [[ "$AGENT" == true ]] || [[ -n "$PROFILE" ]] || [[ "$FILE" == *.bgl ]]; then
-    # Route through check-all for structured agent output / profile support
-    EXTRA_ARGS=()
-    if [[ "$AGENT" == true ]]; then
-        export BEAGLE_AGENT_MODE=1
-    fi
-    if [[ -n "$PROFILE" ]]; then
-        EXTRA_ARGS+=(--profile "$PROFILE")
-    fi
-    "$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "${EXTRA_ARGS[@]}" "$FILE"
-else
-    "$RACKET" "$FILE" > /dev/null
+EXTRA_ARGS=()
+if [[ "$AGENT" == true ]]; then
+    export BEAGLE_AGENT_MODE=1
 fi
+if [[ -n "$PROFILE" ]]; then
+    EXTRA_ARGS+=(--profile "$PROFILE")
+fi
+"$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "${EXTRA_ARGS[@]}" "$FILE"

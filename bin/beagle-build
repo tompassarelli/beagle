@@ -48,34 +48,29 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
-if [[ -z "$target" && "$src" == *.bgl ]]; then
+source_profile=""
+for _t in "${BEAGLE_TARGET_IDS[@]}"; do
+    if [[ "$src" == *".${BEAGLE_TARGET_SRC_EXT[$_t]}" ]]; then
+        source_profile="$_t"
+        break
+    fi
+done
+
+if [[ -z "$source_profile" ]]; then
+    echo "beagle-build: unsupported source extension: $src (run: beagle langs --view extensions)" >&2
+    exit 2
+fi
+
+if [[ -z "$target" && "$source_profile" == "core" ]]; then
     echo "beagle-build: .bgl is Beagle Core; use: beagle build --materializer M --out DIR $src ($BEAGLE_MATERIALIZER_IDS_LIST)" >&2
     exit 2
 fi
 
-## detect target from file extension, then fall back to source content
 ext="clj"
 if [[ -n "$target" ]]; then
     ext="${BEAGLE_TARGET_OUT_EXT[$target]}"
 else
-    _matched=""
-    for _t in "${BEAGLE_HOSTED_TARGET_IDS[@]}"; do
-        if [[ "$src" == *".${BEAGLE_TARGET_SRC_EXT[$_t]}" ]]; then
-            ext="${BEAGLE_TARGET_OUT_EXT[$_t]}"
-            _matched="$_t"
-            break
-        fi
-    done
-    # Legacy .bgl/.rkt: detect from file content, same table, no second list.
-    if [[ -z "$_matched" ]]; then
-        for _t in "${BEAGLE_HOSTED_TARGET_IDS[@]}"; do
-            if grep -qE "^\(define-target[[:space:]]+${_t}\)" "$src" 2>/dev/null || \
-               grep -qE "^#lang ${BEAGLE_TARGET_LANG[$_t]}[[:space:]]*$" "$src" 2>/dev/null; then
-                ext="${BEAGLE_TARGET_OUT_EXT[$_t]}"
-                break
-            fi
-        done
-    fi
+    ext="${BEAGLE_TARGET_OUT_EXT[$source_profile]}"
 fi
 
 if [[ $# -eq 2 ]]; then

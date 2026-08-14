@@ -14,33 +14,22 @@ src/           generated .clj files land here
 From the project root:
 
 ```
-bin/beagle build examples/hello.rkt
+BEAGLE_OUT=runtime/src bin/beagle build examples/demo.bclj
 ```
 
-The output path is derived from `(define-namespace ...)` in the source.
-`(define-namespace beagle.example.hello)` → `runtime/src/beagle/example/hello.clj`.
-
-You can also pipe directly:
-
-```
-racket examples/hello.rkt > runtime/src/myns.clj
-```
+The output path is derived from `(ns ...)` in the source.
+`(ns beagle.demo)` becomes `runtime/src/beagle/demo.clj`.
 
 ## Run
 
 ```
 cd runtime
-clojure
-```
-
-```
-user=> (require '[beagle.example.hello :as h])
-user=> (h/main)
+clojure -M -e "(require 'beagle.demo)"
 ```
 
 ## Hand-written Clojure alongside generated
 
 This is the file-level escape hatch from beagle. Drop any `.clj` files under
 `src/` that you want; they share the same Clojure runtime as the generated
-ones. `.rkt` (under `examples/`) goes through beagle's type checker; `.clj`
-(under `runtime/src/`) is unrestricted Clojure.
+ones. Canonical Beagle sources go through the type checker; `.clj` under
+`runtime/src/` is unrestricted Clojure.

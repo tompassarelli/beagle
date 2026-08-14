@@ -15,22 +15,25 @@
 
 (define BEAGLE-EXTENSIONS
   (append (list (core-profile-source-ext CORE-PROFILE))
-          (map target-source-ext TARGETS)
-          (map car NEUTRAL-EXTENSIONS)))
+          (map target-source-ext TARGETS)))
 
 (define (beagle-source-file? path-str)
   (ormap (lambda (ext) (string-suffix? path-str ext))
          BEAGLE-EXTENSIONS))
 
+(define (require-beagle-source-extension! path [who 'beagle])
+  (define path-str (if (path? path) (path->string path) (format "~a" path)))
+  (unless (beagle-source-file? path-str)
+    (error who
+           "unsupported source extension for ~a; expected one of ~a"
+           path-str
+           (string-join BEAGLE-EXTENSIONS ", "))))
+
 (define EXTENSION-TARGET-MAP
   (append (list (cons (core-profile-source-ext CORE-PROFILE)
                       (core-profile-id CORE-PROFILE)))
           (for/list ([t (in-list TARGETS)])
-            (cons (target-source-ext t) (target-id t)))
-          ;; Legacy sources are recognized, but the extension names no profile,
-          ;; so no header check applies.
-          (for/list ([p (in-list NEUTRAL-EXTENSIONS)])
-            (cons (car p) #f))))
+            (cons (target-source-ext t) (target-id t)))))
 
 (define (expected-target-for-extension path-str)
   (define match
@@ -54,6 +57,7 @@
 
 (provide BEAGLE-EXTENSIONS
          beagle-source-file?
+         require-beagle-source-extension!
          EXTENSION-TARGET-MAP
          expected-target-for-extension
          extension-target-mismatch?

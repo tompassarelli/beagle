@@ -16,7 +16,9 @@
          ;; Side-effect: register all rewrite rules.
          "rewrites/drop-when.rkt"
          "rewrites/case-to-match.rkt"
-         (only-in "extensions.rkt" BEAGLE-EXTENSIONS))
+         (only-in "extensions.rkt"
+                  BEAGLE-EXTENSIONS
+                  require-beagle-source-extension!))
 
 (define apply-changes? (make-parameter #f))
 (define list-rules? (make-parameter #f))
@@ -31,7 +33,9 @@
 
 (define (collect-files target)
   (cond
-    [(file-exists? target) (list target)]
+    [(file-exists? target)
+     (require-beagle-source-extension! target 'beagle-rewrite)
+     (list target)]
     [(directory-exists? target)
      (find-files (lambda (p)
                    (and (file-exists? p) (file-is-beagle? p)))

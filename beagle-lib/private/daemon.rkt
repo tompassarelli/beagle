@@ -61,7 +61,7 @@
       (hash-remove! datum-cache path)
       (hash-clear! datum-cache)))
 
-(define (find-rkt-in args)
+(define (find-beagle-in args)
   (apply append
     (for/list ([a (in-list args)])
       (cond
@@ -69,7 +69,9 @@
          (for/list ([f (in-directory a)]
                     #:when (regexp-match? BEAGLE-FILE-RX (path->string f)))
            (path->string f))]
-        [(file-exists? a) (list a)]
+        [(file-exists? a)
+         (require-beagle-source-extension! a 'beagle-daemon)
+         (list a)]
         [else '()]))))
 
 ;; --- Check results cache -----------------------------------------------------
@@ -110,6 +112,7 @@
       [else #f])))
 
 (define (check-file-full path)
+  (require-beagle-source-extension! path 'beagle-daemon)
   (define errors '())
   (define suspicions '())
   (define repair-info (try-structural-repair! path))
@@ -198,7 +201,7 @@
         (define clean-name
           (regexp-replace #rx"^[a-z]+/" type-name ""))
         (define target (string->symbol clean-name))
-        (for ([f (in-list (find-rkt-in (list (path->string
+        (for ([f (in-list (find-beagle-in (list (path->string
                                                (let-values ([(base _name _ext)
                                                              (split-path (string->path path))])
                                                  base)))))])
@@ -320,7 +323,7 @@
          (hasheq 'ok #t 'result 'null 'note "no cached result"))]))
 
 (define (handle-check-enriched args)
-  (define files (find-rkt-in (if (null? args) (list ".") args)))
+  (define files (find-beagle-in (if (null? args) (list ".") args)))
   (define results '())
   (for ([f (in-list files)])
     (with-handlers ([exn:fail? (lambda (e)
@@ -526,7 +529,7 @@
   (when (< (length args) 2)
     (error "sig requires: <fn-name> <file-or-dir>..."))
   (define name (car args))
-  (define files (find-rkt-in (cdr args)))
+  (define files (find-beagle-in (cdr args)))
   (define results (query-signature-matches name files))
   (when (null? results)
     (raise-user-error 'beagle-sig
@@ -593,7 +596,7 @@
   (when (< (length args) 2)
     (error "callers requires: <fn-name> <file-or-dir>..."))
   (define name (car args))
-  (define files (find-rkt-in (cdr args)))
+  (define files (find-beagle-in (cdr args)))
   (define target (string->symbol name))
   (define results '())
   (for ([f (in-list files)])
@@ -616,7 +619,7 @@
   (when (< (length args) 2)
     (error "impact requires: <fn-name> <file-or-dir>..."))
   (define name (car args))
-  (define files (find-rkt-in (cdr args)))
+  (define files (find-beagle-in (cdr args)))
   (define target (string->symbol name))
   (define sig #f)
   (define def-file #f)
@@ -648,7 +651,7 @@
           'callers (reverse callers)))
 
 (define (handle-check args)
-  (define files (find-rkt-in (if (null? args) (list ".") args)))
+  (define files (find-beagle-in (if (null? args) (list ".") args)))
   (define all-errors '())
   (for ([f (in-list files)])
     (define-values (errs _suspicions _repair) (check-file-full f))
@@ -667,6 +670,7 @@
   (when (null? args) (error "repair requires: <file>"))
   (define path (path->string (simplify-path (string->path (car args)))))
   (unless (file-exists? path) (error (format "file not found: ~a" path)))
+  (require-beagle-source-extension! path 'beagle-daemon)
   ;; Restrict repair to files within watched directories (no path traversal)
   (when (pair? watched-dirs)
     (unless (for/or ([wd (in-list watched-dirs)])
@@ -722,7 +726,7 @@
   (when (< (length args) 2)
     (error "build requires: <out-dir> <file-or-dir>..."))
   (define out-dir (car args))
-  (define files (find-rkt-in (cdr args)))
+  (define files (find-beagle-in (cdr args)))
   (define built 0)
   (define error-list '())
 

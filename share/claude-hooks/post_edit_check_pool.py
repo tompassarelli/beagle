@@ -60,7 +60,7 @@ POOL_CONFIG_FILE = f"{PROJECT_DIR}/.beagle/pool.json"
 PORT_FILE = os.environ.get("BEAGLE_DAEMON_PORTFILE", "/var/tmp/beagle-daemon.port")
 
 BEAGLE_EXTENSIONS = frozenset({
-    ".bgl", ".bclj", ".bjs", ".bnix", ".bsql", ".bpy", ".rkt",
+    ".bgl", ".bclj", ".bjs", ".bnix", ".bsql", ".bpy",
 })
 
 DEFAULT_POOL_CONFIG = {
@@ -625,9 +625,13 @@ def main():
 
 
 def check_cascade(edited_file, config, agents):
-    """Check sibling .bgl/.rkt files for cascade errors caused by editing edited_file."""
+    """Check sibling Beagle files for cascade errors caused by an edit."""
     file_dir = os.path.dirname(edited_file)
-    siblings = glob.glob(os.path.join(file_dir, "*.bgl")) + glob.glob(os.path.join(file_dir, "*.rkt"))
+    siblings = [
+        path
+        for ext in sorted(BEAGLE_EXTENSIONS)
+        for path in glob.glob(os.path.join(file_dir, "*" + ext))
+    ]
     siblings = [s for s in siblings if os.path.abspath(s) != os.path.abspath(edited_file)]
 
     if not siblings:

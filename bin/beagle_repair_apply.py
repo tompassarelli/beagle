@@ -10,7 +10,7 @@ import re
 
 # Hand-kept mirror of targets.rkt's TARGETS source/output extensions (`bin/beagle
 # langs --view extensions` renders the canonical list).
-SOURCE_EXTS = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+SOURCE_EXTS = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl')
 OUTPUT_EXTS = ('.clj', '.js', '.nix')
 
 

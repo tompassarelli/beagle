@@ -49,7 +49,7 @@
      (map (lambda (f) (datum->syntax #f f))
           (append (list '(ns test.rep) '(define-mode strict) '(define-target js))
                   body-forms))
-     #:source-path "rep-soundness.rkt"))
+     #:source-path "rep-soundness.bjs"))
   (define tbl (make-hasheq))
   (parameterize ([current-type-table tbl]) (type-check! prog))
   (register-program-type-table! prog tbl)

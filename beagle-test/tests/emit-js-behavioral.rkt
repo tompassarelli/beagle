@@ -47,7 +47,7 @@
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
-     #:source-path "test.rkt"))
+     #:source-path "test.bjs"))
   (type-check! prog)
   (emit-program prog))
 

@@ -148,11 +148,11 @@ def conv_annotation(r):
 repairs = []
 
 def extract_module_from_path(path):
-    """Extract module name from a file path like '/path/to/catalog.rkt' -> 'catalog'."""
+    """Extract a module name from a source or emitted file path."""
     if not path or path == '?':
         return None
     base = os.path.basename(path)
-    for ext in ['.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
+    for ext in ['.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.clj']:
         if base.endswith(ext):
             return base[:-len(ext)]
     return None

@@ -19,14 +19,14 @@
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
-     #:source-path "test.rkt"))
+     #:source-path "test.bjs"))
   (type-check! prog)
   (emit-program prog))
 
 (define (js-parse src-forms)
   (parse-program
    (map (lambda (f) (datum->syntax #f f)) src-forms)
-   #:source-path "test.rkt"))
+   #:source-path "test.bjs"))
 
 (define-syntax-rule (check-js-contains name expected-str form ...)
   (test-case name
