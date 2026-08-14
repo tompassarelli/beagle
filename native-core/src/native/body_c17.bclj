@@ -1290,23 +1290,22 @@
 
 (defn buffer-layout-of
   [(layouts (Vec core/LayoutDef))
-   (buffer-type core/NativeId)] core/LayoutShapeV0
+   (buffer-type core/NativeId)]
+  core/LayoutShapeV0
   (let [(layout (U core/LayoutDef Nil)) (c17/layout-for-type layouts buffer-type)]
     (if (nil? layout)
       (core/->BufferShapeV0 buffer-type 0 0)
       (core/layoutdef-shape layout))))
 
 (defn buffer-stride
-  [(layouts (Vec core/LayoutDef))
-   (buffer-type core/NativeId)] Int
+  [(layouts (Vec core/LayoutDef)) (buffer-type core/NativeId)] Int
   (let [(shape core/LayoutShapeV0) (buffer-layout-of layouts buffer-type)]
     (if (instance? native.core.BufferShapeV0 shape)
       (core/buffershapev0-stride-bytes shape)
       0)))
 
 (defn buffer-element-alignment
-  [(layouts (Vec core/LayoutDef))
-   (buffer-type core/NativeId)] Int
+  [(layouts (Vec core/LayoutDef)) (buffer-type core/NativeId)] Int
   (let [(shape core/LayoutShapeV0) (buffer-layout-of layouts buffer-type)]
     (if (instance? native.core.BufferShapeV0 shape)
       (core/buffershapev0-align-bytes shape)

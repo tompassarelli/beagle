@@ -4269,8 +4269,7 @@
           (type-id "LowerFailure"))))))
 
 (defn buffer-element-of
-  [(types (Vec core/TypeDef))
-   (target core/NativeId)] core/NativeId
+  [(types (Vec core/TypeDef)) (target core/NativeId)] core/NativeId
   (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
     (if (nil? definition)
       (type-id "LowerFailure")
@@ -4363,7 +4362,8 @@
 
 (defn merge-value-semantics-status
   [(left ValueSemanticsStatusV0)
-   (right ValueSemanticsStatusV0)] ValueSemanticsStatusV0
+   (right ValueSemanticsStatusV0)]
+  ValueSemanticsStatusV0
   (cond
     (and (valuesemanticsstatusv0-admitted left)
       (valuesemanticsstatusv0-admitted right))
@@ -4381,7 +4381,8 @@
 (defn value-semantics-type-inner
   [(types (Vec core/TypeDef))
    (target core/NativeId)
-   (visiting (Vec core/NativeId))] ValueSemanticsStatusV0
+   (visiting (Vec core/NativeId))]
+  ValueSemanticsStatusV0
   (if (core/id-in? visiting target)
     (value-semantics-pass)
     (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
@@ -4399,27 +4400,32 @@
             (value-semantics-refuse "buffer")
 
             (instance? native.core.RecordType shape)
-            (reduce
-              (fn [(status ValueSemanticsStatusV0)
-                   (field core/TypeField)] ValueSemanticsStatusV0
-                (merge-value-semantics-status status
-                  (value-semantics-type-inner types
-                    (core/typefield-type-id field) next)))
-              (value-semantics-pass)
-              (core/recordtype-fields shape))
+            (let [(fields (Vec core/TypeField)) (core/recordtype-fields shape)]
+              (loop [(index Int) 0
+                     (status ValueSemanticsStatusV0) (value-semantics-pass)]
+                (if (>= index (count fields))
+                  status
+                  (recur (+ index 1)
+                    (merge-value-semantics-status status
+                      (value-semantics-type-inner types
+                        (core/typefield-type-id (nth fields index))
+                        next))))))
 
             (instance? native.core.UnionType shape)
-            (reduce
-              (fn [(status ValueSemanticsStatusV0)
-                   (variant core/TypeVariant)] ValueSemanticsStatusV0
-                (let [(payload (U core/NativeId Nil))
-                      (core/typevariant-payload-type variant)]
-                  (merge-value-semantics-status status
-                    (if (nil? payload)
-                      (value-semantics-pass)
-                      (value-semantics-type-inner types payload next)))))
-              (value-semantics-pass)
-              (core/uniontype-variants shape))
+            (let [(variants (Vec core/TypeVariant))
+                  (core/uniontype-variants shape)]
+              (loop [(index Int) 0
+                     (status ValueSemanticsStatusV0) (value-semantics-pass)]
+                (if (>= index (count variants))
+                  status
+                  (let [(payload (U core/NativeId Nil))
+                        (core/typevariant-payload-type (nth variants index))]
+                    (recur (+ index 1)
+                      (merge-value-semantics-status status
+                        (if (nil? payload)
+                          (value-semantics-pass)
+                          (value-semantics-type-inner types payload
+                            next))))))))
 
             (instance? native.core.VectorType shape)
             (value-semantics-type-inner types
@@ -4439,8 +4445,7 @@
             :else (value-semantics-refuse "unsupported")))))))
 
 (defn value-semantics-status
-  [(types (Vec core/TypeDef))
-   (target core/NativeId)] ValueSemanticsStatusV0
+  [(types (Vec core/TypeDef)) (target core/NativeId)] ValueSemanticsStatusV0
   (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
     (if (nil? definition)
       (value-semantics-refuse "unsupported")
@@ -4658,8 +4663,7 @@
           (recur (+ position 1)))))))
 
 (defn buffer-type-of
-  [(types (Vec core/TypeDef))
-   (element core/NativeId)] (U core/NativeId Nil)
+  [(types (Vec core/TypeDef)) (element core/NativeId)] (U core/NativeId Nil)
   (loop [(position Int) 0]
     (if (>= position (count types))
       nil

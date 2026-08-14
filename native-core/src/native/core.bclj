@@ -147,10 +147,7 @@
   (VectorShapeV0 [(element-type NativeId) (stride-bytes Int)])
   ;; The Buffer value is a pointer-sized handle. Element storage is contiguous
   ;; in the owning region with this exact scalar stride and alignment.
-  (BufferShapeV0
-    [(element-type NativeId)
-     (stride-bytes Int)
-     (align-bytes Int)])
+  (BufferShapeV0 [(element-type NativeId) (stride-bytes Int) (align-bytes Int)])
   ;; Map and Set values are arena-owned header handles. Their exact element
   ;; storage ABI and deterministic iteration policy stay in the native program.
   (MapShapeV0
@@ -1192,8 +1189,7 @@
         (recur (+ position 1) blocks)))))
 
 (defn block-arena-producer
-  [(block BasicBlock)
-   (target NativeId)] (U Instruction Nil)
+  [(block BasicBlock) (target NativeId)] (U Instruction Nil)
   (loop [(position Int) 0 (instructions (Vec Instruction))
          (basicblock-instructions block)]
     (if (>= position (count instructions))
@@ -1205,8 +1201,7 @@
           (recur (+ position 1) instructions))))))
 
 (defn function-arena-producer
-  [(function FunctionDef)
-   (target NativeId)] (U Instruction Nil)
+  [(function FunctionDef) (target NativeId)] (U Instruction Nil)
   (loop [(position Int) 0 (blocks (Vec BasicBlock)) (functiondef-blocks function)]
     (if (>= position (count blocks))
       nil
@@ -1290,9 +1285,7 @@
         (basicblock-instructions block)))
     (functiondef-blocks function)))
 
-(defn type-id-is-i64?
-  [(types (Vec TypeDef))
-   (target NativeId)] Bool
+(defn type-id-is-i64? [(types (Vec TypeDef)) (target NativeId)] Bool
   (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       false
@@ -1300,9 +1293,7 @@
         (and (instance? native.core.AtomType shape)
           (instance? native.core.I64Kind (atomtype-kind shape)))))))
 
-(defn type-id-is-arena-handle?
-  [(types (Vec TypeDef))
-   (target NativeId)] Bool
+(defn type-id-is-arena-handle? [(types (Vec TypeDef)) (target NativeId)] Bool
   (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       false
@@ -1311,8 +1302,7 @@
           (native-id= target (referencetype-target-type shape)))))))
 
 (defn region-definition-with-id
-  [(regions (Vec RegionDef))
-   (target NativeId)] (U RegionDef Nil)
+  [(regions (Vec RegionDef)) (target NativeId)] (U RegionDef Nil)
   (loop [(position Int) 0]
     (if (>= position (count regions))
       nil
@@ -1322,8 +1312,7 @@
           (recur (+ position 1)))))))
 
 (defn capability-definition-with-id
-  [(capabilities (Vec CapabilityDef))
-   (target NativeId)] (U CapabilityDef Nil)
+  [(capabilities (Vec CapabilityDef)) (target NativeId)] (U CapabilityDef Nil)
   (loop [(position Int) 0]
     (if (>= position (count capabilities))
       nil
@@ -1332,9 +1321,7 @@
           definition
           (recur (+ position 1)))))))
 
-(defn root-arena-region?
-  [(regions (Vec RegionDef))
-   (target NativeId)] Bool
+(defn root-arena-region? [(regions (Vec RegionDef)) (target NativeId)] Bool
   (let [(definition (U RegionDef Nil))
         (region-definition-with-id regions target)]
     (and (some? definition)
@@ -1345,7 +1332,8 @@
   [(capabilities (Vec CapabilityDef))
    (target NativeId)
    (region NativeId)
-   (mode String)] Bool
+   (mode String)]
+  Bool
   (let [(definition (U CapabilityDef Nil))
         (capability-definition-with-id capabilities target)]
     (if (nil? definition)
@@ -1363,9 +1351,7 @@
             :else false))))))
 
 (defn buffer-function-resource-valid?
-  [(function FunctionDef)
-   (region NativeId)
-   (capability NativeId)] Bool
+  [(function FunctionDef) (region NativeId) (capability NativeId)] Bool
   (and (id-in? (functiondef-regions function) region)
     (id-in? (functiondef-capabilities function) capability)))
 
@@ -1374,7 +1360,8 @@
    (function FunctionDef)
    (arena-id NativeId)
    (region NativeId)
-   (capability NativeId)] Bool
+   (capability NativeId)]
+  Bool
   (let [(producer (U Instruction Nil))
         (function-arena-producer function arena-id)]
     (if (nil? producer)
@@ -1389,8 +1376,7 @@
           (native-id= capability producer-capability))))))
 
 (defn buffer-element-type
-  [(types (Vec TypeDef))
-   (target NativeId)] (U NativeId Nil)
+  [(types (Vec TypeDef)) (target NativeId)] (U NativeId Nil)
   (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       nil
@@ -1404,7 +1390,8 @@
    (regions (Vec RegionDef))
    (capabilities (Vec CapabilityDef))
    (function FunctionDef)
-   (instruction Instruction)] Bool
+   (instruction Instruction)]
+  Bool
   (cond
     (instance? native.core.BufferAllocateInstructionV0 instruction)
     (let [(result SsaValueV0)
@@ -1503,7 +1490,8 @@
   [(types (Vec TypeDef))
    (regions (Vec RegionDef))
    (capabilities (Vec CapabilityDef))
-   (function FunctionDef)] Bool
+   (function FunctionDef)]
+  Bool
   (every?
     (fn [(block BasicBlock)] Bool
       (every?
@@ -1513,8 +1501,7 @@
         (basicblock-instructions block)))
     (functiondef-blocks function)))
 
-(defn instruction-buffer-region
-  [(instruction Instruction)] (U NativeId Nil)
+(defn instruction-buffer-region [(instruction Instruction)] (U NativeId Nil)
   (cond
     (instance? native.core.BufferAllocateInstructionV0 instruction)
     (bufferallocateinstructionv0-region instruction)

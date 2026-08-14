@@ -478,7 +478,8 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (type-name-value String)
-   (layout core/LayoutDef)] String
+   (layout core/LayoutDef)]
+  String
   (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.BufferShapeV0 shape)
       (let [(element String)
