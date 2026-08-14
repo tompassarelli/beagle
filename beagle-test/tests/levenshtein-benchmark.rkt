@@ -10,26 +10,8 @@
 ;; the 20 real NixOS option paths that anchor the fixtures, then asserts
 ;; that nixos-find-similar's Top-1 candidate equals the expected path.
 ;;
-;; Strategy choice (recorded 2026-05-31):
-;;
-;;   The inventory step ranked three approaches:
-;;     (a) Segment-aware edit distance — cheap, attacks 95% of real-world
-;;         "right namespace, wrong leaf" typos, naturally prefilters.
-;;     (b) Symspell precomputed deletion index — best long-term answer,
-;;         but adds cache invalidation + serialization complexity.
-;;     (c) Weighted Levenshtein with segment bonuses — improves ranking
-;;         only, not wall-time.
-;;
-;;   The implemented strategy is (a) segment-aware. It composes with
-;;   the existing flat Levenshtein (no behavioral regression on
-;;   intra-segment typos) and adds a first-segment prefix prefilter
-;;   that cuts candidate scan from ~16k to typically <500. Future
-;;   work: graduate to (b) symspell if validate-time perf demands it.
-;;
-;; Acceptance gate (thread 20260530180100):
-;;   - Baseline Top-1 must be measured before any algorithm change.
-;;   - New Top-1 must exceed baseline by >= 15 percentage points.
-;;   - validate-time perf regression <= 10% on full nixos-config corpus.
+;; The current matcher is segment-aware and must rank the expected candidate
+;; first for at least 90% of this corpus.
 
 (require rackunit
          racket/file
@@ -46,8 +28,7 @@
 ;; Real option paths (anchors)
 ;; ============================================================================
 ;;
-;; 20 real NixOS option paths confirmed present in
-;; /home/tom/code/nixos-config/main/.beagle-cache/schema.json.
+;; 20 representative NixOS option paths.
 
 (define ANCHOR-PATHS
   '("services.openssh.enable"
@@ -123,9 +104,7 @@
     ("services.fail2ban.enabl"           "services.fail2ban.enable"          char-drop)
     ("services.tailscale.enabl"          "services.tailscale.enable"         char-drop)
     ("services.fwupd.enabl"              "services.fwupd.enable"             char-drop)
-    ;; -- HARD CASES — flat Levenshtein known to misrank these against the
-    ;;    real 16k schema (sourced via /tmp/probe-hard-cases.rkt 2026-05-31).
-    ;;    These exercise the segment-aware advantage. The synthetic schema
+    ;; -- HARD CASES — these exercise segment-aware ranking. The synthetic schema
     ;;    needs same-segment-prefix near-neighbors to actually exercise the
     ;;    ranking — NEAR-NEIGHBORS is seeded for that. The real-schema bench
     ;;    is where these typically fail under flat Levenshtein. --
@@ -313,8 +292,7 @@
   (check-true (<= top1 total))
   (check-true (>= top3 top1)))
 
-;; Hard correctness floor against the synthetic ~100-path schema —
-;; must hit at least 90% Top-1. Acceptance #2 of thread 20260530180100.
+;; Hard correctness floor against the synthetic ~100-path schema.
 (test-case "benchmark Top-1 rate clears 90% floor (synthetic schema)"
   (define schema (load-fixture-schema))
   (define-values (top1 top3 total elapsed) (run-benchmark schema #:label "synthetic"))
@@ -338,9 +316,7 @@
     [else
      (printf "  (skipped real-schema bench — set BEAGLE_BENCH_REAL_SCHEMA to enable)~n")]))
 
-;; Regression-guard tests — specific typo cases that the segment-aware
-;; algorithm must Top-1 correctly. These are the cases that were failing
-;; or ambiguous under plain flat Levenshtein.
+;; Specific typo cases that the segment-aware algorithm must rank first.
 (define-syntax-rule (check-top1 schema typo expected)
   (let ([sugs (nixos-find-similar schema typo)])
     (check-true (pair? sugs)

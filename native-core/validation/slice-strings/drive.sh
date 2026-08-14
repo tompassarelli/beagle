@@ -9,9 +9,11 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-strings.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
+mkdir -p "$art"
 
 facts_of() { # facts_of <source> <relative-path> <out.facts>
   "$repo/bin/beagle-ast" "$1" >"$scratch/ast.json"

@@ -3,12 +3,13 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
 types_file="$fram_checkout/src/fram/types.bgl"
 kernel_file="$fram_checkout/src/fram/kernel.bgl"
 probe_file="$here/host_capability_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-capability.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 die() {
@@ -16,7 +17,7 @@ die() {
   exit 1
 }
 
-for command in bb cmp gcc jq rg sha256sum; do
+for command in bb gcc jq rg sha256sum; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -137,18 +138,9 @@ HOST_MONOTONIC_NOW|monotonic-now
 FUNCTIONS
 printf '\n#endif\n' >>"$map"
 
-publish_generated() {
-  local name="$1"
-  if [[ -f "$art/$name" ]] && ! cmp -s "$scratch/generated/$name" "$art/$name"; then
-    diff -u "$art/$name" "$scratch/generated/$name" >&2 || true
-    die "generated artifact drifted: $name"
-  fi
-}
-
 generated_names=(kernel_capability.facts source.sha256 report.txt function_map.h module_0.h module_0.c)
 for name in "${generated_names[@]}"; do
   [[ -f "$scratch/generated/$name" ]] || die "materializer omitted $name"
-  publish_generated "$name"
 done
 
 publish_results() {

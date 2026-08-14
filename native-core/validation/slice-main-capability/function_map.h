@@ -1,6 +1,0 @@
-#ifndef NATIVE_MAIN_CAPABILITY_FUNCTION_MAP_H
-#define NATIVE_MAIN_CAPABILITY_FUNCTION_MAP_H
-
-#define FRAM_MAIN native_m0_fn_0
-
-#endif

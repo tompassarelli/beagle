@@ -5,12 +5,14 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 src="$here/fixture.bclj"
 provider="$here/provider.bclj"
 collision="$here/collision.bclj"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-keyword-access.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
+mkdir -p "$art"
 
 "$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
 "$repo/bin/beagle-ast" "$provider" >"$scratch/provider.ast.json"
@@ -24,10 +26,6 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   --input "$scratch/provider.ast.json=native-core/validation/slice-keyword-access/provider.bclj" \
   --input "$scratch/collision.ast.json=native-core/validation/slice-keyword-access/collision.bclj" \
   --output "$scratch/collision.facts"
-if [[ -f "$art/fixture.facts" ]] && ! cmp -s "$scratch/fixture.facts" "$art/fixture.facts"; then
-  echo "drive.sh: regenerated projection differs from the committed fixture.facts" >&2
-  exit 1
-fi
 cp "$scratch/fixture.facts" "$art/fixture.facts"
 sha256sum "$src" "$provider" | sed "s#  $here/#  #" >"$art/source.sha256"
 

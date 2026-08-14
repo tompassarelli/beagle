@@ -1,5 +1,0 @@
-32a3c332cdf0f598e24e5370e07eaaa85258f15a5c5d510186b06f2397bb709e  module_0.h slice-fold
-f7cee6d5723cdcfa8e98edb66bde13f2ac13ba25f8a522bb9bef6a6c099deeb7  module_0.c slice-fold
-325971c50a7e77259f8f6f4b93d35fcc35fb2367b2fe93126c8087da81fe3397  main.c slice-fold
-7a0c792af31eccde38a6c6c753eaae0f22d6826a53bdfbaa327dde39ed40a72d  module_0.h slice-union
-eafe02cfedaecb803f276ec9775bcde356aae2ee2de261f9f7f1c1bb3eba22da  module_0.c slice-union

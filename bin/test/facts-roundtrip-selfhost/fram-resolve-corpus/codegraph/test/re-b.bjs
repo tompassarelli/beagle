@@ -1,3 +1,0 @@
-#lang beagle/js
-(ns re.b (:require [re.a :refer [red]]))
-(js/export red)

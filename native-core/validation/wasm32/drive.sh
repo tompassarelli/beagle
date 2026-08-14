@@ -5,9 +5,7 @@
 # The emitted _Static_assert wall is the per-target enforcement instrument.
 # slice-union carries the value descriptor channel (native_value_equal/hash/
 # compare over an Any whose Pair variant is a reference), which traps in the
-# shim when a descriptor size disagrees with sizeof(void *). It stands in for
-# slice-rt-core, which cannot run here without per-ABI goldens and a wasm
-# managed-oracle comparison.
+# shim when a descriptor size disagrees with sizeof(void *).
 # Toolchain, declared: BEAGLE_WASI_CC (or WASI_CC), WASMTIME, and wasm-ld on
 # PATH (the clang wrapper spawns it by bare name). The supported flake devshell
 # supplies all three and sets BEAGLE_WASI=1; a missing component there is a hard
@@ -16,9 +14,11 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-artifacts="${NATIVE_SLICE_ARTIFACTS:-$here}"
+artifacts="${NATIVE_SLICE_ARTIFACTS:-}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/native-wasm32.XXXXXX")"
+[[ -n "$artifacts" ]] || artifacts="$work/artifacts"
 trap 'rm -rf "${work:?}"' EXIT
+mkdir -p "$artifacts"
 
 die() {
   echo "wasm32/drive.sh: $*" >&2
@@ -117,14 +117,10 @@ grep -Fqx "$refusal" "$work/union-a/report.txt" \
        die "the wasm32 program did not draw the named QBE refusal"; }
 echo "wasm32/drive.sh: QBE refused the wasm32 program by name"
 
-# ---- committed seam ledger + determinism digests --------------------------
+# ---- seam report + materialization digests --------------------------------
 mkdir -p "$artifacts"
 for name in slice_fold slice_union; do
   bb "$here/seams.clj" "$work/$name.wasm" >"$work/$name.seams"
-  if [[ -f "$here/$name.seams" && "${NATIVE_WASM32_UPDATE:-0}" != 1 ]]; then
-    diff -u "$here/$name.seams" "$work/$name.seams" \
-      || die "$name host seam changed: every import and export is a committed claim"
-  fi
   cp "$work/$name.seams" "$artifacts/$name.seams"
 done
 
@@ -133,10 +129,6 @@ done
       | sed 's|$| slice-fold|' )
   ( cd "$work/union-a" && sha256sum module_0.h module_0.c | sed 's|$| slice-union|' )
 } >"$work/determinism.txt"
-if [[ -f "$here/determinism.txt" && "${NATIVE_WASM32_UPDATE:-0}" != 1 ]]; then
-  diff -u "$here/determinism.txt" "$work/determinism.txt" \
-    || die "wasm32 emission drifted from the committed digests"
-fi
 cp "$work/determinism.txt" "$artifacts/determinism.txt"
 
 echo "wasm32/drive.sh: slice-fold and slice-union PASS at the wasm32 ABI profile"

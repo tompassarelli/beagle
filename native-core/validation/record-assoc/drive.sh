@@ -5,8 +5,9 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_RECORD_ASSOC_REPO:-$(cd "$here/../../.." && pwd)}"
-artifacts="${NATIVE_RECORD_ASSOC_ARTIFACTS:-$here}"
+artifacts="${NATIVE_RECORD_ASSOC_ARTIFACTS:-}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-record-assoc.XXXXXX")"
+[[ -n "$artifacts" ]] || artifacts="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 mkdir -p "$scratch/out" "$scratch/c" "$artifacts"

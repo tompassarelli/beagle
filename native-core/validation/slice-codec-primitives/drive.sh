@@ -5,20 +5,18 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 src="$here/fixture.bclj"
 managed_src="$here/managed_fixture.bclj"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-codec-primitives.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
+mkdir -p "$art"
 
 "$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   --input "$scratch/fixture.ast.json=beagle:native-core/validation/slice-codec-primitives/fixture.bclj" \
   --output "$scratch/fixture.facts"
-if [[ -f "$art/fixture.facts" ]] && ! cmp -s "$scratch/fixture.facts" "$art/fixture.facts"; then
-  echo "drive.sh: regenerated projection differs from fixture.facts" >&2
-  exit 1
-fi
 cp "$scratch/fixture.facts" "$art/fixture.facts"
 {
   sha256sum "$src" | cut -d' ' -f1

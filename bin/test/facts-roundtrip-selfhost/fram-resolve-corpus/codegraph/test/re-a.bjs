@@ -1,3 +1,0 @@
-#lang beagle/js
-(ns re.a)
-(js/export (defn red [(v Any)] Any v))

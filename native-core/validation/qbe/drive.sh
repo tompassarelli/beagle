@@ -7,11 +7,12 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_QBE_REPO:-$(cd "$here/../../.." && pwd)}"
-artifacts="${NATIVE_QBE_ARTIFACTS:-$here}"
+artifacts="${NATIVE_QBE_ARTIFACTS:-}"
 
 command -v bb >/dev/null 2>&1 || { echo "drive.sh: babashka (bb) is required" >&2; exit 2; }
 
 work="$(mktemp -d)"
+[[ -n "$artifacts" ]] || artifacts="$work/artifacts"
 cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
 

@@ -1,4 +1,4 @@
-;; g1-gate.clj — gate G1 for the Phase-2 S1 epoch analysis (report-only).
+;; g1-gate.clj — epoch-assignment gate (report-only).
 ;; Input: epoch-map JSON files (one per module, from epoch-stage.clj).
 ;; Passes iff, across all given maps together:
 ;;   1. >= 90% of allocating sites carry an epoch assignment;

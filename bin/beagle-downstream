@@ -27,7 +27,7 @@ source "$(dirname "$0")/_beagle-racket"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Route the `beagle` collection at THIS checkout's beagle-lib (required in a
-# git worktree, harmless in the canonical checkout). Mirrors beagle-certify.
+# git worktree, harmless in the canonical checkout).
 collects="$root/.beagle/collects"
 mkdir -p "$collects"
 ln -sfn "$root/beagle-lib" "$collects/beagle"

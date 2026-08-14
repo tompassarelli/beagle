@@ -139,7 +139,7 @@ if bb -cp "$FRAM_OUT" "$RES" delete Point ct "$W/ct.edn" >/dev/null 2>&1; then
   echo "  FAIL  ->ctor ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  ->constructor reference blocks delete"; fi
 
-# --- 9. match-pattern + field-accessor references block delete (adversarial sweep #6) -
+# --- 9. match-pattern + field-accessor references block delete -------------------
 echo "--- 9. match-pattern ctor + field-accessor references block delete ---"
 cat > "$W/mt.bclj" <<'EOF'
 #lang beagle/clj
@@ -164,7 +164,7 @@ if bb -cp "$FRAM_OUT" "$RES" delete Point fa "$W/fa.edn" >/dev/null 2>&1; then
   echo "  FAIL  field-accessor ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  field-accessor reference blocks delete"; fi
 
-# --- 10. fully-qualified (module-name/Name) consumer refs block delete (adversarial sweep #8) -
+# --- 10. fully-qualified consumer refs block delete ------------------------------
 echo "--- 10. fully-qualified consumer references block delete ---"
 cat > "$W/fqp.bclj" <<'EOF'
 #lang beagle/clj

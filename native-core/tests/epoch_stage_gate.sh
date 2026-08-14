@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Gate G1 for the Phase-2 S1 epoch analysis (native-core/analysis/epoch/,
-# report-only): run the analysis over the stage/emitter modules and require
+# Run the epoch analysis over the stage/emitter modules and require
 # >= 90% of allocating sites epoch-assigned, every refusal TODO-EPOCH-coded,
 # zero unexplained sites. Prints the per-module assignment table.
 set -euo pipefail

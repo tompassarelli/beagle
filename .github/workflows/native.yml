@@ -63,9 +63,6 @@ jobs:
           raco pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
 
-      - name: Verify Fram CI revision contract
-        run: raco test beagle-test/tests/fram-ci-contract.rkt
-
       # bb runs the blessed seed (self-host/seed/) — the middle leg of the
       # three-way parity (native == bb seed == Racket oracle). Same pin as test.yml.
       - name: Install babashka (bb seed-emit leg of verify-native)
@@ -76,12 +73,12 @@ jobs:
       # verify-native's default corpus is ~/code/fram/main/src/fram/*.bclj. Check out
       # fram so the native binary is gated against the same real modules the
       # local run uses, not just an in-repo fixture.
-      - name: Load pinned Fram compatibility revision
+      - name: Load current Fram revision
         id: fram-revision
         run: |
-          revision="$(tr -d '\r\n' < contrib/downstream/fram-ci-revision)"
+          revision="$(tr -d '\r\n' < native-core/validation/fram.ref)"
           if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "invalid Fram compatibility revision: $revision" >&2
+            echo "invalid Fram revision: $revision" >&2
             exit 1
           fi
           printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"

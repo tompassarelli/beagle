@@ -5,9 +5,11 @@ types_root="$(git rev-parse --show-toplevel)"
 fram_checkout="$("$types_root/native-core/validation/fram-checkout.sh")"
 types_source="$fram_checkout/src/fram/types.bgl"
 types_logical="${types_source#"$fram_checkout/"}"
-types_output="$types_root/native-core/validation/slice-types"
-types_scratch="$(mktemp -d /tmp/native-slice-types.XXXXXX)"
+types_scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types.XXXXXX")"
+types_output="${NATIVE_SLICE_ARTIFACTS:-$types_scratch/artifacts}"
 types_clang_bin="$(command -v clang || true)"
+mkdir -p "$types_output"
+trap 'rm -rf "${types_scratch:?}"' EXIT
 
 if [[ -z "$types_clang_bin" ]]; then
   types_clang_bin="$(find /nix/store -maxdepth 3 -type f -path '*clang-wrapper*/bin/clang' | sort | tail -n 1)"
@@ -35,7 +37,7 @@ fi
   "$types_root/native-core/src/native/lower.bclj" \
   "$types_root/native-core/src/native/obligations.bclj" \
   "$types_root/native-core/src/native/c11.bclj" \
-  "$types_output/pipeline.bclj" \
+  "$types_root/native-core/validation/slice-types/pipeline.bclj" \
   --out "$types_scratch/out" >"$types_scratch/build.log" 2>&1 || {
     sed -n '1,240p' "$types_scratch/build.log" >&2
     exit 1

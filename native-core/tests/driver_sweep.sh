@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # driver_sweep.sh: run every native-core validation driver; each driver's
 # green result is cached on its own traced input closure (bin/_gate-cache-run:
-# compiler sources, beagle-lib, the driver script, and every committed file in
-# the driver's directory — the seeding copy below reads them all under trace).
+# compiler sources, beagle-lib, and the driver script).
 # Compiler unchanged + driver unchanged = cached-green, replayed not re-run.
 # BEAGLE_GATE_NO_CACHE=1 forces full runs.
 #
@@ -11,13 +10,8 @@
 #   driver_sweep.sh --list         # enumerate driver names
 #   driver_sweep.sh --one NAME     # run one driver directly (the cached unit)
 #
-# Artifact redirection is DERIVED per driver, not hand-mapped: every
-# NATIVE_*_ARTIFACTS variable the driver script mentions is pointed at a
-# temporary copy of the driver's committed directory (so byte-compares against
-# committed artifacts still see them, and the tree stays clean), and every
-# NATIVE_*_REPO variable at this repo. A run.sh driver that writes its
-# committed directory in place runs under a full snapshot/restore instead —
-# inside the trace, so the recorded post-state equals the committed state.
+# Every NATIVE_*_ARTIFACTS variable mentioned by a driver is pointed at its own
+# empty temporary directory, and every NATIVE_*_REPO variable at this repo.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,62 +29,28 @@ driver_names() {
 }
 
 run_one() {
-    local name="$1" dir="$validation/$1" driver var status
+    local name="$1" dir="$validation/$1" driver var work dest
     if [[ -f "$dir/drive.sh" ]]; then
         driver="$dir/drive.sh"
-        local work
-        work="$(mktemp -d "${TMPDIR:-/tmp}/sweep-$name.XXXXXX")"
-        # shellcheck disable=SC2064
-        trap "rm -rf '${work:?}'" RETURN
-        # Every *_ARTIFACTS var the driver honors gets its OWN directory —
-        # sharing one dir lets two materializations clobber each other's
-        # outputs (slice-strings' replay header vs its slice header). A var
-        # whose in-script default is the committed dir ($here) is seeded with
-        # a copy of it: the copy reads every committed file under trace,
-        # putting the whole dir in the cache key, and byte-compares against
-        # committed artifacts still see them. A var defaulting to private
-        # scratch stays an empty dir, exactly like the default it replaces.
-        local var_default dest
-        while IFS= read -r var; do
-            dest="$work/${var,,}"
-            mkdir -p "$dest"
-            var_default="$(grep -oE "\\\$\{$var:-[^}]*\}" "$driver" | head -1)"
-            if [[ "$var_default" == *'$here'* ]]; then
-                cp -a "$dir/." "$dest/"
-            fi
-            export "$var=$dest"
-        done < <(grep -oE '\bNATIVE_[A-Z_]*ARTIFACTS\b' "$driver" | LC_ALL=C sort -u)
-        while IFS= read -r var; do
-            export "$var=$repo"
-        done < <(grep -oE '\bNATIVE_[A-Z_]*REPO\b' "$driver" | LC_ALL=C sort -u)
-        (cd "$repo" && bash "$driver")
-        return $?
     elif [[ -f "$dir/run.sh" ]]; then
         driver="$dir/run.sh"
-        # In-place driver: snapshot the committed dir, run, restore exactly —
-        # extras deleted, originals restored — so post-state == committed state.
-        local snap
-        snap="$(mktemp -d "${TMPDIR:-/tmp}/sweep-snap-$name.XXXXXX")"
-        # shellcheck disable=SC2064
-        trap "rm -rf '${snap:?}'" RETURN
-        cp -a "$dir/." "$snap/"
-        (cd "$repo" && bash "$driver")
-        status=$?
-        (cd "$dir" && find . -mindepth 1 \( -type f -o -type l \) | LC_ALL=C sort) \
-            > "$snap.post"
-        (cd "$snap" && find . -mindepth 1 \( -type f -o -type l \) | LC_ALL=C sort) \
-            > "$snap.pre"
-        local extra
-        while IFS= read -r extra; do
-            rm -f "$dir/$extra"
-        done < <(comm -23 "$snap.post" "$snap.pre")
-        cp -a "$snap/." "$dir/"
-        rm -f "$snap.post" "$snap.pre"
-        return $status
     else
         echo "driver_sweep.sh: no driver in $dir" >&2
         return 2
     fi
+
+    work="$(mktemp -d "${TMPDIR:-/tmp}/sweep-$name.XXXXXX")"
+    # shellcheck disable=SC2064
+    trap "rm -rf '${work:?}'" RETURN
+    while IFS= read -r var; do
+        dest="$work/${var,,}"
+        mkdir -p "$dest"
+        export "$var=$dest"
+    done < <(grep -oE '\bNATIVE_[A-Z_]*ARTIFACTS\b' "$driver" | LC_ALL=C sort -u)
+    while IFS= read -r var; do
+        export "$var=$repo"
+    done < <(grep -oE '\bNATIVE_[A-Z_]*REPO\b' "$driver" | LC_ALL=C sort -u)
+    (cd "$repo" && bash "$driver")
 }
 
 case "${1:-}" in

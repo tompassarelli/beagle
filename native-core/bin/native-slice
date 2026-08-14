@@ -16,10 +16,7 @@
 # Every clause prints one PASS/FAIL line; a missing artifact, driver, or
 # toolchain is a named FAIL, never an abort. Exit 0 iff every clause passed.
 #
-# Artifacts, first hit: --artifacts DIR | native-core/validation/slice-<M>.
-# With no slice C output the compile clauses fall back to the fixture corpus
-# native-core/validation/c11 and FAIL — a clean baseline is evidence about
-# the toolchain and shim, never about the module.
+# Artifacts, first hit: --artifacts DIR | a temporary run directory.
 #
 # Driver, first hit: --driver PATH | driver= in <artifacts>/slice.conf | a
 # DRIVER_PROBES name in <artifacts> | native-core/bin/slice-<M>.
@@ -92,7 +89,6 @@ cleanup() { [[ "${NATIVE_SLICE_KEEP:-0}" == 1 ]] || rm -rf "${WORK:?}"; }
 trap cleanup EXIT
 
 SHIM_DIR="$REPO/native-core/shim"
-FIXTURE_DIR="$REPO/native-core/validation/c11"
 
 # ---------------------------------------------------------------- reporting
 
@@ -127,7 +123,7 @@ run_bounded() { # run_bounded <seconds> <logfile> <cmd...>
   fi
 }
 
-snapshot() { # snapshot <dir> <outfile> — content digest of every tracked-ish file
+digest_tree() { # digest_tree <dir> <outfile> — content digest of current outputs
   local dir="$1" out="$2"
   : >"$out"
   [[ -d "$dir" ]] || return 0
@@ -149,6 +145,10 @@ find_driver() { # find_driver <module> <artifacts-dir>
   fi
   for cand in "${DRIVER_PROBES[@]}"; do
     [[ -f "$art/$cand" ]] && { printf '%s\n' "$art/$cand"; return; }
+  done
+  for cand in "${DRIVER_PROBES[@]}"; do
+    [[ -f "$REPO/native-core/validation/slice-$module/$cand" ]] \
+      && { printf '%s\n' "$REPO/native-core/validation/slice-$module/$cand"; return; }
   done
   for cand in "$REPO/native-core/bin/slice-$module" \
               "$REPO/native-core/bin/materialize-$module" \
@@ -321,8 +321,9 @@ run_module() {
   if [[ -n "$ARTIFACTS_OVERRIDE" ]]; then
     art="$ARTIFACTS_OVERRIDE"
   else
-    art="$REPO/native-core/validation/slice-$module"
+    art="$moddir/artifacts"
   fi
+  mkdir -p "$art"
 
   local n_files=0
   if [[ -d "$art" ]]; then
@@ -353,11 +354,7 @@ run_module() {
     cset_origin=slice
   fi
   if [[ ${#cset[@]} -eq 0 ]]; then
-    if [[ -d "$FIXTURE_DIR" ]]; then
-      while IFS= read -r f; do cset+=("$f"); done < <(find "$FIXTURE_DIR" -type f -name '*.c' | LC_ALL=C sort)
-      [[ ${#cset[@]} -gt 0 ]] && cset_origin=fixture-fallback
-    fi
-    [[ ${#cset[@]} -eq 0 ]] && cset_origin=none
+    cset_origin=none
   fi
   # The shim is the ABI floor for every slice; skip it when a slice vendors one.
   local vendored_shim=0
@@ -368,9 +365,8 @@ run_module() {
     cset=("$SHIM_DIR/native_shim.c" "${cset[@]}")
   fi
   case "$cset_origin" in
-    slice)            note "c-set" "${#cset[@]} TU(s) from the slice + shim" ;;
-    fixture-fallback) note "c-set" "${#cset[@]} TU(s) from ${FIXTURE_DIR#"$REPO"/} + shim (fixture corpus, NOT module output)" ;;
-    none)             note "c-set" "no C translation units found" ;;
+    slice) note "c-set" "${#cset[@]} TU(s) from the slice + shim" ;;
+    none)  note "c-set" "no C translation units found" ;;
   esac
 
   driver="$(find_driver "$module" "$art")"
@@ -430,10 +426,6 @@ run_module() {
     if [[ $crc -ne 0 ]]; then
       clause FAIL "$label" "$detail"
       tail_log "$moddir/$cc/$cc.log"
-    elif [[ "$cset_origin" == fixture-fallback ]]; then
-      clause FAIL "$label" "$detail, but on the fixture corpus — module produced no C"
-      # A clean baseline is real evidence about the toolchain, just not about
-      # this module; keep it visible instead of burying it in the gap text.
     else
       clause PASS "$label" "$detail"
     fi
@@ -445,14 +437,14 @@ run_module() {
   else
     local snap_a="$moddir/snap-a.txt" snap_b="$moddir/snap-b.txt"
     local dlog2="$moddir/driver-run2.log"
-    snapshot "$art" "$snap_a"
+    digest_tree "$art" "$snap_a"
     invoke_driver "$driver" "$module" "$art" "$dlog2"
     local rc2=$?
     if [[ $rc2 -ne 0 ]]; then
       clause FAIL "byte-identity re-run" "second materialization exited $rc2 (driver is not re-runnable)"
       tail_log "$dlog2"
     else
-      snapshot "$art" "$snap_b"
+      digest_tree "$art" "$snap_b"
       if [[ ! -s "$snap_a" && ! -s "$snap_b" ]]; then
         clause FAIL "byte-identity re-run" "driver re-ran but produced no files under ${art#"$REPO"/}"
       elif diff -q "$snap_a" "$snap_b" >/dev/null 2>&1; then

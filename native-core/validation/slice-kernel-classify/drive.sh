@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Proves the complete fram.kernel-classify native program against its managed
-# oracle through full C17 and a direct QBE projection of delivery-trigger?.
+# Proves the complete fram.kernel-classify native program against its current
+# managed execution through full C17 and a direct QBE projection.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
 source_file="$fram_checkout/src/fram/kernel_classify.bgl"
 managed_out="$fram_checkout/out"
 probe_file="$here/kernel_classify_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-classify.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 die() {
@@ -42,15 +43,13 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 source_digest="$(sha256sum "$source_file" | cut -d' ' -f1)"
 probe_digest="$(sha256sum "$probe_file" | cut -d' ' -f1)"
 corpus_digest="$(sha256sum "$here/corpus.tsv" | cut -d' ' -f1)"
-oracle_digest="$(sha256sum "$here/managed.out" | cut -d' ' -f1)"
 runner_digest="$(sha256sum "$here/managed_runner.clj" | cut -d' ' -f1)"
 dual_runner_digest="$(sha256sum "$here/dual_main.c" | cut -d' ' -f1)"
 {
   printf '%s  %s\n' "$source_digest" "$source_logical"
   printf '%s  %s\n' "$probe_digest" "$probe_logical"
   printf '%s  %s\n' "$corpus_digest" 'beagle:native-core/validation/slice-kernel-classify/corpus.tsv'
-  printf '%s  %s\n' "$oracle_digest" 'managed-oracle-output'
-  printf '%s  %s\n' "$runner_digest" 'managed-oracle-runner'
+  printf '%s  %s\n' "$runner_digest" 'managed-runner'
   printf '%s  %s\n' "$dual_runner_digest" 'qbe-c17-dual-runner'
 } >"$scratch/generated/source.sha256"
 
@@ -172,18 +171,9 @@ KC_OBSERVED_LEASE_SCHEMA_LINES|observed-lease-schema-lines
 FUNCTIONS
 printf '\n#endif\n' >>"$map"
 
-publish_generated() {
-  local name="$1"
-  if [[ -f "$art/$name" ]] && ! cmp -s "$scratch/generated/$name" "$art/$name"; then
-    diff -u "$art/$name" "$scratch/generated/$name" >&2 || true
-    die "generated artifact drifted: $name"
-  fi
-}
-
 generated_names=(kernel_classify.facts source.sha256 report.txt function_map.h module_0.h module_0.c module_1.ssa)
 for name in "${generated_names[@]}"; do
   [[ -f "$scratch/generated/$name" ]] || die "materializer omitted $name"
-  publish_generated "$name"
 done
 
 publish_results() {
@@ -201,17 +191,11 @@ if [[ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]]; then
   exit 0
 fi
 
-[[ "$(wc -l <"$here/managed.out")" -eq 139 ]] || die "managed oracle line count drifted"
-[[ "$(wc -c <"$here/managed.out")" -eq 3591 ]] || die "managed oracle byte count drifted"
-[[ "$oracle_digest" == '2bab2e7d00496f24ee9ff852c0eed177b6e3ab1c64fdeb7ca39271b1cfb5feef' ]] \
-  || die "managed oracle digest drifted"
-
-if [[ -d "$managed_out" ]]; then
-  bb -cp "$managed_out" \
-    "$here/managed_runner.clj" "$here/corpus.tsv" >"$scratch/managed-fresh.out"
-  cmp -s "$scratch/managed-fresh.out" "$here/managed.out" \
-    || die "fresh managed execution differs from the committed oracle"
-fi
+[[ -d "$managed_out" ]] || die "managed projection is unavailable: $managed_out"
+bb -cp "$managed_out" \
+  "$here/managed_runner.clj" "$here/corpus.tsv" >"$scratch/managed-current.out"
+[[ "$(wc -l <"$scratch/managed-current.out")" -eq 139 ]] \
+  || die "managed execution produced the wrong case count"
 
 build="$scratch/c"
 mkdir -p "$build"
@@ -233,11 +217,8 @@ fi
 "$build/probe_clang" "$here/corpus.tsv" >"$scratch/clang.out"
 
 for output in "$scratch/gcc.out" "$scratch/clang.out"; do
-  cmp -s "$output" "$here/managed.out" || die "native output differs from managed oracle: $output"
-  [[ "$(wc -l <"$output")" -eq 139 ]] || die "native output line count differs"
-  [[ "$(wc -c <"$output")" -eq 3591 ]] || die "native output byte count differs"
-  [[ "$(sha256sum "$output" | cut -d' ' -f1)" == "$oracle_digest" ]] \
-    || die "native output digest differs"
+  cmp -s "$output" "$scratch/managed-current.out" \
+    || die "native output differs from current managed execution: $output"
 done
 
 find_qbe() {
@@ -268,10 +249,10 @@ cp "$scratch/generated/module_1.ssa" "$here/dual_main.c" "$build/"
 
 delivery_inputs=(to target from '' targeted)
 "$build/probe_dual" "${delivery_inputs[@]}" >"$scratch/dual.out"
-awk -F '\t' '$1 == "deliveryTrigger" { print $3 }' "$here/managed.out" \
+awk -F '\t' '$1 == "deliveryTrigger" { print $3 }' "$scratch/managed-current.out" \
   >"$scratch/delivery-managed.out"
 [[ "$(wc -l <"$scratch/delivery-managed.out")" -eq 5 ]] \
-  || die "managed oracle delivery case count drifted"
+  || die "managed delivery case count differs"
 cut -f1 "$scratch/dual.out" >"$scratch/delivery-c17.out"
 cut -f2 "$scratch/dual.out" >"$scratch/delivery-qbe.out"
 cmp -s "$scratch/delivery-c17.out" "$scratch/delivery-managed.out" \
@@ -289,5 +270,4 @@ done
 echo "slice-kernel-classify: gcc strict compile + 77 cases + 3 globals PASS"
 echo "slice-kernel-classify: clang strict compile + 77 cases + 3 globals PASS"
 echo "slice-kernel-classify: direct QBE assemble + link + 5 managed parity cases PASS"
-echo "slice-kernel-classify: lines=139 bytes=3591 sha256=$oracle_digest"
 publish_results

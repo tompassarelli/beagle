@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gate G5 for the Phase-2 S5 promote surface form.
+# Validate the promote surface form.
 #
 #   1  the surface path: `beagle check` types `bgl/promote`, and
 #      `beagle build --materializer c17` lowers and materializes the probe;
@@ -23,12 +23,13 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 probe="$here/promote_probe.bgl"
 
 command -v bb >/dev/null 2>&1 || { echo "drive.sh: babashka (bb) is required" >&2; exit 2; }
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-promote.XXXXXX")"
+[[ -n "$art" ]] || art="$work/artifacts"
 trap 'rm -rf "${work:?}"' EXIT
 
 mkdir -p "$work/src/native" "$work/run-a" "$work/run-b" "$work/core" "$art"

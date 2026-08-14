@@ -51,9 +51,6 @@ run_env_artifacts_slice() {
   local name="$1" driver="$2"; shift 2
   local run1="$work/$name/run1" run2="$work/$name/run2"
   mkdir -p "$run1" "$run2"
-  # A hand-written probe main.c is a driver INPUT read out of the artifacts dir,
-  # not an output it writes, so an empty run dir has to be seeded with it.
-  for r in "$run1" "$run2"; do cp "$(dirname "$driver")/main.c" "$r/" 2>/dev/null || true; done
   echo "--- $name (materialization 1/2) ---"
   NATIVE_SLICE_REPO="$repo" NATIVE_SLICE_ARTIFACTS="$run1" "$@" bash "$driver" \
     || { echo "determinism_gate.sh: $name materialization 1 failed" >&2; status=1; return; }
@@ -90,40 +87,8 @@ run_slice_kernel_classify() {
     env NATIVE_SLICE_NO_COMPILE=1
 }
 
-# run.sh writes into the committed dir directly (no artifacts-dir override);
-# snapshot + restore so the gate never leaves the tree dirty.
 run_slice_types() {
-  local name=slice-types
-  local dir="$validation/slice-types"
-  local artifacts=(main.c module_0.c module_0.h obligations.txt pipeline-evidence.txt source.sha256)
-  local before="$work/$name/before"
-  mkdir -p "$before"
-  for f in "${artifacts[@]}"; do [ -f "$dir/$f" ] && cp "$dir/$f" "$before/$f"; done
-  restore_before() { for f in "${artifacts[@]}"; do [ -f "$before/$f" ] && cp "$before/$f" "$dir/$f"; done; }
-
-  local run1="$work/$name/run1" run2="$work/$name/run2"
-  mkdir -p "$run1" "$run2"
-  echo "--- $name (materialization 1/2) ---"
-  if ! bash "$dir/run.sh"; then
-    echo "determinism_gate.sh: $name materialization 1 failed" >&2
-    restore_before; status=1; return
-  fi
-  for f in "${artifacts[@]}"; do [ -f "$dir/$f" ] && cp "$dir/$f" "$run1/$f"; done
-  echo "--- $name (materialization 2/2) ---"
-  if ! bash "$dir/run.sh"; then
-    echo "determinism_gate.sh: $name materialization 2 failed" >&2
-    restore_before; status=1; return
-  fi
-  for f in "${artifacts[@]}"; do [ -f "$dir/$f" ] && cp "$dir/$f" "$run2/$f"; done
-  restore_before
-
-  if diff -rq "$run1" "$run2" >"$work/$name/diff.txt"; then
-    echo "PASS  $name: byte-identical across two materializations"
-  else
-    echo "FAIL  $name: diverged — differing paths:" >&2
-    sed 's/^/    /' "$work/$name/diff.txt" >&2
-    status=1
-  fi
+  run_env_artifacts_slice slice-types "$validation/slice-types/run.sh" env
 }
 
 run_slice_store() {

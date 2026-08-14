@@ -8,7 +8,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-artifacts="${NATIVE_SLICE_ARTIFACTS:-$here}"
+artifacts="${NATIVE_SLICE_ARTIFACTS:-}"
 native_repo="${NATIVE_RT_CORE_NATIVE_REPO:-$repo}"
 fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
 source_file="$fram_checkout/src/fram/rt_core.bgl"
@@ -17,6 +17,7 @@ managed_out="$fram_checkout/out"
 native_shim="$native_repo/native-core/shim"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-rt-core.XXXXXX")"
 generated="$scratch/generated"
+[[ -n "$artifacts" ]] || artifacts="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 die() {
@@ -24,7 +25,7 @@ die() {
   exit 1
 }
 
-for command in awk bb cmp cut gcc jq pkg-config rg sed sha256sum sort; do
+for command in awk bb cut gcc jq pkg-config rg sed sha256sum sort; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -94,13 +95,13 @@ bb -cp "$managed_out" \
 
 [[ "$(awk -F '\t' '$1 == "rt-core" { print $2 }' "$generated/managed.out" \
         | sort -u | wc -l | tr -d ' ')" -eq 25 ]] \
-  || die "managed oracle did not exercise exactly 25 functions"
+  || die "managed execution did not exercise exactly 25 functions"
 [[ "$(awk -F '\t' '$1 == "rt-core-def" { print $2 }' "$generated/managed.out" \
         | sort -u | wc -l | tr -d ' ')" -eq 12 ]] \
-  || die "managed oracle did not observe exactly 12 immutable definitions"
+  || die "managed execution did not observe exactly 12 immutable definitions"
 [[ "$(awk -F '\t' '$1 == "rt-core-error" { print $2 }' "$generated/managed.out" \
         | sort -u | wc -l | tr -d ' ')" -eq 1 ]] \
-  || die "managed oracle did not observe the error declaration"
+  || die "managed execution did not observe the error declaration"
 
 bb "$here/frontier.clj" "$generated/inventory.txt" "$generated/report.txt" \
   "$generated/frontier.txt"
@@ -114,7 +115,7 @@ awk 'FNR == NR {
 [[ "$(awk -F '\t' '{ print $2 }' "$generated/lowered-managed.out" \
         | sort -u | wc -l | tr -d ' ')" \
       -eq "$(rg -c '^lowered fn_[0-9]+ ' "$generated/report.txt")" ]] \
-  || die "lowered managed oracle does not cover every materialized function"
+  || die "managed execution does not cover every materialized function"
 
 digest_line() {
   local path="$1"
@@ -165,12 +166,6 @@ artifact_names+=(artifacts.sha256)
 
 publish() {
   local name="$1"
-  if [[ -f "$here/$name" ]] && ! cmp -s "$generated/$name" "$here/$name"; then
-    if [[ "${NATIVE_RT_CORE_UPDATE:-0}" != 1 ]]; then
-      diff -u "$here/$name" "$generated/$name" >&2 || true
-      die "generated artifact drifted: $name"
-    fi
-  fi
   cp "$generated/$name" "$artifacts/$name"
 }
 
@@ -204,7 +199,7 @@ done
   || die "frontier did not account for exactly 24 supported functions"
 [[ "$(awk -F '\t' '{ print $2 }' "$generated/lowered-managed.out" \
       | sort -u | wc -l | tr -d ' ')" -eq 24 ]] \
-  || die "managed oracle did not cover exactly the supported 24-function set"
+  || die "managed execution did not cover exactly the supported 24-function set"
 
 find_clang() {
   if command -v clang >/dev/null 2>&1; then

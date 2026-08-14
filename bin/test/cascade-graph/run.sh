@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
-# Regression test + proof artifact for graph-native cascade.
+# Scope-correctness test for graph-native cascade.
 #
 # The fixture defines `helper` in BOTH mod_a and mod_b, each with its own caller
-# chain. Changing mod_a/helper must blast ONLY mod_a (midA, topA); mod_b's helper
-# and its callers must be untouched. A bare-symbol (regex) call graph cannot tell
-# the two `helper`s apart and wrongly blasts both modules.
-#
-# This script:
-#   1. runs the CURRENT (graph-native) cascade and ASSERTS scope-correctness,
-#   2. (if a pre-migration regex cascade is reachable in git) renders the two
-#      result sets side by side on the identical collision case — the receipt.
+# chain. Changing mod_a/helper must blast only mod_a (midA, topA); mod_b's helper
+# and its callers must be untouched.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -39,7 +33,7 @@ echo "================ graph-native cascade — collision fixture ==============
 echo "fixture: helper defined in BOTH mod_a and mod_b; change ONLY mod_a/helper."
 echo
 
-# --- 1. the graph result, and the assertions that make it a proof ----------
+# The graph result and the assertions that make it a proof.
 GRAPH_ERR="$(mktemp)"
 graph_status=0
 GRAPH_OUT="$("$BIN/beagle-cascade" "$CORPUS" "$VERIFY" --modified mod_a/helper 2>"$GRAPH_ERR")" \
@@ -74,33 +68,6 @@ check "mod_b is NOT mentioned at all"            'mod_b'      no
 check "b-result is NOT predicted at risk"        'b-result'   no
 check "risks exactly ONE assertion"              'risks 1 assertion' yes
 echo
-
-# --- 2. the side-by-side receipt (best-effort: needs the old regex cascade) -
-# Default baseline = the pre-migration (regex) cascade, pinned by SHA so the
-# side-by-side stays meaningful after main fast-forwards onto the graph version.
-OLD="$(git -C "$BIN" show "${CASCADE_BASELINE:-4203c1be6c9b529dba169e2e7cc50bdb4324eada}:bin/beagle-cascade" 2>/dev/null || true)"
-if [[ -n "$OLD" ]]; then
-  # Run the baseline FROM the real bin/ so its dirname-based tool lookups
-  # (beagle-provides) resolve — a /tmp copy would find no functions.
-  TMP="$BIN/.cascade-baseline.$$"; printf '%s' "$OLD" > "$TMP"; chmod +x "$TMP"
-  # the regex tool has no module concept — the equivalent query is bare `helper`.
-  REGEX_OUT="$("$TMP" "$CORPUS" "$VERIFY" --modified helper 2>/dev/null || true)"
-  rm -f "$TMP"
-  echo "================ RECEIPT — same fixture, same change, two engines ================"
-  echo "QUERY: change \`helper\` in mod_a."
-  echo
-  echo "REGEX (pre-migration, bare-symbol) — direct callers + predicted failures:"
-  grep -E 'direct callers:|a-result|b-result|Summary:' <<<"$REGEX_OUT" | sed 's/^/    /'
-  echo
-  echo "GRAPH (scope-correct, off the Fram calls-graph):"
-  grep -E 'direct callers:|a-result|b-result|Summary:' <<<"$GRAPH_OUT" | sed 's/^/    /'
-  echo
-  echo "The regex engine pulls mod_b/midB into the blast of a function it never"
-  echo "touched and predicts b-result fails. The graph engine leaves mod_b alone."
-else
-  echo "(side-by-side receipt skipped: no pre-migration cascade reachable at"
-  echo " \${CASCADE_BASELINE:-main}:bin/beagle-cascade — the assertions above still gate.)"
-fi
 
 echo
 if [[ "$fail" == 0 ]]; then

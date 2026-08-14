@@ -24,47 +24,6 @@
 ;; The benchmark scores both as "actual line" with that same fallback so the
 ;; numbers reflect the user-visible diagnostic, not internal state.
 ;;
-;; Strategy (recorded 2026-06-01):
-;;
-;;   srcloc preservation in beagle (HEAD 6fefc09) has known gaps in
-;;   parse-time rewrites — every (parse-expr (list …)) site in
-;;   parse-list-form (parse.rkt:2099-2140, 2069-2085, 2061-2063) passes
-;;   a synthesized bare list to parse-expr, which short-circuits
-;;   store-src! because the bare list is not a syntax object.
-;;
-;;   This benchmark exercises the 10 most user-visible cascades from
-;;   those gaps. Phase C ("rewrite-arm wrap helper" — single helper +
-;;   16 callsite changes, ~S–M cost) must improve the pass rate vs the
-;;   pre-fix baseline measured here.
-;;
-;; Acceptance gate:
-;;   - Baseline pass rate must be measured before the rewrite-arm fix.
-;;   - Post-fix pass rate must exceed baseline by >= 50 percentage points.
-;;   - All "direct AST" control cases must remain at 100%.
-;;
-;; Phase C result (2026-06-01): baseline 5/11 (45.5%) → post-fix 11/11 (100%).
-;; Pass rate gain: +54.5pp. Fix surface:
-;;   - ast.rkt:store-src! first-wins guard (synthesized-rewrite path no
-;;     longer clobbers inner srcloc with surface sugar's loc).
-;;   - parse.rkt:rewrite-as helper + current-form-stx parameter set in
-;;     parse-expr immediately before parse-list-form dispatch.
-;;   - parse.rkt: 16 callsite changes in the gap arms (when/when-not/
-;;     if-not/unless/-> /->>/as->/cond->/cond->>/some->/some->>/if-let/
-;;     when-let/if-some/when-some/fmt) — each now passes a syntax-tagged
-;;     synthesized datum so sub-form srclocs survive.
-;;   - parse.rkt:thread-step-insert + lower-binding-cond — accept the
-;;     original sub-syntax objects (steps, rest items, val expression) so
-;;     downstream srclocs propagate naturally instead of being lost when
-;;     re-cons'd.
-;;   - check.rkt:check-one-arg — prefer call-src over arg-src when both
-;;     are available. Reflects that the callee demanding the wrong type
-;;     is the operative blame point (matches the threading-family
-;;     expected lines).
-;;   - ast.rkt:current-body-locs-table + body-loc-at — positional
-;;     srcloc anchor for bare-symbol body tails (defn return-type
-;;     diag's `(last body)` is often a symbol, which store-src! refuses
-;;     by interning policy).
-;;
 ;; Known limitations (NOT covered by current benchmark entries; would
 ;; require additional fixture work and / or scope expansion to address):
 ;;
@@ -587,4 +546,4 @@
 
 ;; Allow running this file standalone to print the benchmark report:
 (module+ main
-  (run-benchmark #:label "baseline (HEAD)"))
+  (run-benchmark #:label "sourcemap fidelity"))

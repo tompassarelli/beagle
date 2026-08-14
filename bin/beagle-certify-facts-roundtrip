@@ -22,7 +22,7 @@ rm -rf "${LAB:?}"
 mkdir -p "$MATERIALIZED" "$ORACLE" "$PORT"
 
 # Materialize inline fixtures under one stable repo-relative path. Path-backed
-# cases remain at their checked-in paths; their oracle hashes pin their bytes.
+# cases use the current checked-in semantic fixtures.
 bb -e '
   (require (quote [clojure.edn :as edn])
            (quote [clojure.java.io :as io]))

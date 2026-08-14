@@ -102,7 +102,7 @@ fi
 if [ "$ORACLE" -eq 1 ]; then
     echo "=== oracle: Racket emission of the same sources ==="
     source "$root/bin/_beagle-racket"
-    # Route the beagle collection at THIS checkout (worktree-safe; see beagle-certify).
+    # Route the beagle collection at this checkout.
     collects="$root/.beagle/collects"
     mkdir -p "$collects"
     ln -sfn "$root/beagle-lib" "$collects/beagle"

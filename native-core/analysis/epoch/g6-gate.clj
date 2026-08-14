@@ -1,4 +1,4 @@
-;; g6-gate.clj — gate G6, the Phase-2 exit measurement over the compiler-shaped
+;; g6-gate.clj — epoch measurement over the compiler-shaped
 ;; reference programs (the compiler's own modules and the validation corpus's
 ;; program-constructing modules).
 ;;

@@ -1,7 +1,0 @@
-module_0.ssa  native.qbe over the native.c11-validation-corpus fixture program (module 0)
-module_1.ssa  native.qbe over the native.qbe-validation-corpus control-flow and bitwise program (module 1)
-module_2.ssa  native.qbe over the native.qbe-validation-corpus immutable vector transform program (module 2)
-module_3.ssa  native.qbe over the scalar checked I64 arithmetic program (module 3)
-qbe_main.c    C driver for modules 0 through 3; links by the native_shim ABI only
-determinism   two independent emitter runs compared byte-for-byte, plus a
-              permuted-program equality assertion inside the corpus

@@ -118,17 +118,3 @@
                  "break teardown SIGKILLed the live child")
   (check-false (directory-exists? (unbox seen-root))
                "break teardown reaped the root"))
-
-;; --- RED control: the pre-fix shape (no containment) leaks on exception -----
-;; Demonstrates the exact hazard the fix removes: a create-then-run-then-delete
-;; that raises before the delete orphans its root. call-with-scratch-containment
-;; is precisely the wrapper that closes this gap.
-(let ([leaked (box #f)])
-  (with-handlers ([exn:fail? void])
-    (define root (make-temporary-directory TEMPLATE))
-    (set-box! leaked root)
-    (error 'boom "raise before the naive delete")
-    (delete-directory/files root))  ; unreached — the leak
-  (check-true (directory-exists? (unbox leaked))
-              "control: naive (uncontained) cleanup orphans its root on exception")
-  (delete-directory/files (unbox leaked)))

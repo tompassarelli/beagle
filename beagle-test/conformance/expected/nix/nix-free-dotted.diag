@@ -1,2 +1,0 @@
-beagle-test/conformance/corpus/nix-free-dotted.bnix:11:0: beagle: beagle: unbound name `vendor.id` on the nix target: it descends into `vendor`, but `vendor` is not a nix/module formal, a let-binding, or any other binding in scope. It emits `${vendor.id}`, which nix rejects as an undefined variable. Declare `vendor` as a `nix/module` formal, bind it with `let`, or fix the name. (Names inside `nix/with` are exempt — their scope is dynamic.)
-  in: (nix/module (#%brackets config) (#%map :config (#%map :services.foo.extraConfig (s config.services.foo.name "=" vendor.id))))

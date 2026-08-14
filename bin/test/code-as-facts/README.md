@@ -55,10 +55,9 @@ boundary:
 
 - **`rename.sh` / `delete.sh` / `authoring.sh`** — rename (O(1), scope-correct via
   `refers_to`) and delete (fail-closed on orphaned refs). The cross-module rename
-  selects either release CI's pinned `.bclj` Fram owner or lockstep's current
-  `.bgl` owner, adds one minimal qualified consumer, and gives projection,
-  resolution, rendering, and coherent overlay checking separate deadlines. The
-  current `.bgl` candidate must check coherently.
+  uses Fram's current `.bgl` owner, adds one minimal qualified consumer, and gives
+  projection, resolution, rendering, and coherent overlay checking separate
+  deadlines.
   These operations EDIT or REMOVE existing names.
 - **`authoring-verbs.sh`** — `upsert-form` (add a NEW
   top-level def, or replace an existing one by name) and `set-body` (replace a defn's
@@ -76,20 +75,5 @@ boundary:
 FRAM_OUT=~/code/fram/main/out bin/test/code-as-facts/authoring-verbs.sh
 ```
 
-The default `rename.sh` invocation is the complete resolver capability suite and
-runs in moving-current Fram lockstep. Immutable-pin CI uses the focused authority
-boundary:
-
-```
-CODE_AS_FACTS_FRAM_AUTHORITY_ONLY=1 \
-  CODE_AS_FACTS_CORPUS=<pinned-fram>/src \
-  FRAM_OUT=<pinned-fram>/out \
-  CHARTROOM=<pinned-fram>/chartroom \
-  bin/test/code-as-facts/rename.sh
-```
-
-That mode stops after section 3 and accepts only `0` or `1`. It does not describe
-the historical resolver as fully compatible: Fram `0fd8ec42` predates qualified
-type, structural-parameter type, protocol-return type, and typed-let cascades.
-Those four capabilities remain required—and green—in the default moving-current
-suite.
+`rename.sh` is the complete resolver capability suite and runs against current
+Fram source.

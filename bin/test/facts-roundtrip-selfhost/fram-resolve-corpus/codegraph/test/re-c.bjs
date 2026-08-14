@@ -1,3 +1,0 @@
-#lang beagle/js
-(ns re.c (:require [re.b :refer [red]]))
-(defn use-c [] Any (red 1))

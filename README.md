@@ -47,7 +47,7 @@ against *which* target.
 - [`docs/cli.md`](docs/cli.md) — the CLI and the authoring loop.
 - [`docs/architecture.md`](docs/architecture.md) — pipeline, layout, where to change what.
 - [`docs/self-hosting.md`](docs/self-hosting.md) — how the compiler is held correct.
-- [`docs/target-policy.md`](docs/target-policy.md) — why targets get removed, not deprecated.
+- [`docs/target-policy.md`](docs/target-policy.md) — the target registry and projection boundary.
 - [`docs/INFLUENCES.md`](docs/INFLUENCES.md) — lineage and thesis.
 
 Static reference stays thin on purpose — the compiler answers instead: `beagle
@@ -308,8 +308,6 @@ own field omitted. Schema version 3 preserves namespace imports as structural
 Core is a source profile, not a direct source emitter; its row names the frozen
 native program build product while the materializer remains an explicit build
 option.
-Profiles are removed rather than deprecated when they stop earning their place —
-[`docs/target-policy.md`](docs/target-policy.md).
 
 ## Real codebases author against Beagle
 
@@ -329,9 +327,8 @@ Profiles are removed rather than deprecated when they stop earning their place �
 ## How it is held correct
 
 The `clj`-target compiler is written in Beagle and compiles itself to a
-byte-level fixpoint, with the original Racket compiler as a conformance oracle
-and a nightly differential fuzz campaign holding the two to byte-exact agreement
-on an empty exemption list — [`docs/self-hosting.md`](docs/self-hosting.md).
+byte-level fixpoint. Current compiler, property, mutation, and native semantic
+checks cover the live surface — [`docs/self-hosting.md`](docs/self-hosting.md).
 
 ## What it isn't
 

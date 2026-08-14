@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Gate G4 for the Phase-2 S4 epoch materialization.
+# Validate epoch materialization.
 #
 #   1  the six epoch fixture modules materialize, and the corpus' own
-#      obligation gate is green — including the old-to-young NEGATIVE, which
+#      obligation gate is green — including the old-to-young case, which
 #      obligation 8 must refuse, and the same program with promote, which it
 #      must accept;
 #   2  the emitted C compiles under gcc and clang at -std=c17 -pedantic -Wall
@@ -18,11 +18,12 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 
 command -v bb >/dev/null 2>&1 || { echo "drive.sh: babashka (bb) is required" >&2; exit 2; }
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-epoch.XXXXXX")"
+[[ -n "$art" ]] || art="$work/artifacts"
 trap 'rm -rf "${work:?}"' EXIT
 
 mkdir -p "$work/src/native" "$work/run-a" "$work/run-b" "$art"

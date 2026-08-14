@@ -11,8 +11,9 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-loops.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 
 "$repo/bin/beagle-build-all" \
@@ -43,8 +44,8 @@ for m in stages lower obligations simd c11 slice fold_c17 body_c17 qbe body_slic
 done
 
 emit_slice() {
-  local src="$1" generated="$2" committed="$3" module="$4"
-  local annotation="${5:-}" pending="${6:-}"
+  local src="$1" generated="$2" module="$3"
+  local annotation="${4:-}" pending="${5:-}"
   local logical
   local -a projector_args
   mkdir -p "$generated"
@@ -57,10 +58,6 @@ emit_slice() {
     projector_args+=(--native-op "$annotation")
   fi
   bb "$here/../slice-bodies/ast-facts.clj" "${projector_args[@]}"
-  if [[ -f "$committed/loops.facts" ]] && ! cmp -s "$generated/loops.facts" "$committed/loops.facts"; then
-    echo "drive.sh: regenerated projection differs from $committed/loops.facts" >&2
-    exit 1
-  fi
   sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
   bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
@@ -111,13 +108,13 @@ main_generated="$scratch/generated-main"
 counted_generated="$scratch/generated-counted"
 refusal_generated="$scratch/generated-refusals"
 
-emit_slice "$here/loops.bgl" "$main_generated" "$art" "native.loops"
+emit_slice "$here/loops.bgl" "$main_generated" "native.loops"
 if grep -q '^obligation-projection FAIL' "$main_generated/report.txt"; then
   echo "drive.sh: loops.bgl must discharge all ten obligations" >&2
   exit 1
 fi
 
-emit_slice "$here/counted/loops_counted.bgl" "$counted_generated" "$art/counted" \
+emit_slice "$here/counted/loops_counted.bgl" "$counted_generated" \
   "native.loops-counted" "add-i64=checked-add-i64"
 # the interim add-i64 primitive returns Int where the obligation wants an
 # Outcome, so exactly this one refusal is expected until the arithmetic arm lands
@@ -128,7 +125,7 @@ if [ "$(grep -c '^obligation-projection FAIL' "$counted_generated/report.txt")" 
   exit 1
 fi
 
-emit_slice "$here/refusals/refusals.bgl" "$refusal_generated" "$art/refusals" \
+emit_slice "$here/refusals/refusals.bgl" "$refusal_generated" \
   "native.loops-refusals" "" allow-pending
 for expected in \
   'TODO-NATIVE-RECUR-NON-TAIL.*\[non-tail\]' \

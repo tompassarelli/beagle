@@ -1,8 +1,0 @@
-{ lib, pkgs, ... }:
-
-{
-  networking.hostName = lib.mkDefault "nixos";
-  time.timeZone = lib.mkDefault "UTC";
-  environment.systemPackages = lib.mkForce [ pkgs.vim ];
-  services.openssh.settings.PermitRootLogin = lib.mkOverride 50 "no";
-}

@@ -2,17 +2,13 @@
 
 ;; batch-compile.rkt — in-process, per-item Beagle source compile.
 ;;
-;; Lifted from the certify.rkt oracle (beagle-test/conformance/certify.rkt
-;; compile-fixture, lines ~124-134): one Racket process amortizes the compiler
-;; module-graph load across MANY source files instead of paying a fresh
-;; ~2.9s cold load per file (the root cause profiled/decided in the parent
-;; thread's B0 architecture pick). `compile-source` is that primitive, made
-;; independently callable and per-item-safe:
+;; One Racket process amortizes the compiler module-graph load across many
+;; source files. `compile-source` is independently callable and per-item-safe:
 ;;
 ;;   - success returns the RAW emitted bytes (caller decides normalization —
 ;;     byte-identity against the one-shot CLI is the oracle law)
 ;;   - failure returns a NORMALIZED diagnostic string (checkout-absolute-path
-;;     noise stripped, same law as certify's normalize-diag) so one item's
+;;     noise stripped) so one item's
 ;;     failure text is comparable across checkouts/worktrees/CI
 ;;   - a stray (exit N) from inside the compiled module is intercepted and
 ;;     turned into a failure of THIS item rather than tearing down the whole
@@ -32,9 +28,8 @@
 
 ;; Strip an absolute checkout-root prefix from diagnostic text so the same
 ;; failure reads identically regardless of which worktree/CI checkout hit it.
-;; certify.rkt hardcodes its OWN repo-root via define-runtime-path; this
-;; module takes the root as an argument instead, so any caller (any checkout)
-;; gets the same normalization law without baking in a path.
+;; The caller supplies the root so diagnostics remain independent of checkout
+;; location without baking a path into the compiler.
 (define (normalize-diag s root-str)
   (if root-str
       (regexp-replace* (regexp (regexp-quote root-str)) s "")

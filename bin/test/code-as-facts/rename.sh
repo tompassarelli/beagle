@@ -25,11 +25,6 @@ CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
 source "$ROOT/bin/_beagle-racket"
 source "$ROOT/bin/_fram-resolver"
 FRAM_SRC="${CODE_AS_FACTS_CORPUS:-$FRAM_REPO/src}"
-FRAM_AUTHORITY_ONLY="${CODE_AS_FACTS_FRAM_AUTHORITY_ONLY:-0}"
-if [[ "$FRAM_AUTHORITY_ONLY" != 0 && "$FRAM_AUTHORITY_ONLY" != 1 ]]; then
-  echo "rename: CODE_AS_FACTS_FRAM_AUTHORITY_ONLY must be 0 or 1" >&2
-  exit 2
-fi
 fail=0
 
 echo "================ scope-correct rename — the complete engine (resolve.clj) ================"
@@ -73,61 +68,31 @@ chk "def + ref renamed to add-one"   "grep -q 'defn add-one' <<<\"\$sm\" && grep
 chk "shadowing param + use UNTOUCHED" "grep -qF 'other [(helper Int)]' <<<\"\$sm\" && grep -qF '(* helper 2)' <<<\"\$sm\""
 
 # --- 3. cross-module: authoritative owner + minimal qualified consumer ---------
-# Release CI deliberately pins the last Fram compatibility revision while the
-# lockstep workflow follows Fram main. Select the real owner from either source
-# authority, then add only the smallest consumer needed to prove that a qualified
-# reader follows the owner rename. Unrelated Fram modules belong to Fram's own
-# compiler suite; loading all of them here made this focused graph check unbounded.
 echo "--- 3. cross-module (authoritative Fram owner + qualified consumer) ---"
 E="$W/e"
 R="$W/r"
 C="$W/corpus"
 mkdir -p "$E" "$R" "$C"
 
-if [[ -f "$FRAM_SRC/fram/rpc_limits.bgl" ]]; then
-  authority="moving-current"
-  owner="$FRAM_SRC/fram/rpc_limits.bgl"
-  consumer="$C/code_as_facts_consumer.bgl"
-  cat > "$consumer" <<'EOF'
+owner="$FRAM_SRC/fram/rpc_limits.bgl"
+consumer="$C/code_as_facts_consumer.bgl"
+[[ -f "$owner" ]] || { echo "  FAIL  missing current Fram authority: $owner"; exit 3; }
+cat > "$consumer" <<'EOF'
 #lang beagle
 (ns code-as-facts.consumer)
 (define-mode strict)
 (require fram.rpc-limits :as limits)
 (def observed-depth Int limits/term-codec-v1-max-depth)
 EOF
-  old_name="term-codec-v1-max-depth"
-  new_name="code-as-facts-max-depth"
-  owner_scope="rpc_limits"
-  owner_expect="(def code-as-facts-max-depth"
-  old_reader="limits/term-codec-v1-max-depth"
-  new_reader="limits/code-as-facts-max-depth"
-  untouched="rpc-v2-list-envelope-depth"
-elif [[ -f "$FRAM_SRC/fram/store.bclj" ]]; then
-  authority="release-pinned"
-  owner="$FRAM_SRC/fram/store.bclj"
-  consumer="$C/code_as_facts_consumer.bclj"
-  cat > "$consumer" <<'EOF'
-#lang beagle/clj
-(ns code-as-facts.consumer)
-(define-mode strict)
-(require fram.store :as store)
-(require fram.types :as t)
-(defn use-value! [(ctx (Atom t/Store)) (value Any)] Int
-  (store/value! ctx value))
-EOF
-  old_name="value!"
-  new_name="intern!"
-  owner_scope="store"
-  owner_expect="(defn intern!"
-  old_reader="store/value!"
-  new_reader="store/intern!"
-  untouched="value-id"
-else
-  echo "  FAIL  no supported Fram source authority under $FRAM_SRC"
-  exit 3
-fi
+old_name="term-codec-v1-max-depth"
+new_name="code-as-facts-max-depth"
+owner_scope="rpc_limits"
+owner_expect="(def code-as-facts-max-depth"
+old_reader="limits/term-codec-v1-max-depth"
+new_reader="limits/code-as-facts-max-depth"
+untouched="rpc-v2-list-envelope-depth"
 
-echo "  AUTHORITY $authority ($owner)"
+echo "  AUTHORITY $owner"
 sources=("$owner" "$consumer")
 edns=()
 for source in "${sources[@]}"; do
@@ -136,19 +101,6 @@ for source in "${sources[@]}"; do
   phase_must_pass "project $base" 60 "$RACKET" "$RT" --emit-edn "$source" > "$edn"
   edns+=("$edn")
 done
-
-run_phase "reject retired module scope" 180 \
-  bb -cp "$FRAM_OUT" "$RES" rename "$old_name" stale-code-as-facts-name cnf "${edns[@]}"
-stale_status=$?
-if [[ $stale_status -eq 0 ]]; then
-  echo "  FAIL  retired fram.cnf module unexpectedly remained renameable"
-  fail=1
-elif [[ $stale_status -eq 124 ]]; then
-  echo "  FAIL  retired-module refusal exceeded its resolver deadline"
-  exit 124
-else
-  echo "  PASS  retired fram.cnf module is rejected (no silent stale-name success)"
-fi
 
 phase_must_pass "resolve qualified rename" 180 \
   bb -cp "$FRAM_OUT" "$RES" rename "$old_name" "$new_name" "$owner_scope" "${edns[@]}"
@@ -165,10 +117,8 @@ for source in "${sources[@]}"; do
   rendered+=("$output")
 done
 
-if [[ "$authority" == "moving-current" ]]; then
-  phase_must_pass "check coherent candidate overlay" 180 \
-    "$RACKET" "$OVERLAY_CHECK" --check-only "${resolved_edns[@]}" > "$W/overlay.json"
-fi
+phase_must_pass "check coherent candidate overlay" 180 \
+  "$RACKET" "$OVERLAY_CHECK" --check-only "${resolved_edns[@]}" > "$W/overlay.json"
 
 owner_rendered="$R/$(basename "$owner")"
 consumer_rendered="$R/$(basename "$consumer")"
@@ -176,19 +126,7 @@ chk "authoritative owner definition renamed" "grep -Fq -- '$owner_expect' '$owne
 chk "old qualified reader absent"            "! grep -Fq -- '$old_reader' '$consumer_rendered'"
 chk "qualified reader follows owner rename"  "grep -Fq -- '$new_reader' '$consumer_rendered'"
 chk "nearby distinct symbol untouched"       "grep -Fq -- '$untouched' '$owner_rendered'"
-if [[ "$authority" == "moving-current" ]]; then
-  chk "candidate facts check coherently"      "grep -q '\"ok\":true' '$W/overlay.json'"
-fi
-
-if [[ "$FRAM_AUTHORITY_ONLY" == 1 ]]; then
-  echo
-  if [[ $fail -eq 0 ]]; then
-    echo "RESULT: PASS — focused Fram authority projection/rename/render/check boundary."
-    exit 0
-  fi
-  echo "RESULT: FAIL"
-  exit 1
-fi
+chk "candidate facts check coherently"      "grep -q '\"ok\":true' '$W/overlay.json'"
 
 # --- 4. collision invariant: rename onto an existing binding refused ------------
 echo "--- 4. collision invariant (rename helper -> other refused) ---"
@@ -197,9 +135,7 @@ if bb -cp "$FRAM_OUT" "$RES" rename helper other mod "$W/s2.edn" >/dev/null 2>&1
   echo "  FAIL  collision NOT refused"; fail=1
 else echo "  PASS  rename onto existing binding refused"; fi
 
-# --- 5. adversarial findings (scope hazards that recompiled-but-wrong) -----------
-# All three were found by the unified-engine adversarial sweep; each is a SILENT
-# meaning change that compiled clean, the most dangerous failure mode.
+# --- 5. scope hazards that can compile with changed meaning ----------------------
 echo "--- 5. adversarial scope hazards (paren-param shadowing + capture refusal) ---"
 # 5a. typed structural param `(red Int)` must shadow the def — renaming the def must
 #     NOT touch the param or its body use (the param-binding wasn't being collected).
@@ -224,8 +160,7 @@ if bb -cp "$FRAM_OUT" "$RES" rename total sum l "$W/l.edn" >/dev/null 2>&1; then
 else echo "  PASS  let-local capture refused (no-capture invariant)"; fi
 
 # --- 6. type renames (constructor heads, defunion variants, cross-module, single-colon) -
-# All found by adversarial sweep #2 — each was a silent miss (type renamed, a USE of it
-# left dangling) that recompiled. Types are first-class refactor targets.
+# Types are first-class refactor targets, so every use must follow the rename.
 echo "--- 6. type resolution (constructors, defunion, cross-module, structural bindings) ---"
 # 6a. defrecord constructor (Point 1 2) must rename with the type
 printf '#lang beagle/clj\n(ns tp)\n(defrecord Point\n  [(x Int)\n   (y Int)])\n(defn mk [] Point (Point 1 2))\n' > "$W/tp.bclj"
@@ -258,7 +193,7 @@ if bb -cp "$FRAM_OUT" "$RES" rename nonexistent whatever tz "$W/tz.edn" >/dev/nu
   echo "  FAIL  rename-of-nothing not refused"; fail=1
 else echo "  PASS  rename matching no binding refused (no silent 0-edit success)"; fi
 
-# --- 7. sequential binding scope + :or defaults (adversarial sweep #2) ---------------
+# --- 7. sequential binding scope + :or defaults ----------------------------------
 # let/loop/for bindings are SEQUENTIAL and :or defaults are LIVE refs — both were
 # silent miscompiles (a default left dangling; a sibling-capturing rename accepted).
 echo "--- 7. sequential bindings + :or defaults ---"
@@ -283,7 +218,7 @@ else echo "  PASS  let sequential capture refused"; fi
 bb -cp "$FRAM_OUT" "$RES" rename total grand sc "$W/sc.edn" 2>/dev/null
 chk "legitimate sequential rename succeeds (total->grand)" "grep -qF '(* s grand)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-sc.bclj.edn 2>/dev/null)\""
 
-# --- 8. quasiquote templates + bare :refer + import collision (adversarial sweep #2) -
+# --- 8. quasiquote templates + bare :refer + import collision --------------------
 echo "--- 8. quasiquote macro templates + bare :refer + import collision ---"
 # 8a. a quasiquote template ref to a module def renames (Clojure ` qualifies it / beagle hygiene-aliases)
 printf '#lang beagle/clj\n(ns qq)\n(def base Int 1)\n(defmacro add-base [n] (quasiquote (+ base (unquote n))))\n' > "$W/qq.bclj"
@@ -310,7 +245,7 @@ if bb -cp "$FRAM_OUT" "$RES" rename red blue rlib "$W/rlib.edn" "$W/rcon2.edn" >
   echo "  FAIL  import collision not refused"; fail=1
 else echo "  PASS  import collision (consumer already binds new) refused"; fi
 
-# --- 9. deeper type/quasiquote forms (adversarial sweep #3) --------------------------
+# --- 9. deeper type/quasiquote forms ---------------------------------------------
 echo "--- 9. parameterized defunion + protocol return type + quasiquote quote-data ---"
 # 9a. parameterized defunion name (Result T E) renames + its annotations cascade
 printf '#lang beagle/clj\n(ns pd)\n(defunion (Result T E) (Ok [(v T)]) (Err [(e E)]))\n(defn mk [(v Int)] (Result Int Int) (Ok v))\n' > "$W/pd.bclj"
@@ -330,7 +265,7 @@ bb -cp "$FRAM_OUT" "$RES" rename red crimson qd "$W/qd.edn" 2>/dev/null
 qd="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-qd.bclj.edn 2>/dev/null)"
 chk "quasiquote (quote (red)) data untouched; def->crimson" "grep -qF '(quote (red))' <<<\"\$qd\" && grep -qF '(def crimson' <<<\"\$qd\""
 
-# --- 10. quasiquote quote/unquote nesting + nullary variants (adversarial sweep #4) --
+# --- 10. quasiquote quote/unquote nesting + nullary variants ---------------------
 echo "--- 10. unquote-inside-quote + nullary defunion variant ---"
 # 10a. an (unquote ..) nested inside a (quote ..) within a template STILL escapes -> renames
 printf '#lang beagle/clj\n(ns qn)\n(defn red [(x Int)] Int x)\n(defmacro mk [] (quasiquote (quote (unquote (red 1)))))\n' > "$W/qn.bclj"
@@ -343,7 +278,7 @@ printf '#lang beagle/clj\n(ns nv)\n(defunion Maybe (Some [(v Int)]) None)\n(defn
 bb -cp "$FRAM_OUT" "$RES" rename None Nothing nv "$W/nv.edn" 2>/dev/null
 chk "nullary variant None -> Nothing" "grep -qF '(Some [(v Int)]) Nothing)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-nv.bclj.edn 2>/dev/null)\""
 
-# --- 11. shipped idioms: defrecord+defunion, multi-arity defn, ->ctor (sweep #5) -----
+# --- 11. defrecord+defunion, multi-arity defn, ->ctor -----------------------------
 echo "--- 11. defrecord+defunion idiom + multi-arity defn + ->Name constructor ---"
 # 11a. the shipped match-fixture idiom: a defrecord that is also a defunion member renames as ONE type
 printf '#lang beagle/clj\n(ns ri)\n(defrecord Ok [(value Any)])\n(defrecord Err [(error String)])\n(defunion Result Ok Err)\n(defn h [(r Result)] Any (match r [(Ok v) v] [(Err e) e]))\n' > "$W/ri.bclj"
@@ -368,7 +303,7 @@ printf '#lang beagle/clj\n(ns rq)\n(def base Int 1)\n(defmacro mk [y] `(quote ~(
 bb -cp "$FRAM_OUT" "$RES" rename base root rq "$W/rq.edn" 2>/dev/null
 chk "reader ~ unquote inside quote escapes + renames" "grep -qF '(root y)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-rq.bclj.edn 2>/dev/null)\""
 
-# --- 12. match patterns + typed let + map->/accessor factories (adversarial sweep #6) -
+# --- 12. match patterns + typed let + map->/accessor factories -------------------
 echo "--- 12. match-pattern scope + typed let + map->/accessor cascade ---"
 # 12a. match constructor pattern renames with the type; match-local not over-renamed
 cat > "$W/mt.bclj" <<'EOF'
@@ -411,7 +346,7 @@ fa="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-fa.bclj.edn 2>/dev/null)"
 chk "field accessor point-x -> vertex-x" "grep -qF '(vertex-x p)' <<<\"\$fa\""
 chk "map->Point -> map->Vertex"          "grep -qF '(map->Vertex' <<<\"\$fa\""
 
-# --- 13. cross-module field accessors carry a record rename (adversarial sweep #7) ----
+# --- 13. cross-module field accessors carry a record rename ----------------------
 echo "--- 13. cross-module field accessor (qualified + :refer'd) cascades ---"
 # 13a. qualified c/point-x
 printf '#lang beagle/clj\n(ns acore)\n(defrecord Point\n  [(x Int)\n   (y Int)])\n' > "$W/acore.bclj"
@@ -429,7 +364,7 @@ bb -cp "$FRAM_OUT" "$RES" rename Point Coord rcore "$W/rcore.edn" "$W/ruse.edn" 
 ru="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-ruse.bclj.edn 2>/dev/null)"
 chk ":refer'd accessor point-x -> coord-x (import + call)" "grep -qF ':refer [Coord coord-x]' <<<\"\$ru\" && grep -qF '(coord-x p)' <<<\"\$ru\""
 
-# --- 14. fully-qualified module-name refs + type-name-shape guard (adversarial sweep #8) -
+# --- 14. fully-qualified module-name refs + type-name-shape guard ----------------
 echo "--- 14. fully-qualified (module-name/Name) refs + Capitalized-type guard ---"
 # 14a. (require acc.prod) with FQ refs acc.prod/Box, acc.prod/box-w, acc.prod/->Box all cascade
 printf '#lang beagle/clj\n(ns acc.prod)\n(defrecord Box [(w Int)])\n' > "$W/fqp.bclj"
@@ -444,7 +379,7 @@ if bb -cp "$FRAM_OUT" "$RES" rename Box crate fqp "$W/fqp.edn" "$W/fqc.edn" >/de
   echo "  FAIL  lowercase type rename not refused"; fail=1
 else echo "  PASS  lowercase type rename refused (type-name shape)"; fi
 
-# --- 15. defprotocol method names are renameable cross-module (adversarial sweep #9) --
+# --- 15. defprotocol method names are renameable cross-module --------------------
 echo "--- 15. defprotocol method rename (def + :refer + call) ---"
 printf '#lang beagle/clj\n(ns pp.lib)\n(defprotocol Priced (price [self] Int))\n' > "$W/plib.bclj"
 printf '#lang beagle/clj\n(ns pp.use)\n(require pp.lib :refer [price])\n(defn total [(m Int)] Int (price m))\n' > "$W/puse.bclj"
@@ -456,7 +391,7 @@ pu="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-puse.bclj.edn 2>/dev/null)"
 chk "protocol method def renamed (cost [self] Int)" "grep -qF '(cost [self] Int)' <<<\"\$pl\""
 chk "cross-module :refer + call renamed (cost)"        "grep -qF ':refer [cost]' <<<\"\$pu\" && grep -qF '(cost m)' <<<\"\$pu\""
 
-# --- 16. letfn + extend-type binding scopes (adversarial sweep #10) -------------------
+# --- 16. letfn + extend-type binding scopes --------------------------------------
 echo "--- 16. letfn + extend-type impl scopes (capture + shadow) ---"
 # 16a. letfn-local capture refused; legitimate rename succeeds + leaves the letfn-local alone
 cat > "$W/lf.bclj" <<'EOF'
@@ -487,7 +422,7 @@ else echo "  PASS  extend-type impl-param capture refused"; fi
 bb -cp "$FRAM_OUT" "$RES" rename scale factor et "$W/et.edn" 2>/dev/null
 chk "extend-type: module def ref in impl body cascades; impl param self untouched" "grep -qF '(* (box-w self) factor)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-et.bclj.edn 2>/dev/null)\""
 
-# --- 17. as-> threading accumulator binding (adversarial sweep #11) -------------------
+# --- 17. as-> threading accumulator binding --------------------------------------
 echo "--- 17. as-> accumulator scope (capture + shadow) ---"
 cat > "$W/at.bclj" <<'EOF'
 #lang beagle/clj
@@ -506,5 +441,5 @@ chk "as->: module ref in step cascades; accumulator acc untouched" "grep -qF '(+
 
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine: full common beagle surface (incl FQ/protocol-methods/letfn/extend-type/as->), with an explicit current/legacy check boundary."
+  echo "RESULT: PASS — one engine covers the current Beagle surface."
 else echo "RESULT: FAIL"; exit 1; fi

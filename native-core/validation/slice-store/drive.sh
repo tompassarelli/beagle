@@ -15,12 +15,14 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+art="${NATIVE_SLICE_ARTIFACTS:-}"
 fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
 src="$fram_checkout/src/fram/store.bgl"
 dep="$fram_checkout/src/fram/types.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-store.XXXXXX")"
+[[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
+mkdir -p "$art"
 
 for upstream in "$dep" "$src"; do
   [[ -f "$upstream" ]] && continue

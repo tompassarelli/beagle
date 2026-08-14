@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Gate G6, the Phase-2 exit measurement: run the S1 epoch analysis
-# (native-core/analysis/epoch/, report-only) over the compiler-shaped reference
+# Run the epoch analysis over the compiler-shaped reference
 # programs — the compiler's own modules and the validation corpus's
 # program-constructing modules — and require
 #
@@ -11,8 +10,8 @@
 #     retaining a type no compiler module owns — with the stage-product share
 #     of the TYPED escapes floored at 90%.
 #
-# epoch_stage_gate.sh (G1) is the same instrument over the five emitter modules
-# only; this is the wider population Phase 2 exits on. Sixteen modules with
+# epoch_stage_gate.sh is the same instrument over the five emitter modules
+# only; this is the wider population. Sixteen modules with
 # their require closures: expect several minutes.
 set -euo pipefail
 

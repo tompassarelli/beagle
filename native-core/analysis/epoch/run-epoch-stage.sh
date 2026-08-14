@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-epoch-stage.sh [--out DIR] MODULE...
 #
-# Phase-2 S1 epoch analysis driver, report-only. MODULE is a native.* module
+# Epoch analysis driver, report-only. MODULE is a native.* module
 # name (native.body-c17 -> native-core/src/native/body_c17.bclj). Per module:
 # bin/beagle-ast on the module source and its native.* require closure,
 # affordance.clj escape/affordance analysis (module = item, closure =

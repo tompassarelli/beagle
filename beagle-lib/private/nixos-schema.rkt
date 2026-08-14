@@ -278,8 +278,6 @@
 ;; Did-you-mean (Levenshtein, segment-aware)
 ;; ============================================================================
 ;;
-;; Strategy notes (recorded 2026-05-31, thread 20260530180100 Step 2b).
-;;
 ;; Two-tier matcher:
 ;;   1) Flat Levenshtein (kept as `levenshtein`, exported, used elsewhere
 ;;      in the codebase including auto-fix and check.rkt's accessor
@@ -315,56 +313,6 @@
 ;;   [2] flat Levenshtein (final tiebreaker on edit-cost ties)
 ;;   [3] first-segment mismatch flag (same first segment wins)
 ;;
-;; Chosen strategy ranking from the inventory:
-;;   (a) segment-aware       — chosen.
-;;   (b) symspell index      — deferred to Phase 2; large engineering
-;;       cost (precompute + cache invalidation + memory) only worth
-;;       paying once (a) has demonstrated the validate-time budget.
-;;   (c) weighted Lev bonuses — diminishing returns once (a) shipped.
-;;
-;; Measured outcomes against /home/tom/code/beagle/beagle-test/tests/
-;; levenshtein-benchmark.rkt (32 fixtures, mix of real + synthetic):
-;;
-;;   Top-1 against synthetic schema (~100 paths):
-;;     baseline (flat Lev):     96.9% (31/32)
-;;     segment-aware:           96.9% (31/32)         [no regression]
-;;
-;;   Top-1 against real 16k schema:
-;;     baseline (flat Lev):     96.9% (31/32)
-;;     segment-aware:           96.9% (31/32)         [no regression]
-;;
-;;   Sole shared miss: `services.printr.enable` -> `services.fprintd.enable`
-;;   instead of `services.printing.enable`. This case is unfixable by
-;;   any edit-distance metric: `fprintd` has flat distance 2, `printing`
-;;   has flat distance 3. Pure edit-distance algorithms cannot solve it
-;;   without semantic-knowledge augmentation (frequency, phonetic,
-;;   embedding). Recorded for future symspell + ranking-model work.
-;;
-;;   Per-query latency (10 typos, 20 hot iterations, real 16k schema):
-;;     baseline (flat Lev):     306 ms / query
-;;     segment-aware:           130 ms / query        [-57%]
-;;
-;;   Wins from: (1) first-segment prefilter excludes ~95% of candidates,
-;;   (2) length-diff prefilter excludes another large fraction before
-;;   any string-aware work, (3) segment-aware DP often runs on shorter
-;;   per-segment strings than the full path.
-;;
-;;   firn-validate end-to-end against the full nixos-config corpus
-;;   (216 .bnix files, 0 errors so did-you-mean fires rarely):
-;;     baseline (5-run avg):    2.863 s
-;;     segment-aware (5-run):   2.894 s          [+1.1%; well within
-;;                                                the <=10% budget]
-;;
-;; Acceptance against thread 20260530180100 #2:
-;;   - >= 90% Top-1 floor on benchmark        : YES (96.9% both schemas)
-;;   - <= 10% validate-time perf regression    : YES (+1.1%)
-;;   - >= +15pp Top-1 above baseline           : N/A — baseline already
-;;     at the algorithmic ceiling for pure edit-distance (96.9%). The
-;;     +15pp clause is documented in the thread plan as a target
-;;     applicable when baseline is materially below the floor; when
-;;     baseline already meets the floor, the win lives in maintained
-;;     Top-1 + perf headroom (achieved).
-
 (define (levenshtein a b)
   (define la (string-length a))
   (define lb (string-length b))

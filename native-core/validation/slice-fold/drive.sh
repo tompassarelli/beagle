@@ -5,7 +5,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
-artifacts="${NATIVE_SLICE_ARTIFACTS:-$here}"
+artifacts="${NATIVE_SLICE_ARTIFACTS:-}"
 module="${NATIVE_SLICE_MODULE:-fold}"
 abi="${NATIVE_SLICE_ABI:-lp64}"
 
@@ -17,6 +17,7 @@ fi
 command -v bb >/dev/null 2>&1 || { echo "drive.sh: babashka (bb) is required" >&2; exit 2; }
 
 work="$(mktemp -d)"
+[[ -n "$artifacts" ]] || artifacts="$work/artifacts"
 cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
 

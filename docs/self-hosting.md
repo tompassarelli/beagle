@@ -7,9 +7,8 @@ page is the summary the README points at.
 
 The `clj`-target compiler is written in Beagle (`self-host/`). The checked-in
 seed is that compiler's own emitted output, and CI holds the pair to a
-byte-level bootstrap fixpoint (`bin/beagle-remint`) plus byte-agreement with the
-original Racket compiler, which now serves as the conformance oracle
-(`bin/beagle-certify`).
+byte-level bootstrap fixpoint plus agreement with the current Racket compiler
+through `bin/beagle-remint --oracle` and `self-host/verify-selfhost.sh`.
 
 ## Differential fuzz, empty exemption list
 
@@ -28,12 +27,10 @@ self-host/seed …`) is a dev convenience and the substrate for the remint fixpo
 loop — the two are held byte-identical, so the native binary is the distribution
 artifact and bb is the fallback.
 
-The parity harnesses (`self-host/verify-selfhost.sh`,
-`self-host/verify-target.sh`, `self-host/verify-target-nix.sh`) prefer a
-checkout-local native binary only when its `.seed-nar-hash` sidecar matches the
-exact blessed seed; a missing or stale sidecar falls back to the current bb seed.
-Override the path deliberately with `BEAGLE_NATIVE_BIN`, or set it empty to force
-the bb fallback.
+The parity harness (`self-host/verify-selfhost.sh`) prefers a checkout-local
+native binary only when its `.seed-nar-hash` sidecar matches the exact seed; a
+missing or stale sidecar falls back to the current bb seed. Override the path
+deliberately with `BEAGLE_NATIVE_BIN`, or set it empty to force the bb fallback.
 
 ## What this does and does not claim
 

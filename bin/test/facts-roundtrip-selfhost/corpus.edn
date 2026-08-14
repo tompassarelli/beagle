@@ -92,47 +92,4 @@
   :path "bin/test/code-as-facts/rename-corpus/mod_b.bclj"}
  {:name "facts-shadow"
   :path "bin/test/code-as-facts/shadow-corpus/mod.bclj"}
-
- ;; Fram resolve_golden.sh's complete source corpus, vendored so this
- ;; certification remains hermetic and worktree-stable. The .bgl Native
- ;; Core modules are not that gate's input, so they are not vendored here.
- {:name "fram-fold"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/fold.bclj"}
- {:name "fram-import"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/import.bclj"}
- {:name "fram-export"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/export.bclj"}
- {:name "fram-tools"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/tools.bclj"}
- {:name "fram-authority"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/authority.bclj"}
- {:name "fram-claims"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/claims.bclj"}
- {:name "fram-main"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/src/fram/main.bclj"}
-
- {:name "fram-codegraph-trap"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/trap.bjs"}
- {:name "fram-codegraph-mod-a"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/mod-a.bjs"}
- {:name "fram-codegraph-mod-b"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/mod-b.bjs"}
- {:name "fram-codegraph-trap-collision"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/trap-collision.bjs"}
- {:name "fram-codegraph-shadow"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/shadow.bjs"}
- {:name "fram-codegraph-forshadow"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/forshadow.bjs"}
- {:name "fram-codegraph-mapshadow"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/mapshadow.bjs"}
- {:name "fram-codegraph-torture"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/torture.bjs"}
- {:name "fram-codegraph-types"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/types.bjs"}
- {:name "fram-codegraph-re-a"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/re-a.bjs"}
- {:name "fram-codegraph-re-b"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/re-b.bjs"}
- {:name "fram-codegraph-re-c"
-  :path "bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/codegraph/test/re-c.bjs"}
 ]

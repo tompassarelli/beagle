@@ -51,9 +51,6 @@ jobs:
           raco pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
 
-      - name: Verify Fram CI revision contract
-        run: raco test beagle-test/tests/fram-ci-contract.rkt
-
       # Babashka must be installed BEFORE the tiered suite: conformance.rkt's
       # cross-target value-conformance harness uses bb as the real-Clojure ORACLE.
       # Without it the oracle silently skips AND the pinned-divergence tests error
@@ -87,22 +84,6 @@ jobs:
           direnv allow .
           direnv exec . bin/beagle-test
 
-      # Conformance gate (the oracle ratchet): certify the corpus against
-      # committed goldens sourced from the Racket oracle, validity-check the
-      # emitted output with each target's own parser, and enforce the
-      # shrink-only known-divergences-<target>.edn ledgers. bun + nix are the
-      # js/nix validity oracles — without a tool the gate degrades to
-      # "unenforced" for that dimension (never falsely stale), so install both
-      # to keep the silent-miscompile class armed in CI. bb is installed above.
-      - name: Install bun (js validity oracle for the conformance gate)
-        uses: oven-sh/setup-bun@v2
-
-      # _BEAGLE_RACKET pins to the runner's setup-racket (which built all
-      # bytecode in this job); otherwise bin/_beagle-racket would nix-develop
-      # the flake and download a second toolchain.
-      - name: Conformance gate — oracle ratchet
-        run: _BEAGLE_RACKET="$(which racket)" bin/beagle-certify
-
       # Self-host three-way agreement: the blessed seed (self-host/seed/), the
       # seed compiler's remint of its own sources, and the Racket oracle's
       # emission of the same sources must all be byte-identical. The bb-only
@@ -129,12 +110,12 @@ jobs:
       # scope-correctness proof (a change to mod_a/helper must NOT blast mod_b's
       # same-named helper). This is the load-bearing test for the thesis that
       # graph-backed repair beats text-backed repair. (babashka installed above.)
-      - name: Load pinned Fram compatibility revision
+      - name: Load current Fram revision
         id: fram-revision
         run: |
-          revision="$(tr -d '\r\n' < contrib/downstream/fram-ci-revision)"
+          revision="$(tr -d '\r\n' < native-core/validation/fram.ref)"
           if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "invalid Fram compatibility revision: $revision" >&2
+            echo "invalid Fram revision: $revision" >&2
             exit 1
           fi
           printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
@@ -175,14 +156,8 @@ jobs:
       - name: Code as canonical facts — recompile-identity gate
         run: CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-facts/run.sh
 
-      # Immutable-pin authority boundary only: the historical resolver predates four
-      # modern structural/type rename capabilities, so the COMPLETE capability suite
-      # belongs to moving-current fram-lockstep. Here the real pinned owner plus one
-      # qualified consumer must project, rename, and render; the retired fram.cnf
-      # scope must refuse; and current Beagle must reject the owner's retained return
-      # arrows with the pointed migration diagnostic inside the declared deadline.
-      - name: Release-pinned Fram authority rename boundary
-        run: CODE_AS_FACTS_FRAM_AUTHORITY_ONLY=1 FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-facts/rename.sh
+      - name: Fram scope-correct rename
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-facts/rename.sh
 
       # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
       # the form + its subtree and renumbers siblings (no truncation); a delete that

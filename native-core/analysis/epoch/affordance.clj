@@ -1,16 +1,7 @@
 #!/usr/bin/env bb
-;; affordance.clj — allocation-site affordance analyzer (phase 1.5, v2).
-;; v2 upgrades over the phase-1 analyzer (see LIMITS.md in this directory):
-;;   1. defect fixes: swap!-callback store rule (Hole 1), spit/slurp/fact/
-;;      text-id builtin entries, field-sensitive record taint (log_codec
-;;      re-taint), explicit param summaries with missing->escapes default;
-;;   2. boundary v2: fram-vocabulary bracket epochs (open-fold!/close-fold!,
-;;      txn open/commit!), type-shape dispatch entries, caller-ownership
-;;      attribution for class-none defns;
-;;   3. retaining-type promotion classifier: every ESCAPES site reports the
-;;      type of the structure that retains it (record ctor walk / atom cell
-;;      annotation / boundary return annotation) and a domain-identity
-;;      verdict from a declared type table, never a defn-name regex.
+;; affordance.clj — allocation-site affordance analyzer.
+;; Every ESCAPES site reports the type of the structure that retains it and a
+;; domain-identity verdict from the declared type table.
 ;;
 ;; Input: beagle-ast JSON dumps (one per module) forming ONE program.
 ;; Output: JSON report — per allocation site (per the 29-construct taxonomy):
@@ -1874,15 +1865,13 @@
        :region-pred (fn [_] false)}))
 
 ;; ---------------------------------------------------------------------------
-;; Retaining-type promotion classifier (v2)
+;; Retaining-type promotion classifier
 ;; ---------------------------------------------------------------------------
 ;; Every ESCAPES site reports the type of the structure that retains it —
 ;; the record it was ctor'd into (walked by the flow engine's held label),
 ;; the declared contents type of the atom cell it was stored into, or the
 ;; declared return type of the boundary root it crossed — and a
-;; domain-identity verdict against the declared type table below. This
-;; replaces the phase-1 rollup's defn-name regex, whose verified errors all
-;; pointed in the flattering direction.
+;; domain-identity verdict against the declared type table below.
 
 ;; Domain vocabulary modules: records/unions DECLARED here are domain
 ;; identities (fram: triples/store/transaction/query/rotation/datalog

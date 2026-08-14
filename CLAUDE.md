@@ -34,13 +34,12 @@ that pipeline, but `.bclj` itself remains hosted Clojure source.
    `self-host/verify-selfhost.sh` holds it byte-identical to the Racket
    compiler. Read `self-host/README.md` before touching it.
 
-The Racket compiler is the conformance oracle (`bin/beagle-certify`, shrink-only
-divergence ledgers); the self-hosted compiler is the language's own hosted
-compiler. A hosted behavior change on one side is incomplete until the gates
-prove the other side agrees — or a ledger entry records why it deliberately
-doesn't. Native Core lowering is implemented in Beagle and runs from its
-hosted Clojure projection; its separate contract is the frozen native program
-plus the seven native obligations.
+The Racket compiler is the original hosted front end; the self-hosted compiler
+is the language's own hosted compiler. `bin/beagle-remint --oracle` and
+`self-host/verify-selfhost.sh` require both current implementations to agree.
+Native Core lowering is implemented in Beagle and runs from its hosted Clojure
+projection; its separate contract is the frozen native program plus the seven
+native obligations.
 
 Form dispatch is the **combiner registry** in `parse.rkt`
 (`register-combiner!`). Built-in special forms register there; user macros are

@@ -1,4 +1,4 @@
-;; epoch-stage.clj — Phase-2 S1 epoch-assignment analysis, report-only.
+;; epoch-stage.clj — epoch-assignment analysis, report-only.
 ;;
 ;; Pure fold: affordance-v2 report JSON (from affordance.clj beside this
 ;; file) in, epoch map JSON out. Never executes analyzed code, never mutates
