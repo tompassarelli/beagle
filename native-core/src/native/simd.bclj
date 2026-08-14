@@ -218,35 +218,19 @@
     (or (= arithmetic-count 1)
       (and (= arithmetic-count 0) (= load-count 1)))))
 
-(defn header-loop-shape [(block core/BasicBlock)] (U (Vec core/NativeId) Nil)
-  (let [parameters (core/basicblock-parameters block)
-        instructions (core/basicblock-instructions block)
-        terminators (core/basicblock-terminators block)]
-    (if (or (not= 1 (count parameters)) (not= 1 (count terminators)))
-      nil
-      (let [induction-id (core/parameter-id (nth parameters 0))
-            terminator (nth terminators 0)]
-        (if (not (instance? native.core.BranchTerminator terminator))
-          nil
-          (loop [(index Int) 0]
-            (if (>= index (count instructions))
-              nil
-              (let [instruction (nth instructions index)]
-                (if (and
-                      (instance? native.core.CompareInstruction instruction)
-                      (instance? native.core.CompareLtI64V0
-                        (core/compareinstruction-comparison instruction))
-                      (core/native-id=
-                        (core/compareinstruction-left-id instruction)
-                        induction-id)
-                      (core/native-id=
-                        (core/ssavaluev0-id
-                          (core/compareinstruction-result instruction))
-                        (core/branchterminator-condition terminator)))
-                  [induction-id
-                   (core/compareinstruction-right-id instruction)
-                   (core/branchterminator-true-block terminator)]
-                  (recur (+ index 1)))))))))))
+(defn pack-result-id [(instruction SimdPackInstructionV0)] (U core/NativeId Nil)
+  (cond
+    (instance? native.simd.SimdLoadF64V0 instruction)
+    (simdloadf64v0-result-id instruction)
+    (instance? native.simd.SimdSplatF64V0 instruction)
+    (simdsplatf64v0-result-id instruction)
+    (instance? native.simd.SimdAddF64V0 instruction)
+    (simdaddf64v0-result-id instruction)
+    (instance? native.simd.SimdSubF64V0 instruction)
+    (simdsubf64v0-result-id instruction)
+    (instance? native.simd.SimdMulF64V0 instruction)
+    (simdmulf64v0-result-id instruction)
+    :else nil))
 
 (defn atom-i64? [(instruction (U core/Instruction Nil)) (expected Int)] Bool
   (if (or (nil? instruction)
@@ -255,6 +239,67 @@
     (let [atom (core/atominstruction-atom instruction)]
       (and (instance? native.core.I64Atom atom)
         (= expected (core/i64atom-value atom))))))
+
+(defn body-fully-accounted?
+  [(function core/FunctionDef)
+   (body core/BasicBlock)
+   (induction-id core/NativeId)
+   (set-instruction core/BufferSetCheckedInstructionV0)
+   (pack-instructions (Vec SimdPackInstructionV0))]
+  Bool
+  (let [pack-results
+        (vec (keep pack-result-id pack-instructions))
+        set-result
+        (core/ssavaluev0-id
+          (core/buffersetcheckedinstructionv0-result set-instruction))]
+    (every?
+      (fn [(instruction core/Instruction)] Bool
+        (let [result (core/instruction-result-id instruction)]
+          (or (core/native-id= result set-result)
+            (core/id-in? pack-results result)
+            (instance? native.core.CopyInstruction instruction)
+            (atom-i64? instruction 1)
+            (and
+              (instance? native.core.CheckedInstruction instruction)
+              (let [operation (core/checkedinstruction-operation instruction)]
+                (and (instance? native.core.CheckedAddI64V0 operation)
+                  (core/native-id=
+                    (core/checkedaddi64v0-left-id operation)
+                    induction-id)
+                  (atom-i64?
+                    (find-instruction function
+                      (core/checkedaddi64v0-right-id operation))
+                    1)))))))
+      (core/basicblock-instructions body))))
+
+(defn header-loop-shape [(block core/BasicBlock)] (U (Vec core/NativeId) Nil)
+  (let [parameters (core/basicblock-parameters block)
+        instructions (core/basicblock-instructions block)
+        terminators (core/basicblock-terminators block)]
+    (if (or (not= 1 (count parameters))
+          (not= 1 (count instructions))
+          (not= 1 (count terminators)))
+      nil
+      (let [induction-id (core/parameter-id (nth parameters 0))
+            terminator (nth terminators 0)
+            instruction (nth instructions 0)]
+        (if (not (instance? native.core.BranchTerminator terminator))
+          nil
+          (if (and
+                (instance? native.core.CompareInstruction instruction)
+                (instance? native.core.CompareLtI64V0
+                  (core/compareinstruction-comparison instruction))
+                (core/native-id=
+                  (core/compareinstruction-left-id instruction)
+                  induction-id)
+                (core/native-id=
+                  (core/ssavaluev0-id
+                    (core/compareinstruction-result instruction))
+                  (core/branchterminator-condition terminator)))
+            [induction-id
+             (core/compareinstruction-right-id instruction)
+             (core/branchterminator-true-block terminator)]
+            nil))))))
 
 (defn terminator-edges [(terminator core/Terminator)] (Vec SimdControlEdgeV0)
   (cond
@@ -384,17 +429,13 @@
 
 (defn find-buffer-set
   [(body core/BasicBlock)] (U core/BufferSetCheckedInstructionV0 Nil)
-  (let [instructions (core/basicblock-instructions body)]
-    (loop [(index Int) 0
-           (found (U core/BufferSetCheckedInstructionV0 Nil)) nil]
-      (if (>= index (count instructions))
-        found
-        (let [instruction (nth instructions index)]
-          (if (instance? native.core.BufferSetCheckedInstructionV0 instruction)
-            (if (nil? found)
-              (recur (+ index 1) instruction)
-              nil)
-            (recur (+ index 1) found)))))))
+  (let [sets
+        (vec (filter
+               (fn [(instruction core/Instruction)] Bool
+                 (instance? native.core.BufferSetCheckedInstructionV0
+                   instruction))
+               (core/basicblock-instructions body)))]
+    (if (= 1 (count sets)) (nth sets 0) nil)))
 
 (defn end-is-buffer-length?
   [(function core/FunctionDef) (end-id core/NativeId)] Bool
@@ -456,23 +497,28 @@
                         (packbuildcompletev0-instructions pack)))
                   (refused-loop function header shape
                     "refused-expression-not-single-op")
-                  (let [destination
+                  (if (not
+                        (body-fully-accounted? function body induction-id
+                          set-instruction
+                          (packbuildcompletev0-instructions pack)))
+                    (refused-loop function header shape "refused-effect")
+                    (let [destination
                         (core/buffersetcheckedinstructionv0-source-id
                           set-instruction)]
-                    (->SimdLoopPlanV0
-                      (core/functiondef-id function)
-                      (core/functiondef-name function)
-                      (core/basicblock-id header)
-                      body-id
-                      induction-id
-                      end-id
-                      destination
-                      (packbuildcompletev0-source-buffer-ids pack)
-                      (conj (packbuildcompletev0-instructions pack)
-                        (->SimdStoreF64V0 destination value-id))
-                      (packbuildcompletev0-arithmetic pack)
-                      (->SimdEligibleV0
-                        "eligible-elementwise-f64-v0"))))))))))))
+                      (->SimdLoopPlanV0
+                        (core/functiondef-id function)
+                        (core/functiondef-name function)
+                        (core/basicblock-id header)
+                        body-id
+                        induction-id
+                        end-id
+                        destination
+                        (packbuildcompletev0-source-buffer-ids pack)
+                        (conj (packbuildcompletev0-instructions pack)
+                          (->SimdStoreF64V0 destination value-id))
+                        (packbuildcompletev0-arithmetic pack)
+                        (->SimdEligibleV0
+                          "eligible-elementwise-f64-v0")))))))))))))
 
 (defn function-loop-plans [(function core/FunctionDef)] (Vec SimdLoopPlanV0)
   (let [blocks (core/functiondef-blocks function)]
@@ -559,7 +605,7 @@
        (eligibility-reason loop-plan)
        "strict-native-scalar-v0"
        "bounds-runtime-exact"
-       "alias-runtime-disjoint-or-exact"
+       "alias-runtime-disjoint"
        "alignment-8"
        "lanes-materializer-chosen"
        "tail-increasing-scalar"])))
@@ -589,7 +635,7 @@
     " reason=" (eligibility-reason loop-plan)
     " strict=native-scalar-v0"
     " bounds=runtime-exact"
-    " alias=runtime-disjoint-or-exact"
+    " alias=runtime-disjoint"
     " alignment=8"
     " special=" (if (simdloopplanv0-arithmetic loop-plan)
                    "finite-arithmetic" "copy-all-bits")

@@ -4063,49 +4063,82 @@ void native_buffer_set(const native_arena *arena, native_buffer *buffer,
 }
 
 static bool native_buffer_simd_f64_span(
-    const native_buffer *buffer, const native_capability *capability,
-    int64_t start, int64_t end, uintptr_t *begin, uintptr_t *finish) {
+    const native_arena *arena, const native_buffer *buffer,
+    const native_capability *capability, int64_t start, int64_t end,
+    const native_buffer_registration **registration_out, uintptr_t *begin,
+    uintptr_t *finish) {
+  const native_buffer_registration *registration;
   uintptr_t base;
   uint64_t start_bytes;
   uint64_t end_bytes;
 
-  if ((buffer == NULL) || (capability == NULL) || (begin == NULL) ||
-      (finish == NULL) || (capability->token == UINT64_C(0)) ||
-      (capability->token != buffer->owner_capability_token) ||
-      (buffer->stride != INT64_C(8)) ||
-      (buffer->alignment < _Alignof(double)) || (start < INT64_C(0)) ||
-      (end < start) || (end > buffer->length) ||
-      ((end > INT64_C(0)) && (buffer->elements == NULL)) ||
-      ((end > INT64_C(0)) &&
-       (((uintptr_t)buffer->elements % (uintptr_t)_Alignof(double)) != 0U)) ||
+  if ((arena == NULL) || (arena->buffer_registry == NULL) ||
+      (buffer == NULL) || (capability == NULL) ||
+      (registration_out == NULL) || (begin == NULL) || (finish == NULL) ||
+      (start < INT64_C(0)) || (end < start) ||
       ((uint64_t)end > ((uint64_t)SIZE_MAX / UINT64_C(8)))) {
+    return false;
+  }
+  registration = arena->buffer_registry->registrations;
+  while ((registration != NULL) && (&registration->handle != buffer)) {
+    registration = registration->next;
+  }
+  /* Find the durable registration before reading either the public header or
+     capability token. A stale or foreign handle therefore fails closed. */
+  if ((registration == NULL) ||
+      (registration->owner != arena->buffer_registry) ||
+      (registration->generation != arena->buffer_registry->generation) ||
+      (registration->owner_capability != capability) ||
+      (registration->owner_capability_token == UINT64_C(0)) ||
+      (registration->owner_capability_token != capability->token) ||
+      (registration->length < INT64_C(0)) ||
+      (registration->stride != INT64_C(8)) ||
+      (registration->alignment != (size_t)8U) ||
+      ((uint64_t)registration->length >
+       ((uint64_t)SIZE_MAX / UINT64_C(8))) ||
+      (registration->byte_length !=
+       (size_t)((uint64_t)registration->length * UINT64_C(8))) ||
+      (buffer->elements != registration->elements) ||
+      (buffer->length != registration->length) ||
+      (buffer->stride != registration->stride) ||
+      (buffer->alignment != registration->alignment) ||
+      (buffer->owner_capability_token !=
+       registration->owner_capability_token) ||
+      (end > registration->length) ||
+      ((end > INT64_C(0)) && (registration->elements == NULL)) ||
+      ((end > INT64_C(0)) &&
+       (((uintptr_t)registration->elements % (uintptr_t)_Alignof(double)) !=
+        0U))) {
     return false;
   }
   start_bytes = (uint64_t)start * UINT64_C(8);
   end_bytes = (uint64_t)end * UINT64_C(8);
-  base = (uintptr_t)buffer->elements;
+  base = (uintptr_t)registration->elements;
   if ((start_bytes > (uint64_t)(UINTPTR_MAX - base)) ||
       (end_bytes > (uint64_t)(UINTPTR_MAX - base))) {
     return false;
   }
+  *registration_out = registration;
   *begin = base + (uintptr_t)start_bytes;
   *finish = base + (uintptr_t)end_bytes;
   return true;
 }
 
 bool native_buffer_simd_f64_input_view(
-    const native_buffer *buffer, const native_capability *capability,
+    const native_arena *arena, const native_buffer *buffer,
+    const native_capability *capability,
     int64_t start, int64_t end, bool require_finite, const double **out) {
+  const native_buffer_registration *registration;
   uintptr_t begin;
   uintptr_t finish;
   int64_t index;
 
   if ((out == NULL) ||
-      !native_buffer_simd_f64_span(buffer, capability, start, end, &begin,
-                                   &finish)) {
+      !native_buffer_simd_f64_span(arena, buffer, capability, start, end,
+                                   &registration, &begin, &finish)) {
     return false;
   }
-  *out = (const double *)buffer->elements;
+  *out = (const double *)registration->elements;
   if (require_finite) {
     for (index = start; index < end; ++index) {
       if (!isfinite((*out)[index])) {
@@ -4120,17 +4153,19 @@ bool native_buffer_simd_f64_input_view(
 }
 
 bool native_buffer_simd_f64_output_view(
-    native_buffer *buffer, const native_capability *capability,
+    const native_arena *arena, native_buffer *buffer,
+    const native_capability *capability,
     int64_t start, int64_t end, double **out) {
+  const native_buffer_registration *registration;
   uintptr_t begin;
   uintptr_t finish;
 
   if ((out == NULL) ||
-      !native_buffer_simd_f64_span(buffer, capability, start, end, &begin,
-                                   &finish)) {
+      !native_buffer_simd_f64_span(arena, buffer, capability, start, end,
+                                   &registration, &begin, &finish)) {
     return false;
   }
-  *out = (double *)buffer->elements;
+  *out = (double *)registration->elements;
   (void)begin;
   (void)finish;
   return true;

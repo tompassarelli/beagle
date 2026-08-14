@@ -3133,7 +3133,8 @@
 (defn simd-plan-for-block
   [(plans (Vec simd/SimdLoopPlanV0))
    (function core/FunctionDef)
-   (block core/BasicBlock)] (U simd/SimdLoopPlanV0 Nil)
+   (block core/BasicBlock)]
+  (U simd/SimdLoopPlanV0 Nil)
   (loop [(index Int) 0]
     (if (>= index (count plans))
       nil
@@ -3150,8 +3151,7 @@
           (recur (+ index 1)))))))
 
 (defn simd-source-position
-  [(sources (Vec core/NativeId))
-   (target core/NativeId)] Int
+  [(sources (Vec core/NativeId)) (target core/NativeId)] Int
   (loop [(index Int) 0]
     (if (>= index (count sources))
       -1
@@ -3179,7 +3179,8 @@
    (before Int)
    (target core/NativeId)
    (function core/FunctionDef)
-   (slots (Vec ValueSlotV0))] String
+   (slots (Vec ValueSlotV0))]
+  String
   (loop [(index Int) 0 (found Int) -1]
     (if (>= index before)
       (if (< found 0)
@@ -3195,7 +3196,8 @@
 (defn emit-simd-pack-instructions
   [(function core/FunctionDef)
    (slots (Vec ValueSlotV0))
-   (plan simd/SimdLoopPlanV0)] String
+   (plan simd/SimdLoopPlanV0)]
+  String
   (let [instructions (simd/simdloopplanv0-pack-instructions plan)
         sources (simd/simdloopplanv0-source-buffer-ids plan)]
     (loop [(index Int) 0 (result String) ""]
@@ -3251,8 +3253,7 @@
                   ";\n"))]
           (recur (+ index 1) (str result emitted)))))))
 
-(defn emit-simd-source-declarations
-  [(sources (Vec core/NativeId))] String
+(defn emit-simd-source-declarations [(sources (Vec core/NativeId))] String
   (loop [(index Int) 0 (result String) ""]
     (if (>= index (count sources))
       result
@@ -3264,20 +3265,21 @@
   [(function core/FunctionDef)
    (slots (Vec ValueSlotV0))
    (sources (Vec core/NativeId))
-   (arithmetic Bool)] String
+   (arithmetic Bool)]
+  String
   (loop [(index Int) 0 (result String) ""]
     (if (>= index (count sources))
       result
       (recur (+ index 1)
         (str result
           " &&\n        native_buffer_simd_f64_input_view("
+          "(const native_arena *)arena, "
           (value-name function slots (nth sources index))
           ", capability, native_simd_start, native_simd_end, "
           (if arithmetic "true" "false") ", &native_simd_source_"
           index ")")))))
 
-(defn emit-simd-alias-preflight
-  [(sources (Vec core/NativeId))] String
+(defn emit-simd-alias-preflight [(sources (Vec core/NativeId))] String
   (loop [(index Int) 0 (result String) ""]
     (if (>= index (count sources))
       result
@@ -3290,7 +3292,8 @@
 (defn emit-simd-splat-finite-preflight
   [(function core/FunctionDef)
    (slots (Vec ValueSlotV0))
-   (instructions (Vec simd/SimdPackInstructionV0))] String
+   (instructions (Vec simd/SimdPackInstructionV0))]
+  String
   (loop [(index Int) 0 (result String) ""]
     (if (>= index (count instructions))
       result
@@ -3305,7 +3308,8 @@
 (defn emit-simd-loop
   [(function core/FunctionDef)
    (slots (Vec ValueSlotV0))
-   (plan simd/SimdLoopPlanV0)] String
+   (plan simd/SimdLoopPlanV0)]
+  String
   (let [destination (simd/simdloopplanv0-destination-buffer-id plan)
         sources (simd/simdloopplanv0-source-buffer-ids plan)
         instructions (simd/simdloopplanv0-pack-instructions plan)
@@ -3323,6 +3327,7 @@
         "    if ((native_simd_end - native_simd_start >= "
         "((int64_t) NATIVE_SIMD_F64_LANES)) &&\n"
         "        native_buffer_simd_f64_output_view("
+        "(const native_arena *)arena, "
         (value-name function slots destination)
         ", capability, native_simd_start, native_simd_end, "
         "&native_simd_destination)"
