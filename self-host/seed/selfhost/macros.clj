@@ -146,6 +146,15 @@
 (defn ^Boolean macro-seq? [value]
   (vector? value))
 
+(defn ^Boolean reader-tagged-datum? [value]
+  (and (datum-pair? value) (or (= (datum-car value) BRACKET-TAG) (= (datum-car value) MAP-TAG) (= (datum-car value) SET-TAG) (= (datum-car value) STRING-TAG))))
+
+(defn ^Boolean macro-list-datum? [value]
+  (and (vector? value) (not (reader-tagged-datum? value))))
+
+(defn ^Boolean macro-vector-datum? [value]
+  (and (datum-pair? value) (= (datum-car value) BRACKET-TAG)))
+
 (defn macro-seq! [value ^String who]
   (cond
   (and (datum-pair? value) (= (datum-car value) BRACKET-TAG)) (datum-cdr value)
@@ -167,7 +176,7 @@
 (defn ^Boolean macro-closure? [value]
   (and (map? value) (= (get value "kind") "closure")))
 
-(def MACRO-BUILTIN-NAMES ["cons" "list" "vec" "append" "concat" "first" "second" "third" "rest" "null?" "pair?" "empty?" "length" "count" "map" "map-indexed" "mapcat" "reduce" "range" "filter" "every?" "apply" "partition" "nth" "reverse" "distinct" "distinct?" "str" "lower-case" "upper-case" "string->symbol" "symbol->string" "format" "format-symbol" "=" "not=" "not" "<" ">" "<=" ">=" "+" "-" "*" "quot" "mod" "syntax-name" "syntax-type" "make-param" "make-field" "make-defrecord" "make-defn" "make-get" "make-keyword" "ann" "error"])
+(def MACRO-BUILTIN-NAMES ["cons" "list" "vec" "append" "concat" "first" "second" "third" "rest" "null?" "pair?" "list?" "vector?" "empty?" "length" "count" "map" "map-indexed" "mapcat" "reduce" "range" "filter" "every?" "apply" "partition" "nth" "reverse" "distinct" "distinct?" "str" "lower-case" "upper-case" "string->symbol" "symbol->string" "format" "format-symbol" "=" "not=" "not" "<" ">" "<=" ">=" "+" "-" "*" "quot" "mod" "syntax-name" "syntax-type" "syntax-constraint" "syntax-error-at" "make-param" "make-field" "make-defrecord" "make-defn" "make-get" "make-keyword" "ann" "error"])
 
 (defn make-macro-env []
   (reduce (fn [env name] (assoc env name (macro-builtin name))) {"true" true "false" false "nil" []} MACRO-BUILTIN-NAMES))
@@ -196,7 +205,7 @@
    e env]
   (cond
   (= (count items) 0) e
-  (and (>= (count items) 2) (vector? (nth items 0)) (= (count (nth items 0)) 2) (string? (nth (nth items 0) 0))) (recur (subvec items 2) (assoc e (nth (nth items 0) 0) (macro-eval! (nth items 1) e)))
+  (and (>= (count items) 2) (vector? (nth items 0)) (or (= (count (nth items 0)) 2) (= (count (nth items 0)) 3)) (string? (nth (nth items 0) 0))) (recur (subvec items 2) (assoc e (nth (nth items 0) 0) (macro-eval! (nth items 1) e)))
   (and (>= (count items) 2) (string? (nth items 0))) (recur (subvec items 2) (assoc e (nth items 0) (macro-eval! (nth items 1) e)))
   :else (macro-eval-fail! (str "bad let binding: " (str (nth items 0))))))]
   (macro-eval-body! body bound))))
@@ -233,7 +242,7 @@
   (cond
   (= (count rest-items) 0) params
   (= (nth rest-items 0) "&") (macro-eval-fail! "fn variadic parameters are not supported in macro bodies")
-  (and (vector? (nth rest-items 0)) (= (count (nth rest-items 0)) 2) (string? (nth (nth rest-items 0) 0))) (recur (subvec rest-items 1) (conj params (nth (nth rest-items 0) 0)))
+  (and (vector? (nth rest-items 0)) (or (= (count (nth rest-items 0)) 2) (= (count (nth rest-items 0)) 3)) (string? (nth (nth rest-items 0) 0))) (recur (subvec rest-items 1) (conj params (nth (nth rest-items 0) 0)))
   (string? (nth rest-items 0)) (recur (subvec rest-items 1) (conj params (nth rest-items 0)))
   :else (macro-eval-fail! (str "bad fn param: " (str (nth rest-items 0))))))))
 
@@ -321,6 +330,42 @@
   :else (>= a b))]
   (if ok (recur (subvec items 1)) false)))))
 
+(defn macro-syntax-binding-datum [raw]
+  (if (and (macro-vector-datum? raw) (= (count raw) 2) (vector? (nth raw 1)) (or (= (count (nth raw 1)) 2) (= (count (nth raw 1)) 3))) (nth raw 1) raw))
+
+(defn ^Boolean macro-syntax-binding-form? [syntax]
+  (or (string? syntax) (macro-vector-datum? syntax) (and (datum-pair? syntax) (= (datum-car syntax) MAP-TAG))))
+
+(defn ^Boolean macro-typed-syntax-datum? [syntax]
+  (and (vector? syntax) (or (= (count syntax) 2) (= (count syntax) 3)) (macro-syntax-binding-form? (nth syntax 0))))
+
+(defn macro-syntax-name! [raw]
+  (let [syntax (macro-syntax-binding-datum raw)]
+  (cond
+  (macro-typed-syntax-datum? syntax) (nth syntax 0)
+  (string? syntax) syntax
+  :else (macro-eval-fail! (str "syntax-name expected a binding form or (binding-form Type [constraint]) datum, got: " (str syntax))))))
+
+(defn macro-syntax-type! [raw]
+  (let [syntax (macro-syntax-binding-datum raw)]
+  (if (macro-typed-syntax-datum? syntax) (nth syntax 1) (macro-eval-fail! (str "syntax-type expected a (binding-form Type [constraint]) datum, got: " (str syntax))))))
+
+(defn macro-syntax-constraint! [raw]
+  (let [syntax (macro-syntax-binding-datum raw)]
+  (if (macro-typed-syntax-datum? syntax) (if (= (count syntax) 3) (nth syntax 2) []) (macro-eval-fail! (str "syntax-constraint expected a (binding-form Type [constraint]) datum, got: " (str syntax))))))
+
+(defn macro-syntax-error-at! [args]
+  (if (< (count args) 2) (macro-eval-fail! "syntax-error-at expected a collection and index") (let [collection (nth args 0)
+   items (macro-seq! collection "syntax-error-at")
+   index (nth args 1)]
+  (if (not (and (int? index) (>= index 0) (< index (count items)))) (macro-eval-fail! (str "syntax-error-at: index " (str index) " out of range for a collection of " (str (count items)) " item(s)")) (let [form (nth items index)
+   parts (subvec args 2)
+   message (if (= (count parts) 0) (str "Invalid syntax: " (macro-display form)) (apply str (mapv macro-display parts)))]
+  (throw (ex-info message {"kind" "macro-source" "collection" collection "index" index "form" form})))))))
+
+(defn macro-make-binding-form! [^String name args]
+  (if (or (= (count args) 2) (= (count args) 3)) args (macro-eval-fail! (str name " expected 2 or 3 argument(s), got " (str (count args))))))
+
 (defn macro-apply-builtin! [^String name args]
   (cond
   (= name "list") args
@@ -346,6 +391,12 @@
   (= name "pair?") (do
   (macro-require-arity! name args 1)
   (datum-pair? (nth args 0)))
+  (= name "list?") (do
+  (macro-require-arity! name args 1)
+  (macro-list-datum? (nth args 0)))
+  (= name "vector?") (do
+  (macro-require-arity! name args 1)
+  (macro-vector-datum? (nth args 0)))
   (= name "empty?") (do
   (macro-require-arity! name args 1)
   (= (count (macro-seq! (nth args 0) name)) 0))
@@ -425,20 +476,15 @@
   (mod (nth args 0) (nth args 1)))
   (= name "syntax-name") (do
   (macro-require-arity! name args 1)
-  (let [raw (nth args 0)
-   syntax (if (and (vector? raw) (> (count raw) 0) (= (nth raw 0) BRACKET-TAG) (= (count raw) 2) (vector? (nth raw 1)) (= (count (nth raw 1)) 2)) (nth raw 1) raw)]
-  (cond
-  (datum-pair? syntax) (datum-car syntax)
-  (string? syntax) syntax
-  :else (macro-eval-fail! (str "syntax-name expected syntax, got: " (str syntax))))))
+  (macro-syntax-name! (nth args 0)))
   (= name "syntax-type") (do
   (macro-require-arity! name args 1)
-  (let [raw (nth args 0)
-   syntax (if (and (vector? raw) (> (count raw) 0) (= (nth raw 0) BRACKET-TAG) (= (count raw) 2) (vector? (nth raw 1)) (= (count (nth raw 1)) 2)) (nth raw 1) raw)]
-  (if (and (vector? syntax) (= (count syntax) 2) (string? (nth syntax 0))) (nth syntax 1) (macro-eval-fail! (str "syntax-type expected a (name Type) binding datum, got: " (str syntax))))))
-  (or (= name "make-param") (= name "make-field") (= name "ann")) (do
-  (macro-require-arity! name args 2)
-  [(nth args 0) (nth args 1)])
+  (macro-syntax-type! (nth args 0)))
+  (= name "syntax-constraint") (do
+  (macro-require-arity! name args 1)
+  (macro-syntax-constraint! (nth args 0)))
+  (= name "syntax-error-at") (macro-syntax-error-at! args)
+  (or (= name "make-param") (= name "make-field") (= name "ann")) (macro-make-binding-form! name args)
   (= name "make-defrecord") (do
   (macro-require-arity! name args 2)
   ["defrecord" (nth args 0) (nth args 1)])
@@ -479,7 +525,7 @@
   :else []))
 
 (defn ^Boolean typed-binding-datum? [item]
-  (and (vector? item) (= (count item) 2) (not (= (nth item 0) BRACKET-TAG)) (not (= (nth item 0) MAP-TAG)) (or (string? (nth item 0)) (and (vector? (nth item 0)) (> (count (nth item 0)) 0) (or (= (nth (nth item 0) 0) BRACKET-TAG) (= (nth (nth item 0) 0) MAP-TAG))))))
+  (and (vector? item) (or (= (count item) 2) (= (count item) 3)) (not (= (nth item 0) BRACKET-TAG)) (not (= (nth item 0) MAP-TAG)) (or (string? (nth item 0)) (and (vector? (nth item 0)) (> (count (nth item 0)) 0) (or (= (nth (nth item 0) 0) BRACKET-TAG) (= (nth (nth item 0) 0) MAP-TAG))))))
 
 (defn collect-binding-form-binders [form]
   (cond
@@ -712,6 +758,18 @@
   (let [env (assoc (make-macro-env) "fields" [BRACKET-TAG ["x" "Int"] ["y" "String"]])]
   (expect! "collection operators unwrap raw bracketed arguments" (= (macro-eval! ["partition" 1 "fields"] env) [[["x" "Int"]] [["y" "String"]]]))
   (expect! "closures map over evaluator collections" (= (macro-eval! ["map" ["fn" [BRACKET-TAG "field"] "Any" ["first" "field"]] "fields"] env) ["x" "y"])))
+  (let [sequence-binding [[BRACKET-TAG "x" "y"] "Point" "valid-point?"]
+   map-binding [[MAP-TAG ":keys" [BRACKET-TAG "x" "y"]] "Point" "valid-point?"]]
+  (expect! "syntax accessors preserve typed sequential destructuring heads" (and (= (macro-syntax-name! sequence-binding) (nth sequence-binding 0)) (= (macro-syntax-type! sequence-binding) "Point") (= (macro-syntax-constraint! sequence-binding) "valid-point?")))
+  (expect! "syntax accessors preserve typed map destructuring heads" (and (= (macro-syntax-name! map-binding) (nth map-binding 0)) (= (macro-syntax-type! map-binding) "Point") (= (macro-syntax-constraint! map-binding) "valid-point?"))))
+  (let [collection [BRACKET-TAG ["id" "String"] "valid-id-wire?"]
+   rejected (try
+  (macro-syntax-error-at! [collection 1 [STRING-TAG "Invalid field declaration"]])
+  false
+  (catch Exception problem
+    (let [data (ex-data problem)]
+  (and (= (ex-message problem) "Invalid field declaration") (= (get data "collection") collection) (= (get data "index") 1) (= (get data "form") "valid-id-wire?")))))]
+  (expect! "syntax-error-at preserves original collection, index, and stray form" rejected))
   (expect! "nested quasiquote evaluates only the matching depth" (= (macro-eval! ["quasiquote" ["quasiquote" ["a" ["unquote" ["unquote" "x"]]]]] (assoc (make-macro-env) "x" 9)) ["quasiquote" ["a" ["unquote" 9]]]))
   (expect! "cond evaluates canonical flat pairs" (= (macro-eval! ["cond" "false" 1 ["=" 2 2] 2 ":else" 3] (make-macro-env)) 2))
   (expect! "cond evaluates all-bracket clauses and bare else" (= (macro-eval! ["cond" [BRACKET-TAG "false" 1] [BRACKET-TAG ["=" 2 3] 2] [BRACKET-TAG "else" 3]] (make-macro-env)) 3))

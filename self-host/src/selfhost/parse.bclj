@@ -1601,7 +1601,7 @@
   (let [n (count clauses) pairs (loop [(i Int) 0 (acc Any) []] (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))])))) pos (if (= kind "cond->") "first" "last") k (count pairs) temps (loop [(i Int) 0 (acc Any) [(fresh-lowered-sym! "cond-thread")]] (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread"))))) inner (loop [(i Any) (- k 1) (acc Any) (nth temps k)] (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
     ["let" [BRACKET-TAG (nth temps 0) init] inner]))
 
-(defn expand-some-thread [(kind String) (init Any) (steps Any)] Any
+(defn expand-some-thread! [(kind String) (init Any) (steps Any)] Any
   (let [pos (if (= kind "some->") "first" "last") m (count steps)]
     (if (= m 0)
       init
@@ -2823,12 +2823,12 @@
       (let [args (mapv parse-expr* rest-items)]
         (make-threading "some->"
           args
-          (parse-expr* (expand-some-thread "some->" (nth rest-items 0) (subvec rest-items 1)))))
+          (parse-expr* (expand-some-thread! "some->" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "some->>") (>= (count rest-items) 1))
       (let [args (mapv parse-expr* rest-items)]
         (make-threading "some->>"
           args
-          (parse-expr* (expand-some-thread "some->>" (nth rest-items 0) (subvec rest-items 1)))))
+          (parse-expr* (expand-some-thread! "some->>" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "as->")
         (>= (count rest-items) 2)
         (string? (nth rest-items 1)))
@@ -3409,7 +3409,7 @@
 (defn module-type-aliases! [(datums Any) (prefix String) (refer-syms Any)] Any
   (module-type-aliases-with-imports! datums prefix refer-syms {}))
 
-(defn module-parametric-arities
+(defn module-parametric-arities!
   [(datums Any) (prefix String) (refer-syms Any)] Any
   (doseq [datum datums]
     (validate-reserved-type-declaration! (import-normalize datum)))
@@ -4250,27 +4250,27 @@
       (let [folded (> (count (parse-errors)) 0)]
         (reset-errors!)
         (and folded (= (count (parse-errors)) 0)))))
-  (expect! "parse-type primitive"
+  (expect! "parse-type! primitive"
     (= (parse-type! "Int") {"kind" "prim" "name" "Int"}))
-  (expect! "parse-type nullable"
+  (expect! "parse-type! nullable"
     (let [t (parse-type! "String?")]
       (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
-  (expect! "parse-type fn"
+  (expect! "parse-type! fn"
     (let [t (parse-type! ["Fn" [BRACKET-TAG "Int"] "String"])]
       (and (= (get t "kind") "fn") (= (count (get t "params")) 1))))
-  (expect! "parse-type Vec app"
+  (expect! "parse-type! Vec app"
     (let [t (parse-type! ["Vec" "String"])]
       (and (= (get t "kind") "app") (= (get t "name") "Vec"))))
-  (expect! "parse-type Dyn preserves ordered alternatives"
+  (expect! "parse-type! Dyn preserves ordered alternatives"
     (= (parse-type! ["Dyn" "String" "Int"])
       {"kind" "app"
        "name" "Dyn"
        "args" [{"kind" "prim" "name" "String"}
                {"kind" "prim" "name" "Int"}]}))
-  (expect! "parse-type union"
+  (expect! "parse-type! union"
     (let [t (parse-type! ["U" "Int" "String"])]
       (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
-  (expect! "parse-type clj alias Long"
+  (expect! "parse-type! clj alias Long"
     (= (parse-type! "Long") {"kind" "prim" "name" "Int"}))
   (expect! "local parametric type accepts exact arity"
     (let [_ (parse-program!
@@ -4285,13 +4285,13 @@
       (and (= (count errors) 1)
         (str/includes? (nth errors 0) "type Box expects 1 argument, got 0"))))
   (expect! "exported module parametric arity keeps qualified spelling"
-    (= (module-parametric-arities
+    (= (module-parametric-arities!
          [["js/export" ["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG ["value" "T"]]]]]]
          "p"
          nil)
       {"p/Box" 1}))
   (expect! "zero-parameter imported declaration remains visible to validation"
-    (= (module-parametric-arities
+    (= (module-parametric-arities!
          [["js/export" ["defunion" ["Unit"] "UnitValue"]]]
          "p"
          nil)

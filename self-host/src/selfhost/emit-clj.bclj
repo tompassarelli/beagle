@@ -176,7 +176,7 @@
 ;; node (map with a "type" of map-/seq-destructure). emit-param already renders
 ;; both pattern shapes; strings pass through. One target-emitter for every
 ;; binding context (let / loop / binding / with-open / for :let).
-(defn emit-binding-target [(target Any)] String
+(defn emit-binding-target! [(target Any)] String
   (emit-binding-form (param-binding-target target)))
 
 ;; --- binding constraints ---------------------------------------------------
@@ -327,13 +327,13 @@
       (reset! loop-constraint-arity previous)
       result)))
 
-(defn emit-let-bindings [(bindings Any)] String
+(defn emit-let-bindings! [(bindings Any)] String
   (str/join "\n   "
     (loop [(index Int) 0 (acc (Vec String)) []]
       (if (>= index (count bindings))
         acc
         (let [b (nth bindings index)
-              target (emit-binding-target (get b "name"))
+              target (emit-binding-target! (get b "name"))
               value (emit-expr* (get b "value"))]
           (if (constraint-present? b)
             (let [raw-name (str "$beagle$constraint$raw-binding$" index)
@@ -346,13 +346,14 @@
                      (emit-guarded-binding-value b predicate-name raw-name))])))
             (recur (+ index 1) (conj acc (str target " " value)))))))))
 
-(defn emit-with-open-chain [(bindings Any) (body-str String) (index Int)] String
+(defn emit-with-open-chain!
+  [(bindings Any) (body-str String) (index Int)] String
   (if (= 0 (count bindings))
     body-str
     (let [b (nth bindings 0)
-          target (emit-binding-target (get b "name"))
+          target (emit-binding-target! (get b "name"))
           value (emit-expr* (get b "value"))
-          inner (emit-with-open-chain (subvec (vec bindings) 1) body-str (+ index 1))]
+          inner (emit-with-open-chain! (subvec (vec bindings) 1) body-str (+ index 1))]
       (if (constraint-present? b)
         (let [predicate-name (str "$beagle$constraint$predicate$" index)
               raw-name (str "$beagle$constraint$raw-open$" index)]
@@ -363,7 +364,7 @@
                "    " inner "))"))
         (str "(with-open [" target " " value "]\n  " inner ")")))))
 
-(defn emit-dynamic-binding-chain [(bindings Any) (body-str String)] String
+(defn emit-dynamic-binding-chain! [(bindings Any) (body-str String)] String
   (let [capture-bindings
           (loop [(index Int) 0 (acc (Vec String)) []]
             (if (>= index (count bindings))
@@ -384,7 +385,7 @@
         dynamic-bindings
           (mapv (fn [(index Int)] String
                   (let [binding (nth bindings index)]
-                    (str (emit-binding-target (get binding "name")) " "
+                    (str (emit-binding-target! (get binding "name")) " "
                       (if (constraint-present? binding)
                         (str "$beagle$constraint$checked-dynamic$" index)
                         (str "$beagle$constraint$raw-dynamic$" index)))))
@@ -393,7 +394,7 @@
          "  (binding [" (str/join "\n            " dynamic-bindings) "]\n"
          "    " body-str "))")))
 
-(defn emit-for-clauses [(clauses Any)] String
+(defn emit-for-clauses! [(clauses Any)] String
   (str/join "\n   "
     (loop [(index Int) 0 (acc (Vec String)) []]
       (if (>= index (count clauses))
@@ -410,10 +411,10 @@
                     [(str raw-name " " (emit-expr* (get c "expr")))
                      (str ":let [" predicate-name " "
                        (emit-expr* (checked-binding-constraint c)) "\n"
-                       "         " (emit-binding-target (get c "name")) " "
+                       "         " (emit-binding-target! (get c "name")) " "
                        (emit-guarded-binding-value c predicate-name raw-name) "]")])))
               (recur (+ index 1)
-                (conj acc (str (emit-binding-target (get c "name")) " "
+                (conj acc (str (emit-binding-target! (get c "name")) " "
                              (emit-expr* (get c "expr"))))))
 
             (= t "when")
@@ -421,14 +422,14 @@
 
             (= t "let")
             (recur (+ index 1)
-              (conj acc (str ":let [" (emit-let-bindings (get c "bindings")) "]")))
+              (conj acc (str ":let [" (emit-let-bindings! (get c "bindings")) "]")))
 
             :else (recur (+ index 1) acc)))))))
 
 (defn emit-loop-with-constraints! [(e Any)] String
   (let [bindings (get e "bindings")]
     (if (not (bindings-have-constraints? bindings))
-      (str "(loop [" (emit-let-bindings bindings) "]\n  "
+      (str "(loop [" (emit-let-bindings! bindings) "]\n  "
            (emit-body-with-loop-context! (get e "body") "  " nil) ")")
       (let [raw-names
               (mapv (fn [(index Int)] String
@@ -440,7 +441,7 @@
                   acc
                   (let [binding (nth bindings index)
                         raw (nth raw-names index)
-                        target (emit-binding-target (get binding "name"))
+                        target (emit-binding-target! (get binding "name"))
                         base (conj acc
                                (str raw " " (emit-expr* (get binding "value"))))]
                     (if (constraint-present? binding)
@@ -458,7 +459,7 @@
               (mapv (fn [(index Int)] String
                       (let [binding (nth bindings index)
                             raw (nth raw-names index)
-                            target (emit-binding-target (get binding "name"))]
+                            target (emit-binding-target! (get binding "name"))]
                         (str target " "
                           (if (constraint-present? binding)
                             (str "(if $beagle$constraint$first-iteration " raw " "
@@ -665,7 +666,7 @@
     (str/join "\n\n"
       (into (into [record-line] (emit-record-constructor-guards m fields)) accessors))))
 
-(defn emit-defunion [(e Any)] String
+(defn emit-defunion! [(e Any)] String
   (let [comment (str ";; " (get e "name") " = " (str/join " | " (get e "members")))
         mf (get e "member-fields")]
     (if (nil? mf)
@@ -676,7 +677,7 @@
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
 
-(defn emit-deferror [(e Any)] String
+(defn emit-deferror! [(e Any)] String
   (let [comment (str ";; error " (get e "name") " = " (str/join " | " (get e "members")))
         mf (get e "member-fields")]
     (if (nil? mf)
@@ -911,7 +912,7 @@
                        (emit-body (get tail "body") "      ") ")"))]
     (str "(case " target-str "\n    " (str/join "\n    " clause-strs) default-str ")")))
 
-(defn emit-match-arm [(clause Any) (target-sym String)] String
+(defn emit-match-arm! [(clause Any) (target-sym String)] String
   (let [pat (get clause "pattern")
         body-str (emit-body (get clause "body") "      ")
         pt (get pat "type")]
@@ -971,7 +972,7 @@
       (let [target-sym (fresh-match-sym!)]
         (emit-case-folded-match clauses target-sym target-str))
       (let [target-sym (fresh-match-sym!)
-            cond-pairs (mapv (fn [(c Any)] String (emit-match-arm c target-sym)) clauses)]
+            cond-pairs (mapv (fn [(c Any)] String (emit-match-arm! c target-sym)) clauses)]
         (str "(let [" target-sym " " target-str "]\n  (cond\n    "
              (str/join "\n    " cond-pairs) "))")))))
 
@@ -1116,7 +1117,7 @@
           (str "(fn [" (get callable "params") "] " (get callable "body") ")"))
 
       (= node "let")
-        (str "(let [" (emit-let-bindings (get e "bindings")) "]\n  "
+        (str "(let [" (emit-let-bindings! (get e "bindings")) "]\n  "
              (emit-body (get e "body") "  ") ")")
 
       (= node "if")
@@ -1157,15 +1158,15 @@
         (let [bindings (get e "bindings")
               body (emit-body (get e "body") "  ")]
           (if (bindings-have-constraints? bindings)
-            (emit-dynamic-binding-chain bindings body)
-            (str "(binding [" (emit-let-bindings bindings) "]\n  " body ")")))
+            (emit-dynamic-binding-chain! bindings body)
+            (str "(binding [" (emit-let-bindings! bindings) "]\n  " body ")")))
 
       (= node "with-open")
         (let [bindings (get e "bindings")
               body (emit-body (get e "body") "  ")]
           (if (bindings-have-constraints? bindings)
-            (emit-with-open-chain bindings body 0)
-            (str "(with-open [" (emit-let-bindings bindings) "]\n  " body ")")))
+            (emit-with-open-chain! bindings body 0)
+            (str "(with-open [" (emit-let-bindings! bindings) "]\n  " body ")")))
 
       (= node "doto")
         (str "(doto " (emit-expr* (get e "target")) "\n  "
@@ -1200,11 +1201,11 @@
             (if (and (number? context) (= (count args) context)) " false" "") ")"))
 
       (= node "for")
-        (str "(for [" (emit-for-clauses (get e "clauses")) "]\n  "
+        (str "(for [" (emit-for-clauses! (get e "clauses")) "]\n  "
              (emit-body (get e "body") "  ") ")")
 
       (= node "doseq")
-        (str "(doseq [" (emit-for-clauses (get e "clauses")) "]\n  "
+        (str "(doseq [" (emit-for-clauses! (get e "clauses")) "]\n  "
              (emit-body (get e "body") "  ") ")")
 
       (= node "call")
@@ -1324,10 +1325,10 @@
         (emit-defenum e)
 
       (= node "defunion")
-        (emit-defunion e)
+        (emit-defunion! e)
 
       (= node "deferror")
-        (emit-deferror e)
+        (emit-deferror! e)
 
       (= node "defscalar")
         (emit-defscalar e)
@@ -1542,16 +1543,16 @@
         (= (fresh-match-sym!) "match__0")))
 
   ;; regression: destructure binders in LET position must render as patterns,
-  ;; not the raw AST JSON node (fuzz campaign: emit-let-bindings str-printed
-  ;; {"type" "seq-destructure", ...}). emit-binding-target dispatches through
+  ;; not the raw AST JSON node (fuzz campaign: emit-let-bindings! str-printed
+  ;; {"type" "seq-destructure", ...}). emit-binding-target! dispatches through
   ;; emit-param; plain string names pass through unchanged.
   (expect! "binding-target: plain name passes through"
-    (= (emit-binding-target "x") "x"))
+    (= (emit-binding-target! "x") "x"))
   (expect! "binding-target: seq-destructure -> [a b]"
-    (= (emit-binding-target {"type" "seq-destructure" "names" ["a" "b"] "rest" false})
+    (= (emit-binding-target! {"type" "seq-destructure" "names" ["a" "b"] "rest" false})
        "[a b]"))
   (expect! "binding-target: map-destructure -> {:keys [id b]}"
-    (= (emit-binding-target {"type" "map-destructure" "keys" ["id" "b"] "as" false})
+    (= (emit-binding-target! {"type" "map-destructure" "keys" ["id" "b"] "as" false})
        "{:keys [id b]}"))
   (expect! "param: typed sequential aggregate unwraps to binding form"
     (= (emit-param-tagged
@@ -1575,12 +1576,12 @@
           "ann" {"kind" "any"}})
        "[x {:keys [y] :or {y 3} :as row}]"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)"
-    (= (emit-let-bindings
+    (= (emit-let-bindings!
          [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false}
            "value" {"node" "ref" "name" "p"}}])
        "[a b] p"))
   (expect! "let-bindings: map-destructure binder (no raw JSON leak)"
-    (= (emit-let-bindings
+    (= (emit-let-bindings!
          [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false}
            "value" {"node" "ref" "name" "m"}}])
        "{:keys [id b]} m"))
@@ -1608,7 +1609,7 @@
 
   (expect! "constrained let evaluates raw value once before projection"
     (let [output
-            (emit-let-bindings
+            (emit-let-bindings!
               [{"name" "value"
                 "constraint" {"node" "ref" "name" "positive?"}
                 "value" {"node" "call"

@@ -277,11 +277,11 @@
 
     :else false))
 
-;; --- parse-type (from raw datum, for future self-hosted parser) --------------
+;; --- parse-type! (from raw datum, for future self-hosted parser) --------------
 
 (def user-parametric (Map String Bool) {})
 
-(declare parse-type)
+(declare parse-type!)
 
 ;; Var-ize: convert prim types whose name is a forall var into type-vars (the
 ;; oracle consults current-type-vars while parsing; this parser var-izes after).
@@ -310,18 +310,18 @@
     (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (nth e 0)
     :else nil))
 
-(defn parse-fn-params [(items (Vec Any)) (ret Any)] Any
+(defn parse-fn-params! [(items (Vec Any)) (ret Any)] Any
   (let [amp-pos (index-of2 items "&")]
     (if (> amp-pos -1)
       (if (= amp-pos (- (count items) 2))
         (make-fn
-          (mapv parse-type (subvec items 0 amp-pos))
-          (parse-type (nth items (+ amp-pos 1)))
-          (parse-type ret))
+          (mapv parse-type! (subvec items 0 amp-pos))
+          (parse-type! (nth items (+ amp-pos 1)))
+          (parse-type! ret))
         (invalid-type! "function type: `&` must be followed by exactly one final rest type"))
-      (make-fn (mapv parse-type items) nil (parse-type ret)))))
+      (make-fn (mapv parse-type! items) nil (parse-type! ret)))))
 
-(defn parse-type [(t Any)] Any
+(defn parse-type! [(t Any)] Any
   (cond
     ;; Vectors are not types. Retired arrow vectors remain rejected rather
     ;; than becoming a compatibility spelling for the canonical Fn form.
@@ -334,7 +334,7 @@
     (and (vector? t) (= (count t) 3) (= (nth t 0) "Fn")
          (vector? (nth t 1)) (> (count (nth t 1)) 0)
          (= (nth (nth t 1) 0) "#%brackets"))
-      (parse-fn-params (subvec (nth t 1) 1) (nth t 2))
+      (parse-fn-params! (subvec (nth t 1) 1) (nth t 2))
 
     (and (vector? t) (> (count t) 0) (= (nth t 0) "Fn"))
       (invalid-type! "function type requires exactly (Fn [ParamType ...] ReturnType)")
@@ -359,30 +359,30 @@
             bounds (reduce (fn [(acc Any) (e Any)] Any
                              (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:")
                                       (string? (nth e 0)))
-                               (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars))
+                               (assoc acc (nth e 0) (varize-type (parse-type! (nth e 2)) vars))
                                acc))
                            {} raw-vars)]
         (if reserved?
           (invalid-type! "forall type parameter cannot declare `Fn`; Fn is the built-in function type constructor")
-          (make-poly vars (varize-type (parse-type (nth t 2)) vars)
+          (make-poly vars (varize-type (parse-type! (nth t 2)) vars)
                      (if (= (count bounds) 0) nil bounds))))
 
     ;; Union: ["U", ...]
     (and (vector? t) (> (count t) 1) (= (nth t 0) "U"))
-      (make-union (mapv parse-type (subvec t 1)))
+      (make-union (mapv parse-type! (subvec t 1)))
 
     ;; Parametric app: ["Vec", "T"], ["Map", "K", "V"], ["Dyn", ...]
     (and (vector? t) (> (count t) 0) (string? (nth t 0))
          (or (= (nth t 0) "Dyn")
              (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0)
              (= (get user-parametric (nth t 0)) true)))
-      (make-app (nth t 0) (mapv parse-type (subvec t 1)))
+      (make-app (nth t 0) (mapv parse-type! (subvec t 1)))
 
     ;; Nullable sugar: "String?" -> (U String Nil)
     (and (string? t) (> (count t) 1)
          (= (char-at t (- (count t) 1)) "?"))
       (let [base (substring2 t 0 (- (count t) 1))]
-        (make-union [(parse-type base) (make-prim "Nil")]))
+        (make-union [(parse-type! base) (make-prim "Nil")]))
 
     ;; Number alias
     (and (string? t) (= t "Number"))
@@ -607,49 +607,49 @@
       (make-prim "String")
       (make-poly ["T"] (make-prim "String") nil)))
 
-  ;; --- parse-type tests ---
+  ;; --- parse-type! tests ---
 
   (expect! "pt: prim"
-    (= (parse-type "String") (make-prim "String")))
+    (= (parse-type! "String") (make-prim "String")))
   (expect! "pt: app Vec"
-    (= (parse-type ["Vec" "String"]) (make-app "Vec" [(make-prim "String")])))
+    (= (parse-type! ["Vec" "String"]) (make-app "Vec" [(make-prim "String")])))
   (expect! "pt: union"
-    (= (parse-type ["U" "String" "Nil"])
+    (= (parse-type! ["U" "String" "Nil"])
        (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "pt: nullable sugar"
-    (= (parse-type "String?")
+    (= (parse-type! "String?")
        (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "pt: Number alias"
-    (= (parse-type "Number")
+    (= (parse-type! "Number")
        (make-union [(make-prim "Int") (make-prim "Float")])))
   (expect! "pt: CLJ alias Long"
-    (= (parse-type "Long") (make-prim "Int")))
+    (= (parse-type! "Long") (make-prim "Int")))
   (expect! "pt: fn type"
-    (= (parse-type ["Fn" ["#%brackets" "Int"] "String"])
+    (= (parse-type! ["Fn" ["#%brackets" "Int"] "String"])
        (make-fn [(make-prim "Int")] nil (make-prim "String"))))
   (expect! "pt: variadic fn"
-    (= (parse-type ["Fn" ["#%brackets" "Int" "&" "String"] "Bool"])
+    (= (parse-type! ["Fn" ["#%brackets" "Int" "&" "String"] "Bool"])
        (make-fn [(make-prim "Int")] (make-prim "String") (make-prim "Bool"))))
   (expect! "pt: retired arrow fn rejects"
     (let [before (count (type-parse-errors))
-          invalid (parse-type ["#%brackets" "Int" "->" "String"])]
+          invalid (parse-type! ["#%brackets" "Int" "->" "String"])]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: malformed Fn rejects"
     (let [before (count (type-parse-errors))
-          invalid (parse-type ["Fn" "Int" "String"])]
+          invalid (parse-type! ["Fn" "Int" "String"])]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: bare Fn rejects"
     (let [before (count (type-parse-errors))
-          invalid (parse-type "Fn")]
+          invalid (parse-type! "Fn")]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: nested (Vec (Map String Int))"
-    (= (parse-type ["Vec" ["Map" "String" "Int"]])
+    (= (parse-type! ["Vec" ["Map" "String" "Int"]])
        (make-app "Vec" [(make-app "Map" [(make-prim "String") (make-prim "Int")])])))
   (expect! "pt: Dyn"
-    (= (parse-type ["Dyn" "String" "Int"])
+    (= (parse-type! ["Dyn" "String" "Int"])
        (make-app "Dyn" [(make-prim "String") (make-prim "Int")])))
 
   ;; --- ML soundness: Atom invariance ---
@@ -676,7 +676,7 @@
 
   ;; --- ML soundness: bounded forall parse + render ---
   (expect! "pt: bounded forall (T <: Number)"
-    (= (parse-type ["forall" ["#%brackets" ["T" "<:" "Number"]] ["Fn" ["#%brackets" "T"] "T"]])
+    (= (parse-type! ["forall" ["#%brackets" ["T" "<:" "Number"]] ["Fn" ["#%brackets" "T"] "T"]])
        (make-poly ["T"]
          (make-fn [(make-var "T")] nil (make-var "T"))
          {"T" (make-union [(make-prim "Int") (make-prim "Float")])})))
@@ -686,7 +686,7 @@
                        {"T" (make-union [(make-prim "Int") (make-prim "Float")])}))
        "(forall [(T <: Number)] (Fn [T] T))"))
   (expect! "pt: unbounded forall var-izes body"
-    (= (parse-type ["forall" ["#%brackets" "T"] ["Fn" ["#%brackets" "T"] "T"]])
+    (= (parse-type! ["forall" ["#%brackets" "T"] ["Fn" ["#%brackets" "T"] "T"]])
        (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) nil)))
 
   ;; --- infer-literal-type tests ---

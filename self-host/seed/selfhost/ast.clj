@@ -205,8 +205,8 @@
 (defn make-block-string [^String text ^String tag]
   {"node" "block-string" "text" text "tag" tag})
 
-(defn make-param [name ann]
-  {"type" "param" "name" name "ann" ann})
+(defn make-param [name ann constraint]
+  {"type" "param" "name" name "ann" ann "constraint" constraint})
 
 (defn make-map-destructure [keys as-name or-defaults]
   {"type" "map-destructure" "keys" keys "as" as-name "or" or-defaults})
@@ -214,8 +214,8 @@
 (defn make-seq-destructure [names rest-name]
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
-(defn make-let-binding [name ann value]
-  {"name" name "ann" ann "value" value})
+(defn make-let-binding [name ann constraint value]
+  {"name" name "ann" ann "constraint" constraint "value" value})
 
 (defn make-pat-wildcard []
   {"pattern" "wildcard"})
@@ -329,7 +329,7 @@
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))
   (expect! "make-def value" (= (get (get node "value") "kind") "number")))
-  (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"})] nil {"kind" "prim" "name" "String"} [(make-call "str" [(make-ref "x")])] false)]
+  (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"} nil)] nil {"kind" "prim" "name" "String"} [(make-call "str" [(make-ref "x")])] false)]
   (expect! "make-defn node type" (= (get node "node") "defn"))
   (expect! "make-defn params" (= (count (get node "params")) 1))
   (expect! "make-defn param name" (= (get (nth (get node "params") 0) "name") "x")))
@@ -342,10 +342,17 @@
   (let [node (make-defunion "Shape" ["Circle" "Rect"] nil nil)]
   (expect! "make-defunion" (= (get node "node") "defunion"))
   (expect! "make-defunion members" (= (count (get node "members")) 2)))
-  (let [p (make-param "x" {"kind" "prim" "name" "Int"})]
+  (let [p (make-param "x" {"kind" "prim" "name" "Int"} nil)]
   (expect! "param type" (= (get p "type") "param"))
   (expect! "param name" (= (get p "name") "x"))
-  (expect! "param ann" (= (get (get p "ann") "name") "Int")))
+  (expect! "param ann" (= (get (get p "ann") "name") "Int"))
+  (expect! "param absent constraint" (nil? (get p "constraint"))))
+  (let [constraint (make-call "positive?" [(make-ref "x")])
+   p (make-param "x" {"kind" "prim" "name" "Int"} constraint)]
+  (expect! "param owns constraint AST" (= (get (get p "constraint") "node") "call")))
+  (let [constraint (make-ref "positive?")
+   binding (make-let-binding "x" {"kind" "prim" "name" "Int"} constraint (make-literal "number" 1))]
+  (expect! "binding owns constraint AST" (= (get (get binding "constraint") "name") "positive?")))
   (let [d (make-map-destructure ["a" "b"] "m" [])]
   (expect! "map-destructure type" (= (get d "type") "map-destructure"))
   (expect! "map-destructure keys" (= (count (get d "keys")) 2)))
@@ -353,7 +360,7 @@
   (expect! "seq-destructure type" (= (get d "type") "seq-destructure"))
   (expect! "seq-destructure rest" (= (get d "rest") "rest")))
   (let [target (make-seq-destructure ["x" (make-map-destructure ["y"] false [])] false)
-   p (make-param target {"kind" "app" "name" "HVec" "args" []})]
+   p (make-param target {"kind" "app" "name" "HVec" "args" []} nil)]
   (expect! "param accepts structural binding target" (= (get (get p "name") "type") "seq-destructure")))
   (expect! "pat-wildcard" (= (get (make-pat-wildcard) "pattern") "wildcard"))
   (expect! "pat-literal" (= (get (make-pat-literal 42) "value") 42))

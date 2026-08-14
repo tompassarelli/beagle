@@ -233,11 +233,11 @@
     target
     {(selfhost.rt/abs-path source-path) true}))
 
-(defn- import-parametric-arities [(surfaces Any)] Any
+(defn- import-parametric-arities! [(surfaces Any)] Any
   (reduce
     (fn [(arities Any) (surface Any)] Any
       (into arities
-        (p/module-parametric-arities
+        (p/module-parametric-arities!
           (get surface "datums")
           (get surface "prefix")
           (get surface "refer"))))
@@ -310,7 +310,7 @@
                          (p/discover-requires! datums)
                          path
                          target)
-        (imported-arities Any) (import-parametric-arities surfaces)
+        (imported-arities Any) (import-parametric-arities! surfaces)
         (imported-aliases Any) (import-type-aliases surfaces)
         (prog Any) (resolve-imports!
                     (p/parse-program-with-imports!
@@ -341,7 +341,7 @@
 
 ;; Emit dispatch by target. Default clj keeps current behavior; each backend
 ;; adds one branch here (parallel target ports union into this table).
-(defn- emit-for-target [(target String) (prog Any)] String
+(defn- emit-for-target! [(target String) (prog Any)] String
   (cond
     (= target "js") (ejs/emit-program! prog)
     (= target "nix") (en/emit-program! prog)
@@ -583,11 +583,11 @@
   (selfhost.rt/eprint "ok\n"))
 
 (defn- cmd-emit! [(path String) (target String)] Nil
-  (print (emit-for-target target
+  (print (emit-for-target! target
            (check-or-die! (get (parse-file-target! path target) "program")))))
 
 (defn- cmd-emit-from-ast! [(target String)] Nil
-  (print (emit-for-target target
+  (print (emit-for-target! target
            (validate-checked-projection! target
              (selfhost.rt/parse-json (selfhost.rt/read-stdin))))))
 

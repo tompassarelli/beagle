@@ -767,7 +767,7 @@
       (str "(" pattern ": " body-str ")"))))
 
 ;; --- let ---------------------------------------------------------------------
-(defn emit-binding-target [(b Any)] String
+(defn emit-binding-target! [(b Any)] String
   (let [target (param-binding-target b)]
     (if (string? target)
       (mangle-name target)
@@ -775,7 +775,7 @@
         "destructuring in let bindings is not supported by the nix backend — bind the aggregate to a name, then project its fields explicitly"
         {})))))
 
-(defn emit-let-binding-chain*
+(defn emit-let-binding-chain*!
   [(bindings Any) (body-str String) (depth Int) (index Int)] String
   (if (= 0 (count bindings))
     body-str
@@ -783,7 +783,7 @@
           n (get b "name")
           v (get b "value")
           constraint (param-constraint b)
-          rest-str (emit-let-binding-chain*
+          rest-str (emit-let-binding-chain*!
                      (subvec (vec bindings) 1)
                      body-str
                      depth
@@ -823,7 +823,7 @@
             (indent depth)
             rest-str))
         :else
-        (let [target-name (emit-binding-target n)
+        (let [target-name (emit-binding-target! n)
               value-str (emit-expr* v (+ depth 1))]
           (if (absent? constraint)
             (str "(("
@@ -864,12 +864,12 @@
               (paren-wrap value-str v)
               ")"))))))))
 
-(defn emit-let-binding-chain
+(defn emit-let-binding-chain!
   [(bindings Any) (body-str String) (depth Int)] String
-  (emit-let-binding-chain* bindings body-str depth 0))
+  (emit-let-binding-chain*! bindings body-str depth 0))
 
-(defn emit-let [(e Any) (depth Int)] String
-  (emit-let-binding-chain
+(defn emit-let! [(e Any) (depth Int)] String
+  (emit-let-binding-chain!
     (get e "bindings")
     (emit-body (get e "body") depth)
     depth))
@@ -950,7 +950,7 @@
         :else
         (loop-match rest-cs target depth)))))
 
-(defn emit-match [(e Any) (depth Int)] String
+(defn emit-match! [(e Any) (depth Int)] String
   (let [target (emit-expr* (get e "target") depth) clauses (vec (get e "clauses"))]
     (loop-match clauses target depth)))
 
@@ -1034,7 +1034,7 @@
         target-name " (" with-updates ")"))))
 
 ;; --- for comprehension -> concatMap ------------------------------------------
-(defn loop-for [(cs Any) (body Any) (depth Int)] String
+(defn loop-for! [(cs Any) (body Any) (depth Int)] String
   (if (= 0 (count cs))
     (str "[ " (emit-body body depth) " ]")
     (let [c (nth cs 0) t (get c "type") rest-cs (subvec (vec cs) 1)]
@@ -1054,7 +1054,7 @@
                          (get c "constraintSynchronous")}
               lambda-str (emit-param-chain
                            [parameter]
-                           (loop-for rest-cs body depth)
+                           (loop-for! rest-cs body depth)
                            depth)]
           (str "builtins.concatMap ("
             lambda-str
@@ -1064,7 +1064,7 @@
         (str "(if "
           (emit-expr* (get c "test") depth)
           " then "
-          (loop-for rest-cs body depth)
+          (loop-for! rest-cs body depth)
           " else [ ])")
         (= t "let")
         (let [bindings (get c "bindings")]
@@ -1073,20 +1073,20 @@
               (throw (ex-info
                 "destructuring in for :let is not supported by the nix backend — bind the aggregate to a name, then project it explicitly"
                 {}))))
-          (emit-let-binding-chain
+          (emit-let-binding-chain!
             bindings
-            (loop-for rest-cs body depth)
+            (loop-for! rest-cs body depth)
             depth))
         :else
         (throw (ex-info ":while is not expressible in Nix without imperative state — use :when with a guard instead" {}))))))
 
-(defn emit-for [(e Any) (depth Int)] String
+(defn emit-for! [(e Any) (depth Int)] String
   (let [clauses (vec (get e "clauses"))]
     (when (= 0 (count clauses))
       (throw (ex-info "(for [] ...) has no bindings" {})))
     (when (not (= (get (nth clauses 0) "type") "binding"))
       (throw (ex-info "(for ...) must start with a binding clause" {})))
-    (loop-for clauses (get e "body") depth)))
+    (loop-for! clauses (get e "body") depth)))
 
 ;; --- loop/recur -> recursive nix function ------------------------------------
 (defn emit-loop! [(e Any) (depth Int)] String
@@ -1125,7 +1125,7 @@
                       loop-params
                       recursive-body
                       depth)
-            initial-body (emit-let-binding-chain
+            initial-body (emit-let-binding-chain!
                            bindings
                            recursive-body
                            depth)]
@@ -1141,7 +1141,7 @@
 (defn get-is-keyword? [(key-arg Any)] Bool
   (and (= (get key-arg "node") "literal") (= (get key-arg "kind") "keyword")))
 
-(defn emit-call [(e Any) (depth Int)] String
+(defn emit-call! [(e Any) (depth Int)] String
   (let [(fn-expr Any) (get e "fn") (args Any) (vec (get e "args")) (n Int) (count args) (fname Any) (call-fn-name e) (pw Any) (fn
                                                                                                                                 [(a
                                                                                                                                   Any)]
@@ -1867,7 +1867,7 @@
           (emit-body (get e "body") depth)
           depth))
       (= node "let")
-      (emit-let e depth)
+      (emit-let! e depth)
       (= node "if")
       (str "if "
         (emit-expr* (get e "cond") depth)
@@ -1886,7 +1886,7 @@
       (= node "do")
       (emit-body (get e "body") depth)
       (= node "call")
-      (emit-call e depth)
+      (emit-call! e depth)
       (= node "vec")
       (emit-nix-list (get e "items") depth)
       (= node "map")
@@ -1906,11 +1906,11 @@
       (= node "flake-input")
       (emit-flake-input e)
       (= node "match")
-      (emit-match e depth)
+      (emit-match! e depth)
       (= node "with")
       (emit-with-form e depth)
       (= node "for")
-      (emit-for e depth)
+      (emit-for! e depth)
       (= node "loop")
       (emit-loop! e depth)
       (= node "recur")
@@ -2422,7 +2422,7 @@
         "\"Binding constraint failed: x\")) (next-value))")))
   (expect! "for binding owns its constraint"
     (str/includes?
-      (emit-for
+      (emit-for!
         {"clauses" [{"type" "binding"
                      "name" "x"
                      "ann" {"kind" "prim" "name" "Int"}

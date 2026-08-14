@@ -3081,15 +3081,13 @@
                  (= (purity-owner-status state origin) "live"))
                (keys origins))))
 
-(defn purity-set-origin-status
-  [(state Any) (origins Any) (status String)] Any
+(defn purity-set-origin-status [(state Any) (origins Any) (status String)] Any
   (assoc state "owners"
     (reduce (fn [(owners Any) (origin Any)] Any
               (assoc owners origin status))
             (get state "owners") (keys origins))))
 
-(defn purity-escape-origins
-  [(state Any) (origins Any) (node Any)] Any
+(defn purity-escape-origins [(state Any) (origins Any) (node Any)] Any
   (if (= 0 (count origins))
     state
     (purity-set-origin-status
@@ -3102,11 +3100,7 @@
        (not (contains? (get state "globals") "transient"))))
 
 (defn purity-bind-target
-  [(state Any)
-   (target Any)
-   (origins Any)
-   (node Any)
-   (acquire Bool)] Any
+  [(state Any) (target Any) (origins Any) (node Any) (acquire Bool)] Any
   (let [names (destructure-bound-names target)
         simple (and (string? target) (= (count names) 1))
         keep-owner (and simple acquire)
@@ -3665,7 +3659,8 @@
    (params Any)
    (rest-param Any)
    (globals Any)
-   (result-escapes Bool)] Any
+   (result-escapes Bool)]
+  Any
   (let [initial (purity-bind-params
                   {"scope" {}
                    "owners" {}
@@ -3736,8 +3731,7 @@
             names)))
       externs (get prog "forms"))))
 
-(defn definition-effect-markers
-  [(definition Any) (known Any) (globals Any)] Any
+(defn definition-effect-markers [(definition Any) (known Any) (globals Any)] Any
   (reduce
     (fn [(markers Any) (clause Any)] Any
       ;; One multi-arity definition is one purity boundary, but each clause is

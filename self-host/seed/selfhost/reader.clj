@@ -322,13 +322,13 @@
   (expect! "nil symbol" (= (rd1 "nil") "nil"))
   (expect! "keyword" (= (rd1 ":name") ":name"))
   (expect! "standalone colon at EOF is the annotation marker" (= (rd1 ":") ANN-MARKER))
-  (expect! "legacy type marker :-" (= (rd1 ":-") ":-"))
-  (expect! "return marker ->" (= (rd1 "->") "->"))
+  (expect! "retired type marker :- remains lexical input" (= (rd1 ":-") ":-"))
+  (expect! "retired return marker -> remains lexical input" (= (rd1 "->") "->"))
   (expect! "auto-resolved keyword ::kw stays one keyword" (= (rd1 "::kw") "::kw"))
   (expect! "keyword unaffected by the marker split" (= (rd1 ":foo") ":foo"))
   (expect! "x:Int reads as symbol + keyword" (= (rd "x:Int") ["x" ":Int"]))
-  (expect! "postfix marker splits mid-token" (= (rd "x: Int") ["x" ANN-MARKER "Int"]))
-  (expect! "postfix marker with no space" (= (rd "x:Int") ["x" ":Int"]))
+  (expect! "retired postfix marker is preserved for parser rejection" (= (rd "x: Int") ["x" ANN-MARKER "Int"]))
+  (expect! "retired compact postfix text remains symbol plus keyword" (= (rd "x:Int") ["x" ":Int"]))
   (expect! "<: stays one symbol" (= (rd1 "<:") "<:"))
   (expect! "<: inside a forall bound" (= (rd1 "(forall [T <: Num] T)") ["forall" [BRACKET-TAG "T" "<:" "Num"] "T"]))
   (expect! "< unchanged" (= (rd1 "(< a b)") ["<" "a" "b"]))
@@ -391,18 +391,19 @@
   (expect! "Core renders as bare #lang beagle" (= (target-lang-line "core") "#lang beagle"))
   (expect! "hosted targets render with explicit language paths" (= (target-lang-line "clj") "#lang beagle/clj"))
   (expect! "unknown targets have no language path" (nil? (target-lang-line "missing")))
-  (expect! "defn form postfix params" (let [result (rd1 "(defn foo [x: Int] -> String x)")]
+  (expect! "retired defn postfix params remain diagnostic input" (let [result (rd1 "(defn foo [x: Int] -> String x)")]
   (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ANN-MARKER "Int"]) (= (nth result 3) "->") (= (nth result 4) "String") (= (nth result 5) "x"))))
-  (expect! "defn form postfix params, space before colon" (= (rd1 "(defn foo [x : Int] -> String x)") (rd1 "(defn foo [x: Int] -> String x)")))
-  (expect! "defrecord postfix fields" (= (rd1 "(defrecord Point [x: Int y: Int])") ["defrecord" "Point" [BRACKET-TAG "x" ANN-MARKER "Int" "y" ANN-MARKER "Int"]]))
-  (expect! "def postfix annotation" (= (rd1 "(def greeting: String \"hi\")") ["def" "greeting" ANN-MARKER "String" [STRING-TAG "hi"]]))
-  (expect! "mixed param vector" (= (rd1 "[a: Int b c: String]") [BRACKET-TAG "a" ANN-MARKER "Int" "b" "c" ANN-MARKER "String"]))
-  (expect! "defn form flat params" (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
+  (expect! "retired defn postfix spacing is lexically stable" (= (rd1 "(defn foo [x : Int] -> String x)") (rd1 "(defn foo [x: Int] -> String x)")))
+  (expect! "retired defrecord postfix fields remain diagnostic input" (= (rd1 "(defrecord Point [x: Int y: Int])") ["defrecord" "Point" [BRACKET-TAG "x" ANN-MARKER "Int" "y" ANN-MARKER "Int"]]))
+  (expect! "retired def postfix annotation remains diagnostic input" (= (rd1 "(def greeting: String \"hi\")") ["def" "greeting" ANN-MARKER "String" [STRING-TAG "hi"]]))
+  (expect! "retired mixed postfix vector remains diagnostic input" (= (rd1 "[a: Int b c: String]") [BRACKET-TAG "a" ANN-MARKER "Int" "b" "c" ANN-MARKER "String"]))
+  (expect! "retired defn flat params remain diagnostic input" (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
   (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int"]) (= (nth result 3) ":-") (= (nth result 4) "String") (= (nth result 5) "x"))))
-  (expect! "defrecord flat fields" (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]
+  (expect! "retired defrecord flat fields remain diagnostic input" (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]
   (and (= (nth result 0) "defrecord") (= (nth result 1) "Point") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int" "y" ":-" "Int"]))))
   (expect! "def with string value" (let [result (rd1 "(def greeting :- String \"hello\")")]
   (and (= (nth result 0) "def") (= (nth result 1) "greeting") (= (nth result 2) ":-") (= (nth result 3) "String") (= (nth result 4) [STRING-TAG "hello"]))))
+  (expect! "structural typed binding reads as one nested declaration" (= (rd1 "[(x Point) y]") [BRACKET-TAG ["x" "Point"] "y"]))
   (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
   (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) ["Fn" [BRACKET-TAG "String"] ["Promise" "Any"]]))))
   (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))

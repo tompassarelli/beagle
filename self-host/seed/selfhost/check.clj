@@ -6,6 +6,8 @@
 
 (def NIL-TYPE {"kind" "prim" "name" "Nil"})
 
+(def BOOL-TYPE {"kind" "prim" "name" "Bool"})
+
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
 
@@ -38,6 +40,8 @@
 
 (def FILTERV-POLY (make-poly ["A"] (make-fn [(make-fn [(make-var "A")] nil ANY) ANY] nil (make-app "Vec" [(make-var "A")])) nil))
 
+(def STATE (atom {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "diagnostics" []}))
+
 (defn ^Boolean prim? [t]
   (and (not (nil? t)) (not= (get t "kind") nil) (= (get t "kind") "prim")))
 
@@ -59,8 +63,21 @@
 (defn ^Boolean any-type? [t]
   (and (prim? t) (= (get t "name") "Any")))
 
+(defn ^Boolean dynamic-type? [t]
+  (and (app-type? t) (= (get t "name") "Dyn")))
+
 (defn ^Boolean nil-type? [t]
   (and (prim? t) (= (get t "name") "Nil")))
+
+(defn ^Boolean type-contains-any? [t]
+  (cond
+  (nil? t) false
+  (prim? t) (= (get t "name") "Any")
+  (app-type? t) (boolean (some type-contains-any? (get t "args")))
+  (union-type? t) (boolean (some type-contains-any? (get t "members")))
+  (fn-type? t) (or (boolean (some type-contains-any? (get t "params"))) (and (not (nil? (get t "rest"))) (type-contains-any? (get t "rest"))) (type-contains-any? (get t "ret")))
+  (poly-type? t) (or (type-contains-any? (get t "body")) (and (not (nil? (get t "bounds"))) (boolean (some type-contains-any? (vals (get t "bounds"))))))
+  :else false))
 
 (defn ^String type->string [t]
   (cond
@@ -112,6 +129,7 @@
   (and (union-type? actual) (union-type? expected)) (every? (fn [a-alt] (boolean (some (fn [e-alt] (type-compatible? a-alt e-alt)) (get expected "members")))) (get actual "members"))
   (union-type? expected) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "members")))
   (union-type? actual) (every? (fn [alt] (type-compatible? alt expected)) (get actual "members"))
+  (and (prim? actual) (= (get actual "name") "Keyword") (prim? expected) (some? (get-in (deref STATE) ["enum-types" (get expected "name")]))) true
   (and (prim? actual) (prim? expected)) (or (= (get actual "name") (get expected "name")) (and (= (get expected "name") "Float") (= (get actual "name") "Int")) (and (= (get actual "name") "Int") (or (= (get expected "name") "I8") (= (get expected "name") "I16") (= (get expected "name") "I32") (= (get expected "name") "U8") (= (get expected "name") "U16") (= (get expected "name") "U32") (= (get expected "name") "U64") (= (get expected "name") "F32"))) (and (= (get actual "name") "Float") (= (get expected "name") "F32")) (= (unqualify-name (get actual "name")) (unqualify-name (get expected "name"))))
   (and (fn-type? actual) (fn-type? expected)) (let [ap (get actual "params")
    ep (get expected "params")
@@ -122,6 +140,7 @@
   (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ep i) (nth ap i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? p ar)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? er ar))) (type-compatible? (get actual "ret") (get expected "ret"))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
+  (dynamic-type? expected) (if (dynamic-type? actual) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args"))))) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "args"))))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   :else false))
 
@@ -235,7 +254,15 @@
   (poly-type? t) t
   :else t))
 
-(def STATE (atom {"record-fields" {} "record-field-order" {} "union-members" {} "parametric-unions" {} "parametric-member-union" {} "diagnostics" []}))
+(def ^String WITH-CHECK-ID-KEY "$beagle$selfhost$with-check-id")
+
+(def ^String KW-ACCESS-CHECK-ID-KEY "$beagle$selfhost$kw-access-check-id")
+
+(def ^String BINDING-CHECK-ID-KEY "$beagle$selfhost$binding-check-id")
+
+(def ^String IMPORTED-RECORD-CONTRACTS-KEY "$beagle$selfhost$imported-record-contracts")
+
+(def ^String IMPORTED-CALLABLE-SYNCHRONIZATION-KEY "$beagle$selfhost$imported-callable-synchronization")
 
 (defn emit-diag! [^String msg]
   (swap! STATE update "diagnostics" conj msg)
@@ -267,6 +294,167 @@
    rest-name (opt-field (get target "rest"))]
   (if (nil? rest-name) base (conj base rest-name)))
   :else [])))
+
+(defn ^String binding-target->string [target]
+  (if (string? target) target (let [names (destructure-bound-names target)]
+  (if (= (count names) 0) "<binding>" (str "[" (str/join " " names) "]")))))
+
+(defn binding-constraint [binding]
+  (opt-field (get binding "constraint")))
+
+(defn remember-binding-constraint-proof! [binding ^Boolean proved?]
+  (let [check-id (get binding BINDING-CHECK-ID-KEY)]
+  (if (not (nil? check-id)) (do
+  (swap! STATE assoc-in ["binding-constraint-proofs" check-id] proved?))))
+  nil)
+
+(defn ^Boolean constraint-value-synchronous? [value proofs]
+  (cond
+  (vector? value) (every? (fn [item] (constraint-value-synchronous? item proofs)) value)
+  (map? value) (let [node (get value "node")
+   jsk (get value "jsk")]
+  (cond
+  (= node "quoted") true
+  (= node "await") false
+  (and (= node "static-call") (= (get value "name") "js/await")) false
+  (= jsk "await") false
+  (and (or (= jsk "function") (= jsk "method")) (= (get value "async") true)) false
+  (and (= node "js-class") (boolean (some (fn [method] (= (get method "async") true)) (get value "methods")))) false
+  (= node "call") (let [callee (get value "fn")
+   named? (and (map? callee) (= (get callee "node") "ref") (string? (get callee "name")))
+   callee-ok (if named? (= true (get proofs (get callee "name"))) (constraint-value-synchronous? callee proofs))]
+  (and callee-ok (constraint-value-synchronous? (get value "args") proofs)))
+  (= node "static-call") (and (= true (get proofs (get value "name"))) (constraint-value-synchronous? (get value "args") proofs))
+  (= node "ref") (let [name (get value "name")]
+  (if (contains? proofs name) (= true (get proofs name)) true))
+  :else (every? (fn [key] (constraint-value-synchronous? (get value key) proofs)) (keys value))))
+  :else true))
+
+(defn callable-form-clauses [form]
+  (cond
+  (= (get form "node") "defn") [form]
+  (= (get form "node") "defn-multi") (get form "arities")
+  :else []))
+
+(defn ^Boolean callable-clause-synchronous? [clause proofs]
+  (and (constraint-value-synchronous? (get clause "params") proofs) (constraint-value-synchronous? (opt-field (get clause "rest")) proofs) (constraint-value-synchronous? (get clause "body") proofs)))
+
+(defn program-callable-synchronization [prog]
+  (let [forms (get prog "forms")
+   local-definitions (reduce (fn [out raw-form] (let [form (if (= (get raw-form "node") "with-meta") (get raw-form "expr") raw-form)
+   node (get form "node")]
+  (if (or (= node "defn") (= node "defn-multi")) (assoc out (get form "name") form) out))) {} forms)
+   imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
+   imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "synchronous"))) (assoc out (get entry "name") (get entry "synchronous")) out)) {} imported)
+   external-proofs (reduce (fn [out entry] (if (and (string? (get entry "name")) (not (contains? out (get entry "name")))) (assoc out (get entry "name") (not (= (get entry "synchronous") false))) out)) imported-proofs (get prog "externs"))
+   builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (keys STDLIB))
+   assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (keys local-definitions))]
+  (loop [proofs assumed]
+  (let [next (reduce (fn [out name] (let [form (get local-definitions name)
+   clauses (callable-form-clauses form)
+   synchronous? (every? (fn [clause] (callable-clause-synchronous? clause proofs)) clauses)]
+  (assoc out name synchronous?))) proofs (keys local-definitions))]
+  (if (= next proofs) next (recur next))))))
+
+(defn ^Boolean function-valued-type? [type]
+  (let [body (if (poly-type? type) (get type "body") type)]
+  (cond
+  (fn-type? body) true
+  (union-type? body) (and (> (count (get body "members")) 0) (every? function-valued-type? (get body "members")))
+  :else false)))
+
+(defn ^Boolean definition-returns-callable? [form]
+  (let [clauses (callable-form-clauses form)]
+  (and (> (count clauses) 0) (every? (fn [clause] (function-valued-type? (get clause "ret"))) clauses))))
+
+(declare callable-value-synchronous?)
+
+(defn ^Boolean callable-body-tail-synchronous? [body callable-proofs return-proofs aliases]
+  (and (vector? body) (> (count body) 0) (callable-value-synchronous? (nth body (- (count body) 1)) callable-proofs return-proofs aliases)))
+
+(defn ^Boolean callable-value-synchronous? [value callable-proofs return-proofs aliases]
+  (cond
+  (and (map? value) (= (get value "node") "ref")) (let [name (get value "name")]
+  (if (contains? aliases name) (= true (get aliases name)) (= true (get callable-proofs name))))
+  (and (map? value) (= (get value "node") "fn")) (constraint-value-synchronous? value callable-proofs)
+  (and (map? value) (= (get value "node") "call")) (let [callee (get value "fn")
+   name (if (and (map? callee) (= (get callee "node") "ref")) (get callee "name") nil)]
+  (and (string? name) (= true (get return-proofs name)) (constraint-value-synchronous? value callable-proofs)))
+  (and (map? value) (= (get value "node") "if")) (and (constraint-value-synchronous? (get value "cond") callable-proofs) (callable-value-synchronous? (get value "then") callable-proofs return-proofs aliases) (callable-value-synchronous? (get value "else") callable-proofs return-proofs aliases))
+  (and (map? value) (= (get value "node") "cond")) (let [clauses (get value "clauses")]
+  (and (vector? clauses) (> (count clauses) 0) (every? (fn [clause] (and (constraint-value-synchronous? (get clause "test") callable-proofs) (callable-body-tail-synchronous? (get clause "body") callable-proofs return-proofs aliases))) clauses)))
+  (and (map? value) (= (get value "node") "do")) (let [body (get value "body")]
+  (and (vector? body) (> (count body) 0) (constraint-value-synchronous? (subvec body 0 (- (count body) 1)) callable-proofs) (callable-body-tail-synchronous? body callable-proofs return-proofs aliases)))
+  (and (map? value) (= (get value "node") "let")) (let [bindings (get value "bindings")
+   final-aliases (reduce (fn [env binding] (let [target (get binding "name")
+   proof (callable-value-synchronous? (get binding "value") callable-proofs return-proofs env)]
+  (if (string? target) (assoc env target proof) env))) aliases bindings)]
+  (and (constraint-value-synchronous? (mapv (fn [binding] (get binding "value")) bindings) callable-proofs) (callable-body-tail-synchronous? (get value "body") callable-proofs return-proofs final-aliases)))
+  :else false))
+
+(defn program-returns-synchronous-callable [prog callable-proofs]
+  (let [forms (get prog "forms")
+   local-definitions (reduce (fn [out raw-form] (let [form (if (= (get raw-form "node") "with-meta") (get raw-form "expr") raw-form)]
+  (if (and (or (= (get form "node") "defn") (= (get form "node") "defn-multi")) (definition-returns-callable? form)) (assoc out (get form "name") form) out))) {} forms)
+   imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
+   imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "returnsSynchronousCallable"))) (assoc out (get entry "name") (get entry "returnsSynchronousCallable")) out)) {} imported)
+   external-proofs (reduce (fn [out entry] (let [name (get entry "name")]
+  (if (and (string? name) (not (contains? out name))) (assoc out name (= true (get entry "returnsSynchronousCallable"))) out))) imported-proofs (get prog "externs"))
+   assumed (reduce (fn [out name] (assoc out name true)) external-proofs (keys local-definitions))]
+  (loop [proofs assumed]
+  (let [next (reduce (fn [out name] (let [form (get local-definitions name)
+   proven? (every? (fn [clause] (let [body (get clause "body")]
+  (and (vector? body) (> (count body) 0) (constraint-value-synchronous? (subvec body 0 (- (count body) 1)) callable-proofs) (callable-body-tail-synchronous? body callable-proofs proofs {})))) (callable-form-clauses form))]
+  (assoc out name proven?))) proofs (keys local-definitions))]
+  (if (= next proofs) next (recur next))))))
+
+(defn ^Boolean constraint-synchronization-proof [predicate env]
+  (let [proofs (get env "#%callable-synchronous")
+   return-proofs (get env "#%returns-synchronous-callable")]
+  (cond
+  (and (map? predicate) (= (get predicate "node") "ref") (string? (get predicate "name"))) (= true (get proofs (get predicate "name")))
+  (and (map? predicate) (= (get predicate "node") "call") (map? (get predicate "fn")) (= (get (get predicate "fn") "node") "ref") (string? (get (get predicate "fn") "name"))) (and (= true (get return-proofs (get (get predicate "fn") "name"))) (constraint-value-synchronous? predicate proofs))
+  (and (map? predicate) (= (get predicate "node") "fn")) (constraint-value-synchronous? predicate proofs)
+  :else false)))
+
+(defn constraint-callable-resolution! [inferred effective]
+  (if (poly-type? inferred) (let [body (get inferred "body")
+   bindings (atom {})]
+  (if (and (fn-type? body) (= (count (get body "params")) 1)) (do
+  (infer-type-var-bindings! (nth (get body "params") 0) effective bindings)))
+  (let [bounds (get inferred "bounds")
+   bounds-ok? (or (nil? bounds) (every? (fn [var] (let [bound (get bounds var)
+   bound-value (get (deref bindings) var)]
+  (or (nil? bound-value) (any-type? bound-value) (type-compatible? bound-value bound)))) (keys bounds)))]
+  {"type" (apply-type-bindings body bindings) "bounds-ok" bounds-ok?})) {"type" inferred "bounds-ok" true}))
+
+(defn binding-constraint-error! [target declared predicate-type ^String context ^String reason]
+  (let [binding-name (binding-target->string target)
+   expected (if (nil? declared) "(Fn [DeclaredType] Bool)" (type->string (make-fn [declared] nil BOOL-TYPE)))
+   actual (if (nil? predicate-type) "Any" (type->string predicate-type))]
+  (emit-diag! (str "beagle: " context " " binding-name " constraint must be a statically known predicate " expected "; got " actual " (" reason ")"))))
+
+(defn check-binding-constraint! [owner declared effective predicate env ^String context]
+  (if (nil? predicate) (remember-binding-constraint-proof! owner false) (do
+  (remember-binding-constraint-proof! owner false)
+  (cond
+  (nil? declared) (binding-constraint-error! (get owner "name") nil nil context "a constraint requires an explicit declared type")
+  (type-contains-any? declared) (binding-constraint-error! (get owner "name") declared declared context "the declared input contains Any")
+  :else (let [inferred (infer-expr! predicate env)]
+  (cond
+  (or (nil? inferred) (type-contains-any? inferred)) (binding-constraint-error! (get owner "name") declared inferred context "the predicate type contains Any")
+  :else (let [resolution (constraint-callable-resolution! inferred effective)
+   callable (get resolution "type")]
+  (cond
+  (not (= (get resolution "bounds-ok") true)) (binding-constraint-error! (get owner "name") declared callable context "its input does not satisfy the predicate's type-variable bound")
+  (not (fn-type? callable)) (binding-constraint-error! (get owner "name") declared callable context "the constraint expression is not callable")
+  (or (not= (count (get callable "params")) 1) (not (nil? (get callable "rest")))) (binding-constraint-error! (get owner "name") declared callable context "the predicate must accept exactly one argument")
+  (type-contains-any? callable) (binding-constraint-error! (get owner "name") declared callable context "the predicate signature contains Any")
+  (not (type-compatible? effective (nth (get callable "params") 0))) (binding-constraint-error! (get owner "name") declared callable context (str "its input does not accept " (type->string effective)))
+  (not (type-compatible? (get callable "ret") BOOL-TYPE)) (binding-constraint-error! (get owner "name") declared callable context "the predicate return type is not Bool")
+  (not (constraint-synchronization-proof predicate env)) (binding-constraint-error! (get owner "name") declared callable context "the predicate is not proven synchronous; js/await, async call chains, and callables without interface synchronization metadata are not allowed")
+  :else (remember-binding-constraint-proof! owner true))))))
+  nil)))
 
 (defn destructure-default-exprs [pattern]
   (let [target (param-binding-target pattern)
@@ -375,16 +563,42 @@
   (= t "seq-destructure") ANY
   :else ANY)))
 
+(defn ^Boolean vec-aggregate-type? [t]
+  (and (app-type? t) (= (get t "name") "Vec") (= (count (get t "args")) 1)))
+
+(defn rest-param-call-element-type [rest-param]
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
+  (if (vec-aggregate-type? authored) (nth (get authored "args") 0) ANY)))
+
+(defn rest-param-body-type [rest-param]
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
+  (if (vec-aggregate-type? authored) authored (make-app "Vec" [(rest-param-call-element-type rest-param)]))))
+
+(defn check-rest-annotation! [rest-param ^String context]
+  (if (not (nil? rest-param)) (do
+  (let [authored (get rest-param "ann")]
+  (if (and (not (nil? authored)) (not (vec-aggregate-type? authored))) (do
+  (emit-diag! (str "beagle: " context " rest parameter annotation must describe its aggregate body binding as " "(Vec Element), got " (type->string authored))))))))
+  nil)
+
 (defn extend-with-params! [env params rest-param]
-  (let [env1 (reduce (fn [out p] (let [target (param-binding-target p)
-   declared (param-type-or-any p)]
-  (if (string? target) (assoc out target declared) (bind-destructure-type! out target declared "parameter")))) env params)]
-  (if (and (not (nil? rest-param)) (= (get rest-param "type") "param")) (assoc env1 (get rest-param "name") (param-type-or-any rest-param)) env1)))
+  (let [all-params (if (nil? rest-param) (vec params) (conj (vec params) rest-param))
+   effective-types (if (nil? rest-param) (mapv param-type-or-any params) (conj (mapv param-type-or-any params) (rest-param-body-type rest-param)))]
+  (check-rest-annotation! rest-param "parameter")
+  (doseq [i (range (count all-params))]
+  (let [p (nth all-params i)]
+  (if (= (get p "type") "param") (do
+  (check-binding-constraint! p (get p "ann") (nth effective-types i) (binding-constraint p) env "parameter")))))
+  (reduce (fn [out i] (let [p (nth all-params i)
+   target (param-binding-target p)
+   effective (nth effective-types i)]
+  (if (string? target) (assoc out target effective) (bind-destructure-type! out target effective "parameter")))) env (range (count all-params)))))
 
 (defn extend-with-let-bindings! [env bindings]
   (reduce (fn [out b] (let [inferred (infer-expr! (get b "value") out)
    declared (get b "ann")
    bname (get b "name")]
+  (check-binding-constraint! b declared (if (nil? declared) inferred declared) (binding-constraint b) out "let binding")
   (if (or (= (get bname "type") "map-destructure") (= (get bname "type") "seq-destructure")) (do
   (if (and (not (nil? declared)) (not (check-hvec-literal! (get b "value") declared out)) (not (type-compatible? inferred declared))) (do
   (emit-diag! (str "beagle: destructured let binding: expected aggregate " (type->string declared) ", got " (type->string inferred)))))
@@ -527,16 +741,41 @@
   (emit-diag! (str "beagle: bare symbol `" (get e "name") "` in non-final statement position resolves to nothing" " and has no effect — usually a binding name swallowed by" " an imbalanced paren in a previous `let` binding's value." " Check the enclosing `let` bindings for a missing `)`." " If you meant a call, write `(" (get e "name") " ...)`."))))
   (infer-expr! e env))) ANY (range n)))))
 
+(defn enum-member-violation [expected arg]
+  (if (and (prim? expected) (= (get arg "node") "literal") (= (get arg "kind") "keyword")) (let [members (get-in (deref STATE) ["enum-types" (get expected "name")])
+   raw-value (get arg "value")
+   value (if (and (string? raw-value) (str/starts-with? raw-value ":")) raw-value (str ":" raw-value))]
+  (if (and (vector? members) (not (boolean (some (fn [member] (= member value)) members)))) {"enum" (get expected "name") "members" members "value" value} nil)) nil))
+
+(defn emit-enum-member-violation! [violation]
+  (emit-diag! (str "beagle: " (get violation "value") " is not a member of enum " (get violation "enum") " (valid: " (str/join " " (get violation "members")) ")")))
+
+(defn check-enum-comparison! [^String fn-name args env]
+  (if (and (or (= fn-name "=") (= fn-name "not=")) (= (count args) 2)) (do
+  (let [check-side! (fn [value-expr keyword-expr] (if (= (get value-expr "node") "ref") (do
+  (let [value-type (infer-expr! value-expr env)
+   violation (enum-member-violation value-type keyword-expr)]
+  (if (some? violation) (do
+  (emit-enum-member-violation! violation))))))
+  nil)]
+  (check-side! (nth args 0) (nth args 1))
+  (check-side! (nth args 1) (nth args 0)))))
+  nil)
+
 (defn check-args! [^String fn-name fn-t args env]
   (let [fixed (get fn-t "params")
    rest-t (get fn-t "rest")
    n-fixed (count fixed)
    n-args (count args)
    check-slot (fn [i] (let [actual (infer-expr! (nth args i) env)
-   expected (if (< i n-fixed) (nth fixed i) rest-t)]
+   expected (if (< i n-fixed) (nth fixed i) rest-t)
+   enum-violation (enum-member-violation expected (nth args i))]
+  (if (some? enum-violation) (do
+  (emit-enum-member-violation! enum-violation)))
   (if (not (type-compatible? actual expected)) (do
   (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1) " expected " (type->string expected) ", got " (type->string actual)))))
   actual))]
+  (check-enum-comparison! fn-name args env)
   (cond
   (not (nil? rest-t)) (do
   (if (< n-args n-fixed) (do
@@ -558,6 +797,48 @@
   {"result" (merge-types (get state "result") body-type) "env" else-env}))) {"result" ANY "env" env} clauses)]
   (get final "result")))
 
+(defn ^Boolean fields-have-constraints? [fields]
+  (boolean (some (fn [field] (not (nil? (binding-constraint field)))) fields)))
+
+(defn ^String record-validator-symbol [^String name]
+  (str "$beagle$record$" name "$validate"))
+
+(defn install-imported-record-contracts! [contracts]
+  (doseq [contract contracts]
+  (let [name (get contract "name")
+   fields (get contract "fields")
+   field-order (get contract "field-order")
+   validator (get contract "validator")
+   constrained (get contract "constrained")
+   synchronous (get contract "synchronous")]
+  (cond
+  (not (and (string? name) (map? fields) (vector? field-order) (boolean? constrained) (= synchronous true))) (emit-diag! (str "beagle: imported record contract is malformed or lacks a positive synchronization proof: " (str contract)))
+  (and constrained (not (string? validator))) (emit-diag! (str "beagle: imported constrained record " name " is missing its provider validator contract"))
+  (and (not constrained) (not (nil? validator)) (not (false? validator))) (emit-diag! (str "beagle: imported unconstrained record " name " has an invalid validator contract"))
+  :else (do
+  (swap! STATE assoc-in ["record-fields" name] fields)
+  (swap! STATE assoc-in ["record-field-order" name] field-order)
+  (if constrained (do
+  (swap! STATE assoc-in ["record-validators" name] validator)))))))
+  nil)
+
+(defn register-record-validator! [^String name fields]
+  (if (fields-have-constraints? fields) (do
+  (swap! STATE assoc-in ["record-validators" name] (record-validator-symbol name))))
+  nil)
+
+(defn remember-record-update! [with-node contract]
+  (let [check-id (get with-node WITH-CHECK-ID-KEY)]
+  (if (not (nil? check-id)) (do
+  (swap! STATE assoc-in ["record-updates" check-id] contract))))
+  nil)
+
+(defn remember-record-field-access! [access-node contract]
+  (let [check-id (get access-node KW-ACCESS-CHECK-ID-KEY)]
+  (if (not (nil? check-id)) (do
+  (swap! STATE assoc-in ["record-field-accesses" check-id] contract))))
+  nil)
+
 (defn register-record! [^String name fields env]
   (let [rec-type (make-prim name)
    name-lower (str/lower-case name)
@@ -567,6 +848,7 @@
    env2 (assoc env1 (str "->" name) (make-fn (mapv (fn [f] (if (nil? (get f "ann")) ANY (get f "ann"))) fields) nil rec-type))]
   (swap! STATE assoc-in ["record-fields" name] field-map)
   (swap! STATE assoc-in ["record-field-order" name] field-order)
+  (register-record-validator! name fields)
   env2))
 
 (defn register-union! [^String name members type-params member-fields env]
@@ -588,6 +870,7 @@
    e2 (reduce (fn [ee f] (assoc ee (str m-lower "-" (get f "name")) (make-poly type-params (make-fn [m-type] nil (if (nil? (get f "ann")) ANY (get f "ann"))) nil))) e1 fields)]
   (swap! STATE assoc-in ["record-fields" m] field-map)
   (swap! STATE assoc-in ["record-field-order" m] field-order)
+  (register-record-validator! m fields)
   e2) e))) env1 members) env1)))))
 
 (defn ^Boolean check-hvec-literal! [value expected env]
@@ -647,26 +930,41 @@
   (emit-diag! (str "beagle: defn " (get e "name") " (" (count (get a "params")) "-arity): expected return " (type->string expected-ret) ", got " (type->string body-type)))))))
   ANY)
   (= (get e "node") "fn") (let [params (get e "params")
+   rest-param (opt-field (get e "rest"))
    p-types (mapv param-type-or-any params)
-   body-env (extend-with-params! env params (opt-field (get e "rest")))
-   ret (if (not (nil? (get e "ret"))) (get e "ret") (last-expr-type! (get e "body") body-env))]
-  (make-fn p-types nil ret))
+   rest-type (if (nil? rest-param) nil (rest-param-call-element-type rest-param))
+   body-env (extend-with-params! env params rest-param)
+   expected-ret (get e "ret")
+   body-type (last-expr-type! (get e "body") body-env)
+   ret (if (not (nil? expected-ret)) expected-ret body-type)]
+  (if (and (not (nil? expected-ret)) (not (type-compatible? body-type expected-ret))) (do
+  (emit-diag! (str "beagle: fn: expected return " (type->string expected-ret) ", got " (type->string body-type)))))
+  (make-fn p-types rest-type ret))
   (= (get e "node") "let") (let [body-env (extend-with-let-bindings! env (get e "bindings"))]
+  (last-expr-type! (get e "body") body-env))
+  (= (get e "node") "with-open") (let [body-env (extend-with-let-bindings! env (get e "bindings"))]
   (last-expr-type! (get e "body") body-env))
   (= (get e "node") "binding") (do
   (doseq [b (get e "bindings")]
   (let [vt (infer-expr! (get b "value") env)
    nm (get b "name")
    dyn-vars (get env "#%dynamic-vars")
-   declared (get env nm)]
+   declared (get env nm)
+   authored (get b "ann")]
   (if (nil? (get dyn-vars nm)) (do
   (emit-diag! (str "beagle: binding: " nm " is not a dynamic var — only `(def ^:dynamic " nm " ...)` vars can be rebound with `binding`"))))
+  (if (and (not (nil? authored)) (not (nil? declared)) (not (type-compatible? authored declared))) (do
+  (emit-diag! (str "beagle: binding " nm ": annotation " (type->string authored) " does not match dynamic var type " (type->string declared)))))
+  (check-binding-constraint! b authored (cond
+  (not (nil? authored)) authored
+  (not (nil? declared)) declared
+  :else vt) (binding-constraint b) env "dynamic binding")
   (if (and (not (nil? declared)) (not (type-compatible? vt declared))) (do
   (emit-diag! (str "beagle: binding " nm ": expected " (type->string declared) ", got " (type->string vt)))))))
   (last-expr-type! (get e "body") env))
   (= (get e "node") "letfn") (let [body-env (reduce (fn [be f] (let [rp (opt-field (get f "rest"))
    p-types (mapv param-type-or-any (get f "params"))
-   rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
+   rtype (if (not (nil? rp)) (rest-param-call-element-type rp) nil)
    ret (if (not (nil? (get f "ret"))) (get f "ret") ANY)]
   (assoc be (get f "name") (make-fn p-types rtype ret)))) env (get e "fns"))]
   (doseq [f (get e "fns")]
@@ -756,6 +1054,7 @@
    effective (if (nil? declared) elem-type declared)]
   (if (and (not (nil? declared)) (not (type-compatible? elem-type declared))) (do
   (emit-diag! (str "beagle: for/doseq binding: expected element " (type->string declared) ", got " (type->string elem-type) " from " (type->string coll-type)))))
+  (check-binding-constraint! c declared effective (binding-constraint c) be "for/doseq binding")
   (if (string? target) (assoc be target effective) (bind-destructure-type! be target effective "for/doseq binding")))
   (= ct "when") (do
   (infer-expr! (get c "test") be)
@@ -773,6 +1072,7 @@
    effective (if (nil? declared) elem-type declared)]
   (if (and (not (nil? declared)) (not (type-compatible? elem-type declared))) (do
   (emit-diag! (str "beagle: for/doseq binding: expected element " (type->string declared) ", got " (type->string elem-type) " from " (type->string coll-type)))))
+  (check-binding-constraint! c declared effective (binding-constraint c) be "for/doseq binding")
   (if (string? target) (assoc be target effective) (bind-destructure-type! be target effective "for/doseq binding")))
   (= ct "when") (do
   (infer-expr! (get c "test") be)
@@ -799,14 +1099,23 @@
   (infer-expr! a env))
   ANY)
   (= (get e "node") "kw-access") (let [target-type (infer-expr! (get e "target") env)
-   dflt (opt-field (get e "default"))]
+   dflt (opt-field (get e "default"))
+   nominal-name (cond
+  (prim? target-type) (get target-type "name")
+  (app-type? target-type) (get target-type "name")
+  :else nil)
+   record-contract (if (and (string? nominal-name) (not (nil? (get-in (deref STATE) ["record-fields" nominal-name])))) {"recordName" nominal-name} nil)]
+  (remember-record-field-access! e record-contract)
   (if (not (nil? dflt)) (do
   (infer-expr! dflt env)))
   (lookup-kw-field-type (get e "kw") target-type))
   (= (get e "node") "with") (let [target-type (infer-expr! (get e "target") env)]
   (cond
-  (and (prim? target-type) (not (nil? (get-in (deref STATE) ["record-fields" (get target-type "name")])))) (let [rec-name (get target-type "name")
-   field-map (get-in (deref STATE) ["record-fields" rec-name])]
+  (and (or (prim? target-type) (app-type? target-type)) (not (nil? (get-in (deref STATE) ["record-fields" (get target-type "name")])))) (let [rec-name (get target-type "name")
+   field-map (get-in (deref STATE) ["record-fields" rec-name])
+   field-order (get-in (deref STATE) ["record-field-order" rec-name])
+   validator (get-in (deref STATE) ["record-validators" rec-name])]
+  (remember-record-update! e {"recordName" rec-name "fieldOrder" field-order "validator" validator})
   (doseq [u (get e "updates")]
   (let [kw (get u "field")
    val-type (infer-expr! (get u "value") env)
@@ -817,6 +1126,7 @@
   :else (emit-diag! (str "beagle: with " rec-name ": no field " kw)))))
   target-type)
   :else (do
+  (remember-record-update! e nil)
   (doseq [u (get e "updates")]
   (infer-expr! (get u "value") env))
   ANY)))
@@ -949,7 +1259,10 @@
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
    dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
    env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
-   env-with-externs (if (= (get prog "target") "clj") (reduce (fn [env nm] (if (nil? (get env nm)) (assoc env nm ANY) env)) env-with-externs CLJ-BUILTIN-DYNAMIC-VARS) env-with-externs)]
+   env-with-externs (if (= (get prog "target") "clj") (reduce (fn [env nm] (if (nil? (get env nm)) (assoc env nm ANY) env)) env-with-externs CLJ-BUILTIN-DYNAMIC-VARS) env-with-externs)
+   callable-synchronization (program-callable-synchronization prog)
+   returns-synchronous-callable (program-returns-synchronous-callable prog callable-synchronization)
+   env-with-externs (assoc env-with-externs "#%callable-synchronous" callable-synchronization "#%returns-synchronous-callable" returns-synchronous-callable)]
   (reduce (fn [env raw-form] (let [form (if (= (get raw-form "node") "with-meta") (get raw-form "expr") raw-form)
    node (get form "node")]
   (cond
@@ -958,21 +1271,75 @@
   (= node "defn") (let [params (get form "params")
    rest-param (opt-field (get form "rest"))
    p-types (mapv param-type-or-any params)
-   rtype (if (not (nil? rest-param)) (param-type-or-any rest-param) nil)
+   rtype (if (not (nil? rest-param)) (rest-param-call-element-type rest-param) nil)
    ret (if (not (nil? (get form "ret"))) (get form "ret") ANY)]
   (assoc env (get form "name") (make-fn p-types rtype ret)))
   (= node "defn-multi") (let [arities (get form "arities")
    alt-types (mapv (fn [a] (let [rp (opt-field (get a "rest"))
    p-types (mapv param-type-or-any (get a "params"))
-   rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
+   rtype (if (not (nil? rp)) (rest-param-call-element-type rp) nil)
    ret (if (not (nil? (get a "ret"))) (get a "ret") ANY)]
   (make-fn p-types rtype ret))) arities)]
   (assoc env (get form "name") (if (= (count alt-types) 1) (nth alt-types 0) (make-union alt-types))))
   (= node "record") (register-record! (get form "name") (get form "fields") env)
   (= node "defunion") (register-union! (get form "name") (get form "members") (get form "type-params") (get form "member-fields") env)
-  (= node "defenum") env
+  (= node "deferror") (register-union! (get form "name") (get form "members") [] (get form "member-fields") env)
+  (= node "defprotocol") (reduce (fn [protocol-env method] (let [rest-param (opt-field (get method "rest"))]
+  (assoc protocol-env (get method "name") (make-fn (mapv param-type-or-any (get method "params")) (if (nil? rest-param) nil (rest-param-call-element-type rest-param)) (get method "ret"))))) env (get form "methods"))
+  (= node "defenum") (do
+  (swap! STATE assoc-in ["enum-types" (get form "name")] (get form "values"))
+  env)
   (= node "defmulti") (assoc env (get form "name") (make-fn [ANY] nil ANY))
   :else env))) env-with-externs forms)))
+
+(defn check-parameter-declarations! [params rest-param env ^String context]
+  (check-rest-annotation! rest-param context)
+  (doseq [p params]
+  (if (= (get p "type") "param") (do
+  (check-binding-constraint! p (get p "ann") (param-type-or-any p) (binding-constraint p) env context))))
+  (if (and (not (nil? rest-param)) (= (get rest-param "type") "param")) (do
+  (check-binding-constraint! rest-param (get rest-param "ann") (rest-param-body-type rest-param) (binding-constraint rest-param) env context)))
+  nil)
+
+(defn check-field-declarations! [fields env ^String context]
+  (doseq [field fields]
+  (check-binding-constraint! field (get field "ann") (get field "ann") (binding-constraint field) env context))
+  nil)
+
+(def NUMERIC-SCALAR-BACKINGS #{"Int" "Float" "U8" "U16" "U32" "U64" "I8" "I16" "I32" "F32"})
+
+(defn check-scalar-predicate-declarations! [scalar]
+  (let [predicates (get scalar "predicates")
+   backing (get scalar "backing")
+   backing-name (if (prim? backing) (get backing "name") (str backing))]
+  (if (and (not (nil? predicates)) (> (count predicates) 0) (not (contains? NUMERIC-SCALAR-BACKINGS backing-name))) (do
+  (doseq [predicate predicates]
+  (emit-diag! (str "beagle: defscalar " (get scalar "name") ": predicate (" (get predicate "op") " " (get predicate "value") ") requires a numeric backing type; got " backing-name))))))
+  nil)
+
+(defn ^Boolean declared-return-compatible? [actual expected]
+  (or (nil? expected) (type-compatible? actual expected) (and (app-type? expected) (= (get expected "name") "Promise") (= (count (get expected "args")) 1) (type-compatible? actual (nth (get expected "args") 0)))))
+
+(defn check-method-body! [method env ^String context]
+  (let [rest-param (opt-field (get method "rest"))
+   body-env (extend-with-params! env (get method "params") rest-param)
+   body (get method "body")
+   actual (last-expr-type! body body-env)
+   expected (get method "ret")]
+  (if (not (declared-return-compatible? actual expected)) (do
+  (emit-diag! (str "beagle: " context " " (get method "name") ": expected return " (type->string expected) ", got " (type->string actual))))))
+  nil)
+
+(defn check-extend-type! [form env]
+  (doseq [impl (get form "impls")]
+  (doseq [method (get impl "methods")]
+  (check-method-body! method env "method")))
+  nil)
+
+(defn check-js-class! [form env]
+  (doseq [method (get form "methods")]
+  (check-method-body! method env "js/method"))
+  nil)
 
 (defn check-form! [form env]
   (let [node (get form "node")]
@@ -989,15 +1356,28 @@
   (= node "defn-multi") (do
   (infer-expr! form env)
   nil)
-  (= node "record") nil
-  (= node "defunion") nil
+  (= node "record") (check-field-declarations! (get form "fields") env "record field")
+  (= node "defunion") (do
+  (if (not (nil? (get form "member-fields"))) (do
+  (doseq [fields (vals (get form "member-fields"))]
+  (check-field-declarations! fields env "union field"))))
+  nil)
   (= node "defenum") nil
-  (= node "defscalar") nil
-  (= node "deferror") nil
-  (= node "defprotocol") nil
+  (= node "defscalar") (check-scalar-predicate-declarations! form)
+  (= node "deferror") (do
+  (if (not (nil? (get form "member-fields"))) (do
+  (doseq [fields (vals (get form "member-fields"))]
+  (check-field-declarations! fields env "throwable field"))))
+  nil)
+  (= node "defprotocol") (do
+  (doseq [method (get form "methods")]
+  (check-parameter-declarations! (get method "params") (opt-field (get method "rest")) env "protocol parameter"))
+  nil)
   (= node "deftype") nil
+  (= node "extend-type") (check-extend-type! form env)
+  (= node "js-class") (check-js-class! form env)
   (= node "defmulti") nil
-  (= node "defmethod") nil
+  (= node "defmethod") (check-method-body! form env "method")
   (= node "with-meta") (check-form! (get form "expr") env)
   :else (do
   (infer-expr! form env)
@@ -1090,7 +1470,9 @@
   (emit-diag! (str "unresolved namespace alias" (if plural "es" "") " — these will crash at " target " load:\n" lines "\nAdd the missing (require NS :as ALIAS) form(s), or fix the alias."))))))))
   nil))
 
-(def TRANSIENT-MARKER-SET {"persistent!" true "assoc!" true "conj!" true "dissoc!" true "disj!" true "pop!" true})
+(def TRANSIENT-MUTATORS {"assoc!" true "conj!" true "dissoc!" true "disj!" true "pop!" true})
+
+(def TRANSIENT-FAMILY (assoc TRANSIENT-MUTATORS "persistent!" true))
 
 (defn ^Boolean bang-name? [name]
   (and (string? name) (str/ends-with? name "!")))
@@ -1098,48 +1480,328 @@
 (defn marker-add [markers marker]
   (if (or (nil? marker) (boolean (some (fn [present] (= present marker)) markers))) markers (conj markers marker)))
 
-(declare collect-markers-walk)
+(defn origins-union [left right]
+  (reduce (fn [out origin] (assoc out origin true)) left (keys right)))
 
-(defn collect-map-child-markers [x known markers]
-  (reduce (fn [acc child] (collect-markers-walk child known acc)) markers (vals x)))
+(defn purity-result [state origins]
+  {"state" state "origins" origins})
 
-(defn collect-markers-walk [x known markers]
+(defn purity-note [state marker]
+  (assoc state "markers" (marker-add (get state "markers") marker)))
+
+(defn purity-fresh-id [state]
+  {"id" (get state "next-id") "state" (assoc state "next-id" (+ (get state "next-id") 1))})
+
+(defn purity-bind-name [state ^String name origins]
+  (let [fresh (purity-fresh-id state)
+   next (get fresh "state")]
+  (assoc next "scope" (assoc (get next "scope") name {"id" (get fresh "id") "origins" origins "lambda-depth" (get next "lambda-depth")}))))
+
+(defn ^String purity-owner-status [state origin]
+  (let [status (get (get state "owners") origin)]
+  (if (nil? status) "absent" status)))
+
+(defn ^Boolean purity-origins-live? [state origins]
+  (and (> (count origins) 0) (every? (fn [origin] (= (purity-owner-status state origin) "live")) (keys origins))))
+
+(defn purity-set-origin-status [state origins ^String status]
+  (assoc state "owners" (reduce (fn [owners origin] (assoc owners origin status)) (get state "owners") (keys origins))))
+
+(defn purity-escape-origins [state origins node]
+  (if (= 0 (count origins)) state (purity-set-origin-status (purity-note state "transient-escape") origins "dead")))
+
+(defn ^Boolean purity-direct-transient-call? [value state]
+  (and (= (get value "node") "call") (= (call-fn-name value) "transient") (not (contains? (get state "scope") "transient")) (not (contains? (get state "globals") "transient"))))
+
+(defn purity-bind-target [state target origins node ^Boolean acquire]
+  (let [names (destructure-bound-names target)
+   simple (and (string? target) (= (count names) 1))
+   keep-owner (and simple acquire)
+   prepared (if (and (not keep-owner) (> (count origins) 0)) (purity-escape-origins state origins node) state)]
+  (reduce (fn [next name] (purity-bind-name next name (if keep-owner origins {}))) prepared names)))
+
+(defn purity-restore-scope [state scope]
+  (assoc state "scope" scope))
+
+(defn purity-copy-path-state [base counter-source]
+  (assoc base "next-id" (get counter-source "next-id")))
+
+(defn purity-join-states [base states]
+  (let [origin-ids (reduce (fn [ids state] (reduce (fn [out origin] (assoc out origin true)) ids (keys (get state "owners")))) {} states)
+   owners (reduce (fn [out origin] (assoc out origin (if (every? (fn [state] (= (purity-owner-status state origin) "live")) states) "live" "dead"))) {} (keys origin-ids))
+   max-id (reduce (fn [current state] (let [candidate (get state "next-id")]
+  (if (> candidate current) candidate current))) (get base "next-id") states)
+   all-markers (reduce (fn [markers state] (reduce marker-add markers (get state "markers"))) (get base "markers") states)]
+  (assoc (assoc (assoc base "owners" owners) "next-id" max-id) "markers" all-markers)))
+
+(declare purity-analyze)
+
+(defn purity-analyze-sequence [body state]
+  (if (= 0 (count body)) (purity-result state {}) (loop [remaining body
+   current state]
+  (let [result (purity-analyze (first remaining) current)]
+  (if (= 1 (count remaining)) result (recur (rest remaining) (get result "state")))))))
+
+(defn purity-analyze-and-escape [value state node]
+  (let [result (purity-analyze value state)]
+  (purity-escape-origins (get result "state") (get result "origins") node)))
+
+(defn purity-analyze-defaults [state target]
+  (reduce (fn [next default] (purity-analyze-and-escape default next default)) state (destructure-default-exprs target)))
+
+(defn purity-analyze-bindings [bindings state ^Boolean allow-acquire]
+  (reduce (fn [next binding] (let [target (get binding "name")
+   acquire (and allow-acquire (string? target) (purity-direct-transient-call? (get binding "value") next))
+   result (purity-analyze (get binding "value") next)
+   after-value (get result "state")
+   origins (get result "origins")
+   escaped (if (or acquire (= 0 (count origins))) after-value (purity-escape-origins after-value origins binding))
+   after-defaults (purity-analyze-defaults escaped target)]
+  (purity-bind-target after-defaults target (if acquire origins {}) binding acquire))) state bindings))
+
+(defn purity-bind-params [state params rest-param]
+  (let [all-params (if (or (nil? rest-param) (false? rest-param)) params (conj (vec params) rest-param))]
+  (reduce (fn [next param] (let [target (param-binding-target param)
+   after-defaults (purity-analyze-defaults next target)]
+  (purity-bind-target after-defaults target {} param false))) state all-params)))
+
+(defn purity-analyze-branches [branches state]
+  (let [summary (reduce (fn [acc branch] (let [branch-base (purity-copy-path-state state (get acc "counter"))
+   result (purity-analyze-sequence branch branch-base)]
+  {"counter" (get result "state") "states" (conj (get acc "states") (get result "state")) "origins" (origins-union (get acc "origins") (get result "origins"))})) {"counter" state "states" [] "origins" {}} branches)]
+  (purity-result (purity-join-states state (get summary "states")) (get summary "origins"))))
+
+(defn purity-analyze-cond-clauses [clauses state]
+  (loop [remaining clauses
+   fallthrough state
+   results []
+   origins {}]
+  (if (= 0 (count remaining)) (purity-result (purity-join-states state (conj results fallthrough)) origins) (let [clause (first remaining)
+   test (get clause "test")]
+  (if (and (= (get test "node") "ref") (= (get test "name") "else")) (let [result (purity-analyze-sequence (get clause "body") fallthrough)]
+  (purity-result (purity-join-states state (conj results (get result "state"))) (origins-union origins (get result "origins")))) (let [after-test (purity-analyze-and-escape test fallthrough clause)
+   result (purity-analyze-sequence (get clause "body") after-test)
+   next-fallthrough (purity-copy-path-state after-test (get result "state"))]
+  (recur (rest remaining) next-fallthrough (conj results (get result "state")) (origins-union origins (get result "origins")))))))))
+
+(defn purity-analyze-comprehension [clauses body state ^Boolean collects]
+  (let [outer-scope (get state "scope")
+   bound (reduce (fn [next clause] (let [kind (get clause "type")]
   (cond
-  (vector? x) (reduce (fn [acc item] (collect-markers-walk item known acc)) markers x)
-  (not (map? x)) markers
-  :else (let [node (get x "node")]
+  (= kind "binding") (let [result (purity-analyze (get clause "expr") next)
+   escaped (purity-escape-origins (get result "state") (get result "origins") clause)]
+  (purity-bind-target escaped (get clause "name") {} clause false))
+  (= kind "let") (purity-analyze-bindings (get clause "bindings") next false)
+  (= kind "when") (purity-analyze-and-escape (get clause "test") next clause)
+  :else next))) state clauses)
+   result (purity-analyze-sequence body bound)
+   after-body (get result "state")
+   completed (if collects (purity-escape-origins after-body (get result "origins") body) after-body)]
+  (purity-result (purity-restore-scope completed outer-scope) {})))
+
+(defn purity-map-pair-children [pairs]
+  (vec (apply concat (mapv (fn [pair] [(get pair "key") (get pair "val")]) pairs))))
+
+(defn purity-unknown-children [value]
   (cond
-  (or (= node "quoted") (= node "def") (= node "defonce") (= node "defn") (= node "defn-multi")) markers
-  (= node "set!") (collect-map-child-markers x known (marker-add markers "set!"))
-  (= node "call") (let [name (call-fn-name x)
-   marked (if (or (bang-name? name) (= true (get known name))) (marker-add markers name) markers)]
-  (collect-map-child-markers x known marked))
-  :else (collect-map-child-markers x known markers)))))
+  (vector? value) value
+  (not (map? value)) []
+  (= (get value "node") "vec") (get value "items")
+  (= (get value "node") "set") (get value "items")
+  (= (get value "node") "map") (purity-map-pair-children (get value "pairs"))
+  (= (get value "node") "with") (conj (mapv (fn [update] (get update "value")) (get value "updates")) (get value "target"))
+  (= (get value "node") "doto") (into [(get value "target")] (get value "forms"))
+  :else (vals value)))
+
+(defn purity-analyze-unknown [value state]
+  (purity-result (reduce (fn [next child] (purity-analyze-and-escape child next value)) state (purity-unknown-children value)) {}))
+
+(defn purity-analyze-call [call state]
+  (let [name (call-fn-name call)
+   args (get call "args")
+   lexical (and (string? name) (contains? (get state "scope") name))
+   primitive-shadowed (and (string? name) (or lexical (contains? (get state "globals") name)))]
+  (cond
+  (and (= name "transient") (not primitive-shadowed)) (let [after-args (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) state args)
+   fresh (purity-fresh-id after-args)
+   origin (get fresh "id")
+   origins {origin true}]
+  (purity-result (purity-set-origin-status (get fresh "state") origins "live") origins))
+  (and (string? name) (= true (get TRANSIENT-FAMILY name)) (not primitive-shadowed)) (let [owner-result (if (> (count args) 0) (purity-analyze (first args) state) (purity-result state {}))
+   after-owner (get owner-result "state")
+   owner-origins (get owner-result "origins")
+   valid (purity-origins-live? after-owner owner-origins)
+   marked (if valid after-owner (purity-note after-owner name))
+   after-rest (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) marked (if (> (count args) 0) (rest args) []))]
+  (cond
+  (not valid) (purity-result (purity-escape-origins after-rest owner-origins call) {})
+  (= name "persistent!") (purity-result (purity-set-origin-status after-rest owner-origins "dead") {})
+  :else (purity-result after-rest owner-origins)))
+  :else (let [marked (if (and (not lexical) (or (bang-name? name) (= true (get (get state "known") name)))) (purity-note state name) state)
+   fn-expr (get call "fn")
+   after-callee (if (and (string? name) (not lexical)) marked (purity-analyze-and-escape fn-expr marked call))
+   after-args (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) after-callee args)]
+  (purity-result after-args {})))))
+
+(defn purity-pattern-bound-names [pattern]
+  (let [kind (get pattern "type")]
+  (cond
+  (= kind "var") [(get pattern "name")]
+  (= kind "record") (mapv (fn [binding] (get binding "name")) (get pattern "bindings"))
+  (= kind "map") (mapv (fn [entry] (get entry "name")) (get pattern "entries"))
+  :else [])))
+
+(defn purity-bind-names [state names]
+  (reduce (fn [next name] (purity-bind-name next name {})) state names))
+
+(defn purity-analyze [value state]
+  (cond
+  (vector? value) (purity-analyze-unknown value state)
+  (not (map? value)) (purity-result state {})
+  :else (let [node (get value "node")]
+  (cond
+  (= node "quoted") (purity-result state {})
+  (= node "ref") (let [binding (get (get state "scope") (get value "name"))]
+  (if (nil? binding) (purity-result state {}) (let [origins (get binding "origins")]
+  (if (and (> (count origins) 0) (< (get binding "lambda-depth") (get state "lambda-depth"))) (purity-result (purity-escape-origins state origins value) {}) (purity-result state origins)))))
+  (= node "call") (purity-analyze-call value state)
+  (= node "threading") (purity-analyze (get value "desugared") state)
+  (or (= node "let") (= node "loop")) (let [outer-scope (get state "scope")
+   bound (purity-analyze-bindings (get value "bindings") state true)
+   result (purity-analyze-sequence (get value "body") bound)]
+  (purity-result (purity-restore-scope (get result "state") outer-scope) (get result "origins")))
+  (= node "fn") (let [nested (assoc state "lambda-depth" (+ (get state "lambda-depth") 1))
+   bound (purity-bind-params nested (get value "params") (opt-field (get value "rest")))
+   result (purity-analyze-sequence (get value "body") bound)
+   escaped (purity-escape-origins (get result "state") (get result "origins") value)
+   restored (assoc (assoc (assoc state "owners" (get escaped "owners")) "markers" (get escaped "markers")) "next-id" (get escaped "next-id"))]
+  (purity-result restored {}))
+  (= node "if") (let [after-test (purity-analyze-and-escape (get value "cond") state value)
+   alternative (opt-field (get value "else"))]
+  (purity-analyze-branches [[(get value "then")] (if (nil? alternative) [] [alternative])] after-test))
+  (= node "when") (let [after-test (purity-analyze-and-escape (get value "cond") state value)]
+  (purity-analyze-branches [(get value "body") []] after-test))
+  (= node "do") (purity-analyze-sequence (get value "body") state)
+  (= node "cond") (purity-analyze-cond-clauses (get value "clauses") state)
+  (= node "condp") (let [after-pred (purity-analyze-and-escape (get value "pred") state value)
+   after-test (purity-analyze-and-escape (get value "test") after-pred value)
+   summary (reduce (fn [acc clause] (let [fallthrough (get acc "fallthrough")
+   after-clause-test (purity-analyze-and-escape (get clause "test") fallthrough value)
+   branch (purity-analyze (get clause "body") after-clause-test)]
+  {"fallthrough" (purity-copy-path-state after-clause-test (get branch "state")) "states" (conj (get acc "states") (get branch "state")) "origins" (origins-union (get acc "origins") (get branch "origins"))})) {"fallthrough" after-test "states" [] "origins" {}} (get value "clauses"))
+   fallback (opt-field (get value "default"))
+   default-result (if (nil? fallback) (purity-result (get summary "fallthrough") {}) (purity-analyze fallback (get summary "fallthrough")))
+   states (conj (get summary "states") (get default-result "state"))]
+  (purity-result (purity-join-states state states) (origins-union (get summary "origins") (get default-result "origins"))))
+  (= node "target-case") (purity-analyze-branches (mapv (fn [item] [(get item "body")]) (get value "cases")) state)
+  (= node "rescue") (let [primary (purity-analyze (get value "expr") state)
+   fallback-base (purity-copy-path-state state (get primary "state"))
+   err-name (opt-field (get value "err"))
+   fallback-bound (if (nil? err-name) fallback-base (purity-bind-name fallback-base err-name {}))
+   fallback (purity-analyze (get value "fallback") fallback-bound)]
+  (purity-result (purity-join-states state [(get primary "state") (get fallback "state")]) (origins-union (get primary "origins") (get fallback "origins"))))
+  (= node "letfn") (let [outer-scope (get state "scope")
+   fn-scope (reduce (fn [next fn-def] (purity-bind-name next (get fn-def "name") {})) state (get value "fns"))
+   after-fns (reduce (fn [next fn-def] (let [nested (assoc next "lambda-depth" (+ (get next "lambda-depth") 1))
+   bound (purity-bind-params nested (get fn-def "params") (opt-field (get fn-def "rest")))
+   result (purity-analyze-sequence (get fn-def "body") bound)
+   escaped (purity-escape-origins (get result "state") (get result "origins") fn-def)]
+  (assoc (assoc (assoc next "owners" (get escaped "owners")) "markers" (get escaped "markers")) "next-id" (get escaped "next-id")))) fn-scope (get value "fns"))
+   result (purity-analyze-sequence (get value "body") after-fns)]
+  (purity-result (purity-restore-scope (get result "state") outer-scope) (get result "origins")))
+  (= node "binding") (let [after-bindings (reduce (fn [next binding] (purity-analyze-and-escape (get binding "value") next binding)) state (get value "bindings"))]
+  (purity-analyze-sequence (get value "body") after-bindings))
+  (= node "with-open") (let [outer-scope (get state "scope")
+   bound (purity-analyze-bindings (get value "bindings") state false)
+   result (purity-analyze-sequence (get value "body") bound)]
+  (purity-result (purity-restore-scope (get result "state") outer-scope) (get result "origins")))
+  (or (= node "when-let") (= node "when-some")) (let [result (purity-analyze (get value "expr") state)
+   escaped (purity-escape-origins (get result "state") (get result "origins") value)
+   bound (purity-bind-name escaped (get value "name") {})
+   body-result (purity-analyze-sequence (get value "body") bound)]
+  (purity-result (purity-join-states state [(get body-result "state") escaped]) (get body-result "origins")))
+  (or (= node "if-let") (= node "if-some")) (let [result (purity-analyze (get value "expr") state)
+   escaped (purity-escape-origins (get result "state") (get result "origins") value)
+   then-base (purity-bind-name escaped (get value "name") {})
+   then-result (purity-analyze (get value "then") then-base)
+   else-base (purity-copy-path-state escaped (get then-result "state"))
+   alternative (opt-field (get value "else"))
+   else-result (if (nil? alternative) (purity-result else-base {}) (purity-analyze alternative else-base))]
+  (purity-result (purity-join-states state [(get then-result "state") (get else-result "state")]) (origins-union (get then-result "origins") (get else-result "origins"))))
+  (= node "set!") (let [marked (purity-note state "set!")
+   after-target (purity-analyze-and-escape (get value "target") marked value)]
+  (purity-result (purity-analyze-and-escape (get value "value") after-target value) {}))
+  (or (= node "vec") (= node "set") (= node "map") (= node "with") (= node "doto")) (purity-analyze-unknown value state)
+  (= node "for") (purity-analyze-comprehension (get value "clauses") (get value "body") state true)
+  (= node "doseq") (purity-analyze-comprehension (get value "clauses") (get value "body") state false)
+  (= node "dotimes") (let [after-count (purity-analyze-and-escape (get value "count") state value)
+   bound (purity-bind-name after-count (get value "name") {})
+   result (purity-analyze-sequence (get value "body") bound)]
+  (purity-result (purity-restore-scope (get result "state") (get state "scope")) {}))
+  (= node "case") (let [after-test (purity-analyze-and-escape (get value "test") state value)
+   fallback (opt-field (get value "default"))
+   branches (conj (mapv (fn [clause] [(get clause "body")]) (get value "clauses")) (if (nil? fallback) [] [fallback]))]
+  (purity-analyze-branches branches after-test))
+  (= node "try") (let [outer-scope (get state "scope")
+   normal (purity-analyze-sequence (get value "body") state)
+   catches (reduce (fn [acc clause] (let [base (purity-copy-path-state (get normal "state") (get acc "counter"))
+   caught (purity-bind-name base (get clause "name") {})
+   result (purity-analyze-sequence (get clause "body") caught)]
+  {"counter" (get result "state") "states" (conj (get acc "states") (get result "state")) "origins" (origins-union (get acc "origins") (get result "origins"))})) {"counter" (get normal "state") "states" [(get normal "state")] "origins" (get normal "origins")} (get value "catches"))
+   joined (purity-join-states state (get catches "states"))
+   finally-body (opt-field (get value "finally"))
+   after-finally (if (nil? finally-body) joined (get (purity-analyze-sequence finally-body joined) "state"))]
+  (purity-result (purity-restore-scope after-finally outer-scope) (get catches "origins")))
+  (= node "match") (let [after-target (purity-analyze-and-escape (get value "target") state value)
+   summary (reduce (fn [acc clause] (let [base (purity-copy-path-state after-target (get acc "counter"))
+   bound (purity-bind-names base (purity-pattern-bound-names (get clause "pattern")))
+   result (purity-analyze-sequence (get clause "body") bound)]
+  {"counter" (get result "state") "states" (conj (get acc "states") (get result "state")) "origins" (origins-union (get acc "origins") (get result "origins"))})) {"counter" after-target "states" [] "origins" {}} (get value "clauses"))]
+  (purity-result (purity-join-states after-target (get summary "states")) (get summary "origins")))
+  (or (= node "defn") (= node "defn-multi") (= node "def") (= node "defonce")) (let [marked (purity-note state "definition-publication")
+   live (reduce (fn [origins origin] (if (= (purity-owner-status marked origin) "live") (assoc origins origin true) origins)) {} (keys (get marked "owners")))]
+  (purity-result (purity-escape-origins marked live value) {}))
+  :else (purity-analyze-unknown value state)))))
+
+(defn analyze-expression-effects [body known params rest-param globals ^Boolean result-escapes]
+  (let [initial (purity-bind-params {"scope" {} "owners" {} "lambda-depth" 0 "next-id" 0 "markers" [] "known" known "globals" globals} params rest-param)
+   result (purity-analyze-sequence body initial)
+   final-state (if result-escapes (purity-escape-origins (get result "state") (get result "origins") body) (get result "state"))]
+  (get final-state "markers")))
 
 (defn collect-markers [body known]
-  (collect-markers-walk body known []))
+  (analyze-expression-effects body known [] nil {} true))
 
 (defn effective-markers [body known]
-  (let [collected (collect-markers body known)
-   opens-transient (boolean (some (fn [marker] (= marker "transient")) (collect-markers body {"transient" true})))]
-  (if opens-transient (filterv (fn [marker] (not (= true (get TRANSIENT-MARKER-SET marker)))) collected) collected)))
+  (collect-markers body known))
+
+(defn purity-definition-form [form]
+  (let [node (get form "node")]
+  (cond
+  (or (= node "js-export") (= node "js-export-default")) (get form "form")
+  (and (= node "static-call") (or (= (get form "name") "js/export") (= (get form "name") "js/export-default")) (= (count (get form "args")) 1)) (nth (get form "args") 0)
+  :else form)))
 
 (defn collect-purity-defs [prog]
-  (reduce (fn [defs form] (let [node (get form "node")]
+  (reduce (fn [defs raw-form] (let [form (purity-definition-form raw-form)
+   node (get form "node")]
   (cond
-  (= node "defn") (conj defs {"name" (get form "name") "body" (get form "body")})
-  (= node "defn-multi") (reduce (fn [acc arity] (conj acc {"name" (get form "name") "body" (get arity "body")})) defs (get form "arities"))
-  (or (= node "js-export") (= node "js-export-default")) (let [inner (get form "form")
-   inner-node (get inner "node")]
-  (cond
-  (= inner-node "defn") (conj defs {"name" (get inner "name") "body" (get inner "body")})
-  (= inner-node "defn-multi") (reduce (fn [acc arity] (conj acc {"name" (get inner "name") "body" (get arity "body")})) defs (get inner "arities"))
-  :else defs))
+  (= node "defn") (conj defs {"name" (get form "name") "clauses" [{"params" (get form "params") "rest" (opt-field (get form "rest")) "body" (get form "body")}]})
+  (= node "defn-multi") (conj defs {"name" (get form "name") "clauses" (mapv (fn [arity] {"params" (get arity "params") "rest" (opt-field (get arity "rest")) "body" (get arity "body")}) (get form "arities"))})
   :else defs))) [] (get prog "forms")))
 
-(defn derive-effectful-defs [defs]
+(defn purity-global-bindings [prog]
+  (let [externs (reduce (fn [names entry] (assoc names (get entry "name") true)) {} (get prog "externs"))]
+  (reduce (fn [names raw-form] (let [form (purity-definition-form raw-form)
+   node (get form "node")]
+  (if (or (= node "defn") (= node "defn-multi") (= node "def") (= node "defonce")) (assoc names (get form "name") true) names))) externs (get prog "forms"))))
+
+(defn definition-effect-markers [definition known globals]
+  (reduce (fn [markers clause] (into markers (analyze-expression-effects (get clause "body") known (get clause "params") (get clause "rest") globals true))) [] (get definition "clauses")))
+
+(defn derive-effectful-defs [defs globals]
   (loop [known {}]
-  (let [next (reduce (fn [acc definition] (if (> (count (effective-markers (get definition "body") known)) 0) (assoc acc (get definition "name") true) acc)) known defs)]
+  (let [next (reduce (fn [acc definition] (if (> (count (definition-effect-markers definition known globals)) 0) (assoc acc (get definition "name") true) acc)) known defs)]
   (if (= next known) known (recur next)))))
 
 (defn ^String purity-severity-for [mode profile]
@@ -1157,35 +1819,105 @@
 (defn check-purity-with-severity! [prog ^String severity]
   (if (and (= (get prog "mode") "strict") (not (= severity "off"))) (do
   (let [defs (collect-purity-defs prog)
-   effectful (derive-effectful-defs defs)]
+   globals (purity-global-bindings prog)
+   effectful (derive-effectful-defs defs globals)]
   (doseq [definition defs]
   (let [name (get definition "name")
    known (dissoc effectful name)
-   markers (if (= name "-main") [] (effective-markers (get definition "body") known))]
+   markers (if (= name "-main") [] (definition-effect-markers definition known globals))]
   (if (and (not (bang-name? name)) (> (count markers) 0)) (do
   (let [message (purity-message name markers)]
   (if (= severity "warn") (selfhost.rt/eprint (str "warning: " message "\n")) (emit-diag! message))))))))))
   nil)
 
 (defn check-purity! [prog]
-  (check-purity-with-severity! prog (purity-severity))
+  (if (not (= (selfhost.rt/getenv "BEAGLE_CHECK_PROFILE") "0")) (do
+  (check-purity-with-severity! prog (purity-severity))))
   nil)
 
+(defn tag-semantic-node-ids-from [value next-id]
+  (cond
+  (vector? value) (reduce (fn [state item] (let [tagged (tag-semantic-node-ids-from item (get state "next"))]
+  {"value" (conj (get state "value") (get tagged "value")) "next" (get tagged "next")})) {"value" [] "next" next-id} value)
+  (map? value) (let [with-node? (= (get value "node") "with")
+   kw-access-node? (= (get value "node") "kw-access")
+   binding-owner? (or (= (get value "type") "param") (and (contains? value "name") (contains? value "constraint") (or (contains? value "value") (contains? value "expr") (contains? value "ann"))))
+   semantic-node? (or with-node? kw-access-node? binding-owner?)
+   own-id (if semantic-node? next-id nil)
+   child-start (if semantic-node? (+ next-id 1) next-id)
+   tagged (reduce (fn [state key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY)) state (let [child (tag-semantic-node-ids-from (get value key) (get state "next"))]
+  {"value" (assoc (get state "value") key (get child "value")) "next" (get child "next")}))) {"value" {} "next" child-start} (keys value))
+   tagged-value (cond
+  with-node? (assoc (get tagged "value") WITH-CHECK-ID-KEY own-id)
+  kw-access-node? (assoc (get tagged "value") KW-ACCESS-CHECK-ID-KEY own-id)
+  binding-owner? (assoc (get tagged "value") BINDING-CHECK-ID-KEY own-id)
+  :else (get tagged "value"))]
+  {"value" tagged-value "next" (get tagged "next")})
+  :else {"value" value "next" next-id}))
+
+(defn tag-semantic-node-ids [prog]
+  (get (tag-semantic-node-ids-from prog 0) "value"))
+
+(defn decorate-tagged-value [value record-updates record-field-accesses binding-constraint-proofs]
+  (cond
+  (vector? value) (mapv (fn [item] (decorate-tagged-value item record-updates record-field-accesses binding-constraint-proofs)) value)
+  (map? value) (let [with-check-id (get value WITH-CHECK-ID-KEY)
+   kw-check-id (get value KW-ACCESS-CHECK-ID-KEY)
+   binding-check-id (get value BINDING-CHECK-ID-KEY)
+   decorated (reduce (fn [out key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY) (= key IMPORTED-RECORD-CONTRACTS-KEY) (= key IMPORTED-CALLABLE-SYNCHRONIZATION-KEY)) out (assoc out key (decorate-tagged-value (get value key) record-updates record-field-accesses binding-constraint-proofs)))) {} (keys value))]
+  (cond
+  (= (get value "node") "with") (assoc decorated "recordUpdate" (get record-updates with-check-id))
+  (= (get value "node") "kw-access") (assoc decorated "recordFieldAccess" (get record-field-accesses kw-check-id))
+  (not (nil? binding-check-id)) (assoc decorated "constraintSynchronous" (= true (get binding-constraint-proofs binding-check-id)))
+  :else decorated))
+  :else value))
+
 (defn type-check! [prog]
-  (let [mode (get prog "mode")]
+  (let [checked-input (tag-semantic-node-ids prog)
+   mode (get checked-input "mode")]
+  (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
+  (install-imported-record-contracts! (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
   (if (= mode "strict") (do
-  (reset! STATE {"record-fields" {} "record-field-order" {} "union-members" {} "parametric-unions" {} "parametric-member-union" {} "target" (get prog "target") "diagnostics" []})
-  (let [env (build-initial-env! prog)]
-  (doseq [form (get prog "forms")]
+  (let [env (build-initial-env! checked-input)]
+  (doseq [form (get checked-input "forms")]
   (check-form! form env))
-  (check-nix-free-dotted! prog)
-  (check-qualified-resolution! prog env)
-  (check-purity! prog)))))
+  (check-nix-free-dotted! checked-input)
+  (check-qualified-resolution! checked-input env)
+  (check-purity! checked-input))))
+  (swap! STATE assoc "checked-program" (decorate-tagged-value checked-input (get (deref STATE) "record-updates") (get (deref STATE) "record-field-accesses") (get (deref STATE) "binding-constraint-proofs"))))
   (let [diags (get (deref STATE) "diagnostics")]
   {"diagnostics" diags "count" (count diags)}))
 
 (defn check-program! [prog]
   (get (type-check! prog) "diagnostics"))
+
+(defn decorate-checked-program! [prog]
+  (let [state (deref STATE)]
+  (if (= prog (get state "input-program")) (get state "checked-program") (throw (ex-info "decorate-checked-program! requires the program most recently passed to check-program!" {})))))
+
+(defn local-record-names [prog]
+  (reduce (fn [names form] (let [node (get form "node")]
+  (cond
+  (= node "record") (conj names (get form "name"))
+  (or (= node "defunion") (= node "deferror")) (let [member-fields (get form "member-fields")]
+  (if (map? member-fields) (into names (keys member-fields)) names))
+  :else names))) [] (get prog "forms")))
+
+(defn export-checked-record-contracts! [prog]
+  (let [state (deref STATE)]
+  (if (not (= prog (get state "input-program"))) (throw (ex-info "export-checked-record-contracts! requires the program most recently passed to check-program!" {})) (let [namespace (get prog "namespace")]
+  (mapv (fn [name] (let [validator (get-in state ["record-validators" name])]
+  {"name" name "fields" (get-in state ["record-fields" name]) "field-order" (get-in state ["record-field-order" name]) "constrained" (string? validator) "synchronous" true "validator" (if (string? validator) (str namespace "/" validator) nil)})) (local-record-names prog))))))
+
+(defn export-checked-callable-synchronization! [prog]
+  (let [state (deref STATE)]
+  (if (not (= prog (get state "input-program"))) (throw (ex-info "export-checked-callable-synchronization! requires the program most recently passed to check-program!" {})) (let [proofs (program-callable-synchronization prog)
+   return-proofs (program-returns-synchronous-callable prog proofs)]
+  (reduce (fn [out raw-form] (let [form (if (= (get raw-form "node") "with-meta") (get raw-form "expr") raw-form)
+   node (get form "node")
+   name (get form "name")
+   private? (= (get form "private") true)]
+  (if (and (or (= node "defn") (= node "defn-multi")) (string? name) (not private?)) (conj out {"name" name "synchronous" (= true (get proofs name)) "returnsSynchronousCallable" (= true (get return-proofs name))}) out))) [] (get prog "forms"))))))
 
 (defn make-lit [^String kind value]
   {"node" "literal" "kind" kind "value" value})
@@ -1201,6 +1933,9 @@
 
 (defn make-param [name ann]
   {"type" "param" "name" name "ann" ann})
+
+(defn make-constrained-param [name ann constraint]
+  {"type" "param" "name" name "ann" ann "constraint" constraint})
 
 (defn make-seq-target [names rest-name]
   {"type" "seq-destructure" "names" names "rest" rest-name})
@@ -1226,6 +1961,9 @@
 (defn make-let-binding [name ann value]
   {"name" name "ann" ann "value" value})
 
+(defn make-constrained-let-binding [name ann constraint value]
+  {"name" name "ann" ann "constraint" constraint "value" value})
+
 (defn make-vec-node [items]
   {"node" "vec" "items" items})
 
@@ -1240,6 +1978,15 @@
 
 (defn make-prog [forms]
   {"mode" "strict" "namespace" "test" "target" "js" "forms" forms "externs" [] "requires" []})
+
+(defn make-prog-with-externs [forms externs]
+  {"mode" "strict" "namespace" "test" "target" "js" "forms" forms "externs" externs "requires" []})
+
+(defn make-with-node [target ^String field value]
+  {"node" "with" "target" target "updates" [{"field" field "value" value}]})
+
+(defn ^Boolean diagnostics-include? [diagnostics ^String fragment]
+  (boolean (some (fn [message] (str/includes? message fragment)) diagnostics)))
 
 (def passes (atom []))
 
@@ -1288,13 +2035,24 @@
   (boolean (some (fn [m] (= m "swap!")) (collect-markers [nested] {})))))
   (expect! "purity: rescue/doto and future node children cannot hide markers" (let [wrapped {"node" "future-node" "payload" {"node" "rescue" "expr" {"node" "doto" "target" (make-ref "cell") "forms" [(make-call "reset!" [])]} "fallback" (make-lit "nil" nil) "err" false}}]
   (boolean (some (fn [m] (= m "reset!")) (collect-markers [wrapped] {})))))
-  (expect! "purity: local effects reach a source-order-independent fixed point" (let [forward [{"name" "outer" "body" [(make-call "middle" [])]} {"name" "middle" "body" [(make-call "inner" [])]} {"name" "inner" "body" [(make-call "reset!" [])]}]
+  (expect! "purity: local effects reach a source-order-independent fixed point" (let [forward [{"name" "outer" "clauses" [{"params" [] "rest" nil "body" [(make-call "middle" [])]}]} {"name" "middle" "clauses" [{"params" [] "rest" nil "body" [(make-call "inner" [])]}]} {"name" "inner" "clauses" [{"params" [] "rest" nil "body" [(make-call "reset!" [])]}]}]
    reverse (vec (reverse forward))
-   forward-effectful (derive-effectful-defs forward)
-   reverse-effectful (derive-effectful-defs reverse)]
+   globals {"outer" true "middle" true "inner" true}
+   forward-effectful (derive-effectful-defs forward globals)
+   reverse-effectful (derive-effectful-defs reverse globals)]
   (and (= forward-effectful reverse-effectful) (= true (get forward-effectful "outer")) (= true (get forward-effectful "middle")) (= true (get forward-effectful "inner")))))
-  (expect! "purity: an owned transient is externally pure" (= 0 (count (effective-markers [(make-call "transient" [(make-vec-node [])]) (make-call "conj!" [(make-ref "work") (make-lit "number" 1)]) (make-call "persistent!" [(make-ref "work")])] {}))))
+  (expect! "purity: dynamic binding retains ordinary effect resolution" (let [dynamic-call {"node" "binding" "bindings" [(make-let-binding "writer!" nil (make-ref "replacement"))] "body" [(make-call "writer!" [(make-ref "value")])]}]
+  (= ["writer!"] (analyze-expression-effects [dynamic-call] {} [] nil {"writer!" true} true))))
+  (expect! "purity: multi-arity clauses retain repeated witnesses in order" (let [definition {"name" "write-twice" "clauses" [{"params" [] "rest" nil "body" [(make-call "reset!" [])]} {"params" [] "rest" nil "body" [(make-call "reset!" [])]}]}]
+  (= ["reset!" "reset!"] (definition-effect-markers definition {} {}))))
+  (expect! "purity: an owned transient is externally pure" (= 0 (count (effective-markers [(make-let-node [(make-let-binding "work" nil (make-call "transient" [(make-vec-node [])]))] [(make-call "conj!" [(make-ref "work") (make-lit "number" 1)]) (make-call "persistent!" [(make-ref "work")])])] {}))))
   (expect! "purity: mutation of a received transient still leaks" (> (count (effective-markers [(make-call "conj!" [(make-ref "work") (make-lit "number" 1)])] {})) 0))
+  (expect! "purity: an owned transient cannot suppress a borrowed mutation" (let [body [(make-let-node [(make-let-binding "owned" nil (make-call "transient" [(make-ref "xs")]))] [(make-call "conj!" [(make-ref "borrowed") (make-lit "number" 1)]) (make-call "conj!" [(make-ref "owned") (make-lit "number" 2)]) (make-call "persistent!" [(make-ref "owned")])])]
+   markers (effective-markers body {})]
+  (and (boolean (some (fn [m] (= m "conj!")) markers)) (not (boolean (some (fn [m] (= m "persistent!")) markers))))))
+  (expect! "purity: returning or capturing an owned transient is an escape" (let [escaped (make-let-node [(make-let-binding "owned" nil (make-call "transient" [(make-ref "xs")]))] [(make-ref "owned")])
+   captured (make-let-node [(make-let-binding "owned" nil (make-call "transient" [(make-ref "xs")]))] [{"node" "fn" "params" [] "rest" false "ret" ANY "body" [(make-call "conj!" [(make-ref "owned") (make-lit "number" 1)])]}])]
+  (and (boolean (some (fn [m] (= m "transient-escape")) (effective-markers [escaped] {}))) (boolean (some (fn [m] (= m "transient-escape")) (effective-markers [captured] {}))))))
   (expect! "purity: strict non-bang boundary rejects an indirect effect" (do
   (swap! STATE assoc "diagnostics" [])
   (check-purity-with-severity! (make-prog [(make-defn-node "caller" [] ANY [(make-call "writer" [])]) (make-defn-node "writer" [] ANY [(make-call "reset!" [])])]) "error")
@@ -1529,6 +2287,158 @@
   (swap! STATE assoc "diagnostics" [])
   (resolve-poly-call! (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE}) [(make-lit "number" 3)] {})
   (= (count (get (deref STATE) "diagnostics")) 0)))
+  (expect! "constraint: unary typed parameter accepted" (let [prog (make-prog-with-externs [(make-defn-node "keep" [(make-constrained-param "x" (make-prim "Int") (make-ref "positive?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: non-callable expression rejected" (let [prog (make-prog [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-lit "number" 1))] (make-prim "Int") [(make-ref "x")])])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "constraint expression is not callable")))
+  (expect! "constraint: Any predicate rejected" (let [prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "unknown?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "unknown?" "type" ANY}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "predicate type contains Any")))
+  (expect! "constraint: wrong predicate input rejected" (let [prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "string-ok?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "string-ok?" "type" (make-fn [(make-prim "String")] nil BOOL-TYPE)}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "its input does not accept Int")))
+  (expect! "constraint: non-Bool predicate result rejected" (let [prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "describe"))] (make-prim "Int") [(make-ref "x")])] [{"name" "describe" "type" (make-fn [(make-prim "Int")] nil (make-prim "String"))}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "predicate return type is not Bool")))
+  (expect! "constraint: direct await predicate rejected as asynchronous" (let [predicate {"node" "fn" "params" [(make-param "value" (make-prim "Int"))] "rest" false "ret" BOOL-TYPE "body" [{"node" "await" "expr" (make-ref "value")}]}
+   prog (make-prog [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") predicate)] (make-prim "Int") [(make-ref "x")])])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: transitive async named predicate rejected" (let [async-leaf (make-defn-node "async-leaf?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [{"node" "await" "expr" (make-ref "x")}])
+   wrapper (make-defn-node "wrapper?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [(make-call "async-leaf?" [(make-ref "x")])])
+   consumer (make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "wrapper?"))] (make-prim "Int") [(make-ref "x")])
+   prog (make-prog [async-leaf wrapper consumer])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: higher-order pass-through cannot launder async predicate" (let [predicate-type (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+   async-predicate (make-defn-node "async-predicate?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [{"node" "await" "expr" (make-ref "x")}])
+   pass-through (make-defn-node "pass-predicate" [(make-param "predicate" predicate-type)] predicate-type [(make-ref "predicate")])
+   consumer (make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-call "pass-predicate" [(make-ref "async-predicate?")]))] (make-prim "Int") [(make-ref "x")])
+   prog (make-prog [async-predicate pass-through consumer])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: call-produced predicate fails closed without value provenance" (let [predicate-type (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+   consumer (make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-call "make-predicate" [(make-lit "number" 0)]))] (make-prim "Int") [(make-ref "x")])
+   prog (make-prog-with-externs [consumer] [{"name" "make-predicate" "type" (make-fn [(make-prim "Int")] nil predicate-type)}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: call-produced predicate accepts a proven local factory" (let [predicate-type (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+   predicate (make-defn-node "positive?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [(make-lit "bool" true)])
+   factory (make-defn-node "make-predicate" [(make-param "seed" (make-prim "Int"))] predicate-type [(make-ref "positive?")])
+   consumer (make-defn-node "keep" [(make-constrained-param "x" (make-prim "Int") (make-call "make-predicate" [(make-lit "number" 0)]))] (make-prim "Int") [(make-ref "x")])]
+  (= (count (check-program! (make-prog [predicate factory consumer]))) 0)))
+  (expect! "constraint: conditional predicate fails closed without value provenance" (let [left (make-defn-node "left?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [(make-lit "bool" true)])
+   right (make-defn-node "right?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [(make-lit "bool" true)])
+   predicate (make-if-node (make-lit "bool" true) (make-ref "left?") (make-ref "right?"))
+   consumer (make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") predicate)] (make-prim "Int") [(make-ref "x")])
+   diagnostics (check-program! (make-prog [left right consumer]))]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: unproved imported predicate rejected" (let [prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "remote/valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE) "synchronous" false}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: checked imported predicate proof accepted" (let [base (make-prog-with-externs [(make-defn-node "keep" [(make-constrained-param "x" (make-prim "Int") (make-ref "remote/valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE) "synchronous" false}])
+   prog (assoc base IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [{"name" "remote/valid?" "synchronous" true}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: checked imported negative proof remains authoritative" (let [base (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "remote/valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])
+   prog (assoc base IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [{"name" "remote/valid?" "synchronous" false}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "not proven synchronous")))
+  (expect! "constraint: checked callable synchronization export owns both effects" (let [sync-fn (make-defn-node "sync?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [(make-lit "bool" true)])
+   async-fn (make-defn-node "async?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [{"node" "await" "expr" (make-ref "x")}])
+   prog (make-prog [sync-fn async-fn])
+   diagnostics (check-program! prog)
+   exported (export-checked-callable-synchronization! prog)]
+  (and (= (count diagnostics) 0) (= exported [{"name" "sync?" "synchronous" true "returnsSynchronousCallable" false} {"name" "async?" "synchronous" false "returnsSynchronousCallable" false}]))))
+  (expect! "constraint: checked declarations own always-present sync proofs" (let [prog (make-prog-with-externs [(make-defn-node "keep" [(make-constrained-param "x" (make-prim "Int") (make-ref "positive?")) (make-param "label" (make-prim "String"))] (make-prim "Int") [(make-ref "x")])] [{"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)
+   params (get (nth (get checked "forms") 0) "params")]
+  (and (= (count diagnostics) 0) (= (get (nth params 0) "constraintSynchronous") true) (= (get (nth params 1) "constraintSynchronous") false) (not (contains? (nth params 0) BINDING-CHECK-ID-KEY)) (not (contains? (nth params 1) BINDING-CHECK-ID-KEY)))))
+  (expect! "constraint: polymorphic predicate bound enforced" (let [bounded-predicate (make-poly ["T"] (make-fn [(make-var "T")] nil BOOL-TYPE) {"T" NUMBER-TYPE})
+   prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "String") (make-ref "bounded?"))] (make-prim "String") [(make-ref "x")])] [{"name" "bounded?" "type" bounded-predicate}])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "type-variable bound")))
+  (expect! "constraint: destructured typed parameter uses aggregate type" (let [pair-type (make-app "HVec" [(make-prim "Int") (make-prim "Int")])
+   target (make-seq-target ["x" "y"] false)
+   prog (make-prog-with-externs [(make-defn-node "first-valid" [(make-constrained-param target pair-type (make-ref "pair-valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "pair-valid?" "type" (make-fn [pair-type] nil BOOL-TYPE)}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: parameter predicate resolves before sibling bindings" (let [prog (make-prog-with-externs [(make-defn-node "prebinding" [(make-param "positive?" (make-prim "Int")) (make-constrained-param "x" (make-prim "Int") (make-ref "positive?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: rest parameter checks aggregate body binding" (let [rest-type (make-app "Vec" [(make-prim "Int")])
+   rest-param (make-constrained-param "xs" rest-type (make-ref "nonempty-ints?"))
+   fn-form (assoc (make-defn-node "collect" [] rest-type [(make-ref "xs")]) "rest" rest-param)
+   prog (make-prog-with-externs [fn-form] [{"name" "nonempty-ints?" "type" (make-fn [rest-type] nil BOOL-TYPE)}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: let and for bindings accepted" (let [predicate {"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+   let-expr (make-let-node [(make-constrained-let-binding "seed" (make-prim "Int") (make-ref "positive?") (make-lit "number" 1))] [{"node" "for" "clauses" [{"type" "binding" "name" "x" "ann" (make-prim "Int") "constraint" (make-ref "positive?") "expr" (make-vec-node [(make-ref "seed")])}] "body" [(make-ref "x")]}])
+   prog (make-prog-with-externs [(make-def-node "values" (make-app "Vec" [(make-prim "Int")]) let-expr)] [predicate])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: record, protocol, and implementation declarations accepted" (let [predicate {"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+   constrained (make-constrained-param "value" (make-prim "Int") (make-ref "positive?"))
+   record (make-record-node "Positive" [constrained])
+   protocol {"node" "defprotocol" "name" "Measured" "methods" [{"name" "measure" "params" [constrained] "rest" false "ret" BOOL-TYPE}]}
+   extension {"node" "extend-type" "name" "Positive" "impls" [{"protocol" "Measured" "methods" [{"name" "measure" "params" [constrained] "rest" false "ret" BOOL-TYPE "body" [(make-lit "bool" true)]}]}]}
+   prog (make-prog-with-externs [record protocol extension] [predicate])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: dynamic binding accepted against incoming var environment" (let [dyn-def (assoc (make-def-node "*level*" (make-prim "Int") (make-lit "number" 0)) "dynamic" true)
+   rebinding (make-constrained-let-binding "*level*" (make-prim "Int") (make-ref "positive?") (make-lit "number" 1))
+   prog (make-prog-with-externs [dyn-def (make-defn-node "level" [] (make-prim "Int") [{"node" "binding" "bindings" [rebinding] "body" [(make-ref "*level*")]}])] [{"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "constraint: checked with nodes carry exact local validator contracts" (let [predicate {"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+   constrained-field (make-constrained-param "x" (make-prim "Int") (make-ref "positive?"))
+   plain-field (make-param "x" (make-prim "Int"))
+   same-with (make-with-node (make-ref "value") ":x" (make-lit "number" 2))
+   prog (make-prog-with-externs [(make-record-node "Constrained" [constrained-field]) (make-record-node "Plain" [plain-field]) (make-defn-node "update-constrained" [(make-param "value" (make-prim "Constrained"))] (make-prim "Constrained") [same-with]) (make-defn-node "update-plain" [(make-param "value" (make-prim "Plain"))] (make-prim "Plain") [same-with])] [predicate])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)
+   constrained-with (nth (get (nth (get checked "forms") 2) "body") 0)
+   plain-with (nth (get (nth (get checked "forms") 3) "body") 0)]
+  (and (= (count diagnostics) 0) (= (get constrained-with "recordUpdate") {"recordName" "Constrained" "fieldOrder" [":x"] "validator" "$beagle$record$Constrained$validate"}) (= (get plain-with "recordUpdate") {"recordName" "Plain" "fieldOrder" [":x"] "validator" nil}) (not (contains? constrained-with "validator")) (not (contains? plain-with "validator")) (not (contains? constrained-with WITH-CHECK-ID-KEY)) (not (contains? plain-with WITH-CHECK-ID-KEY)))))
+  (expect! "constraint: imported record update consumes provider validator contract" (let [contract {"name" "models/Constrained" "fields" {":x" (make-prim "Int")} "field-order" [":x"] "constrained" true "synchronous" true "validator" "models/$beagle$record$Constrained$validate"}
+   base (make-prog [(make-defn-node "update-imported" [(make-param "value" (make-prim "models/Constrained"))] (make-prim "models/Constrained") [(make-with-node (make-ref "value") ":x" (make-lit "number" 2))])])
+   prog (assoc base IMPORTED-RECORD-CONTRACTS-KEY [contract])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)
+   with-node (nth (get (nth (get checked "forms") 0) "body") 0)]
+  (and (= (count diagnostics) 0) (= (get with-node "recordUpdate") {"recordName" "models/Constrained" "fieldOrder" [":x"] "validator" "models/$beagle$record$Constrained$validate"}) (not (contains? with-node "validator")) (not (contains? checked IMPORTED-RECORD-CONTRACTS-KEY)))))
+  (expect! "constraint: imported unconstrained and dynamic updates are distinguished" (let [contract {"name" "models/Plain" "fields" {":x" (make-prim "Int")} "field-order" [":x"] "constrained" false "synchronous" true "validator" nil}
+   imported-with (make-with-node (make-ref "value") ":x" (make-lit "number" 2))
+   dynamic-with (make-with-node (make-ref "value") ":x" (make-lit "number" 2))
+   base (make-prog [(make-defn-node "update-imported" [(make-param "value" (make-prim "models/Plain"))] (make-prim "models/Plain") [imported-with]) (make-defn-node "update-dynamic" [(make-param "value" ANY)] ANY [dynamic-with])])
+   prog (assoc base IMPORTED-RECORD-CONTRACTS-KEY [contract])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)
+   checked-imported (nth (get (nth (get checked "forms") 0) "body") 0)
+   checked-dynamic (nth (get (nth (get checked "forms") 1) "body") 0)]
+  (and (= (count diagnostics) 0) (= (get checked-imported "recordUpdate") {"recordName" "models/Plain" "fieldOrder" [":x"] "validator" nil}) (nil? (get checked-dynamic "recordUpdate")) (not (contains? checked-imported "validator")) (not (contains? checked-dynamic "validator")))))
+  (expect! "constraint: imported record contract without sync proof rejected" (let [contract {"name" "models/Constrained" "fields" {":x" (make-prim "Int")} "field-order" [":x"] "constrained" true "synchronous" false "validator" "models/$beagle$record$Constrained$validate"}
+   prog (assoc (make-prog []) IMPORTED-RECORD-CONTRACTS-KEY [contract])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "positive synchronization proof")))
+  (expect! "constraint: checked kw-access facts are exact and always present" (let [record (make-record-node "Person" [(make-param "name" (make-prim "String"))])
+   same-access {"node" "kw-access" "kw" ":name" "target" (make-ref "value") "default" false}
+   prog (make-prog [record (make-defn-node "record-name" [(make-param "value" (make-prim "Person"))] (make-prim "String") [same-access]) (make-defn-node "map-name" [(make-param "value" (make-app "Map" [(make-prim "Keyword") (make-prim "String")]))] ANY [same-access])])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)
+   record-access (nth (get (nth (get checked "forms") 1) "body") 0)
+   map-access (nth (get (nth (get checked "forms") 2) "body") 0)]
+  (and (= (count diagnostics) 0) (= (get record-access "recordFieldAccess") {"recordName" "Person"}) (nil? (get map-access "recordFieldAccess")) (not (contains? record-access KW-ACCESS-CHECK-ID-KEY)) (not (contains? map-access KW-ACCESS-CHECK-ID-KEY)))))
+  (expect! "constraint: imported nominal kw-access carries checked record fact" (let [contract {"name" "models/Person" "fields" {":name" (make-prim "String")} "field-order" [":name"] "constrained" false "synchronous" true "validator" nil}
+   access {"node" "kw-access" "kw" ":name" "target" (make-ref "value") "default" false}
+   base (make-prog [(make-defn-node "imported-name" [(make-param "value" (make-prim "models/Person"))] (make-prim "String") [access])])
+   prog (assoc base IMPORTED-RECORD-CONTRACTS-KEY [contract])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)
+   checked-access (nth (get (nth (get checked "forms") 0) "body") 0)]
+  (and (= (count diagnostics) 0) (= (get checked-access "recordFieldAccess") {"recordName" "models/Person"}))))
+  (expect! "constraint: checked record contract export carries provider ABI" (let [predicate {"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+   field (make-constrained-param "x" (make-prim "Int") (make-ref "positive?"))
+   prog (make-prog-with-externs [(make-record-node "Constrained" [field])] [predicate])
+   diagnostics (check-program! prog)
+   exported (export-checked-record-contracts! prog)
+   contract (nth exported 0)]
+  (and (= (count diagnostics) 0) (= (get contract "name") "Constrained") (= (get contract "field-order") [":x"]) (= (get contract "constrained") true) (= (get contract "synchronous") true) (= (get contract "validator") "test/$beagle$record$Constrained$validate"))))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  CHECK: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))
