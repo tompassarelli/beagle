@@ -21,7 +21,6 @@
   (program->module-interface
    (parse-program stxs)
    #:source-id "binding-constraint-interface.bclj"
-   #:datums (map syntax->datum stxs)
    #:provisional? #t))
 
 (define (checked-program source
@@ -93,7 +92,7 @@
   (test-suite
    "binding constraints in module interfaces"
 
-   (test-case "schema v6 preserves constraint AST and synchronization proof"
+   (test-case "schema v7 preserves constraint AST and synchronization proof"
      (define positive
        (published
         (string-append
@@ -122,7 +121,7 @@
      (define positive-binding (binding-ref positive 'keep))
      (define constraint
        (car (interface-binding-constraints positive-binding)))
-     (check-equal? (module-interface-schema-version positive) 6)
+     (check-equal? (module-interface-schema-version positive) 7)
      (check-true (interface-constraint? constraint))
      (check-false (interface-constraint-synchronous? constraint))
      (check-false (interface-constraint-provider constraint))
@@ -175,8 +174,7 @@
      (define provider-interface
        (program->module-interface
         provider-program
-        #:source-id "interface/async-provider.bjs"
-        #:datums (map syntax->datum provider-stxs)))
+        #:source-id "interface/async-provider.bjs"))
      (check-false
       (interface-binding-synchronous?
        (binding-ref provider-interface 'remote-valid?)))
@@ -185,7 +183,6 @@
         'interface.async-provider
         "interface/async-provider.bjs"
         provider-stxs
-        (map syntax->datum provider-stxs)
         provider-interface))
      (define error
        (with-handlers ([exn:fail? values])
@@ -226,8 +223,7 @@
      (define provider-interface
        (program->module-interface
         provider-program
-        #:source-id "interface/protocol-provider.bclj"
-        #:datums (map syntax->datum provider-stxs)))
+        #:source-id "interface/protocol-provider.bclj"))
      (define textual
        (module-interface-protocol-contract-ref
         provider-interface 'Textual))
@@ -265,7 +261,6 @@
         'interface.protocol-provider
         "interface/protocol-provider.bclj"
         provider-stxs
-        (map syntax->datum provider-stxs)
         provider-interface))
      (define consumer
        (checked-program
@@ -331,8 +326,7 @@
      (define provider-interface
        (program->module-interface
         provider-program
-        #:source-id "interface/provider.bclj"
-        #:datums (map syntax->datum provider-stxs)))
+        #:source-id "interface/provider.bclj"))
      (define expected-local (record-validator-symbol 'Character))
      (check-eq? expected-local '$beagle$record$Character$validate)
      (check-eq?
@@ -346,7 +340,6 @@
         'interface.provider
         "interface/provider.bclj"
         provider-stxs
-        (map syntax->datum provider-stxs)
         provider-interface))
      (define consumer
        (checked-program

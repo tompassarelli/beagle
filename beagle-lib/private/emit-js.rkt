@@ -1643,8 +1643,6 @@
 (define (emit-module-header prog)
   (define importer-ns (symbol->string (program-namespace prog)))
   (define rs (program-requires prog))
-  (define imported-scalar-fns
-    (list->set (program-imported-scalar-fns prog)))
   (define used-unqualified-record-validators
     (for/set ([(node contract)
                (in-hash (program-semantic-contracts prog))]
@@ -1689,36 +1687,14 @@
        #f]
       [(record-constructor-import? prog entry name)
        (string->symbol (substring (symbol->string name) 2))]
-      [(or (eq? kind 'scalar-accessor)
-           (and (not interface)
-                (set-member?
-                 imported-scalar-fns
-                 (qualified-binding (require-prefix entry) name))
-                (string-suffix? (symbol->string name) "-value")))
+      [(eq? kind 'scalar-accessor)
        #f]
-      [(or (eq? kind 'scalar-constructor)
-           (and (not interface)
-                (set-member?
-                 imported-scalar-fns
-                 (qualified-binding (require-prefix entry) name))
-                (string-prefix? (symbol->string name) "->")))
-       (define scalar-name
-         (qualified-binding
-          (require-prefix entry)
-          (string->symbol (substring (symbol->string name) 2))))
-       (and (if interface
-                (interface-scalar-predicated?
-                 interface
-                 (string->symbol (substring (symbol->string name) 2)))
-                (hash-has-key?
-                 (program-imported-scalar-preds prog)
-                 scalar-name))
+      [(eq? kind 'scalar-constructor)
+       (and (interface-scalar-predicated?
+             interface
+             (string->symbol (substring (symbol->string name) 2)))
             name)]
       [(eq? kind 'extern) #f]
-      [(set-member?
-        (program-imported-type-names prog)
-        (qualified-binding (require-prefix entry) name))
-       #f]
       [else name]))
   ;; A `:refer`'d name that resolved to a macro is compile-time only — it's
   ;; expanded away and never referenced at runtime, and the target module emits

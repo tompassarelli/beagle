@@ -2,9 +2,9 @@
 
 ;; Coherent multi-module checking for graph-authored candidates.
 ;;
-;; Every candidate is reconstructed from its EDN datum projection.  A bootstrap
-;; parse lets modules import candidate datums independent of input order.  The
-;; provisional interfaces from that parse are never authority: every module is
+;; Every candidate is reconstructed from its EDN syntax projection. A bootstrap
+;; parse mints provisional semantic interfaces independent of input order. Those
+;; provisional interfaces are never authority: every module is
 ;; reparsed and checked, checked interfaces are reminted, and the process
 ;; repeats until the whole overlay reaches one fixed point.  Type checking and
 ;; emission happen only against that coherent overlay, and emitted bytes are
@@ -75,7 +75,6 @@
    (stxs-declared-namespace stxs source)
    source
    stxs
-   (map syntax->datum stxs)
    #f))
 
 (struct candidate-overlay (by-namespace by-source) #:transparent)
@@ -322,7 +321,6 @@
           (program->module-interface
            prog
            #:source-id (module-source-source-id source)
-           #:datums (module-source-datums source)
            #:provisional? #t)])))
     (define provisional-overlay
       (guard #f 'index (lambda () (source-overlay provisional-sources))))
@@ -500,8 +498,7 @@
                (lambda ()
                  (program->module-interface
                   prog
-                  #:source-id (module-source-source-id source)
-                  #:datums (module-source-datums source))))])))
+                  #:source-id (module-source-source-id source))))])))
         (if (interfaces-stable? current-sources next-sources)
             (values round-programs next-sources)
             (stabilize next-sources (add1 round)))))

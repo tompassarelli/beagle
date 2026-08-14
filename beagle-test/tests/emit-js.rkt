@@ -104,11 +104,9 @@
         'interface.provider
         "interface/provider.bjs"
         provider-stxs
-        provider-datums
         (program->module-interface
          provider
-         #:source-id "interface/provider.bjs"
-         #:datums provider-datums)))
+         #:source-id "interface/provider.bjs")))
      (define consumer-datums
        (list
         (list 'ns 'interface.consumer

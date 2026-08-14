@@ -2,8 +2,8 @@
 
 ;; CLJ-specific stdlib entries: JVM/Clojure functions unavailable in CLJS.
 ;;
-;; Split from stdlib-types.rkt. Merged into the unified STDLIB-TYPES at
-;; require time; kept separate so the CLJS pipeline can exclude cleanly.
+;; Combined with the portable and Babashka catalogs by `(stdlib-for-target
+;; 'clj)`; kept separate so the CLJS pipeline can exclude cleanly.
 
 (require "types.rkt"
          "stdlib-helpers.rkt"

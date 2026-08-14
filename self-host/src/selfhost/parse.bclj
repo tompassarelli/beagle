@@ -9,9 +9,9 @@
 ;; Input: vector of top-level datums (selfhost.reader encoding).
 ;; Output: program AST matching beagle-lib/private/ast-json.rkt exactly.
 ;;
-;; MODULE RESOLUTION — CLOSED. `import-module-surface!` (below) is the port of
-;; parse.rkt import-module-types!'s reg! calls: given a required module's RAW
-;; datums + the import prefix (alias / last ns segment) + optional :refer list,
+;; MODULE RESOLUTION — CLOSED. `import-module-surface!` (below) is the
+;; self-host compiler's source-surface reader: given a required module's datums
+;; + the import prefix (alias / last ns segment) + optional :refer list,
 ;; it returns the alias-qualified externs the importer sees — declare-extern,
 ;; defrecord ctor/accessors, defscalar ctor/accessor, defunion (plain/throwable/
 ;; parametric name), typed def/defonce, ^:dynamic vars, and defn signatures.
@@ -3221,8 +3221,7 @@
   (parse-program! datums))
 
 ;; --- module surface import (PURE) --------------------------------------------
-;; Mirror of beagle-lib parse.rkt import-module-types! (the reg! calls that land
-;; in the externs hash): given a required module's RAW datums, the import PREFIX
+;; Self-host source-surface reader: given a required module's datums, the import PREFIX
 ;; (alias, else last ns segment) and an optional :refer list, produce the typed
 ;; externs the importing module sees. PURE — no IO. The driver (main.bclj)
 ;; resolves paths + slurps + reads, then hands datums here and merges the result

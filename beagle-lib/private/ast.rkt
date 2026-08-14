@@ -614,7 +614,9 @@
                  namespace
                  forms
                  macros
+                 declared-macros
                  externs
+                 declared-externs
                  requires
                  imports
                  form-stxs

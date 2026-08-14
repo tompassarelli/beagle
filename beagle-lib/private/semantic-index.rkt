@@ -400,7 +400,6 @@
    (stxs-declared-namespace stxs)
    rel
    stxs
-   (map syntax->datum stxs)
    #f))
 
 (define (overlay-failure->error result)

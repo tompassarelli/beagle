@@ -309,7 +309,6 @@
        (bundle-source-namespace source)
        (bundle-source-source-id source)
        (bundle-source-stxs source)
-       (map syntax->datum (bundle-source-stxs source))
        #f)))
   (define (parse-exact source resolver)
     (define source-id (format "~a" (module-source-source-id source)))

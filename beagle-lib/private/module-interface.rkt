@@ -2,11 +2,8 @@
 
 ;; A checked module's public, cross-module contract.
 ;;
-;; The parser historically re-read a required source file and scraped a subset
-;; of its datums directly into the consumer's extern table.  That remains the
-;; compatibility path for importing the full legacy surface, but coherent-overlay
-;; checking needs a first-class boundary for facts that must never disappear:
-;; the exact export set and typed-error effects.  This module owns that boundary
+;; Every Beagle-to-Beagle import crosses this boundary.  Source syntax is parsed
+;; once into a program; consumers receive only the program's semantic interface
 ;; and its deterministic digest.
 
 (require racket/list
@@ -15,24 +12,22 @@
          racket/set
          openssl/sha1
          "ast.rkt"
+         "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 6)
-;; V6 preserves binding-local constraints structurally alongside finalized
-;; definition signatures and publishes positive synchronization proofs for
-;; public callables, callable-return effects, and every binding constraint. It
-;; still does not encode
-;; every cross-module semantic contract (notably ^:dynamic status).
-;; Therefore an unchanged interface digest MUST NOT prune reverse-require
-;; consumers: Fram must keep selecting the complete reverse closure from the
-;; changed source/overlay digest until this flag can truthfully become #t.
-(define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #f)
+(define INTERFACE-SCHEMA-VERSION 7)
+;; V7 is the complete Beagle import boundary: finalized bindings, macros,
+;; type/record/error contracts, and dynamic-var status all participate in the
+;; interface digest.  Unchanged interfaces can therefore prune reverse users.
+(define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
 (struct interface-constraint (expression synchronous? provider) #:transparent)
 (struct interface-binding
   (name kind type raises constraints synchronous?
         returns-synchronous-callable?)
+  #:transparent)
+(struct interface-macro (name kind fixed-params rest-param template)
   #:transparent)
 (struct interface-error (name members member-fields) #:transparent)
 (struct interface-type-declaration (name kind details) #:transparent)
@@ -44,15 +39,14 @@
   #:transparent)
 (struct interface-protocol-contract (name methods) #:transparent)
 (struct module-interface
-  (schema-version namespace target bindings macro-fingerprints
+  (schema-version namespace target bindings macros macro-fingerprints
                   type-declarations type-exports record-contracts errors requires
-                  digest source-digest source-id)
+                  dynamic-vars digest source-digest source-id)
   #:transparent)
 
-;; A resolver returns a module-source.  DATUMS are consumed by the compatibility
-;; importer; INTERFACE is #f during the bootstrap parse and a module-interface
-;; during the authoritative parse.
-(struct module-source (namespace source-id stxs datums interface) #:transparent)
+;; A resolver returns a module-source. INTERFACE is #f during the bootstrap
+;; parse and a module-interface during authoritative parsing.
+(struct module-source (namespace source-id stxs interface) #:transparent)
 
 ;; One consumer-side import of an interface.  PREFIX is the spelling accepted at
 ;; qualified use sites; REFER is #f or the explicitly referred symbol list.
@@ -413,51 +407,47 @@
       [_ (void)]))
   out)
 
-(define (raw-interface-bindings datums externs)
-  ;; Meta forms are absent from program-forms.  Keep their actual public names
-  ;; in the exact export set so macro/extern use is not falsely rejected.
-  (for/fold ([out (hasheq)]) ([datum (in-list datums)])
-    (match datum
-      [(list 'defmacro (? symbol? name) _ _)
-       (hash-set out name
-                 (interface-binding name 'macro ANY #f '() #f #f))]
-      [(list 'declare-extern (? symbol? name) type-expression)
-       (hash-set out name
-                 (interface-binding
-                  name
-                  'extern
-                  (hash-ref
-                   externs
-                   name
-                  (lambda () (parse-type type-expression)))
-                  #f
-                  '()
-                  #f
-                  #f))]
-      [(list 'declare-extern names-form type-expression)
-       #:when (bracketed? names-form)
-       (for/fold ([next out]) ([name (in-list (bracket-body names-form))])
-         (hash-set next name
-                   (interface-binding
-                    name
-                    'extern
-                    (hash-ref
-                     externs
-                     name
-                     (lambda () (parse-type type-expression)))
-                    #f
-                    '()
-                    #f
-                    #f)))]
-      [_ out])))
+(define (declared-interface-bindings prog)
+  ;; Meta declarations are absent from program-forms, so the parser retains
+  ;; their local semantic products explicitly on the program.
+  (define extern-bindings
+    (for/hasheq ([(name type) (in-hash (program-declared-externs prog))])
+      (values name (interface-binding name 'extern type #f '() #f #f))))
+  (for/fold ([bindings extern-bindings])
+            ([name (in-hash-keys (program-declared-macros prog))])
+    (hash-set bindings name
+              (interface-binding name 'macro ANY #f '() #f #f))))
 
-(define (raw-macro-fingerprints datums)
-  (for/fold ([fingerprints (hasheq)])
-            ([datum (in-list datums)])
-    (match datum
-      [(list 'defmacro (? symbol? name) _ _)
-       (hash-set fingerprints name (sha256-datum datum))]
-      [_ fingerprints])))
+(define (program-interface-macros prog)
+  (for/hasheq ([(name definition)
+                (in-hash (program-declared-macros prog))])
+    (values
+     name
+     (interface-macro
+      name
+      (macro-def-kind definition)
+      (macro-def-fixed-params definition)
+      (macro-def-rest-param definition)
+      (macro-def-template definition)))))
+
+(define (interface-macro->canonical-datum macro)
+  `(macro
+    ,(interface-macro-name macro)
+    ,(interface-macro-kind macro)
+    (params ,@(interface-macro-fixed-params macro))
+    (rest ,(interface-macro-rest-param macro))
+    (template
+     ,(constraint->canonical-datum (interface-macro-template macro)))))
+
+(define (interface-macro-fingerprints macros)
+  (for/hasheq ([(name macro) (in-hash macros)])
+    (values name (sha256-datum (interface-macro->canonical-datum macro)))))
+
+(define (program-dynamic-vars prog)
+  (for/seteq ([raw-form (in-list (program-forms prog))]
+              #:do [(define form (unwrap-public-form raw-form))]
+              #:when (and (def-form? form) (def-form-dynamic? form)))
+    (def-form-name form)))
 
 (define (program-errors prog provisional?)
   (for/hasheq ([raw-form (in-list (program-forms prog))]
@@ -851,7 +841,8 @@
 
 (define (interface-canonical-datum
          namespace mode target gen-class? bindings macro-fingerprints
-         type-declarations type-exports record-contracts errors requires)
+         type-declarations type-exports record-contracts errors requires
+         dynamic-vars)
   `(module-interface
     (schema ,INTERFACE-SCHEMA-VERSION)
     (consumer-pruning-safe
@@ -882,6 +873,7 @@
      ,@(for/list ([name (in-list (sort (hash-keys macro-fingerprints)
                                       symbol<?))])
          (list name (hash-ref macro-fingerprints name))))
+    (dynamic-vars ,@(sort (set->list dynamic-vars) symbol<?))
     (types
      ,@(for/list
         ([name (in-list (sort (hash-keys type-declarations) symbol<?))])
@@ -937,7 +929,6 @@
 
 (define (program->module-interface prog
                                    #:source-id [source-id #f]
-                                   #:datums [datums '()]
                                    #:provisional? [provisional? #f])
   (define effective
     (publication-effective-definition-types prog provisional?))
@@ -945,11 +936,12 @@
     (ast-interface-bindings prog effective provisional?))
   (define bindings (hash-copy ast-bindings))
   (for ([(name binding)
-         (in-hash
-          (raw-interface-bindings datums (program-externs prog)))])
+         (in-hash (declared-interface-bindings prog))])
     (hash-set! bindings name binding))
   (define errors (program-errors prog provisional?))
-  (define macro-fingerprints (raw-macro-fingerprints datums))
+  (define macros (program-interface-macros prog))
+  (define macro-fingerprints (interface-macro-fingerprints macros))
+  (define dynamic-vars (program-dynamic-vars prog))
   (define exported-aliases
     (canonical-exported-aliases
      (program-namespace prog)
@@ -1008,20 +1000,30 @@
      type-exports
      record-contracts
      errors
-     (program-requires prog)))
+     (program-requires prog)
+     dynamic-vars))
+  (define source-canonical
+    `(module-program
+      (interface ,canonical)
+      (forms
+       ,@(for/list ([stx (in-list (program-form-stxs prog))])
+           (syntax->datum stx)))
+      (imports ,@(program-imports prog))))
   (module-interface
    INTERFACE-SCHEMA-VERSION
    (program-namespace prog)
    (program-target prog)
    qualified-bindings
+   macros
    macro-fingerprints
    qualified-type-declarations
    type-exports
    record-contracts
    errors
    (program-requires prog)
+   dynamic-vars
    (sha256-datum canonical)
-   (sha256-datum `(module-source ,@datums))
+   (sha256-datum source-canonical)
    source-id))
 
 (define (module-interface-export? interface name)
@@ -1250,6 +1252,7 @@
  program-protocol-method-contract-ref
  module-interfaces-overlay-digest
  (struct-out interface-binding)
+ (struct-out interface-macro)
  (struct-out interface-constraint)
  (struct-out interface-error)
  (struct-out interface-type-declaration)

@@ -28,9 +28,10 @@
 ;; Persistent environment across REPL inputs
 (define repl-env (make-hash))
 (define repl-records (make-hash))
+(define repl-stdlib (stdlib-for-target 'clj))
 
 (define (init-repl-env!)
-  (for ([(k v) (in-hash STDLIB-TYPES)])
+  (for ([(k v) (in-hash repl-stdlib)])
     (hash-set! repl-env k v)))
 
 ;; REPL bindings are real inputs to the next whole-program check.  Carry them
@@ -207,7 +208,7 @@
 (define (show-env)
   (define user-bindings
     (for/list ([(k v) (in-hash repl-env)]
-               #:when (not (hash-has-key? STDLIB-TYPES k)))
+               #:when (not (hash-has-key? repl-stdlib k)))
       (cons k v)))
   (if (null? user-bindings)
       (displayln "  (no user bindings)")

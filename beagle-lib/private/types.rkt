@@ -1103,9 +1103,8 @@
     [(type-poly? type) type]
     [else type]))
 
-;; The built-in environment (BUILTIN-ENV) lives in stdlib-types.rkt to avoid
-;; a circular dependency (stdlib-types.rkt needs the type constructors from
-;; this module). Consumers should import STDLIB-TYPES directly.
+;; Target-specific built-in environments live in the stdlib catalog modules,
+;; which depend on the type constructors defined here.
 
 (provide
  BRACKET-TAG

@@ -242,22 +242,10 @@
   (string->symbol
    (string-append (symbol->string prefix-sym) "/" (symbol->string name-sym))))
 
-;; Every datum-level reader of another module's surface must see through the
-;; export marker, or a module's public API is exactly the part with no signature.
-(define (multi-arity-clause? d)
-  (and (pair? d) (bracketed? (car d))))
-
 (define (strip-target-export d)
   (match d
     [(list (or 'js/export 'js/export-default) inner) (strip-target-export inner)]
     [_ d]))
-
-(define (parametric-defunion-arities datums)
-  (for/fold ([arities '()]) ([raw (in-list datums)])
-    (match (strip-target-export raw)
-      [(list 'defunion (list (? symbol? name) type-vars ...) _ ...)
-       (cons (cons name (length type-vars)) arities)]
-      [_ arities])))
 
 (define (read-beagle-datums path)
   (require-beagle-source-extension! path 'read-beagle-datums)
@@ -881,124 +869,6 @@
                    (layout-edit-replacement edit)
                    (substring out end))))
 
-(define (copy-type type)
-  (cond
-    [(type-prim? type) (type-prim (type-prim-name type))]
-    [(type-var? type) (type-var (type-var-name type))]
-    [(type-app? type)
-     (type-app (type-app-ctor type) (map copy-type (type-app-args type)))]
-    [(type-union? type)
-     (type-union (map copy-type (type-union-alts type)))]
-    [(type-fn? type)
-     (type-fn (map copy-type (type-fn-params type))
-              (and (type-fn-rest-type type)
-                   (copy-type (type-fn-rest-type type)))
-              (copy-type (type-fn-ret type)))]
-    [(type-poly? type)
-     (define bounds (type-poly-bounds type))
-     (define copied
-       (type-poly
-        (type-poly-vars type)
-        (copy-type (type-poly-body type))
-        (and bounds
-             (for/hasheq ([(name bound) (in-hash bounds)])
-               (values name (copy-type bound))))))
-     (set-type-poly-origin! copied (type-poly-origin type))
-     copied]
-    [else type]))
-
-(define (require-specs-in datum)
-  (match datum
-    [(list* 'require specs)
-     (if (and (pair? specs) (symbol? (car specs)))
-         (list (cons BRACKET-TAG specs))
-         specs)]
-    [(list* 'ns (? symbol?) clauses)
-     (for/fold ([specs '()]) ([clause (in-list clauses)])
-       (if (and (pair? clause) (eq? (car clause) ':require))
-           (append specs (cdr clause))
-           specs))]
-    [_ '()]))
-
-(define (decode-require-spec spec)
-  (define unquoted
-    (if (and (pair? spec) (eq? (car spec) 'quote) (pair? (cdr spec)))
-        (cadr spec)
-        spec))
-  (define items
-    (cond
-      [(symbol? unquoted) (list unquoted)]
-      [(and (pair? unquoted) (eq? (car unquoted) BRACKET-TAG))
-       (cdr unquoted)]
-      [else '()]))
-  (and (pair? items)
-       (symbol? (car items))
-       (let ([namespace (car items)])
-         (let loop ([rest (cdr items)] [alias #f] [referred '()])
-           (cond
-             [(null? rest)
-              (list namespace
-                    (or alias
-                        (string->symbol
-                         (last-of (split-ns-segments namespace))))
-                    referred)]
-             [(and (eq? (car rest) ':as)
-                   (pair? (cdr rest))
-                   (symbol? (cadr rest)))
-              (loop (cddr rest) (cadr rest) referred)]
-             [(and (eq? (car rest) ':refer) (pair? (cdr rest)))
-              (define names (cadr rest))
-              (if (and (pair? names) (eq? (car names) BRACKET-TAG))
-                  (loop (cddr rest) alias (cdr names))
-                  #f)]
-             [else #f])))))
-
-(define (collect-local-type-aliases datums imported-aliases)
-  (define-values (local _visible)
-    (for/fold ([local (hasheq)] [visible imported-aliases])
-              ([datum (in-list datums)])
-      (match datum
-        [(list 'defalias (? symbol? name) type-expr)
-         (with-handlers ([exn:fail? (lambda (_e) (values local visible))])
-           (define expansion
-             (copy-type
-              (parameterize ([current-type-aliases visible])
-                (parse-type type-expr))))
-           (values (hash-set local name expansion)
-                   (hash-set visible name expansion)))]
-        [_ (values local visible)])))
-  local)
-
-(define (raw-local-type-names datums)
-  (define (member-name member)
-    (cond
-      [(symbol? member) member]
-      [(and (pair? member) (symbol? (car member))) (car member)]
-      [else #f]))
-  (define (add-members names members)
-    (for/fold ([found names]) ([member (in-list members)])
-      (define name (member-name member))
-      (if name (set-add found name) found)))
-  (for/fold ([names (seteq)]) ([datum (in-list datums)])
-    (match datum
-      [(list 'defalias (? symbol? name) _)
-       (set-add names name)]
-      [(list 'defrecord (? symbol? name) _)
-       (set-add names name)]
-      [(list* 'defprotocol (? symbol? name) _)
-       (set-add names name)]
-      [(list* 'defenum (? symbol? name) _)
-       (set-add names name)]
-      [(list* 'defscalar (? symbol? name) _)
-       (set-add names name)]
-      [(list* 'defunion ':throwable (? symbol? name) members)
-       (add-members (set-add names name) members)]
-      [(list* 'defunion (? symbol? name) members)
-       (add-members (set-add names name) members)]
-      [(list* 'defunion (list (? symbol? name) _ ...) members)
-       (add-members (set-add names name) members)]
-      [_ names])))
-
 (define (reject-reserved-type-name! name where)
   (when (eq? name 'Fn)
     (raise-parse-error
@@ -1041,546 +911,6 @@
        (for ([member (in-list members)])
          (reject-member! member "defunion member"))]
       [_ (void)])))
-
-(define (canonicalize-local-aliases aliases namespace datums)
-  (define local-type-names (raw-local-type-names datums))
-  (for/hasheq ([(name expansion) (in-hash aliases)])
-    (values
-     name
-     (qualify-provider-local-type-references
-      expansion namespace local-type-names))))
-
-;; Provider-private type qualifiers must resolve while its signatures are read,
-;; but must not enter the consumer's alias namespace. A candidate resolver is
-;; authoritative when present: nested imports recurse through the supplied
-;; module-source graph instead of probing sibling files.
-(define (collect-required-type-aliases
-         datums
-         source-path
-         seen
-         #:module-resolver [module-resolver #f]
-         #:source-id [source-id source-path])
-  (for*/fold ([aliases (hasheq)])
-             ([datum (in-list datums)]
-              [spec (in-list (require-specs-in datum))])
-    (match (decode-require-spec spec)
-      [(list namespace prefix referred)
-       (define candidate
-         (and module-resolver (module-resolver namespace source-id)))
-       (when (and candidate (not (module-source? candidate)))
-         (error
-          'beagle
-          "module resolver returned ~v for ~a; expected module-source or #f"
-          candidate
-          namespace))
-       (when (and candidate
-                  (not (eq? (module-source-namespace candidate) namespace)))
-         (error
-          'beagle
-          "module resolver returned namespace ~a for required module ~a"
-          (module-source-namespace candidate)
-          namespace))
-       (define (collect-dependency dependency-datums dependency-id next-seen)
-         (define active-dependency-datums
-           (resolve-reader-conditional-datum-stream
-            dependency-datums
-            #:source-path dependency-id))
-         (validate-reserved-type-declarations! active-dependency-datums)
-         (define dependency-imports
-           (collect-required-type-aliases
-            active-dependency-datums
-            dependency-id
-            next-seen
-            #:module-resolver module-resolver
-            #:source-id dependency-id))
-         (define dependency-locals
-           (canonicalize-local-aliases
-            (collect-local-type-aliases
-             active-dependency-datums dependency-imports)
-            namespace
-            active-dependency-datums))
-         (for/fold ([visible aliases])
-                   ([(name expansion) (in-hash dependency-locals)])
-           (define prefixed-name (qualify-name prefix name))
-           (define prefixed-expansion
-             (register-type-alias-display! (copy-type expansion) prefixed-name))
-           (define with-prefixed
-             (hash-set visible prefixed-name prefixed-expansion))
-           (define full-name (qualify-name namespace name))
-           (define with-full
-             (if (eq? prefixed-name full-name)
-                 with-prefixed
-                 (hash-set
-                  with-prefixed
-                  full-name
-                  (register-type-alias-display!
-                   (copy-type expansion) full-name))))
-           (if (memq name referred)
-               (hash-set
-                with-full
-                name
-                (register-type-alias-display! (copy-type expansion) name))
-               with-full)))
-       (cond
-         [candidate
-          (define dependency-id
-            (format "~a" (module-source-source-id candidate)))
-          (define dependency-key (cons 'candidate dependency-id))
-          (if (set-member? seen dependency-key)
-              aliases
-              (collect-dependency
-               (module-source-datums candidate)
-               dependency-id
-               (set-add seen dependency-key)))]
-         [else
-          (define dependency-path
-            (resolve-module-path namespace source-path))
-          (define canonical-path
-            (and dependency-path
-                 (simplify-path (path->complete-path dependency-path))))
-          (define dependency-key (and canonical-path (cons 'path canonical-path)))
-          (if (or (not canonical-path) (set-member? seen dependency-key))
-              aliases
-              (with-handlers ([exn:fail? (lambda (_error) aliases)])
-                (define dependency-datums
-                  (read-beagle-datums canonical-path))
-                (collect-dependency
-                 dependency-datums
-                 canonical-path
-                 (set-add seen dependency-key))))])]
-      [_ aliases])))
-
-
-(define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns
-                              #:type-names [imp-type-names #f]
-                              #:scalar-fns [imp-scalar-fns #f]
-                              #:scalar-preds [imp-scalar-preds #f]
-                              #:symbol-ns [imp-symbol-ns #f]
-                              #:union-members [imp-union-members #f]
-                              #:parametric-unions [imp-param-unions #f]
-                              #:enums [imp-enums #f]
-                              #:dynamic-vars [imp-dyn-vars #f]
-                              #:refer-syms [refer-syms #f]
-                              #:bare-all? [bare-all? #f]
-                              #:datums [pre-datums #f]
-                              #:module-resolver [module-resolver #f]
-                              #:canonical-provider-types?
-                              [canonical-provider-types? #f])
-  ;; pre-datums lets a caller that already read this file (e.g. the sibling
-  ;; scan, to gate on the ns) hand the datums in, avoiding a second read.
-  (define raw-datums (or pre-datums (read-beagle-datums mod-path)))
-  ;; Docstrings are surface the importer must see through, same as the
-  ;; main parser: (defn name "doc" [params] ...) / (def name "doc" v) /
-  ;; (def name T "doc" v). Strip them up front so the match arms below
-  ;; stay docstring-blind. (The importer missing this erased a module's
-  ;; whole type surface — found 2026-06-12 by the import-failure warning.)
-  (define (strip-doc d)
-    (match d
-      [(list* (and head (or 'defn 'defn-)) (? symbol? name) (? string? _) rest)
-       #:when (pair? rest)
-       (list* head name rest)]
-      [(list (and head (or 'def 'defonce)) (? symbol? name) type-expr (? string? _) value)
-       (list head name type-expr value)]
-      [(list (and head (or 'def 'defonce)) (? symbol? name) (? string? _) value)
-       (list head name value)]
-      [_ d]))
-  ;; Export markers come off before docstrings: the wrapper hides the head the
-  ;; docstring normalizer and every match arm below dispatch on.
-  (define datums
-    (for/list ([d (in-list raw-datums)])
-      (strip-doc (strip-target-export d))))
-  (define active-datums
-    (resolve-reader-conditional-datum-stream
-     datums
-     #:source-path mod-path))
-  (validate-reserved-type-declarations! active-datums)
-  (define parametric-arities (parametric-defunion-arities active-datums))
-  (for ([entry (in-list parametric-arities)])
-    (define name (car entry))
-    (define arity (cdr entry))
-    (when (zero? arity)
-      (error 'beagle
-             "parametric defunion ~a requires at least one type parameter; use (defunion ~a ...) for a non-parametric union"
-             name
-             name)))
-  (define refer-set (and refer-syms (list->set refer-syms)))
-  ;; A provider's bare constructor names are required while parsing its own
-  ;; aliases and signatures. They do not become consumer names unless the
-  ;; require is explicitly bare/referred; otherwise a provider Box/1 could
-  ;; overwrite a consumer-local Box/2 registered by the program pre-scan.
-  (define (referred? name)
-    (or bare-all? (and refer-set (set-member? refer-set name))))
-  (define consumer-parametric-arities (current-user-parametric-arities))
-  (define provider-parametric-arities
-    (for/fold ([arities consumer-parametric-arities])
-              ([entry (in-list parametric-arities)])
-      (define name (car entry))
-      (define arity (cdr entry))
-      (hash-set
-       (hash-set
-        (hash-set arities name arity)
-        (qualify-name prefix name) arity)
-       (qualify-name mod-ns name) arity)))
-  (current-user-parametric-arities
-   (for/fold ([arities consumer-parametric-arities])
-             ([entry (in-list parametric-arities)])
-     (define name (car entry))
-     (define arity (cdr entry))
-     (define qualified-arities
-       (hash-set
-        (hash-set arities (qualify-name prefix name) arity)
-        (qualify-name mod-ns name) arity))
-     (if (referred? name)
-         (hash-set qualified-arities name arity)
-         qualified-arities)))
-  ;; Imported macro templates need the provider's definition context. Build it
-  ;; while importing the provider surface, then register macros after the scan
-  ;; so references to definitions declared later in the file are known too.
-  (define provider-definition-names (make-hasheq))
-  (define pending-macros '())
-  (define source-path
-    (simplify-path (path->complete-path mod-path)))
-  (define provider-import-aliases
-    (collect-required-type-aliases
-     active-datums
-     source-path
-     (set
-      (if module-resolver
-          (cons 'candidate (format "~a" mod-path))
-          (cons 'path source-path)))
-     #:module-resolver module-resolver
-     #:source-id mod-path))
-  ;; The raw-source importer is the standalone-check counterpart to candidate
-  ;; interfaces: collect provider aliases before importing provider signatures.
-  (define raw-provider-aliases
-    (parameterize
-        ([current-user-parametric-arities provider-parametric-arities])
-      (canonicalize-local-aliases
-       (collect-local-type-aliases active-datums provider-import-aliases)
-       mod-ns
-       active-datums)))
-  (define provider-aliases
-    (for/hasheq ([(name expansion) (in-hash raw-provider-aliases)])
-      (define displayed-expansion
-        (register-type-alias-display!
-         (copy-type expansion)
-         (qualify-name prefix name)))
-      (values name displayed-expansion)))
-  ;; Qualified annotations in the consumer resolve through the same expansions
-  ;; used by imported signatures. Full namespace spellings get their own copy so
-  ;; diagnostics can preserve the spelling that crossed the boundary.
-  (define consumer-aliases (current-type-aliases))
-  (for ([(name expansion) (in-hash provider-aliases)])
-    (define prefixed-name (qualify-name prefix name))
-    (set! consumer-aliases
-          (hash-set consumer-aliases prefixed-name expansion))
-    (define full-name (qualify-name mod-ns name))
-    (unless (eq? prefixed-name full-name)
-      (define full-expansion
-        (register-type-alias-display! (copy-type expansion) full-name))
-      (set! consumer-aliases
-            (hash-set consumer-aliases full-name full-expansion))))
-  (current-type-aliases consumer-aliases)
-  (define import-aliases-with-dependencies
-    (for/fold ([aliases consumer-aliases])
-              ([(name expansion) (in-hash provider-import-aliases)])
-      (hash-set aliases name expansion)))
-  (define import-aliases
-    (for/fold ([aliases import-aliases-with-dependencies])
-              ([(name expansion) (in-hash provider-aliases)])
-      (hash-set aliases name expansion)))
-  (define (note-type! name)
-    (hash-set! provider-definition-names name #t)
-    (when imp-type-names
-      (set-add! imp-type-names (qualify-name prefix name))
-      (when (referred? name)
-        (set-add! imp-type-names name))))
-  (for ([name (in-hash-keys raw-provider-aliases)])
-    (note-type! name))
-  (define (register-scalar-runtime! name predicates)
-    (define name-str (symbol->string name))
-    (define ctor (string->symbol (string-append "->" name-str)))
-    (define accessor
-      (string->symbol
-       (string-append (string-downcase name-str) "-value")))
-    (when imp-scalar-fns
-      (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
-      (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t)
-      (when (referred? ctor)
-        (hash-set! imp-scalar-fns ctor #t))
-      (when (referred? accessor)
-        (hash-set! imp-scalar-fns accessor #t)))
-    (when (and imp-scalar-preds (pair? predicates))
-      (hash-set! imp-scalar-preds (qualify-name prefix name) predicates)
-      (when (referred? ctor)
-        (hash-set! imp-scalar-preds name predicates))))
-  (define (reg! name type)
-    (hash-set! provider-definition-names name #t)
-    (hash-set! externs (qualify-name prefix name) type)
-    (when (and (referred? name) (not (hash-has-key? externs name)))
-      (hash-set! externs name type))
-    (when (and imp-symbol-ns (referred? name))
-      (hash-set! imp-symbol-ns name prefix)))
-  ;; Register the fully declared function type for a defn. Claim is gone;
-  ;; declarations carry their types directly in the signature.
-  (define (defn-reg! name type)
-    (reg! name type))
-  ;; Record an imported `^:dynamic` var so cross-module `binding` can see its
-  ;; dynamic-ness (G-A). Qualified to match the use site (prefix = alias or
-  ;; last ns segment, exactly what qualify-name uses); also bare when referred.
-  (define (note-dyn! name)
-    (when imp-dyn-vars
-      (set-add! imp-dyn-vars (qualify-name prefix name))
-      (when (referred? name) (set-add! imp-dyn-vars name))))
-  ;; Cross-module twin of check.rkt's register-union-member-fields!: a defunion
-  ;; member and a defrecord expose the same ctor/accessor/field-map/field-order
-  ;; surface, and narrow-env-for-match binds a variant pattern to the FIELD only
-  ;; when the field map is present.
-  (define (reg-fielded-type! name fields type-vars)
-    (define rec-type (type-prim name))
-    (define name-str (symbol->string name))
-    (define name-lower (string-downcase name-str))
-    (define (generalize t) (if (null? type-vars) t (type-poly type-vars t #f)))
-    (reg! (string->symbol (string-append "->" name-str))
-          (generalize (type-fn (map param-type fields) #f rec-type)))
-    (define field-map (make-hash))
-    (for ([f (in-list fields)])
-      (define fname (symbol->string (param-name f)))
-      (reg! (string->symbol (string-append name-lower "-" fname))
-            (generalize (type-fn (list rec-type) #f (param-type f))))
-      (hash-set! field-map
-                 (string->symbol (string-append ":" fname))
-                 (param-type f)))
-    (when imp-rec-fields
-      (hash-set! imp-rec-fields name field-map))
-    (when imp-rec-field-order
-      ;; Field-name STRINGS: the emitters read this table that way.
-      (hash-set! imp-rec-field-order name
-                 (map (lambda (f) (symbol->string (param-name f))) fields)))
-    (when imp-rec-ns
-      (hash-set! imp-rec-ns name mod-ns)
-      (hash-set! imp-rec-ns (qualify-name mod-ns name) mod-ns)))
-  ;; A checked module interface publishes provider-local nominal identities as
-  ;; fully qualified names.  The corresponding union registry entry must use
-  ;; the same identity on both sides: `provider/U` contains `provider/M`, never
-  ;; the provider-source spelling `M`.  Bootstrap and standalone source imports
-  ;; retain their bare member spellings until an authoritative interface exists.
-  (define (qualify-union-value value qualifier)
-    (define (qualify-member member)
-      (qualify-name qualifier member))
-    (cond
-      [(list? value) (map qualify-member value)]
-      [(hash? value)
-       (define members (hash-ref value 'members '()))
-       (define member-fields (hash-ref value 'member-fields (hasheq)))
-       (hash-set
-        (hash-set value 'members (map qualify-member members))
-        'member-fields
-        (for/hasheq ([(member fields) (in-hash member-fields)])
-          (values (qualify-member member) fields)))]
-      [else value]))
-
-  ;; A use site names an imported union by its qualified spelling while the
-  ;; provider declares it bare; both keys must reach UNION-MEMBERS /
-  ;; PARAMETRIC-UNIONS or assignability and match narrowing silently miss.
-  (define (reg-union-table! table name value)
-    (when table
-      (hash-set! table name value)
-      (hash-set! table
-                 (qualify-name prefix name)
-                 (if canonical-provider-types?
-                     (qualify-union-value value prefix)
-                     value))
-      (hash-set! table
-                 (qualify-name mod-ns name)
-                 (if canonical-provider-types?
-                     (qualify-union-value value mod-ns)
-                     value))))
-  ;; A bare member NAMES an already-declared type; registering its nullary
-  ;; surface is deferred past the datum scan so it can never overwrite a
-  ;; sibling defrecord's fields, in either source order.
-  (define deferred-bare-members '())
-  (define (declared-fielded-type? name)
-    (hash-has-key? externs
-                   (qualify-name prefix
-                                 (string->symbol
-                                  (string-append "->" (symbol->string name))))))
-  ;; Returns member NAMES (never the raw `(Name [fields])` datum — exhaustiveness
-  ;; compares them against pattern heads) plus their parsed field map.
-  (define (reg-union-members! member-defs type-vars)
-    (define mf-hash (make-hasheq))
-    (define mnames
-      (for/list ([md (in-list member-defs)])
-        (define-values (mname fields fielded?)
-          (parse-union-member-declaration md "imported defunion" type-vars))
-        (hash-set! mf-hash mname fields)
-        (if fielded?
-            (reg-fielded-type! mname fields type-vars)
-            (set! deferred-bare-members
-                  (cons (cons mname type-vars) deferred-bare-members)))
-        mname))
-    (values mnames mf-hash))
-  (parameterize ([current-type-aliases import-aliases]
-                 [current-user-parametric-arities
-                  provider-parametric-arities])
-    (for ([d (in-list active-datums)])
-      ;; One unparseable form must not erase the rest of the module's
-      ;; types — warn and continue per form.
-      (with-handlers ([exn:fail?
-                       (lambda (e)
-                         (eprintf "warning: type import from ~a skipped a form: ~a\n"
-                                  mod-ns (exn-message e)))])
-      (match d
-      [(list 'declare-extern (? bracketed? names-form) type-expr)
-       (for ([name (in-list (bracket-body names-form))])
-         (reg! name (parse-type type-expr)))]
-      [(list 'declare-extern (? symbol? name) type-expr)
-       (reg! name (parse-type type-expr))]
-      [(cons 'define-macro _)
-       (raise-parse-error 'legacy-macro-form
-        "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
-      [(list 'defmacro (? symbol? name) params template)
-       (unless (bracketed? params)
-         (error 'beagle "macro ~a: parameters must be written in `[...]`" name))
-       (define ps (bracket-body params))
-       (hash-set! provider-definition-names name #t)
-       (set! pending-macros (cons (list name ps template) pending-macros))]
-      [(list 'defrecord (? symbol? name) fields-form)
-       (note-type! name)
-       (define fields (parse-record-fields fields-form))
-       (define rec-type (type-prim name))
-       (define name-str (symbol->string name))
-       (define name-lower (string-downcase name-str))
-       (reg! (string->symbol (string-append "->" name-str))
-             (type-fn (map param-type fields) #f rec-type))
-       (define field-map (make-hash))
-       (for ([f (in-list fields)])
-         (define fname (symbol->string (param-name f)))
-         (reg! (string->symbol (string-append name-lower "-" fname))
-               (type-fn (list rec-type) #f (param-type f)))
-         (hash-set! field-map
-                    (string->symbol (string-append ":" fname))
-                    (param-type f)))
-       (hash-set! imp-rec-fields name field-map)
-       (hash-set! imp-rec-field-order name
-                  (map (lambda (f) (symbol->string (param-name f))) fields))
-       (hash-set! imp-rec-ns name mod-ns)
-       (hash-set! imp-rec-ns (qualify-name mod-ns name) mod-ns)]
-      [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
-       (note-type! name)
-       (define scalar-type (type-prim name))
-       (define backing-name (parse-scalar-backing backing))
-       (define backing-type (type-prim backing-name))
-       (define name-str (symbol->string name))
-       (define name-lower (string-downcase name-str))
-       (define ctor (string->symbol (string-append "->" name-str)))
-       (define accessor (string->symbol (string-append name-lower "-value")))
-       (reg! ctor (type-fn (list backing-type) #f scalar-type))
-       (reg! accessor (type-fn (list scalar-type) #f backing-type))
-       (define parsed-preds
-         (for/list ([p (in-list preds)])
-           (parse-scalar-predicate p)))
-       (register-scalar-runtime! name parsed-preds)]
-      [(list 'defscalar (? symbol? name) (? symbol? backing))
-       (note-type! name)
-       (define scalar-type (type-prim name))
-       (define backing-name (parse-scalar-backing backing))
-       (define backing-type (type-prim backing-name))
-       (define name-str (symbol->string name))
-       (define name-lower (string-downcase name-str))
-       (define ctor (string->symbol (string-append "->" name-str)))
-       (define accessor (string->symbol (string-append name-lower "-value")))
-       (reg! ctor (type-fn (list backing-type) #f scalar-type))
-       (reg! accessor (type-fn (list scalar-type) #f backing-type))
-       (register-scalar-runtime! name '())]
-      ;; `:throwable` reads as an ordinary symbol, so this arm MUST precede the
-      ;; plain-name arm or it never fires.  Variants register on the throw/catch
-      ;; path in the consumer's own pass; only the parent name crosses here.
-      [(list 'defunion ':throwable (? symbol? name) _members ...)
-       (define-values (mnames _member-fields)
-         (reg-union-members! _members '()))
-       (note-type! name)
-       (for ([member (in-list mnames)]) (note-type! member))
-       (reg! name (type-union (map (lambda (member) (type-prim member)) mnames)))
-       (reg-union-table! imp-union-members name mnames)]
-      [(list 'defunion (? symbol? name) member-defs ...)
-       (define-values (mnames _mf) (reg-union-members! member-defs '()))
-       (note-type! name)
-       (for ([member (in-list mnames)]) (note-type! member))
-       (reg! name (type-union (map (lambda (m) (type-prim m)) mnames)))
-       (reg-union-table! imp-union-members name mnames)]
-      [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
-       ;; The bootstrap candidate-overlay pass has provider datums but not yet a
-       ;; canonical interface.  Admit the exact qualified spellings here so a
-       ;; consumer annotation such as (api/Result String) can reach the
-       ;; authoritative second pass, where the interface resolver proves the
-       ;; export and validates arity.
-       (reg! name (type-prim name))
-       (define-values (mnames member-fields-hash)
-         (reg-union-members! member-defs type-vars))
-       (note-type! name)
-       (for ([member (in-list mnames)]) (note-type! member))
-       (reg-union-table! imp-union-members name mnames)
-       (reg-union-table! imp-param-unions name
-                         (hasheq 'params type-vars
-                                 'members mnames
-                                 'member-fields member-fields-hash))]
-      ;; Positional types on def/defonce/defn register the typed shape
-      ;; so imported modules surface the annotated type to call sites in the
-      ;; importing module.
-      [(list 'def (? symbol? name) type-expr _)
-       (reg! name (parse-type type-expr))]
-      [(list 'defonce (? symbol? name) type-expr _)
-       (reg! name (parse-type type-expr))]
-      ;; ^:dynamic defs — the name is wrapped in (#%meta MV name), so the plain
-      ;; (? symbol? name) arms above miss them. Import the var (typed or Any) AND
-      ;; record its dynamic-ness so a requiring module's `binding` resolves it
-      ;; across the module boundary, matching Clojure (G-A).
-      [(list 'def (list '#%meta mv (? symbol? name)) type-expr _)
-       (reg! name (parse-type type-expr))
-       (when (meta-dynamic? mv) (note-dyn! name))]
-      [(list 'def (list '#%meta mv (? symbol? name)) _)
-       (reg! name (type-prim 'Any))
-       (when (meta-dynamic? mv) (note-dyn! name))]
-      ;; Multi-arity: every clause is `([params] RET body ...)`. Imported as
-      ;; the union of its clause types, matching ast-interface-bindings, so a
-      ;; consumer's call resolves against the clause with its arity.
-      [(list* 'defn (? symbol? name) (and clauses (list (? multi-arity-clause?) ...)))
-       #:when (pair? clauses)
-       (define alternatives
-         (for/list ([clause (in-list clauses)])
-           (define-values (parsed rest-p) (parse-params (car clause)))
-           (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
-           (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
-           (define ret (parse-type (cadr clause)))
-           (type-fn ptypes rtype ret)))
-       (defn-reg! name (if (= (length alternatives) 1)
-                           (car alternatives)
-                           (type-union alternatives)))]
-      [(list 'defn (? symbol? name) params-form return-type _ _ ...)
-       (define-values (parsed rest-p) (parse-params params-form))
-       (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
-       (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
-       (defn-reg! name (type-fn ptypes rtype (parse-type return-type)))]
-      ;; Enum: register the name so keyword literals type-check against it in
-      ;; the importing module (Keyword <: EnumType, types.rkt). Variants emit
-      ;; as enum-qualified members on targets that support them.
-      [(list* 'defenum (? symbol? name) _variants)
-       (note-type! name)
-       (when imp-enums (hash-set! imp-enums name #t))]
-        [_ (void)])))
-    (for ([entry (in-list (reverse deferred-bare-members))])
-      (unless (declared-fielded-type? (car entry))
-        (reg-fielded-type! (car entry) '() (cdr entry))))
-    (for ([pending (in-list (reverse pending-macros))])
-      (match-define (list name ps template) pending)
-      (define qualified-template
-        (qualify-imported-macro-template
-         template ps provider-definition-names prefix))
-      (register-macro! registry (qualify-name prefix name)
-                       'defmacro ps qualified-template)
-      (when (and (referred? name) (not (hash-has-key? registry name)))
-        (register-macro! registry name 'defmacro ps qualified-template)))))
 
 ;; --- reader-conditional resolution ----------------------------------------
 ;;
@@ -1692,56 +1022,6 @@
         (rc-splice-children target d)])]
     [else d]))
 
-;; Datum-only counterpart to parse-program*'s syntax-preserving rewrite. Raw
-;; provider datums cross the module interface importer without their own parse
-;; pass, so candidate-overlay alias traversal must select the same target branch
-;; before it enumerates requires or declarations.
-(define (resolve-reader-conditional-datum-stream
-         datums
-         #:source-path [source-path #f])
-  (define target
-    (for/first ([datum (in-list datums)]
-                #:when
-                (and (pair? datum)
-                     (eq? (car datum) 'define-target)
-                     (pair? (cdr datum))
-                     (symbol? (cadr datum))))
-      (cadr datum)))
-  (define effective-target
-    (or target
-        (and source-path
-             (expected-target-for-extension (format "~a" source-path)))
-        DEFAULT-TARGET))
-  (if (not (for/or ([datum (in-list datums)])
-             (has-reader-conditional? datum)))
-      datums
-      (apply
-       append
-       (for/list ([datum (in-list datums)])
-         (cond
-           [(and (pair? datum)
-                 (eq? (car datum) 'reader-conditional-splice))
-            (define chosen
-              (rc-select effective-target (rc-pairs (cdr datum)) datum))
-            (define sequence
-              (cond
-                [(and (pair? chosen)
-                      (memq (car chosen) '(#%brackets #%map #%set)))
-                 (cdr chosen)]
-                [(list? chosen) chosen]
-                [else
-                 (raise-parse-error
-                  'reader-conditional-no-match
-                  "reader-conditional-splice: chosen branch is not a sequence: ~v"
-                  chosen)]))
-            (map
-             (lambda (item)
-               (resolve-reader-conditionals item effective-target))
-             sequence)]
-           [else
-            (list
-             (resolve-reader-conditionals datum effective-target))])))))
-
 ;; --- mode-2 hygiene: inject free-ref aliases ------------------------------
 ;; The top-level definition name of a form, or #f.
 (define (form-def-name f)
@@ -1784,6 +1064,12 @@
 ;; legacy nominal/JVM path.
 (define current-candidate-type-bindings (make-parameter #f))
 (define current-candidate-type-prefixes (make-parameter #f))
+
+;; Standalone parsing resolves sibling Beagle modules to provisional semantic
+;; interfaces. Nested parses share this cache; an active set makes source cycles
+;; fail visibly instead of recursing through the filesystem indefinitely.
+(define current-standalone-interface-cache (make-parameter #f))
+(define current-standalone-interface-active (make-parameter (set)))
 
 (define INTERFACE-TYPE-EXPORT-KINDS
   '(record protocol enum union parametric-union union-member
@@ -1945,6 +1231,8 @@
 (define (parse-program stxs*
                        #:source-path [source-path #f]
                        #:module-resolver [module-resolver #f])
+  (define standalone-cache
+    (or (current-standalone-interface-cache) (make-hash)))
   (parameterize ([lowering-counter (box 0)]
                  ;; Type aliases and parametric declaration names are
                  ;; program-local.  Freshening them here prevents one module
@@ -1954,6 +1242,7 @@
                  [current-type-aliases (hasheq)]
                  [current-candidate-type-bindings (make-hasheq)]
                  [current-candidate-type-prefixes (make-hash)]
+                 [current-standalone-interface-cache standalone-cache]
                  [current-qualified-type-resolver
                   resolve-candidate-qualified-type]
                  [current-type-surface-error
@@ -2063,7 +1352,9 @@
   (define ns-set?   #f)
   (define gen-class? #f)
   (define registry  (make-macro-registry))
+  (define declared-macros (make-hasheq))
   (define externs   (make-hash))
+  (define declared-externs (make-hasheq))
   (define imp-rec-fields (make-hash))
   (define imp-rec-field-order (make-hash))
   (define imp-rec-ns (make-hash))
@@ -2080,11 +1371,21 @@
   (define imp-module-interfaces '())
   (define declared-type-aliases (make-hasheq))
 
-  (define (register-interface-types! interface prefix)
+  (define (referred? refer-syms name)
+    (and refer-syms (memq name refer-syms)))
+
+  (define (interface-spellings interface prefix refer-syms name)
+    (remove-duplicates
+     (append
+      (list (qualify-name prefix name)
+            (qualify-name (module-interface-namespace interface) name))
+      (if (referred? refer-syms name) (list name) '()))
+     eq?))
+
+  (define (validate-interface! interface)
     (unless
-        (equal?
-         (module-interface-schema-version interface)
-         INTERFACE-SCHEMA-VERSION)
+        (equal? (module-interface-schema-version interface)
+                INTERFACE-SCHEMA-VERSION)
       (raise-parse-error
        'module-interface
        "required Beagle module ~a uses interface schema v~v; this compiler requires v~a"
@@ -2097,13 +1398,27 @@
        "required Beagle interface schema v~a has invalid namespace ~v"
        INTERFACE-SCHEMA-VERSION
        (module-interface-namespace interface)))
-    (unless (hash? (module-interface-type-exports interface))
+    (for ([field (in-list
+                  (list (module-interface-bindings interface)
+                        (module-interface-macros interface)
+                        (module-interface-type-declarations interface)
+                        (module-interface-type-exports interface)
+                        (module-interface-record-contracts interface)))])
+      (unless (hash? field)
+        (raise-parse-error
+         'module-interface
+         "required Beagle module ~a has a malformed schema-v~a interface table"
+         (module-interface-namespace interface)
+         INTERFACE-SCHEMA-VERSION)))
+    (unless (set? (module-interface-dynamic-vars interface))
       (raise-parse-error
        'module-interface
-       "required Beagle module ~a has invalid schema-v~a type export table: expected a hash, got ~v"
+       "required Beagle module ~a has a malformed schema-v~a dynamic-var set"
        (module-interface-namespace interface)
-       INTERFACE-SCHEMA-VERSION
-       (module-interface-type-exports interface)))
+       INTERFACE-SCHEMA-VERSION)))
+
+  (define (register-interface-types! interface prefix refer-syms)
+    (validate-interface! interface)
     (define namespace (module-interface-namespace interface))
     (define prefixes (current-candidate-type-prefixes))
     (define bindings (current-candidate-type-bindings))
@@ -2112,31 +1427,223 @@
     (for ([(name export)
            (in-hash (module-interface-type-exports interface))])
       (validate-interface-type-export! interface name export)
-      (define prefixed (qualify-name prefix name))
-      (define fully-qualified (qualify-name namespace name))
-      (define qualified-names
-        (if (eq? prefixed fully-qualified)
-            (list prefixed)
-            (list prefixed fully-qualified)))
-      (for ([qualified-name (in-list qualified-names)])
-        (hash-set! bindings qualified-name (cons interface export))
+      (define visible-names
+        (interface-spellings interface prefix refer-syms name))
+      (for ([visible-name (in-list visible-names)])
+        (hash-set! bindings visible-name (cons interface export))
         (when (interface-type-export-expansion export)
           (current-type-aliases
-           (hash-set
-            (current-type-aliases)
-            qualified-name
-            (interface-type-export-expansion export))))
-        (when
-            (eq? (interface-type-export-kind export) 'parametric-union)
+           (hash-set (current-type-aliases)
+                     visible-name
+                     (interface-type-export-expansion export))))
+        (when (eq? (interface-type-export-kind export) 'parametric-union)
           (current-user-parametric-arities
-           (hash-set
-            (current-user-parametric-arities)
-            qualified-name
-            (interface-type-export-arity export)))))))
+           (hash-set (current-user-parametric-arities)
+                     visible-name
+                     (interface-type-export-arity export)))))))
 
-  ;; Shared require registration: resolve sibling beagle modules for type
-  ;; import, then record the require-entry. Used by the top-level
-  ;; (require ...) arms and by (ns ... (:require ...)) clauses.
+  (define (record-referred? refer-syms name)
+    (or (referred? refer-syms name)
+        (referred?
+         refer-syms
+         (string->symbol (format "->~a" name)))))
+
+  (define (record-spellings interface prefix refer-syms name)
+    (remove-duplicates
+     (append
+      (list (qualify-name prefix name)
+            (qualify-name (module-interface-namespace interface) name))
+      (if (record-referred? refer-syms name) (list name) '()))
+     eq?))
+
+  (define (interface-provider-names interface)
+    (for/fold ([names (make-hasheq)])
+              ([name (in-list
+                      (append
+                       (hash-keys (module-interface-bindings interface))
+                       (hash-keys (module-interface-macros interface))
+                       (hash-keys (module-interface-type-exports interface))))])
+      (hash-set! names name #t)
+      names))
+
+  (define (import-interface-macros! interface prefix refer-syms)
+    (define provider-names (interface-provider-names interface))
+    (for ([(name macro) (in-hash (module-interface-macros interface))])
+      (unless (and (interface-macro? macro)
+                   (eq? name (interface-macro-name macro)))
+        (raise-parse-error
+         'module-interface
+         "required Beagle module ~a has malformed macro export ~a"
+         (module-interface-namespace interface)
+         name))
+      (define params
+        (append
+         (interface-macro-fixed-params macro)
+         (if (interface-macro-rest-param macro)
+             (list '& (interface-macro-rest-param macro))
+             '())))
+      (define template
+        (qualify-imported-macro-template
+         (interface-macro-template macro)
+         params
+         provider-names
+         prefix))
+      (define qualified-names
+        (remove-duplicates
+         (list (qualify-name prefix name)
+               (qualify-name (module-interface-namespace interface) name))
+         eq?))
+      (for ([qualified-name (in-list qualified-names)])
+        (register-macro!
+         registry qualified-name (interface-macro-kind macro) params template))
+      (when (and (referred? refer-syms name)
+                 (not (hash-has-key? registry name)))
+        (register-macro!
+         registry name (interface-macro-kind macro) params template))))
+
+  (define (import-interface-records! interface prefix refer-syms)
+    (define namespace (module-interface-namespace interface))
+    (for ([(name contract)
+           (in-hash (module-interface-record-contracts interface))])
+      (define fields (interface-record-contract-fields contract))
+      (define field-map
+        (for/hash ([field (in-list fields)])
+          (values (string->symbol (format ":~a" (param-name field)))
+                  (param-type field))))
+      (define field-order
+        (for/list ([field (in-list fields)])
+          (symbol->string (param-name field))))
+      (for ([spelling
+             (in-list (record-spellings interface prefix refer-syms name))])
+        (hash-set! imp-rec-fields spelling field-map)
+        (hash-set! imp-rec-field-order spelling field-order)
+        (hash-set! imp-rec-ns spelling namespace))))
+
+  (define (interface-record-fields interface name)
+    (define contract
+      (module-interface-record-contract-ref interface name #f))
+    (if contract (interface-record-contract-fields contract) '()))
+
+  (define (qualified-union-members qualifier members)
+    (for/list ([member (in-list members)])
+      (qualify-name qualifier member)))
+
+  (define (qualified-member-fields interface qualifier members)
+    (for/hasheq ([member (in-list members)])
+      (values (qualify-name qualifier member)
+              (interface-record-fields interface member))))
+
+  (define (register-interface-union! interface prefix refer-syms name
+                                     type-params members)
+    (define namespace (module-interface-namespace interface))
+    (define bare? (referred? refer-syms name))
+    (define (members-for qualifier)
+      (if qualifier (qualified-union-members qualifier members) members))
+    (define (member-fields-for qualifier)
+      (if qualifier
+          (qualified-member-fields interface qualifier members)
+          (for/hasheq ([member (in-list members)])
+            (values member (interface-record-fields interface member)))))
+    (define (register-members! key qualifier)
+      (hash-set! imp-union-members key (members-for qualifier)))
+    (define (register-parametric! key qualifier)
+      (hash-set!
+       imp-param-unions
+       key
+       (hasheq 'params type-params
+               'members (members-for qualifier)
+               'member-fields (member-fields-for qualifier))))
+    (register-members! (qualify-name prefix name) prefix)
+    (register-members! (qualify-name namespace name) namespace)
+    (when bare? (register-members! name #f))
+    (unless (null? type-params)
+      (register-parametric! (qualify-name prefix name) prefix)
+      (register-parametric! (qualify-name namespace name) namespace)
+      (when bare? (register-parametric! name #f))))
+
+  (define (import-interface-type-contracts! interface prefix refer-syms)
+    (define namespace (module-interface-namespace interface))
+    (for ([(name declaration)
+           (in-hash (module-interface-type-declarations interface))])
+      (match (interface-type-declaration-details declaration)
+        [`(type-params ,type-params members ,member-specs)
+         (register-interface-union!
+          interface prefix refer-syms name type-params (map car member-specs))]
+        [`(members ,member-specs)
+         (register-interface-union!
+          interface prefix refer-syms name '() (map car member-specs))]
+        [`(values ,_ ...)
+         (for ([spelling
+                (in-list (interface-spellings
+                          interface prefix refer-syms name))])
+           (hash-set! imp-enums spelling #t))]
+        [`(backing ,_ predicates ,predicates)
+         (define parsed-predicates
+           (for/list ([predicate (in-list predicates)])
+             (match predicate
+               [(list op value) (scalar-predicate op value)])))
+         (define name-string (symbol->string name))
+         (define ctor (string->symbol (string-append "->" name-string)))
+         (define accessor
+           (string->symbol
+            (string-append (string-downcase name-string) "-value")))
+         (for ([runtime-name (in-list (list ctor accessor))])
+           (for ([spelling
+                  (in-list (interface-spellings
+                            interface prefix refer-syms runtime-name))])
+             (hash-set! imp-scalar-fns spelling #t)))
+         (define scalar-referred?
+           (or (referred? refer-syms name)
+               (referred? refer-syms ctor)
+               (referred? refer-syms accessor)))
+         (define scalar-spellings
+           (remove-duplicates
+            (append
+             (list (qualify-name prefix name)
+                   (qualify-name namespace name))
+             (if scalar-referred? (list name) '()))
+            eq?))
+         (when (pair? parsed-predicates)
+           (for ([spelling (in-list scalar-spellings)])
+             (hash-set! imp-scalar-preds spelling parsed-predicates)))]
+        [_ (void)])))
+
+  (define (import-interface! interface prefix refer-syms)
+    (register-interface-types! interface prefix refer-syms)
+    (for ([name (in-list (or refer-syms '()))])
+      (unless (or (module-interface-export? interface name)
+                  (module-interface-type-export? interface name))
+        (error 'beagle
+               "required module ~a does not export referred name ~a"
+               (module-interface-namespace interface)
+               name)))
+    (for ([(name binding) (in-hash (module-interface-bindings interface))]
+           #:unless (eq? (interface-binding-kind binding) 'macro))
+      (define binding-type (interface-binding-type binding))
+      (for ([spelling
+             (in-list (interface-spellings
+                       interface prefix refer-syms name))])
+        (unless (and (eq? spelling name) (hash-has-key? externs name))
+          (hash-set! externs spelling binding-type)))
+      (when (referred? refer-syms name)
+        (hash-set! imp-symbol-ns name prefix)))
+    (import-interface-macros! interface prefix refer-syms)
+    (for ([name (in-hash-keys (module-interface-type-exports interface))])
+      (for ([spelling
+             (in-list (interface-spellings
+                       interface prefix refer-syms name))])
+        (set-add! imp-type-names spelling)))
+    (import-interface-records! interface prefix refer-syms)
+    (import-interface-type-contracts! interface prefix refer-syms)
+    (for ([name (in-set (module-interface-dynamic-vars interface))])
+      (for ([spelling
+             (in-list (interface-spellings
+                       interface prefix refer-syms name))])
+        (set-add! imp-dyn-vars spelling)))
+    (set! imp-module-interfaces
+          (cons (module-import interface prefix refer-syms)
+                imp-module-interfaces)))
+
   (define (candidate-for-require rn)
     (validate-module-path! rn)
     (define candidate
@@ -2145,202 +1652,106 @@
       (error 'beagle
              "module resolver returned ~v for ~a; expected module-source or #f"
              candidate rn))
-    (when
-        (and candidate
-             (not (eq? (module-source-namespace candidate) rn)))
+    (when (and candidate
+               (not (eq? (module-source-namespace candidate) rn)))
       (error 'beagle
              "module resolver returned namespace ~a for required module ~a"
              (module-source-namespace candidate)
              rn))
     candidate)
 
-  (define (register-bootstrap-candidate-aliases!
-           candidate namespace prefix refer-syms)
-    (define candidate-id
-      (format "~a" (module-source-source-id candidate)))
-    (define candidate-datums
-      (resolve-reader-conditional-datum-stream
-       (module-source-datums candidate)
-       #:source-path candidate-id))
-    (validate-reserved-type-declarations! candidate-datums)
-    (define imported-aliases
-      (collect-required-type-aliases
-       candidate-datums
-       candidate-id
-       (set (cons 'candidate candidate-id))
-       #:module-resolver module-resolver
-       #:source-id candidate-id))
-    (define local-aliases
-      (canonicalize-local-aliases
-       (collect-local-type-aliases candidate-datums imported-aliases)
-       namespace
-       candidate-datums))
-    (for ([(name expansion) (in-hash local-aliases)])
-      (define prefixed-name (qualify-name prefix name))
-      (define full-name (qualify-name namespace name))
-      (define visible-names
-        (append
-         (if (eq? prefixed-name full-name)
-             (list prefixed-name)
-             (list prefixed-name full-name))
-         (if (and refer-syms (memq name refer-syms))
-             (list name)
-             '())))
-      (for ([visible-name (in-list visible-names)])
-        (current-type-aliases
-         (hash-set
-          (current-type-aliases)
-          visible-name
-          (register-type-alias-display!
-           (copy-type expansion)
-           visible-name))))))
+  (define (standalone-interface-for rn)
+    (define mod-path (resolve-module-path rn source-path))
+    (and
+     mod-path
+     (let* ([canonical-path
+             (simplify-path (path->complete-path mod-path))]
+            [cache (current-standalone-interface-cache)]
+            [active (current-standalone-interface-active)])
+       (hash-ref
+        cache
+        canonical-path
+        (lambda ()
+          (when (set-member? active canonical-path)
+            (error 'beagle
+                   "standalone module cycle reaches ~a; check the module set through the coherent overlay"
+                   canonical-path))
+          (define provider
+            (parameterize
+                ([current-standalone-interface-active
+                  (set-add active canonical-path)])
+              (parse-program/file canonical-path)))
+          (unless (eq? (program-namespace provider) rn)
+            (error 'beagle
+                   "required module ~a resolved to source declaring namespace ~a"
+                   rn
+                   (program-namespace provider)))
+          (define interface
+            (program->module-interface
+             provider
+             #:source-id (path->string canonical-path)
+             #:provisional? #t))
+          (hash-set! cache canonical-path interface)
+          interface)))))
 
   (define (pre-register-require-types! rn alias refer-syms)
-    (define candidate (candidate-for-require rn))
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (define candidate (candidate-for-require rn))
+    (define interface
+      (if candidate
+          (module-source-interface candidate)
+          (standalone-interface-for rn)))
     (cond
+      [interface
+       (register-interface-types! interface prefix refer-syms)]
       [candidate
-      (define interface (module-source-interface candidate))
-      (if interface
-          ;; Authoritative pass: aliases may expand imported aliases and must
-          ;; fail closed against the exact provider type export set.
-          (register-interface-types! interface prefix)
-          ;; Bootstrap pass: transparent aliases must be expanded from the
-          ;; exact candidate closure before a provisional namespace marker can
-          ;; nominalize them. The marker remains authoritative for real nominal
-          ;; declarations until the second pass installs the full interface.
-          (let ([prefixes (current-candidate-type-prefixes)])
-            (register-bootstrap-candidate-aliases!
-             candidate rn prefix refer-syms)
-            (hash-set! prefixes (symbol->string prefix) rn)
-            (hash-set! prefixes (symbol->string rn) rn)))]
-      [else
-       ;; Standalone checking has no candidate interface. Read only the
-       ;; required source's constructor declarations here so local aliases are
-       ;; parsed against the same exact arities as later annotations. Full
-       ;; binding, macro, and type-surface import remains in register-require!.
-       (define mod-path (resolve-module-path rn source-path))
-       (when mod-path
-         (define provider-datums (read-beagle-datums mod-path))
-         (validate-reserved-type-declarations! provider-datums)
-         (define refer-set (and refer-syms (list->seteq refer-syms)))
-         (for ([entry
-                (in-list
-                 (parametric-defunion-arities
-                  provider-datums))])
-           (define name (car entry))
-           (define arity (cdr entry))
-           (when (zero? arity)
-             (error 'beagle
-                    "parametric defunion ~a requires at least one type parameter; use (defunion ~a ...) for a non-parametric union"
-                    name
-                    name))
-           (define arities (current-user-parametric-arities))
-           (define qualified-arities
-             (hash-set
-              (hash-set arities (qualify-name prefix name) arity)
-              (qualify-name rn name) arity))
-           (current-user-parametric-arities
-            (if (and refer-set (set-member? refer-set name))
-                (hash-set qualified-arities name arity)
-                qualified-arities))))]))
+       ;; Bootstrap knows the namespace but has not minted its semantic
+       ;; interface yet. Qualified types remain opaque until the next round.
+       (define prefixes (current-candidate-type-prefixes))
+       (hash-set! prefixes (symbol->string prefix) rn)
+       (hash-set! prefixes (symbol->string rn) rn)]
+      [else (void)]))
 
   (define (register-require! rn alias refer-syms)
-    (define prefix (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (define prefix
+      (or alias (string->symbol (last-of (split-ns-segments rn)))))
     (define candidate (candidate-for-require rn))
-    ;; A failed sibling-module import must be VISIBLE: silently voiding it
-    ;; (the pre-2026-06-12 behavior) meant a parse error in the required
-    ;; module just erased its types, and downstream code typed as Any.
-    ;; External (non-beagle) requires never reach the handler — they fail
-    ;; resolve-module-path and skip the import cleanly.
+    (define interface
+      (if candidate
+          (module-source-interface candidate)
+          (with-handlers
+              ([exn:fail?
+                (lambda (error)
+                  (eprintf "warning: interface import from ~a failed: ~a\n"
+                           rn (exn-message error))
+                  #f)])
+            (standalone-interface-for rn))))
     (cond
+      [interface
+       (import-interface! interface prefix refer-syms)]
       [candidate
-       ;; Candidate-overlay modules are authoritative and fail closed.  Their
-       ;; source datums win over any old provider still present on disk.
-       ;; Make the qualifier visible during the bootstrap parse.  The namespace
-       ;; symbol is a deliberate provisional marker; the authoritative pass
-       ;; overwrites it with the canonical module-interface below.
-       (define candidate-prefixes (current-candidate-type-prefixes))
-       (hash-set! candidate-prefixes (symbol->string prefix) rn)
-       (hash-set! candidate-prefixes (symbol->string rn) rn)
-       (define interface (module-source-interface candidate))
-       (import-module-types!
-        (module-source-source-id candidate)
-        prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
-        #:type-names imp-type-names
-        #:scalar-fns imp-scalar-fns
-        #:scalar-preds imp-scalar-preds
-        #:symbol-ns imp-symbol-ns
-        #:union-members imp-union-members
-        #:parametric-unions imp-param-unions
-        #:dynamic-vars imp-dyn-vars
-        #:refer-syms refer-syms
-        #:datums (module-source-datums candidate)
-        #:module-resolver module-resolver
-        #:canonical-provider-types? (and interface #t))
-       (when interface
-         (register-interface-types! interface prefix)
-         (for ([name (in-list (or refer-syms '()))])
-           (unless (or (module-interface-export? interface name)
-                       (module-interface-type-export? interface name))
-             (error 'beagle
-                    "required module ~a does not export referred name ~a"
-                    rn name)))
-         ;; The authoritative pass imports public binding types from the
-         ;; canonical interface.  The datum importer above still supplies the
-         ;; richer legacy record/union/macro registries, but it no longer gets
-         ;; the final word on a binding's signature.
-         (for ([(name binding)
-                (in-hash (module-interface-bindings interface))]
-               #:unless (eq? (interface-binding-kind binding) 'macro))
-           (define binding-type (interface-binding-type binding))
-           (hash-set! externs (qualify-name prefix name) binding-type)
-           (hash-set!
-            externs
-            (qualify-name (module-interface-namespace interface) name)
-            binding-type)
-           (when (and refer-syms (memq name refer-syms))
-             (hash-set! externs name binding-type)
-             (hash-set! imp-symbol-ns name prefix)))
-         (for ([name (in-hash-keys (module-interface-type-exports interface))])
-           (set-add! imp-type-names (qualify-name prefix name))
-           (when (and refer-syms (memq name refer-syms))
-             (set-add! imp-type-names name)))
-         (set! imp-module-interfaces
-               (cons (module-import interface prefix refer-syms)
-                     imp-module-interfaces)))]
-      [else
-       (with-handlers ([exn:fail?
-                        (lambda (e)
-                          (eprintf "warning: type import from ~a failed: ~a\n"
-                                   rn (exn-message e)))])
-         (define mod-path (resolve-module-path rn source-path))
-         (cond
-           [mod-path
-            (import-module-types!
-              mod-path prefix externs registry
-              imp-rec-fields imp-rec-field-order imp-rec-ns rn
-              #:type-names imp-type-names
-              #:scalar-fns imp-scalar-fns
-              #:scalar-preds imp-scalar-preds
-              #:symbol-ns imp-symbol-ns
-              #:union-members imp-union-members
-              #:parametric-unions imp-param-unions
-              #:dynamic-vars imp-dyn-vars
-              #:refer-syms refer-syms)]
-           [(and (eq? target 'js)
-                 (let ([module-name (symbol->string rn)])
-                   (not (string-contains? module-name "."))))
-            ;; Foreign package refers are runtime bindings with unknown types.
-            (for ([name (in-list (or refer-syms '()))])
-              (hash-set! externs name (type-prim 'Any))
-              (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
-              (hash-set! imp-symbol-ns name prefix))]
-           [(and (eq? target 'js)
-                 (string-contains? (symbol->string rn) "."))
-            (error 'beagle "required module ~a could not be resolved" rn)]
-           [else (void)]))])
+       (define prefixes (current-candidate-type-prefixes))
+       (hash-set! prefixes (symbol->string prefix) rn)
+       (hash-set! prefixes (symbol->string rn) rn)
+       ;; A parse-only bootstrap round may see referred values before their
+       ;; interface exists. They are deliberately imprecise and never checked.
+       (for ([name (in-list (or refer-syms '()))])
+         (hash-set! externs name (type-prim 'Any))
+         (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
+         (hash-set! imp-symbol-ns name prefix))]
+      [(and (eq? target 'js)
+            (let ([module-name (symbol->string rn)])
+              (not (string-contains? module-name "."))))
+       ;; Foreign package refers are runtime bindings with unknown types.
+       (for ([name (in-list (or refer-syms '()))])
+         (hash-set! externs name (type-prim 'Any))
+         (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
+         (hash-set! imp-symbol-ns name prefix))]
+      [(and (eq? target 'js)
+            (string-contains? (symbol->string rn) "."))
+       (error 'beagle "required module ~a could not be resolved" rn)]
+      [else (void)])
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
 
   (define current-require-registration
@@ -2527,7 +1938,8 @@
          (raise-parse-error 'bad-meta-value
                             "macro ~a: parameters must be written in `[...]`" name))
        (define ps (bracket-body macro-params))
-       (register-macro! registry name 'defmacro ps template)]
+       (register-macro! registry name 'defmacro ps template)
+       (hash-set! declared-macros name (hash-ref registry name))]
 
       [(list 'declare-extern (? bracketed? names-form) type-expr)
        (for ([name (in-list (bracket-body names-form))])
@@ -2537,12 +1949,16 @@
          (validate-identifier! name "extern")
          (when (hash-has-key? externs name)
            (raise-parse-error 'duplicate-meta "duplicate declare-extern: ~a" name))
-         (hash-set! externs name (parse-type type-expr)))]
+         (define type (parse-type type-expr))
+         (hash-set! externs name type)
+         (hash-set! declared-externs name type))]
       [(list 'declare-extern (? symbol? name) type-expr)
        (validate-identifier! name "extern")
        (when (hash-has-key? externs name)
          (raise-parse-error 'duplicate-meta "duplicate declare-extern: ~a" name))
-       (hash-set! externs name (parse-type type-expr))]
+       (define type (parse-type type-expr))
+       (hash-set! externs name type)
+       (hash-set! declared-externs name type)]
 
       ;; (require lib), (require lib :as a), (require lib :refer [syms]),
       ;; (require lib :as a :refer [syms]) — bare form, options trailing.
@@ -2686,7 +2102,9 @@
     (inject-hygiene-aliases parsed0 form-stxs0 hygiene-alias-table))
 
   (define prog
-    (program mode ns parsed registry externs (reverse requires) (reverse imports)
+    (program mode ns parsed registry (hash-copy declared-macros)
+             externs (hash-copy declared-externs)
+             (reverse requires) (reverse imports)
              form-stxs src-table (make-hasheq)
              (hash-copy declared-type-aliases)
              imp-type-names

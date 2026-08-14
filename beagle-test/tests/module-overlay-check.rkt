@@ -1123,7 +1123,7 @@
       #rx"p/Box expects 1 argument, got 0"
       (diagnostic-text unapplied)))))
 
-(test-case "interface v6 rejects stale schemas and malformed export arity"
+(test-case "interface v7 rejects stale schemas and malformed export arity"
   (with-overlay-files
    (lambda (_root provider-source consumer-source)
      (write-text!
@@ -1146,15 +1146,13 @@
      (define valid-interface
        (program->module-interface
         provider-program
-        #:source-id (path->string provider-source)
-        #:datums provider-datums))
+        #:source-id (path->string provider-source)))
      (define (parse-consumer interface)
        (define candidate
          (module-source
           'overlay.provider
           (path->string provider-source)
           provider-stxs
-          provider-datums
           interface))
        (parse-program
         (read-beagle-syntax consumer-source)
@@ -1168,7 +1166,7 @@
         valid-interface
         [schema-version 1]))
      (check-exn
-      #rx"uses interface schema v1; this compiler requires v6"
+      #rx"uses interface schema v1; this compiler requires v7"
       (lambda () (parse-consumer stale-interface)))
      (define valid-box
        (module-interface-type-export-ref valid-interface 'Box))
@@ -1214,11 +1212,11 @@
       (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
-(test-case "interface v6 forbids interface-only consumer pruning"
+(test-case "interface v7 includes dynamic-var status in consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 6)
-     (check-false INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
+     (check-equal? INTERFACE-SCHEMA-VERSION 7)
+     (check-true INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!
         root "plain-dynamic" provider-source
@@ -1244,10 +1242,10 @@
         (overlay-check-result-overlay-digest result)))
      (define-values (plain-interface plain-overlay) (digests plain-edn))
      (define-values (dynamic-interface dynamic-overlay) (digests dynamic-edn))
-     (check-equal?
+     (check-not-equal?
       plain-interface
       dynamic-interface
-      "^:dynamic is not yet an interface-pruning key")
+      "^:dynamic must invalidate the semantic interface")
      (check-not-equal?
       plain-overlay
       dynamic-overlay

@@ -111,8 +111,8 @@ absolute checkout paths and remain byte-stable across machines.
   resolves each `(require ...)` to a sibling beagle source (mirroring
   `parse.rkt` `resolve-module-path`: ns-segments → path, source-dir then
   parent walk, `BEAGLE-EXTENSIONS`), reads + parses it (pure), and imports
-  its typed surface via `parse.bclj` `import-module-surface` — a port of
-  `import-module-types!` `reg!`: alias-qualified externs for declare-extern,
+  its typed surface via `parse.bclj` `import-module-surface`: alias-qualified
+  externs for declare-extern,
   `defrecord` ctor/accessors, `defscalar`, `defunion`, typed `def`/`defonce`,
   `^:dynamic` vars, and `defn` signatures (`:refer` also binds bare). Exported
   `defalias` declarations are imported structurally as well, including

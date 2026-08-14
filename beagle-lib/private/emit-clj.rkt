@@ -404,13 +404,6 @@ CLJ
      #f]
     [(hash-ref (program-macros prog) name #f) #f]
     [(and binding (eq? (interface-binding-kind binding) 'extern)) #f]
-    ;; Legacy source import still records known type-only names even when no
-    ;; candidate interface is available.
-    [(and (not interface)
-          (set-member?
-           (program-imported-type-names prog)
-           (qualified-binding (require-prefix entry) name)))
-     #f]
     [else name]))
 
 (define (emit-require prog r)

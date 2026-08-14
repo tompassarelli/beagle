@@ -3,8 +3,7 @@
 ;; Stdlib type catalog — combines portable + target-specific entries.
 ;;
 ;; Consumers call (stdlib-for-target target) to get the combined hash
-;; for a given target. STDLIB-TYPES is provided for backward compatibility
-;; (LSP, REPL, docs-sync).
+;; for a given target.
 
 (require "stdlib-portable.rkt"
          "stdlib-core.rkt"
@@ -47,11 +46,7 @@
     [(js) JS-NO-EMIT]
     [else #f]))
 
-;; Backward compatibility: STDLIB-TYPES = full CLJ combined set
-(define STDLIB-TYPES stdlib-clj-combined)
-
-(provide STDLIB-TYPES
-         stdlib-for-target target-excludes-for
+(provide stdlib-for-target target-excludes-for
          STDLIB-CORE
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT

@@ -1734,10 +1734,8 @@
                      (for/list ([f (in-list declared)])
                        (string->symbol (string-append ":" f)))
                      (hash-keys field-map)))))
-  ;; Candidate-overlay interfaces are the authoritative imported record
-  ;; surface. Register each accepted nominal spelling with provider-qualified
-  ;; field types; the legacy datum tables above remain the standalone bootstrap
-  ;; compatibility path.
+  ;; Interfaces are the authoritative imported record surface. Register each
+  ;; accepted nominal spelling with provider-qualified field types.
   (for ([import (in-list (program-imported-module-interfaces prog))])
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))
@@ -2343,7 +2341,7 @@
   ;; Typed externs and platform/builtin callables have no Beagle body capable
   ;; of hiding js/await. Their type declarations are the host boundary proof.
   ;; Imported interface bindings are also projected into PROGRAM-EXTERNS for
-  ;; type lookup; never let that compatibility projection overwrite the
+  ;; type lookup; never let that semantic projection overwrite the
   ;; provider's authoritative positive/negative synchronization fact above.
   (for ([(name type) (in-hash (program-externs prog))])
     (when (and (not (hash-has-key? proofs name))

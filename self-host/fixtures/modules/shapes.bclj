@@ -4,8 +4,8 @@
 
 ;; Cross-module refs: g/->Point (ctor), g/point-x (accessor), g/manhattan +
 ;; g/origin (fns), g/UNIT (var). The record TYPE crosses the boundary bare
-;; (Point), matching the oracle (import-module-types! registers ->Point and
-;; point-x, not a qualified type name).
+;; (Point), matching the self-host source-surface import (constructors and
+;; accessors are value bindings, not qualified type names).
 (defn diag [(n Int)] Point (g/->Point n n))
 
 (defn total [(p Point)] Int (g/manhattan p))

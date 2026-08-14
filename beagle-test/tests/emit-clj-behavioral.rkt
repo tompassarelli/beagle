@@ -102,14 +102,12 @@
   (define provider-interface
     (program->module-interface
      provider
-     #:source-id (format "~a.bclj" provider-ns)
-     #:datums (map syntax->datum provider-stxs)))
+     #:source-id (format "~a.bclj" provider-ns)))
   (define provider-source
     (module-source
      provider-ns
      (format "~a.bclj" provider-ns)
      provider-stxs
-     (map syntax->datum provider-stxs)
      provider-interface))
   (define-values (consumer _consumer-stxs)
     (checked-module
