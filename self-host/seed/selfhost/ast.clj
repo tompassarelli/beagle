@@ -285,10 +285,10 @@
 
 (defn ^Boolean validate-identifier [^String sym]
   (let [bad-chars ";'\"` (){}[],"]
-  (and (not (str/starts-with? sym "$beagle$")) (every? (fn [c] (nil? (str/index-of bad-chars c))) (map str (seq sym))))))
+  (and (not (str/starts-with? sym "$beagle$")) (every? (fn [^String c] (nil? (str/index-of bad-chars c))) (map str (seq sym))))))
 
 (defn ^Boolean validate-module-path [^String path]
-  (and (every? (fn [c] (let [code (int (.charAt c 0))]
+  (and (every? (fn [^String c] (let [code (int (.charAt c 0))]
   (or (upper-case-char? code) (and (>= code 97) (<= code 122)) (and (>= code 48) (<= code 57)) (= c ".") (= c "_") (= c "/") (= c "-")))) (map str (seq path))) (nil? (str/index-of path ".."))))
 
 (def passes (atom []))

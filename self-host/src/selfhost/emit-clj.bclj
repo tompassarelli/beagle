@@ -143,31 +143,17 @@
       :else "_"))))
 
 (defn emit-param [(p Any)] String
-  (emit-binding-form (param-binding-target p)))
-
-(defn emit-param-tagged [(p Any)] String
   (let [target (param-binding-target p)]
     (if (and (= (get p "type") "param") (string? target))
       (str (clj-tag-prefix (get p "ann")) target)
       (emit-binding-form target))))
 
-(defn emit-params [(params Any)] String
-  (str/join " " (mapv emit-param params)))
-
 (defn emit-params-with-rest [(params Any) (rest-p Any)] String
-  (let [fixed (emit-params params)]
+  (let [fixed (str/join " " (mapv emit-param params))]
     (if rest-p
       (if (= fixed "")
-        (str "& " (emit-param rest-p))
-        (str fixed " & " (emit-param rest-p)))
-      fixed)))
-
-(defn emit-params-with-rest-tagged [(params Any) (rest-p Any)] String
-  (let [fixed (str/join " " (mapv emit-param-tagged params))]
-    (if rest-p
-      (if (= fixed "")
-        (str "& " (emit-param rest-p))
-        (str fixed " & " (emit-param rest-p)))
+        (str "& " (emit-binding-form (param-binding-target rest-p)))
+        (str fixed " & " (emit-binding-form (param-binding-target rest-p))))
       fixed)))
 
 ;; --- bindings / clauses / bodies (recursion via emit-expr*) --------------------
@@ -242,7 +228,7 @@
     (str "$beagle$constraint$raw-param$" index)))
 
 (defn emit-constrained-callable
-  [(params Any) (rest-p Any) (body-str String) (tagged? Bool)] Any
+  [(params Any) (rest-p Any) (body-str String)] Any
   (let [all (params+rest params rest-p)
         fixed-count (count params)
         raw-names (mapv (fn [(index Int)] String
@@ -253,8 +239,7 @@
                       (let [raw (nth raw-names index)
                             param (nth params index)
                             target (param-binding-target param)]
-                        (if (and tagged?
-                                 (= (get param "type") "param")
+                        (if (and (= (get param "type") "param")
                                  (string? target))
                           (str (clj-tag-prefix (get param "ann")) raw)
                           raw)))
@@ -302,12 +287,10 @@
                  "      " body-str ")))")}))
 
 (defn emit-callable-signature+body
-  [(params Any) (rest-p Any) (body-str String) (tagged? Bool)] Any
+  [(params Any) (rest-p Any) (body-str String)] Any
   (if (callable-has-constraints? params rest-p)
-    (emit-constrained-callable params rest-p body-str tagged?)
-    (let [fixed (if tagged?
-                  (emit-params-with-rest-tagged params nil)
-                  (emit-params-with-rest params nil))
+    (emit-constrained-callable params rest-p body-str)
+    (let [fixed (emit-params-with-rest params nil)
           params-str (if (or (nil? rest-p) (false? rest-p))
                        fixed
                        (if (= fixed "")
@@ -608,8 +591,7 @@
                         (if (= 0 (count fields))
                           ""
                           (str " " (str/join " " (field-names-of fields))))
-                        ")")
-                      false)
+                        ")"))
             validation-bindings
               (loop [(i Int) 0 (acc (Vec String)) []]
                 (if (>= i (count constrained))
@@ -807,7 +789,7 @@
                                (get method "body") "    " nil)
                         callable (emit-callable-signature+body
                                    (get method "params") (get method "rest")
-                                   body false)]
+                                   body)]
                     (str "(" (protocol-raw-method-name protocol-name (get method "name"))
                          " [" (get callable "params") "]\n"
                          "    " (get callable "body") ")")))
@@ -1087,7 +1069,7 @@
               name-tag (clj-tag-prefix (get e "ret"))
               body (emit-body-with-loop-context! (get e "body") "  " nil)
               callable (emit-callable-signature+body
-                         (get e "params") (get e "rest") body true)
+                         (get e "params") (get e "rest") body)
               doc (get e "doc")]
           (str "(" kw " " name-tag name
                (if (string? doc) (str "\n  " (write-clj-string doc)) "")
@@ -1101,7 +1083,7 @@
                                               (get a "body") "    " nil)
                                        callable (emit-callable-signature+body
                                                   (get a "params") (get a "rest")
-                                                  body false)]
+                                                  body)]
                                    (str "  ([" (get callable "params")
                                         "]\n    " (get callable "body") ")")))
                                (get e "arities"))
@@ -1113,7 +1095,7 @@
       (= node "fn")
         (let [body (emit-body-with-loop-context! (get e "body") "  " nil)
               callable (emit-callable-signature+body
-                         (get e "params") (get e "rest") body false)]
+                         (get e "params") (get e "rest") body)]
           (str "(fn [" (get callable "params") "] " (get callable "body") ")"))
 
       (= node "let")
@@ -1352,7 +1334,7 @@
                                            (get f "body") "    " nil)
                                     callable (emit-callable-signature+body
                                                (get f "params") (get f "rest")
-                                               body false)]
+                                               body)]
                                 (str "(" (get f "name") " ["
                                      (get callable "params") "] "
                                      (get callable "body") ")")))
@@ -1555,7 +1537,7 @@
     (= (emit-binding-target! {"type" "map-destructure" "keys" ["id" "b"] "as" false})
        "{:keys [id b]}"))
   (expect! "param: typed sequential aggregate unwraps to binding form"
-    (= (emit-param-tagged
+    (= (emit-param
          {"type" "param"
           "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false}
           "ann" {"kind" "hvec"
@@ -1563,7 +1545,7 @@
                             {"kind" "prim" "name" "String"}]}})
        "[x y]"))
   (expect! "param: nested map defaults and as survive aggregate annotation"
-    (= (emit-param-tagged
+    (= (emit-param
          {"type" "param"
           "name" {"type" "seq-destructure"
                   "names" ["x"

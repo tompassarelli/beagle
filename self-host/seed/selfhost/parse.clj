@@ -1136,7 +1136,7 @@
   :else (do
   (err! (str "target-case: expected keyword-expression pairs, got trailing: " (str (subvec items i))))
   acc)))]
-  (if (= (count cases) 0) (err! "target-case: no branches provided") {"node" "target-case" "cases" (mapv (fn [k] {"target" k "body" (get cases k)}) (vec (sort (vec (keys cases)))))})))
+  (if (= (count cases) 0) (err! "target-case: no branches provided") {"node" "target-case" "cases" (mapv (fn [^String k] {"target" k "body" (get cases k)}) (vec (sort (vec (keys cases)))))})))
 
 (def JSQ-BINARY-OPS {"+" "+" "-" "-" "*" "*" "/" "/" "%" "%" "**" "**" "===" "===" "!==" "!==" "==" "==" "!=" "!=" "<" "<" ">" ">" "<=" "<=" ">=" ">=" "and" "&&" "or" "||" "nullish" "??" "bit-and" "&" "bit-or" "|" "bit-xor" "^" "<<" "<<" ">>" ">>" ">>>" ">>>" "in" "in" "instanceof" "instanceof"})
 
@@ -1611,7 +1611,7 @@
   (string? unq) [unq]
   (vector? unq) (let [items (if (bracketed? unq) (bracket-body unq) unq)]
   (if (and (>= (count items) 2) (every? string? items)) (let [package-name (nth items 0)]
-  (mapv (fn [class-name] (str package-name "." class-name)) (subvec items 1))) (do
+  (mapv (fn [^String class-name] (str package-name "." class-name)) (subvec items 1))) (do
   (err! (str context ": import spec must be (package Class ...) with symbols, got: " (str unq)))
   [])))
   :else (do
@@ -1818,7 +1818,7 @@
 
 (defn- qualify-provider-type [t ^String provider-ns local-type-names]
   (if (not (map? t)) t (let [kind (get t "kind")
-   qualify-name (fn [name] (if (= true (get local-type-names name)) (str provider-ns "/" name) name))]
+   qualify-name (fn [^String name] (if (= true (get local-type-names name)) (str provider-ns "/" name) name))]
   (cond
   (= kind "prim") (assoc t "name" (qualify-name (get t "name")))
   (= kind "app") (assoc (assoc t "name" (qualify-name (get t "name"))) "args" (mapv (fn [arg] (qualify-provider-type arg provider-ns local-type-names)) (get t "args")))
@@ -1954,13 +1954,13 @@
   (import-module-surface-with-aliases! datums prefix refer-syms {}))
 
 (defn qualify-imported-record-contracts [contracts ^String prefix refer-syms]
-  (let [refer-set (if (some? refer-syms) (reduce (fn [out name] (assoc out name true)) {} refer-syms) {})]
+  (let [refer-set (if (some? refer-syms) (reduce (fn [out ^String name] (assoc out name true)) {} refer-syms) {})]
   (vec (apply concat (mapv (fn [contract] (let [name (get contract "name")
    qualified (assoc contract "name" (str prefix "/" name))]
   (if (= true (get refer-set name)) [qualified (assoc contract "name" name)] [qualified]))) contracts)))))
 
 (defn qualify-imported-callable-synchronization [entries ^String prefix refer-syms]
-  (let [refer-set (if (some? refer-syms) (reduce (fn [out name] (assoc out name true)) {} refer-syms) {})]
+  (let [refer-set (if (some? refer-syms) (reduce (fn [out ^String name] (assoc out name true)) {} refer-syms) {})]
   (vec (apply concat (mapv (fn [entry] (let [name (get entry "name")
    qualified (assoc entry "name" (str prefix "/" name))]
   (if (= true (get refer-set name)) [qualified (assoc entry "name" name)] [qualified]))) entries)))))
@@ -2330,7 +2330,7 @@
   (> (count (parse-errors)) 0)))
   (expect! "parse-program! reserves compiler prefix across metadata binders" (let [_ (parse-program! [["ns" "$beagle$ns"] ["defmacro" "$beagle$macro" [BRACKET-TAG] 1] ["declare-extern" "$beagle$extern" "Any"]])
    errors (parse-errors)]
-  (= (count (filterv (fn [message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))
+  (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))
   (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "fram.fold"] ["require" "fram.kernel" ":as" "k"]])]
   (= (get prog "requires") [{"ns" "fram.kernel" "alias" "k" "refer" false}])))
   (expect! "parse-program! ns docstring dropped" (let [prog (parse-program! [["ns" "fram.fold" ["#%string" "Replay the log."]]])]

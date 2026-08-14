@@ -81,7 +81,7 @@
   (or (and (some? inferred-name) (= true (get (deref nix-record-types-ref) inferred-name))) (and (some? direct-name) (= true (get (deref nix-record-types-ref) direct-name))))))
 
 (defn ^Boolean exact-object-keys? [value expected]
-  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [key] (contains? value key)) expected)))
+  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [^String key] (contains? value key)) expected)))
 
 (defn ^Boolean valid-record-update-contract? [contract]
   (and (exact-object-keys? contract ["recordName" "fieldOrder" "validator"]) (string? (get contract "recordName")) (vector? (get contract "fieldOrder")) (every? string? (get contract "fieldOrder")) (or (nil? (get contract "validator")) (string? (get contract "validator")))))
@@ -548,7 +548,7 @@
    constrained-record? (and (some? record-name) (= true (get (deref nix-constrained-record-types-ref) record-name)))]
   (if (not (nil? contract)) (do
   (doseq [update updates]
-  (if (nil? (some (fn [field] (if (= field (get update "field")) (do
+  (if (nil? (some (fn [^String field] (if (= field (get update "field")) (do
   field))) (get contract "fieldOrder"))) (do
   (throw (ex-info "checked with-form updates a field outside its recordUpdate fieldOrder" {})))))))
   (if (and (not checked?) constrained-record? (absent? validator)) (do
@@ -820,11 +820,11 @@
    tag (str/lower-case name)
    ctor-name (mangle-name (str "->" name))
    fnames (field-names-of fields)
-   entries (str " _tag = \"" (escape-nix tag) "\";" (if (= 0 (count fnames)) " " (str " " (str/join " " (mapv (fn [field-name] (let [emitted (mangle-name field-name)]
+   entries (str " _tag = \"" (escape-nix tag) "\";" (if (= 0 (count fnames)) " " (str " " (str/join " " (mapv (fn [^String field-name] (let [emitted (mangle-name field-name)]
   (str emitted " = " emitted ";"))) fnames)) " ")))
    value-str (str "{" entries "}")
    ctor (str ind ctor-name " = " (emit-param-chain fields value-str depth) ";")
-   accessors (mapv (fn [field-name] (let [emitted (mangle-name field-name)
+   accessors (mapv (fn [^String field-name] (let [emitted (mangle-name field-name)
    accessor (mangle-name (str tag "-" field-name))]
   (str ind accessor " = r: r." emitted ";"))) fnames)
    validator (emit-record-validator-def name fields depth)
@@ -846,8 +846,8 @@
    members (get e "members")
    mf (get e "member-fields")
    header (str ind "# union " name " = " (str/join " | " members))]
-  (if (or (nil? mf) (false? mf)) header (let [defs (mapv (fn [member] (if (contains? mf member) (emit-tagged-type-defs member (get mf member) depth) "")) members)
-   present (filterv (fn [s] (not (= s ""))) defs)]
+  (if (or (nil? mf) (false? mf)) header (let [defs (mapv (fn [^String member] (if (contains? mf member) (emit-tagged-type-defs member (get mf member) depth) "")) members)
+   present (filterv (fn [^String s] (not (= s ""))) defs)]
   (if (= 0 (count present)) header (str header "\n" (str/join "\n" present)))))))
 
 (defn ^String emit-top-deferror [e depth]
@@ -855,7 +855,7 @@
    name (mangle-name (get e "name"))
    members (get e "members")
    mf (get e "member-fields")]
-  (str ind "# error " name "\n" (str/join "\n" (mapv (fn [member] (emit-tagged-type-defs member (if (and (map? mf) (contains? mf member)) (get mf member) []) depth)) members)))))
+  (str ind "# error " name "\n" (str/join "\n" (mapv (fn [^String member] (emit-tagged-type-defs member (if (and (map? mf) (contains? mf member)) (get mf member) []) depth)) members)))))
 
 (defn ^String nix-scalar-literal [v]
   (cond
@@ -891,7 +891,7 @@
    backing-check (scalar-backing-check (get e "backing") value-name)
    predicate-checks (mapv (fn [p] (scalar-pred-to-nix value-name p)) (get e "predicates"))
    checks (into (if (nil? backing-check) [] [backing-check]) predicate-checks)]
-  (if (= 0 (count checks)) (str ind ctor-name " = v: v;") (str ind ctor-name " = v: " (str/join " " (mapv (fn [check] (str "assert " check ";")) checks)) " v;"))))
+  (if (= 0 (count checks)) (str ind ctor-name " = v: v;") (str ind ctor-name " = v: " (str/join " " (mapv (fn [^String check] (str "assert " check ";")) checks)) " v;"))))
 
 (defn ^String emit-top-def [f depth]
   (let [ind (indent depth)
@@ -972,7 +972,7 @@
   (= node "check") (str "(let r = " (emit-expr* (get e "expr") depth) "; in if r ? _tag && r._tag == \"Ok\" then r.value else abort \"check failed\")")
   (= node "rescue") (str "(let r = " (emit-expr* (get e "expr") depth) "; in if r ? _tag && r._tag == \"Ok\" then r.value else " (emit-expr* (get e "fallback") depth) ")")
   (= node "target-case") (let [cases (vec (get e "cases"))
-   pick (fn [t] (first (filterv (fn [c] (= (get c "target") t)) cases)))
+   pick (fn [^String t] (first (filterv (fn [c] (= (get c "target") t)) cases)))
    branch (pick "nix")]
   (if (nil? branch) (throw (ex-info "target-case: no branch for target nix" {})) (emit-expr* (get branch "body") depth)))
   (= node "try") (str "(let __t = builtins.tryEval (" (emit-body (get e "body") depth) "); in if __t.success then __t.value else null)")
@@ -1022,13 +1022,13 @@
   (cond
   (= node "record") (add-record-type names (get form "name"))
   (= node "defunion") (let [mf (get form "member-fields")]
-  (if (map? mf) (reduce (fn [out member] (if (contains? mf member) (add-record-type out member) out)) names (get form "members")) names))
+  (if (map? mf) (reduce (fn [out ^String member] (if (contains? mf member) (add-record-type out member) out)) names (get form "members")) names))
   (= node "deferror") (reduce add-record-type names (get form "members"))
   :else names)))
 
 (defn program-record-types [prog]
   (let [imported-fields (get prog "imported-record-fields")
-   from-fields (if (map? imported-fields) (reduce (fn [names name] (assoc names name true)) {} (keys imported-fields)) {})]
+   from-fields (if (map? imported-fields) (reduce (fn [names ^String name] (assoc names name true)) {} (keys imported-fields)) {})]
   (reduce add-form-record-types from-fields (get prog "forms"))))
 
 (defn add-form-constrained-record-types [names form]
@@ -1036,7 +1036,7 @@
   (cond
   (= node "record") (if (record-fields-constrained? (get form "fields")) (add-record-type names (get form "name")) names)
   (or (= node "defunion") (= node "deferror")) (let [mf (get form "member-fields")]
-  (if (map? mf) (reduce (fn [out member] (let [fields (get mf member)]
+  (if (map? mf) (reduce (fn [out ^String member] (let [fields (get mf member)]
   (if (and (some? fields) (record-fields-constrained? fields)) (add-record-type out member) out))) names (get form "members")) names))
   :else names)))
 

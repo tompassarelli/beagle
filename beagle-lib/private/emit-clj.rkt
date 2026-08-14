@@ -474,22 +474,12 @@ CLJ
 
     [(defn-form? f)
      (define kw (if (defn-form-private? f) "defn-" "defn"))
-     ;; Return type sits on the defn-form; per-param types live on each
-     ;; param struct. Untyped slots (type = #f) emit no metadata.
-     ;; Destructure params (map-destructure / seq-destructure) have no
-     ;; type slot — emit no metadata for them.
      (define name-tag (clj-tag-prefix (defn-form-return-type f)))
-     (define param-tags
-       (for/list ([p (in-list (defn-form-params f))])
-         (cond
-           [(param? p) (clj-tag-prefix (param-type p))]
-           [else ""])))
      (define-values (params-str body-str)
        (emit-callable-signature+body
         (defn-form-params f)
         (defn-form-rest-param f)
-        (emit-body (defn-form-body f) "  ")
-        #:param-tags param-tags))
+        (emit-body (defn-form-body f) "  ")))
      (format "(~a ~a~a~a [~a]\n  ~a)"
              kw
              name-tag
@@ -1652,14 +1642,20 @@ CLJ
 (define (callable-has-constraints? params rest-p)
   (bindings-have-constraints? (params+rest params rest-p)))
 
+(define (param-tag-prefix p)
+  ;; Clojure type hints attach only to identifier binders. An annotation on a
+  ;; destructuring pattern remains a Beagle checking boundary, not a JVM tag.
+  (if (and (param? p) (symbol? (param-binding-target p)))
+      (clj-tag-prefix (param-type p))
+      ""))
+
 ;; A constrained callable cannot expose any authored parameter name before all
 ;; parameter predicates have been captured. Otherwise a predicate expression
 ;; that resolved to an outer name could be captured accidentally by a sibling
 ;; or its own parameter. Every source parameter therefore receives a reserved
 ;; raw slot; an outer let captures predicates, and an inner let guards then
 ;; binds/projects the source targets.
-(define (emit-constrained-callable params rest-p body-str
-                                   #:param-tags [param-tags #f])
+(define (emit-constrained-callable params rest-p body-str)
   (define all (params+rest params rest-p))
   (define fixed-count (length params))
   (define raw-names
@@ -1669,12 +1665,8 @@ CLJ
           (format "$beagle$constraint$raw-param$~a" index))))
   (define fixed-raw
     (for/list ([raw (in-list (take raw-names fixed-count))]
-               [index (in-naturals)])
-      (define tag
-        (if param-tags
-            (list-ref (pad-tags param-tags fixed-count) index)
-            ""))
-      (string-append tag raw)))
+               [binding (in-list params)])
+      (string-append (param-tag-prefix binding) raw)))
   (define params-str
     (string-join
      (append fixed-raw
@@ -1724,12 +1716,10 @@ CLJ
            (string-join target-bindings "\n       ")
            body-str)))
 
-(define (emit-unconstrained-callable params rest-p body-str
-                                     #:param-tags [param-tags #f])
+(define (emit-unconstrained-callable params rest-p body-str)
   (define params-str
     (emit-params-with-rest
      params rest-p
-     #:param-tags param-tags
      #:rest-name (and rest-p CLJ-HOST-REST)))
   (values
    params-str
@@ -1740,13 +1730,10 @@ CLJ
                body-str)
        body-str)))
 
-(define (emit-callable-signature+body params rest-p body-str
-                                      #:param-tags [param-tags #f])
+(define (emit-callable-signature+body params rest-p body-str)
   (if (callable-has-constraints? params rest-p)
-      (emit-constrained-callable params rest-p body-str
-                                 #:param-tags param-tags)
-      (emit-unconstrained-callable params rest-p body-str
-                                   #:param-tags param-tags)))
+      (emit-constrained-callable params rest-p body-str)
+      (emit-unconstrained-callable params rest-p body-str)))
 
 ;; Emit one param with an optional type-hint prefix. tag-prefix is a
 ;; pre-formatted string like "^Int " or "" — see clj-tag-prefix.
@@ -1758,41 +1745,20 @@ CLJ
       (string-append tag-prefix (emit-param p))
       (emit-param p)))
 
-(define (emit-params params)
-  (string-join (map emit-param params) " "))
-
-;; emit-params-with-rest now takes an optional #:param-tags list that
-;; runs parallel to `params` (a list of tag-prefix strings, "" for no
-;; hint). When #f, emits the legacy untagged shape. The rest-param never
-;; gets a tag (Clojure rest-args are heterogeneous lists).
+;; Rest params remain untagged because Clojure rest args are heterogeneous.
 (define (emit-params-with-rest params rest-p
-                               #:param-tags [param-tags #f]
                                #:rest-name [rest-name #f])
   (define fixed
-    (cond
-      [param-tags
-       (string-join
-        (for/list ([p (in-list params)]
-                   [tag (in-list (pad-tags param-tags (length params)))])
-          (emit-param/tag p tag))
-        " ")]
-      [else (emit-params params)]))
+    (string-join
+     (for/list ([p (in-list params)])
+       (emit-param/tag p (param-tag-prefix p)))
+     " "))
   (if rest-p
       (let ([emitted-rest (or rest-name (emit-param rest-p))])
       (if (string=? fixed "")
           (format "& ~a" emitted-rest)
           (format "~a & ~a" fixed emitted-rest)))
       fixed))
-
-;; Right-pad a tag list to length n with "" entries. Defensive — the
-;; per-param tag list is built from defn-form-params directly, so it
-;; should always match, but if a caller passes a shorter list we'd
-;; rather emit no tag than crash.
-(define (pad-tags tags n)
-  (cond
-    [(= (length tags) n) tags]
-    [(< (length tags) n) (append tags (make-list (- n (length tags)) ""))]
-    [else (take tags n)]))
 
 (define (emit-let-bindings bindings)
   (string-join

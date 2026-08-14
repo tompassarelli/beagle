@@ -45,7 +45,7 @@
   (if (< i 0) "" (subs path 0 i))))
 
 (defn- ^String join-slash [segs]
-  (if (= (count segs) 0) "" (reduce (fn [a s] (str a "/" s)) (nth segs 0) (subvec segs 1))))
+  (if (= (count segs) 0) "" (reduce (fn [^String a ^String s] (str a "/" s)) (nth segs 0) (subvec segs 1))))
 
 (defn- try-ext [^String dir ^String rel]
   (loop [i 0]
@@ -172,13 +172,13 @@
 (def CHECKED-PROGRAM-KEYS ["kind" "schemaVersion" "phase" "target" "namespace" "sourceId" "sourceSha256" "projectionSha256" "mode" "gen-class" "requires" "imports" "externs" "forms"])
 
 (defn- ^Boolean exact-checked-program-keys? [projection]
-  (and (= (count (keys projection)) (count CHECKED-PROGRAM-KEYS)) (every? (fn [key] (contains? projection key)) CHECKED-PROGRAM-KEYS)))
+  (and (= (count (keys projection)) (count CHECKED-PROGRAM-KEYS)) (every? (fn [^String key] (contains? projection key)) CHECKED-PROGRAM-KEYS)))
 
 (defn- ^Boolean complete-binding? [binding]
   (and (map? binding) (contains? binding "name") (contains? binding "constraint") (contains? binding "constraintSynchronous") (boolean? (get binding "constraintSynchronous")) (= (get binding "constraintSynchronous") (and (not (nil? (get binding "constraint"))) (not (false? (get binding "constraint")))))))
 
 (defn- ^Boolean exact-object-keys? [value expected]
-  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [key] (contains? value key)) expected)))
+  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [^String key] (contains? value key)) expected)))
 
 (defn- ^Boolean valid-record-update-contract? [contract]
   (and (exact-object-keys? contract ["recordName" "fieldOrder" "validator"]) (string? (get contract "recordName")) (vector? (get contract "fieldOrder")) (every? string? (get contract "fieldOrder")) (or (nil? (get contract "validator")) (string? (get contract "validator")))))

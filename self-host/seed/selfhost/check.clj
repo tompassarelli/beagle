@@ -100,7 +100,7 @@
   :else (str "(U " (str/join " " (mapv (fn [m] (type->string m)) members)) ")")))
   (var-type? t) (get t "name")
   (poly-type? t) (let [bounds (get t "bounds")
-   var-strs (mapv (fn [v] (let [b (if (nil? bounds) nil (get bounds v))]
+   var-strs (mapv (fn [^String v] (let [b (if (nil? bounds) nil (get bounds v))]
   (if (nil? b) v (str "(" v " <: " (type->string b) ")")))) (get t "vars"))]
   (str "(forall [" (str/join " " var-strs) "] " (type->string (get t "body")) ")"))
   :else "?"))
@@ -215,7 +215,7 @@
   (not (or (any-type? declared) (and (prim? declared) (or (= (get declared "name") "Int") (= (get declared "name") "Float") (= (get declared "name") "Number"))))) declared
   :else (let [classes (mapv (fn [t] (numeric-class t)) arg-types)]
   (cond
-  (= op "/") (if (and (= 2 (count classes)) (every? (fn [class] (= class "float")) classes)) FLOAT-TYPE declared)
+  (= op "/") (if (and (= 2 (count classes)) (every? (fn [^String class] (= class "float")) classes)) FLOAT-TYPE declared)
   (boolean (some (fn [c] (= c "other")) classes)) declared
   (boolean (some (fn [c] (= c "float")) classes)) FLOAT-TYPE
   (boolean (some (fn [c] (= c "number")) classes)) NUMBER-TYPE
@@ -499,15 +499,15 @@
 (defn record-field-type-for! [aggregate ^String keyword]
   (let [field-map (record-field-map-for-type aggregate)]
   (if (not (nil? field-map)) (if (contains? field-map keyword) (resolve-parametric-field-type! (get field-map keyword) aggregate) nil) (let [members (nominal-union-members aggregate)]
-  (if (nil? members) nil (let [declaring (filterv (fn [member] (let [member-fields (get-in (deref STATE) ["record-fields" member])]
+  (if (nil? members) nil (let [declaring (filterv (fn [^String member] (let [member-fields (get-in (deref STATE) ["record-fields" member])]
   (and (not (nil? member-fields)) (contains? member-fields keyword)))) members)]
-  (if (and (> (count declaring) 0) (= (count declaring) (count members))) (merge-types-list (mapv (fn [member] (resolve-parametric-field-type! (get-in (deref STATE) ["record-fields" member keyword]) aggregate)) declaring)) nil)))))))
+  (if (and (> (count declaring) 0) (= (count declaring) (count members))) (merge-types-list (mapv (fn [^String member] (resolve-parametric-field-type! (get-in (deref STATE) ["record-fields" member keyword]) aggregate)) declaring)) nil)))))))
 
 (defn destructure-type-error! [pattern aggregate ^String where ^String message]
   (emit-diag! (str "beagle: " where " destructuring " (if (= (get pattern "type") "map-destructure") "map" "sequential") ": " message " (aggregate type " (type->string aggregate) ")")))
 
 (defn bind-destructure-any! [env pattern]
-  (let [out (reduce (fn [acc name] (assoc acc name ANY)) env (destructure-bound-names pattern))]
+  (let [out (reduce (fn [acc ^String name] (assoc acc name ANY)) env (destructure-bound-names pattern))]
   (doseq [default (destructure-default-exprs pattern)]
   (infer-expr! default out))
   out))
@@ -539,7 +539,7 @@
   (if (and (nil? field-map) (nil? union-members) (nil? map-value-type)) (do
   (destructure-type-error! pattern aggregate where "key patterns require a nominal record or homogeneous Map")
   (bind-destructure-any! env pattern)) (let [defaults (get pattern "or")
-   projection (reduce (fn [state name] (let [keyword (str ":" name)
+   projection (reduce (fn [state ^String name] (let [keyword (str ":" name)
    default-entry (first (filterv (fn [entry] (= (get entry "key") name)) defaults))
    nominal? (or (not (nil? field-map)) (not (nil? union-members)))
    projected (if nominal? (record-field-type-for! aggregate keyword) nil)
@@ -644,7 +644,7 @@
   (cond
   (any-type? t) true
   (prim? t) (= (get t "name") "Bool")
-  (union-type? t) (reduce (fn [acc m] (or acc (type-could-be-false? m))) false (get t "members"))
+  (union-type? t) (reduce (fn [^Boolean acc m] (or acc (type-could-be-false? m))) false (get t "members"))
   :else false))
 
 (defn call-fn-name [e]
@@ -654,7 +654,7 @@
 (defn test-narrowings [cond-expr env]
   (let [fn-name (call-fn-name cond-expr)
    args (get cond-expr "args")
-   fold-branch (fn [xs pick-then] (reduce (fn [acc a] (let [tn (test-narrowings a (merge env acc))]
+   fold-branch (fn [xs ^Boolean pick-then] (reduce (fn [acc a] (let [tn (test-narrowings a (merge env acc))]
   (merge acc (get tn (if pick-then "then" "else"))))) {} xs))]
   (cond
   (and (= fn-name "not") (= (count args) 1)) (let [tn (test-narrowings (nth args 0) env)]
@@ -1263,9 +1263,9 @@
    target-stdlib (if (= (get prog "target") "core") (merge STDLIB CORE-STDLIB) STDLIB)
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
-   dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
+   dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
    env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
-   env-with-externs (if (= (get prog "target") "clj") (reduce (fn [env nm] (if (nil? (get env nm)) (assoc env nm ANY) env)) env-with-externs CLJ-BUILTIN-DYNAMIC-VARS) env-with-externs)
+   env-with-externs (if (= (get prog "target") "clj") (reduce (fn [env ^String nm] (if (nil? (get env nm)) (assoc env nm ANY) env)) env-with-externs CLJ-BUILTIN-DYNAMIC-VARS) env-with-externs)
    callable-synchronization (program-callable-synchronization prog)
    returns-synchronous-callable (program-returns-synchronous-callable prog callable-synchronization)
    env-with-externs (assoc env-with-externs "#%callable-synchronous" callable-synchronization "#%returns-synchronous-callable" returns-synchronous-callable)]
@@ -1396,7 +1396,7 @@
   (if (or (nil? i) (= i 0)) nil (subs s 0 i)))))
 
 (defn ^Boolean nix-qualified? [^String s]
-  (or (str/includes? s "/") (< 0 (count (filterv (fn [p] (str/starts-with? s p)) NIX-QUALIFIED-PREFIXES)))))
+  (or (str/includes? s "/") (< 0 (count (filterv (fn [^String p] (str/starts-with? s p)) NIX-QUALIFIED-PREFIXES)))))
 
 (defn nix-collect-bound [x acc]
   (cond
@@ -1524,7 +1524,7 @@
    simple (and (string? target) (= (count names) 1))
    keep-owner (and simple acquire)
    prepared (if (and (not keep-owner) (> (count origins) 0)) (purity-escape-origins state origins node) state)]
-  (reduce (fn [next name] (purity-bind-name next name (if keep-owner origins {}))) prepared names)))
+  (reduce (fn [next ^String name] (purity-bind-name next name (if keep-owner origins {}))) prepared names)))
 
 (defn purity-restore-scope [state scope]
   (assoc state "scope" scope))
@@ -1658,7 +1658,7 @@
   :else [])))
 
 (defn purity-bind-names [state names]
-  (reduce (fn [next name] (purity-bind-name next name {})) state names))
+  (reduce (fn [next ^String name] (purity-bind-name next name {})) state names))
 
 (defn purity-analyze [value state]
   (cond
@@ -1912,7 +1912,7 @@
 (defn export-checked-record-contracts! [prog]
   (let [state (deref STATE)]
   (if (not (= prog (get state "input-program"))) (throw (ex-info "export-checked-record-contracts! requires the program most recently passed to check-program!" {})) (let [namespace (get prog "namespace")]
-  (mapv (fn [name] (let [validator (get-in state ["record-validators" name])]
+  (mapv (fn [^String name] (let [validator (get-in state ["record-validators" name])]
   {"name" name "fields" (get-in state ["record-fields" name]) "field-order" (get-in state ["record-field-order" name]) "constrained" (string? validator) "synchronous" true "validator" (if (string? validator) (str namespace "/" validator) nil)})) (local-record-names prog))))))
 
 (defn export-checked-callable-synchronization! [prog]
@@ -1992,7 +1992,7 @@
   {"node" "with" "target" target "updates" [{"field" field "value" value}]})
 
 (defn ^Boolean diagnostics-include? [diagnostics ^String fragment]
-  (boolean (some (fn [message] (str/includes? message fragment)) diagnostics)))
+  (boolean (some (fn [^String message] (str/includes? message fragment)) diagnostics)))
 
 (def passes (atom []))
 

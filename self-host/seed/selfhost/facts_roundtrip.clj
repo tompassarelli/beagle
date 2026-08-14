@@ -186,7 +186,7 @@
 (defn- ^Boolean rest-placeholder? [node]
   (let [own (and (= (get node "kind") "symbol") (= (get node "value") "%&"))
    children (get node "children")]
-  (if own true (if (some? children) (reduce (fn [found child] (or found (rest-placeholder? child))) false children) false))))
+  (if own true (if (some? children) (reduce (fn [^Boolean found child] (or found (rest-placeholder? child))) false children) false))))
 
 (defn- rewrite-fn-placeholders [node]
   (let [children (get node "children")
@@ -470,7 +470,7 @@
   [(nth items 0) (edn-value (nth items 1)) (edn-value (nth items 2))]))
 
 (defn- read-triples [^String path]
-  (reduce (fn [out line] (if (and (> (count line) 0) (= (rd/char-at line 0) "[")) (conj out (parse-triple line)) out)) [] (str/split-lines (selfhost.rt/slurp-file path))))
+  (reduce (fn [out ^String line] (if (and (> (count line) 0) (= (rd/char-at line 0) "[")) (conj out (parse-triple line)) out)) [] (str/split-lines (selfhost.rt/slurp-file path))))
 
 (defn- triples-props [triples]
   (reduce (fn [props triple] (assoc-in props [(nth triple 0) (nth triple 1)] (nth triple 2))) {} triples))
@@ -479,7 +479,7 @@
   (let [crdt (re-matches #"^f([0-9]+(?:\.[0-9]+)*)~([0-9]+)$" predicate)
    legacy (re-matches #"^f([0-9]+)$" predicate)]
   (cond
-  (some? crdt) [(mapv (fn [part] (parse-long part)) (str/split (nth crdt 1) #"\.")) (parse-long (nth crdt 2))]
+  (some? crdt) [(mapv (fn [^String part] (parse-long part)) (str/split (nth crdt 1) #"\.")) (parse-long (nth crdt 2))]
   (some? legacy) [[(* (+ (parse-long (nth legacy 1)) 1) 65536)] 0]
   :else nil)))
 
@@ -657,7 +657,7 @@
    pad (loop [i 0
    out ""]
   (if (>= i inner-col) out (recur (+ i 1) (str out " "))))]
-  (if (= (count items) 0) "[]" (str "[" (logical-item-source (nth items 0)) (reduce (fn [out item] (str out "\n" pad (logical-item-source item))) "" (subvec items 1)) "]"))))
+  (if (= (count items) 0) "[]" (str "[" (logical-item-source (nth items 0)) (reduce (fn [^String out item] (str out "\n" pad (logical-item-source item))) "" (subvec items 1)) "]"))))
 
 (defn- list-items [datum]
   (if (datum-list? datum) (group-anns datum) []))
@@ -785,7 +785,7 @@
 (declare datum-pretty-context)
 
 (defn- ^String pretty-many [items ^String prefix col]
-  (reduce (fn [out item] (str out "\n" prefix (datum-pretty-context item col "normal"))) "" items))
+  (reduce (fn [^String out item] (str out "\n" prefix (datum-pretty-context item col "normal"))) "" items))
 
 (defn- ^String pretty-context-items [parent ^String ctx items start ^String prefix col]
   (loop [i 0
@@ -796,7 +796,7 @@
   (recur (+ i 1) (str out "\n" prefix (datum-pretty-context item col child-ctx)))))))
 
 (defn- ^String signature-pretty [parent ^String ctx after keep col ^String pad]
-  (let [inline-signature (reduce (fn [out item] (str out " " (datum-source item))) (str "(" (datum-source (nth (list-items parent) 0))) (subvec after 0 keep))
+  (let [inline-signature (reduce (fn [^String out item] (str out " " (datum-source item))) (str "(" (datum-source (nth (list-items parent) 0))) (subvec after 0 keep))
    signature-over-width? (> (+ col (count inline-signature)) 80)]
   (loop [i 0
    out (str "(" (datum-source (nth (list-items parent) 0)))]
@@ -861,8 +861,8 @@
   (let [comments (node-comments props id)
    leading (comments-with comments "leading")
    trailing (comments-with comments "trailing")
-   lead-text (reduce (fn [out c] (str out (nth c 1) "\n")) "" leading)
-   trail-text (reduce (fn [out c] (str out " " (nth c 1))) "" trailing)]
+   lead-text (reduce (fn [^String out c] (str out (nth c 1) "\n")) "" leading)
+   trail-text (reduce (fn [^String out c] (str out " " (nth c 1))) "" trailing)]
   (str lead-text (datum-pretty (build-datum props id) 0) trail-text)))
 
 (defn render-edn! [^String path]

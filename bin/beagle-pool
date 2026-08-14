@@ -1,12 +1,11 @@
 #!/tmp/sdk-test/bin/python3
-"""Warm repair agent pool — Unix socket dispatch + filesystem fallback.
+"""Warm repair agent pool — Unix socket dispatch.
 
 The architect agent calls `dispatch-fix` which sends requests over a Unix
 socket to this daemon. A warm Claude worker applies edits instantly and
 handles cascading errors.
 
-Also watches .beagle/fixes/ for JSON fix plans (legacy/fallback path)
-and monitors file mtimes for moved-on detection.
+Also monitors file mtimes for moved-on detection.
 
 Uses the Claude Code SDK (ClaudeSDKClient) for persistent sessions.
 
@@ -44,7 +43,6 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DAEMON_BIN = os.path.join(PROJECT_DIR, "bin", "beagle-daemon")
 POOL_LOG = os.path.join(PROJECT_DIR, ".beagle", "pool-log.jsonl")
 PROMPT_FILE = os.path.join(PROJECT_DIR, ".beagle", "repair-agent-prompt.md")
-FIXES_DIR = os.path.join(PROJECT_DIR, ".beagle", "fixes")
 SOCK_PATH = os.path.join(PROJECT_DIR, ".beagle", "pool.sock")
 
 
@@ -204,8 +202,6 @@ class Pool:
         subprocess.run([DAEMON_BIN, "query", "watch", self.watch_dir],
                        capture_output=True, timeout=5)
 
-        os.makedirs(FIXES_DIR, exist_ok=True)
-
         print(f"beagle-pool: connecting {self.pool_size} warm worker(s)...", flush=True)
         for i in range(self.pool_size):
             w = Worker(f"w{i}", self.model, self.system_prompt, self.watch_dir)
@@ -237,7 +233,7 @@ class Pool:
         return True
 
     async def dispatch(self, file_path, fixes, source="socket"):
-        """Dispatch a fix request (from socket or fix plan)."""
+        """Dispatch a fix request from the Unix socket."""
         if not self._check_budget():
             return False, "cost cap reached"
 
@@ -368,21 +364,6 @@ def scan_mtimes(directory):
     return mtimes
 
 
-def scan_fix_plans():
-    plans = []
-    if not os.path.exists(FIXES_DIR):
-        return plans
-    for f in glob.glob(os.path.join(FIXES_DIR, "*.json")):
-        try:
-            with open(f) as fh:
-                plan = json.load(fh)
-            if "file" in plan and "fixes" in plan:
-                plans.append((plan, f))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return plans
-
-
 async def main():
     parser = argparse.ArgumentParser(description="Warm repair agent pool")
     parser.add_argument("directory", help="Directory to watch")
@@ -438,20 +419,6 @@ async def main():
             break
         except asyncio.TimeoutError:
             pass
-
-        # Check for fix plans from .beagle/fixes/ (legacy/fallback)
-        if pool.get_idle_worker():
-            for plan, plan_file in scan_fix_plans():
-                file_path = plan["file"]
-                if not pool.is_handled(file_path):
-                    ok, _ = await pool.dispatch(
-                        file_path, plan["fixes"], source="fixplan")
-                    if ok:
-                        try:
-                            os.unlink(plan_file)
-                        except OSError:
-                            pass
-                        break
 
         # Moved-on watcher (fallback)
         curr_mtimes = scan_mtimes(watch_dir)

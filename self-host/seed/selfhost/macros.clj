@@ -110,7 +110,7 @@
   (selfhost.rt/eprint (str "beagle: duplicate macro definition: " name "\n"))))
   (if (and (not= kind "safe") (not= kind "defmacro")) (do
   (selfhost.rt/eprint (str "beagle: macro " name ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
-  nil) (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i x] (if (= x "&") i nil)) params)) -1)
+  nil) (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i ^String x] (if (= x "&") i nil)) params)) -1)
    fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
    rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
   (swap! reg assoc name {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template})
@@ -179,7 +179,7 @@
 (def MACRO-BUILTIN-NAMES ["cons" "list" "vec" "append" "concat" "first" "second" "third" "rest" "null?" "pair?" "list?" "vector?" "empty?" "length" "count" "map" "map-indexed" "mapcat" "reduce" "range" "filter" "every?" "apply" "partition" "nth" "reverse" "distinct" "distinct?" "str" "lower-case" "upper-case" "string->symbol" "symbol->string" "format" "format-symbol" "=" "not=" "not" "<" ">" "<=" ">=" "+" "-" "*" "quot" "mod" "syntax-name" "syntax-type" "syntax-constraint" "syntax-error-at" "make-param" "make-field" "make-defrecord" "make-defn" "make-get" "make-keyword" "ann" "error"])
 
 (defn make-macro-env []
-  (reduce (fn [env name] (assoc env name (macro-builtin name))) {"true" true "false" false "nil" []} MACRO-BUILTIN-NAMES))
+  (reduce (fn [env ^String name] (assoc env name (macro-builtin name))) {"true" true "false" false "nil" []} MACRO-BUILTIN-NAMES))
 
 (defn macro-eval-body! [body env]
   (loop [forms body
@@ -550,7 +550,7 @@
 
 (defn remove-macro-param-binders [names macro-params]
   (let [mp (set macro-params)]
-  (filterv (fn [name] (not (clojure.core/contains? mp name))) names)))
+  (filterv (fn [^String name] (not (clojure.core/contains? mp name))) names)))
 
 (defn collect-param-binders [form macro-params]
   (let [items (unwrap-brackets form)
@@ -580,7 +580,7 @@
   (and (datum-pair? d) (or (= (datum-car d) "unquote") (= (datum-car d) "unquote-splicing"))))
 
 (defn collect-template-binders [template macro-params]
-  (letfn [(add-unique [acc name] (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
+  (letfn [(add-unique [acc ^String name] (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
           (walk [acc datum] (if (datum-pair? datum) (let [head (datum-car datum)]
   (cond
   (unquote-form? datum) acc
@@ -597,7 +597,7 @@
   (walk [] template)))
 
 (defn collect-template-free-refs [template macro-params binders reg]
-  (letfn [(add-unique [acc name] (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
+  (letfn [(add-unique [acc ^String name] (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
           (walk [acc datum] (cond
   (string? datum) (if (and (module-def-name? datum) (not (clojure.core/contains? (set macro-params) datum)) (not (clojure.core/contains? (set binders) datum)) (nil? (lookup-macro reg datum))) (add-unique acc datum) acc)
   (datum-pair? datum) (cond
@@ -618,8 +618,8 @@
   (let [macro-params (if (nil? rest-param) fixed-params (into [rest-param] fixed-params))
    binders (collect-template-binders template macro-params)
    free-refs (if (some? (deref MODULE-DEF-NAMES)) (collect-template-free-refs template macro-params binders reg) [])
-   renames0 (reduce (fn [acc b] (assoc acc b (fresh-lowered-sym! b))) {} (reverse binders))
-   renames (reduce (fn [acc r] (assoc acc r (hygiene-alias-for! r))) renames0 (reverse free-refs))]
+   renames0 (reduce (fn [acc ^String b] (assoc acc b (fresh-lowered-sym! b))) {} (reverse binders))
+   renames (reduce (fn [acc ^String r] (assoc acc r (hygiene-alias-for! r))) renames0 (reverse free-refs))]
   (if (= (count renames) 0) template (rename-in-template template renames))))
 
 (defn expand-template-macro! [reg m ^String name args ctx]

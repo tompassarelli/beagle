@@ -80,7 +80,7 @@
   (contains? (deref bound-vars) n))
 
 (defn add-names [m names]
-  (reduce (fn [acc n] (assoc acc n true)) m names))
+  (reduce (fn [acc ^String n] (assoc acc n true)) m names))
 
 (defn ^String with-bound! [names thunk]
   (let [saved (deref bound-vars)]
@@ -230,7 +230,7 @@
   (if present? constraint nil)))
 
 (defn ^Boolean exact-object-keys? [value expected]
-  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [key] (contains? value key)) expected)))
+  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [^String key] (contains? value key)) expected)))
 
 (defn ^Boolean valid-record-update-contract? [contract]
   (and (exact-object-keys? contract ["recordName" "fieldOrder" "validator"]) (string? (get contract "recordName")) (vector? (get contract "fieldOrder")) (every? string? (get contract "fieldOrder")) (or (nil? (get contract "validator")) (string? (get contract "validator")))))
@@ -387,7 +387,7 @@
    t (get target "type")]
   (cond
   (= t "map-destructure") (let [defaults (get target "or")
-   fields (mapv (fn [name] (let [entry (first (filterv (fn [d] (= (get d "key") name)) defaults))]
+   fields (mapv (fn [^String name] (let [entry (first (filterv (fn [d] (= (get d "key") name)) defaults))]
   (str (mangle-prop name) ": " (mangle-name name) (if (nil? entry) "" (str " = " (emit-expr*! (get entry "value"))))))) (get target "keys"))]
   (str "{" (str/join ", " fields) "}"))
   (= t "seq-destructure") (let [names (str/join ", " (mapv (fn [name] (if (string? name) (mangle-name name) (emit-destructure! name))) (get target "names")))
@@ -414,7 +414,7 @@
 (defn hidden-binding-renames [bindings ^String prefix base]
   (reduce (fn [renames entry] (let [binding (nth entry 1)
    i (nth entry 0)]
-  (reduce (fn [inner name] (assoc inner name (str "$beagle$" prefix "$" i "$" (mangle-name name)))) renames (names-from-target (get binding "name"))))) base (vec (map-indexed (fn [i binding] [i binding]) bindings))))
+  (reduce (fn [inner ^String name] (assoc inner name (str "$beagle$" prefix "$" i "$" (mangle-name name)))) renames (names-from-target (get binding "name"))))) base (vec (map-indexed (fn [i binding] [i binding]) bindings))))
 
 (defn callable-param-renames [params rest-p]
   (let [bindings (param-bindings params rest-p)]
@@ -437,7 +437,7 @@
   (= (get target "type") "map-destructure") (let [defaults (get target "or")
    as-name (get target "as")
    with-as (if (absent? as-name) [] [(str "let " (resolved-name as-name) " = " source ";")])
-   fields (mapv (fn [name] (let [entry (first (filterv (fn [d] (= (get d "key") name)) defaults))
+   fields (mapv (fn [^String name] (let [entry (first (filterv (fn [d] (= (get d "key") name)) defaults))
    value (str source "[" (js-string-lit (kw->prop name)) "]")]
   (str "let " (resolved-name name) " = " (if (nil? entry) value (str "(" value " ?? " (if (nil? (deref pattern-default-bound)) (emit-expr*! (get entry "value")) (with-emission-env! (deref pattern-default-bound) (deref pattern-default-types) (deref pattern-default-renames) (fn [] (emit-expr*! (get entry "value"))))) ")")) ";"))) (get target "keys"))]
   (into with-as fields))
@@ -478,32 +478,32 @@
    fields (field-names-of declarations)
    constrained? (bindings-have-constraints? declarations)
    name-mangled (mangle-name name)
-   field-raw-params (map-indexed (fn [i field] (if constrained? (str "$beagle$field$" i) (mangle-name field))) fields)
-   field-params (map-indexed (fn [i field] (if constrained? (str "$beagle$field$" i "$" (mangle-name field)) (mangle-name field))) fields)
+   field-raw-params (map-indexed (fn [i ^String field] (if constrained? (str "$beagle$field$" i) (mangle-name field))) fields)
+   field-params (map-indexed (fn [i ^String field] (if constrained? (str "$beagle$field$" i "$" (mangle-name field)) (mangle-name field))) fields)
    field-props (mapv mangle-prop fields)
-   field-installs (if constrained? (map-indexed (fn [i field-name] (str "const " field-name " = " (nth field-raw-params i) ";")) field-params) [])
+   field-installs (if constrained? (map-indexed (fn [i ^String field-name] (str "const " field-name " = " (nth field-raw-params i) ";")) field-params) [])
    field-checks (vec (filterv (fn [check] (not (nil? check))) (map-indexed (fn [i field] (emit-binding-constraint-statement! field (nth field-raw-params i))) declarations)))
-   field-entries (map-indexed (fn [i prop] (let [param (nth field-params i)]
+   field-entries (map-indexed (fn [i ^String prop] (let [param (nth field-params i)]
   (if (= prop param) param (str prop ": " param)))) field-props)
    validator (emit-record-validator! name declarations)
    frozen (str "Object.freeze({_tag: " (js-string-lit name) ", " (str/join ", " field-entries) "})")
    factory (str "function " name-mangled "(" (str/join ", " field-raw-params) ") {\n  " (if (= 0 (count field-checks)) "" (str (str/join "\n  " field-checks) "\n  ")) (if (= 0 (count field-installs)) "" (str (str/join "\n  " field-installs) "\n  ")) "return " frozen ";\n}")
-   accessors (map-indexed (fn [i prop] (str "function " (mangle-str (str (str/lower-case name) "-" (nth fields i))) "(r) { return r." prop "; }")) field-props)]
+   accessors (map-indexed (fn [i ^String prop] (str "function " (mangle-str (str (str/lower-case name) "-" (nth fields i))) "(r) { return r." prop "; }")) field-props)]
   (str/join "\n\n" (into (if (nil? validator) [] [validator]) (into [factory] accessors)))))
 
 (defn ^String emit-tagged-factory! [^String member-name fields]
   (let [m-str (mangle-name member-name)
    raw-fields (field-names-of fields)
    constrained? (bindings-have-constraints? fields)
-   field-raw-params (map-indexed (fn [i field] (if constrained? (str "$beagle$field$" i) (mangle-name field))) raw-fields)
-   field-params (map-indexed (fn [i field] (if constrained? (str "$beagle$field$" i "$" (mangle-name field)) (mangle-name field))) raw-fields)
+   field-raw-params (map-indexed (fn [i ^String field] (if constrained? (str "$beagle$field$" i) (mangle-name field))) raw-fields)
+   field-params (map-indexed (fn [i ^String field] (if constrained? (str "$beagle$field$" i "$" (mangle-name field)) (mangle-name field))) raw-fields)
    field-props (mapv mangle-prop raw-fields)]
-  (let [installs (if constrained? (map-indexed (fn [i field-name] (str "const " field-name " = " (nth field-raw-params i) ";")) field-params) [])
+  (let [installs (if constrained? (map-indexed (fn [i ^String field-name] (str "const " field-name " = " (nth field-raw-params i) ";")) field-params) [])
    field-checks (vec (filterv (fn [check] (not (nil? check))) (map-indexed (fn [i field] (emit-binding-constraint-statement! field (nth field-raw-params i))) fields)))
    validator (emit-record-validator! member-name fields)
-   frozen (str "Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-params)) "" (str ", " (str/join ", " (map-indexed (fn [i prop] (str prop ": " (nth field-params i))) field-props)))) " })")
+   frozen (str "Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-params)) "" (str ", " (str/join ", " (map-indexed (fn [i ^String prop] (str prop ": " (nth field-params i))) field-props)))) " })")
    factory (str "function " m-str "(" (str/join ", " field-raw-params) ") { " (if (= 0 (count field-checks)) "" (str (str/join " " field-checks) " ")) (if (= 0 (count installs)) "" (str (str/join " " installs) " ")) "return " frozen "; }")
-   accessors (map-indexed (fn [i prop] (str "function " (mangle-str (str (str/lower-case member-name) "-" (nth raw-fields i))) "(r) { return r." prop "; }")) field-props)]
+   accessors (map-indexed (fn [i ^String prop] (str "function " (mangle-str (str (str/lower-case member-name) "-" (nth raw-fields i))) "(r) { return r." prop "; }")) field-props)]
   (str/join "\n\n" (into (if (nil? validator) [] [validator]) (into [factory] accessors))))))
 
 (defn ^String emit-defenum [f]
@@ -514,14 +514,14 @@
    members (get f "members")
    comment (str "// " name " = " (str/join " | " (mapv mangle-name members)))
    mf (get f "member-fields")]
-  (if (absent? mf) comment (str comment "\n" (str/join "\n" (mapv (fn [m] (emit-tagged-factory! m (vec (get mf m)))) members))))))
+  (if (absent? mf) comment (str comment "\n" (str/join "\n" (mapv (fn [^String m] (emit-tagged-factory! m (vec (get mf m)))) members))))))
 
 (defn ^String emit-deferror! [f]
   (let [name (mangle-name (get f "name"))
    members (get f "members")
    comment (str "// error " name " = " (str/join " | " (mapv mangle-name members)))
    mf (get f "member-fields")]
-  (str comment "\n" (str/join "\n" (mapv (fn [m] (emit-tagged-factory! m (vec (get mf m)))) members)))))
+  (str comment "\n" (str/join "\n" (mapv (fn [^String m] (emit-tagged-factory! m (vec (get mf m)))) members)))))
 
 (defn ^String emit-defscalar [f]
   (let [name (get f "name")
@@ -735,7 +735,7 @@
    validator (if (nil? contract) nil (get contract "validator"))]
   (if (not (nil? contract)) (do
   (doseq [update (get e "updates")]
-  (if (not (some? (some (fn [field] (if (= field (get update "field")) (do
+  (if (not (some? (some (fn [^String field] (if (= field (get update "field")) (do
   field))) (get contract "fieldOrder")))) (do
   (throw (ex-info "checked with node updates a field outside its recordUpdate fieldOrder" {})))))))
   (if (nil? validator) (str "Object.freeze(" candidate ")") (str "Object.freeze(" (emit-ref-name (str validator)) "(" candidate "))")))))
@@ -786,7 +786,7 @@
   (vec (apply concat (mapv (fn [b] (names-from-target (get b "name"))) bindings))))
 
 (defn ^Boolean shadows-inline? [names]
-  (> (count (filterv (fn [n] (contains? (deref inline-scope) n)) names)) 0))
+  (> (count (filterv (fn [^String n] (contains? (deref inline-scope) n)) names)) 0))
 
 (defn emit-let-bind-info! [bindings body]
   (let [mutated (collect-set!-syms! body)
@@ -803,8 +803,8 @@
    post-bound (add-names bound names)
    post-types (add-types types [binding])
    id (if constrained-sequence? (next-constrained-binding-id!) i)
-   post-renames (reduce (fn [next name] (assoc next name (if constrained-sequence? (str "$beagle$constrained$binding$" id "$" (mangle-name name)) (mangle-name name)))) renames names)
-   mutable? (> (count (filterv (fn [name] (> (count (filterv (fn [x] (= x name)) mutated)) 0)) names)) 0)
+   post-renames (reduce (fn [next ^String name] (assoc next name (if constrained-sequence? (str "$beagle$constrained$binding$" id "$" (mangle-name name)) (mangle-name name)))) renames names)
+   mutable? (> (count (filterv (fn [^String name] (> (count (filterv (fn [^String x] (= x name)) mutated)) 0)) names)) 0)
    slot (if constrained-sequence? (str "$beagle$constrained$binding$" id) (str "$beagle$binding$" i))
    stmts (emit-let-binding-stmts! binding value mutable? slot constrained-sequence? bound types renames post-bound post-types post-renames)]
   (recur (subvec remaining 1) (+ i 1) (into strings stmts) post-bound post-types post-renames))))))
@@ -829,7 +829,7 @@
   (let [names (names-from-target (get binding "name"))
    post-bound (add-names bound names)
    post-types (add-types types [binding])
-   post-renames (reduce (fn [next name] (assoc next name (if (nil? (binding-constraint binding)) (mangle-name name) (str "$beagle$" prefix "$" index "$" (mangle-name name))))) renames names)]
+   post-renames (reduce (fn [next ^String name] (assoc next name (if (nil? (binding-constraint binding)) (mangle-name name) (str "$beagle$" prefix "$" index "$" (mangle-name name))))) renames names)]
   {"bound" post-bound "types" post-types "renames" post-renames}))
 
 (defn emit-for-binding-setup! [binding ^String source pre-bound pre-types pre-renames post-bound post-types post-renames]
@@ -1007,7 +1007,7 @@
    names (names-from-target (get binding "name"))
    post-bound (add-names bound names)
    post-types (add-types types [binding])
-   post-renames (reduce (fn [next name] (assoc next name (if hide-all? (str "$beagle$" prefix "$" i "$" (mangle-name name)) (mangle-name name)))) renames names)
+   post-renames (reduce (fn [next ^String name] (assoc next name (if hide-all? (str "$beagle$" prefix "$" i "$" (mangle-name name)) (mangle-name name)))) renames names)
    context {"binding" binding "pre-bound" bound "pre-types" types "pre-renames" renames "post-bound" post-bound "post-types" post-types "post-renames" post-renames}]
   (recur (subvec remaining 1) (+ i 1) (conj contexts context) post-bound post-types post-renames)))))
 
@@ -1046,7 +1046,7 @@
   (letfn [(walk [remaining] (cond
   (= 0 (count remaining)) (emit-value identity-value)
   (= 1 (count remaining)) (emit-loop-stmt-with! (nth remaining 0) bind-names emit-value)
-  :else (emit-loop-stmt-with! (nth remaining 0) bind-names (fn [value-str] (let [temp (fresh-logical-sym!)
+  :else (emit-loop-stmt-with! (nth remaining 0) bind-names (fn [^String value-str] (let [temp (fresh-logical-sym!)
    truthy (clj-truthy-test temp)
    next-str (walk (subvec remaining 1))
    short-str (emit-value temp)]
@@ -1085,7 +1085,7 @@
   :else (emit-value (emit-expr*! e))))))
 
 (defn ^String emit-loop-stmt! [e bind-names]
-  (emit-loop-stmt-with! e bind-names (fn [value-str] (str "return " value-str ";"))))
+  (emit-loop-stmt-with! e bind-names (fn [^String value-str] (str "return " value-str ";"))))
 
 (defn ^String indent-str [depth]
   (str/join "" (mapv (fn [x] " ") (range (* depth 2)))))
@@ -1431,7 +1431,7 @@
    pre-renames (deref rename-env)
    post-bound (add-names pre-bound abound)
    post-types (add-types pre-types (param-type-entries ps rest?))
-   post-renames (if (bindings-have-constraints? bindings) (hidden-binding-renames bindings "arity" pre-renames) (reduce (fn [next n] (assoc next n (mangle-name n))) pre-renames abound))
+   post-renames (if (bindings-have-constraints? bindings) (hidden-binding-renames bindings "arity" pre-renames) (reduce (fn [next ^String n] (assoc next n (mangle-name n))) pre-renames abound))
    fixed (vec (apply concat (map-indexed (fn [i p] (emit-js-argument-binding-setup! p (str "$beagle$args[" i "]") (str "$beagle$arg$" i) pre-bound pre-types pre-renames post-bound post-types post-renames)) ps)))
    rest-setup (if (absent? rest?) [] (emit-js-argument-binding-setup! rest? (str "$beagle$args.slice(" np ")") "$beagle$arg$rest" pre-bound pre-types pre-renames post-bound post-types post-renames))
    allb (into fixed rest-setup)
@@ -1473,7 +1473,7 @@
   (let [ns-str (get r "ns")
    refer (get r "refer")
    module-path (if (bare-js-module-specifier? ns-str) ns-str (relative-js-path importer ns-str))]
-  (if (and refer (not (false? refer))) (let [runtime-refer (filterv (fn [nm] (not (contains? macros nm))) refer)]
+  (if (and refer (not (false? refer))) (let [runtime-refer (filterv (fn [^String nm] (not (contains? macros nm))) refer)]
   (if (= 0 (count runtime-refer)) "" (str "import { " (str/join ", " (mapv mangle-name runtime-refer)) " } from '" module-path "';"))) (let [alias0 (get r "alias")
    alias (if (absent? alias0) (last-seg ns-str) alias0)]
   (str "import * as " (mangle-name alias) " from '" module-path "';")))))
@@ -1483,7 +1483,7 @@
    rs (get prog "requires")
    macros (let [m (get prog "macros")]
   (if (absent? m) {} m))
-   lines (filterv (fn [s] (not (= s ""))) (mapv (fn [r] (emit-require-line importer r macros)) rs))]
+   lines (filterv (fn [^String s] (not (= s ""))) (mapv (fn [r] (emit-require-line importer r macros)) rs))]
   (if (= 0 (count lines)) "" (str (str/join "\n" lines) "\n"))))
 
 (defn collect-top-names [forms requires externs]

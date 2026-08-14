@@ -101,7 +101,7 @@
   (poly-type? t) (let [vars (get t "vars")
    body (get t "body")
    bounds (get t "bounds")
-   var-strs (mapv (fn [v] (let [b (if (nil? bounds) nil (get bounds v))]
+   var-strs (mapv (fn [^String v] (let [b (if (nil? bounds) nil (get bounds v))]
   (if (nil? b) v (str "(" v " <: " (type->string b) ")")))) vars)]
   (str "(forall [" (str/join " " var-strs) "] " (type->string body) ")"))
   :else "?"))
@@ -130,7 +130,7 @@
   (and (union-type? actual) (union-type? expected)) (every? (fn [a-alt] (some (fn [e-alt] (type-compatible? a-alt e-alt)) (get expected "members"))) (get actual "members"))
   (union-type? expected) (some (fn [alt] (type-compatible? actual alt)) (get expected "members"))
   (union-type? actual) (every? (fn [alt] (type-compatible? alt expected)) (get actual "members"))
-  (and (prim? actual) (prim? expected)) (or (= (get actual "name") (get expected "name")) (and (= (get actual "name") "Int") (= (get expected "name") "Float")) (and (= (get actual "name") "Int") (boolean (some (fn [name] (= (get expected "name") name)) ["I8" "I16" "I32" "U8" "U16" "U32" "U64" "F32"]))) (and (= (get actual "name") "Float") (= (get expected "name") "F32")) (= (unqualify-name (get actual "name")) (unqualify-name (get expected "name"))))
+  (and (prim? actual) (prim? expected)) (or (= (get actual "name") (get expected "name")) (and (= (get actual "name") "Int") (= (get expected "name") "Float")) (and (= (get actual "name") "Int") (boolean (some (fn [^String name] (= (get expected "name") name)) ["I8" "I16" "I32" "U8" "U16" "U32" "U64" "F32"]))) (and (= (get actual "name") "Float") (= (get expected "name") "F32")) (= (unqualify-name (get actual "name")) (unqualify-name (get expected "name"))))
   (and (fn-type? actual) (fn-type? expected)) (let [ap (get actual "params")
    ep (get expected "params")
    ar (get actual "rest")

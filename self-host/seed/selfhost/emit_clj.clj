@@ -83,22 +83,12 @@
   :else "_"))))
 
 (defn ^String emit-param [p]
-  (emit-binding-form (param-binding-target p)))
-
-(defn ^String emit-param-tagged [p]
   (let [target (param-binding-target p)]
   (if (and (= (get p "type") "param") (string? target)) (str (clj-tag-prefix (get p "ann")) target) (emit-binding-form target))))
 
-(defn ^String emit-params [params]
-  (str/join " " (mapv emit-param params)))
-
 (defn ^String emit-params-with-rest [params rest-p]
-  (let [fixed (emit-params params)]
-  (if rest-p (if (= fixed "") (str "& " (emit-param rest-p)) (str fixed " & " (emit-param rest-p))) fixed)))
-
-(defn ^String emit-params-with-rest-tagged [params rest-p]
-  (let [fixed (str/join " " (mapv emit-param-tagged params))]
-  (if rest-p (if (= fixed "") (str "& " (emit-param rest-p)) (str fixed " & " (emit-param rest-p))) fixed)))
+  (let [fixed (str/join " " (mapv emit-param params))]
+  (if rest-p (if (= fixed "") (str "& " (emit-binding-form (param-binding-target rest-p))) (str fixed " & " (emit-binding-form (param-binding-target rest-p)))) fixed)))
 
 (defn ^String emit-binding-target! [target]
   (emit-binding-form (param-binding-target target)))
@@ -150,14 +140,14 @@
 (defn ^String callable-raw-name [index fixed-count]
   (if (= index fixed-count) "$beagle$constraint$raw-rest" (str "$beagle$constraint$raw-param$" index)))
 
-(defn emit-constrained-callable [params rest-p ^String body-str ^Boolean tagged?]
+(defn emit-constrained-callable [params rest-p ^String body-str]
   (let [all (params+rest params rest-p)
    fixed-count (count params)
    raw-names (mapv (fn [index] (callable-raw-name index fixed-count)) (range (count all)))
    fixed-raw (mapv (fn [index] (let [raw (nth raw-names index)
    param (nth params index)
    target (param-binding-target param)]
-  (if (and tagged? (= (get param "type") "param") (string? target)) (str (clj-tag-prefix (get param "ann")) raw) raw))) (range fixed-count))
+  (if (and (= (get param "type") "param") (string? target)) (str (clj-tag-prefix (get param "ann")) raw) raw))) (range fixed-count))
    params-str (str/join " " (if (or (nil? rest-p) (false? rest-p)) fixed-raw (into fixed-raw ["&" CLJ-HOST-REST])))
    rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
    predicate-bindings (loop [index 0
@@ -171,8 +161,8 @@
    target-bindings (mapv (fn [index] (str (emit-binding-form (binding-target (nth all index))) " " "$beagle$constraint$checked-param$" index)) (range (count all)))]
   {"params" params-str "body" (str "(let [" (str/join "\n       " (into rest-normalization predicate-bindings)) "]\n" "  (let [" (str/join "\n       " checked-bindings) "]\n" "    (let [" (str/join "\n       " target-bindings) "]\n" "      " body-str ")))")}))
 
-(defn emit-callable-signature+body [params rest-p ^String body-str ^Boolean tagged?]
-  (if (callable-has-constraints? params rest-p) (emit-constrained-callable params rest-p body-str tagged?) (let [fixed (if tagged? (emit-params-with-rest-tagged params nil) (emit-params-with-rest params nil))
+(defn emit-callable-signature+body [params rest-p ^String body-str]
+  (if (callable-has-constraints? params rest-p) (emit-constrained-callable params rest-p body-str) (let [fixed (emit-params-with-rest params nil)
    params-str (if (or (nil? rest-p) (false? rest-p)) fixed (if (= fixed "") (str "& " CLJ-HOST-REST) (str fixed " & " CLJ-HOST-REST)))]
   {"params" params-str "body" (if (or (nil? rest-p) (false? rest-p)) body-str (str "(let [" (emit-binding-form (binding-target rest-p)) " (vec " CLJ-HOST-REST ")]\n  " body-str ")"))})))
 
@@ -317,7 +307,7 @@
    raw-positional (str "$beagle$record$" name "$raw-constructor")
    raw-map (str "$beagle$record$" name "$raw-map-constructor")
    validator (record-validator-name name)
-   guarded (emit-callable-signature+body fields false (str "(" raw-positional (if (= 0 (count fields)) "" (str " " (str/join " " (field-names-of fields)))) ")") false)
+   guarded (emit-callable-signature+body fields false (str "(" raw-positional (if (= 0 (count fields)) "" (str " " (str/join " " (field-names-of fields)))) ")"))
    validation-bindings (loop [i 0
    acc []]
   (if (>= i (count constrained)) acc (let [entry (nth constrained i)
@@ -336,7 +326,7 @@
    fnames (field-names-of fields)
    name-lower (str/lower-case name)
    record-line (str "(defrecord " name " [" (str/join " " fnames) "])")
-   accessors (mapv (fn [fname] (str "(defn " name-lower "-" fname " [r] (:" fname " r))")) fnames)]
+   accessors (mapv (fn [^String fname] (str "(defn " name-lower "-" fname " [r] (:" fname " r))")) fnames)]
   (str/join "\n\n" (into (into [record-line] (emit-record-constructor-guards name fields)) accessors))))
 
 (defn ^String emit-defenum [e]
@@ -347,18 +337,18 @@
   (let [fnames (field-names-of fields)
    m-lower (str/lower-case m)
    record-line (str "(defrecord " m " [" (str/join " " fnames) "])")
-   accessors (mapv (fn [fname] (str "(defn " m-lower "-" fname " [r] (:" fname " r))")) fnames)]
+   accessors (mapv (fn [^String fname] (str "(defn " m-lower "-" fname " [r] (:" fname " r))")) fnames)]
   (str/join "\n\n" (into (into [record-line] (emit-record-constructor-guards m fields)) accessors))))
 
 (defn ^String emit-defunion! [e]
   (let [comment (str ";; " (get e "name") " = " (str/join " | " (get e "members")))
    mf (get e "member-fields")]
-  (if (nil? mf) comment (str comment "\n" (str/join "\n" (mapv (fn [m] (emit-variant-defrecord m (vec (get mf m)))) (get e "members")))))))
+  (if (nil? mf) comment (str comment "\n" (str/join "\n" (mapv (fn [^String m] (emit-variant-defrecord m (vec (get mf m)))) (get e "members")))))))
 
 (defn ^String emit-deferror! [e]
   (let [comment (str ";; error " (get e "name") " = " (str/join " | " (get e "members")))
    mf (get e "member-fields")]
-  (if (nil? mf) comment (str comment "\n" (str/join "\n" (mapv (fn [m] (emit-variant-defrecord m (vec (get mf m)))) (get e "members")))))))
+  (if (nil? mf) comment (str comment "\n" (str/join "\n" (mapv (fn [^String m] (emit-variant-defrecord m (vec (get mf m)))) (get e "members")))))))
 
 (defn ^String scalar-backing-label [backing]
   (let [name (get backing "name")]
@@ -411,7 +401,7 @@
 (defn ^String emit-type-impl! [impl]
   (let [protocol-name (get impl "protocol")
    method-lines (mapv (fn [method] (let [body (emit-body-with-loop-context! (get method "body") "    " nil)
-   callable (emit-callable-signature+body (get method "params") (get method "rest") body false)]
+   callable (emit-callable-signature+body (get method "params") (get method "rest") body)]
   (str "(" (protocol-raw-method-name protocol-name (get method "name")) " [" (get callable "params") "]\n" "    " (get callable "body") ")"))) (get impl "methods"))]
   (str protocol-name "\n  " (str/join "\n  " method-lines))))
 
@@ -521,7 +511,7 @@
   (or (nil? x) (false? x)))
 
 (defn ^Boolean exact-object-keys? [value expected]
-  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [key] (contains? value key)) expected)))
+  (and (map? value) (= (count (keys value)) (count expected)) (every? (fn [^String key] (contains? value key)) expected)))
 
 (defn ^Boolean valid-record-update-contract? [contract]
   (and (exact-object-keys? contract ["recordName" "fieldOrder" "validator"]) (string? (get contract "recordName")) (vector? (get contract "fieldOrder")) (every? string? (get contract "fieldOrder")) (or (nil? (get contract "validator")) (string? (get contract "validator")))))
@@ -578,18 +568,18 @@
    name (get e "name")
    name-tag (clj-tag-prefix (get e "ret"))
    body (emit-body-with-loop-context! (get e "body") "  " nil)
-   callable (emit-callable-signature+body (get e "params") (get e "rest") body true)
+   callable (emit-callable-signature+body (get e "params") (get e "rest") body)
    doc (get e "doc")]
   (str "(" kw " " name-tag name (if (string? doc) (str "\n  " (write-clj-string doc)) "") " [" (get callable "params") "]\n  " (get callable "body") ")"))
   (= node "defn-multi") (let [kw (if (get e "private") "defn-" "defn")
    name (get e "name")
    arity-strs (mapv (fn [a] (let [body (emit-body-with-loop-context! (get a "body") "    " nil)
-   callable (emit-callable-signature+body (get a "params") (get a "rest") body false)]
+   callable (emit-callable-signature+body (get a "params") (get a "rest") body)]
   (str "  ([" (get callable "params") "]\n    " (get callable "body") ")"))) (get e "arities"))
    doc (get e "doc")]
   (str "(" kw " " name (if (string? doc) (str "\n  " (write-clj-string doc)) "") "\n" (str/join "\n" arity-strs) ")"))
   (= node "fn") (let [body (emit-body-with-loop-context! (get e "body") "  " nil)
-   callable (emit-callable-signature+body (get e "params") (get e "rest") body false)]
+   callable (emit-callable-signature+body (get e "params") (get e "rest") body)]
   (str "(fn [" (get callable "params") "] " (get callable "body") ")"))
   (= node "let") (str "(let [" (emit-let-bindings! (get e "bindings")) "]\n  " (emit-body (get e "body") "  ") ")")
   (= node "if") (let [els (get e "else")]
@@ -661,7 +651,7 @@
    validator (if (nil? contract) nil (get contract "validator"))]
   (if (not (nil? contract)) (do
   (doseq [update (get e "updates")]
-  (if (not (some? (some (fn [field] (if (= field (get update "field")) (do
+  (if (not (some? (some (fn [^String field] (if (= field (get update "field")) (do
   field))) (get contract "fieldOrder")))) (do
   (throw (ex-info "checked with node updates a field outside its recordUpdate fieldOrder" {})))))))
   (if (nil? validator) updated (str "(let [$beagle$record$update$candidate " updated "]\n" "  (" validator " $beagle$record$update$candidate))")))
@@ -675,12 +665,12 @@
    val (emit-expr* (get e "value"))]
   (if (= (get target "node") "method-call") (str "(set! (" (get target "method") " " (emit-expr* (get target "target")) ") " val ")") (str "(set! " (emit-expr* target) " " val ")")))
   (= node "letfn") (let [fn-strs (mapv (fn [f] (let [body (emit-body-with-loop-context! (get f "body") "    " nil)
-   callable (emit-callable-signature+body (get f "params") (get f "rest") body false)]
+   callable (emit-callable-signature+body (get f "params") (get f "rest") body)]
   (str "(" (get f "name") " [" (get callable "params") "] " (get callable "body") ")"))) (get e "fns"))]
   (str "(letfn [" (str/join "\n          " fn-strs) "]\n  " (emit-body (get e "body") "  ") ")"))
   (= node "target-case") (let [cases (vec (get e "cases"))
    want (deref emit-target)
-   pick (fn [t] (first (filterv (fn [c] (= (get c "target") t)) cases)))
+   pick (fn [^String t] (first (filterv (fn [c] (= (get c "target") t)) cases)))
    branch0 (pick want)
    branch (if (nil? branch0) (pick "clj") branch0)]
   (if (nil? branch) "nil" (emit-expr* (get branch "body"))))
@@ -786,8 +776,8 @@
   (expect! "binding-target: plain name passes through" (= (emit-binding-target! "x") "x"))
   (expect! "binding-target: seq-destructure -> [a b]" (= (emit-binding-target! {"type" "seq-destructure" "names" ["a" "b"] "rest" false}) "[a b]"))
   (expect! "binding-target: map-destructure -> {:keys [id b]}" (= (emit-binding-target! {"type" "map-destructure" "keys" ["id" "b"] "as" false}) "{:keys [id b]}"))
-  (expect! "param: typed sequential aggregate unwraps to binding form" (= (emit-param-tagged {"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" [{"kind" "prim" "name" "Int"} {"kind" "prim" "name" "String"}]}}) "[x y]"))
-  (expect! "param: nested map defaults and as survive aggregate annotation" (= (emit-param-tagged {"type" "param" "name" {"type" "seq-destructure" "names" ["x" {"type" "map-destructure" "keys" ["y"] "or" [{"key" "y" "value" {"node" "literal" "kind" "number" "value" 3}}] "as" "row"}] "rest" false} "ann" {"kind" "any"}}) "[x {:keys [y] :or {y 3} :as row}]"))
+  (expect! "param: typed sequential aggregate unwraps to binding form" (= (emit-param {"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" [{"kind" "prim" "name" "Int"} {"kind" "prim" "name" "String"}]}}) "[x y]"))
+  (expect! "param: nested map defaults and as survive aggregate annotation" (= (emit-param {"type" "param" "name" {"type" "seq-destructure" "names" ["x" {"type" "map-destructure" "keys" ["y"] "or" [{"key" "y" "value" {"node" "literal" "kind" "number" "value" 3}}] "as" "row"}] "rest" false} "ann" {"kind" "any"}}) "[x {:keys [y] :or {y 3} :as row}]"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false} "value" {"node" "ref" "name" "p"}}]) "[a b] p"))
   (expect! "let-bindings: map-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false} "value" {"node" "ref" "name" "m"}}]) "{:keys [id b]} m"))
   (expect! "constrained callable captures predicate before authored binder" (let [output (emit-expr! {"node" "defn" "name" "keep" "params" [{"type" "param" "name" "value" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"}}] "rest" false "ret" {"kind" "prim" "name" "Int"} "body" [{"node" "ref" "name" "value"}] "private" false "doc" false})]
