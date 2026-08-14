@@ -1,7 +1,7 @@
 #lang racket/base
 
-;; Execution oracle for JS fixtures: compile each .bjs via beagle-build,
-;; then exercise the emitted JavaScript with a node driver. Catches
+;; Execution oracle for JS fixtures: compile each .bjs through a checked JS
+;; path, then exercise the emitted JavaScript with a node driver. Catches
 ;; semantic bugs (ReferenceError, TypeError, wrong value) that
 ;; emit-structure assertions cannot.
 ;;
@@ -10,15 +10,19 @@
 
 (require rackunit
          racket/list
+         racket/set
          racket/string
          racket/port
          racket/system
          racket/runtime-path
-         racket/file)
+         racket/file
+         (file "../../beagle-lib/private/parse.rkt")
+         (only-in (file "../../beagle-lib/private/emit-js.rkt")
+                  current-js-export-names)
+         (file "../../beagle-lib/private/module-overlay-check.rkt"))
 
 (define-runtime-path fixtures-dir "fixtures")
 (define-runtime-path beagle-build "../../bin/beagle-build")
-(define-runtime-path beagle "../../bin/beagle")
 
 (define tmp-dir (make-temporary-file "beagle-js-oracle-~a" 'directory))
 
@@ -34,6 +38,18 @@
          (append (drop-right parts 1)
                  (list (string-append (last parts) ".js")))))
 
+(define (source-namespace source)
+  (second (regexp-match #px"\\(ns\\s+([^\\s\\)]+)" source)))
+
+(define (overlay-diagnostics->string result)
+  (string-join
+   (for/list ([diagnostic
+               (in-list (overlay-check-result-diagnostics result))])
+     (format "~a: ~a"
+             (overlay-diagnostic-source diagnostic)
+             (overlay-diagnostic-message diagnostic)))
+   "\n"))
+
 (define (emit-batch-and-run modules entry-namespace)
   (define scratch
     (make-temporary-file "beagle-js-batch-oracle-~a" 'directory))
@@ -48,25 +64,33 @@
            (build-path src-dir (string-append (car module) ".bjs")))
          (write-source path (cdr module))
          path))
-     (define build-out (open-output-string))
-     (define build-err (open-output-string))
-     (define build-code
-       (parameterize ([current-output-port build-out]
-                      [current-error-port build-err])
-         (apply system*/exit-code
-                beagle
-                "build"
-                (append (map path->string sources)
-                        (list "--out" (path->string out-dir))))))
+     (define checked
+       ;; build-all derives the provider export set from the whole batch. The
+       ;; overlay already supplies that whole-module context, so emit every
+       ;; public binding while exercising its canonical interfaces.
+       (parameterize ([current-js-export-names (set '*)])
+         (check-module-overlay
+          (for/list ([module (in-list modules)]
+                     [path (in-list sources)])
+            (define stxs (read-beagle-syntax path))
+            (module-source
+             (string->symbol (source-namespace (cdr module)))
+             (path->string path)
+             stxs
+             (map syntax->datum stxs)
+             #f))
+          #:capture-types? #t
+          #:closed? #t)))
+     (define build-code (if (overlay-check-result-ok? checked) 0 1))
      (define emitted
        (if (zero? build-code)
-           (for/hash ([module (in-list modules)])
+           (for/hash ([module
+                       (in-list (overlay-check-result-modules checked))])
              (define namespace
-               (second (regexp-match #px"\\(ns\\s+([^\\s\\)]+)"
-                                     (cdr module))))
-             (values namespace
-                     (file->string
-                      (module-output-path out-dir namespace))))
+               (symbol->string (checked-overlay-module-namespace module)))
+             (define source (checked-overlay-module-emitted module))
+             (write-source (module-output-path out-dir namespace) source)
+             (values namespace source))
            (hash)))
      (write-source (build-path out-dir "package.json")
                    "{\"type\":\"module\"}\n")
@@ -84,8 +108,7 @@
            1))
      (values build-code run-code emitted
              (get-output-string run-out)
-             (string-append (get-output-string build-out)
-                            (get-output-string build-err)
+             (string-append (overlay-diagnostics->string checked)
                             (get-output-string run-err))))
    (lambda () (delete-directory/files scratch #:must-exist? #f))))
 

@@ -1396,20 +1396,11 @@
          [`(backing ,_ predicates ,predicates) (pair? predicates)]
          [_ #f])))
 
-(define (legacy-record-constructor-import? prog entry name)
-  (define authored (symbol->string name))
-  (and (string-prefix? authored "->")
-       (let* ([record-name (string->symbol (substring authored 2))]
-              [owned-name (qualified-binding (require-entry-ns entry) record-name)])
-         (equal? (hash-ref (program-imported-record-ns prog) owned-name #f)
-                 (require-entry-ns entry)))))
-
 (define (record-constructor-import? prog entry name)
   (define binding (require-interface-binding prog entry name))
-  (or (and (string-prefix? (symbol->string name) "->")
-           binding
-           (record-constructor-kind? (interface-binding-kind binding)))
-      (and (not binding) (legacy-record-constructor-import? prog entry name))))
+  (and (string-prefix? (symbol->string name) "->")
+       binding
+       (record-constructor-kind? (interface-binding-kind binding))))
 
 (define (build-record-constructor-set prog)
   (define local
@@ -1438,16 +1429,7 @@
                      #:when (record-constructor-kind?
                              (interface-binding-kind binding)))
             name)
-          (for/list ([(owned-name owner)
-                      (in-hash (program-imported-record-ns prog))]
-                     #:when (and (eq? owner namespace)
-                                 (string-prefix?
-                                  (symbol->string owned-name)
-                                  (string-append (symbol->string namespace) "/"))))
-            (define record-name
-              (substring (symbol->string owned-name)
-                         (add1 (string-length (symbol->string namespace)))))
-            (string->symbol (string-append "->" record-name)))))
+          '()))
     (define qualified
       (for/fold ([next constructors]) ([name (in-list names)])
         (set-add (set-add next (qualified-binding prefix name))
