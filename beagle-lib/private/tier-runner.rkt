@@ -37,7 +37,7 @@
 (define manifest-path  (build-path beagle-root "beagle-test" "tiers.rktd"))
 (define tests-dir      (build-path beagle-root "beagle-test" "tests"))
 
-;; Content-keyed result cache (bin/_gate-cache-run). When present, each
+;; Content-keyed result cache (bin/_gate-cache-run). When present, each eligible
 ;; per-file raco-test child runs through it: a stored green result whose whole
 ;; traced input closure is byte-identical is replayed instead of re-run, and
 ;; its first stdout line is a "beagle-gate-cache: cached-green ..." marker.
@@ -48,6 +48,14 @@
 
 (define (gate-cache-available?)
   (file-exists? gate-cache-wrapper))
+
+;; The cache proves a traced filesystem closure. query.rkt deliberately probes
+;; live daemon/process/socket behavior, which is outside that proof, so a prior
+;; green result must never stand in for a fresh landing-gate execution.
+(define gate-cache-ineligible-files '("query.rkt"))
+
+(define (gate-cache-eligible-file? fname)
+  (not (member fname gate-cache-ineligible-files)))
 
 (define cache-marker-rx #rx"^beagle-gate-cache: ")
 (define cached-green-rx #rx"^beagle-gate-cache: cached-green ")
@@ -190,7 +198,7 @@
        (and root (make-temporary-directory "child-~a" #:base-dir root)))
      (define raco (find-executable-path "raco"))
      (define argv
-       (if (gate-cache-available?)
+       (if (and (gate-cache-available?) (gate-cache-eligible-file? fname))
            (list gate-cache-wrapper
                  "--domain" "raco-test" "--id" fname "--"
                  raco "test" (path->string full-path))
@@ -541,6 +549,12 @@
                 "explicit --jobs overrides everything")
   (check-true (>= default-jobs 1) "default jobs is at least 1")
   (check-true (<= default-jobs 16) "default jobs is capped at 16")
+
+  ;; A filesystem-closure cache cannot prove a live endpoint observation.
+  (check-false (gate-cache-eligible-file? "query.rkt")
+               "query tests always execute fresh")
+  (check-true (gate-cache-eligible-file? "parse.rkt")
+              "ordinary filesystem-closed tests remain cacheable")
 
   ;; --- runner-owned temp containment ---------------------------------------
 

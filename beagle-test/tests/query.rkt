@@ -66,17 +66,33 @@
        (path->string DAEMON-FILES))))
   (values status (get-output-string out) (get-output-string err)))
 
-(define (closed-local-port)
+(define (call-with-controlled-dead-endpoint proc)
   (define listener (tcp-listen 0 1 #t "127.0.0.1"))
   (define addresses (call-with-values (lambda () (tcp-addresses listener #t)) list))
-  (tcp-close listener)
-  (cadr addresses))
+  (define accepted (make-semaphore 0))
+  (define endpoint-thread
+    (thread
+     (lambda ()
+       (define-values (in out) (tcp-accept listener))
+       (semaphore-post accepted)
+       ;; The test owns this endpoint and makes it die during the request.
+       ;; Keeping the listener bound until the connection is accepted removes
+       ;; the close-then-reuse race of selecting an unowned ephemeral port.
+       (close-output-port out)
+       (close-input-port in))))
+  (dynamic-wind
+    void
+    (lambda () (proc (cadr addresses) accepted))
+    (lambda ()
+      (kill-thread endpoint-thread)
+      (tcp-close listener))))
 
-(define (run-daemon-cli-against-dead-port scratch source-path)
+(define (run-daemon-cli-against-dead-port scratch source-path port)
   (define out (open-output-string))
   (define err (open-output-string))
   (define script
     (string-append
+     "export BEAGLE_ZO_GATE_QUIET=1; "
      "export BEAGLE_DAEMON_PORTFILE=\"$1/daemon.port\"; "
      "export BEAGLE_DAEMON_PIDFILE=\"$1/daemon.pid\"; "
      "export BEAGLE_DAEMON_IDENTITYFILE=\"$1/daemon.identity\"; "
@@ -94,7 +110,7 @@
        "daemon-dead-port-test"
        (path->string scratch)
        (path->string DAEMON-FILES)
-       (number->string (closed-local-port))
+       (number->string port)
        (path->string DAEMON-CLI)
        source-path)))
   (values status (get-output-string out) (get-output-string err)))
@@ -267,7 +283,7 @@
       (check-equal? stale-port ""))
     (lambda () (delete-directory/files scratch))))
 
-(test-case "daemon CLI falls back one-shot from a compatible dead endpoint"
+(test-case "daemon CLI falls back one-shot when a compatible endpoint dies"
   (define scratch (make-temporary-file "beagle-daemon-dead-port-~a" 'directory))
   (define source-path (build-path scratch "present.bclj"))
   (dynamic-wind
@@ -282,11 +298,19 @@
             "(ns daemon.dead-port)\n"
             "(defn present [] Int 1)\n")
            out)))
-      (define-values (status out err)
-        (run-daemon-cli-against-dead-port scratch (path->string source-path)))
-      (check-equal? status 0)
-      (check-true (string-contains? out "\"signature\":\"(Fn [] Int)\""))
-      (check-equal? err ""))
+      (call-with-controlled-dead-endpoint
+       (lambda (port accepted)
+         (define-values (status out err)
+           (run-daemon-cli-against-dead-port
+            scratch
+            (path->string source-path)
+            port))
+         (check-not-false
+          (sync/timeout 0 accepted)
+          "the CLI exercised the test-owned compatible endpoint")
+         (check-equal? status 0)
+         (check-true (string-contains? out "\"signature\":\"(Fn [] Int)\""))
+         (check-equal? err ""))))
     (lambda () (delete-directory/files scratch))))
 
 (test-case "fields: retired flat fields are refused by the canonical parser"

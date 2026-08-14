@@ -94,7 +94,10 @@ send_query() {
     fi
 
     # Fallback: no compatible daemon, or its endpoint did not answer in time.
-    printf '%s\nquit\n' "$*" | "$RACKET" -e '(require beagle/private/daemon) (run-daemon)' 2>/dev/null | head -1
+    # One command followed by EOF yields one response and exits. Appending a
+    # second `quit` response then truncating with `head` races pipefail against
+    # Racket's second write under load.
+    printf '%s\n' "$*" | "$RACKET" -e '(require beagle/private/daemon) (run-daemon)' 2>/dev/null
 }
 
 stop_running_daemon() {
