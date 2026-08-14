@@ -175,15 +175,14 @@ jobs:
       - name: Code as canonical facts — recompile-identity gate
         run: CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-facts/run.sh
 
-      # Scope-correct rename — the COMPLETE engine (chartroom's resolve.clj, refers_to),
-      # ONE gate across every scope hazard: mod_a/helper renamed but mod_b's untouched
-      # (collision); a shadowing local untouched (shadowing); every cross-module reader
-      # renamed (cross-file, fram.store/value! -> intern! over fram/src); the retired
-      # fram.cnf module is rejected instead of silently succeeding with zero edits; a collision onto
-      # an existing binding refused; each renamed tree recompiles. Repair as a graph
-      # operation, O(1) (edits the def; references follow refers_to).
-      - name: Scope-correct rename (collision + shadowing + cross-module) gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-facts/rename.sh
+      # Immutable-pin authority boundary only: the historical resolver predates four
+      # modern structural/type rename capabilities, so the COMPLETE capability suite
+      # belongs to moving-current fram-lockstep. Here the real pinned owner plus one
+      # qualified consumer must project, rename, and render; the retired fram.cnf
+      # scope must refuse; and current Beagle must reject the owner's retained return
+      # arrows with the pointed migration diagnostic inside the declared deadline.
+      - name: Release-pinned Fram authority rename boundary
+        run: CODE_AS_FACTS_FRAM_AUTHORITY_ONLY=1 FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-facts/rename.sh
 
       # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
       # the form + its subtree and renumbers siblings (no truncation); a delete that

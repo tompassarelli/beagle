@@ -2,7 +2,9 @@
 
 ;; Thin process boundary for Fram's atomic graph transaction gate.
 ;;
-;; Success writes exactly one JSON receipt containing all emitted candidates.
+;; Success writes exactly one JSON receipt containing all checked candidates.
+;; Emission is the default atomic publication gate; --check-only retains the
+;; coherent interface/type proof for emitter-neutral profiles such as Core.
 ;; Failure writes diagnostics to stderr, exits non-zero, and keeps stdout empty
 ;; so a caller cannot accidentally publish a partial candidate overlay.
 
@@ -11,11 +13,11 @@
          "module-overlay-check.rkt")
 
 (define args (vector->list (current-command-line-arguments)))
-(define-values (check-namespaces check-sources edn-paths)
-  (let loop ([rest args] [checks '()] [sources '()] [paths '()])
+(define-values (check-namespaces check-sources emit? edn-paths)
+  (let loop ([rest args] [checks '()] [sources '()] [emit? #t] [paths '()])
     (cond
       [(null? rest)
-       (values (reverse checks) (reverse sources) (reverse paths))]
+       (values (reverse checks) (reverse sources) emit? (reverse paths))]
       [(equal? (car rest) "--check")
        (when (null? (cdr rest))
          (eprintf "--check requires a declared namespace\n")
@@ -24,6 +26,7 @@
         (cddr rest)
         (cons (string->symbol (cadr rest)) checks)
         sources
+        emit?
         paths)]
       [(equal? (car rest) "--check-source")
        (when (null? (cdr rest))
@@ -33,27 +36,28 @@
         (cddr rest)
         checks
         (cons (cadr rest) sources)
+        emit?
         paths)]
+      [(equal? (car rest) "--check-only")
+       (loop (cdr rest) checks sources #f paths)]
       [(regexp-match? #rx"^--" (car rest))
        (eprintf "unknown option: ~a\n" (car rest))
        (exit 2)]
       [else
-       (loop (cdr rest)
-             checks
-             sources
-             (cons (car rest) paths))])))
+       (loop (cdr rest) checks sources emit? (cons (car rest) paths))])))
 (when (null? edn-paths)
   (eprintf
-   "usage: racket facts-check-overlay.rkt [--check declared.ns | --check-source @file-id]... <overlay.edn> ...\n")
+   "usage: racket facts-check-overlay.rkt [--check-only] [--check declared.ns | --check-source @file-id]... <overlay.edn> ...\n")
   (exit 2))
 
 (define result
   (if (and (null? check-namespaces) (null? check-sources))
-      (check-edn-overlay edn-paths)
+      (check-edn-overlay edn-paths #:emit? emit?)
       (check-edn-overlay
        edn-paths
        #:check-namespaces check-namespaces
-       #:check-sources check-sources)))
+       #:check-sources check-sources
+       #:emit? emit?)))
 
 (cond
   [(overlay-check-result-ok? result)

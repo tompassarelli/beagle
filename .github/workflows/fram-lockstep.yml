@@ -3,7 +3,8 @@ name: fram lockstep
 # Release and certification workflows consume one immutable Fram revision.
 # This lane deliberately follows Fram main so forward compatibility drift is
 # visible without making Beagle releases depend on a repository that can
-# change between retries.
+# change between retries. The code-as-facts rename gate selects Fram's current
+# `.bgl` owner; release CI independently keeps the immutable compatibility owner.
 on:
   workflow_dispatch:
   schedule:
@@ -52,6 +53,8 @@ jobs:
           bin/test/cascade-graph/run.sh
           bin/test/callgraph-xmodule/run.sh
           bin/test/code-as-facts/run.sh
+          # Moving Fram owns the complete rename capability suite. Immutable-pin
+          # CI runs only its explicit legacy authority boundary.
           bin/test/code-as-facts/rename.sh
           bin/test/code-as-facts/delete.sh
           bin/test/code-as-facts/authoring.sh

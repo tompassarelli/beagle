@@ -1,1 +1,1 @@
-(defn call-keyword [m: Any] -> Any ((:k m)))
+(defn call-keyword [(m Any)] Any ((:k m)))

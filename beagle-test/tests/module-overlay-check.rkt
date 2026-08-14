@@ -602,7 +602,45 @@
      (check-equal? (length (hash-ref receipt 'modules)) 1)
      (check-equal?
       (hash-ref (car (hash-ref receipt 'modules)) 'source)
-      "graph.fixture.selected"))))
+      "graph.fixture.selected")
+     (check-true
+      (string? (hash-ref (car (hash-ref receipt 'modules)) 'emitted))))))
+
+(test-case "CLI check-only accepts an emitter-neutral Core overlay"
+  (with-overlay-files
+   (lambda (root _provider-source _consumer-source)
+     (define core-edn
+       (candidate!
+        root
+        "core-candidate"
+        "graph.fixture.core.bgl"
+        (string-append
+         "#lang beagle\n"
+         "(ns overlay.core)\n"
+         "(def answer Int 42)\n")))
+     (define-values (status out err)
+       (run-overlay-cli
+        "--check-only"
+        (path->string core-edn)))
+     (check-equal? status 0 err)
+     (check-equal? err "")
+     (define receipt (string->jsexpr out))
+     (check-true (hash-ref receipt 'ok))
+     (check-equal? (length (hash-ref receipt 'modules)) 1)
+     (check-false
+      (hash-ref (car (hash-ref receipt 'modules)) 'emitted)))))
+
+(test-case "CLI option errors stay pointed"
+  (define-values (missing-status missing-out missing-err)
+    (run-overlay-cli "--check"))
+  (check-equal? missing-status 2)
+  (check-equal? missing-out "")
+  (check-regexp-match #rx"--check requires a declared namespace" missing-err)
+  (define-values (unknown-status unknown-out unknown-err)
+    (run-overlay-cli "--check-only=maybe"))
+  (check-equal? unknown-status 2)
+  (check-equal? unknown-out "")
+  (check-regexp-match #rx"unknown option: --check-only=maybe" unknown-err))
 
 (test-case "removed qualified provider export fails closed instead of typing as Any"
   (with-overlay-files
