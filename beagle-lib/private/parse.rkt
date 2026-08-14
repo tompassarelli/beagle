@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Parse beagle source into structured AST nodes. Macros are expanded in
-;; pass 2. Meta forms (mode, namespace, declare-extern, require, define-macro)
+;; pass 2. Meta forms (mode, namespace, declare-extern, require, defmacro)
 ;; are pulled out separately and don't appear in `forms`.
 
 (require racket/match
@@ -25,7 +25,7 @@
          ;; drift out of sync (#19; the #18 dynamic-var divergence was a symptom).
          (only-in "../lang/reader-impl.rkt"
                   fn-shorthand->fn reading-fn-shorthand? beagle-readtable)
-         (only-in "tags.rkt" ANN-MARKER ann))
+         (only-in "tags.rkt" ann))
 
 ;; --- structured parse errors ------------------------------------------------
 ;;
@@ -445,9 +445,6 @@
                    (reverse (cons entry acc))))]
            [(structured-binding? (->datum (car rest)))
             (loop (cdr rest) (cons (car rest) acc))]
-           [(or (eq? (->datum (car rest)) ANN-MARKER)
-                (eq? (->datum (car rest)) LEGACY-MARKER))
-            #f]
            [else (loop (cdr rest) (cons (car rest) acc))]))))
 
 ;; Each binding is one source datum, so layout never has to infer logical
@@ -1928,10 +1925,6 @@
             (raise-parse-error 'bad-meta-value
                                "(ns ~a ...): unsupported ns clause ~v — supported: docstring, (:require libspec ...), (:import spec ...)" n clause)]))]
 
-      [(cons 'define-macro _)
-       (raise-parse-error 'legacy-macro-form
-        "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
-
       [(list 'defmacro (? symbol? name) macro-params template)
        (validate-identifier! name "macro")
        (unless (bracketed? macro-params)
@@ -2132,7 +2125,6 @@
        (memq (car d) '(ns
                        define-mode
                        define-target
-                       define-macro
                        defmacro
                        declare-extern
                        require
@@ -2295,17 +2287,6 @@
     [else (error 'beagle "unsupported expression: ~v" d)])
    loc))
 
-;; Retired annotation punctuation. The reader still preserves these markers so
-;; stale source receives a pointed rejection, but no parser path accepts them.
-(define LEGACY-MARKER ':-)
-
-(define (annotation-marker? sym)
-  (or (eq? sym ANN-MARKER) (eq? sym LEGACY-MARKER) (eq? sym ':)))
-
-(define (return-marker? sym)
-  (or (eq? sym '->) (eq? sym LEGACY-MARKER)))
-
-;; `#%:` never reaches printed output; render it as the source spelling.
 ;; A typed binding is structural: `(binding-form Type [constraint])`. The
 ;; optional constraint is a predicate expression owned by the same binding.
 ;; The binding form is
@@ -2327,8 +2308,7 @@
        (not (bracketed? item))
        (not (map-destructure-form? item))
        (memq (length item) '(2 3))
-       (binding-form-datum? (car item))
-       (not (ormap annotation-marker? item))))
+       (binding-form-datum? (car item))))
 
 (define (parse-binding-form item where)
   (cond
@@ -2422,27 +2402,6 @@
         '()))
   (values name fields fielded?))
 
-(define (raise-retired-binding-annotation where)
-  (raise-parse-error
-   'inline-type-annotation
-   "punctuation annotations are not supported in ~a — write `(name Type)`"
-   where))
-
-(define (raise-retired-return-annotation where)
-  (raise-parse-error
-   'inline-type-annotation
-   "return arrows are not supported in ~a — write `[params] ReturnType body...`"
-   where))
-
-;; `[a :Int]` — the colon glued to the TYPE instead of the NAME, so the reader
-;; produced a keyword. Callers gate on position: in a param/field slot ANY
-;; keyword is this mistake; in a let/for slot a keyword is a legal VALUE, so
-;; only the over-long `[a :Int VALUE]` shape can be it.
-(define (raise-keyword-annotation-confusion name kw)
-  (raise-parse-error 'inline-type-annotation
-                     "unexpected keyword ~a after binding ~a; did you mean (~a ~a)?"
-                     kw name name (substring (symbol->string kw) 1)))
-
 ;; A capitalized bare binding is usually an accidentally unwrapped type name.
 (define (note-capitalized-binding! name where)
   (define s (symbol->string name))
@@ -2469,8 +2428,6 @@
     (raise-parse-error
      'bad-form
      "multi-arity clause needs a return type and body — write `([params] ReturnType body...)`"))
-  (when (or (return-marker? (car rest)) (eq? (car rest) ANN-MARKER))
-    (raise-retired-return-annotation "multi-arity clause"))
   (arity-clause parsed rest-p
                 (parse-type (car rest))
                 (parse-body (or (stx-tail subs 2) (cdr rest)))))
@@ -2538,8 +2495,6 @@
     (define rest (cddr item))
     (define-values (parsed rest-p)
       (parse-params (or (stx-ref item-subs 1) params-form)))
-    (when (or (return-marker? (car rest)) (eq? (car rest) ANN-MARKER))
-      (raise-retired-return-annotation (format "letfn ~a" name)))
     (letfn-fn name parsed rest-p
               (parse-type (car rest))
               (parse-body (or (stx-tail item-subs 3) (cdr rest))))))
@@ -2587,10 +2542,6 @@
 ;; call-form / let-form / if-form composition. No new AST nodes — every
 ;; threading construct lowers to shapes the type checker already handles.
 ;;
-;; Per CLAUDE.md "Beagle is Clojure plus types, nothing else": the previous
-;; pipe family (`|>` / `|>>` / `pipe-to` / `pipe-from`) was an Elixir/F# import
-;; that has been hard-removed. The replacement is the full Clojure threading
-;; family — `->`, `->>`, `as->`, `cond->`, `cond->>`, `some->`, `some->>`.
 ;; Insert VAL into STEP at POSITION ('first or 'last). When STEP is a
 ;; syntax object, the resulting list is wrapped with `datum->syntax` using
 ;; STEP as the context — this propagates the threading-step's srcloc to
@@ -2980,9 +2931,6 @@
        #:when (multi-arity-form? first-clause)
        (raise-parse-error 'bad-form
          "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")]
-      [(list 'fn params-form marker _ _ ...)
-       #:when (or (return-marker? marker) (eq? marker ANN-MARKER))
-       (raise-retired-return-annotation "fn")]
       [(list 'fn params-form return-type body body-rest ...)
        (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
          (fn-form parsed rest-p
@@ -3003,9 +2951,6 @@
        (defonce-form name (parse-type type-expr)
                      (parse-expr (or (stx-ref subs 4) value))
                      doc)]
-      [(list 'defonce (? symbol? name) marker _ _ ...)
-       #:when (annotation-marker? marker)
-       (raise-retired-binding-annotation "defonce")]
       [(list 'defonce (? symbol? name) (and type-expr (not (? string?))) value)
        (defonce-form name (parse-type type-expr)
                      (parse-expr (or (stx-ref subs 3) value))
@@ -3219,9 +3164,6 @@
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
                  doc #f)]
-      [(list 'def (? symbol? name) marker _ _ ...)
-       #:when (annotation-marker? marker)
-       (raise-retired-binding-annotation "def")]
       [(list 'def (? symbol? name) (and type-expr (not (? string?))) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 3) value))
@@ -3236,9 +3178,6 @@
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
                  doc (meta-dynamic? mv))]
-      [(list 'def (list '#%meta _ (? symbol? _)) marker _ _ ...)
-       #:when (annotation-marker? marker)
-       (raise-retired-binding-annotation "def")]
       [(list 'def (list '#%meta mv (? symbol? name)) (and type-expr (not (? string?))) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 3) value))
@@ -3301,19 +3240,12 @@
      (raise-parse-error 'bad-form
                         "defn attr-map metadata is not supported — use a docstring: (defn name \"doc\" [params] body)")]
 
-    ;; Retired return punctuation is rejected wherever it occurs.
-    [(list* (and head (or 'defn 'defn-)) (? symbol? name) (? return-marker? m) _)
-     (raise-retired-return-annotation (format "~a ~a" head name))]
-
     [(list 'defn (? symbol? name) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
      (defn-multi name (map parse-arity-clause
                            (or (stx-tail subs 2)
                                (cons first-clause rest-clauses))) #f #f)]
 
-    [(list 'defn (? symbol? name) params-form marker _ _ ...)
-     #:when (or (return-marker? marker) (eq? marker ANN-MARKER))
-     (raise-retired-return-annotation (format "defn ~a" name))]
     [(list 'defn (? symbol? name) params-form return-type ':raises err-type body body-rest ...)
        (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p (parse-type return-type)
@@ -3332,9 +3264,6 @@
                            (or (stx-tail subs 2)
                                (cons first-clause rest-clauses))) #t #f)]
 
-    [(list 'defn (list '#%meta _ (? symbol? name)) params-form marker _ _ ...)
-     #:when (or (return-marker? marker) (eq? marker ANN-MARKER))
-     (raise-retired-return-annotation (format "defn ~a" name))]
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form return-type ':raises err-type body body-rest ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -3353,9 +3282,6 @@
                            (or (stx-tail subs 2)
                                (cons first-clause rest-clauses))) #t #f)]
 
-    [(list 'defn- (? symbol? name) params-form marker _ _ ...)
-     #:when (or (return-marker? marker) (eq? marker ANN-MARKER))
-     (raise-retired-return-annotation (format "defn- ~a" name))]
     [(list 'defn- (? symbol? name) params-form return-type ':raises err-type body body-rest ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -3602,15 +3528,6 @@
                           #:suggestion (replace-head-suggestion 'has 'contains?))]
       [_ (parse-list-form* d subs)])))
 
-;; `implies` — removed as part of the pipe family. Pointed rejection.
-(register-combiner! 'implies
-  (lambda (d subs)
-    (match d
-      [(list 'implies _ ...)
-       (raise-parse-error 'legacy-pipe-form
-                          "(implies …) — removed as part of the pipe family. Use `(if a b true)` for logical implication, or `(or (not a) b)`.")]
-      [_ (parse-list-form* d subs)])))
-
 ;; `assert` — bare `assert` HARD-REJECTED; canonical Nix form is `nix/assert`.
 (register-combiner! 'assert
   (lambda (d subs)
@@ -3774,24 +3691,6 @@
        (raise-parse-error 'bare-nix-form
                           "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`."
                           #:suggestion (replace-head-suggestion 'module 'nix/module))]
-      [_ (parse-list-form* d subs)])))
-
-;; `pipe-to` — removed pipe family; HARD-REJECT (use `->`). Migrated to registry.
-(register-combiner! 'pipe-to
-  (lambda (d subs)
-    (match d
-      [(list 'pipe-to _ ...)
-       (raise-parse-error 'legacy-pipe-form
-                          "(pipe-to …) — the pipe family is removed. Use `(-> x f …)` for thread-first.")]
-      [_ (parse-list-form* d subs)])))
-
-;; `pipe-from` — removed pipe family; HARD-REJECT (use `->>`). Migrated to registry.
-(register-combiner! 'pipe-from
-  (lambda (d subs)
-    (match d
-      [(list 'pipe-from _ ...)
-       (raise-parse-error 'legacy-pipe-form
-                          "(pipe-from …) — the pipe family is removed. Use `(->> x f …)` for thread-last.")]
       [_ (parse-list-form* d subs)])))
 
 ;; `unquote` — `,` outside quasiquote; HARD-REJECT. Migrated to the registry.
@@ -4256,13 +4155,6 @@
     ;; `nix/flake` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `flake` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; The pipe family (`pipe-to`, `pipe-from`, `implies`, `|>`, `|>>`) was an
-    ;; Elixir/F# import — removed per CLAUDE.md "Beagle is Clojure plus types,
-    ;; nothing else." Use Clojure threading (`->`, `->>`) instead.
-    ;; `pipe-to` migrated to the compile-time combiner registry (see register-combiner!).
-    ;; `pipe-from` migrated to the compile-time combiner registry (see register-combiner!).
-    ;; `implies` migrated to the compile-time combiner registry (see register-combiner!).
-
     ;; --- end Nix-specific forms ----------------------------------------------
 
     ;; --- JS-specific forms (js/*) ---------------------------------------------
@@ -4514,9 +4406,6 @@
 (define (parse-protocol-method sig)
   (define d (->datum sig))
   (match d
-    [(list (? symbol? name) params-form marker _)
-     #:when (or (return-marker? marker) (eq? marker ANN-MARKER))
-     (raise-retired-return-annotation (format "defprotocol method ~a" name))]
     [(list (? symbol? name) params-form return-type)
      (validate-identifier! name "protocol method")
      (let-values ([(parsed rest-p)
@@ -4881,8 +4770,6 @@
             (store-src!
              (param name type constraint)
              (and after-amp-stxs (stx->src-loc (car after-amp-stxs))))]
-           [(ormap annotation-marker? after-amp)
-            (raise-retired-binding-annotation "rest parameter")]
            [else
             (error 'beagle "bad rest parameter after &: ~v"
                    (if (= (length after-amp) 1) (car after-amp) after-amp))])))
@@ -4917,8 +4804,6 @@
               (parse-structured-binding item "parameter" (and stxs (car stxs))))
             (store-src! (param name type constraint)
                         (and stxs (stx->src-loc (car stxs))))]
-           [(and (symbol? item) (annotation-marker? item))
-            (raise-retired-binding-annotation "parameter list")]
            [(bracketed? item)
             (raise-parse-error
              'inline-type-annotation
@@ -4927,8 +4812,6 @@
             (raise-parse-error
              'inline-type-annotation
              "destructured parameter requires an aggregate type — write `({:keys [...]} Type)`")]
-           [(and (list? item) (ormap annotation-marker? item))
-            (raise-retired-binding-annotation "parameter list")]
            [(symbol? item)
             (validate-identifier! item "parameter")
             (note-capitalized-binding! item "parameter")
@@ -5012,9 +4895,6 @@
        (loop (cdr rest)
              (and stxs (cdr stxs))
              (cons (let-binding #f #f #f (parse-expr (car (or (and stxs (list (car stxs))) (list (car rest)))))) acc))]
-      [(and (list? (car rest))
-            (ormap annotation-marker? (car rest)))
-       (raise-retired-binding-annotation "let bindings")]
       [(and (>= (length rest) 2)
             (map-destructure-form? (car rest)))
        (define destr (parse-map-destructure (car rest)))
@@ -5044,15 +4924,6 @@
                                  (parse-expr (or val-stx (cadr rest))))
                     (and stxs (stx->src-loc (car stxs))))
                    acc))]
-      [(or (annotation-marker? (car rest))
-           (and (>= (length rest) 2)
-                (annotation-marker? (cadr rest))))
-       (raise-retired-binding-annotation "let bindings")]
-      ;; `[a :Int VALUE]` — colon glued to the type. A keyword IS a legal
-      ;; binding value, so fire only on the odd count that is malformed anyway.
-      [(and (odd? (length rest)) (>= (length rest) 3)
-            (symbol? (car rest)) (keyword-sym? (cadr rest)))
-       (raise-keyword-annotation-confusion (car rest) (cadr rest))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
@@ -5177,10 +5048,6 @@
              (cons (store-src! (param name type constraint)
                                (and stxs (stx->src-loc (car stxs))))
                    acc))]
-      [(or (annotation-marker? (car rest))
-           (and (list? (car rest))
-                (ormap annotation-marker? (car rest))))
-       (raise-retired-binding-annotation "record fields")]
       [else
        (error 'beagle
               "defrecord field needs a type — use [(name Type) (name2 Type2 validator) ...], got: ~v"
@@ -5214,9 +5081,6 @@
   (define d (->datum x))
   (define subs (stx-subs x))
   (match d
-    [(list (? symbol? name) params-form marker _ _ ...)
-     #:when (or (return-marker? marker) (eq? marker ANN-MARKER))
-     (raise-retired-return-annotation (format "method ~a" name))]
     [(list (? symbol? name) params-form return-type body body-rest ...)
      (validate-identifier! name "implementation method")
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
@@ -5230,26 +5094,8 @@
   (cond
     [(bracketed? d)  (format "[~a]" (string-join (map binding-datum->src (bracket-body d)) " "))]
     [(map-tagged? d) (format "{~a}" (string-join (map binding-datum->src (map-body d)) " "))]
-    [(eq? d ANN-MARKER) ":"]
     [(and (pair? d) (list? d)) (format "(~a)" (string-join (map binding-datum->src d) " "))]
     [else (format "~a" d)]))
-
-;; `[...]` means sequential destructuring at EVERY binding site, so an
-;; annotation marker inside one would bind a variable literally named `#%:`.
-(define (raise-bracketed-annotation body)
-  (define idx
-    (for/first ([e (in-list body)] [i (in-naturals)]
-                #:when (or (eq? e ANN-MARKER) (eq? e LEGACY-MARKER)))
-      i))
-  (define name (if (> idx 0) (binding-datum->src (list-ref body (sub1 idx))) "name"))
-  (define ty (if (< (add1 idx) (length body))
-               (binding-datum->src (list-ref body (add1 idx)))
-               "Type"))
-  (raise-parse-error
-   'inline-type-annotation
-   "`[~a]` is not a typed binding — `[...]` in binding position is sequential destructuring — write `(~a ~a)`"
-   (string-join (map binding-datum->src body) " ")
-   name ty))
 
 ;; Sequential destructure: [a b], [a [b c]], [{:keys [x]} y], [a & rest].
 ;; Nested patterns recurse (real Clojure); entries other than symbols and
@@ -5257,8 +5103,6 @@
 (define (parse-seq-destructure item)
   (define d (->datum item))
   (define body (bracket-body d))
-  (when (ormap (lambda (e) (or (eq? e ANN-MARKER) (eq? e LEGACY-MARKER))) body)
-    (raise-bracketed-annotation body))
   (define-values (names rest-name)
     (let loop ([items body] [acc '()])
       (cond
@@ -5333,13 +5177,6 @@
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (for-binding (car rest) (parse-expr (or val-stx (cadr rest))) #f #f) acc))]
-      [(or (annotation-marker? (car rest))
-           (and (>= (length rest) 2)
-                (annotation-marker? (cadr rest))))
-       (raise-retired-binding-annotation "for/doseq clauses")]
-      [(and (odd? (length rest)) (>= (length rest) 3)
-            (symbol? (car rest)) (keyword-sym? (cadr rest)))
-       (raise-keyword-annotation-confusion (car rest) (cadr rest))]
       [else (error 'beagle "bad for clause: ~v" rest)])))
 
 
@@ -5369,5 +5206,4 @@
  beagle-parse-error-kind
  beagle-parse-error-details
  raise-parse-error
- ANN-MARKER ann
- annotation-marker? return-marker?)
+ ann)

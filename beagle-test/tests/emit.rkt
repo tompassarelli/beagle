@@ -131,12 +131,6 @@
                '(defn use [n] Any (inc1 n))))
   (check-true (matches? #rx"\\(\\+ n 1\\)" out)))
 
-(test-case "legacy (define-macro …) is rejected — points at defmacro"
-  (check-exn (lambda (e) (and (exn:fail? e)
-                              (regexp-match? #rx"define-macro.*defmacro"
-                                             (exn-message e))))
-             (lambda () (compile '(define-macro unsafe wild (x) (do (println "trace") x))))))
-
 ;; --- require emits in ns form ---------------------------------------------
 
 (test-case "require with alias emits in ns :require"

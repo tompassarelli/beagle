@@ -243,11 +243,6 @@
   (check-true (nix-path? f))
   (check-equal? (nix-path-path-string f) "./hello.nix"))
 
-;; --- pipe family removed ----------------------------------------------------
-;; (pipe-to …), (pipe-from …), and (implies …) — the Elixir/F# pipe family —
-;; were hard-removed per CLAUDE.md "Beagle is Clojure plus types, nothing
-;; else." Behavioral rejection tests live in tests/threading.rkt.
-
 ;; --- flake-input ------------------------------------------------------------
 
 (test-case "flake-input parses to flake-input-form"

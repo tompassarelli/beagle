@@ -9,8 +9,8 @@
 #   2. SHADOWING          — rename a def; a local of the same name (param/let) untouched
 #   3. CROSS-MODULE        — rename a def; every `<alias>/name` reader across files renamed
 #   + the collision invariant: a rename onto an existing binding is refused.
-# Current candidates check coherently; release-pinned legacy syntax is rejected
-# with its migration diagnostic. Needs racket + bb + fram out/ + chartroom resolve.clj.
+# Current candidates check coherently. Needs racket + bb + fram out/ +
+# chartroom resolve.clj.
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
 
@@ -168,30 +168,6 @@ done
 if [[ "$authority" == "moving-current" ]]; then
   phase_must_pass "check coherent candidate overlay" 180 \
     "$RACKET" "$OVERLAY_CHECK" --check-only "${resolved_edns[@]}" > "$W/overlay.json"
-else
-  pinned_check_err="$W/release-pinned-overlay.err"
-  run_phase "reject release-pinned retired return syntax" 180 \
-    "$RACKET" "$OVERLAY_CHECK" --check-only "${resolved_edns[@]}" \
-    > "$W/overlay.json" 2> "$pinned_check_err"
-  pinned_check_status=$?
-  if [[ -s "$pinned_check_err" ]]; then
-    cat "$pinned_check_err" >&2
-  fi
-  if [[ $pinned_check_status -eq 0 ]]; then
-    echo "  FAIL  release-pinned retired return syntax unexpectedly passed"
-    fail=1
-  elif [[ $pinned_check_status -eq 124 ]]; then
-    echo "  FAIL  release-pinned retired return syntax exceeded its check deadline"
-    exit 124
-  elif [[ $pinned_check_status -eq 1 ]] \
-       && [[ ! -s "$W/overlay.json" ]] \
-       && grep -Fq -- 'return arrows are not supported in defn' "$pinned_check_err" \
-       && grep -Fq -- 'write `[params] ReturnType body...`' "$pinned_check_err"; then
-    echo "  PASS  release-pinned tree fails with the pointed retired-return-arrow diagnostic"
-  else
-    echo "  FAIL  release-pinned tree failed for a different reason (status $pinned_check_status)"
-    fail=1
-  fi
 fi
 
 owner_rendered="$R/$(basename "$owner")"

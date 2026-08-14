@@ -251,12 +251,11 @@ applies the token-aware source-range rewrite. Comment-bearing ranges that cannot
 move safely are reported without a lossy rewrite; source-less macro-produced
 datums have no physical-layout obligation.
 
-### Retired punctuation is not compatibility syntax
+### Structural declarations are the only type surface
 
-`name: Type`, `name :- Type`, and executable `-> Return` are hard parse errors
-with a pointed replacement. Do not add a dual parser, deprecation window, or
-formatter compatibility path. An old spelling that parses is a second language
-surface an agent learns.
+Bindings carry type and optional constraint in one structural form. Executable
+returns occupy the mandatory positional slot after the parameter vector. Do not
+add a second declaration surface.
 
 A bare capitalized binding still raises the `capitalized-binding-name` warning:
 
@@ -309,7 +308,10 @@ The non-obvious ones an agent gets wrong otherwise.
 
 Beagle has zero external users (Tom is the only one). No deprecation, no transitional aliases, no soft hints. When a form/keyword/surface is wrong, **remove it** — make it unparseable, not discouraged. Accretion is the enemy, not breakage.
 
-Removals must reject with a **pointed error naming the replacement** (e.g. `(:use ...) is not supported — use (:require [lib :refer [sym ...]])`), not a cryptic downstream misparse. A removal with a confusing error is half the win.
+Removal means absence throughout the live tree: delete its reader/parser branch,
+diagnostic kind, tests, fixtures, and authoring documentation. Generic current
+reader/parser behavior owns text outside the language. Pointed errors remain
+appropriate for malformed uses of current forms, not as tombstones for old ones.
 
 Do **not** reach for deprecated-alias patterns reflexively: an alias is justified only by a real corpus migration (many live sites depending on the old spelling). For surfaces with zero corpus hits it's pure off-ramp plus a second canonical form. Recording `X → Y` in release notes is fine; an accepted-but-deprecated parser state is not.
 
@@ -324,7 +326,11 @@ Classify demand- vs thesis-driven *before* gating. When the classification is un
 
 ### Macros
 
-`defmacro` + quasiquote is active, supported work. `(define-macro ...)` is hard-rejected at parse time (`'legacy-macro-form` in `parse.rkt`) — write `(defmacro NAME [params] body)`. No `safe`/`unsafe` kind word, no alias. Unquote `~`, splice `~@` (Clojure syntax-quote), **uniform across ALL targets** — a metaprogramming operator never varies by emission target. nix `${}` string interpolation is the `(s …)`/`(ms …)` form; the old `~"…"`/`~''…''` tilde-string reader sugar (which squatted on `~` and made nix's reader the lone divergent one) is removed in favor of `(s …)`.
+`defmacro` + quasiquote is active, supported work: `(defmacro NAME [params]
+body)`. No macro-kind word or alias. Unquote `~`, splice `~@` (Clojure
+syntax-quote), **uniform across ALL targets** — a metaprogramming operator never
+varies by emission target. Nix `${}` string interpolation is the `(s …)`/`(ms
+…)` form.
 
 ### Zero escape hatches
 
@@ -346,9 +352,8 @@ form is plain Clojure. (Why this matters → README "What it isn't" /
 
 - **Never invent syntax.** No new operators, forms, or sigils — capabilities
   that don't fit Clojure-shaped surface live in the type or backend layer.
-  The pipe family (`|>`, `|>>`, `pipe-to`, `pipe-from`) was hard-removed for
-  this reason; use the Clojure threading family (`->`, `->>`, `as->`,
-  `cond->`, `cond->>`, `some->`, `some->>`).
+  Use the Clojure threading family (`->`, `->>`, `as->`, `cond->`,
+  `cond->>`, `some->`, `some->>`).
 - **Accept-and-canonicalize is for real Clojure forms only** (`when`, `if-let`,
   `cond` flat-pair, quoted containers, list-wrapped multi-arity). Never accept
   a Beagle-specific spelling beside the Clojure one.
@@ -457,10 +462,8 @@ The canonical binding grammar is `symbol | (binding-form Type [constraint])`.
 Bare symbols request inference, explicit `Any` marks a dynamic boundary, and a
 constraint must check as a synchronous unary `[Type -> Bool]` predicate.
 Executable signatures use `[params] RET` with a mandatory positional return.
-The retired `name: Type`, `name :- Type`, and executable `-> RET` spellings are
-HARD-REJECTED with a fix-it pointing at the structural form. Function-type
-arrows remain inside type vectors. See the "Surface lock" anchor for the
-complete accept/reject matrix.
+Function-type arrows remain inside type vectors. See the "Surface lock" anchor
+for the complete grammar.
 
 Deferred type-system work (refinement annotations, bidirectional Layer 2 synthesis, sourcemap fidelity, types-as-view delaborator) is tracked in contrast-doc thread `20260530180000` and `20260614120025` — not here.
 

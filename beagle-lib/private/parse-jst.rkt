@@ -5,8 +5,7 @@
 
 (require racket/string
          "ast.rkt"
-         "types.rkt"
-         (only-in "tags.rkt" ANN-MARKER))
+         "types.rkt")
 
 (define JST-BINARY-OPS
   (hasheq 'js/+  '+   'js/-  '-   'js/*  '*   'js/div  '/   'js/%  '%   'js/**  '**
@@ -42,9 +41,6 @@
   (when (< (length body-forms) 2)
     (error 'beagle
            "js/ method needs a return type and body — write `[params] ReturnType body...`"))
-  (when (memq (->datum (car body-forms)) (list '-> ':- ': ANN-MARKER))
-    (error 'beagle
-           "return arrows are not supported in a js/ method — write `[params] ReturnType body...`"))
   (values param-list rest-param
           (parse-type (->datum (car body-forms)))
           (map (current-parse-expr) (cdr body-forms))))

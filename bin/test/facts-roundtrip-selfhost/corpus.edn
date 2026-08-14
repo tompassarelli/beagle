@@ -1,10 +1,10 @@
 [
  {:name "plain-clj"
   :ext ".bclj"
-  :source "#lang beagle/clj\n\n;; hdr\n(def x: Int 42)\n"}
+  :source "#lang beagle/clj\n\n;; hdr\n(def x Int 42)\n"}
  {:name "plain-nix"
   :ext ".bnix"
-  :source "#lang beagle/nix\n(def x: Int 1)\n"}
+  :source "#lang beagle/nix\n(def x Int 1)\n"}
  {:name "g1-type-hint"
   :ext ".bclj"
   :source "(defn f [^String s] s)\n"}

@@ -747,10 +747,6 @@
 
 (defn datum-source [(datum Any)] String
   (cond
-    ;; Retired punctuation is preserved only well enough for pointed parser
-    ;; rejection; canonical typed binders are ordinary `(name Type)` lists.
-    (= datum rd/ANN-MARKER)
-    ":"
     (tagged-string? datum)
     (edn-string (nth datum 1))
     (and (vector? datum) (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG))
@@ -870,13 +866,6 @@
       (bracket-datum? (nth items i)) i
       :else (recur (+ i 1)))))
 
-(defn- contains-retired-return-marker? [(items Any)] Bool
-  (loop [i 0]
-    (cond
-      (>= i (count items)) false
-      (or (= (nth items i) ":-") (= (nth items i) "->")) true
-      :else (recur (+ i 1)))))
-
 (defn- contains-index? [(items Any) (idx Int)] Bool
   (loop [i 0]
     (cond
@@ -892,8 +881,7 @@
           start (if docstring? 3 2)
           tail (subvec items start)]
       (if (or (= (count tail) 0)
-            (not (bracket-datum? (nth tail 0)))
-            (contains-retired-return-marker? tail))
+            (not (bracket-datum? (nth tail 0))))
         []
         (loop [offset 0 current? false forms-after 0 indexes []]
           (if (>= offset (count tail))

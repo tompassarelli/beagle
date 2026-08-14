@@ -29,7 +29,7 @@ function format_expansion_chain(ctx) {
   return (() => { const all_lines = collect_chain_lines(ctx); const n = all_lines.length; return ((n <= 10) ? all_lines.join("\n") : (() => { const top = all_lines.slice(0, 4); const bot = all_lines.slice((n - 4), n); return top.concat([("".concat("  ... (", (n - 8), " more)"))], bot).join("\n"); })()); })();
 }
 
-const KNOWN_FORM_HEADS = ["def", "defn", "defrecord", "defunion", "deferror", "defscalar", "defonce", "defmulti", "do", "let", "fn", "if", "cond", "when", "unless", "match", "case", "for", "doseq", "dotimes", "loop", "try", "println", "prn", "defn-", "ns", "require", "import", "define-macro", "declare-extern", "set!", "letfn", "when-let", "if-let", "when-some", "if-some", "condp"];
+const KNOWN_FORM_HEADS = ["def", "defn", "defrecord", "defunion", "deferror", "defscalar", "defonce", "defmulti", "do", "let", "fn", "if", "cond", "when", "unless", "match", "case", "for", "doseq", "dotimes", "loop", "try", "println", "prn", "defn-", "ns", "require", "import", "declare-extern", "set!", "letfn", "when-let", "if-let", "when-some", "if-some", "condp"];
 
 const gensym_state = {["counter"]: 0};
 

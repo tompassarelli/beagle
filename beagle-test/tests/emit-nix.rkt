@@ -684,12 +684,6 @@
   (define out (nix-emit "(define-target nix) (search-path nixpkgs)"))
   (check-true (and out (string-contains? out "<nixpkgs>"))))
 
-;; --- Phase 3: Operator/convenience parity ----------------------------------
-
-;; pipe-to / pipe-from / implies removed alongside the pipe family.
-;; These no longer parse, so they cannot emit. Rejection behaviour is
-;; covered by tests/threading.rkt.
-
 ;; --- escape hatch removed --------------------------------------------------
 
 (test-case "unsafe-nix is rejected at parse time"

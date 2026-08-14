@@ -215,13 +215,6 @@
           "(defunion (Box T) (BoxValue [(value T)]))\n"
           "(defn unbox [({:keys [value]} (Box String))] String value)")))))))
 
-;; There is no compatibility parser for either retired punctuation form.
-(err/rx "flat colon binding rejected"
-        #rx"punctuation annotations are not supported"
-        "(defn f [x: Int] Int x)")
-(err/rx "legacy binding rejected"
-        #rx"punctuation annotations are not supported"
-        "(defn f [x :- Int] Int x)")
 (err/rx "arrow function type rejected"
         #rx"arrow function types are not supported.*Fn"
         "(defn f [(callback [Int -> Int])] Int (callback 1))")
@@ -247,16 +240,6 @@
   (check-not-exn (lambda () (parse-src "(def value api/Fn nil)"))))
 (ok "value-level Fn binding remains legal"
     "(defn value-level [(Fn Int)] Int Fn)")
-(err/rx "return arrow rejected"
-        #rx"return arrows are not supported"
-        "(defn f [(x Int)] -> Int x)")
-(err/rx "legacy return marker rejected"
-        #rx"return arrows are not supported"
-        "(defn f [(x Int)] :- Int x)")
-(err/rx "colon inside structural binding rejected"
-        #rx"punctuation annotations are not supported"
-        "(defn f [(x : Int)] Int x)")
-
 ;; The slot is fixed; the parser never guesses whether a type-shaped symbol is
 ;; a body expression.
 (err/rx "defn missing return slot"

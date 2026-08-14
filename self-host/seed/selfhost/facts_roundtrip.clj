@@ -595,7 +595,6 @@
 
 (defn ^String datum-source [datum]
   (cond
-  (= datum rd/ANN-MARKER) ":"
   (tagged-string? datum) (edn-string (nth datum 1))
   (and (vector? datum) (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)) (nth datum 1)
   (and (vector? datum) (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)) (str "\\" (char (nth datum 1)))
@@ -672,13 +671,6 @@
   (bracket-datum? (nth items i)) i
   :else (recur (+ i 1)))))
 
-(defn- ^Boolean contains-retired-return-marker? [items]
-  (loop [i 0]
-  (cond
-  (>= i (count items)) false
-  (or (= (nth items i) ":-") (= (nth items i) "->")) true
-  :else (recur (+ i 1)))))
-
 (defn- ^Boolean contains-index? [items idx]
   (loop [i 0]
   (cond
@@ -690,7 +682,7 @@
   (if (or (< (count items) 4) (not (some? (get #{"defn" "defn-"} (nth items 0))))) [] (let [docstring? (and (> (count items) 2) (string? (nth items 2)))
    start (if docstring? 3 2)
    tail (subvec items start)]
-  (if (or (= (count tail) 0) (not (bracket-datum? (nth tail 0))) (contains-retired-return-marker? tail)) [] (loop [offset 0
+  (if (or (= (count tail) 0) (not (bracket-datum? (nth tail 0)))) [] (loop [offset 0
    current? false
    forms-after 0
    indexes []]

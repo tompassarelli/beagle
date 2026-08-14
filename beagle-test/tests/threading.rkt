@@ -2,13 +2,6 @@
 
 ;; Threading family tests — the full Clojure threading set, implemented as
 ;; parse-time rewrites in beagle-lib/private/parse.rkt.
-;;
-;; This file replaces the pipe-family rejection tests that used to live in
-;; nix-parse.rkt, emit-nix.rkt, check.rkt. Per CLAUDE.md "Beagle is Clojure
-;; plus types, nothing else" — the Elixir/F# pipe family (`pipe-to`,
-;; `pipe-from`, `|>`, `|>>`, `implies`) has been hard-removed; the
-;; Clojure threading macros (`->`, `->>`, `as->`, `cond->`, `cond->>`,
-;; `some->`, `some->>`) are the canonical replacement.
 
 (require rackunit
          beagle/private/parse
@@ -178,73 +171,3 @@
   (define els (if-form-else-expr ifn))
   (check-true (call-form? els))
   (check-eq? (call-form-fn els) 'map))
-
-;; ============================================================================
-;; Negative cases — pipe family is HARD-REMOVED.
-;; ============================================================================
-
-(test-case "(pipe-to …) rejects with 'legacy-pipe-form pointing to ->"
-  (define e
-    (with-handlers ([beagle-parse-error? values])
-      (parse-one '(pipe-to 1 my-fn))
-      'no-error-raised))
-  (check-pred beagle-parse-error? e)
-  (check-eq? (beagle-parse-error-kind e) 'legacy-pipe-form)
-  ;; Error message contains both "pipe-to" and "->".
-  (define msg (exn-message e))
-  (check-regexp-match #rx"pipe-to" msg)
-  (check-regexp-match #rx"->" msg))
-
-(test-case "(pipe-from …) rejects with 'legacy-pipe-form pointing to ->>"
-  (define e
-    (with-handlers ([beagle-parse-error? values])
-      (parse-one '(pipe-from my-fn 1))
-      'no-error-raised))
-  (check-pred beagle-parse-error? e)
-  (check-eq? (beagle-parse-error-kind e) 'legacy-pipe-form)
-  (define msg (exn-message e))
-  (check-regexp-match #rx"pipe-from" msg)
-  (check-regexp-match #rx"->>" msg))
-
-(test-case "(implies …) rejects with 'legacy-pipe-form"
-  (define e
-    (with-handlers ([beagle-parse-error? values])
-      (parse-one '(implies a b))
-      'no-error-raised))
-  (check-pred beagle-parse-error? e)
-  (check-eq? (beagle-parse-error-kind e) 'legacy-pipe-form))
-
-;; ============================================================================
-;; Reader negative: `|>` / `|>>` no longer parse as threading.
-;; ============================================================================
-;;
-;; The pipe-reader is gone — `|` reverts to Racket's default quoted-identifier
-;; delimiter. This test is a sanity assertion that the reader-table no longer
-;; contains a `#\|` entry. Direct reader-level testing happens here as text:
-
-(require beagle/lang/reader-impl
-         racket/port)
-
-(test-case "reader no longer recognises |> as a special threading symbol"
-  ;; With the pipe-reader removed, `|>` reads as `|>` only because Racket's
-  ;; default `|…|` quoted-identifier delimiter would only fire on a balanced
-  ;; pair. A bare `|>` (no closing `|`) raises a read error from Racket's
-  ;; default behaviour, OR — if the surrounding token boundary terminates —
-  ;; reads as a symbol. Either way, beagle does NOT install a special
-  ;; threading-symbol macro; the surface forms `(|> x f)` / `(|>> x f)` are
-  ;; not threading constructs. We assert by reading `(my-fn x)` (which works)
-  ;; and confirming that reading `(|> x f)` either errors or produces a list
-  ;; whose head is the *symbol* `|>` (NOT a special form).
-  (define (try-read s)
-    (with-handlers ([exn:fail? (lambda (e) 'read-error)])
-      (with-input-from-string s
-        (lambda ()
-          (beagle-read-syntax 'test (current-input-port))))))
-  ;; Sanity: ordinary symbol-head form reads.
-  (define ok (try-read "(my-fn x)"))
-  (check-not-eq? ok 'read-error)
-  ;; `|>` reads via Racket's default `|…|` rule, which expects a matching
-  ;; closing `|`. Without it the read errors. That's the expected behaviour
-  ;; once pipe-reader is gone.
-  (define pipe-result (try-read "(|> x f)"))
-  (check-eq? pipe-result 'read-error))

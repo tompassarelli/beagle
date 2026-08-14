@@ -10,8 +10,7 @@
 ;; Contents of data literals are still read with the same reader, so
 ;; nesting works: `{:k [1 2 3]}` reads as `(#%map :k (#%brackets 1 2 3))`.
 
-(require racket/port
-         (only-in beagle/private/tags ANN-MARKER))
+(require racket/port)
 
 (define (read-regex-pattern port)
   (let loop ([acc '()])
@@ -266,13 +265,6 @@
 ;; 20260528220000-beagle_quote_operator_clarification — that design was
 ;; superseded; this comment was stale until 2026-06-12.)
 
-;; (pipe-reader removed alongside the pipe family. `|>` / `|>>` are no
-;; longer reserved threading symbols. `|` now reverts to Racket's default
-;; quoted-identifier delimiter (`|foo bar|` → symbol `foo bar`). The
-;; replacement for the pipe family is the Clojure threading macros
-;; `->`, `->>`, `as->`, `cond->`, `cond->>`, `some->`, `some->>` —
-;; implemented at parse time, see beagle-lib/private/parse.rkt.)
-
 ;; Read items until the given close character, using the beagle readtable
 ;; recursively so nested forms parse the same way.
 ;;
@@ -513,74 +505,21 @@
 ;; Delimiters mirror the readtable's terminating chars + whitespace; `'` and `#`
 ;; are NON-terminating constituents (so a primed/`#`-bearing tail stays one
 ;; symbol, per the G6 primed-symbol rule) and are therefore NOT delimiters.
-;; Token-terminating chars shared by the hand-rolled `.` and `:` token readers.
-;; `'` and `#` are NON-terminating constituents, so they are NOT delimiters.
+;; Token-terminating chars for the hand-rolled `.` token reader. `'` and `#`
+;; are NON-terminating constituents, so they are NOT delimiters.
 (define (base-token-delimiter? c)
   (or (eof-object? c)
       (char-whitespace? c)
       (memv c '(#\, #\( #\) #\[ #\] #\{ #\} #\" #\; #\~ #\^ #\` #\\))))
-
-;; `:` terminates a dot-token (`.foo:` → `.foo` + the annotation marker) but is
-;; NOT a delimiter inside a keyword token, so `::kw` / `:a/b` stay one symbol.
-(define (dot-token-delimiter? c)
-  (or (base-token-delimiter? c) (eqv? c #\:)))
 
 (define (dot-reader ch port src line col pos)
   ;; ch (the leading `.`) is already consumed by the readtable dispatch.
   (define sym
     (let loop ([acc (list #\.)])
       (define c (peek-char port))
-      (if (dot-token-delimiter? c)
+      (if (base-token-delimiter? c)
         (string->symbol (list->string (reverse acc)))
         (begin (read-char port) (loop (cons c acc))))))
-  (if src
-    (datum->syntax #f sym (vector src line col pos (string-length (symbol->string sym))))
-    sym))
-
-;; `:` reader — ONE char serving two roles, split by the next character.
-;;
-;;   `:` + delimiter/whitespace/EOF → ANN-MARKER. Executable punctuation
-;;       annotations are retired; preserving the marker lets parse.rkt reject
-;;       `x: Int` and `x : Int` with a structural `(x Int)` replacement.
-;;   `:` + anything else            → today's keyword symbol, byte-identical
-;;       (`:foo`, `:foo/bar`, `::kw`, `:-`).
-;;
-;; Terminating (unlike `.`/`#`/`'`) so it also fires MID-token: `x:` splits into
-;; the symbol `x` and the marker for the pointed retirement diagnostic.
-(define (colon-reader ch port src line col pos)
-  (cond
-    [(base-token-delimiter? (peek-char port))
-     (if src (datum->syntax #f ANN-MARKER (vector src line col pos 1)) ANN-MARKER)]
-    [else
-     (define text
-       (let loop ([acc '()])
-         (define c (peek-char port))
-         (if (base-token-delimiter? c)
-           (list->string (reverse acc))
-           (begin (read-char port) (loop (cons c acc))))))
-     (define sym (string->symbol (string-append ":" text)))
-     (if src
-       (datum->syntax #f sym (vector src line col pos (+ 1 (string-length text))))
-       sym)]))
-
-;; `<:` (the forall subtype-bound operator) is ONE symbol, but `:` terminates
-;; tokens, so the default reader would split it into `<` + the marker. Fires only
-;; at token start (non-terminating) and only glues a colon that ENDS the token,
-;; so `<`, `<=`, `<-` and every mid-token `<` read exactly as before.
-(define (lt-reader ch port src line col pos)
-  (define (colon-ends-token?)
-    (define la (peek-string 2 0 port))
-    (or (not (string? la)) (< (string-length la) 2)
-        (base-token-delimiter? (string-ref la 1))))
-  (define sym
-    (let loop ([acc (list #\<)])
-      (define c (peek-char port))
-      (cond
-        [(and (eqv? c #\:) (null? (cdr acc)) (colon-ends-token?))
-         (read-char port)
-         (loop (cons #\: acc))]
-        [(dot-token-delimiter? c) (string->symbol (list->string (reverse acc)))]
-        [else (read-char port) (loop (cons c acc))])))
   (if src
     (datum->syntax #f sym (vector src line col pos (string-length (symbol->string sym))))
     sym))
@@ -588,11 +527,6 @@
 (define beagle-readtable
   (make-readtable #f
     #\^ 'terminating-macro meta-reader
-    #\< 'non-terminating-macro lt-reader
-    ;; MUST live in beagle-readtable itself, never a layer on top: bracket-,
-    ;; quasiquote-, unquote- and meta-readers re-parameterize to THIS table, so a
-    ;; layered entry silently vanishes inside every container and template.
-    #\: 'terminating-macro colon-reader
     #\[ 'terminating-macro bracket-reader
     #\] 'terminating-macro
                             (lambda (ch port src line col pos)
@@ -639,5 +573,4 @@
     (read-syntax src in)))
 
 (provide beagle-read beagle-read-syntax beagle-readtable
-         fn-shorthand->fn reading-fn-shorthand? unquote-reader
-         ANN-MARKER)
+         fn-shorthand->fn reading-fn-shorthand? unquote-reader)

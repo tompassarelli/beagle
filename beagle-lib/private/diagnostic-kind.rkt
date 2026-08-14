@@ -147,7 +147,7 @@
 
 ;; parse.rkt kinds — emitted by raise-parse-error helper that we add
 ;; in this phase to the high-traffic subset (removed-forms,
-;; ns/define-mode/define-target/declare-extern/define-macro top-of-file
+;; ns/define-mode/define-target/declare-extern top-of-file
 ;; shape errors).
 ;;
 ;;   removed-form        : authoring used a Clojure-shape form that
@@ -165,13 +165,7 @@
 ;;                         received a value of the wrong shape (bad
 ;;                         parameter list, unknown mode/target,
 ;;                         non-symbol name). Type-error.
-;;   inline-type-annotation : retired punctuation or a malformed structural
-;;                         typed binding — a dangling `:`, `name: Type`,
-;;                         `name :- Type`, or executable `-> Ret`.
-;;                         Surface-divergence.
-;;   legacy-annotation-marker : author wrote retired `:-` punctuation.
-;;                         It is retained only as a diagnostic category and is
-;;                         never accepted as executable syntax.
+;;   inline-type-annotation : malformed structural typed binding.
 ;;                         Surface-divergence.
 ;;   claim-form-removed   : author wrote `(claim NAME TYPE)`. The claim
 ;;                         form has been deleted entirely; annotate the actual
@@ -184,21 +178,6 @@
 ;;                         (`nix/assert`, `nix/with-cfg`, `nix/with`).
 ;;                         Surface-divergence — fixable by renaming the
 ;;                         head symbol.
-;;   legacy-macro-form   : author wrote `(define-macro …)` — the legacy
-;;                         template-macro form. `defmacro` is the canonical
-;;                         and only macro definition form. Surface-divergence
-;;                         — fixable by renaming `define-macro` →
-;;                         `defmacro` and dropping the `safe`/`unsafe` kind
-;;                         word.
-;;   legacy-pipe-form    : author wrote `(pipe-to …)`, `(pipe-from …)`,
-;;                         or `(implies …)` — the Elixir/F#-shaped pipe
-;;                         family that has been hard-removed per CLAUDE.md
-;;                         "Beagle is Clojure plus types, nothing else."
-;;                         Surface-divergence — fixable by switching to
-;;                         `(-> x f …)` (thread-first) or `(->> x f …)`
-;;                         (thread-last). Distinct kind so the histogram
-;;                         tracks pipe-family migrations separately from
-;;                         the generic `removed-form` bucket.
 ;;   macro-expansion-parse-error
 ;;                       : a macro expanded but the resulting datum
 ;;                         doesn't satisfy beagle's surface grammar
@@ -228,14 +207,11 @@
    'removed-form           'surface-divergence
    'unknown-form           'surface-divergence
    'inline-type-annotation 'surface-divergence
-   'legacy-annotation-marker 'surface-divergence
    'legacy-function-type     'surface-divergence
    'malformed-function-type  'surface-divergence
    'reserved-type-name       'surface-divergence
    'claim-form-removed     'surface-divergence
    'bare-nix-form          'surface-divergence
-   'legacy-macro-form      'surface-divergence
-   'legacy-pipe-form       'surface-divergence
    'macro-source-error      'surface-divergence
    'macro-expansion-parse-error 'surface-divergence
    'reader-conditional-no-match 'surface-divergence

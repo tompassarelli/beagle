@@ -141,8 +141,6 @@ without a special case.
 - `def`, `defonce`, `let`, `loop`, and typed record/union/error fields use the
   same noun-then-type structure. A typed rest parameter is `& (more (Vec Int))`;
   its constrained form is `& (more (Vec Int) nonempty?)`.
-- `name: Type`, `name :- Type`, and executable `-> Return` are rejected; never
-  introduce compatibility syntax for them.
 
 Fields and macro DSLs with field-local metadata put the entire declaration in
 one form, such as `[(id String validator?)]`. A DSL with more metadata likewise

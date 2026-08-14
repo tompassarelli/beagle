@@ -377,11 +377,6 @@
       ;; the reader's `\` is a terminating char-literal macro (`v\'` → symbol `v` +
       ;; char `'`). So flag `'` only in leading position; elsewhere it needs nothing.
       (char=? (string-ref s 0) #\')
-      ;; `:` terminates a token now. `:foo`/`::x` still re-read bare (the colon
-      ;; reader consumes the whole tail), but a bare `:` or an interior colon
-      ;; (`a:b`) would split — pipe-quote those.
-      (and (regexp-match? #rx":" s)
-           (not (and (>= (string-length s) 2) (char=? (string-ref s 0) #\:))))
       (regexp-match? #rx"[][ \t\r\n(){}\"|;\\\\,`]" s)))
 (define (symbol->src d)
   (define s (symbol->string d))
@@ -390,11 +385,6 @@
     ;; carry \ or |), but OUTSIDE bars `\X` escapes any char (\\ -> \, a\ b -> "a b").
     ;; So backslash-escape each unsafe char per-char; only the empty symbol needs ||.
     [(= (string-length s) 0) "||"]
-    ;; `\:` reads as the CHAR literal, so a colon can only be quoted with bars.
-    [(and (symbol-needs-bars? s)
-          (regexp-match? #rx":" s)
-          (not (regexp-match? #rx"[|]" s)))
-     (string-append "|" s "|")]
     [(symbol-needs-bars? s)
      (apply string-append
             (for/list ([c (in-string s)])
@@ -408,7 +398,6 @@
 (define %map      (string->symbol "#%map"))
 (define %set      (string->symbol "#%set"))
 (define %regex    (string->symbol "#%regex"))
-(define %ann      (string->symbol "#%:"))
 (define %meta     (string->symbol "#%meta"))
 ;; #-reader markers whose text is glued to a single operand (G8/G10/G11). Same
 ;; interned symbols the reader mints in reader-impl.rkt.
@@ -451,9 +440,6 @@
 (define (datum->src d)
   (cond
     [(null? d) "()"]
-    ;; Retained only so malformed legacy input can still be rendered for a
-    ;; pointed parser diagnostic. Valid source never contains this marker.
-    [(eq? d %ann) ":"]
     [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (cdr d)) " "))]

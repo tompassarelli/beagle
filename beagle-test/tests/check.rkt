@@ -1249,10 +1249,6 @@
   #rx"nix/(module|fn-set|overlay) is only supported in beagle/nix"
   '(def x Any (nix/fn-set [{a 1}] a)))
 
-;; pipe-to / pipe-from removed entirely (not just nix-only). The rejection is
-;; now uniform across targets — see tests/threading.rkt for the parse-time
-;; 'legacy-pipe-form check.
-
 (check-js-err/rx "s (interpolated string) rejected in beagle/js"
   #rx"is only supported in beagle/nix"
   '(def x Any (s "hello " name)))

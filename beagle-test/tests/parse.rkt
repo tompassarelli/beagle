@@ -241,36 +241,6 @@
   (check-eq? (type-prim-name (let-binding-type b1)) 'Any)
   (check-equal? (let-binding-value b1) "foo"))
 
-;; -- Bare `:` at a def/defonce/defn head is rejected. (Source text can no
-;; -- longer produce a bare `:` symbol; these
-;; -- structurally-built datums keep the rejection arms alive.)
-
-;; DELIBERATE retired fixtures: the bare `:` below is the thing under test.
-
-(parse-err/rx "rejects punctuation annotation on def"
-  #rx"punctuation annotations.*def.*[(]name Type[)]"
-  '(def x : Int 42))
-
-(parse-err/rx "rejects punctuation annotation on defonce"
-  #rx"punctuation annotations.*defonce.*[(]name Type[)]"
-  '(defonce x : Int 42))
-
-(parse-err/rx "rejects return-position `:` on defn with bare params"
-  #rx"unknown type: :"
-  '(defn add [x y] : Int (+ x y)))
-
-(parse-err/rx "rejects executable return arrow"
-  #rx"return arrows are not supported.*ReturnType"
-  '(defn add [x y] -> Int (+ x y)))
-
-(parse-err/rx "rejects return-position `:` on defn with typed params"
-  #rx"unknown type: :"
-  '(defn add [(x Int) (y Int)] : Int (+ x y)))
-
-(parse-err/rx "rejects return-position `:` on defn-/private"
-  #rx"unknown type: :"
-  '(defn- helper [(x Int)] : Int x))
-
 ;; Sanity: bare forms still parse — the rejection must not collateral-damage
 ;; the canonical untyped path.
 
@@ -660,14 +630,6 @@
   (check-eq?  (call-form-fn value) '+)
   (check-equal? (call-form-args value) '(5 1)))
 
-(parse-err/rx "legacy (define-macro safe …) is rejected — points at defmacro"
-              #rx"define-macro.*defmacro"
-  '(define-macro safe foo (x) (+ x 1)))
-
-(parse-err/rx "legacy (define-macro unsafe …) is rejected — points at defmacro"
-              #rx"define-macro.*defmacro"
-  '(define-macro unsafe wild (x) x))
-
 (parse-err "macro arity mismatch errors"
   `(defmacro two ,(br 'a 'b) (+ a b))
   '(def y (two 1)))
@@ -875,12 +837,6 @@
   (check-eq? (param-name (car (defn-form-params f))) 'name)
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'String)
   (check-eq? (type-prim-name (defn-form-return-type f)) 'String))
-
-(test-case "punctuation inside a typed binding remains rejected"
-  (check-exn #rx"punctuation annotations.*parameter list.*[(]name Type[)]"
-             (lambda ()
-               (parse-one (L 'defn 'greet (br (L 'name ANN-MARKER 'String))
-                             'String '(str "hello " name))))))
 
 ;; --- Java interop ------------------------------------------------------------
 
@@ -1814,10 +1770,6 @@
 (parse-err/rx "defn attr-map metadata rejected pointing at docstring"
   #rx"docstring"
   (L 'defn 'f (mt ':added "1.0") (br 'x) 'Any 'x))
-
-(parse-err/rx "prefix return arrow names the positional return replacement"
-  #rx"return arrows.*[[]params[]] ReturnType body"
-  (L 'defn 'f '-> 'Int (br 'x) 'x))
 
 ;; Special-form guards — no call-form passthrough for malformed shapes.
 

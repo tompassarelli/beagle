@@ -20,17 +20,11 @@
 
 ;; --- entry ----------------------------------------------------------------
 
-(define (reject-legacy-macro d)
-  (when (and (pair? d) (eq? (car d) 'define-macro))
-    (error 'beagle-expand
-           "`define-macro` is not supported; use `(defmacro NAME [params] body)`")))
-
 (define (expand-file path)
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
   ;; First pass: register canonical macros.
   (for ([d (in-list datums)])
-    (reject-legacy-macro d)
     (match d
       [(list 'defmacro (? symbol? name) params template)
        (define ps (cond
@@ -136,7 +130,6 @@
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
   (for ([d (in-list datums)])
-    (reject-legacy-macro d)
     (match d
       [(list 'defmacro (? symbol? name) params template)
        (define ps (cond

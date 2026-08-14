@@ -162,8 +162,7 @@
   (define out (compile-bnix-file (build-path fixtures-dir "nix-macro.bnix")))
   (check-true (string-contains? out "lib.mkEnableOption \"Example service\""))
   (check-true (string-contains? out "lib.mkIf cfg.enable"))
-  (check-false (string-contains? out "enable-opt"))
-  (check-false (string-contains? out "define-macro")))
+  (check-false (string-contains? out "enable-opt")))
 
 ;; --- ~''…'' reader form round-trip ------------------------------------------
 ;; Indented Nix strings authored as ~''…'' must round-trip through the

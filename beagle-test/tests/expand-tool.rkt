@@ -116,16 +116,3 @@
        (check-not-exn (lambda () (beagle-read (open-input-string rendered)))
                       (format "expanded form did not re-read: ~a" rendered))))
    (lambda () (delete-file tmp))))
-
-(test-case "expand-datums rejects the removed macro definition surface"
-  (define tmp (make-temporary-file "exp-legacy-macro-~a.bclj"))
-  (dynamic-wind
-   void
-   (lambda ()
-     (call-with-output-file tmp
-       (lambda (o)
-         (display "#lang beagle/clj\n(define-macro proc old [x] x)\n" o))
-       #:exists 'truncate/replace)
-     (check-exn #rx"define-macro.*defmacro"
-                (lambda () (expand-datums tmp))))
-   (lambda () (delete-file tmp))))

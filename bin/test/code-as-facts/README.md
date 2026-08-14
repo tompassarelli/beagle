@@ -58,10 +58,7 @@ boundary:
   selects either release CI's pinned `.bclj` Fram owner or lockstep's current
   `.bgl` owner, adds one minimal qualified consumer, and gives projection,
   resolution, rendering, and coherent overlay checking separate deadlines. The
-  current `.bgl` candidate must check coherently. The immutable release-pinned
-  `.bclj` owner still uses retired return arrows, so its check must fail within
-  the same deadline with the exact migration diagnostic; success, timeout, or
-  another failure is a regression.
+  current `.bgl` candidate must check coherently.
   These operations EDIT or REMOVE existing names.
 - **`authoring-verbs.sh`** — `upsert-form` (add a NEW
   top-level def, or replace an existing one by name) and `set-body` (replace a defn's

@@ -11,7 +11,7 @@
 
 (def ^String CHAR-TAG "#%char")
 
-(def META-FORMS ["ns" "define-mode" "define-target" "define-macro" "defmacro" "defalias" "declare-extern" "require" "import"])
+(def META-FORMS ["ns" "define-mode" "define-target" "defmacro" "defalias" "declare-extern" "require" "import"])
 
 (def ERRORS (atom []))
 
@@ -158,51 +158,13 @@
   (err! (str context " '" sym "' uses the reserved compiler identifier prefix $beagle$"))))
   sym)
 
-(def ^String ANN-MARKER "#%:")
-
-(def ^String LEGACY-MARKER ":-")
-
-(def ^String RETURN-MARKER "->")
-
-(defn ^Boolean retired-binding-marker? [sym]
-  (or (= sym ANN-MARKER) (= sym LEGACY-MARKER) (= sym ":")))
-
-(defn ^Boolean retired-return-marker? [sym]
-  (or (= sym ANN-MARKER) (= sym LEGACY-MARKER) (= sym RETURN-MARKER)))
-
 (defn- ^String binding-datum->src [d]
   (cond
   (bracketed? d) (str "[" (str/join " " (mapv binding-datum->src (bracket-body d))) "]")
   (map-tagged? d) (str "{" (str/join " " (mapv binding-datum->src (map-body d))) "}")
-  (= d ANN-MARKER) ":"
   (string-literal-datum? d) (extract-string d)
   (vector? d) (str "(" (str/join " " (mapv binding-datum->src d)) ")")
   :else (str d)))
-
-(defn- raise-retired-binding-annotation! [^String where]
-  (err! (str "punctuation annotations are not supported in " where " — write `(name Type)`")))
-
-(defn- raise-retired-return-annotation! [^String where]
-  (err! (str "return arrows are not supported in " where " — write `[params] ReturnType body...`")))
-
-(defn- ^Boolean bracketed-annotation? [body]
-  (let [n (count body)]
-  (loop [i 0]
-  (cond
-  (>= i n) false
-  (retired-binding-marker? (nth body i)) true
-  :else (recur (+ i 1))))))
-
-(defn- raise-bracketed-annotation! [body]
-  (let [n (count body)
-   idx (loop [i 0]
-  (cond
-  (>= i n) -1
-  (retired-binding-marker? (nth body i)) i
-  :else (recur (+ i 1))))
-   nm (if (> idx 0) (binding-datum->src (nth body (- idx 1))) "name")
-   ty (if (< (+ idx 1) n) (binding-datum->src (nth body (+ idx 1))) "Type")]
-  (err! (str "`[" (str/join " " (mapv binding-datum->src body)) "]` is not a typed binding — `[...]` in binding position is sequential destructuring — write `" "(" nm " " ty ")" "`"))))
 
 (defn- note-capitalized-binding! [name ^String where]
   (if (string? name) (do
@@ -578,8 +540,6 @@
 (defn parse-seq-destructure! [item]
   (let [body (bracket-body item)
    n (count body)]
-  (if (bracketed-annotation? body) (do
-  (raise-bracketed-annotation! body)))
   (loop [i 0
    names []
    rest-name nil]
@@ -603,7 +563,7 @@
   (or (string? item) (bracketed? item) (map-destructure-form? item)))
 
 (defn ^Boolean structured-binding? [item]
-  (and (vector? item) (or (= (count item) 2) (= (count item) 3)) (not (bracketed? item)) (not (map-tagged? item)) (= (count (filterv retired-binding-marker? item)) 0) (binding-form-datum? (nth item 0))))
+  (and (vector? item) (or (= (count item) 2) (= (count item) 3)) (not (bracketed? item)) (not (map-tagged? item)) (binding-form-datum? (nth item 0))))
 
 (defn- parse-binding-form! [item ^String where]
   (cond
@@ -627,7 +587,6 @@
   (if (string? (get binding "name")) (make-param (get binding "name") (get binding "ann") (get binding "constraint")) (do
   (err! "rest parameter must bind one name, not a destructuring pattern")
   nil)))
-  (> (count (filterv retired-binding-marker? after)) 0) (raise-retired-binding-annotation! "rest parameter")
   :else (do
   (err! (str "bad rest parameter after &: " (str after)))
   nil)))
@@ -659,9 +618,6 @@
   (cond
   (structured-binding? item) (let [binding (parse-structured-binding! item "parameter")]
   (recur (+ i 1) (conj fixed (make-param (get binding "name") (get binding "ann") (get binding "constraint"))) rest-param))
-  (or (retired-binding-marker? item) (and (< (+ i 1) n) (retired-binding-marker? (nth items (+ i 1)))) (and (vector? item) (> (count (filterv retired-binding-marker? item)) 0))) (do
-  (raise-retired-binding-annotation! "parameter list")
-  (recur (+ i 1) fixed rest-param))
   (bracketed? item) (do
   (err! "destructured parameter requires an aggregate type — write `([pattern ...] Type)`")
   (recur (+ i 1) fixed rest-param))
@@ -691,9 +647,6 @@
    acc []]
   (cond
   (>= i n) acc
-  (or (retired-binding-marker? (nth items i)) (and (< (+ i 1) n) (retired-binding-marker? (nth items (+ i 1)))) (and (vector? (nth items i)) (> (count (filterv retired-binding-marker? (nth items i))) 0))) (do
-  (raise-retired-binding-annotation! "let bindings")
-  (recur (+ i 1) acc))
   (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-map-destructure! (nth items i)) nil nil (parse-expr* (nth items (+ i 1))))))
   (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-seq-destructure! (nth items i)) nil nil (parse-expr* (nth items (+ i 1))))))
   (and (< (+ i 1) n) (structured-binding? (nth items i))) (let [binding (parse-structured-binding! (nth items i) "let binding")]
@@ -721,9 +674,6 @@
   (if (string? (get binding "name")) (recur (+ i 1) (conj acc {"name" (get binding "name") "ann" (get binding "ann") "constraint" (get binding "constraint")})) (do
   (err! (str "defrecord field name must be a name, got destructuring pattern: " (binding-datum->src (nth items i))))
   (recur (+ i 1) acc))))
-  (or (retired-binding-marker? (nth items i)) (and (vector? (nth items i)) (> (count (filterv retired-binding-marker? (nth items i))) 0))) (do
-  (raise-retired-binding-annotation! "record fields")
-  (recur (+ i 1) acc))
   :else (do
   (err! (str "defrecord field needs a type — use [(name Type) " "(name2 Type2 validator) ...], got: " (str (nth items i))))
   (recur (+ i 1) acc))))))
@@ -753,9 +703,6 @@
   (>= i n) acc
   (and (< (+ i 1) n) (= (nth items i) ":when")) (recur (+ i 2) (conj acc {"type" "when" "test" (parse-expr* (nth items (+ i 1)))}))
   (and (< (+ i 1) n) (= (nth items i) ":let")) (recur (+ i 2) (conj acc {"type" "let" "bindings" (parse-let-bindings! (nth items (+ i 1)))}))
-  (or (retired-binding-marker? (nth items i)) (and (< (+ i 1) n) (retired-binding-marker? (nth items (+ i 1))))) (do
-  (raise-retired-binding-annotation! "for/doseq binding")
-  (recur (+ i 1) acc))
   (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc {"type" "binding" "name" (parse-seq-destructure! (nth items i)) "ann" nil "constraint" nil "expr" (parse-expr* (nth items (+ i 1)))}))
   (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc {"type" "binding" "name" (parse-map-destructure! (nth items i)) "ann" nil "constraint" nil "expr" (parse-expr* (nth items (+ i 1)))}))
   (and (< (+ i 1) n) (structured-binding? (nth items i))) (let [binding (parse-structured-binding! (nth items i) "for/doseq binding")]
@@ -860,8 +807,6 @@
   (mapv (fn [item] (if (and (vector? item) (>= (count item) 4) (string? (nth item 0)) (bracketed? (nth item 1))) (let [name (nth item 0)
    parsed-params (parse-params! (nth item 1))
    rp (get parsed-params "rest-param")]
-  (if (retired-return-marker? (nth item 2)) (do
-  (raise-retired-return-annotation! (str "letfn " name))))
   {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type* (nth item 2)) "body" (mapv parse-expr* (subvec item 3))}) (do
   (err! (str "letfn function needs (name [params] ReturnType body...), got: " (binding-datum->src item)))
   nil))) items)))
@@ -870,8 +815,6 @@
   (if (and (vector? item) (= (count item) 3) (string? (nth item 0)) (bracketed? (nth item 1))) (let [name (nth item 0)
    parsed-params (parse-params! (nth item 1))
    rp (get parsed-params "rest-param")]
-  (if (retired-return-marker? (nth item 2)) (do
-  (raise-retired-return-annotation! (str "defprotocol method " name))))
   {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type* (nth item 2))}) (do
   (err! (str "defprotocol method needs (name [params] ReturnType), got: " (binding-datum->src item)))
   nil)))
@@ -880,8 +823,6 @@
   (if (and (vector? item) (>= (count item) 4) (string? (nth item 0)) (bracketed? (nth item 1))) (let [name (nth item 0)
    parsed-params (parse-params! (nth item 1))
    rp (get parsed-params "rest-param")]
-  (if (retired-return-marker? (nth item 2)) (do
-  (raise-retired-return-annotation! (str "method " name))))
   {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type* (nth item 2)) "body" (mapv parse-expr* (subvec item 3))}) (do
   (err! (str "protocol implementation method needs (name [params] ReturnType body...), got: " (binding-datum->src item)))
   nil)))
@@ -921,8 +862,6 @@
 (defn parse-arity-clause! [clause]
   (if (and (vector? clause) (>= (count clause) 3) (bracketed? (nth clause 0))) (let [parsed-params (parse-params! (nth clause 0))
    rp (get parsed-params "rest-param")]
-  (if (retired-return-marker? (nth clause 1)) (do
-  (raise-retired-return-annotation! "multi-arity clause")))
   {"params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type* (nth clause 1)) "body" (mapv parse-expr* (subvec clause 2))}) (err! (str "multi-arity clause needs ([params] ReturnType body...), got: " (binding-datum->src clause)))))
 
 (defn thread-step-insert [val step ^String position]
@@ -1078,7 +1017,6 @@
   (validate-identifier! name "definition")
   (cond
   (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0))) (make-defn-multi name (mapv parse-arity-clause! after-name) priv)
-  (and (>= (count after-name) 2) (retired-return-marker? (nth after-name 1))) (raise-retired-return-annotation! (str "defn " name))
   (>= (count after-name) 3) (let [parsed-params (parse-params! (nth after-name 0))
    ret (parse-type* (nth after-name 1))
    tail (subvec after-name 2)
@@ -1111,12 +1049,10 @@
    items (subvec rest-items 1)]
   (cond
   (not (string? name)) (err! (str "malformed " kw ": " (str rest-items)))
-  (retired-binding-marker? name) (raise-retired-binding-annotation! kw)
   (str/starts-with? name "$beagle$") (do
   (validate-identifier! name kw)
   NIL-LITERAL)
   (and (= kw "defonce") (meta-name? name-form)) (err! "malformed defonce — metadata on the name is not supported")
-  (and (> (count items) 0) (retired-binding-marker? (nth items 0))) (raise-retired-binding-annotation! kw)
   (and (= (count items) 3) (string-literal-datum? (nth items 1))) (mk-def-node kw name (parse-type* (nth items 0)) (parse-expr* (nth items 2)) (extract-string (nth items 1)) dyn)
   (and (= (count items) 2) (string-literal-datum? (nth items 0))) (mk-def-node kw name nil (parse-expr* (nth items 1)) (extract-string (nth items 0)) dyn)
   (= (count items) 2) (mk-def-node kw name (parse-type* (nth items 0)) (parse-expr* (nth items 1)) nil dyn)
@@ -1444,7 +1380,6 @@
   (= head "deftype") (err! "deftype removed — use defrecord for the data shape and extend-type for protocol implementations")
   (and (= head "extend-type") (>= (count rest-items) 1) (string? (nth rest-items 0))) {"node" "extend-type" "type-name" (nth rest-items 0) "impls" (parse-type-impls! (subvec rest-items 1))}
   (and (= head "fn") (>= (count rest-items) 1) (multi-arity-form? (nth rest-items 0))) (err! "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")
-  (and (= head "fn") (>= (count rest-items) 2) (retired-return-marker? (nth rest-items 1))) (raise-retired-return-annotation! "fn")
   (and (= head "fn") (>= (count rest-items) 3)) (let [parsed-params (parse-params! (nth rest-items 0))]
   (make-fn (get parsed-params "params") (get parsed-params "rest-param") (parse-type* (nth rest-items 1)) (mapv parse-expr* (subvec rest-items 2))))
   (= head "fn") (err! "fn needs (fn [params] ReturnType body...)")
@@ -1710,9 +1645,6 @@
   :else (do
   (err! (str "(ns " (nth d 1) " ...): unsupported ns clause " (str clause)))
   nil))))
-  (= head "define-macro") (do
-  (err! "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")
-  nil)
   (= head "defmacro") (if (and (= (count d) 4) (string? (nth d 1)) (or (bracketed? (nth d 2)) (vector? (nth d 2)))) (do
   (validate-identifier! (nth d 1) "macro")
   (mac/register-macro! (deref CURRENT-REGISTRY-CELL) (nth d 1) "defmacro" (unwrap-items (nth d 2)) (nth d 3))) (do
@@ -1936,8 +1868,6 @@
   :else nil)
   (= head "defn") (if (and (>= (count d) 3) (string? (nth d 1))) (do
   (let [after (subvec d 2)]
-  (if (and (>= (count after) 2) (retired-return-marker? (nth after 1))) (do
-  (raise-retired-return-annotation! (str "defn " (nth d 1)))))
   (if (and (>= (count after) 3) (bracketed? (nth after 0))) (emit! (nth d 1) (make-fn-type (import-fn-ptypes! (nth after 0)) (import-fn-rest! (nth after 0)) (parse-type* (nth after 1)))) nil))))
   :else nil))))))
   (deref out)))
@@ -2000,29 +1930,12 @@
   (and (= (get node "node") "def") (= (get node "name") "x") (= (get (get node "ann") "name") "Int") (= (get (get node "value") "value") 42))))
   (expect! "def with docstring" (let [node (parse-expr* ["def" "x" ["#%string" "doc"] 42])]
   (and (= (get node "node") "def") (= (get (get node "value") "value") 42))))
-  (expect! "def bare `:` rejected" (do
-  (reset-errors!)
-  (parse-expr* ["def" "x" ":" "Int" 42])
-  (> (count (parse-errors)) 0)))
-  (expect! "def punctuation annotation rejected" (do
-  (reset-errors!)
-  (parse-expr* ["def" "x" ANN-MARKER "Int" 42])
-  (> (count (parse-errors)) 0)))
   (expect! "defn structural params + positional return" (let [node (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" "Int"]] "String" ["str" "x"]])]
   (and (= (get node "node") "defn") (= (get node "name") "foo") (= (count (get node "params")) 1) (= (get (get (nth (get node "params") 0) "ann") "name") "Int") (= (get (get node "ret") "name") "String"))))
-  (expect! "defn marker in RETURN position rejected pointing at `->`" (do
-  (reset-errors!)
-  (parse-expr* ["defn" "foo" [BRACKET-TAG "x"] ANN-MARKER "String" "x"])
-  (> (count (parse-errors)) 0)))
   (expect! "defrecord structural fields" (let [node (parse-expr* ["defrecord" "P" [BRACKET-TAG ["x" "Int"]]])]
   (and (= (get node "node") "record") (= (count (get node "fields")) 1))))
-  (expect! "bare parameter datums stay structurally independent" (= (count (get (parse-params! [BRACKET-TAG "x" ":Int"]) "params")) 2))
   (expect! "defn typed params + return type" (let [node (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" "Int"]] "String" ["str" "x"]])]
   (and (= (get node "node") "defn") (= (get node "name") "foo") (= (count (get node "params")) 1) (= (get (nth (get node "params") 0) "name") "x") (= (get (get (nth (get node "params") 0) "ann") "name") "Int") (= (get node "ret") {"kind" "prim" "name" "String"}) (= (get node "private") false) (= (get node "rest") false))))
-  (expect! "defn punctuation inside structural param rejected" (do
-  (reset-errors!)
-  (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" ANN-MARKER "Int"]] "String" ["str" "x"]])
-  (> (count (parse-errors)) 0)))
   (expect! "typed sequential parameter keeps one aggregate annotation" (let [result (parse-params! [BRACKET-TAG [[BRACKET-TAG "a" "b"] ["HVec" "Int" "String"]]])
    param (nth (get result "params") 0)
    target (get param "name")]
@@ -2044,10 +1957,6 @@
   (expect! "nested parameter binders must be unique" (do
   (reset-errors!)
   (parse-params! [BRACKET-TAG [[BRACKET-TAG "x" [MAP-TAG ":keys" [BRACKET-TAG "y"] ":as" "x"]] ["HVec" "Int" "Config"]]])
-  (> (count (parse-errors)) 0)))
-  (expect! "bracketed annotation [x : Int] rejected in a param slot" (do
-  (reset-errors!)
-  (parse-params! [BRACKET-TAG [BRACKET-TAG "x" ANN-MARKER "Int"]])
   (> (count (parse-errors)) 0)))
   (expect! "structural let binding accepted" (let [bs (parse-let-bindings! [BRACKET-TAG ["n" "Int"] 1])]
   (and (= (get (get (nth bs 0) "ann") "name") "Int") (nil? (get (nth bs 0) "constraint")))))
@@ -2134,10 +2043,6 @@
   (> (count (parse-errors)) 0)))
   (expect! "defrecord structural fields" (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG ["tx" "Int"] ["op" "String"]]])]
   (and (= (get node "node") "record") (= (get node "name") "Assertion") (= (count (get node "fields")) 2) (= (nth (get node "fields") 0) {"name" "tx" "ann" {"kind" "prim" "name" "Int"} "constraint" nil}) (nil? (get node "private")))))
-  (expect! "defrecord punctuation fields rejected" (do
-  (reset-errors!)
-  (parse-expr* ["defrecord" "Point" [BRACKET-TAG ["x" ANN-MARKER "Float"] ["y" ANN-MARKER "Float"]]])
-  (> (count (parse-errors)) 0)))
   (expect! "defrecord destructuring field rejected" (do
   (reset-errors!)
   (parse-expr* ["defrecord" "Point" [BRACKET-TAG [[BRACKET-TAG "x" "y"] ["HVec" "Float" "Float"]]]])
@@ -2268,18 +2173,6 @@
   (reset-errors!)
   (parse-expr* ["unsafe-js" ["#%string" "1+1"]])
   (> (count (parse-errors)) 0)))
-  (expect! "let dangling marker recorded as parse error" (do
-  (reset-errors!)
-  (parse-let-bindings! [BRACKET-TAG "y" ANN-MARKER])
-  (> (count (parse-errors)) 0)))
-  (expect! "let punctuation marker rejected" (do
-  (reset-errors!)
-  (parse-let-bindings! [BRACKET-TAG "y" ANN-MARKER "Int" 3])
-  (> (count (parse-errors)) 0)))
-  (expect! "let keyword-glued-to-type recorded as parse error" (do
-  (reset-errors!)
-  (parse-let-bindings! [BRACKET-TAG "y" ":Int" 3])
-  (> (count (parse-errors)) 0)))
   (expect! "parse-errors folds macro-expansion errors; reset clears both" (do
   (reset-errors!)
   (let [reg (mac/make-macro-registry)]
@@ -2324,10 +2217,6 @@
   (and (= (count errors) 1) (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-mode" "strict"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
   (and (= (get prog "namespace") "my.app") (= (get prog "mode") "strict") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
-  (expect! "parse-program! rejects legacy define-macro" (do
-  (reset-errors!)
-  (parse-program! [["define-macro" "safe" "old" [BRACKET-TAG "x"] "x"]])
-  (> (count (parse-errors)) 0)))
   (expect! "parse-program! reserves compiler prefix across metadata binders" (let [_ (parse-program! [["ns" "$beagle$ns"] ["defmacro" "$beagle$macro" [BRACKET-TAG] 1] ["declare-extern" "$beagle$extern" "Any"]])
    errors (parse-errors)]
   (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))

@@ -73,17 +73,17 @@ ATT="$(mktemp -d)"; mkdir -p "$ATT/c"
 cat > "$ATT/c/m.bclj" <<'EOF'
 #lang beagle/clj
 (ns att.m)
-(defn dbl [x: Int] -> Int (* x 2))
-(defn inc1 [x: Int] -> Int (+ x 1))
-(defn thread-it [x: Int] -> Int (-> x dbl inc1))
-(defn hof-it [xs: (Vec Int)] -> (Vec Int) (mapv dbl xs))
+(defn dbl [(x Int)] Int (* x 2))
+(defn inc1 [(x Int)] Int (+ x 1))
+(defn thread-it [(x Int)] Int (-> x dbl inc1))
+(defn hof-it [(xs (Vec Int))] (Vec Int) (mapv dbl xs))
 EOF
 cat > "$ATT/c/e.bclj" <<'EOF'
 #lang beagle/clj
 (ns att.e)
-(defrecord Box [(w: Int)])
-(defn wrap [n: Int] -> Int (+ n 1))
-(defprotocol Show (render [self] -> Int))
+(defrecord Box [(w Int)])
+(defn wrap [(n Int)] Int (+ n 1))
+(defprotocol Show (render [self] Int))
 (extend-type Box Show (render [self] (wrap (box-w self))))
 EOF
 capture_callgraph AJ "$ATT/c"

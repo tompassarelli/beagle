@@ -81,8 +81,7 @@
              "license-metadata.rkt"       ; root license files and package metadata stay in sync
              "macro-hygiene.rkt"
              "parse.rkt"
-             "annotation-reader.rkt"  ; `:` marker in THE readtable; observed-table + reader-path parity
-             "annotation-parse.rkt"   ; every annotatable position + the four migration diagnostics
+             "annotation-parse.rkt"   ; structural typed bindings and fixed return slots
              "annotation-printer.rkt" ; glue/no-break/round-trip across all four beagle-source writers
              "annotation-macros.rkt"  ; dynamic typed-binding construction (template + `ann` constructor)
              "purity.rkt"               ; `!`-purity enforcement (Phase 6, hard by default)
