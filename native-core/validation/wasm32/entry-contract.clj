@@ -4,6 +4,14 @@
 (require '[cheshire.core :as json]
          '[clojure.string :as str])
 
+(load-file
+  (.getCanonicalPath
+    (clojure.java.io/file
+      (.getParentFile (.getParentFile (.getParentFile
+        (clojure.java.io/file *file*))))
+      "bin" "checked-program.clj")))
+(require '[native.checked-program :as checked-program])
+
 (defn fail! [entry detail]
   (binding [*out* *err*]
     (println (str "beagle wasm: entry '" entry "' " detail)))
@@ -27,10 +35,16 @@
                           (fail! entry
                                  (str "checked AST is unreadable: "
                                       (.getMessage error)))))]
+              ;; native.checked-program is the single authority on kind,
+              ;; schemaVersion, and projection authenticity; pinning them again
+              ;; here is how this validator drifts behind the checker.
+              (try
+                (checked-program/require-checked-program!
+                  ast ast-path "beagle wasm entry contract")
+                (catch Exception error
+                  (fail! entry (.getMessage error))))
               (doseq [[field expected]
-                      {"kind" "beagle.checked-program"
-                       "schemaVersion" 2
-                       "phase" "checked"
+                      {"phase" "checked"
                        "target" "core"
                        "mode" "strict"}]
                 (when (not= expected (get ast field))

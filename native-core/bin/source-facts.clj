@@ -44,9 +44,37 @@
 
 (declare emit-ann emit-expr emit-pattern emit-binding-target)
 
+(def sha256-pattern #"sha256:[0-9a-f]{64}")
+
+;; native.checked-program owns kind, schemaVersion, and projection
+;; authenticity. What remains here are this projector's own preconditions:
+;; Core source facts are only meaningful for a strict Core-target projection,
+;; and its sourceId is the logical path the build addresses it by.
+(defn require-strict-core-projection! [ast relative-path]
+  (doseq [[field expected] {"phase" "checked"
+                            "target" "core"
+                            "mode" "strict"}]
+    (when (not= expected (get ast field))
+      (throw
+        (ex-info "source facts require a strict checked Core projection"
+                 {:field field :expected expected :actual (get ast field)
+                  :relative-path relative-path}))))
+  (when (not= relative-path (get ast "sourceId"))
+    (throw
+      (ex-info "checked projection sourceId does not match its logical path"
+               {:expected relative-path :actual (get ast "sourceId")})))
+  (let [digest (get ast "sourceSha256")]
+    (when-not (and (string? digest)
+                   (re-matches sha256-pattern digest))
+      (throw
+        (ex-info "checked projection carries a malformed SHA-256 digest"
+                 {:field "sourceSha256" :value digest
+                  :relative-path relative-path})))))
+
 (defn require-native-compatible-ast! [ast relative-path]
   (checked-program/require-checked-program!
-    ast relative-path "native source-fact projection"))
+    ast relative-path "native source-fact projection")
+  (require-strict-core-projection! ast relative-path))
 
 (defn emit-seq [items emit-one]
   (let [n (nid)]
@@ -627,35 +655,7 @@
               "defprotocol" "extend-type"} (get form "node"))
            (and include-defs? (= "def" (get form "node"))))))
 
-(def sha256-pattern #"sha256:[0-9a-f]{64}")
-
-(defn require-checked-program! [ast relative-path]
-  (let [required {"kind" "beagle.checked-program"
-                  "schemaVersion" 2
-                  "phase" "checked"
-                  "target" "core"
-                  "mode" "strict"}]
-    (doseq [[field expected] required]
-      (when (not= expected (get ast field))
-        (throw
-          (ex-info "source facts require a strict checked Core projection"
-                   {:field field :expected expected :actual (get ast field)
-                    :relative-path relative-path}))))
-    (when (not= relative-path (get ast "sourceId"))
-      (throw
-        (ex-info "checked projection sourceId does not match its logical path"
-                 {:expected relative-path :actual (get ast "sourceId")})))
-    (doseq [field ["sourceSha256" "projectionSha256"]]
-      (let [digest (get ast field)]
-        (when-not (and (string? digest)
-                       (re-matches sha256-pattern digest))
-          (throw
-            (ex-info "checked projection carries a malformed SHA-256 digest"
-                     {:field field :value digest
-                      :relative-path relative-path})))))))
-
 (defn emit-module [ast relative-path include-defs? selected-names]
-  (require-checked-program! ast relative-path)
   (let [selected-forms (filterv
                          #(selected-form? include-defs? selected-names %)
                          (get ast "forms"))
