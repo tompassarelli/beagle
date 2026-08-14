@@ -236,6 +236,12 @@
       (let ([path (find-executable-path fallback)])
         (and path (path->string path)))))
 
+;; beagle-wasm-tools hands the materializer a RESOLVED tool path, and that is
+;; what the audit records. Expecting the caller's own spelling would assert the
+;; resolver performs no normalization — false the moment TMPDIR ends in "/".
+(define (resolved-tool-path path)
+  (path->string (normalize-path path)))
+
 (define (subtree-reaped? receipt)
   (and (file-exists? receipt)
        (string=? "subtree-reaped-v0 timeout status=124\n"
@@ -249,14 +255,26 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'fake-wasi-clang 1.0\n'
   exit 0
 fi
-expected_ld="${FAKE_EXPECTED_LD:?}"
+physical_path() {
+  printf '%s\n' "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
+}
+# beagle-wasm-tools hands back a resolved path, so the linker this compiler was
+# told to use is the same FILE, not necessarily the same spelling: a TMPDIR
+# ending in "/" reaches here with a doubled separator the resolver collapsed.
+expected_ld="$(physical_path "${FAKE_EXPECTED_LD:?}")"
 seen_ld=0
 for argument in "$@"; do
-  if [[ "$argument" == "-fuse-ld=$expected_ld" ]]; then
-    seen_ld=1
+  if [[ "$argument" == -fuse-ld=* ]]; then
+    if [[ "$(physical_path "${argument#-fuse-ld=}")" == "$expected_ld" ]]; then
+      seen_ld=1
+    fi
   fi
 done
-[[ "$seen_ld" == "1" ]]
+if [[ "$seen_ld" != "1" ]]; then
+  printf 'fake-wasi-clang: no -fuse-ld resolving to %s in: %s\n' \
+    "$expected_ld" "$*" >&2
+  exit 1
+fi
 count=0
 if [[ -f "${FAKE_CC_COUNT:?}" ]]; then
   read -r count <"$FAKE_CC_COUNT"
@@ -271,7 +289,10 @@ while [[ $# -gt 0 ]]; do
     shift
   fi
 done
-[[ -n "$output" ]]
+if [[ -z "$output" ]]; then
+  printf 'fake-wasi-clang: no -o output argument\n' >&2
+  exit 1
+fi
 printf '\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x05\x03\x01\x00\x01\x07\x18\x02\x06\x6d\x65\x6d\x6f\x72\x79\x02\x00\x0b\x5f\x69\x6e\x69\x74\x69\x61\x6c\x69\x7a\x65\x00\x00\x0a\x04\x01\x02\x00\x0b' >"$output"
 SH
 )
@@ -415,13 +436,15 @@ SH
         identity))
      (define audit (file->string (build-path artifacts "wasm-audit.txt")))
      (check-true
-      (string-contains? audit (format "wasm-tool-cc-path-shell ~a\n" (path->string cc))))
+      (string-contains? audit (format "wasm-tool-cc-path-shell ~a\n"
+                                      (resolved-tool-path cc))))
      (check-true
-      (string-contains? audit (format "wasm-tool-ld-path-shell ~a\n" (path->string ld))))
+      (string-contains? audit (format "wasm-tool-ld-path-shell ~a\n"
+                                      (resolved-tool-path ld))))
      (check-true
       (string-contains? audit
                         (format "wasm-tool-runtime-path-shell ~a\n"
-                                (path->string runtime)))))
+                                (resolved-tool-path runtime)))))
    (lambda () (delete-directory/files scratch))))
 
 )
