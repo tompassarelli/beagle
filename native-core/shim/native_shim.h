@@ -425,6 +425,21 @@ void native_buffer_set(const native_arena *arena, native_buffer *buffer,
                        const native_capability *capability,
                        int64_t index, const void *value, int64_t stride,
                        size_t alignment);
+/* Nontrapping SIMD preflight. These expose an F64 view only after exact
+   capability, stride, eight-byte alignment, range, and address-overflow
+   checks. Arithmetic callers request a finite scan before any write. */
+bool native_buffer_simd_f64_input_view(
+    const native_buffer *buffer, const native_capability *capability,
+    int64_t start, int64_t end, bool require_finite, const double **out);
+bool native_buffer_simd_f64_output_view(
+    native_buffer *buffer, const native_capability *capability,
+    int64_t start, int64_t end, double **out);
+/* Read-only inputs may alias each other. A destination/source pair is safe
+   only when the exact accessed spans are disjoint; every overlap falls back
+   to the authoritative scalar loop. */
+bool native_buffer_simd_f64_alias_safe(const double *destination,
+                                       const double *source,
+                                       int64_t start, int64_t end);
 
 /* A read-only alias of octets this shim did not allocate: one header, never a
    copy of the data. The caller keeps `data` live and unmodified for as long as

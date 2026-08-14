@@ -4062,6 +4062,110 @@ void native_buffer_set(const native_arena *arena, native_buffer *buffer,
   }
 }
 
+static bool native_buffer_simd_f64_span(
+    const native_buffer *buffer, const native_capability *capability,
+    int64_t start, int64_t end, uintptr_t *begin, uintptr_t *finish) {
+  uintptr_t base;
+  uint64_t start_bytes;
+  uint64_t end_bytes;
+
+  if ((buffer == NULL) || (capability == NULL) || (begin == NULL) ||
+      (finish == NULL) || (capability->token == UINT64_C(0)) ||
+      (capability->token != buffer->owner_capability_token) ||
+      (buffer->stride != INT64_C(8)) ||
+      (buffer->alignment < _Alignof(double)) || (start < INT64_C(0)) ||
+      (end < start) || (end > buffer->length) ||
+      ((end > INT64_C(0)) && (buffer->elements == NULL)) ||
+      ((end > INT64_C(0)) &&
+       (((uintptr_t)buffer->elements % (uintptr_t)_Alignof(double)) != 0U)) ||
+      ((uint64_t)end > ((uint64_t)SIZE_MAX / UINT64_C(8)))) {
+    return false;
+  }
+  start_bytes = (uint64_t)start * UINT64_C(8);
+  end_bytes = (uint64_t)end * UINT64_C(8);
+  base = (uintptr_t)buffer->elements;
+  if ((start_bytes > (uint64_t)(UINTPTR_MAX - base)) ||
+      (end_bytes > (uint64_t)(UINTPTR_MAX - base))) {
+    return false;
+  }
+  *begin = base + (uintptr_t)start_bytes;
+  *finish = base + (uintptr_t)end_bytes;
+  return true;
+}
+
+bool native_buffer_simd_f64_input_view(
+    const native_buffer *buffer, const native_capability *capability,
+    int64_t start, int64_t end, bool require_finite, const double **out) {
+  uintptr_t begin;
+  uintptr_t finish;
+  int64_t index;
+
+  if ((out == NULL) ||
+      !native_buffer_simd_f64_span(buffer, capability, start, end, &begin,
+                                   &finish)) {
+    return false;
+  }
+  *out = (const double *)buffer->elements;
+  if (require_finite) {
+    for (index = start; index < end; ++index) {
+      if (!isfinite((*out)[index])) {
+        *out = NULL;
+        return false;
+      }
+    }
+  }
+  (void)begin;
+  (void)finish;
+  return true;
+}
+
+bool native_buffer_simd_f64_output_view(
+    native_buffer *buffer, const native_capability *capability,
+    int64_t start, int64_t end, double **out) {
+  uintptr_t begin;
+  uintptr_t finish;
+
+  if ((out == NULL) ||
+      !native_buffer_simd_f64_span(buffer, capability, start, end, &begin,
+                                   &finish)) {
+    return false;
+  }
+  *out = (double *)buffer->elements;
+  (void)begin;
+  (void)finish;
+  return true;
+}
+
+bool native_buffer_simd_f64_alias_safe(const double *destination,
+                                       const double *source,
+                                       int64_t start, int64_t end) {
+  uintptr_t destination_begin;
+  uintptr_t destination_end;
+  uintptr_t source_begin;
+  uintptr_t source_end;
+  uint64_t start_bytes;
+  uint64_t end_bytes;
+
+  if ((destination == NULL) || (source == NULL) || (start < INT64_C(0)) ||
+      (end <= start) ||
+      ((uint64_t)end > ((uint64_t)SIZE_MAX / UINT64_C(8)))) {
+    return false;
+  }
+  start_bytes = (uint64_t)start * UINT64_C(8);
+  end_bytes = (uint64_t)end * UINT64_C(8);
+  if ((start_bytes > (uint64_t)(UINTPTR_MAX - (uintptr_t)destination)) ||
+      (end_bytes > (uint64_t)(UINTPTR_MAX - (uintptr_t)destination)) ||
+      (start_bytes > (uint64_t)(UINTPTR_MAX - (uintptr_t)source)) ||
+      (end_bytes > (uint64_t)(UINTPTR_MAX - (uintptr_t)source))) {
+    return false;
+  }
+  destination_begin = (uintptr_t)destination + (uintptr_t)start_bytes;
+  destination_end = (uintptr_t)destination + (uintptr_t)end_bytes;
+  source_begin = (uintptr_t)source + (uintptr_t)start_bytes;
+  source_end = (uintptr_t)source + (uintptr_t)end_bytes;
+  return (destination_end <= source_begin) || (source_end <= destination_begin);
+}
+
 /* A second header over storage already handed out: the source header keeps its
    own length, so both stay readable and neither can rewrite the other's
    elements. */

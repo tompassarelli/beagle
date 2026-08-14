@@ -1,0 +1,99 @@
+#lang beagle
+(ns native.simd-f64-kernels)
+(define-mode strict)
+
+(defn copy! [(source (Buffer Float)) (destination (Buffer Float))] Float
+  (let [length (alength source)]
+    (if (not= length (alength destination))
+      0.0
+      (loop [(index Int) 0]
+        (if (< index length)
+          (do
+            (aset-double! destination index (aget source index))
+            (recur (+ index 1)))
+          (if (zero? length) 0.0 (aget destination 0)))))))
+
+(defn add!
+  [(left (Buffer Float))
+   (right (Buffer Float))
+   (destination (Buffer Float))]
+  Float
+  (let [length (alength left)]
+    (if (or (not= length (alength right))
+          (not= length (alength destination)))
+      0.0
+      (loop [(index Int) 0]
+        (if (< index length)
+          (do
+            (aset-double! destination index
+              (+ (aget left index) (aget right index)))
+            (recur (+ index 1)))
+          (if (zero? length) 0.0 (aget destination 0)))))))
+
+(defn subtract!
+  [(left (Buffer Float))
+   (right (Buffer Float))
+   (destination (Buffer Float))]
+  Float
+  (let [length (alength left)]
+    (if (or (not= length (alength right))
+          (not= length (alength destination)))
+      0.0
+      (loop [(index Int) 0]
+        (if (< index length)
+          (do
+            (aset-double! destination index
+              (- (aget left index) (aget right index)))
+            (recur (+ index 1)))
+          (if (zero? length) 0.0 (aget destination 0)))))))
+
+(defn multiply!
+  [(left (Buffer Float))
+   (right (Buffer Float))
+   (destination (Buffer Float))]
+  Float
+  (let [length (alength left)]
+    (if (or (not= length (alength right))
+          (not= length (alength destination)))
+      0.0
+      (loop [(index Int) 0]
+        (if (< index length)
+          (do
+            (aset-double! destination index
+              (* (aget left index) (aget right index)))
+            (recur (+ index 1)))
+          (if (zero? length) 0.0 (aget destination 0)))))))
+
+(defn multiply-add!
+  [(left (Buffer Float))
+   (right (Buffer Float))
+   (addend (Buffer Float))
+   (destination (Buffer Float))]
+  Float
+  (let [length (alength left)]
+    (if (or (not= length (alength right))
+          (not= length (alength addend))
+          (not= length (alength destination)))
+      0.0
+      (loop [(index Int) 0]
+        (if (< index length)
+          (do
+            (aset-double! destination index
+              (+ (* (aget left index) (aget right index))
+                (aget addend index)))
+            (recur (+ index 1)))
+          (if (zero? length) 0.0 (aget destination 0)))))))
+
+;; Shifted reads carry a dependence when destination aliases source. V0 keeps
+;; this stencil scalar instead of speculating about overlap.
+(defn shifted-copy!
+  [(source (Buffer Float)) (destination (Buffer Float))] Float
+  (let [length (alength source)]
+    (if (or (< length 2) (not= length (alength destination)))
+      0.0
+      (loop [(index Int) 1]
+        (if (< index length)
+          (do
+            (aset-double! destination index (aget source (- index 1)))
+            (recur (+ index 1)))
+          (aget destination 1))))))

@@ -2,7 +2,8 @@
 ;; Reads the same frozen core/NativeCoreProgram native.c11 reads; every QBE-shaped
 ;; concession stays inside this file. Authority: North thread 019fbd6c A6.
 (ns native.qbe
-  (:require [native.core :as core]))
+  (:require [native.core :as core]
+            [native.simd :as simd]))
 
 (define-mode strict)
 
@@ -2645,3 +2646,12 @@
             (module-name String) (str "module_" module-index ".ssa")
             (module-text String) (emit-module types layouts functions texts module-index)]
         (->QbeSuccess (->QbeArtifact module-name module-text))))))
+
+(defn materialize-program-with-simd
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)
+   (plan simd/SimdPlanV0)] QbeMaterialization
+  (->QbeFailure
+    (str (simd/demanded-backend-refusal "qbe")
+      "; plan-digest=" (simd/simdplanv0-digest plan))))

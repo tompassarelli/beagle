@@ -8,6 +8,7 @@
 
 (require native.core :as core)
 (require native.fold-c17 :as c17)
+(require native.simd :as simd)
 
 (defrecord BodyArtifactV0
   [(header-name String)
@@ -3129,6 +3130,229 @@
                     (recur (+ inner 1)))))]
           (if hit true (recur (+ position 1))))))))
 
+(defn simd-plan-for-block
+  [(plans (Vec simd/SimdLoopPlanV0))
+   (function core/FunctionDef)
+   (block core/BasicBlock)] (U simd/SimdLoopPlanV0 Nil)
+  (loop [(index Int) 0]
+    (if (>= index (count plans))
+      nil
+      (let [plan (nth plans index)]
+        (if (and
+              (simd/loop-eligible? plan)
+              (core/native-id=
+                (simd/simdloopplanv0-function-id plan)
+                (core/functiondef-id function))
+              (core/native-id=
+                (simd/simdloopplanv0-header-block-id plan)
+                (core/basicblock-id block)))
+          plan
+          (recur (+ index 1)))))))
+
+(defn simd-source-position
+  [(sources (Vec core/NativeId))
+   (target core/NativeId)] Int
+  (loop [(index Int) 0]
+    (if (>= index (count sources))
+      -1
+      (if (core/native-id= (nth sources index) target)
+        index
+        (recur (+ index 1))))))
+
+(defn simd-pack-result-id
+  [(instruction simd/SimdPackInstructionV0)] (U core/NativeId Nil)
+  (cond
+    (instance? native.simd.SimdLoadF64V0 instruction)
+    (simd/simdloadf64v0-result-id instruction)
+    (instance? native.simd.SimdSplatF64V0 instruction)
+    (simd/simdsplatf64v0-result-id instruction)
+    (instance? native.simd.SimdAddF64V0 instruction)
+    (simd/simdaddf64v0-result-id instruction)
+    (instance? native.simd.SimdSubF64V0 instruction)
+    (simd/simdsubf64v0-result-id instruction)
+    (instance? native.simd.SimdMulF64V0 instruction)
+    (simd/simdmulf64v0-result-id instruction)
+    :else nil))
+
+(defn simd-pack-value-name
+  [(instructions (Vec simd/SimdPackInstructionV0))
+   (before Int)
+   (target core/NativeId)
+   (function core/FunctionDef)
+   (slots (Vec ValueSlotV0))] String
+  (loop [(index Int) 0 (found Int) -1]
+    (if (>= index before)
+      (if (< found 0)
+        (value-name function slots target)
+        (str "native_simd_value_" found))
+      (let [result-id (simd-pack-result-id (nth instructions index))]
+        (recur (+ index 1)
+          (if (and (not (nil? result-id))
+                (core/native-id= result-id target))
+            index
+            found))))))
+
+(defn emit-simd-pack-instructions
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (plan simd/SimdLoopPlanV0)] String
+  (let [instructions (simd/simdloopplanv0-pack-instructions plan)
+        sources (simd/simdloopplanv0-source-buffer-ids plan)]
+    (loop [(index Int) 0 (result String) ""]
+      (if (>= index (count instructions))
+        result
+        (let [instruction (nth instructions index)
+              target (str "native_simd_value_" index)
+              emitted
+              (cond
+                (instance? native.simd.SimdLoadF64V0 instruction)
+                (str "      const double " target " = native_simd_source_"
+                  (simd-source-position sources
+                    (simd/simdloadf64v0-buffer-id instruction))
+                  "[native_simd_index];\n")
+
+                (instance? native.simd.SimdSplatF64V0 instruction)
+                (str "      const double " target " = "
+                  (value-name function slots
+                    (simd/simdsplatf64v0-value-id instruction))
+                  ";\n")
+
+                (instance? native.simd.SimdAddF64V0 instruction)
+                (str "      const double " target " = "
+                  (simd-pack-value-name instructions index
+                    (simd/simdaddf64v0-left-id instruction) function slots)
+                  " + "
+                  (simd-pack-value-name instructions index
+                    (simd/simdaddf64v0-right-id instruction) function slots)
+                  ";\n")
+
+                (instance? native.simd.SimdSubF64V0 instruction)
+                (str "      const double " target " = "
+                  (simd-pack-value-name instructions index
+                    (simd/simdsubf64v0-left-id instruction) function slots)
+                  " - "
+                  (simd-pack-value-name instructions index
+                    (simd/simdsubf64v0-right-id instruction) function slots)
+                  ";\n")
+
+                (instance? native.simd.SimdMulF64V0 instruction)
+                (str "      const double " target " = "
+                  (simd-pack-value-name instructions index
+                    (simd/simdmulf64v0-left-id instruction) function slots)
+                  " * "
+                  (simd-pack-value-name instructions index
+                    (simd/simdmulf64v0-right-id instruction) function slots)
+                  ";\n")
+
+                :else
+                (str "      native_simd_destination[native_simd_index] = "
+                  (simd-pack-value-name instructions index
+                    (simd/simdstoref64v0-value-id instruction) function slots)
+                  ";\n"))]
+          (recur (+ index 1) (str result emitted)))))))
+
+(defn emit-simd-source-declarations
+  [(sources (Vec core/NativeId))] String
+  (loop [(index Int) 0 (result String) ""]
+    (if (>= index (count sources))
+      result
+      (recur (+ index 1)
+        (str result "    const double *native_simd_source_" index
+          " = NULL;\n")))))
+
+(defn emit-simd-source-preflight
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (sources (Vec core/NativeId))
+   (arithmetic Bool)] String
+  (loop [(index Int) 0 (result String) ""]
+    (if (>= index (count sources))
+      result
+      (recur (+ index 1)
+        (str result
+          " &&\n        native_buffer_simd_f64_input_view("
+          (value-name function slots (nth sources index))
+          ", capability, native_simd_start, native_simd_end, "
+          (if arithmetic "true" "false") ", &native_simd_source_"
+          index ")")))))
+
+(defn emit-simd-alias-preflight
+  [(sources (Vec core/NativeId))] String
+  (loop [(index Int) 0 (result String) ""]
+    (if (>= index (count sources))
+      result
+      (recur (+ index 1)
+        (str result
+          " &&\n        native_buffer_simd_f64_alias_safe(native_simd_destination, "
+          "native_simd_source_" index
+          ", native_simd_start, native_simd_end)")))))
+
+(defn emit-simd-splat-finite-preflight
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (instructions (Vec simd/SimdPackInstructionV0))] String
+  (loop [(index Int) 0 (result String) ""]
+    (if (>= index (count instructions))
+      result
+      (let [instruction (nth instructions index)]
+        (recur (+ index 1)
+          (if (instance? native.simd.SimdSplatF64V0 instruction)
+            (str result " &&\n        isfinite("
+              (value-name function slots
+                (simd/simdsplatf64v0-value-id instruction)) ")")
+            result))))))
+
+(defn emit-simd-loop
+  [(function core/FunctionDef)
+   (slots (Vec ValueSlotV0))
+   (plan simd/SimdLoopPlanV0)] String
+  (let [destination (simd/simdloopplanv0-destination-buffer-id plan)
+        sources (simd/simdloopplanv0-source-buffer-ids plan)
+        instructions (simd/simdloopplanv0-pack-instructions plan)
+        induction-name
+        (value-name function slots (simd/simdloopplanv0-induction-id plan))
+        end-name (value-name function slots (simd/simdloopplanv0-end-id plan))]
+    (if (nil? destination)
+      ""
+      (str
+        "  {\n"
+        "    const int64_t native_simd_start = " induction-name ";\n"
+        "    const int64_t native_simd_end = " end-name ";\n"
+        "    double *native_simd_destination = NULL;\n"
+        (emit-simd-source-declarations sources)
+        "    if ((native_simd_end - native_simd_start >= "
+        "((int64_t) NATIVE_SIMD_F64_LANES)) &&\n"
+        "        native_buffer_simd_f64_output_view("
+        (value-name function slots destination)
+        ", capability, native_simd_start, native_simd_end, "
+        "&native_simd_destination)"
+        (emit-simd-source-preflight function slots sources
+          (simd/simdloopplanv0-arithmetic plan))
+        (emit-simd-alias-preflight sources)
+        (if (simd/simdloopplanv0-arithmetic plan)
+          (emit-simd-splat-finite-preflight function slots instructions)
+          "")
+        ") {\n"
+        "      const int64_t native_simd_limit = native_simd_start +\n"
+        "        ((native_simd_end - native_simd_start) / "
+        "((int64_t) NATIVE_SIMD_F64_LANES)) * "
+        "((int64_t) NATIVE_SIMD_F64_LANES);\n"
+        "#if defined(__clang__)\n"
+        "#pragma clang loop vectorize(enable)\n"
+        "#elif defined(__GNUC__)\n"
+        ;; The preflight proves that output/source spans are disjoint or the
+        ;; exact same span, so there are no loop-carried memory dependencies.
+        "#pragma GCC ivdep\n"
+        "#endif\n"
+        "      for (int64_t native_simd_index = native_simd_start;\n"
+        "           native_simd_index < native_simd_limit;\n"
+        "           ++native_simd_index) {\n"
+        (emit-simd-pack-instructions function slots plan)
+        "      }\n"
+        "      " induction-name " = native_simd_limit;\n"
+        "    }\n"
+        "  }\n"))))
+
 (defn emit-block
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
@@ -3140,6 +3364,7 @@
    (function core/FunctionDef)
    (function-index Int)
    (slots (Vec ValueSlotV0))
+   (plans (Vec simd/SimdLoopPlanV0))
    (position Int)]
   String
   (let [(block core/BasicBlock) (nth (core/functiondef-blocks function) position)
@@ -3148,9 +3373,12 @@
         (if targeted
           (str (label-name function-index position) ": ;\n")
           "")
-        (instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
+        (instructions (Vec core/Instruction)) (core/basicblock-instructions block)
+        (simd-plan (U simd/SimdLoopPlanV0 Nil))
+        (simd-plan-for-block plans function block)]
     (str label
       (if targeted (emit-unused-block-parameters function slots block) "")
+      (if (nil? simd-plan) "" (emit-simd-loop function slots simd-plan))
       (loop [(inner Int) 0 (result String) ""]
         (if (>= inner (count instructions))
           result
@@ -3171,7 +3399,8 @@
    (module-index Int)
    (pool ConstantPoolV0)
    (function-index Int)
-   (function core/FunctionDef)]
+   (function core/FunctionDef)
+   (plans (Vec simd/SimdLoopPlanV0))]
   String
   (let [(slots (Vec ValueSlotV0)) (function-value-slots function)
         (epochs (Vec core/NativeId)) (function-epoch-arenas regions function)
@@ -3201,7 +3430,7 @@
           (recur (+ position 1)
             (str result
               (emit-block types layouts epochs functions abis module-index pool
-                function function-index slots position)))))
+                function function-index slots plans position)))))
       "}\n")))
 
 (defn emit-functions
@@ -3211,7 +3440,8 @@
    (functions (Vec core/FunctionDef))
    (abis (Vec core/AbiDeclV0))
    (module-index Int)
-   (pool ConstantPoolV0)]
+   (pool ConstantPoolV0)
+   (plans (Vec simd/SimdLoopPlanV0))]
   String
   (loop [(position Int) 0 (result String) ""]
     (if (>= position (count functions))
@@ -3219,7 +3449,7 @@
       (recur (+ position 1)
         (str result
           (emit-function types layouts regions functions abis module-index pool
-            position (nth functions position)))))))
+            position (nth functions position) plans))))))
 
 (defn function-has-tiled-kernel?
   [(functions (Vec core/FunctionDef)) (kernel core/NativeId)] Bool
@@ -3351,23 +3581,35 @@
    (abis (Vec core/AbiDeclV0))
    (module-index Int)
    (pool ConstantPoolV0)
-   (header-name String)]
+   (header-name String)
+   (plans (Vec simd/SimdLoopPlanV0))]
   String
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n"
     (if (functions-use-parallel? functions)
       "#include \"native_parallel.h\"\n" "")
     "\n"
+    (if (> (count plans) 0)
+      (str "#include <math.h>\n\n"
+        "#ifndef NATIVE_SIMD_F64_LANES\n"
+        "#define NATIVE_SIMD_F64_LANES 4\n"
+        "#endif\n"
+        "#if NATIVE_SIMD_F64_LANES < 2\n"
+        "#error \"NATIVE_SIMD_F64_LANES must be at least 2\"\n"
+        "#endif\n\n")
+      "")
     (emit-internal-function-prototypes types functions abis module-index)
     (emit-text-pool module-index pool)
     (emit-value-descriptors types layouts functions module-index)
     (emit-parallel-adapters types functions module-index)
-    (emit-functions types layouts regions functions abis module-index pool)))
+    (emit-functions types layouts regions functions abis module-index pool
+      plans)))
 
-(defn materialize-program-for-abi
+(defn materialize-program-plans
   [(program core/NativeCoreProgram)
    (module-index Int)
-   (abi-id String)]
+   (abi-id String)
+   (plans (Vec simd/SimdLoopPlanV0))]
   BodyMaterializationV0
   (let [(validation core/ValidationReport) (core/validate-program program)]
     (cond
@@ -3405,8 +3647,28 @@
             (emit-public-header types layouts functions abis module-index)
             (str "module_" module-index ".c")
             (emit-source types layouts (core/nativecoreprogram-regions program)
-              functions abis module-index pool header-name)))))))
+              functions abis module-index pool header-name plans)))))))
+
+(defn materialize-program-for-abi
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)]
+  BodyMaterializationV0
+  (materialize-program-plans program module-index abi-id []))
 
 (defn materialize-program
   [(program core/NativeCoreProgram) (module-index Int)] BodyMaterializationV0
   (materialize-program-for-abi program module-index "lp64"))
+
+;; SIMD materialization is reachable only on lp64; every other ABI is refused
+;; before this point, so the plan slice never spells a second ABI.
+(defn materialize-program-with-simd
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (plan simd/SimdPlanV0)]
+  BodyMaterializationV0
+  (let [eligible (simd/eligible-loops plan)]
+    (if (= 0 (count eligible))
+      (->BodyFailureV0
+        "SimdPlanV0 contains no eligible-elementwise-f64-v0 loop")
+      (materialize-program-plans program module-index "lp64" eligible))))

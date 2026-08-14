@@ -3,7 +3,7 @@
 #
 # Usage:
 #   beagle build --materializer c17 [--materializer qbe] --out DIR
-#     [--abi lp64|wasm32] [--entry NS/NAME]... SOURCE.bgl...
+#     [--abi lp64|wasm32] [--entry NS/NAME]... [--simd] SOURCE.bgl...
 #
 # A successful run always writes the authoritative frozen native program encoding
 # and digest, plus every explicitly selected materializer projection. The
@@ -30,6 +30,7 @@ abi="lp64"
 materializers=()
 entries=()
 sources=()
+simd_required=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -69,6 +70,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --entry=*)
             entries+=("${1#*=}")
+            shift
+            ;;
+        --simd)
+            simd_required=1
             shift
             ;;
         --help|-h)
@@ -131,6 +136,8 @@ managed_artifacts=(
     report.txt
     module.native-program
     module.native-program.sha256
+    module.simd-plan-v0
+    module.simd-plan-v0.sha256
     module_0.h
     module_0.c
     module_0.ssa
@@ -164,6 +171,7 @@ bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 core_modules=(
     native-core/src/native/core.bclj
     native-core/src/native/stages.bclj
+    native-core/src/native/simd.bclj
     native-core/src/native/lower.bclj
     native-core/src/native/obligations.bclj
     native-core/src/native/c11.bclj
@@ -218,7 +226,7 @@ if [[ ! -f "$cache_entry/.complete" ]]; then
     # emitter qualifies cross-module union patterns itself.
     core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
         "$compiled/native/core.clj" | tr '\n' ' ')"
-    for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+    for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
         generated="$compiled/native/$module.clj"
         [[ -f "$generated" ]] || continue
         sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
@@ -251,6 +259,7 @@ export BEAGLE_CORE_FACTS="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
 export BEAGLE_CORE_ABI="$abi"
+export BEAGLE_CORE_SIMD_REQUIRED="$simd_required"
 export BEAGLE_CORE_REPORT="$out/report.txt"
 printf '%s\n' "${entries[@]}" >"$work/entries"
 export BEAGLE_CORE_ENTRIES="$work/entries"
@@ -262,6 +271,7 @@ set +e
 bb -cp "$compiled" -e '
 (require (quote [native.core :as core])
          (quote [native.stages :as stages])
+         (quote [native.simd :as simd])
          (quote [native.lower :as lower])
          (quote [native.obligations :as obligations])
          (quote [native.slice :as slice])
@@ -691,9 +701,15 @@ bb -cp "$compiled" -e '
        (slice/obligation-report "obligation-projection" projected abi)
        (body-slice/failing-obligations projected abi)))
 
-(defn materialize-c17! [projected artifacts-dir abi-id]
+(defn materialize-c17! [projected artifacts-dir plan simd-required? abi-id]
   (start-stage! "materialization-c17")
-  (let [result (body/materialize-program-for-abi projected 0 abi-id)
+  (let [result (cond
+                 (not simd-required?)
+                 (body/materialize-program-for-abi projected 0 abi-id)
+                 (not= abi-id "lp64")
+                 (body/->BodyFailureV0
+                   (simd/demanded-backend-refusal "wasm"))
+                 :else (body/materialize-program-with-simd projected 0 plan))
         ok? (body/materialization-ok? result)
         parallel-wasm-refusal? (and (= abi-id "wasm32")
                                     (program-has-parallel? projected)
@@ -706,7 +722,10 @@ bb -cp "$compiled" -e '
                         (let [artifact (body/materialization-artifact result)]
                           (str "OK "
                                (body/bodyartifactv0-header-name artifact) " "
-                               (body/bodyartifactv0-source-name artifact)))
+                               (body/bodyartifactv0-source-name artifact)
+                               (if simd-required?
+                                 " SIMD-ELIGIBLE actual-vectorization=pending-compiler-evidence"
+                                 "")))
                         (str "REFUSED " (body/materialization-detail result)))
                       "\n"))]
     (if-not ok?
@@ -723,9 +742,11 @@ bb -cp "$compiled" -e '
         {:ok? true
          :report report}))))
 
-(defn materialize-qbe! [projected artifacts-dir abi-id]
+(defn materialize-qbe! [projected artifacts-dir abi-id plan simd-required?]
   (start-stage! "materialization-qbe")
-  (let [result (qbe/materialize-program projected 0 abi-id)
+  (let [result (if simd-required?
+                 (qbe/materialize-program-with-simd projected 0 abi-id plan)
+                 (qbe/materialize-program projected 0 abi-id))
         ok? (instance? native.qbe.QbeSuccess result)
         parallel-refusal? (and (program-has-parallel? projected) (not ok?))
         report (if parallel-refusal?
@@ -750,14 +771,17 @@ bb -cp "$compiled" -e '
          :report report}))))
 
 (defn materialize-programs!
-  [projected qbe-projected artifacts-dir materializers abi-id]
+  [projected qbe-projected artifacts-dir materializers abi-id plan
+   simd-required?]
   (loop [remaining materializers reports []]
     (if (empty? remaining)
       {:ok? true :report (str (apply str reports) "result PASS\n")}
       (let [materializer (first remaining)
             result (case materializer
-                     "c17" (materialize-c17! projected artifacts-dir abi-id)
-                     "qbe" (materialize-qbe! qbe-projected artifacts-dir abi-id))
+                     "c17" (materialize-c17! projected artifacts-dir plan
+                             simd-required? abi-id)
+                     "qbe" (materialize-qbe! qbe-projected artifacts-dir abi-id
+                             plan simd-required?))
             next-reports (conj reports (:report result))]
         (if (:ok? result)
           (recur (rest remaining) next-reports)
@@ -767,7 +791,7 @@ bb -cp "$compiled" -e '
 
 (defn compile-core!
   [facts-path projected-facts-path artifacts-dir compiler-commit entries
-   materializers abi-id abi]
+   materializers abi-id abi simd-required?]
   (start-stage! "source-projection")
   (let [raw-rows (slice/parse-facts (slurp facts-path))
         projection (project-entry-rows raw-rows entries)]
@@ -844,6 +868,13 @@ bb -cp "$compiled" -e '
                                                                   configuration abi)
                         projected (body-slice/projected-program program)
                         qbe-projected (body-slice/projected-program qbe-program)
+                        simd-plan (simd/derive-plan projected
+                                    (stages/frozennativestagev0-digest frozen-native)
+                                    abi-id)
+                        _write-simd-plan
+                        (when simd-required?
+                          (spit (str artifacts-dir "/module.simd-plan-v0")
+                            (simd/simdplanv0-encoding simd-plan)))
                         _start-obligations (start-stage! "native-obligations")
                         verdicts (obligations/validate-native-core-program projected abi)
                         head (native-report-head rows entries source program projected
@@ -871,9 +902,14 @@ bb -cp "$compiled" -e '
                         (let [materialization
                               (materialize-programs! projected qbe-projected
                                                      artifacts-dir materializers
-                                                     abi-id)]
+                                                     abi-id simd-plan
+                                                     simd-required?)]
                           (assoc materialization
-                                 :report (str head (:report materialization))))))))))))))))
+                                 :report (str head
+                                           (if simd-required?
+                                             (simd/plan-report simd-plan)
+                                             "")
+                                           (:report materialization))))))))))))))))
 
 (try
   (let [facts-path (System/getenv "BEAGLE_CORE_FACTS")
@@ -888,13 +924,15 @@ bb -cp "$compiled" -e '
                              (str/split-lines
                               (slurp (System/getenv "BEAGLE_CORE_ENTRIES")))))
         abi-id (or (System/getenv "BEAGLE_CORE_ABI") "lp64")
+        simd-required? (= "1" (System/getenv "BEAGLE_CORE_SIMD_REQUIRED"))
         abi (core/abi-profile-for abi-id)
         result (if (nil? abi)
                  {:ok? false
                   :report (str "abi-error unknown abi profile " abi-id "\n"
                                "result FAIL unknown abi profile\n")}
                  (compile-core! facts-path projected-facts-path artifacts-dir
-                                compiler-commit entries materializers abi-id abi))
+                                compiler-commit entries materializers abi-id abi
+                                simd-required?))
         final-report (report-with-stage-progress (:report result))]
     (durable-write! report-path final-report)
     (spit (str artifacts-dir "/report.txt") final-report)
@@ -912,6 +950,10 @@ if [[ -f "$work/artifacts/module.native-program" ]]; then
     sha256sum "$work/artifacts/module.native-program" | awk '{print $1}' \
         >"$work/artifacts/module.native-program.sha256"
 fi
+if [[ -f "$work/artifacts/module.simd-plan-v0" ]]; then
+    sha256sum "$work/artifacts/module.simd-plan-v0" | awk '{print $1}' \
+        >"$work/artifacts/module.simd-plan-v0.sha256"
+fi
 
 if [[ -f "$work/artifacts/source.facts" ]]; then
     cp "$work/artifacts/source.facts" "$out/source.facts"
@@ -921,7 +963,8 @@ fi
 if [[ -f "$work/artifacts/report.txt" ]]; then
     cp "$work/artifacts/report.txt" "$out/report.txt"
 fi
-for program_artifact in module.native-program module.native-program.sha256; do
+for program_artifact in module.native-program module.native-program.sha256 \
+                        module.simd-plan-v0 module.simd-plan-v0.sha256; do
     if [[ -f "$work/artifacts/$program_artifact" ]]; then
         cp "$work/artifacts/$program_artifact" "$out/$program_artifact"
     fi
@@ -939,6 +982,12 @@ for artifact in module.native-program module.native-program.sha256 report.txt; d
     [[ -f "$work/artifacts/$artifact" ]] || die "successful runner omitted $artifact"
     cp "$work/artifacts/$artifact" "$out/$artifact"
 done
+if [[ $simd_required -eq 1 ]]; then
+    for artifact in module.simd-plan-v0 module.simd-plan-v0.sha256; do
+        [[ -f "$work/artifacts/$artifact" ]] || die "successful SIMD runner omitted $artifact"
+        cp "$work/artifacts/$artifact" "$out/$artifact"
+    done
+fi
 for materializer in "${materializers[@]}"; do
     case "$materializer" in
       c17)
