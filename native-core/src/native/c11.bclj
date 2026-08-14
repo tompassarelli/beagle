@@ -738,7 +738,8 @@
 (defn materialize-program-with-simd
   [(program core/NativeCoreProgram)
    (module-index Int)
-   (plan simd/SimdPlanV0)] C11Materialization
+   (plan simd/SimdPlanV0)]
+  C11Materialization
   (->C11Failure
     (str (simd/demanded-backend-refusal "c11")
       "; plan-digest=" (simd/simdplanv0-digest plan))))

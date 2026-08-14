@@ -86,8 +86,7 @@
 
 ;; Shifted reads carry a dependence when destination aliases source. V0 keeps
 ;; this stencil scalar instead of speculating about overlap.
-(defn shifted-copy!
-  [(source (Buffer Float)) (destination (Buffer Float))] Float
+(defn shifted-copy! [(source (Buffer Float)) (destination (Buffer Float))] Float
   (let [length (alength source)]
     (if (or (< length 2) (not= length (alength destination)))
       0.0

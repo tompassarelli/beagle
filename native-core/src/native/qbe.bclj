@@ -2651,7 +2651,8 @@
   [(program core/NativeCoreProgram)
    (module-index Int)
    (abi-id String)
-   (plan simd/SimdPlanV0)] QbeMaterialization
+   (plan simd/SimdPlanV0)]
+  QbeMaterialization
   (->QbeFailure
     (str (simd/demanded-backend-refusal "qbe")
       "; plan-digest=" (simd/simdplanv0-digest plan))))
