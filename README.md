@@ -290,7 +290,8 @@ for deterministic external consumers; it strictly checks but never executes
 the source. Source identities are relative to the containing Git checkout, or
 canonical absolute paths for files outside one. `sourceSha256` binds the exact
 source bytes; `projectionSha256` binds the canonical projection with only its
-own field omitted.
+own field omitted. Schema version 3 preserves namespace imports as structural
+`imports` entries, so an AST can be emitted without losing JVM class imports.
 
 Core is a source profile, not a direct source emitter; its row names the frozen
 native program build product while the materializer remains an explicit build

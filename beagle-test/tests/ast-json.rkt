@@ -246,6 +246,16 @@
                   (parse+check-json/js
                    "(ns t)\n(js/quote (const x (object dangling-key)))"))))
 
+   (test-case "program JSON preserves JVM imports"
+     (define json
+       (parse+check-json
+        (string-append
+         "(ns program.imports (:import [java.nio.charset StandardCharsets] "
+         "[java.util.zip CRC32]))\n"
+         "(def value Int 1)\n")))
+     (check-equal? (hash-ref json 'imports)
+                   '("java.nio.charset.StandardCharsets" "java.util.zip.CRC32")))
+
    (test-case "checked-program v3 expands an imported typed declaration macro"
      (define path
        (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
@@ -514,6 +524,19 @@
        (hash-ref (car (hash-ref json 'forms)) 'effectiveType))
      (check-equal? (hash-ref effective 'kind) "poly")
      (check-equal? (hash-ref (hash-ref effective 'body) 'kind) "union"))
+
+   (test-case "checked-program v3 preserves JVM imports as semantic metadata"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.imports (:import [java.nio.charset StandardCharsets] "
+         "[java.util.zip CRC32]))\n"
+         "(def value Int 1)\n")
+        ".bclj"
+        "checked-imports.bclj"))
+     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (check-equal? (hash-ref json 'imports)
+                   '("java.nio.charset.StandardCharsets" "java.util.zip.CRC32")))
 
    (test-case "ast CLI canonicalizes equivalent checkout paths"
      (define relative "beagle-test/tests/fixtures/checked-projection/wiki.bjs")

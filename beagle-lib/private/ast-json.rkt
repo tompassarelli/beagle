@@ -1093,6 +1093,7 @@
             'namespace (symbol->string (program-namespace prog))
             'mode (symbol->string (program-mode prog))
             'gen-class (program-gen-class? prog)
+            'imports (map symbol->string (program-imports prog))
             'requires (map (lambda (r)
                              (hasheq 'ns (symbol->string (require-entry-ns r))
                                      'alias (and (require-entry-alias r)
@@ -1152,6 +1153,7 @@
        'sourceSha256 (sha256-prefixed source-bytes)
        'mode (symbol->string (program-mode prog))
        'gen-class (program-gen-class? prog)
+       'imports (map symbol->string (program-imports prog))
        'requires
        (map (lambda (r)
               (hasheq 'ns (symbol->string (require-entry-ns r))
