@@ -360,6 +360,9 @@
 
 (def qbe-artifact-names #{"module_0.ssa"})
 
+(def simd-artifact-names
+  #{"module.simd-plan-v0" "module.simd-plan-v0.sha256"})
+
 (defn exact-generation-sets? [receipt-names artifact-names]
   (let [wasm? (or (contains? receipt-names "wasm.receipt")
                   (not (empty? (set/intersection artifact-names
@@ -369,13 +372,17 @@
                  (not (empty? (set/intersection artifact-names
                                                 c17-artifact-names))))
         qbe? (not (empty? (set/intersection artifact-names qbe-artifact-names)))
+        simd? (not
+                (empty? (set/intersection artifact-names
+                          simd-artifact-names)))
         expected-receipts (cond-> #{"native.receipts"}
                             c17? (conj "c17.receipt")
                             wasm? (conj "wasm.receipt"))
         expected-artifacts (cond-> base-artifact-names
                              c17? (set/union c17-artifact-names)
                              wasm? (set/union wasm-artifact-names)
-                             qbe? (set/union qbe-artifact-names))]
+                             qbe? (set/union qbe-artifact-names)
+                             simd? (set/union simd-artifact-names))]
     (and (or c17? wasm? qbe?)
          (= expected-receipts receipt-names)
          (= expected-artifacts artifact-names))))
@@ -438,6 +445,14 @@
                                 (str directory "/module.native-program")) 7)]
       (when-not (= native-digest-file native-digest)
         (fail! "module.native-program.sha256 does not bind Native bytes")))
+    (when (contains? artifact-names "module.simd-plan-v0")
+      (let [simd-digest-file (str/trim
+                              (slurp (str directory
+                                          "/module.simd-plan-v0.sha256")))
+            simd-digest (subs (sha256-file
+                                (str directory "/module.simd-plan-v0")) 7)]
+        (when-not (= simd-digest-file simd-digest)
+          (fail! "module.simd-plan-v0.sha256 does not bind SIMD plan bytes"))))
     (when (contains? artifact-names "module_0.wasm")
       (let [wasm-digest-file (str/trim
                                (slurp (str directory "/module_0.wasm.sha256")))
