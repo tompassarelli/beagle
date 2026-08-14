@@ -192,7 +192,8 @@ typedef enum native_collection_equality_kind {
   NATIVE_COLLECTION_EQ_KIND_F64 = 3,
   NATIVE_COLLECTION_EQ_KIND_TEXT = 4,
   NATIVE_COLLECTION_EQ_KIND_KEYWORD = 5,
-  NATIVE_COLLECTION_EQ_KIND_STRUCTURAL = 6
+  NATIVE_COLLECTION_EQ_KIND_STRUCTURAL = 6,
+  NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL = 7
 } native_collection_equality_kind;
 
 typedef struct native_collection_equality {
@@ -213,6 +214,9 @@ typedef struct native_collection_equality {
 #define NATIVE_COLLECTION_EQ_STRUCTURAL(value_descriptor)                     \
   ((native_collection_equality){NATIVE_COLLECTION_EQ_KIND_STRUCTURAL,         \
                                 (value_descriptor)})
+#define NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(value_descriptor)             \
+  ((native_collection_equality){                                              \
+      NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL, (value_descriptor)})
 
 typedef enum native_collection_state {
   NATIVE_COLLECTION_PERSISTENT = 1,
@@ -484,6 +488,14 @@ int64_t native_value_hash(const native_value_descriptor *descriptor,
                           const void *value);
 int64_t native_value_compare(const native_value_descriptor *descriptor,
                              const void *left, const void *right);
+void native_dynamic_value_validate(const native_value_descriptor *descriptor,
+                                   const void *value);
+bool native_dynamic_value_equal(const native_value_descriptor *descriptor,
+                                const void *left, const void *right);
+int64_t native_dynamic_value_hash(const native_value_descriptor *descriptor,
+                                  const void *value);
+int64_t native_dynamic_value_compare(const native_value_descriptor *descriptor,
+                                     const void *left, const void *right);
 uint64_t native_value_to_text(native_arena *arena,
                               const native_value_descriptor *descriptor,
                               const void *value,

@@ -55,29 +55,114 @@ _Static_assert(sizeof(native_m0_type_9) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_9) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_9, tag) == 0, "union tag offset");
 
-/* vector of native_m0_type_1, stride 8 */
-typedef native_vec *native_m0_type_10;
-_Static_assert(sizeof(native_m0_type_10) == 8, "layout size");
+typedef struct native_m0_type_10 {
+  native_m0_type_7 tag;
+  union {
+    native_m0_type_1 variant_0;
+  } payload;
+} native_m0_type_10;
+_Static_assert(sizeof(native_m0_type_10) == 16, "layout size");
 _Static_assert(_Alignof(native_m0_type_10) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_10, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_10, payload) == 8, "union payload offset");
 
-/* vector of native_m0_type_15, stride 16 */
-typedef native_vec *native_m0_type_11;
-_Static_assert(sizeof(native_m0_type_11) == 8, "layout size");
+typedef struct native_m0_type_11 {
+  native_m0_type_7 tag;
+  union {
+    native_m0_type_1 variant_0;
+  } payload;
+} native_m0_type_11;
+_Static_assert(sizeof(native_m0_type_11) == 16, "layout size");
 _Static_assert(_Alignof(native_m0_type_11) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_11, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_11, payload) == 8, "union payload offset");
 
-typedef void *native_m0_type_12;
+/* insertion-order map of native_m0_type_29 to native_m0_type_1 */
+typedef native_map *native_m0_type_12;
 _Static_assert(sizeof(native_m0_type_12) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_12) == 8, "layout alignment");
 
-typedef void *native_m0_type_13;
+/* insertion-order set of native_m0_type_1 */
+typedef native_set *native_m0_type_13;
 _Static_assert(sizeof(native_m0_type_13) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_13) == 8, "layout alignment");
 
-typedef void *native_m0_type_14;
+typedef struct native_m0_type_14 {
+  native_m0_type_13 field_0;
+} native_m0_type_14;
 _Static_assert(sizeof(native_m0_type_14) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_14) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_14, field_0) == 0, "field offset");
 
-typedef struct native_m0_type_15 {
+/* insertion-order set of native_m0_type_29 */
+typedef native_set *native_m0_type_15;
+_Static_assert(sizeof(native_m0_type_15) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_15) == 8, "layout alignment");
+
+/* vector of native_m0_type_21, stride 8 */
+typedef native_vec *native_m0_type_16;
+_Static_assert(sizeof(native_m0_type_16) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_16) == 8, "layout alignment");
+
+typedef struct native_m0_type_17 {
+  native_m0_type_16 field_0;
+} native_m0_type_17;
+_Static_assert(sizeof(native_m0_type_17) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_17) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_17, field_0) == 0, "field offset");
+
+typedef struct native_m0_type_18 {
+  native_m0_type_1 field_0;
+  native_m0_type_16 field_1;
+} native_m0_type_18;
+_Static_assert(sizeof(native_m0_type_18) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_18) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_18, field_0) == 0, "field offset");
+_Static_assert(offsetof(native_m0_type_18, field_1) == 8, "field offset");
+
+/* vector of native_m0_type_1, stride 8 */
+typedef native_vec *native_m0_type_19;
+_Static_assert(sizeof(native_m0_type_19) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_19) == 8, "layout alignment");
+
+/* vector of native_m0_type_29, stride 16 */
+typedef native_vec *native_m0_type_20;
+_Static_assert(sizeof(native_m0_type_20) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_20) == 8, "layout alignment");
+
+typedef native_atom *native_m0_type_21;
+_Static_assert(sizeof(native_m0_type_21) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_21) == 8, "layout alignment");
+
+typedef void *native_m0_type_22;
+_Static_assert(sizeof(native_m0_type_22) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_22) == 8, "layout alignment");
+
+typedef void *native_m0_type_23;
+_Static_assert(sizeof(native_m0_type_23) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_23) == 8, "layout alignment");
+
+typedef void *native_m0_type_24;
+_Static_assert(sizeof(native_m0_type_24) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_24) == 8, "layout alignment");
+
+typedef void *native_m0_type_25;
+_Static_assert(sizeof(native_m0_type_25) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_25) == 8, "layout alignment");
+
+typedef void *native_m0_type_26;
+_Static_assert(sizeof(native_m0_type_26) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_26) == 8, "layout alignment");
+
+typedef void *native_m0_type_27;
+_Static_assert(sizeof(native_m0_type_27) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_27) == 8, "layout alignment");
+
+typedef void *native_m0_type_28;
+_Static_assert(sizeof(native_m0_type_28) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_28) == 8, "layout alignment");
+
+typedef struct native_m0_type_29 {
   native_m0_type_7 tag;
   union {
     native_m0_type_3 variant_0;
@@ -85,175 +170,202 @@ typedef struct native_m0_type_15 {
     native_m0_type_4 variant_2;
     native_m0_type_5 variant_3;
     native_m0_type_6 variant_4;
-    native_m0_type_12 variant_6;
-    native_m0_type_13 variant_7;
-    native_m0_type_14 variant_8;
+    native_m0_type_22 variant_6;
+    native_m0_type_24 variant_7;
+    native_m0_type_28 variant_8;
+    native_m0_type_26 variant_9;
+    native_m0_type_25 variant_10;
+    native_m0_type_23 variant_11;
+    native_m0_type_27 variant_12;
   } payload;
-} native_m0_type_15;
-_Static_assert(sizeof(native_m0_type_15) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_15) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_15, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_15, payload) == 8, "union payload offset");
+} native_m0_type_29;
+_Static_assert(sizeof(native_m0_type_29) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_29) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_29, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_29, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_16 {
-  native_m0_type_15 field_0;
-} native_m0_type_16;
-_Static_assert(sizeof(native_m0_type_16) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_16) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_16, field_0) == 0, "field offset");
+typedef struct native_m0_type_30 {
+  native_m0_type_29 field_0;
+} native_m0_type_30;
+_Static_assert(sizeof(native_m0_type_30) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_30) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_30, field_0) == 0, "field offset");
 
-typedef struct native_m0_type_17 {
+typedef struct native_m0_type_31 {
+  native_m0_type_29 field_0;
+} native_m0_type_31;
+_Static_assert(sizeof(native_m0_type_31) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_31) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_31, field_0) == 0, "field offset");
+
+typedef struct native_m0_type_32 {
   native_m0_type_7 tag;
   union {
-    native_m0_type_12 variant_0;
+    native_m0_type_22 variant_0;
     native_m0_type_9 variant_1;
   } payload;
-} native_m0_type_17;
-_Static_assert(sizeof(native_m0_type_17) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_17) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_17, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_17, payload) == 8, "union payload offset");
+} native_m0_type_32;
+_Static_assert(sizeof(native_m0_type_32) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_32) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_32, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_32, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_18 {
+typedef struct native_m0_type_33 {
   native_m0_type_7 tag;
   union {
     native_m0_type_1 variant_0;
     native_m0_type_9 variant_1;
   } payload;
-} native_m0_type_18;
-_Static_assert(sizeof(native_m0_type_18) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_18) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_18, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_18, payload) == 8, "union payload offset");
+} native_m0_type_33;
+_Static_assert(sizeof(native_m0_type_33) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_33) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_33, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_33, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_19 {
+typedef struct native_m0_type_34 {
   native_m0_type_7 tag;
   union {
     native_m0_type_3 variant_0;
     native_m0_type_9 variant_1;
   } payload;
-} native_m0_type_19;
-_Static_assert(sizeof(native_m0_type_19) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_19) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_19, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_19, payload) == 8, "union payload offset");
+} native_m0_type_34;
+_Static_assert(sizeof(native_m0_type_34) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_34) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_34, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_34, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_20 {
+typedef struct native_m0_type_35 {
   native_m0_type_7 tag;
   union {
     native_m0_type_4 variant_0;
     native_m0_type_9 variant_1;
   } payload;
-} native_m0_type_20;
-_Static_assert(sizeof(native_m0_type_20) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_20) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_20, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_20, payload) == 8, "union payload offset");
+} native_m0_type_35;
+_Static_assert(sizeof(native_m0_type_35) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_35) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_35, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_35, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_21 {
+typedef struct native_m0_type_36 {
   native_m0_type_7 tag;
   union {
     native_m0_type_5 variant_0;
     native_m0_type_9 variant_1;
   } payload;
-} native_m0_type_21;
-_Static_assert(sizeof(native_m0_type_21) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_21) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_21, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_21, payload) == 8, "union payload offset");
+} native_m0_type_36;
+_Static_assert(sizeof(native_m0_type_36) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_36) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_36, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_36, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_22 {
+typedef struct native_m0_type_37 {
   native_m0_type_7 tag;
   union {
     native_m0_type_6 variant_0;
     native_m0_type_9 variant_1;
   } payload;
-} native_m0_type_22;
-_Static_assert(sizeof(native_m0_type_22) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_22) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_22, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_22, payload) == 8, "union payload offset");
+} native_m0_type_37;
+_Static_assert(sizeof(native_m0_type_37) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_37) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_37, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_37, payload) == 8, "union payload offset");
 
-typedef struct native_m0_type_23 {
+typedef struct native_m0_type_38 {
   native_m0_type_6 field_0;
-  native_m0_type_21 field_1;
-  native_m0_type_18 field_2;
-  native_m0_type_20 field_3;
-  native_m0_type_19 field_4;
-  native_m0_type_22 field_5;
-  native_m0_type_17 field_6;
-} native_m0_type_23;
-_Static_assert(sizeof(native_m0_type_23) == 104, "layout size");
-_Static_assert(_Alignof(native_m0_type_23) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_23, field_0) == 0, "field offset");
-_Static_assert(offsetof(native_m0_type_23, field_1) == 8, "field offset");
-_Static_assert(offsetof(native_m0_type_23, field_2) == 24, "field offset");
-_Static_assert(offsetof(native_m0_type_23, field_3) == 40, "field offset");
-_Static_assert(offsetof(native_m0_type_23, field_4) == 56, "field offset");
-_Static_assert(offsetof(native_m0_type_23, field_5) == 72, "field offset");
-_Static_assert(offsetof(native_m0_type_23, field_6) == 88, "field offset");
+  native_m0_type_36 field_1;
+  native_m0_type_33 field_2;
+  native_m0_type_35 field_3;
+  native_m0_type_34 field_4;
+  native_m0_type_37 field_5;
+  native_m0_type_32 field_6;
+} native_m0_type_38;
+_Static_assert(sizeof(native_m0_type_38) == 104, "layout size");
+_Static_assert(_Alignof(native_m0_type_38) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_38, field_0) == 0, "field offset");
+_Static_assert(offsetof(native_m0_type_38, field_1) == 8, "field offset");
+_Static_assert(offsetof(native_m0_type_38, field_2) == 24, "field offset");
+_Static_assert(offsetof(native_m0_type_38, field_3) == 40, "field offset");
+_Static_assert(offsetof(native_m0_type_38, field_4) == 56, "field offset");
+_Static_assert(offsetof(native_m0_type_38, field_5) == 72, "field offset");
+_Static_assert(offsetof(native_m0_type_38, field_6) == 88, "field offset");
 
-typedef struct native_m0_type_24 {
+typedef struct native_m0_type_39 {
   native_m0_type_7 tag;
   union {
-    native_m0_type_10 variant_0;
+    native_m0_type_19 variant_0;
     native_m0_type_1 variant_1;
   } payload;
-} native_m0_type_24;
-_Static_assert(sizeof(native_m0_type_24) == 16, "layout size");
-_Static_assert(_Alignof(native_m0_type_24) == 8, "layout alignment");
-_Static_assert(offsetof(native_m0_type_24, tag) == 0, "union tag offset");
-_Static_assert(offsetof(native_m0_type_24, payload) == 8, "union payload offset");
+} native_m0_type_39;
+_Static_assert(sizeof(native_m0_type_39) == 16, "layout size");
+_Static_assert(_Alignof(native_m0_type_39) == 8, "layout alignment");
+_Static_assert(offsetof(native_m0_type_39, tag) == 0, "union tag offset");
+_Static_assert(offsetof(native_m0_type_39, payload) == 8, "union payload offset");
 
-native_m0_type_3 native_m0_fn_0(native_m0_type_15 native_v_0);
-native_m0_type_15 native_m0_fn_1(native_m0_type_1 native_v_0);
-native_m0_type_1 native_m0_fn_2(native_m0_type_15 native_v_0);
-native_m0_type_1 native_m0_fn_3(native_m0_type_15 native_v_0);
-native_m0_type_3 native_m0_fn_4(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1);
-native_m0_type_1 native_m0_fn_5(native_m0_type_15 native_v_0);
-native_m0_type_1 native_m0_fn_6(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1);
-native_m0_type_2 native_m0_fn_7(native_m0_type_15 native_v_0);
-native_m0_type_15 native_m0_fn_8(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1);
-native_m0_type_15 native_m0_fn_9(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1);
-native_m0_type_15 native_m0_fn_10(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1, native_m0_type_15 native_v_2);
-native_m0_type_15 native_m0_fn_11(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1, native_m0_type_15 native_v_2);
-native_m0_type_15 native_m0_fn_12(native_m0_type_1 native_v_0);
-native_m0_type_15 native_m0_fn_13(native_m0_type_1 native_v_0);
+native_m0_type_3 native_m0_fn_0(native_m0_type_29 native_v_0);
+native_m0_type_29 native_m0_fn_1(native_m0_type_1 native_v_0);
+native_m0_type_1 native_m0_fn_2(native_m0_type_29 native_v_0);
+native_m0_type_1 native_m0_fn_3(native_m0_type_29 native_v_0);
+native_m0_type_3 native_m0_fn_4(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_1 native_m0_fn_5(native_m0_type_29 native_v_0);
+native_m0_type_1 native_m0_fn_6(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_2 native_m0_fn_7(native_m0_type_29 native_v_0);
+native_m0_type_29 native_m0_fn_8(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_29 native_m0_fn_9(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_29 native_m0_fn_10(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1, native_m0_type_29 native_v_2);
+native_m0_type_29 native_m0_fn_11(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1, native_m0_type_29 native_v_2);
+native_m0_type_29 native_m0_fn_12(native_m0_type_1 native_v_0);
+native_m0_type_29 native_m0_fn_13(native_m0_type_1 native_v_0);
 native_m0_type_3 native_m0_fn_14(void);
 native_m0_type_9 native_m0_fn_15(void);
-native_m0_type_15 native_m0_fn_16(native_m0_type_15 native_v_0);
-native_m0_type_15 native_m0_fn_17(native_m0_type_15 native_v_0);
-native_m0_type_15 native_m0_fn_18(native_m0_type_15 native_v_0);
-native_m0_type_15 native_m0_fn_19(native_m0_type_15 native_v_0);
-native_m0_type_15 native_m0_fn_20(native_m0_type_1 native_v_0);
-native_m0_type_15 native_m0_fn_21(native_m0_type_5 native_v_0);
-native_m0_type_11 native_m0_fn_22(native_m0_type_3 native_v_0, native_m0_type_11 native_v_1);
-native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0);
-native_m0_type_3 native_m0_fn_24(native_m0_type_15 native_v_0);
-native_m0_type_22 native_m0_fn_25(native_m0_type_15 native_v_0);
+native_m0_type_29 native_m0_fn_16(native_m0_type_29 native_v_0);
+native_m0_type_29 native_m0_fn_17(native_m0_type_29 native_v_0);
+native_m0_type_29 native_m0_fn_18(native_m0_type_29 native_v_0);
+native_m0_type_29 native_m0_fn_19(native_m0_type_29 native_v_0);
+native_m0_type_29 native_m0_fn_20(native_m0_type_1 native_v_0);
+native_m0_type_29 native_m0_fn_21(native_m0_type_5 native_v_0);
+native_m0_type_20 native_m0_fn_22(native_m0_type_3 native_v_0, native_m0_type_20 native_v_1);
+native_m0_type_38 native_m0_fn_23(native_arena *arena, const native_capability *capability, native_m0_type_29 native_v_0);
+native_m0_type_3 native_m0_fn_24(native_m0_type_29 native_v_0);
+native_m0_type_37 native_m0_fn_25(native_m0_type_29 native_v_0);
 native_m0_type_3 native_m0_fn_26(native_m0_type_3 native_v_0);
 native_m0_type_3 native_m0_fn_27(native_m0_type_3 native_v_0);
-native_m0_type_3 native_m0_fn_28(native_m0_type_15 native_v_0);
-native_m0_type_3 native_m0_fn_29(native_m0_type_15 native_v_0);
+native_m0_type_3 native_m0_fn_28(native_m0_type_29 native_v_0);
+native_m0_type_3 native_m0_fn_29(native_m0_type_29 native_v_0);
 native_m0_type_3 native_m0_fn_30(native_m0_type_1 native_v_0);
 native_m0_type_3 native_m0_fn_31(native_m0_type_1 native_v_0);
 native_m0_type_4 native_m0_fn_32(void);
 native_m0_type_4 native_m0_fn_33(native_m0_type_1 native_v_0);
 native_m0_type_4 native_m0_fn_34(native_m0_type_4 native_v_0);
-native_m0_type_4 native_m0_fn_35(native_m0_type_15 native_v_0);
+native_m0_type_4 native_m0_fn_35(native_m0_type_29 native_v_0);
 native_m0_type_3 native_m0_fn_36(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
 native_m0_type_3 native_m0_fn_37(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
 native_m0_type_3 native_m0_fn_38(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
 native_m0_type_3 native_m0_fn_39(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
 native_m0_type_3 native_m0_fn_40(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1);
 native_m0_type_1 native_m0_fn_41(native_m0_type_5 native_v_0);
-native_m0_type_1 native_m0_fn_42(native_m0_type_15 native_v_0);
+native_m0_type_1 native_m0_fn_42(native_m0_type_29 native_v_0);
 native_m0_type_3 native_m0_fn_43(native_m0_type_1 native_v_0, native_m0_type_1 native_v_1);
-native_m0_type_3 native_m0_fn_44(native_m0_type_24 native_v_0);
-native_m0_type_3 native_m0_fn_45(native_m0_type_10 native_v_0);
+native_m0_type_3 native_m0_fn_44(native_m0_type_39 native_v_0);
+native_m0_type_3 native_m0_fn_45(native_m0_type_19 native_v_0);
 native_m0_type_3 native_m0_fn_46(native_m0_type_1 native_v_0);
 native_m0_type_3 native_m0_fn_47(native_m0_type_5 native_v_0, native_m0_type_5 native_v_1);
-native_m0_type_18 native_m0_fn_48(native_m0_type_3 native_v_0);
-native_m0_type_18 native_m0_fn_49(native_m0_type_3 native_v_0);
+native_m0_type_33 native_m0_fn_48(native_m0_type_3 native_v_0);
+native_m0_type_33 native_m0_fn_49(native_m0_type_3 native_v_0);
+native_m0_type_12 native_m0_fn_50(native_arena *arena, const native_capability *capability);
+native_m0_type_3 native_m0_fn_51(native_m0_type_12 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_12 native_m0_fn_52(native_arena *arena, const native_capability *capability, native_m0_type_12 native_v_0, native_m0_type_29 native_v_1, native_m0_type_1 native_v_2);
+native_m0_type_15 native_m0_fn_53(native_arena *arena, const native_capability *capability);
+native_m0_type_3 native_m0_fn_54(native_m0_type_15 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_15 native_m0_fn_55(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_1 native_m0_fn_56(native_m0_type_12 native_v_0);
+native_m0_type_1 native_m0_fn_57(native_m0_type_12 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_12 native_m0_fn_58(native_arena *arena, const native_capability *capability, native_m0_type_12 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_1 native_m0_fn_59(native_m0_type_15 native_v_0);
+native_m0_type_15 native_m0_fn_60(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_12 native_m0_fn_61(native_arena *arena, const native_capability *capability, native_m0_type_29 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_15 native_m0_fn_62(native_arena *arena, const native_capability *capability, native_m0_type_29 native_v_0, native_m0_type_29 native_v_1);
+native_m0_type_3 native_m0_fn_63(native_m0_type_29 native_v_0);
+native_m0_type_3 native_m0_fn_64(native_m0_type_29 native_v_0);
+native_m0_type_3 native_m0_fn_65(native_m0_type_29 native_v_0);
 
 #endif

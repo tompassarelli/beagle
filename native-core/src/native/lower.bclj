@@ -4357,6 +4357,9 @@
 (defn value-semantics-pass [] ValueSemanticsStatusV0
   (->ValueSemanticsStatusV0 true ""))
 
+(defn value-semantics-dynamic [] ValueSemanticsStatusV0
+  (->ValueSemanticsStatusV0 true "dynamic"))
+
 (defn value-semantics-refuse [(reason String)] ValueSemanticsStatusV0
   (->ValueSemanticsStatusV0 false reason))
 
@@ -4367,7 +4370,10 @@
   (cond
     (and (valuesemanticsstatusv0-admitted left)
       (valuesemanticsstatusv0-admitted right))
-    (value-semantics-pass)
+    (if (or (= "dynamic" (valuesemanticsstatusv0-reason left))
+          (= "dynamic" (valuesemanticsstatusv0-reason right)))
+      (value-semantics-dynamic)
+      (value-semantics-pass))
     (or (= "buffer" (valuesemanticsstatusv0-reason left))
       (= "buffer" (valuesemanticsstatusv0-reason right)))
     (value-semantics-refuse "buffer")
@@ -4377,14 +4383,18 @@
 ;; has faithful value semantics. A semantic record reference may close a type
 ;; cycle through Any; revisiting that already-checked edge is safe and prevents
 ;; compiler recursion. Opaque self-references, cells, maps, sets, functions and
-;; mutable Buffer identities are not value leaves.
+;; mutable Buffer identities are not value leaves. Raw Any's SliceValue is the
+;; dynamic boundary: its active tag selects the descriptor walked at runtime,
+;; so unrelated record alternatives do not invalidate every Any operation.
 (defn value-semantics-type-inner
   [(types (Vec core/TypeDef))
    (target core/NativeId)
    (visiting (Vec core/NativeId))]
   ValueSemanticsStatusV0
-  (if (core/id-in? visiting target)
-    (value-semantics-pass)
+  (if (same-id? target (type-id "SliceValue"))
+    (value-semantics-dynamic)
+    (if (core/id-in? visiting target)
+      (value-semantics-pass)
     (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
       (if (nil? definition)
         (value-semantics-refuse "unsupported")
@@ -4442,7 +4452,7 @@
                 (value-semantics-type-inner types pointee next)
                 (value-semantics-refuse "unsupported")))
 
-            :else (value-semantics-refuse "unsupported")))))))
+            :else (value-semantics-refuse "unsupported"))))))))
 
 (defn value-semantics-status
   [(types (Vec core/TypeDef)) (target core/NativeId)] ValueSemanticsStatusV0
@@ -4462,6 +4472,40 @@
 (defn value-semantics-type?
   [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (valuesemanticsstatusv0-admitted (value-semantics-status types target)))
+
+(defn value-semantics-dynamic?
+  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (= "dynamic"
+    (valuesemanticsstatusv0-reason (value-semantics-status types target))))
+
+(defn value-equal-operation
+  [(domain-type core/NativeId)
+   (left-id core/NativeId)
+   (right-id core/NativeId)
+   (dynamic Bool)]
+  core/ValueSemanticsOpV0
+  (if dynamic
+    (core/->DynamicValueEqualV0 domain-type left-id right-id)
+    (core/->ValueEqualV0 domain-type left-id right-id)))
+
+(defn value-hash-operation
+  [(domain-type core/NativeId)
+   (value-id core/NativeId)
+   (dynamic Bool)]
+  core/ValueSemanticsOpV0
+  (if dynamic
+    (core/->DynamicValueHashV0 domain-type value-id)
+    (core/->ValueHashV0 domain-type value-id)))
+
+(defn value-compare-operation
+  [(domain-type core/NativeId)
+   (left-id core/NativeId)
+   (right-id core/NativeId)
+   (dynamic Bool)]
+  core/ValueSemanticsOpV0
+  (if dynamic
+    (core/->DynamicValueCompareV0 domain-type left-id right-id)
+    (core/->ValueCompareV0 domain-type left-id right-id)))
 
 (defn value-semantics-refusal-reason
   [(types (Vec core/TypeDef)) (target core/NativeId)] String
@@ -4745,9 +4789,13 @@
         (concrete-equality-for target)]
     (if (some? scalar)
       scalar
-      (if (value-semantics-type? types target)
-        (core/->StructuralEqualityV0 target)
-        nil))))
+      (let [(status ValueSemanticsStatusV0)
+            (value-semantics-status types target)]
+        (if (valuesemanticsstatusv0-admitted status)
+          (if (= "dynamic" (valuesemanticsstatusv0-reason status))
+            (core/->DynamicStructuralEqualityV0 target)
+            (core/->StructuralEqualityV0 target))
+          nil)))))
 
 (defn set-element-equality-for
   [(types (Vec core/TypeDef))
@@ -6910,8 +6958,35 @@
    (union-id core/NativeId)
    (union-type core/NativeId)]
   ExprResultV0
-  (lower-scalar-union-equality-with-budget types owner state scalar-id
-    scalar-type union-id union-type (widen-budget)))
+  (let [(status ValueSemanticsStatusV0)
+        (value-semantics-status types union-type)]
+    (cond
+      (not (valuesemanticsstatusv0-admitted status))
+      (fail-result state
+        "TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS: equality union contains a value without structural semantics")
+
+      (and (= "dynamic" (valuesemanticsstatusv0-reason status))
+        (or (some? (equality-comparison scalar-type))
+          (value-semantics-type? types scalar-type)))
+      (let [(widened ExprResultV0)
+            (lower-boundary-coerce types owner state scalar-id scalar-type
+              union-type)
+            (current BodyStateV0) (exprresultv0-state widened)]
+        (if (state-blocked? current)
+          (dead-result current)
+          (let [(result-id core/NativeId)
+                (state-id current owner "dynamic-union-equal")]
+            (->ExprResultV0
+              (state-emit (state-bump current)
+                (core/->ValueSemanticsInstruction
+                  (core/->SsaValueV0 result-id (bool-type-id))
+                  (value-equal-operation union-type
+                    (exprresultv0-value-id widened) union-id true)))
+              result-id (bool-type-id) false))))
+
+      :else
+      (lower-scalar-union-equality-with-budget types owner state scalar-id
+        scalar-type union-id union-type (widen-budget)))))
 
 (defn lower-scalar-predicate
   [(types (Vec core/TypeDef))
@@ -7696,7 +7771,8 @@
           (state-emit (state-bump state)
             (core/->ValueSemanticsInstruction
               (core/->SsaValueV0 result-id (bool-type-id))
-              (core/->ValueEqualV0 left-type left-id right-id)))
+              (value-equal-operation left-type left-id right-id
+                (value-semantics-dynamic? types left-type))))
           result-id (bool-type-id) false))
 
       (and left-union (not right-union))
@@ -14413,8 +14489,10 @@
                     (state-emit (state-bump current)
                       (core/->ValueSemanticsInstruction
                         (core/->SsaValueV0 result-id (int-type-id))
-                        (core/->ValueHashV0 (nth value-types 0)
-                          (nth values 0))))
+                        (value-hash-operation (nth value-types 0)
+                          (nth values 0)
+                          (value-semantics-dynamic? types
+                            (nth value-types 0)))))
                     result-id (int-type-id) false))
 
                 (= "hash" callee)
@@ -14430,8 +14508,10 @@
                     (state-emit (state-bump current)
                       (core/->ValueSemanticsInstruction
                         (core/->SsaValueV0 result-id (int-type-id))
-                        (core/->ValueCompareV0 (nth value-types 0)
-                          (nth values 0) (nth values 1))))
+                        (value-compare-operation (nth value-types 0)
+                          (nth values 0) (nth values 1)
+                          (value-semantics-dynamic? types
+                            (nth value-types 0)))))
                     result-id (int-type-id) false))
 
                 (= "compare" callee)
@@ -14456,8 +14536,10 @@
                     (state-emit (state-bump current)
                       (core/->ValueSemanticsInstruction
                         (core/->SsaValueV0 result-id (bool-type-id))
-                        (core/->ValueEqualV0 (nth value-types 0)
-                          (nth values 0) (nth values 1))))
+                        (value-equal-operation (nth value-types 0)
+                          (nth values 0) (nth values 1)
+                          (value-semantics-dynamic? types
+                            (nth value-types 0)))))
                     result-id (bool-type-id) false))
 
                 (and (not (= "=" callee)) (some? comparison)
@@ -17426,9 +17508,13 @@
     (instance? native.core.F64EqualityV0 equality) "f64-equality-v0"
     (instance? native.core.TextEqualityV0 equality) "text-equality-v0"
     (instance? native.core.KeywordEqualityV0 equality) "keyword-equality-v0"
-    :else
+    (instance? native.core.StructuralEqualityV0 equality)
     (stages/canonical-record "structural-equality-v0"
-      [(id-value (core/structuralequalityv0-domain-type equality))])))
+      [(id-value (core/structuralequalityv0-domain-type equality))])
+    :else
+    (stages/canonical-record "dynamic-structural-equality-v0"
+      [(id-value
+         (core/dynamicstructuralequalityv0-domain-type equality))])))
 
 (defn encode-value-semantics-operation
   [(operation core/ValueSemanticsOpV0)] String
@@ -17441,6 +17527,15 @@
        [(id-value domain-type) (id-value value-id)])]
     [(ValueCompareV0 domain-type left-id right-id)
      (stages/canonical-record "value-compare-v0"
+       [(id-value domain-type) (id-value left-id) (id-value right-id)])]
+    [(DynamicValueEqualV0 domain-type left-id right-id)
+     (stages/canonical-record "dynamic-value-equal-v0"
+       [(id-value domain-type) (id-value left-id) (id-value right-id)])]
+    [(DynamicValueHashV0 domain-type value-id)
+     (stages/canonical-record "dynamic-value-hash-v0"
+       [(id-value domain-type) (id-value value-id)])]
+    [(DynamicValueCompareV0 domain-type left-id right-id)
+     (stages/canonical-record "dynamic-value-compare-v0"
        [(id-value domain-type) (id-value left-id) (id-value right-id)])]))
 
 (defn encode-codec-primitive-operation

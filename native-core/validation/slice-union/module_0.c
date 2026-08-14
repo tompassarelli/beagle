@@ -51,6 +51,21 @@ extern const native_value_descriptor native_m0_value_21;
 extern const native_value_descriptor native_m0_value_22;
 extern const native_value_descriptor native_m0_value_23;
 extern const native_value_descriptor native_m0_value_24;
+extern const native_value_descriptor native_m0_value_25;
+extern const native_value_descriptor native_m0_value_26;
+extern const native_value_descriptor native_m0_value_27;
+extern const native_value_descriptor native_m0_value_28;
+extern const native_value_descriptor native_m0_value_29;
+extern const native_value_descriptor native_m0_value_30;
+extern const native_value_descriptor native_m0_value_31;
+extern const native_value_descriptor native_m0_value_32;
+extern const native_value_descriptor native_m0_value_33;
+extern const native_value_descriptor native_m0_value_34;
+extern const native_value_descriptor native_m0_value_35;
+extern const native_value_descriptor native_m0_value_36;
+extern const native_value_descriptor native_m0_value_37;
+extern const native_value_descriptor native_m0_value_38;
+extern const native_value_descriptor native_m0_value_39;
 
 static const native_value_field_descriptor native_m0_value_2_fields[] = {
   { .offset = (size_t)0, .value = &native_m0_value_1 },
@@ -63,59 +78,85 @@ static const native_value_variant_descriptor native_m0_value_8_variants[] = {
   { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = NULL },
   { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = NULL },
   { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = NULL },
 };
 static const native_value_variant_descriptor native_m0_value_9_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = NULL },
 };
-static const native_value_variant_descriptor native_m0_value_15_variants[] = {
+static const native_value_variant_descriptor native_m0_value_10_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_11_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_field_descriptor native_m0_value_14_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_13 },
+};
+static const native_value_field_descriptor native_m0_value_17_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_16 },
+};
+static const native_value_field_descriptor native_m0_value_18_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_16 },
+};
+static const native_value_variant_descriptor native_m0_value_29_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
   { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
   { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
   { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_6 },
   { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
-  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_12 },
-  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
-  { .tag = INT64_C(8), .payload_offset = (size_t)8, .payload = &native_m0_value_14 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_22 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(8), .payload_offset = (size_t)8, .payload = &native_m0_value_28 },
+  { .tag = INT64_C(9), .payload_offset = (size_t)8, .payload = &native_m0_value_26 },
+  { .tag = INT64_C(10), .payload_offset = (size_t)8, .payload = &native_m0_value_25 },
+  { .tag = INT64_C(11), .payload_offset = (size_t)8, .payload = &native_m0_value_23 },
+  { .tag = INT64_C(12), .payload_offset = (size_t)8, .payload = &native_m0_value_27 },
 };
-static const native_value_field_descriptor native_m0_value_16_fields[] = {
-  { .offset = (size_t)0, .value = &native_m0_value_15 },
+static const native_value_field_descriptor native_m0_value_30_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_29 },
 };
-static const native_value_variant_descriptor native_m0_value_17_variants[] = {
-  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_12 },
+static const native_value_field_descriptor native_m0_value_31_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_29 },
+};
+static const native_value_variant_descriptor native_m0_value_32_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_22 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
 };
-static const native_value_variant_descriptor native_m0_value_18_variants[] = {
+static const native_value_variant_descriptor native_m0_value_33_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
 };
-static const native_value_variant_descriptor native_m0_value_19_variants[] = {
+static const native_value_variant_descriptor native_m0_value_34_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
 };
-static const native_value_variant_descriptor native_m0_value_20_variants[] = {
+static const native_value_variant_descriptor native_m0_value_35_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
 };
-static const native_value_variant_descriptor native_m0_value_21_variants[] = {
+static const native_value_variant_descriptor native_m0_value_36_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
 };
-static const native_value_variant_descriptor native_m0_value_22_variants[] = {
+static const native_value_variant_descriptor native_m0_value_37_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_6 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
 };
-static const native_value_field_descriptor native_m0_value_23_fields[] = {
+static const native_value_field_descriptor native_m0_value_38_fields[] = {
   { .offset = (size_t)0, .value = &native_m0_value_6 },
-  { .offset = (size_t)8, .value = &native_m0_value_21 },
-  { .offset = (size_t)24, .value = &native_m0_value_18 },
-  { .offset = (size_t)40, .value = &native_m0_value_20 },
-  { .offset = (size_t)56, .value = &native_m0_value_19 },
-  { .offset = (size_t)72, .value = &native_m0_value_22 },
-  { .offset = (size_t)88, .value = &native_m0_value_17 },
+  { .offset = (size_t)8, .value = &native_m0_value_36 },
+  { .offset = (size_t)24, .value = &native_m0_value_33 },
+  { .offset = (size_t)40, .value = &native_m0_value_35 },
+  { .offset = (size_t)56, .value = &native_m0_value_34 },
+  { .offset = (size_t)72, .value = &native_m0_value_37 },
+  { .offset = (size_t)88, .value = &native_m0_value_32 },
 };
-static const native_value_variant_descriptor native_m0_value_24_variants[] = {
-  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_10 },
+static const native_value_variant_descriptor native_m0_value_39_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_19 },
   { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
 };
 const native_value_descriptor native_m0_value_0 = {
@@ -263,7 +304,7 @@ const native_value_descriptor native_m0_value_8 = {
   .fields = NULL,
   .field_count = (size_t)0,
   .variants = native_m0_value_8_variants,
-  .variant_count = (size_t)6,
+  .variant_count = (size_t)7,
   .element = NULL,
   .stride = (size_t)0,
   .map_key = NULL,
@@ -290,6 +331,159 @@ const native_value_descriptor native_m0_value_9 = {
 };
 const native_value_descriptor native_m0_value_10 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_10_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_11 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_11_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_12 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_29,
+  .map_value = &native_m0_value_1,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_13 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_14 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_14_fields,
+  .field_count = (size_t)1,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_15 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_16 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_21,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_17 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_17_fields,
+  .field_count = (size_t)1,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_18 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_18_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_19 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_VECTOR,
   .size = (size_t)8,
   .alignment = (size_t)8,
@@ -305,7 +499,7 @@ const native_value_descriptor native_m0_value_10 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_11 = {
+const native_value_descriptor native_m0_value_20 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_VECTOR,
   .size = (size_t)8,
@@ -315,14 +509,31 @@ const native_value_descriptor native_m0_value_11 = {
   .field_count = (size_t)0,
   .variants = NULL,
   .variant_count = (size_t)0,
-  .element = &native_m0_value_15,
+  .element = &native_m0_value_29,
   .stride = (size_t)16,
   .map_key = NULL,
   .map_value = NULL,
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_12 = {
+const native_value_descriptor native_m0_value_21 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_22 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_REFERENCE,
   .size = (size_t)8,
@@ -339,7 +550,7 @@ const native_value_descriptor native_m0_value_12 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_13 = {
+const native_value_descriptor native_m0_value_23 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_REFERENCE,
   .size = (size_t)8,
@@ -349,14 +560,14 @@ const native_value_descriptor native_m0_value_13 = {
   .field_count = (size_t)0,
   .variants = NULL,
   .variant_count = (size_t)0,
-  .element = &native_m0_value_23,
+  .element = &native_m0_value_38,
   .stride = (size_t)0,
   .map_key = NULL,
   .map_value = NULL,
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_14 = {
+const native_value_descriptor native_m0_value_24 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_REFERENCE,
   .size = (size_t)8,
@@ -366,14 +577,82 @@ const native_value_descriptor native_m0_value_14 = {
   .field_count = (size_t)0,
   .variants = NULL,
   .variant_count = (size_t)0,
-  .element = &native_m0_value_16,
+  .element = &native_m0_value_17,
   .stride = (size_t)0,
   .map_key = NULL,
   .map_value = NULL,
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_15 = {
+const native_value_descriptor native_m0_value_25 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_18,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_26 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_14,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_27 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_30,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_28 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_31,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_29 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -381,8 +660,8 @@ const native_value_descriptor native_m0_value_15 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_15_variants,
-  .variant_count = (size_t)9,
+  .variants = native_m0_value_29_variants,
+  .variant_count = (size_t)13,
   .element = NULL,
   .stride = (size_t)0,
   .map_key = NULL,
@@ -390,13 +669,13 @@ const native_value_descriptor native_m0_value_15 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_16 = {
+const native_value_descriptor native_m0_value_30 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_RECORD,
   .size = (size_t)16,
   .alignment = (size_t)8,
   .tag_offset = (size_t)0,
-  .fields = native_m0_value_16_fields,
+  .fields = native_m0_value_30_fields,
   .field_count = (size_t)1,
   .variants = NULL,
   .variant_count = (size_t)0,
@@ -407,7 +686,24 @@ const native_value_descriptor native_m0_value_16 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_17 = {
+const native_value_descriptor native_m0_value_31 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_31_fields,
+  .field_count = (size_t)1,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_32 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -415,7 +711,7 @@ const native_value_descriptor native_m0_value_17 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_17_variants,
+  .variants = native_m0_value_32_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -424,7 +720,7 @@ const native_value_descriptor native_m0_value_17 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_18 = {
+const native_value_descriptor native_m0_value_33 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -432,7 +728,7 @@ const native_value_descriptor native_m0_value_18 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_18_variants,
+  .variants = native_m0_value_33_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -441,7 +737,7 @@ const native_value_descriptor native_m0_value_18 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_19 = {
+const native_value_descriptor native_m0_value_34 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -449,7 +745,7 @@ const native_value_descriptor native_m0_value_19 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_19_variants,
+  .variants = native_m0_value_34_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -458,7 +754,7 @@ const native_value_descriptor native_m0_value_19 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_20 = {
+const native_value_descriptor native_m0_value_35 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -466,7 +762,7 @@ const native_value_descriptor native_m0_value_20 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_20_variants,
+  .variants = native_m0_value_35_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -475,7 +771,7 @@ const native_value_descriptor native_m0_value_20 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_21 = {
+const native_value_descriptor native_m0_value_36 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -483,7 +779,7 @@ const native_value_descriptor native_m0_value_21 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_21_variants,
+  .variants = native_m0_value_36_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -492,7 +788,7 @@ const native_value_descriptor native_m0_value_21 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_22 = {
+const native_value_descriptor native_m0_value_37 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -500,7 +796,7 @@ const native_value_descriptor native_m0_value_22 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_22_variants,
+  .variants = native_m0_value_37_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -509,13 +805,13 @@ const native_value_descriptor native_m0_value_22 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_23 = {
+const native_value_descriptor native_m0_value_38 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_RECORD,
   .size = (size_t)104,
   .alignment = (size_t)8,
   .tag_offset = (size_t)0,
-  .fields = native_m0_value_23_fields,
+  .fields = native_m0_value_38_fields,
   .field_count = (size_t)7,
   .variants = NULL,
   .variant_count = (size_t)0,
@@ -526,7 +822,7 @@ const native_value_descriptor native_m0_value_23 = {
   .keywords = NULL,
   .keyword_count = (size_t)0
 };
-const native_value_descriptor native_m0_value_24 = {
+const native_value_descriptor native_m0_value_39 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
   .kind = NATIVE_VALUE_UNION,
   .size = (size_t)16,
@@ -534,7 +830,7 @@ const native_value_descriptor native_m0_value_24 = {
   .tag_offset = (size_t)0,
   .fields = NULL,
   .field_count = (size_t)0,
-  .variants = native_m0_value_24_variants,
+  .variants = native_m0_value_39_variants,
   .variant_count = (size_t)2,
   .element = NULL,
   .stride = (size_t)0,
@@ -544,7 +840,7 @@ const native_value_descriptor native_m0_value_24 = {
   .keyword_count = (size_t)0
 };
 
-native_m0_type_3 native_m0_fn_0(native_m0_type_15 native_v_0) {
+native_m0_type_3 native_m0_fn_0(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
@@ -568,6 +864,14 @@ native_m0_type_3 native_m0_fn_0(native_m0_type_15 native_v_0) {
     goto native_l0_2;
   case INT64_C(8):
     goto native_l0_2;
+  case INT64_C(9):
+    goto native_l0_2;
+  case INT64_C(10):
+    goto native_l0_2;
+  case INT64_C(11):
+    goto native_l0_2;
+  case INT64_C(12):
+    goto native_l0_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
@@ -584,15 +888,15 @@ native_l0_2: ;
 native_l0_3: ;
   return native_s_2;
 }
-native_m0_type_15 native_m0_fn_1(native_m0_type_1 native_v_0) {
+native_m0_type_29 native_m0_fn_1(native_m0_type_1 native_v_0) {
   (void)native_v_0;
-  native_m0_type_15 native_s_0;
-  native_s_0 = (native_m0_type_15){ .tag = INT64_C(1), .payload = { .variant_1 = native_v_0 } };
+  native_m0_type_29 native_s_0;
+  native_s_0 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_v_0 } };
   return native_s_0;
 }
-native_m0_type_1 native_m0_fn_2(native_m0_type_15 native_v_0) {
+native_m0_type_1 native_m0_fn_2(native_m0_type_29 native_v_0) {
   (void)native_v_0;
-  native_m0_type_12 native_s_0;
+  native_m0_type_22 native_s_0;
   native_m0_type_1 native_s_1;
   if (native_v_0.tag != INT64_C(6)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -601,9 +905,9 @@ native_m0_type_1 native_m0_fn_2(native_m0_type_15 native_v_0) {
   native_s_1 = ((native_m0_type_2 *)native_s_0)->field_0;
   return native_s_1;
 }
-native_m0_type_1 native_m0_fn_3(native_m0_type_15 native_v_0) {
+native_m0_type_1 native_m0_fn_3(native_m0_type_29 native_v_0) {
   (void)native_v_0;
-  native_m0_type_12 native_s_0;
+  native_m0_type_22 native_s_0;
   native_m0_type_1 native_s_1;
   if (native_v_0.tag != INT64_C(6)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -612,30 +916,30 @@ native_m0_type_1 native_m0_fn_3(native_m0_type_15 native_v_0) {
   native_s_1 = ((native_m0_type_2 *)native_s_0)->field_1;
   return native_s_1;
 }
-native_m0_type_3 native_m0_fn_4(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1) {
+native_m0_type_3 native_m0_fn_4(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1) {
   (void)native_v_0;
   (void)native_v_1;
   native_m0_type_3 native_s_0;
-  native_s_0 = native_value_equal(&native_m0_value_15, &native_v_0, &native_v_1);
+  native_s_0 = native_dynamic_value_equal(&native_m0_value_29, &native_v_0, &native_v_1);
   return native_s_0;
 }
-native_m0_type_1 native_m0_fn_5(native_m0_type_15 native_v_0) {
+native_m0_type_1 native_m0_fn_5(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_1 native_s_0;
-  native_s_0 = native_value_hash(&native_m0_value_15, &native_v_0);
+  native_s_0 = native_dynamic_value_hash(&native_m0_value_29, &native_v_0);
   return native_s_0;
 }
-native_m0_type_1 native_m0_fn_6(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1) {
+native_m0_type_1 native_m0_fn_6(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1) {
   (void)native_v_0;
   (void)native_v_1;
   native_m0_type_1 native_s_0;
-  native_s_0 = native_value_compare(&native_m0_value_15, &native_v_0, &native_v_1);
+  native_s_0 = native_dynamic_value_compare(&native_m0_value_29, &native_v_0, &native_v_1);
   return native_s_0;
 }
-native_m0_type_2 native_m0_fn_7(native_m0_type_15 native_v_0) {
+native_m0_type_2 native_m0_fn_7(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
-  native_m0_type_12 native_s_1;
+  native_m0_type_22 native_s_1;
   native_m0_type_2 native_s_2;
   native_m0_type_1 native_s_3;
   native_m0_type_2 native_s_4;
@@ -663,16 +967,16 @@ native_l7_2: ;
 native_l7_3: ;
   return native_s_4;
 }
-native_m0_type_15 native_m0_fn_8(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1) {
+native_m0_type_29 native_m0_fn_8(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1) {
   (void)native_v_0;
   (void)native_v_1;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_3 native_s_3;
-  native_m0_type_15 native_s_4;
-  native_m0_type_15 native_s_5;
-  native_m0_type_15 native_s_6;
+  native_m0_type_29 native_s_4;
+  native_m0_type_29 native_s_5;
+  native_m0_type_29 native_s_6;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l8_1;
@@ -691,6 +995,14 @@ native_m0_type_15 native_m0_fn_8(native_m0_type_15 native_v_0, native_m0_type_15
   case INT64_C(7):
     goto native_l8_2;
   case INT64_C(8):
+    goto native_l8_2;
+  case INT64_C(9):
+    goto native_l8_2;
+  case INT64_C(10):
+    goto native_l8_2;
+  case INT64_C(11):
+    goto native_l8_2;
+  case INT64_C(12):
     goto native_l8_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -733,16 +1045,16 @@ native_l8_8: ;
 native_l8_9: ;
   return native_s_6;
 }
-native_m0_type_15 native_m0_fn_9(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1) {
+native_m0_type_29 native_m0_fn_9(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1) {
   (void)native_v_0;
   (void)native_v_1;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_3 native_s_3;
-  native_m0_type_15 native_s_4;
-  native_m0_type_15 native_s_5;
-  native_m0_type_15 native_s_6;
+  native_m0_type_29 native_s_4;
+  native_m0_type_29 native_s_5;
+  native_m0_type_29 native_s_6;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l9_1;
@@ -761,6 +1073,14 @@ native_m0_type_15 native_m0_fn_9(native_m0_type_15 native_v_0, native_m0_type_15
   case INT64_C(7):
     goto native_l9_2;
   case INT64_C(8):
+    goto native_l9_2;
+  case INT64_C(9):
+    goto native_l9_2;
+  case INT64_C(10):
+    goto native_l9_2;
+  case INT64_C(11):
+    goto native_l9_2;
+  case INT64_C(12):
     goto native_l9_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -803,7 +1123,7 @@ native_l9_8: ;
 native_l9_9: ;
   return native_s_6;
 }
-native_m0_type_15 native_m0_fn_10(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1, native_m0_type_15 native_v_2) {
+native_m0_type_29 native_m0_fn_10(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1, native_m0_type_29 native_v_2) {
   (void)native_v_0;
   (void)native_v_1;
   (void)native_v_2;
@@ -815,10 +1135,10 @@ native_m0_type_15 native_m0_fn_10(native_m0_type_15 native_v_0, native_m0_type_1
   native_m0_type_3 native_s_5;
   native_m0_type_3 native_s_6;
   native_m0_type_3 native_s_7;
-  native_m0_type_15 native_s_8;
-  native_m0_type_15 native_s_9;
-  native_m0_type_15 native_s_10;
-  native_m0_type_15 native_s_11;
+  native_m0_type_29 native_s_8;
+  native_m0_type_29 native_s_9;
+  native_m0_type_29 native_s_10;
+  native_m0_type_29 native_s_11;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l10_1;
@@ -837,6 +1157,14 @@ native_m0_type_15 native_m0_fn_10(native_m0_type_15 native_v_0, native_m0_type_1
   case INT64_C(7):
     goto native_l10_2;
   case INT64_C(8):
+    goto native_l10_2;
+  case INT64_C(9):
+    goto native_l10_2;
+  case INT64_C(10):
+    goto native_l10_2;
+  case INT64_C(11):
+    goto native_l10_2;
+  case INT64_C(12):
     goto native_l10_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -887,6 +1215,14 @@ native_l10_6: ;
     goto native_l10_8;
   case INT64_C(8):
     goto native_l10_8;
+  case INT64_C(9):
+    goto native_l10_8;
+  case INT64_C(10):
+    goto native_l10_8;
+  case INT64_C(11):
+    goto native_l10_8;
+  case INT64_C(12):
+    goto native_l10_8;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
@@ -931,7 +1267,7 @@ native_l10_15: ;
 native_l10_16: ;
   return native_s_11;
 }
-native_m0_type_15 native_m0_fn_11(native_m0_type_15 native_v_0, native_m0_type_15 native_v_1, native_m0_type_15 native_v_2) {
+native_m0_type_29 native_m0_fn_11(native_m0_type_29 native_v_0, native_m0_type_29 native_v_1, native_m0_type_29 native_v_2) {
   (void)native_v_0;
   (void)native_v_1;
   (void)native_v_2;
@@ -943,10 +1279,10 @@ native_m0_type_15 native_m0_fn_11(native_m0_type_15 native_v_0, native_m0_type_1
   native_m0_type_3 native_s_5;
   native_m0_type_3 native_s_6;
   native_m0_type_3 native_s_7;
-  native_m0_type_15 native_s_8;
-  native_m0_type_15 native_s_9;
-  native_m0_type_15 native_s_10;
-  native_m0_type_15 native_s_11;
+  native_m0_type_29 native_s_8;
+  native_m0_type_29 native_s_9;
+  native_m0_type_29 native_s_10;
+  native_m0_type_29 native_s_11;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l11_1;
@@ -965,6 +1301,14 @@ native_m0_type_15 native_m0_fn_11(native_m0_type_15 native_v_0, native_m0_type_1
   case INT64_C(7):
     goto native_l11_2;
   case INT64_C(8):
+    goto native_l11_2;
+  case INT64_C(9):
+    goto native_l11_2;
+  case INT64_C(10):
+    goto native_l11_2;
+  case INT64_C(11):
+    goto native_l11_2;
+  case INT64_C(12):
     goto native_l11_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1015,6 +1359,14 @@ native_l11_6: ;
     goto native_l11_8;
   case INT64_C(8):
     goto native_l11_8;
+  case INT64_C(9):
+    goto native_l11_8;
+  case INT64_C(10):
+    goto native_l11_8;
+  case INT64_C(11):
+    goto native_l11_8;
+  case INT64_C(12):
+    goto native_l11_8;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
@@ -1059,14 +1411,14 @@ native_l11_15: ;
 native_l11_16: ;
   return native_s_11;
 }
-native_m0_type_15 native_m0_fn_12(native_m0_type_1 native_v_0) {
+native_m0_type_29 native_m0_fn_12(native_m0_type_1 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
-  native_m0_type_15 native_s_2;
+  native_m0_type_29 native_s_2;
   native_m0_type_1 native_s_3;
-  native_m0_type_15 native_s_4;
-  native_m0_type_15 native_s_5;
+  native_m0_type_29 native_s_4;
+  native_m0_type_29 native_s_5;
   native_s_0 = false;
   (void)native_s_0;
   if (native_s_0) {
@@ -1081,24 +1433,24 @@ native_l12_2: ;
   native_s_3 = native_v_0;
   goto native_l12_4;
 native_l12_3: ;
-  native_s_2 = (native_m0_type_15){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_1 } };
+  native_s_2 = (native_m0_type_29){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_1 } };
   native_s_5 = native_s_2;
   goto native_l12_5;
 native_l12_4: ;
-  native_s_4 = (native_m0_type_15){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_3 } };
+  native_s_4 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_3 } };
   native_s_5 = native_s_4;
   goto native_l12_5;
 native_l12_5: ;
   return native_s_5;
 }
-native_m0_type_15 native_m0_fn_13(native_m0_type_1 native_v_0) {
+native_m0_type_29 native_m0_fn_13(native_m0_type_1 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
-  native_m0_type_15 native_s_2;
+  native_m0_type_29 native_s_2;
   native_m0_type_1 native_s_3;
-  native_m0_type_15 native_s_4;
-  native_m0_type_15 native_s_5;
+  native_m0_type_29 native_s_4;
+  native_m0_type_29 native_s_5;
   native_s_0 = true;
   (void)native_s_0;
   if (native_s_0) {
@@ -1113,11 +1465,11 @@ native_l13_2: ;
   native_s_3 = native_v_0;
   goto native_l13_4;
 native_l13_3: ;
-  native_s_2 = (native_m0_type_15){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_1 } };
+  native_s_2 = (native_m0_type_29){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_1 } };
   native_s_5 = native_s_2;
   goto native_l13_5;
 native_l13_4: ;
-  native_s_4 = (native_m0_type_15){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_3 } };
+  native_s_4 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_3 } };
   native_s_5 = native_s_4;
   goto native_l13_5;
 native_l13_5: ;
@@ -1134,23 +1486,23 @@ native_m0_type_9 native_m0_fn_15(void) {
   native_s_0 = (native_m0_type_9){ .tag = INT64_C(0) };
   return native_s_0;
 }
-native_m0_type_15 native_m0_fn_16(native_m0_type_15 native_v_0) {
+native_m0_type_29 native_m0_fn_16(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   return native_v_0;
 }
-native_m0_type_15 native_m0_fn_17(native_m0_type_15 native_v_0) {
+native_m0_type_29 native_m0_fn_17(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   return native_v_0;
 }
-native_m0_type_15 native_m0_fn_18(native_m0_type_15 native_v_0) {
+native_m0_type_29 native_m0_fn_18(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_3 native_s_3;
   native_m0_type_1 native_s_4;
-  native_m0_type_15 native_s_5;
-  native_m0_type_15 native_s_6;
+  native_m0_type_29 native_s_5;
+  native_m0_type_29 native_s_6;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l18_1;
@@ -1169,6 +1521,14 @@ native_m0_type_15 native_m0_fn_18(native_m0_type_15 native_v_0) {
   case INT64_C(7):
     goto native_l18_2;
   case INT64_C(8):
+    goto native_l18_2;
+  case INT64_C(9):
+    goto native_l18_2;
+  case INT64_C(10):
+    goto native_l18_2;
+  case INT64_C(11):
+    goto native_l18_2;
+  case INT64_C(12):
     goto native_l18_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1209,15 +1569,15 @@ native_l18_7: ;
 native_l18_8: ;
   return native_s_6;
 }
-native_m0_type_15 native_m0_fn_19(native_m0_type_15 native_v_0) {
+native_m0_type_29 native_m0_fn_19(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_3 native_s_3;
   native_m0_type_1 native_s_4;
-  native_m0_type_15 native_s_5;
-  native_m0_type_15 native_s_6;
+  native_m0_type_29 native_s_5;
+  native_m0_type_29 native_s_6;
   switch (native_v_0.tag) {
   case INT64_C(0):
     goto native_l19_1;
@@ -1236,6 +1596,14 @@ native_m0_type_15 native_m0_fn_19(native_m0_type_15 native_v_0) {
   case INT64_C(7):
     goto native_l19_2;
   case INT64_C(8):
+    goto native_l19_2;
+  case INT64_C(9):
+    goto native_l19_2;
+  case INT64_C(10):
+    goto native_l19_2;
+  case INT64_C(11):
+    goto native_l19_2;
+  case INT64_C(12):
     goto native_l19_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1276,7 +1644,7 @@ native_l19_7: ;
 native_l19_8: ;
   return native_s_6;
 }
-native_m0_type_15 native_m0_fn_20(native_m0_type_1 native_v_0) {
+native_m0_type_29 native_m0_fn_20(native_m0_type_1 native_v_0) {
   (void)native_v_0;
   native_m0_type_1 native_s_0;
   native_m0_type_3 native_s_1;
@@ -1285,12 +1653,12 @@ native_m0_type_15 native_m0_fn_20(native_m0_type_1 native_v_0) {
   native_m0_type_3 native_s_4;
   native_m0_type_9 native_s_5;
   native_m0_type_5 native_s_6;
-  native_m0_type_15 native_s_7;
+  native_m0_type_29 native_s_7;
   native_m0_type_1 native_s_8;
-  native_m0_type_15 native_s_9;
+  native_m0_type_29 native_s_9;
   native_m0_type_9 native_s_10;
-  native_m0_type_15 native_s_11;
-  native_m0_type_15 native_s_12;
+  native_m0_type_29 native_s_11;
+  native_m0_type_29 native_s_12;
   native_s_0 = INT64_C(0);
   (void)native_s_0;
   native_s_1 = (native_v_0 == native_s_0);
@@ -1321,35 +1689,35 @@ native_l20_4: ;
   native_s_10 = native_s_5;
   goto native_l20_7;
 native_l20_5: ;
-  native_s_7 = (native_m0_type_15){ .tag = INT64_C(3), .payload = { .variant_3 = native_s_6 } };
+  native_s_7 = (native_m0_type_29){ .tag = INT64_C(3), .payload = { .variant_3 = native_s_6 } };
   native_s_12 = native_s_7;
   goto native_l20_8;
 native_l20_6: ;
-  native_s_9 = (native_m0_type_15){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_8 } };
+  native_s_9 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_8 } };
   native_s_12 = native_s_9;
   goto native_l20_8;
 native_l20_7: ;
   (void)native_s_10;
-  native_s_11 = (native_m0_type_15){ .tag = INT64_C(5) };
+  native_s_11 = (native_m0_type_29){ .tag = INT64_C(5) };
   native_s_12 = native_s_11;
   goto native_l20_8;
 native_l20_8: ;
   return native_s_12;
 }
-native_m0_type_15 native_m0_fn_21(native_m0_type_5 native_v_0) {
+native_m0_type_29 native_m0_fn_21(native_m0_type_5 native_v_0) {
   (void)native_v_0;
   native_m0_type_1 native_s_0;
   native_s_0 = INT64_C(1);
   (void)native_s_0;
   native_trap((uint32_t)native_s_0);
 }
-native_m0_type_11 native_m0_fn_22(native_m0_type_3 native_v_0, native_m0_type_11 native_v_1) {
+native_m0_type_20 native_m0_fn_22(native_m0_type_3 native_v_0, native_m0_type_20 native_v_1) {
   (void)native_v_0;
   (void)native_v_1;
   native_m0_type_5 native_s_0;
-  native_m0_type_15 native_s_1;
+  native_m0_type_29 native_s_1;
   native_m0_type_1 native_s_2;
-  native_m0_type_11 native_s_3;
+  native_m0_type_20 native_s_3;
   if (native_v_0) {
     goto native_l22_1;
   } else {
@@ -1369,7 +1737,7 @@ native_l22_2: ;
 native_l22_3: ;
   return native_s_3;
 }
-native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0) {
+native_m0_type_38 native_m0_fn_23(native_arena *arena, const native_capability *capability, native_m0_type_29 native_v_0) {
   (void)arena;
   (void)capability;
   (void)native_v_0;
@@ -1384,18 +1752,18 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   native_m0_type_9 native_s_8;
   native_m0_type_9 native_s_9;
   native_m0_type_9 native_s_10;
-  native_m0_type_21 native_s_11;
+  native_m0_type_36 native_s_11;
   native_m0_type_9 native_s_12;
-  native_m0_type_18 native_s_13;
+  native_m0_type_33 native_s_13;
   native_m0_type_9 native_s_14;
-  native_m0_type_20 native_s_15;
+  native_m0_type_35 native_s_15;
   native_m0_type_9 native_s_16;
-  native_m0_type_19 native_s_17;
+  native_m0_type_34 native_s_17;
   native_m0_type_9 native_s_18;
-  native_m0_type_22 native_s_19;
+  native_m0_type_37 native_s_19;
   native_m0_type_9 native_s_20;
-  native_m0_type_17 native_s_21;
-  native_m0_type_23 native_s_22;
+  native_m0_type_32 native_s_21;
+  native_m0_type_38 native_s_22;
   native_m0_type_3 native_s_23;
   native_m0_type_3 native_s_24;
   native_m0_type_3 native_s_25;
@@ -1407,17 +1775,17 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   native_m0_type_9 native_s_31;
   native_m0_type_9 native_s_32;
   native_m0_type_9 native_s_33;
-  native_m0_type_21 native_s_34;
-  native_m0_type_18 native_s_35;
+  native_m0_type_36 native_s_34;
+  native_m0_type_33 native_s_35;
   native_m0_type_9 native_s_36;
-  native_m0_type_20 native_s_37;
+  native_m0_type_35 native_s_37;
   native_m0_type_9 native_s_38;
-  native_m0_type_19 native_s_39;
+  native_m0_type_34 native_s_39;
   native_m0_type_9 native_s_40;
-  native_m0_type_22 native_s_41;
+  native_m0_type_37 native_s_41;
   native_m0_type_9 native_s_42;
-  native_m0_type_17 native_s_43;
-  native_m0_type_23 native_s_44;
+  native_m0_type_32 native_s_43;
+  native_m0_type_38 native_s_44;
   native_m0_type_3 native_s_45;
   native_m0_type_3 native_s_46;
   native_m0_type_3 native_s_47;
@@ -1429,17 +1797,17 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   native_m0_type_9 native_s_53;
   native_m0_type_9 native_s_54;
   native_m0_type_9 native_s_55;
-  native_m0_type_21 native_s_56;
+  native_m0_type_36 native_s_56;
   native_m0_type_9 native_s_57;
-  native_m0_type_18 native_s_58;
-  native_m0_type_20 native_s_59;
+  native_m0_type_33 native_s_58;
+  native_m0_type_35 native_s_59;
   native_m0_type_9 native_s_60;
-  native_m0_type_19 native_s_61;
+  native_m0_type_34 native_s_61;
   native_m0_type_9 native_s_62;
-  native_m0_type_22 native_s_63;
+  native_m0_type_37 native_s_63;
   native_m0_type_9 native_s_64;
-  native_m0_type_17 native_s_65;
-  native_m0_type_23 native_s_66;
+  native_m0_type_32 native_s_65;
+  native_m0_type_38 native_s_66;
   native_m0_type_3 native_s_67;
   native_m0_type_3 native_s_68;
   native_m0_type_3 native_s_69;
@@ -1451,17 +1819,17 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   native_m0_type_9 native_s_75;
   native_m0_type_9 native_s_76;
   native_m0_type_9 native_s_77;
-  native_m0_type_21 native_s_78;
+  native_m0_type_36 native_s_78;
   native_m0_type_9 native_s_79;
-  native_m0_type_18 native_s_80;
+  native_m0_type_33 native_s_80;
   native_m0_type_9 native_s_81;
-  native_m0_type_20 native_s_82;
-  native_m0_type_19 native_s_83;
+  native_m0_type_35 native_s_82;
+  native_m0_type_34 native_s_83;
   native_m0_type_9 native_s_84;
-  native_m0_type_22 native_s_85;
+  native_m0_type_37 native_s_85;
   native_m0_type_9 native_s_86;
-  native_m0_type_17 native_s_87;
-  native_m0_type_23 native_s_88;
+  native_m0_type_32 native_s_87;
+  native_m0_type_38 native_s_88;
   native_m0_type_3 native_s_89;
   native_m0_type_3 native_s_90;
   native_m0_type_3 native_s_91;
@@ -1473,19 +1841,19 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   native_m0_type_9 native_s_97;
   native_m0_type_9 native_s_98;
   native_m0_type_9 native_s_99;
-  native_m0_type_21 native_s_100;
+  native_m0_type_36 native_s_100;
   native_m0_type_9 native_s_101;
-  native_m0_type_18 native_s_102;
+  native_m0_type_33 native_s_102;
   native_m0_type_9 native_s_103;
-  native_m0_type_20 native_s_104;
+  native_m0_type_35 native_s_104;
   native_m0_type_9 native_s_105;
-  native_m0_type_19 native_s_106;
-  native_m0_type_22 native_s_107;
+  native_m0_type_34 native_s_106;
+  native_m0_type_37 native_s_107;
   native_m0_type_9 native_s_108;
-  native_m0_type_17 native_s_109;
-  native_m0_type_23 native_s_110;
+  native_m0_type_32 native_s_109;
+  native_m0_type_38 native_s_110;
   native_m0_type_3 native_s_111;
-  native_m0_type_12 native_s_112;
+  native_m0_type_22 native_s_112;
   native_m0_type_2 native_s_113;
   native_m0_type_6 native_s_114;
   native_m0_type_9 native_s_115;
@@ -1494,26 +1862,26 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   native_m0_type_9 native_s_118;
   native_m0_type_9 native_s_119;
   native_m0_type_9 native_s_120;
-  native_m0_type_21 native_s_121;
+  native_m0_type_36 native_s_121;
   native_m0_type_9 native_s_122;
-  native_m0_type_18 native_s_123;
+  native_m0_type_33 native_s_123;
   native_m0_type_9 native_s_124;
-  native_m0_type_20 native_s_125;
+  native_m0_type_35 native_s_125;
   native_m0_type_9 native_s_126;
-  native_m0_type_19 native_s_127;
+  native_m0_type_34 native_s_127;
   native_m0_type_9 native_s_128;
-  native_m0_type_22 native_s_129;
-  native_m0_type_12 native_s_130;
-  native_m0_type_17 native_s_131;
-  native_m0_type_23 native_s_132;
+  native_m0_type_37 native_s_129;
+  native_m0_type_22 native_s_130;
+  native_m0_type_32 native_s_131;
+  native_m0_type_38 native_s_132;
   native_m0_type_1 native_s_133;
-  native_m0_type_23 native_s_134;
-  native_m0_type_23 native_s_135;
-  native_m0_type_23 native_s_136;
-  native_m0_type_23 native_s_137;
-  native_m0_type_23 native_s_138;
-  native_m0_type_23 native_s_139;
-  native_m0_type_23 native_s_140;
+  native_m0_type_38 native_s_134;
+  native_m0_type_38 native_s_135;
+  native_m0_type_38 native_s_136;
+  native_m0_type_38 native_s_137;
+  native_m0_type_38 native_s_138;
+  native_m0_type_38 native_s_139;
+  native_m0_type_38 native_s_140;
   native_s_0 = arena;
   (void)native_s_0;
   switch (native_v_0.tag) {
@@ -1534,6 +1902,14 @@ native_m0_type_23 native_m0_fn_23(native_arena *arena, const native_capability *
   case INT64_C(7):
     goto native_l23_2;
   case INT64_C(8):
+    goto native_l23_2;
+  case INT64_C(9):
+    goto native_l23_2;
+  case INT64_C(10):
+    goto native_l23_2;
+  case INT64_C(11):
+    goto native_l23_2;
+  case INT64_C(12):
     goto native_l23_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1571,18 +1947,18 @@ native_l23_4: ;
   (void)native_s_9;
   native_s_10 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_10;
-  native_s_11 = (native_m0_type_21){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_4 } };
+  native_s_11 = (native_m0_type_36){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_4 } };
   native_s_12 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_13 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_12 } };
+  native_s_13 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_12 } };
   native_s_14 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_15 = (native_m0_type_20){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_14 } };
+  native_s_15 = (native_m0_type_35){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_14 } };
   native_s_16 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_17 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_16 } };
+  native_s_17 = (native_m0_type_34){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_16 } };
   native_s_18 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_19 = (native_m0_type_22){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_18 } };
+  native_s_19 = (native_m0_type_37){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_18 } };
   native_s_20 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_21 = (native_m0_type_17){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_20 } };
-  native_s_22 = (native_m0_type_23){ .field_0 = native_s_5, .field_1 = native_s_11, .field_2 = native_s_13, .field_3 = native_s_15, .field_4 = native_s_17, .field_5 = native_s_19, .field_6 = native_s_21 };
+  native_s_21 = (native_m0_type_32){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_20 } };
+  native_s_22 = (native_m0_type_38){ .field_0 = native_s_5, .field_1 = native_s_11, .field_2 = native_s_13, .field_3 = native_s_15, .field_4 = native_s_17, .field_5 = native_s_19, .field_6 = native_s_21 };
   native_s_134 = native_s_22;
   goto native_l23_28;
 native_l23_5: ;
@@ -1604,6 +1980,14 @@ native_l23_5: ;
   case INT64_C(7):
     goto native_l23_7;
   case INT64_C(8):
+    goto native_l23_7;
+  case INT64_C(9):
+    goto native_l23_7;
+  case INT64_C(10):
+    goto native_l23_7;
+  case INT64_C(11):
+    goto native_l23_7;
+  case INT64_C(12):
     goto native_l23_7;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1642,17 +2026,17 @@ native_l23_9: ;
   native_s_32 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_32;
   native_s_33 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_34 = (native_m0_type_21){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_33 } };
-  native_s_35 = (native_m0_type_18){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_26 } };
+  native_s_34 = (native_m0_type_36){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_33 } };
+  native_s_35 = (native_m0_type_33){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_26 } };
   native_s_36 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_37 = (native_m0_type_20){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_36 } };
+  native_s_37 = (native_m0_type_35){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_36 } };
   native_s_38 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_39 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_38 } };
+  native_s_39 = (native_m0_type_34){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_38 } };
   native_s_40 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_41 = (native_m0_type_22){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_40 } };
+  native_s_41 = (native_m0_type_37){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_40 } };
   native_s_42 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_43 = (native_m0_type_17){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_42 } };
-  native_s_44 = (native_m0_type_23){ .field_0 = native_s_27, .field_1 = native_s_34, .field_2 = native_s_35, .field_3 = native_s_37, .field_4 = native_s_39, .field_5 = native_s_41, .field_6 = native_s_43 };
+  native_s_43 = (native_m0_type_32){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_42 } };
+  native_s_44 = (native_m0_type_38){ .field_0 = native_s_27, .field_1 = native_s_34, .field_2 = native_s_35, .field_3 = native_s_37, .field_4 = native_s_39, .field_5 = native_s_41, .field_6 = native_s_43 };
   native_s_135 = native_s_44;
   goto native_l23_29;
 native_l23_10: ;
@@ -1674,6 +2058,14 @@ native_l23_10: ;
   case INT64_C(7):
     goto native_l23_12;
   case INT64_C(8):
+    goto native_l23_12;
+  case INT64_C(9):
+    goto native_l23_12;
+  case INT64_C(10):
+    goto native_l23_12;
+  case INT64_C(11):
+    goto native_l23_12;
+  case INT64_C(12):
     goto native_l23_12;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1712,17 +2104,17 @@ native_l23_14: ;
   native_s_54 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_54;
   native_s_55 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_56 = (native_m0_type_21){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_55 } };
+  native_s_56 = (native_m0_type_36){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_55 } };
   native_s_57 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_58 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_57 } };
-  native_s_59 = (native_m0_type_20){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_48 } };
+  native_s_58 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_57 } };
+  native_s_59 = (native_m0_type_35){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_48 } };
   native_s_60 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_61 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_60 } };
+  native_s_61 = (native_m0_type_34){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_60 } };
   native_s_62 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_63 = (native_m0_type_22){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_62 } };
+  native_s_63 = (native_m0_type_37){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_62 } };
   native_s_64 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_65 = (native_m0_type_17){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_64 } };
-  native_s_66 = (native_m0_type_23){ .field_0 = native_s_49, .field_1 = native_s_56, .field_2 = native_s_58, .field_3 = native_s_59, .field_4 = native_s_61, .field_5 = native_s_63, .field_6 = native_s_65 };
+  native_s_65 = (native_m0_type_32){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_64 } };
+  native_s_66 = (native_m0_type_38){ .field_0 = native_s_49, .field_1 = native_s_56, .field_2 = native_s_58, .field_3 = native_s_59, .field_4 = native_s_61, .field_5 = native_s_63, .field_6 = native_s_65 };
   native_s_136 = native_s_66;
   goto native_l23_30;
 native_l23_15: ;
@@ -1744,6 +2136,14 @@ native_l23_15: ;
   case INT64_C(7):
     goto native_l23_17;
   case INT64_C(8):
+    goto native_l23_17;
+  case INT64_C(9):
+    goto native_l23_17;
+  case INT64_C(10):
+    goto native_l23_17;
+  case INT64_C(11):
+    goto native_l23_17;
+  case INT64_C(12):
     goto native_l23_17;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1782,17 +2182,17 @@ native_l23_19: ;
   native_s_76 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_76;
   native_s_77 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_78 = (native_m0_type_21){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_77 } };
+  native_s_78 = (native_m0_type_36){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_77 } };
   native_s_79 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_80 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_79 } };
+  native_s_80 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_79 } };
   native_s_81 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_82 = (native_m0_type_20){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_81 } };
-  native_s_83 = (native_m0_type_19){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_70 } };
+  native_s_82 = (native_m0_type_35){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_81 } };
+  native_s_83 = (native_m0_type_34){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_70 } };
   native_s_84 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_85 = (native_m0_type_22){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_84 } };
+  native_s_85 = (native_m0_type_37){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_84 } };
   native_s_86 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_87 = (native_m0_type_17){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_86 } };
-  native_s_88 = (native_m0_type_23){ .field_0 = native_s_71, .field_1 = native_s_78, .field_2 = native_s_80, .field_3 = native_s_82, .field_4 = native_s_83, .field_5 = native_s_85, .field_6 = native_s_87 };
+  native_s_87 = (native_m0_type_32){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_86 } };
+  native_s_88 = (native_m0_type_38){ .field_0 = native_s_71, .field_1 = native_s_78, .field_2 = native_s_80, .field_3 = native_s_82, .field_4 = native_s_83, .field_5 = native_s_85, .field_6 = native_s_87 };
   native_s_137 = native_s_88;
   goto native_l23_31;
 native_l23_20: ;
@@ -1814,6 +2214,14 @@ native_l23_20: ;
   case INT64_C(7):
     goto native_l23_22;
   case INT64_C(8):
+    goto native_l23_22;
+  case INT64_C(9):
+    goto native_l23_22;
+  case INT64_C(10):
+    goto native_l23_22;
+  case INT64_C(11):
+    goto native_l23_22;
+  case INT64_C(12):
     goto native_l23_22;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1852,17 +2260,17 @@ native_l23_24: ;
   native_s_98 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_98;
   native_s_99 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_100 = (native_m0_type_21){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_99 } };
+  native_s_100 = (native_m0_type_36){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_99 } };
   native_s_101 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_102 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_101 } };
+  native_s_102 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_101 } };
   native_s_103 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_104 = (native_m0_type_20){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_103 } };
+  native_s_104 = (native_m0_type_35){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_103 } };
   native_s_105 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_106 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_105 } };
-  native_s_107 = (native_m0_type_22){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_92 } };
+  native_s_106 = (native_m0_type_34){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_105 } };
+  native_s_107 = (native_m0_type_37){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_92 } };
   native_s_108 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_109 = (native_m0_type_17){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_108 } };
-  native_s_110 = (native_m0_type_23){ .field_0 = native_s_93, .field_1 = native_s_100, .field_2 = native_s_102, .field_3 = native_s_104, .field_4 = native_s_106, .field_5 = native_s_107, .field_6 = native_s_109 };
+  native_s_109 = (native_m0_type_32){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_108 } };
+  native_s_110 = (native_m0_type_38){ .field_0 = native_s_93, .field_1 = native_s_100, .field_2 = native_s_102, .field_3 = native_s_104, .field_4 = native_s_106, .field_5 = native_s_107, .field_6 = native_s_109 };
   native_s_138 = native_s_110;
   goto native_l23_32;
 native_l23_25: ;
@@ -1894,19 +2302,19 @@ native_l23_26: ;
   native_s_119 = (native_m0_type_9){ .tag = INT64_C(0) };
   (void)native_s_119;
   native_s_120 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_121 = (native_m0_type_21){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_120 } };
+  native_s_121 = (native_m0_type_36){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_120 } };
   native_s_122 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_123 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_122 } };
+  native_s_123 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_122 } };
   native_s_124 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_125 = (native_m0_type_20){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_124 } };
+  native_s_125 = (native_m0_type_35){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_124 } };
   native_s_126 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_127 = (native_m0_type_19){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_126 } };
+  native_s_127 = (native_m0_type_34){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_126 } };
   native_s_128 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_129 = (native_m0_type_22){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_128 } };
+  native_s_129 = (native_m0_type_37){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_128 } };
   native_s_130 = native_arena_alloc((native_arena *)native_s_0, sizeof(native_m0_type_2), _Alignof(native_m0_type_2));
   *(native_m0_type_2 *)native_s_130 = native_s_113;
-  native_s_131 = (native_m0_type_17){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_130 } };
-  native_s_132 = (native_m0_type_23){ .field_0 = native_s_114, .field_1 = native_s_121, .field_2 = native_s_123, .field_3 = native_s_125, .field_4 = native_s_127, .field_5 = native_s_129, .field_6 = native_s_131 };
+  native_s_131 = (native_m0_type_32){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_130 } };
+  native_s_132 = (native_m0_type_38){ .field_0 = native_s_114, .field_1 = native_s_121, .field_2 = native_s_123, .field_3 = native_s_125, .field_4 = native_s_127, .field_5 = native_s_129, .field_6 = native_s_131 };
   native_s_139 = native_s_132;
   goto native_l23_33;
 native_l23_27: ;
@@ -1934,7 +2342,7 @@ native_l23_33: ;
 native_l23_34: ;
   return native_s_140;
 }
-native_m0_type_3 native_m0_fn_24(native_m0_type_15 native_v_0) {
+native_m0_type_3 native_m0_fn_24(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
@@ -1957,6 +2365,14 @@ native_m0_type_3 native_m0_fn_24(native_m0_type_15 native_v_0) {
   case INT64_C(7):
     goto native_l24_2;
   case INT64_C(8):
+    goto native_l24_2;
+  case INT64_C(9):
+    goto native_l24_2;
+  case INT64_C(10):
+    goto native_l24_2;
+  case INT64_C(11):
+    goto native_l24_2;
+  case INT64_C(12):
     goto native_l24_1;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1974,28 +2390,28 @@ native_l24_2: ;
 native_l24_3: ;
   return native_s_2;
 }
-native_m0_type_22 native_m0_fn_25(native_m0_type_15 native_v_0) {
+native_m0_type_37 native_m0_fn_25(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
-  native_m0_type_14 native_s_2;
-  native_m0_type_16 native_s_3;
-  native_m0_type_15 native_s_4;
+  native_m0_type_27 native_s_2;
+  native_m0_type_30 native_s_3;
+  native_m0_type_29 native_s_4;
   native_m0_type_3 native_s_5;
   native_m0_type_3 native_s_6;
   native_m0_type_3 native_s_7;
   native_m0_type_3 native_s_8;
-  native_m0_type_14 native_s_9;
-  native_m0_type_16 native_s_10;
-  native_m0_type_15 native_s_11;
+  native_m0_type_27 native_s_9;
+  native_m0_type_30 native_s_10;
+  native_m0_type_29 native_s_11;
   native_m0_type_6 native_s_12;
   native_m0_type_9 native_s_13;
   native_m0_type_6 native_s_14;
-  native_m0_type_22 native_s_15;
+  native_m0_type_37 native_s_15;
   native_m0_type_9 native_s_16;
   native_m0_type_9 native_s_17;
-  native_m0_type_22 native_s_18;
-  native_m0_type_22 native_s_19;
+  native_m0_type_37 native_s_18;
+  native_m0_type_37 native_s_19;
   native_s_0 = native_m0_fn_24(native_v_0);
   if (native_s_0) {
     goto native_l25_2;
@@ -2008,14 +2424,14 @@ native_l25_1: ;
   native_s_8 = native_s_1;
   goto native_l25_6;
 native_l25_2: ;
-  if (native_v_0.tag != INT64_C(8)) {
+  if (native_v_0.tag != INT64_C(12)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_2 = native_v_0.payload.variant_8;
+  native_s_2 = native_v_0.payload.variant_12;
   if (native_s_2 == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_3 = *((const native_m0_type_16 *)native_s_2);
+  native_s_3 = *((const native_m0_type_30 *)native_s_2);
   native_s_4 = native_s_3.field_0;
   switch (native_s_4.tag) {
   case INT64_C(0):
@@ -2035,6 +2451,14 @@ native_l25_2: ;
   case INT64_C(7):
     goto native_l25_4;
   case INT64_C(8):
+    goto native_l25_4;
+  case INT64_C(9):
+    goto native_l25_4;
+  case INT64_C(10):
+    goto native_l25_4;
+  case INT64_C(11):
+    goto native_l25_4;
+  case INT64_C(12):
     goto native_l25_4;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2059,14 +2483,14 @@ native_l25_6: ;
     goto native_l25_8;
   }
 native_l25_7: ;
-  if (native_v_0.tag != INT64_C(8)) {
+  if (native_v_0.tag != INT64_C(12)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_9 = native_v_0.payload.variant_8;
+  native_s_9 = native_v_0.payload.variant_12;
   if (native_s_9 == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_10 = *((const native_m0_type_16 *)native_s_9);
+  native_s_10 = *((const native_m0_type_30 *)native_s_9);
   native_s_11 = native_s_10.field_0;
   if (native_s_11.tag != INT64_C(4)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2079,13 +2503,13 @@ native_l25_8: ;
   native_s_16 = native_s_13;
   goto native_l25_10;
 native_l25_9: ;
-  native_s_15 = (native_m0_type_22){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
+  native_s_15 = (native_m0_type_37){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
   native_s_19 = native_s_15;
   goto native_l25_11;
 native_l25_10: ;
   (void)native_s_16;
   native_s_17 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_18 = (native_m0_type_22){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_17 } };
+  native_s_18 = (native_m0_type_37){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_17 } };
   native_s_19 = native_s_18;
   goto native_l25_11;
 native_l25_11: ;
@@ -2109,99 +2533,27 @@ native_m0_type_3 native_m0_fn_27(native_m0_type_3 native_v_0) {
   native_s_1 = (native_s_0 == native_v_0);
   return native_s_1;
 }
-native_m0_type_3 native_m0_fn_28(native_m0_type_15 native_v_0) {
+native_m0_type_3 native_m0_fn_28(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
-  native_m0_type_3 native_s_1;
+  native_m0_type_29 native_s_1;
   native_m0_type_3 native_s_2;
-  native_m0_type_3 native_s_3;
-  native_m0_type_3 native_s_4;
   native_s_0 = false;
   (void)native_s_0;
-  switch (native_v_0.tag) {
-  case INT64_C(0):
-    goto native_l28_1;
-  case INT64_C(1):
-    goto native_l28_2;
-  case INT64_C(2):
-    goto native_l28_2;
-  case INT64_C(3):
-    goto native_l28_2;
-  case INT64_C(4):
-    goto native_l28_2;
-  case INT64_C(5):
-    goto native_l28_2;
-  case INT64_C(6):
-    goto native_l28_2;
-  case INT64_C(7):
-    goto native_l28_2;
-  case INT64_C(8):
-    goto native_l28_2;
-  default:
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-native_l28_1: ;
-  if (native_v_0.tag != INT64_C(0)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  native_s_1 = native_v_0.payload.variant_0;
-  native_s_2 = (native_s_0 == native_s_1);
-  native_s_4 = native_s_2;
-  goto native_l28_3;
-native_l28_2: ;
-  native_s_3 = false;
-  (void)native_s_3;
-  native_s_4 = native_s_3;
-  goto native_l28_3;
-native_l28_3: ;
-  return native_s_4;
+  native_s_1 = (native_m0_type_29){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_0 } };
+  native_s_2 = native_dynamic_value_equal(&native_m0_value_29, &native_s_1, &native_v_0);
+  return native_s_2;
 }
-native_m0_type_3 native_m0_fn_29(native_m0_type_15 native_v_0) {
+native_m0_type_3 native_m0_fn_29(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
-  native_m0_type_3 native_s_1;
+  native_m0_type_29 native_s_1;
   native_m0_type_3 native_s_2;
-  native_m0_type_3 native_s_3;
-  native_m0_type_3 native_s_4;
   native_s_0 = true;
   (void)native_s_0;
-  switch (native_v_0.tag) {
-  case INT64_C(0):
-    goto native_l29_1;
-  case INT64_C(1):
-    goto native_l29_2;
-  case INT64_C(2):
-    goto native_l29_2;
-  case INT64_C(3):
-    goto native_l29_2;
-  case INT64_C(4):
-    goto native_l29_2;
-  case INT64_C(5):
-    goto native_l29_2;
-  case INT64_C(6):
-    goto native_l29_2;
-  case INT64_C(7):
-    goto native_l29_2;
-  case INT64_C(8):
-    goto native_l29_2;
-  default:
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-native_l29_1: ;
-  if (native_v_0.tag != INT64_C(0)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  native_s_1 = native_v_0.payload.variant_0;
-  native_s_2 = (native_s_0 == native_s_1);
-  native_s_4 = native_s_2;
-  goto native_l29_3;
-native_l29_2: ;
-  native_s_3 = false;
-  (void)native_s_3;
-  native_s_4 = native_s_3;
-  goto native_l29_3;
-native_l29_3: ;
-  return native_s_4;
+  native_s_1 = (native_m0_type_29){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_0 } };
+  native_s_2 = native_dynamic_value_equal(&native_m0_value_29, &native_s_1, &native_v_0);
+  return native_s_2;
 }
 native_m0_type_3 native_m0_fn_30(native_m0_type_1 native_v_0) {
   (void)native_v_0;
@@ -2233,7 +2585,7 @@ native_m0_type_4 native_m0_fn_34(native_m0_type_4 native_v_0) {
   (void)native_v_0;
   return native_v_0;
 }
-native_m0_type_4 native_m0_fn_35(native_m0_type_15 native_v_0) {
+native_m0_type_4 native_m0_fn_35(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_1 native_s_0;
   native_m0_type_4 native_s_1;
@@ -2258,6 +2610,14 @@ native_m0_type_4 native_m0_fn_35(native_m0_type_15 native_v_0) {
   case INT64_C(7):
     goto native_l35_3;
   case INT64_C(8):
+    goto native_l35_3;
+  case INT64_C(9):
+    goto native_l35_3;
+  case INT64_C(10):
+    goto native_l35_3;
+  case INT64_C(11):
+    goto native_l35_3;
+  case INT64_C(12):
     goto native_l35_3;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2321,12 +2681,12 @@ native_m0_type_3 native_m0_fn_40(native_m0_type_4 native_v_0, native_m0_type_4 n
 }
 native_m0_type_1 native_m0_fn_41(native_m0_type_5 native_v_0) {
   (void)native_v_0;
-  native_m0_type_18 native_s_0;
+  native_m0_type_33 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_3 native_s_3;
   native_m0_type_1 native_s_4;
-  native_m0_type_18 native_s_5;
+  native_m0_type_33 native_s_5;
   native_m0_type_1 native_s_6;
   native_m0_type_1 native_s_7;
   native_m0_type_1 native_s_8;
@@ -2381,18 +2741,18 @@ native_l41_7: ;
 native_l41_8: ;
   return native_s_8;
 }
-native_m0_type_1 native_m0_fn_42(native_m0_type_15 native_v_0) {
+native_m0_type_1 native_m0_fn_42(native_m0_type_29 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_5 native_s_3;
-  native_m0_type_18 native_s_4;
+  native_m0_type_33 native_s_4;
   native_m0_type_3 native_s_5;
   native_m0_type_3 native_s_6;
   native_m0_type_3 native_s_7;
   native_m0_type_1 native_s_8;
-  native_m0_type_18 native_s_9;
+  native_m0_type_33 native_s_9;
   native_m0_type_1 native_s_10;
   native_m0_type_1 native_s_11;
   native_m0_type_1 native_s_12;
@@ -2416,6 +2776,14 @@ native_m0_type_1 native_m0_fn_42(native_m0_type_15 native_v_0) {
   case INT64_C(7):
     goto native_l42_2;
   case INT64_C(8):
+    goto native_l42_2;
+  case INT64_C(9):
+    goto native_l42_2;
+  case INT64_C(10):
+    goto native_l42_2;
+  case INT64_C(11):
+    goto native_l42_2;
+  case INT64_C(12):
     goto native_l42_2;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2511,7 +2879,7 @@ native_m0_type_3 native_m0_fn_43(native_m0_type_1 native_v_0, native_m0_type_1 n
   native_s_2 = (native_s_0 < native_s_1);
   return native_s_2;
 }
-native_m0_type_3 native_m0_fn_44(native_m0_type_24 native_v_0) {
+native_m0_type_3 native_m0_fn_44(native_m0_type_39 native_v_0) {
   (void)native_v_0;
   native_m0_type_3 native_s_0;
   native_m0_type_3 native_s_1;
@@ -2537,19 +2905,19 @@ native_l44_2: ;
 native_l44_3: ;
   return native_s_2;
 }
-native_m0_type_3 native_m0_fn_45(native_m0_type_10 native_v_0) {
+native_m0_type_3 native_m0_fn_45(native_m0_type_19 native_v_0) {
   (void)native_v_0;
-  native_m0_type_24 native_s_0;
+  native_m0_type_39 native_s_0;
   native_m0_type_3 native_s_1;
-  native_s_0 = (native_m0_type_24){ .tag = INT64_C(0), .payload = { .variant_0 = native_v_0 } };
+  native_s_0 = (native_m0_type_39){ .tag = INT64_C(0), .payload = { .variant_0 = native_v_0 } };
   native_s_1 = native_m0_fn_44(native_s_0);
   return native_s_1;
 }
 native_m0_type_3 native_m0_fn_46(native_m0_type_1 native_v_0) {
   (void)native_v_0;
-  native_m0_type_24 native_s_0;
+  native_m0_type_39 native_s_0;
   native_m0_type_3 native_s_1;
-  native_s_0 = (native_m0_type_24){ .tag = INT64_C(1), .payload = { .variant_1 = native_v_0 } };
+  native_s_0 = (native_m0_type_39){ .tag = INT64_C(1), .payload = { .variant_1 = native_v_0 } };
   native_s_1 = native_m0_fn_44(native_s_0);
   return native_s_1;
 }
@@ -2566,16 +2934,16 @@ native_m0_type_3 native_m0_fn_47(native_m0_type_5 native_v_0, native_m0_type_5 n
   }
   return native_s_0;
 }
-native_m0_type_18 native_m0_fn_48(native_m0_type_3 native_v_0) {
+native_m0_type_33 native_m0_fn_48(native_m0_type_3 native_v_0) {
   (void)native_v_0;
   native_m0_type_1 native_s_0;
   native_m0_type_9 native_s_1;
   native_m0_type_1 native_s_2;
-  native_m0_type_18 native_s_3;
+  native_m0_type_33 native_s_3;
   native_m0_type_9 native_s_4;
   native_m0_type_9 native_s_5;
-  native_m0_type_18 native_s_6;
-  native_m0_type_18 native_s_7;
+  native_m0_type_33 native_s_6;
+  native_m0_type_33 native_s_7;
   if (native_v_0) {
     goto native_l48_1;
   } else {
@@ -2591,28 +2959,28 @@ native_l48_2: ;
   native_s_4 = native_s_1;
   goto native_l48_4;
 native_l48_3: ;
-  native_s_3 = (native_m0_type_18){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_2 } };
+  native_s_3 = (native_m0_type_33){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_2 } };
   native_s_7 = native_s_3;
   goto native_l48_5;
 native_l48_4: ;
   (void)native_s_4;
   native_s_5 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_6 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_5 } };
+  native_s_6 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_5 } };
   native_s_7 = native_s_6;
   goto native_l48_5;
 native_l48_5: ;
   return native_s_7;
 }
-native_m0_type_18 native_m0_fn_49(native_m0_type_3 native_v_0) {
+native_m0_type_33 native_m0_fn_49(native_m0_type_3 native_v_0) {
   (void)native_v_0;
   native_m0_type_1 native_s_0;
   native_m0_type_9 native_s_1;
   native_m0_type_1 native_s_2;
-  native_m0_type_18 native_s_3;
+  native_m0_type_33 native_s_3;
   native_m0_type_9 native_s_4;
   native_m0_type_9 native_s_5;
-  native_m0_type_18 native_s_6;
-  native_m0_type_18 native_s_7;
+  native_m0_type_33 native_s_6;
+  native_m0_type_33 native_s_7;
   if (native_v_0) {
     goto native_l49_1;
   } else {
@@ -2628,15 +2996,388 @@ native_l49_2: ;
   native_s_4 = native_s_1;
   goto native_l49_4;
 native_l49_3: ;
-  native_s_3 = (native_m0_type_18){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_2 } };
+  native_s_3 = (native_m0_type_33){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_2 } };
   native_s_7 = native_s_3;
   goto native_l49_5;
 native_l49_4: ;
   (void)native_s_4;
   native_s_5 = (native_m0_type_9){ .tag = INT64_C(0) };
-  native_s_6 = (native_m0_type_18){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_5 } };
+  native_s_6 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_5 } };
   native_s_7 = native_s_6;
   goto native_l49_5;
 native_l49_5: ;
   return native_s_7;
+}
+native_m0_type_12 native_m0_fn_50(native_arena *arena, const native_capability *capability) {
+  (void)arena;
+  (void)capability;
+  native_m0_type_0 native_s_0;
+  native_m0_type_12 native_s_1;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_map_from_arrays((native_arena *)native_s_0, NULL, NULL, INT64_C(0), INT64_C(16), (size_t)8, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_1;
+}
+native_m0_type_3 native_m0_fn_51(native_m0_type_12 native_v_0, native_m0_type_29 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_3 native_s_0;
+  native_s_0 = native_map_contains(native_v_0, &native_v_1, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_0;
+}
+native_m0_type_12 native_m0_fn_52(native_arena *arena, const native_capability *capability, native_m0_type_12 native_v_0, native_m0_type_29 native_v_1, native_m0_type_1 native_v_2) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  (void)native_v_2;
+  native_m0_type_0 native_s_0;
+  native_m0_type_12 native_s_1;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_map_assoc((native_arena *)native_s_0, native_v_0, &native_v_1, &native_v_2, INT64_C(16), (size_t)8, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_1;
+}
+native_m0_type_15 native_m0_fn_53(native_arena *arena, const native_capability *capability) {
+  (void)arena;
+  (void)capability;
+  native_m0_type_0 native_s_0;
+  native_m0_type_15 native_s_1;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_set_from_array((native_arena *)native_s_0, NULL, INT64_C(0), INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_1;
+}
+native_m0_type_3 native_m0_fn_54(native_m0_type_15 native_v_0, native_m0_type_29 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_3 native_s_0;
+  native_s_0 = native_set_contains(native_v_0, &native_v_1, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_0;
+}
+native_m0_type_15 native_m0_fn_55(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0, native_m0_type_29 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_m0_type_15 native_s_1;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_set_conj((native_arena *)native_s_0, native_v_0, &native_v_1, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_1;
+}
+native_m0_type_1 native_m0_fn_56(native_m0_type_12 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_s_0 = native_map_count(native_v_0);
+  return native_s_0;
+}
+native_m0_type_1 native_m0_fn_57(native_m0_type_12 native_v_0, native_m0_type_29 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_1 native_s_0;
+  native_m0_type_1 native_s_1;
+  native_s_0 = INT64_C(-1);
+  (void)native_s_0;
+  {
+    const void *native_map_hit_1 = native_map_get(native_v_0, &native_v_1, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+    native_s_1 = (native_map_hit_1 == NULL) ? native_s_0 : *(const native_m0_type_1 *)native_map_hit_1;
+  }
+  return native_s_1;
+}
+native_m0_type_12 native_m0_fn_58(native_arena *arena, const native_capability *capability, native_m0_type_12 native_v_0, native_m0_type_29 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_m0_type_12 native_s_1;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_map_dissoc((native_arena *)native_s_0, native_v_0, &native_v_1, INT64_C(16), (size_t)8, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_1;
+}
+native_m0_type_1 native_m0_fn_59(native_m0_type_15 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_s_0 = native_set_count(native_v_0);
+  return native_s_0;
+}
+native_m0_type_15 native_m0_fn_60(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0, native_m0_type_29 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_m0_type_15 native_s_1;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_set_disj((native_arena *)native_s_0, native_v_0, &native_v_1, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  return native_s_1;
+}
+native_m0_type_12 native_m0_fn_61(native_arena *arena, const native_capability *capability, native_m0_type_29 native_v_0, native_m0_type_29 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_arena native_epoch_0;
+  native_m0_type_0 native_s_0;
+  native_m0_type_0 native_s_1;
+  native_m0_type_12 native_s_2;
+  native_m0_type_12 native_s_3;
+  native_m0_type_1 native_s_4;
+  native_m0_type_1 native_s_5;
+  native_m0_type_29 native_s_6;
+  native_m0_type_29 native_s_7;
+  native_m0_type_1 native_s_8;
+  native_m0_type_20 native_s_9;
+  native_m0_type_20 native_s_10;
+  native_m0_type_20 native_s_11;
+  native_m0_type_1 native_s_12;
+  native_m0_type_1 native_s_13;
+  native_m0_type_1 native_s_14;
+  native_m0_type_12 native_s_15;
+  native_m0_type_3 native_s_16;
+  native_m0_type_29 native_s_17;
+  native_m0_type_1 native_s_18;
+  native_m0_type_29 native_s_19;
+  native_m0_type_3 native_s_20;
+  native_m0_type_29 native_s_21;
+  native_m0_type_1 native_s_22;
+  native_m0_type_29 native_s_23;
+  native_m0_type_3 native_s_24;
+  native_m0_type_1 native_s_25;
+  native_m0_type_1 native_s_26;
+  native_m0_type_1 native_s_27;
+  native_m0_type_12 native_s_28;
+  native_m0_type_1 native_s_29;
+  native_m0_type_10 native_s_30;
+  native_m0_type_1 native_s_31;
+  native_m0_type_0 native_s_32;
+  native_m0_type_10 native_s_33;
+  native_m0_type_1 native_s_34;
+  native_m0_type_12 native_s_35;
+  native_m0_type_0 native_s_36;
+  native_s_0 = arena;
+  (void)native_s_0;
+  (void)native_arena_init_growable(&native_epoch_0, (size_t)0U);
+  native_s_1 = &native_epoch_0;
+  (void)native_s_1;
+  native_s_2 = native_map_from_arrays((native_arena *)native_s_0, NULL, NULL, INT64_C(0), INT64_C(16), (size_t)8, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  native_s_3 = native_map_transient_open((native_arena *)native_s_0, native_s_2, (size_t)8, (size_t)8);
+  native_s_4 = INT64_C(0);
+  (void)native_s_4;
+  native_s_5 = INT64_C(1);
+  (void)native_s_5;
+  native_s_6 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_4 } };
+  native_s_7 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_5 } };
+  native_s_8 = INT64_C(2);
+  (void)native_s_8;
+  native_s_9 = native_vec_new((native_arena *)native_s_1, native_s_8, INT64_C(16), (size_t)8);
+  native_s_10 = native_vec_push((native_arena *)native_s_1, native_s_9, &native_s_6, INT64_C(16), (size_t)8);
+  native_s_11 = native_vec_push((native_arena *)native_s_1, native_s_10, &native_s_7, INT64_C(16), (size_t)8);
+  native_s_12 = native_vec_length(native_s_11);
+  native_s_13 = INT64_C(0);
+  (void)native_s_13;
+  native_s_14 = native_s_13;
+  native_s_15 = native_s_3;
+  goto native_l61_1;
+native_l61_1: ;
+  native_s_16 = (native_s_14 < native_s_12);
+  if (native_s_16) {
+    goto native_l61_2;
+  } else {
+    goto native_l61_11;
+  }
+native_l61_2: ;
+  native_s_17 = *(const native_m0_type_29 *)native_vec_at(native_s_11, native_s_14, INT64_C(16));
+  native_s_18 = INT64_C(0);
+  (void)native_s_18;
+  native_s_19 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_18 } };
+  native_s_20 = native_dynamic_value_equal(&native_m0_value_29, &native_s_19, &native_s_17);
+  if (native_s_20) {
+    goto native_l61_3;
+  } else {
+    goto native_l61_4;
+  }
+native_l61_3: ;
+  native_s_21 = native_v_0;
+  goto native_l61_5;
+native_l61_4: ;
+  native_s_21 = native_v_1;
+  goto native_l61_5;
+native_l61_5: ;
+  native_s_22 = INT64_C(0);
+  (void)native_s_22;
+  native_s_23 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_22 } };
+  native_s_24 = native_dynamic_value_equal(&native_m0_value_29, &native_s_23, &native_s_17);
+  if (native_s_24) {
+    goto native_l61_6;
+  } else {
+    goto native_l61_7;
+  }
+native_l61_6: ;
+  native_s_25 = INT64_C(1);
+  (void)native_s_25;
+  native_s_27 = native_s_25;
+  goto native_l61_8;
+native_l61_7: ;
+  native_s_26 = INT64_C(2);
+  (void)native_s_26;
+  native_s_27 = native_s_26;
+  goto native_l61_8;
+native_l61_8: ;
+  native_s_28 = native_map_assoc_transient((native_arena *)native_s_0, native_s_15, &native_s_21, &native_s_27, INT64_C(16), (size_t)8, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  native_s_29 = INT64_C(1);
+  (void)native_s_29;
+  if (__builtin_add_overflow(native_s_14, native_s_29, &native_s_30.payload.variant_0)) {
+    native_s_30.tag = INT64_C(1);
+  } else {
+    native_s_30.tag = INT64_C(0);
+  }
+  switch (native_s_30.tag) {
+  case INT64_C(0):
+    native_s_33 = native_s_30;
+  goto native_l61_10;
+  case INT64_C(1):
+    goto native_l61_9;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l61_9: ;
+  native_s_31 = INT64_C(2);
+  (void)native_s_31;
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_32 = NULL;
+  (void)native_s_32;
+  native_trap((uint32_t)native_s_31);
+native_l61_10: ;
+  native_s_34 = native_s_33.payload.variant_0;
+  native_s_14 = native_s_34;
+  native_s_15 = native_s_28;
+  goto native_l61_1;
+native_l61_11: ;
+  native_s_35 = native_map_persistent_close((native_arena *)native_s_0, native_s_15);
+  native_arena_destroy((native_arena *)native_s_1);
+  native_s_36 = NULL;
+  (void)native_s_36;
+  return native_s_35;
+}
+native_m0_type_15 native_m0_fn_62(native_arena *arena, const native_capability *capability, native_m0_type_29 native_v_0, native_m0_type_29 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_m0_type_15 native_s_1;
+  native_m0_type_15 native_s_2;
+  native_m0_type_1 native_s_3;
+  native_m0_type_20 native_s_4;
+  native_m0_type_20 native_s_5;
+  native_m0_type_20 native_s_6;
+  native_m0_type_1 native_s_7;
+  native_m0_type_1 native_s_8;
+  native_m0_type_1 native_s_9;
+  native_m0_type_15 native_s_10;
+  native_m0_type_3 native_s_11;
+  native_m0_type_29 native_s_12;
+  native_m0_type_15 native_s_13;
+  native_m0_type_1 native_s_14;
+  native_m0_type_10 native_s_15;
+  native_m0_type_1 native_s_16;
+  native_m0_type_10 native_s_17;
+  native_m0_type_1 native_s_18;
+  native_m0_type_15 native_s_19;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_set_from_array((native_arena *)native_s_0, NULL, INT64_C(0), INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  native_s_2 = native_set_transient_open((native_arena *)native_s_0, native_s_1, (size_t)8);
+  native_s_3 = INT64_C(2);
+  (void)native_s_3;
+  native_s_4 = native_vec_new((native_arena *)native_s_0, native_s_3, INT64_C(16), (size_t)8);
+  native_s_5 = native_vec_push((native_arena *)native_s_0, native_s_4, &native_v_0, INT64_C(16), (size_t)8);
+  native_s_6 = native_vec_push((native_arena *)native_s_0, native_s_5, &native_v_1, INT64_C(16), (size_t)8);
+  native_s_7 = native_vec_length(native_s_6);
+  native_s_8 = INT64_C(0);
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  native_s_10 = native_s_2;
+  goto native_l62_1;
+native_l62_1: ;
+  native_s_11 = (native_s_9 < native_s_7);
+  if (native_s_11) {
+    goto native_l62_2;
+  } else {
+    goto native_l62_5;
+  }
+native_l62_2: ;
+  native_s_12 = *(const native_m0_type_29 *)native_vec_at(native_s_6, native_s_9, INT64_C(16));
+  native_s_13 = native_set_conj_transient((native_arena *)native_s_0, native_s_10, &native_s_12, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&native_m0_value_29));
+  native_s_14 = INT64_C(1);
+  (void)native_s_14;
+  if (__builtin_add_overflow(native_s_9, native_s_14, &native_s_15.payload.variant_0)) {
+    native_s_15.tag = INT64_C(1);
+  } else {
+    native_s_15.tag = INT64_C(0);
+  }
+  switch (native_s_15.tag) {
+  case INT64_C(0):
+    native_s_17 = native_s_15;
+  goto native_l62_4;
+  case INT64_C(1):
+    goto native_l62_3;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l62_3: ;
+  native_s_16 = INT64_C(2);
+  (void)native_s_16;
+  native_trap((uint32_t)native_s_16);
+native_l62_4: ;
+  native_s_18 = native_s_17.payload.variant_0;
+  native_s_9 = native_s_18;
+  native_s_10 = native_s_13;
+  goto native_l62_1;
+native_l62_5: ;
+  native_s_19 = native_set_persistent_close((native_arena *)native_s_0, native_s_10);
+  return native_s_19;
+}
+native_m0_type_3 native_m0_fn_63(native_m0_type_29 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_m0_type_29 native_s_1;
+  native_m0_type_3 native_s_2;
+  native_s_0 = INT64_C(42);
+  (void)native_s_0;
+  native_s_1 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_0 } };
+  native_s_2 = native_dynamic_value_equal(&native_m0_value_29, &native_s_1, &native_v_0);
+  return native_s_2;
+}
+native_m0_type_3 native_m0_fn_64(native_m0_type_29 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_m0_type_29 native_s_1;
+  native_m0_type_3 native_s_2;
+  native_s_0 = INT64_C(42);
+  (void)native_s_0;
+  native_s_1 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_0 } };
+  native_s_2 = native_dynamic_value_equal(&native_m0_value_29, &native_s_1, &native_v_0);
+  return native_s_2;
+}
+native_m0_type_3 native_m0_fn_65(native_m0_type_29 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_1 native_s_0;
+  native_m0_type_29 native_s_1;
+  native_m0_type_3 native_s_2;
+  native_m0_type_3 native_s_3;
+  native_m0_type_3 native_s_4;
+  native_s_0 = INT64_C(42);
+  (void)native_s_0;
+  native_s_1 = (native_m0_type_29){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_0 } };
+  native_s_2 = native_dynamic_value_equal(&native_m0_value_29, &native_s_1, &native_v_0);
+  native_s_3 = false;
+  (void)native_s_3;
+  native_s_4 = (native_s_2 == native_s_3);
+  return native_s_4;
 }

@@ -6,7 +6,9 @@
    fn_8..19 logic probes; fn_26..31 exact Bool predicate probes;
    fn_32..43 numeric scalar probes; fn_44..46 vector predicates;
    fn_47 text suffix.
-   Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair. */
+   Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair,
+   7 FramIndex, 8 RecursiveValue, 9 OpaqueIndex, 10 LateUnsafe,
+   11 ValueRow, 12 TaggedValue. */
 #include <math.h>
 #include "module_0.h"
 
@@ -24,13 +26,32 @@ typedef SLICE_ANY_TYPE slice_any;
 typedef SLICE_NIL_TYPE slice_nil_value;
 typedef SLICE_PAIR_TYPE slice_pair_value;
 
+struct slice_recursive_value {
+  slice_any next;
+};
+
 #define ARENA_BYTES ((size_t)16384)
+#define RECURSIVE_DEPTH ((size_t)160U)
 
 static uint8_t arena_storage[ARENA_BYTES];
+static const native_capability capability = { UINT64_C(0) };
 
 struct slice_text_blob {
   uint64_t length;
   uint8_t bytes[3];
+};
+
+struct slice_fram_index {
+  native_vec *cells;
+};
+
+struct slice_opaque_index {
+  native_set *members;
+};
+
+struct slice_late_unsafe {
+  int64_t prefix;
+  native_vec *cells;
 };
 
 static const struct slice_text_blob text_abc_left = {
@@ -52,10 +73,56 @@ static const struct slice_text_blob_2 text_42 = {
   UINT64_C(2), { UINT8_C('4'), UINT8_C('2') }
 };
 
+static const native_value_descriptor vector_cycle_descriptor = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = sizeof(native_vec *),
+  .alignment = _Alignof(native_vec *),
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &vector_cycle_descriptor,
+  .stride = sizeof(native_vec *),
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+
 static slice_any slice_pair(void *target) {
   slice_any value;
   value.tag = INT64_C(6);
   value.payload.variant_6 = target;
+  return value;
+}
+
+static slice_any slice_fram_index(void *target) {
+  slice_any value;
+  value.tag = INT64_C(7);
+  value.payload.variant_7 = target;
+  return value;
+}
+
+static slice_any slice_recursive_value(void *target) {
+  slice_any value;
+  value.tag = INT64_C(8);
+  value.payload.variant_8 = target;
+  return value;
+}
+
+static slice_any slice_opaque_index(void *target) {
+  slice_any value;
+  value.tag = INT64_C(9);
+  value.payload.variant_9 = target;
+  return value;
+}
+
+static slice_any slice_late_unsafe(void *target) {
+  slice_any value;
+  value.tag = INT64_C(10);
+  value.payload.variant_10 = target;
   return value;
 }
 
@@ -77,6 +144,13 @@ static slice_any slice_text(const struct slice_text_blob *blob) {
   slice_any value;
   value.tag = INT64_C(3);
   value.payload.variant_3 = (uint64_t)(uintptr_t)blob;
+  return value;
+}
+
+static slice_any slice_keyword(const struct slice_text_blob *blob) {
+  slice_any value;
+  value.tag = INT64_C(4);
+  value.payload.variant_4 = (uint64_t)(uintptr_t)blob;
   return value;
 }
 
@@ -119,8 +193,246 @@ int main(int argc, char **argv) {
   slice_any as_false = slice_bool(false);
   slice_any as_true = slice_bool(true);
   slice_any as_nil = slice_nil();
+  struct slice_recursive_value recursive[RECURSIVE_DEPTH];
+  struct slice_recursive_value equal_recursive[RECURSIVE_DEPTH];
+  struct slice_recursive_value recursive_cycle;
+  struct slice_fram_index unsafe_index;
+  struct slice_fram_index null_vector_index = { NULL };
+  struct slice_opaque_index opaque_index = { NULL };
+  struct slice_late_unsafe late_left;
+  struct slice_late_unsafe late_right;
+  native_atom *cell = NULL;
+  native_vec *cells;
+  slice_any as_recursive;
+  slice_any as_equal_recursive;
+  slice_any as_cycle;
+  slice_any unsupported;
+  slice_any opaque;
+  slice_any late_unsafe_left;
+  slice_any late_unsafe_right;
+  slice_any null_text = slice_text(NULL);
+  slice_any null_keyword = slice_keyword(NULL);
+  slice_any null_vector = slice_fram_index(&null_vector_index);
+  native_vec *vector_cycle;
+  native_vec *vector_cycle_element;
+  size_t depth;
 
   native_arena_init(&arena, arena_storage, ARENA_BYTES);
+
+  recursive[0].next = as_number;
+  equal_recursive[0].next = as_number;
+  for (depth = 1U; depth < RECURSIVE_DEPTH; depth++) {
+    recursive[depth].next = slice_recursive_value(&recursive[depth - 1U]);
+    equal_recursive[depth].next =
+        slice_recursive_value(&equal_recursive[depth - 1U]);
+  }
+  as_recursive = slice_recursive_value(&recursive[RECURSIVE_DEPTH - 1U]);
+  as_equal_recursive =
+      slice_recursive_value(&equal_recursive[RECURSIVE_DEPTH - 1U]);
+  recursive_cycle.next = slice_recursive_value(&recursive_cycle);
+  as_cycle = slice_recursive_value(&recursive_cycle);
+
+  cells = native_vec_new(
+      &arena, INT64_C(1), (int64_t)sizeof cell, _Alignof(native_atom *));
+  cells = native_vec_push(&arena, cells, &cell, (int64_t)sizeof cell,
+                          _Alignof(native_atom *));
+  unsafe_index.cells = cells;
+  unsupported = slice_fram_index(&unsafe_index);
+  opaque = slice_opaque_index(&opaque_index);
+  late_left.prefix = INT64_C(0);
+  late_left.cells = cells;
+  late_right.prefix = INT64_C(1);
+  late_right.cells = cells;
+  late_unsafe_left = slice_late_unsafe(&late_left);
+  late_unsafe_right = slice_late_unsafe(&late_right);
+  vector_cycle = native_vec_new(
+      &arena, INT64_C(1), (int64_t)sizeof vector_cycle,
+      _Alignof(native_vec *));
+  vector_cycle = native_vec_push(
+      &arena, vector_cycle, &vector_cycle, (int64_t)sizeof vector_cycle,
+      _Alignof(native_vec *));
+  /* push copies the old header pointer. Rewrite that test-only payload after
+     the final persistent header exists so this is a genuine vector-only cycle. */
+  memcpy(vector_cycle->elements, &vector_cycle, sizeof vector_cycle);
+  memcpy(&vector_cycle_element, vector_cycle->elements,
+         sizeof vector_cycle_element);
+  if (vector_cycle_element != vector_cycle) {
+    return 104;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'u')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(unsupported, unsupported);
+    } else if (argv[1][1] == 'h') {
+      (void)native_m0_fn_5(unsupported);
+    } else {
+      (void)native_m0_fn_6(unsupported, unsupported);
+    }
+    return 12;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'o')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(opaque, opaque);
+    } else if (argv[1][1] == 'h') {
+      (void)native_m0_fn_5(opaque);
+    } else {
+      (void)native_m0_fn_6(opaque, opaque);
+    }
+    return 13;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'c')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(as_cycle, as_cycle);
+    } else if (argv[1][1] == 'h') {
+      (void)native_m0_fn_5(as_cycle);
+    } else {
+      (void)native_m0_fn_6(as_cycle, as_cycle);
+    }
+    return 14;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'l')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(late_unsafe_left, late_unsafe_right);
+    } else {
+      (void)native_m0_fn_6(late_unsafe_left, late_unsafe_right);
+    }
+    return 15;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'x')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(as_number, unsupported);
+    } else {
+      (void)native_m0_fn_6(as_number, unsupported);
+    }
+    return 16;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'y')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(unsupported, as_number);
+    } else {
+      (void)native_m0_fn_6(unsupported, as_number);
+    }
+    return 17;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'z')) {
+    if (argv[1][1] == 'a') {
+      (void)native_m0_fn_63(unsupported);
+    } else if (argv[1][1] == 'b') {
+      (void)native_m0_fn_64(unsupported);
+    } else {
+      (void)native_m0_fn_65(unsupported);
+    }
+    return 18;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'v')) {
+    if (argv[1][1] == 'e') {
+      (void)native_dynamic_value_equal(
+          &vector_cycle_descriptor, &vector_cycle, &vector_cycle);
+    } else if (argv[1][1] == 'h') {
+      (void)native_dynamic_value_hash(
+          &vector_cycle_descriptor, &vector_cycle);
+    } else if (argv[1][1] == 'c') {
+      (void)native_dynamic_value_compare(
+          &vector_cycle_descriptor, &vector_cycle, &vector_cycle);
+    } else {
+      native_dynamic_value_validate(
+          &vector_cycle_descriptor, &vector_cycle);
+    }
+    return 19;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'w')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(null_text, null_text);
+    } else if (argv[1][1] == 'h') {
+      (void)native_m0_fn_5(null_text);
+    } else {
+      (void)native_m0_fn_6(null_text, null_text);
+    }
+    return 20;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'i')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(null_keyword, null_keyword);
+    } else if (argv[1][1] == 'h') {
+      (void)native_m0_fn_5(null_keyword);
+    } else {
+      (void)native_m0_fn_6(null_keyword, null_keyword);
+    }
+    return 21;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'p')) {
+    if (argv[1][1] == 'e') {
+      (void)native_m0_fn_4(null_vector, null_vector);
+    } else if (argv[1][1] == 'h') {
+      (void)native_m0_fn_5(null_vector);
+    } else {
+      (void)native_m0_fn_6(null_vector, null_vector);
+    }
+    return 22;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'g')) {
+    native_map *map = native_m0_fn_50(&arena, &capability);
+    (void)native_m0_fn_51(map, unsupported);
+    return 23;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'q')) {
+    native_map *map = native_m0_fn_50(&arena, &capability);
+    (void)native_m0_fn_57(map, unsupported);
+    return 24;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'a')) {
+    native_map *map = native_m0_fn_50(&arena, &capability);
+    (void)native_m0_fn_52(&arena, &capability, map, unsupported, INT64_C(1));
+    return 25;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 's')) {
+    native_set *set = native_m0_fn_53(&arena, &capability);
+    (void)native_m0_fn_54(set, unsupported);
+    return 26;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'j')) {
+    native_set *set = native_m0_fn_53(&arena, &capability);
+    (void)native_m0_fn_55(&arena, &capability, set, unsupported);
+    return 27;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'k')) {
+    native_map *map = native_m0_fn_50(&arena, &capability);
+    (void)native_m0_fn_58(&arena, &capability, map, unsupported);
+    return 28;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 'r')) {
+    native_set *set = native_m0_fn_53(&arena, &capability);
+    (void)native_m0_fn_60(&arena, &capability, set, unsupported);
+    return 29;
+  }
+
+  if ((argc > 1) && (argv[1][0] == 't')) {
+    if (argv[1][1] == 'm') {
+      (void)native_m0_fn_61(
+          &arena, &capability, unsupported, unsupported);
+    } else {
+      (void)native_m0_fn_62(
+          &arena, &capability, unsupported, unsupported);
+    }
+    return 30;
+  }
 
   if ((argc > 1) && (argv[1][0] == 'n')) {
     native_m0_fn_7(slice_pair(NULL));
@@ -184,6 +496,76 @@ int main(int argc, char **argv) {
       || (native_m0_fn_6(as_abc_left, as_abc_right) != INT64_C(0))
       || (native_m0_fn_6(as_abc_left, as_abd) >= INT64_C(0))) {
     return 8;
+  }
+  if (!native_m0_fn_4(as_recursive, as_equal_recursive)
+      || (native_m0_fn_5(as_recursive)
+          != native_m0_fn_5(as_equal_recursive))
+      || (native_m0_fn_6(as_recursive, as_equal_recursive) != INT64_C(0))) {
+    return 47;
+  }
+  {
+    slice_any null_record = slice_pair(NULL);
+    if (!native_m0_fn_4(null_record, null_record)
+        || (native_m0_fn_5(null_record) != native_m0_fn_5(null_record))
+        || (native_m0_fn_6(null_record, null_record) != INT64_C(0))) {
+      return 48;
+    }
+  }
+  {
+    native_map *map = native_m0_fn_50(&arena, &capability);
+    native_set *set = native_m0_fn_53(&arena, &capability);
+    if ((native_m0_fn_56(map) != INT64_C(0))
+        || (native_m0_fn_59(set) != INT64_C(0))
+        || native_m0_fn_51(map, as_pair)
+        || native_m0_fn_54(set, as_pair)) {
+      return 49;
+    }
+    map = native_m0_fn_52(
+        &arena, &capability, map, as_pair, INT64_C(7));
+    set = native_m0_fn_55(&arena, &capability, set, as_pair);
+    map = native_m0_fn_52(
+        &arena, &capability, map, as_equal_pair, INT64_C(8));
+    set = native_m0_fn_55(&arena, &capability, set, as_equal_pair);
+    if ((native_m0_fn_56(map) != INT64_C(1))
+        || (native_m0_fn_57(map, as_pair) != INT64_C(8))
+        || (native_m0_fn_57(map, as_equal_pair) != INT64_C(8))
+        || (native_m0_fn_59(set) != INT64_C(1))
+        || !native_m0_fn_51(map, as_pair)
+        || !native_m0_fn_51(map, as_equal_pair)
+        || !native_m0_fn_54(set, as_pair)
+        || !native_m0_fn_54(set, as_equal_pair)) {
+      return 50;
+    }
+    map = native_m0_fn_58(&arena, &capability, map, as_equal_pair);
+    set = native_m0_fn_60(&arena, &capability, set, as_equal_pair);
+    if ((native_m0_fn_56(map) != INT64_C(0))
+        || (native_m0_fn_59(set) != INT64_C(0))
+        || native_m0_fn_51(map, as_pair)
+        || native_m0_fn_54(set, as_pair)) {
+      return 51;
+    }
+  }
+  {
+    native_map *map = native_m0_fn_61(
+        &arena, &capability, as_pair, as_equal_pair);
+    native_set *set = native_m0_fn_62(
+        &arena, &capability, as_pair, as_equal_pair);
+    if ((native_m0_fn_56(map) != INT64_C(1))
+        || (native_m0_fn_57(map, as_pair) != INT64_C(2))
+        || (native_m0_fn_57(map, as_equal_pair) != INT64_C(2))
+        || (native_m0_fn_59(set) != INT64_C(1))
+        || !native_m0_fn_54(set, as_pair)
+        || !native_m0_fn_54(set, as_equal_pair)) {
+      return 52;
+    }
+  }
+  if (!native_m0_fn_63(as_number)
+      || !native_m0_fn_64(as_number)
+      || native_m0_fn_65(as_number)
+      || native_m0_fn_63(as_pair)
+      || native_m0_fn_64(as_pair)
+      || !native_m0_fn_65(as_pair)) {
+    return 53;
   }
   slice_pair_value copied_pair = native_m0_fn_7(as_pair);
   if ((copied_pair.field_0 != INT64_C(3)) ||

@@ -2304,7 +2304,10 @@
   (match operation
     [(ValueEqualV0 domain-type left-id right-id) "equal"]
     [(ValueHashV0 domain-type value-id) "hash"]
-    [(ValueCompareV0 domain-type left-id right-id) "compare"]))
+    [(ValueCompareV0 domain-type left-id right-id) "compare"]
+    [(DynamicValueEqualV0 domain-type left-id right-id) "equal"]
+    [(DynamicValueHashV0 domain-type value-id) "hash"]
+    [(DynamicValueCompareV0 domain-type left-id right-id) "compare"]))
 
 (defn unsupported-block-value-semantics
   [(block core/BasicBlock)] (U String Nil)

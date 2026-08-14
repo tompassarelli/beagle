@@ -4258,12 +4258,24 @@ static void native_collection_check_equality(
     }
     return;
   case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
+  case NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL:
     if (equality.descriptor == NULL) {
       native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
     }
     return;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_collection_validate_candidate(
+    const void *candidate, native_collection_equality equality) {
+  if (candidate == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_collection_check_equality(equality);
+  if (equality.kind == NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL) {
+    native_dynamic_value_validate(equality.descriptor, candidate);
   }
 }
 
@@ -4310,6 +4322,10 @@ static bool native_collection_equal(const void *left, const void *right,
     return native_text_eq(left_value, right_value);
   }
   case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
+  case NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL:
+    /* Dynamic collection candidates are validated exactly once by the shared
+       find seam before lookup or insertion. Every resident therefore entered
+       through the same gate, so scans retain the total structural comparator. */
     return native_value_equal(equality.descriptor, left, right);
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -4363,7 +4379,8 @@ static uint64_t native_map_hash_mix(uint64_t hash) {
    must refuse a structural map before it allocates a slot table, or every
    operation past the minimum length pays a table it is about to discard. */
 static bool native_map_kind_hashable(native_collection_equality_kind kind) {
-  return kind != NATIVE_COLLECTION_EQ_KIND_STRUCTURAL;
+  return (kind != NATIVE_COLLECTION_EQ_KIND_STRUCTURAL) &&
+         (kind != NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL);
 }
 
 /* Hashes what native_collection_equal compares over readable keys: equal keys
@@ -4427,6 +4444,7 @@ static bool native_map_hash_key(const void *key,
     break;
   }
   case NATIVE_COLLECTION_EQ_KIND_STRUCTURAL:
+  case NATIVE_COLLECTION_EQ_KIND_DYNAMIC_STRUCTURAL:
     /* native_value_hash traps on values native_value_equal accepts (a null text
        handle on both sides, a pointer-identical malformed vector), so hashing a
        structural key could turn a working lookup into a trap. Structural keys
@@ -4730,7 +4748,7 @@ static int64_t native_map_find(const native_map *map, const void *key,
   if (key == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_collection_check_equality(equality);
+  native_collection_validate_candidate(key, equality);
   if (map->index != NULL) {
     int64_t found;
     if (native_map_index_lookup(map, key, equality, &found)) {
@@ -5053,7 +5071,7 @@ static int64_t native_set_find(const native_set *set, const void *value,
   if (value == NULL) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_collection_check_equality(equality);
+  native_collection_validate_candidate(value, equality);
   for (index = INT64_C(0); index < set->length; index++) {
     if (native_collection_equal(native_set_item_at(set, index), value,
                                 equality)) {
@@ -5242,6 +5260,175 @@ static const native_value_variant_descriptor *native_value_variant(
   native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
 }
 
+typedef struct native_value_semantics_path {
+  const native_value_descriptor *descriptor;
+  const void *value;
+  const struct native_value_semantics_path *parent;
+} native_value_semantics_path;
+
+static bool native_value_semantics_path_contains(
+    const native_value_semantics_path *path,
+    const native_value_descriptor *descriptor, const void *value) {
+  while (path != NULL) {
+    if ((path->descriptor == descriptor) && (path->value == value)) {
+      return true;
+    }
+    path = path->parent;
+  }
+  return false;
+}
+
+static void native_dynamic_value_validate_inner(
+    const native_value_descriptor *descriptor, const void *value,
+    const native_value_semantics_path *path) {
+  size_t index;
+  if (!native_value_descriptor_valid(descriptor) || (value == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  switch (descriptor->kind) {
+    case NATIVE_VALUE_BOOL:
+      if (descriptor->size != sizeof(bool)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_SIGNED:
+    case NATIVE_VALUE_UNSIGNED:
+      if ((descriptor->size != sizeof(uint8_t)) &&
+          (descriptor->size != sizeof(uint16_t)) &&
+          (descriptor->size != sizeof(uint32_t)) &&
+          (descriptor->size != sizeof(uint64_t))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_FLOAT:
+      if ((descriptor->size != sizeof(float)) &&
+          (descriptor->size != sizeof(double))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_TEXT:
+    case NATIVE_VALUE_KEYWORD: {
+      uint64_t handle;
+      if (descriptor->size != sizeof handle) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&handle, value, sizeof handle);
+      (void)native_text_length(handle);
+      return;
+    }
+
+    case NATIVE_VALUE_BYTES: {
+      native_bytes bytes;
+      if (descriptor->size != sizeof bytes) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&bytes, value, sizeof bytes);
+      if ((bytes.data == NULL) && (bytes.length != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_RECORD:
+      if ((descriptor->fields == NULL) && (descriptor->field_count != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      for (index = 0U; index < descriptor->field_count; index++) {
+        const native_value_field_descriptor *field = &descriptor->fields[index];
+        if (!native_value_descriptor_valid(field->value) ||
+            (field->offset > descriptor->size) ||
+            (field->value->size > (descriptor->size - field->offset))) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        native_dynamic_value_validate_inner(
+            field->value, (const uint8_t *)value + field->offset, path);
+      }
+      return;
+
+    case NATIVE_VALUE_UNION: {
+      int64_t tag;
+      const native_value_variant_descriptor *variant;
+      if ((descriptor->tag_offset > descriptor->size) ||
+          (sizeof tag > (descriptor->size - descriptor->tag_offset))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&tag, (const uint8_t *)value + descriptor->tag_offset, sizeof tag);
+      variant = native_value_variant(descriptor, tag);
+      if (variant->payload != NULL) {
+        if (!native_value_descriptor_valid(variant->payload) ||
+            (variant->payload_offset > descriptor->size) ||
+            (variant->payload->size >
+             (descriptor->size - variant->payload_offset))) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        native_dynamic_value_validate_inner(
+            variant->payload,
+            (const uint8_t *)value + variant->payload_offset, path);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_VECTOR: {
+      const native_vec *vector;
+      native_value_semantics_path next;
+      if (descriptor->size != sizeof vector) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&vector, value, sizeof vector);
+      native_value_vector_validate(descriptor, vector);
+      if (native_value_semantics_path_contains(path, descriptor, vector)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      next.descriptor = descriptor;
+      next.value = vector;
+      next.parent = path;
+      for (index = 0U; index < (size_t)vector->length; index++) {
+        native_dynamic_value_validate_inner(
+            descriptor->element,
+            (const uint8_t *)vector->elements + (index * descriptor->stride),
+            &next);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_REFERENCE: {
+      const void *reference;
+      native_value_semantics_path next;
+      if ((descriptor->size != sizeof reference) ||
+          !native_value_descriptor_valid(descriptor->element) ||
+          (descriptor->element->kind != NATIVE_VALUE_RECORD)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&reference, value, sizeof reference);
+      if (reference == NULL) {
+        return;
+      }
+      if (native_value_semantics_path_contains(path, descriptor->element,
+                                               reference)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      next.descriptor = descriptor->element;
+      next.value = reference;
+      next.parent = path;
+      native_dynamic_value_validate_inner(descriptor->element, reference,
+                                          &next);
+      return;
+    }
+
+    case NATIVE_VALUE_MAP:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+void native_dynamic_value_validate(const native_value_descriptor *descriptor,
+                                   const void *value) {
+  native_dynamic_value_validate_inner(descriptor, value, NULL);
+}
+
 static bool native_value_equal_inner(const native_value_descriptor *descriptor,
                                      const void *left, const void *right) {
   size_t index;
@@ -5399,6 +5586,13 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
 
 bool native_value_equal(const native_value_descriptor *descriptor,
                         const void *left, const void *right) {
+  return native_value_equal_inner(descriptor, left, right);
+}
+
+bool native_dynamic_value_equal(const native_value_descriptor *descriptor,
+                                const void *left, const void *right) {
+  native_dynamic_value_validate(descriptor, left);
+  native_dynamic_value_validate(descriptor, right);
   return native_value_equal_inner(descriptor, left, right);
 }
 
@@ -5642,7 +5836,9 @@ static void native_value_hash_float(
 }
 
 static void native_value_hash_inner(const native_value_descriptor *descriptor,
-                                    const void *value, uint64_t *state) {
+                                    const void *value, uint64_t *state,
+                                    bool dynamic,
+                                    const native_value_semantics_path *path) {
   size_t index;
   if (!native_value_descriptor_valid(descriptor) || (value == NULL) ||
       (state == NULL)) {
@@ -5717,51 +5913,95 @@ static void native_value_hash_inner(const native_value_descriptor *descriptor,
       native_value_hash_u64(state, (uint64_t)descriptor->field_count);
       for (index = 0U; index < descriptor->field_count; index++) {
         const native_value_field_descriptor *field = &descriptor->fields[index];
+        if (dynamic &&
+            (!native_value_descriptor_valid(field->value) ||
+             (field->offset > descriptor->size) ||
+             (field->value->size > (descriptor->size - field->offset)))) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
         native_value_hash_inner(field->value,
-                                (const uint8_t *)value + field->offset, state);
+                                (const uint8_t *)value + field->offset, state,
+                                dynamic, path);
       }
       return;
 
     case NATIVE_VALUE_UNION: {
       int64_t tag;
       const native_value_variant_descriptor *variant;
+      if (dynamic &&
+          ((descriptor->tag_offset > descriptor->size) ||
+           (sizeof tag > (descriptor->size - descriptor->tag_offset)))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
       memcpy(&tag, (const uint8_t *)value + descriptor->tag_offset, sizeof tag);
       variant = native_value_variant(descriptor, tag);
       native_value_hash_u64(state, (uint64_t)tag);
       if (variant->payload != NULL) {
+        if (dynamic &&
+            (!native_value_descriptor_valid(variant->payload) ||
+             (variant->payload_offset > descriptor->size) ||
+             (variant->payload->size >
+              (descriptor->size - variant->payload_offset)))) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
         native_value_hash_inner(
             variant->payload,
-            (const uint8_t *)value + variant->payload_offset, state);
+            (const uint8_t *)value + variant->payload_offset, state, dynamic,
+            path);
       }
       return;
     }
 
     case NATIVE_VALUE_VECTOR: {
       const native_vec *vector;
+      native_value_semantics_path next;
+      const native_value_semantics_path *nested_path = path;
+      if (dynamic && (descriptor->size != sizeof vector)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
       memcpy(&vector, value, sizeof vector);
       native_value_vector_validate(descriptor, vector);
+      if (dynamic) {
+        if (native_value_semantics_path_contains(path, descriptor, vector)) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        next.descriptor = descriptor;
+        next.value = vector;
+        next.parent = path;
+        nested_path = &next;
+      }
       native_value_hash_u64(state, (uint64_t)vector->length);
       for (index = 0U; index < (size_t)vector->length; index++) {
         native_value_hash_inner(
             descriptor->element,
             (const uint8_t *)vector->elements + (index * descriptor->stride),
-            state);
+            state, dynamic, nested_path);
       }
       return;
     }
 
     case NATIVE_VALUE_REFERENCE: {
       const void *reference;
+      native_value_semantics_path next;
       if ((descriptor->size != sizeof reference) ||
-          !native_value_descriptor_valid(descriptor->element)) {
+          !native_value_descriptor_valid(descriptor->element) ||
+          (dynamic && (descriptor->element->kind != NATIVE_VALUE_RECORD))) {
         native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
       }
       memcpy(&reference, value, sizeof reference);
       if (reference == NULL) {
         native_value_hash_u64(state, UINT64_C(0));
       } else {
+        if (dynamic && native_value_semantics_path_contains(
+                           path, descriptor->element, reference)) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+        next.descriptor = descriptor->element;
+        next.value = reference;
+        next.parent = path;
         native_value_hash_u64(state, UINT64_C(1));
-        native_value_hash_inner(descriptor->element, reference, state);
+        native_value_hash_inner(descriptor->element, reference, state, dynamic,
+                                dynamic ? &next : path);
       }
       return;
     }
@@ -5775,7 +6015,14 @@ static void native_value_hash_inner(const native_value_descriptor *descriptor,
 int64_t native_value_hash(const native_value_descriptor *descriptor,
                           const void *value) {
   uint64_t state = NATIVE_VALUE_HASH_OFFSET;
-  native_value_hash_inner(descriptor, value, &state);
+  native_value_hash_inner(descriptor, value, &state, false, NULL);
+  return (int64_t)(state & UINT64_C(0x7fffffffffffffff));
+}
+
+int64_t native_dynamic_value_hash(const native_value_descriptor *descriptor,
+                                  const void *value) {
+  uint64_t state = NATIVE_VALUE_HASH_OFFSET;
+  native_value_hash_inner(descriptor, value, &state, true, NULL);
   return (int64_t)(state & UINT64_C(0x7fffffffffffffff));
 }
 
@@ -6035,6 +6282,13 @@ static int64_t native_value_compare_inner(
 
 int64_t native_value_compare(const native_value_descriptor *descriptor,
                              const void *left, const void *right) {
+  return native_value_compare_inner(descriptor, left, right);
+}
+
+int64_t native_dynamic_value_compare(const native_value_descriptor *descriptor,
+                                     const void *left, const void *right) {
+  native_dynamic_value_validate(descriptor, left);
+  native_dynamic_value_validate(descriptor, right);
   return native_value_compare_inner(descriptor, left, right);
 }
 

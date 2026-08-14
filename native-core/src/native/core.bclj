@@ -47,7 +47,8 @@
   (F64EqualityV0 [(token Bool)])
   (TextEqualityV0 [(token Bool)])
   (KeywordEqualityV0 [(token Bool)])
-  (StructuralEqualityV0 [(domain-type NativeId)]))
+  (StructuralEqualityV0 [(domain-type NativeId)])
+  (DynamicStructuralEqualityV0 [(domain-type NativeId)]))
 
 (defunion TypeShape
   (AtomType [(kind AtomKind)])
@@ -302,7 +303,12 @@
   (ValueCompareV0
     [(domain-type NativeId)
      (left-id NativeId)
-     (right-id NativeId)]))
+     (right-id NativeId)])
+  (DynamicValueEqualV0
+    [(domain-type NativeId) (left-id NativeId) (right-id NativeId)])
+  (DynamicValueHashV0 [(domain-type NativeId) (value-id NativeId)])
+  (DynamicValueCompareV0
+    [(domain-type NativeId) (left-id NativeId) (right-id NativeId)]))
 
 (defunion ValueTextModeV0
   (ValueStrV0 [(token Bool)])
@@ -1825,9 +1831,12 @@
 (defn concrete-equality-refs-closed?
   [(equality ConcreteEqualityV0)
    (known-types (Vec NativeId))] Bool
-  (if (instance? native.core.StructuralEqualityV0 equality)
+  (cond
+    (instance? native.core.StructuralEqualityV0 equality)
     (id-in? known-types (structuralequalityv0-domain-type equality))
-    true))
+    (instance? native.core.DynamicStructuralEqualityV0 equality)
+    (id-in? known-types (dynamicstructuralequalityv0-domain-type equality))
+    :else true))
 
 (defn instruction-semantic-refs-closed?
   [(instruction Instruction)
@@ -1958,6 +1967,12 @@
        [(ValueHashV0 domain-type value-id)
         (id-in? known-types domain-type)]
        [(ValueCompareV0 domain-type left-id right-id)
+        (id-in? known-types domain-type)]
+       [(DynamicValueEqualV0 domain-type left-id right-id)
+        (id-in? known-types domain-type)]
+       [(DynamicValueHashV0 domain-type value-id)
+        (id-in? known-types domain-type)]
+       [(DynamicValueCompareV0 domain-type left-id right-id)
         (id-in? known-types domain-type)])]
     [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
      (id-in? known-types domain-type)]
@@ -2239,7 +2254,11 @@
      (match operation
        [(ValueEqualV0 domain-type left-id right-id) [left-id right-id]]
        [(ValueHashV0 domain-type value-id) [value-id]]
-       [(ValueCompareV0 domain-type left-id right-id) [left-id right-id]])]
+       [(ValueCompareV0 domain-type left-id right-id) [left-id right-id]]
+       [(DynamicValueEqualV0 domain-type left-id right-id) [left-id right-id]]
+       [(DynamicValueHashV0 domain-type value-id) [value-id]]
+       [(DynamicValueCompareV0 domain-type left-id right-id)
+        [left-id right-id]])]
     [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
      [arena-id value-id]]
     [(CodecPrimitiveInstructionV0 result operation)

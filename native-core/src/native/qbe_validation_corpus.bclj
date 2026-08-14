@@ -785,6 +785,40 @@
     []
     []))
 
+(def refusal-dynamic-value-hash-block core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-dyn-hsh-blk")
+    []
+    [(core/->ValueSemanticsInstruction
+       (core/->SsaValueV0 (slice-id "ref-dyn-hsh-out") (slice-id "type-0-i64"))
+       (core/->DynamicValueHashV0 (slice-id "type-3-par")
+         (slice-id "ref-dyn-hsh-val")))]
+    [(core/return-terminator (slice-id "ref-dyn-hsh-out"))]))
+
+(def refusal-dynamic-value-hash-function core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-dyn-hsh-fn") "refuse-dynamic-value-hash"
+    [(core/->Parameter (slice-id "ref-dyn-hsh-val") (slice-id "type-3-par"))]
+    [refusal-dynamic-value-hash-block]
+    (slice-id "ref-dyn-hsh-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-dynamic-value-hash-program core/NativeCoreProgram
+  (core/->NativeCoreProgram (slice-id "ref-dyn-hsh-wld") nil
+    "native-qbe-fixture-v0"
+    [slice-i64-type slice-pair-type]
+    []
+    []
+    []
+    [slice-i64-layout slice-pair-layout]
+    [refusal-dynamic-value-hash-function]
+    []
+    []
+    []
+    []
+    []))
+
 (def refusal-value-compare-block core/BasicBlock
   (core/->BasicBlock (slice-id "ref-val-cmp-blk")
     []
@@ -1253,6 +1287,14 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: compare" value)])))
 
+(def refusal-dynamic-value-hash-proven? Bool
+  (and (core/validationreport-passed
+         (core/validate-program refusal-dynamic-value-hash-program))
+    (match (qbe/materialize-program refusal-dynamic-value-hash-program 3 "lp64")
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: hash" value)])))
+
 (def refusal-value-to-text-proven? Bool
   (and (core/validationreport-passed
          (core/validate-program refusal-value-to-text-program))
@@ -1298,6 +1340,7 @@
     refusal-value-equal-proven?
     refusal-value-hash-proven?
     refusal-value-compare-proven?
+    refusal-dynamic-value-hash-proven?
     refusal-value-to-text-proven?
     atom-refusal-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)

@@ -698,40 +698,44 @@
           "  .keyword_count = (size_t)0\n"
           "};\n")))))
 
+(defn descriptor-collection-equality? [(equality core/ConcreteEqualityV0)] Bool
+  (or (instance? native.core.StructuralEqualityV0 equality)
+    (instance? native.core.DynamicStructuralEqualityV0 equality)))
+
 (defn structural-collection-equality? [(instruction core/Instruction)] Bool
   (cond
     (instance? native.core.MapLiteralInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/mapliteralinstructionv0-key-equality instruction))
     (instance? native.core.SetLiteralInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/setliteralinstructionv0-element-equality instruction))
     (instance? native.core.MapGetInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/mapgetinstructionv0-key-equality instruction))
     (instance? native.core.MapContainsInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/mapcontainsinstructionv0-key-equality instruction))
     (instance? native.core.MapAssocInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/mapassocinstructionv0-key-equality instruction))
     (instance? native.core.MapDissocInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/mapdissocinstructionv0-key-equality instruction))
     (instance? native.core.SetContainsInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/setcontainsinstructionv0-element-equality instruction))
     (instance? native.core.SetConjInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/setconjinstructionv0-element-equality instruction))
     (instance? native.core.SetDisjInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/setdisjinstructionv0-element-equality instruction))
     (instance? native.core.TransientMapAssocInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/transientmapassocinstructionv0-key-equality instruction))
     (instance? native.core.TransientSetConjInstructionV0 instruction)
-    (instance? native.core.StructuralEqualityV0
+    (descriptor-collection-equality?
       (core/transientsetconjinstructionv0-element-equality instruction))
     :else false))
 
@@ -1405,10 +1409,15 @@
     "NATIVE_COLLECTION_EQ_TEXT"
     (instance? native.core.KeywordEqualityV0 equality)
     "NATIVE_COLLECTION_EQ_KEYWORD"
-    :else
+    (instance? native.core.StructuralEqualityV0 equality)
     (str "NATIVE_COLLECTION_EQ_STRUCTURAL(&"
       (descriptor-symbol types module-index
         (core/structuralequalityv0-domain-type equality))
+      ")")
+    :else
+    (str "NATIVE_COLLECTION_EQ_DYNAMIC_STRUCTURAL(&"
+      (descriptor-symbol types module-index
+        (core/dynamicstructuralequalityv0-domain-type equality))
       ")")))
 
 (defn emit-value-list
@@ -2145,6 +2154,31 @@
 
           [(ValueCompareV0 domain-type left-id right-id)
            (str "  " target " = native_value_compare(&"
+             (descriptor-symbol types module-index domain-type)
+             ", &"
+             (value-name function slots left-id)
+             ", &"
+             (value-name function slots right-id)
+             ");\n")]
+
+          [(DynamicValueEqualV0 domain-type left-id right-id)
+           (str "  " target " = native_dynamic_value_equal(&"
+             (descriptor-symbol types module-index domain-type)
+             ", &"
+             (value-name function slots left-id)
+             ", &"
+             (value-name function slots right-id)
+             ");\n")]
+
+          [(DynamicValueHashV0 domain-type value-id)
+           (str "  " target " = native_dynamic_value_hash(&"
+             (descriptor-symbol types module-index domain-type)
+             ", &"
+             (value-name function slots value-id)
+             ");\n")]
+
+          [(DynamicValueCompareV0 domain-type left-id right-id)
+           (str "  " target " = native_dynamic_value_compare(&"
              (descriptor-symbol types module-index domain-type)
              ", &"
              (value-name function slots left-id)

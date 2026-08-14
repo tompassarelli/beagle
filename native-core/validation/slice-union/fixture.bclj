@@ -9,6 +9,24 @@
 
 (defrecord Pair [(left Int) (right Int)])
 
+;; Fram's slot hash accepts Any in a program that also declares mutable index
+;; records. Those unrelated record alternatives must not make every dynamic
+;; SliceValue hash site unlowerable; the active union tag still selects the
+;; descriptor walked at runtime.
+(defrecord FramIndex [(cells (Vec (Atom (Vec Int))))])
+
+;; A finite recursive value repeats the SliceValue descriptor at different
+;; addresses. Active-path validation must not confuse that with a value cycle.
+(defrecord RecursiveValue [(next Any)])
+
+;; Set storage is an opaque runtime reference, not a semantic record reference.
+;; Selecting this active Any branch must trap before dereferencing it.
+(defrecord OpaqueIndex [(members (Set Int))])
+
+;; Equality and comparison must validate the whole active value before an
+;; earlier differing field can short-circuit past this unsupported field.
+(defrecord LateUnsafe [(prefix Int) (cells (Vec (Atom (Vec Int))))])
+
 (defn pair? [(v Any)] Bool (instance? Pair v))
 
 ;; Widening: the declared return closes to the Any union, so the body's Int is
@@ -185,3 +203,64 @@
 
 (defn maybe-int-when [(available Bool)] Int?
   (when available 9))
+
+;; Dynamic collection equality validates a candidate before an empty lookup or
+;; first insertion, then keeps structural collections on the scan path.
+(defn empty-any-map [] (Map Any Int) {})
+
+(defn any-map-contains? [(entries (Map Any Int)) (key Any)] Bool
+  (contains? entries key))
+
+(defn any-map-assoc
+  [(entries (Map Any Int)) (key Any) (value Int)] (Map Any Int)
+  (assoc entries key value))
+
+(defn empty-any-set [] (Set Any) #{})
+
+(defn any-set-contains? [(entries (Set Any)) (value Any)] Bool
+  (contains? entries value))
+
+(defn any-set-conj [(entries (Set Any)) (value Any)] (Set Any)
+  (conj entries value))
+
+(defn any-map-count [(entries (Map Any Int))] Int
+  (count entries))
+
+(defn any-map-value [(entries (Map Any Int)) (key Any)] Int
+  (get entries key -1))
+
+(defn any-map-dissoc [(entries (Map Any Int)) (key Any)] (Map Any Int)
+  (dissoc entries key))
+
+(defn any-set-count [(entries (Set Any))] Int
+  (count entries))
+
+(defn any-set-disj [(entries (Set Any)) (value Any)] (Set Any)
+  (disj entries value))
+
+(defn transient-any-map! [(key Any) (equal-key Any)] (Map Any Int)
+  (persistent!
+    (reduce
+      (fn [(entries Any) (stage Any)] Any
+        (assoc! entries
+          (if (= stage 0) key equal-key)
+          (if (= stage 0) 1 2)))
+      (transient {})
+      [0 1])))
+
+(defn transient-any-set! [(value Any) (equal-value Any)] (Set Any)
+  (persistent!
+    (reduce
+      (fn [(entries Any) (entry Any)] Any
+        (conj! entries entry))
+      (transient #{})
+      [value equal-value])))
+
+(defn any-equal-int? [(value Any)] Bool
+  (= value 42))
+
+(defn int-equal-any? [(value Any)] Bool
+  (= 42 value))
+
+(defn any-not-equal-int? [(value Any)] Bool
+  (not= value 42))

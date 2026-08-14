@@ -1,0 +1,15 @@
+#lang beagle/clj
+(ns fixture.union-refusal)
+(define-mode strict)
+
+(defn map-or-int-equal? [(value (U (Map Int Int) Int))] Bool
+  (= value 1))
+
+(defn set-or-int-equal? [(value (U (Set Int) Int))] Bool
+  (= value 1))
+
+(defn cell-or-int-equal? [(value (U (Atom Int) Int))] Bool
+  (= value 1))
+
+(defn function-or-int-equal? [(value (U (Fn [Int] Int) Int))] Bool
+  (= value 1))

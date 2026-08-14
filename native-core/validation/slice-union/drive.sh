@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Drive validation/slice-union/fixture.bclj through the native pipeline and run
-# the coercion rule's own C probe: a tag inject, a checked extract that reads a
-# record reference out of the Any union, a checked by-value record copy, and
-# traps for a wrong tag or null record reference.
-# fram.types guards every narrowing it performs, so only this fixture can fire
-# the trap; the projection reuses slice-bodies' AST-to-facts step unchanged.
+# Drive union coercion plus dynamic Any value semantics through native C17/QBE.
+# The gate owns active-branch equality/hash/compare, Map/Set persistent and
+# transient behavior, compile-time unsupported-union refusals, and exact traps
+# for unsupported values, malformed handles, wrong tags, and reference/vector
+# cycles. It reuses slice-bodies' AST-to-facts projection unchanged.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -67,6 +66,54 @@ grep -Fq "lowered fn_46 int-vector? " "$art/report.txt"
 grep -Fq "lowered fn_47 text-ends-with? " "$art/report.txt"
 grep -Fq "lowered fn_48 maybe-int-if " "$art/report.txt"
 grep -Fq "lowered fn_49 maybe-int-when " "$art/report.txt"
+grep -Fq "lowered fn_50 empty-any-map " "$art/report.txt"
+grep -Fq "lowered fn_51 any-map-contains? " "$art/report.txt"
+grep -Fq "lowered fn_52 any-map-assoc " "$art/report.txt"
+grep -Fq "lowered fn_53 empty-any-set " "$art/report.txt"
+grep -Fq "lowered fn_54 any-set-contains? " "$art/report.txt"
+grep -Fq "lowered fn_55 any-set-conj " "$art/report.txt"
+grep -Fq "lowered fn_56 any-map-count " "$art/report.txt"
+grep -Fq "lowered fn_57 any-map-value " "$art/report.txt"
+grep -Fq "lowered fn_58 any-map-dissoc " "$art/report.txt"
+grep -Fq "lowered fn_59 any-set-count " "$art/report.txt"
+grep -Fq "lowered fn_60 any-set-disj " "$art/report.txt"
+grep -Fq "lowered fn_61 transient-any-map! " "$art/report.txt"
+grep -Fq "lowered fn_62 transient-any-set! " "$art/report.txt"
+grep -Fq "lowered fn_63 any-equal-int? " "$art/report.txt"
+grep -Fq "lowered fn_64 int-equal-any? " "$art/report.txt"
+grep -Fq "lowered fn_65 any-not-equal-int? " "$art/report.txt"
+
+refusal="$scratch/mixed-value-refusal"
+mkdir -p "$refusal"
+"$repo/bin/beagle-ast" "$here/mixed_value_refusal.bclj" \
+  >"$refusal/fixture.ast.json"
+bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+  "$refusal/fixture.ast.json" \
+  "$refusal/fixture.facts"
+bb -cp "$scratch/out" -e "
+(require 'native.body-slice)
+(spit \"$refusal/report.txt\"
+  (native.body-slice/emit-slice!
+    \"$refusal/fixture.facts\" \"fixture.union-refusal\"
+    \"native-core/validation/slice-union/mixed_value_refusal.bclj\"
+    \"$refusal\" \"native-slice-union-refusal-v0\" \"$abi\"))"
+cat "$refusal/report.txt"
+grep -Fq "TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS" \
+  "$refusal/report.txt" || {
+  echo "drive.sh: mixed union refusal diagnostic missing" >&2
+  exit 1
+}
+for function in map-or-int-equal? set-or-int-equal? cell-or-int-equal?; do
+  grep -Fq "[$function]" "$refusal/report.txt" || {
+    echo "drive.sh: mixed union refusal missing function: $function" >&2
+    exit 1
+  }
+done
+grep -Fq "TODO-NATIVE-FUNCTION-ABI: function-or-int-equal?" \
+  "$refusal/report.txt" || {
+  echo "drive.sh: function-bearing union ABI refusal missing" >&2
+  exit 1
+}
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
   exit 0
@@ -96,22 +143,44 @@ type_definitions=(
   "-DSLICE_PAIR_TYPE=$pair_type")
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
+
+expect_abort() {
+  local probe="$1"
+  local operation="$2"
+  local description="$3"
+  local status
+
+  if bash -c '
+      cd "$1" || exit 125
+      ulimit -c 0
+      "./$2" "$3" >/dev/null 2>&1
+      observed=$?
+      exit "$observed"
+    ' _ "$build" "$probe" "$operation" 2>/dev/null; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ $status -ne 134 ]]; then
+    echo "drive.sh: $description (expected abort 134, observed $status)" >&2
+    exit 1
+  fi
+}
+
 ( cd "$build" && gcc "${strict[@]}" "${type_definitions[@]}" \
     -o probe_gcc module_0.c native_shim.c main.c )
 ( cd "$build" && ./probe_gcc )
-if ( cd "$build" && ulimit -c 0 && ./probe_gcc mismatch ) 2>/dev/null; then
-  echo "drive.sh: the mismatched union tag did not trap" >&2
-  exit 1
-fi
-if ( cd "$build" && ulimit -c 0 && ./probe_gcc null ) 2>/dev/null; then
-  echo "drive.sh: the null record reference did not trap" >&2
-  exit 1
-fi
-if ( cd "$build" && ulimit -c 0 && ./probe_gcc double ) 2>/dev/null; then
-  echo "drive.sh: double accepted a non-numeric union tag" >&2
-  exit 1
-fi
-echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + mismatch/null/double traps ok"
+expect_abort probe_gcc mismatch "the mismatched union tag did not trap"
+expect_abort probe_gcc null "the null record reference did not trap"
+expect_abort probe_gcc double "double accepted a non-numeric union tag"
+for operation in \
+    ue uh uc oe oh oc ce ch cc le lc xe xc ye yc za zb zn vv ve vh vc \
+    we wh wc ie ih ic pe ph pc \
+    g q a s j k r tm ts; do
+  expect_abort probe_gcc "$operation" \
+    "dynamic unsupported value semantics did not trap: $operation"
+done
+echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + mismatch/null/double/dynamic-value traps ok"
 
 find_clang() {
   if command -v clang >/dev/null 2>&1; then command -v clang; return 0; fi
@@ -125,19 +194,20 @@ if [ -n "$clang_bin" ]; then
   ( cd "$build" && "$clang_bin" "${strict[@]}" "${type_definitions[@]}" \
       -o probe_clang module_0.c native_shim.c main.c )
   ( cd "$build" && ./probe_clang )
-  if ( cd "$build" && ulimit -c 0 && ./probe_clang mismatch ) 2>/dev/null; then
-    echo "drive.sh: clang build did not trap on the mismatched union tag" >&2
-    exit 1
-  fi
-  if ( cd "$build" && ulimit -c 0 && ./probe_clang null ) 2>/dev/null; then
-    echo "drive.sh: clang build did not trap on the null record reference" >&2
-    exit 1
-  fi
-  if ( cd "$build" && ulimit -c 0 && ./probe_clang double ) 2>/dev/null; then
-    echo "drive.sh: clang build did not trap on an invalid double operand" >&2
-    exit 1
-  fi
-  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + mismatch/null/double traps ok"
+  expect_abort probe_clang mismatch \
+    "clang build did not trap on the mismatched union tag"
+  expect_abort probe_clang null \
+    "clang build did not trap on the null record reference"
+  expect_abort probe_clang double \
+    "clang build did not trap on an invalid double operand"
+  for operation in \
+      ue uh uc oe oh oc ce ch cc le lc xe xc ye yc za zb zn vv ve vh vc \
+      we wh wc ie ih ic pe ph pc \
+      g q a s j k r tm ts; do
+    expect_abort probe_clang "$operation" \
+      "clang dynamic unsupported value semantics did not trap: $operation"
+  done
+  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + mismatch/null/double/dynamic-value traps ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
 fi
