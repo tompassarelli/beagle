@@ -8513,8 +8513,12 @@
                 (bodystatev0-value-refinements state)
                 (join-id core/NativeId) (state-id state owner "condition-join")
                 (join-parameter core/NativeId)
-                (state-id state owner "condition-value")]
-            (loop [(position Int) 0 (current BodyStateV0) state]
+                (state-id state owner "condition-value")
+                ;; Reserve this short-circuit node's coordinate before lowering
+                ;; an operand. A nested and/or otherwise sees the same counter
+                ;; and mints the same condition join and parameter identities.
+                (operand-state BodyStateV0) (state-bump state)]
+            (loop [(position Int) 0 (current BodyStateV0) operand-state]
               (let [(operand-node core/NativeId) (nth args position)
                     (operand ExprResultV0)
                     (lower-condition env owner current operand-node)

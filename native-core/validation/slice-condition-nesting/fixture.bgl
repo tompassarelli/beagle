@@ -1,0 +1,14 @@
+#lang beagle
+(ns native.short-circuit)
+(define-mode strict)
+
+(defn nested-short-circuit
+  [(outer Bool)
+   (left Bool)
+   (middle Bool)
+   (right Bool)] Bool
+  (if (and outer
+        (and (or left middle)
+          (and middle right)))
+    true
+    false))
