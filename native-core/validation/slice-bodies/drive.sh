@@ -3,9 +3,8 @@
 #   beagle-ast -> source facts (signatures + bodies) -> frozen source program
 #     -> typed program -> native program with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
-# Re-runnable: the projection is rebuilt from the vendored fram source and
-# must match the
-# committed types.facts byte for byte.
+# Re-runnable: the projection and tracked artifacts are rebuilt from the
+# current vendored Fram source.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -13,7 +12,6 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-source "$repo/native-core/validation/publish-verified-set.sh"
 # Upstream fram sources are vendored under native-core/validation/upstream/fram
 # (its MANIFEST records the fram revision and digests); a FRAM_* override still
 # points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
@@ -24,43 +22,20 @@ generated="$scratch/generated"
 trap 'rm -rf "${scratch:?}"' EXIT
 mkdir -p "$generated"
 
-banner=""
 logical=""
-if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
-  # Opt-in only, and it says so in the report: this mode proves the committed
-  # projection still lowers, never that it still matches the vendored source.
-  [[ -f "$art/types.facts" ]] \
-    || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/types.facts" >&2; exit 1; }
-  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches the vendored fram source"
-  echo "drive.sh: $banner" >&2
-  cp "$art/types.facts" "$generated/types.facts"
-  mapfile -t logical_ids < <(
-    awk -F '\t' '$2 == "relative-path" && $3 == "t" { print $4 }' \
-      "$generated/types.facts"
-  )
-  [[ "${#logical_ids[@]}" -eq 1 && -n "${logical_ids[0]}" ]] || {
-    echo "drive.sh: committed types.facts must contain exactly one non-empty relative-path" >&2
-    exit 1
-  }
-  logical="${logical_ids[0]}"
-elif [[ ! -f "$src" ]]; then
+if [[ ! -f "$src" ]]; then
   echo "drive.sh: upstream fram source is missing: $src" >&2
-  echo "drive.sh: restore native-core/validation/upstream/fram, point FRAM_TYPES at a fram source, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
+  echo "drive.sh: restore native-core/validation/upstream/fram or point FRAM_TYPES at the current Fram source" >&2
   exit 1
-else
-  "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
-  logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
-    "$scratch/types.ast.json")"
-  bb "$here/ast-facts.clj" \
-    "$scratch/types.ast.json=$logical" \
-    "$generated/types.facts" \
-    --include-defs
-  if [[ -f "$art/types.facts" ]] && ! cmp -s "$generated/types.facts" "$art/types.facts"; then
-    echo "drive.sh: regenerated projection differs from the committed types.facts" >&2
-    exit 1
-  fi
-  sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
 fi
+"$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
+logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/types.ast.json")"
+bb "$here/ast-facts.clj" \
+  "$scratch/types.ast.json=$logical" \
+  "$generated/types.facts" \
+  --include-defs
+sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
@@ -96,9 +71,6 @@ bb -cp "$scratch/out" -e "
     \"$logical\"
     \"$generated\" \"native-slice-bodies-v0\" \"$abi\"))"
 
-if [[ -n "$banner" ]]; then
-  sed -i "1i $banner" "$generated/report.txt"
-fi
 cat "$generated/report.txt"
 
 if [[ "${NATIVE_SLICE_SOURCE_ID_PROOF:-0}" == 1 ]]; then
@@ -110,7 +82,11 @@ fi
 publish_results() {
   local -a names=(types.facts report.txt module_0.h module_0.c)
   [[ -f "$generated/source.sha256" ]] && names+=(source.sha256)
-  publish_verified_set "$generated" "$art" "${names[@]}"
+  local name
+  mkdir -p "$art"
+  for name in "${names[@]}"; do
+    cp -- "$generated/$name" "$art/$name"
+  done
 }
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then

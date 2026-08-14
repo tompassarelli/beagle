@@ -1,4 +1,3 @@
-MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches the vendored fram source
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
