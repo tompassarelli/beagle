@@ -11,8 +11,9 @@
 # Usage: self-host/verify-selfhost.sh [MODULE.bclj ...]
 #   SELFHOST_OUT=/tmp/stage runs the ladder against an isolated authored-source
 #   compilation without changing the checked-in seed.
-#   default corpus: every tracked fixture under self-host/fixtures/, plus
-#   $FRAM_REPO/src/fram/fold.bclj when that checkout exists
+#   default corpus: every tracked fixture under self-host/fixtures/, plus the
+#   $FRAM_REPO/src/fram modules listed below that exist in that checkout
+#   BEAGLE_ORACLE_ROOT=/path selects the oracle binaries to compare against.
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
