@@ -4,7 +4,7 @@
 #     -> typed program -> native program with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 # Re-runnable: the projection and tracked artifacts are rebuilt from the
-# current vendored Fram source.
+# selected current Fram source.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -12,11 +12,8 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-src="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+src="$fram_checkout/src/fram/types.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-bodies.XXXXXX")"
 generated="$scratch/generated"
 trap 'rm -rf "${scratch:?}"' EXIT
@@ -24,8 +21,7 @@ mkdir -p "$generated"
 
 logical=""
 if [[ ! -f "$src" ]]; then
-  echo "drive.sh: upstream fram source is missing: $src" >&2
-  echo "drive.sh: restore native-core/validation/upstream/fram or point FRAM_TYPES at the current Fram source" >&2
+  echo "drive.sh: selected Fram source is missing: $src" >&2
   exit 1
 fi
 "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
@@ -111,10 +107,12 @@ value_param_of() { # <fn-index> — first parameter that is a generated type
 }
 defines=(
   "-DSLICE_ANY_TYPE=$(value_param_of 0)"          # instant? [v: Any]
-  "-DSLICE_TRIPLE_TYPE=$(return_type_of 21)"      # triple -> Triple
-  "-DSLICE_TERM_TYPE=$(value_param_of 21)"        # triple [t1: Term …]
+  "-DSLICE_TRIPLE_TYPE=$(return_type_of 23)"      # triple -> Triple
+  "-DSLICE_TERM_TYPE=$(value_param_of 23)"        # triple [t1: Term …]
   "-DSLICE_PAGE_REQUEST_TYPE=$(value_param_of 11)" # …cursor-value [r: RpcPageRequest]
   "-DSLICE_INSTANT_TYPE=$(return_type_of 1)"      # instant -> Instant
+  "-DSLICE_OPERATION_OCCURRENCE_TYPE=$(return_type_of 30)"
+  "-DSLICE_WITHDRAWAL_TYPE=$(return_type_of 33)"
 )
 for define in "${defines[@]}"; do
   [[ "$define" == *=native_m0_type_* ]] \

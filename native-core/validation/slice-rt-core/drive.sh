@@ -10,13 +10,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 artifacts="${NATIVE_SLICE_ARTIFACTS:-$here}"
 native_repo="${NATIVE_RT_CORE_NATIVE_REPO:-$repo}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-source_file="${FRAM_RT_CORE:-$repo/native-core/validation/upstream/fram/src/fram/rt_core.bgl}"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+source_file="$fram_checkout/src/fram/rt_core.bgl"
 supported_probe="$here/supported_probe.bgl"
-managed_out="${FRAM_MANAGED_OUT:-$repo/native-core/validation/upstream/fram/out}"
+managed_out="$fram_checkout/out"
 native_shim="$native_repo/native-core/shim"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-rt-core.XXXXXX")"
 generated="$scratch/generated"
@@ -27,7 +24,7 @@ die() {
   exit 1
 }
 
-for command in awk bb cmp cut gcc pkg-config rg sed sha256sum sort; do
+for command in awk bb cmp cut gcc jq pkg-config rg sed sha256sum sort; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -59,8 +56,10 @@ semantic_digest="$({
 compiler_commit="native-rt-core-projection-v0:$semantic_digest"
 
 "$repo/bin/beagle-ast" "$source_file" >"$scratch/rt_core.ast.json"
+source_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/rt_core.ast.json")"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/rt_core.ast.json=native-core/validation/upstream/fram/src/fram/rt_core.bgl" \
+  --input "$scratch/rt_core.ast.json=$source_logical" \
   --output "$generated/rt_core.facts" \
   --include-defs
 bb "$here/inventory.clj" "$scratch/rt_core.ast.json" "$generated/inventory.txt"
@@ -87,7 +86,7 @@ done
 
 bb -cp "$scratch/out" \
   "$here/native_runner.clj" \
-  "$generated/rt_core.facts" "$generated" "$compiler_commit" \
+  "$generated/rt_core.facts" "$source_logical" "$generated" "$compiler_commit" \
   "$generated/report.txt"
 
 bb -cp "$managed_out" \
@@ -124,7 +123,7 @@ digest_line() {
 }
 
 {
-  digest_line "$source_file" 'native-core/validation/upstream/fram/src/fram/rt_core.bgl'
+  digest_line "$source_file" "$source_logical"
   digest_line "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
     'beagle:native-core/validation/slice-bodies/ast-facts.clj'
   digest_line "$repo/native-core/bin/source-facts.clj" \

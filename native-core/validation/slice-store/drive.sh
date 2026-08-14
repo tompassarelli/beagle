@@ -8,7 +8,7 @@
 # store.bgl declares no record of its own: every type in its signatures comes
 # from fram.types, so both ASTs are projected into one source program.
 #
-# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_STORE, FRAM_TYPES.
+# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_CHECKOUT.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -16,12 +16,9 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-src="${FRAM_STORE:-$repo/native-core/validation/upstream/fram/src/fram/store.bgl}"
-dep="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+src="$fram_checkout/src/fram/store.bgl"
+dep="$fram_checkout/src/fram/types.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-store.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -32,6 +29,8 @@ for upstream in "$dep" "$src"; do
 done
 "$repo/bin/beagle-ast" "$dep" >"$scratch/types.ast.json"
 "$repo/bin/beagle-ast" "$src" >"$scratch/store.ast.json"
+store_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/store.ast.json")"
 bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/store.ast.json" \
   "$scratch/store.facts"
 cp "$scratch/store.facts" "$art/store.facts"
@@ -67,7 +66,7 @@ bb -Xmx4g -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
   (native.slice/emit-slice! \"$scratch/store.facts\" \"fram.store\"
-    \"fram:src/fram/store.bgl\" \"$art\" \"native-slice-store-v0\" \"$abi\"))"
+    \"$store_logical\" \"$art\" \"native-slice-store-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
 

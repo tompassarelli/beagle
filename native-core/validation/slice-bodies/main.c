@@ -3,7 +3,8 @@
    fn_0 instant?  fn_1 instant  fn_2 instant-shift-seconds
    fn_3 instant-seconds-between  fn_4 triple?
    fn_11 rpc-page-request-cursor-value  fn_16 commit-operation?
-   fn_19 atom? through fn_30 occurrence-before?
+   fn_19 operation-occurrence?  fn_20 withdrawal?
+   fn_21 atom? through fn_33 withdrawal
    Term tags: 0 text, 1 i64, 2 f64, 3 bool, 4 keyword, 5 Instant, 6 Triple.
    Every generated TYPE is named through a macro drive.sh resolves out of the
    emitted header: the emitter numbers its type table in collection order, so
@@ -29,12 +30,20 @@
 #ifndef SLICE_INSTANT_TYPE
 #error "SLICE_INSTANT_TYPE must name the generated Instant type"
 #endif
+#ifndef SLICE_OPERATION_OCCURRENCE_TYPE
+#error "SLICE_OPERATION_OCCURRENCE_TYPE must name the generated OperationOccurrence type"
+#endif
+#ifndef SLICE_WITHDRAWAL_TYPE
+#error "SLICE_WITHDRAWAL_TYPE must name the generated Withdrawal type"
+#endif
 
 typedef SLICE_ANY_TYPE slice_any;
 typedef SLICE_TRIPLE_TYPE slice_triple;
 typedef SLICE_TERM_TYPE slice_term;
 typedef SLICE_PAGE_REQUEST_TYPE slice_page_request;
 typedef SLICE_INSTANT_TYPE slice_instant;
+typedef SLICE_OPERATION_OCCURRENCE_TYPE slice_operation_occurrence;
+typedef SLICE_WITHDRAWAL_TYPE slice_withdrawal;
 
 /* Any variant tags, in fram.types collection order. */
 #define ANY_TAG_BOOL INT64_C(0)
@@ -46,6 +55,8 @@ typedef SLICE_INSTANT_TYPE slice_instant;
 #define ANY_TAG_INSTANT INT64_C(6)
 #define ANY_TAG_TRIPLE INT64_C(7)
 #define ANY_TAG_COMMIT_OPERATION INT64_C(21)
+#define ANY_TAG_OPERATION_OCCURRENCE INT64_C(23)
+#define ANY_TAG_WITHDRAWAL INT64_C(24)
 
 /* Term variant tags, in fram.types collection order. */
 #define TERM_TAG_TEXT INT64_C(0)
@@ -64,6 +75,10 @@ static slice_any any_reference(int64_t tag, void *target) {
     value.payload.variant_6 = target;
   } else if (tag == ANY_TAG_TRIPLE) {
     value.payload.variant_7 = target;
+  } else if (tag == ANY_TAG_OPERATION_OCCURRENCE) {
+    value.payload.variant_23 = target;
+  } else if (tag == ANY_TAG_WITHDRAWAL) {
+    value.payload.variant_24 = target;
   } else {
     value.payload.variant_21 = target;
   }
@@ -172,9 +187,8 @@ int main(int argc, char **argv) {
   uint64_t tx_sequence =
     keyword_of(&arena, "kernel/tx-sequence");
   uint64_t op_ordinal = keyword_of(&arena, "kernel/op-ordinal");
-  uint64_t asserts = keyword_of(&arena, "kernel/asserts");
-  uint64_t retracts = keyword_of(&arena, "kernel/retracts");
-  uint64_t withdraws = keyword_of(&arena, "kernel/withdraws");
+  uint64_t assert_action = keyword_of(&arena, "assert");
+  uint64_t retract_action = keyword_of(&arena, "retract");
   uint64_t recorded_at = keyword_of(&arena, "kernel/recorded-at");
 
   if ((argc > 1) && (argv[1][0] == 't')) {
@@ -280,39 +294,39 @@ int main(int argc, char **argv) {
 
   /* The nested predicate tree distinguishes every scalar tag without
      extracting the wrong union arm. */
-  if (!native_m0_fn_19(any_bool(true)) ||
-      !native_m0_fn_19(any_i64(INT64_C(9))) ||
-      !native_m0_fn_19(any_f64(3.25)) ||
-      !native_m0_fn_19(any_text(space)) ||
-      !native_m0_fn_19(any_keyword(custom)) ||
-      !native_m0_fn_19(as_instant)) {
+  if (!native_m0_fn_21(any_bool(true)) ||
+      !native_m0_fn_21(any_i64(INT64_C(9))) ||
+      !native_m0_fn_21(any_f64(3.25)) ||
+      !native_m0_fn_21(any_text(space)) ||
+      !native_m0_fn_21(any_keyword(custom)) ||
+      !native_m0_fn_21(as_instant)) {
     return 20;
   }
-  if (native_m0_fn_19(any_nil()) || native_m0_fn_19(as_triple)) {
+  if (native_m0_fn_21(any_nil()) || native_m0_fn_21(as_triple)) {
     return 21;
   }
 
   /* Constructing a recursive Term boxes the by-value Triple into the arena.
      triple takes t1/t2/t3 as Term and widens each slot into the Triple's Any. */
-  slice_triple scalar_triple = native_m0_fn_21(
+  slice_triple scalar_triple = native_m0_fn_23(
     &arena, &capability, term_text(space), term_keyword(custom),
     term_i64(INT64_C(2)));
   slice_any scalar_triple_ref =
     any_reference(ANY_TAG_TRIPLE, &scalar_triple);
-  if (!native_m0_fn_20(scalar_triple_ref)) {
+  if (!native_m0_fn_22(scalar_triple_ref)) {
     return 22;
   }
   slice_triple invalid_term = {
     any_nil(), any_i64(INT64_C(1)), any_i64(INT64_C(2))
   };
-  if (native_m0_fn_20(any_reference(ANY_TAG_TRIPLE, &invalid_term))) {
+  if (native_m0_fn_22(any_reference(ANY_TAG_TRIPLE, &invalid_term))) {
     return 23;
   }
 
   /* Boundary coercion wraps text, keyword, and integer values into Any; the
      predicate then checks and extracts them before comparing. */
   slice_triple tx =
-    native_m0_fn_22(&arena, &capability, space, INT64_C(9));
+    native_m0_fn_24(&arena, &capability, space, INT64_C(9));
   if ((tx.field_0.tag != ANY_TAG_TEXT) ||
       (tx.field_0.payload.variant_3 != space) ||
       (tx.field_1.tag != ANY_TAG_KEYWORD) ||
@@ -320,23 +334,23 @@ int main(int argc, char **argv) {
       !native_text_eq(tx.field_1.payload.variant_4, tx_sequence) ||
       (tx.field_2.tag != ANY_TAG_I64) ||
       (tx.field_2.payload.variant_1 != INT64_C(9)) ||
-      !native_m0_fn_23(any_reference(ANY_TAG_TRIPLE, &tx))) {
+      !native_m0_fn_25(any_reference(ANY_TAG_TRIPLE, &tx))) {
     return 24;
   }
   slice_triple dynamic_tx_predicate = tx;
   dynamic_tx_predicate.field_1 = any_keyword(tx_sequence);
-  if (!native_m0_fn_23(any_reference(ANY_TAG_TRIPLE, &dynamic_tx_predicate))) {
+  if (!native_m0_fn_25(any_reference(ANY_TAG_TRIPLE, &dynamic_tx_predicate))) {
     return 25;
   }
   slice_triple wrong_predicate = tx;
   wrong_predicate.field_1 = any_keyword(custom);
-  if (native_m0_fn_23(any_reference(ANY_TAG_TRIPLE, &wrong_predicate))) {
+  if (native_m0_fn_25(any_reference(ANY_TAG_TRIPLE, &wrong_predicate))) {
     return 26;
   }
 
   /* Passing a direct Triple where Any is required emits an arena-owned box. */
   slice_triple occurrence =
-    native_m0_fn_24(&arena, &capability, tx, INT64_C(3));
+    native_m0_fn_26(&arena, &capability, tx, INT64_C(3));
   if ((occurrence.field_0.tag != ANY_TAG_TRIPLE) ||
       (occurrence.field_0.payload.variant_7 == NULL) ||
       (occurrence.field_1.tag != ANY_TAG_KEYWORD) ||
@@ -344,12 +358,12 @@ int main(int argc, char **argv) {
       !native_text_eq(occurrence.field_1.payload.variant_4, op_ordinal) ||
       (occurrence.field_2.tag != ANY_TAG_I64) ||
       (occurrence.field_2.payload.variant_1 != INT64_C(3)) ||
-      !native_m0_fn_25(any_reference(ANY_TAG_TRIPLE, &occurrence))) {
+      !native_m0_fn_27(any_reference(ANY_TAG_TRIPLE, &occurrence))) {
     return 27;
   }
   slice_triple dynamic_occurrence_predicate = occurrence;
   dynamic_occurrence_predicate.field_1 = any_keyword(op_ordinal);
-  if (!native_m0_fn_25(
+  if (!native_m0_fn_27(
         any_reference(ANY_TAG_TRIPLE, &dynamic_occurrence_predicate))) {
     return 28;
   }
@@ -359,28 +373,40 @@ int main(int argc, char **argv) {
     return 29;
   }
 
-  /* The remaining constructors retain their predicate keyword and box each
-     record-valued slot with the same arena ownership. */
-  slice_triple assertion =
-    native_m0_fn_26(&arena, &capability, occurrence, tx);
-  slice_triple retraction =
-    native_m0_fn_27(&arena, &capability, occurrence, tx);
+  /* Current Fram keeps assertion/retraction history out of Term. */
   slice_triple later =
-    native_m0_fn_24(&arena, &capability, tx, INT64_C(4));
-  slice_triple withdrawal =
-    native_m0_fn_28(&arena, &capability, occurrence, later);
+    native_m0_fn_26(&arena, &capability, tx, INT64_C(4));
   slice_triple recorded =
-    native_m0_fn_29(&arena, &capability, tx, moment);
-  if (!native_text_eq(assertion.field_1.payload.variant_4, asserts) ||
-      !native_text_eq(retraction.field_1.payload.variant_4, retracts) ||
-      !native_text_eq(withdrawal.field_1.payload.variant_4, withdraws) ||
-      !native_text_eq(recorded.field_1.payload.variant_4, recorded_at)) {
+    native_m0_fn_28(&arena, &capability, tx, moment);
+  if (!native_text_eq(recorded.field_1.payload.variant_4, recorded_at)) {
     return 30;
   }
 
-  if (!native_m0_fn_30(&arena, &capability, occurrence, later) ||
-      native_m0_fn_30(&arena, &capability, later, occurrence)) {
+  if (!native_m0_fn_29(&arena, &capability, occurrence, later) ||
+      native_m0_fn_29(&arena, &capability, later, occurrence)) {
     return 31;
+  }
+
+  slice_operation_occurrence assertion = native_m0_fn_30(
+    &arena, &capability, occurrence, assert_action, scalar_triple);
+  slice_operation_occurrence retraction = native_m0_fn_30(
+    &arena, &capability, later, retract_action, scalar_triple);
+  slice_any assertion_ref =
+    any_reference(ANY_TAG_OPERATION_OCCURRENCE, &assertion);
+  slice_any retraction_ref =
+    any_reference(ANY_TAG_OPERATION_OCCURRENCE, &retraction);
+  if (!native_m0_fn_31(&arena, &capability, assertion_ref) ||
+      native_m0_fn_31(&arena, &capability, retraction_ref) ||
+      !native_m0_fn_32(&arena, &capability, retraction_ref) ||
+      native_m0_fn_32(&arena, &capability, assertion_ref)) {
+    return 32;
+  }
+
+  slice_withdrawal withdrawal = native_m0_fn_33(
+    &arena, &capability, retraction, assertion);
+  if (!native_m0_fn_20(any_reference(ANY_TAG_WITHDRAWAL, &withdrawal)) ||
+      !native_m0_fn_19(assertion_ref)) {
+    return 33;
   }
   return 0;
 }

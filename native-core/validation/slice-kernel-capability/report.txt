@@ -4,8 +4,8 @@ stage typed-to-native PENDING
 stage native-to-epoch COMPLETE
 source-modules 3
 source-imports 3
-full-program-functions 64
-full-program-abis 66
+full-program-functions 59
+full-program-abis 61
 host-program-functions 4
 host-program-abis 6
 lowered fn_0 getenv 1 blocks

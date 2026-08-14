@@ -2,11 +2,9 @@
 set -euo pipefail
 
 types_root="$(git rev-parse --show-toplevel)"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-types_source="${FRAM_TYPES:-$types_root/native-core/validation/upstream/fram/src/fram/types.bgl}"
+fram_checkout="$("$types_root/native-core/validation/fram-checkout.sh")"
+types_source="$fram_checkout/src/fram/types.bgl"
+types_logical="${types_source#"$fram_checkout/"}"
 types_output="$types_root/native-core/validation/slice-types"
 types_scratch="$(mktemp -d /tmp/native-slice-types.XXXXXX)"
 types_clang_bin="$(command -v clang || true)"
@@ -44,7 +42,7 @@ fi
   }
 
 bb -cp "$types_scratch/out" -e \
-  "(require 'native.slice-types-pipeline) (native.slice-types-pipeline/emit-slice! \"$types_scratch/facts.edn\" \"$types_source\" \"$types_output\")"
+  "(require 'native.slice-types-pipeline) (native.slice-types-pipeline/emit-slice! \"$types_scratch/facts.edn\" \"$types_logical\" \"$types_output\")"
 
 sha256sum "$types_source" | cut -d ' ' -f 1 >"$types_output/source.sha256"
 

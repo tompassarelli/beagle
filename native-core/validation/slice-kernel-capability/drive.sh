@@ -4,12 +4,9 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-types_file="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
-kernel_file="${FRAM_KERNEL:-$repo/native-core/validation/upstream/fram/src/fram/kernel.bgl}"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+types_file="$fram_checkout/src/fram/types.bgl"
+kernel_file="$fram_checkout/src/fram/kernel.bgl"
 probe_file="$here/host_capability_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-capability.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT

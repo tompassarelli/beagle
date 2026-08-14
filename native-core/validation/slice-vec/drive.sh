@@ -6,7 +6,7 @@
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 # The pair is projected together because store.bgl signatures and bodies use
 # the fram.types record vectors that give this slice its concrete layouts.
-# Re-runnable: the projection is rebuilt from the current vendored Fram source.
+# Re-runnable: the projection is rebuilt from the selected current Fram source.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -14,12 +14,9 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-src="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
-dep="${FRAM_STORE:-$repo/native-core/validation/upstream/fram/src/fram/store.bgl}"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+src="$fram_checkout/src/fram/types.bgl"
+dep="$fram_checkout/src/fram/store.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-vec.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -31,10 +28,16 @@ done
 "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
 "$repo/bin/beagle-ast" "$dep" >"$scratch/store.ast.json"
 "$repo/bin/beagle-ast" "$here/vec_probe.bclj" >"$scratch/probe.ast.json"
+types_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/types.ast.json")"
+store_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/store.ast.json")"
+probe_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/probe.ast.json")"
 bb "$here/ast-facts.clj" \
-  "$scratch/types.ast.json=fram:src/fram/types.bgl" \
-  "$scratch/store.ast.json=fram:src/fram/store.bgl" \
-  "$scratch/probe.ast.json=beagle:native-core/validation/slice-vec/vec_probe.bclj" \
+  "$scratch/types.ast.json=$types_logical" \
+  "$scratch/store.ast.json=$store_logical" \
+  "$scratch/probe.ast.json=$probe_logical" \
   "$scratch/vec.facts"
 cp "$scratch/vec.facts" "$art/vec.facts"
 { sha256sum "$src" | cut -d' ' -f1; sha256sum "$dep" | cut -d' ' -f1; } \
@@ -70,7 +73,7 @@ bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/vec.facts\" \"fram.store\"
-    \"fram:src/fram/store.bgl\" \"$art\" \"native-slice-vec-v0\" \"$abi\"))"
+    \"$store_logical\" \"$art\" \"native-slice-vec-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
 

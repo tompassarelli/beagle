@@ -5,11 +5,10 @@
          '[native.slice :as slice]
          '[native.stages :as stages])
 
-(defn qbe-report [facts-path artifacts-dir compiler-commit abi]
+(defn qbe-report [facts-path source-id artifacts-dir compiler-commit abi]
   (let [rows (slice/parse-facts (slurp facts-path))
         configuration ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        source (slice/source-program rows "fram.rt-core"
-                 "native-core/validation/upstream/fram/src/fram/rt_core.bgl")
+        source (slice/source-program rows "fram.rt-core" source-id)
         freeze-result (lower/freeze-source-stage source compiler-commit configuration)]
     (cond
       (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
@@ -42,18 +41,20 @@
               (str "qbe-materialize REFUSED "
                 (qbe/qbefailure-detail result) "\n"))))))))
 
-(let [[facts-path artifacts-dir compiler-commit report-path] *command-line-args*]
-  (when (some nil? [facts-path artifacts-dir compiler-commit report-path])
+(let [[facts-path source-id artifacts-dir compiler-commit report-path]
+      *command-line-args*]
+  (when (some nil? [facts-path source-id artifacts-dir compiler-commit report-path])
     (throw (ex-info
-      "usage: native_runner.clj FACTS ARTIFACTS COMPILER-COMMIT REPORT" {})))
+      "usage: native_runner.clj FACTS SOURCE-ID ARTIFACTS COMPILER-COMMIT REPORT"
+      {})))
   (let [abi-id (or (System/getenv "NATIVE_SLICE_ABI") "lp64")
         abi (core/abi-profile-for abi-id)
         c-report (body-slice/emit-slice! facts-path "fram.rt-core"
-                   "native-core/validation/upstream/fram/src/fram/rt_core.bgl"
-                   artifacts-dir compiler-commit
+                   source-id artifacts-dir compiler-commit
                    abi-id)
         backend-report (try
-                         (qbe-report facts-path artifacts-dir compiler-commit abi)
+                         (qbe-report facts-path source-id artifacts-dir
+                           compiler-commit abi)
                          (catch Throwable error
                            (str "qbe-materialize ERROR "
                              (.getName (class error)) ": "

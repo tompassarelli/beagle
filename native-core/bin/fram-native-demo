@@ -13,8 +13,9 @@ die() {
   exit 1
 }
 
-[[ -d /home/tom/code/fram/main/out ]] \
-  || die "managed Fram output is required at /home/tom/code/fram/main/out"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+[[ -d "$fram_checkout/out" ]] \
+  || die "managed Fram output is required at $fram_checkout/out"
 
 mkdir -p "$work/types" "$work/kernel"
 cp "$repo/native-core/validation/slice-bodies/main.c" "$work/types/main.c"

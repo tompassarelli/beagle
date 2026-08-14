@@ -8,12 +8,9 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-source_file="${FRAM_KERNEL_CLASSIFY:-$repo/native-core/validation/upstream/fram/src/fram/kernel_classify.bgl}"
-managed_out="${FRAM_MANAGED_OUT:-$repo/native-core/validation/upstream/fram/out}"
+fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+source_file="$fram_checkout/src/fram/kernel_classify.bgl"
+managed_out="$fram_checkout/out"
 probe_file="$here/kernel_classify_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-classify.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT

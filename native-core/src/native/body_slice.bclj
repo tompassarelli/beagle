@@ -66,6 +66,9 @@
       (instance? native.core.SetTypeV0 shape)
       [(core/settypev0-element-type shape)]
 
+      (instance? native.core.AtomCellTypeV0 shape)
+      [(core/atomcelltypev0-content-type shape)]
+
       (instance? native.core.ReferenceType shape)
       [(core/referencetype-target-type shape)]
 

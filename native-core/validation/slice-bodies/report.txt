@@ -4,10 +4,10 @@ stage typed-to-native COMPLETE
 stage native-to-epoch COMPLETE
 source-modules 1
 source-imports 1
-program-types 74
-program-functions 31
-program-abis 31
-projected-types 72
+program-types 86
+program-functions 34
+program-abis 34
+projected-types 84
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
 lowered fn_2 instant-shift-seconds 3 blocks
@@ -18,7 +18,7 @@ lowered fn_6 rpc-page-response? 4 blocks
 lowered fn_7 rpc-error? 4 blocks
 lowered fn_8 rpc-request? 4 blocks
 lowered fn_9 rpc-response? 4 blocks
-lowered fn_10 rpc-frame-v1? 4 blocks
+lowered fn_10 rpc-frame-v2? 4 blocks
 lowered fn_11 rpc-page-request-cursor-value 12 blocks
 lowered fn_12 rpc-page-response-cursor-value 12 blocks
 lowered fn_13 rpc-error-detail-value 12 blocks
@@ -27,18 +27,21 @@ lowered fn_15 rpc-response-payload-value 12 blocks
 lowered fn_16 commit-operation? 4 blocks
 lowered fn_17 transaction-frame? 4 blocks
 lowered fn_18 term-store-dump? 4 blocks
-lowered fn_19 atom? 49 blocks
-lowered fn_20 term? 14 blocks
-lowered fn_21 triple 28 blocks
-lowered fn_22 transaction-coordinate 7 blocks
-lowered fn_23 transaction-coordinate? 32 blocks
-lowered fn_24 occurrence-coordinate 7 blocks
-lowered fn_25 occurrence-coordinate? 24 blocks
-lowered fn_26 assertion-occurrence 7 blocks
-lowered fn_27 retraction-occurrence 7 blocks
-lowered fn_28 withdrawal 7 blocks
-lowered fn_29 recorded-at 7 blocks
-lowered fn_30 occurrence-before? 20 blocks
+lowered fn_19 operation-occurrence? 4 blocks
+lowered fn_20 withdrawal? 4 blocks
+lowered fn_21 atom? 49 blocks
+lowered fn_22 term? 14 blocks
+lowered fn_23 triple 28 blocks
+lowered fn_24 transaction-coordinate 7 blocks
+lowered fn_25 transaction-coordinate? 32 blocks
+lowered fn_26 occurrence-coordinate 7 blocks
+lowered fn_27 occurrence-coordinate? 24 blocks
+lowered fn_28 recorded-at 7 blocks
+lowered fn_29 occurrence-before? 20 blocks
+lowered fn_30 operation-occurrence 16 blocks
+lowered fn_31 assertion-occurrence? 21 blocks
+lowered fn_32 retraction-occurrence? 21 blocks
+lowered fn_33 withdrawal 16 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
