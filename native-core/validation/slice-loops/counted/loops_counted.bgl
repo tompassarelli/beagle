@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 ;; The counted loop/recur shapes of fram.fri-replay and fram.fold. `+` routes
 ;; through the add-i64 primitive the driver marks native-op checked-add-i64,
 ;; which returns Int and so refuses checked-arithmetic until the arithmetic arm

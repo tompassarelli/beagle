@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.main-capability-variadic-refusal)
+(define-mode strict)
+
+(defn -main [& _] Nil
+  (println "variadic Native entry must remain refused"))

@@ -24,6 +24,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+source "$repo/native-core/validation/publish-verified-set.sh"
 probe="$here/promote_probe.bgl"
 
 command -v bb >/dev/null 2>&1 || { echo "drive.sh: babashka (bb) is required" >&2; exit 2; }
@@ -72,13 +73,11 @@ hosted_report="$(bb -cp "$hosted" -e "
   || { echo "drive.sh: hosted run disagreed: $hosted_report" >&2; exit 1; }
 echo "drive.sh: hosted run '$hosted_report' — promote returned the same object"
 
-# The canonical surface path. It also leaves behind the entry-projected source
+# The canonical surface path. It also leaves behind the complete module source
 # facts the epoch fixture below re-reads, so both clauses are about one program.
+# These are parameterized library functions; `--entry` is reserved for an
+# executable zero-argument entry contract.
 "$repo/bin/beagle" build --materializer c17 --out "$work/core" \
-  --entry native.promote-probe/promoted-text \
-  --entry native.promote-probe/escaping-text \
-  --entry native.promote-probe/promoted-count \
-  --entry native.promote-probe/promoted-parameter \
   "$probe" > "$work/core-build.log" 2>&1 || {
     sed -n '1,200p' "$work/core-build.log" >&2
     exit 1
@@ -107,7 +106,7 @@ grep -q 'native_arena_destroy' "$work/core/module_0.c" \
   || { echo "drive.sh: surface build left the minted epoch open" >&2; exit 1; }
 cp "$work/core/source.facts" "$work/promote.facts"
 
-modules=(core stages lower obligations c11 fold_c17 body_c17 qbe slice
+modules=(core stages lower obligations simd c11 fold_c17 body_c17 qbe slice
          body_slice promote_validation_corpus)
 for name in "${modules[@]}"; do
   cp "$repo/native-core/src/native/$name.bclj" "$work/src/native/$name.bclj"
@@ -147,17 +146,21 @@ generated=(module_0.h module_0.c module_1.h module_1.c report.txt)
 for name in "${generated[@]}"; do
   cmp -s "$work/run-a/$name" "$work/run-b/$name" \
     || { echo "drive.sh: re-emission is not byte-identical for $name" >&2; exit 1; }
-  cp "$work/run-a/$name" "$art/$name"
 done
-cat "$art/report.txt"
+cat "$work/run-a/report.txt"
+
+publish_results() {
+  publish_verified_set "$work/run-a" "$art" "${generated[@]}"
+}
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
+  publish_results
   exit 0
 fi
 
 build="$work/c"
 mkdir -p "$build"
-cp "$art"/module_*.h "$art"/module_*.c "$here/main.c" "$build/"
+cp "$work/run-a"/module_*.h "$work/run-a"/module_*.c "$here/main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" \
    "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
@@ -201,3 +204,4 @@ else
 fi
 
 echo "drive.sh: promote surface form G5 PASS"
+publish_results

@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 
 ;; GENERATED. Author substantive forms through the Fram graph-edit verbs,
 ;; never by editing this rendered view as text. SEEDED 2026-07-27 for the

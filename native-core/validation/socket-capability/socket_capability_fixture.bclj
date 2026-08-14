@@ -40,6 +40,27 @@
      nil
      false)])
 
+(defn fixture-export-abi [(layouts-digest String)] core/AbiDeclV0
+  (core/->AbiDeclV0
+    (fixture-id "abi-export")
+    (fixture-id "function")
+    "native_socket_capability_fixture_v0"
+    (core/->AbiExportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    [(core/->AbiValueV0 "fd" (lower/type-id "Int")
+       (core/->BorrowedV0 true) nil)
+     (core/->AbiValueV0 "bound" (lower/type-id "Int")
+       (core/->BorrowedV0 true) nil)
+     (core/->AbiValueV0 "bytes" (lower/bytes-type-id)
+       (core/->BorrowedV0 true) nil)]
+    (core/->AbiValueV0 "result" (lower/socket-close-outcome-type-id)
+      (core/->OwnedV0 true) nil)
+    (lower/type-id "LowerFailure")
+    [(lower/allocate-effect-id) (lower/host-socket-effect-id)]
+    [(lower/allocate-capability-id) (lower/host-socket-capability-id)]
+    "v0"
+    layouts-digest))
+
 (defn fixture-function [] core/FunctionDef
   (let [(function-id core/NativeId) (fixture-id "function")
         (block-id core/NativeId) (fixture-id "entry")
@@ -106,7 +127,8 @@
           (lower/resolve-layouts types (core/abi-profile-lp64)))
         (effects (Vec core/EffectDef)) (fixture-effects)
         (regions (Vec core/RegionDef)) (fixture-regions)
-        (capabilities (Vec core/CapabilityDef)) (fixture-capabilities)]
+        (capabilities (Vec core/CapabilityDef)) (fixture-capabilities)
+        (digest String) (lower/layout-digest layouts)]
     (core/->NativeCoreProgram
       (fixture-id "program") nil "socket-capability-fixture-v0"
       types effects regions capabilities layouts
@@ -114,7 +136,7 @@
       [(lower/allocate-effect-id) (lower/host-socket-effect-id)]
       [(lower/arena-region-id)]
       [(lower/allocate-capability-id) (lower/host-socket-capability-id)]
-      (lower/host-socket-abis (lower/layout-digest layouts))
+      (conj (lower/host-socket-abis digest) (fixture-export-abi digest))
       [])))
 
 (defn obligations-pass? [(program core/NativeCoreProgram)] Bool

@@ -20,6 +20,7 @@ static const native_value_variant_descriptor native_m0_value_4_variants[] = {
   { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = NULL },
   { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = NULL },
   { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = NULL },
 };
 static const native_value_variant_descriptor native_m0_value_5_variants[] = {
   { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
@@ -106,7 +107,7 @@ const native_value_descriptor native_m0_value_4 = {
   .fields = NULL,
   .field_count = (size_t)0,
   .variants = native_m0_value_4_variants,
-  .variant_count = (size_t)6,
+  .variant_count = (size_t)7,
   .element = NULL,
   .stride = (size_t)0,
   .map_key = NULL,

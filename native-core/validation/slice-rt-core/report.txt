@@ -1,13 +1,14 @@
+projection-scope supported-functions-only
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
-stage typed-to-native COMPLETE
+stage typed-to-native PENDING
 stage native-to-epoch COMPLETE
 source-modules 1
 source-imports 1
-program-types 61
-program-functions 25
-program-abis 25
-projected-types 43
+program-types 64
+program-functions 24
+program-abis 24
+projected-types 39
 lowered fn_0 str-index-of 1 blocks
 lowered fn_1 split-comma 1 blocks
 lowered fn_2 str-lt? 1 blocks
@@ -29,10 +30,9 @@ lowered fn_17 reject-message 1 blocks
 lowered fn_18 server-write-response 50 blocks
 lowered fn_19 server-version-response 15 blocks
 lowered fn_20 server-version-for-log-response 26 blocks
-lowered fn_21 server-status-response 25 blocks
-lowered fn_22 server-status-down 1 blocks
-lowered fn_23 warm-read-response 12 blocks
-lowered fn_24 warm-read-for-log-response 12 blocks
+lowered fn_21 server-status-down 1 blocks
+lowered fn_22 warm-read-response 12 blocks
+lowered fn_23 warm-read-for-log-response 12 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -42,5 +42,7 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 obligation-projection PASS epoch-soundness
 obligation-projection PASS leak-freedom
+obligation-projection PASS deterministic-parallelism
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS: equality union contains a value without structural semantics [server-status-response]
 materialize OK module_0.h module_0.c
 qbe-materialize REFUSED unsupported native value-semantics op: equal

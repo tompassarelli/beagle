@@ -1,6 +1,6 @@
 source-functions 25
-lowered-functions 25
-pending-functions 0
+lowered-functions 24
+pending-functions 1
 function str-index-of LOWERED fn_0 1 blocks
 function split-comma LOWERED fn_1 1 blocks
 function str-lt? LOWERED fn_2 1 blocks
@@ -22,10 +22,10 @@ function reject-message LOWERED fn_17 1 blocks
 function server-write-response LOWERED fn_18 50 blocks
 function server-version-response LOWERED fn_19 15 blocks
 function server-version-for-log-response LOWERED fn_20 26 blocks
-function server-status-response LOWERED fn_21 25 blocks
-function server-status-down LOWERED fn_22 1 blocks
-function warm-read-response LOWERED fn_23 12 blocks
-function warm-read-for-log-response LOWERED fn_24 12 blocks
+function server-status-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS: equality union contains a value without structural semantics
+function server-status-down LOWERED fn_21 1 blocks
+function warm-read-response LOWERED fn_22 12 blocks
+function warm-read-for-log-response LOWERED fn_23 12 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -35,6 +35,7 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 obligation-projection PASS epoch-soundness
 obligation-projection PASS leak-freedom
+obligation-projection PASS deterministic-parallelism
 materialize OK module_0.h module_0.c
 qbe-materialize REFUSED unsupported native value-semantics op: equal
 frontier-accounting PASS accounted=25

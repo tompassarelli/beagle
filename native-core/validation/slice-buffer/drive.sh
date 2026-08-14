@@ -371,7 +371,8 @@ expect_native_refusal() {
   expect_bounded_rejection_logged "$label refusal build" 60 5 \
     "$output/build.log" "$repo/bin/beagle" build --materializer c17 \
     --out "$output" "$source"
-  rg -q "$pattern" "$output/report.txt" "$output/build.log"
+  rg -q "$pattern" "$output/build.log"
+  test ! -e "$output/report.txt"
 }
 
 expect_source_refusal() {
@@ -403,11 +404,12 @@ expect_buffer_value_refusal() {
     "$output/build.log" "$repo/bin/beagle" build --materializer c17 \
     --out "$output" "$source"
   test "$(grep -c 'TODO-NATIVE-BUFFER-VALUE-SEMANTICS-V0' \
-    "$output/report.txt")" = 3
+    "$output/build.log")" = 3
   local function
   for function in "$@"; do
-    grep -Fq "[$function]" "$output/report.txt"
+    grep -Fq "[$function]" "$output/build.log"
   done
+  test ! -e "$output/report.txt"
 }
 
 expect_qbe_refusal() {
@@ -419,7 +421,8 @@ expect_qbe_refusal() {
     --out "$output" "$here/buffer.bgl"
   grep -Fqx \
     'materialize-qbe REFUSED QBE Buffer v0 is unsupported: mutable region-owned storage has no QBE runtime representation' \
-    "$output/report.txt"
+    "$output/build.log"
+  test ! -e "$output/report.txt"
   test ! -e "$output/module_0.ssa"
 }
 
@@ -578,7 +581,7 @@ run_bounded "native-exe Buffer execute" 10 2 "$native_exe"
 expect_native_refusal "$here/wrong_element.bgl" \
   'stage source-to-typed REJECTED' element
 grep -Fq 'LOWER-BUFFER-ELEMENT-V0' \
-  "$scratch/refusal-element/report.txt"
+  "$scratch/refusal-element/build.log"
 expect_source_refusal "$here/arity_double_array.bgl" \
   'call to double-array: expected 1 arg(s), got 0' arity-double-array
 expect_source_refusal "$here/arity_alength.bgl" \

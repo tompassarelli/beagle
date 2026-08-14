@@ -920,6 +920,17 @@
   (core/->TypeDef (atom-fixture-id "type-bool") "Bool"
     (core/->AtomType (core/->BoolKind true))))
 
+(def atom-tag-type core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-tag") "AtomFailureTag"
+    (core/->AtomType (core/->I64Kind true))))
+
+(def atom-failure-variant core/TypeVariant
+  (core/->TypeVariant (atom-fixture-id "variant-failure") "failure" nil))
+
+(def atom-failure-type core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-failure") "AtomFailure"
+    (core/->UnionType [atom-failure-variant])))
+
 (def atom-cell-type core/TypeDef
   (core/->TypeDef (atom-fixture-id "type-cell") "AtomCell"
     (core/->AtomCellTypeV0 (atom-fixture-id "type-i64"))))
@@ -941,6 +952,18 @@
   (core/->LayoutDef (atom-fixture-id "layout-bool")
     (atom-fixture-id "type-bool") 1 1
     (core/->ScalarShapeV0 (core/->BoolReprV0 8))))
+
+(def atom-tag-layout core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-tag")
+    (atom-fixture-id "type-tag") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def atom-failure-layout core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-failure")
+    (atom-fixture-id "type-failure") 8 8
+    (core/->UnionShapeV0 (atom-fixture-id "type-tag") 0
+      [(core/->UnionVariantLayoutV0
+         (atom-fixture-id "variant-failure") 0 nil 0)])))
 
 (def atom-cell-layout core/LayoutDef
   (core/->LayoutDef (atom-fixture-id "layout-cell")
@@ -1152,21 +1175,84 @@
     [(atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-state")]))
 
+(defn atom-abi-value
+  [(name String) (type-id core/NativeId)] core/AbiValueV0
+  (core/->AbiValueV0 name type-id (core/->BorrowedV0 true) nil))
+
+(defn atom-export-abi
+  [(name String)
+   (function-id core/NativeId)
+   (symbol String)
+   (parameters (Vec core/AbiValueV0))
+   (result-type core/NativeId)
+   (effects (Vec core/NativeId))
+   (capabilities (Vec core/NativeId))] core/AbiDeclV0
+  (core/->AbiDeclV0
+    (atom-fixture-id (str "abi-" name))
+    function-id
+    symbol
+    (core/->AbiExportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    parameters
+    (core/->AbiValueV0 "result" result-type (core/->OwnedV0 true) nil)
+    (atom-fixture-id "type-failure")
+    effects
+    capabilities
+    "v0"
+    "sha256:atom-fixture-layout-v0"))
+
+(def atom-export-abis (Vec core/AbiDeclV0)
+  [(atom-export-abi "new" (atom-fixture-id "fn-1-new")
+     "native_atom_new_v0"
+     [(atom-abi-value "initial" (atom-fixture-id "type-i64"))]
+     (atom-fixture-id "type-cell")
+     [(atom-fixture-id "effect-allocate") (atom-fixture-id "effect-state")]
+     [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")])
+   (atom-export-abi "deref" (atom-fixture-id "fn-2-get")
+     "native_atom_deref_v0"
+     [(atom-abi-value "cell" (atom-fixture-id "type-cell"))]
+     (atom-fixture-id "type-i64")
+     [(atom-fixture-id "effect-state")]
+     [(atom-fixture-id "cap-state")])
+   (atom-export-abi "swap" (atom-fixture-id "fn-3-swp")
+     "native_atom_swap_v0"
+     [(atom-abi-value "cell" (atom-fixture-id "type-cell"))
+      (atom-abi-value "next" (atom-fixture-id "type-i64"))]
+     (atom-fixture-id "type-i64")
+     [(atom-fixture-id "effect-state")]
+     [(atom-fixture-id "cap-state")])
+   (atom-export-abi "reset" (atom-fixture-id "fn-4-rst")
+     "native_atom_reset_v0"
+     [(atom-abi-value "cell" (atom-fixture-id "type-cell"))
+      (atom-abi-value "next" (atom-fixture-id "type-i64"))]
+     (atom-fixture-id "type-i64")
+     [(atom-fixture-id "effect-state")]
+     [(atom-fixture-id "cap-state")])
+   (atom-export-abi "compare-exchange" (atom-fixture-id "fn-5-cas")
+     "native_atom_compare_exchange_v0"
+     [(atom-abi-value "cell" (atom-fixture-id "type-cell"))
+      (atom-abi-value "expected" (atom-fixture-id "type-i64"))
+      (atom-abi-value "replacement" (atom-fixture-id "type-i64"))]
+     (atom-fixture-id "type-bool")
+     [(atom-fixture-id "effect-state")]
+     [(atom-fixture-id "cap-state")])])
+
 (def atom-program core/NativeCoreProgram
   (core/->NativeCoreProgram (atom-fixture-id "program") nil "native-atom-fixture-v0"
-    [atom-i64-type atom-bool-type atom-cell-type atom-state-type atom-arena-type]
+    [atom-i64-type atom-bool-type atom-tag-type atom-failure-type atom-cell-type
+     atom-state-type atom-arena-type]
     [atom-pure-effect atom-allocate-effect atom-state-effect]
     [atom-arena-region atom-state-region]
     [atom-allocate-capability atom-state-capability]
-    [atom-i64-layout atom-bool-layout atom-cell-layout atom-state-layout
-     atom-arena-layout]
+    [atom-i64-layout atom-bool-layout atom-tag-layout atom-failure-layout
+     atom-cell-layout atom-state-layout atom-arena-layout]
     [atom-updater-function atom-create-function atom-deref-function
      atom-swap-function atom-reset-function atom-cas-function]
     [(atom-fixture-id "effect-pure") (atom-fixture-id "effect-allocate")
      (atom-fixture-id "effect-state")]
     [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]
     [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")]
-    []
+    atom-export-abis
     []))
 
 ;; Scalar checked arithmetic is shared frozen-IR vocabulary. This program keeps

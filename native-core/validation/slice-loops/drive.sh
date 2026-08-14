@@ -3,7 +3,7 @@
 # frozen source program -> typed program -> native program (one SSA header block per
 # loop, one back-edge Jump per recur) -> 7 obligations -> native.body-c17 ->
 # gcc/clang -std=c17 -> probe main.
-# Two programs: loops.bclj must pass all ten obligations; counted/ carries the
+# Two programs: loops.bgl must pass all ten obligations; counted/ carries the
 # fram counted shapes and refuses checked-arithmetic on its interim add-i64.
 set -euo pipefail
 
@@ -11,6 +11,8 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
+art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+source "$repo/native-core/validation/publish-verified-set.sh"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-loops.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -19,6 +21,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -31,7 +34,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for m in stages lower obligations simd c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \
@@ -41,24 +44,32 @@ for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
 done
 
 emit_slice() {
-  local src="$1" art="$2" module="$3" annotation="${4:-}" pending="${5:-}"
+  local src="$1" generated="$2" committed="$3" module="$4"
+  local annotation="${5:-}" pending="${6:-}"
+  local logical
+  local -a projector_args
+  mkdir -p "$generated"
   "$repo/bin/beagle-ast" "$src" >"$scratch/ast.json"
-  # shellcheck disable=SC2086
-  bb "$here/../slice-bodies/ast-facts.clj" "$scratch/ast.json" \
-    "$scratch/loops.facts" $annotation
-  if [[ -f "$art/loops.facts" ]] && ! cmp -s "$scratch/loops.facts" "$art/loops.facts"; then
-    echo "drive.sh: regenerated projection differs from $art/loops.facts" >&2
+  logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+    "$scratch/ast.json")"
+  projector_args=(--input "$scratch/ast.json=$logical" \
+    --output "$generated/loops.facts")
+  if [[ -n "$annotation" ]]; then
+    projector_args+=(--native-op "$annotation")
+  fi
+  bb "$here/../slice-bodies/ast-facts.clj" "${projector_args[@]}"
+  if [[ -f "$committed/loops.facts" ]] && ! cmp -s "$generated/loops.facts" "$committed/loops.facts"; then
+    echo "drive.sh: regenerated projection differs from $committed/loops.facts" >&2
     exit 1
   fi
-  cp "$scratch/loops.facts" "$art/loops.facts"
-  sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
+  sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
   bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
-(spit \"$art/report.txt\"
-  (native.body-slice/emit-slice! \"$scratch/loops.facts\" \"$module\"
-    \"beagle:${src#"$repo"/}\" \"$art\" \"native-slice-loops-v0\" \"$abi\"))"
-  cat "$art/report.txt"
-  if [ -z "$pending" ] && grep -q '^pending ' "$art/report.txt"; then
+(spit \"$generated/report.txt\"
+  (native.body-slice/emit-slice! \"$generated/loops.facts\" \"$module\"
+    \"$logical\" \"$generated\" \"native-slice-loops-v0\" \"$abi\"))"
+  cat "$generated/report.txt"
+  if [ -z "$pending" ] && grep -q '^pending ' "$generated/report.txt"; then
     echo "drive.sh: a loop fixture function did not lower" >&2
     exit 1
   fi
@@ -76,10 +87,11 @@ return_type_of() { # return_type_of <header> <fn-index>
 }
 
 compile_and_run() {
-  local art="$1" label="$2"; shift 2
+  local generated="$1" main_file="$2" label="$3"; shift 3
   local build="$scratch/c-$label"
   mkdir -p "$build"
-  cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
+  cp "$generated/module_0.h" "$generated/module_0.c" "$build/"
+  cp "$main_file" "$build/main.c"
   cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
   ( cd "$build" && gcc -std=c17 -pedantic -Wall -Wextra -Werror "$@" \
       -o probe_gcc module_0.c native_shim.c main.c )
@@ -96,25 +108,29 @@ compile_and_run() {
   fi
 }
 
-emit_slice "$here/loops.bclj" "$here" "native.loops"
-if grep -q '^obligation-projection FAIL' "$here/report.txt"; then
-  echo "drive.sh: loops.bclj must discharge all ten obligations" >&2
+main_generated="$scratch/generated-main"
+counted_generated="$scratch/generated-counted"
+refusal_generated="$scratch/generated-refusals"
+
+emit_slice "$here/loops.bgl" "$main_generated" "$art" "native.loops"
+if grep -q '^obligation-projection FAIL' "$main_generated/report.txt"; then
+  echo "drive.sh: loops.bgl must discharge all ten obligations" >&2
   exit 1
 fi
 
-emit_slice "$here/counted/loops_counted.bclj" "$here/counted" \
+emit_slice "$here/counted/loops_counted.bgl" "$counted_generated" "$art/counted" \
   "native.loops-counted" "add-i64=checked-add-i64"
 # the interim add-i64 primitive returns Int where the obligation wants an
 # Outcome, so exactly this one refusal is expected until the arithmetic arm lands
 expected_fail="obligation-projection FAIL checked-arithmetic"
-if [ "$(grep -c '^obligation-projection FAIL' "$here/counted/report.txt")" != "1" ] ||
-   ! grep -qx "$expected_fail" "$here/counted/report.txt"; then
+if [ "$(grep -c '^obligation-projection FAIL' "$counted_generated/report.txt")" != "1" ] ||
+   ! grep -qx "$expected_fail" "$counted_generated/report.txt"; then
   echo "drive.sh: counted/ obligations changed beyond the known checked-arithmetic refusal" >&2
   exit 1
 fi
 
-emit_slice "$here/refusals/refusals.bclj" "$here/refusals" "native.loops-refusals" \
-  "" allow-pending
+emit_slice "$here/refusals/refusals.bgl" "$refusal_generated" "$art/refusals" \
+  "native.loops-refusals" "" allow-pending
 for expected in \
   'TODO-NATIVE-RECUR-NON-TAIL.*\[non-tail\]' \
   'TODO-NATIVE-RECUR-OUTSIDE-LOOP.*\[outside-loop\]' \
@@ -125,16 +141,25 @@ for expected in \
   'TODO-NATIVE-RECUR-NON-TAIL.*\[through-try\]' \
   'TODO-NATIVE-RECUR-NON-TAIL.*\[nested-init\]' \
   'TODO-NATIVE-RECUR-ARITY.*\[nested-wrong-target\]'; do
-  grep -q "$expected" "$here/refusals/report.txt" ||
+  grep -q "$expected" "$refusal_generated/report.txt" ||
     { echo "drive.sh: refusals/ omitted expected evidence: $expected" >&2; exit 1; }
 done
-# every function refused, so the refusal program materializes nothing worth keeping
-rm -f "$here/refusals/module_0.c" "$here/refusals/module_0.h"
+publish_results() {
+  publish_verified_set "$main_generated" "$art" \
+    loops.facts source.sha256 report.txt module_0.h module_0.c
+  publish_verified_set "$counted_generated" "$art/counted" \
+    loops.facts source.sha256 report.txt module_0.h module_0.c
+  publish_verified_set "$refusal_generated" "$art/refusals" \
+    loops.facts source.sha256 report.txt
+}
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
+  publish_results
   exit 0
 fi
 
-compile_and_run "$here" loops
-compile_and_run "$here/counted" counted \
-  "-DCOUNTED_PAIR_TYPE=$(return_type_of "$here/counted/module_0.h" 4)"
+compile_and_run "$main_generated" "$here/main.c" loops
+compile_and_run "$counted_generated" "$here/counted/main.c" counted \
+  "-DCOUNTED_PAIR_TYPE=$(return_type_of "$counted_generated/module_0.h" 4)"
+
+publish_results

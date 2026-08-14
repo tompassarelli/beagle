@@ -4,11 +4,9 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-# Upstream fram sources are vendored under native-core/validation/upstream/fram
-# (its MANIFEST records the fram revision and digests); a FRAM_* override still
-# points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
-# must not be a function of another repository's working tree.
-main_file="${FRAM_MAIN:-$repo/native-core/validation/upstream/fram/src/fram/main.bclj}"
+source "$repo/native-core/validation/publish-verified-set.sh"
+main_file="$here/main_fixture.bgl"
+variadic_file="$here/variadic_entry_refusal.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-main-capability.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -22,16 +20,17 @@ for command in bb cmp gcc rg sha256sum; do
     || die "required command is unavailable: $command"
 done
 [[ -f "$main_file" ]] || die "source is unavailable: $main_file"
+[[ -f "$variadic_file" ]] || die "source is unavailable: $variadic_file"
 mkdir -p "$art" "$scratch/generated"
 
 "$repo/bin/beagle-ast" "$main_file" >"$scratch/main.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/main.ast.json=fram:src/fram/main.bclj" \
+  --input "$scratch/main.ast.json=native-core/validation/slice-main-capability/main_fixture.bgl" \
   --output "$scratch/generated/main_capability.facts" \
   --include-defs
 
 sha256sum "$main_file" \
-  | sed 's#  .*#  fram:src/fram/main.bclj#' \
+  | sed 's#  .*#  native-core/validation/slice-main-capability/main_fixture.bgl#' \
   >"$scratch/generated/source.sha256"
 
 "$repo/bin/beagle-build-all" \
@@ -39,6 +38,7 @@ sha256sum "$main_file" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -52,7 +52,7 @@ sha256sum "$main_file" \
   }
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe main_capability_slice; do
+for module in stages lower obligations simd c11 slice fold_c17 body_c17 body_slice qbe main_capability_slice; do
   [[ -f "$scratch/out/native/$module.clj" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$module.clj"
@@ -109,20 +109,40 @@ printf '%s\n' \
 
 publish_generated() {
   local name="$1"
-  if [[ -f "$here/$name" ]] && ! cmp -s "$scratch/generated/$name" "$here/$name"; then
-    diff -u "$here/$name" "$scratch/generated/$name" >&2 || true
+  if [[ -f "$art/$name" ]] && ! cmp -s "$scratch/generated/$name" "$art/$name"; then
+    diff -u "$art/$name" "$scratch/generated/$name" >&2 || true
     die "generated artifact drifted: $name"
   fi
-  cp "$scratch/generated/$name" "$art/$name"
 }
 
-for name in main_capability.facts source.sha256 report.txt function_map.h module_0.h module_0.c; do
+generated_names=(main_capability.facts source.sha256 report.txt function_map.h module_0.h module_0.c)
+for name in "${generated_names[@]}"; do
   [[ -f "$scratch/generated/$name" ]] || die "materializer omitted $name"
   publish_generated "$name"
 done
 
+
+publish_results() {
+  publish_verified_set "$scratch/generated" "$art" "${generated_names[@]}"
+}
+
+set +e
+"$repo/bin/beagle" build --materializer c17 \
+  --out "$scratch/variadic-refusal" \
+  --entry native.main-capability-variadic-refusal/-main \
+  "$variadic_file" >"$scratch/variadic.stdout" 2>"$scratch/variadic.stderr"
+variadic_status=$?
+set -e
+[[ $variadic_status -ne 0 ]] || die "variadic Native entry unexpectedly built"
+rg -F 'entry native.main-capability-variadic-refusal/-main must not have a rest parameter' \
+  "$scratch/variadic.stderr" >/dev/null \
+  || die "variadic Native entry refusal changed"
+[[ ! -e "$scratch/variadic-refusal/report.txt" ]] \
+  || die "failed variadic build published a partial report"
+
 cat "$report"
 if [[ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]]; then
+  publish_results
   exit 0
 fi
 
@@ -149,3 +169,5 @@ if command -v clang >/dev/null 2>&1; then
     || die "clang binary stdout did not match exact fram.main output"
   echo "slice-main-capability: clang $(clang -dumpversion | head -1) compile + run ok"
 fi
+
+publish_results

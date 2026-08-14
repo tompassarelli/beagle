@@ -20,6 +20,1524 @@ struct native_m0_keyword_5_blob { uint64_t length; uint8_t bytes[sizeof "kernel/
 static const struct native_m0_keyword_5_blob native_m0_keyword_5 = { (uint64_t)(sizeof "kernel/recorded-at" - 1U), "kernel/recorded-at" };
 _Static_assert(offsetof(struct native_m0_keyword_5_blob, bytes) == 8, "keyword blob is length-prefixed");
 
+extern const native_value_descriptor native_m0_value_0;
+extern const native_value_descriptor native_m0_value_1;
+extern const native_value_descriptor native_m0_value_2;
+extern const native_value_descriptor native_m0_value_3;
+extern const native_value_descriptor native_m0_value_4;
+extern const native_value_descriptor native_m0_value_5;
+extern const native_value_descriptor native_m0_value_6;
+extern const native_value_descriptor native_m0_value_7;
+extern const native_value_descriptor native_m0_value_8;
+extern const native_value_descriptor native_m0_value_9;
+extern const native_value_descriptor native_m0_value_10;
+extern const native_value_descriptor native_m0_value_11;
+extern const native_value_descriptor native_m0_value_12;
+extern const native_value_descriptor native_m0_value_13;
+extern const native_value_descriptor native_m0_value_14;
+extern const native_value_descriptor native_m0_value_15;
+extern const native_value_descriptor native_m0_value_16;
+extern const native_value_descriptor native_m0_value_17;
+extern const native_value_descriptor native_m0_value_18;
+extern const native_value_descriptor native_m0_value_19;
+extern const native_value_descriptor native_m0_value_20;
+extern const native_value_descriptor native_m0_value_21;
+extern const native_value_descriptor native_m0_value_22;
+extern const native_value_descriptor native_m0_value_23;
+extern const native_value_descriptor native_m0_value_24;
+extern const native_value_descriptor native_m0_value_25;
+extern const native_value_descriptor native_m0_value_26;
+extern const native_value_descriptor native_m0_value_27;
+extern const native_value_descriptor native_m0_value_28;
+extern const native_value_descriptor native_m0_value_29;
+extern const native_value_descriptor native_m0_value_30;
+extern const native_value_descriptor native_m0_value_31;
+extern const native_value_descriptor native_m0_value_32;
+extern const native_value_descriptor native_m0_value_33;
+extern const native_value_descriptor native_m0_value_34;
+extern const native_value_descriptor native_m0_value_35;
+extern const native_value_descriptor native_m0_value_36;
+extern const native_value_descriptor native_m0_value_37;
+extern const native_value_descriptor native_m0_value_38;
+extern const native_value_descriptor native_m0_value_39;
+extern const native_value_descriptor native_m0_value_40;
+extern const native_value_descriptor native_m0_value_41;
+extern const native_value_descriptor native_m0_value_42;
+extern const native_value_descriptor native_m0_value_43;
+extern const native_value_descriptor native_m0_value_44;
+extern const native_value_descriptor native_m0_value_45;
+extern const native_value_descriptor native_m0_value_46;
+extern const native_value_descriptor native_m0_value_47;
+extern const native_value_descriptor native_m0_value_48;
+extern const native_value_descriptor native_m0_value_49;
+extern const native_value_descriptor native_m0_value_50;
+extern const native_value_descriptor native_m0_value_51;
+extern const native_value_descriptor native_m0_value_52;
+extern const native_value_descriptor native_m0_value_53;
+extern const native_value_descriptor native_m0_value_54;
+extern const native_value_descriptor native_m0_value_55;
+extern const native_value_descriptor native_m0_value_56;
+extern const native_value_descriptor native_m0_value_57;
+extern const native_value_descriptor native_m0_value_58;
+extern const native_value_descriptor native_m0_value_59;
+extern const native_value_descriptor native_m0_value_60;
+extern const native_value_descriptor native_m0_value_61;
+extern const native_value_descriptor native_m0_value_62;
+extern const native_value_descriptor native_m0_value_63;
+extern const native_value_descriptor native_m0_value_64;
+extern const native_value_descriptor native_m0_value_65;
+extern const native_value_descriptor native_m0_value_66;
+extern const native_value_descriptor native_m0_value_67;
+extern const native_value_descriptor native_m0_value_68;
+extern const native_value_descriptor native_m0_value_69;
+extern const native_value_descriptor native_m0_value_70;
+extern const native_value_descriptor native_m0_value_71;
+
+static const native_value_field_descriptor native_m0_value_2_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+};
+static const native_value_field_descriptor native_m0_value_3_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+  { .offset = (size_t)16, .value = &native_m0_value_1 },
+};
+static const native_value_field_descriptor native_m0_value_4_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+  { .offset = (size_t)16, .value = &native_m0_value_1 },
+};
+static const native_value_field_descriptor native_m0_value_5_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+};
+static const native_value_field_descriptor native_m0_value_10_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+  { .offset = (size_t)16, .value = &native_m0_value_9 },
+  { .offset = (size_t)24, .value = &native_m0_value_1 },
+};
+static const native_value_variant_descriptor native_m0_value_12_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_13_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_14_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_15_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_field_descriptor native_m0_value_18_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_17 },
+};
+static const native_value_field_descriptor native_m0_value_24_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_8 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+  { .offset = (size_t)16, .value = &native_m0_value_19 },
+  { .offset = (size_t)24, .value = &native_m0_value_20 },
+  { .offset = (size_t)32, .value = &native_m0_value_23 },
+  { .offset = (size_t)40, .value = &native_m0_value_22 },
+  { .offset = (size_t)48, .value = &native_m0_value_17 },
+  { .offset = (size_t)56, .value = &native_m0_value_21 },
+  { .offset = (size_t)64, .value = &native_m0_value_16 },
+  { .offset = (size_t)72, .value = &native_m0_value_6 },
+  { .offset = (size_t)80, .value = &native_m0_value_16 },
+  { .offset = (size_t)88, .value = &native_m0_value_16 },
+  { .offset = (size_t)96, .value = &native_m0_value_16 },
+};
+static const native_value_field_descriptor native_m0_value_25_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_8 },
+  { .offset = (size_t)16, .value = &native_m0_value_1 },
+  { .offset = (size_t)24, .value = &native_m0_value_19 },
+  { .offset = (size_t)32, .value = &native_m0_value_20 },
+  { .offset = (size_t)40, .value = &native_m0_value_23 },
+  { .offset = (size_t)48, .value = &native_m0_value_22 },
+};
+static const native_value_field_descriptor native_m0_value_27_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_26 },
+};
+static const native_value_variant_descriptor native_m0_value_48_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_6 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_7 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_8 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_31 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_29 },
+  { .tag = INT64_C(8), .payload_offset = (size_t)8, .payload = &native_m0_value_41 },
+  { .tag = INT64_C(9), .payload_offset = (size_t)8, .payload = &native_m0_value_44 },
+  { .tag = INT64_C(10), .payload_offset = (size_t)8, .payload = &native_m0_value_32 },
+  { .tag = INT64_C(11), .payload_offset = (size_t)8, .payload = &native_m0_value_36 },
+  { .tag = INT64_C(12), .payload_offset = (size_t)8, .payload = &native_m0_value_37 },
+  { .tag = INT64_C(13), .payload_offset = (size_t)8, .payload = &native_m0_value_35 },
+  { .tag = INT64_C(14), .payload_offset = (size_t)8, .payload = &native_m0_value_46 },
+  { .tag = INT64_C(15), .payload_offset = (size_t)8, .payload = &native_m0_value_45 },
+  { .tag = INT64_C(16), .payload_offset = (size_t)8, .payload = &native_m0_value_30 },
+  { .tag = INT64_C(17), .payload_offset = (size_t)8, .payload = &native_m0_value_34 },
+  { .tag = INT64_C(18), .payload_offset = (size_t)8, .payload = &native_m0_value_42 },
+  { .tag = INT64_C(19), .payload_offset = (size_t)8, .payload = &native_m0_value_39 },
+  { .tag = INT64_C(20), .payload_offset = (size_t)8, .payload = &native_m0_value_38 },
+  { .tag = INT64_C(21), .payload_offset = (size_t)8, .payload = &native_m0_value_43 },
+  { .tag = INT64_C(22), .payload_offset = (size_t)8, .payload = &native_m0_value_47 },
+  { .tag = INT64_C(23), .payload_offset = (size_t)8, .payload = &native_m0_value_33 },
+  { .tag = INT64_C(24), .payload_offset = (size_t)8, .payload = &native_m0_value_40 },
+};
+static const native_value_field_descriptor native_m0_value_49_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_48 },
+  { .offset = (size_t)16, .value = &native_m0_value_48 },
+  { .offset = (size_t)32, .value = &native_m0_value_48 },
+};
+static const native_value_field_descriptor native_m0_value_50_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_9 },
+  { .offset = (size_t)8, .value = &native_m0_value_49 },
+};
+static const native_value_field_descriptor native_m0_value_51_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_48 },
+  { .offset = (size_t)16, .value = &native_m0_value_1 },
+};
+static const native_value_variant_descriptor native_m0_value_52_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_31 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_53_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_32 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_54_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_36 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_55_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_37 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_field_descriptor native_m0_value_56_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_9 },
+  { .offset = (size_t)8, .value = &native_m0_value_1 },
+  { .offset = (size_t)16, .value = &native_m0_value_1 },
+  { .offset = (size_t)24, .value = &native_m0_value_54 },
+  { .offset = (size_t)40, .value = &native_m0_value_55 },
+};
+static const native_value_variant_descriptor native_m0_value_57_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_41 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_58_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_44 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_59_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_60_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_6 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_61_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_7 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_62_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_8 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_7 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_6 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_31 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_29 },
+};
+static const native_value_field_descriptor native_m0_value_63_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_8 },
+  { .offset = (size_t)8, .value = &native_m0_value_9 },
+  { .offset = (size_t)16, .value = &native_m0_value_59 },
+  { .offset = (size_t)32, .value = &native_m0_value_57 },
+  { .offset = (size_t)48, .value = &native_m0_value_59 },
+  { .offset = (size_t)64, .value = &native_m0_value_62 },
+};
+static const native_value_variant_descriptor native_m0_value_64_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_8 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_variant_descriptor native_m0_value_65_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_field_descriptor native_m0_value_66_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_9 },
+  { .offset = (size_t)8, .value = &native_m0_value_64 },
+  { .offset = (size_t)24, .value = &native_m0_value_59 },
+  { .offset = (size_t)40, .value = &native_m0_value_61 },
+  { .offset = (size_t)56, .value = &native_m0_value_60 },
+  { .offset = (size_t)72, .value = &native_m0_value_65 },
+  { .offset = (size_t)88, .value = &native_m0_value_52 },
+};
+static const native_value_variant_descriptor native_m0_value_67_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_62 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_13 },
+};
+static const native_value_field_descriptor native_m0_value_68_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_9 },
+  { .offset = (size_t)8, .value = &native_m0_value_6 },
+  { .offset = (size_t)16, .value = &native_m0_value_8 },
+  { .offset = (size_t)24, .value = &native_m0_value_67 },
+};
+static const native_value_field_descriptor native_m0_value_69_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_8 },
+  { .offset = (size_t)8, .value = &native_m0_value_9 },
+  { .offset = (size_t)16, .value = &native_m0_value_1 },
+  { .offset = (size_t)24, .value = &native_m0_value_58 },
+  { .offset = (size_t)40, .value = &native_m0_value_53 },
+  { .offset = (size_t)56, .value = &native_m0_value_67 },
+};
+static const native_value_field_descriptor native_m0_value_70_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_67 },
+};
+static const native_value_field_descriptor native_m0_value_71_fields[] = {
+  { .offset = (size_t)0, .value = &native_m0_value_1 },
+  { .offset = (size_t)8, .value = &native_m0_value_67 },
+  { .offset = (size_t)32, .value = &native_m0_value_6 },
+};
+const native_value_descriptor native_m0_value_0 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_0,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_1 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_SIGNED,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_2 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_2_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_3 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_3_fields,
+  .field_count = (size_t)3,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_4 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_4_fields,
+  .field_count = (size_t)3,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_5 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_5_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_6 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_BOOL,
+  .size = (size_t)1,
+  .alignment = (size_t)1,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_7 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_FLOAT,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_8 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_TEXT,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_9 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_KEYWORD,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_10 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)32,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_10_fields,
+  .field_count = (size_t)4,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_11 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_SIGNED,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_12 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_12_variants,
+  .variant_count = (size_t)7,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_13 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_13_variants,
+  .variant_count = (size_t)1,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_14 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_14_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_15 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_15_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_16 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_28,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_17 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_1,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_18 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_18_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_19 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_66,
+  .stride = (size_t)104,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_20 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_3,
+  .stride = (size_t)24,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_21 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_18,
+  .stride = (size_t)16,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_22 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_10,
+  .stride = (size_t)32,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_23 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_4,
+  .stride = (size_t)24,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_24 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)104,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_24_fields,
+  .field_count = (size_t)13,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_25 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)56,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_25_fields,
+  .field_count = (size_t)7,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_26 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_50,
+  .stride = (size_t)56,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_27 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_27_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_28 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_29 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_49,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_30 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_66,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_31 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_2,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_32 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_68,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_33 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_24,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_34 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_3,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_35 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_56,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_36 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_63,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_37 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_69,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_38 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_18,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_39 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_10,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_40 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_25,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_41 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_70,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_42 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_4,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_43 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_50,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_44 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_71,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_45 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_51,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_46 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_5,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_47 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_27,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_48 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_48_variants,
+  .variant_count = (size_t)25,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_49 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)48,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_49_fields,
+  .field_count = (size_t)3,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_50 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)56,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_50_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_51 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_51_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_52 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_52_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_53 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_53_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_54 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_54_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_55 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_55_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_56 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)56,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_56_fields,
+  .field_count = (size_t)5,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_57 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_57_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_58 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_58_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_59 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_59_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_60 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_60_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_61 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_61_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_62 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_62_variants,
+  .variant_count = (size_t)7,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_63 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)80,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_63_fields,
+  .field_count = (size_t)6,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_64 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_64_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_65 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_65_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_66 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)104,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_66_fields,
+  .field_count = (size_t)7,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_67 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_67_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_68 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)48,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_68_fields,
+  .field_count = (size_t)4,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_69 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)80,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_69_fields,
+  .field_count = (size_t)6,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_70 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)32,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_70_fields,
+  .field_count = (size_t)2,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_71 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_RECORD,
+  .size = (size_t)40,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = native_m0_value_71_fields,
+  .field_count = (size_t)3,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+
 native_m0_type_6 native_m0_fn_0(native_m0_type_48 native_v_0) {
   (void)native_v_0;
   native_m0_type_6 native_s_0;
@@ -2540,19 +4058,19 @@ native_m0_type_6 native_m0_fn_23(native_m0_type_48 native_v_0) {
   native_m0_type_6 native_s_12;
   native_m0_type_29 native_s_13;
   native_m0_type_48 native_s_14;
-  native_m0_type_9 native_s_15;
+  native_m0_type_48 native_s_15;
   native_m0_type_6 native_s_16;
-  native_m0_type_6 native_s_17;
-  native_m0_type_6 native_s_18;
-  native_m0_type_29 native_s_19;
-  native_m0_type_48 native_s_20;
+  native_m0_type_29 native_s_17;
+  native_m0_type_48 native_s_18;
+  native_m0_type_6 native_s_19;
+  native_m0_type_6 native_s_20;
   native_m0_type_6 native_s_21;
-  native_m0_type_6 native_s_22;
-  native_m0_type_6 native_s_23;
-  native_m0_type_29 native_s_24;
-  native_m0_type_48 native_s_25;
-  native_m0_type_1 native_s_26;
-  native_m0_type_1 native_s_27;
+  native_m0_type_29 native_s_22;
+  native_m0_type_48 native_s_23;
+  native_m0_type_1 native_s_24;
+  native_m0_type_1 native_s_25;
+  native_m0_type_6 native_s_26;
+  native_m0_type_6 native_s_27;
   native_m0_type_6 native_s_28;
   native_m0_type_6 native_s_29;
   native_m0_type_6 native_s_30;
@@ -2567,8 +4085,6 @@ native_m0_type_6 native_m0_fn_23(native_m0_type_48 native_v_0) {
   native_m0_type_6 native_s_39;
   native_m0_type_6 native_s_40;
   native_m0_type_6 native_s_41;
-  native_m0_type_6 native_s_42;
-  native_m0_type_6 native_s_43;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_0;
   (void)native_s_0;
   native_s_1 = native_m0_fn_4(native_v_0);
@@ -2578,8 +4094,8 @@ native_m0_type_6 native_m0_fn_23(native_m0_type_48 native_v_0) {
     goto native_l23_1;
   }
 native_l23_1: ;
-  native_s_41 = native_s_1;
-  goto native_l23_32;
+  native_s_39 = native_s_1;
+  goto native_l23_29;
 native_l23_2: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2657,8 +4173,8 @@ native_l23_5: ;
     goto native_l23_6;
   }
 native_l23_6: ;
-  native_s_38 = native_s_6;
-  goto native_l23_29;
+  native_s_36 = native_s_6;
+  goto native_l23_26;
 native_l23_7: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2679,228 +4195,162 @@ native_l23_7: ;
     goto native_l23_8;
   }
 native_l23_8: ;
-  native_s_35 = native_s_12;
-  goto native_l23_26;
+  native_s_33 = native_s_12;
+  goto native_l23_23;
 native_l23_9: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_13 = native_v_0.payload.variant_7;
   native_s_14 = ((native_m0_type_49 *)native_s_13)->field_1;
-  switch (native_s_14.tag) {
-  case INT64_C(0):
+  native_s_15 = (native_m0_type_48){ .tag = INT64_C(4), .payload = { .variant_4 = native_s_0 } };
+  native_s_16 = native_dynamic_value_equal(&native_m0_value_48, &native_s_15, &native_s_14);
+  if (native_s_16) {
     goto native_l23_11;
-  case INT64_C(1):
-    goto native_l23_11;
-  case INT64_C(2):
-    goto native_l23_11;
-  case INT64_C(3):
-    goto native_l23_11;
-  case INT64_C(4):
+  } else {
     goto native_l23_10;
-  case INT64_C(5):
-    goto native_l23_11;
-  case INT64_C(6):
-    goto native_l23_11;
-  case INT64_C(7):
-    goto native_l23_11;
-  case INT64_C(8):
-    goto native_l23_11;
-  case INT64_C(9):
-    goto native_l23_11;
-  case INT64_C(10):
-    goto native_l23_11;
-  case INT64_C(11):
-    goto native_l23_11;
-  case INT64_C(12):
-    goto native_l23_11;
-  case INT64_C(13):
-    goto native_l23_11;
-  case INT64_C(14):
-    goto native_l23_11;
-  case INT64_C(15):
-    goto native_l23_11;
-  case INT64_C(16):
-    goto native_l23_11;
-  case INT64_C(17):
-    goto native_l23_11;
-  case INT64_C(18):
-    goto native_l23_11;
-  case INT64_C(19):
-    goto native_l23_11;
-  case INT64_C(20):
-    goto native_l23_11;
-  case INT64_C(21):
-    goto native_l23_11;
-  case INT64_C(22):
-    goto native_l23_11;
-  case INT64_C(23):
-    goto native_l23_11;
-  case INT64_C(24):
-    goto native_l23_11;
-  default:
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l23_10: ;
-  if (native_s_14.tag != INT64_C(4)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  native_s_15 = native_s_14.payload.variant_4;
-  native_s_16 = native_text_eq(native_s_0, native_s_15);
-  native_s_18 = native_s_16;
-  goto native_l23_12;
+  native_s_30 = native_s_16;
+  goto native_l23_20;
 native_l23_11: ;
-  native_s_17 = false;
-  (void)native_s_17;
-  native_s_18 = native_s_17;
-  goto native_l23_12;
-native_l23_12: ;
-  if (native_s_18) {
-    goto native_l23_14;
-  } else {
-    goto native_l23_13;
-  }
-native_l23_13: ;
-  native_s_32 = native_s_18;
-  goto native_l23_23;
-native_l23_14: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_19 = native_v_0.payload.variant_7;
-  native_s_20 = ((native_m0_type_49 *)native_s_19)->field_2;
-  switch (native_s_20.tag) {
+  native_s_17 = native_v_0.payload.variant_7;
+  native_s_18 = ((native_m0_type_49 *)native_s_17)->field_2;
+  switch (native_s_18.tag) {
   case INT64_C(0):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(1):
-    goto native_l23_15;
+    goto native_l23_12;
   case INT64_C(2):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(3):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(4):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(5):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(6):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(7):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(8):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(9):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(10):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(11):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(12):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(13):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(14):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(15):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(16):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(17):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(18):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(19):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(20):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(21):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(22):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(23):
-    goto native_l23_16;
+    goto native_l23_13;
   case INT64_C(24):
-    goto native_l23_16;
+    goto native_l23_13;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+native_l23_12: ;
+  native_s_19 = true;
+  (void)native_s_19;
+  native_s_21 = native_s_19;
+  goto native_l23_14;
+native_l23_13: ;
+  native_s_20 = false;
+  (void)native_s_20;
+  native_s_21 = native_s_20;
+  goto native_l23_14;
+native_l23_14: ;
+  if (native_s_21) {
+    goto native_l23_16;
+  } else {
+    goto native_l23_15;
+  }
 native_l23_15: ;
-  native_s_21 = true;
-  (void)native_s_21;
-  native_s_23 = native_s_21;
+  native_s_27 = native_s_21;
   goto native_l23_17;
 native_l23_16: ;
-  native_s_22 = false;
-  (void)native_s_22;
-  native_s_23 = native_s_22;
-  goto native_l23_17;
-native_l23_17: ;
-  if (native_s_23) {
-    goto native_l23_19;
-  } else {
-    goto native_l23_18;
-  }
-native_l23_18: ;
-  native_s_29 = native_s_23;
-  goto native_l23_20;
-native_l23_19: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_24 = native_v_0.payload.variant_7;
-  native_s_25 = ((native_m0_type_49 *)native_s_24)->field_2;
-  native_s_26 = INT64_C(0);
-  (void)native_s_26;
-  if (native_s_25.tag != INT64_C(1)) {
+  native_s_22 = native_v_0.payload.variant_7;
+  native_s_23 = ((native_m0_type_49 *)native_s_22)->field_2;
+  native_s_24 = INT64_C(0);
+  (void)native_s_24;
+  if (native_s_23.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_27 = native_s_25.payload.variant_1;
-  native_s_28 = (native_s_26 <= native_s_27);
-  native_s_30 = native_s_28;
+  native_s_25 = native_s_23.payload.variant_1;
+  native_s_26 = (native_s_24 <= native_s_25);
+  native_s_28 = native_s_26;
+  goto native_l23_18;
+native_l23_17: ;
+  native_s_29 = native_s_27;
+  goto native_l23_19;
+native_l23_18: ;
+  native_s_29 = native_s_28;
+  goto native_l23_19;
+native_l23_19: ;
+  native_s_31 = native_s_29;
   goto native_l23_21;
 native_l23_20: ;
-  native_s_31 = native_s_29;
+  native_s_32 = native_s_30;
   goto native_l23_22;
 native_l23_21: ;
-  native_s_31 = native_s_30;
+  native_s_32 = native_s_31;
   goto native_l23_22;
 native_l23_22: ;
-  native_s_33 = native_s_31;
+  native_s_34 = native_s_32;
   goto native_l23_24;
 native_l23_23: ;
-  native_s_34 = native_s_32;
+  native_s_35 = native_s_33;
   goto native_l23_25;
 native_l23_24: ;
-  native_s_34 = native_s_33;
+  native_s_35 = native_s_34;
   goto native_l23_25;
 native_l23_25: ;
-  native_s_36 = native_s_34;
+  native_s_37 = native_s_35;
   goto native_l23_27;
 native_l23_26: ;
-  native_s_37 = native_s_35;
+  native_s_38 = native_s_36;
   goto native_l23_28;
 native_l23_27: ;
-  native_s_37 = native_s_36;
+  native_s_38 = native_s_37;
   goto native_l23_28;
 native_l23_28: ;
-  native_s_39 = native_s_37;
+  native_s_40 = native_s_38;
   goto native_l23_30;
 native_l23_29: ;
-  native_s_40 = native_s_38;
+  native_s_41 = native_s_39;
   goto native_l23_31;
 native_l23_30: ;
-  native_s_40 = native_s_39;
+  native_s_41 = native_s_40;
   goto native_l23_31;
 native_l23_31: ;
-  native_s_42 = native_s_40;
-  goto native_l23_33;
-native_l23_32: ;
-  native_s_43 = native_s_41;
-  goto native_l23_34;
-native_l23_33: ;
-  native_s_43 = native_s_42;
-  goto native_l23_34;
-native_l23_34: ;
-  return native_s_43;
+  return native_s_41;
 }
 native_m0_type_49 native_m0_fn_24(native_arena *arena, const native_capability *capability, native_m0_type_49 native_v_0, native_m0_type_1 native_v_1) {
   (void)arena;
@@ -2978,19 +4428,19 @@ native_m0_type_6 native_m0_fn_25(native_m0_type_48 native_v_0) {
   native_m0_type_6 native_s_4;
   native_m0_type_29 native_s_5;
   native_m0_type_48 native_s_6;
-  native_m0_type_9 native_s_7;
+  native_m0_type_48 native_s_7;
   native_m0_type_6 native_s_8;
-  native_m0_type_6 native_s_9;
-  native_m0_type_6 native_s_10;
-  native_m0_type_29 native_s_11;
-  native_m0_type_48 native_s_12;
+  native_m0_type_29 native_s_9;
+  native_m0_type_48 native_s_10;
+  native_m0_type_6 native_s_11;
+  native_m0_type_6 native_s_12;
   native_m0_type_6 native_s_13;
-  native_m0_type_6 native_s_14;
-  native_m0_type_6 native_s_15;
-  native_m0_type_29 native_s_16;
-  native_m0_type_48 native_s_17;
-  native_m0_type_1 native_s_18;
-  native_m0_type_1 native_s_19;
+  native_m0_type_29 native_s_14;
+  native_m0_type_48 native_s_15;
+  native_m0_type_1 native_s_16;
+  native_m0_type_1 native_s_17;
+  native_m0_type_6 native_s_18;
+  native_m0_type_6 native_s_19;
   native_m0_type_6 native_s_20;
   native_m0_type_6 native_s_21;
   native_m0_type_6 native_s_22;
@@ -3002,8 +4452,6 @@ native_m0_type_6 native_m0_fn_25(native_m0_type_48 native_v_0) {
   native_m0_type_6 native_s_28;
   native_m0_type_6 native_s_29;
   native_m0_type_6 native_s_30;
-  native_m0_type_6 native_s_31;
-  native_m0_type_6 native_s_32;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_keyword_1;
   (void)native_s_0;
   native_s_1 = native_m0_fn_4(native_v_0);
@@ -3013,8 +4461,8 @@ native_m0_type_6 native_m0_fn_25(native_m0_type_48 native_v_0) {
     goto native_l25_1;
   }
 native_l25_1: ;
-  native_s_30 = native_s_1;
-  goto native_l25_24;
+  native_s_28 = native_s_1;
+  goto native_l25_21;
 native_l25_2: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -3028,219 +4476,153 @@ native_l25_2: ;
     goto native_l25_3;
   }
 native_l25_3: ;
-  native_s_27 = native_s_4;
-  goto native_l25_21;
+  native_s_25 = native_s_4;
+  goto native_l25_18;
 native_l25_4: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_s_5 = native_v_0.payload.variant_7;
   native_s_6 = ((native_m0_type_49 *)native_s_5)->field_1;
-  switch (native_s_6.tag) {
-  case INT64_C(0):
+  native_s_7 = (native_m0_type_48){ .tag = INT64_C(4), .payload = { .variant_4 = native_s_0 } };
+  native_s_8 = native_dynamic_value_equal(&native_m0_value_48, &native_s_7, &native_s_6);
+  if (native_s_8) {
     goto native_l25_6;
-  case INT64_C(1):
-    goto native_l25_6;
-  case INT64_C(2):
-    goto native_l25_6;
-  case INT64_C(3):
-    goto native_l25_6;
-  case INT64_C(4):
+  } else {
     goto native_l25_5;
-  case INT64_C(5):
-    goto native_l25_6;
-  case INT64_C(6):
-    goto native_l25_6;
-  case INT64_C(7):
-    goto native_l25_6;
-  case INT64_C(8):
-    goto native_l25_6;
-  case INT64_C(9):
-    goto native_l25_6;
-  case INT64_C(10):
-    goto native_l25_6;
-  case INT64_C(11):
-    goto native_l25_6;
-  case INT64_C(12):
-    goto native_l25_6;
-  case INT64_C(13):
-    goto native_l25_6;
-  case INT64_C(14):
-    goto native_l25_6;
-  case INT64_C(15):
-    goto native_l25_6;
-  case INT64_C(16):
-    goto native_l25_6;
-  case INT64_C(17):
-    goto native_l25_6;
-  case INT64_C(18):
-    goto native_l25_6;
-  case INT64_C(19):
-    goto native_l25_6;
-  case INT64_C(20):
-    goto native_l25_6;
-  case INT64_C(21):
-    goto native_l25_6;
-  case INT64_C(22):
-    goto native_l25_6;
-  case INT64_C(23):
-    goto native_l25_6;
-  case INT64_C(24):
-    goto native_l25_6;
-  default:
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
 native_l25_5: ;
-  if (native_s_6.tag != INT64_C(4)) {
-    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
-  }
-  native_s_7 = native_s_6.payload.variant_4;
-  native_s_8 = native_text_eq(native_s_0, native_s_7);
-  native_s_10 = native_s_8;
-  goto native_l25_7;
+  native_s_22 = native_s_8;
+  goto native_l25_15;
 native_l25_6: ;
-  native_s_9 = false;
-  (void)native_s_9;
-  native_s_10 = native_s_9;
-  goto native_l25_7;
-native_l25_7: ;
-  if (native_s_10) {
-    goto native_l25_9;
-  } else {
-    goto native_l25_8;
-  }
-native_l25_8: ;
-  native_s_24 = native_s_10;
-  goto native_l25_18;
-native_l25_9: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_11 = native_v_0.payload.variant_7;
-  native_s_12 = ((native_m0_type_49 *)native_s_11)->field_2;
-  switch (native_s_12.tag) {
+  native_s_9 = native_v_0.payload.variant_7;
+  native_s_10 = ((native_m0_type_49 *)native_s_9)->field_2;
+  switch (native_s_10.tag) {
   case INT64_C(0):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(1):
-    goto native_l25_10;
+    goto native_l25_7;
   case INT64_C(2):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(3):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(4):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(5):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(6):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(7):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(8):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(9):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(10):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(11):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(12):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(13):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(14):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(15):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(16):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(17):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(18):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(19):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(20):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(21):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(22):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(23):
-    goto native_l25_11;
+    goto native_l25_8;
   case INT64_C(24):
-    goto native_l25_11;
+    goto native_l25_8;
   default:
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+native_l25_7: ;
+  native_s_11 = true;
+  (void)native_s_11;
+  native_s_13 = native_s_11;
+  goto native_l25_9;
+native_l25_8: ;
+  native_s_12 = false;
+  (void)native_s_12;
+  native_s_13 = native_s_12;
+  goto native_l25_9;
+native_l25_9: ;
+  if (native_s_13) {
+    goto native_l25_11;
+  } else {
+    goto native_l25_10;
+  }
 native_l25_10: ;
-  native_s_13 = true;
-  (void)native_s_13;
-  native_s_15 = native_s_13;
+  native_s_19 = native_s_13;
   goto native_l25_12;
 native_l25_11: ;
-  native_s_14 = false;
-  (void)native_s_14;
-  native_s_15 = native_s_14;
-  goto native_l25_12;
-native_l25_12: ;
-  if (native_s_15) {
-    goto native_l25_14;
-  } else {
-    goto native_l25_13;
-  }
-native_l25_13: ;
-  native_s_21 = native_s_15;
-  goto native_l25_15;
-native_l25_14: ;
   if (native_v_0.tag != INT64_C(7)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_16 = native_v_0.payload.variant_7;
-  native_s_17 = ((native_m0_type_49 *)native_s_16)->field_2;
-  native_s_18 = INT64_C(0);
-  (void)native_s_18;
-  if (native_s_17.tag != INT64_C(1)) {
+  native_s_14 = native_v_0.payload.variant_7;
+  native_s_15 = ((native_m0_type_49 *)native_s_14)->field_2;
+  native_s_16 = INT64_C(0);
+  (void)native_s_16;
+  if (native_s_15.tag != INT64_C(1)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
-  native_s_19 = native_s_17.payload.variant_1;
-  native_s_20 = (native_s_18 <= native_s_19);
-  native_s_22 = native_s_20;
+  native_s_17 = native_s_15.payload.variant_1;
+  native_s_18 = (native_s_16 <= native_s_17);
+  native_s_20 = native_s_18;
+  goto native_l25_13;
+native_l25_12: ;
+  native_s_21 = native_s_19;
+  goto native_l25_14;
+native_l25_13: ;
+  native_s_21 = native_s_20;
+  goto native_l25_14;
+native_l25_14: ;
+  native_s_23 = native_s_21;
   goto native_l25_16;
 native_l25_15: ;
-  native_s_23 = native_s_21;
+  native_s_24 = native_s_22;
   goto native_l25_17;
 native_l25_16: ;
-  native_s_23 = native_s_22;
+  native_s_24 = native_s_23;
   goto native_l25_17;
 native_l25_17: ;
-  native_s_25 = native_s_23;
+  native_s_26 = native_s_24;
   goto native_l25_19;
 native_l25_18: ;
-  native_s_26 = native_s_24;
+  native_s_27 = native_s_25;
   goto native_l25_20;
 native_l25_19: ;
-  native_s_26 = native_s_25;
+  native_s_27 = native_s_26;
   goto native_l25_20;
 native_l25_20: ;
-  native_s_28 = native_s_26;
+  native_s_29 = native_s_27;
   goto native_l25_22;
 native_l25_21: ;
-  native_s_29 = native_s_27;
+  native_s_30 = native_s_28;
   goto native_l25_23;
 native_l25_22: ;
-  native_s_29 = native_s_28;
+  native_s_30 = native_s_29;
   goto native_l25_23;
 native_l25_23: ;
-  native_s_31 = native_s_29;
-  goto native_l25_25;
-native_l25_24: ;
-  native_s_32 = native_s_30;
-  goto native_l25_26;
-native_l25_25: ;
-  native_s_32 = native_s_31;
-  goto native_l25_26;
-native_l25_26: ;
-  return native_s_32;
+  return native_s_30;
 }
 native_m0_type_49 native_m0_fn_26(native_arena *arena, const native_capability *capability, native_m0_type_49 native_v_0, native_m0_type_49 native_v_1) {
   (void)arena;

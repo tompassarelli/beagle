@@ -24,7 +24,8 @@
   (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
         (configuration (Vec String)) ["profile=3"]
         (source stages/SourceStageV0)
-        (slice/source-program rows "fram.main" "fram:src/fram/main.bclj")
+        (slice/source-program rows "fram.main"
+          "native-core/validation/slice-main-capability/main_fixture.bgl")
         (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))

@@ -109,18 +109,18 @@ run_phase purity-valid-build 180 env BEAGLE_PURITY=error \
     --out "$scratch/purity-valid-art" "$here/purity_valid.bgl"
 rg -q '^result PASS$' "$scratch/purity-valid-art/report.txt"
 run_phase atom-mutations-ast 60 "$repo/bin/beagle-ast" \
-  "$here/atom_mutations.bclj" \
+  "$here/atom_mutations.bgl" \
   >"$scratch/atom_mutations.ast.json"
 run_phase atom-refusals-ast 60 "$repo/bin/beagle-ast" \
-  "$here/atom_mutation_refusals.bclj" \
+  "$here/atom_mutation_refusals.bgl" \
   >"$scratch/atom_mutation_refusals.ast.json"
 run_phase atom-mutations-facts 60 bb \
   "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/atom_mutations.ast.json=beagle:native-core/validation/atom/atom_mutations.bclj" \
+  --input "$scratch/atom_mutations.ast.json=native-core/validation/atom/atom_mutations.bgl" \
   --output "$scratch/atom_mutations.facts"
 run_phase atom-refusals-facts 60 bb \
   "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/atom_mutation_refusals.ast.json=beagle:native-core/validation/atom/atom_mutation_refusals.bclj" \
+  --input "$scratch/atom_mutation_refusals.ast.json=native-core/validation/atom/atom_mutation_refusals.bgl" \
   --output "$scratch/atom_mutation_refusals.facts"
 
 run_phase native-compiler-build 300 "$repo/bin/beagle-build-all" \
@@ -128,6 +128,7 @@ run_phase native-compiler-build 300 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/qbe.bclj" \
@@ -147,7 +148,7 @@ core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
 qbe_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/qbe.clj" | tr '\n' ' ')"
 
-for name in stages lower obligations c11 slice qbe fold_c17 body_c17 body_slice \
+for name in stages lower obligations simd c11 slice qbe fold_c17 body_c17 body_slice \
     qbe_validation_corpus; do
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$name.clj"
@@ -168,13 +169,13 @@ run_phase atom-source-materialization 180 bb -cp "$scratch/out" -e "
   (native.body-slice/emit-slice!
     \"$scratch/atom_mutations.facts\"
     \"native.atom-mutations\"
-    \"beagle:native-core/validation/atom/atom_mutations.bclj\"
+    \"native-core/validation/atom/atom_mutations.bgl\"
     \"$scratch/source-art\" \"native-atom-mutations-v0\" \"$abi\"))
 (spit \"$scratch/refusal-report.txt\"
   (native.body-slice/emit-slice!
     \"$scratch/atom_mutation_refusals.facts\"
     \"native.atom-mutation-refusals\"
-    \"beagle:native-core/validation/atom/atom_mutation_refusals.bclj\"
+    \"native-core/validation/atom/atom_mutation_refusals.bgl\"
     \"$scratch/refusal-art\" \"native-atom-mutation-refusals-v0\" \"$abi\"))"
 
 for name in direct-update make-counter-cell make-vector-cell reset-counter! \

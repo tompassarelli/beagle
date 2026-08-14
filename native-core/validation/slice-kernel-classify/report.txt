@@ -36,6 +36,7 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 obligation-projection PASS epoch-soundness
 obligation-projection PASS leak-freedom
+obligation-projection PASS deterministic-parallelism
 materialize OK module_0.h module_0.c
 qbe-stage typed-to-native COMPLETE
 qbe-selected-function delivery-trigger?
@@ -51,4 +52,5 @@ qbe-obligation PASS discharged-tokens
 qbe-obligation PASS bounded-effects
 qbe-obligation PASS epoch-soundness
 qbe-obligation PASS leak-freedom
+qbe-obligation PASS deterministic-parallelism
 qbe-materialize OK module_1.ssa

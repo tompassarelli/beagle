@@ -53,11 +53,12 @@
 (defn emit-slice!
   [(facts-path String)
    (artifacts-dir String)
-   (compiler-commit String)] String
+   (compiler-commit String)
+   (source-logical-id String)] String
   (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
         (configuration (Vec String)) ["profile=3"]
         (source stages/SourceStageV0)
-        (slice/source-program rows "fram.kernel" "fram:src/fram/kernel.bgl")
+        (slice/source-program rows "fram.kernel" source-logical-id)
         (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))

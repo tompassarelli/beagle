@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 ;; The four loop/recur shapes the Beagle checker accepts and the native lowering
 ;; must refuse by name; each function carries exactly one of them.
 (ns native.loops-refusals)

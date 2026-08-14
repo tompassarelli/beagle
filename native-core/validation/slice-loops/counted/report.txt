@@ -22,5 +22,6 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 obligation-projection PASS epoch-soundness
 obligation-projection PASS leak-freedom
+obligation-projection PASS deterministic-parallelism
 obligation-detail checked-arithmetic native-id-v0:24:native-lower-v0/function:40:native-id-v0:20:native-slice-v0/node:1:77:add-i64
 materialize OK module_0.h module_0.c

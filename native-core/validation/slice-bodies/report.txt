@@ -1,3 +1,4 @@
+MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches the vendored fram source
 stage source-freeze ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
@@ -31,9 +32,9 @@ lowered fn_19 atom? 49 blocks
 lowered fn_20 term? 14 blocks
 lowered fn_21 triple 28 blocks
 lowered fn_22 transaction-coordinate 7 blocks
-lowered fn_23 transaction-coordinate? 35 blocks
+lowered fn_23 transaction-coordinate? 32 blocks
 lowered fn_24 occurrence-coordinate 7 blocks
-lowered fn_25 occurrence-coordinate? 27 blocks
+lowered fn_25 occurrence-coordinate? 24 blocks
 lowered fn_26 assertion-occurrence 7 blocks
 lowered fn_27 retraction-occurrence 7 blocks
 lowered fn_28 withdrawal 7 blocks
@@ -48,4 +49,5 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 obligation-projection PASS epoch-soundness
 obligation-projection PASS leak-freedom
+obligation-projection PASS deterministic-parallelism
 materialize OK module_0.h module_0.c

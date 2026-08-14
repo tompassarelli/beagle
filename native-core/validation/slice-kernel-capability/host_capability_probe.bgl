@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 
 (ns native.host-capability-probe)
 

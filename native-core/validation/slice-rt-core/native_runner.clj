@@ -8,7 +8,8 @@
 (defn qbe-report [facts-path artifacts-dir compiler-commit abi]
   (let [rows (slice/parse-facts (slurp facts-path))
         configuration ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        source (slice/source-program rows "fram.rt-core" "fram:src/fram/rt_core.bclj")
+        source (slice/source-program rows "fram.rt-core"
+                 "native-core/validation/upstream/fram/src/fram/rt_core.bgl")
         freeze-result (lower/freeze-source-stage source compiler-commit configuration)]
     (cond
       (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
@@ -48,7 +49,8 @@
   (let [abi-id (or (System/getenv "NATIVE_SLICE_ABI") "lp64")
         abi (core/abi-profile-for abi-id)
         c-report (body-slice/emit-slice! facts-path "fram.rt-core"
-                   "fram:src/fram/rt_core.bclj" artifacts-dir compiler-commit
+                   "native-core/validation/upstream/fram/src/fram/rt_core.bgl"
+                   artifacts-dir compiler-commit
                    abi-id)
         backend-report (try
                          (qbe-report facts-path artifacts-dir compiler-commit abi)
@@ -56,4 +58,7 @@
                            (str "qbe-materialize ERROR "
                              (.getName (class error)) ": "
                              (or (.getMessage error) "no message") "\n")))]
-    (spit report-path (str c-report backend-report))))
+    (spit report-path
+      (str "projection-scope supported-functions-only\n"
+        c-report
+        backend-report))))

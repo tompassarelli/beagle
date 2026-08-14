@@ -21,6 +21,7 @@ obligation-host PASS discharged-tokens
 obligation-host PASS bounded-effects
 obligation-host PASS epoch-soundness
 obligation-host PASS leak-freedom
+obligation-host PASS deterministic-parallelism
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type [relational-admission-errors]
 materialize OK module_0.h module_0.c
 qbe REFUSED QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation

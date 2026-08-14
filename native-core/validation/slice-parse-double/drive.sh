@@ -26,10 +26,10 @@ fi
 [[ -n "$clang_bin" ]] || die "clang is required for the second C frontend"
 
 "$repo/bin/beagle" check --agent \
-  "$here/fixture.bclj" "$here/managed_fixture.bclj"
-"$repo/bin/beagle-ast" "$here/fixture.bclj" >"$scratch/fixture.ast.json"
+  "$here/fixture.bgl" "$here/managed_fixture.bclj"
+"$repo/bin/beagle-ast" "$here/fixture.bgl" >"$scratch/fixture.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  "$scratch/fixture.ast.json=beagle:native-core/validation/slice-parse-double/fixture.bclj" \
+  "$scratch/fixture.ast.json=native-core/validation/slice-parse-double/fixture.bgl" \
   "$scratch/fixture.facts" --include-defs
 
 "$repo/bin/beagle-build-all" \
@@ -37,6 +37,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -50,7 +51,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations simd c11 slice fold_c17 body_c17 qbe body_slice; do
   target="$scratch/out/native/$module.clj"
   [[ -f "$target" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$target"
@@ -65,7 +66,7 @@ bb -cp "$scratch/out" -e "
 (spit \"$scratch/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\"
     \"native.parse-double\"
-    \"beagle:native-core/validation/slice-parse-double/fixture.bclj\"
+    \"native-core/validation/slice-parse-double/fixture.bgl\"
     \"$scratch\" \"native-slice-parse-double-v0\" \"parse-value\" 1 \"$abi\"))"
 
 cat "$scratch/report.txt"

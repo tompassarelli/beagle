@@ -1,7 +1,8 @@
 (ns native.checked-program
   (:require [cheshire.core :as json])
   (:import [java.math BigInteger]
-           [java.security MessageDigest]))
+           [java.security MessageDigest]
+           [java.util Locale]))
 
 (def schema-version 3)
 
@@ -16,9 +17,39 @@
 
     :else value))
 
+(defn- canonical-json [value]
+  ;; Racket's canonical JSON writer emits lowercase hexadecimal digits in
+  ;; active \u escapes; Jackson emits uppercase. Walk JSON escape tokens rather
+  ;; than replacing text so a literal string such as "\\u000B" is unchanged.
+  (let [encoded (json/generate-string (canonical-value value))
+        length (.length encoded)
+        output (StringBuilder.)]
+    (loop [index 0]
+      (if (>= index length)
+        (.toString output)
+        (let [current (.charAt encoded index)]
+          (if (and (= current \\)
+                (< (+ index 5) length)
+                (= (.charAt encoded (+ index 1)) (char 117)))
+            (do
+              (.append output "\\u")
+              (.append output
+                (.toLowerCase
+                  (.substring encoded (+ index 2) (+ index 6))
+                  Locale/ROOT))
+              (recur (+ index 6)))
+            (if (and (= current \\) (< (+ index 1) length))
+              (do
+                (.append output current)
+                (.append output (.charAt encoded (+ index 1)))
+                (recur (+ index 2)))
+              (do
+                (.append output current)
+                (recur (+ index 1))))))))))
+
 (defn projection-digest [ast]
   (let [payload (dissoc ast "projectionSha256")
-        canonical-json (json/generate-string (canonical-value payload))
+        canonical-json (canonical-json payload)
         digest (MessageDigest/getInstance "SHA-256")]
     (.update digest (.getBytes canonical-json "UTF-8"))
     (str "sha256:" (format "%064x" (BigInteger. 1 (.digest digest))))))

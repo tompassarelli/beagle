@@ -4,13 +4,14 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+source "$repo/native-core/validation/publish-verified-set.sh"
 # Upstream fram sources are vendored under native-core/validation/upstream/fram
 # (its MANIFEST records the fram revision and digests); a FRAM_* override still
 # points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
 # must not be a function of another repository's working tree.
 types_file="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
 kernel_file="${FRAM_KERNEL:-$repo/native-core/validation/upstream/fram/src/fram/kernel.bgl}"
-probe_file="$here/host_capability_probe.bclj"
+probe_file="$here/host_capability_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-capability.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -19,7 +20,7 @@ die() {
   exit 1
 }
 
-for command in bb cmp gcc rg sha256sum; do
+for command in bb cmp gcc jq rg sha256sum; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -31,17 +32,23 @@ mkdir -p "$art" "$scratch/generated"
 "$repo/bin/beagle-ast" "$types_file" >"$scratch/types.ast.json"
 "$repo/bin/beagle-ast" "$kernel_file" >"$scratch/kernel.ast.json"
 "$repo/bin/beagle-ast" "$probe_file" >"$scratch/probe.ast.json"
+types_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/types.ast.json")"
+kernel_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/kernel.ast.json")"
+probe_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/probe.ast.json")"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/types.ast.json=fram:src/fram/types.bgl" \
-  --input "$scratch/kernel.ast.json=fram:src/fram/kernel.bgl" \
-  --input "$scratch/probe.ast.json=beagle:native-core/validation/slice-kernel-capability/host_capability_probe.bclj" \
+  --input "$scratch/types.ast.json=$types_logical" \
+  --input "$scratch/kernel.ast.json=$kernel_logical" \
+  --input "$scratch/probe.ast.json=$probe_logical" \
   --output "$scratch/generated/kernel_capability.facts" \
   --include-defs
 
 {
-  sha256sum "$types_file" | sed 's#  .*#  fram:src/fram/types.bgl#'
-  sha256sum "$kernel_file" | sed 's#  .*#  fram:src/fram/kernel.bgl#'
-  sha256sum "$probe_file" | sed 's#  .*#  beagle:native-core/validation/slice-kernel-capability/host_capability_probe.bclj#'
+  printf '%s  %s\n' "$(sha256sum "$types_file" | cut -d' ' -f1)" "$types_logical"
+  printf '%s  %s\n' "$(sha256sum "$kernel_file" | cut -d' ' -f1)" "$kernel_logical"
+  printf '%s  %s\n' "$(sha256sum "$probe_file" | cut -d' ' -f1)" "$probe_logical"
 } >"$scratch/generated/source.sha256"
 
 "$repo/bin/beagle-build-all" \
@@ -49,6 +56,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -62,7 +70,7 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
   }
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe host_capability_slice; do
+for module in stages lower obligations simd c11 slice fold_c17 body_c17 body_slice qbe host_capability_slice; do
   [[ -f "$scratch/out/native/$module.clj" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$module.clj"
@@ -78,9 +86,16 @@ bb -cp "$scratch/out" -e "
   (native.host-capability-slice/emit-slice!
     \"$scratch/generated/kernel_capability.facts\"
     \"$scratch/generated\"
-    \"native-kernel-capability-v0\"))"
+    \"native-kernel-capability-v0\"
+    \"$kernel_logical\"))"
 
 report="$scratch/generated/report.txt"
+if [[ "${NATIVE_SLICE_SOURCE_ID_PROOF:-0}" == 1 ]]; then
+  rg -Fx 'stage source-freeze ACCEPTED' "$report" >/dev/null
+  printf 'slice-kernel-capability: source-id proof PASS types=%s kernel=%s probe=%s\n' \
+    "$types_logical" "$kernel_logical" "$probe_logical"
+  exit 0
+fi
 for line in \
   'stage source-freeze ACCEPTED' \
   'stage source-to-typed ACCEPTED' \
@@ -128,20 +143,25 @@ printf '\n#endif\n' >>"$map"
 
 publish_generated() {
   local name="$1"
-  if [[ -f "$here/$name" ]] && ! cmp -s "$scratch/generated/$name" "$here/$name"; then
-    diff -u "$here/$name" "$scratch/generated/$name" >&2 || true
+  if [[ -f "$art/$name" ]] && ! cmp -s "$scratch/generated/$name" "$art/$name"; then
+    diff -u "$art/$name" "$scratch/generated/$name" >&2 || true
     die "generated artifact drifted: $name"
   fi
-  cp "$scratch/generated/$name" "$art/$name"
 }
 
-for name in kernel_capability.facts source.sha256 report.txt function_map.h module_0.h module_0.c; do
+generated_names=(kernel_capability.facts source.sha256 report.txt function_map.h module_0.h module_0.c)
+for name in "${generated_names[@]}"; do
   [[ -f "$scratch/generated/$name" ]] || die "materializer omitted $name"
   publish_generated "$name"
 done
 
+publish_results() {
+  publish_verified_set "$scratch/generated" "$art" "${generated_names[@]}"
+}
+
 cat "$report"
 if [[ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]]; then
+  publish_results
   exit 0
 fi
 
@@ -164,3 +184,5 @@ if command -v clang >/dev/null 2>&1; then
   (cd "$build" && BEAGLE_NATIVE_HOST_TEST=capability-value ./probe_clang)
   echo "slice-kernel-capability: clang $(clang -dumpversion | head -1) compile + run ok"
 fi
+
+publish_results

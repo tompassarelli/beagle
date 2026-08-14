@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 
 (ns fram.kernel-classify
   "The ONE classification authority fram.kernel / fram.fold / server.clj\n  delegate to, so a server and a CLI can never classify differently: predicate\n  cardinality, reference shape, fold key bytes, lease codec, delivery candidacy.\n\n  INVARIANT: stays inside the natively lowerable subset — String/Int/Bool/records/Vec\n  only, no Any, no higher-order fns, no throw, no env reads.")

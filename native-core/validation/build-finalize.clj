@@ -351,6 +351,11 @@
   #{"module_0.h" "module_0.c" "native_shim.h" "native_shim.c"
     "native_unicode15_data.h" "UNICODE-LICENSE.txt"})
 
+(def parallel-artifact-names #{"native_parallel.h" "native_parallel.c"})
+
+(def simd-artifact-names
+  #{"module.simd-plan-v0" "module.simd-plan-v0.sha256"})
+
 (def wasm-artifact-names
   #{"module_0.wasm" "module_0.wasm.sha256" "module_0.wasm.seams"
     "wasm-report.txt" "wasm-audit.txt" "wasm.retention.c" "wasm.adapter.c"
@@ -359,9 +364,6 @@
     "wasm.cc-identity.txt" "wasm.ld-identity.txt" "wasm.runtime-identity.txt"})
 
 (def qbe-artifact-names #{"module_0.ssa"})
-
-(def simd-artifact-names
-  #{"module.simd-plan-v0" "module.simd-plan-v0.sha256"})
 
 (defn exact-generation-sets? [receipt-names artifact-names]
   (let [wasm? (or (contains? receipt-names "wasm.receipt")
@@ -372,18 +374,21 @@
                  (not (empty? (set/intersection artifact-names
                                                 c17-artifact-names))))
         qbe? (not (empty? (set/intersection artifact-names qbe-artifact-names)))
-        simd? (not
-                (empty? (set/intersection artifact-names
-                          simd-artifact-names)))
+        parallel? (not (empty?
+                         (set/intersection artifact-names
+                           parallel-artifact-names)))
+        simd? (not (empty? (set/intersection artifact-names simd-artifact-names)))
         expected-receipts (cond-> #{"native.receipts"}
                             c17? (conj "c17.receipt")
                             wasm? (conj "wasm.receipt"))
         expected-artifacts (cond-> base-artifact-names
                              c17? (set/union c17-artifact-names)
+                             parallel? (set/union parallel-artifact-names)
+                             simd? (set/union simd-artifact-names)
                              wasm? (set/union wasm-artifact-names)
-                             qbe? (set/union qbe-artifact-names)
-                             simd? (set/union simd-artifact-names))]
+                             qbe? (set/union qbe-artifact-names))]
     (and (or c17? wasm? qbe?)
+         (or (not parallel?) c17?)
          (= expected-receipts receipt-names)
          (= expected-artifacts artifact-names))))
 
@@ -500,6 +505,19 @@
 (let [[mode output & tail] *command-line-args*]
   (when-not mode (fail! "expected a mode"))
   (case mode
+    "generation-set-contract"
+    (let [receipt-csv output
+          artifact-csv (first tail)
+          parse-names (fn [value]
+                        (if (or (nil? value) (str/blank? value))
+                          #{}
+                          (set (str/split value #","))))
+          receipt-names (parse-names receipt-csv)
+          artifact-names (parse-names artifact-csv)]
+      (if (exact-generation-sets? receipt-names artifact-names)
+        (println "generation-set-contract PASS")
+        (fail! "generation-set-contract REFUSED")))
+
     "native-index"
     (let [[receipts-path native-program-path] tail
           receipts (validate-native! receipts-path native-program-path)]

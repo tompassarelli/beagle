@@ -247,20 +247,17 @@ private_rc=$?
 try_rc=$?
 set -e
 [[ $full_rc -ne 0 && $refusal_rc -ne 0 && $private_rc -ne 0 && $try_rc -ne 0 ]]
-grep -Fq 'pending TODO-NATIVE-FUNCTION-BODY:' "$scratch/full-module/report.txt"
-grep -Fq '[unreachable]' "$scratch/reachable-refusal/report.txt"
-grep -Fqx 'entry-error entry is private, not exported: native.entry-projection/hidden' \
-    "$scratch/private-entry/report.txt"
-grep -Fq 'TODO-NATIVE-FORM-unsupported-try' "$scratch/try-reachable/report.txt"
-for helper in try-body-helper try-catch-helper try-finally-helper; do
-    grep -Fq $'\tname\tt\t'"$helper" "$scratch/try-reachable/source.facts"
+grep -Fq 'pending TODO-NATIVE-FUNCTION-BODY:' "$scratch/full-module.stderr"
+grep -Fq '[unreachable]' "$scratch/reachable-refusal.stderr"
+grep -Fqx 'entry-error entry native.entry-projection/hidden must be a public source function' \
+    "$scratch/private-entry.stderr"
+grep -Fq 'TODO-NATIVE-FORM-unsupported-try' "$scratch/try-reachable.stderr"
+for failed in full-module reachable-refusal private-entry try-reachable; do
+    [[ ! -e "$scratch/$failed/report.txt" ]]
+    [[ ! -e "$scratch/$failed/source.facts" ]]
 done
-if grep -Fq $'\tname\tt\tunreachable' "$scratch/try-reachable/source.facts"; then
-    echo "native-exe smoke: try projection retained an unreachable definition" >&2
-    exit 1
-fi
 printf 'native-exe smoke: full default + reachable/private refusals fail closed\n'
-printf 'native-exe smoke: try child reachability + lowering refusal ok\n'
+printf 'native-exe smoke: try lowering refusal stays unpublished\n'
 
 missing="$scratch/missing-entry"
 printf 'stale executable\n' >"$missing"

@@ -8,13 +8,14 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+source "$repo/native-core/validation/publish-verified-set.sh"
 # Upstream fram sources are vendored under native-core/validation/upstream/fram
 # (its MANIFEST records the fram revision and digests); a FRAM_* override still
 # points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
 # must not be a function of another repository's working tree.
-source_file="${FRAM_KERNEL_CLASSIFY:-$repo/native-core/validation/upstream/fram/src/fram/kernel_classify.bclj}"
+source_file="${FRAM_KERNEL_CLASSIFY:-$repo/native-core/validation/upstream/fram/src/fram/kernel_classify.bgl}"
 managed_out="${FRAM_MANAGED_OUT:-$repo/native-core/validation/upstream/fram/out}"
-probe_file="$here/kernel_classify_probe.bclj"
+probe_file="$here/kernel_classify_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-classify.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
@@ -23,7 +24,7 @@ die() {
   exit 1
 }
 
-for command in bb cmp gcc rg sha256sum; do
+for command in bb cmp gcc jq rg sha256sum; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$source_file" ]] || die "source is unavailable: $source_file"
@@ -32,9 +33,13 @@ mkdir -p "$art" "$scratch/generated"
 
 "$repo/bin/beagle-ast" "$source_file" >"$scratch/kernel.ast.json"
 "$repo/bin/beagle-ast" "$probe_file" >"$scratch/probe.ast.json"
+source_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/kernel.ast.json")"
+probe_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/probe.ast.json")"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/kernel.ast.json=fram:src/fram/kernel_classify.bclj" \
-  --input "$scratch/probe.ast.json=beagle:native-core/validation/slice-kernel-classify/kernel_classify_probe.bclj" \
+  --input "$scratch/kernel.ast.json=$source_logical" \
+  --input "$scratch/probe.ast.json=$probe_logical" \
   --output "$scratch/generated/kernel_classify.facts" \
   --include-defs
 
@@ -45,8 +50,8 @@ oracle_digest="$(sha256sum "$here/managed.out" | cut -d' ' -f1)"
 runner_digest="$(sha256sum "$here/managed_runner.clj" | cut -d' ' -f1)"
 dual_runner_digest="$(sha256sum "$here/dual_main.c" | cut -d' ' -f1)"
 {
-  printf '%s  %s\n' "$source_digest" 'fram:src/fram/kernel_classify.bclj'
-  printf '%s  %s\n' "$probe_digest" 'beagle:native-core/validation/slice-kernel-classify/kernel_classify_probe.bclj'
+  printf '%s  %s\n' "$source_digest" "$source_logical"
+  printf '%s  %s\n' "$probe_digest" "$probe_logical"
   printf '%s  %s\n' "$corpus_digest" 'beagle:native-core/validation/slice-kernel-classify/corpus.tsv'
   printf '%s  %s\n' "$oracle_digest" 'managed-oracle-output'
   printf '%s  %s\n' "$runner_digest" 'managed-oracle-runner'
@@ -58,6 +63,7 @@ dual_runner_digest="$(sha256sum "$here/dual_main.c" | cut -d' ' -f1)"
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -72,7 +78,7 @@ dual_runner_digest="$(sha256sum "$here/dual_main.c" | cut -d' ' -f1)"
 # Imported record patterns need the provider classes referred and imported in
 # the generated Clojure until the emitter qualifies cross-module patterns.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for module in stages lower obligations simd c11 slice fold_c17 body_c17 qbe body_slice; do
   [[ -f "$scratch/out/native/$module.clj" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$scratch/out/native/$module.clj"
@@ -88,7 +94,7 @@ bb -cp "$scratch/out" -e "
   (native.body-slice/emit-dual-slice!
     \"$scratch/generated/kernel_classify.facts\"
     \"fram.kernel-classify\"
-    \"fram:src/fram/kernel_classify.bclj\"
+    \"$source_logical\"
     \"$scratch/generated\"
     \"native-kernel-classify-v0\"
     \"delivery-trigger?\"
@@ -96,6 +102,12 @@ bb -cp "$scratch/out" -e "
     \"$abi\"))"
 
 report="$scratch/generated/report.txt"
+if [[ "${NATIVE_SLICE_SOURCE_ID_PROOF:-0}" == 1 ]]; then
+  rg -Fx 'stage source-freeze ACCEPTED' "$report" >/dev/null
+  printf 'slice-kernel-classify: source-id proof PASS source=%s probe=%s\n' \
+    "$source_logical" "$probe_logical"
+  exit 0
+fi
 for line in \
   'stage source-freeze ACCEPTED' \
   'stage source-to-typed ACCEPTED' \
@@ -166,21 +178,26 @@ printf '\n#endif\n' >>"$map"
 
 publish_generated() {
   local name="$1"
-  if [[ -f "$here/$name" ]] && ! cmp -s "$scratch/generated/$name" "$here/$name"; then
-    diff -u "$here/$name" "$scratch/generated/$name" >&2 || true
+  if [[ -f "$art/$name" ]] && ! cmp -s "$scratch/generated/$name" "$art/$name"; then
+    diff -u "$art/$name" "$scratch/generated/$name" >&2 || true
     die "generated artifact drifted: $name"
   fi
-  cp "$scratch/generated/$name" "$art/$name"
 }
 
-for name in kernel_classify.facts source.sha256 report.txt function_map.h module_0.h module_0.c module_1.ssa; do
+generated_names=(kernel_classify.facts source.sha256 report.txt function_map.h module_0.h module_0.c module_1.ssa)
+for name in "${generated_names[@]}"; do
   [[ -f "$scratch/generated/$name" ]] || die "materializer omitted $name"
   publish_generated "$name"
 done
 
+publish_results() {
+  publish_verified_set "$scratch/generated" "$art" "${generated_names[@]}"
+}
+
 cat "$report"
 
 if [[ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]]; then
+  publish_results
   exit 0
 fi
 
@@ -273,3 +290,4 @@ echo "slice-kernel-classify: gcc strict compile + 77 cases + 3 globals PASS"
 echo "slice-kernel-classify: clang strict compile + 77 cases + 3 globals PASS"
 echo "slice-kernel-classify: direct QBE assemble + link + 5 managed parity cases PASS"
 echo "slice-kernel-classify: lines=139 bytes=3591 sha256=$oracle_digest"
+publish_results

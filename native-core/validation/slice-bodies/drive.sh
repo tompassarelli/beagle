@@ -13,15 +13,19 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+source "$repo/native-core/validation/publish-verified-set.sh"
 # Upstream fram sources are vendored under native-core/validation/upstream/fram
 # (its MANIFEST records the fram revision and digests); a FRAM_* override still
 # points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
 # must not be a function of another repository's working tree.
 src="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-bodies.XXXXXX")"
+generated="$scratch/generated"
 trap 'rm -rf "${scratch:?}"' EXIT
+mkdir -p "$generated"
 
 banner=""
+logical=""
 if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
   # Opt-in only, and it says so in the report: this mode proves the committed
   # projection still lowers, never that it still matches the vendored source.
@@ -29,22 +33,33 @@ if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
     || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/types.facts" >&2; exit 1; }
   banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches the vendored fram source"
   echo "drive.sh: $banner" >&2
-  cp "$art/types.facts" "$scratch/types.facts"
+  cp "$art/types.facts" "$generated/types.facts"
+  mapfile -t logical_ids < <(
+    awk -F '\t' '$2 == "relative-path" && $3 == "t" { print $4 }' \
+      "$generated/types.facts"
+  )
+  [[ "${#logical_ids[@]}" -eq 1 && -n "${logical_ids[0]}" ]] || {
+    echo "drive.sh: committed types.facts must contain exactly one non-empty relative-path" >&2
+    exit 1
+  }
+  logical="${logical_ids[0]}"
 elif [[ ! -f "$src" ]]; then
   echo "drive.sh: upstream fram source is missing: $src" >&2
   echo "drive.sh: restore native-core/validation/upstream/fram, point FRAM_TYPES at a fram source, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
   exit 1
 else
   "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
+  logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+    "$scratch/types.ast.json")"
   bb "$here/ast-facts.clj" \
-    "$scratch/types.ast.json=fram:src/fram/types.bgl" "$scratch/types.facts" \
+    "$scratch/types.ast.json=$logical" \
+    "$generated/types.facts" \
     --include-defs
-  if [[ -f "$art/types.facts" ]] && ! cmp -s "$scratch/types.facts" "$art/types.facts"; then
+  if [[ -f "$art/types.facts" ]] && ! cmp -s "$generated/types.facts" "$art/types.facts"; then
     echo "drive.sh: regenerated projection differs from the committed types.facts" >&2
     exit 1
   fi
-  cp "$scratch/types.facts" "$art/types.facts"
-  sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
+  sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
 fi
 
 "$repo/bin/beagle-build-all" \
@@ -52,6 +67,7 @@ fi
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -64,7 +80,7 @@ fi
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for m in stages lower obligations simd c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \
@@ -75,32 +91,46 @@ done
 
 bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
-(spit \"$art/report.txt\"
-  (native.body-slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"
-    \"fram:src/fram/types.bgl\" \"$art\" \"native-slice-bodies-v0\" \"$abi\"))"
+(spit \"$generated/report.txt\"
+  (native.body-slice/emit-slice! \"$generated/types.facts\" \"fram.types\"
+    \"$logical\"
+    \"$generated\" \"native-slice-bodies-v0\" \"$abi\"))"
 
 if [[ -n "$banner" ]]; then
-  sed -i "1i $banner" "$art/report.txt"
+  sed -i "1i $banner" "$generated/report.txt"
 fi
-cat "$art/report.txt"
+cat "$generated/report.txt"
+
+if [[ "${NATIVE_SLICE_SOURCE_ID_PROOF:-0}" == 1 ]]; then
+  rg -Fx 'stage source-freeze ACCEPTED' "$generated/report.txt" >/dev/null
+  printf 'slice-bodies: source-id proof PASS logical=%s\n' "$logical"
+  exit 0
+fi
+
+publish_results() {
+  local -a names=(types.facts report.txt module_0.h module_0.c)
+  [[ -f "$generated/source.sha256" ]] && names+=(source.sha256)
+  publish_verified_set "$generated" "$art" "${names[@]}"
+}
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
+  publish_results
   exit 0
 fi
 
 build="$scratch/c"
 mkdir -p "$build"
-cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
+cp "$generated/module_0.h" "$generated/module_0.c" "$here/main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
 # The emitter numbers its type table in collection order, so the probe names
 # every generated type through a macro resolved here instead of spelling an
 # ordinal that an unrelated fram.types change silently repoints.
 return_type_of() { # <fn-index>
-  sed -nE "s/^(native_m0_type_[0-9]+) native_m0_fn_$1\(.*/\1/p" "$art/module_0.h"
+  sed -nE "s/^(native_m0_type_[0-9]+) native_m0_fn_$1\(.*/\1/p" "$generated/module_0.h"
 }
 value_param_of() { # <fn-index> — first parameter that is a generated type
-  sed -nE "s/^native_m0_type_[0-9]+ native_m0_fn_$1\((.*)\);$/\1/p" "$art/module_0.h" \
+  sed -nE "s/^native_m0_type_[0-9]+ native_m0_fn_$1\((.*)\);$/\1/p" "$generated/module_0.h" \
     | tr ',' '\n' | sed -nE 's/^ *(native_m0_type_[0-9]+) .*/\1/p' | head -1
 }
 defines=(
@@ -147,3 +177,5 @@ if [ -n "$clang_bin" ]; then
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
 fi
+
+publish_results

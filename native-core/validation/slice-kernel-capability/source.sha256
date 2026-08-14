@@ -1,3 +1,3 @@
-e58abae54c2baa2528358ade496d9ed6cf7c6b0fed45afe8638049ebd654634c  fram:src/fram/types.bgl
-db8025377776873cae0dc6cc07c12e3eced629bc587f100aaa07ca4f303eebda  fram:src/fram/kernel.bgl
-a9b0d8881030459b5b0eeab58c97cac9fe3f7d9c6854302f0c4935db390d6c2e  beagle:native-core/validation/slice-kernel-capability/host_capability_probe.bclj
+eb00cba671982d0a6c3ceb4985e963bf743b71c5785ee2d783d153b0ad44b4ac  native-core/validation/upstream/fram/src/fram/types.bgl
+7b5de9fc190fa4abd82d91d9879e283cbc2ffd0fb2ed278d74ee7d1592f340d7  native-core/validation/upstream/fram/src/fram/kernel.bgl
+50a9565d1f9e48132adb1ac27a1570116381dd26df389b572b563914f0153fc6  native-core/validation/slice-kernel-capability/host_capability_probe.bgl

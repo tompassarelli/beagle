@@ -20,7 +20,6 @@ mkdir -p "$scratch/out" "$scratch/generated" "$scratch/source-c17" \
 "$repo/bin/beagle" check --agent "$here/socket_byte_sink.bgl"
 "$repo/bin/beagle" build --materializer c17 \
   --out "$scratch/source-c17" \
-  --entry native.socket-byte-sink/write-frame \
   "$here/socket_byte_sink.bgl" >"$scratch/source-c17.log"
 
 source_report="$scratch/source-c17/report.txt"
@@ -40,14 +39,13 @@ rg -F 'native_host_socket_write_bounded_v0' \
 set +e
 "$repo/bin/beagle" build --materializer qbe \
   --out "$scratch/source-qbe" \
-  --entry native.socket-byte-sink/write-frame \
   "$here/socket_byte_sink.bgl" >"$scratch/source-qbe.log" 2>&1
 qbe_status=$?
 set -e
 [[ $qbe_status -ne 0 ]] || die "QBE unexpectedly accepted the socket effect"
 rg -Fx \
   'materialize-qbe REFUSED QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation' \
-  "$scratch/source-qbe/report.txt" >/dev/null \
+  "$scratch/source-qbe.log" >/dev/null \
   || die "QBE socket refusal changed"
 
 "$repo/bin/beagle-build-all" \
@@ -56,6 +54,7 @@ rg -Fx \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/body_c17.bclj" \
   "$repo/native-core/src/native/qbe.bclj" \
   "$here/socket_capability_fixture.bclj" \
@@ -66,7 +65,7 @@ rg -Fx \
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations fold_c17 body_c17 qbe socket_capability_fixture; do
+for module in stages lower obligations fold_c17 simd body_c17 qbe socket_capability_fixture; do
   generated="$scratch/out/native/$module.clj"
   [[ -f "$generated" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
@@ -88,7 +87,7 @@ rg -Fx 'fixture PASS' "$report" >/dev/null || {
   cat "$report" >&2
   die "native program fixture failed"
 }
-rg -Fx 'abis 5' "$report" >/dev/null || die "socket imports were not closed"
+rg -Fx 'abis 6' "$report" >/dev/null || die "socket ABIs were not closed"
 rg -Fx \
   'qbe REFUSED QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation' \
   "$report" >/dev/null || die "QBE refusal changed"

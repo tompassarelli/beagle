@@ -46,6 +46,9 @@ NATIVE_PARALLEL_WORKERS=8 "$repo/bin/beagle" build --materializer c17 \
 for artifact in module.native-program module.native-program.sha256 module_0.h module_0.c; do
   cmp "$scratch/c17-workers-1/$artifact" "$scratch/c17-workers-8/$artifact"
 done
+test -s "$scratch/c17-workers-1/build.manifest.sha256"
+grep -Fq 'native_parallel.h' "$scratch/c17-workers-1/build.manifest"
+grep -Fq 'native_parallel.c' "$scratch/c17-workers-1/build.manifest"
 report="$scratch/c17-workers-1/report.txt"
 grep -Fqx "program-functions 2" "$report"
 grep -Fqx "program-abis 1" "$report"
@@ -83,7 +86,8 @@ if "$repo/bin/beagle" build --materializer qbe --out "$scratch/qbe" \
 fi
 grep -Fqx \
   "qbe-parallel REFUSED QBE deterministic parallel F64 instructions are unsupported" \
-  "$scratch/qbe/report.txt"
+  "$scratch/qbe.log"
+test ! -e "$scratch/qbe/report.txt"
 if [[ -e "$scratch/qbe/module_0.ssa" ]]; then
   echo "parallel-runtime fixture: refused QBE build emitted module_0.ssa" >&2
   exit 1
@@ -98,7 +102,8 @@ if "$repo/bin/beagle" build --materializer c17 --abi wasm32 \
 fi
 grep -Fqx \
   "wasm-parallel REFUSED shared-memory-worker-host-envelope-unavailable" \
-  "$scratch/wasm/report.txt"
+  "$scratch/wasm.log"
+test ! -e "$scratch/wasm/report.txt"
 for artifact in module_0.h module_0.c native_parallel.h native_parallel.c; do
   if [[ -e "$scratch/wasm/$artifact" ]]; then
     echo "parallel-runtime fixture: refused Wasm build emitted $artifact" >&2

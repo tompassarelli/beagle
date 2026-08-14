@@ -12,7 +12,12 @@ command -v bb >/dev/null 2>&1 || {
 bb -e '
   (load-file (first *command-line-args*))
   (require (quote [native.checked-program :as checked]))
-  (let [base {"kind" "beagle.checked-program"
+  (let [escape-payload {"control" "\u000b"
+                        "literal" "\\u000B"}
+        escape-digest (checked/projection-digest escape-payload)
+        literal-lower-digest
+        (checked/projection-digest (assoc escape-payload "literal" "\\u000b"))
+        base {"kind" "beagle.checked-program"
               "schemaVersion" 3
               "phase" "checked"
               "namespace" "native.ingress-λ"
@@ -52,6 +57,12 @@ bb -e '
         missing-field-access (checked/with-projection-digest
                                (update-in base ["forms" 0 "body" 2]
                                  dissoc "recordFieldAccess"))]
+    (when-not (= "sha256:3ad47654810b8b6943504e237b4a929aac61c6b5d53731d2bcc366995e6dafdb"
+                escape-digest)
+      (throw (ex-info "JSON unicode escape canonicalization drifted"
+               {:actual escape-digest})))
+    (when (= escape-digest literal-lower-digest)
+      (throw (ex-info "literal backslash-u payload was normalized" {})))
     (checked/require-checked-program! authentic "authentic" "test ingress")
     (try
       (checked/require-checked-program! tampered "tampered" "test ingress")
@@ -98,5 +109,5 @@ bb -e '
         (when-not (clojure.string/includes?
                     (ex-message error) "schemaVersion 3")
           (throw error))))
-    (println "checked-program ingress: authenticity, structural constraint proof, and schema gate PASS"))' \
+    (println "checked-program ingress: cross-runtime escapes, authenticity, structural constraint proof, and schema gate PASS"))' \
   "$repo/native-core/bin/checked-program.clj"

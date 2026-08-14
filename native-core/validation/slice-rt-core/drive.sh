@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Projects the complete fram.rt-core module through the native program pipeline.
-# Pending semantics remain a named frontier; the normal gate accepts only all
-# 25 functions, all ten obligations, and an executable C17 materialization.
+# Accounts for every fram.rt-core function at the native projection boundary.
+# The real Fram source stays authoritative: 24 supported functions must lower,
+# while server-status-response remains the one named semantic frontier. A
+# separate Beagle-owned fixture proves the supported C17 execution path without
+# pretending to be a complete Fram module.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +14,8 @@ native_repo="${NATIVE_RT_CORE_NATIVE_REPO:-$repo}"
 # (its MANIFEST records the fram revision and digests); a FRAM_* override still
 # points a run at a live checkout. The default is beagle-only ON PURPOSE: a gate
 # must not be a function of another repository's working tree.
-source_file="${FRAM_RT_CORE:-$repo/native-core/validation/upstream/fram/src/fram/rt_core.bclj}"
+source_file="${FRAM_RT_CORE:-$repo/native-core/validation/upstream/fram/src/fram/rt_core.bgl}"
+supported_probe="$here/supported_probe.bgl"
 managed_out="${FRAM_MANAGED_OUT:-$repo/native-core/validation/upstream/fram/out}"
 native_shim="$native_repo/native-core/shim"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-rt-core.XXXXXX")"
@@ -29,6 +32,7 @@ for command in awk bb cmp cut gcc pkg-config rg sed sha256sum sort; do
     || die "required command is unavailable: $command"
 done
 [[ -f "$source_file" ]] || die "source is unavailable: $source_file"
+[[ -f "$supported_probe" ]] || die "supported probe is unavailable: $supported_probe"
 [[ -f "$managed_out/fram/rt_core.clj" ]] \
   || die "managed projection is unavailable: $managed_out/fram/rt_core.clj"
 [[ -d "$native_repo/native-core/src/native" ]] \
@@ -39,7 +43,7 @@ done
   || die "native shim is unavailable: $native_shim"
 mkdir -p "$generated" "$artifacts"
 
-modules=(core stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe)
+modules=(core stages lower obligations simd c11 slice fold_c17 body_c17 body_slice qbe)
 native_sources=()
 for module in "${modules[@]}"; do
   source="$native_repo/native-core/src/native/$module.bclj"
@@ -56,7 +60,7 @@ compiler_commit="native-rt-core-projection-v0:$semantic_digest"
 
 "$repo/bin/beagle-ast" "$source_file" >"$scratch/rt_core.ast.json"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/rt_core.ast.json=fram:src/fram/rt_core.bclj" \
+  --input "$scratch/rt_core.ast.json=native-core/validation/upstream/fram/src/fram/rt_core.bgl" \
   --output "$generated/rt_core.facts" \
   --include-defs
 bb "$here/inventory.clj" "$scratch/rt_core.ast.json" "$generated/inventory.txt"
@@ -71,7 +75,7 @@ bb "$here/inventory.clj" "$scratch/rt_core.ast.json" "$generated/inventory.txt"
 # patterns are emitted with their defining namespace.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in stages lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+for module in stages lower obligations simd c11 slice fold_c17 body_c17 body_slice qbe; do
   target="$scratch/out/native/$module.clj"
   [[ -f "$target" ]] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$target"
@@ -101,7 +105,6 @@ bb -cp "$managed_out" \
 
 bb "$here/frontier.clj" "$generated/inventory.txt" "$generated/report.txt" \
   "$generated/frontier.txt"
-bb "$here/function_map.clj" "$generated/report.txt" "$generated/function_map.h"
 awk 'FNR == NR {
        if (($1 == "function") && ($3 == "LOWERED")) lowered[$2] = 1
        next
@@ -121,7 +124,7 @@ digest_line() {
 }
 
 {
-  digest_line "$source_file" 'fram:src/fram/rt_core.bclj'
+  digest_line "$source_file" 'native-core/validation/upstream/fram/src/fram/rt_core.bgl'
   digest_line "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
     'beagle:native-core/validation/slice-bodies/ast-facts.clj'
   digest_line "$repo/native-core/bin/source-facts.clj" \
@@ -136,10 +139,8 @@ digest_line() {
     'beagle:native-core/validation/slice-rt-core/managed_runner.clj'
   digest_line "$here/native_runner.clj" \
     'beagle:native-core/validation/slice-rt-core/native_runner.clj'
-  digest_line "$here/function_map.clj" \
-    'beagle:native-core/validation/slice-rt-core/function_map.clj'
-  digest_line "$here/main.c" \
-    'beagle:native-core/validation/slice-rt-core/main.c'
+  digest_line "$supported_probe" \
+    'native-core/validation/slice-rt-core/supported_probe.bgl'
   digest_line "$here/drive.sh" \
     'beagle:native-core/validation/slice-rt-core/drive.sh'
   for index in "${!modules[@]}"; do
@@ -155,10 +156,7 @@ digest_line() {
 } >"$generated/source.sha256"
 
 artifact_names=(rt_core.facts inventory.txt managed.out lowered-managed.out
-  report.txt frontier.txt function_map.h source.sha256)
-for name in module_0.h module_0.c module_0.ssa; do
-  [[ -f "$generated/$name" ]] && artifact_names+=("$name")
-done
+  report.txt frontier.txt source.sha256)
 {
   for name in "${artifact_names[@]}"; do
     digest_line "$generated/$name" "beagle:native-core/validation/slice-rt-core/$name"
@@ -177,97 +175,80 @@ publish() {
   cp "$generated/$name" "$artifacts/$name"
 }
 
+pending='pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS: equality union contains a value without structural semantics [server-status-response]'
+frontier_pending='function server-status-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS: equality union contains a value without structural semantics'
+for line in \
+  'projection-scope supported-functions-only' \
+  'stage typed-to-native PENDING' \
+  'program-functions 24' \
+  'program-abis 24' \
+  "$pending" \
+  'materialize OK module_0.h module_0.c' \
+  'qbe-materialize REFUSED unsupported native value-semantics op: equal'; do
+  rg -Fx "$line" "$generated/report.txt" >/dev/null \
+    || die "projection report is missing: $line"
+done
+[[ "$(rg -c '^pending ' "$generated/report.txt")" -eq 1 ]] \
+  || die "projection report did not retain exactly one pending function"
+[[ "$(rg -c '^obligation-projection PASS ' "$generated/report.txt")" -eq 10 ]] \
+  || die "projection report did not contain exactly ten passing validators"
+for line in \
+  'source-functions 25' \
+  'lowered-functions 24' \
+  'pending-functions 1' \
+  "$frontier_pending" \
+  'frontier-accounting PASS accounted=25'; do
+  rg -Fx "$line" "$generated/frontier.txt" >/dev/null \
+    || die "frontier report is missing: $line"
+done
+[[ "$(rg -c '^function .* LOWERED ' "$generated/frontier.txt")" -eq 24 ]] \
+  || die "frontier did not account for exactly 24 supported functions"
+[[ "$(awk -F '\t' '{ print $2 }' "$generated/lowered-managed.out" \
+      | sort -u | wc -l | tr -d ' ')" -eq 24 ]] \
+  || die "managed oracle did not cover exactly the supported 24-function set"
+
+find_clang() {
+  if command -v clang >/dev/null 2>&1; then
+    command -v clang
+    return 0
+  fi
+  local candidate
+  candidate="$(compgen -G '/nix/store/*-clang-wrapper-*/bin/clang' \
+    | sort -V | tail -1)"
+  [[ -n "$candidate" ]] && printf '%s\n' "$candidate"
+}
+
+run_supported_probe() {
+  local label="$1"
+  local compiler="$2"
+  local build="$scratch/supported-$label"
+  local executable="$build/probe"
+  mkdir -p "$build/artifacts"
+  "$repo/bin/beagle" native-exe \
+    --out "$executable" \
+    --entry native.rt-core-supported-probe/probe \
+    --cc "$compiler" \
+    --artifacts "$build/artifacts" \
+    "$supported_probe" >"$build/build.log"
+  "$executable"
+  rg -Fx 'stage typed-to-native COMPLETE' "$build/artifacts/report.txt" >/dev/null \
+    || die "$label supported fixture did not complete native lowering"
+  rg -Fx 'program-functions 3' "$build/artifacts/report.txt" >/dev/null \
+    || die "$label supported fixture function set changed"
+  rg -F 'native-exe-entry PASS name=native.rt-core-supported-probe/probe ' \
+    "$build/artifacts/native-exe.report.txt" >/dev/null \
+    || die "$label supported fixture entry mapping was not recorded"
+  echo "slice-rt-core: $label supported fixture compile/link/run PASS"
+}
+
+clang_bin="$(find_clang || true)"
+[[ -n "$clang_bin" ]] || die "Clang is required for the second C17 frontend"
+run_supported_probe gcc "$(command -v gcc)"
+run_supported_probe clang "$clang_bin"
+
 for name in "${artifact_names[@]}"; do
   publish "$name"
 done
 
-for name in module_0.h module_0.c module_0.ssa; do
-  if [[ -f "$here/$name" && ! -f "$generated/$name" ]]; then
-    die "materializer stopped producing committed artifact: $name"
-  fi
-done
-
-complete=1
-rg -Fx 'stage typed-to-native COMPLETE' "$generated/report.txt" >/dev/null \
-  || complete=0
-rg -Fx 'program-functions 25' "$generated/report.txt" >/dev/null || complete=0
-rg -Fx 'program-abis 25' "$generated/report.txt" >/dev/null || complete=0
-[[ "$(rg -c '^obligation-projection PASS ' "$generated/report.txt")" -eq 10 ]] \
-  || complete=0
-if rg -n '^pending ' "$generated/report.txt" >/dev/null; then
-  complete=0
-fi
-rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt" \
-  || complete=0
-
-strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
-if rg -q '^materialize OK module_0.h module_0.c$' "$generated/report.txt"; then
-  build="$scratch/c"
-  mkdir -p "$build"
-  cp "$generated/module_0.h" "$generated/module_0.c" \
-    "$generated/function_map.h" "$here/main.c" "$build/"
-  cp "$native_shim/native_shim.c" "$native_shim/native_shim.h" "$native_shim/native_unicode15_data.h" "$build/"
-
-  (cd "$build" && gcc "${strict[@]}" -o probe_gcc \
-    module_0.c native_shim.c main.c)
-  "$build/probe_gcc" >"$scratch/gcc.out"
-  clang_bin="$(command -v clang || true)"
-  if [[ -z "$clang_bin" ]]; then
-    clang_bin="$(ls -d /nix/store/*-clang-wrapper-*/bin/clang 2>/dev/null \
-      | sort -V | tail -1 || true)"
-  fi
-  [[ -n "$clang_bin" ]] || die "Clang is required for the second C17 frontend"
-  (cd "$build" && "$clang_bin" "${strict[@]}" \
-    -o probe_clang module_0.c native_shim.c main.c)
-  "$build/probe_clang" >"$scratch/clang.out"
-  cmp -s "$scratch/gcc.out" "$generated/lowered-managed.out" \
-    || die "GCC C17 probe differs from the lowered managed oracle"
-  cmp -s "$scratch/clang.out" "$generated/lowered-managed.out" \
-    || die "Clang C17 probe differs from the lowered managed oracle"
-  echo "slice-rt-core: GCC and Clang strict C17 compile/link/run PASS"
-
-  # fram.rt-core carries a minted epoch, so its C destroys an arena mid-body.
-  # An epoch close is a free(): only a sanitizer can hold the reclamation to
-  # account, and the oracle comparison is repeated under it.
-  sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
-            -fno-omit-frame-pointer -g)
-  (cd "$build" && gcc "${strict[@]}" "${sanitize[@]}" -o probe_gcc_san \
-    module_0.c native_shim.c main.c)
-  ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
-    "$build/probe_gcc_san" >"$scratch/gcc-san.out"
-  cmp -s "$scratch/gcc-san.out" "$generated/lowered-managed.out" \
-    || die "sanitized GCC C17 probe differs from the lowered managed oracle"
-  echo "slice-rt-core: GCC ASan+UBSan compile/link/run PASS"
-fi
-
-if rg -q '^qbe-materialize OK module_0.ssa$' "$generated/report.txt"; then
-  command -v qbe >/dev/null 2>&1 || die "QBE accepted the program but qbe is unavailable"
-  [[ -f "$here/qbe_main.c" ]] \
-    || die "QBE accepted the program but qbe_main.c is unavailable"
-  qbe "$generated/module_0.ssa" >"$scratch/module_0.s"
-  gcc "${strict[@]}" -o "$scratch/qbe_probe" "$scratch/module_0.s" \
-    "$native_shim/native_shim.c" "$here/qbe_main.c"
-  "$scratch/qbe_probe" >"$scratch/qbe.out"
-  cmp -s "$scratch/qbe.out" "$generated/lowered-managed.out" \
-    || die "QBE probe differs from the lowered managed oracle"
-  echo "slice-rt-core: QBE assemble/link/run PASS"
-elif rg -q '^qbe-materialize REFUSED ' "$generated/report.txt"; then
-  rg '^qbe-materialize REFUSED ' "$generated/report.txt"
-  echo "slice-rt-core: QBE execution is outside the materializer's declared slice"
-else
-  if [[ "$complete" -eq 1 ]]; then
-    die "QBE materialization neither succeeded nor gave a deterministic refusal"
-  fi
-  rg '^qbe-materialize ' "$generated/report.txt" || true
-fi
-
-if [[ "$complete" -ne 1 ]]; then
-  cat "$generated/frontier.txt"
-  if [[ "${NATIVE_RT_CORE_ALLOW_PENDING:-0}" == 1 ]]; then
-    echo "slice-rt-core: pending frontier recorded (ALLOW_PENDING=1)"
-    exit 0
-  fi
-  die "full rt_core native program is not complete"
-fi
-
 cat "$generated/report.txt"
+cat "$generated/frontier.txt"

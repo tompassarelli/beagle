@@ -1,0 +1,38 @@
+--- upstream
++++ derived
+@@ -8,26 +8,26 @@
+ 
+ (defalias TermSlots (Vec (Atom (Vec Int))))
+ 
+-(def empty-positions: (Vec Int) [])
++(def empty-positions (Vec Int) [])
+ 
+-(def empty-slots: TermSlots [])
++(def empty-slots TermSlots [])
+ 
+-(defn fresh-slots [width: Int] -> TermSlots
+-  (loop [slots: TermSlots empty-slots position: Int 0]
++(defn fresh-slots [(width Int)] TermSlots
++  (loop [(slots TermSlots) empty-slots (position Int) 0]
+     (if (>= position width)
+       slots
+       (recur (conj slots (atom empty-positions)) (inc position)))))
+ 
+-(defn slot-of [value: Any width: Int] -> Int (mod (hash value) width))
++(defn slot-of [(value Any) (width Int)] Int (mod (hash value) width))
+ 
+ ;; Growth always builds a fresh table, so a cell handed out is never rebound.
+ (defn slot-add!
+-  [slots: TermSlots
+-   slot: Int
+-   position: Int] -> TermSlots
++  [(slots TermSlots)
++   (slot Int)
++   (position Int)] TermSlots
+   (do
+     (swap! (nth slots slot) conj position)
+     slots))
+ 
+-(defn slot-positions [slots: TermSlots slot: Int] -> (Vec Int)
++(defn slot-positions [(slots TermSlots) (slot Int)] (Vec Int)
+   (deref (nth slots slot)))
