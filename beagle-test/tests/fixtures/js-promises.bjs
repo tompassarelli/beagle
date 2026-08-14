@@ -7,7 +7,7 @@
 
 (defn fetch-text [(url String)] (Promise String)
   (let [resp (js/await (fetch url))]
-    (js/await (.text resp))))
+    (js/await (js/call resp .text))))
 
 (defn fetch-and-parse [(url String)] (Promise Any)
   (let [text (js/await (fetch-text url))]
@@ -19,13 +19,13 @@
     [ta tb]))
 
 (defn resolve-now [(x Int)] (Promise Int)
-  (Promise/resolve x))
+  (js/call Promise .resolve x))
 
 (defn reject-with [(msg String)] (Promise Nil)
-  (Promise/reject msg))
+  (js/call Promise .reject msg))
 
 (defn all-of [(promises (Vec (Promise Int)))] (Promise (Vec Int))
-  (Promise/all promises))
+  (js/call Promise .all promises))
 
 (defn race-of [(promises (Vec (Promise Int)))] (Promise Int)
-  (Promise/race promises))
+  (js/call Promise .race promises))

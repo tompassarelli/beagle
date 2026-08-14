@@ -1163,6 +1163,10 @@
 (define (resolved-name sym)
   (hash-ref (current-rename-env) sym (lambda () (mangle-name sym))))
 
+;; Typed-JS operators live in emit-jst.rkt, but their operands share this
+;; emitter's lexical rename environment with every ordinary expression.
+(current-jst-resolve-name resolved-name)
+
 (define (with-bindings syms thunk)
   (parameterize ([current-js-bound (set-union (current-js-bound) (list->set syms))])
     (thunk)))
@@ -2011,9 +2015,15 @@
 
     ;; --- Typed JS target expression forms (jst-*) -----------------------------
     [(jst-dot? e)      (emit-jst-dot e)]
+    [(jst-get? e)      (emit-jst-get e)]
+    [(jst-call? e)     (emit-jst-call e)]
+    [(jst-set? e)      (emit-jst-set e)]
+    [(jst-new? e)      (emit-jst-new e)]
+    [(jst-delete? e)   (emit-jst-delete e)]
+    [(jst-in? e)       (emit-jst-in e)]
     [(jst-spread? e)   (format "...~a" (emit-jst-expr (jst-spread-expr e)))]
     [(jst-import-meta? e) "import.meta"]
-    [(jst-typeof? e)   (format "typeof ~a" (emit-jst-expr (jst-typeof-expr e)))]
+    [(jst-typeof? e)   (emit-jst-typeof e)]
     [(jst-template? e) (emit-jst-template e)]
     [(jst-binary? e)   (emit-jst-binary e)]
     [(jst-unary? e)    (emit-jst-unary e)]
@@ -2432,18 +2442,6 @@
          (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
                 #:async? has-await))))]
 
-    [(method-call? e)
-     (define method-str (symbol->string (method-call-method-name e)))
-     (if (and (> (string-length method-str) 2)
-              (string=? (substring method-str 0 2) ".-"))
-       (format "~a.~a"
-               (emit-expr (method-call-target e))
-               (mangle-prop (substring method-str 2)))
-       (format "~a.~a(~a)"
-               (emit-expr (method-call-target e))
-               (mangle-prop (substring method-str 1))
-               (string-join (map emit-expr (method-call-args e)) ", ")))]
-
     [(static-call? e)
      (define s (symbol->string (static-call-class+method e)))
      (define slash-pos (let loop ([i 0])
@@ -2583,15 +2581,6 @@
        (if (case-form-default e) (emit-expr (case-form-default e)) "null"))
      (string-append (string-join parts " : ") " : " default-str)]
 
-    [(new-form? e)
-     (define raw (symbol->string (new-form-class-name e)))
-     (define cls (if (string-suffix? raw ".") (substring raw 0 (sub1 (string-length raw))) raw))
-     ;; An alias-qualified class (`(THREE/Scene.)`) is a member access on the
-     ;; imported namespace object, so each segment mangles on its own.
-     (format "new ~a(~a)"
-             (string-join (map mangle-str (string-split cls "/")) ".")
-             (string-join (map emit-expr (new-form-args e)) ", "))]
-
     [(kw-access? e)
      ;; (:kw m) / (get m :kw) — REP-AWARE: a scalar keyword read still hits the
      ;; HAMT when the COLLECTION is HAMT-repped (the key being scalar is a red
@@ -2631,19 +2620,9 @@
     [(set!-form? e)
      (define target (set!-form-target e))
      (define val (emit-expr (set!-form-value e)))
-     (cond
-       [(method-call? target)
-        (define method-str (symbol->string (method-call-method-name target)))
-        (define prop
-          (if (and (> (string-length method-str) 2)
-                   (string=? (substring method-str 0 2) ".-"))
-            (mangle-prop (substring method-str 2))
-            (mangle-prop (substring method-str 1))))
-        (format "(~a.~a = ~a)" (emit-expr (method-call-target target)) prop val)]
-       [(symbol? target)
-        (format "(~a = ~a)" (resolved-name target) val)]
-       [else
-        (format "(~a = ~a)" (emit-expr target) val)])]
+     (unless (symbol? target)
+       (error 'beagle-js "set! emission requires a lexical binding target"))
+     (format "(~a = ~a)" (resolved-name target) val)]
 
     [(with-open-form? e)
      (error 'beagle-js "with-open is not supported for JS target")]
@@ -2732,9 +2711,9 @@
        [(emit-core-call fn-sym args) => values]
        [(not (symbol? fn-sym))
         ;; higher-order call: the callee is an arbitrary expression — e.g.
-        ;; ((.-newSession client)) or ((get o :k) a) — which parse.rkt emits as a
-        ;; call-form with a non-symbol head. Emit (callee)(args); never run the
-        ;; symbol-only mangle path below, which would `symbol->string` and crash.
+        ;; ((get o :k) a) — which parse.rkt emits as a call-form with a
+        ;; non-symbol head. Emit (callee)(args); never run the symbol-only
+        ;; mangle path below, which would `symbol->string` and crash.
         (format "(~a)(~a)"
                 (emit-expr fn-sym)
                 (string-join (map emit-expr args) ", "))]

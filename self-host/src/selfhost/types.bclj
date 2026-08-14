@@ -5,7 +5,6 @@
 ;; Self-hosted type system — matches beagle-lib/private/types.rkt.
 ;; Type AST constructors, parser, compatibility checker, formatter.
 ;; Produces/consumes the JSON type format from ast-json.rkt.
-;; Ported from ~/code/beagle/.worktrees/driftlab/self-host/types.bjs (.bjs target).
 
 (require selfhost.rt)
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))

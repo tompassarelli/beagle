@@ -35,7 +35,7 @@
 (declare-extern selfhost.rt/valid-sha256? (Fn [Any] Bool))
 (declare-extern selfhost.rt/valid-projection-sha256? (Fn [Any] Bool))
 
-(def CHECKED-PROGRAM-SCHEMA-VERSION Int 3)
+(def CHECKED-PROGRAM-SCHEMA-VERSION Int 4)
 
 (def IMPORTED-RECORD-CONTRACTS-KEY String
   "$beagle$selfhost$imported-record-contracts")
@@ -523,13 +523,13 @@
     (invalid-projection! "input must be a checked-program JSON object")
 
     (not (exact-checked-program-keys? projection))
-    (invalid-projection! "checked-program keys do not match the v3 contract")
+    (invalid-projection! "checked-program keys do not match the v4 contract")
 
     (not (= (get projection "kind") "beagle.checked-program"))
     (invalid-projection! "kind must be beagle.checked-program")
 
     (not (= (get projection "schemaVersion") CHECKED-PROGRAM-SCHEMA-VERSION))
-    (invalid-projection! "schemaVersion must be 3")
+    (invalid-projection! "schemaVersion must be 4")
 
     (not (= (get projection "phase") "checked"))
     (invalid-projection! "phase must be checked")

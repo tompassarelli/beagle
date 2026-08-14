@@ -193,6 +193,37 @@
    acc ["\""]]
   (if (>= i n) (str/join "" (conj acc "\"")) (recur (+ i 1) (conj acc (js-escape-char (subs s i (+ i 1)))))))))
 
+(defn ^Boolean js-member-identifier? [^String s]
+  (some? (re-matches #"[A-Za-z_$][A-Za-z0-9_$]*" s)))
+
+(defn ^String js-selector-suffix [^String name]
+  (if (js-member-identifier? name) (str "." name) (str "[" (js-string-lit name) "]")))
+
+(defn ^Boolean js-postfix-base? [e]
+  (if (not (map? e)) (or (string? e) (boolean? e)) (let [node (get e "node")]
+  (cond
+  (= node "ref") true
+  (= node "literal") (contains? #{"string" "bool" "char" "nil"} (get e "kind"))
+  (or (= node "regex") (= node "vec") (= node "set") (= node "call") (= node "static-call") (= node "kw-access") (= node "dynamic-var") (= node "js-dot") (= node "js-get") (= node "js-call") (= node "js-new") (= node "js-template") (= node "js-import-meta")) true
+  (= node "threading") (js-postfix-base? (get e "desugared"))
+  :else false))))
+
+(defn ^String emit-js-postfix-base! [e]
+  (let [rendered (emit-expr*! e)]
+  (if (js-postfix-base? e) rendered (str "(" rendered ")"))))
+
+(defn ^String emit-js-member! [receiver key]
+  (let [receiver-str (emit-js-postfix-base! receiver)]
+  (if (= (get key "node") "js-selector") (str receiver-str (js-selector-suffix (get key "name"))) (str receiver-str "[" (emit-expr*! key) "]"))))
+
+(defn ^Boolean js-constructor-reference? [e]
+  (and (map? e) (contains? #{"ref" "js-dot" "js-get"} (get e "node"))))
+
+(defn ^String emit-js-unary-operand! [e]
+  (let [rendered (emit-expr*! e)
+   node (get e "node")]
+  (if (or (= node "fn") (= node "await") (= node "js-spread")) (str "(" rendered ")") rendered)))
+
 (defn ^String emit-js-number [v]
   (str v))
 
@@ -324,6 +355,15 @@
   (= node "with") (or (expr-has-await? (get e "target")) (anyb (mapv (fn [u] (get u "value")) (get e "updates"))))
   (= node "kw-access") (expr-has-await? (get e "target"))
   (= node "set!") (or (expr-has-await? (get e "target")) (expr-has-await? (get e "value")))
+  (= node "js-selector") false
+  (or (= node "js-get") (= node "js-delete") (= node "js-in")) (or (expr-has-await? (get e "receiver")) (let [key (get e "key")]
+  (and (not (= (get key "node") "js-selector")) (expr-has-await? key))))
+  (= node "js-call") (or (expr-has-await? (get e "receiver")) (let [key (get e "key")]
+  (and (not (= (get key "node") "js-selector")) (expr-has-await? key))) (anyb (get e "args")))
+  (= node "js-set") (or (expr-has-await? (get e "receiver")) (let [key (get e "key")]
+  (and (not (= (get key "node") "js-selector")) (expr-has-await? key))) (expr-has-await? (get e "value")))
+  (= node "js-new") (or (expr-has-await? (get e "callee")) (anyb (get e "args")))
+  (= node "js-typeof") (expr-has-await? (get e "expr"))
   (= node "threading") (anyb (get e "args"))
   (= node "check") (expr-has-await? (get e "expr"))
   (= node "rescue") (or (expr-has-await? (get e "expr")) (expr-has-await? (get e "fallback")))
@@ -761,6 +801,20 @@
   (= node "try") (reduce (fn [a c] (walk-set! (get c "body") a)) (walk-set! (get e "body") acc) (get e "catches"))
   (= node "vec") (walk-set! (get e "items") acc)
   (= node "with") (reduce (fn [a u] (walk-set! (get u "value") a)) (walk-set! (get e "target") acc) (get e "updates"))
+  (= node "js-selector") acc
+  (or (= node "js-get") (= node "js-delete") (= node "js-in")) (let [after-receiver (walk-set! (get e "receiver") acc)
+   key (get e "key")]
+  (if (= (get key "node") "js-selector") after-receiver (walk-set! key after-receiver)))
+  (= node "js-call") (let [after-receiver (walk-set! (get e "receiver") acc)
+   key (get e "key")
+   after-key (if (= (get key "node") "js-selector") after-receiver (walk-set! key after-receiver))]
+  (walk-set! (get e "args") after-key))
+  (= node "js-set") (let [after-receiver (walk-set! (get e "receiver") acc)
+   key (get e "key")
+   after-key (if (= (get key "node") "js-selector") after-receiver (walk-set! key after-receiver))]
+  (walk-set! (get e "value") after-key))
+  (= node "js-new") (walk-set! (get e "args") (walk-set! (get e "callee") acc))
+  (= node "js-typeof") (walk-set! (get e "expr") acc)
   :else acc))))
 
 (defn collect-set!-syms! [body]
@@ -1335,16 +1389,23 @@
   (= node "record") (emit-record! e)
   (= node "quoted") (emit-quoted (get e "datum"))
   (= node "regex") (str "/" (get e "pattern") "/")
-  (= node "method-call") (let [m (get e "method")]
-  (if (and (> (count m) 2) (= (subs m 0 2) ".-")) (str (emit-expr*! (get e "target")) "." (mangle-prop (subs m 2))) (str (emit-expr*! (get e "target")) "." (mangle-prop (subs m 1)) "(" (emit-args-list (get e "args")) ")")))
+  (= node "js-selector") (throw (ex-info "a selector literal is valid only as a js/ member key" {}))
+  (= node "js-get") (emit-js-member! (get e "receiver") (get e "key"))
+  (= node "js-call") (str (emit-js-member! (get e "receiver") (get e "key")) "(" (emit-args-list (get e "args")) ")")
+  (= node "js-set") (str "(" (emit-js-member! (get e "receiver") (get e "key")) " = " (emit-expr*! (get e "value")) ")")
+  (= node "js-new") (let [callee (get e "callee")
+   rendered (emit-expr*! callee)]
+  (str "new " (if (js-constructor-reference? callee) rendered (str "(" rendered ")")) "(" (emit-args-list (get e "args")) ")"))
+  (= node "js-delete") (str "delete " (emit-js-member! (get e "receiver") (get e "key")))
+  (= node "js-in") (let [receiver (get e "receiver")
+   key (get e "key")]
+  (if (= (get key "node") "js-selector") (str "(" (js-string-lit (get key "name")) " in " (emit-js-postfix-base! receiver) ")") (str "(($beagle$jst$receiver, $beagle$jst$key) => " "($beagle$jst$key in $beagle$jst$receiver))(" (emit-expr*! receiver) ", " (emit-expr*! key) ")")))
+  (= node "js-typeof") (str "typeof " (emit-js-unary-operand! (get e "expr")))
   (= node "static-call") (let [name (get e "name")]
   (cond
   (= name "js/await") (str "await " (emit-expr*! (nth (get e "args") 0)))
   (= name "js/export") (str "export " (emit-form* (nth (get e "args") 0)))
   :else (str (static-dotted name) "(" (emit-args-list (get e "args")) ")")))
-  (= node "new") (let [raw (get e "class")
-   cls (if (str/ends-with? raw ".") (subs raw 0 (- (count raw) 1)) raw)]
-  (str "new " (mangle-dotted-path cls) "(" (emit-args-list (get e "args")) ")"))
   (= node "kw-access") (let [_contract (record-field-access-contract e)
    target-str (emit-expr*! (get e "target"))
    prop (kw->prop (get e "kw"))
@@ -1369,12 +1430,7 @@
   (= node "with") (emit-with! e)
   (= node "set!") (let [target (get e "target")
    val (emit-expr*! (get e "value"))]
-  (cond
-  (= (get target "node") "method-call") (let [m (get target "method")
-   prop (if (and (> (count m) 2) (= (subs m 0 2) ".-")) (mangle-prop (subs m 2)) (mangle-prop (subs m 1)))]
-  (str "(" (emit-expr*! (get target "target")) "." prop " = " val ")"))
-  (= (get target "node") "ref") (str "(" (resolved-name (get target "name")) " = " val ")")
-  :else (str "(" (emit-expr*! target) " = " val ")")))
+  (if (= (get target "node") "ref") (str "(" (resolved-name (get target "name")) " = " val ")") (throw (ex-info "set! emission requires a lexical binding target" {}))))
   (= node "letfn") (let [fns (get e "fns")
    body (get e "body")
    fn-names (mapv (fn [f] (get f "name")) fns)
@@ -1543,7 +1599,7 @@
   (reset! bc-get-used false)
   (reset! inline-scope {})
   (reset! ctx "stmt")
-  (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 3) (= (get prog "phase") "checked")))
+  (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
   (let [forms (get prog "forms")]
   (register-tables! forms)
   (reset! bound-vars (collect-top-names forms (get prog "requires") (get prog "externs")))
@@ -1602,11 +1658,28 @@
   (expect! "mangle-prop: predicate punctuation" (= (mangle-prop "ready?") "ready_p"))
   (expect! "mangle-prop: mixed punctuation" (= (mangle-prop "wall_s-ready?!->=<%") "wall_s_ready_p_bang__gt_eq_lt_pct"))
   (expect! "mangle-prop: reserved word unchanged" (= (mangle-prop "delete") "delete"))
+  (expect! "selector: authored underscore stays exact" (= (js-selector-suffix "raw_name") ".raw_name"))
+  (expect! "selector: reserved word stays exact" (= (js-selector-suffix "default") ".default"))
+  (expect! "selector: punctuation uses an exact quoted key" (= (js-selector-suffix "ready?!") "[\"ready?!\"]"))
   (expect! "string: plain" (= (js-string-lit "hi") "\"hi\""))
   (expect! "string: newline" (= (js-string-lit "a\nb") "\"a\\nb\""))
   (expect! "string: control x01" (= (js-string-lit (str "x" (char 1) "y")) "\"x\\x01y\""))
   (expect! "kw->prop: colon" (= (kw->prop ":price") "price"))
   (expect! "kw->prop: bare" (= (kw->prop "k") "k"))
+  (let [receiver {"node" "ref" "name" "obj"}
+   selector {"node" "js-selector" "name" "raw_name"}
+   dynamic-key {"node" "ref" "name" "key"}]
+  (expect! "js/get static selector" (= (emit-expr! {"node" "js-get" "receiver" receiver "key" selector}) "obj.raw_name"))
+  (expect! "js/get dynamic key" (= (emit-expr! {"node" "js-get" "receiver" receiver "key" dynamic-key}) "obj[key]"))
+  (expect! "js/call preserves receiver member call" (= (emit-expr! {"node" "js-call" "receiver" receiver "key" {"node" "js-selector" "name" "run"} "args" [{"node" "literal" "kind" "number" "value" 1}]}) "obj.run(1)"))
+  (expect! "js/set! assigns through the member" (= (emit-expr! {"node" "js-set" "receiver" receiver "key" dynamic-key "value" {"node" "literal" "kind" "number" "value" 2}}) "(obj[key] = 2)"))
+  (expect! "js/delete! emits the JavaScript primitive" (= (emit-expr! {"node" "js-delete" "receiver" receiver "key" selector}) "delete obj.raw_name"))
+  (expect! "js/in? reverses its static receiver-first surface" (= (emit-expr! {"node" "js-in" "receiver" receiver "key" selector}) "(\"raw_name\" in obj)")))
+  (expect! "js/new preserves qualified constructor references" (= (emit-expr! {"node" "js-new" "callee" {"node" "ref" "name" "THREE/Scene"} "args" []}) "new THREE.Scene()"))
+  (expect! "js/new parenthesizes computed constructors" (= (emit-expr! {"node" "js-new" "callee" {"node" "call" "fn" {"node" "ref" "name" "factory"} "args" []} "args" []}) "new (factory())()"))
+  (expect! "js/in? evaluates receiver then dynamic key exactly once" (let [emitted (emit-expr! {"node" "js-in" "receiver" {"node" "call" "fn" {"node" "ref" "name" "receiver!"} "args" []} "key" {"node" "call" "fn" {"node" "ref" "name" "key!"} "args" []}})]
+  (and (appears-once? emitted "receiver_bang()") (appears-once? emitted "key_bang()") (appears-before? emitted "receiver_bang()" "key_bang()"))))
+  (expect! "js/typeof" (= (emit-expr! {"node" "js-typeof" "expr" {"node" "ref" "name" "obj"}}) "typeof obj"))
   (expect! "record factory + accessors" (= (emit-record! {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]}) "function Pt(x, y) {\n  return Object.freeze({_tag: \"Pt\", x, y});\n}\n\nfunction pt_x(r) { return r.x; }\n\nfunction pt_y(r) { return r.y; }"))
   (expect! "def -> const" (= (emit-form! {"node" "def" "name" "tax-rate" "value" {"node" "literal" "kind" "float" "value" 0.08}}) "const tax_rate = 0.08;"))
   (expect! "unary minus (- 1)" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "-"} "args" [{"node" "literal" "kind" "number" "value" 1}]}) "(-1)"))

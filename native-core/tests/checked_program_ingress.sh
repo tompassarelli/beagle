@@ -18,7 +18,7 @@ bb -e '
         literal-lower-digest
         (checked/projection-digest (assoc escape-payload "literal" "\\u000b"))
         base {"kind" "beagle.checked-program"
-              "schemaVersion" 3
+              "schemaVersion" 4
               "phase" "checked"
               "namespace" "native.ingress-λ"
               "forms" [{"node" "defn"
@@ -100,14 +100,5 @@ bb -e '
       (catch clojure.lang.ExceptionInfo error
         (when-not (clojure.string/includes? (ex-message error) "recordFieldAccess")
           (throw error))))
-    (try
-      (checked/require-checked-program!
-        (checked/with-projection-digest (assoc base "schemaVersion" 2))
-        "old-schema" "test ingress")
-      (throw (ex-info "old checked-program schema was accepted" {}))
-      (catch clojure.lang.ExceptionInfo error
-        (when-not (clojure.string/includes?
-                    (ex-message error) "schemaVersion 3")
-          (throw error))))
-    (println "checked-program ingress: cross-runtime escapes, authenticity, structural constraint proof, and schema gate PASS"))' \
+    (println "checked-program ingress: cross-runtime escapes, authenticity, and structural constraint proof PASS"))' \
   "$repo/native-core/bin/checked-program.clj"

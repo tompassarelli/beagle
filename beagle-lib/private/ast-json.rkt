@@ -29,7 +29,7 @@
 (define current-json-effective-definition-types (make-parameter #f))
 (define current-json-semantic-contracts (make-parameter #f))
 
-(define CHECKED-PROGRAM-SCHEMA-VERSION 3)
+(define CHECKED-PROGRAM-SCHEMA-VERSION 4)
 
 (define (sha256-prefixed bytes)
   (string-append "sha256:"
@@ -900,6 +900,34 @@
      (hasheq 'node "js-dot"
              'object (expr->json (jst-dot-object e))
              'property (symbol->string (jst-dot-property e)))]
+    [(jst-selector? e)
+     (hasheq 'node "js-selector" 'name (jst-selector-name e))]
+    [(jst-get? e)
+     (hasheq 'node "js-get"
+             'receiver (expr->json (jst-get-receiver e))
+             'key (expr->json (jst-get-key e)))]
+    [(jst-call? e)
+     (hasheq 'node "js-call"
+             'receiver (expr->json (jst-call-receiver e))
+             'key (expr->json (jst-call-key e))
+             'args (map expr->json (jst-call-args e)))]
+    [(jst-set? e)
+     (hasheq 'node "js-set"
+             'receiver (expr->json (jst-set-receiver e))
+             'key (expr->json (jst-set-key e))
+             'value (expr->json (jst-set-value e)))]
+    [(jst-new? e)
+     (hasheq 'node "js-new"
+             'callee (expr->json (jst-new-callee e))
+             'args (map expr->json (jst-new-args e)))]
+    [(jst-delete? e)
+     (hasheq 'node "js-delete"
+             'receiver (expr->json (jst-delete-receiver e))
+             'key (expr->json (jst-delete-key e)))]
+    [(jst-in? e)
+     (hasheq 'node "js-in"
+             'receiver (expr->json (jst-in-receiver e))
+             'key (expr->json (jst-in-key e)))]
     [(jst-spread? e)
      (hasheq 'node "js-spread" 'expr (expr->json (jst-spread-expr e)))]
     [(jst-typeof? e)

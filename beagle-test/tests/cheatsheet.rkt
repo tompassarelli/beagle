@@ -25,19 +25,27 @@
       (define stx (read-syntax 'cheatsheet-test in))
       (if (eof-object? stx) '() (cons stx (loop))))))
 
-(define PRELUDE
-  "(ns t)\n(define-mode strict)\n(define-target clj)\n")
+(define (target-prelude target)
+  (case target
+    [(clj) "(ns t)\n(define-mode strict)\n(define-target clj)\n"]
+    [(js) "(ns t)\n(define-mode strict)\n(define-target js)\n"]
+    [(nix) "(ns t)\n(define-mode strict)\n(define-target nix)\n"]
+    [else (error 'cheatsheet "unknown example target: ~a" target)]))
 
 (test-case "cheatsheet is non-empty"
   (check-true (pair? CHEATSHEET)))
 
 (for ([c (in-list CHEATSHEET)])
-  (test-case (format "cheatsheet example parses + checks clean: ~a" (cheat-form c))
+  (test-case (format "cheatsheet example parses + checks clean [~a]: ~a"
+                     (cheat-target c)
+                     (cheat-form c))
+    (define source
+      (string-append (target-prelude (cheat-target c))
+                     (cheat-example c)))
     (check-not-exn
      (lambda ()
        (parameterize ([current-check-profile 2])
-         (type-check!
-          (parse-program (read-forms (string-append PRELUDE (cheat-example c)))))))))
+         (type-check! (parse-program (read-forms source)))))))
   (test-case (format "cheatsheet example uses canonical layout: ~a" (cheat-form c))
     (define path (make-temporary-file "beagle-cheatsheet-~a.bclj"))
     (dynamic-wind
@@ -53,7 +61,12 @@
   (check-true (> (string-length doc) 200))
   (for ([c (in-list CHEATSHEET)])
     (check-true (regexp-match? (regexp (regexp-quote (cheat-form c))) doc)
-                (format "rendered cheatsheet should mention ~a" (cheat-form c)))))
+                (format "rendered cheatsheet should mention ~a" (cheat-form c)))
+    (check-true
+     (regexp-match? (regexp (format "Target: `~a`" (cheat-target c))) doc)
+     (format "rendered cheatsheet should name ~a target for ~a"
+             (cheat-target c)
+             (cheat-form c)))))
 
 (test-case "docs/CHEATSHEET.md is in sync with the module (regenerate: bin/beagle-cheatsheet > docs/CHEATSHEET.md)"
   (check-equal? (file->string cheatsheet-md) (render-cheatsheet)))

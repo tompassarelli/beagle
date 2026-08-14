@@ -11,8 +11,7 @@
   (hasheq 'js/+  '+   'js/-  '-   'js/*  '*   'js/div  '/   'js/%  '%   'js/**  '**
           'js/=== '===  'js/!== '!==  'js/== '==  'js/!= '!=
           'js/<  '<   'js/>  '>   'js/<= '<=  'js/>= '>=
-          'js/&& 'and  'js/|| 'or  'js/?? 'nullish
-          'js/in 'in  'js/instanceof 'instanceof))
+          'js/&& 'and  'js/|| 'or  'js/?? 'nullish))
 
 (define (jst-binary-op? sym)
   (and (symbol? sym) (hash-has-key? JST-BINARY-OPS sym)))
@@ -35,6 +34,13 @@
     [(and (symbol? d) (jst-dotted-symbol? d))
      (jst-split-dotted d)]
     [else ((current-parse-expr) form)]))
+
+(define (parse-jst-member-key form)
+  (define d (->datum form))
+  (if (dot-method-sym? d)
+      (store-src! (jst-selector (substring (symbol->string d) 1))
+                  (and (syntax? form) (stx->src-loc form)))
+      ((current-parse-expr) form)))
 
 (define (jst-split-ret-body params-form body-forms)
   (define-values (param-list rest-param) ((current-parse-params) params-form))
@@ -88,4 +94,4 @@
 
 (provide
  JST-BINARY-OPS jst-binary-op?
- parse-jst-class)
+ parse-jst-class parse-jst-member-key)

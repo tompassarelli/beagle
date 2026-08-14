@@ -412,14 +412,14 @@
      "const c ="
      '(defn scan [(s String) (n Int)] Int
        (loop [i 0]
-         (let [c (.charCodeAt s i)]
+         (let [c (js/call s .charCodeAt i)]
            (if (= c n) i (recur (+ i 1)))))))
 
    (check-js-contains "loop with let + recur has continue at correct level"
      "continue;"
      '(defn scan [(s String) (n Int)] Int
        (loop [i 0]
-         (let [c (.charCodeAt s i)]
+         (let [c (js/call s .charCodeAt i)]
            (if (= c n) i (recur (+ i 1)))))))
 
    (check-js-contains "async loop/recur -> async IIFE with while"
@@ -488,17 +488,17 @@
 
    ;; --- interop --------------------------------------------------------------
 
-   (check-js-contains ".method -> dot call"
+   (check-js-contains "js/call selector -> member call"
      ".toString("
-     '(defn f [(x Any)] String (.toString x)))
+     '(defn f [(x Any)] String (js/call x .toString)))
 
    (check-js-contains "Class/method -> dot call"
      "Math.abs("
      '(defn f [(x Int)] Int (Math/abs x)))
 
-   (check-js-contains "new -> new keyword"
+   (check-js-contains "js/new -> new keyword"
      "new Date("
-     '(def d Any (Date. 2024)))
+     '(def d Any (js/new Date 2024)))
 
    ;; --- multi-arity ----------------------------------------------------------
 
@@ -646,12 +646,11 @@
      '(require inventory.core)
      '(defn f [] Any (core/init)))
 
-   ;; An alias-qualified class is a member access on the imported namespace
-   ;; object; mangling the whole spelling emitted `new THREE/Scene()`.
+   ;; An alias-qualified class is a value imported from the namespace object.
    (check-js-contains "alias-qualified constructor -> new alias.Class()"
      "new THREE.Scene()"
      '(require three :as THREE)
-     '(defn f [] Any (THREE/Scene.)))
+     '(defn f [] Any (js/new THREE/Scene)))
 
    ;; --- additional stdlib translations ----------------------------------------
 
@@ -895,25 +894,24 @@
      (check-true (string-contains? result "less_ltthan")
                  (format "expected < mangled to _lt, got:\n~a" result)))
 
-   ;; --- Property access with .- ------------------------------------------------
+   ;; --- Receiver-first JavaScript interop -------------------------------------
 
-   (test-case ".-prop emits property access, not method call"
+   (test-case "js/get emits property access, not method call"
      (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
                                    '(declare-extern obj Any)
-                                   '(defn f [(obj Any)] Any (.-name obj)))))
+                                   '(defn f [(obj Any)] Any (js/get obj .name)))))
      (check-true (string-contains? result "obj.name")
                  (format "expected property access, got:\n~a" result))
      (check-false (string-contains? result "obj.name(")
                   "should not have parens for property access"))
 
-   (test-case "invoking a .- property-access result emits a call, not a compiler crash"
+   (test-case "js/call emits a receiver-preserving member call"
      (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
                                    '(declare-extern client Any)
-                                   '(defn f [(client Any)] Any ((.-newSession client))))))
-     (check-true (string-contains? result "client.newSession")
-                 (format "expected callee property access, got:\n~a" result))
-     (check-true (string-contains? result ")()")
-                 (format "expected the property-access result to be invoked, got:\n~a" result)))
+                                   '(defn f [(client Any)] Any
+                                      (js/call client .newSession)))))
+     (check-true (string-contains? result "client.newSession()")
+                 (format "expected a direct member call, got:\n~a" result)))
 
    ;; --- JS-NO-EMIT safety net ------------------------------------------------
 
@@ -971,24 +969,24 @@
      (check-equal? stderr-output ""
                    "expected no warning for translated function"))
 
-   (check-js-contains "set! .- property mangles kebab to underscore"
-     "(obj.my_prop = 99)"
+   (check-js-contains "js/set! keeps a static selector byte-exact"
+     "obj[\"my-prop\"] = 99"
      '(declare-extern obj Any)
-     '(defn f! [(obj Any)] Any (set! (.-my-prop obj) 99)))
+     '(defn f! [(obj Any)] Any (js/set! obj .my-prop 99)))
 
-   (check-js-contains ".- read property mangles kebab to underscore"
-     "obj.my_prop"
+   (check-js-contains "js/get keeps a static selector byte-exact"
+     "obj[\"my-prop\"]"
      '(declare-extern obj Any)
-     '(defn f [(obj Any)] Any (.-my-prop obj)))
+     '(defn f [(obj Any)] Any (js/get obj .my-prop)))
 
-   (test-case "authored underscores stay literal in every ordinary property position"
+   (test-case "selector bytes and map underscores stay literal"
      (define result
        (js-emit
         (list '(ns test.app) '(define-mode strict) '(define-target js)
-              '(defn read-wall [(obj Any)] Any (.-wall_s obj))
-              '(defn call-context [(obj Any)] Any (.ctx_str obj))
+              '(defn read-wall [(obj Any)] Any (js/get obj .wall_s))
+              '(defn call-context [(obj Any)] Any (js/call obj .ctx_str))
               '(defn write-total! [(obj Any) (v Any)] Any
-                 (set! (.-total_str obj) v))
+                 (js/set! obj .total_str v))
               `(def metrics Any ,(mt ':wall_s 1 ':ctx_str 2 ':total_str 3))
               '(defrecord Snapshot [(wall_s Int) (ctx_str String) (total_str String)]))))
      (for ([expected (in-list '("obj.wall_s"
@@ -1008,9 +1006,22 @@
        (check-false (string-contains? result forbidden)
                     (format "property spelling drifted to ~v in:\n~a" forbidden result))))
 
-   (check-js-contains "property mangle preserves underscore while mapping mixed punctuation"
-     "obj.wall_s_ready_p_bang__gt_eq_lt_pct"
-     '(defn mixed [(obj Any)] Any (.-wall_s-ready?!->=<% obj)))
+   (test-case "selectors distinguish identifier, punctuation, and reserved-word members"
+     (define result
+       (js-emit
+        (list '(ns test.app) '(define-mode strict) '(define-target js)
+              '(defn underscore [(obj Any)] Any (js/get obj ._private))
+              '(defn hyphen [(obj Any)] Any (js/get obj .dash-name))
+              '(defn question [(obj Any)] Any (js/get obj .ready?))
+              '(defn bang [(obj Any)] Any (js/get obj .save!))
+              '(defn reserved [(obj Any)] Any (js/get obj .delete)))))
+     (for ([expected (in-list '("obj._private"
+                                "obj[\"dash-name\"]"
+                                "obj[\"ready?\"]"
+                                "obj[\"save!\"]"
+                                "obj.delete"))])
+       (check-true (string-contains? result expected)
+                   (format "expected exact selector ~v in:\n~a" expected result))))
 
    ;; A let-binding reassigned via `set!` must emit `let`, not `const` — otherwise
    ;; the generated `const acc = 0; acc = …` throws "Assignment to constant variable"

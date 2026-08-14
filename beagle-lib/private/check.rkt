@@ -104,6 +104,13 @@
    jst-class?               'js
    jst-method?              'js
    jst-dot?                 'js
+   jst-selector?            'js
+   jst-get?                 'js
+   jst-call?                'js
+   jst-set?                 'js
+   jst-new?                 'js
+   jst-delete?              'js
+   jst-in?                  'js
    jst-spread?              'js
    jst-typeof?              'js
    jst-template?            'js
@@ -136,6 +143,13 @@
    jst-class?               "js/class"
    jst-method?              "js/method"
    jst-dot?                 "js/."
+   jst-selector?            "JavaScript member selector"
+   jst-get?                 "js/get"
+   jst-call?                "js/call"
+   jst-set?                 "js/set!"
+   jst-new?                 "js/new"
+   jst-delete?              "js/delete!"
+   jst-in?                  "js/in?"
    jst-spread?              "js/spread"
    jst-typeof?              "js/typeof"
    jst-template?            "js/template"
@@ -2214,6 +2228,10 @@
          root callable-proofs [unknown-call-synchronous? #f])
   (define (all-sync? values)
     (for/and ([value (in-list values)]) (walk value)))
+  (define (jst-member-sync? receiver key trailing)
+    (and (walk receiver)
+         (or (jst-selector? key) (walk key))
+         (all-sync? trailing)))
   (define (bindings-sync? bindings)
     (for/and ([binding (in-list bindings)])
       (and (walk (let-binding-value binding))
@@ -2253,6 +2271,20 @@
             (hash-ref callable-proofs callee unknown-call-synchronous?)
             (walk callee))
         (all-sync? (call-form-args value)))]
+      [(jst-selector? value) #t]
+      [(jst-get? value)
+       (jst-member-sync? (jst-get-receiver value) (jst-get-key value) '())]
+      [(jst-call? value) #f]
+      [(jst-set? value)
+       (jst-member-sync?
+        (jst-set-receiver value) (jst-set-key value)
+        (list (jst-set-value value)))]
+      [(jst-new? value) #f]
+      [(jst-delete? value)
+       (jst-member-sync?
+        (jst-delete-receiver value) (jst-delete-key value) '())]
+      [(jst-in? value)
+       (jst-member-sync? (jst-in-receiver value) (jst-in-key value) '())]
       [(symbol? value)
        ;; A known callable used as a first-class value carries its effect with
        ;; it. This closes aliases, captures, collection storage, and
@@ -4837,15 +4869,18 @@
      ;; (Any Int Any)); until one exists, this reads as a checker rejection
      ;; rather than a silent miscompile.
      (define target (set!-form-target e))
+     (define js-target? (eq? (current-check-target) 'js))
      (unless (or (symbol? target)
-                 (method-call? target))
+                 (and (not js-target?) (method-call? target)))
        (define target-desc
          (if (and (call-form? target) (symbol? (call-form-fn target)))
              (format "(~a …)" (call-form-fn target))
              "that form"))
        (raise-diag 'target-form
-                   (format "set! target must be a local variable or a field access (.-field); ~a is not an assignable place on the ~a target"
-                           target-desc (current-check-target))
+                   (if js-target?
+                       "set! target must be a local variable on the js target"
+                       (format "set! target must be a local variable or a field access (.-field); ~a is not an assignable place on the ~a target"
+                               target-desc (current-check-target)))
                    (hasheq 'form "set!"
                            'current-target (symbol->string (or (current-check-target) 'unknown)))
                    #:src (src-for e)))
@@ -4869,6 +4904,29 @@
     [(jst-class? e)    (infer-jst-class e env)]
     [(jst-method? e)   (infer-jst-method e env)]
     [(jst-dot? e)      (infer-jst-dot-expr e env)]
+    [(jst-selector? e) ANY]
+    [(jst-get? e)
+     (infer-jst-member (jst-get-receiver e) (jst-get-key e) '() env)
+     ANY]
+    [(jst-call? e)
+     (infer-jst-member
+      (jst-call-receiver e) (jst-call-key e) (jst-call-args e) env)
+     ANY]
+    [(jst-set? e)
+     (infer-jst-member
+      (jst-set-receiver e) (jst-set-key e) (list (jst-set-value e)) env)
+     ANY]
+    [(jst-new? e)
+     (infer-expr (jst-new-callee e) env)
+     (for-each (lambda (arg) (infer-expr arg env)) (jst-new-args e))
+     ANY]
+    [(jst-delete? e)
+     (infer-jst-member
+      (jst-delete-receiver e) (jst-delete-key e) '() env)
+     (type-prim 'Bool)]
+    [(jst-in? e)
+     (infer-jst-member (jst-in-receiver e) (jst-in-key e) '() env)
+     (type-prim 'Bool)]
     [(jst-spread? e)   (infer-expr (jst-spread-expr e) env)]
     [(jst-typeof? e)   (infer-expr (jst-typeof-expr e) env) (type-prim 'String)]
     [(jst-template? e)
@@ -4920,6 +4978,11 @@
      (warn-target-exclude (dynamic-var-name e) e)
      (hash-ref env (dynamic-var-name e) ANY)]
     [(method-call? e)
+     (when (eq? (current-check-target) 'js)
+       (raise-diag 'target-form
+                   "JVM-style method calls are not supported on the js target"
+                   (hasheq 'form "method-call" 'current-target "js")
+                   #:src (src-for e)))
      (define method-sym (method-call-method-name e))
      (warn-target-exclude method-sym e)
      ;; Receiver-typed dispatch: if the target's type is a known JVM class,
@@ -5106,6 +5169,11 @@
          NIL))
      (apply merge-types default-type clause-types)]
     [(new-form? e)
+     (when (eq? (current-check-target) 'js)
+       (raise-diag 'target-form
+                   "JVM-style constructor forms are not supported on the js target"
+                   (hasheq 'form "new" 'current-target "js")
+                   #:src (src-for e)))
      ;; Typed JVM constructor: resolve against the CLASS-TABLE (return the class
      ;; nominal, arg-check via overloads). Unknown class → Any (unchanged), so a
      ;; JVM class not yet in the manifest doesn't suddenly break.
@@ -5546,6 +5614,12 @@
     [(and or nullish) (merge-types lt rt)]
     [(+ - * / % **) (merge-types lt rt)]
     [else ANY]))
+
+(define (infer-jst-member receiver key trailing env)
+  (infer-expr receiver env)
+  (unless (jst-selector? key)
+    (infer-expr key env))
+  (for-each (lambda (value) (infer-expr value env)) trailing))
 
 (define (infer-jst-dot-expr e env)
   (infer-expr (jst-dot-object e) env)
@@ -6785,6 +6859,28 @@
           (current-local-bindings) (defmethod-form-params e)))
        (parameterize ([current-local-bindings param-locals])
          (for-each walk (defmethod-form-body e)))]
+      [(jst-selector? e) (void)]
+      [(jst-get? e)
+       (walk (jst-get-receiver e))
+       (unless (jst-selector? (jst-get-key e)) (walk (jst-get-key e)))]
+      [(jst-call? e)
+       (walk (jst-call-receiver e))
+       (unless (jst-selector? (jst-call-key e)) (walk (jst-call-key e)))
+       (for-each walk (jst-call-args e))]
+      [(jst-set? e)
+       (walk (jst-set-receiver e))
+       (unless (jst-selector? (jst-set-key e)) (walk (jst-set-key e)))
+       (walk (jst-set-value e))]
+      [(jst-new? e)
+       (walk (jst-new-callee e))
+       (for-each walk (jst-new-args e))]
+      [(jst-delete? e)
+       (walk (jst-delete-receiver e))
+       (unless (jst-selector? (jst-delete-key e))
+         (walk (jst-delete-key e)))]
+      [(jst-in? e)
+       (walk (jst-in-receiver e))
+       (unless (jst-selector? (jst-in-key e)) (walk (jst-in-key e)))]
       [(jst-class? e)
        (when (jst-class-extends e)
          (walk (jst-class-extends e)))
@@ -6914,6 +7010,34 @@
                  (expr-involves-scalar? body-expr))))
          (for/or ([body-expr (in-list (letfn-form-body e))])
            (expr-involves-scalar? body-expr)))]
+    [(jst-selector? e) #f]
+    [(jst-get? e)
+     (or (expr-involves-scalar? (jst-get-receiver e))
+         (and (not (jst-selector? (jst-get-key e)))
+              (expr-involves-scalar? (jst-get-key e))))]
+    [(jst-call? e)
+     (or (expr-involves-scalar? (jst-call-receiver e))
+         (and (not (jst-selector? (jst-call-key e)))
+              (expr-involves-scalar? (jst-call-key e)))
+         (for/or ([arg (in-list (jst-call-args e))])
+           (expr-involves-scalar? arg)))]
+    [(jst-set? e)
+     (or (expr-involves-scalar? (jst-set-receiver e))
+         (and (not (jst-selector? (jst-set-key e)))
+              (expr-involves-scalar? (jst-set-key e)))
+         (expr-involves-scalar? (jst-set-value e)))]
+    [(jst-new? e)
+     (or (expr-involves-scalar? (jst-new-callee e))
+         (for/or ([arg (in-list (jst-new-args e))])
+           (expr-involves-scalar? arg)))]
+    [(jst-delete? e)
+     (or (expr-involves-scalar? (jst-delete-receiver e))
+         (and (not (jst-selector? (jst-delete-key e)))
+              (expr-involves-scalar? (jst-delete-key e))))]
+    [(jst-in? e)
+     (or (expr-involves-scalar? (jst-in-receiver e))
+         (and (not (jst-selector? (jst-in-key e)))
+              (expr-involves-scalar? (jst-in-key e))))]
     [(jst-class? e)
      (or (and (jst-class-extends e)
               (expr-involves-scalar? (jst-class-extends e)))
@@ -7005,6 +7129,28 @@
       [(with-open-form? expr)
        (go-bindings (with-open-form-bindings expr))
        (for-each go (with-open-form-body expr))]
+      [(jst-selector? expr) (void)]
+      [(jst-get? expr)
+       (go (jst-get-receiver expr))
+       (unless (jst-selector? (jst-get-key expr)) (go (jst-get-key expr)))]
+      [(jst-call? expr)
+       (go (jst-call-receiver expr))
+       (unless (jst-selector? (jst-call-key expr)) (go (jst-call-key expr)))
+       (for-each go (jst-call-args expr))]
+      [(jst-set? expr)
+       (go (jst-set-receiver expr))
+       (unless (jst-selector? (jst-set-key expr)) (go (jst-set-key expr)))
+       (go (jst-set-value expr))]
+      [(jst-new? expr)
+       (go (jst-new-callee expr))
+       (for-each go (jst-new-args expr))]
+      [(jst-delete? expr)
+       (go (jst-delete-receiver expr))
+       (unless (jst-selector? (jst-delete-key expr))
+         (go (jst-delete-key expr)))]
+      [(jst-in? expr)
+       (go (jst-in-receiver expr))
+       (unless (jst-selector? (jst-in-key expr)) (go (jst-in-key expr)))]
       [(jst-class? expr)
        (when (jst-class-extends expr) (go (jst-class-extends expr)))
        (for ([method (in-list (jst-class-methods expr))])
@@ -7398,6 +7544,13 @@
      (for/fold ([next state]) ([child (in-list children)])
        (analyze-and-escape child next value))
      (seteq)))
+  (define (analyze-jst-member receiver key trailing node state)
+    (for/fold ([next state])
+              ([child (in-list
+                       (append (list receiver)
+                               (if (jst-selector? key) '() (list key))
+                               trailing))])
+      (analyze-and-escape child next node)))
   (define (record-exception-state! state)
     (define sink (current-exception-sink))
     (when sink (sink state)))
@@ -7671,6 +7824,43 @@
          (analyze (if-some-form-else-body value) escaped))
        (values (join-states state (list then-result else-result))
                (set-union then-origins else-origins))]
+      [(jst-selector? value) (values state (seteq))]
+      [(jst-get? value)
+       (values
+        (analyze-jst-member
+         (jst-get-receiver value) (jst-get-key value) '() value state)
+        (seteq))]
+      [(jst-call? value)
+       (values
+        (analyze-jst-member
+         (jst-call-receiver value) (jst-call-key value)
+         (jst-call-args value) value state)
+        (seteq))]
+      [(jst-set? value)
+       (note! 'js/set! value)
+       (values
+        (analyze-jst-member
+         (jst-set-receiver value) (jst-set-key value)
+         (list (jst-set-value value)) value state)
+        (seteq))]
+      [(jst-new? value)
+       (values
+        (for/fold ([next (analyze-and-escape
+                          (jst-new-callee value) state value)])
+                  ([arg (in-list (jst-new-args value))])
+          (analyze-and-escape arg next value))
+        (seteq))]
+      [(jst-delete? value)
+       (note! 'js/delete! value)
+       (values
+        (analyze-jst-member
+         (jst-delete-receiver value) (jst-delete-key value) '() value state)
+        (seteq))]
+      [(jst-in? value)
+       (values
+        (analyze-jst-member
+         (jst-in-receiver value) (jst-in-key value) '() value state)
+        (seteq))]
       [(set!-form? value)
        (note! 'set! value)
        (define after-target (analyze-and-escape (set!-form-target value) state value))
@@ -8040,6 +8230,28 @@
       [(check-expr? e) (go (check-expr-expr e) l)]
       [(set!-form? e) (go (set!-form-target e) l)
                       (go (set!-form-value e) l)]
+      [(jst-selector? e) (void)]
+      [(jst-get? e)
+       (go (jst-get-receiver e) l)
+       (unless (jst-selector? (jst-get-key e)) (go (jst-get-key e) l))]
+      [(jst-call? e)
+       (go (jst-call-receiver e) l)
+       (unless (jst-selector? (jst-call-key e)) (go (jst-call-key e) l))
+       (go-body (jst-call-args e) l)]
+      [(jst-set? e)
+       (go (jst-set-receiver e) l)
+       (unless (jst-selector? (jst-set-key e)) (go (jst-set-key e) l))
+       (go (jst-set-value e) l)]
+      [(jst-new? e)
+       (go (jst-new-callee e) l)
+       (go-body (jst-new-args e) l)]
+      [(jst-delete? e)
+       (go (jst-delete-receiver e) l)
+       (unless (jst-selector? (jst-delete-key e))
+         (go (jst-delete-key e) l))]
+      [(jst-in? e)
+       (go (jst-in-receiver e) l)
+       (unless (jst-selector? (jst-in-key e)) (go (jst-in-key e) l))]
       [(jst-class? e)
        (when (jst-class-extends e) (go (jst-class-extends e) l))
        (for ([method (in-list (jst-class-methods e))])

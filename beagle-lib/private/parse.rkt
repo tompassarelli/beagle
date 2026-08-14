@@ -2584,6 +2584,25 @@
   (foldl (lambda (step acc) (thread-step-insert acc step 'last))
          init steps))
 
+;; A receiver-first JS operator is intentionally incomplete while it occupies
+;; a thread-step slot: the threader supplies its receiver before the expanded
+;; form reaches the real operator parser. Keep the marker's surface copy as a
+;; generic call-shaped AST so parsing that non-authoritative copy cannot reject
+;; before insertion. The expanded form below still passes through the exact
+;; js/* arity parser and is the only form checked or emitted for JS.
+(define JS-RECEIVER-THREAD-HEADS
+  '(js/get js/call js/set! js/delete! js/in?))
+
+(define (parse-thread-surface-expr form)
+  (define d (->datum form))
+  (define subs (stx-subs form))
+  (if (and (pair? d) (memq (car d) JS-RECEIVER-THREAD-HEADS))
+      (store-src!
+       (call-form (car d)
+                  (map parse-expr (or (stx-tail subs 1) (cdr d))))
+       (and (syntax? form) (stx->src-loc form)))
+      (parse-expr form)))
+
 ;; (as-> init name s1 s2 …)
 ;;   → (let [name init] (let [name s1] (let [name s2] … name)))
 ;; The placeholder `name` is bound to each successive step's value. The
@@ -3408,7 +3427,7 @@
                              (cons init clauses)))
        (threading-marker
         'cond->
-        (map parse-expr orig-stxs)
+        (map parse-thread-surface-expr orig-stxs)
         (parse-expr (rewrite-as
                      (expand-cond-thread (or (stx-ref subs 1) init)
                                          (or (and subs (stx-tail subs 2)) clauses)
@@ -3424,7 +3443,7 @@
                              (cons init clauses)))
        (threading-marker
         'cond->>
-        (map parse-expr orig-stxs)
+        (map parse-thread-surface-expr orig-stxs)
         (parse-expr (rewrite-as
                      (expand-cond-thread (or (stx-ref subs 1) init)
                                          (or (and subs (stx-tail subs 2)) clauses)
@@ -3440,7 +3459,7 @@
                              (cons init (cons name steps))))
        (threading-marker
         'as->
-        (map parse-expr orig-stxs)
+        (map parse-thread-surface-expr orig-stxs)
         (parse-expr (rewrite-as
                      (expand-as-thread (or (stx-ref subs 1) init)
                                        name
@@ -3459,7 +3478,7 @@
                              (cons init steps)))
        (threading-marker
         'some->
-        (map parse-expr orig-stxs)
+        (map parse-thread-surface-expr orig-stxs)
         (parse-expr (rewrite-as
                      (expand-some-thread (or (stx-ref subs 1) init)
                                          (or (and subs (stx-tail subs 2)) steps)
@@ -3475,7 +3494,7 @@
                              (cons init steps)))
        (threading-marker
         'some->>
-        (map parse-expr orig-stxs)
+        (map parse-thread-surface-expr orig-stxs)
         (parse-expr (rewrite-as
                      (expand-some-thread (or (stx-ref subs 1) init)
                                          (or (and subs (stx-tail subs 2)) steps)
@@ -3981,6 +4000,62 @@
        (jst-typeof (parse-expr expr-form))]
       [_ (parse-list-form* d subs)])))
 
+(register-combiner! 'js/get
+  (lambda (d subs)
+    (match d
+      [(list 'js/get receiver key)
+       (jst-get (parse-expr (or (stx-ref subs 1) receiver))
+                (parse-jst-member-key (or (stx-ref subs 2) key)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/get expects exactly a receiver and member key")])))
+
+(register-combiner! 'js/call
+  (lambda (d subs)
+    (match d
+      [(list* 'js/call receiver key args)
+       (jst-call (parse-expr (or (stx-ref subs 1) receiver))
+                 (parse-jst-member-key (or (stx-ref subs 2) key))
+                 (map parse-expr (or (stx-tail subs 3) args)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/call expects a receiver, member key, and optional arguments")])))
+
+(register-combiner! 'js/set!
+  (lambda (d subs)
+    (match d
+      [(list 'js/set! receiver key value)
+       (jst-set (parse-expr (or (stx-ref subs 1) receiver))
+                (parse-jst-member-key (or (stx-ref subs 2) key))
+                (parse-expr (or (stx-ref subs 3) value)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/set! expects exactly a receiver, member key, and value")])))
+
+(register-combiner! 'js/new
+  (lambda (d subs)
+    (match d
+      [(list* 'js/new callee args)
+       (jst-new (parse-expr (or (stx-ref subs 1) callee))
+                (map parse-expr (or (stx-tail subs 2) args)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/new expects a constructor and optional arguments")])))
+
+(register-combiner! 'js/delete!
+  (lambda (d subs)
+    (match d
+      [(list 'js/delete! receiver key)
+       (jst-delete (parse-expr (or (stx-ref subs 1) receiver))
+                   (parse-jst-member-key (or (stx-ref subs 2) key)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/delete! expects exactly a receiver and member key")])))
+
+(register-combiner! 'js/in?
+  (lambda (d subs)
+    (match d
+      [(list 'js/in? receiver key)
+       (jst-in (parse-expr (or (stx-ref subs 1) receiver))
+               (parse-jst-member-key (or (stx-ref subs 2) key)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/in? expects exactly a receiver and member key")])))
+
 ;; `js/import-meta` migrated to the compile-time combiner registry (see register-combiner!).
 (register-combiner! 'js/import-meta
   (lambda (d subs)
@@ -4277,7 +4352,7 @@
                            (cons init steps)))
      (threading-marker
       '->
-      (map parse-expr orig-stxs)
+      (map parse-thread-surface-expr orig-stxs)
       (parse-expr (rewrite-as
                    (expand-thread-first (or (stx-ref subs 1) init)
                                         (or (and subs (stx-tail subs 2)) steps)))))]
@@ -4286,7 +4361,7 @@
                            (cons init steps)))
      (threading-marker
       '->>
-      (map parse-expr orig-stxs)
+      (map parse-thread-surface-expr orig-stxs)
       (parse-expr (rewrite-as
                    (expand-thread-last (or (stx-ref subs 1) init)
                                        (or (and subs (stx-tail subs 2)) steps)))))]

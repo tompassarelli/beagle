@@ -710,7 +710,7 @@
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
   (reset! emit-target (get prog "target"))
-  (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 3) (= (get prog "phase") "checked")))
+  (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
   (register-tables! (get prog "forms"))
   (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
   (str (emit-ns-form prog body) "\n\n" body "\n")))

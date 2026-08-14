@@ -116,8 +116,10 @@
 ;; --- EXP-025 G9 bare-dot interop `(. Target member)` (malli java.time) --------
 ;; Racket's default reader reserves a lone `.` as the dotted-pair separator and
 ;; errors on `(. LocalTime -MIN)` ("illegal use of `.`"). Beagle is Clojure, so
-;; `.` is the ordinary interop special-form head → the symbol `.`. `.method` /
-;; `.-field` prefixed tokens are constituents already and MUST stay unchanged.
+;; `.` is the ordinary hosted-Clojure interop special-form head → the symbol
+;; `.`. Dot-prefixed tokens remain single symbols: hosted Clojure interprets
+;; its interop spellings, while the JS parser interprets `.member` only in a
+;; receiver-first operator's selector slot.
 (test-case "G9 bare `.` reads as the symbol `.`"
   (check-equal? (rd ".") (string->symbol ".")))
 (test-case "G9 `(. Target -field)` interop reads with `.` head"
@@ -126,9 +128,9 @@
 (test-case "G9 `(. obj method arg)` interop reads with `.` head"
   (check-equal? (rd "(. obj method arg)")
                 (list (string->symbol ".") 'obj 'method 'arg)))
-(test-case "G9 `.method` sugar is UNCHANGED (single symbol, `.` not fired)"
+(test-case "G9 dot-prefixed method token remains one symbol"
   (check-equal? (rd "(.method obj)") '(.method obj)))
-(test-case "G9 `.-field` sugar is UNCHANGED (single symbol)"
+(test-case "G9 dot-dash field token remains one symbol"
   (check-equal? (rd "(.-field obj)") '(.-field obj)))
 (test-case "G9 mid-token dot is a constituent — `foo.bar` stays one symbol"
   (check-equal? (rd "foo.bar") 'foo.bar))

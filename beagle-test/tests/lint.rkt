@@ -70,6 +70,26 @@
                          '(def widget (Widget.))))
   (check-false (regexp-match? #rx"unused declare-extern: Widget" out)))
 
+(test-case "receiver-first JS operators traverse every expression operand"
+  (define out
+    (lint-prog
+     '(define-target js)
+     '(declare-extern receiver Any)
+     '(declare-extern dynamic-key Any)
+     '(declare-extern value Any)
+     '(declare-extern Constructor Any)
+     '(declare-extern argument Any)
+     '(def read Any (js/get receiver dynamic-key))
+     '(def called Any (js/call receiver dynamic-key argument))
+     '(def written Any (js/set! receiver dynamic-key value))
+     '(def built Any (js/new Constructor argument))
+     '(def removed Bool (js/delete! receiver dynamic-key))
+     '(def present Bool (js/in? receiver dynamic-key))))
+  (for ([name (in-list '(receiver dynamic-key value Constructor argument))])
+    (check-false
+     (regexp-match? (regexp (format "unused declare-extern: ~a" name)) out)
+     (format "~a was not traversed:\n~a" name out))))
+
 (test-case "catch type counts as an extern use"
   (define out (lint-prog '(declare-extern Error Any)
                          (list 'defn 'guarded (br) 'Int

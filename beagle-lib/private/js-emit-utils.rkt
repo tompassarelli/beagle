@@ -86,6 +86,20 @@
 (define (mangle-prop s)
   (mangle-punctuation s))
 
+;; Foreign selector literals name JavaScript members exactly.  Dot notation is
+;; available only for the conservative ASCII identifier subset; every other
+;; spelling stays byte-for-byte visible through a quoted bracket key.
+(define (js-member-identifier? s)
+  (and (string? s)
+       (regexp-match? #px"^[A-Za-z_$][A-Za-z0-9_$]*$" s)))
+
+(define (js-selector-suffix name)
+  (unless (string? name)
+    (raise-argument-error 'js-selector-suffix "string?" name))
+  (if (js-member-identifier? name)
+      (string-append "." name)
+      (string-append "[" (js-string-lit name) "]")))
+
 ;; --- canonical JS binary/assign operator tables -----------------------------
 ;; Shared by parse-js-quote (recognition during parse) and the emitters
 ;; (rendering during emit). Single source of truth.
@@ -144,6 +158,7 @@
  escape-js-regex-slash escape-js-template-string
  js-string-lit
  mangle-name mangle-str mangle-prop mangle-chars
+ js-member-identifier? js-selector-suffix
  JS-BINARY-OPS JS-ASSIGN-OPS
  js-binary-op? js-assign-op?
  current-emit-expr)

@@ -10,7 +10,7 @@
             [selfhost.emit-js :as ejs]
             [selfhost.facts-roundtrip :as fr]))
 
-(def CHECKED-PROGRAM-SCHEMA-VERSION 3)
+(def CHECKED-PROGRAM-SCHEMA-VERSION 4)
 
 (def ^String IMPORTED-RECORD-CONTRACTS-KEY "$beagle$selfhost$imported-record-contracts")
 
@@ -243,9 +243,9 @@
 (defn- validate-checked-projection! [^String target projection]
   (cond
   (not (map? projection)) (invalid-projection! "input must be a checked-program JSON object")
-  (not (exact-checked-program-keys? projection)) (invalid-projection! "checked-program keys do not match the v3 contract")
+  (not (exact-checked-program-keys? projection)) (invalid-projection! "checked-program keys do not match the v4 contract")
   (not (= (get projection "kind") "beagle.checked-program")) (invalid-projection! "kind must be beagle.checked-program")
-  (not (= (get projection "schemaVersion") CHECKED-PROGRAM-SCHEMA-VERSION)) (invalid-projection! "schemaVersion must be 3")
+  (not (= (get projection "schemaVersion") CHECKED-PROGRAM-SCHEMA-VERSION)) (invalid-projection! "schemaVersion must be 4")
   (not (= (get projection "phase") "checked")) (invalid-projection! "phase must be checked")
   (not (= (get projection "mode") "strict")) (invalid-projection! "checked-program mode must be strict")
   (not (= (get projection "target") target)) (invalid-projection! (str "target mismatch: projection is " (get projection "target") ", command requested " target))

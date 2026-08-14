@@ -3,9 +3,8 @@
   "Self-hosted type checker — matches beagle-lib/private/check.rkt semantics on
   the program AST JSON (string-keyed maps per ast-json.rkt). Public entry:
   check-program! (Fn [Any] Any) returning a vector of error strings (empty =
-  accepted). Ported from ~/code/beagle/.worktrees/driftlab/self-host/check.bjs
-  (.bjs target): JS mutable env objects -> threaded immutable maps; the global
-  registry + diagnostics -> a module-level atom (STATE); mutating fns get a `!`.")
+  accepted). Registry state and diagnostics live in the module-level STATE atom;
+  mutating functions carry a `!`.")
 (define-mode strict)
 
 (require selfhost.rt)
@@ -557,6 +556,24 @@
   (swap! STATE update "diagnostics" conj msg)
   nil)
 
+(def JS-TARGET-FORM-NAMES Any
+  {"js-selector" "JavaScript member selector"
+   "js-get" "js/get"
+   "js-call" "js/call"
+   "js-set" "js/set!"
+   "js-new" "js/new"
+   "js-delete" "js/delete!"
+   "js-in" "js/in?"
+   "js-typeof" "js/typeof"})
+
+(defn js-target-form-name [(value Any)] Any
+  (if (map? value) (get JS-TARGET-FORM-NAMES (get value "node")) nil))
+
+(defn invalid-js-target-form? [(value Any)] Bool
+  (let [name (js-target-form-name value)]
+    (and (not (nil? name))
+      (not (= (get (deref STATE) "target") "js")))))
+
 ;; --- stdlib signature table (permissive: this checker has NO Int<:Number
 ;; subtyping, so params stay Any and variadics use rest — today's semantics for
 ;; the fns fold references, kept from erroring on well-typed programs) ---------
@@ -721,6 +738,21 @@
                (boolean
                  (some (fn [(method Any)] Bool (= (get method "async") true))
                    (get value "methods")))) false
+
+          (= node "js-selector") true
+
+          (or (= node "js-get") (= node "js-set")
+              (= node "js-delete") (= node "js-in"))
+            (and
+              (constraint-value-synchronous? (get value "receiver") proofs)
+              (let [key (get value "key")]
+                (or (= (get key "node") "js-selector")
+                  (constraint-value-synchronous? key proofs)))
+              (if (= node "js-set")
+                (constraint-value-synchronous? (get value "value") proofs)
+                true))
+
+          (or (= node "js-call") (= node "js-new")) false
 
           (= node "call")
             (let [callee (get value "fn")
@@ -2007,9 +2039,26 @@
       true)
     false))
 
+(defn infer-js-member!
+  [(receiver Any) (key Any) (trailing Any) (env Any)] Nil
+  (infer-expr! receiver env)
+  (when (not (= (get key "node") "js-selector"))
+    (infer-expr! key env))
+  (doseq [value trailing]
+    (infer-expr! value env))
+  nil)
+
 (defn infer-expr! [(e Any) (env Any)] Any
   (cond
     (nil? e) ANY
+
+    (invalid-js-target-form? e)
+      (do
+        (emit-diag!
+          (str (js-target-form-name e)
+            " is only supported in beagle/js (current target: "
+            (get (deref STATE) "target") ")"))
+        ANY)
 
     ;; threading is transparent to the checker — walk the desugared form
     ;; (check.rkt threading-marker arms); surface args are emit-side only
@@ -2190,21 +2239,28 @@
           ANY)
 
     (= (get e "node") "set!")
-      ;; A set! target must be an assignable PLACE. On value targets (js,
-      ;; clj, nix) the only places are a bare local (ref) and a field access
-      ;; (.-field / .field, a method-call). A call like (get m k) is NOT a place;
+      ;; A set! target must be an assignable place. JavaScript member mutation
+      ;; is represented by js/set!, so plain set! owns lexical bindings only.
       (let [target (get e "target")
             tnode (get target "node")
-            tgt (get (deref STATE) "target")]
-        (when (not (or (= tnode "ref") (= tnode "method-call")))
+            tgt (get (deref STATE) "target")
+            allowed (or (= tnode "ref")
+                      (and (not (= tgt "js")) (= tnode "method-call")))]
+        (if allowed
+          (do
+            (infer-expr! target env)
+            (infer-expr! (get e "value") env)
+            ANY)
           (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref"))
                               (str "(" (get (get target "fn") "name") " …)")
                               "that form")]
-            (emit-diag! (str "beagle: set! target must be a local variable or a field access (.-field); "
-                             target-desc " is not an assignable place on the " (str tgt) " target"))))
-        (infer-expr! target env)
-        (infer-expr! (get e "value") env)
-        ANY)
+            (emit-diag!
+              (if (= tgt "js")
+                "set! target must be a local variable on the js target"
+                (str "set! target must be a local variable or a field access (.-field); "
+                  target-desc " is not an assignable place on the " (str tgt)
+                  " target")))
+            ANY)))
 
     (= (get e "node") "await")
       (let [inner-type (infer-expr! (get e "expr") env)]
@@ -2213,6 +2269,44 @@
                  (= (count (get inner-type "args")) 1))
           (nth (get inner-type "args") 0)
           ANY))
+
+    (= (get e "node") "js-selector") ANY
+
+    (= (get e "node") "js-get")
+      (do
+        (infer-js-member! (get e "receiver") (get e "key") [] env)
+        ANY)
+
+    (= (get e "node") "js-call")
+      (do
+        (infer-js-member! (get e "receiver") (get e "key") (get e "args") env)
+        ANY)
+
+    (= (get e "node") "js-set")
+      (do
+        (infer-js-member! (get e "receiver") (get e "key") [(get e "value")] env)
+        ANY)
+
+    (= (get e "node") "js-new")
+      (do
+        (infer-expr! (get e "callee") env)
+        (doseq [arg (get e "args")] (infer-expr! arg env))
+        ANY)
+
+    (= (get e "node") "js-delete")
+      (do
+        (infer-js-member! (get e "receiver") (get e "key") [] env)
+        BOOL-TYPE)
+
+    (= (get e "node") "js-in")
+      (do
+        (infer-js-member! (get e "receiver") (get e "key") [] env)
+        BOOL-TYPE)
+
+    (= (get e "node") "js-typeof")
+      (do
+        (infer-expr! (get e "expr") env)
+        (make-prim "String"))
 
     (= (get e "node") "vec")
       (let [items (get e "items")]
@@ -2392,7 +2486,10 @@
         (merge-types-list (into [body-type] catch-types)))
 
     (= (get e "node") "new")
-      (do (doseq [a (get e "args")] (infer-expr! a env))
+      (do
+          (when (= (get (deref STATE) "target") "js")
+            (emit-diag! "JVM-style constructor forms are not supported on the js target"))
+          (doseq [a (get e "args")] (infer-expr! a env))
           ANY)
 
     (= (get e "node") "kw-access")
@@ -2460,6 +2557,8 @@
       (let [method-name (get e "method")
             all-args (into [(get e "target")] (get e "args"))
             raw-type (get env method-name)]
+        (when (= (get (deref STATE) "target") "js")
+          (emit-diag! "JVM-style method calls are not supported on the js target"))
         (infer-expr! (get e "target") env)
         (cond
           (and (not (nil? raw-type)) (poly-type? raw-type))
@@ -3180,6 +3279,17 @@
     (purity-escape-origins
       (get result "state") (get result "origins") node)))
 
+(defn purity-analyze-js-member
+  [(receiver Any) (key Any) (trailing Any) (node Any) (state Any)] Any
+  (let [children (into [receiver]
+                   (into
+                     (if (= (get key "node") "js-selector") [] [key])
+                     trailing))]
+    (reduce
+      (fn [(next Any) (child Any)] Any
+        (purity-analyze-and-escape child next node))
+      state children)))
+
 (defn purity-analyze-defaults [(state Any) (target Any)] Any
   (reduce (fn [(next Any) (default Any)] Any
             (purity-analyze-and-escape default next default))
@@ -3573,6 +3683,49 @@
                   [(get then-result "state") (get else-result "state")])
                 (origins-union (get then-result "origins")
                   (get else-result "origins"))))
+          (= node "js-selector")
+            (purity-result state {})
+          (= node "js-get")
+            (purity-result
+              (purity-analyze-js-member
+                (get value "receiver") (get value "key") [] value state)
+              {})
+          (= node "js-call")
+            (purity-result
+              (purity-analyze-js-member
+                (get value "receiver") (get value "key")
+                (get value "args") value state)
+              {})
+          (= node "js-set")
+            (purity-result
+              (purity-analyze-js-member
+                (get value "receiver") (get value "key")
+                [(get value "value")] value
+                (purity-note state "js/set!"))
+              {})
+          (= node "js-new")
+            (purity-result
+              (reduce
+                (fn [(next Any) (child Any)] Any
+                  (purity-analyze-and-escape child next value))
+                state
+                (into [(get value "callee")] (get value "args")))
+              {})
+          (= node "js-delete")
+            (purity-result
+              (purity-analyze-js-member
+                (get value "receiver") (get value "key") [] value
+                (purity-note state "js/delete!"))
+              {})
+          (= node "js-in")
+            (purity-result
+              (purity-analyze-js-member
+                (get value "receiver") (get value "key") [] value state)
+              {})
+          (= node "js-typeof")
+            (purity-result
+              (purity-analyze-and-escape (get value "expr") state value)
+              {})
           (= node "set!")
             (let [marked (purity-note state "set!")
                   after-target (purity-analyze-and-escape

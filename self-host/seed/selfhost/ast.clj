@@ -133,6 +133,30 @@
 (defn make-static-call [^String class-method args]
   {"node" "static-call" "class-method" class-method "args" args})
 
+(defn make-js-selector [^String name]
+  {"node" "js-selector" "name" name})
+
+(defn make-js-get [receiver key]
+  {"node" "js-get" "receiver" receiver "key" key})
+
+(defn make-js-call [receiver key args]
+  {"node" "js-call" "receiver" receiver "key" key "args" args})
+
+(defn make-js-set [receiver key value]
+  {"node" "js-set" "receiver" receiver "key" key "value" value})
+
+(defn make-js-new [callee args]
+  {"node" "js-new" "callee" callee "args" args})
+
+(defn make-js-delete [receiver key]
+  {"node" "js-delete" "receiver" receiver "key" key})
+
+(defn make-js-in [receiver key]
+  {"node" "js-in" "receiver" receiver "key" key})
+
+(defn make-js-typeof [expr]
+  {"node" "js-typeof" "expr" expr})
+
 (defn make-map [pairs]
   {"node" "map" "pairs" pairs})
 
@@ -339,6 +363,16 @@
   (let [node (make-match (make-ref "x") [{"pattern" (make-pat-record "Circle" ["r"]) "body" (make-ref "r")}])]
   (expect! "make-match" (= (get node "node") "match"))
   (expect! "make-match target" (= (get (get node "target") "name") "x")))
+  (let [receiver (make-ref "obj")
+   selector (make-js-selector "raw_name")]
+  (expect! "make-js-selector preserves member bytes" (= selector {"node" "js-selector" "name" "raw_name"}))
+  (expect! "make-js-get" (= (make-js-get receiver selector) {"node" "js-get" "receiver" receiver "key" selector}))
+  (expect! "make-js-call" (= (get (make-js-call receiver selector []) "node") "js-call"))
+  (expect! "make-js-set" (= (get (make-js-set receiver selector (make-literal "number" 1)) "node") "js-set"))
+  (expect! "make-js-new" (= (get (make-js-new (make-ref "Ctor") []) "node") "js-new"))
+  (expect! "make-js-delete" (= (get (make-js-delete receiver selector) "node") "js-delete"))
+  (expect! "make-js-in" (= (get (make-js-in receiver selector) "node") "js-in"))
+  (expect! "make-js-typeof" (= (make-js-typeof receiver) {"node" "js-typeof" "expr" receiver})))
   (let [node (make-defunion "Shape" ["Circle" "Rect"] nil nil)]
   (expect! "make-defunion" (= (get node "node") "defunion"))
   (expect! "make-defunion members" (= (count (get node "members")) 2)))

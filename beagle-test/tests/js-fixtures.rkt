@@ -35,7 +35,7 @@
 
 ;; --- stdlib statics (Math/JSON/Number) -------------------------------------
 
-(test-case "js-stdlib-statics fixture — uppercase-prefix slashed -> dotted"
+(test-case "js-stdlib-statics fixture — js/call and js/get emit dotted access"
   (define out (js-fixture "js-stdlib-statics.bjs"))
   (check-true (string-contains? out "JSON.parse(s)"))
   (check-true (string-contains? out "JSON.stringify(obj)"))
@@ -76,9 +76,9 @@
   (check-true (string-contains? out "Array.from(iter)"))
   (check-true (string-contains? out "Array.isArray(x)")))
 
-;; --- Array prototype methods (.push, .pop, etc.) ---------------------------
+;; --- Array prototype methods -----------------------------------------------
 
-(test-case "js-array-methods fixture — .method dispatch on instance"
+(test-case "js-array-methods fixture — js/call dispatch on instance"
   (define out (js-fixture "js-array-methods.bjs"))
   (check-true (string-contains? out "xs.push(x)"))
   (check-true (string-contains? out "xs.pop()"))

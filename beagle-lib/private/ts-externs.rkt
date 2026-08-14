@@ -552,13 +552,13 @@
     ;; A class with no declared constructor still constructs with zero arguments.
     (emit! (format "make-~a" prefix)
            (if (null? ctors)
-               (list (list '() "Any" (format "(~a.)" cname)))
+               (list (list '() "Any" (format "(js/new ~a)" cname)))
                (member-clauses ctors
                                values
                                (lambda (params m)
                                  (if (null? params)
-                                     (format "(~a.)" cname)
-                                     (format "(~a. ~a)" cname (arg-refs params))))))))
+                                     (format "(js/new ~a)" cname)
+                                     (format "(js/new ~a ~a)" cname (arg-refs params))))))))
 
   (for ([group (in-list (group-members (ts-class-members c) 'method))])
     (define name (car group))
@@ -567,8 +567,8 @@
                            (lambda (params) (cons (ts-param "self" "any" #f #f) params))
                            (lambda (params m)
                              (if (null? params)
-                                 (format "(.~a self)" name)
-                                 (format "(.~a self ~a)" name (arg-refs params)))))))
+                                 (format "(js/call self .~a)" name)
+                                 (format "(js/call self .~a ~a)" name (arg-refs params)))))))
 
   (for ([group (in-list (if runtime? (group-members (ts-class-members c) 'static-method) '()))])
     (define name (car group))
@@ -580,8 +580,8 @@
                                  (format "(~a/~a)" cname name)
                                  (format "(~a/~a ~a)" cname name (arg-refs params)))))))
 
-  ;; Only primitive-typed properties are worth wrapping: an `Any` accessor buys
-  ;; nothing over `(.-prop obj)`.
+  ;; Only primitive-typed properties are worth wrapping: an `Any` accessor adds
+  ;; no information beyond direct `js/get`.
   (define seen-props (make-hash))
   (for ([m (in-list (ts-class-members c))]
         #:when (eq? (ts-member-kind m) 'property)
@@ -591,12 +591,13 @@
     (when (member bt '("Float" "String" "Bool"))
       (define self-param (list (ts-param "self" "any" #f #f)))
       (emit! (format "~a-~a" prefix (kebab (ts-member-name m)))
-             (list (list self-param bt (format "(.-~a self)" (ts-member-name m)))))
+             (list (list self-param bt
+                         (format "(js/get self .~a)" (ts-member-name m)))))
       (unless (ts-member-readonly? m)
         (emit! (format "set-~a-~a!" prefix (kebab (ts-member-name m)))
                (list (list (append self-param (list (ts-param "value" (ts-member-type m) #f #f)))
                            "Nil"
-                           (format "(do (set! (.-~a self) value) nil)" (ts-member-name m))))))))
+                           (format "(do (js/set! self .~a value) nil)" (ts-member-name m))))))))
   (values (get-output-string out) (unbox emitted-any?)))
 
 (define (emit-module namespace module-spec classes names runtime-exported?)

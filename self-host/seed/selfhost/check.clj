@@ -269,6 +269,15 @@
   (swap! STATE update "diagnostics" conj msg)
   nil)
 
+(def JS-TARGET-FORM-NAMES {"js-selector" "JavaScript member selector" "js-get" "js/get" "js-call" "js/call" "js-set" "js/set!" "js-new" "js/new" "js-delete" "js/delete!" "js-in" "js/in?" "js-typeof" "js/typeof"})
+
+(defn js-target-form-name [value]
+  (if (map? value) (get JS-TARGET-FORM-NAMES (get value "node")) nil))
+
+(defn ^Boolean invalid-js-target-form? [value]
+  (let [name (js-target-form-name value)]
+  (and (not (nil? name)) (not (= (get (deref STATE) "target") "js")))))
+
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] ANY ANY) "-" (make-fn [ANY] ANY ANY) "*" (make-fn [] ANY ANY) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
@@ -325,6 +334,10 @@
   (= jsk "await") false
   (and (or (= jsk "function") (= jsk "method")) (= (get value "async") true)) false
   (and (= node "js-class") (boolean (some (fn [method] (= (get method "async") true)) (get value "methods")))) false
+  (= node "js-selector") true
+  (or (= node "js-get") (= node "js-set") (= node "js-delete") (= node "js-in")) (and (constraint-value-synchronous? (get value "receiver") proofs) (let [key (get value "key")]
+  (or (= (get key "node") "js-selector") (constraint-value-synchronous? key proofs))) (if (= node "js-set") (constraint-value-synchronous? (get value "value") proofs) true))
+  (or (= node "js-call") (= node "js-new")) false
   (= node "call") (let [callee (get value "fn")
    named? (and (map? callee) (= (get callee "node") "ref") (string? (get callee "name")))
    callee-ok (if named? (= true (get proofs (get callee "name"))) (constraint-value-synchronous? callee proofs))]
@@ -898,9 +911,20 @@
   (emit-diag! (str "beagle: atom init: expected " (type->string elem) ", got " (type->string it)))))
   true) false))
 
+(defn infer-js-member! [receiver key trailing env]
+  (infer-expr! receiver env)
+  (if (not (= (get key "node") "js-selector")) (do
+  (infer-expr! key env)))
+  (doseq [value trailing]
+  (infer-expr! value env))
+  nil)
+
 (defn infer-expr! [e env]
   (cond
   (nil? e) ANY
+  (invalid-js-target-form? e) (do
+  (emit-diag! (str (js-target-form-name e) " is only supported in beagle/js (current target: " (get (deref STATE) "target") ")"))
+  ANY)
   (= (get e "node") "threading") (infer-expr! (get e "desugared") env)
   (= (get e "node") "literal") (let [t (infer-literal-type e)]
   (if (nil? t) ANY t))
@@ -1000,15 +1024,40 @@
   ANY)
   (= (get e "node") "set!") (let [target (get e "target")
    tnode (get target "node")
-   tgt (get (deref STATE) "target")]
-  (if (not (or (= tnode "ref") (= tnode "method-call"))) (do
-  (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref")) (str "(" (get (get target "fn") "name") " …)") "that form")]
-  (emit-diag! (str "beagle: set! target must be a local variable or a field access (.-field); " target-desc " is not an assignable place on the " (str tgt) " target")))))
+   tgt (get (deref STATE) "target")
+   allowed (or (= tnode "ref") (and (not (= tgt "js")) (= tnode "method-call")))]
+  (if allowed (do
   (infer-expr! target env)
   (infer-expr! (get e "value") env)
-  ANY)
+  ANY) (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref")) (str "(" (get (get target "fn") "name") " …)") "that form")]
+  (emit-diag! (if (= tgt "js") "set! target must be a local variable on the js target" (str "set! target must be a local variable or a field access (.-field); " target-desc " is not an assignable place on the " (str tgt) " target")))
+  ANY)))
   (= (get e "node") "await") (let [inner-type (infer-expr! (get e "expr") env)]
   (if (and (app-type? inner-type) (= (get inner-type "name") "Promise") (= (count (get inner-type "args")) 1)) (nth (get inner-type "args") 0) ANY))
+  (= (get e "node") "js-selector") ANY
+  (= (get e "node") "js-get") (do
+  (infer-js-member! (get e "receiver") (get e "key") [] env)
+  ANY)
+  (= (get e "node") "js-call") (do
+  (infer-js-member! (get e "receiver") (get e "key") (get e "args") env)
+  ANY)
+  (= (get e "node") "js-set") (do
+  (infer-js-member! (get e "receiver") (get e "key") [(get e "value")] env)
+  ANY)
+  (= (get e "node") "js-new") (do
+  (infer-expr! (get e "callee") env)
+  (doseq [arg (get e "args")]
+  (infer-expr! arg env))
+  ANY)
+  (= (get e "node") "js-delete") (do
+  (infer-js-member! (get e "receiver") (get e "key") [] env)
+  BOOL-TYPE)
+  (= (get e "node") "js-in") (do
+  (infer-js-member! (get e "receiver") (get e "key") [] env)
+  BOOL-TYPE)
+  (= (get e "node") "js-typeof") (do
+  (infer-expr! (get e "expr") env)
+  (make-prim "String"))
   (= (get e "node") "vec") (let [items (get e "items")]
   (if (= (count items) 0) (make-app "Vec" [ANY]) (let [elem-types (mapv (fn [it] (infer-expr! it env)) items)]
   (make-app "Vec" [(collection-elem-type elem-types)]))))
@@ -1100,6 +1149,8 @@
   (last-expr-type! fin env)))
   (merge-types-list (into [body-type] catch-types)))
   (= (get e "node") "new") (do
+  (if (= (get (deref STATE) "target") "js") (do
+  (emit-diag! "JVM-style constructor forms are not supported on the js target")))
   (doseq [a (get e "args")]
   (infer-expr! a env))
   ANY)
@@ -1146,6 +1197,8 @@
   (= (get e "node") "method-call") (let [method-name (get e "method")
    all-args (into [(get e "target")] (get e "args"))
    raw-type (get env method-name)]
+  (if (= (get (deref STATE) "target") "js") (do
+  (emit-diag! "JVM-style method calls are not supported on the js target")))
   (infer-expr! (get e "target") env)
   (cond
   (and (not (nil? raw-type)) (poly-type? raw-type)) (let [resolved (resolve-poly-call! raw-type all-args env)]
@@ -1552,6 +1605,10 @@
   (let [result (purity-analyze value state)]
   (purity-escape-origins (get result "state") (get result "origins") node)))
 
+(defn purity-analyze-js-member [receiver key trailing node state]
+  (let [children (into [receiver] (into (if (= (get key "node") "js-selector") [] [key]) trailing))]
+  (reduce (fn [next child] (purity-analyze-and-escape child next node)) state children)))
+
 (defn purity-analyze-defaults [state target]
   (reduce (fn [next default] (purity-analyze-and-escape default next default)) state (destructure-default-exprs target)))
 
@@ -1734,6 +1791,14 @@
    alternative (opt-field (get value "else"))
    else-result (if (nil? alternative) (purity-result else-base {}) (purity-analyze alternative else-base))]
   (purity-result (purity-join-states state [(get then-result "state") (get else-result "state")]) (origins-union (get then-result "origins") (get else-result "origins"))))
+  (= node "js-selector") (purity-result state {})
+  (= node "js-get") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [] value state) {})
+  (= node "js-call") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") (get value "args") value state) {})
+  (= node "js-set") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [(get value "value")] value (purity-note state "js/set!")) {})
+  (= node "js-new") (purity-result (reduce (fn [next child] (purity-analyze-and-escape child next value)) state (into [(get value "callee")] (get value "args"))) {})
+  (= node "js-delete") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [] value (purity-note state "js/delete!")) {})
+  (= node "js-in") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [] value state) {})
+  (= node "js-typeof") (purity-result (purity-analyze-and-escape (get value "expr") state value) {})
   (= node "set!") (let [marked (purity-note state "set!")
    after-target (purity-analyze-and-escape (get value "target") marked value)]
   (purity-result (purity-analyze-and-escape (get value "value") after-target value) {}))

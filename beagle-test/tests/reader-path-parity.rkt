@@ -100,6 +100,11 @@
    "^:dynamic *x*"
    "^{:doc \"d\"} y"
    "(def ^:private z 1)"
+   ;; JS selector tokens remain byte-exact through the shared reader; target
+   ;; ownership is decided later by the parser/checker.
+   "(js/get object .field)"
+   "(js/call object .ready?)"
+   "(js/set! object .dash-name value)"
    ;; regex + raw string
    "#\"a.*b\""
    "#r#\"raw \\ \" string\"#"

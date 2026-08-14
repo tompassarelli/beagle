@@ -155,6 +155,38 @@
                           (equal? (hash-ref form 'name #f) name)))
     form))
 
+(define (definition-value json name)
+  (hash-ref (find-named-form json "def" name) 'value))
+
+(define (wire-ref name)
+  (hasheq 'node "ref" 'name name))
+
+(define (wire-number value)
+  (hasheq 'node "literal" 'kind "number" 'value value))
+
+(define (wire-selector name)
+  (hasheq 'node "js-selector" 'name name))
+
+(define receiver-first-js-source
+  (string-append
+   "(ns checked.js-members)\n"
+   "(define-mode strict)\n"
+   "(declare-extern object Any)\n"
+   "(declare-extern key Any)\n"
+   "(declare-extern Constructor Any)\n"
+   "(def static-get Any (js/get object .field))\n"
+   "(def dynamic-get Any (js/get object key))\n"
+   "(def static-call Any (js/call object .method 1 2))\n"
+   "(def dynamic-call Any (js/call object key 1 2))\n"
+   "(def static-set Any (js/set! object .field 3))\n"
+   "(def dynamic-set Any (js/set! object key 3))\n"
+   "(def constructed Any (js/new Constructor 1 2))\n"
+   "(def static-delete Bool (js/delete! object .field))\n"
+   "(def dynamic-delete Bool (js/delete! object key))\n"
+   "(def static-in Bool (js/in? object .field))\n"
+   "(def dynamic-in Bool (js/in? object key))\n"
+   "(def object-type String (js/typeof object))\n"))
+
 (define (run-ast-cli source)
   (parameterize ([current-directory root])
     (define-values (process stdout stdin stderr)
@@ -256,13 +288,13 @@
      (check-equal? (hash-ref json 'imports)
                    '("java.nio.charset.StandardCharsets" "java.util.zip.CRC32")))
 
-   (test-case "checked-program v3 expands an imported typed declaration macro"
+   (test-case "checked-program v4 expands an imported typed declaration macro"
      (define path
        (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
      (define-values (_prog json)
        (parse+checked-json/path path "checked-projection/wiki.bjs"))
      (check-equal? (hash-ref json 'kind) "beagle.checked-program")
-     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (check-equal? (hash-ref json 'schemaVersion) 4)
      (check-equal? (hash-ref json 'phase) "checked")
      (check-equal? (hash-ref json 'sourceId) "checked-projection/wiki.bjs")
      (check-equal? (hash-ref json 'sourceSha256)
@@ -333,7 +365,7 @@
      (check-equal? (hash-ref name 'type) "seq-destructure")
      (check-equal? (hash-ref name 'names) '("a" "b")))
 
-   (test-case "checked-program v3 retains binding-local constraints"
+   (test-case "checked-program v4 retains binding-local constraints"
      (define json
        (parse+checked-json
         (string-append
@@ -348,7 +380,7 @@
          "    (for [(item Int positive?) [local]] item)))\n")
         ".bclj"
         "checked-binding-constraints.bclj"))
-     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (check-equal? (hash-ref json 'schemaVersion) 4)
      (define predicate (find-named-form json "defn" "positive?"))
      (check-equal?
       (hash-ref (car (hash-ref predicate 'params)) 'constraint)
@@ -421,7 +453,7 @@
       (hash-ref (car (hash-ref for-node 'clauses))
                 'constraintSynchronous)))
 
-   (test-case "checked-program v3 publishes the record validator for with"
+   (test-case "checked-program v4 publishes the record validator for with"
      (define json
        (parse+checked-json
         (string-append
@@ -446,7 +478,7 @@
      (check-equal? (hash-ref json 'projectionSha256)
                    (projection-sha256 json)))
 
-   (test-case "checked-program v3 always emits null validator for dynamic with"
+   (test-case "checked-program v4 always emits null validator for dynamic with"
      (define json
        (parse+checked-json
         (string-append
@@ -459,7 +491,7 @@
      (check-equal? (hash-ref update 'recordUpdate) 'null)
      (check-false (hash-has-key? update 'validator)))
 
-   (test-case "checked-program v3 publishes exact record field access identity"
+   (test-case "checked-program v4 publishes exact record field access identity"
      (define json
        (parse+checked-json
         (string-append
@@ -477,7 +509,7 @@
                    "Score")
      (check-equal? (hash-ref dynamic 'recordFieldAccess) 'null))
 
-   (test-case "checked-program v3 keeps one aggregate parameter with a structural name"
+   (test-case "checked-program v4 keeps one aggregate parameter with a structural name"
      (define json
        (parse+checked-json
         (string-append
@@ -488,12 +520,12 @@
      (define parameter
        (car (hash-ref (car (hash-ref json 'forms)) 'params)))
      (define binding (hash-ref parameter 'name))
-     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (check-equal? (hash-ref json 'schemaVersion) 4)
      (check-equal? (hash-ref binding 'type) "seq-destructure")
      (check-equal? (hash-ref binding 'names) '("x" "y"))
      (check-equal? (hash-ref (hash-ref parameter 'ann) 'name) "HVec"))
 
-   (test-case "checked-program v3 publishes inference separately from authored annotations"
+   (test-case "checked-program v4 publishes inference separately from authored annotations"
      (define json
        (parse+checked-json
         (string-append
@@ -504,7 +536,7 @@
      (define definition (car (hash-ref json 'forms)))
      (define parameter (car (hash-ref definition 'params)))
      (define effective (hash-ref definition 'effectiveType))
-     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (check-equal? (hash-ref json 'schemaVersion) 4)
      (check-equal? (hash-ref parameter 'ann) 'null)
      (check-equal? (hash-ref effective 'kind) "fn")
      (check-equal?
@@ -512,7 +544,7 @@
       "Int")
      (check-equal? (hash-ref (hash-ref effective 'ret) 'name) "Int"))
 
-   (test-case "checked-program v3 publishes one finalized multi-arity signature"
+   (test-case "checked-program v4 publishes one finalized multi-arity signature"
      (define json
        (parse+checked-json
         (string-append
@@ -525,7 +557,7 @@
      (check-equal? (hash-ref effective 'kind) "poly")
      (check-equal? (hash-ref (hash-ref effective 'body) 'kind) "union"))
 
-   (test-case "checked-program v3 preserves JVM imports as semantic metadata"
+   (test-case "checked-program v4 preserves JVM imports as semantic metadata"
      (define json
        (parse+checked-json
         (string-append
@@ -534,7 +566,7 @@
          "(def value Int 1)\n")
         ".bclj"
         "checked-imports.bclj"))
-     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (check-equal? (hash-ref json 'schemaVersion) 4)
      (check-equal? (hash-ref json 'imports)
                    '("java.nio.charset.StandardCharsets" "java.util.zip.CRC32")))
 
@@ -667,7 +699,106 @@
      (check-not-false (find-form-node json "defprotocol"))
      (check-not-false (find-form-node json "extend-type")))
 
-   (test-case "checked-program v3 retains constrained protocol rest bindings"
+   (test-case "AST JSON preserves static JavaScript selector wire shapes"
+     (define json (parse+check-json/js receiver-first-js-source))
+     (define object (wire-ref "object"))
+     (define field (wire-selector "field"))
+     (check-equal?
+      (definition-value json "static-get")
+      (hasheq 'node "js-get" 'receiver object 'key field))
+     (check-equal?
+      (definition-value json "static-call")
+      (hasheq 'node "js-call"
+              'receiver object
+              'key (wire-selector "method")
+              'args (list (wire-number 1) (wire-number 2))))
+     (check-equal?
+      (definition-value json "static-set")
+      (hasheq 'node "js-set"
+              'receiver object
+              'key field
+              'value (wire-number 3)))
+     (check-equal?
+      (definition-value json "constructed")
+      (hasheq 'node "js-new"
+              'callee (wire-ref "Constructor")
+              'args (list (wire-number 1) (wire-number 2))))
+     (check-equal?
+      (definition-value json "static-delete")
+      (hasheq 'node "js-delete" 'receiver object 'key field))
+     (check-equal?
+      (definition-value json "static-in")
+      (hasheq 'node "js-in" 'receiver object 'key field))
+     (check-equal?
+      (definition-value json "object-type")
+      (hasheq 'node "js-typeof" 'expr object)))
+
+   (test-case "AST JSON preserves dynamic JavaScript key wire shapes"
+     (define json (parse+check-json/js receiver-first-js-source))
+     (define object (wire-ref "object"))
+     (define key (wire-ref "key"))
+     (check-equal?
+      (definition-value json "dynamic-get")
+      (hasheq 'node "js-get" 'receiver object 'key key))
+     (check-equal?
+      (definition-value json "dynamic-call")
+      (hasheq 'node "js-call"
+              'receiver object
+              'key key
+              'args (list (wire-number 1) (wire-number 2))))
+     (check-equal?
+      (definition-value json "dynamic-set")
+      (hasheq 'node "js-set"
+              'receiver object
+              'key key
+              'value (wire-number 3)))
+     (check-equal?
+      (definition-value json "dynamic-delete")
+      (hasheq 'node "js-delete" 'receiver object 'key key))
+     (check-equal?
+      (definition-value json "dynamic-in")
+      (hasheq 'node "js-in" 'receiver object 'key key)))
+
+   (test-case "checked-program v4 preserves receiver-first JavaScript nodes"
+     (define json
+       (parse+checked-json receiver-first-js-source
+                           ".bjs"
+                           "checked-js-members.bjs"))
+     (check-equal? (hash-ref json 'schemaVersion) 4)
+     (check-equal?
+      (for/list ([name (in-list '("static-get"
+                                  "dynamic-get"
+                                  "static-call"
+                                  "dynamic-call"
+                                  "static-set"
+                                  "dynamic-set"
+                                  "constructed"
+                                  "static-delete"
+                                  "dynamic-delete"
+                                  "static-in"
+                                  "dynamic-in"
+                                  "object-type"))])
+        (hash-ref (definition-value json name) 'node))
+      '("js-get"
+        "js-get"
+        "js-call"
+        "js-call"
+        "js-set"
+        "js-set"
+        "js-new"
+        "js-delete"
+        "js-delete"
+        "js-in"
+        "js-in"
+        "js-typeof"))
+     (check-equal?
+      (hash-ref (hash-ref (definition-value json "static-get") 'key) 'node)
+      "js-selector")
+     (check-equal?
+      (hash-ref (hash-ref (definition-value json "dynamic-get") 'key) 'node)
+      "ref"))
+
+   (test-case "checked-program v4 retains constrained protocol rest bindings"
      (define json
        (parse+checked-json
         (string-append

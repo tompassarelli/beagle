@@ -5,7 +5,7 @@
 ;; A qualified name used as a VALUE, not called — read and written through a
 ;; property access.
 (js/export
-  (defn peek-it [] Any (.-value p/cell)))
+  (defn peek-it [] Any (js/get p/cell .value)))
 
 (js/export
-  (defn poke-it [(v Any)] Nil (do (set! (.-value p/cell) v) nil)))
+  (defn poke-it [(v Any)] Nil (do (js/set! p/cell .value v) nil)))

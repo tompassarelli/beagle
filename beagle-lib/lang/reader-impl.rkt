@@ -26,11 +26,8 @@
          [else (loop (cons next (cons #\\ acc)))])]
       [else (loop (cons c acc))])))
 
-;; Heredoc reader (`#<<TAG`) removed per audit row 5. Raw strings (`#r#"..."#`)
-;; were also removed there ("never used in any user-facing corpus") but are
-;; RESTORED below: Wake's Beagle/JS code generator uses them for substantial
-;; emitted JavaScript, and the only alternative on the js target is
-;; escaped-string churn. Rust-style:
+;; Rust-style raw strings support generated JavaScript without escaped-string
+;; churn:
 ;; opener `#r` + N `#` + `"`, closer `"` + N `#`, body verbatim.
 (define (read-raw-string port hashes)
   (define tail (make-string hashes #\#))
@@ -487,21 +484,19 @@
      (read-char port)
      (if src (datum->syntax #f next (vector src line col pos 2)) next)]))
 
-;; `.` bare-dot reader (Clojure interop special-form head). Racket's default
-;; reader reserves a lone `.` as the improper-list (dotted-pair) separator and
-;; errors on `(. Target member)` with "read: illegal use of `.`" (EXP-025 G9,
-;; malli's java.time interop: `(. LocalTime -MIN)`, `(. obj method arg)`). In
-;; Clojure `.` is an ordinary symbol — the interop special form's head — and
-;; beagle is Clojure, so there are no dotted pairs to protect: `.` reads as the
-;; symbol `.`.
+;; Dot-prefixed token reader. Racket reserves a lone `.` for dotted pairs, but
+;; Beagle targets need the token itself: hosted Clojure uses it for JVM interop,
+;; while JavaScript accepts `.member` only as a selector operand to a `js/*`
+;; member operator. The reader assigns no access semantics; each target parser
+;; owns the symbols it accepts.
 ;;
 ;; Registered NON-terminating (like `#` and `'`), so it fires ONLY at token
 ;; start — mid-token dots (`foo.bar`, `1.5`) stay untouched constituents. At
 ;; token start we accumulate the whole token against beagle's delimiter set,
 ;; matching the self-hosted reader's read-symbol-text (structural parity):
-;;   `.`        (followed by delimiter/EOF) → symbol `.`      (the bare special form)
-;;   `.method`                              → symbol `.method` (unchanged; method-call sugar)
-;;   `.-field`                              → symbol `.-field` (unchanged; field-access sugar)
+;;   `.`        (followed by delimiter/EOF) → symbol `.`
+;;   `.member`                              → symbol `.member`
+;;   `.-field`                              → symbol `.-field`
 ;; Delimiters mirror the readtable's terminating chars + whitespace; `'` and `#`
 ;; are NON-terminating constituents (so a primed/`#`-bearing tail stays one
 ;; symbol, per the G6 primed-symbol rule) and are therefore NOT delimiters.
@@ -556,11 +551,9 @@
     ;; so `\tab` → symbol `tab`). Registering as terminating-macro intercepts it
     ;; before any identifier-reading starts.
     #\\ 'terminating-macro char-lit-reader
-    ;; `.` is NON-terminating (like `#`): fires only when it STARTS a token
-    ;; (`(. Target member)` → symbol `.`), and is an ordinary constituent
-    ;; mid-token (`foo.bar`, `1.5`). Overrides Racket's default dotted-pair
-    ;; reading of a lone `.` (EXP-025 G9). Self-hosted reader already agrees
-    ;; (reader.bclj's `delimiter?` excludes `.`, so it reads `.` as a symbol).
+    ;; `.` is NON-terminating (like `#`): it reads a complete dot-prefixed
+    ;; symbol at token start and remains an ordinary constituent mid-token
+    ;; (`foo.bar`, `1.5`). Target parsers decide whether that symbol is valid.
     #\. 'non-terminating-macro dot-reader
     #\# 'non-terminating-macro hash-dispatch))
 

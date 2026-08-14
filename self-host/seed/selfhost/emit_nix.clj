@@ -1046,7 +1046,7 @@
 (defn ^String emit-program! [prog]
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
-  (reset! nix-checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 3) (= (get prog "phase") "checked")))
+  (reset! nix-checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
   (reset! nix-record-types-ref (program-record-types prog))
   (reset! nix-constrained-record-types-ref (program-constrained-record-types prog))
   (let [forms (vec (get prog "forms"))

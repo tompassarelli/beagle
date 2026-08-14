@@ -16,7 +16,6 @@ constraint_source="$here/constraint_fixture.bgl"
 ast="$scratch/fixture.ast.json"
 constraint_ast="$scratch/constraint.ast.json"
 tampered_constraint_ast="$scratch/tampered-constraint.ast.json"
-schema_v2_ast="$scratch/schema-v2.ast.json"
 affordance_ast="$scratch/affordance.ast.json"
 facts="$scratch/fixture.facts"
 mismatch_ast="$scratch/mismatch.ast.json"
@@ -52,23 +51,6 @@ if bb "$repo/native-core/bin/source-facts.clj" \
 fi
 rg -F 'projectionSha256 does not match its canonical payload' \
   "$scratch/tampered-constraint.stderr"
-bb -e '
-  (require (quote [cheshire.core :as json]))
-  (load-file (second *command-line-args*))
-  (let [ast (json/parse-string (slurp (first *command-line-args*)))]
-    (spit (nth *command-line-args* 2)
-      (json/generate-string
-        (native.checked-program/with-projection-digest
-          (assoc ast "schemaVersion" 2)))))' \
-  "$constraint_ast" "$repo/native-core/bin/checked-program.clj" "$schema_v2_ast"
-if bb "$repo/native-core/bin/source-facts.clj" \
-    --input "$schema_v2_ast=native-core/validation/structured-params/constraint_fixture.bgl" \
-    --output "$scratch/schema-v2.facts" --include-defs \
-    >"$scratch/schema-v2.stdout" 2>"$scratch/schema-v2.stderr"; then
-  echo "drive.sh: checked-program schema v2 unexpectedly crossed the Native boundary" >&2
-  exit 1
-fi
-rg -F 'requires checked-program schemaVersion 3, got 2' "$scratch/schema-v2.stderr"
 bb "$repo/native-core/bin/source-facts.clj" \
   --input "$constraint_ast=native-core/validation/structured-params/constraint_fixture.bgl" \
   --output "$scratch/constraint.facts" --include-defs

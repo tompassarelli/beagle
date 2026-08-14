@@ -38,7 +38,7 @@ beagle ast FILE             # canonical, versioned checked-program JSON;
                             #  parses + strict-checks without execution;
                             #  sourceId is repo-relative; sourceSha256 binds
                             #  source bytes and projectionSha256 binds the AST;
-                            #  schema v3 retains structural namespace imports
+                            #  schema v4 retains structural namespace imports
 beagle explain CODE         # diagnostic explanation (E001, …)
 beagle explain-type FILE    # inferred types as a view
 beagle facts-roundtrip MODE FILE   # program-lossless source↔fact projection

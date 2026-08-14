@@ -18,6 +18,15 @@
     [(exact-integer? e) (number->string e)]
     [(real? e) (number->string e)]
     [(jst-dot? e) (emit-jst-dot e)]
+    [(jst-selector? e)
+     (error 'beagle-js "a selector literal is valid only as a js/ member key")]
+    [(jst-get? e) (emit-jst-get e)]
+    [(jst-call? e) (emit-jst-call e)]
+    [(jst-set? e) (emit-jst-set e)]
+    [(jst-new? e) (emit-jst-new e)]
+    [(jst-delete? e) (emit-jst-delete e)]
+    [(jst-in? e) (emit-jst-in e)]
+    [(jst-typeof? e) (emit-jst-typeof e)]
     [else ((current-emit-expr) e)]))
 
 (define (emit-jst-binding-label target)
@@ -90,12 +99,18 @@
                         (param-name binding))))))]))
 
 (define current-jst-rename-env (make-parameter (hash)))
+(define current-jst-resolve-name
+  (make-parameter mangle-name))
 (define current-jst-with-binding-env
   (make-parameter (lambda (_names _rename-env thunk) (thunk))))
 
 (define (jst-resolved-name name)
-  (hash-ref (current-jst-rename-env) name
-            (lambda () (mangle-name name))))
+  (define resolved
+    (hash-ref (current-jst-rename-env) name
+              (lambda () ((current-jst-resolve-name) name))))
+  (if (string-contains? resolved "/")
+      (string-replace resolved "/" ".")
+      resolved))
 
 (define (jst-binding-names binding)
   (binding-target-bound-names (param-binding-target binding)))
@@ -261,6 +276,86 @@
           (emit-jst-expr (jst-dot-object e))
           (mangle-name (jst-dot-property e))))
 
+(define (jst-postfix-base? e)
+  (or (symbol? e)
+      (string? e)
+      (boolean? e)
+      (char? e)
+      (regex-lit? e)
+      (vec-form? e)
+      (set-form? e)
+      (call-form? e)
+      (static-call? e)
+      (kw-access? e)
+      (dynamic-var? e)
+      (jst-dot? e)
+      (jst-get? e)
+      (jst-call? e)
+      (jst-new? e)
+      (jst-template? e)
+      (jst-import-meta? e)
+      (and (with-meta? e)
+           (jst-postfix-base? (with-meta-expr e)))
+      (and (threading-marker? e)
+           (jst-postfix-base? (threading-marker-desugared e)))))
+
+(define (emit-jst-postfix-base e)
+  (define rendered (emit-jst-expr e))
+  (if (jst-postfix-base? e)
+      rendered
+      (format "(~a)" rendered)))
+
+(define (emit-jst-member receiver key)
+  (define receiver-str (emit-jst-postfix-base receiver))
+  (if (jst-selector? key)
+      (string-append receiver-str
+                     (js-selector-suffix (jst-selector-name key)))
+      (format "~a[~a]" receiver-str (emit-jst-expr key))))
+
+(define (emit-jst-get e)
+  (emit-jst-member (jst-get-receiver e) (jst-get-key e)))
+
+(define (emit-jst-call e)
+  (format "~a(~a)"
+          (emit-jst-member (jst-call-receiver e) (jst-call-key e))
+          (string-join (map emit-jst-expr (jst-call-args e)) ", ")))
+
+(define (emit-jst-set e)
+  (format "(~a = ~a)"
+          (emit-jst-member (jst-set-receiver e) (jst-set-key e))
+          (emit-jst-expr (jst-set-value e))))
+
+(define (jst-constructor-reference? e)
+  (or (symbol? e) (jst-dot? e) (jst-get? e)))
+
+(define (emit-jst-new e)
+  (define callee (jst-new-callee e))
+  (define rendered (emit-jst-expr callee))
+  (format "new ~a(~a)"
+          (if (jst-constructor-reference? callee)
+              rendered
+              (format "(~a)" rendered))
+          (string-join (map emit-jst-expr (jst-new-args e)) ", ")))
+
+(define (emit-jst-delete e)
+  (format "delete ~a"
+          (emit-jst-member (jst-delete-receiver e)
+                           (jst-delete-key e))))
+
+(define (emit-jst-in e)
+  (define receiver (jst-in-receiver e))
+  (define key (jst-in-key e))
+  (if (jst-selector? key)
+      (format "(~a in ~a)"
+              (js-string-lit (jst-selector-name key))
+              (emit-jst-postfix-base receiver))
+      (format
+       (string-append
+        "(($beagle$jst$receiver, $beagle$jst$key) => "
+        "($beagle$jst$key in $beagle$jst$receiver))(~a, ~a)")
+       (emit-jst-expr receiver)
+       (emit-jst-expr key))))
+
 (define (emit-jst-template e)
   (define parts-str
     (for/list ([p (in-list (jst-template-parts e))])
@@ -278,11 +373,24 @@
           op-str
           (emit-jst-expr (jst-binary-right e))))
 
+(define (emit-jst-unary-operand e)
+  (define rendered (emit-jst-expr e))
+  (if (or (fn-form? e)
+          (await-form? e)
+          (jst-spread? e))
+      (format "(~a)" rendered)
+      rendered))
+
+(define (emit-jst-typeof e)
+  (format "typeof ~a"
+          (emit-jst-unary-operand (jst-typeof-expr e))))
+
 (define (emit-jst-unary e)
   (define op-str (symbol->string (jst-unary-op e)))
+  (define operand (emit-jst-unary-operand (jst-unary-expr e)))
   (case (jst-unary-op e)
-    [(! - +) (format "~a~a" op-str (emit-jst-expr (jst-unary-expr e)))]
-    [else (format "~a ~a" op-str (emit-jst-expr (jst-unary-expr e)))]))
+    [(! - +) (format "~a~a" op-str operand)]
+    [else (format "~a ~a" op-str operand)]))
 
 (define (emit-jst-class e)
   (define prefix (if (jst-class-export? e) "export " ""))
@@ -339,7 +447,10 @@
 (provide
  emit-jst-expr
  emit-jst-return emit-jst-dot
- emit-jst-template emit-jst-binary emit-jst-unary
+ emit-jst-get emit-jst-call emit-jst-set emit-jst-new
+ emit-jst-delete emit-jst-in
+ emit-jst-template emit-jst-binary emit-jst-typeof emit-jst-unary
  emit-jst-class emit-jst-method
  emit-jst-stmt emit-jst-params emit-jst-body
- current-jst-with-binding-env current-jst-semantic-contracts)
+ current-jst-resolve-name current-jst-with-binding-env
+ current-jst-semantic-contracts)

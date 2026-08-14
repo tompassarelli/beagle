@@ -465,6 +465,27 @@
        (for ([e (in-list (jst-method-body m))])
          (check-shadow e method-scope ctx)))]
     [(jst-dot obj _) (check-shadow obj scope ctx)]
+    [(jst-selector _) (void)]
+    [(jst-get receiver key)
+     (check-shadow receiver scope ctx)
+     (check-shadow key scope ctx)]
+    [(jst-call receiver key args)
+     (check-shadow receiver scope ctx)
+     (check-shadow key scope ctx)
+     (for ([arg (in-list args)]) (check-shadow arg scope ctx))]
+    [(jst-set receiver key value)
+     (check-shadow receiver scope ctx)
+     (check-shadow key scope ctx)
+     (check-shadow value scope ctx)]
+    [(jst-new callee args)
+     (check-shadow callee scope ctx)
+     (for ([arg (in-list args)]) (check-shadow arg scope ctx))]
+    [(jst-delete receiver key)
+     (check-shadow receiver scope ctx)
+     (check-shadow key scope ctx)]
+    [(jst-in receiver key)
+     (check-shadow receiver scope ctx)
+     (check-shadow key scope ctx)]
     [(jst-spread expr) (check-shadow expr scope ctx)]
     [(jst-typeof expr) (check-shadow expr scope ctx)]
     [(jst-template parts) (for ([p (in-list parts)]) (unless (string? p) (check-shadow p scope ctx)))]
@@ -759,6 +780,27 @@
          (collect-symbols (param-constraint (jst-method-rest-param m)) used))
        (for ([e (in-list (jst-method-body m))]) (collect-symbols e used)))]
     [(jst-dot obj _) (collect-symbols obj used)]
+    [(jst-selector _) (void)]
+    [(jst-get receiver key)
+     (collect-symbols receiver used)
+     (collect-symbols key used)]
+    [(jst-call receiver key args)
+     (collect-symbols receiver used)
+     (collect-symbols key used)
+     (for ([arg (in-list args)]) (collect-symbols arg used))]
+    [(jst-set receiver key value)
+     (collect-symbols receiver used)
+     (collect-symbols key used)
+     (collect-symbols value used)]
+    [(jst-new callee args)
+     (collect-symbols callee used)
+     (for ([arg (in-list args)]) (collect-symbols arg used))]
+    [(jst-delete receiver key)
+     (collect-symbols receiver used)
+     (collect-symbols key used)]
+    [(jst-in receiver key)
+     (collect-symbols receiver used)
+     (collect-symbols key used)]
     [(jst-spread expr) (collect-symbols expr used)]
     [(jst-typeof expr) (collect-symbols expr used)]
     [(jst-template parts) (for ([p (in-list parts)]) (unless (string? p) (collect-symbols p used)))]

@@ -34,8 +34,8 @@ statement position (value unused). Two concrete consequences:
    lowers to `xs.forEach(…)`, a statement) spliced into a ternary arm emits invalid
    JS:
    ```clojure
-   (cond (node? v) (.push out v)
-         (array? v) (doseq [e v] (.push out e))   ; -> ... ? v.forEach(...); : null
+   (cond (node? v) (js/call out .push v)
+         (array? v) (doseq [e v] (js/call out .push e)) ; -> ... ? v.forEach(...); : null
          :else nil)
    ```
    emits `... ? v.forEach((e) => {…}); : null` — **`Unexpected :`**. (Cost a real
@@ -73,11 +73,11 @@ unaffected.
 
 ---
 
-## 3. Closed stdlib namespaces — `Math/roundmin` emits `Math.roundmin(…)` with only a NOTE
+## 3. Closed extern surfaces — an unknown selector emits with only a NOTE
 
-**Surfaced by:** an externs sweep converting `(.round Math x)` → `(Math/round x)`;
-a typo `(Math/round min)` → `(Math/roundmin)` compiled to `Math.roundmin(min)` (a
-runtime crash) with only a levenshtein NOTE — caught by byte-diff, NOT by `check`.
+**Surfaced by:** an externs sweep where a typo in
+`(js/call Math .roundmin min)` compiled to `Math.roundmin(min)` (a runtime
+crash) with only a Levenshtein NOTE — caught by byte-diff, not by `check`.
 
 **Why it's a NOTE (deliberate):** `check.rkt` documents that the typed catalog is
 *deliberately partial*, so a missing member "can't be an error" (it might be a real
@@ -85,11 +85,10 @@ member just not yet typed).
 
 **Proposal (design, not a bug-fix):** allow marking a stdlib namespace as **closed**
 (complete surface) — `Math`, `JSON`, `Number` have fixed, fully-enumerable member
-sets. For a closed namespace, an unknown `NS/member` becomes an ERROR (catches the
-`Math/roundmin` class at check time). Bonus: the same closed-world mechanism applied
-to user `(declare-extern [Obj/member] …)` is the **enabling precondition for typed
-Firefox-API seams** — today an undeclared `(gBrowser/bogusMethod x)` emits freely
-(see #5), which is exactly why typed seams can't enforce.
+sets. For a closed extern surface, an unknown selector becomes an ERROR and
+catches the `.roundmin` class at check time. The same mechanism applied to a
+user-declared host object is the enabling precondition for typed Firefox-API
+seams: today `(js/call gBrowser .bogusMethod x)` emits freely (see #7).
 
 **Status:** FILED — needs a closed-namespace marker; design call.
 
@@ -128,72 +127,63 @@ current file's own `declare-extern`s. (Benign — verbose-profile only — but w
 
 ---
 
-## 6. `Obj/member` in value position doesn't translate `/`→`.`
+## 6. Member values use `js/get`
 
 **Surfaced by:** probing whether Firefox host-global properties could be typed.
 
-**The issue:** call position translates (`(gBrowser/addTab x)` → `gBrowser.addTab(x)`),
-but **value position emits the slash literally** — invalid JS, silently:
+Property reads are receiver-first and explicit. A static selector names the
+foreign member without becoming a value on its own:
 ```clojure
-(declare-extern [gBrowser/selectedTab] Any)
-(def t gBrowser/selectedTab)   ; -> const t = gBrowser/selectedTab;   (division — broken)
+(declare-extern gBrowser Any)
+(def t Any (js/get gBrowser .selectedTab))
 ```
-**Status:** FILED — value-position `Obj/member` should translate `/`→`.` or error.
+Dynamic member names use the same operator with an expression key.
 
 ---
 
-## 7. `Obj/method` externs are not closed-world
+## 7. Declared host objects are not closed-world
 
-**Surfaced by:** evaluating whether typed `Obj/method` externs could enforce the
+**Surfaced by:** evaluating whether typed member declarations could enforce the
 Firefox-API seam surface (gjoa task #73).
 
-**The issue:** an undeclared `(gBrowser/bogusMethod x)` emits `gBrowser.bogusMethod(x)`
-freely, no error — even when no `(declare-extern [gBrowser/bogusMethod] …)` exists.
-So declaring the surface gains no enforcement (a typo / a removed upstream method is
-not caught). This is why typed Firefox seams were rejected as "documentation churn,
-no teeth." Same root as #3 (closing the world on `Obj/member`).
+**The issue:** `(js/call gBrowser .bogusMethod x)` emits
+`gBrowser.bogusMethod(x)` freely when `gBrowser` has the open `Any` boundary.
+The selector makes the member identity explicit, but it does not claim that the
+host object's member set is complete. Same root as #3.
 **Status:** FILED — couples with #3.
 
 ---
 
-## 8. `aset` is array-only (no object string-key form)  · minor
+## 8. Dynamic object access uses the member operators
 
-**Surfaced by:** building an id→records index in the projector.
+`aset` remains an array operation. JavaScript object members use the same
+receiver-first operators for static selectors and dynamic key expressions:
 
-**The issue:** `(aset obj "key" v)` → `beagle: call to aset: arg 2 expected Int, got
-String`. There's no clean form to set a dynamic string key on a JS object;
-workaround was a JS `Map` (`.set`/`.get`). An `aset`/`oset` accepting string keys
-for objects would help.
-**Status:** FILED — minor ergonomics.
+```clojure
+(js/set! obj .knownMember value)
+(js/set! obj key value)
+(js/get obj key)
+```
+
+Dynamic keys emit bracket access. This keeps array indexing and foreign object
+membership as separate operations.
 
 ---
 
-## 9. Keyword map-key with `_` emits a doubled underscore; property read does not — write/read disagree
+## 9. Selectors preserve foreign member identity
 
-**Surfaced by:** a JSON-backed ledger storing `{:emit_sha256 h ...}` and reading it
-back with `(.-emit_sha256 entry)` — every read returned `undefined`, so the round
-trip silently never matched.
+Selectors are not Beagle bindings and never pass through binding-name mangling.
+An authored `_` therefore remains `_`, and a map key/property read round-trip
+uses one spelling:
 
-**The issue:** a keyword map-literal key containing `_` is lowered with the `_`
-**doubled**, but the matching property access keeps it **single** — so the key the
-object is written under is not the key it's read from:
 ```clojure
-(let [m {:a_b 1}]    ; ->  const m = {a__b: 1};
-  (.-a_b m))         ; ->  return m.a_b;   →  undefined (a__b ≠ a_b)
+(let [m {:emit_sha256 "abc"}]
+  (js/get m .emit_sha256))
 ```
-The two sides apply different kebab/underscore normalization to the same name.
-This is a silent correctness bug — `check` passes, emit looks plausible, and the
-mismatch only shows at runtime. Workaround was camelCase keys (`:emitSha`), which
-round-trip identically on both sides.
 
-**Fix direction:** make the map-literal-key lowering and the `.-prop` lowering
-share one name-normalization function so a given source name maps to exactly one JS
-identifier regardless of position. (Either both preserve `_`, or both collapse it —
-but they must agree.)
-
-**Status:** FILED — silent correctness bug, not one-line (the fix is unifying the
-two name-normalization paths, which warrants a deliberate change + round-trip
-regression test).
+Static selectors emit dot access when their exact bytes form a legal JavaScript
+member identifier and escaped bracket access otherwise. Dynamic expressions
+always emit bracket access.
 
 ---
 
@@ -230,12 +220,15 @@ name-resolving bundler; one shared normalization fixes it.
 ## 11. Inline arrow fn with a map-literal body emits a JS block, not an object return  · FIXED (#8)
 
 **Surfaced by:** building the gjoa about:sovereignty manifest generator — an inline
-`(fn [g] {map})` passed to `.map` produced JS that wouldn't parse.
+`(fn [g] {map})` passed to an array's `map` method produced JS that wouldn't
+parse.
 
 **The issue:** an inline anonymous fn whose body is a single map literal lowered to
 an arrow with a BLOCK body:
 ```clojure
-(.map xs (fn [(g Any)] Any {:pref (.-name g) :what (.-vector g)}))
+(js/call xs .map
+  (fn [(g Any)] Any
+    {:pref (js/get g .name) :what (js/get g .vector)}))
 ;; emitted:  xs.map((g) => {pref: g.name, what: g.vector})   ← {…} is a JS block
 ;;           -> SyntaxError: "Expected ; but found :"
 ;; correct:  xs.map((g) => ({pref: g.name, what: g.vector}))  ← ({…}) returns the object

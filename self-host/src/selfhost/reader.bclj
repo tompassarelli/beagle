@@ -6,8 +6,7 @@
 ;; datums that parse-program (selfhost.parse) consumes. Replaces Racket's
 ;; readtable-based reader (beagle-lib/lang/reader-impl.rkt).
 ;;
-;; Ported from ~/code/beagle/.worktrees/driftlab/self-host/reader.bjs (.bjs
-;; target). Today-surface upgrades over the PoC: \uXXXX string escapes,
+;; Supports \uXXXX string escapes,
 ;; float-by-text classification incl. exponents, and regex literals that
 ;; preserve backslash escapes (the .bjs mangled them through decode-escape).
 ;;
@@ -625,6 +624,8 @@
   (expect! "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))
   (expect! "minus as symbol" (= (rd1 "(- 5 3)") ["-" 5 3]))
   (expect! "dot method symbol" (= (rd1 ".charAt") ".charAt"))
+  (expect! "static JavaScript selector remains a dot-prefixed token"
+    (= (rd1 "(js/get obj .raw_name)") ["js/get" "obj" ".raw_name"]))
   (expect! "dynamic var" (= (rd1 "*state*") "*state*"))
   (expect! "constructor symbol" (= (rd1 "Point.") "Point."))
   (expect! "empty list" (= (rd1 "()") []))

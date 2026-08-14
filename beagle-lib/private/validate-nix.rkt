@@ -529,6 +529,27 @@
             (params-scope (letfn-fn-params f) (letfn-fn-rest-param f))))
          (for-each (lambda (b) (walk b fn-scope)) (letfn-fn-body f)))
        (for-each (lambda (b) (walk b group-scope)) (letfn-form-body e))]
+      [(jst-selector? e) (void)]
+      [(jst-get? e)
+       (walk (jst-get-receiver e) scope)
+       (walk (jst-get-key e) scope)]
+      [(jst-call? e)
+       (walk (jst-call-receiver e) scope)
+       (walk (jst-call-key e) scope)
+       (for-each (lambda (arg) (walk arg scope)) (jst-call-args e))]
+      [(jst-set? e)
+       (walk (jst-set-receiver e) scope)
+       (walk (jst-set-key e) scope)
+       (walk (jst-set-value e) scope)]
+      [(jst-new? e)
+       (walk (jst-new-callee e) scope)
+       (for-each (lambda (arg) (walk arg scope)) (jst-new-args e))]
+      [(jst-delete? e)
+       (walk (jst-delete-receiver e) scope)
+       (walk (jst-delete-key e) scope)]
+      [(jst-in? e)
+       (walk (jst-in-receiver e) scope)
+       (walk (jst-in-key e) scope)]
       [(jst-class? e)
        (when (jst-class-extends e) (walk (jst-class-extends e) scope))
        (for ([method (in-list (jst-class-methods e))])

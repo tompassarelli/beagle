@@ -4,8 +4,7 @@
 
 (define-mode strict)
 
-;; Self-hosted parser for beagle — port of driftlab self-host/parse.bjs,
-;; upgraded to today's surface (beagle-lib/private/parse.rkt).
+;; Self-hosted parser for beagle, matching beagle-lib/private/parse.rkt.
 ;; Input: vector of top-level datums (selfhost.reader encoding).
 ;; Output: program AST matching beagle-lib/private/ast-json.rkt exactly.
 ;;
@@ -204,6 +203,11 @@
 
 (defn dot-method-sym? [(sym String)] Bool
   (and (> (count sym) 1) (= (char-at sym 0) ".")))
+
+(defn parse-js-member-key [(datum Any)] Any
+  (if (and (string? datum) (dot-method-sym? datum))
+    {"node" "js-selector" "name" (subs datum 1)}
+    (parse-expr* datum)))
 
 (defn static-method-sym? [(sym String)] Bool
   (let [slash-pos (str-index-of sym "/")]
@@ -555,6 +559,27 @@
 
 (defn make-static-call [(class-method String) (args Any)] Any
   {"node" "static-call" "name" class-method "args" args})
+
+(defn make-js-get [(receiver Any) (key Any)] Any
+  {"node" "js-get" "receiver" receiver "key" key})
+
+(defn make-js-call [(receiver Any) (key Any) (args Any)] Any
+  {"node" "js-call" "receiver" receiver "key" key "args" args})
+
+(defn make-js-set [(receiver Any) (key Any) (value Any)] Any
+  {"node" "js-set" "receiver" receiver "key" key "value" value})
+
+(defn make-js-new [(callee Any) (args Any)] Any
+  {"node" "js-new" "callee" callee "args" args})
+
+(defn make-js-delete [(receiver Any) (key Any)] Any
+  {"node" "js-delete" "receiver" receiver "key" key})
+
+(defn make-js-in [(receiver Any) (key Any)] Any
+  {"node" "js-in" "receiver" receiver "key" key})
+
+(defn make-js-typeof [(expr Any)] Any
+  {"node" "js-typeof" "expr" expr})
 
 ;; threading-marker (ast.rkt): kind + parsed surface args (clj surface
 ;; reconstruction) + parsed desugared form (what check walks).
@@ -1508,6 +1533,26 @@
       (conj step val))
     [step val]))
 
+;; Receiver-first JS operators are incomplete while they occupy a thread-step
+;; slot: expansion supplies the receiver before the real operator parser runs.
+;; Preserve the marker's non-authoritative surface copy as a generic call so it
+;; cannot reject the temporary arity. The expanded form remains authoritative.
+(defn receiver-first-js-thread-head? [(head Any)] Bool
+  (and (string? head)
+    (or (= head "js/get")
+      (= head "js/call")
+      (= head "js/set!")
+      (= head "js/delete!")
+      (= head "js/in?"))))
+
+(defn parse-thread-surface-expr [(form Any)] Any
+  (if (and (vector? form)
+        (> (count form) 0)
+        (receiver-first-js-thread-head? (nth form 0)))
+    (make-call (make-ref (nth form 0))
+      (mapv parse-expr* (subvec form 1)))
+    (parse-expr* form)))
+
 (defn expand-thread-first [(init Any) (steps Any)] Any
   (reduce (fn [(acc Any) (step Any)] Any (thread-step-insert acc step "first"))
     init
@@ -2429,6 +2474,46 @@
       (err! "(fmt ...) is not supported — use str / format")
       (= head "js/quote")
       {"node" "js-quote" "body" (pj-body! rest-items)}
+      (and (= head "js/typeof") (= (count rest-items) 1))
+      (make-js-typeof (parse-expr* (nth rest-items 0)))
+      (= head "js/get")
+      (if (= (count rest-items) 2)
+        (make-js-get
+          (parse-expr* (nth rest-items 0))
+          (parse-js-member-key (nth rest-items 1)))
+        (err! "js/get expects exactly a receiver and member key"))
+      (= head "js/call")
+      (if (>= (count rest-items) 2)
+        (make-js-call
+          (parse-expr* (nth rest-items 0))
+          (parse-js-member-key (nth rest-items 1))
+          (mapv parse-expr* (subvec rest-items 2)))
+        (err! "js/call expects a receiver, member key, and optional arguments"))
+      (= head "js/set!")
+      (if (= (count rest-items) 3)
+        (make-js-set
+          (parse-expr* (nth rest-items 0))
+          (parse-js-member-key (nth rest-items 1))
+          (parse-expr* (nth rest-items 2)))
+        (err! "js/set! expects exactly a receiver, member key, and value"))
+      (= head "js/new")
+      (if (>= (count rest-items) 1)
+        (make-js-new
+          (parse-expr* (nth rest-items 0))
+          (mapv parse-expr* (subvec rest-items 1)))
+        (err! "js/new expects a constructor and optional arguments"))
+      (= head "js/delete!")
+      (if (= (count rest-items) 2)
+        (make-js-delete
+          (parse-expr* (nth rest-items 0))
+          (parse-js-member-key (nth rest-items 1)))
+        (err! "js/delete! expects exactly a receiver and member key"))
+      (= head "js/in?")
+      (if (= (count rest-items) 2)
+        (make-js-in
+          (parse-expr* (nth rest-items 0))
+          (parse-js-member-key (nth rest-items 1)))
+        (err! "js/in? expects exactly a receiver and member key"))
       (= head "def")
       (parse-def-form! "def" rest-items)
       (= head "defonce")
@@ -2713,39 +2798,39 @@
       (and (= head "module") (= (count rest-items) 2))
       (err! "(module ...) — bare `module` is not supported. Use `(nix/module FORMALS BODY)`.")
       (and (= head "->") (>= (count rest-items) 1))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "->"
           args
           (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "->>") (>= (count rest-items) 1))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "->>"
           args
           (parse-expr* (expand-thread-last (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "cond->") (>= (count rest-items) 1))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "cond->"
           args
           (parse-expr* (expand-cond-thread! "cond->" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "cond->>") (>= (count rest-items) 1))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "cond->>"
           args
           (parse-expr* (expand-cond-thread! "cond->>" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "some->") (>= (count rest-items) 1))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "some->"
           args
           (parse-expr* (expand-some-thread! "some->" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "some->>") (>= (count rest-items) 1))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "some->>"
           args
           (parse-expr* (expand-some-thread! "some->>" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "as->")
         (>= (count rest-items) 2)
         (string? (nth rest-items 1)))
-      (let [args (mapv parse-expr* rest-items)]
+      (let [args (mapv parse-thread-surface-expr rest-items)]
         (make-threading "as->"
           args
           (parse-expr* (expand-as-thread (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2)))))
@@ -3908,6 +3993,35 @@
       (and (= (get node "node") "method-call")
         (= (get node "method") ".push")
         (= (get (get node "target") "name") "arr"))))
+  (expect! "js/get static selector"
+    (= (parse-expr* ["js/get" "obj" ".raw_name"])
+      {"node" "js-get"
+       "receiver" {"node" "ref" "name" "obj"}
+       "key" {"node" "js-selector" "name" "raw_name"}}))
+  (expect! "js/get dynamic key"
+    (= (get (get (parse-expr* ["js/get" "obj" "key"]) "key") "node")
+      "ref"))
+  (expect! "js/call receiver-first arguments"
+    (let [node (parse-expr* ["js/call" "obj" ".run" 1 2])]
+      (and (= (get node "node") "js-call")
+        (= (get (get node "receiver") "name") "obj")
+        (= (get (get node "key") "name") "run")
+        (= (count (get node "args")) 2))))
+  (expect! "js/set! receiver-first"
+    (= (get (parse-expr* ["js/set!" "obj" ".field" 1]) "node") "js-set"))
+  (expect! "js/new callee-first"
+    (= (get (parse-expr* ["js/new" "Ctor" 1]) "node") "js-new"))
+  (expect! "js/delete! receiver-first"
+    (= (get (parse-expr* ["js/delete!" "obj" ".field"]) "node") "js-delete"))
+  (expect! "js/in? receiver-first"
+    (= (get (parse-expr* ["js/in?" "obj" ".field"]) "node") "js-in"))
+  (expect! "js/typeof"
+    (= (get (parse-expr* ["js/typeof" "obj"]) "node") "js-typeof"))
+  (expect! "js/get rejects wrong arity"
+    (do
+      (reset-errors!)
+      (parse-expr* ["js/get" "obj"])
+      (= (parse-errors) ["js/get expects exactly a receiver and member key"])))
   (expect! "kw-access without default — false (ast-json parity)"
     (let [node (parse-expr* [":name" "m"])]
       (and (= (get node "node") "kw-access")

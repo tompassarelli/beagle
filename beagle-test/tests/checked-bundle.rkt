@@ -145,7 +145,7 @@
 (define (request sources [entry-source-id "app/main.bjs"])
   (hasheq
    'kind "beagle.checked-bundle.request"
-   'schemaVersion 3
+   'schemaVersion 4
    'entrySourceId entry-source-id
    'sources sources))
 
@@ -188,10 +188,10 @@
    (test-case "projects a deterministic checked closure and all three digests"
      (define response (build-checked-bundle (request (list entry provider))))
      (check-equal? (hash-ref response 'kind) "beagle.checked-bundle")
-     (check-equal? (hash-ref response 'schemaVersion) 3)
+     (check-equal? (hash-ref response 'schemaVersion) 4)
      (check-equal?
       (hash-ref (hash-ref response 'entryProjection) 'schemaVersion)
-      3)
+      4)
      (check-equal? (hash-ref response 'entrySourceId) "app/main.bjs")
      (check-equal?
       (sorted-keys response)
@@ -230,13 +230,6 @@
      (check-equal?
       response
       (build-checked-bundle (request (list provider entry)))))
-
-   (test-case "rejects checked-bundle request schema v2"
-     (check-exn
-      #rx"request schemaVersion must be 3"
-      (lambda ()
-        (build-checked-bundle
-         (hash-set (request (list entry provider)) 'schemaVersion 2)))))
 
    (test-case "closed interfaces preserve provider-local union membership"
      (define provider

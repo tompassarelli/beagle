@@ -4,7 +4,7 @@
            [java.security MessageDigest]
            [java.util Locale]))
 
-(def schema-version 3)
+(def schema-version 4)
 
 (defn- canonical-value [value]
   (cond

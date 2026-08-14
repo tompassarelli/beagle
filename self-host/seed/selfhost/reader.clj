@@ -377,6 +377,7 @@
   (expect! "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))
   (expect! "minus as symbol" (= (rd1 "(- 5 3)") ["-" 5 3]))
   (expect! "dot method symbol" (= (rd1 ".charAt") ".charAt"))
+  (expect! "static JavaScript selector remains a dot-prefixed token" (= (rd1 "(js/get obj .raw_name)") ["js/get" "obj" ".raw_name"]))
   (expect! "dynamic var" (= (rd1 "*state*") "*state*"))
   (expect! "constructor symbol" (= (rd1 "Point.") "Point."))
   (expect! "empty list" (= (rd1 "()") []))

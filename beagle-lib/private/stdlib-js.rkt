@@ -6,8 +6,7 @@
 ;;
 ;; Naming: `Namespace/member` mirrors the JS `Namespace.member` access form;
 ;; the JS emitter translates the `/` back to `.`. Member-of-instance methods
-;; (Array.prototype.push, String.prototype.split, etc.) are reached via
-;; `(.method obj args ...)` and are not (currently) in this table.
+;; use `js/call` and are not declared in this table.
 
 (require racket/set
          "types.rkt"
