@@ -59,4 +59,5 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 obligation-projection PASS epoch-soundness
 obligation-projection PASS leak-freedom
+obligation-projection PASS deterministic-parallelism
 materialize OK module_0.h module_0.c

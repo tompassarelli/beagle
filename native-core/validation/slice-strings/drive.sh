@@ -20,8 +20,8 @@ facts_of() { # facts_of <source> <relative-path> <out.facts>
 }
 
 # --- corpus projection: the source is in this repo, so always regenerate ----
-facts_of "$here/text_ops.bclj" \
-  "beagle:native-core/validation/slice-strings/text_ops.bclj" \
+facts_of "$here/text_ops.bgl" \
+  "native-core/validation/slice-strings/text_ops.bgl" \
   "$scratch/text_ops.facts"
 cp "$scratch/text_ops.facts" "$art/text_ops.facts"
 
@@ -30,6 +30,7 @@ cp "$scratch/text_ops.facts" "$art/text_ops.facts"
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -43,7 +44,7 @@ cp "$scratch/text_ops.facts" "$art/text_ops.facts"
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in stages lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
+for m in stages lower obligations simd c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \
@@ -56,7 +57,7 @@ bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$art/text_ops.facts\" \"native.text-ops\"
-    \"native-core/validation/slice-strings/text_ops.bclj\" \"$art\"
+    \"native-core/validation/slice-strings/text_ops.bgl\" \"$art\"
     \"native-slice-strings-v0\" \"$abi\"))"
 
 cat "$art/report.txt"

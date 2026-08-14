@@ -278,7 +278,7 @@ printf 'native-exe smoke: missing export fails closed\n'
 
 set +e
 "$repo/bin/beagle" build --materializer c17 --out "$scratch/hosted-refusal" \
-    "$repo/native-core/validation/slice-strings/text_ops.bclj" \
+    "$repo/native-core/validation/slice-strings/text_ops.bgl" \
     >"$scratch/hosted-refusal.stdout" 2>"$scratch/hosted-refusal.stderr"
 hosted_rc=$?
 set -e
