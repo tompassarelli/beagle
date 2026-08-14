@@ -13,7 +13,6 @@
             [native.body-c17 :as body]
             [native.qbe :as qbe]))
 
-(define-mode strict)
 
 (defn typing-rejection-report [(result lower/TypingResultV0)] String
   (if (not (instance? native.lower.TypingRejectedV0 result))

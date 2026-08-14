@@ -107,6 +107,28 @@
     [(defn-multi? form) (defn-multi-name form)]
     [else (error 'beagle-sig "not a callable definition: ~v" form)]))
 
+(define (value-definition-form? form)
+  (or (def-form? form) (defonce-form? form)))
+
+(define (value-definition-name form)
+  (cond
+    [(def-form? form) (def-form-name form)]
+    [(defonce-form? form) (defonce-form-name form)]
+    [else (error 'beagle-sig "not a value definition: ~v" form)]))
+
+(define (checked-definition-type program name)
+  (define effective
+    (program-effective-definition-type program name #f))
+  (unless effective
+    (error 'beagle-sig
+           "checked program is missing the effective type for ~a"
+           name))
+  (when (pair? (free-type-metas effective))
+    (error 'beagle-sig
+           "refusing to expose an unresolved effective type for ~a"
+           name))
+  effective)
+
 (define (callable-clauses form)
   (cond
     [(defn-form? form)
@@ -261,19 +283,7 @@
       (define form (unwrap-definition-form raw-form))
       (when (and (callable-form? form)
                  (eq? (callable-name form) local-target))
-        (define signature
-          (let ([effective
-                 (program-effective-definition-type program local-target #f)])
-            (cond
-              [effective effective]
-              ;; Dynamic programs deliberately do not publish inferred types.
-              ;; Their canonical annotations remain useful authoring facts.
-              [(eq? (program-mode program) 'dynamic)
-               (authored-callable-type form)]
-              [else
-               (error 'beagle-sig
-                      "checked program is missing the effective signature for ~a"
-                      local-target)])))
+        (define signature (checked-definition-type program local-target))
         (set! matches
               (cons
                (signature-match
@@ -281,6 +291,18 @@
                 (callable-clause-details
                  (callable-clauses form)
                  (callable-signature-alternatives signature))
+               #:loc (definition-location program form raw-form))
+               matches)))
+      (when (and (value-definition-form? form)
+                 (eq? (value-definition-name form) local-target))
+        (set! matches
+              (cons
+               (signature-match
+                target
+                f
+                program
+                (checked-definition-type program local-target)
+                '()
                 #:loc (definition-location program form raw-form))
                matches)))
       ;; Record constructors and accessors are real emitted functions.  They
@@ -480,6 +502,7 @@
                                 (fprintf (current-error-port)
                                          "error reading ~a: ~a\n" file (exn-message e)))])
     (define datums (read-expanded-datums file))
+    (define program (checked-program/file file))
     (define ns-name #f)
     (for ([d (in-list datums)])
       (define ns (extract-ns d))
@@ -488,7 +511,12 @@
 
     (define records '())
     (define fns '())
-    (define defs '())
+    (define defs
+      (for/list ([raw-form (in-list (program-forms program))]
+                 #:do [(define form (unwrap-definition-form raw-form))]
+                 #:when (value-definition-form? form))
+        (define name (value-definition-name form))
+        (list name (checked-definition-type program name))))
     (define externs '())
 
     (for ([d (in-list datums)])
@@ -496,8 +524,6 @@
       (when rec (set! records (cons rec records)))
       (define fn (extract-defn-entry d))
       (when fn (set! fns (cons fn fns)))
-      (define df (extract-def-entry d))
-      (when df (set! defs (cons df defs)))
       (set! externs (append (extract-extern-entry d) externs)))
 
     (unless (null? records)
@@ -520,7 +546,7 @@
 
     (unless (null? defs)
       (printf "defs:\n")
-      (for ([d (in-list (reverse defs))])
+      (for ([d (in-list defs)])
         (printf "  ~a : ~a\n" (car d) (type->string (cadr d))))
       (newline))
 

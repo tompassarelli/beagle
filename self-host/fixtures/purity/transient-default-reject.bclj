@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-default-reject)
-(define-mode strict)
 
 (defn default-effect [(input Any) (cell Any)] Any
   (let [{:keys [value] :or {value (reset! cell nil)}} input]

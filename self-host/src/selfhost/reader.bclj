@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.reader)
-(define-mode strict)
 
 ;; S-expression reader for beagle source. Converts text to string-keyed
 ;; datums that parse-program (selfhost.parse) consumes. Replaces Racket's
@@ -110,8 +109,10 @@
 (defn hex-val [(c String)] Int
   (cond
     (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
-    (and (>= (compare c "a") 0) (<= (compare c "f") 0)) (+ 10 (compare c "a"))
-    (and (>= (compare c "A") 0) (<= (compare c "F") 0)) (+ 10 (compare c "A"))
+    (and (>= (compare c "a") 0) (<= (compare c "f") 0))
+      (let [(offset Int) (compare c "a")] (+ 10 offset))
+    (and (>= (compare c "A") 0) (<= (compare c "F") 0))
+      (let [(offset Int) (compare c "A")] (+ 10 offset))
     :else 0))
 
 ;; \uXXXX -> the char. i points at the first hex digit.
@@ -143,7 +144,7 @@
 
 (defn read-string-literal [(src String) (pos Int)] Any
   (let [len (count src)]
-    (loop [(i Any) (+ pos 1) (buf (Vec String)) []]
+    (loop [(i Int) (+ pos 1) (buf (Vec String)) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated string\n")
@@ -163,7 +164,7 @@
 ;; read-regex-pattern). pos points at the opening ".
 (defn read-regex-literal [(src String) (pos Int)] Any
   (let [len (count src)]
-    (loop [(i Any) (+ pos 1) (buf (Vec String)) []]
+    (loop [(i Int) (+ pos 1) (buf (Vec String)) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated regex literal\n")
@@ -194,7 +195,7 @@
     (if (or (>= open-pos len) (not= (char-at src open-pos) "\""))
       (do (selfhost.rt/eprint "beagle reader: expected '\"' after #r hashes\n")
           (make-result "" open-pos))
-      (loop [(i Any) (+ open-pos 1) (buf (Vec String)) []]
+      (loop [(i Int) (+ open-pos 1) (buf (Vec String)) []]
         (if (>= i len)
           (make-result [STRING-TAG (str/join "" buf)] i)
           (if (= (char-at src i) "\"")
@@ -266,7 +267,7 @@
 
 (defn read-delimited [(src String) (pos Int) (close String)] Any
   (let [len (count src)]
-    (loop [(p Any) (skip-ws src pos) (items (Vec Any)) []]
+    (loop [(p Int) (skip-ws src pos) (items (Vec Any)) []]
       (cond
         (>= p len)
           (do (selfhost.rt/eprint
@@ -441,7 +442,7 @@
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")]
-    (loop [(p Any) (skip-ws src start-pos) (datums (Vec Any)) []]
+    (loop [(p Int) (skip-ws src start-pos) (datums (Vec Any)) []]
       (if (>= p (count src))
         {"target" target "datums" datums}
         (let [result (read-datum src p)]
@@ -650,11 +651,11 @@
            (= (nth result 2) "name")
            (= (nth result 3) [STRING-TAG "!"]))))
   (expect! "full clj header"
-    (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(define-mode strict)")]
+    (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(def x 1)")]
       (and (= (get result "target") "clj")
            (= (count (get result "datums")) 2)
            (= (nth (nth (get result "datums") 0) 0) "ns")
-           (= (nth (nth (get result "datums") 1) 0) "define-mode"))))
+           (= (nth (nth (get result "datums") 1) 0) "def"))))
 
   ;; --- read-program contract ---
   (expect! "read-program returns datum vector"

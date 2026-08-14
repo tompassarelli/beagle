@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.parallel-source)
-(define-mode strict)
 
 (defn advect-tile!
   [(current (Buffer Float))

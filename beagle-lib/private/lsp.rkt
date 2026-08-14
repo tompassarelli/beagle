@@ -150,6 +150,15 @@
     [(defn-multi? form) (defn-multi-name form)]
     [else (error 'beagle-lsp "not a callable definition: ~v" form)]))
 
+(define (value-definition-form? form)
+  (or (def-form? form) (defonce-form? form)))
+
+(define (value-definition-name form)
+  (cond
+    [(def-form? form) (def-form-name form)]
+    [(defonce-form? form) (defonce-form-name form)]
+    [else (error 'beagle-lsp "not a value definition: ~v" form)]))
+
 (define (authored-rest-element-type rest-param)
   (define aggregate (and rest-param (param-type rest-param)))
   (cond
@@ -197,13 +206,21 @@
     [effective
      (public-type->string effective)
      effective]
-    [(eq? (program-mode prog) 'dynamic)
-     (define authored (authored-callable-type form))
-     (public-type->string authored)
-     authored]
     [else
      (error 'beagle-lsp
             "checked program is missing the effective signature for ~a"
+            name)]))
+
+(define (effective-value-definition-type prog form)
+  (define name (value-definition-name form))
+  (define effective (program-effective-definition-type prog name #f))
+  (cond
+    [effective
+     (public-type->string effective)
+     effective]
+    [else
+     (error 'beagle-lsp
+            "checked program is missing the effective type for ~a"
             name)]))
 
 (define (binding-target->string target)
@@ -256,13 +273,13 @@
                                   fields)
                              "\n"))
                     results)))
-      (when (and (def-form? form)
-                 (eq? (def-form-name form) target)
-                 (def-form-type form))
+      (when (and (value-definition-form? form)
+                 (eq? (value-definition-name form) target))
+        (define effective (effective-value-definition-type prog form))
         (set! results
               (cons (format "```\n~a : ~a\n```"
                             target
-                            (public-type->string (def-form-type form)))
+                            (public-type->string effective))
                     results))))
     (define extern-type (hash-ref (program-externs prog) target #f))
     (when extern-type
@@ -578,13 +595,14 @@
                               'kind 4  ; Constructor
                               'detail (format "-> ~a" name))
                       items))))
-      (when (and (def-form? form) (def-form-type form))
-        (define name (symbol->string (def-form-name form)))
+      (when (value-definition-form? form)
+        (define name (symbol->string (value-definition-name form)))
         (when (string-prefix? name prefix)
+          (define effective (effective-value-definition-type prog form))
           (set! items
                 (cons (hasheq 'label name
                               'kind 6  ; Variable
-                              'detail (public-type->string (def-form-type form)))
+                              'detail (public-type->string effective))
                       items))))))
   ;; Directory-sibling definitions (for cross-module)
   (with-handlers ([exn:fail? (lambda (_) (void))])

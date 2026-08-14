@@ -227,11 +227,11 @@ def parser_shape(value):
 # Externs need driver-level module resolution and are checked in rung 6.
 # NOTE: this block is single-quoted shell — no apostrophes below this line.
 same_forms = parser_shape(a.get("forms")) == parser_shape(b.get("forms"))
-same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","mode","target"])
+same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","target"])
 sys.exit(0 if same_forms and same_meta else 1)
 ' "$LAB/$name-self-ast.json" "$astj" >/dev/null 2>&1
   then
-    ok "$name AST parity (forms/requires/imports/namespace/mode/target)"
+    ok "$name AST parity (forms/requires/imports/namespace/target)"
   else
     bad "$name AST parity — compare $LAB/$name-self-ast.json vs $astj"
   fi
@@ -638,7 +638,7 @@ def parser_shape(value):
 an = {(e["name"], json.dumps(e["type"], sort_keys=True)) for e in a.get("externs", [])}
 bn = {(e["name"], json.dumps(e["type"], sort_keys=True)) for e in b.get("externs", [])}
 same_forms = parser_shape(a.get("forms")) == parser_shape(b.get("forms"))
-same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","mode","target"])
+same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","target"])
 core = same_forms and same_meta
 sys.exit(0 if (an == bn and core) else 1)
 ' "$LAB/$name-mod-self.json" "$oast" >/dev/null 2>&1

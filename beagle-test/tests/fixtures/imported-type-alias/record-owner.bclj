@@ -1,6 +1,5 @@
 #lang beagle/clj
 
-(define-mode strict)
 
 (defrecord Item [(value Int)])
 (defalias Term (Dyn String Item))

@@ -118,6 +118,8 @@
 ;;                        allocation-failure policy.
 ;;   error-contract     : a throwing path, payload, propagation, or recovery
 ;;                        site violates its declared typed-error contract.
+;;   native-abi         : a Core function's finalized effective type is
+;;                        generalized and therefore has no closed Native ABI.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -142,12 +144,13 @@
    'error-contract       'type-error
    'missing-export       'type-error
    'unresolved-call      'type-error
+   'native-abi           'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 
 ;; parse.rkt kinds — emitted by raise-parse-error helper that we add
 ;; in this phase to the high-traffic subset (removed-forms,
-;; ns/define-mode/define-target/declare-extern top-of-file
+;; ns/define-target/declare-extern top-of-file
 ;; shape errors).
 ;;
 ;;   removed-form        : authoring used a Clojure-shape form that
@@ -157,11 +160,11 @@
 ;;                         spelling).
 ;;   unknown-form        : function-position-as-keyword reject (the
 ;;                         `(:keyword target)` call-form). Surface.
-;;   duplicate-meta      : ns/define-mode/define-target/declare-extern
+;;   duplicate-meta      : ns/define-target/declare-extern
 ;;                         duplicate declaration. Type-error in the
 ;;                         "schema of the program header" sense — the
 ;;                         tokens are right; the count is wrong.
-;;   bad-meta-value      : ns/define-mode/define-target/declare-extern
+;;   bad-meta-value      : ns/define-target/declare-extern
 ;;                         received a value of the wrong shape (bad
 ;;                         parameter list, unknown mode/target,
 ;;                         non-symbol name). Type-error.

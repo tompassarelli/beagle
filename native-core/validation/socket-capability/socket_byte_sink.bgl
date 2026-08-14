@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.socket-byte-sink)
 
-(define-mode strict)
 
 (def frame-octets (Vec Int) [0 0 0 4 112 111 110 103])
 

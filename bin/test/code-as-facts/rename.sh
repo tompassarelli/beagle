@@ -80,7 +80,6 @@ consumer="$C/code_as_facts_consumer.bgl"
 cat > "$consumer" <<'EOF'
 #lang beagle
 (ns code-as-facts.consumer)
-(define-mode strict)
 (require fram.rpc-limits :as limits)
 (def observed-depth Int limits/term-codec-v1-max-depth)
 EOF

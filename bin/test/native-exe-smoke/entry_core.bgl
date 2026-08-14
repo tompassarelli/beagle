@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.core-entry)
 
-(define-mode strict)
 
 (def sample-values (Vec String) ["left" "right"])
 

@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.match-fixture)
-(define-mode strict)
 
 (defrecord LeftValue [(value Int)])
 (defrecord RightValue [(value Int)])

@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.unicode-text)
-(define-mode strict)
 
 (declare-extern java.util.Locale/ROOT Any)
 (declare-extern .toLowerCase (Fn [String Any] String))

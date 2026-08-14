@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.scalar-numerics)
-(define-mode strict)
 
 (defn i64-add [(left Int) (right Int)] Int
   (+ left right))

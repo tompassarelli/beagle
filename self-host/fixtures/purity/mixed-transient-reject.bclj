@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.mixed-transient-reject)
-(define-mode strict)
 
 (defn mixed [(borrowed Any) (xs Any)] Any
   (let [owned (transient xs)]

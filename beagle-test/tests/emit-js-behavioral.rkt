@@ -59,7 +59,7 @@
 
 (define (run-js-test beagle-forms assertions-js)
   (define raw-js
-    (js-emit (append (list '(ns test.app) '(define-mode strict) '(define-target js))
+    (js-emit (append (list '(ns test.app) '(define-target js))
                      beagle-forms)))
   (define js-code
     (string-append
@@ -648,7 +648,7 @@ console.log(JSON.stringify(snapshot()));"
       "Binding constraint failed: value"))
 
    (test-case "let with repeated binding name never emits duplicate const/let in one block"
-     (define js (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define js (js-emit (list '(ns test.app) '(define-target js)
                                 '(defn f [] Int
                                    (let [x 1
                                          x (+ x 1)]

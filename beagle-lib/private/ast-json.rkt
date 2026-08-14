@@ -438,14 +438,21 @@
     [(eq? e (void)) (hasheq 'node "literal" 'kind "nil")]
 
     [(def-form? e)
-     (hasheq 'node "def"
-             'name (symbol->string (def-form-name e))
-             'ann (type->json (def-form-type e))
-             'value (expr->json (def-form-value e))
-             ;; emit-relevant flags: emit-clj renders "doc" and ^:dynamic;
-             ;; check consults dynamic? for the `binding` target registry
-             'doc (or (def-form-doc e) #f)
-             'dynamic (and (def-form-dynamic? e) #t))]
+     (define wire
+       (hasheq 'node "def"
+               'name (symbol->string (def-form-name e))
+               'ann (type->json (def-form-type e))
+               'value (expr->json (def-form-value e))
+               ;; emit-relevant flags: emit-clj renders "doc" and ^:dynamic;
+               ;; check consults dynamic? for the `binding` target registry
+               'doc (or (def-form-doc e) #f)
+               'dynamic (and (def-form-dynamic? e) #t)))
+     (if (current-checked-projection?)
+         (hash-set
+          wire
+          'effectiveType
+          (effective-definition-type->json (def-form-name e)))
+         wire)]
 
     [(defn-form? e)
      (define wire
@@ -837,11 +844,18 @@
                               'body (expr->json (hash-ref cases k)))))]
 
     [(defonce-form? e)
-     (hasheq 'node "defonce"
-             'name (symbol->string (defonce-form-name e))
-             'ann (type->json (defonce-form-type e))
-             'value (expr->json (defonce-form-value e))
-             'doc (or (defonce-form-doc e) #f))]
+     (define wire
+       (hasheq 'node "defonce"
+               'name (symbol->string (defonce-form-name e))
+               'ann (type->json (defonce-form-type e))
+               'value (expr->json (defonce-form-value e))
+               'doc (or (defonce-form-doc e) #f)))
+     (if (current-checked-projection?)
+         (hash-set
+          wire
+          'effectiveType
+          (effective-definition-type->json (defonce-form-name e)))
+         wire)]
 
     [(block-string? e)
      (hasheq 'node "block-string"
@@ -1119,7 +1133,6 @@
                   (program-semantic-contracts prog)])
     (hasheq 'target (symbol->string (program-target prog))
             'namespace (symbol->string (program-namespace prog))
-            'mode (symbol->string (program-mode prog))
             'gen-class (program-gen-class? prog)
             'imports (map symbol->string (program-imports prog))
             'requires (map (lambda (r)
@@ -1141,11 +1154,17 @@
 (define (program->json-string prog)
   (jsexpr->string (program->json prog)))
 
+(define (imported-record-field-order->json prog)
+  (for/hasheq ([(name fields)
+                (in-hash (program-imported-record-field-order prog))])
+    (values name fields)))
+
+(define (imported-record-namespaces->json prog)
+  (for/hasheq ([(name namespace)
+                (in-hash (program-imported-record-ns prog))])
+    (values name (symbol->string namespace))))
+
 (define (checked-program->json prog #:source-id [source-id #f])
-  (unless (eq? (program-mode prog) 'strict)
-    (error 'beagle-ast-json
-           "checked-program projection requires strict mode, got ~a"
-           (program-mode prog)))
   (define type-table (program-type-table prog))
   (unless type-table
     (error 'beagle-ast-json
@@ -1179,9 +1198,10 @@
        'namespace (symbol->string (program-namespace prog))
        'sourceId (or source-id 'null)
        'sourceSha256 (sha256-prefixed source-bytes)
-       'mode (symbol->string (program-mode prog))
        'gen-class (program-gen-class? prog)
        'imports (map symbol->string (program-imports prog))
+       'importedRecordFieldOrder (imported-record-field-order->json prog)
+       'importedRecordNamespaces (imported-record-namespaces->json prog)
        'requires
        (map (lambda (r)
               (hasheq 'ns (symbol->string (require-entry-ns r))

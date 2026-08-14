@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.atom-mutations)
-(define-mode strict)
 
 (defrecord Counter [(value Int)])
 (defalias CounterMap (Map Keyword Int))

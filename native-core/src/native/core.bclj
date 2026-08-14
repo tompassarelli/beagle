@@ -2,7 +2,6 @@
 (ns native.core
   (:require [clojure.string :as str]))
 
-(define-mode strict)
 
 (defrecord NativeId [(value String)])
 

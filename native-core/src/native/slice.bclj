@@ -8,7 +8,6 @@
             [native.obligations :as obligations]
             [native.c11 :as c11]))
 
-(define-mode strict)
 
 ;; One row of the canonical source-fact projection: subject and object name
 ;; source nodes by ordinal; kind "t" carries literal text and "e" its escaped

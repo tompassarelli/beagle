@@ -3,7 +3,6 @@
 ;; the closure of Any and narrowing back out of it are both reachable from C.
 ;; fram.types has no unguarded narrowing, so its slice cannot fire the trap.
 (ns fixture.union)
-(define-mode strict)
 
 (require clojure.string :as str)
 

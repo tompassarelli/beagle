@@ -11,7 +11,7 @@
 
 (def ^String CHAR-TAG "#%char")
 
-(def META-FORMS ["ns" "define-mode" "define-target" "defmacro" "defalias" "declare-extern" "require" "import"])
+(def META-FORMS ["ns" "define-target" "defmacro" "defalias" "declare-extern" "require" "import"])
 
 (def ERRORS (atom []))
 
@@ -1625,9 +1625,7 @@
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
   (if (= (get (deref USER-PARAMETRIC-ARITIES) name) 0) (do
   (zero-parametric-declaration-error! name))))
-  (let [mode (atom "strict")
-   mode-set (atom false)
-   namespace (atom "beagle.user")
+  (let [namespace (atom "beagle.user")
    ns-set (atom false)
    target (atom "clj")
    target-set (atom false)
@@ -1648,11 +1646,6 @@
   (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2)) (do
   (let [head (nth d 0)]
   (cond
-  (= head "define-mode") (do
-  (if (deref mode-set) (do
-  (err! "duplicate define-mode")))
-  (if (or (= (nth d 1) "strict") (= (nth d 1) "dynamic")) (reset! mode (nth d 1)) (err! (str "unknown mode: " (str (nth d 1)) " (expected strict or dynamic)")))
-  (reset! mode-set true))
   (= head "define-target") (do
   (if (deref target-set) (do
   (err! "duplicate define-target")))
@@ -1734,7 +1727,7 @@
   (if (some? alias) (conj acc f (make-def (str alias) nil (make-ref (str nm)) nil false)) (conj acc f)))) [] (deref forms))))))
   (mac/set-hygiene-context! nil)
   (reset! CURRENT-REGISTRY-CELL nil)
-  {"mode" (deref mode) "namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}))
+  {"namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}))
 
 (defn parse-program-with-parametric-arities! [datums imported-arities]
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
@@ -2265,8 +2258,8 @@
   (expect! "preloaded zero-parameter declaration is rejected" (let [_ (parse-program-with-parametric-arities! [["defn" "keep" [BRACKET-TAG] "String" ["#%string" "ok"]]] {"p/Unit" 0})
    errors (parse-errors)]
   (and (= (count errors) 1) (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
-  (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-mode" "strict"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
-  (and (= (get prog "namespace") "my.app") (= (get prog "mode") "strict") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
+  (and (= (get prog "namespace") "my.app") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
   (expect! "parse-program! reserves compiler prefix across metadata binders" (let [_ (parse-program! [["ns" "$beagle$ns"] ["defmacro" "$beagle$macro" [BRACKET-TAG] 1] ["declare-extern" "$beagle$extern" "Any"]])
    errors (parse-errors)]
   (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))
@@ -2282,8 +2275,8 @@
   (= (get prog "requires") [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
   (expect! "require discovery matches authoritative require parsing" (let [datums [["ns" "my.app" [":require" ["#%brackets" "my.lib" ":as" "m"]]] ["require" "other.lib" ":refer" ["#%brackets" "f"]]]]
   (= (discover-requires! datums) (get (parse-program! datums) "requires"))))
-  (expect! "parse-program! default mode strict + target clj + gen-class false" (let [prog (parse-program! [["ns" "x.y"]])]
-  (and (= (get prog "mode") "strict") (= (get prog "target") "clj") (= (get prog "gen-class") false))))
+  (expect! "parse-program! default target clj + gen-class false" (let [prog (parse-program! [["ns" "x.y"]])]
+  (and (= (get prog "target") "clj") (= (get prog "gen-class") false))))
   (expect! "parse-program! (:gen-class) sets program flag" (let [prog (parse-program! [["ns" "fram.main" [":gen-class"]]])]
   (= (get prog "gen-class") true)))
   (expect! "nix: (s ...) interpolated-string — literal parts are text, others expr" (let [node (parse-expr* ["s" ["#%string" "#!"] "pkgs.bash" ["#%string" "/bin"]])]

@@ -10,13 +10,11 @@
 (define PRELUDE
   (string-append
    "(ns binding.constraint.check)\n"
-   "(define-mode strict)\n"
    "(define-target clj)\n"))
 
 (define JS-PRELUDE
   (string-append
    "(ns binding.constraint.check)\n"
-   "(define-mode strict)\n"
    "(define-target js)\n"))
 
 (define (read-forms source)

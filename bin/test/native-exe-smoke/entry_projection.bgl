@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.entry-projection)
 
-(define-mode strict)
 
 (def seed Int 2)
 

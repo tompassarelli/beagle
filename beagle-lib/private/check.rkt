@@ -4,8 +4,7 @@
 ;;
 ;; Best-effort: annotated forms and calls to typed functions get checked;
 ;; the rest passes through. `Any` is universal.
-;; Variadic function types respect their rest-type. Skipped entirely in
-;; dynamic mode.
+;; Variadic function types respect their rest-type.
 
 (require racket/match
          racket/string
@@ -42,12 +41,9 @@
           (string->number v)
           2))))
 
-;; `!`-purity enforcement (Phase 6 — design-purity.md). Seeded from
-;; BEAGLE_PURITY ('off | 'warn | 'error). Default is now 'error: a strict-mode
-;; defn whose body mutates (set! or a `!`-named call) must itself be `!`-named,
-;; or it is a hard compile error. Opt down with BEAGLE_PURITY=off|warn. All
-;; live consumers (gjoa/fram/nixos-config) and beagle's own corpus are clean at
-;; 'error as of the flip; mirrors the BEAGLE_CHECK_PROFILE env precedent.
+;; `!`-purity enforcement. A defn whose body mutates (set! or a `!`-named call)
+;; must itself be `!`-named. BEAGLE_PURITY=off|warn opts down from the default
+;; hard error.
 (define current-purity-enforcement
   (make-parameter
     (case (getenv "BEAGLE_PURITY")
@@ -353,6 +349,7 @@
     [(allocation-contract) "E024"]
     [(missing-export)      "E026"]
     [(unresolved-call)     "E027"]
+    [(native-abi)          "E029"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -766,8 +763,7 @@
   out)
 
 (define (type-check! prog)
-  (when (and (eq? (program-mode prog) 'strict)
-             (>= (current-check-profile) 1))
+  (when (>= (current-check-profile) 1)
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
     (hash-clear! UNION-MEMBERS)
@@ -1791,17 +1787,16 @@
 
   ;; --- def/defn/defonce pre-pass --------------------------------------------
   ;;
-  ;; Declared types on def/defonce/defn forms are the source of pre-pass type
-  ;; information. The parser stores each declared type in the
+  ;; Declared types on def/defonce/defn forms are the source of authored
+  ;; pre-pass type information. The parser stores each declared type in the
   ;; form's type slot (def-form-type, defonce-form-type, defn-form-return-type)
   ;; and per-param declarations in param-type. We walk the top-level forms
   ;; once and seed `env` from those slots so callers can resolve typed
   ;; references in either direction (forward or backward).
   ;;
-  ;; Untyped bindings enter the environment as ANY: they still carry no type
-  ;; precision, but their names are resolved for strict target scope checks.
-  ;; Untyped params likewise bind as ANY in the body env (see
-  ;; extend-with-params).
+  ;; Omitted value definitions enter the environment as inference
+  ;; metavariables so forward references can constrain them. Untyped params are
+  ;; handled by the definition solver below.
 
   ;; Names of `^:dynamic` vars — consulted by `binding` to reject rebinding a
   ;; non-dynamic var at compile time (the runtime "Can't dynamically bind
@@ -1815,10 +1810,10 @@
     (match form
       [(def-form name (? type? t) _ _ dyn?) (hash-set! env name t) (when dyn? (set-add! dyn-vars name))]
       [(def-form name #f _ _ dyn?)
-       (hash-set! env name ANY)
+       (hash-set! env name (fresh-type-meta))
        (when dyn? (set-add! dyn-vars name))]
       [(defonce-form name (? type? t) _ _) (hash-set! env name t)]
-      [(defonce-form name #f _ _) (hash-set! env name ANY)]
+      [(defonce-form name #f _ _) (hash-set! env name (fresh-type-meta))]
       [(defn-form name params rest-p ret _ _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
@@ -2161,9 +2156,26 @@
 
 (define (definition-name form)
   (cond
+    [(def-form? form) (def-form-name form)]
+    [(defonce-form? form) (defonce-form-name form)]
     [(defn-form? form) (defn-form-name form)]
     [(defn-multi? form) (defn-multi-name form)]
-    [else (error 'beagle "not a callable definition: ~v" form)]))
+    [else (error 'beagle "not a definition: ~v" form)]))
+
+(define (value-definition? form)
+  (or (def-form? form) (defonce-form? form)))
+
+(define (value-definition-authored-type form)
+  (cond
+    [(def-form? form) (def-form-type form)]
+    [(defonce-form? form) (defonce-form-type form)]
+    [else #f]))
+
+(define (value-definition-value form)
+  (cond
+    [(def-form? form) (def-form-value form)]
+    [(defonce-form? form) (defonce-form-value form)]
+    [else (error 'beagle "not a value definition: ~v" form)]))
 
 (define (definition-clauses form)
   (cond
@@ -2212,11 +2224,15 @@
   (finalized-definition-type signature))
 
 (define (definition-effective-type form)
-  (define alternatives
-    (map inference-clause-effective-type (definition-clauses form)))
-  (if (= (length alternatives) 1)
-      (car alternatives)
-      (type-union alternatives)))
+  (cond
+    [(value-definition? form)
+     (or (value-definition-authored-type form) (fresh-type-meta))]
+    [else
+     (define alternatives
+       (map inference-clause-effective-type (definition-clauses form)))
+     (if (= (length alternatives) 1)
+         (car alternatives)
+         (type-union alternatives))]))
 
 ;; Synchronization is a callable effect, not a return-type property. A function
 ;; is synchronous only when its own executable body contains no await/async
@@ -2557,15 +2573,17 @@
 (define (top-level-definitions prog)
   (for/list ([raw-form (in-list (program-forms prog))]
              #:do [(define form (unwrap-definition-form raw-form))]
-             #:when (or (defn-form? form) (defn-multi? form)))
+             #:when (or (def-form? form)
+                        (defonce-form? form)
+                        (defn-form? form)
+                        (defn-multi? form)))
     form))
 
-;; Collect calls to top-level definitions while respecting every lexical binder
-;; that can shadow one.  A scope-blind walk can invent an SCC edge from `(f x)`
-;; when `f` is a parameter or local letfn, accidentally monomorphizing otherwise
-;; independent definitions.
-(define (definition-local-callees form local-names)
-  (define called (mutable-seteq))
+;; Collect ordinary references and calls to top-level definitions while
+;; respecting every lexical binder that can shadow one. A scope-blind walk can
+;; invent an SCC edge from `(f x)` when `f` is a parameter or local letfn.
+(define (definition-local-dependencies form local-names)
+  (define dependencies (mutable-seteq))
   (define (walk-constraint constraint scope)
     ;; A binding constraint is itself a predicate value.  Unlike an ordinary
     ;; symbol expression, a bare top-level function name here is an implicit
@@ -2573,7 +2591,7 @@
     (when (and (symbol? constraint)
                (set-member? local-names constraint)
                (not (set-member? scope constraint)))
-      (set-add! called constraint))
+      (set-add! dependencies constraint))
     (walk constraint scope))
   (define (scope-add-target scope target)
     (for/fold ([out scope]) ([name (in-list (binding-target-bound-names target))])
@@ -2639,16 +2657,33 @@
        (define callee (call-form-fn value))
        (cond
          [(symbol? callee)
-          (when (and (set-member? local-names callee)
+         (when (and (set-member? local-names callee)
                      (not (set-member? scope callee)))
-            (set-add! called callee))]
+            (set-add! dependencies callee))]
          [else (walk callee scope)])
        (for ([arg (in-list (call-form-args value))]) (walk arg scope))]
+      [(symbol? value)
+       (when (and (set-member? local-names value)
+                  (not (set-member? scope value)))
+         (set-add! dependencies value))]
       [(fn-form? value)
        (walk-body
         (fn-form-body value)
         (scope-add-params scope (fn-form-params value)
                           (fn-form-rest-param value)))]
+      [(if-form? value)
+       (walk (if-form-cond-expr value) scope)
+       (walk (if-form-then-expr value) scope)
+       (when (if-form-else-expr value)
+         (walk (if-form-else-expr value) scope))]
+      [(when-form? value)
+       (walk (when-form-cond-expr value) scope)
+       (walk-body (when-form-body value) scope)]
+      [(do-form? value) (walk-body (do-form-body value) scope)]
+      [(cond-form? value)
+       (for ([clause (in-list (cond-form-clauses value))])
+         (walk (cond-clause-test clause) scope)
+         (walk-body (cond-clause-body clause) scope))]
       [(let-form? value)
        (walk-body (let-form-body value)
                   (walk-bindings (let-form-bindings value) scope))]
@@ -2671,6 +2706,30 @@
          (when (let-binding-constraint binding)
            (walk-constraint (let-binding-constraint binding) scope)))
        (walk-body (binding-form-body value) scope)]
+      [(method-call? value)
+       (walk (method-call-target value) scope)
+       (walk-body (method-call-args value) scope)]
+      [(static-call? value)
+       (walk-body (static-call-args value) scope)]
+      [(dynamic-var? value)
+       (walk (dynamic-var-name value) scope)]
+      [(kw-access? value)
+       (walk (kw-access-target value) scope)
+       (when (kw-access-default value)
+         (walk (kw-access-default value) scope))]
+      [(case-form? value)
+       (walk (case-form-test value) scope)
+       (for ([clause (in-list (case-form-clauses value))])
+         ;; Case values are data, not evaluated expressions.
+         (walk (case-clause-body clause) scope))
+       (when (case-form-default value)
+         (walk (case-form-default value) scope))]
+      [(new-form? value)
+       (walk-body (new-form-args value) scope)]
+      [(with-form? value)
+       (walk (with-form-target value) scope)
+       (for ([update (in-list (with-form-updates value))])
+         (walk (with-update-value update) scope))]
       [(for-form? value)
        (walk-body (for-form-body value)
                   (walk-for-clauses (for-form-clauses value) scope))]
@@ -2699,6 +2758,9 @@
       [(with-open-form? value)
        (walk-body (with-open-form-body value)
                   (walk-bindings (with-open-form-bindings value) scope))]
+      [(doto-form? value)
+       (walk (doto-form-target value) scope)
+       (walk-body (doto-form-forms value) scope)]
       [(dotimes-form? value)
        (walk (dotimes-form-count-expr value) scope)
        (walk-body (dotimes-form-body value)
@@ -2716,6 +2778,19 @@
              (if (rescue-form-err-name value)
                  (set-add scope (rescue-form-err-name value))
                  scope))]
+      [(check-expr? value) (walk (check-expr-expr value) scope)]
+      [(await-form? value) (walk (await-form-expr value) scope)]
+      [(set!-form? value)
+       (walk (set!-form-target value) scope)
+       (walk (set!-form-value value) scope)]
+      [(condp-form? value)
+       (walk (condp-form-pred-fn value) scope)
+       (walk (condp-form-test-expr value) scope)
+       (for ([clause (in-list (condp-form-clauses value))])
+         (walk (car clause) scope)
+         (walk (cdr clause) scope))
+       (when (condp-form-default value)
+         (walk (condp-form-default value) scope))]
       [(match-form? value)
        (walk (match-form-target value) scope)
        (for ([clause (in-list (match-form-clauses value))])
@@ -2725,6 +2800,92 @@
            scope (pattern-bound-names (match-clause-pattern clause)))))]
       [(threading-marker? value)
        (walk (threading-marker-desugared value) scope)]
+      [(target-case-form? value)
+       ;; Target names are selectors, not references.
+       (for ([branch (in-hash-values (target-case-form-cases value))])
+         (walk branch scope))]
+      [(with-meta? value)
+       ;; Metadata is data. Only the wrapped expression participates in value
+       ;; dependency inference.
+       (walk (with-meta-expr value) scope)]
+      [(nix-inherit-from? value)
+       (walk (nix-inherit-from-ns-expr value) scope)]
+      [(nix-with? value)
+       (walk (nix-with-ns-expr value) scope)
+       (walk (nix-with-body value) scope)]
+      [(nix-rec-attrs? value)
+       (for ([pair (in-list (nix-rec-attrs-pairs value))])
+         (walk (cdr pair) scope))]
+      [(nix-assert? value)
+       (walk (nix-assert-cond-expr value) scope)
+       (walk (nix-assert-body value) scope)]
+      [(nix-get-or? value)
+       (walk (nix-get-or-base-expr value) scope)
+       (walk (nix-get-or-default value) scope)]
+      [(nix-has-attr? value)
+       (walk (nix-has-attr-base-expr value) scope)]
+      [(nix-interpolated-string? value)
+       (walk-body (nix-interpolated-string-parts value) scope)]
+      [(nix-fn-set? value)
+       (for ([formal (in-list (nix-fn-set-formals value))])
+         (when (nix-fn-set-formal-default formal)
+           (walk (nix-fn-set-formal-default formal) scope)))
+       (define body-scope
+         (scope-add-names
+          scope
+          (append
+           (map nix-fn-set-formal-name (nix-fn-set-formals value))
+           (if (nix-fn-set-at-name value)
+               (list (nix-fn-set-at-name value))
+               '()))))
+       (walk (nix-fn-set-body value) body-scope)]
+      [(nix-derivation? value) (walk (nix-derivation-attrs value) scope)]
+      [(nix-flake? value) (walk (nix-flake-attrs value) scope)]
+      [(nix-with-cfg? value) (walk (nix-with-cfg-body value) scope)]
+      [(js-quote-form? value) (walk (js-quote-form-body value) scope)]
+      [(js-ast-splice-expr? value)
+       (walk (js-ast-splice-expr-beagle-expr value) scope)]
+      [(js-ast-splice-stmts? value)
+       (walk (js-ast-splice-stmts-beagle-expr value) scope)]
+      [(js-ast-splice-json? value)
+       (walk (js-ast-splice-json-beagle-expr value) scope)]
+      [(jst-return? value) (walk (jst-return-expr value) scope)]
+      [(jst-dot? value) (walk (jst-dot-object value) scope)]
+      [(jst-get? value)
+       (walk (jst-get-receiver value) scope)
+       (unless (jst-selector? (jst-get-key value))
+         (walk (jst-get-key value) scope))]
+      [(jst-call? value)
+       (walk (jst-call-receiver value) scope)
+       (unless (jst-selector? (jst-call-key value))
+         (walk (jst-call-key value) scope))
+       (walk-body (jst-call-args value) scope)]
+      [(jst-set? value)
+       (walk (jst-set-receiver value) scope)
+       (unless (jst-selector? (jst-set-key value))
+         (walk (jst-set-key value) scope))
+       (walk (jst-set-value value) scope)]
+      [(jst-new? value)
+       (walk (jst-new-callee value) scope)
+       (walk-body (jst-new-args value) scope)]
+      [(jst-delete? value)
+       (walk (jst-delete-receiver value) scope)
+       (unless (jst-selector? (jst-delete-key value))
+         (walk (jst-delete-key value) scope))]
+      [(jst-in? value)
+       (walk (jst-in-receiver value) scope)
+       (unless (jst-selector? (jst-in-key value))
+         (walk (jst-in-key value) scope))]
+      [(jst-spread? value) (walk (jst-spread-expr value) scope)]
+      [(jst-typeof? value) (walk (jst-typeof-expr value) scope)]
+      [(jst-template? value) (walk-body (jst-template-parts value) scope)]
+      [(jst-binary? value)
+       (walk (jst-binary-left value) scope)
+       (walk (jst-binary-right value) scope)]
+      [(jst-unary? value) (walk (jst-unary-expr value) scope)]
+      [(jst-export? value) (walk (jst-export-form value) scope)]
+      [(jst-export-default? value)
+       (walk (jst-export-default-form value) scope)]
       [(quoted? value) (void)]
       [(pair? value) (walk (car value) scope) (walk (cdr value) scope)]
       [(vector? value) (for ([item (in-vector value)]) (walk item scope))]
@@ -2733,16 +2894,24 @@
          (walk key scope)
          (walk item scope))]
       [(struct? value)
-       (for ([item (in-list (cdr (vector->list (struct->vector value))))])
+       ;; Unknown structural children still recurse, but a direct symbol field
+       ;; is conservatively metadata. New expression-bearing symbol fields need
+       ;; an explicit arm above so they cannot manufacture false SCC edges.
+       (for ([item (in-list (cdr (vector->list (struct->vector value))))]
+             #:unless (symbol? item))
          (walk item scope))]
       [else (void)]))
-  (for ([clause (in-list (definition-clauses form))])
-    (walk-body
-     (inference-clause-body clause)
-     (scope-add-params (seteq)
-                       (inference-clause-params clause)
-                       (inference-clause-rest-param clause))))
-  (set->list called))
+  (cond
+    [(value-definition? form)
+     (walk (value-definition-value form) (seteq))]
+    [else
+     (for ([clause (in-list (definition-clauses form))])
+       (walk-body
+        (inference-clause-body clause)
+        (scope-add-params (seteq)
+                          (inference-clause-params clause)
+                          (inference-clause-rest-param clause))))])
+  (set->list dependencies))
 
 ;; Deterministic Tarjan SCCs. Definitions and edges are visited in source
 ;; order; consumers are solved only after every local dependency they call.
@@ -2756,7 +2925,7 @@
     (for/hasheq ([form (in-list defns)])
       (values
        (definition-name form)
-       (sort (definition-local-callees form local-names)
+       (sort (definition-local-dependencies form local-names)
              < #:key (lambda (name) (hash-ref source-index name))))))
   (define next-index 0)
   (define indexes (make-hasheq))
@@ -2844,15 +3013,43 @@
   (if (type-union? body) (type-union-alts body) (list body)))
 
 (define (constrain-definition! form env signature)
-  (define clauses (definition-clauses form))
-  (define alternatives (signature-alternatives signature))
-  (unless (= (length clauses) (length alternatives))
-    (error 'beagle
-           "definition inference signature/arity mismatch for ~a: ~a clauses, ~a alternatives"
-           (definition-name form) (length clauses) (length alternatives)))
-  (for ([clause (in-list clauses)]
-        [alternative (in-list alternatives)])
-    (constrain-inference-clause! clause env alternative)))
+  (cond
+    [(value-definition? form)
+     (define authored (value-definition-authored-type form))
+     ;; Authored value boundaries are validated by the normal check-form pass,
+     ;; including its expected-directed HVec and Atom construction rules. Only
+     ;; omission asks this solver to derive a type from the initializer.
+     (unless authored
+       (define actual (infer-expr (value-definition-value form) env))
+       ;; Anonymous functions infer a reusable local scheme. A value definition
+       ;; binds one monomorphic instance of that scheme.
+       (define monomorphic-actual
+         (if (inferred-type-poly? actual) (instantiate-type actual) actual))
+       (with-handlers
+           ([exn:fail:type-unification?
+             (lambda (error)
+               (raise-diag
+                'definition-inference
+                (format "~a ~a: initializer does not satisfy ~a: ~a"
+                        (if (defonce-form? form) "defonce" "def")
+                        (definition-name form)
+                        (type->string signature)
+                        (exn-message error))
+                (hasheq 'name (symbol->string (definition-name form))
+                        'actual (type->string monomorphic-actual)
+                        'expected (type->string signature))
+                #:src (src-for (value-definition-value form))))])
+         (unify-types! monomorphic-actual signature)))]
+    [else
+     (define clauses (definition-clauses form))
+     (define alternatives (signature-alternatives signature))
+     (unless (= (length clauses) (length alternatives))
+       (error 'beagle
+              "definition inference signature/arity mismatch for ~a: ~a clauses, ~a alternatives"
+              (definition-name form) (length clauses) (length alternatives)))
+     (for ([clause (in-list clauses)]
+           [alternative (in-list alternatives)])
+       (constrain-inference-clause! clause env alternative))]))
 
 (define (finalized-definition-type type)
   (define final (generalize-type type))
@@ -2862,6 +3059,41 @@
            (type->string final)))
   final)
 
+(define (finalized-value-definition-type form type)
+  (define final (zonk-type type))
+  (when (or (type-poly? final)
+            (pair? (free-type-metas final))
+            (type-contains-any? final))
+    (raise-diag
+     'definition-inference
+     (format
+      "~a ~a: omitted type did not resolve to a concrete monomorphic type; add a type annotation, or write Any explicitly for an intentional dynamic boundary"
+      (if (defonce-form? form) "defonce" "def")
+      (definition-name form))
+     (hasheq 'name (symbol->string (definition-name form))
+             'actual (type->string final))
+     #:src (src-for (value-definition-value form))))
+  final)
+
+(define (check-core-function-abis! prog signatures)
+  (when (eq? (program-target prog) 'core)
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (unwrap-definition-form raw-form))
+      (when (or (defn-form? form) (defn-multi? form))
+        (define name (definition-name form))
+        (define signature (hash-ref signatures name))
+        (when (type-poly? signature)
+          (raise-diag
+           'native-abi
+           (format
+            "~a has a generalized effective signature; Core requires a closed monomorphic Native ABI"
+            name)
+           (hasheq
+            'function (symbol->string name)
+            'effective-type (type->string signature)
+            'repair "annotate every otherwise unconstrained parameter with its concrete Core ABI type")
+           #:src (src-for form)))))))
+
 (define (infer-definition-types! prog env)
   (define defns (top-level-definitions prog))
   (define by-name
@@ -2869,8 +3101,19 @@
       (values (definition-name form) form)))
   (define signatures (make-hasheq))
   (for ([form (in-list defns)])
-    (hash-set! signatures (definition-name form) (definition-effective-type form)))
+    (define name (definition-name form))
+    (hash-set!
+     signatures
+     name
+     (if (and (value-definition? form)
+              (not (value-definition-authored-type form)))
+         ;; Keep the pre-pass metavariable so contracts prepared before this
+         ;; solver contribute to the same value identity.
+         (hash-ref env name)
+         (definition-effective-type form))))
   (define-values (sccs _edges) (definition-sccs defns))
+  (for ([(name signature) (in-hash signatures)])
+    (hash-set! env name signature))
   ;; Tarjan yields dependency-first components for caller -> callee edges.
   (for ([component (in-list sccs)])
     (for ([name (in-list component)])
@@ -2879,10 +3122,18 @@
       (for ([name (in-list component)])
         (constrain-definition! (hash-ref by-name name) env (hash-ref signatures name))))
     (for ([name (in-list component)])
-      (define finalized (finalized-definition-type (hash-ref signatures name)))
+      (define form (hash-ref by-name name))
+      (define finalized
+        (if (value-definition? form)
+            (if (value-definition-authored-type form)
+                (zonk-type (hash-ref signatures name))
+                (finalized-value-definition-type
+                 form (hash-ref signatures name)))
+            (finalized-definition-type (hash-ref signatures name))))
       (hash-set! signatures name finalized)
       (hash-set! env name finalized)))
   (register-program-effective-definition-types! prog signatures)
+  (check-core-function-abis! prog signatures)
   signatures)
 
 (define (prepare-and-infer-definition-types! prog env)
@@ -3861,18 +4112,52 @@
   (for/fold ([best -1]) ([c (in-string s)] [i (in-naturals)])
     (if (or (char=? c #\.) (char=? c #\/)) i best)))
 
-;; The canonical Beagle record/variant an `instance?` first argument names, by
-;; its last qualifier segment; #f for everything else, so an arbitrary JVM class
-;; hierarchy (whose nominal alternatives may overlap) never narrows.
-(define (instance-member-name datum)
-  (and (symbol? datum)
-       (let* ([s (symbol->string datum)]
-              [i (last-separator-index s)]
-              [base (if (>= i 0) (string->symbol (substring s (add1 i))) datum)])
-         (and (or (hash-has-key? RECORD-FIELDS base)
-                  (for/or ([(_u members) (in-hash UNION-MEMBERS)])
-                    (and (memq base members) #t)))
-              base))))
+(define (unqualified-member-name name)
+  (define spelling (symbol->string name))
+  (define separator (last-separator-index spelling))
+  (if (negative? separator)
+      name
+      (string->symbol (substring spelling (add1 separator)))))
+
+;; Return the closed nominal alternatives represented by TYPE, including a
+;; nominal union nested inside a structural union such as `(U TermV0 Nil)`.
+(define (closed-union-members type)
+  (cond
+    [(and (type-prim? type)
+          (hash-ref UNION-MEMBERS (type-prim-name type) #f))
+     => values]
+    [(and (type-prim? type)
+          (for/or ([members (in-hash-values UNION-MEMBERS)])
+            (memq (type-prim-name type) members)))
+     (list (type-prim-name type))]
+    [(and (type-app? type)
+          (hash-ref UNION-MEMBERS (type-app-ctor type) #f))
+     => values]
+    [(and (type-app? type)
+          (hash-ref PARAMETRIC-MEMBER-UNION (type-app-ctor type) #f))
+     (list (type-app-ctor type))]
+    [(type-union? type)
+     (append-map closed-union-members (type-union-alts type))]
+    [else '()]))
+
+;; Imported unions carry use-site-qualified member names (`core/AtomType`),
+;; while emitted JVM class tests and explicit imports spell the same member as
+;; `native.core.AtomType` or bare `AtomType`. Resolve that spelling against the
+;; scrutinee's closed union, never against the global class universe; a JVM
+;; hierarchy therefore cannot acquire an unsound nominal narrowing.
+(define (canonical-union-member-name written target-type)
+  (define members (closed-union-members target-type))
+  (cond
+    [(memq written members) written]
+    [else
+     (define base (unqualified-member-name written))
+     (define matches
+       (remove-duplicates
+        (filter (lambda (member)
+                  (eq? base (unqualified-member-name member)))
+                members)
+        eq?))
+     (and (= (length matches) 1) (car matches))]))
 
 ;; Member removed from a CLOSED union only — a nominal defunion or a structural
 ;; union. Any (open) is left alone.
@@ -3894,14 +4179,17 @@
   (and (call-form? cond-expr)
        (eq? (call-form-fn cond-expr) 'instance?)
        (= 2 (length (call-form-args cond-expr)))
-       (let ([member-name (instance-member-name (car (call-form-args cond-expr)))]
+       (let ([written (car (call-form-args cond-expr))]
              [var (cadr (call-form-args cond-expr))])
-         (and member-name
+         (and (symbol? written)
               (stable-scrutinee-var var env)
-              (let ([cur (hash-ref env var #f)])
+              (let* ([cur (hash-ref env var #f)]
+                     [member-name
+                      (and cur
+                           (canonical-union-member-name written cur))])
                 ;; true branch is type(x) ∩ Member, which for a nominal member
                 ;; is the member (with a parametric scrutinee's substitutions).
-                (and cur
+                (and member-name
                      (cons (list (cons var (member-view-type member-name cur)))
                            (list (cons var (subtract-member cur member-name))))))))))
 
@@ -4022,7 +4310,10 @@
   (define pat (match-clause-pattern clause))
   (cond
     [(pat-record? pat)
-     (define rec-name (pat-record-type-name pat))
+     (define written-name (pat-record-type-name pat))
+     (define rec-name
+       (or (canonical-union-member-name written-name target-type)
+           written-name))
      (define bindings (pat-record-bindings pat))
      (define arm-env (mut-copy env))
      ;; Scrutinee first: a pattern binder of the same name legitimately shadows
@@ -4108,9 +4399,6 @@
                 clauses)))
   (define record-pats
     (filter pat-record? all-patterns))
-  (define matched-types
-    (map pat-record-type-name record-pats))
-  (define matched-set (list->set matched-types))
   (define has-wildcard?
     (ormap (lambda (p)
              (or (pat-wildcard? p) (pat-var? p)))
@@ -4132,6 +4420,11 @@
       [else #f]))
   (define union-members
     (and union-name (hash-ref UNION-MEMBERS union-name)))
+  (define matched-types
+    (for/list ([pattern (in-list record-pats)])
+      (define written (pat-record-type-name pattern))
+      (or (canonical-union-member-name written target-type) written)))
+  (define matched-set (list->set matched-types))
 
   (cond
     ;; Strict exhaustive check for defunion types
@@ -4399,65 +4692,6 @@
                               (string-join (map format-predicate preds) ", "))
                       #:src (src-for e)))))))
 
-;; --- NixOS option path validation ------------------------------------------
-
-(define MODULE-STRUCTURAL-KEYS '("config" "options" "imports" "_module" "_file"))
-
-(define (dotted-option-key? sym)
-  (and (symbol? sym)
-       (let ([s (symbol->string sym)])
-         (and (> (string-length s) 1)
-              (char=? (string-ref s 0) #\:)
-              (string-contains? s ".")))))
-
-(define (key-sym->path sym)
-  (substring (symbol->string sym) 1))
-
-(define (validate-nixos-map-keys! pairs env)
-  (define schema (current-nixos-schema))
-  (when schema
-    (for ([pair (in-list pairs)])
-      (define key (car pair))
-      (define val (cdr pair))
-      (when (dotted-option-key? key)
-        (define path-str (key-sym->path key))
-        (cond
-          [(member (car (string-split path-str ".")) MODULE-STRUCTURAL-KEYS)
-           (void)]
-          [(string-prefix? path-str "options.")
-           (void)]
-          [else
-           (define entry (nixos-option-lookup schema path-str))
-           (cond
-             [(not entry)
-              (define top-ns (car (string-split path-str ".")))
-              (when (nixos-namespace-exists? schema top-ns)
-                (define similars (nixos-find-similar schema path-str))
-                (define suggest
-                  (if (null? similars) ""
-                      (format " -- did you mean: ~a?"
-                              (string-join (take similars (min 3 (length similars)))
-                                           ", "))))
-                (with-handlers ([exn:fail? void])
-                  (raise-diag 'nixos-unknown-option
-                    (format "unknown NixOS option: ~a~a" path-str suggest)
-                    (hasheq 'path path-str)
-                    #:src (src-for key))))]
-             [else
-              (define val-type (infer-expr val env))
-              (define result (nixos-check-value-type entry val-type))
-              (when (and (pair? result) (eq? (car result) 'mismatch))
-                (with-handlers ([exn:fail? void])
-                  (raise-diag 'nixos-type-mismatch
-                    (format "NixOS option ~a: ~a" path-str (cadr result))
-                    (hasheq 'path path-str
-                            'expected (hash-ref entry 't "?")
-                            'actual (type->string val-type))
-                    #:src (src-for val))))])]))
-      ;; Recurse into nested maps
-      (when (map-form? val)
-        (validate-nixos-map-keys! (map-form-pairs val) env)))))
-
 ;; --- JVM class interop (typed host-class resolution) ----------------------
 ;; Canonicalize a class name to its FQCN: an inline FQCN (java.io.File) is its
 ;; own key; a bare imported name (Socket) maps through the program's (import …).
@@ -4645,8 +4879,6 @@
            (type-app 'Vec (list ANY)))))]
     [(map-form? e)
      (define pairs (map-form-pairs e))
-     (when (current-nixos-schema)
-       (validate-nixos-map-keys! pairs env))
      (if (null? pairs)
        (type-app 'Map (list ANY ANY))
        (let ()
@@ -4965,6 +5197,20 @@
      (if (any-type? body-type)
        (type-app 'Vec (list ANY))
        (type-app 'Vec (list body-type)))]
+    [(nix-fn-set? e)
+     ;; Nix attrset-pattern lambdas introduce every formal simultaneously.
+     ;; Defaults may refer to any sibling formal, and `:as` names the complete
+     ;; incoming attrset.  The attrset's open structural shape remains Any,
+     ;; but its defaults and body must still pass through ordinary inference.
+     (define body-env (mut-copy env))
+     (for ([formal (in-list (nix-fn-set-formals e))])
+       (hash-set! body-env (nix-fn-set-formal-name formal) ANY))
+     (when (nix-fn-set-at-name e)
+       (hash-set! body-env (nix-fn-set-at-name e) ANY))
+     (for ([formal (in-list (nix-fn-set-formals e))]
+           #:when (nix-fn-set-formal-default formal))
+       (infer-expr (nix-fn-set-formal-default formal) body-env))
+     (type-fn (list ANY) #f (infer-expr (nix-fn-set-body e) body-env))]
     [(fn-form? e)
      (infer-local-clause-type
       (inference-clause
@@ -5823,12 +6069,12 @@
 ;; produce Float on mixed Int/Float — interiors stop dissolving into
 ;; Any at the first arithmetic chain. Exact binary Float `/` also stays
 ;; Float; every other `/` remains Any because Clojure integer division can
-;; produce Ratio. A Number operand degrades to Number; anything else (Any,
-;; strings, …) falls back to the declared stdlib return, which is exactly
-;; today's behavior. The refinement only fires when the declared return is
-;; itself numeric-or-Any, so a user-shadowed op with a different contract is
-;; untouched.
+;; produce Ratio. A Number operand degrades to Number. Operand validity is
+;; enforced separately by the stdlib signature and check-one-arg. The
+;; refinement only fires when the declared return is itself numeric-or-Any, so
+;; a user-shadowed op with a different contract is untouched.
 
+(define NUMERIC-ARITHMETIC-OPS '(+ - * /))
 (define NUMERIC-PRESERVING-OPS '(+ - * inc dec min max abs))
 
 (define (numeric-class t)
@@ -6021,14 +6267,25 @@
   (define inference-evidence?
     (or (pair? (free-type-metas a-type))
         (pair? (free-type-metas expected-type))))
+  ;; Any is normally an intentional dynamic boundary and therefore compatible
+  ;; with every expected type. Arithmetic is stricter: its Number parameter is
+  ;; a real operand precondition, so an unchecked value must be narrowed first.
+  (define strict-numeric-operand?
+    (and (memq fn-name NUMERIC-ARITHMETIC-OPS)
+         (type-prim? expected-type)
+         (eq? (type-prim-name expected-type) 'Number)))
   (define compatible?
-    (if inference-evidence?
-        (with-handlers ([exn:fail:type-unification? (lambda (_error) #f)])
-          (unify-types!
-           (if (inferred-type-poly? a-type) (instantiate-type a-type) a-type)
-           expected-type)
-          #t)
-        (type-compatible? a-type expected-type)))
+    (cond
+      [inference-evidence?
+       (with-handlers ([exn:fail:type-unification? (lambda (_error) #f)])
+         (unify-types!
+          (if (inferred-type-poly? a-type) (instantiate-type a-type) a-type)
+          expected-type)
+         #t)]
+      [(and strict-numeric-operand?
+            (eq? (numeric-class a-type) 'other))
+       #f]
+      [else (type-compatible? a-type expected-type)]))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
               compatible?)
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
@@ -6077,8 +6334,7 @@
 ;; caller (compile, lsp, daemon, build-all) pays nothing: the type-table stays
 ;; unbound and store-type! is a genuine no-op.
 (define (type-check-with-locs! prog error-handler #:capture-types? [capture-types? #f])
-  (when (and (eq? (program-mode prog) 'strict)
-             (>= (current-check-profile) 1))
+  (when (>= (current-check-profile) 1)
     (define env #f)
     (define nix-schema
       (and (eq? (program-target prog) 'nix)
@@ -6387,10 +6643,9 @@
   (when (>= (current-check-profile) 2)
     (build-scalar-registry! prog)
     (build-known-fns! prog)
-    (when (eq? (program-mode prog) 'strict)
-      (define src-table (program-src-table prog))
-      (for ([form (in-list (program-forms prog))])
-        (walk-for-provenance form src-table (program-target prog))))))
+    (define src-table (program-src-table prog))
+    (for ([form (in-list (program-forms prog))])
+      (walk-for-provenance form src-table (program-target prog)))))
 
 ;; --- free dotted-name rejection (nix target) -------------------------------
 ;; A dotted name `root.a.b` on the nix target descends into an attrset, so its
@@ -6495,7 +6750,6 @@
 ;; Program-wide entry (type-check! path — lets the diagnostic propagate).
 (define (check-nix-free-dotted! prog)
   (when (and (eq? (program-target prog) 'nix)
-             (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
     (define src-table (program-src-table prog))
     (define forms (program-forms prog))
@@ -7200,7 +7454,6 @@
 ;; defn with a pure body) is allowed.
 ;;
 ;; GATING:
-;;   * mode gate    — runs only under (define-mode strict);
 ;;   * env/feature flag — current-purity-enforcement, seeded from BEAGLE_PURITY,
 ;;     defaults to 'error. 'off explicitly disables the pass.
 ;;   * an explicit 'error is a hard diagnostic at every checking profile;
@@ -8067,8 +8320,7 @@
     [else    'off]))
 
 (define (check-purity! prog [error-handler #f])
-  (when (and (eq? (program-mode prog) 'strict)
-             (>= (current-check-profile) 1)
+  (when (and (>= (current-check-profile) 1)
              (not (eq? (current-purity-enforcement) 'off)))
     (for ([violation (in-list (purity-violations prog))])
       (define name (purity-violation-name violation))
@@ -8301,8 +8553,7 @@
     [else (go root)]))
 
 (define (check-module-interface-resolution! prog)
-  (when (and (eq? (program-mode prog) 'strict)
-             (>= (current-check-profile) 1)
+  (when (and (>= (current-check-profile) 1)
              (pair? (program-imported-module-interfaces prog)))
     (define prefix->interface (make-hash))
     (for ([import (in-list (program-imported-module-interfaces prog))])
@@ -8368,7 +8619,6 @@
   (define target (program-target prog))
   (define clj-target? (eq? target 'clj))
   (when (and (memq target '(clj js))
-             (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
     (define src-table (program-src-table prog))
     ;; alias/full-ns → ns-sym.

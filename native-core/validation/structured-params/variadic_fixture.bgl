@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.structured-params-variadic)
-(define-mode strict)
 
 (defn count-more [& (more (Vec Int))] Int
   (count more))

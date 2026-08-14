@@ -1,7 +1,6 @@
 #lang beagle/clj
 (ns native.obligations (:require [native.core :as core]))
 
-(define-mode strict)
 
 (defunion ObligationVerdictV0
   (ObligationPassV0 [(code core/ObligationCode)])

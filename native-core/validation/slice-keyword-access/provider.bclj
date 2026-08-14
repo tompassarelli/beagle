@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.keyword-provider)
-(define-mode strict)
 
 (defrecord Pair [(value String)])
 

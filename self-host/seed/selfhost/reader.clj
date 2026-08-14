@@ -66,8 +66,10 @@
 (defn hex-val [^String c]
   (cond
   (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
-  (and (>= (compare c "a") 0) (<= (compare c "f") 0)) (+ 10 (compare c "a"))
-  (and (>= (compare c "A") 0) (<= (compare c "F") 0)) (+ 10 (compare c "A"))
+  (and (>= (compare c "a") 0) (<= (compare c "f") 0)) (let [offset (compare c "a")]
+  (+ 10 offset))
+  (and (>= (compare c "A") 0) (<= (compare c "F") 0)) (let [offset (compare c "A")]
+  (+ 10 offset))
   :else 0))
 
 (defn decode-u4 [^String src i]
@@ -390,8 +392,8 @@
   (expect! "keyword :else in map" (= (rd1 "{:else true}") [MAP-TAG ":else" true]))
   (expect! "str concat call" (let [result (rd1 "(str \"Hello, \" name \"!\")")]
   (and (= (nth result 0) "str") (= (nth result 1) [STRING-TAG "Hello, "]) (= (nth result 2) "name") (= (nth result 3) [STRING-TAG "!"]))))
-  (expect! "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(define-mode strict)")]
-  (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "define-mode"))))
+  (expect! "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(def x 1)")]
+  (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "def"))))
   (expect! "read-program returns datum vector" (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)") [["ns" "app"] ["def" "x" 1]]))
   (expect! "read-program: clj target injects NO define-target (parser default)" (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
   (expect! "read-program: Core prepends (define-target core)" (= (read-program "#lang beagle\n(def x 1)") [["define-target" "core"] ["def" "x" 1]]))

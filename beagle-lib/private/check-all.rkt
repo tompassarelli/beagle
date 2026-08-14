@@ -9,6 +9,7 @@
          "query.rkt"
          "blame.rkt"
          "lint.rkt"
+         "validate-nix.rkt"
          "extensions.rkt"
          "targets.rkt")
 
@@ -468,6 +469,7 @@
   (define error-count 0)
   (define agent-errors '())
   (define lint-count 0)
+  (define parsed-program #f)
 
   (define (report-error e loc-stx)
     (set! error-count (+ error-count 1))
@@ -484,8 +486,8 @@
   (with-handlers
     ([exn:fail?
       (lambda (e) (report-error e #f))])
-    (define stxs (read-beagle-syntax path))
-    (define prog (parse-program stxs #:source-path path))
+    (define prog (parse-program/file path))
+    (set! parsed-program prog)
 
     ;; Extension/header mismatch check
     (define expected-tgt (expected-target-for-extension path))
@@ -521,7 +523,7 @@
             (check-scalar-provenance! prog)
             (run-semantic-analysis! prog #:file path)))))
 
-  (values error-count lint-count (reverse agent-errors)))
+  (values error-count lint-count (reverse agent-errors) parsed-program))
 
 (define (expand-args args)
   (sort
@@ -569,18 +571,54 @@
   (define total-errors 0)
   (define total-lint 0)
   (define all-agent-errors '())
+  (define parsed-nix-files '())
+  (define file-error-counts (make-hash))
+  (for ([file (in-list files)])
+    (hash-set! file-error-counts file 0))
 
   (parameterize ([current-check-profile profile])
     (for ([f (in-list files)])
-      (define-values (errs lints aerrs) (check-one-file f json?))
-      (cond
-        [(zero? errs)
-         (unless (or json? agent?)
-           (eprintf "  ~a ok\n" f))]
-        [else
-         (set! total-errors (+ total-errors errs))])
+      (define-values (errs lints aerrs prog) (check-one-file f json?))
+      (set! total-errors (+ total-errors errs))
+      (hash-set! file-error-counts f errs)
       (set! total-lint (+ total-lint lints))
-      (set! all-agent-errors (append all-agent-errors aerrs))))
+      (set! all-agent-errors (append all-agent-errors aerrs))
+      (when (and prog (string-suffix? f ".bnix"))
+        (set! parsed-nix-files
+              (append parsed-nix-files (list (cons f prog))))))
+
+    ;; Schema and collection checks consume the exact Programs parsed above.
+    ;; Profile 0 remains explicitly parse-only.
+    (when (and (>= profile 1) (pair? parsed-nix-files))
+      (define validation (validate-parsed-programs parsed-nix-files))
+      (define validation-errors (validation-result-errors validation))
+      (set! total-errors (+ total-errors (length validation-errors)))
+      (for ([err (in-list validation-errors)])
+        (define file (validation-error-file err))
+        (when (hash-has-key? file-error-counts file)
+          (hash-update! file-error-counts file add1 0))
+        (cond
+          [agent?
+           (set!
+            all-agent-errors
+            (append
+             all-agent-errors
+             (list
+              (agent-error
+               file
+               (validation-error-line err)
+               (validation-error-message err)))))]
+          [json?
+           (write-json (error->jsexpr err) (current-error-port))
+           (newline (current-error-port))
+           (flush-output (current-error-port))]
+          [else
+           (displayln (validation-error->string err) (current-error-port))]))))
+
+  (unless (or json? agent?)
+    (for ([file (in-list files)]
+          #:when (zero? (hash-ref file-error-counts file 0)))
+      (eprintf "  ~a ok\n" file)))
 
   (cond
     [agent?

@@ -524,7 +524,7 @@
   (define out
     (nix-check-and-emit
      (string-append
-      "(define-mode strict) (define-target nix) "
+      "(define-target nix) "
       "(defrecord Flags [(ready? Bool)]) "
       "(:ready? (->Flags true))")))
   (check-true (string-contains? out ").ready_p")))
@@ -540,7 +540,7 @@
   (define out
     (nix-check-and-emit
      (string-append
-      "(define-mode strict) (define-target nix) "
+      "(define-target nix) "
       "(defn positive? [(value Int)] Bool (> value 0)) "
       "(defrecord Foo [(a Int positive?)]) "
       "(with (->Foo 1) [:a 2])")))

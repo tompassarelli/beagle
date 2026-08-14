@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.emit-js)
-(define-mode strict)
 
 ;; Self-hosted JavaScript emitter. Port of beagle-lib/private/emit-js.rkt
 ;; (+ js-emit-utils.rkt, js-capabilities.rkt, emit-js-quote.rkt), consuming the
@@ -985,12 +984,17 @@
 
 (defn static-dotted [(s String)] String
   (let [slash (str/index-of s "/")]
-    (cond
-      (nil? slash) (mangle-str s)
-      (= (subs s 0 slash) "js") (mangle-str (subs s (+ slash 1)))
-      (and (> (count s) (+ slash 3)) (= (subs s (+ slash 1) (+ slash 3)) "->"))
-        (mangle-str (str (subs s 0 slash) "." (subs s (+ slash 3))))
-      :else (mangle-str (str/replace s "/" ".")))))
+    (if (nil? slash)
+      (mangle-str s)
+      (let [(slash-index Int) slash]
+        (cond
+          (= (subs s 0 slash-index) "js")
+            (mangle-str (subs s (+ slash-index 1)))
+          (and (> (count s) (+ slash-index 3))
+               (= (subs s (+ slash-index 1) (+ slash-index 3)) "->"))
+            (mangle-str
+              (str (subs s 0 slash-index) "." (subs s (+ slash-index 3))))
+          :else (mangle-str (str/replace s "/" ".")))))))
 
 (defn emit-ref-name [(name String)] String
   (cond
@@ -2465,7 +2469,11 @@
 ;; --- module header + program --------------------------------------------------
 
 (defn last-seg [(s String)] String
-  (let [idx (str/last-index-of s ".")] (if (nil? idx) s (subs s (+ idx 1)))))
+  (let [idx (str/last-index-of s ".")]
+    (if (nil? idx)
+      s
+      (let [(offset Int) idx]
+        (subs s (+ offset 1))))))
 
 (defn relative-js-path [(importer String) (imported String)] String
   (let [imp-parts (str/split importer #"\.")
@@ -2847,11 +2855,11 @@
             ok (and (str/includes? emitted "function guarded($beagle$param$0)")
                     (str/includes? emitted "if (!(x)($beagle$param$0))")
                     (str/includes? emitted
-                      "const $beagle$param$0$x = $beagle$param$0;")
+                      "let $beagle$param$0$x = $beagle$param$0;")
                     (str/includes? emitted "return $beagle$param$0$x;")
                     (appears-before? emitted
                       "if (!(x)($beagle$param$0))"
-                      "const $beagle$param$0$x = $beagle$param$0;"))]
+                      "let $beagle$param$0$x = $beagle$param$0;"))]
         (reset! bound-vars {})
         ok)))
   (expect! "constraint: rest and destructuring guard the raw aggregate"
@@ -2892,9 +2900,9 @@
           doseq-out (emit-doseq! {"node" "doseq" "clauses" [binding]
                                  "body" [{"node" "ref" "name" "x"}]})]
       (and (str/includes? for-out "if (!(positive_p)($beagle$item))")
-           (str/includes? for-out "const $beagle$for$0$x = $beagle$item;")
+           (str/includes? for-out "let $beagle$for$0$x = $beagle$item;")
            (str/includes? doseq-out "if (!(positive_p)($beagle$item))")
-           (str/includes? doseq-out "const $beagle$doseq$0$x = $beagle$item;"))))
+           (str/includes? doseq-out "let $beagle$doseq$0$x = $beagle$item;"))))
   (expect! "constraint: loop initial and recur values validate before assignment"
     (let [binding {"name" "n" "ann" {"kind" "prim" "name" "Int"}
                    "constraint" {"node" "ref" "name" "positive?"}
@@ -2909,7 +2917,7 @@
            (str/includes? emitted "if (!(positive_p)(_recur_0))")
            (appears-before? emitted "if (!(positive_p)(_recur_0))"
              "$beagle$loop$0 = _recur_0;"))))
-  (expect! "constraint: record constructors and checked updates use provider validator"
+  (expect! "constraint: record constructors guard fields and checked updates use provider validator"
     (let [field {"name" "id" "ann" {"kind" "prim" "name" "String"}
                  "constraint" {"node" "ref" "name" "id?"}}
           record-out (emit-record! {"node" "record" "name" "Character" "fields" [field]})]
@@ -2928,10 +2936,8 @@
         (and (str/includes? record-out
                "export function $beagle$record$Character$validate($beagle$record)")
              (str/includes? record-out "if (!(id_p)($beagle$record.id))")
-             (str/includes? record-out
-               "return $beagle$record$Character$validate(Object.freeze")
              (str/starts-with? with-out
-               "$beagle$record$Character$validate(Object.freeze")))))
+               "Object.freeze($beagle$record$Character$validate(")))))
   (expect! "constraint: predicated scalar constructor remains live and compares"
     (= (emit-defscalar {"node" "defscalar" "name" "Percent"
                         "predicates" [{"op" ">=" "value" 0}

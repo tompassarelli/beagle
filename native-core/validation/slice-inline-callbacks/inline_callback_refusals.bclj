@@ -2,7 +2,6 @@
 
 (ns native.inline-callback-refusals)
 
-(define-mode strict)
 
 (defn refuses-named-callback [(value Int)] Int
   (let [(values (Vec Int)) [value]]

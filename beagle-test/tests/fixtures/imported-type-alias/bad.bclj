@@ -1,6 +1,5 @@
 #lang beagle/clj
 
 (require provider :as p)
-(define-mode strict)
 
 (def rejected Bool (p/accepts? 1.5))

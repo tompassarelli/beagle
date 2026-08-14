@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.structured-params-affordance)
-(define-mode strict)
 
 (defrecord Request [(port Int)])
 

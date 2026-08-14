@@ -2,6 +2,5 @@
 
 (require two-hop-provider :as c)
 (require alias-owner :as t)
-(define-mode strict)
 
 (def accepted Bool (c/accepts? "ready"))

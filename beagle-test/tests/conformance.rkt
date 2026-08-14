@@ -214,12 +214,10 @@
 ;; JS target: header `#lang beagle/js`, export the fn, run via node, print via
 ;; JSON.stringify so compound structure is visible (and arrays/objects don't
 ;; collapse to `[object Object]`).
-;; strict mode is REQUIRED: per-node type capture (and thus P3 rep-selection —
-;; compound-key map -> hamtMap, value-set -> hamtSet) only runs under
-;; (define-mode strict). Without it the JS target emits native objects/Sets and
-;; the compound-key cases would silently fall back to string-coercion.
+;; Per-node type capture drives P3 representation selection: compound-key maps
+;; use hamtMap and value sets use hamtSet.
 (define (js-wrap expr ret)
-  (string-append "#lang beagle/js\n(ns conf)\n(define-mode strict)\n"
+  (string-append "#lang beagle/js\n(ns conf)\n"
                  "(js/export (defn result [] " ret " " expr "))\n"))
 
 (define (js-run out-path)

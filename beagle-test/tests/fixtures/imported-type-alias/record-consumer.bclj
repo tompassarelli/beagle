@@ -1,7 +1,6 @@
 #lang beagle/clj
 
 (require record-owner :as t)
-(define-mode strict)
 
 (defrecord Item [(value String)])
 

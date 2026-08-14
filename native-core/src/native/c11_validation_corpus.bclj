@@ -1,7 +1,6 @@
 #lang beagle/clj
 (ns native.c11-validation-corpus)
 
-(define-mode strict)
 
 (require native.core :as core)
 (require native.c11 :as c11)

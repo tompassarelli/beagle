@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.do-sequence-validation)
-(define-mode strict)
 
 (defn body-last [(x Int)] Int
   (+ x 1)

@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.codec-primitives)
-(define-mode strict)
 
 (defn encode-utf8 [(value String)] (Vec Int)
   (utf8-encode value))

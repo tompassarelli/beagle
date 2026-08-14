@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.structured-constraint)
-(define-mode strict)
 
 (defn positive? [(value Int)] Bool
   (> value 0))

@@ -49,6 +49,9 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
+             "definition-inference.rkt"
+             "effective-signature-publication.rkt"
+             "daemon-effective-signatures.rkt"
              "binding-constraint-check.rkt"     ; unary Any-free synchronous binding constraints — checker contract
              "binding-constraint-interface.rkt" ; the same contract as published module-interface schema v6
              "scratch-containment-test.rkt" ; identity-scoped direct-run scratch reaper — normal/exception/child-reap/identity-scope
@@ -112,6 +115,7 @@
              ;; CI). Requires cargo like emit-clj-behavioral requires bb.
              "nix-import-roundtrip.rkt"
              "validate-nix.rkt"
+             "check-all-nix.rkt"
              ;; Clojure — promoted Phase D (2026-05).
              ;; emit.rkt is the clj structural suite; emit-clj-behavioral.rkt
              ;; runs the emitted clj via bb (Babashka).

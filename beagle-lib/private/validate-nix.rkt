@@ -19,8 +19,7 @@
          "parse.rkt"
          "types.rkt"
          "nixos-schema.rkt"
-         "diagnostic-kind.rkt"
-         (prefix-in nix: beagle/nix/lang/reader-impl))
+         "diagnostic-kind.rkt")
 
 ;; ============================================================================
 ;; Error collection
@@ -28,7 +27,17 @@
 
 (struct validation-error (file line col message kind path) #:transparent)
 
-(define (fmt-error err)
+;; Pure validation output. Parsing, reporting, mutation, and process exit stay
+;; at adapters; the checker can therefore validate the exact Program it has
+;; already parsed.
+(struct validation-result
+  (errors schema hm-schema darwin-schema file-keys myconfig-declared file-count)
+  #:transparent)
+
+(define (validation-result-error-count result)
+  (length (validation-result-errors result)))
+
+(define (validation-error->string err)
   (define f (validation-error-file err))
   (define l (validation-error-line err))
   (define c (validation-error-col err))
@@ -44,7 +53,7 @@
 (define (error->jsexpr err)
   (define kind (validation-error-kind err))
   (hasheq 'schemaVersion 1
-          'tool "beagle-validate"
+          'tool "beagle"
           'file (let ([f (validation-error-file err)])
                   (cond [(path? f) (path->string f)]
                         [else f]))
@@ -350,7 +359,16 @@
     (cond
       [(map-form? e)       (walk-map-pairs (map-form-pairs e) scope)]
       [(nix-fn-set? e)
-       (define new-scope (scope-merge scope (fn-set-scope (nix-fn-set-formals e))))
+       (define formal-scope
+         (scope-merge scope (fn-set-scope (nix-fn-set-formals e))))
+       (define new-scope
+         (if (nix-fn-set-at-name e)
+             (hash-set formal-scope
+                       (symbol->string (nix-fn-set-at-name e)) #t)
+             formal-scope))
+       (for ([formal (in-list (nix-fn-set-formals e))]
+             #:when (nix-fn-set-formal-default formal))
+         (walk (nix-fn-set-formal-default formal) new-scope))
        (walk (nix-fn-set-body e) new-scope)]
       [(nix-rec-attrs? e)  (walk-map-pairs (nix-rec-attrs-pairs e) scope)]
       [(def-form? e)       (walk (def-form-value e) scope)]
@@ -967,192 +985,222 @@
       (eprintf "  fixed: ~a\n" file))))
 
 ;; ============================================================================
-;; Top-level entry: validate one or more files
+;; Parsed/result API
 ;; ============================================================================
 
-(define (validate-files files
-                        #:auto-fix? [auto-fix? #f]
-                        #:verbose?  [verbose?  #f]
-                        #:json?     [json?     #f])
-  (when (null? files)
-    (eprintf "beagle-validate: no .bnix files to validate\n")
-    (exit 2))
+(define (empty-validation-result errors file-count)
+  (validation-result errors #f #f #f '() (set) file-count))
 
-  ;; Find schema from first file
-  (define schema-path (find-schema-json (car files)))
-  (unless schema-path
-    (eprintf "beagle-validate: cannot find .beagle-cache/schema.json\n")
-    (eprintf "  searched upward from: ~a\n" (car files))
-    (eprintf "  run `beagle-extract-schema` or place schema.json in .beagle-cache/\n")
-    (exit 2))
+(define (validate-parsed-programs file-programs)
+  (define files (map car file-programs))
+  (cond
+    [(null? files)
+     (empty-validation-result
+      (list (validation-error "<input>" #f #f
+                              "no .bnix files to validate"
+                              'no-input #f))
+      0)]
+    [else
+     (define schema-path (find-schema-json (car files)))
+     (cond
+       [(not schema-path)
+        (empty-validation-result
+         (list
+          (validation-error
+           (car files) #f #f
+           (format
+            "cannot find .beagle-cache/schema.json; searched upward from ~a"
+            (car files))
+           'missing-schema #f))
+         (length files))]
+       [else
+        (with-handlers
+          ([exn:fail?
+            (lambda (e)
+              (empty-validation-result
+               (list
+                (validation-error
+                 schema-path #f #f
+                 (format "cannot load Nix option schema: ~a" (exn-message e))
+                 'schema-load #f))
+               (length files)))])
+          (define schema (load-nixos-schema schema-path))
+          (define hm-schema-path (find-hm-schema-json (car files)))
+          (define hm-schema
+            (and hm-schema-path (load-nixos-schema hm-schema-path)))
+          (define darwin-schema-path (find-darwin-schema-json (car files)))
+          (define darwin-schema
+            (and darwin-schema-path (load-nixos-schema darwin-schema-path)))
+          (define loaded-cfg (load-validator-config schema-path))
+          (define cfg
+            (cond
+              [(and (null? (validator-config-home-manager-roots loaded-cfg))
+                    hm-schema)
+               (struct-copy
+                validator-config loaded-cfg
+                [home-manager-roots (discover-hm-roots hm-schema)])]
+              [else loaded-cfg]))
+          (define all-errors '())
+          (define all-file-keys '())
 
-  (define schema (load-nixos-schema schema-path))
-  (define schema-count (hash-count (nixos-schema-table schema)))
-  (when verbose?
-    (eprintf "beagle-validate: loaded schema from ~a (~a options)\n"
-             schema-path schema-count))
+          (parameterize ([current-validator-config cfg])
+            (for ([file-program (in-list file-programs)])
+              (define file (car file-program))
+              (define prog (cdr file-program))
+              (cond
+                [(not (eq? (program-target prog) 'nix))
+                 (set!
+                  all-errors
+                  (append
+                   all-errors
+                   (list
+                    (validation-error
+                     file #f #f
+                     (format "expected nix target, found ~a" (program-target prog))
+                     'target-mismatch #f))))]
+                [else
+                 (define-values (keys lint-warnings)
+                   (collect-program-keys
+                    prog
+                    #:schemas
+                    (filter values (list schema hm-schema darwin-schema))))
+                 (set! all-file-keys
+                       (append all-file-keys (list (cons file keys))))
+                 (set!
+                  all-errors
+                  (append
+                   all-errors
+                   (for/list ([warning (in-list lint-warnings)])
+                     (validation-error
+                      file #f #f warning 'string-key-lint #f))))
+                 (define file-string
+                   (if (path? file) (path->string file) file))
+                 (define flake?
+                   (regexp-match? #rx"/flake\\.bnix$|^flake\\.bnix$"
+                                  file-string))
+                 (set!
+                  all-errors
+                  (append
+                   all-errors
+                   (validate-file-keys
+                    file keys schema
+                    #:hm-schema hm-schema
+                    #:alternate-schema (and flake? darwin-schema))))
+                 (unless flake?
+                   (set! all-errors
+                         (append all-errors (detect-duplicates file keys))))
+                 (set! all-errors
+                       (append all-errors
+                               (detect-missing-defaults file keys)))]))
 
-  (define hm-schema-path (find-hm-schema-json (car files)))
-  (define hm-schema
-    (and hm-schema-path (load-nixos-schema hm-schema-path)))
-  (define hm-count
-    (if hm-schema (hash-count (nixos-schema-table hm-schema)) 0))
-  (when (and verbose? hm-schema)
-    (eprintf "beagle-validate: loaded HM schema from ~a (~a options)\n"
-             hm-schema-path hm-count))
+            ;; These collection checks must run once over the complete parsed
+            ;; input, never once per file.
+            (define myconfig-declared
+              (collect-myconfig-declarations all-file-keys))
+            (unless (set-empty? myconfig-declared)
+              (set!
+               all-errors
+               (append
+                all-errors
+                (detect-myconfig-errors all-file-keys myconfig-declared))))
+            (set!
+             all-errors
+             (append all-errors
+                     (detect-cross-file-conflicts all-file-keys schema)))
+            (validation-result
+             all-errors schema hm-schema darwin-schema all-file-keys
+             myconfig-declared (length files))))])]))
 
-  (define darwin-schema-path (find-darwin-schema-json (car files)))
-  (define darwin-schema
-    (and darwin-schema-path (load-nixos-schema darwin-schema-path)))
-  (define darwin-count
-    (if darwin-schema (hash-count (nixos-schema-table darwin-schema)) 0))
-  (when (and verbose? darwin-schema)
-    (eprintf "beagle-validate: loaded Darwin schema from ~a (~a options)\n"
-             darwin-schema-path darwin-count))
-
-  ;; Load validator config alongside schema; auto-discover HM roots if absent.
-  (define loaded-cfg (load-validator-config schema-path))
-  (define cfg
-    (cond
-      [(and (null? (validator-config-home-manager-roots loaded-cfg)) hm-schema)
-       (struct-copy validator-config loaded-cfg
-                    [home-manager-roots (discover-hm-roots hm-schema)])]
-      [else loaded-cfg]))
-  (current-validator-config cfg)
-
-  (define all-errors '())
-  (define all-file-keys '())
-
+(define (validate-files files)
+  (define parsed '())
+  (define parse-errors '())
   (for ([file (in-list files)])
     (with-handlers
       ([exn:fail?
         (lambda (e)
-          (set! all-errors
-                (cons (validation-error file #f #f
-                        (format "parse error: ~a" (exn-message e))
-                        'parse-error #f)
-                      all-errors)))])
-      ;; Use the nix-aware reader so ~"..." / ~''...'' macros expand.
-      ;; We strip the #lang line and inject (define-target nix) so the
-      ;; parser sees a nix-target program regardless of #lang quoting.
-      (define src-name (if (path? file) (path->string file) file))
-      (define stxs
-        (call-with-input-file file
-          (lambda (in)
-            (read-line in) ; skip #lang
-            (let loop ([acc (list (datum->syntax #f '(define-target nix)))])
-              (define d (nix:beagle-nix-read-syntax src-name in))
-              (if (eof-object? d) (reverse acc) (loop (cons d acc)))))))
-      (define prog (parse-program stxs #:source-path file))
+          (set!
+           parse-errors
+           (append
+            parse-errors
+            (list
+             (validation-error
+              file #f #f (format "parse error: ~a" (exn-message e))
+              'parse-error #f)))))])
+      (set! parsed
+            (append parsed (list (cons file (parse-program/file file)))))))
+  (define result
+    (if (null? parsed)
+        (if (null? files)
+            (validate-parsed-programs '())
+            (empty-validation-result '() (length files)))
+        (validate-parsed-programs parsed)))
+  (struct-copy validation-result result
+               [errors (append parse-errors (validation-result-errors result))]
+               [file-count (length files)]))
 
-      (unless (eq? (program-target prog) 'nix)
-        (eprintf "  skipping ~a (target: ~a, expected nix)\n"
-                 file (program-target prog)))
-
-      (when (eq? (program-target prog) 'nix)
-        (define-values (keys lint-warnings)
-          (collect-program-keys
-           prog
-           #:schemas (filter values (list schema hm-schema darwin-schema))))
-        (set! all-file-keys (cons (cons file keys) all-file-keys))
-
-        ;; Lint warnings from scope-aware string key analysis
-        (for ([w (in-list lint-warnings)])
-          (set! all-errors
-                (cons (validation-error file #f #f w 'string-key-lint #f)
-                      all-errors)))
-
-        ;; Schema validation
-        (define is-flake?
-          (let ([fp (if (path? file) (path->string file) file)])
-            (regexp-match? #rx"/flake\\.bnix$|^flake\\.bnix$" fp)))
-        (define schema-errors
-          (validate-file-keys
-           file keys schema
-           #:hm-schema hm-schema
-           #:alternate-schema (and is-flake? darwin-schema)))
-        (set! all-errors (append all-errors schema-errors))
-
-        ;; Duplicate detection
-        ;; flake.bnix routinely defines the same nixos-option in multiple
-        ;; sub-system builders (mkSystem vs mkDarwinSystem) — they're in
-        ;; separate module instantiations, not actual duplicates. Skip.
-        (unless is-flake?
-          (define dup-errors (detect-duplicates file keys))
-          (set! all-errors (append all-errors dup-errors)))
-
-        ;; Missing default detection
-        (define default-errors (detect-missing-defaults file keys))
-        (set! all-errors (append all-errors default-errors)))))
-
-  ;; myConfig introspective validation
-  (define myconfig-declared (collect-myconfig-declarations all-file-keys))
-  (define myconfig-count (set-count myconfig-declared))
-  (unless (set-empty? myconfig-declared)
-    (define myconfig-errors (detect-myconfig-errors all-file-keys myconfig-declared))
-    (set! all-errors (append all-errors myconfig-errors))
-    (when verbose?
-      (eprintf "beagle-validate: introspected ~a myConfig declarations\n"
-               myconfig-count)))
-
-  ;; Cross-file conflict detection
-  (define conflict-errors (detect-cross-file-conflicts all-file-keys schema))
-  (set! all-errors (append all-errors conflict-errors))
-
-  ;; Report errors — either human-readable (default) or jsonl (when
-  ;; --json was passed). The jsonl path stamps every record with a
-  ;; cause-class so beagle-rejection-stats can bucket them.
+(define (report-validation-result result
+                                  #:verbose? [verbose? #f]
+                                  #:json? [json? #f])
+  (define errors (validation-result-errors result))
   (cond
     [json?
-     (for ([err (in-list all-errors)])
+     (for ([err (in-list errors)])
        (write-json (error->jsexpr err) (current-output-port))
        (newline (current-output-port)))
      (flush-output (current-output-port))]
     [else
-     (for ([err (in-list all-errors)])
-       (displayln (fmt-error err) (current-error-port)))])
+     (for ([err (in-list errors)])
+       (displayln (validation-error->string err) (current-error-port)))])
+  (when verbose?
+    (define schema (validation-result-schema result))
+    (define hm-schema (validation-result-hm-schema result))
+    (define darwin-schema (validation-result-darwin-schema result))
+    (when schema
+      (eprintf "beagle-validate: loaded ~a NixOS options\n"
+               (hash-count (nixos-schema-table schema))))
+    (when hm-schema
+      (eprintf "beagle-validate: loaded ~a Home Manager options\n"
+               (hash-count (nixos-schema-table hm-schema))))
+    (when darwin-schema
+      (eprintf "beagle-validate: loaded ~a Darwin options\n"
+               (hash-count (nixos-schema-table darwin-schema)))))
+  (validation-result-error-count result))
 
-  ;; Auto-fix if requested
-  (when (and auto-fix? (pair? all-errors))
-    (define fixes (compute-auto-fixes all-errors schema
-                                      #:hm-schema hm-schema
-                                      #:myconfig-declared myconfig-declared))
-    (cond
-      [(null? fixes)
-       (eprintf "\nbeagle-validate: no auto-fixable errors found\n")]
-      [else
-       (eprintf "\nbeagle-validate: applying ~a auto-fix(es)...\n" (length fixes))
-       (for ([fix (in-list fixes)])
-         (eprintf "  ~a:~a: ~a -> ~a\n"
-                  (car fix)
-                  (or (cadddr fix) "?")
-                  (cadr fix)
-                  (caddr fix)))
-       (apply-auto-fixes! fixes)]))
-
-  ;; Summary — single-line by default, expanded under --verbose
-  (define error-count (length all-errors))
-  (define file-count (length files))
+(define (apply-validation-result-fixes! result)
+  (define schema (validation-result-schema result))
+  (define errors (validation-result-errors result))
+  (define fixes
+    (if schema
+        (compute-auto-fixes
+         errors schema
+         #:hm-schema (validation-result-hm-schema result)
+         #:myconfig-declared (validation-result-myconfig-declared result))
+        '()))
   (cond
-    [verbose?
-     (eprintf "\n~a file(s) checked, ~a error(s)\n" file-count error-count)]
+    [(null? fixes)
+     (eprintf "beagle-validate: no auto-fixable errors found\n")]
     [else
-     (eprintf "beagle-validate: ~a files, ~a errors  (~a NixOS~a~a options)\n"
-              file-count error-count
-              schema-count
-              (if (positive? hm-count) (format " + ~a HM" hm-count) "")
-              (if (positive? myconfig-count) (format " + ~a myConfig" myconfig-count) ""))])
-
-  error-count)
+     (eprintf "beagle-validate: applying ~a auto-fix(es)...\n" (length fixes))
+     (for ([fix (in-list fixes)])
+       (eprintf "  ~a:~a: ~a -> ~a\n"
+                (car fix) (or (cadddr fix) "?") (cadr fix) (caddr fix)))
+     (apply-auto-fixes! fixes)])
+  (length fixes))
 
 (provide validate-files
+         validate-parsed-programs
+         report-validation-result
+         apply-validation-result-fixes!
+         validation-result-error-count
+         validation-error->string
          validate-file-keys
          collect-program-keys
          collect-myconfig-declarations
          detect-myconfig-errors
          error->jsexpr
          (struct-out found-key)
-         (struct-out validation-error))
+         (struct-out validation-error)
+         (struct-out validation-result))
 
 ;; When run as a script
 (module+ main
@@ -1171,5 +1219,8 @@
      #:args files
      files))
   (define error-count
-    (validate-files files #:auto-fix? auto-fix? #:verbose? verbose? #:json? json?))
+    (let ([result (validate-files files)])
+      (report-validation-result result #:verbose? verbose? #:json? json?)
+      (when auto-fix? (apply-validation-result-fixes! result))
+      (validation-result-error-count result)))
   (exit (if (zero? error-count) 0 1)))

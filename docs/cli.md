@@ -25,6 +25,10 @@ beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
 beagle doctor [--deep]      # is the authoring loop online and working?
 ```
 
+Beagle source is strictly checked. `--profile 0` stops after parsing for
+diagnostic workflows; it does not change source semantics or produce a checked
+program.
+
 ## Query — the compiler is the source of truth
 
 ```sh

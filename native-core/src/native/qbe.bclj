@@ -5,7 +5,6 @@
   (:require [native.core :as core]
             [native.simd :as simd]))
 
-(define-mode strict)
 
 ;; Shim ABI is shared verbatim with the C materializer: same symbol names,
 ;; same trap codes (native-core/shim/native_shim.h).

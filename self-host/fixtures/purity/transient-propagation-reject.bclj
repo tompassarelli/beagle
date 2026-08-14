@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-propagation-reject)
-(define-mode strict)
 
 (defn caller [(xs Any)] Any
   (wrapper xs))

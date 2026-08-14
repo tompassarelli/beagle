@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.multi-arity-reject)
-(define-mode strict)
 
 (defn write
   ([(value Any)] Any value)

@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.types)
-(define-mode strict)
 
 ;; Self-hosted type system — matches beagle-lib/private/types.rkt.
 ;; Type AST constructors, parser, compatibility checker, formatter.
@@ -27,6 +26,10 @@
     (loop [(i Int) 0]
       (if (>= i n) -1
         (if (= (nth xs i) v) i (recur (+ i 1)))))))
+
+(defn str-index-of [(s String) (sub String)] Int
+  (let [result (str/index-of s sub)]
+    (if (nil? result) -1 result)))
 
 ;; driftlab: string-keyed object mutation — route through an Any-typed helper
 ;; (module-level atom + swap! replaces JS `aset`/mutable-object-field-set).
@@ -157,8 +160,8 @@
 ;; --- unqualify-type-name -----------------------------------------------------
 
 (defn unqualify-name [(name String)] String
-  (let [idx (str/index-of name "/")]
-    (if (nil? idx)
+  (let [(idx Int) (str-index-of name "/")]
+    (if (= idx -1)
       name
       (substring2 name (+ idx 1) (count name)))))
 
@@ -639,17 +642,17 @@
     (= (parse-type! ["Fn" ["#%brackets" "Int" "&" "String"] "Bool"])
        (make-fn [(make-prim "Int")] (make-prim "String") (make-prim "Bool"))))
   (expect! "pt: retired arrow fn rejects"
-    (let [before (count (type-parse-errors))
+    (let [(before Int) (count (type-parse-errors))
           invalid (parse-type! ["#%brackets" "Int" "->" "String"])]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: malformed Fn rejects"
-    (let [before (count (type-parse-errors))
+    (let [(before Int) (count (type-parse-errors))
           invalid (parse-type! ["Fn" "Int" "String"])]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: bare Fn rejects"
-    (let [before (count (type-parse-errors))
+    (let [(before Int) (count (type-parse-errors))
           invalid (parse-type! "Fn")]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))

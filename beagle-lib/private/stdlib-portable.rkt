@@ -82,13 +82,14 @@
    'float-from-bits (fn-of '(Int) 'Float)
    ;; The epoch is unspecified; readings support elapsed time, never wall time.
    'monotonic-nanoseconds (fn-of '() 'Int)
-   ;; --- math (variadic on Int; Clojure's are polymorphic, v0 narrows) -----
+   ;; --- math --------------------------------------------------------------
    ;; Math operators are polymorphic in real Clojure (Long/Double/Ratio).
-   ;; v0 types them as variadic Any to avoid spurious type errors on FP work.
-   '+          (fn-of '() 'Any #:rest 'Any)
-   '-          (fn-of '(Any) 'Any #:rest 'Any)
-   '*          (fn-of '() 'Any #:rest 'Any)
-   '/          (fn-of '(Any) 'Any #:rest 'Any)
+   ;; Their operands are always numeric. The checker refines the conservative
+   ;; return from the concrete Int/Float/Number operands at each call site.
+   '+          (fn-of '() 'Any #:rest 'Number)
+   '-          (fn-of '(Number) 'Any #:rest 'Number)
+   '*          (fn-of '() 'Any #:rest 'Number)
+   '/          (fn-of '(Number) 'Any #:rest 'Number)
    'mod        (fn-of '(Int Int) 'Int)
    'quot       (fn-of '(Int Int) 'Int)
    'rem        (fn-of '(Int Int) 'Int)

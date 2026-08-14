@@ -2,7 +2,6 @@
 
 (ns native.inline-callbacks)
 
-(define-mode strict)
 
 (defrecord OptionalBoolCarrier [(value (U Bool Nil))])
 (defrecord CallbackBox [(value Int)])

@@ -52,7 +52,8 @@
 
 (defn- pos-loc [start end]
   (let [base {"pos" (+ start 1) "relative" true}]
-  (if (some? end) (assoc base "span" (- end start)) base)))
+  (if (some? end) (let [end-position end]
+  (assoc base "span" (- end-position start))) base)))
 
 (defn- make-node [^String kind value loc children]
   {"kind" kind "value" value "loc" loc "children" children})
@@ -87,8 +88,10 @@
   (let [loc (get node "loc")
    pos (get loc "pos")
    span (get loc "span")
-   rel (if (some? pos) (- pos (+ base-codepoint 1)) 0)
-   next-loc (if (some? span) (pos-loc rel (+ rel span)) (pos-loc rel nil))
+   rel (if (some? pos) (let [position pos]
+  (- position (+ base-codepoint 1))) 0)
+   next-loc (if (some? span) (let [span-width span]
+  (pos-loc rel (+ rel span-width))) (pos-loc rel nil))
    children (get node "children")]
   (assoc node "loc" next-loc "children" (if (some? children) (mapv (fn [child] (relative-loc child base-codepoint)) children) nil))))
 
@@ -166,7 +169,8 @@
 (defn- js-node [^String src start]
   (let [inner-r (scan-datum src (+ start 3))
    child0 (dissoc inner-r "next")
-   child-pos (- (get (get child0 "loc") "pos") 1)
+   child-start (get (get child0 "loc") "pos")
+   child-pos (- child-start 1)
    child-loc (source-loc src child-pos nil)
    child (replace-loc child0 child-loc)
    loc (source-loc src start nil)]
@@ -252,7 +256,9 @@
 (defn- shift-node-location [node shift]
   (let [loc (get node "loc")
    children (get node "children")
-   next-loc (if (or (nil? loc) (= true (get loc "relative"))) loc (assoc loc "line" (+ (get loc "line") 1) "pos" (+ (get loc "pos") shift)))]
+   next-loc (if (or (nil? loc) (= true (get loc "relative"))) loc (let [line (get loc "line")
+   position (get loc "pos")]
+  (assoc loc "line" (+ line 1) "pos" (+ position shift))))]
   (assoc node "loc" next-loc "children" (if (some? children) (mapv (fn [child] (shift-node-location child shift)) children) nil))))
 
 (defn- located-program [^String src]
@@ -341,7 +347,9 @@
    source-end (get loc "source-end")]
   (recur (+ i 1) (cond
   (and (some? source-start) (some? source-end)) (conj out [i source-start source-end])
-  (and (some? pos) (some? span)) (conj out [i (- pos 1 shift) (+ (- pos 1 shift) span)])
+  (and (some? pos) (some? span)) (let [position pos
+   span-width span]
+  (conj out [i (- position 1 shift) (+ (- position 1 shift) span-width)]))
   :else out))))))
 
 (defn- ^Boolean in-span? [off spans]
@@ -366,7 +374,8 @@
   (>= j (count text)) nil
   (and (= (rd/char-at text j) ";") (not (in-span? (+ start j) spans))) j
   :else (recur (+ j 1))))]
-  (if (some? hit) (conj out [(+ start hit) (str/trimr (subs text hit))]) out))) [] (source-lines src)))
+  (if (some? hit) (let [hit-offset hit]
+  (conj out [(+ start hit-offset) (str/trimr (subs text hit-offset))])) out))) [] (source-lines src)))
 
 (defn- line-number [^String src off]
   (nth (line-col src off) 0))
@@ -389,7 +398,8 @@
    before (nearest-preceding off spans)
    after (nearest-following off spans)]
   (cond
-  (and (some? before) (= (line-number src (- (nth before 2) 1)) (line-number src off))) ["trailing" (nth before 0) text]
+  (and (some? before) (let [before-end (nth before 2)]
+  (= (line-number src (- before-end 1)) (line-number src off)))) ["trailing" (nth before 0) text]
   (some? after) ["leading" (nth after 0) text]
   :else ["trailing" "file" text]))) (line-comments src spans)))
 
@@ -739,8 +749,10 @@
   (cond
   (or (= head "defn") (= head "defn-")) (cond
   (nil? vector-index) (if (and (>= n 2) (arity-clause? (nth after 1))) 1 (min 1 n))
-  :else (min (+ vector-index 2) n))
-  (= head "defmacro") (if (some? vector-index) (+ vector-index 1) (min 1 n))
+  :else (let [index vector-index]
+  (min (+ index 2) n)))
+  (= head "defmacro") (if (some? vector-index) (let [index vector-index]
+  (+ index 1)) (min 1 n))
   (or (= head "def") (= head "defonce")) (cond
   (< n 1) n
   (>= n 3) 2
@@ -748,8 +760,10 @@
   (= head "fn") (cond
   (and (> n 0) (arity-clause? (nth after 0))) 0
   (and (>= n 2) (string? (nth after 0)) (arity-clause? (nth after 1))) 1
-  :else (if (some? vector-index) (min (+ vector-index 2) n) (min 1 n)))
-  (or (= head "defrecord") (= head "deftype")) (if (some? vector-index) (+ vector-index 1) (min 1 n))
+  :else (if (some? vector-index) (let [index vector-index]
+  (min (+ index 2) n)) (min 1 n)))
+  (or (= head "defrecord") (= head "deftype")) (if (some? vector-index) (let [index vector-index]
+  (+ index 1)) (min 1 n))
   (some? (get #{"let" "loop" "letfn" "binding" "for" "doseq" "with-open" "with-local-vars" "when-let" "if-let" "when-some" "if-some"} head)) (min 1 n)
   (= head "defunion") (if (and (> n 0) (= (nth after 0) ":throwable")) (min 2 n) (min 1 n))
   (some? (get #{"if" "when" "when-not" "when-first" "while" "if-not" "match" "doto" "defprotocol" "extend-type"} head)) (min 1 n)
@@ -771,7 +785,8 @@
 
 (defn- current-col [^String text initial]
   (let [idx (str/last-index-of text "\n")]
-  (if (nil? idx) (+ initial (count text)) (- (count text) (+ idx 1)))))
+  (if (nil? idx) (+ initial (count text)) (let [line-break idx]
+  (- (count text) (+ line-break 1))))))
 
 (declare datum-pretty-context)
 

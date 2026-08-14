@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.ast)
-(define-mode strict)
 
 ;; Self-hosted AST definitions — matches beagle-lib/private/ast.rkt.
 ;; AST node constructors, tag utilities, symbol predicates.
@@ -350,19 +349,17 @@
 
 ;; --- program -----------------------------------------------------------------
 
-(def DEFAULT-MODE String "strict")
 (def DEFAULT-TARGET String "clj")
 (def DEFAULT-NAMESPACE String "beagle.user")
 
 (defn make-program
-  [(mode String)
-   (namespace String)
+  [(namespace String)
    (target String)
    (forms (Vec Any))
    (externs Any)
    (requires (Vec Any))]
   Any
-  {"mode" mode "namespace" namespace "target" target
+  {"namespace" namespace "target" target
    "forms" forms "externs" externs "requires" requires})
 
 ;; --- identifier validation ---------------------------------------------------
@@ -530,7 +527,6 @@
 
   ;; --- constants ---
 
-  (expect! "DEFAULT-MODE" (= DEFAULT-MODE "strict"))
   (expect! "DEFAULT-TARGET" (= DEFAULT-TARGET "clj"))
   (expect! "DEFAULT-NAMESPACE" (= DEFAULT-NAMESPACE "beagle.user"))
 

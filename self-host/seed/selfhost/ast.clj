@@ -298,14 +298,12 @@
 (defn make-nix-impl [lhs rhs]
   {"node" "nix-impl" "lhs" lhs "rhs" rhs})
 
-(def ^String DEFAULT-MODE "strict")
-
 (def ^String DEFAULT-TARGET "clj")
 
 (def ^String DEFAULT-NAMESPACE "beagle.user")
 
-(defn make-program [^String mode ^String namespace ^String target forms externs requires]
-  {"mode" mode "namespace" namespace "target" target "forms" forms "externs" externs "requires" requires})
+(defn make-program [^String namespace ^String target forms externs requires]
+  {"namespace" namespace "target" target "forms" forms "externs" externs "requires" requires})
 
 (defn ^Boolean validate-identifier [^String sym]
   (let [bad-chars ";'\"` (){}[],"]
@@ -406,7 +404,6 @@
   (let [node (make-nix-fn-set [{"name" "x" "default" nil}] true "args" (make-ref "x"))]
   (expect! "nix-fn-set" (= (get node "node") "nix-fn-set"))
   (expect! "nix-fn-set rest" (= (get node "rest") true)))
-  (expect! "DEFAULT-MODE" (= DEFAULT-MODE "strict"))
   (expect! "DEFAULT-TARGET" (= DEFAULT-TARGET "clj"))
   (expect! "DEFAULT-NAMESPACE" (= DEFAULT-NAMESPACE "beagle.user"))
   (doseq [f (deref failures)]

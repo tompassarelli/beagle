@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.bitwise-roots)
-(define-mode strict)
 
 (defn codec-word
   [(value Int)

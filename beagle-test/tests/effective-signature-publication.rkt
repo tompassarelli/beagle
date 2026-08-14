@@ -44,7 +44,6 @@
        (parsed
         (string-append
          "(ns signature.unchecked)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn identity [value] Int value)\n")))
      (check-exn
@@ -56,24 +55,11 @@
        (parsed
         (string-append
          "(ns signature.bootstrap)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn identity [value] Int value)\n")))
      (define interface
        (program->module-interface prog #:provisional? #t))
-     (check-equal? (module-interface-schema-version interface) 7)
-     (check-equal? (type->string (binding-type interface 'identity))
-                   "(Fn [Any] Int)"))
-
-   (test-case "dynamic publication remains authored and non-inferred"
-     (define interface
-       (program->module-interface
-        (parsed
-         (string-append
-          "(ns signature.dynamic)\n"
-          "(define-mode dynamic)\n"
-          "(define-target clj)\n"
-          "(defn identity [value] Int value)\n"))))
+     (check-equal? (module-interface-schema-version interface) 8)
      (check-equal? (type->string (binding-type interface 'identity))
                    "(Fn [Any] Int)"))
 
@@ -83,17 +69,30 @@
         (checked
          (string-append
           "(ns signature.inferred)\n"
-          "(define-mode strict)\n"
           "(define-target clj)\n"
           "(defn identity [value] Int value)\n"
           "(defn choose ([x] Int x) ([x y] String y))\n"))))
      (define identity (binding-type interface 'identity))
      (define choose (binding-type interface 'choose))
-     (check-equal? INTERFACE-SCHEMA-VERSION 7)
+     (check-equal? INTERFACE-SCHEMA-VERSION 8)
      (check-equal? (type->string identity) "(Fn [Int] Int)")
      (check-true (inferred-type-poly? choose))
      (check-equal? (free-type-metas identity) '())
      (check-equal? (free-type-metas choose) '()))
+
+   (test-case "checked value definitions publish inferred and authored boundaries"
+     (define interface
+       (program->module-interface
+        (checked
+         (string-append
+          "(ns signature.values)\n"
+          "(define-target clj)\n"
+          "(def answer 42)\n"
+          "(defonce label \"ready\")\n"
+          "(def boundary Any 42)\n"))))
+     (check-equal? (type->string (binding-type interface 'answer)) "Int")
+     (check-equal? (type->string (binding-type interface 'label)) "String")
+     (check-equal? (type->string (binding-type interface 'boundary)) "Any"))
 
    (test-case "published signatures qualify provider-local nominal types"
      (define interface
@@ -101,7 +100,6 @@
         (checked
          (string-append
           "(ns signature.provider)\n"
-          "(define-mode strict)\n"
           "(define-target clj)\n"
           "(defrecord Point [(x Float)])\n"
           "(defn echo [point] Point point)\n"))))
@@ -115,7 +113,6 @@
        (parsed
         (string-append
          "(ns signature.missing)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn identity [value] Int value)\n")))
      (register-program-effective-definition-types! missing (hasheq))
@@ -126,7 +123,6 @@
        (parsed
         (string-append
          "(ns signature.unresolved)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn identity [value] Int value)\n")))
      (register-program-effective-definition-types!

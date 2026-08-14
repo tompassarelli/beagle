@@ -2,7 +2,6 @@
 ;; The four loop/recur shapes the Beagle checker accepts and the native lowering
 ;; must refuse by name; each function carries exactly one of them.
 (ns native.loops-refusals)
-(define-mode strict)
 
 (defn non-tail [(n Int)] Int
   (loop [(a Int) 0]

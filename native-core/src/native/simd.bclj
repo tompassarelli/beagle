@@ -5,7 +5,6 @@
   (:require [native.core :as core]
             [native.stages :as stages]))
 
-(define-mode strict)
 
 (defunion SimdPackInstructionV0
   (SimdLoadF64V0 [(result-id core/NativeId) (buffer-id core/NativeId)])

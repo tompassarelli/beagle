@@ -1,6 +1,5 @@
 #lang beagle/js
 (ns app.main)
-(define-mode strict)
 
 (defrecord Product
   [(name String)

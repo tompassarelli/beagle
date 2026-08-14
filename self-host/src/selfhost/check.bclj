@@ -5,8 +5,6 @@
   check-program! (Fn [Any] Any) returning a vector of error strings (empty =
   accepted). Registry state and diagnostics live in the module-level STATE atom;
   mutating functions carry a `!`.")
-(define-mode strict)
-
 (require selfhost.rt)
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 (declare-extern selfhost.rt/getenv (Fn [String] Any))
@@ -87,6 +85,8 @@
          "enum-types" {}
          "parametric-unions" {}
          "parametric-member-union" {}
+         "definition-inference-counter" 0
+         "definition-inference-bindings" {}
          "diagnostics" []}))
 
 ;; --- type predicates ---------------------------------------------------------
@@ -138,6 +138,133 @@
           (and (not (nil? (get t "bounds")))
                (boolean (some type-contains-any? (vals (get t "bounds"))))))
     :else false))
+
+;; Definition inference variables are private checker terms. They survive only
+;; until the program-scoped definition pass either solves them or generalizes
+;; them into ordinary forall variables.
+(def INFERENCE-VAR-PREFIX String "#%definition/")
+
+(defn inference-var? [(t Any)] Bool
+  (and (var-type? t)
+       (str/starts-with? (get t "name") INFERENCE-VAR-PREFIX)))
+
+(defn fresh-inference-var! [] Any
+  (let [(counter Int)
+        (get (deref STATE) "definition-inference-counter" 0)]
+    (swap! STATE assoc "definition-inference-counter" (+ counter 1))
+    (make-var (str INFERENCE-VAR-PREFIX counter))))
+
+(defn inference-binding [(t Any)] Any
+  (if (inference-var? t)
+    (get-in (deref STATE) ["definition-inference-bindings" (get t "name")])
+    nil))
+
+(defn inference-var-occurs? [(name String) (t Any)] Bool
+  (cond
+    (nil? t) false
+    (inference-var? t)
+      (let [bound (inference-binding t)]
+        (if (nil? bound)
+          (= name (get t "name"))
+          (inference-var-occurs? name bound)))
+    (fn-type? t)
+      (or (boolean (some (fn [(p Any)] Bool
+                           (inference-var-occurs? name p))
+                     (get t "params")))
+          (and (not (nil? (get t "rest")))
+               (inference-var-occurs? name (get t "rest")))
+          (inference-var-occurs? name (get t "ret")))
+    (app-type? t)
+      (boolean (some (fn [(a Any)] Bool (inference-var-occurs? name a))
+                 (get t "args")))
+    (union-type? t)
+      (boolean (some (fn [(m Any)] Bool (inference-var-occurs? name m))
+                 (get t "members")))
+    :else false))
+
+(defn prune-inference-type [(t Any)] Any
+  (cond
+    (nil? t) nil
+    (inference-var? t)
+      (let [bound (inference-binding t)]
+        (if (nil? bound)
+          t
+          (prune-inference-type bound)))
+    (fn-type? t)
+      (make-fn
+        (mapv prune-inference-type (get t "params"))
+        (if (nil? (get t "rest"))
+          nil
+          (prune-inference-type (get t "rest")))
+        (prune-inference-type (get t "ret")))
+    (app-type? t)
+      (make-app (get t "name")
+        (mapv prune-inference-type (get t "args")))
+    (union-type? t)
+      (make-union (mapv prune-inference-type (get t "members")))
+    :else t))
+
+(defn bind-inference-var! [(variable Any) (value Any)] Nil
+  (let [resolved (prune-inference-type value)
+        name (get variable "name")]
+    (when (and (not (and (inference-var? resolved)
+                         (= name (get resolved "name"))))
+               (not (any-type? resolved))
+               (not (inference-var-occurs? name resolved)))
+      (swap! STATE assoc-in
+        ["definition-inference-bindings" name] resolved)))
+  nil)
+
+(defn unify-inference-types! [(left Any) (right Any)] Nil
+  (let [a (prune-inference-type left)
+        b (prune-inference-type right)]
+    (cond
+      (or (nil? a) (nil? b) (any-type? a) (any-type? b)) nil
+      (inference-var? a) (bind-inference-var! a b)
+      (inference-var? b) (bind-inference-var! b a)
+      (and (fn-type? a) (fn-type? b))
+        (do
+          (doseq [i (range (min (count (get a "params"))
+                                (count (get b "params"))))]
+            (unify-inference-types!
+              (nth (get a "params") i)
+              (nth (get b "params") i)))
+          (when (and (not (nil? (get a "rest")))
+                     (not (nil? (get b "rest"))))
+            (unify-inference-types! (get a "rest") (get b "rest")))
+          (unify-inference-types! (get a "ret") (get b "ret")))
+      (and (app-type? a) (app-type? b)
+           (= (get a "name") (get b "name"))
+           (= (count (get a "args")) (count (get b "args"))))
+        (doseq [i (range (count (get a "args")))]
+          (unify-inference-types!
+            (nth (get a "args") i)
+            (nth (get b "args") i)))
+      (and (union-type? a) (union-type? b)
+           (= (count (get a "members")) (count (get b "members"))))
+        (doseq [i (range (count (get a "members")))]
+          (unify-inference-types!
+            (nth (get a "members") i)
+            (nth (get b "members") i)))
+      :else nil))
+  nil)
+
+(defn type-contains-inference-var? [(t Any)] Bool
+  (let [resolved (prune-inference-type t)]
+    (cond
+      (nil? resolved) false
+      (inference-var? resolved) true
+      (fn-type? resolved)
+        (or (boolean (some type-contains-inference-var?
+                       (get resolved "params")))
+            (and (not (nil? (get resolved "rest")))
+                 (type-contains-inference-var? (get resolved "rest")))
+            (type-contains-inference-var? (get resolved "ret")))
+      (app-type? resolved)
+        (boolean (some type-contains-inference-var? (get resolved "args")))
+      (union-type? resolved)
+        (boolean (some type-contains-inference-var? (get resolved "members")))
+      :else false)))
 
 ;; --- type->string ------------------------------------------------------------
 
@@ -192,7 +319,10 @@
 
 (defn unqualify-name [(name String)] String
   (let [idx (str/index-of name "/")]
-    (if (some? idx) (subs name (+ idx 1)) name)))
+    (if (some? idx)
+      (let [(offset Int) idx]
+        (subs name (+ offset 1)))
+      name)))
 
 ;; --- type-invariant-equal? ---------------------------------------------------
 
@@ -439,8 +569,11 @@
 ;; + - * inc dec min max abs keep Int when every operand is Int, produce Float on
 ;; any Float operand, and Number on any Number operand. Exact binary Float `/`
 ;; also stays Float; every other `/` keeps its declared Any because integer
-;; division can produce Ratio. A non-numeric operand falls back to the declared
-;; return, exactly as the oracle narrows.
+;; division can produce Ratio. The stdlib signature and check-args! enforce
+;; numeric operands before this return refinement runs.
+(defn numeric-arithmetic-op? [(op String)] Bool
+  (or (= op "+") (= op "-") (= op "*") (= op "/")))
+
 (defn numeric-preserving-op? [(op String)] Bool
   (or (= op "+") (= op "-") (= op "*") (= op "inc") (= op "dec")
       (= op "min") (= op "max") (= op "abs")))
@@ -574,9 +707,7 @@
     (and (not (nil? name))
       (not (= (get (deref STATE) "target") "js")))))
 
-;; --- stdlib signature table (permissive: this checker has NO Int<:Number
-;; subtyping, so params stay Any and variadics use rest — today's semantics for
-;; the fns fold references, kept from erroring on well-typed programs) ---------
+;; --- stdlib signature table --------------------------------------------------
 
 (def STDLIB Any
   {;; Boolean literals parse as refs (`true`/`false`), so the checker resolves
@@ -606,9 +737,12 @@
    "<="       (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool"))
    "and"      (make-fn [] ANY ANY)
    "or"       (make-fn [] ANY ANY)
-   "+"        (make-fn [] ANY ANY)
-   "-"        (make-fn [ANY] ANY ANY)
-   "*"        (make-fn [] ANY ANY)
+   "+"        (make-fn [] NUMBER-TYPE ANY)
+   "-"        (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY)
+   "*"        (make-fn [] NUMBER-TYPE ANY)
+   "/"        (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY)
+   "quot"     (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE)
+   "mod"      (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE)
    "max"      (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE)
    "min"      (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE)
    "inc"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
@@ -1380,6 +1514,14 @@
       (= t "seq-destructure") ANY
       :else ANY)))
 
+(defn inference-param-type! [(p Any)] Any
+  (let [kind (get p "type")]
+    (cond
+      (and (= kind "param") (not (nil? (get p "ann")))) (get p "ann")
+      (= kind "param") (fresh-inference-var!)
+      ;; Untyped destructuring does not identify one scalar input type.
+      :else ANY)))
+
 (defn vec-aggregate-type? [(t Any)] Bool
   (and (app-type? t)
        (= (get t "name") "Vec")
@@ -1390,6 +1532,12 @@
     (if (vec-aggregate-type? authored)
       (nth (get authored "args") 0)
       ANY)))
+
+(defn inference-rest-call-element-type! [(rest-param Any)] Any
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
+    (if (vec-aggregate-type? authored)
+      (nth (get authored "args") 0)
+      (fresh-inference-var!))))
 
 (defn rest-param-body-type [(rest-param Any)] Any
   (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
@@ -1817,13 +1965,21 @@
                            expected (if (< i n-fixed) (nth fixed i) rest-t)
                            enum-violation
                              (enum-member-violation expected (nth args i))]
-                       (when (some? enum-violation)
-                         (emit-enum-member-violation! enum-violation))
-                       (when (not (type-compatible? actual expected))
-                         (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1)
-                                          " expected " (type->string expected)
-                                          ", got " (type->string actual))))
-                       actual))]
+                       (unify-inference-types! actual expected)
+                       (let [actual (prune-inference-type actual)
+                             expected (prune-inference-type expected)]
+                         (when (some? enum-violation)
+                           (emit-enum-member-violation! enum-violation))
+                         (when (not (and
+                                      (type-compatible? actual expected)
+                                      (or (not (and
+                                                 (numeric-arithmetic-op? fn-name)
+                                                 (= (numeric-class expected) "number")))
+                                          (not (= (numeric-class actual) "other")))))
+                           (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1)
+                                            " expected " (type->string expected)
+                                            ", got " (type->string actual))))
+                         actual)))]
     (check-enum-comparison! fn-name args env)
     (cond
       (not (nil? rest-t))
@@ -2723,6 +2879,21 @@
 
     (= (get e "node") "ns") ANY
 
+    (= (get e "node") "nix-fn-set")
+      (let [formals (get e "formals")
+            body-env (reduce (fn [(out Any) (formal Any)] Any
+                               (assoc out (get formal "name") ANY))
+                       env formals)
+            at-name (get e "at-name")
+            body-env (if (or (nil? at-name) (= at-name false))
+                       body-env
+                       (assoc body-env at-name ANY))]
+        (doseq [formal formals]
+          (let [default (get formal "default")]
+            (when (and (not (nil? default)) (not (= default false)))
+              (infer-expr! default body-env))))
+        (make-fn [ANY] nil (infer-expr! (get e "body") body-env)))
+
     (or (= (get e "node") "nix-inherit")
         (= (get e "node") "nix-inherit-from")
         (= (get e "node") "nix-with")
@@ -2735,7 +2906,6 @@
         (= (get e "node") "nix-multiline-string")
         (= (get e "node") "nix-indented-string")
         (= (get e "node") "nix-path")
-        (= (get e "node") "nix-fn-set")
         (= (get e "node") "nix-pipe")
         (= (get e "node") "nix-impl"))
       ANY
@@ -2816,21 +2986,25 @@
             (= node "defn")
               (let [params (get form "params")
                     rest-param (opt-field (get form "rest"))
-                    p-types (mapv param-type-or-any params)
+                    p-types (mapv inference-param-type! params)
                     rtype (if (not (nil? rest-param))
-                            (rest-param-call-element-type rest-param)
+                            (inference-rest-call-element-type! rest-param)
                             nil)
-                    ret (if (not (nil? (get form "ret"))) (get form "ret") ANY)]
+                    ret (if (not (nil? (get form "ret")))
+                          (get form "ret")
+                          (fresh-inference-var!))]
                 (assoc env (get form "name") (make-fn p-types rtype ret)))
             (= node "defn-multi")
               (let [arities (get form "arities")
                     alt-types (mapv (fn [(a Any)] Any
                                       (let [rp (opt-field (get a "rest"))
-                                            p-types (mapv param-type-or-any (get a "params"))
+                                            p-types (mapv inference-param-type! (get a "params"))
                                             rtype (if (not (nil? rp))
-                                                    (rest-param-call-element-type rp)
+                                                    (inference-rest-call-element-type! rp)
                                                     nil)
-                                            ret (if (not (nil? (get a "ret"))) (get a "ret") ANY)]
+                                            ret (if (not (nil? (get a "ret")))
+                                                  (get a "ret")
+                                                  (fresh-inference-var!))]
                                         (make-fn p-types rtype ret)))
                                     arities)]
                 (assoc env (get form "name")
@@ -2868,6 +3042,220 @@
               (assoc env (get form "name") (make-fn [ANY] nil ANY))
             :else env)))
       env-with-externs forms)))
+
+;; Omitted value definitions are inferred from their initializers as one
+;; program-scoped, monomorphic pass. A pending definition is retried only after
+;; another value became concrete, which makes forward references independent of
+;; source order. Explicit Any remains an authored boundary.
+(defn value-definition? [(form Any)] Bool
+  (or (= (get form "node") "def") (= (get form "node") "defonce")))
+
+(defn unwrap-definition [(form Any)] Any
+  (if (= (get form "node") "with-meta") (get form "expr") form))
+
+(defn definition-type-table [(prog Any) (env Any)] Any
+  (reduce
+    (fn [(out Any) (raw-form Any)] Any
+      (let [form (unwrap-definition raw-form)
+            node (get form "node")
+            name (get form "name")]
+        (if (and (string? name)
+                 (or (= node "def") (= node "defonce")
+                     (= node "defn") (= node "defn-multi"))
+                 (contains? env name))
+          (assoc out name (get env name))
+          out)))
+    {}
+    (get prog "forms")))
+
+(def GENERALIZATION-NAMES Any
+  ["A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M"
+   "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"])
+
+(defn rewrite-inference-vars!
+  [(t Any) (mapping Any) (names Any)] Any
+  (let [resolved (prune-inference-type t)]
+    (cond
+      (inference-var? resolved)
+        (let [raw-name (get resolved "name")
+              existing (get (deref mapping) raw-name)]
+          (if (not (nil? existing))
+            (make-var existing)
+            (let [index (count (deref names))
+                  public-name (if (< index (count GENERALIZATION-NAMES))
+                                (nth GENERALIZATION-NAMES index)
+                                (str "T" index))]
+              (swap! mapping assoc raw-name public-name)
+              (swap! names conj public-name)
+              (make-var public-name))))
+      (fn-type? resolved)
+        (make-fn
+          (mapv (fn [(p Any)] Any
+                  (rewrite-inference-vars! p mapping names))
+            (get resolved "params"))
+          (if (nil? (get resolved "rest"))
+            nil
+            (rewrite-inference-vars! (get resolved "rest") mapping names))
+          (rewrite-inference-vars! (get resolved "ret") mapping names))
+      (app-type? resolved)
+        (make-app (get resolved "name")
+          (mapv (fn [(a Any)] Any
+                  (rewrite-inference-vars! a mapping names))
+            (get resolved "args")))
+      (union-type? resolved)
+        (make-union
+          (mapv (fn [(m Any)] Any
+                  (rewrite-inference-vars! m mapping names))
+            (get resolved "members")))
+      :else resolved)))
+
+(defn generalize-inference-type! [(t Any)] Any
+  (let [mapping (atom {})
+        names (atom [])
+        body (rewrite-inference-vars! t mapping names)]
+    (if (= (count (deref names)) 0)
+      body
+      (make-poly (deref names) body nil))))
+
+(defn callable-definition? [(form Any)] Bool
+  (or (= (get form "node") "defn") (= (get form "node") "defn-multi")))
+
+(defn callable-clauses [(form Any)] Any
+  (if (= (get form "node") "defn") [form] (get form "arities")))
+
+(defn signature-alternatives [(signature Any)] Any
+  (let [resolved (prune-inference-type signature)]
+    (if (union-type? resolved) (get resolved "members") [resolved])))
+
+(defn extend-with-effective-params!
+  [(env Any) (params Any) (rest-param Any) (signature Any)] Any
+  (let [all-params (if (nil? rest-param)
+                     (vec params)
+                     (conj (vec params) rest-param))
+        fixed-types (get signature "params")
+        effective-types (if (nil? rest-param)
+                          fixed-types
+                          (conj (vec fixed-types)
+                            (make-app "Vec" [(get signature "rest")])))]
+    (reduce
+      (fn [(out Any) (i Int)] Any
+        (let [parameter (nth all-params i)
+              target (param-binding-target parameter)
+              effective (nth effective-types i)]
+          (if (string? target)
+            (assoc out target effective)
+            (bind-destructure-type! out target effective "parameter"))))
+      env
+      (range (count all-params)))))
+
+(defn constrain-callable-definitions! [(prog Any) (env Any)] Nil
+  (doseq [raw-form (get prog "forms")]
+    (let [form (unwrap-definition raw-form)]
+      (when (callable-definition? form)
+        (let [clauses (callable-clauses form)
+              alternatives (signature-alternatives (get env (get form "name")))]
+          (doseq [i (range (min (count clauses) (count alternatives)))]
+            (let [clause (nth clauses i)
+                  signature (nth alternatives i)
+                  rest-param (opt-field (get clause "rest"))
+                  body-env (extend-with-effective-params!
+                             env (get clause "params") rest-param signature)
+                  actual (last-expr-type! (get clause "body") body-env)]
+              (unify-inference-types! actual (get signature "ret"))))))))
+  nil)
+
+(defn finalize-callable-definition-types! [(prog Any) (env Any) (types Any)] Any
+  (reduce
+    (fn [(state Any) (raw-form Any)] Any
+      (let [form (unwrap-definition raw-form)]
+        (if (callable-definition? form)
+          (let [name (get form "name")
+                finalized (generalize-inference-type! (get (get state "env") name))]
+            {"env" (assoc (get state "env") name finalized)
+             "types" (assoc (get state "types") name finalized)})
+          state)))
+    {"env" env "types" types}
+    (get prog "forms")))
+
+(defn infer-value-definition-types! [(prog Any) (initial-env Any)] Any
+  (let [pending
+          (reduce
+            (fn [(out Any) (raw-form Any)] Any
+              (let [form (unwrap-definition raw-form)]
+                (if (and (value-definition? form) (nil? (get form "ann")))
+                  (conj out form)
+                  out)))
+            []
+            (get prog "forms"))]
+    (loop [env initial-env
+           types (definition-type-table prog initial-env)
+           remaining pending]
+      (if (= (count remaining) 0)
+        {"env" env "types" types}
+        (let [step
+                (reduce
+                  (fn [(state Any) (form Any)] Any
+                    (let [before-diags (get (deref STATE) "diagnostics")
+                          inferred (prune-inference-type
+                                     (infer-expr! (get form "value")
+                                       (get state "env")))]
+                      (if (and (not (poly-type? inferred))
+                               (not (type-contains-inference-var? inferred))
+                               (not (type-contains-any? inferred)))
+                        (let [name (get form "name")]
+                          {"env" (assoc (get state "env") name inferred)
+                           "types" (assoc (get state "types") name inferred)
+                           "remaining" (get state "remaining")
+                           "progress" true})
+                        (do
+                          ;; A provisional attempt through an unresolved
+                          ;; dependency is not an observable checker pass.
+                          (swap! STATE assoc "diagnostics" before-diags)
+                          {"env" (get state "env")
+                           "types" (get state "types")
+                           "remaining" (conj (get state "remaining") form)
+                           "progress" (get state "progress")}))))
+                  {"env" env "types" types "remaining" [] "progress" false}
+                  remaining)]
+          (if (= true (get step "progress"))
+            (recur (get step "env") (get step "types")
+                   (get step "remaining"))
+            (do
+              (doseq [form (get step "remaining")]
+                (emit-diag!
+                  (str "beagle: " (get form "node") " " (get form "name")
+                    ": omitted type did not resolve to a concrete monomorphic type; "
+                    "add a type annotation, or write Any explicitly for an intentional dynamic boundary")))
+              {"env" (get step "env") "types" (get step "types")})))))))
+
+(defn infer-definition-types! [(prog Any) (initial-env Any)] Any
+  (let [before-provisional (get (deref STATE) "diagnostics")]
+    ;; The first pass lets callable constraints inform value initializers. Any
+    ;; diagnostic it encounters is provisional and is reproduced by the final
+    ;; pass against the complete value environment.
+    (constrain-callable-definitions! prog initial-env)
+    (swap! STATE assoc "diagnostics" before-provisional)
+    (let [values (infer-value-definition-types! prog initial-env)
+          env (get values "env")]
+      (constrain-callable-definitions! prog env)
+      (finalize-callable-definition-types! prog env (get values "types")))))
+
+(defn check-core-function-abis! [(prog Any) (types Any)] Nil
+  (when (= (get prog "target") "core")
+    (doseq [raw-form (get prog "forms")]
+      (let [form (unwrap-definition raw-form)
+            node (get form "node")
+            name (get form "name")
+            signature (get types name)]
+        (when (and (or (= node "defn") (= node "defn-multi"))
+                   (string? name)
+                   (poly-type? signature))
+          (emit-diag!
+            (str "beagle: " name
+              " has a generalized effective signature; "
+              "Core requires a closed monomorphic Native ABI; "
+              "annotate every otherwise unconstrained parameter with its concrete Core ABI type"))))))
+  nil)
 
 (defn check-parameter-declarations!
   [(params Any) (rest-param Any) (env Any) (context String)] Nil
@@ -3066,7 +3454,7 @@
     :else nil))
 
 (defn check-nix-free-dotted! [(prog Any)] Nil
-  (when (and (= (get prog "target") "nix") (= (get prog "mode") "strict"))
+  (when (= (get prog "target") "nix")
     (let [forms (get prog "forms")
           bound (reduce (fn [(a Any) (f Any)] Any (nix-collect-bound f a)) #{} forms)]
       (doseq [form forms]
@@ -3101,8 +3489,7 @@
 
 (defn check-qualified-resolution! [(prog Any) (env Any)] Nil
   (let [target (get prog "target")]
-    (when (and (= target "clj")
-               (= (get prog "mode") "strict"))
+    (when (= target "clj")
       (let [required (reduce
                        (fn [(m Any) (r Any)] Any
                          (let [ns (get r "ns")
@@ -3143,7 +3530,7 @@
     nil))
 
 ;; === `!`-purity enforcement ==================================================
-;; A strict-mode definition without a trailing `!` is a checked pure boundary.
+;; A definition without a trailing `!` is a checked pure boundary.
 ;; Direct mutation and calls to module-local effectful definitions propagate to
 ;; a source-order-independent fixed point. This is the self-hosted projection of
 ;; check.rkt's canonical pass; the dense AST maps are walked at the same semantic
@@ -3179,8 +3566,9 @@
   (assoc state "markers" (marker-add (get state "markers") marker)))
 
 (defn purity-fresh-id [(state Any)] Any
-  {"id" (get state "next-id")
-   "state" (assoc state "next-id" (+ (get state "next-id") 1))})
+  (let [(next-id Int) (get state "next-id")]
+    {"id" next-id
+     "state" (assoc state "next-id" (+ next-id 1))}))
 
 (defn purity-bind-name [(state Any) (name String) (origins Any)] Any
   (let [fresh (purity-fresh-id state)
@@ -3526,8 +3914,8 @@
                 (purity-restore-scope (get result "state") outer-scope)
                 (get result "origins")))
           (= node "fn")
-            (let [nested (assoc state "lambda-depth"
-                           (+ (get state "lambda-depth") 1))
+            (let [(lambda-depth Int) (get state "lambda-depth")
+                  nested (assoc state "lambda-depth" (+ lambda-depth 1))
                   bound (purity-bind-params nested
                           (get value "params") (opt-field (get value "rest")))
                   result (purity-analyze-sequence (get value "body") bound)
@@ -3617,8 +4005,10 @@
                              state (get value "fns"))
                   after-fns (reduce
                               (fn [(next Any) (fn-def Any)] Any
-                                (let [nested (assoc next "lambda-depth"
-                                               (+ (get next "lambda-depth") 1))
+                                (let [(lambda-depth Int)
+                                        (get next "lambda-depth")
+                                      nested (assoc next "lambda-depth"
+                                               (+ lambda-depth 1))
                                       bound (purity-bind-params nested
                                               (get fn-def "params")
                                               (opt-field (get fn-def "rest")))
@@ -3944,7 +4334,7 @@
        (str/join ", " markers) " — rename to '" name "!' or remove the effect"))
 
 (defn check-purity-with-severity! [(prog Any) (severity String)] Nil
-  (when (and (= (get prog "mode") "strict") (not (= severity "off")))
+  (when (not (= severity "off"))
     (let [defs (collect-purity-defs prog)
           globals (purity-global-bindings prog)
           effectful (derive-effectful-defs defs globals)]
@@ -4057,6 +4447,18 @@
                         binding-constraint-proofs))))
                 {}
                 (keys value))]
+        (let [definition-types
+                (get (deref STATE) "effective-definition-types")
+              node (get value "node")
+              name (get value "name")
+              decorated
+                (if (and (string? name)
+                         (or (= node "def") (= node "defonce")
+                             (= node "defn") (= node "defn-multi"))
+                         (contains? definition-types name))
+                  (assoc decorated "effectiveType"
+                    (get definition-types name))
+                  decorated)]
         (cond
           (= (get value "node") "with")
             (assoc decorated "recordUpdate"
@@ -4067,13 +4469,12 @@
           (not (nil? binding-check-id))
             (assoc decorated "constraintSynchronous"
               (= true (get binding-constraint-proofs binding-check-id)))
-          :else decorated))
+          :else decorated)))
 
     :else value))
 
 (defn type-check! [(prog Any)] Any
-  (let [checked-input (tag-semantic-node-ids prog)
-        mode (get checked-input "mode")]
+  (let [checked-input (tag-semantic-node-ids prog)]
     (reset! STATE {"record-fields" {}
                    "record-field-order" {}
                    "record-validators" {}
@@ -4084,19 +4485,24 @@
                    "enum-types" {}
                    "parametric-unions" {}
                    "parametric-member-union" {}
+                   "definition-inference-counter" 0
+                   "definition-inference-bindings" {}
                    "target" (get checked-input "target")
                    "input-program" prog
                    "checked-input" checked-input
                    "diagnostics" []})
     (install-imported-record-contracts!
       (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
-    (when (= mode "strict")
-      (let [env (build-initial-env! checked-input)]
-        (doseq [form (get checked-input "forms")]
-          (check-form! form env))
-        (check-nix-free-dotted! checked-input)
-        (check-qualified-resolution! checked-input env)
-        (check-purity! checked-input)))
+    (let [initial-env (build-initial-env! checked-input)
+          inferred (infer-definition-types! checked-input initial-env)
+          env (get inferred "env")]
+      (swap! STATE assoc "effective-definition-types" (get inferred "types"))
+      (check-core-function-abis! checked-input (get inferred "types"))
+      (doseq [form (get checked-input "forms")]
+        (check-form! form env))
+      (check-nix-free-dotted! checked-input)
+      (check-qualified-resolution! checked-input env)
+      (check-purity! checked-input))
     (swap! STATE assoc "checked-program"
       (decorate-tagged-value
         checked-input
@@ -4162,6 +4568,7 @@
           (fn [(name String)] Any
             (let [validator (get-in state ["record-validators" name])]
               {"name" name
+               "namespace" namespace
                "fields" (get-in state ["record-fields" name])
                "field-order" (get-in state ["record-field-order" name])
                "constrained" (string? validator)
@@ -4267,11 +4674,11 @@
   {"node" "set!" "target" target "value" value})
 
 (defn make-prog [(forms (Vec Any))] Any
-  {"mode" "strict" "namespace" "test" "target" "js"
+  {"namespace" "test" "target" "js"
    "forms" forms "externs" [] "requires" []})
 
 (defn make-prog-with-externs [(forms Any) (externs Any)] Any
-  {"mode" "strict" "namespace" "test" "target" "js"
+  {"namespace" "test" "target" "js"
    "forms" forms "externs" externs "requires" []})
 
 (defn make-with-node [(target Any) (field String) (value Any)] Any
@@ -4473,16 +4880,6 @@
            (make-defn-node "-main" [] ANY [(make-call "writer!" [])])])
         "error")
       (= 0 (count (get (deref STATE) "diagnostics")))))
-  (expect! "purity: dynamic mode is outside the enforcement contract"
-    (do
-      (swap! STATE assoc "diagnostics" [])
-      (check-purity-with-severity!
-        (assoc (make-prog
-                 [(make-defn-node "writer" [] ANY [(make-call "reset!" [])])])
-               "mode" "dynamic")
-        "error")
-      (= 0 (count (get (deref STATE) "diagnostics")))))
-
   ;; --- structural typed destructuring projection ---
   (expect! "destructure: HVec projects positions"
     (let [target (make-seq-target ["x" "label"] false)
@@ -4657,7 +5054,7 @@
 
   ;; --- call type checking ---
   (expect! "call: correct args"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "js"
+    (let [prog {"namespace" "test" "target" "js"
                 "forms" [(make-def-node "r" (make-prim "Int")
                            (make-call "add" [(make-lit "number" 1) (make-lit "number" 2)]))]
                 "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}]
@@ -4665,7 +5062,7 @@
           result (type-check! prog)]
       (= (get result "count") 0)))
   (expect! "call: wrong arg type"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "js"
+    (let [prog {"namespace" "test" "target" "js"
                 "forms" [(make-def-node "r" nil
                            (make-call "add" [(make-lit "string" "x") (make-lit "number" 2)]))]
                 "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}]
@@ -4673,7 +5070,7 @@
           result (type-check! prog)]
       (> (get result "count") 0)))
   (expect! "call: wrong arity"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "js"
+    (let [prog {"namespace" "test" "target" "js"
                 "forms" [(make-def-node "r" nil
                            (make-call "add" [(make-lit "number" 1)]))]
                 "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}]
@@ -4706,7 +5103,7 @@
 
   ;; --- qualified JVM instance-position interop ---
   (expect! "JVM instance-position: receiver excluded from declared arity"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+    (let [prog {"namespace" "test" "target" "clj"
                 "forms" [(make-defn-node "connect-with-timeout"
                            [(make-param "sock" (make-prim "Socket"))
                             (make-param "addr" ANY)
@@ -4720,7 +5117,7 @@
           result (type-check! prog)]
       (= (get result "count") 0)))
   (expect! "JVM instance-position: wrong Java arity rejected"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+    (let [prog {"namespace" "test" "target" "clj"
                 "forms" [(make-defn-node "connect-with-too-many-args"
                            [(make-param "sock" (make-prim "Socket"))
                             (make-param "addr" ANY)
@@ -4735,7 +5132,7 @@
           result (type-check! prog)]
       (> (get result "count") 0)))
   (expect! "JVM static gate-c: declared unknown static checks every argument"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+    (let [prog {"namespace" "test" "target" "clj"
                 "forms" [(make-def-node "quoted" (make-prim "String")
                            (make-static-call "java.util.regex.Pattern/quote"
                              [(make-lit "string" "x") (make-lit "string" "y")]))]
@@ -4749,7 +5146,7 @@
   (expect! "binding: ^:dynamic def target accepted"
     (let [dyn-def (assoc (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0))
                          "dynamic" true)
-          prog {"mode" "strict" "namespace" "test" "target" "clj"
+          prog {"namespace" "test" "target" "clj"
                 "forms" [dyn-def
                          (make-defn-node "f" [] (make-prim "Int")
                            [{"node" "binding"
@@ -4760,7 +5157,7 @@
       (= (get result "count") 0)))
   (expect! "binding: non-dynamic def target rejected"
     (let [plain-def (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0))
-          prog {"mode" "strict" "namespace" "test" "target" "clj"
+          prog {"namespace" "test" "target" "clj"
                 "forms" [plain-def
                          (make-defn-node "f" [] (make-prim "Int")
                            [{"node" "binding"
@@ -4770,7 +5167,7 @@
           result (type-check! prog)]
       (> (get result "count") 0)))
   (expect! "binding: clojure.core builtin *out* accepted on clj"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+    (let [prog {"namespace" "test" "target" "clj"
                 "forms" [(make-defn-node "f" [] (make-prim "Int")
                            [{"node" "binding"
                              "bindings" [(make-let-binding "*out*" nil (make-ref "*err*"))]
@@ -4925,6 +5322,23 @@
            (= (count (get t1 "params")) 1)
            (= (get (get t1 "ret") "name") "Bool"))))
 
+  (expect! "infer: nix-fn-set checks defaults and body"
+    (do
+      (swap! STATE assoc "diagnostics" [])
+      (let [t1
+            (infer-expr!
+              {"node" "nix-fn-set"
+               "formals"
+               [{"name" "config" "default" false}
+                {"name" "fallback"
+                 "default" (make-call "inc" [(make-lit "string" "bad-default")])}]
+               "rest" true
+               "at-name" "args"
+               "body" (make-call "inc" [(make-lit "string" "bad-body")])}
+              STDLIB)]
+        (and (fn-type? t1)
+             (= 2 (count (get (deref STATE) "diagnostics")))))))
+
   ;; --- record field inference ---
   (expect! "infer: kw-access on registered record"
     (do (swap! STATE assoc "record-fields" {})
@@ -4948,7 +5362,7 @@
            (= (count (get ft "params")) 1)
            (= (get (get ft "ret") "name") "String"))))
   (expect! "env: extern registers type"
-    (let [prog {"mode" "strict" "namespace" "test" "target" "js"
+    (let [prog {"namespace" "test" "target" "js"
                 "forms" []
                 "externs" [{"name" "fetch" "type" (make-fn [(make-prim "String")] nil (make-prim "Any"))}]
                 "requires" []}
@@ -4969,13 +5383,42 @@
           result (type-check! prog)]
       (= (get result "count") 0)))
 
-  ;; --- dynamic mode skips checking ---
-  (expect! "dynamic mode: no errors"
-    (let [prog {"mode" "dynamic" "namespace" "test" "target" "js"
-                "forms" [(make-def-node "x" (make-prim "String") (make-lit "number" 42))]
-                "externs" [] "requires" []}
+  (expect! "definition inference: omitted def and forward defonce become concrete"
+    (let [prog (make-prog
+                 [{"node" "defonce" "name" "answer" "ann" nil
+                   "value" (make-ref "seed")}
+                  (make-def-node "seed" nil (make-lit "number" 42))])
+          result (type-check! prog)
+          checked (decorate-checked-program! prog)
+          answer (nth (get checked "forms") 0)
+          seed (nth (get checked "forms") 1)]
+      (and (= (get result "count") 0)
+           (= (get (get answer "effectiveType") "name") "Int")
+           (= (get (get seed "effectiveType") "name") "Int")
+           (nil? (get answer "ann"))
+           (nil? (get seed "ann")))))
+
+  (expect! "definition inference: unresolved value cycle is rejected"
+    (let [prog (make-prog
+                 [(make-def-node "left" nil (make-ref "right"))
+                  (make-def-node "right" nil (make-ref "left"))])
           result (type-check! prog)]
-      (= (get result "count") 0)))
+      (and (> (get result "count") 0)
+           (diagnostics-include?
+             (get result "diagnostics")
+             "omitted type did not resolve to a concrete monomorphic type"))))
+
+  (expect! "definition inference: authored Any stays authored and effective"
+    (let [authored (make-prim "Any")
+          prog (make-prog
+                 [(make-def-node "dynamic" authored
+                    (make-lit "number" 42))])
+          result (type-check! prog)
+          checked (decorate-checked-program! prog)
+          definition (nth (get checked "forms") 0)]
+      (and (= (get result "count") 0)
+           (= (get definition "ann") authored)
+           (= (get definition "effectiveType") authored))))
 
   ;; --- check-program! contract (empty vec = accepted, non-empty = errors) ---
   (expect! "check-program!: accepts well-typed"
@@ -4985,31 +5428,94 @@
     (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
       (> (count (check-program! prog)) 0)))
 
+  (expect! "Core ABI: finalized polymorphic function rejected"
+    (do
+      (reset! STATE {"diagnostics" []})
+      (check-core-function-abis!
+        (assoc
+          (make-prog
+            [(make-defn-node "constant" [(make-param "x" nil)]
+               (make-prim "Int") [(make-lit "number" 1)])])
+          "target" "core")
+        {"constant"
+          (make-poly ["A"]
+            (make-fn [(make-var "A")] nil (make-prim "Int")) nil)})
+      (diagnostics-include?
+        (get (deref STATE) "diagnostics")
+        "Core requires a closed monomorphic Native ABI")))
+
+  (expect! "hosted ABI: finalized polymorphic function remains valid"
+    (do
+      (reset! STATE {"diagnostics" []})
+      (check-core-function-abis!
+        (assoc
+          (make-prog
+            [(make-defn-node "constant" [(make-param "x" nil)]
+               (make-prim "Int") [(make-lit "number" 1)])])
+          "target" "clj")
+        {"constant"
+          (make-poly ["A"]
+            (make-fn [(make-var "A")] nil (make-prim "Int")) nil)})
+      (= 0 (count (get (deref STATE) "diagnostics")))))
+
+  (expect! "definition inference: hosted unused parameter publishes forall"
+    (let [prog (make-prog
+                 [(make-defn-node "constant" [(make-param "x" nil)]
+                    (make-prim "Int") [(make-lit "number" 1)])])
+          result (type-check! prog)
+          effective (get-in (deref STATE)
+                      ["effective-definition-types" "constant"])]
+      (and (= (get result "count") 0)
+           (poly-type? effective)
+           (= (type->string effective) "(forall [A] (Fn [A] Int))"))))
+
+  (expect! "definition inference: Core rejects only the unresolved callable ABI"
+    (let [constant (assoc
+                     (make-prog
+                       [(make-defn-node "constant" [(make-param "x" nil)]
+                          (make-prim "Int") [(make-lit "number" 1)])])
+                     "target" "core")
+          constant-result (type-check! constant)
+          constant-diagnostics (get constant-result "diagnostics")
+          identity (assoc
+                     (make-prog
+                       [(make-defn-node "identity" [(make-param "x" nil)]
+                          (make-prim "Int") [(make-ref "x")])])
+                     "target" "core")
+          identity-result (type-check! identity)
+          identity-type (get-in (deref STATE)
+                          ["effective-definition-types" "identity"])]
+      (and (diagnostics-include? constant-diagnostics
+             "Core requires a closed monomorphic Native ABI")
+           (= (get identity-result "count") 0)
+           (fn-type? identity-type)
+           (= (get (nth (get identity-type "params") 0) "name") "Int"))))
+
   ;; --- E021 free dotted-name (nix target) ---
   (expect! "E021: free dotted root rejected"
-    (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" []
+    (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" []
                 "forms" [{"node" "nix-fn-set" "rest" true "at-name" false
                           "formals" [{"name" "config" "default" false}]
                           "body" {"node" "ref" "name" "vendor.id"}}]}]
       (> (count (check-program! prog)) 0)))
   (expect! "E021: formal-rooted dotted accepted"
-    (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" []
+    (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" []
                 "forms" [{"node" "nix-fn-set" "rest" true "at-name" false
                           "formals" [{"name" "config" "default" false}]
                           "body" {"node" "ref" "name" "config.services.foo"}}]}]
       (= (count (check-program! prog)) 0)))
   (expect! "E021: qualified lib. dotted exempt"
-    (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" []
+    (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" []
                 "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" []
                           "body" {"node" "ref" "name" "lib.mkIf"}}]}]
       (= (count (check-program! prog)) 0)))
   (expect! "E021: builtins global root exempt"
-    (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" []
+    (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" []
                 "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" []
                           "body" {"node" "ref" "name" "builtins.length"}}]}]
       (= (count (check-program! prog)) 0)))
   (expect! "E021: nix/with body exempts free root"
-    (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" []
+    (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" []
                 "forms" [{"node" "nix-fn-set" "rest" true "at-name" false
                           "formals" [{"name" "config" "default" false}]
                           "body" {"node" "nix-with"
@@ -5017,8 +5523,8 @@
                                   "body" {"node" "ref" "name" "framework.foo"}}}]}]
       (= (count (check-program! prog)) 0)))
   (expect! "E021: not fired on clj target"
-    (let [prog {"mode" "strict" "namespace" "t" "target" "clj" "externs" [] "requires" []
-                "forms" [{"node" "def" "name" "x" "ann" nil "dynamic" false
+    (let [prog {"namespace" "t" "target" "clj" "externs" [] "requires" []
+                "forms" [{"node" "def" "name" "x" "ann" ANY "dynamic" false
                           "value" {"node" "ref" "name" "vendor.id"}}]}]
       (= (count (check-program! prog)) 0)))
 

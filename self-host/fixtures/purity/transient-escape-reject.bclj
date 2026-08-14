@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-escape-reject)
-(define-mode strict)
 
 (defn escape [(xs Any)] Any
   (let [owned (transient xs)]

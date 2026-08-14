@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-alias-reject)
-(define-mode strict)
 
 (defn alias-result [(xs Any)] Any
   (let [owned (transient xs)

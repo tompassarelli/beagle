@@ -30,23 +30,23 @@
 
 (define-syntax-rule (check-js-contains name expected-str form ...)
   (test-case name
-    (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js) form ...)))
+    (define result (js-emit (list '(ns test.app) '(define-target js) form ...)))
     (check-true (string-contains? result expected-str)
                 (format "expected ~v in:\n~a" expected-str result))))
 
 (define-syntax-rule (check-js-quote name expected-str body ...)
   (test-case name
-    (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js) body ...)))
+    (define result (js-emit (list '(ns test.app) '(define-target js) body ...)))
     (check-true (string-contains? result expected-str)
                 (format "expected ~v in:\n~a" expected-str result))))
 
 (define-syntax-rule (check-js-parse-ok name form ...)
   (test-case name
-    (check-not-exn (lambda () (js-parse (list '(ns test.app) '(define-mode strict) '(define-target js) form ...))))))
+    (check-not-exn (lambda () (js-parse (list '(ns test.app) '(define-target js) form ...))))))
 
 (define-syntax-rule (check-js-parse-err name form ...)
   (test-case name
-    (check-exn exn:fail? (lambda () (js-parse (list '(ns test.app) '(define-mode strict) '(define-target js) form ...))))))
+    (check-exn exn:fail? (lambda () (js-parse (list '(ns test.app) '(define-target js) form ...))))))
 
 (run-tests
  (test-suite "js/quote"
@@ -328,7 +328,7 @@
      (test-case "js/quote preserves authored underscores only in property positions"
        (define result
          (js-emit
-          (list '(ns test.app) '(define-mode strict) '(define-target js)
+          (list '(ns test.app) '(define-target js)
                 '(js/quote
                   (const total_str 7)
                   (const wall (dot obj wall_s))
@@ -397,7 +397,7 @@
    (test-suite "type-check"
 
      (test-case "js/quote returns JsAst type"
-       (define prog (js-parse (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (define prog (js-parse (list '(ns test.app) '(define-target js)
                                     '(def code JsAst (js/quote (const x 1))))))
        (check-not-exn (lambda () (type-check! prog))))
 
@@ -405,7 +405,7 @@
        (check-exn
         exn:fail?
         (lambda ()
-          (define prog (js-parse (list '(ns test.app) '(define-mode strict)
+          (define prog (js-parse (list '(ns test.app)
                                        '(js/quote (const x 1)))))
           (type-check! prog))))
 

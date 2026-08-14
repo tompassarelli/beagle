@@ -1,6 +1,5 @@
 #lang beagle/clj
 
-(define-mode strict)
 
 (defalias StoreValue (Dyn String Int Bool Keyword (Vec Int)))
 

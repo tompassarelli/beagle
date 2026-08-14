@@ -1,7 +1,6 @@
 #lang beagle/clj
 
 (ns test.graph-mint-render-text-oracle)
-(define-mode strict)
 
 (def ^:dynamic *arity-check?* Bool true)
 

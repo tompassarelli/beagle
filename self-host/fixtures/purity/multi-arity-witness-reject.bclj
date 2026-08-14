@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.multi-arity-witness-reject)
-(define-mode strict)
 
 (defn write-twice
   ([(cell Any)] Any

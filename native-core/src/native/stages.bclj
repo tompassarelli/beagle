@@ -1,7 +1,6 @@
 #lang beagle/clj
 (ns native.stages (:require [native.core :as core]))
 
-(define-mode strict)
 
 ;; Recursive terms refer to one another by stable identity so every stage kind
 ;; shares the same finite, canonical graph representation.

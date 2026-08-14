@@ -97,21 +97,18 @@
        (published
         (string-append
          "(ns interface.constraints)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn keep [(value Int (compose positive? integer?))] Int value)\n")))
      (define nonnegative
        (published
         (string-append
          "(ns interface.constraints)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn keep [(value Int (compose nonnegative? integer?))] Int value)\n")))
      (define positive-expanded
        (published
         (string-append
          "(ns interface.constraints)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defn keep\n"
          "  [(value Int\n"
@@ -121,7 +118,7 @@
      (define positive-binding (binding-ref positive 'keep))
      (define constraint
        (car (interface-binding-constraints positive-binding)))
-     (check-equal? (module-interface-schema-version positive) 7)
+     (check-equal? (module-interface-schema-version positive) 8)
      (check-true (interface-constraint? constraint))
      (check-false (interface-constraint-synchronous? constraint))
      (check-false (interface-constraint-provider constraint))
@@ -141,7 +138,6 @@
        (published
         (string-append
          "(ns interface.protocol)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defprotocol Joinable\n"
          "  (join [(self Any) & (parts (Vec String) nonempty?)] String))\n")))
@@ -161,7 +157,6 @@
      (define provider-source
        (string-append
         "(ns interface.async-provider)\n"
-        "(define-mode strict)\n"
         "(define-target js)\n"
         "(declare-extern fetch-flag (Fn [Int] (Promise Bool)))\n"
         "(defn remote-valid? [(value Int)] Bool\n"
@@ -190,7 +185,6 @@
           (string-append
            "(ns interface.async-consumer\n"
            "  (:require [interface.async-provider :as p]))\n"
-           "(define-mode strict)\n"
            "(define-target js)\n"
            "(defn keep [(value Int p/remote-valid?)] Int value)\n")
           #:source-path "interface/async-consumer.bjs"
@@ -208,7 +202,6 @@
      (define provider-source
        (string-append
         "(ns interface.protocol-provider)\n"
-        "(define-mode strict)\n"
         "(define-target clj)\n"
         "(declare-extern provider-valid? (Fn [String] Bool))\n"
         "(defprotocol Textual\n"
@@ -267,7 +260,6 @@
         (string-append
          "(ns interface.protocol-consumer\n"
          "  (:require [interface.protocol-provider :as p]))\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(declare-extern local-valid? (Fn [String] Bool))\n"
          "(extend-type String p/Textual\n"
@@ -291,7 +283,6 @@
        (published
         (string-append
          "(ns interface.record)\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defrecord Character [(id String valid-id?) (name String)])\n")))
      (define constructor (binding-ref interface '->Character))
@@ -314,7 +305,6 @@
      (define provider-source
        (string-append
         "(ns interface.provider)\n"
-        "(define-mode strict)\n"
         "(define-target clj)\n"
         "(declare-extern valid-id? (Fn [String] Bool))\n"
         "(defrecord Character [(id String valid-id?) (name String)])\n"))
@@ -346,7 +336,6 @@
         (string-append
          "(ns interface.consumer\n"
          "  (:require [interface.provider :as p]))\n"
-         "(define-mode strict)\n"
          "(define-target clj)\n"
          "(defrecord Plain [(id String) (name String)])\n"
          "(defn rename-character [(character p/Character)] p/Character\n"
@@ -394,7 +383,6 @@
      (define source
        (string-append
         "(ns interface.plain)\n"
-        "(define-mode strict)\n"
         "(define-target clj)\n"
         "(defn keep [(value Int)] Int value)\n"))
      (define first (published source))

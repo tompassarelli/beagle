@@ -1132,10 +1132,11 @@
   (expect! "Map-shaped typed param with defaults unwraps to native attrset pattern" (= (nix-param-pattern {"type" "param" "name" {"type" "map-destructure" "keys" ["x" "y"] "or" [{"key" "x" "value" {"node" "literal" "kind" "number" "value" 1}} {"key" "y" "value" {"node" "literal" "kind" "number" "value" 7}}] "as" "whole"} "ann" {"kind" "app" "name" "Map" "args" [{"kind" "prim" "name" "Keyword"} {"kind" "prim" "name" "Int"}]}} 0) "{ x ? 1, y ? 7, ... } @ whole:"))
   (expect! "nominal record map params may require fields without defaults" (let [param {"type" "param" "name" {"type" "map-destructure" "keys" ["x" "y"] "or" [] "as" false} "ann" {"kind" "prim" "name" "Point"}}
    prog {"forms" [{"node" "record" "name" "Point" "fields" []} {"node" "defn" "name" "sum" "params" [param] "rest" false "body" [{"node" "literal" "kind" "number" "value" 0}]}] "requires" []}]
-  (str/includes? (emit-program! prog) "sum = { x, y, ... }:")))
+  (let [emitted (emit-program! prog)]
+  (and (str/includes? emitted "builtins.getAttr \"x\" bgl____binding__0") (str/includes? emitted "builtins.getAttr \"y\" bgl____binding__0")))))
   (expect! "imported nominal record registry permits required fields" (let [param {"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [] "as" false} "ann" {"kind" "prim" "name" "Point"}}
    prog {"forms" [{"node" "defn" "name" "x-of" "params" [param] "rest" false "body" [{"node" "ref" "name" "x"}]}] "requires" [] "imported-record-fields" {"Point" {":x" {"kind" "prim" "name" "Int"}}}}]
-  (str/includes? (emit-program! prog) "x-of = { x, ... }:")))
+  (str/includes? (emit-program! prog) "builtins.getAttr \"x\" bgl____binding__0")))
   (expect! "typed map param rejects missing-key semantic drift" (try
   (nix-param-pattern {"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [] "as" false} "ann" {"kind" "app" "name" "Map" "args" []}} 0)
   false
@@ -1158,8 +1159,9 @@
   (do
   (let [constraint {"node" "ref" "name" "positive?"}
    param {"type" "param" "name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" constraint}]
-  (expect! "constrained parameter captures predicate before raw binding" (= (emit-param-chain [param] "x" 0) (str "let bgl____constraint__thunk__0 = _: positive_p; in " "x: builtins.deepSeq x (let bgl____constraint__0 = " "bgl____constraint__thunk__0 null; in if " "bgl____constraint__0 x then (x) else builtins.throw " "\"Binding constraint failed: x\")")))
-  (expect! "constrained rest parameter uses the same binding chain" (str/includes? (emit-param-chain [(assoc param "name" "more")] "more" 0) "bgl____constraint__0 more"))))
+  (expect! "constrained parameter captures predicate before raw binding" (let [emitted (emit-param-chain [param] "x" 0)]
+  (and (str/starts-with? emitted "let bgl____constraint__thunk__0 = _: positive_p; in ") (str/includes? emitted "bgl____constraint__0 bgl____binding__0 then (((x:"))))
+  (expect! "constrained rest parameter uses the same binding chain" (str/includes? (emit-param-chain [(assoc param "name" "more")] "more" 0) "bgl____constraint__0 bgl____binding__0 then (((more:"))))
   (expect! "map default thunk preserves prebinding scope" (= (emit-param-chain [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [{"key" "x" "value" {"node" "ref" "name" "x"}}] "as" false} "ann" {"kind" "app" "name" "Map" "args" []} "constraint" nil}] "x" 0) (str "let bgl____default__thunk__0__0 = _: x; in " "bgl____binding__0: builtins.deepSeq bgl____binding__0 " "(((x: builtins.deepSeq x (x)) " "(if builtins.hasAttr \"x\" bgl____binding__0 " "then builtins.getAttr \"x\" bgl____binding__0 " "else bgl____default__thunk__0__0 null)))")))
   (do
   (reset! nix-record-types-ref {"Point" true})
@@ -1174,21 +1176,22 @@
     (str/includes? (ex-message problem) "constraintSynchronous")))]
   (reset! nix-checked-program-ref false)
   result)))
-  (expect! "constrained let shares the incoming value" (= (emit-expr! {"node" "let" "bindings" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "call" "fn" {"node" "ref" "name" "next-value"} "args" []}}] "body" [{"node" "ref" "name" "x"}]} 0) (str "((let bgl____constraint__0 = positive_p; in x: builtins.deepSeq x (if " "bgl____constraint__0 x then (x) else builtins.throw " "\"Binding constraint failed: x\")) (next-value))")))
+  (expect! "constrained let shares the incoming value" (let [emitted (emit-expr! {"node" "let" "bindings" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "call" "fn" {"node" "ref" "name" "next-value"} "args" []}}] "body" [{"node" "ref" "name" "x"}]} 0)]
+  (and (str/includes? emitted "bgl____constraint__0 bgl____binding__0 then ((x:") (str/includes? emitted ")) (next-value null))"))))
   (expect! "for binding owns its constraint" (str/includes? (emit-for! {"clauses" [{"type" "binding" "name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "expr" {"node" "ref" "name" "xs"}}] "body" [{"node" "ref" "name" "x"}]} 0) "if bgl____constraint__0 bgl____binding__0"))
   (expect! "loop initial and recur routes each validate once" (let [emitted (emit-loop! {"bindings" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "literal" "kind" "number" "value" 1}}] "body" [{"node" "recur" "args" [{"node" "literal" "kind" "number" "value" 2}]}]} 0)]
-  (and (str/includes? emitted "bgl____loop = bgl____binding__0:") (str/includes? emitted "in ((let bgl____constraint__0 = positive_p; in x:"))))
-  (expect! "record constructor routes through provider validator" (let [emitted (emit-record-defs {"name" "Point" "fields" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"}}]} 1)]
-  (and (str/includes? emitted "bgl____24626561676c65247265636f726424506f696e742476616c6964617465 = bgl____record__value:") (str/includes? emitted "mkPoint = x: bgl____24626561676c65247265636f726424506f696e742476616c6964617465 ({"))))
+  (and (str/includes? emitted "bgl____loop = bgl____binding__0:") (str/includes? emitted "in ((let bgl____constraint__0 = positive_p; in bgl____binding__0:"))))
+  (expect! "record constructor guards fields and publishes provider validator" (let [emitted (emit-record-defs {"name" "Point" "fields" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"}}]} 1)]
+  (and (str/includes? emitted "bgl____24626561676c65247265636f726424506f696e742476616c6964617465 = bgl____record__value:") (str/includes? emitted "mkPoint = let bgl____constraint__thunk__0 = _: positive_p; in bgl____binding__0:") (str/includes? emitted "bgl____constraint__0 bgl____binding__0 then (((x:"))))
   (expect! "defscalar emits backing and value predicates" (= (emit-top-defscalar {"node" "defscalar" "name" "Port" "backing" {"kind" "prim" "name" "Int"} "predicates" [{"op" ">=" "value" 1} {"op" "<=" "value" 65535}]} 1) "  mkPort = v: assert builtins.isInt v; assert v >= 1; assert v <= 65535; v;"))
   (expect! "checked with calls qualified provider validator" (do
   (reset! nix-checked-program-ref true)
-  (let [result (= (emit-with-form {"node" "with" "target" {"node" "ref" "name" "point"} "recordUpdate" {"recordName" "Point" "fieldOrder" [":x"] "validator" "geo/$beagle$record$Point$validate"} "updates" [{"field" ":x" "value" {"node" "literal" "kind" "number" "value" 2}}]} 0) (str "(geo.bgl____24626561676c65247265636f726424506f696e742476616c6964617465 " "((point // { x = 2; })))"))]
+  (let [result (= (emit-with-form {"node" "with" "target" {"node" "ref" "name" "point"} "recordUpdate" {"recordName" "Point" "fieldOrder" [":x"] "validator" "geo/$beagle$record$Point$validate"} "updates" [{"field" ":x" "value" {"node" "literal" "kind" "number" "value" 2}}]} 0) (str "let bgl____update__target = point; in builtins.deepSeq " "bgl____update__target (let bgl____update__value__0 = 2; in " "builtins.deepSeq bgl____update__value__0 (let " "bgl____update__candidate = (bgl____update__target // { x = " "bgl____update__value__0; }); in " "(geo.bgl____24626561676c65247265636f726424506f696e742476616c6964617465 " "bgl____update__candidate)))"))]
   (reset! nix-checked-program-ref false)
   result)))
   (expect! "checked Map with preserves authored field punctuation" (do
   (reset! nix-checked-program-ref true)
-  (let [result (= (emit-with-form {"node" "with" "target" {"node" "ref" "name" "settings"} "recordUpdate" nil "updates" [{"field" ":ready?" "value" {"node" "literal" "kind" "bool" "value" true}}]} 0) "(settings // { \"ready?\" = true; })")]
+  (let [result (str/includes? (emit-with-form {"node" "with" "target" {"node" "ref" "name" "settings"} "recordUpdate" nil "updates" [{"field" ":ready?" "value" {"node" "literal" "kind" "bool" "value" true}}]} 0) "bgl____update__target // { \"ready?\" = bgl____update__value__0; }")]
   (reset! nix-checked-program-ref false)
   result)))
   (expect! "checked with rejects a malformed recordUpdate contract" (do

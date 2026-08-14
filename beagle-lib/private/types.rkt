@@ -8,8 +8,7 @@
 ;;   parametric:   (Vec T), (List T), (Set T), (Map K V)
 ;;   union:        (U String Nil)
 ;;
-;; `Any` is universal; matches anything in either direction. Skipped entirely
-;; in dynamic mode.
+;; `Any` is universal; matches anything in either direction.
 
 (require racket/match
          racket/format

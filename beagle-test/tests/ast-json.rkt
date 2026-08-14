@@ -170,7 +170,6 @@
 (define receiver-first-js-source
   (string-append
    "(ns checked.js-members)\n"
-   "(define-mode strict)\n"
    "(declare-extern object Any)\n"
    "(declare-extern key Any)\n"
    "(declare-extern Constructor Any)\n"
@@ -305,7 +304,7 @@
      (check-equal? (hash-ref declaration 'node) "def")
      (check-equal? (hash-ref declaration 'name) "revision")
      (check-equal? (hash-ref (hash-ref declaration 'ann) 'name)
-                   "wake/EntityDeclaration")
+                   "wake.dsl/EntityDeclaration")
      (define provenance (hash-ref declaration 'provenance))
      (check-equal?
       (hash-ref
@@ -321,7 +320,7 @@
      (check-equal? (hash-ref (hash-ref constructor 'fn) 'name)
                    "wake/->EntityDeclaration")
      (check-equal? (hash-ref (hash-ref constructor 'inferredType) 'name)
-                   "EntityDeclaration")
+                   "wake.dsl/EntityDeclaration")
      (define field-constructor
        (car (hash-ref (cadr (hash-ref constructor 'args)) 'items)))
      (check-equal? (hash-ref (hash-ref field-constructor 'fn) 'name)
@@ -540,9 +539,25 @@
      (check-equal? (hash-ref parameter 'ann) 'null)
      (check-equal? (hash-ref effective 'kind) "fn")
      (check-equal?
-      (hash-ref (car (hash-ref effective 'params)) 'name)
+     (hash-ref (car (hash-ref effective 'params)) 'name)
       "Int")
      (check-equal? (hash-ref (hash-ref effective 'ret) 'name) "Int"))
+
+   (test-case "checked-program v4 publishes value inference separately from authored annotations"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.inferred-values)\n"
+         "(def answer 42)\n"
+         "(defonce label \"ready\")\n")
+        ".bclj"
+        "checked-inferred-values.bclj"))
+     (define answer (find-named-form json "def" "answer"))
+     (define label (find-named-form json "defonce" "label"))
+     (check-equal? (hash-ref answer 'ann) 'null)
+     (check-equal? (hash-ref label 'ann) 'null)
+     (check-equal? (hash-ref (hash-ref answer 'effectiveType) 'name) "Int")
+     (check-equal? (hash-ref (hash-ref label 'effectiveType) 'name) "String"))
 
    (test-case "checked-program v4 publishes one finalized multi-arity signature"
      (define json

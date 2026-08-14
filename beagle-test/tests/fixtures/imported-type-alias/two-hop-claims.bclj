@@ -1,7 +1,6 @@
 #lang beagle/clj
 
 (require two-hop-provider :as c)
-(define-mode strict)
 
 (def value Any "ready")
 (def accepted-string Bool (c/accepts? "ready"))

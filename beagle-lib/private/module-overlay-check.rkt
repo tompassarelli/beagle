@@ -445,8 +445,8 @@
               (module-source-source-id source)
               'parse
               (lambda () (parse-source* source current-resolver))))))
-        ;; Every provider in the candidate context is checked before any of its
-        ;; schema-v3 interface can become authority. Selectors affect only the
+        ;; Every provider in the candidate context is checked before its
+        ;; interface can become authority. Selectors affect only the
         ;; returned/emitted module set, never the proof closure.
         (define diagnostics '())
         (parameterize ([current-check-profile check-profile])

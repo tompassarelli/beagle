@@ -15,7 +15,7 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 7)
+(define INTERFACE-SCHEMA-VERSION 8)
 ;; V7 is the complete Beagle import boundary: finalized bindings, macros,
 ;; type/record/error contracts, and dynamic-var status all participate in the
 ;; interface digest.  Unchanged interfaces can therefore prune reverse users.
@@ -236,9 +236,6 @@
 
 (define (publication-effective-definition-types prog provisional?)
   (cond
-    ;; Dynamic mode has no checked inference authority. Its interface remains
-    ;; the authored surface, including Any for omitted annotations.
-    [(not (eq? (program-mode prog) 'strict)) #f]
     ;; Candidate-overlay bootstrap parsing needs names before checking can run.
     ;; The caller must opt into that weaker, transient interface explicitly.
     [provisional? #f]
@@ -247,7 +244,7 @@
      (unless (hash? effective)
        (error
         'program->module-interface
-        "strict interface publication requires finalized effective definition signatures; type-check the program first or use #:provisional? #t only for bootstrap parsing"))
+        "interface publication requires finalized effective definition signatures; type-check the program first or use #:provisional? #t only for bootstrap parsing"))
      effective]))
 
 (define (published-definition-type effective name authored)
@@ -285,9 +282,25 @@
     (define form (unwrap-public-form raw-form))
     (match form
       [(def-form name type _ _ _)
-       (add! (interface-binding name 'def (or type ANY) #f '() #f #f))]
+       (add!
+        (interface-binding
+         name
+         'def
+         (published-definition-type effective name (or type ANY))
+         #f
+         '()
+         #f
+         #f))]
       [(defonce-form name type _ _)
-       (add! (interface-binding name 'defonce (or type ANY) #f '() #f #f))]
+       (add!
+        (interface-binding
+         name
+         'defonce
+         (published-definition-type effective name (or type ANY))
+         #f
+         '()
+         #f
+         #f))]
       [(defn-form name params rest-param return-type _ private? raises _)
        (unless private?
          (define authored
@@ -840,7 +853,7 @@
     [else details]))
 
 (define (interface-canonical-datum
-         namespace mode target gen-class? bindings macro-fingerprints
+         namespace target gen-class? bindings macro-fingerprints
          type-declarations type-exports record-contracts errors requires
          dynamic-vars)
   `(module-interface
@@ -848,7 +861,6 @@
     (consumer-pruning-safe
      ,INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
     (namespace ,namespace)
-    (mode ,mode)
     (target ,target)
     (gen-class ,gen-class?)
     (requires
@@ -991,7 +1003,6 @@
   (define canonical
     (interface-canonical-datum
      (program-namespace prog)
-     (program-mode prog)
      (program-target prog)
      (program-gen-class? prog)
      qualified-bindings

@@ -40,7 +40,7 @@
 
 (define (validator-count files)
   (parameterize ([current-error-port (open-output-string)])
-    (validate-files files)))
+    (validation-result-error-count (validate-files files))))
 
 (define (make-validator-repo nixos-entries
                              #:hm [hm-entries #f]
@@ -390,6 +390,34 @@ BNIX
      dir "ordinary-typo.bnix"
      "(ns ordinary-typo)\n(def config-value {:boot.loader.grub.enabel true})"))
   (check-equal? (validator-count (list source-file)) 1)
+  (delete-directory/files dir))
+
+(test-case "parsed validation reports missing required schema"
+  (define dir (make-temporary-directory))
+  (define source-file
+    (write-bnix-file
+     dir "missing-schema.bnix"
+     "(ns missing-schema)\n(def config-value {:services.demo.enable true})"))
+  (define result (validate-files (list source-file)))
+  (check-equal? (validation-result-error-count result) 1)
+  (check-eq? (validation-error-kind (car (validation-result-errors result)))
+             'missing-schema)
+  (delete-directory/files dir))
+
+(test-case "unknown option result preserves nearest suggestion"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "services.openssh.enable" 't "bool"))))
+  (define source-file
+    (write-bnix-file
+     dir "suggestion.bnix"
+     "(ns suggestion)\n(def config-value {:services.openssh.enabl true})"))
+  (define result (validate-files (list source-file)))
+  (check-equal? (validation-result-error-count result) 1)
+  (check-true
+   (string-contains?
+    (validation-error-message (car (validation-result-errors result)))
+    "services.openssh.enable"))
   (delete-directory/files dir))
 
 (test-case "Nix validation walks option keys inside binding constraints"

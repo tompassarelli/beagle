@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.invalid.flattened-field-declaration)
-(define-mode strict)
 
 (declare-extern character-id-wire? (Fn [String] Bool))
 (declare-extern character-name-wire? (Fn [String] Bool))

@@ -16,6 +16,10 @@
   (loop [i 0]
   (if (>= i n) -1 (if (= (nth xs i) v) i (recur (+ i 1)))))))
 
+(defn str-index-of [^String s ^String sub]
+  (let [result (str/index-of s sub)]
+  (if (nil? result) -1 result)))
+
 (defn obj-set! [obj k v]
   (swap! obj assoc k v))
 
@@ -107,8 +111,8 @@
   :else "?"))
 
 (defn ^String unqualify-name [^String name]
-  (let [idx (str/index-of name "/")]
-  (if (nil? idx) name (substring2 name (+ idx 1) (count name)))))
+  (let [idx (str-index-of name "/")]
+  (if (= idx -1) name (substring2 name (+ idx 1) (count name)))))
 
 (defn ^Boolean type-invariant-equal? [a b]
   (cond

@@ -13,7 +13,7 @@
          beagle/private/ast
          (only-in beagle/private/emit-clj clj-emit-program))
 
-(define PRELUDE "(ns t)\n(define-mode strict)\n(define-target clj)\n")
+(define PRELUDE "(ns t)\n(define-target clj)\n")
 
 (define (read-forms str)
   (parameterize ([current-readtable beagle-readtable])

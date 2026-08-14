@@ -1,7 +1,6 @@
 #lang beagle/clj
 (ns native.slice-types-pipeline)
 
-(define-mode strict)
 
 (require native.core :as core)
 (require native.stages :as stages)

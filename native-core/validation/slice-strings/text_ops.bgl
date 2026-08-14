@@ -1,7 +1,6 @@
 #lang beagle
 ;; Text/Keyword corpus plus FRI Boolean control flow and immutable globals.
 (ns native.text-ops)
-(define-mode strict)
 
 (def sample-values (Vec String) ["left" "right"])
 

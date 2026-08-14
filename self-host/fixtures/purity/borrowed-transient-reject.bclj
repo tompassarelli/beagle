@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.borrowed-transient-reject)
-(define-mode strict)
 
 (defn append-one [(work Any)] Any
   (conj! work 1))

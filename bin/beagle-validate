@@ -65,16 +65,16 @@ if [[ ${#files[@]} -eq 0 ]]; then
     exit 2
 fi
 
-# Build the racket command
-racket_args=()
 if [[ -n "$auto_fix" ]]; then
-    racket_args+=("$auto_fix")
+    # Mutation is a deliberate first pass; the shared checker below reparses
+    # the resulting source and owns the final verdict.
+    set +e
+    "$RACKET" "$LIB_DIR/validate-nix.rkt" --auto-fix "${files[@]}"
+    set -e
 fi
-if [[ -n "$json_flag" ]]; then
-    racket_args+=("$json_flag")
-fi
-for f in "${files[@]}"; do
-    racket_args+=("$f")
-done
 
-exec "$RACKET" "$LIB_DIR/validate-nix.rkt" "${racket_args[@]}"
+if [[ -n "$json_flag" ]]; then
+    export BEAGLE_ERROR_FORMAT=json
+fi
+
+exec "$BEAGLE_ROOT/bin/beagle-check-all" "${files[@]}"

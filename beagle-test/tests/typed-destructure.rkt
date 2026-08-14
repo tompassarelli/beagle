@@ -23,7 +23,7 @@
     (parse-program
      (read-forms
       (string-append
-       "(ns typed.destructure)\n(define-mode strict)\n(define-target "
+       "(ns typed.destructure)\n(define-target "
        (symbol->string target)
        ")\n"
        source))))
@@ -36,7 +36,7 @@
     (parse-program
      (read-forms
       (string-append
-       "(ns typed.destructure)\n(define-mode strict)\n(define-target clj)\n"
+       "(ns typed.destructure)\n(define-target clj)\n"
        source))))
   (parameterize ([current-check-profile 3])
     (type-check! program))

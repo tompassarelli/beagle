@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-holder)
-(define-mode strict)
 
 ;; Explicit structure-of-buffers composition is ordinary semantic structure:
 ;; the record stores a Buffer handle without changing record or Vec layout.

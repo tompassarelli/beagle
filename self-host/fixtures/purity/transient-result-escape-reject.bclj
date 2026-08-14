@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-result-escape-reject)
-(define-mode strict)
 
 (defn expose-result [(xs Any)] Any
   (let [owned (transient xs)]

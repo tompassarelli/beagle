@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-arity-double-array)
-(define-mode strict)
 
 (defn bad-double-array [] Any
   (double-array))

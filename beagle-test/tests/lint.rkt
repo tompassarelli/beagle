@@ -15,19 +15,9 @@
 (define (br . xs) (cons '#%brackets xs))
 (define (typed name type) (list name type))
 
-(test-case "untyped def warns in strict mode"
-  (define out (lint-prog '(def x 42)))
-  (check-true (regexp-match? #rx"untyped def x" out)))
-
-(test-case "typed def does not warn"
-  (define out (lint-prog '(def x Int 42)))
-  (check-false (regexp-match? #rx"untyped def x" out)))
-
-(test-case "lint skipped in dynamic mode"
-  (define out (lint-prog '(define-mode dynamic)
-                         '(def x 42)
-                         (list 'defn 'foo (br 'x) 'Any 'x)))
-  (check-equal? out ""))
+(test-case "omitted def and defonce annotations are not lint warnings"
+  (define out (lint-prog '(def x 42) '(defonce y "ready")))
+  (check-false (regexp-match? #rx"untyped def" out)))
 
 ;; --- shadowed bindings -----------------------------------------------------
 

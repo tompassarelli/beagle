@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns fixtures.invalid.enum-non-member)
-(define-mode strict)
 
 (defenum Mode :on :off)
 

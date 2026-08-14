@@ -122,7 +122,6 @@
     (write-text source
                 (string-append "#lang beagle\n"
                                "(ns fixture.core)\n"
-                               "(define-mode strict)\n"
                                "(defn entry [] Int 42)\n"))
     (check-equal?
      (run-bounded beagle "build" "--materializer" "c17" "--abi" "wasm32"
@@ -937,7 +936,6 @@ SH
                  "entry is ambiguous")))])
     (define namespace (list-ref case 1))
     (define source-text (string-append prefix "(ns " namespace ")\n"
-                                       "(define-mode strict)\n"
                                        (list-ref case 2)))
     (define-values (code stdout stderr marker?)
       (run-entry-build source-text (string-append namespace "/entry")))
@@ -960,7 +958,6 @@ SH
                  (string-append
                   "#lang beagle\n"
                   "(ns native.wasm-refusal)\n"
-                  "(define-mode strict)\n"
                   "(defn entry [(value Int)] Int value)\n"))
      (define stdout (open-output-string))
      (define stderr (open-output-string))
@@ -1013,7 +1010,6 @@ SH
                     (string-append
                      "#lang beagle\n"
                      "(ns native.wasm-e2e)\n"
-                     "(define-mode strict)\n"
                      "(defn entry [] Int 42)\n"))
         (define env (environment-variables-copy (current-environment-variables)))
         (environment-variables-set! env #"BEAGLE_WASI_CC"

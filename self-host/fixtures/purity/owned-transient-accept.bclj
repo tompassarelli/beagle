@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.owned-transient-accept)
-(define-mode strict)
 
 (defn all-operations [(xs Any)] Any
   (let [owned (transient xs)]

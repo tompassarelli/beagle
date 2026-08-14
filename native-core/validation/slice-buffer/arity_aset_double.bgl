@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-arity-aset-double)
-(define-mode strict)
 
 (defn bad-aset-double! [(buffer (Buffer Float))] Float
   (aset-double! buffer 0))

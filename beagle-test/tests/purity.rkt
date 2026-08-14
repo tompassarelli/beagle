@@ -10,9 +10,9 @@
 ;; exposes every rename boundary.
 ;;
 ;; These tests pin BOTH halves of the Phase 6.0 contract:
-;;   * the pass FIRES correctly when enabled (warn/error, under strict mode);
+;;   * the pass FIRES correctly when enabled (warn/error);
 ;;   * the pass is INERT only when explicitly off. The shipped default is
-;;     error, so a strict checked build cannot publish an impure boundary.
+;;     error, so a checked build cannot publish an impure boundary.
 
 (require rackunit
          racket/file
@@ -40,22 +40,22 @@
 
 ;; A non-`!` defn whose body resets an atom.
 (define non-bang-mutating
-  (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+  (prog* '(ns t.app) '(define-target clj)
          '(defn save [box v] Any (reset! box v))))
 
 ;; The same body under a `!`-named defn.
 (define bang-mutating
-  (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+  (prog* '(ns t.app) '(define-target clj)
          '(defn save! [box v] Any (reset! box v))))
 
 ;; A non-`!` defn whose body is pure.
 (define pure-defn
-  (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+  (prog* '(ns t.app) '(define-target clj)
          '(defn add [a b] Any (+ a b))))
 
 ;; A non-`!` defn whose body uses set! (the AST-level mutation marker).
 (define non-bang-set!
-  (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+  (prog* '(ns t.app) '(define-target clj)
          '(defn store [box v] Any (set! box v))))
 
 ;; ============================================================================
@@ -137,21 +137,12 @@
        (type-check! non-bang-mutating)))))
 
 ;; ============================================================================
-;; Gating: mode + descent edge cases
+;; Descent edge cases
 ;; ============================================================================
-
-(test-case "dynamic mode is exempt even with the flag on (mode gate)"
-  (define dyn
-    (prog* '(ns t.app) '(define-mode dynamic) '(define-target clj)
-           '(defn save [box v] Any (reset! box v))))
-  (parameterize ([current-purity-enforcement 'warn])
-    ;; dynamic mode short-circuits the whole checker; no purity output.
-    (define o (check-output dyn))
-    (check-false (regexp-match? #rx"purity leak" o))))
 
 (test-case "warn: a mutation nested in let/if/do is still caught (descends)"
   (define nested
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn refresh [box v] Any
               (let [x v]
                 (if x
@@ -164,7 +155,7 @@
 
 (test-case "warn: locally effectful defs propagate through every purity boundary"
   (define indirect
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn write-cache [box v] Any (reset! box v))
            '(defn refresh-cache [box v] Any (write-cache box v))
            '(defn run-refresh [box v] Any (refresh-cache box v))))
@@ -177,7 +168,7 @@
 
 (test-case "warn: calls through pure local defs remain pure"
   (define pure-chain
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn add-one [x] Any (+ x 1))
            '(defn add-two [x] Any (add-one (add-one x)))))
   (parameterize ([current-purity-enforcement 'warn])
@@ -186,7 +177,7 @@
 
 (test-case "warn: a mutation inside an inner fn still counts (effects run in the call)"
   (define inner
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn make-handler [box] Any
               (fn [v] Any (reset! box v)))))
   (parameterize ([current-purity-enforcement 'warn])
@@ -196,7 +187,7 @@
 
 (test-case "warn: structural descent finds effects in rescue, doto, and threading"
   (define structural
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn rescue-primary [box v] Any
               (rescue (reset! box v) nil))
            '(defn rescue-fallback [box v] Any
@@ -215,7 +206,7 @@
 
 (test-case "quoted mutation syntax is data, not an effect"
   (define quoted-mutation
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn mutation-data [box v] Any
               (quote (reset! box v)))))
   (parameterize ([current-purity-enforcement 'warn])
@@ -234,7 +225,7 @@
   (define (violations . forms)
     (map purity-violation-name
          (purity-violations
-          (apply prog* '(ns t.owner) '(define-mode strict)
+          (apply prog* '(ns t.owner)
                  '(define-target clj) forms))))
   ;; An established owner may flow through nested transient-family calls, and
   ;; a fresh origin may be consumed immediately without first being bound.
@@ -306,7 +297,7 @@
 
 (test-case "module effect edges honor lexical binding identity"
   (define p
-    (prog* '(ns t.scope) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.scope) '(define-target clj)
            '(defn writer [cell] Any (reset! cell nil))
            '(defn sink! [value] Any (reset! value nil))
            '(defn parameter-shadow [writer value] Any (writer value))
@@ -328,7 +319,6 @@
       (string-append
        "#lang beagle/clj\n"
        "(ns t.scope.destructure)\n"
-       "(define-mode strict)\n"
        "(defn writer [(cell Any)] Any (reset! cell nil))\n"
        "(defn destructure-shadow [(m (Map Keyword Any))] Any\n"
        "  (let [{:keys [writer] :or {writer writer}} m]\n"
@@ -339,13 +329,13 @@
 
 (test-case "primitive transient recognition honors module and external bindings"
   (define module-shadow
-    (prog* '(ns t.owner.module-shadow) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.owner.module-shadow) '(define-target clj)
            '(defn transient [value] Any value)
            '(defn expose [xs] Any (persistent! (transient xs)))))
   (check-equal? (map purity-violation-name (purity-violations module-shadow))
                 '(expose))
   (define external-shadow
-    (prog* '(ns t.owner.external-shadow) '(define-mode strict)
+    (prog* '(ns t.owner.external-shadow)
            '(define-target clj) '(declare-extern transient Any)
            '(defn expose [xs] Any (persistent! (transient xs)))))
   (check-equal? (map purity-violation-name (purity-violations external-shadow))
@@ -353,7 +343,7 @@
 
 (test-case "nested publishing definitions are effects and cannot retain owners"
   (define p
-    (prog* '(ns t.owner.publish) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.owner.publish) '(define-target clj)
            '(defn publish [xs] Any
               (let [owned (transient xs)]
                 (defn retained [] Any owned)
@@ -393,7 +383,7 @@
 
 (test-case "rescue fallback starts from every primary exceptional edge"
   (define p
-    (prog* '(ns t.owner.rescue) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.owner.rescue) '(define-target clj)
            '(defn freeze-then-fallback [xs] Any
               (let [owned (transient xs)]
                 (rescue
@@ -434,7 +424,6 @@
     (string-append
      "#lang beagle\n"
      "(ns t.constraint)\n"
-     "(define-mode strict)\n"
      "(defn check! [(value Int)] Bool true)\n"
      body))
   (define (violations-of body)
@@ -475,7 +464,7 @@
 
 (test-case "condp predicate invocations use the implicit-call seam"
   (define p
-    (prog* '(ns t.condp) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.condp) '(define-target clj)
            '(defn pred! [expected actual] Bool (= expected actual))
            '(defn classify [value] String
               (condp pred! value 1 "one" 2 "two" "other"))))
@@ -489,7 +478,7 @@
 (test-case "condp in binding zero resolves its predicate before that binding"
   (define p
     (prog* '(ns t.condp.binding-zero)
-           '(define-mode strict)
+
            '(define-target clj)
            '(defn pred! [expected actual] Bool (= expected actual))
            '(defn classify [value] String
@@ -505,7 +494,7 @@
 (test-case "condp respects an already-bound lexical predicate"
   (define p
     (prog* '(ns t.condp.lexical)
-           '(define-mode strict)
+
            '(define-target clj)
            '(defn pred! [expected actual] Bool (= expected actual))
            '(defn classify [pred! value] String
@@ -514,7 +503,7 @@
 
 (test-case "protocol methods participate in global primitive shadowing"
   (define p
-    (prog* '(ns t.protocol-shadow) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.protocol-shadow) '(define-target clj)
            '(defprotocol P (transient [self] Any))
            '(defn expose [value] Any (persistent! (transient value)))))
   (define violations (purity-violations p))
@@ -527,7 +516,7 @@
 (test-case "protocol names participate in global primitive shadowing"
   (define p
     (prog* '(ns t.protocol-name-shadow)
-           '(define-mode strict)
+
            '(define-target clj)
            '(defprotocol transient (value [self] Any))
            '(defn expose [item] Any (persistent! (transient item)))))
@@ -540,7 +529,7 @@
 
 (test-case "JS class names participate in global primitive shadowing"
   (define p
-    (prog* '(ns t.class-shadow) '(define-mode strict) '(define-target js)
+    (prog* '(ns t.class-shadow) '(define-target js)
            '(js/class transient)
            '(defn expose [value] Any (persistent! (transient value)))))
   (define violations (purity-violations p))
@@ -552,7 +541,7 @@
 
 (test-case "-main is exempt: the entry-point contract name cannot carry `!`"
   (define entry
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn run! [(v Any)] Any (reset! (atom nil) v))
            '(defn -main [& (args (Vec String))] Any (run! args))))
   (parameterize ([current-purity-enforcement 'warn])
@@ -565,7 +554,7 @@
 
 (test-case "plain Clojure main remains a checked purity boundary"
   (define non-entry
-    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+    (prog* '(ns t.app) '(define-target clj)
            '(defn store-roundtrip?! [] Bool true)
            '(defn main [] Nil (do (store-roundtrip?!) nil))))
   (define e
@@ -582,7 +571,7 @@
     (parse-program
      (list
       (datum->syntax #f '(ns t.app) (vector "purity-location.bclj" 1 0 #f #f))
-      (datum->syntax #f '(define-mode strict)
+      (datum->syntax #f
                      (vector "purity-location.bclj" 2 0 #f #f))
       (datum->syntax #f '(define-target clj)
                      (vector "purity-location.bclj" 3 0 #f #f))

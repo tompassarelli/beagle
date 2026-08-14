@@ -35,7 +35,6 @@
 
 (define PRELUDE "
 (ns test.shapes)
-(define-mode strict)
 (define-target clj)
 (defrecord Circle [(r Int)])
 (defrecord Square [(side Int)])

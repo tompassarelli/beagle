@@ -5,7 +5,6 @@
 ;; calls these while those tiers land separately.
 (ns fram.vec-probe)
 
-(define-mode strict)
 
 (require fram.types :as t)
 

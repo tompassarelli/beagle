@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.fixed-width-entry)
 
-(define-mode strict)
 
 (defrecord PackedValue
   [(coordinate I32)

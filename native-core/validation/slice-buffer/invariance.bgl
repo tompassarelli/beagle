@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-invariance)
-(define-mode strict)
 
 (defn accept-any-buffer [(buffer (Buffer Any))] Nil
   nil)

@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.parse-double)
-(define-mode strict)
 
 (defn parse-value [(text String)] (U Float Nil)
   (parse-double text))

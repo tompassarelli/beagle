@@ -50,7 +50,7 @@ bb -e '
                     form))
                 (get ast "forms"))]
     (assert (= "beagle.checked-program" (get ast "kind")))
-    (assert (= 3 (get ast "schemaVersion")))
+    (assert (= 4 (get ast "schemaVersion")))
     ;; The source stays compiler-valid. These two AST replacements are explicit
     ;; lowering refusals that cannot be authored because the checker rejects
     ;; them earlier; re-attest the mutated checked payload before projection.

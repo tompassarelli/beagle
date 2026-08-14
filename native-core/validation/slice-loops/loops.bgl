@@ -3,7 +3,6 @@
 ;; arithmetic arm: every accumulator is a Bool, a record, or an Int carried
 ;; across the back edge unchanged. The counted fram shapes live in counted/.
 (ns native.loops)
-(define-mode strict)
 
 (defrecord Tally [(flag Bool) (mark Int)])
 

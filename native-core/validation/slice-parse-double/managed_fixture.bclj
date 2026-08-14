@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.parse-double-managed)
-(define-mode strict)
 
 (defn parse-value [(text String)] (U Float Nil)
   (parse-double text))

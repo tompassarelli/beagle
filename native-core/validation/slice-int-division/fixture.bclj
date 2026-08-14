@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.int-division)
-(define-mode strict)
 
 (defn quot-int [(left Int) (right Int)] Int
   (quot left right))

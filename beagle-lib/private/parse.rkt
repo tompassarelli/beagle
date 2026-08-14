@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Parse beagle source into structured AST nodes. Macros are expanded in
-;; pass 2. Meta forms (mode, namespace, declare-extern, require, defmacro)
+;; pass 2. Meta forms (namespace, declare-extern, require, defmacro)
 ;; are pulled out separately and don't appear in `forms`.
 
 (require racket/match
@@ -1341,8 +1341,6 @@
   (validate-reserved-type-declarations! datums)
 
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
-  (define mode      DEFAULT-MODE)
-  (define mode-set? #f)
   (define target    DEFAULT-TARGET)
   (define target-set? #f)
   (define ns        DEFAULT-NAMESPACE)
@@ -1876,14 +1874,6 @@
 
   (for ([d (in-list datums)])
     (match d
-      [(list 'define-mode (? symbol? m))
-       (when mode-set? (raise-parse-error 'duplicate-meta "duplicate define-mode"))
-       (unless (or (eq? m 'strict) (eq? m 'dynamic))
-         (raise-parse-error 'bad-meta-value
-                            "unknown mode: ~a (expected strict or dynamic)" m))
-       (set! mode m)
-       (set! mode-set? #t)]
-
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
       (unless (memq t (source-profile-ids))
@@ -1997,10 +1987,6 @@
       [(cons 'define-target _)
        (raise-parse-error 'bad-meta-value
                           "malformed define-target — expected (define-target core|clj|js|nix), got: ~v" d)]
-      [(cons 'define-mode _)
-       (raise-parse-error 'bad-meta-value
-                          "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]
-
       [_ (void)]))
 
   ;; Pass 2: parse each remaining form from syntax objects.
@@ -2095,7 +2081,7 @@
     (inject-hygiene-aliases parsed0 form-stxs0 hygiene-alias-table))
 
   (define prog
-    (program mode ns parsed registry (hash-copy declared-macros)
+    (program ns parsed registry (hash-copy declared-macros)
              externs (hash-copy declared-externs)
              (reverse requires) (reverse imports)
              form-stxs src-table (make-hasheq)
@@ -2123,7 +2109,6 @@
 (define (meta-form? d)
   (and (pair? d)
        (memq (car d) '(ns
-                       define-mode
                        define-target
                        defmacro
                        declare-extern

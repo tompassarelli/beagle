@@ -1,7 +1,6 @@
 #lang beagle/clj
 (ns native.c11)
 
-(define-mode strict)
 
 (require native.core :as core)
 (require native.simd :as simd)

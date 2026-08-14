@@ -416,10 +416,6 @@
     [effective
      (public-type->string effective)
      effective]
-    [(eq? (program-mode prog) 'dynamic)
-     (define authored (authored-callable-type form))
-     (public-type->string authored)
-     authored]
     [else
      (error 'beagle-daemon
             "checked program is missing the effective signature for ~a"

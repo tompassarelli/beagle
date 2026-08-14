@@ -7,7 +7,6 @@
   (:gen-class) so the JVM/GraalVM native-image path has a -main entry class;
   babashka ignores it."
   (:gen-class))
-(define-mode strict)
 
 (require clojure.string :as str)
 (require selfhost.rt)
@@ -72,7 +71,7 @@
       :else (recur (+ i 1) start acc))))
 
 (defn- last-slash [(s String)] Int
-  (loop [i (- (count s) 1)]
+  (loop [(i Int) (- (count s) 1)]
     (cond
       (< i 0) -1
       (= (subs s i (+ i 1)) "/") i
@@ -329,6 +328,27 @@
        "source-sha256" (get source-snapshot "sourceSha256")
        "source-id" (selfhost.rt/source-id path)})))
 
+(defn- imported-record-field-order [(prog Any)] Any
+  (reduce
+    (fn [(out Any) (contract Any)] Any
+      (assoc out (get contract "name")
+        (mapv
+          (fn [(field String)] String
+            (if (str/starts-with? field ":") (subs field 1) field))
+          (get contract "field-order"))))
+    {}
+    (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
+
+(defn- imported-record-namespaces [(prog Any)] Any
+  (reduce
+    (fn [(out Any) (contract Any)] Any
+      (let [namespace (get contract "namespace")]
+        (if (string? namespace)
+          (assoc out (get contract "name") namespace)
+          out)))
+    {}
+    (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
+
 (defn- check-or-die! [(prog Any)] Any
   (let [(errors Any) (c/check-program! prog)]
     (if (> (count errors) 0)
@@ -337,7 +357,9 @@
           (selfhost.rt/eprint (str "beagle [check]: " err "\n")))
         (selfhost.rt/exit 1)
         prog)
-      (c/decorate-checked-program! prog))))
+      (assoc (c/decorate-checked-program! prog)
+        "importedRecordFieldOrder" (imported-record-field-order prog)
+        "importedRecordNamespaces" (imported-record-namespaces prog)))))
 
 ;; Emit dispatch by target. Default clj keeps current behavior; each backend
 ;; adds one branch here (parallel target ports union into this table).
@@ -349,8 +371,9 @@
 
 (def CHECKED-PROGRAM-KEYS Any
   ["kind" "schemaVersion" "phase" "target" "namespace" "sourceId"
-   "sourceSha256" "projectionSha256" "mode" "gen-class" "requires"
-   "imports" "externs" "forms"])
+   "sourceSha256" "projectionSha256" "gen-class" "requires"
+   "imports" "importedRecordFieldOrder" "importedRecordNamespaces"
+   "externs" "forms"])
 
 (defn- exact-checked-program-keys? [(projection Any)] Bool
   (and (= (count (keys projection)) (count CHECKED-PROGRAM-KEYS))
@@ -504,10 +527,11 @@
               "namespace" (get prog "namespace")
               "sourceId" (get snapshot "source-id")
               "sourceSha256" (get snapshot "source-sha256")
-              "mode" (get prog "mode")
               "gen-class" (get prog "gen-class")
               "requires" (get prog "requires")
               "imports" (get prog "imports")
+              "importedRecordFieldOrder" (get prog "importedRecordFieldOrder")
+              "importedRecordNamespaces" (get prog "importedRecordNamespaces")
               "externs" externs
               "forms" (get prog "forms")}]
     (assoc base "projectionSha256" (selfhost.rt/projection-sha256 base))))
@@ -533,9 +557,6 @@
 
     (not (= (get projection "phase") "checked"))
     (invalid-projection! "phase must be checked")
-
-    (not (= (get projection "mode") "strict"))
-    (invalid-projection! "checked-program mode must be strict")
 
     (not (= (get projection "target") target))
     (invalid-projection! (str "target mismatch: projection is " (get projection "target")

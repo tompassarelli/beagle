@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.emit-clj)
-(define-mode strict)
 
 ;; Self-hosted Clojure emitter. Port of driftlab self-host/emit-clj.bjs,
 ;; upgraded to match TODAY'S beagle-lib/private/emit-clj.rkt byte-for-byte
@@ -13,11 +12,11 @@
 
 ;; --- module state (reset per emit-program!) -----------------------------------
 
-;; record name -> field-name vector; includes defunion/deferror members
-;; (mirrors emit-clj.rkt build-record-field-table — drives ^Rec hints and
-;; match record-pattern field binding). JSON carries no imported-record info,
-;; so every entry is "local" (hintable).
+;; record name -> field-name vector; includes local and imported records.
 (def record-fields Any (atom {}))
+
+;; imported record spelling -> provider namespace, used for JVM class names.
+(def record-namespaces Any (atom {}))
 
 ;; scalar ctor/accessor names that erase to identity at call sites. Predicated
 ;; scalar constructors remain real calls; their accessors still erase.
@@ -507,7 +506,10 @@
 
 (defn last-dot-segment [(s String)] String
   (let [idx (str/last-index-of s ".")]
-    (if (nil? idx) s (subs s (+ idx 1)))))
+    (if (nil? idx)
+      s
+      (let [(offset Int) idx]
+        (subs s (+ offset 1))))))
 
 (defn emit-require [(r Any)] String
   (let [ns-name (get r "ns")
@@ -527,8 +529,9 @@
   (let [idx (str/last-index-of class-name ".")]
     (if (nil? idx)
       class-name
-      (str "[" (subs class-name 0 idx) " "
-           (subs class-name (+ idx 1)) "]"))))
+      (let [(offset Int) idx]
+        (str "[" (subs class-name 0 offset) " "
+             (subs class-name (+ offset 1)) "]")))))
 
 (defn has-clojure-string? [(rs Any)] Bool
   (> (count (filterv (fn [(r Any)] Bool (= "clojure.string" (get r "ns"))) rs)) 0))
@@ -567,7 +570,10 @@
 
 (defn unqualify-name [(name String)] String
   (let [index (str/last-index-of name "/")]
-    (if (nil? index) name (subs name (+ index 1)))))
+    (if (nil? index)
+      name
+      (let [(offset Int) index]
+        (subs name (+ offset 1))))))
 
 (defn record-validator-name [(name String)] String
   (str "$beagle$record$" (unqualify-name name) "$validate"))
@@ -915,17 +921,53 @@
       (= pt "record")
         (let [rec-name (get pat "name")
               bindings (vec (get pat "bindings"))
-              fields (get (deref record-fields) rec-name)
-              test (str "(instance? " rec-name " " target-sym ")")]
+              direct-fields (get (deref record-fields) rec-name)
+              direct-namespace (get (deref record-namespaces) rec-name)
+              candidates
+                (if (some? direct-fields)
+                  []
+                  (filterv
+                    (fn [(name String)] Bool
+                      (= rec-name (unqualify-name name)))
+                    (keys (deref record-fields))))
+              candidate (if (= 0 (count candidates)) nil (nth candidates 0))
+              fields (if (some? direct-fields)
+                       direct-fields
+                       (if (nil? candidate)
+                         nil
+                         (get (deref record-fields) candidate)))
+              namespace (if (some? direct-fields)
+                          direct-namespace
+                          (if (nil? candidate)
+                            nil
+                            (get (deref record-namespaces) candidate)))
+              compatible
+                (every?
+                  (fn [(name String)] Bool
+                    (and (= fields (get (deref record-fields) name))
+                         (= namespace (get (deref record-namespaces) name))))
+                  candidates)
+              class-name
+                (if (string? namespace)
+                  (str namespace "." (unqualify-name rec-name))
+                  rec-name)
+              test (str "(instance? " class-name " " target-sym ")")]
+          (when (not compatible)
+            (throw
+              (ex-info
+                (str "ambiguous imported record pattern: " rec-name) {})))
           (if (or (= 0 (count bindings)) (nil? fields))
             (str test " " body-str)
-            (let [pairs (loop [(i Int) 0
+            (let [(field-vector (Vec Any))
+                  (vec fields)
+                  pairs (loop [(i Int) 0
                                (acc (Vec String)) []]
-                          (if (or (>= i (count bindings)) (>= i (count fields)))
+                          (if (or (>= i (count bindings))
+                                  (>= i (count field-vector)))
                             acc
                             (recur (+ i 1)
                                    (conj acc (str (get (nth bindings i) "name")
-                                                  " (:" (nth fields i) " " target-sym ")")))))]
+                                                  " (:" (nth field-vector i) " " target-sym ")")))))]
               (str test " (let [" (str/join " " pairs) "] " body-str ")"))))
       (= pt "map")
         (let [entries (vec (get pat "entries"))
@@ -1403,7 +1445,8 @@
 
 (defn emit-program! [(prog Any)] String
   (reset! emit-expr-ref emit-expr!)
-  (reset! record-fields {})
+  (reset! record-fields (get prog "importedRecordFieldOrder" {}))
+  (reset! record-namespaces (get prog "importedRecordNamespaces" {}))
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
@@ -1430,6 +1473,7 @@
 (defn run-tests! [] Int
   (reset! emit-expr-ref emit-expr!)
   (reset! record-fields {})
+  (reset! record-namespaces {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)

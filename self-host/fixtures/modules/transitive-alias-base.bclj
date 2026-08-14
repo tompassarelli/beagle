@@ -1,5 +1,4 @@
 #lang beagle/clj
 (ns fixtures.transitive-alias-base)
-(define-mode strict)
 
 (defalias Slots (Atom (Vec Int)))

@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.strict-accept)
-(define-mode strict)
 
 (defn copy-with-one [(values Any)] Any
   (let [work (transient values)]

@@ -27,9 +27,9 @@
 
 (define (target-prelude target)
   (case target
-    [(clj) "(ns t)\n(define-mode strict)\n(define-target clj)\n"]
-    [(js) "(ns t)\n(define-mode strict)\n(define-target js)\n"]
-    [(nix) "(ns t)\n(define-mode strict)\n(define-target nix)\n"]
+    [(clj) "(ns t)\n(define-target clj)\n"]
+    [(js) "(ns t)\n(define-target js)\n"]
+    [(nix) "(ns t)\n(define-target nix)\n"]
     [else (error 'cheatsheet "unknown example target: ~a" target)]))
 
 (test-case "cheatsheet is non-empty"

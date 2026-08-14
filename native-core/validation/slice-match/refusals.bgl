@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.match-refusals)
-(define-mode strict)
 
 (defn nonexhaustive [(tag Keyword?)] Int
   (match tag

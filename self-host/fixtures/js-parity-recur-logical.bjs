@@ -1,6 +1,5 @@
 #lang beagle/js
 (ns selfhost.fixtures.js-parity-recur-logical)
-(define-mode strict)
 
 (defn exact [(limit Int)] Any
   (loop [(at Int) 0]

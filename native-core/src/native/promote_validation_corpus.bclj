@@ -11,7 +11,6 @@
 ;;   1  the same program under IDENTITY assignment — nothing is younger than
 ;;      the root, so every promote collapses and no epoch is minted
 
-(define-mode strict)
 
 (require native.body-c17 :as body)
 (require native.body-slice :as body-slice)

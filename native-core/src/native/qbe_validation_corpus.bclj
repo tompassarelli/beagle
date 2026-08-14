@@ -6,7 +6,6 @@
   (:require [native.core :as core]
             [native.qbe :as qbe]))
 
-(define-mode strict)
 
 (defn fixture-id [(name String)] core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))

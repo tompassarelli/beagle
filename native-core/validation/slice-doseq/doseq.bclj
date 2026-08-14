@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.doseq)
-(define-mode strict)
 
 ;; The body reads through the bound element. A second element equal to the Vec
 ;; length proves the back edge ran by taking VecGet's bounds trap.

@@ -48,15 +48,14 @@
 
 ;; native.checked-program owns kind, schemaVersion, and projection
 ;; authenticity. What remains here are this projector's own preconditions:
-;; Core source facts are only meaningful for a strict Core-target projection,
+;; Core source facts are only meaningful for a Core-target projection,
 ;; and its sourceId is the logical path the build addresses it by.
-(defn require-strict-core-projection! [ast relative-path]
+(defn require-core-projection! [ast relative-path]
   (doseq [[field expected] {"phase" "checked"
-                            "target" "core"
-                            "mode" "strict"}]
+                            "target" "core"}]
     (when (not= expected (get ast field))
       (throw
-        (ex-info "source facts require a strict checked Core projection"
+        (ex-info "source facts require a checked Core projection"
                  {:field field :expected expected :actual (get ast field)
                   :relative-path relative-path}))))
   (when (not= relative-path (get ast "sourceId"))
@@ -74,7 +73,7 @@
 (defn require-native-compatible-ast! [ast relative-path]
   (checked-program/require-checked-program!
     ast relative-path "native source-fact projection")
-  (require-strict-core-projection! ast relative-path))
+  (require-core-projection! ast relative-path))
 
 (defn emit-seq [items emit-one]
   (let [n (nid)]
@@ -612,6 +611,8 @@
       "def"    (do (row! n "form-kind" "t" "def")
                    (row! n "name" "t" (get f "name"))
                    (when-let [a (get f "ann")] (row! n "ann" "n" (emit-ann a)))
+                   (when-let [effective (get f "effectiveType")]
+                     (row! n "effective-type" "n" (emit-ann effective)))
                    (row! n "value" "n" (emit-expr (get f "value"))))
       "defn"   (do (row! n "form-kind" "t" "defn")
                    (row! n "name" "t" (get f "name"))

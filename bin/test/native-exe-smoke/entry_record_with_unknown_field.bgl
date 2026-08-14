@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.record-with-unknown-field)
 
-(define-mode strict)
 
 (defrecord Fighter [(health Int)])
 

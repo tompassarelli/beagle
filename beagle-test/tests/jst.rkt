@@ -25,7 +25,7 @@
    #:source-path "test.bjs"))
 
 (define (jst-preamble . forms)
-  (append '((ns test.app) (define-mode strict) (define-target js)) forms))
+  (append '((ns test.app) (define-target js)) forms))
 
 (define-syntax-rule (check-jst-emit name expected-str form ...)
   (test-case name
@@ -157,7 +157,7 @@
        (check-exn
         exn:fail?
         (lambda ()
-          (define prog (jst-parse (list '(ns test.app) '(define-mode strict)
+          (define prog (jst-parse (list '(ns test.app)
                                         '(js/class Foo (constructor [] Nil (js/return))))))
           (type-check! prog))))
 
@@ -175,7 +175,7 @@
             (define prog
               (jst-parse
                (list '(ns test.app)
-                     '(define-mode strict)
+
                      '(declare-extern object Any)
                      '(declare-extern key Any)
                      '(declare-extern Constructor Any)

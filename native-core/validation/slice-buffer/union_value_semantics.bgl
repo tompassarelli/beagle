@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-union-value-semantics)
-(define-mode strict)
 
 (defn buffer-or-int-equal?
   [(left (U (Buffer Float) Int)) (right (U (Buffer Float) Int))] Bool

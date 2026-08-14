@@ -1,7 +1,6 @@
 #lang beagle/clj
 
 (ns kitchen-sink)
-(define-mode strict)
 
 ;; records
 (defrecord Point [(x Int) (y Int)])

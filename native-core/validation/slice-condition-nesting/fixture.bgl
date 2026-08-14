@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.short-circuit)
-(define-mode strict)
 
 (defn nested-short-circuit
   [(outer Bool)

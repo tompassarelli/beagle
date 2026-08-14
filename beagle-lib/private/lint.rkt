@@ -5,23 +5,18 @@
 ;; Print to stderr so they're visible during build but don't pollute the
 ;; stdout that bin/beagle-build pipes to .clj files.
 ;;
-;; Skipped in dynamic mode (types are optional there by definition).
-
 (require racket/match
          racket/format
          racket/string
          "parse.rkt")
 
 (define (lint-program! prog)
-  (when (eq? (program-mode prog) 'strict)
-    (for ([form (in-list (program-forms prog))])
-      (lint-form form))
-    (lint-shadows prog)
-    (lint-unused-externs prog)
-    (when (eq? (program-target prog) 'js)
-      (lint-export-naming prog))
-    (when (eq? (program-target prog) 'nix)
-      (lint-nix prog))))
+  (lint-shadows prog)
+  (lint-unused-externs prog)
+  (when (eq? (program-target prog) 'js)
+    (lint-export-naming prog))
+  (when (eq? (program-target prog) 'nix)
+    (lint-nix prog)))
 
 ;; --- cross-module naming lint (JS target) -----------------------------------
 ;; kebab-case names mangle to snake_case (`build-context-menu` ->
@@ -60,34 +55,10 @@
               name (camel->kebab-str (symbol->string name))
               (camel->kebab-str (symbol->string name)))))))
 
-(define (lint-form f)
-  (cond
-    [(def-form? f) (lint-def f)]
-    [(defonce-form? f) (lint-defonce f)]
-    [else (void)]))
-
 (define (warn fmt . args)
   (apply fprintf (current-error-port)
          (string-append "beagle [lint]: " fmt "\n")
          args))
-
-;; Compiler-generated hygiene aliases (macros.rkt mode-2) are `(def <orig>__hyg
-;; <orig>)` — name ends in __hyg AND the value is a bare symbol. Requiring both
-;; avoids silencing an author's own untyped `(def x__hyg 5)` nudge.
-(define (hygiene-alias-def? f)
-  (and (symbol? (def-form-name f))
-       (regexp-match? #rx"__hyg[0-9]*$" (symbol->string (def-form-name f)))
-       (symbol? (def-form-value f))))
-
-(define (lint-def f)
-  (unless (or (def-form-type f) (hygiene-alias-def? f))
-    (warn "untyped def ~a (consider adding `NAME Type`)"
-          (def-form-name f))))
-
-(define (lint-defonce f)
-  (unless (defonce-form-type f)
-    (warn "untyped defonce ~a (consider adding `NAME Type`)"
-          (defonce-form-name f))))
 
 (define (string-join xs sep)
   (cond

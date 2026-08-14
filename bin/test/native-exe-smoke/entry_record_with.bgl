@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.record-with-entry)
 
-(define-mode strict)
 
 (defrecord Fighter
   [(name String)

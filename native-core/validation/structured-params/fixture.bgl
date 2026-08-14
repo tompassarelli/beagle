@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.structured-params)
-(define-mode strict)
 
 (defrecord Request [(host-name String) (port Int)])
 

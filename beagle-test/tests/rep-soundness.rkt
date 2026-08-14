@@ -47,7 +47,7 @@
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f))
-          (append (list '(ns test.rep) '(define-mode strict) '(define-target js))
+          (append (list '(ns test.rep) '(define-target js))
                   body-forms))
      #:source-path "rep-soundness.bjs"))
   (define tbl (make-hasheq))

@@ -234,10 +234,10 @@
   (define tbl (program-binder-type-table prog))
   (and tbl (hash-ref tbl binding #f)))
 
-;; Definition-local inference derives callable signatures without rewriting the
+;; Definition-local inference derives effective types without rewriting the
 ;; authored AST.  The checker registers its finalized result here so every
 ;; downstream publication boundary reads one shared, program-identity-scoped
-;; source of truth.
+;; source of truth for values and callables alike.
 (define PROGRAM->EFFECTIVE-DEFINITION-TYPES (make-weak-hasheq))
 (define (register-program-effective-definition-types! prog table)
   (hash-set! PROGRAM->EFFECTIVE-DEFINITION-TYPES prog table))
@@ -330,7 +330,6 @@
 ;; --- AST -------------------------------------------------------------------
 
 (struct ns-decl     (name)                                  #:transparent)
-(struct mode-decl   (mode)                                  #:transparent)
 ;; doc: optional docstring (String or #f). Real Clojure surface — carried
 ;; through to clj emit; ignored by nix emit and the checker.
 ;; dynamic?: #t when defined `(def ^:dynamic *x* …)` — a dynamic (rebindable)
@@ -613,8 +612,7 @@
 (struct record-update-contract (record-name validator-symbol field-order)
   #:transparent)
 
-(struct program (mode
-                 namespace
+(struct program (namespace
                  forms
                  macros
                  declared-macros
@@ -642,7 +640,6 @@
                  gen-class?)
   #:transparent)
 
-(define DEFAULT-MODE      'strict)
 (define DEFAULT-TARGET    'clj)
 (define DEFAULT-NAMESPACE 'beagle.user)
 
@@ -678,9 +675,9 @@
  ;; Parse injection
  current-parse-expr current-parse-params
  ;; Constants
- DEFAULT-MODE DEFAULT-TARGET DEFAULT-NAMESPACE
+ DEFAULT-TARGET DEFAULT-NAMESPACE
  ;; Core AST
- (struct-out ns-decl) (struct-out mode-decl)
+ (struct-out ns-decl)
  (struct-out def-form) (struct-out defn-form) (struct-out fn-form)
  (struct-out let-form) (struct-out binding-form) (struct-out if-form) (struct-out cond-form) (struct-out cond-clause)
  (struct-out when-form) (struct-out do-form) (struct-out call-form) (struct-out vec-form)

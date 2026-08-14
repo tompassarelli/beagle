@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-context-escape-reject)
-(define-mode strict)
 
 (defn container-escape [(xs Any)] Any
   (let [owned (transient xs)]

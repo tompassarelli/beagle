@@ -45,8 +45,7 @@
                   (fail! entry (.getMessage error))))
               (doseq [[field expected]
                       {"phase" "checked"
-                       "target" "core"
-                       "mode" "strict"}]
+                       "target" "core"}]
                 (when (not= expected (get ast field))
                   (fail! entry
                          (str "checked AST " field " must equal " expected))))

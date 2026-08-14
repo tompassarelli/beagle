@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.simd-f64-kernels)
-(define-mode strict)
 
 (defn copy! [(source (Buffer Float)) (destination (Buffer Float))] Float
   (let [length (alength source)]

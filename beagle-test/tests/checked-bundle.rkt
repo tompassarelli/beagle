@@ -36,21 +36,18 @@
   (string-append
    "#lang beagle/js\n"
    "(ns wake.core)\n"
-   "(define-mode strict)\n"
    "(defn greeting [(name String)] String name)\n"))
 
 (define entry-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
-   "(define-mode strict)\n"
    "(defn go [(name String)] String (wake/greeting name))\n"))
 
 (define closed-union-provider-source
   (string-append
    "#lang beagle/js\n"
    "(ns union.provider)\n"
-   "(define-mode strict)\n"
    "(defunion FieldValueType (StringField [(unit Nil)]))\n"
    "(defrecord FieldSpec [(value-type FieldValueType)])\n"))
 
@@ -58,7 +55,6 @@
   (string-append
    "#lang beagle/js\n"
    "(ns union.consumer (:require [union.provider :as p]))\n"
-   "(define-mode strict)\n"
    "(defn build [] p/FieldSpec\n"
    "  (p/->FieldSpec (p/->StringField nil)))\n"))
 
@@ -66,7 +62,6 @@
   (string-append
    "#lang beagle/js\n"
    "(ns union.consumer (:require [union.provider :as p]))\n"
-   "(define-mode strict)\n"
    "(defrecord StringField [(unit Nil)])\n"
    "(defn build [] p/FieldSpec\n"
    "  (p/->FieldSpec (->StringField nil)))\n"))
@@ -75,14 +70,12 @@
   (string-append
    "#lang beagle/js\n"
    "(ns unused.module)\n"
-   "(define-mode strict)\n"
    "(def value Int 1)\n"))
 
 (define shared-types-source
   (string-append
    "#lang beagle/js\n"
    "(ns shared.types)\n"
-   "(define-mode strict)\n"
    "(defalias Text String)\n"))
 
 (define nested-provider-source
@@ -91,7 +84,6 @@
    "(ns wake.core\n"
    "  (:require #?@(:js [[shared.types :as shared]]\n"
    "                  :nix [[missing.types :as missing]])))\n"
-   "(define-mode strict)\n"
    "(defalias WakeText shared/Text)\n"
    "(defn pass [(value WakeText)] WakeText value)\n"))
 
@@ -99,28 +91,24 @@
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
-   "(define-mode strict)\n"
    "(defn go [] String (wake/pass \"hello\"))\n"))
 
 (define nested-bad-argument-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
-   "(define-mode strict)\n"
    "(defn bad [] String (wake/pass 1))\n"))
 
 (define nested-bad-return-source
   (string-append
    "#lang beagle/js\n"
    "(ns app.main (:require [wake.core :as wake]))\n"
-   "(define-mode strict)\n"
    "(defn bad [] Int (wake/pass \"hello\"))\n"))
 
 (define cycle-a-source
   (string-append
    "#lang beagle/js\n"
    "(ns cycle.a (:require [cycle.b :as b]))\n"
-   "(define-mode strict)\n"
    "(defalias AName String)\n"
    "(defn a [(value AName)] AName value)\n"))
 
@@ -128,7 +116,6 @@
   (string-append
    "#lang beagle/js\n"
    "(ns cycle.b (:require [cycle.a :as a]))\n"
-   "(define-mode strict)\n"
    "(defalias BName String)\n"
    "(defn b [(value BName)] BName value)\n"))
 
@@ -401,27 +388,12 @@
       (lambda ()
         (build-checked-bundle
          (hash-set (request (list entry provider)) 'extra #t))))
-     (define dynamic-entry
-       (source
-        "dynamic/main.bjs"
-        (string-append
-         "#lang beagle/js\n"
-         "(ns dynamic.main)\n"
-         "(define-mode dynamic)\n"
-         "(def value Int 1)\n")
-        "package"))
-     (check-exn
-      #rx"must use \\(define-mode strict\\)"
-      (lambda ()
-        (build-checked-bundle
-         (request (list dynamic-entry) "dynamic/main.bjs"))))
      (define mismatched-entry
        (source
         "mismatch/main.bclj"
         (string-append
          "#lang beagle/js\n"
          "(ns mismatch.main)\n"
-         "(define-mode strict)\n"
          "(def value Int 1)\n")
         "package"))
      (check-exn

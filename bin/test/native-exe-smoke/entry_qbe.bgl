@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.qbe-entry)
 
-(define-mode strict)
 
 (defn entry [] Int
   42)

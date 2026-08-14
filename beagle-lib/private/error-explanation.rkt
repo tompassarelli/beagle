@@ -168,6 +168,14 @@
       "(defscalar Email String :where (> 0))  ;; ERROR: String is not numeric"
       "(defscalar Score Int :where (> 0))"
       "Use a numeric primitive backing type for :where, or omit :where from a nonnumeric scalar."
+      #:since "0.18")
+
+   (E "E029" "Open Native function ABI"
+      "A Core function generalized one or more unconstrained parameters, so Native cannot assign it one closed calling convention."
+      "A parameter that never participates in the function body has no concrete machine representation to lower."
+      "(defn constant [unused] Int 1)"
+      "(defn constant [(unused Int)] Int 1)"
+      "Annotate each otherwise unconstrained parameter with the concrete type required by the Core ABI."
       #:since "0.18")))
 
 (define CODE->EXPL

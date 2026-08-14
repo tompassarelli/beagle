@@ -3,7 +3,6 @@
   "Self-hosted macro expansion engine — matches beagle-lib/private/macros.rkt.
   Canonical defmacro bodies run in a pure compile-time evaluator over raw
   syntax. Template substitution remains only for internal fixtures.")
-(define-mode strict)
 
 (require clojure.string :as str)
 (require selfhost.rt)
@@ -47,7 +46,8 @@
   {"macro-name" name "depth" 0 "parent" nil})
 
 (defn push-ctx [(parent Any) (name String)] Any
-  {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
+  (let [(parent-depth Int) (get parent "depth")]
+    {"macro-name" name "depth" (+ 1 parent-depth) "parent" parent}))
 
 (defn collect-chain-lines [(ctx Any)] (Vec String)
   (if (nil? ctx)
@@ -170,11 +170,12 @@
           (str "beagle: macro " name
                ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
         nil)
-    (let [amp-pos (or (clojure.core/first (keep-indexed (fn
-                                                          [(i Int)
-                                                           (x String)]
-                                                          Any
-                                                          (if (= x "&") i nil)) params)) -1)
+      (let [(amp-pos Int)
+              (or (clojure.core/first (keep-indexed (fn
+                                                     [(i Int)
+                                                      (x String)]
+                                                     Any
+                                                     (if (= x "&") i nil)) params)) -1)
           fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
           rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
       (swap! reg assoc name
@@ -559,7 +560,9 @@
     (= name "-")
       (cond
         (= (count args) 0) (macro-eval-fail! "- expected at least one argument")
-        (= (count args) 1) (- 0 (nth args 0))
+        (= (count args) 1)
+          (let [(arg Number) (nth args 0)]
+            (- 0 arg))
         :else (reduce - (nth args 0) (subvec args 1)))
     :else (macro-eval-fail! (str "unknown numeric function: " name))))
 

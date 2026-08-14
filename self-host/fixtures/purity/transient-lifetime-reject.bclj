@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-lifetime-reject)
-(define-mode strict)
 
 (def global-owned Any (transient []))
 

@@ -9,7 +9,7 @@
          beagle/private/types)
 
 (define PRELUDE
-  "(ns inference.test)\n(define-mode strict)\n(define-target clj)\n")
+  "(ns inference.test)\n(define-target clj)\n")
 
 (define (read-forms source)
   (parameterize ([current-readtable beagle-readtable])
@@ -47,6 +47,47 @@
   (define declared (signature program 'one))
   (check-false (type-poly? declared))
   (check-equal? (type->string declared) "(Fn [Any] Int)"))
+
+(test-case "omitted def and defonce infer monomorphic types without rewriting source"
+  (define program
+    (checked
+     (string-append
+      "(def answer 42)\n"
+      "(defonce label \"ready\")\n")))
+  (check-equal? (type->string (signature program 'answer)) "Int")
+  (check-equal? (type->string (signature program 'label)) "String")
+  (define definitions (program-forms program))
+  (check-false (def-form-type (car definitions)))
+  (check-false (defonce-form-type (cadr definitions))))
+
+(test-case "value definitions and callable consumers are source-order independent"
+  (define provider-first
+    (checked
+     (string-append
+      "(def answer 42)\n"
+      "(defn read-answer [] Int answer)\n")))
+  (define consumer-first
+    (checked
+     (string-append
+      "(defn read-answer [] Int answer)\n"
+      "(def answer 42)\n")))
+  (for ([program (in-list (list provider-first consumer-first))])
+    (check-equal? (type->string (signature program 'answer)) "Int")
+    (check-equal? (type->string (signature program 'read-answer))
+                  "(Fn [] Int)")))
+
+(test-case "explicit Any remains an intentional value boundary"
+  (define program (checked "(def boundary Any 42)"))
+  (check-equal? (type->string (signature program 'boundary)) "Any"))
+
+(test-case "unresolved value cycles fail instead of publishing Any"
+  (check-exn
+   #rx"omitted type did not resolve to a concrete monomorphic type"
+   (lambda ()
+     (checked
+      (string-append
+       "(def left right)\n"
+       "(def right left)\n")))))
 
 (test-case "inferred polymorphic calls instantiate independently"
   (define program

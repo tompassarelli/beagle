@@ -2,7 +2,6 @@
 
 (ns selfhost.parse)
 
-(define-mode strict)
 
 ;; Self-hosted parser for beagle, matching beagle-lib/private/parse.rkt.
 ;; Input: vector of top-level datums (selfhost.reader encoding).
@@ -50,7 +49,6 @@
 
 (def META-FORMS (Vec String)
   ["ns"
-   "define-mode"
    "define-target"
    "defmacro"
    "defalias"
@@ -1566,7 +1564,7 @@
 (defn expand-cond-thread! [(kind String) (init Any) (clauses Any)] Any
   (when (not= (mod (count clauses) 2) 0)
     (err! (str kind ": expected pairs of (test step) after init; got " (str (mod (count clauses) 2)) " trailing form(s)")))
-  (let [n (count clauses) pairs (loop [(i Int) 0 (acc Any) []] (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))])))) pos (if (= kind "cond->") "first" "last") k (count pairs) temps (loop [(i Int) 0 (acc Any) [(fresh-lowered-sym! "cond-thread")]] (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread"))))) inner (loop [(i Any) (- k 1) (acc Any) (nth temps k)] (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
+  (let [n (count clauses) pairs (loop [(i Int) 0 (acc Any) []] (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))])))) pos (if (= kind "cond->") "first" "last") k (count pairs) temps (loop [(i Int) 0 (acc Any) [(fresh-lowered-sym! "cond-thread")]] (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread"))))) inner (loop [(i Int) (- k 1) (acc Any) (nth temps k)] (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
     ["let" [BRACKET-TAG (nth temps 0) init] inner]))
 
 (defn expand-some-thread! [(kind String) (init Any) (steps Any)] Any
@@ -1574,7 +1572,7 @@
     (if (= m 0)
       init
       (let [temps (loop [(i Int) 0 (acc Any) []] (if (>= i m) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "some-thread"))))) threadeds (loop [(i Int) 0 (acc Any) []] (if (>= i m) acc (recur (+ i 1) (conj acc (thread-step-insert (nth temps i) (nth steps i) pos)))))]
-        (loop [(i Any) (- m 1) (acc Any) (nth threadeds (- m 1))]
+        (loop [(i Int) (- m 1) (acc Any) (nth threadeds (- m 1))]
           (let [node ["let" [BRACKET-TAG (nth temps i) (if (= i 0) init (nth threadeds (- i 1)))] ["if" ["nil?" (nth temps i)] "nil" acc]]]
             (if (= i 0) node (recur (- i 1) node))))))))
 
@@ -1583,7 +1581,7 @@
 ;; the placeholder (parse.rkt expand-as-thread; NOT a value-position fold).
 (defn expand-as-thread [(init Any) (name Any) (steps Any)] Any
   (let [values (into [init] steps)]
-    (loop [(i Any) (- (count values) 1) (acc Any) name]
+    (loop [(i Int) (- (count values) 1) (acc Any) name]
       (if (< i 0)
         acc
         (recur (- i 1) ["let" [BRACKET-TAG name (nth values i)] acc])))))
@@ -3034,7 +3032,7 @@
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
     (when (= (get (deref USER-PARAMETRIC-ARITIES) name) 0)
       (zero-parametric-declaration-error! name)))
-  (let [mode (atom "strict") mode-set (atom false) namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) imports (atom []) gen-class (atom false) forms (atom [])]
+  (let [namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) imports (atom []) gen-class (atom false) forms (atom [])]
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0)))
         (let [name-form (nth d 1)]
@@ -3048,13 +3046,6 @@
       (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2))
         (let [head (nth d 0)]
           (cond
-            (= head "define-mode")
-            (do
-              (when (deref mode-set) (err! "duplicate define-mode"))
-              (if (or (= (nth d 1) "strict") (= (nth d 1) "dynamic"))
-                (reset! mode (nth d 1))
-                (err! (str "unknown mode: " (str (nth d 1)) " (expected strict or dynamic)")))
-              (reset! mode-set true))
             (= head "define-target")
             (do
               (when (deref target-set) (err! "duplicate define-target"))
@@ -3179,9 +3170,7 @@
             (deref forms)))))
     (mac/set-hygiene-context! nil)
     (reset! CURRENT-REGISTRY-CELL nil)
-    {"mode"
-     (deref mode)
-     "namespace"
+    {"namespace"
      (deref namespace)
      "target"
      (deref target)
@@ -4304,9 +4293,8 @@
       (and (= (count errors) 1)
         (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction"
-    (let [prog (parse-program! [["ns" "my.app"] ["define-mode" "strict"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
+    (let [prog (parse-program! [["ns" "my.app"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
       (and (= (get prog "namespace") "my.app")
-        (= (get prog "mode") "strict")
         (= (get prog "target") "js")
         (= (count (get prog "forms")) 1)
         (= (get (nth (get prog "forms") 0) "node") "def")
@@ -4351,10 +4339,9 @@
                   ["require" "other.lib" ":refer" ["#%brackets" "f"]]]]
       (= (discover-requires! datums)
         (get (parse-program! datums) "requires"))))
-  (expect! "parse-program! default mode strict + target clj + gen-class false"
+  (expect! "parse-program! default target clj + gen-class false"
     (let [prog (parse-program! [["ns" "x.y"]])]
-      (and (= (get prog "mode") "strict")
-        (= (get prog "target") "clj")
+      (and (= (get prog "target") "clj")
         (= (get prog "gen-class") false))))
   (expect! "parse-program! (:gen-class) sets program flag"
     (let [prog (parse-program! [["ns" "fram.main" [":gen-class"]]])]

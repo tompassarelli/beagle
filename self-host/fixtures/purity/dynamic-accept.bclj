@@ -1,6 +1,0 @@
-#lang beagle/clj
-(ns selfhost.fixtures.purity.dynamic-accept)
-(define-mode dynamic)
-
-(defn store [cell value] Any
-  (reset! cell value))

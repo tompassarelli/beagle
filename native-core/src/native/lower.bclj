@@ -4,7 +4,6 @@
             [native.stages :as stages]
             [native.obligations :as obligations]))
 
-(define-mode strict)
 
 (defrecord SourceFactV0
   [(identity core/NativeId)
@@ -1966,7 +1965,7 @@
   [(module-name String)
    (name String)
    (value core/NativeId)
-   (annotation (U core/NativeId Nil))])
+   (effective-type (U core/NativeId Nil))])
 
 (defn source-globals [(index SourceIndexV0)] (Vec GlobalBindingV0)
   (let [(forms (Vec core/NativeId)) (index-form-ids index "def")]
@@ -1981,7 +1980,7 @@
               globals
               (conj globals
                 (->GlobalBindingV0 (source-module-name index form) name value
-                  (index-first-object index form "ann"))))))))))
+                  (index-first-object index form "effective-type"))))))))))
 
 (defn global-key [(global GlobalBindingV0)] String
   (str (globalbindingv0-module-name global) "/" (globalbindingv0-name global)))
@@ -1991,14 +1990,14 @@
   (loop [(position Int) 0 (definitions (Vec core/TypeDef)) []]
     (if (>= position (count globals))
       definitions
-      (let [(annotation (U core/NativeId Nil))
-            (globalbindingv0-annotation (nth globals position))]
+      (let [(effective-type (U core/NativeId Nil))
+            (globalbindingv0-effective-type (nth globals position))]
         (recur (+ position 1)
-          (if (nil? annotation)
+          (if (nil? effective-type)
             definitions
             (append-type-defs definitions
               (typeresolutionv0-definitions
-                (resolve-source-type index annotation)))))))))
+                (resolve-source-type index effective-type)))))))))
 
 ;; Local annotations participate in body typing just as signatures and globals
 ;; do. Collect them before lowering so a body's first nullable value already
@@ -15150,39 +15149,44 @@
     (if (or (>= position (count globals)) (state-blocked? current))
       current
       (let [(global GlobalBindingV0) (nth globals position)
-            (annotation (U core/NativeId Nil))
-            (globalbindingv0-annotation global)
-            (expected (U core/NativeId Nil))
-            (annotation-native-type (bodyenvv0-index env) annotation)
-            (raw ExprResultV0)
-            (lower-expr-expected env owner current
-              (globalbindingv0-value global) expected)
-            (value ExprResultV0)
-            (if (or (nil? annotation)
-                    (exprresultv0-terminated raw)
-                    (state-blocked? (exprresultv0-state raw)))
-              raw
-              (lower-boundary-coerce (bodyenvv0-types env) owner
-                (exprresultv0-state raw)
-                (exprresultv0-value-id raw)
-                (exprresultv0-type-id raw)
-                (typeresolutionv0-type-id
-                  (resolve-source-type (bodyenvv0-index env) annotation))))]
-        (cond
-          (state-blocked? (exprresultv0-state value))
-          (exprresultv0-state value)
+            (effective-type (U core/NativeId Nil))
+            (globalbindingv0-effective-type global)]
+        (if (nil? effective-type)
+          (state-fail current
+            (str "LOWER-MISSING-GLOBAL-EFFECTIVE-TYPE: "
+              (globalbindingv0-name global)
+              " has no checker-published effective type"))
+          (let [(expected (U core/NativeId Nil))
+                (annotation-native-type (bodyenvv0-index env) effective-type)
+                (raw ExprResultV0)
+                (lower-expr-expected env owner current
+                  (globalbindingv0-value global) expected)
+                (value ExprResultV0)
+                (if (or (exprresultv0-terminated raw)
+                        (state-blocked? (exprresultv0-state raw)))
+                  raw
+                  (lower-boundary-coerce (bodyenvv0-types env) owner
+                    (exprresultv0-state raw)
+                    (exprresultv0-value-id raw)
+                    (exprresultv0-type-id raw)
+                    (typeresolutionv0-type-id
+                      (resolve-source-type
+                        (bodyenvv0-index env) effective-type))))]
+            (cond
+              (state-blocked? (exprresultv0-state value))
+              (exprresultv0-state value)
 
-          (exprresultv0-terminated value)
-          (state-fail (exprresultv0-state value)
-            (str "TODO-NATIVE-GLOBAL-INITIALIZER: "
-              (globalbindingv0-name global) " does not produce a value"))
+              (exprresultv0-terminated value)
+              (state-fail (exprresultv0-state value)
+                (str "TODO-NATIVE-GLOBAL-INITIALIZER: "
+                  (globalbindingv0-name global) " does not produce a value"))
 
-          :else
-          (recur (+ position 1)
-            (state-bind (exprresultv0-state value)
-              (global-key global)
-              (exprresultv0-value-id value)
-              (exprresultv0-type-id value))))))))
+              :else
+              (recur (+ position 1)
+                (state-bind (exprresultv0-state value)
+                  (global-key global)
+                  (exprresultv0-value-id value)
+                  (exprresultv0-type-id value))))))))))
 
 (defn binding-default-at
   [(index SourceIndexV0)

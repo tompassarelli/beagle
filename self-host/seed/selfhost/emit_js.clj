@@ -592,11 +592,11 @@
 
 (defn ^String static-dotted [^String s]
   (let [slash (str/index-of s "/")]
+  (if (nil? slash) (mangle-str s) (let [slash-index slash]
   (cond
-  (nil? slash) (mangle-str s)
-  (= (subs s 0 slash) "js") (mangle-str (subs s (+ slash 1)))
-  (and (> (count s) (+ slash 3)) (= (subs s (+ slash 1) (+ slash 3)) "->")) (mangle-str (str (subs s 0 slash) "." (subs s (+ slash 3))))
-  :else (mangle-str (str/replace s "/" ".")))))
+  (= (subs s 0 slash-index) "js") (mangle-str (subs s (+ slash-index 1)))
+  (and (> (count s) (+ slash-index 3)) (= (subs s (+ slash-index 1) (+ slash-index 3)) "->")) (mangle-str (str (subs s 0 slash-index) "." (subs s (+ slash-index 3))))
+  :else (mangle-str (str/replace s "/" ".")))))))
 
 (defn ^String emit-ref-name [^String name]
   (cond
@@ -1509,7 +1509,8 @@
 
 (defn ^String last-seg [^String s]
   (let [idx (str/last-index-of s ".")]
-  (if (nil? idx) s (subs s (+ idx 1)))))
+  (if (nil? idx) s (let [offset idx]
+  (subs s (+ offset 1))))))
 
 (defn ^String relative-js-path [^String importer ^String imported]
   (let [imp-parts (str/split importer #"\.")
@@ -1726,7 +1727,7 @@
   (reset! rename-env {})
   (let [param {"type" "param" "name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "x"}}
    emitted (emit-form! {"node" "defn" "name" "guarded" "params" [param] "rest" false "body" [{"node" "ref" "name" "x"}] "private" false})
-   ok (and (str/includes? emitted "function guarded($beagle$param$0)") (str/includes? emitted "if (!(x)($beagle$param$0))") (str/includes? emitted "const $beagle$param$0$x = $beagle$param$0;") (str/includes? emitted "return $beagle$param$0$x;") (appears-before? emitted "if (!(x)($beagle$param$0))" "const $beagle$param$0$x = $beagle$param$0;"))]
+   ok (and (str/includes? emitted "function guarded($beagle$param$0)") (str/includes? emitted "if (!(x)($beagle$param$0))") (str/includes? emitted "let $beagle$param$0$x = $beagle$param$0;") (str/includes? emitted "return $beagle$param$0$x;") (appears-before? emitted "if (!(x)($beagle$param$0))" "let $beagle$param$0$x = $beagle$param$0;"))]
   (reset! bound-vars {})
   ok)))
   (expect! "constraint: rest and destructuring guard the raw aggregate" (let [pair {"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "app" "name" "Point" "args" []} "constraint" {"node" "ref" "name" "point?"}}
@@ -1741,15 +1742,15 @@
   (expect! "constraint: for and doseq guard each raw collection item" (let [binding {"type" "binding" "name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "expr" {"node" "ref" "name" "rows"}}
    for-out (emit-expr*! {"node" "for" "clauses" [binding] "body" [{"node" "ref" "name" "x"}]})
    doseq-out (emit-doseq! {"node" "doseq" "clauses" [binding] "body" [{"node" "ref" "name" "x"}]})]
-  (and (str/includes? for-out "if (!(positive_p)($beagle$item))") (str/includes? for-out "const $beagle$for$0$x = $beagle$item;") (str/includes? doseq-out "if (!(positive_p)($beagle$item))") (str/includes? doseq-out "const $beagle$doseq$0$x = $beagle$item;"))))
+  (and (str/includes? for-out "if (!(positive_p)($beagle$item))") (str/includes? for-out "let $beagle$for$0$x = $beagle$item;") (str/includes? doseq-out "if (!(positive_p)($beagle$item))") (str/includes? doseq-out "let $beagle$doseq$0$x = $beagle$item;"))))
   (expect! "constraint: loop initial and recur values validate before assignment" (let [binding {"name" "n" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "literal" "kind" "number" "value" 1}}
    emitted (emit-expr*! {"node" "loop" "bindings" [binding] "body" [{"node" "recur" "args" [{"node" "call" "fn" {"node" "ref" "name" "inc"} "args" [{"node" "ref" "name" "n"}]}]}]})]
   (and (str/includes? emitted "if (!(positive_p)($beagle$loop$0))") (str/includes? emitted "if (!(positive_p)(_recur_0))") (appears-before? emitted "if (!(positive_p)(_recur_0))" "$beagle$loop$0 = _recur_0;"))))
-  (expect! "constraint: record constructors and checked updates use provider validator" (let [field {"name" "id" "ann" {"kind" "prim" "name" "String"} "constraint" {"node" "ref" "name" "id?"}}
+  (expect! "constraint: record constructors guard fields and checked updates use provider validator" (let [field {"name" "id" "ann" {"kind" "prim" "name" "String"} "constraint" {"node" "ref" "name" "id?"}}
    record-out (emit-record! {"node" "record" "name" "Character" "fields" [field]})]
   (reset! record-field-bindings {"Character" [field]})
   (let [with-out (emit-with! {"node" "with" "target" {"node" "ref" "name" "character" "inferredType" {"kind" "prim" "name" "Character"}} "inferredType" {"kind" "prim" "name" "Character"} "recordUpdate" {"recordName" "Character" "fieldOrder" [":id"] "validator" "$beagle$record$Character$validate"} "updates" [{"field" ":id" "value" {"node" "literal" "kind" "string" "value" "next"}}]})]
-  (and (str/includes? record-out "export function $beagle$record$Character$validate($beagle$record)") (str/includes? record-out "if (!(id_p)($beagle$record.id))") (str/includes? record-out "return $beagle$record$Character$validate(Object.freeze") (str/starts-with? with-out "$beagle$record$Character$validate(Object.freeze")))))
+  (and (str/includes? record-out "export function $beagle$record$Character$validate($beagle$record)") (str/includes? record-out "if (!(id_p)($beagle$record.id))") (str/starts-with? with-out "Object.freeze($beagle$record$Character$validate(")))))
   (expect! "constraint: predicated scalar constructor remains live and compares" (= (emit-defscalar {"node" "defscalar" "name" "Percent" "predicates" [{"op" ">=" "value" 0} {"op" "not=" "value" 101}]}) "function __gtPercent(v) {\n  if (!(v >= 0 && v !== 101)) throw new Error('scalar constraint violated');\n  return v;\n}"))
   (expect! "constraint: async predicate is rejected" (try
   (do

@@ -32,7 +32,8 @@
   {"macro-name" name "depth" 0 "parent" nil})
 
 (defn push-ctx [parent ^String name]
-  {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
+  (let [parent-depth (get parent "depth")]
+  {"macro-name" name "depth" (+ 1 parent-depth) "parent" parent}))
 
 (defn collect-chain-lines [ctx]
   (if (nil? ctx) [] (into [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")] (collect-chain-lines (get ctx "parent")))))
@@ -315,7 +316,8 @@
   (= name "*") (reduce * 1 args)
   (= name "-") (cond
   (= (count args) 0) (macro-eval-fail! "- expected at least one argument")
-  (= (count args) 1) (- 0 (nth args 0))
+  (= (count args) 1) (let [arg (nth args 0)]
+  (- 0 arg))
   :else (reduce - (nth args 0) (subvec args 1)))
   :else (macro-eval-fail! (str "unknown numeric function: " name))))
 

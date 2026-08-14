@@ -2,7 +2,6 @@
 
 (ns fram.sequence-probe)
 
-(define-mode strict)
 
 (defn first-value [(values (Vec Int))] Int
   (first values))

@@ -3,7 +3,6 @@
 ;; deliberately not Fram's variadic CLI entry: Native v0 has no rest-argument
 ;; packing ABI, and this driver must not erase that external contract.
 (ns fram.main)
-(define-mode strict)
 
 (defn -main [] Nil
   (println "fram usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> (alias: untell) | query <edn> | selfcheck --deep"))

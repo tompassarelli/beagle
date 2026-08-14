@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.probe)
-(define-mode strict)
 
 (require clojure.string :as str)
 

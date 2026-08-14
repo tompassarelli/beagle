@@ -2,7 +2,6 @@
 
 (ns selfhost.facts-roundtrip "Lossless Beagle source ↔ fact-triple roundtrip.")
 
-(define-mode strict)
 
 (require clojure.string :as str)
 
@@ -91,7 +90,10 @@
 
 (defn- pos-loc [(start Int) (end Any)] Any
   (let [base {"pos" (+ start 1) "relative" true}]
-    (if (some? end) (assoc base "span" (- end start)) base)))
+    (if (some? end)
+      (let [(end-position Int) end]
+        (assoc base "span" (- end-position start)))
+      base)))
 
 (defn- make-node [(kind String) (value Any) (loc Any) (children Any)] Any
   {"kind" kind "value" value "loc" loc "children" children})
@@ -146,7 +148,7 @@
         nil))))
 
 (defn- relative-loc [(node Any) (base-codepoint Int)] Any
-  (let [loc (get node "loc") pos (get loc "pos") span (get loc "span") rel (if (some? pos) (- pos (+ base-codepoint 1)) 0) next-loc (if (some? span) (pos-loc rel (+ rel span)) (pos-loc rel nil)) children (get node "children")]
+  (let [loc (get node "loc") pos (get loc "pos") span (get loc "span") rel (if (some? pos) (let [(position Int) pos] (- position (+ base-codepoint 1))) 0) next-loc (if (some? span) (let [(span-width Int) span] (pos-loc rel (+ rel span-width))) (pos-loc rel nil)) children (get node "children")]
     (assoc node
       "loc"
       next-loc
@@ -173,7 +175,7 @@
 (declare scan-datum)
 
 (defn- scan-delimited [(src String) (pos Int) (close String)] Any
-  (loop [(p Any) (rd/skip-ws src pos) (out Any) []]
+  (loop [(p Int) (rd/skip-ws src pos) (out Any) []]
     (cond
       (>= p (count src))
       {"nodes" out "pos" p}
@@ -209,7 +211,7 @@
     (assoc (list-node children loc) "next" (get sym-r "pos"))))
 
 (defn- syntax-quote-node [(src String) (start Int)] Any
-  (let [inner-r (scan-datum src (+ start 2)) next (get inner-r "next") child (relative-loc (dissoc inner-r "next") (codepoint-offset src start)) head (make-node "symbol" "syntax" (pos-loc 0 2) nil) wrapper (list-node [head child] (pos-loc 0 (- next start)))]
+  (let [inner-r (scan-datum src (+ start 2)) (next Int) (get inner-r "next") child (relative-loc (dissoc inner-r "next") (codepoint-offset src start)) head (make-node "symbol" "syntax" (pos-loc 0 2) nil) wrapper (list-node [head child] (pos-loc 0 (- next start)))]
     (assoc wrapper "next" next)))
 
 (defn- regex-node [(src String) (start Int)] Any
@@ -222,7 +224,7 @@
     (assoc (tagged-node ast/SET-TAG items loc loc) "next" (get result "pos"))))
 
 (defn- js-node [(src String) (start Int)] Any
-  (let [inner-r (scan-datum src (+ start 3)) child0 (dissoc inner-r "next") child-pos (- (get (get child0 "loc") "pos") 1) child-loc (source-loc src child-pos nil) child (replace-loc child0 child-loc) loc (source-loc src start nil)]
+  (let [inner-r (scan-datum src (+ start 3)) child0 (dissoc inner-r "next") (child-start Int) (get (get child0 "loc") "pos") child-pos (- child-start 1) child-loc (source-loc src child-pos nil) child (replace-loc child0 child-loc) loc (source-loc src start nil)]
     (assoc (list-node [(synthetic-leaf "#%js" loc) child] loc)
       "next"
       (get inner-r "next"))))
@@ -341,7 +343,7 @@
         (assoc (result-leaf src p result) "next" (get result "pos"))))))
 
 (defn- shift-node-location [(node Any) (shift Int)] Any
-  (let [loc (get node "loc") children (get node "children") next-loc (if (or (nil? loc) (= true (get loc "relative"))) loc (assoc loc "line" (+ (get loc "line") 1) "pos" (+ (get loc "pos") shift)))]
+  (let [loc (get node "loc") children (get node "children") next-loc (if (or (nil? loc) (= true (get loc "relative"))) loc (let [(line Int) (get loc "line") (position Int) (get loc "pos")] (assoc loc "line" (+ line 1) "pos" (+ position shift))))]
     (assoc node
       "loc"
       next-loc
@@ -432,7 +434,9 @@
             (and (some? source-start) (some? source-end))
             (conj out [i source-start source-end])
             (and (some? pos) (some? span))
-            (conj out [i (- pos 1 shift) (+ (- pos 1 shift) span)])
+            (let [(position Int) pos (span-width Int) span]
+              (conj out [i (- position 1 shift)
+                         (+ (- position 1 shift) span-width)]))
             :else
             out))))))
 
@@ -456,7 +460,7 @@
       (recur (+ i 1) start out))))
 
 (defn- line-comments [(src String) (spans Any)] Any
-  (reduce (fn [(out Any) (line Any)] Any (let [start (nth line 0) text (nth line 1) hit (loop [j 0] (cond (>= j (count text)) nil (and (= (rd/char-at text j) ";") (not (in-span? (+ start j) spans))) j :else (recur (+ j 1))))] (if (some? hit) (conj out [(+ start hit) (str/trimr (subs text hit))]) out)))
+  (reduce (fn [(out Any) (line Any)] Any (let [(start Int) (nth line 0) text (nth line 1) hit (loop [j 0] (cond (>= j (count text)) nil (and (= (rd/char-at text j) ";") (not (in-span? (+ start j) spans))) j :else (recur (+ j 1))))] (if (some? hit) (let [(hit-offset Int) hit] (conj out [(+ start hit-offset) (str/trimr (subs text hit-offset))])) out)))
     []
     (source-lines src)))
 
@@ -483,7 +487,7 @@
             best))))))
 
 (defn- classify-comments [(src String) (spans Any)] Any
-  (mapv (fn [(comment Any)] Any (let [off (nth comment 0) text (nth comment 1) before (nearest-preceding off spans) after (nearest-following off spans)] (cond (and (some? before) (= (line-number src (- (nth before 2) 1)) (line-number src off))) ["trailing" (nth before 0) text] (some? after) ["leading" (nth after 0) text] :else ["trailing" "file" text])))
+  (mapv (fn [(comment Any)] Any (let [off (nth comment 0) text (nth comment 1) before (nearest-preceding off spans) after (nearest-following off spans)] (cond (and (some? before) (let [(before-end Int) (nth before 2)] (= (line-number src (- before-end 1)) (line-number src off)))) ["trailing" (nth before 0) text] (some? after) ["leading" (nth after 0) text] :else ["trailing" "file" text])))
     (line-comments src spans)))
 
 (defn- symbol-char? [(ch String)] Bool
@@ -513,7 +517,7 @@
    (out Any)] Nil
   (let [indexes (atom {})]
     (doseq [comment comments]
-      (let [placement (nth comment 0) spec (nth comment 1) text (nth comment 2) anchor (if (= spec "file") root (nth form-ids spec)) idx (get (deref indexes) anchor 0) cid (fresh-id! counter)]
+      (let [placement (nth comment 0) spec (nth comment 1) text (nth comment 2) anchor (if (= spec "file") root (nth form-ids spec)) (idx Int) (get (deref indexes) anchor 0) cid (fresh-id! counter)]
         (swap! indexes assoc anchor (+ idx 1))
         (add-fact! out cid "kind" "comment")
         (add-fact! out cid "style" "line")
@@ -973,9 +977,13 @@
         (nil? vector-index)
         (if (and (>= n 2) (arity-clause? (nth after 1))) 1 (min 1 n))
         :else
-        (min (+ vector-index 2) n))
+        (let [(index Int) vector-index]
+          (min (+ index 2) n)))
       (= head "defmacro")
-      (if (some? vector-index) (+ vector-index 1) (min 1 n))
+      (if (some? vector-index)
+        (let [(index Int) vector-index]
+          (+ index 1))
+        (min 1 n))
       (or (= head "def") (= head "defonce"))
       (cond (< n 1) n (>= n 3) 2 :else 1)
       (= head "fn")
@@ -983,9 +991,15 @@
         (and (> n 0) (arity-clause? (nth after 0))) 0
         (and (>= n 2) (string? (nth after 0)) (arity-clause? (nth after 1))) 1
         :else
-        (if (some? vector-index) (min (+ vector-index 2) n) (min 1 n)))
+        (if (some? vector-index)
+          (let [(index Int) vector-index]
+            (min (+ index 2) n))
+          (min 1 n)))
       (or (= head "defrecord") (= head "deftype"))
-      (if (some? vector-index) (+ vector-index 1) (min 1 n))
+      (if (some? vector-index)
+        (let [(index Int) vector-index]
+          (+ index 1))
+        (min 1 n))
       (some? (get #{"let" "loop" "letfn" "binding" "for" "doseq" "with-open" "with-local-vars" "when-let" "if-let" "when-some" "if-some"} head))
       (min 1 n)
       (= head "defunion")
@@ -1011,7 +1025,10 @@
 
 (defn- current-col [(text String) (initial Int)] Int
   (let [idx (str/last-index-of text "\n")]
-    (if (nil? idx) (+ initial (count text)) (- (count text) (+ idx 1)))))
+    (if (nil? idx)
+      (+ initial (count text))
+      (let [(line-break Int) idx]
+        (- (count text) (+ line-break 1))))))
 
 (declare datum-pretty-context)
 

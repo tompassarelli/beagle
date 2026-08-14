@@ -61,6 +61,31 @@
       (check-false (regexp-match? #rx"Any|\\?[0-9]+" rendered)))
     (lambda () (delete-file path))))
 
+(test-case "daemon signature lookup exposes inferred value definitions"
+  (define path (make-temporary-file "beagle-daemon-effective-values-~a.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (write-source!
+       path
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns daemon.effective-values)\n"
+        "(def answer 42)\n"
+        "(defonce label \"ready\")\n"))
+      (define responses
+        (run-commands
+         (list (format "sig answer ~a" path)
+               (format "sig label ~a" path))))
+      (define signature-responses (take responses 2))
+      (check-equal? (map result-signature signature-responses)
+                    '("Int" "String"))
+      (for ([response (in-list signature-responses)])
+        (check-true (hash-ref response 'ok))
+        (check-false
+         (regexp-match? #rx"Any|\\?[0-9]+" (jsexpr->string response)))))
+    (lambda () (delete-file path))))
+
 (test-case "daemon signature lookup fails closed on a rejected program"
   (define path (make-temporary-file "beagle-daemon-invalid-~a.bclj"))
   (dynamic-wind
@@ -97,26 +122,6 @@
       (check-equal?
        (hash-ref response 'error)
        "beagle-sig: callable missing not found in provided files"))
-    (lambda () (delete-file path))))
-
-(test-case "daemon dynamic typed rest publishes the element type"
-  (define path (make-temporary-file "beagle-daemon-dynamic-rest-~a.bclj"))
-  (dynamic-wind
-    void
-    (lambda ()
-      (write-source!
-       path
-       (string-append
-        "#lang beagle/clj\n"
-        "(ns daemon.dynamic-rest)\n"
-        "(define-mode dynamic)\n"
-        "(defn collect [(first Int) & (more (Vec Int))] Int first)\n"))
-      (define response
-        (car (run-commands (list (format "sig collect ~a" path)))))
-      (define result (car (hash-ref response 'results)))
-      (check-true (hash-ref response 'ok))
-      (check-equal? (hash-ref result 'signature) "(Fn [Int & Int] Int)")
-      (check-equal? (hash-ref (hash-ref result 'rest) 'type) "Int"))
     (lambda () (delete-file path))))
 
 (test-case "daemon fields and generated signatures share the checked AST"

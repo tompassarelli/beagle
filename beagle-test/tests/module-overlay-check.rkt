@@ -12,7 +12,8 @@
          beagle/private/facts-roundtrip
          beagle/private/module-interface
          beagle/private/parse
-         beagle/private/module-overlay-check)
+         beagle/private/module-overlay-check
+         beagle/private/types)
 
 (define-runtime-path overlay-cli
   "../../beagle-lib/private/facts-check-overlay.rkt")
@@ -784,6 +785,46 @@
        (checked-overlay-module-interface provider)
        'User)))))
 
+(test-case "inferred value definition types cross candidate module interfaces"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "value-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.provider)\n"
+         "(def answer 42)\n"
+         "(defonce label \"ready\")\n")))
+     (define consumer-edn
+       (candidate!
+        root "value-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.consumer (:require [overlay.provider :as p]))\n"
+         "(defn read-answer [] Int p/answer)\n"
+         "(defn read-label [] String p/label)\n")))
+     (define result
+       (check-edn-overlay (list consumer-edn provider-edn)))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+     (define provider
+       (for/first
+           ([module (in-list (overlay-check-result-modules result))]
+            #:when
+            (eq? (checked-overlay-module-namespace module) 'overlay.provider))
+         module))
+     (define interface (checked-overlay-module-interface provider))
+     (check-equal?
+      (type->string
+       (interface-binding-type
+        (module-interface-binding-ref interface 'answer)))
+      "Int")
+     (check-equal?
+      (type->string
+       (interface-binding-type
+        (module-interface-binding-ref interface 'label)))
+      "String"))))
+
 (test-case "cross-module aliases expand transparently in source order"
   (with-overlay-files
    (lambda (root provider-source consumer-source)
@@ -1123,7 +1164,7 @@
       #rx"p/Box expects 1 argument, got 0"
       (diagnostic-text unapplied)))))
 
-(test-case "interface v7 rejects stale schemas and malformed export arity"
+(test-case "interface v8 rejects stale schemas and malformed export arity"
   (with-overlay-files
    (lambda (_root provider-source consumer-source)
      (write-text!
@@ -1166,7 +1207,7 @@
         valid-interface
         [schema-version 1]))
      (check-exn
-      #rx"uses interface schema v1; this compiler requires v7"
+      #rx"uses interface schema v1; this compiler requires v8"
       (lambda () (parse-consumer stale-interface)))
      (define valid-box
        (module-interface-type-export-ref valid-interface 'Box))
@@ -1215,7 +1256,7 @@
 (test-case "interface v7 includes dynamic-var status in consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 7)
+     (check-equal? INTERFACE-SCHEMA-VERSION 8)
      (check-true INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!

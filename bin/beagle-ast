@@ -44,9 +44,6 @@ fi
 
 (define src (vector-ref (current-command-line-arguments) 0))
 (define prog (parse-program/file src))
-(unless (eq? (program-mode prog) 'strict)
-  (error 'beagle-ast
-         \"checked-program projection requires (define-mode strict)\"))
 (type-check-with-locs!
  prog
  (lambda (e _loc-stx) (raise e))

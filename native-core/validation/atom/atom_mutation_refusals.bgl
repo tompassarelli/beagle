@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.atom-mutation-refusals)
-(define-mode strict)
 
 (defrecord Counter [(value Int)])
 

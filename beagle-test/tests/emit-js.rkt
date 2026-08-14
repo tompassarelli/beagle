@@ -35,12 +35,12 @@
 
 (define-syntax-rule (check-js name expected-rx form ...)
   (test-case name
-    (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js) form ...)))
+    (define result (js-emit (list '(ns test.app) '(define-target js) form ...)))
     (check-regexp-match expected-rx result)))
 
 (define-syntax-rule (check-js-contains name expected-str form ...)
   (test-case name
-    (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js) form ...)))
+    (define result (js-emit (list '(ns test.app) '(define-target js) form ...)))
     (check-true (string-contains? result expected-str)
                 (format "expected ~v in:\n~a" expected-str result))))
 
@@ -90,7 +90,7 @@
    (test-case "imported record updates call the provider-owned validator"
      (define provider-datums
        (list '(ns interface.provider)
-             '(define-mode strict)
+
              '(define-target js)
              '(defn valid-id? [(value String)] Bool (> (count value) 0))
              '(defrecord Character [(id String valid-id?) (name String)])))
@@ -111,7 +111,7 @@
        (list
         (list 'ns 'interface.consumer
               (list ':require (br 'interface.provider ':as 'p)))
-        '(define-mode strict)
+
         '(define-target js)
         `(defn rename-character [(character p/Character)] p/Character
            (with character ,(br ':name "renamed")))))
@@ -145,7 +145,7 @@
         (list 'ns 'interface.referred-consumer
               (list ':require
                     (br 'interface.provider ':refer (br 'Character))))
-        '(define-mode strict)
+
         '(define-target js)
         `(defn rename-character ,(br '(character Character)) Character
            (with character ,(br ':name "renamed")))))
@@ -185,7 +185,7 @@
      (define result
        (js-emit
         (list '(ns test.app)
-              '(define-mode strict)
+
               '(define-target js)
               '(js/export
                 (defrecord PointerGesture [(pointer-id Float)]))
@@ -212,7 +212,7 @@
         (set! result
               (js-emit
                (list '(ns test.app)
-                     '(define-mode strict)
+
                      '(define-target js)
                      '(defrecord PointerGesture [(pointer-id Float)])
                      '(defn read-pointer [(gesture PointerGesture)] Float
@@ -345,7 +345,7 @@
         (set! result
               (js-emit
                (list '(ns test.app)
-                     '(define-mode strict)
+
                      '(define-target js)
                      '(defn retain [] Any
                         (tgt/keep-target "" true true)))))))
@@ -817,7 +817,7 @@
      '(defn f [(xs Any)] Any (drop-while neg? xs)))
 
    (test-case "no runtime import when not needed"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn f [(x Int)] Int (+ x 1)))))
      (check-false (string-contains? result "$$bc")
                   (format "unexpected runtime import in:\n~a" result)))
@@ -857,7 +857,7 @@
      '(defn f [(x Int)] Int (+ x 1)))
 
    (test-case "user-defined inc shadows stdlib wrapper"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn inc [(x Int)] Int (* x 10))
                                    `(defn f [(xs (Vec Int))] Any (map inc xs)))))
      (check-true (string-contains? result "xs.map(inc)")
@@ -866,7 +866,7 @@
                   "should NOT emit stdlib wrapper when user defines inc"))
 
    (test-case "param name shadows stdlib wrapper"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn greet [(name String)] String (str "Hello " name)))))
      (check-true (string-contains? result "(\"\".concat(\"Hello \", name))")
                  (format "param 'name' should use mangled name, got:\n~a" result))
@@ -874,7 +874,7 @@
                   "should NOT emit stdlib wrapper for param named 'name'"))
 
    (test-case "let binding shadows stdlib wrapper"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn f [] Any
                                       (let [identity 42] identity)))))
      (check-false (string-contains? result "(_x) => _x")
@@ -883,13 +883,13 @@
    ;; --- Mangle: > and < in identifiers ----------------------------------------
 
    (test-case "mangle > in identifier"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn id->ref [(s String)] String s))))
      (check-true (string-contains? result "id__gtref")
                  (format "expected > mangled to _gt, got:\n~a" result)))
 
    (test-case "mangle < in identifier"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn less<than [(x Int)] Int x))))
      (check-true (string-contains? result "less_ltthan")
                  (format "expected < mangled to _lt, got:\n~a" result)))
@@ -897,7 +897,7 @@
    ;; --- Receiver-first JavaScript interop -------------------------------------
 
    (test-case "js/get emits property access, not method call"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(declare-extern obj Any)
                                    '(defn f [(obj Any)] Any (js/get obj .name)))))
      (check-true (string-contains? result "obj.name")
@@ -906,7 +906,7 @@
                   "should not have parens for property access"))
 
    (test-case "js/call emits a receiver-preserving member call"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(declare-extern client Any)
                                    '(defn f [(client Any)] Any
                                       (js/call client .newSession)))))
@@ -920,7 +920,7 @@
        (with-output-to-string
          (lambda ()
            (parameterize ([current-error-port (current-output-port)])
-             (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+             (js-emit (list '(ns test.app) '(define-target js)
                             '(declare-extern xs Any)
                             '(defn f [(xs Any)] Any (trampoline xs))))))))
      (check-true (string-contains? stderr-output "trampoline has no JS translation")
@@ -938,7 +938,7 @@
    ;; --- special float values (Inf/NaN) --------------------------------------
 
    (test-case "+inf.0 -> Infinity"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(def x Float +inf.0))))
      (check-true (string-contains? result "Infinity")
                  (format "expected Infinity in:\n~a" result))
@@ -946,13 +946,13 @@
                   (format "should not contain +inf.0 in:\n~a" result)))
 
    (test-case "-inf.0 -> -Infinity"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(def x Float -inf.0))))
      (check-true (string-contains? result "-Infinity")
                  (format "expected -Infinity in:\n~a" result)))
 
    (test-case "+nan.0 -> NaN"
-     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+     (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(def x Float +nan.0))))
      (check-true (string-contains? result "NaN")
                  (format "expected NaN in:\n~a" result))
@@ -964,7 +964,7 @@
        (with-output-to-string
          (lambda ()
            (parameterize ([current-error-port (current-output-port)])
-             (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+             (js-emit (list '(ns test.app) '(define-target js)
                             '(defn f [(xs (Vec Int))] Int (count xs))))))))
      (check-equal? stderr-output ""
                    "expected no warning for translated function"))
@@ -982,7 +982,7 @@
    (test-case "selector bytes and map underscores stay literal"
      (define result
        (js-emit
-        (list '(ns test.app) '(define-mode strict) '(define-target js)
+        (list '(ns test.app) '(define-target js)
               '(defn read-wall [(obj Any)] Any (js/get obj .wall_s))
               '(defn call-context [(obj Any)] Any (js/call obj .ctx_str))
               '(defn write-total! [(obj Any) (v Any)] Any
@@ -1009,7 +1009,7 @@
    (test-case "selectors distinguish identifier, punctuation, and reserved-word members"
      (define result
        (js-emit
-        (list '(ns test.app) '(define-mode strict) '(define-target js)
+        (list '(ns test.app) '(define-target js)
               '(defn underscore [(obj Any)] Any (js/get obj ._private))
               '(defn hyphen [(obj Any)] Any (js/get obj .dash-name))
               '(defn question [(obj Any)] Any (js/get obj .ready?))
@@ -1070,7 +1070,7 @@
 
    (test-case "let :as single-evaluates its value (no double call)"
      (define result
-       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (js-emit (list '(ns test.app) '(define-target js)
                       `(declare-extern mk ,(fn-ty '(Any) 'Any))
                       `(defn f ,(br '(m Any)) Any
                          ,(br `(let (,(mt ':keys (br 'a) ':as 'whole) (mk m)) whole))))))
@@ -1118,7 +1118,7 @@
    ;; NEGATIVE: a scalar-keyed map literal must STAY native (no over-promotion).
    (test-case "scalar-key map literal stays native (no hamtMap)"
      (define result
-       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (js-emit (list '(ns test.app) '(define-target js)
                       `(def m Any ,(mt ':a 1)))))
      (check-true (string-contains? result "{a: 1}")
                  (format "expected native object literal in:\n~a" result))
@@ -1130,7 +1130,7 @@
    ;; effect (statement) position lowers to if/else + if/else-if chains.
    (test-case "seam2: do-interior if-with-else -> if/else stmt, no ternary"
      (define result
-       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (js-emit (list '(ns test.app) '(define-target js)
                       '(def c true)
                       '(do (if c (println "a") (println "b")) (println "z")))))
      (check-true (string-contains? result "if (c) {")
@@ -1140,7 +1140,7 @@
 
    (test-case "seam2: cond in effect position -> if/else-if/else chain"
      (define result
-       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (js-emit (list '(ns test.app) '(define-target js)
                       '(def c true)
                       '(do (cond c (println "x") :else (println "y")) (println "z")))))
      (check-true (string-contains? result "if (c) {")
@@ -1150,7 +1150,7 @@
 
    (test-case "seam2: nested if inside when body lowers idiomatically"
      (define result
-       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (js-emit (list '(ns test.app) '(define-target js)
                       '(def c true) '(def d false)
                       '(when c (if d (println "a") (println "b"))))))
      (check-true (string-contains? result "if (d) {")
@@ -1160,7 +1160,7 @@
 
    (test-case "seam2: nested if inside let body lowers idiomatically"
      (define result
-       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+       (js-emit (list '(ns test.app) '(define-target js)
                       '(def c true)
                       '(let (x 1) (if c (println "a") (println "b"))))))
      (check-true (string-contains? result "if (c) {")

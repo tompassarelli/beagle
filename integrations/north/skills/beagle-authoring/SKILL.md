@@ -61,6 +61,10 @@ materializers are reported by `beagle langs`. Hosted compiler or application cod
 explicit hosted profile such as `.bclj` with `#lang beagle/clj`. A hosted
 implementation of the lowering tool does not make `.bgl` a hosted source file.
 
+Beagle source is strictly checked.
+`beagle check --profile 0` is parser-only diagnostics; it does not select a
+dynamic language mode or produce a checked program.
+
 ## Repair compiler defects upstream
 
 A confirmed parser, checker, lowering, emitter, runtime, or authoring-tool

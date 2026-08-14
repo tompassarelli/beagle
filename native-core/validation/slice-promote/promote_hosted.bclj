@@ -1,7 +1,6 @@
 #lang beagle/clj
 (ns native.promote-hosted)
 
-(define-mode strict)
 
 ;; The Core probe's bodies in the hosted dialect. A hosted target has one
 ;; GC-owned heap and no epochs, so promotion is identity: the value that comes

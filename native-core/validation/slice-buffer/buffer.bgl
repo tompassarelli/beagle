@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-stencil)
-(define-mode strict)
 
 ;; Buffer v0 is the mutable dense carrier; every persistent aggregate remains
 ;; an ordinary Vec/record and is never transposed into this representation.

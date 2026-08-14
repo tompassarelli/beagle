@@ -38,8 +38,7 @@
 
 (define (run-clj-test beagle-forms assertions-clj)
   (define raw-clj
-    (clj-emit (append (list '(ns test.clj-behavioral)
-                            '(define-mode strict))
+    (clj-emit (append (list '(ns test.clj-behavioral))
                       beagle-forms)))
   (define clj-code
     (string-append raw-clj "\n\n" assertions-clj "\n"))
@@ -80,7 +79,7 @@
   (define stxs
     (map (lambda (form) (datum->syntax #f form))
          (append (list (list 'ns ns)
-                       '(define-mode strict)
+
                        '(define-target clj))
                  forms)))
   (define program
@@ -1216,8 +1215,7 @@
              (define mod-ns (car mod))
              (define mod-forms (cdr mod))
              (define raw-clj
-               (clj-emit (append (list (list 'ns mod-ns)
-                                       '(define-mode strict))
+               (clj-emit (append (list (list 'ns mod-ns))
                                  mod-forms)))
              (set! all-clj (string-append all-clj
                              (format ";;; --- ~a ---\n~a\n\n" mod-ns raw-clj)))

@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.binding-constraints)
-(define-mode strict)
 
 (defn positive? [(value Int)] Bool
   (> value 0))

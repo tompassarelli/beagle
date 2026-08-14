@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-record-value-semantics)
-(define-mode strict)
 
 (defrecord Holder [(buffer (Buffer Float))])
 

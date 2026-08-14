@@ -69,33 +69,6 @@
 ;; errors are type-errors, not surface-divergence). The canonical
 ;; surface-divergence exemplars above (cond->, case) cover that bucket.
 
-;; --- type-error: duplicate-meta header (parse-time) -------------------------
-
-(test-case "type-error: duplicate define-mode is tagged"
-  (define e
-    (with-handlers ([beagle-parse-error? values])
-      (parse-program
-       (list (datum->syntax #f '(define-mode strict))
-             (datum->syntax #f '(define-mode dynamic))))
-      'no-error-raised))
-  (check-pred beagle-parse-error? e)
-  (check-eq?  (beagle-parse-error-kind e) 'duplicate-meta)
-  (check-equal? (hash-ref (beagle-parse-error-details e) 'cause)
-                "type-error"))
-
-;; --- type-error: bad-meta-value header --------------------------------------
-
-(test-case "type-error: unknown define-mode value is tagged"
-  (define e
-    (with-handlers ([beagle-parse-error? values])
-      (parse-program
-       (list (datum->syntax #f '(define-mode wat))))
-      'no-error-raised))
-  (check-pred beagle-parse-error? e)
-  (check-eq?  (beagle-parse-error-kind e) 'bad-meta-value)
-  (check-equal? (hash-ref (beagle-parse-error-details e) 'cause)
-                "type-error"))
-
 ;; --- type-error: check.rkt raise-diag flows cause through -------------------
 ;;
 ;; Use kind->cause-class directly to assert the mapping; the full check
@@ -155,6 +128,7 @@
     '(target-form template-splice arity type-mismatch return-type def-type
                   let-binding type-bound scalar-predicate
                   scalar-predicate-declaration exhaustive-match
+                  native-abi
                   nixos-type-mismatch sql-group-by sql-table sql-column
                   sql-type nixos-unknown-option
                   removed-form unknown-form duplicate-meta bad-meta-value
@@ -257,7 +231,6 @@
     (with-handlers ([beagle-parse-error? values])
       (parse-prog*
         '(ns test.app)
-        '(define-mode strict)
         '(define-target clj)
         (list 'defmacro 'bad (br)
               (list 'quasiquote (list 'dotimes (br 'i 3) 'x)))
@@ -285,7 +258,6 @@
   (define prog
     (parse-prog*
       '(ns test.app)
-      '(define-mode strict)
       '(define-target clj)
       `(defmacro bad ,(br)
          (quasiquote "hello"))
@@ -323,7 +295,6 @@
   (define prog
     (parse-program
      (list (datum->syntax #f '(ns t.app))
-           (datum->syntax #f '(define-mode strict))
            (datum->syntax #f '(define-target clj))
            (datum->syntax #f (list 'defmacro 'mk (br)
                                    (list 'quasiquote (list 'str "hello"))))
@@ -424,7 +395,7 @@
 (test-case "diagnostics carry structured types + the repair compiler reasons over them"
   (define prog
     (parse-prog*
-     '(ns t.app) '(define-mode strict) '(define-target clj)
+     '(ns t.app) '(define-target clj)
      (list 'def 'xs (list 'Vec 'Int) (br "a"))))
   (define e
     (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error-raised))

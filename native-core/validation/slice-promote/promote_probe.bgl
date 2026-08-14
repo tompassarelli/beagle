@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.promote-probe)
 
-(define-mode strict)
 
 ;; The S4 promote fixture written in the surface language. The concatenation
 ;; is the only allocation, and the value that leaves the frame is the promoted

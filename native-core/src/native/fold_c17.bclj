@@ -4,7 +4,6 @@
 ;; atoms, and by-value declaration ordering.
 (ns native.fold-c17)
 
-(define-mode strict)
 
 (require native.core :as core)
 

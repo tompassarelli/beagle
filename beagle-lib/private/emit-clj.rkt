@@ -1365,11 +1365,27 @@ CLJ
     [(pat-record? pat)
      (define rec-name (pat-record-type-name pat))
      (define bindings (pat-record-bindings pat))
-     (define fields (hash-ref (current-emit-record-fields) rec-name #f))
-     (define rec-ns (hash-ref (current-emit-record-ns) rec-name #f))
+     (define direct-fields
+       (hash-ref (current-emit-record-fields) rec-name #f))
+     (define direct-ns (hash-ref (current-emit-record-ns) rec-name #f))
+     (define candidates
+       (if direct-fields
+           '()
+           (for/list ([candidate
+                       (in-hash-keys (current-emit-record-fields))]
+                      #:when (eq? (unqualify-type-name candidate) rec-name))
+             (cons
+              (hash-ref (current-emit-record-fields) candidate)
+              (hash-ref (current-emit-record-ns) candidate #f)))))
+     (define resolutions (remove-duplicates candidates equal?))
+     (when (> (length resolutions) 1)
+       (error 'emit-clj "ambiguous imported record pattern: ~a" rec-name))
+     (define resolved (and (pair? resolutions) (car resolutions)))
+     (define fields (or direct-fields (and resolved (car resolved))))
+     (define rec-ns (or direct-ns (and resolved (cdr resolved))))
      (define qualified-name
        (if rec-ns
-         (format "~a.~a" rec-ns rec-name)
+         (format "~a.~a" rec-ns (unqualify-type-name rec-name))
          (symbol->string rec-name)))
      (define test (format "(instance? ~a ~a)" qualified-name target-sym))
      (cond

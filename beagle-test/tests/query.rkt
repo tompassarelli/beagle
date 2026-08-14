@@ -157,12 +157,11 @@
   (check-false (string-contains? out "forall") out)
   (check-false (regexp-match? #rx"\\?[0-9]+" out) out))
 
-(test-case "sig: dynamic typed rest publishes the element type"
+(test-case "sig: typed rest publishes the element type"
   (define out
     (query-output
      (string-append
-      "(ns q.dynamic-rest)\n"
-      "(define-mode dynamic)\n"
+      "(ns q.typed-rest)\n"
       "(defn collect [(first Int) & (more (Vec Int))] Int first)\n")
      '("sig" "collect")))
   (check-regexp-match #rx"collect : \\(Fn \\[Int & Int\\] Int\\)" out)
@@ -326,7 +325,6 @@
    #rx"beagle-fields: record Missing not found in provided files"
    (lambda ()
      (with-query-file
-      ""
       (lambda (f) (run-query (list "fields" "Missing" f)))))))
 
 (test-case "fields: checked-program failure reports its path"

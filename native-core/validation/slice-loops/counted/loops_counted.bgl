@@ -4,7 +4,6 @@
 ;; which returns Int and so refuses checked-arithmetic until the arithmetic arm
 ;; lands; loop lowering itself is what these fixtures exercise.
 (ns native.loops-counted)
-(define-mode strict)
 
 (defrecord Tally [(hits Int) (misses Int)])
 

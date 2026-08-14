@@ -3,6 +3,8 @@
 
 (def record-fields (atom {}))
 
+(def record-namespaces (atom {}))
+
 (def scalar-fns (atom {}))
 
 (def match-counter (atom 0))
@@ -262,7 +264,8 @@
 
 (defn ^String last-dot-segment [^String s]
   (let [idx (str/last-index-of s ".")]
-  (if (nil? idx) s (subs s (+ idx 1)))))
+  (if (nil? idx) s (let [offset idx]
+  (subs s (+ offset 1))))))
 
 (defn ^String emit-require [r]
   (let [ns-name (get r "ns")
@@ -273,7 +276,8 @@
 
 (defn ^String emit-import [^String class-name]
   (let [idx (str/last-index-of class-name ".")]
-  (if (nil? idx) class-name (str "[" (subs class-name 0 idx) " " (subs class-name (+ idx 1)) "]"))))
+  (if (nil? idx) class-name (let [offset idx]
+  (str "[" (subs class-name 0 offset) " " (subs class-name (+ offset 1)) "]")))))
 
 (defn ^Boolean has-clojure-string? [rs]
   (> (count (filterv (fn [r] (= "clojure.string" (get r "ns"))) rs)) 0))
@@ -295,7 +299,8 @@
 
 (defn ^String unqualify-name [^String name]
   (let [index (str/last-index-of name "/")]
-  (if (nil? index) name (subs name (+ index 1)))))
+  (if (nil? index) name (let [offset index]
+  (subs name (+ offset 1))))))
 
 (defn ^String record-validator-name [^String name]
   (str "$beagle$record$" (unqualify-name name) "$validate"))
@@ -484,11 +489,21 @@
   (str "(or " (str/join " " tests) ") " body-str))
   (= pt "record") (let [rec-name (get pat "name")
    bindings (vec (get pat "bindings"))
-   fields (get (deref record-fields) rec-name)
-   test (str "(instance? " rec-name " " target-sym ")")]
-  (if (or (= 0 (count bindings)) (nil? fields)) (str test " " body-str) (let [pairs (loop [i 0
+   direct-fields (get (deref record-fields) rec-name)
+   direct-namespace (get (deref record-namespaces) rec-name)
+   candidates (if (some? direct-fields) [] (filterv (fn [^String name] (= rec-name (unqualify-name name))) (keys (deref record-fields))))
+   candidate (if (= 0 (count candidates)) nil (nth candidates 0))
+   fields (if (some? direct-fields) direct-fields (if (nil? candidate) nil (get (deref record-fields) candidate)))
+   namespace (if (some? direct-fields) direct-namespace (if (nil? candidate) nil (get (deref record-namespaces) candidate)))
+   compatible (every? (fn [^String name] (and (= fields (get (deref record-fields) name)) (= namespace (get (deref record-namespaces) name)))) candidates)
+   class-name (if (string? namespace) (str namespace "." (unqualify-name rec-name)) rec-name)
+   test (str "(instance? " class-name " " target-sym ")")]
+  (if (not compatible) (do
+  (throw (ex-info (str "ambiguous imported record pattern: " rec-name) {}))))
+  (if (or (= 0 (count bindings)) (nil? fields)) (str test " " body-str) (let [field-vector (vec fields)
+   pairs (loop [i 0
    acc []]
-  (if (or (>= i (count bindings)) (>= i (count fields))) acc (recur (+ i 1) (conj acc (str (get (nth bindings i) "name") " (:" (nth fields i) " " target-sym ")")))))]
+  (if (or (>= i (count bindings)) (>= i (count field-vector))) acc (recur (+ i 1) (conj acc (str (get (nth bindings i) "name") " (:" (nth field-vector i) " " target-sym ")")))))]
   (str test " (let [" (str/join " " pairs) "] " body-str ")"))))
   (= pt "map") (let [entries (vec (get pat "entries"))
    key-of (fn [en] (let [k (get en "key")]
@@ -705,7 +720,8 @@
 
 (defn ^String emit-program! [prog]
   (reset! emit-expr-ref emit-expr!)
-  (reset! record-fields {})
+  (reset! record-fields (get prog "importedRecordFieldOrder" {}))
+  (reset! record-namespaces (get prog "importedRecordNamespaces" {}))
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
@@ -730,6 +746,7 @@
 (defn run-tests! []
   (reset! emit-expr-ref emit-expr!)
   (reset! record-fields {})
+  (reset! record-namespaces {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)

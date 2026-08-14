@@ -343,8 +343,6 @@
   (for ([module (in-list modules)])
     (define source-id (format "~a" (checked-overlay-module-source module)))
     (define prog (checked-overlay-module-program module))
-    (unless (eq? (program-mode prog) 'strict)
-      (fail "source ~a must use (define-mode strict)" source-id))
     (define expected-target (expected-target-for-extension source-id))
     (unless (eq? expected-target (program-target prog))
       (fail "source ~a extension requires #lang ~a, got #lang ~a"

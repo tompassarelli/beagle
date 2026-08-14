@@ -155,13 +155,20 @@
   (selfhost.rt/exit 1)
   prog) {"program" prog "datums" datums "source-text" source-text "source-sha256" (get source-snapshot "sourceSha256") "source-id" (selfhost.rt/source-id path)})))
 
+(defn- imported-record-field-order [prog]
+  (reduce (fn [out contract] (assoc out (get contract "name") (mapv (fn [^String field] (if (str/starts-with? field ":") (subs field 1) field)) (get contract "field-order")))) {} (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
+
+(defn- imported-record-namespaces [prog]
+  (reduce (fn [out contract] (let [namespace (get contract "namespace")]
+  (if (string? namespace) (assoc out (get contract "name") namespace) out))) {} (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
+
 (defn- check-or-die! [prog]
   (let [errors (c/check-program! prog)]
   (if (> (count errors) 0) (do
   (doseq [err errors]
   (selfhost.rt/eprint (str "beagle [check]: " err "\n")))
   (selfhost.rt/exit 1)
-  prog) (c/decorate-checked-program! prog))))
+  prog) (assoc (c/decorate-checked-program! prog) "importedRecordFieldOrder" (imported-record-field-order prog) "importedRecordNamespaces" (imported-record-namespaces prog)))))
 
 (defn- ^String emit-for-target! [^String target prog]
   (cond
@@ -169,7 +176,7 @@
   (= target "nix") (en/emit-program! prog)
   :else (e/emit-program! prog)))
 
-(def CHECKED-PROGRAM-KEYS ["kind" "schemaVersion" "phase" "target" "namespace" "sourceId" "sourceSha256" "projectionSha256" "mode" "gen-class" "requires" "imports" "externs" "forms"])
+(def CHECKED-PROGRAM-KEYS ["kind" "schemaVersion" "phase" "target" "namespace" "sourceId" "sourceSha256" "projectionSha256" "gen-class" "requires" "imports" "importedRecordFieldOrder" "importedRecordNamespaces" "externs" "forms"])
 
 (defn- ^Boolean exact-checked-program-keys? [projection]
   (and (= (count (keys projection)) (count CHECKED-PROGRAM-KEYS)) (every? (fn [^String key] (contains? projection key)) CHECKED-PROGRAM-KEYS)))
@@ -232,7 +239,7 @@
 (defn- checked-projection [snapshot]
   (let [prog (get snapshot "program")
    externs (mapv (fn [extern] {"name" (get extern "name") "type" (get extern "type")}) (get prog "externs"))
-   base {"kind" "beagle.checked-program" "schemaVersion" CHECKED-PROGRAM-SCHEMA-VERSION "phase" "checked" "target" (get prog "target") "namespace" (get prog "namespace") "sourceId" (get snapshot "source-id") "sourceSha256" (get snapshot "source-sha256") "mode" (get prog "mode") "gen-class" (get prog "gen-class") "requires" (get prog "requires") "imports" (get prog "imports") "externs" externs "forms" (get prog "forms")}]
+   base {"kind" "beagle.checked-program" "schemaVersion" CHECKED-PROGRAM-SCHEMA-VERSION "phase" "checked" "target" (get prog "target") "namespace" (get prog "namespace") "sourceId" (get snapshot "source-id") "sourceSha256" (get snapshot "source-sha256") "gen-class" (get prog "gen-class") "requires" (get prog "requires") "imports" (get prog "imports") "importedRecordFieldOrder" (get prog "importedRecordFieldOrder") "importedRecordNamespaces" (get prog "importedRecordNamespaces") "externs" externs "forms" (get prog "forms")}]
   (assoc base "projectionSha256" (selfhost.rt/projection-sha256 base))))
 
 (defn- invalid-projection! [^String message]
@@ -247,7 +254,6 @@
   (not (= (get projection "kind") "beagle.checked-program")) (invalid-projection! "kind must be beagle.checked-program")
   (not (= (get projection "schemaVersion") CHECKED-PROGRAM-SCHEMA-VERSION)) (invalid-projection! "schemaVersion must be 4")
   (not (= (get projection "phase") "checked")) (invalid-projection! "phase must be checked")
-  (not (= (get projection "mode") "strict")) (invalid-projection! "checked-program mode must be strict")
   (not (= (get projection "target") target)) (invalid-projection! (str "target mismatch: projection is " (get projection "target") ", command requested " target))
   (not (string? (get projection "namespace"))) (invalid-projection! "namespace must be a string")
   (not (or (nil? (get projection "sourceId")) (string? (get projection "sourceId")))) (invalid-projection! "sourceId must be a string or null")

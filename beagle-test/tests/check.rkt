@@ -197,14 +197,6 @@
   '(def x Bool (zero? 1 2)))   ; zero? is single-arg
 
 ;; =============================================================================
-;; Tests — dynamic mode
-;; =============================================================================
-
-(check-ok "dynamic mode lets type errors through"
-  '(define-mode dynamic)
-  '(def x Int "wrong type but who cares"))
-
-;; =============================================================================
 ;; Tests — macros
 ;; =============================================================================
 ;; Macro expansions are type-checked end-to-end.
@@ -1543,8 +1535,25 @@
   #rx"expected .*(Number|Int|Float).*, got String"
   '(def h Int (inc "s")))
 
-(check-ok "numeric: Any operand falls back to today's behavior"
+(check-err/rx "numeric: Any operand is rejected"
+  #rx"expected Number, got Any"
   '(defn k [(x Any)] Int (+ x 1)))
+
+(check-err/rx "numeric: + rejects a String operand"
+  #rx"expected Number, got String"
+  '(def invalid-plus Int (+ "s" 1)))
+
+(check-err/rx "numeric: - rejects a String operand"
+  #rx"expected Number, got String"
+  '(def invalid-minus Int (- "s" 1)))
+
+(check-err/rx "numeric: * rejects a String operand"
+  #rx"expected Number, got String"
+  '(def invalid-times Int (* "s" 1)))
+
+(check-err/rx "numeric: / rejects a String operand"
+  #rx"expected Number, got String"
+  '(def invalid-divide Int (/ "s" 1)))
 
 (check-ok "numeric: Number operand degrades to Number, satisfies Float"
   '(defn m [(x Number)] Float (+ x 1.0)))

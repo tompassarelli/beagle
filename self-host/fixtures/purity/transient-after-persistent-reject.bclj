@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-after-persistent-reject)
-(define-mode strict)
 
 (defn mutate-after-persistent [(xs Any)] Any
   (let [owned (transient xs)

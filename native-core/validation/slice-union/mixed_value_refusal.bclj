@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns fixture.union-refusal)
-(define-mode strict)
 
 (defn map-or-int-equal? [(value (U (Map Int Int) Int))] Bool
   (= value 1))

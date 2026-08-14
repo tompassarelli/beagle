@@ -7,7 +7,7 @@
 ;;   parse  → check  → emit
 ;;
 ;; The custom reader (lang/reader.rkt) preserves [...] vs (...) via a
-;; `#%brackets` tag. main.rkt parses, type-checks (strict mode), emits
+;; `#%brackets` tag. main.rkt parses, type-checks, emits
 ;; target source, and the runtime `(display)`s it.
 ;;
 ;; The hosted wrappers prepend their own `(define-target ...)`; when none is

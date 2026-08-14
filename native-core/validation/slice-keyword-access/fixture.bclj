@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns native.keyword-access)
-(define-mode strict)
 
 (require native.keyword-provider :as provider)
 

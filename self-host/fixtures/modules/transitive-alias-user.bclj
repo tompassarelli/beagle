@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns fixtures.transitive-alias-user)
-(define-mode strict)
 
 (require fixtures.transitive-alias-owner :as owner)
 

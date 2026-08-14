@@ -17,7 +17,6 @@
 ;;      the callee's own minted epoch
 ;;   5  the same pair at epoch-0
 
-(define-mode strict)
 
 (require native.body-c17 :as body)
 (require native.core :as core)

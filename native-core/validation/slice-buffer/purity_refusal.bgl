@@ -1,6 +1,5 @@
 #lang beagle
 (ns native.buffer-purity-refusal)
-(define-mode strict)
 
 ;; Mutation is visible at both call boundaries: the primitive and its helper
 ;; carry `!`, so this unmarked wrapper is rejected by ordinary purity tracking.

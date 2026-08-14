@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns fixtures.alias-owner)
-(define-mode strict)
 
 (defrecord Box [(value String)])
 

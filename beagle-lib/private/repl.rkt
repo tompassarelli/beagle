@@ -61,13 +61,17 @@
       (hash-set! env name type)))
   env)
 
-(define (definition-form-type form prog)
+(define (repl-definition-name form)
   (define definition (unwrap-definition-form form))
-  (define name
-    (cond
-      [(defn-form? definition) (defn-form-name definition)]
-      [(defn-multi? definition) (defn-multi-name definition)]
-      [else #f]))
+  (cond
+    [(def-form? definition) (def-form-name definition)]
+    [(defonce-form? definition) (defonce-form-name definition)]
+    [(defn-form? definition) (defn-form-name definition)]
+    [(defn-multi? definition) (defn-multi-name definition)]
+    [else #f]))
+
+(define (definition-form-type form prog)
+  (define name (repl-definition-name form))
   (and name (program-effective-definition-type prog name #f)))
 
 (define (repl-type-of expr-str)
@@ -82,17 +86,11 @@
        (define raw-last-form (last forms))
        (define last-form (unwrap-definition-form raw-last-form))
        (cond
-         [(or (defn-form? last-form) (defn-multi? last-form))
+         [(repl-definition-name last-form)
           (define effective (definition-form-type last-form prog))
           (unless effective
             (error 'beagle-repl "checked definition has no effective signature"))
           (type->string effective)]
-         [(def-form? last-form)
-          (type->string (or (def-form-type last-form)
-                            (infer-in-env (def-form-value last-form) env)))]
-         [(defonce-form? last-form)
-          (type->string (or (defonce-form-type last-form)
-                            (infer-in-env (defonce-form-value last-form) env)))]
          [else
           (type->string (infer-in-env raw-last-form env))])])))
 
@@ -125,27 +123,14 @@
 (define (register-form! raw-form prog env)
   (define form (unwrap-definition-form raw-form))
   (cond
-    [(or (defn-form? form) (defn-multi? form))
-     (define name
-       (if (defn-form? form)
-           (defn-form-name form)
-           (defn-multi-name form)))
+    [(repl-definition-name form)
+     (define name (repl-definition-name form))
      (define effective (program-effective-definition-type prog name #f))
      (unless effective
        (error 'beagle-repl
               "checked definition ~a has no effective signature"
               name))
      (hash-set! repl-env name effective)]
-    [(def-form? form)
-     (define name (def-form-name form))
-     (define t (or (def-form-type form)
-                   (infer-in-env (def-form-value form) env)))
-     (hash-set! repl-env name t)]
-    [(defonce-form? form)
-     (define name (defonce-form-name form))
-     (define t (or (defonce-form-type form)
-                   (infer-in-env (defonce-form-value form) env)))
-     (hash-set! repl-env name t)]
     [(record-form? form)
      (define name (record-form-name form))
      (hash-set! repl-records name form)

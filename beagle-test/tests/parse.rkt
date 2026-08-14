@@ -63,28 +63,17 @@
 
 ;; --- meta forms ------------------------------------------------------------
 
-(test-case "default namespace and mode"
+(test-case "default namespace"
   (define p (parse-prog))
-  (check-eq? (program-mode      p) 'strict)
   (check-eq? (program-namespace p) 'beagle.user))
 
-(test-case "ns and define-mode"
-  (define p (parse-prog
-             '(ns beagle.test)
-             '(define-mode dynamic)))
-  (check-eq? (program-namespace p) 'beagle.test)
-  (check-eq? (program-mode      p) 'dynamic))
+(test-case "ns"
+  (define p (parse-prog '(ns beagle.test)))
+  (check-eq? (program-namespace p) 'beagle.test))
 
 (parse-err "duplicate ns errors"
   '(ns foo)
   '(ns bar))
-
-(parse-err "duplicate define-mode errors"
-  '(define-mode strict)
-  '(define-mode dynamic))
-
-(parse-err "unknown define-mode errors"
-  '(define-mode wat))
 
 (parse-err/rx "compiler host prefix is reserved source-wide"
   #rx"reserved compiler identifier prefix"

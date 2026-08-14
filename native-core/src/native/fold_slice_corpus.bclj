@@ -3,7 +3,6 @@
 ;; declarations its signatures name, driven freeze -> typed -> native -> C17.
 (ns native.fold-slice-corpus)
 
-(define-mode strict)
 
 (require native.core :as core)
 (require native.stages :as stages)

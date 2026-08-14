@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.dynamic-binding-reject)
-(define-mode strict)
 
 (def ^:dynamic writer! Any
   (fn [(value Any)] Any (reset! value nil)))

@@ -1,6 +1,5 @@
 #lang beagle/clj
 (ns selfhost.fixtures.purity.transient-direct-escape-reject)
-(define-mode strict)
 
 (defn expose [(xs Any)] Any
   (transient xs))
