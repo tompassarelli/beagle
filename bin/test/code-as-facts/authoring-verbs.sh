@@ -6,12 +6,12 @@
 # gate proves the missing verbs exist as FACT OPERATIONS on the lossless AST-facts
 # projection, reusing resolve.clj's edit+render machinery (the rename/delete template):
 #
-#   upsert-form : add a NEW top-level def (append a wrapper fN edge) OR replace an
-#                 existing def by name (supersede its wrapper fN edge -> a fresh subtree)
-#   set-body    : replace a defn's BODY (supersede its post-params fN edges -> a fresh body)
+#   upsert-form : add a NEW top-level def (append a wrapper order slot) OR replace an
+#                 existing def by name (supersede its wrapper slot -> a fresh subtree)
+#   set-body    : replace a defn's BODY (supersede its post-params slots -> a fresh body)
 #
 # The structured edit spec the agent emits is data, not text: an EDN datum (the new
-# form / body) minted into the SAME Fram store as kind/v/fN facts. For each verb the
+# form / body) minted into the SAME Fram store as kind/v/order-slot facts. For each verb the
 # gate runs the full loop and HARD-ASSERTS:
 #   1. project .bclj -> facts          (facts-roundtrip --emit-edn)
 #   2. apply the edit AS A FACT OP      (resolve.clj upsert-form / set-body)
@@ -20,7 +20,7 @@
 #      it is SCOPE-CORRECT (a new def references an existing one and resolves via
 #      refers_to; a body edit leaves sibling forms + comments intact), and the edit
 #      was a FACT OP not a text splice (the EDN delta shows freshly-minted node ids
-#      carrying kind/v/fN facts + a re-pointed wrapper/body fN edge).
+#      carrying kind/v/order-slot facts + a re-pointed wrapper/body slot).
 #
 # Needs racket + bb + fram out/ + chartroom (resolve.clj). Fail-closed: an edit the
 # engine refuses, or that does not recompile, is REJECTED with no tree written.
@@ -65,7 +65,7 @@ author() {
 
 # fact_node_growth <corpus> <op> <args...> -> prints "<orig_nodes> <proj_nodes>".
 # The edit projects to MORE kind-fact nodes (a minted subtree), and the projected
-# EDN carries kind/v/fN facts the agent never wrote as text -> a graph op, not a
+# EDN carries kind/v/order-slot facts the agent never wrote as text -> a graph op, not a
 # text splice (a sed/Edit changes characters in place; it mints no fact nodes).
 fact_node_growth() {
   local corpus="$1" op="$2"; shift 2

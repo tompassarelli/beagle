@@ -5,8 +5,8 @@
 # fact edit on the canonical store, gated by a REASONING query the graph can answer
 # exactly and text cannot: "does any reference point at this binding?" (refers_to).
 #   - SAFE (no references): remove the def's form + project; the rest of the file
-#     survives (the renderer reads fN children consecutively, so the engine must
-#     RENUMBER to close the gap — a naive edge-drop would truncate the file) and
+#     survives (the renderer reads CRDT-ordered children, so the engine must
+#     supersede the selected slot without disturbing sibling order) and
 #     recompiles.
 #   - UNSAFE (a reference would be orphaned, in THIS module or a CONSUMER via alias):
 #     refuse, mutate nothing (fail closed).

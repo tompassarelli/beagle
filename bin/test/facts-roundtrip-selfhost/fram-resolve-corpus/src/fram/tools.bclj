@@ -23,7 +23,8 @@
 ;; The op of a tool — constrains dispatch (cond/:else) and missing-req. `:tell`/`:retract`
 ;; are the single-triple KB writes (assert/retract of ANY predicate); `:query` backs
 ;; `ask`; `:show`/`:validate` are the reads. The trailing seven are GRAPH-AST EDIT ops:
-;; they author a graph-upstream Beagle module by minting/superseding kind/v/fN facts via
+;; they author a graph-upstream Beagle module by minting/superseding
+;; kind/v/CRDT-order-slot facts via
 ;; the engine's resolve.clj verbs (NOT a single commit-sequencer triple), so they return a
 ;; distinct {:edit ...} envelope the host runs out-of-band, recompile-gated and fail-closed.
 ;; :insert-after is the CRDT insert-anywhere (commute) op — insert a NEW top-level def

@@ -66,8 +66,9 @@ boundary:
 - **`authoring-verbs.sh`** — `upsert-form` (add a NEW
   top-level def, or replace an existing one by name) and `set-body` (replace a defn's
   body). The new form/body is an EDN datum **minted into the same Fram store** as
-  `kind`/`v`/`fN` facts (the inverse of `--emit-edn`), then the wrapper/body `fN`
-  edges are wired (append) or **superseded** (replace) — the rename template. The gate
+  `kind`/`v`/CRDT-order-slot facts (the inverse of `--emit-edn`), then the
+  wrapper/body order slots are wired (append) or **superseded** (replace) —
+  the rename template. The gate
   hard-asserts: edit PRESENT, module RECOMPILES, SCOPE-CORRECT (a subsequent `rename`
   of an existing def propagates to the *authored* call site — the authored reference
   carries a real `refers_to` identity edge), siblings + comments intact, and the edit

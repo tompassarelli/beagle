@@ -6,6 +6,8 @@
 
 (def ^String EXACT-NUMBER-TAG "#%exact-number")
 
+(def ORDER-STEP 65536)
+
 (def CODEPOINT-OFFSETS (atom []))
 
 (def LINE-COLS (atom []))
@@ -302,6 +304,9 @@
   (swap! counter inc)
   (deref counter))
 
+(defn- ^String slot-predicate [index child-id]
+  (str "f" (* (+ index 1) ORDER-STEP) "~" child-id))
+
 (declare emit-node!)
 
 (defn- emit-loc! [out id loc]
@@ -321,8 +326,7 @@
   (let [slot (nth indexed 0)
    child (nth indexed 1)
    child-id (emit-node! child counter out)]
-  (add-fact! out id (str "f" slot) child-id)
-  (add-fact! out id "child" child-id))) (if (not= kind "nil") (do
+  (add-fact! out id (slot-predicate slot child-id) child-id))) (if (not= kind "nil") (do
   (add-fact! out id "v" (encoded-value kind (get node "value"))))))
   (emit-loc! out id (get node "loc"))
   id))
@@ -439,13 +443,11 @@
    head (synthetic-leaf "beagle-file" nil)]
   (add-fact! out root "kind" "list")
   (let [head-id (emit-node! head counter out)]
-  (add-fact! out root "f0" head-id)
-  (add-fact! out root "child" head-id))
+  (add-fact! out root (slot-predicate 0 head-id) head-id))
   (let [form-ids (loop [i 0
    ids []]
   (if (>= i (count forms)) ids (let [id (emit-node! (nth forms i) counter out)]
-  (add-fact! out root (str "f" (+ i 1)) id)
-  (add-fact! out root "child" id)
+  (add-fact! out root (slot-predicate (+ i 1) id) id)
   (recur (+ i 1) (conj ids id)))))]
   (emit-comments! (classify-comments src (form-spans forms shift)) form-ids root counter out))
   (deref out)))
@@ -476,12 +478,8 @@
   (reduce (fn [props triple] (assoc-in props [(nth triple 0) (nth triple 1)] (nth triple 2))) {} triples))
 
 (defn- slot-key [^String predicate]
-  (let [crdt (re-matches #"^f([0-9]+(?:\.[0-9]+)*)~([0-9]+)$" predicate)
-   legacy (re-matches #"^f([0-9]+)$" predicate)]
-  (cond
-  (some? crdt) [(mapv (fn [^String part] (parse-long part)) (str/split (nth crdt 1) #"\.")) (parse-long (nth crdt 2))]
-  (some? legacy) [[(* (+ (parse-long (nth legacy 1)) 1) 65536)] 0]
-  :else nil)))
+  (let [match (re-matches #"^f([0-9]+(?:\.[0-9]+)*)~([0-9]+)$" predicate)]
+  (if (some? match) [(mapv (fn [^String part] (parse-long part)) (str/split (nth match 1) #"\.")) (parse-long (nth match 2))] nil)))
 
 (defn- ordered-children [props id]
   (let [entries (reduce (fn [out entry] (let [key (slot-key (nth entry 0))]
@@ -489,7 +487,7 @@
   (mapv (fn [entry] (nth entry 1)) (sort-by (fn [entry] (nth entry 0)) entries))))
 
 (defn- ^Boolean ref-predicate? [^String predicate]
-  (or (= predicate "child") (= predicate "tail") (some? (slot-key predicate))))
+  (or (= predicate "tail") (some? (slot-key predicate))))
 
 (defn- root-id [props]
   (let [refs (reduce (fn [out subject-entry] (reduce (fn [inner entry] (let [predicate (nth entry 0)
@@ -497,7 +495,8 @@
   (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props)
    candidates (reduce (fn [out entry] (let [id (nth entry 0)]
   (if (= true (get refs id)) out (conj out id)))) [] props)
-   wrappers (filterv (fn [id] (let [head (get (get props id {}) "f0")]
+   wrappers (filterv (fn [id] (let [children (ordered-children props id)
+   head (if (> (count children) 0) (nth children 0) nil)]
   (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates)
    structural (filterv (fn [id] (let [kind (get (get props id {}) "kind")]
   (or (= kind "list") (= kind "vector")))) candidates)]
@@ -893,7 +892,3 @@
   (selfhost.rt/eprint "usage: beagle facts-roundtrip --emit-edn FILE | --render EDN\n")
   (selfhost.rt/exit 2))))
   nil)
-
-(defn- ^Boolean beagle-file-wrapper? [props id]
-  (let [head (get (get props id {}) "f0")]
-  (and (number? head) (= (get (get props head {}) "v") "beagle-file"))))

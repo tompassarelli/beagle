@@ -8,10 +8,10 @@
 ;; is the identity over a real corpus:
 ;; the lossless occurrence projection is a faithful, regenerable representation of source.
 ;;
-;;   racket beagle-lib/private/facts-roundtrip.rkt <file-or-dir> ...
+;;   bin/beagle facts-roundtrip <file-or-dir> ...
 ;;
-;; Every datum node is minted (leaves carry kind+value; lists/vectors carry ordered
-;; fN children + a uniform `child` edge + an optional improper `tail`). That is the
+;; Every datum node is minted (leaves carry kind+value; lists/vectors carry CRDT
+;; ordered slots plus an optional improper `tail`). That is the
 ;; deliberate trade: this projection is VERBOSE but LOSSLESS, where the query
 ;; projection is COMPACT but lossy — two views of one source, like Fram's fact vs
 ;; markdown views of a thread.
@@ -41,27 +41,23 @@
       [(pair? d) (loop (cdr d) (cons (car d) acc))]
       [else      (values (reverse acc) d)])))
 
-;; --- #36 CRDT order keys: a child slot is "f<path>~<tie>", not just "fN" -----
-;; fram's chartroom verbs (insert-form / upsert-form) position children with a
+;; --- CRDT order keys: every child slot is "f<path>~<tie>" --------------------
+;; Fram's chartroom verbs (insert-form / upsert-form) position children with a
 ;; logoot order key: pred "f<path>~<tie>", path = dot-separated ints (dense — a key
 ;; strictly between any two always exists), tie = the child node's atomic id (so
-;; concurrent same-gap inserts get distinct keys → both land → commute). The legacy
-;; emit-facts spelling "fN" is the same family at ((N+1)*ORD-STEP, tie 0). A dump
-;; mixes both (seed forms "fN", verb forms "f<path>~<tie>"). We MUST parse the dual
-;; spelling and sort children by (path, tie) — matching resolve.bclj's ord-parse /
-;; ord-cmp exactly — or every verb-positioned form silently vanishes (the sequential
-;; f0/f1/… loop stops at the first gap). Source of truth: fram-lease resolve.bclj.
+;; concurrent same-gap inserts get distinct keys → both land → commute). Initial
+;; projections use path ((N+1)*ORD-STEP) and the minted child id as tie. Rendering
+;; accepts this one current spelling and sorts by (path,tie), matching Fram.
 (define ORD-STEP 65536)
-(define (parse-fN-slot p)             ; pred string -> {path:(listof int) tie:int} | #f
+(define (slot-predicate index child-id)
+  (format "f~a~~~a" (* (add1 index) ORD-STEP) child-id))
+(define (parse-order-slot p)          ; pred string -> {path:(listof int) tie:int} | #f
   (and (string? p)
        (let ([m (regexp-match #rx"^f([0-9]+(?:\\.[0-9]+)*)~([0-9]+)$" p)])
-         (cond
-           [m (cons (map string->number (regexp-split #rx"\\." (cadr m)))
-                    (string->number (caddr m)))]
-           [(regexp-match #rx"^f([0-9]+)$" p)
-            => (lambda (m2) (cons (list (* (add1 (string->number (cadr m2))) ORD-STEP)) 0))]
-           [else #f]))))
-(define (fN-slot? p) (and (parse-fN-slot p) #t))
+         (and m
+              (cons (map string->number (regexp-split #rx"\\." (cadr m)))
+                    (string->number (caddr m)))))))
+(define (order-slot? p) (and (parse-order-slot p) #t))
 (define (slot-key<? a b)              ; (path . tie) order: lexicographic path, then tie
   (let loop ([pa (car a)] [pb (car b)])
     (cond
@@ -71,11 +67,12 @@
       [(< (car pa) (car pb)) #t]
       [(> (car pa) (car pb)) #f]
       [else (loop (cdr pa) (cdr pb))])))
-;; a node's ordered child ids: ALL fN slots (legacy + CRDT) by (path,tie). props
-;; here is a node's pred->obj hash. Used by every EDN-side reconstruction path.
+;; A node's ordered child ids by (path,tie). `props` is the node's pred->obj
+;; hash. Used by every EDN-side reconstruction path.
 (define (ordered-slot-children h)
   (map cdr
-       (sort (for/list ([(p o) (in-hash h)] #:when (fN-slot? p)) (cons (parse-fN-slot p) o))
+       (sort (for/list ([(p o) (in-hash h)] #:when (order-slot? p))
+               (cons (parse-order-slot p) o))
              slot-key<? #:key car)))
 
 (define (datum->facts d)             ; -> (values root-id (listof (list subj pred obj)))
@@ -89,12 +86,10 @@
     (emit! id "kind" k)
     (for ([x (in-list elems)] [i (in-naturals)])
       (define cid (walk x))
-      (emit! id (string-append "f" (number->string i)) cid)
-      (emit! id "child" cid))
+      (emit! id (slot-predicate i cid) cid))
     (unless (null? tail)
       (define tid (walk tail))
-      (emit! id "tail" tid)
-      (emit! id "child" tid))
+      (emit! id "tail" tid))
     id)
   (define (walk d)
     (cond
@@ -136,12 +131,10 @@
     (emit! id "kind" k)
     (for ([x (in-list kid-stxs)] [i (in-naturals)])
       (define cid (walk x))
-      (emit! id (string-append "f" (number->string i)) cid)
-      (emit! id "child" cid))
+      (emit! id (slot-predicate i cid) cid))
     (when tail-stx
       (define tid (walk tail-stx))
-      (emit! id "tail" tid)
-      (emit! id "child" tid))
+      (emit! id "tail" tid))
     (srcloc! id stx)
     id)
   (define (walk stx)
@@ -242,7 +235,7 @@
     (cond
       [(equal? p "kind") (format "[~a \"kind\" ~a]" s (edn-string o))]
       [(equal? p "v")    (format "[~a \"v\" ~a]" s (edn-string (encode-leaf (hash-ref kind-of s) o)))]
-      [else              (format "[~a ~a ~a]" s (edn-string p) o)])))   ; fN/child/tail -> int ref
+      [else              (format "[~a ~a ~a]" s (edn-string p) o)])))   ; order slot/tail -> int ref
 (define (datum->edn-lines d)
   (define-values (root triples) (datum->facts d))
   (triples->edn-lines triples))
@@ -257,7 +250,7 @@
   (for ([t (in-list triples)])
     (hash-update! props (car t) (lambda (h) (hash-set! h (cadr t) (caddr t)) h) (lambda () (make-hash))))
   props)
-(define (ordered-fN props id)           ; node ids of fN children, in (path,tie) order
+(define (ordered-children props id)      ; node ids in CRDT (path,tie) order
   (ordered-slot-children (hash-ref props id (make-hash))))
 ;; Largest NODE id, so comment/segment ids can be allocated beyond it. Consider
 ;; ONLY subjects (car): every minted node is the subject of its own kind fact, so
@@ -272,16 +265,17 @@
 ;; reconstruct a datum from EDN triples (each a list (subj pred obj)) ---------
 ;; root = the one subject never referenced as a child — robust even after Fram
 ;; re-mints all ids on its way through the store.
-;; A predicate naming a STRUCTURAL child edge (fN / child / tail) — the only
+;; A predicate naming a structural child ref (CRDT order slot or improper tail) — the only
 ;; numeric-valued facts that are node REFS. srcloc facts (line/col/pos/span) are
 ;; ALSO numeric but are NOT refs; ref-detection must exclude them or it mistakes a
 ;; `pos`/`line` value for a child node id (#33 slice-2).
 (define (ref-pred? p)
-  (or (equal? p "child") (equal? p "tail") (fN-slot? p)))   ; fN-slot? covers fN AND f<path>~<tie>
+  (or (equal? p "tail") (order-slot? p)))
 
 (define (beagle-file-wrapper? props id)
   (define h (hash-ref props id (make-hash)))
-  (define head (hash-ref h "f0" #f))
+  (define children (ordered-slot-children h))
+  (define head (and (pair? children) (car children)))
   (and (exact-integer? head)
        (equal?
         (hash-ref (hash-ref props head (make-hash)) "v" #f)
@@ -292,10 +286,9 @@
   (for ([(s h) (in-hash props)])
     (for ([(p o) (in-hash h)]) (when (and (number? o) (ref-pred? p)) (hash-set! refs o #t))))
   (define cands (for/list ([s (in-list (hash-keys props))] #:unless (hash-ref refs s #f)) s))
-  ;; A graph may retain old list bodies through compatibility `child` edges
-  ;; after its authoritative fN slot moves. Prefer the explicit file wrapper
-  ;; before the generic list fallback so those unreachable facts cannot make
-  ;; reconstruction depend on hash-key order.
+  ;; Superseded bodies may remain as unreferenced facts after an authoritative
+  ;; order slot moves. Prefer the explicit file wrapper before the generic list
+  ;; fallback so those unreachable facts cannot affect reconstruction.
   (or (for/first ([s (in-list cands)]
                   #:when (beagle-file-wrapper? props s))
         s)
@@ -303,7 +296,7 @@
                   #:when (member (hash-ref (hash-ref props s (make-hash)) "kind" #f) '("list" "vector")))
         s)
       (and (pair? cands) (car cands))))
-(define (make-edn-build props)            ; id -> datum (follows fN/tail only; ignores comment*/seg*)
+(define (make-edn-build props)            ; id -> datum (follows slots/tail only; ignores comment*/seg*)
   (define (build id)
     (define h (hash-ref props id))
     (define k (hash-ref h "kind"))
@@ -1056,7 +1049,7 @@
   (define src (file->string path))
   (define-values (root triples) (stx->facts (datum->syntax #f (cons 'beagle-file stxs))))
   (define props (triples->props triples))
-  (define root-kids (ordered-fN props root))      ; [beagle-file-sym, form0-node, form1-node, ...]
+  (define root-kids (ordered-children props root)) ; [beagle-file-sym, form0-node, form1-node, ...]
   (define (form-node i) (list-ref root-kids (add1 i)))
   (define spans (form-spans stxs (port->file-shift src stxs)))
   (define comments (classify-comments (capture-comments src spans) spans src))
@@ -1078,7 +1071,7 @@
 ;; is keyed by AST-node, the datum facts by int node-id, and both carry a source
 ;; (pos,span) — so a type attaches to the datum node sharing its span. Types are
 ;; ADDITIVE + DERIVED (re-derive == re-check, zero staleness) — the build path
-;; ignores them (string-valued, not fN/child/tail), so a typed dump still builds
+;; ignores them (string-valued, not an order slot/tail), so a typed dump still builds
 ;; byte-identically (consume = re-check, per fram-2 Q4).
 (define (emit-edn-typed-file path)
   (define-values (stxs _root _triples props lines) (file->datum-projection path))
@@ -1103,7 +1096,7 @@
         (when id (hash-set! typed id (type->string ty))))))
   (printf "@file ~a\n" path)
   (for ([l (in-list lines)]) (displayln l))
-  ;; type value is a STRING → quote it (the fN/child/tail else-branch emits raw ints)
+  ;; type value is a STRING → quote it (the order-slot/tail branch emits raw ints)
   (for ([id (in-list (sort (hash-keys typed) <))])
     (displayln (format "[~a \"type\" ~a]" id (edn-string (hash-ref typed id))))))
 
@@ -1115,10 +1108,8 @@
   (define root (edn-root props))
   (define build (make-edn-build props))
   (define wrapped?                                  ; root is the (beagle-file ...) wrapper?
-    (and root (let ([h (hash-ref props root)])
-                (and (hash-has-key? h "f0")
-                     (equal? (hash-ref (hash-ref props (hash-ref h "f0")) "v" #f) "beagle-file")))))
-  (define form-ids (if wrapped? (cdr (ordered-fN props root)) (list root)))
+    (and root (beagle-file-wrapper? props root)))
+  (define form-ids (if wrapped? (cdr (ordered-children props root)) (list root)))
   (define (lead cs)  (filter (lambda (c) (equal? (car c) "leading"))  cs))
   (define (trail cs) (filter (lambda (c) (equal? (car c) "trailing")) cs))
   (define (block fid)                               ; leading comments (own lines) + form + trailing (same line)

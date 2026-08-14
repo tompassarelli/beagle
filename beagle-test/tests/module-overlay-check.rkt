@@ -81,11 +81,17 @@
    #:exists 'append))
 
 (define (structural-edge-predicate? predicate)
-  (or (equal? predicate "child")
-      (equal? predicate "tail")
+  (or (equal? predicate "tail")
       (regexp-match?
-       #px"^f[0-9]+(?:\\.[0-9]+)*(?:~[0-9]+)?$"
+       #px"^f[0-9]+(?:\\.[0-9]+)*~[0-9]+$"
        predicate)))
+
+(define (shift-order-tie predicate delta)
+  (define match
+    (regexp-match #px"^f([0-9]+(?:\\.[0-9]+)*)~([0-9]+)$" predicate))
+  (if match
+      (format "f~a~~~a" (cadr match) (+ (string->number (caddr match)) delta))
+      predicate))
 
 (define (shift-edn-node-ids! path delta)
   (define source-line (car (file->lines path)))
@@ -102,7 +108,7 @@
         out
         "[~s ~s ~s]\n"
         (+ subject delta)
-        predicate
+        (shift-order-tie predicate delta)
         (if (and (exact-integer? object)
                  (structural-edge-predicate? predicate))
             (+ object delta)
@@ -527,7 +533,7 @@
       (checked-overlay-module-source checked)
       "graph.fixture.selected"))))
 
-(test-case "explicit file wrapper wins over orphaned legacy body lists"
+(test-case "explicit file wrapper wins over orphaned superseded body lists"
   (with-overlay-files
    (lambda (root _provider-source _consumer-source)
      (define selected-edn (build-path root "selected-with-orphans.edn"))
@@ -538,19 +544,19 @@
      ;; Match the stable IDs of the post-commit Fram regression so the old
      ;; hash-order root heuristic deterministically selects an orphan body.
      (shift-edn-node-ids! selected-edn 1543)
-     ;; Fram's historical `child` overlay can retain old list bodies after the
-     ;; authoritative fN slot moves. They are harmless unreachable facts, but
+     ;; Fram can retain old list bodies after the authoritative order slot moves.
+     ;; They are harmless unreachable facts, but
      ;; they must not outrank the explicit beagle-file wrapper as EDN root.
      (append-edn-lines!
       selected-edn
       '("[1936 \"kind\" \"list\"]"
         "[1938 \"kind\" \"symbol\"]"
         "[1938 \"v\" \"orphan-a\"]"
-        "[1936 \"f0\" 1938]"
+        "[1936 \"f65536~1938\" 1938]"
         "[2186 \"kind\" \"list\"]"
         "[2188 \"kind\" \"symbol\"]"
         "[2188 \"v\" \"orphan-b\"]"
-        "[2186 \"f0\" 2188]"))
+        "[2186 \"f65536~2188\" 2188]"))
      (define result
        (check-edn-overlay
         (list selected-edn)

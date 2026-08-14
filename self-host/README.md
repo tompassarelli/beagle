@@ -87,6 +87,10 @@ byte-for-byte against the pinned-Racket original by
 `bin/beagle-certify-facts-roundtrip certify`; the Fram-side adoption is a
 separate follow-up cut.
 
+Every structural child uses one CRDT order predicate,
+`f<dot-separated-path>~<tie>`. Projection and graph edits share that form, and
+rendering is in-process; there is no sequential-slot or subprocess variant.
+
 ## Changing the compiler
 
 1. Edit `src/selfhost/*.bclj` (or `src/selfhost/rt.clj`).
