@@ -7270,6 +7270,16 @@
     (for/fold ([next state])
               ([default (in-list (destructure-or-default-exprs target))])
       (analyze-and-escape default next default)))
+  ;; A binding constraint is not merely evaluated: the binding guard INVOKES
+  ;; the resulting predicate. Model that as an implicit call in the
+  ;; pre-binding scope so a `!` predicate cannot hide behind declaration
+  ;; syntax. Zero arguments: the guard's input is the value being bound, and
+  ;; handing it to the predicate here would widen transient ownership beyond
+  ;; what the guard can observe.
+  (define (constraint-events node constraint)
+    (if constraint
+        (list (implicit-call-event constraint '() node 'pre-binding 0))
+        '()))
   (define (analyze-bindings bindings state)
     (for/fold ([next state]) ([binding (in-list bindings)])
       (define target (let-binding-name binding))
@@ -7280,7 +7290,9 @@
         (analyze (let-binding-value binding) next))
       (define after-defaults (analyze-defaults after-value target))
       (define after-events
-        (analyze-implicit-events binding 'pre-binding after-defaults))
+        (analyze-implicit-events
+         binding 'pre-binding after-defaults
+         (constraint-events binding (let-binding-constraint binding))))
       (bind-target after-events target origins binding #:acquire? acquire?)))
   ;; Only a simple-symbol let/loop binding may acquire a fresh transient.
   ;; Every other binding surface receives an ordinary value, so an owner on
@@ -7293,7 +7305,9 @@
       (define escaped (escape-origins after-value origins binding))
       (define after-defaults (analyze-defaults escaped target))
       (define after-events
-        (analyze-implicit-events binding 'pre-binding after-defaults))
+        (analyze-implicit-events
+         binding 'pre-binding after-defaults
+         (constraint-events binding (let-binding-constraint binding))))
       (bind-target after-events target (seteq) binding)))
   (define (bind-params state ps rest-p)
     (for/fold ([next state])
@@ -7301,7 +7315,9 @@
       (define target (param-binding-target p))
       (define with-defaults (analyze-defaults next target))
       (define after-events
-        (analyze-implicit-events p 'pre-binding with-defaults))
+        (analyze-implicit-events
+         p 'pre-binding with-defaults
+         (constraint-events p (and (param? p) (param-constraint p)))))
       (bind-target after-events target (seteq) p)))
   (define (analyze-branches branches state)
     (define results
@@ -7356,7 +7372,11 @@
            (define-values (after-expr origins)
              (analyze (for-binding-expr clause) next))
            (define escaped (escape-origins after-expr origins clause))
-           (bind-target escaped (for-binding-name clause) (seteq) clause)]
+           (define after-events
+             (analyze-implicit-events
+              clause 'pre-binding escaped
+              (constraint-events clause (for-binding-constraint clause))))
+           (bind-target after-events (for-binding-name clause) (seteq) clause)]
           [(for-let? clause)
            (analyze-nonowning-bindings (for-let-bindings clause) next)]
           [(for-when? clause)

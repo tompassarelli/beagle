@@ -19,12 +19,17 @@
          racket/set
          beagle/private/parse
          beagle/private/check
+         beagle/private/tags
          beagle/private/diagnostic-kind)
 
 ;; --- helpers ----------------------------------------------------------------
 
 (define (prog* . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
+
+;; A located form must carry the reader's bracket tag: `bracket-items` only
+;; tolerates an untagged list when the syntax has no source.
+(define (br . xs) (cons BRACKET-TAG xs))
 
 ;; Run type-check! capturing stderr; return the captured string.
 (define (check-output prog)
@@ -403,8 +408,8 @@
    '(persistent! transient-escape)))
 
 (test-case "implicit calls use explicit-call lexical and ownership semantics"
-  (define first-binding (let-binding 'guard! #f 1))
-  (define second-binding (let-binding 'value #f 2))
+  (define first-binding (let-binding 'guard! #f #f 1))
+  (define second-binding (let-binding 'value #f #f 2))
   (define form
     (let-form (list first-binding second-binding) '(value)))
   (define events
@@ -419,6 +424,54 @@
     (analyze-expression-effects (list form) (seteq)
                                 #:implicit-call-events events))
   (check-equal? (map effect-witness-marker witnesses) '(guard! later!)))
+
+;; A binding constraint's predicate is invoked by the binding guard, so an
+;; effectful predicate leaks through declaration syntax exactly as a body call
+;; would. Every binding surface that accepts a constraint routes through the
+;; same pre-binding seam.
+(test-case "binding constraints invoke their predicate on every surface"
+  (define (constrained-source body)
+    (string-append
+     "#lang beagle\n"
+     "(ns t.constraint)\n"
+     "(define-mode strict)\n"
+     "(defn check! [(value Int)] Bool true)\n"
+     body))
+  (define (violations-of body)
+    (for/list ([v (in-list
+                   (purity-violations
+                    (parse-program/bytes
+                     (string->bytes/utf-8 (constrained-source body))
+                     #:source-path "constraint.bgl")))])
+      (cons (purity-violation-name v)
+            (map purity-witness-marker (purity-violation-witnesses v)))))
+  (check-equal? (violations-of
+                 "(defn use-param [(value Int check!)] Int value)\n")
+                '((use-param check!)))
+  (check-equal? (violations-of
+                 "(defn use-let [(n Int)] Int (let [(x Int check!) n] x))\n")
+                '((use-let check!)))
+  (check-equal? (violations-of
+                 (string-append
+                  "(defn use-for [(xs (Vec Int))] (Vec Int)\n"
+                  "  (for [(x Int check!) xs] x))\n"))
+                '((use-for check!)))
+  (check-equal? (violations-of
+                 (string-append
+                  "(defn use-fn [(n Int)] Int\n"
+                  "  (let [f (fn [(x Int check!)] Int x)] (f n)))\n"))
+                '((use-fn check!)))
+  ;; The predicate need not be `!`-named: reaching a locally effectful
+  ;; definition through the constraint leaks just the same.
+  (check-equal? (violations-of
+                 (string-append
+                  "(defn middle [(value Int)] Bool (check! value))\n"
+                  "(defn use-transitive [(value Int middle)] Int value)\n"))
+                '((middle check!) (use-transitive middle)))
+  ;; An unconstrained binding of the same shape stays pure.
+  (check-equal? (violations-of
+                 "(defn plain [(n Int)] Int (let [(x Int) n] x))\n")
+                '()))
 
 (test-case "condp predicate invocations use the implicit-call seam"
   (define p
@@ -533,7 +586,7 @@
                      (vector "purity-location.bclj" 2 0 #f #f))
       (datum->syntax #f '(define-target clj)
                      (vector "purity-location.bclj" 3 0 #f #f))
-      (datum->syntax #f '(defn save [box v] Any (reset! box v))
+      (datum->syntax #f `(defn save ,(br 'box 'v) Any (reset! box v))
                      (vector "purity-location.bclj" 4 2 #f #f)))))
   (define diagnostics '())
   (define locations '())

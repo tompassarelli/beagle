@@ -4674,7 +4674,7 @@
   (lambda (d subs)
     (match d
       [(list 'js/export inner-form)
-       (define inner (parse-expr inner-form))
+       (define inner (parse-expr (or (stx-ref subs 1) inner-form)))
        (cond
          [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
          [else (jst-export inner)])]
@@ -4685,7 +4685,7 @@
   (lambda (d subs)
     (match d
       [(list 'js/export-default inner-form)
-       (jst-export-default (parse-expr inner-form))]
+       (jst-export-default (parse-expr (or (stx-ref subs 1) inner-form)))]
       [_ (parse-list-form* d subs)])))
 
 ;; `js/!` migrated to the compile-time combiner registry (see register-combiner!).

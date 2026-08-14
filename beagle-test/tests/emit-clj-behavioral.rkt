@@ -782,12 +782,14 @@
       '(def captured (Atom java.net.Socket?) (atom nil))
       '(defn reject-socket! [(value java.net.Socket)] Bool
          (do (reset! captured value) false))
-      '(defn rejected-open [] Bool
+      ;; The binding guard invokes `reject-socket!`, so this boundary is
+      ;; effectful and carries the `!` its constraint forces on it.
+      '(defn rejected-open! [] Bool
          (with-open
           [(socket java.net.Socket reject-socket!) (java.net.Socket.)]
           true)))
      (string-append
-      "(try (rejected-open) "
+      "(try (rejected-open!) "
       "     (catch Exception error (println (.getMessage error))))\n"
      "(println (.isClosed @captured))")
      "Binding constraint failed: socket\ntrue")

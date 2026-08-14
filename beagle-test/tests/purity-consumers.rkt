@@ -17,6 +17,13 @@
     (lambda (out) (display source out))
     #:exists 'truncate/replace))
 
+;; TMPDIR may carry a trailing separator, so a constructed scratch path can hold
+;; a redundant `//` that a diagnostic's own reporting has already collapsed.
+;; The claim is "same file", so compare in simplified form.
+(define (check-same-file? reported constructed)
+  (check-equal? (simplify-path (string->path reported))
+                (simplify-path constructed)))
+
 (test-case "LSP publishes every purity boundary at its authored source line"
   (define path (make-temporary-file "beagle-lsp-purity-~a.bgl"))
   (dynamic-wind
@@ -82,7 +89,7 @@
       (check-equal? (hash-ref diagnostic 'kind) "purity-leak")
       (check-equal? (hash-ref diagnostic 'error-code) "E019")
       (check-equal? (hash-ref diagnostic 'cause) "type-error")
-      (check-equal? (hash-ref diagnostic 'file) (path->string source))
+      (check-same-file? (hash-ref diagnostic 'file) source)
       (check-equal? (hash-ref diagnostic 'line) 3)
       (check-false
        (file-exists? (build-path out-dir "daemon" "purity.js"))))
@@ -125,7 +132,7 @@
       (check-equal? (hash-ref diagnostic 'kind) "purity-leak")
       (check-equal? (hash-ref diagnostic 'error-code) "E019")
       (check-equal? (hash-ref diagnostic 'cause) "type-error")
-      (check-equal? (hash-ref diagnostic 'file) (path->string source))
+      (check-same-file? (hash-ref diagnostic 'file) source)
       (check-equal? (hash-ref diagnostic 'line) 3)
       (check-false
        (file-exists? (build-path out-dir "batch" "purity.js"))))
