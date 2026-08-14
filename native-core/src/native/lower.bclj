@@ -5340,8 +5340,7 @@
     nil))
 
 (defn source-int-literal-value
-  [(index SourceIndexV0)
-   (node core/NativeId)] (U Int Nil)
+  [(index SourceIndexV0) (node core/NativeId)] (U Int Nil)
   (if (and (= "literal" (fact-text index node "form-kind"))
         (or (= "int" (fact-text index node "literal-kind"))
           (= "number" (fact-text index node "literal-kind"))))
@@ -5349,22 +5348,18 @@
     nil))
 
 (defn source-keyword-literal-value
-  [(index SourceIndexV0)
-   (node core/NativeId)] (U String Nil)
+  [(index SourceIndexV0) (node core/NativeId)] (U String Nil)
   (if (and (= "literal" (fact-text index node "form-kind"))
         (= "keyword" (fact-text index node "literal-kind")))
     (fact-text index node "value")
     nil))
 
-(defn f64-buffer-type?
-  [(types (Vec core/TypeDef))
-   (target core/NativeId)] Bool
+(defn f64-buffer-type? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (and (buffer-type? types target)
     (same-id? (buffer-element-of types target) (float-type-id))))
 
 (defn tiled-kernel-signature?
-  [(types (Vec core/TypeDef))
-   (signature TypedFunctionV0)] Bool
+  [(types (Vec core/TypeDef)) (signature TypedFunctionV0)] Bool
   (let [(parameters (Vec core/Parameter))
         (typedfunctionv0-parameters signature)]
     (and (= 5 (count parameters))
@@ -17322,8 +17317,7 @@
     layouts-digest))
 
 (defn function-id-is-tiled-kernel?
-  [(functions (Vec core/FunctionDef))
-   (target core/NativeId)] Bool
+  [(functions (Vec core/FunctionDef)) (target core/NativeId)] Bool
   (some?
     (some
       (fn [(function core/FunctionDef)] Bool
@@ -17345,7 +17339,8 @@
 
 (defn public-ready-functions
   [(typed-functions (Vec TypedFunctionV0))
-   (functions (Vec core/FunctionDef))] (Vec TypedFunctionV0)
+   (functions (Vec core/FunctionDef))]
+  (Vec TypedFunctionV0)
   (filterv
     (fn [(function TypedFunctionV0)] Bool
       (and (ready-function? function)

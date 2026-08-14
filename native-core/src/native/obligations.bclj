@@ -2536,7 +2536,8 @@
 
 (defn find-function-by-id
   [(functions (Vec core/FunctionDef))
-   (target core/NativeId)] (U core/FunctionDef Nil)
+   (target core/NativeId)]
+  (U core/FunctionDef Nil)
   (loop [(position Int) 0]
     (if (>= position (count functions))
       nil
@@ -2546,15 +2547,13 @@
           (recur (+ position 1)))))))
 
 (defn f64-buffer-type-id?
-  [(types (Vec core/TypeDef))
-   (target core/NativeId)] Bool
+  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (let [(element (U core/NativeId Nil))
         (core/buffer-element-type types target)]
     (and (some? element) (core/type-id-is-f64? types element))))
 
 (defn tile-kernel-signature-valid?
-  [(types (Vec core/TypeDef))
-   (kernel core/FunctionDef)] Bool
+  [(types (Vec core/TypeDef)) (kernel core/FunctionDef)] Bool
   (let [(parameters (Vec core/Parameter))
         (core/functiondef-parameters kernel)
         (result (U core/NativeId Nil)) (core/functiondef-return-type kernel)]
@@ -2580,7 +2579,8 @@
 (defn tile-kernel-instruction-valid?
   [(types (Vec core/TypeDef))
    (kernel core/FunctionDef)
-   (instruction core/Instruction)] Bool
+   (instruction core/Instruction)]
+  Bool
   (let [(parameters (Vec core/Parameter))
         (core/functiondef-parameters kernel)
         (current core/NativeId) (core/parameter-id (nth parameters 0))
@@ -2627,8 +2627,7 @@
       :else false)))
 
 (defn tile-kernel-leaf-valid?
-  [(types (Vec core/TypeDef))
-   (kernel core/FunctionDef)] Bool
+  [(types (Vec core/TypeDef)) (kernel core/FunctionDef)] Bool
   (every?
     (fn [(block core/BasicBlock)] Bool
       (every?
@@ -2638,8 +2637,7 @@
     (core/functiondef-blocks kernel)))
 
 (defn function-id-abi-visible?
-  [(abis (Vec core/AbiDeclV0))
-   (target core/NativeId)] Bool
+  [(abis (Vec core/AbiDeclV0)) (target core/NativeId)] Bool
   (some?
     (some
       (fn [(abi core/AbiDeclV0)] Bool
@@ -2647,8 +2645,7 @@
       abis)))
 
 (defn function-id-ordinary-reachable?
-  [(functions (Vec core/FunctionDef))
-   (target core/NativeId)] Bool
+  [(functions (Vec core/FunctionDef)) (target core/NativeId)] Bool
   (some?
     (some
       (fn [(function core/FunctionDef)] Bool
@@ -2674,7 +2671,8 @@
 (defn parallel-instruction-valid?
   [(program core/NativeCoreProgram)
    (owner core/FunctionDef)
-   (instruction core/Instruction)] Bool
+   (instruction core/Instruction)]
+  Bool
   (cond
     (instance? native.core.TiledStepF64InstructionV0 instruction)
     (let [(kernel (U core/FunctionDef Nil))
