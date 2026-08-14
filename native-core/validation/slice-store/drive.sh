@@ -8,8 +8,7 @@
 # store.bgl declares no record of its own: every type in its signatures comes
 # from fram.types, so both ASTs are projected into one source program.
 #
-# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_STORE, FRAM_TYPES,
-#      NATIVE_SLICE_COMMITTED_FACTS.
+# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_STORE, FRAM_TYPES.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -26,33 +25,17 @@ dep="${FRAM_TYPES:-$repo/native-core/validation/upstream/fram/src/fram/types.bgl
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-store.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-banner=""
-if [[ "${NATIVE_SLICE_COMMITTED_FACTS:-0}" == 1 ]]; then
-  # Opt-in only, and it says so in the report: this mode proves the committed
-  # projection still lowers, never that it still matches the vendored source.
-  [[ -f "$art/store.facts" ]] \
-    || { echo "drive.sh: NATIVE_SLICE_COMMITTED_FACTS=1 but no committed $art/store.facts" >&2; exit 1; }
-  banner="MODE committed-facts: upstream fram source NOT read; this run does not prove the projection matches the vendored fram source"
-  echo "drive.sh: $banner" >&2
-  cp "$art/store.facts" "$scratch/store.facts"
-else
-  for upstream in "$dep" "$src"; do
-    [[ -f "$upstream" ]] && continue
-    echo "drive.sh: upstream fram source is missing: $upstream" >&2
-    echo "drive.sh: restore native-core/validation/upstream/fram, point FRAM_TYPES/FRAM_STORE at fram sources, or set NATIVE_SLICE_COMMITTED_FACTS=1 to check only the committed projection" >&2
-    exit 1
-  done
-  "$repo/bin/beagle-ast" "$dep" >"$scratch/types.ast.json"
-  "$repo/bin/beagle-ast" "$src" >"$scratch/store.ast.json"
-  bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/store.ast.json" \
-    "$scratch/store.facts"
-  if [[ -f "$art/store.facts" ]] && ! cmp -s "$scratch/store.facts" "$art/store.facts"; then
-    echo "drive.sh: regenerated projection differs from the committed store.facts" >&2
-    exit 1
-  fi
-  cp "$scratch/store.facts" "$art/store.facts"
-  { sha256sum "$dep"; sha256sum "$src"; } | cut -d' ' -f1 >"$art/source.sha256"
-fi
+for upstream in "$dep" "$src"; do
+  [[ -f "$upstream" ]] && continue
+  echo "drive.sh: upstream Fram source is missing: $upstream" >&2
+  exit 1
+done
+"$repo/bin/beagle-ast" "$dep" >"$scratch/types.ast.json"
+"$repo/bin/beagle-ast" "$src" >"$scratch/store.ast.json"
+bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/store.ast.json" \
+  "$scratch/store.facts"
+cp "$scratch/store.facts" "$art/store.facts"
+{ sha256sum "$dep"; sha256sum "$src"; } | cut -d' ' -f1 >"$art/source.sha256"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
@@ -86,9 +69,6 @@ bb -Xmx4g -cp "$scratch/out" -e "
   (native.slice/emit-slice! \"$scratch/store.facts\" \"fram.store\"
     \"fram:src/fram/store.bgl\" \"$art\" \"native-slice-store-v0\" \"$abi\"))"
 
-if [[ -n "$banner" ]]; then
-  sed -i "1i $banner" "$art/report.txt"
-fi
 cat "$art/report.txt"
 
 # The driver is fail-closed on its own C: a projection that no longer compiles

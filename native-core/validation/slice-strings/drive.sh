@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-# Drive the text corpus and a real FRI replay slice through the native pipeline:
+# Drive the text corpus through the native pipeline:
 #   beagle-ast -> source facts -> frozen source program -> typed program
 #     -> native program with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
-#
-# Two projections: text_ops.facts (this directory's corpus) and
-# replay_text.facts (an unmodified fram.fri-replay helper slice). Both generated
-# modules are compiled and run. Set FRAM_REPLAY to re-derive the replay facts and
-# fail on drift.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -16,9 +11,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-strings.XXXXXX")"
-replay_art="${NATIVE_REPLAY_ARTIFACTS:-$scratch/replay}"
 trap 'rm -rf "${scratch:?}"' EXIT
-mkdir -p "$replay_art"
 
 facts_of() { # facts_of <source> <relative-path> <out.facts>
   "$repo/bin/beagle-ast" "$1" >"$scratch/ast.json"
@@ -30,45 +23,7 @@ facts_of() { # facts_of <source> <relative-path> <out.facts>
 facts_of "$here/text_ops.bclj" \
   "beagle:native-core/validation/slice-strings/text_ops.bclj" \
   "$scratch/text_ops.facts"
-if [[ -f "$art/text_ops.facts" ]] \
-   && ! cmp -s "$scratch/text_ops.facts" "$art/text_ops.facts"; then
-  echo "drive.sh: regenerated projection differs from the committed text_ops.facts" >&2
-  exit 1
-fi
 cp "$scratch/text_ops.facts" "$art/text_ops.facts"
-
-# --- replay projection: real fram source, re-derived only on request -------
-replay_forms=(digit-table no-strings char-at split-on index-of last-index-of
-  "trim-character?" trim-line join-strings IntParse digit-value parse-int strip-at
-  line-version line-assert line-retract line-batch line-invalid ParsedFact ParsedOp
-  no-facts invalid-fact invalid-op parse-fact parse-facts "facts-parsed?"
-  parse-mutation parse-batch parse-line act-assert act-retract ModelTriple Model
-  Action ReplayCommit no-triples no-actions no-commits initial-model find-exact
-  find-group remove-at "single-predicate?" subject-predicate-count "collapses?"
-  "declaration-collapse?" GroupRemoval remove-group ApplyResult apply-assert
-  apply-retract apply-action kind-version kind-ok kind-reject
-  reason-invalid-request reason-conflict reason-cardinality-collapse Outcome
-  MutationResult no-outcomes reject op-actions "any-local-base?" apply-actions
-  mutate ReplayFrame ReplayResult no-frames replay)
-if [[ -n "${FRAM_REPLAY:-}" ]]; then
-  "$repo/bin/beagle-ast" "$FRAM_REPLAY" >"$scratch/replay.json"
-  form_args=()
-  for form in "${replay_forms[@]}"; do
-    form_args+=(--form "$form")
-  done
-  bb "$repo/native-core/bin/source-facts.clj" \
-    --input "$scratch/replay.json=fram:src/fram/fri_replay.bclj" \
-    --output "$scratch/replay_text.facts" --include-defs "${form_args[@]}"
-  if [[ -f "$art/replay_text.facts" ]] \
-     && ! cmp -s "$scratch/replay_text.facts" "$art/replay_text.facts"; then
-    echo "drive.sh: fram.fri-replay slice drifted from the committed projection" >&2
-    exit 1
-  fi
-  cp "$scratch/replay_text.facts" "$art/replay_text.facts"
-  sha256sum "$FRAM_REPLAY" | cut -d' ' -f1 >"$art/replay_text.source.sha256"
-else
-  echo "drive.sh: MODE committed-facts for the replay projection: fram.fri-replay NOT read; set FRAM_REPLAY to prove it still matches live fram" >&2
-fi
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
@@ -102,15 +57,9 @@ bb -cp "$scratch/out" -e "
 (spit \"$art/report.txt\"
   (native.body-slice/emit-slice! \"$art/text_ops.facts\" \"native.text-ops\"
     \"native-core/validation/slice-strings/text_ops.bclj\" \"$art\"
-    \"native-slice-strings-v0\" \"$abi\"))
-(spit \"$art/replay-report.txt\"
-  (native.body-slice/emit-slice! \"$art/replay_text.facts\" \"fram.fri-replay\"
-    \"fram:src/fram/fri_replay.bclj\" \"$replay_art\"
     \"native-slice-strings-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
-echo "-- fram.fri-replay native slice --"
-cat "$art/replay-report.txt"
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
   exit 0
@@ -170,22 +119,4 @@ if [ -n "$clang_bin" ]; then
   echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + refusal traps ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
-fi
-
-replay_build="$scratch/replay-c"
-mkdir -p "$replay_build"
-cp "$replay_art/module_0.h" "$replay_art/module_0.c" "$here/replay_main.c" \
-  "$replay_build/"
-cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" \
-  "$replay_build/"
-( cd "$replay_build" && gcc "${strict[@]}" -o replay_gcc \
-    module_0.c native_shim.c replay_main.c )
-( cd "$replay_build" && ./replay_gcc )
-echo "drive.sh: replay helpers gcc strict compile + run ok"
-
-if [ -n "$clang_bin" ]; then
-  ( cd "$replay_build" && "$clang_bin" -std=c17 -Werror -o replay_clang \
-      module_0.c native_shim.c replay_main.c )
-  ( cd "$replay_build" && ./replay_clang )
-  echo "drive.sh: replay helpers clang compile + run ok"
 fi

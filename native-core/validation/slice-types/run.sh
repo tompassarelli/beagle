@@ -19,11 +19,8 @@ if [[ -z "$types_clang_bin" ]]; then
   exit 1
 fi
 
-# This slice has no committed fact projection to fall back to, so an absent
-# upstream is fatal here and must name the path instead of dying inside racket.
 if [[ ! -f "$types_source" ]]; then
-  echo "run.sh: upstream fram source is missing: $types_source" >&2
-  echo "run.sh: restore native-core/validation/upstream/fram or set FRAM_TYPES to a fram.types source; this slice has no committed-facts mode" >&2
+  echo "run.sh: upstream Fram source is missing: $types_source" >&2
   exit 1
 fi
 
