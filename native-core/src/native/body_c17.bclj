@@ -140,8 +140,7 @@
     [(BodySuccessV0 artifact) artifact]
     [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
 
-(defn artifact-hashes
-  [(artifact BodyArtifactV0)] (Vec core/ArtifactHashV0)
+(defn artifact-hashes [(artifact BodyArtifactV0)] (Vec core/ArtifactHashV0)
   [(core/->ArtifactHashV0
      (bodyartifactv0-header-name artifact)
      (stages/content-digest (bodyartifactv0-header-text artifact)))

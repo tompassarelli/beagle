@@ -13,19 +13,14 @@
   (TextTermV0 [(value String)])
   (RefTermV0 [(target core/NativeId)])
   (TripleTermV0
-    [(subject core/NativeId)
-     (predicate core/NativeId)
-     (object core/NativeId)]))
+    [(subject core/NativeId) (predicate core/NativeId) (object core/NativeId)]))
 
 (defrecord TermNodeV0 [(identity core/NativeId) (term TermV0)])
 
 (defrecord TermGraphV0 [(root core/NativeId) (nodes (Vec TermNodeV0))])
 
 (defrecord SourceLocationV0
-  [(module-id core/NativeId)
-   (relative-path String)
-   (line Int)
-   (column Int)])
+  [(module-id core/NativeId) (relative-path String) (line Int) (column Int)])
 
 (defrecord SourceModuleV0
   [(id core/NativeId)
@@ -60,23 +55,16 @@
    (obligation-roots (Vec core/NativeId))])
 
 (defrecord FrozenSourceStageV0
-  [(stage SourceStageV0)
-   (encoding String)
-   (digest String)])
+  [(stage SourceStageV0) (encoding String) (digest String)])
 
 (defrecord FrozenTypedStageV0
-  [(stage TypedStageV0)
-   (encoding String)
-   (digest String)])
+  [(stage TypedStageV0) (encoding String) (digest String)])
 
 (defrecord FrozenNativeStageV0
-  [(stage NativeStageV0)
-   (encoding String)
-   (digest String)])
+  [(stage NativeStageV0) (encoding String) (digest String)])
 
 (defrecord BuildManifestV0
-  [(receipts (Vec core/ArtifactHashV0))
-   (artifacts (Vec core/ArtifactHashV0))])
+  [(receipts (Vec core/ArtifactHashV0)) (artifacts (Vec core/ArtifactHashV0))])
 
 (defn canonical-record [(tag String) (fields (Vec String))] String
   (str (count tag) ":" tag ":" (core/canonical-parts fields)))
@@ -290,8 +278,7 @@
     [(encode-string (core/diagnosticv0-code diagnostic))
      (encode-string (core/diagnosticv0-detail diagnostic))]))
 
-(defn encode-receipt-obligation
-  [(obligation core/ReceiptObligationV0)] String
+(defn encode-receipt-obligation [(obligation core/ReceiptObligationV0)] String
   (canonical-record "receipt-obligation-v0"
     [(encode-string (encode-obligation-code
                       (core/receiptobligationv0-code obligation)))
@@ -352,7 +339,8 @@
    (configuration (Vec String))
    (backend String)
    (backend-version String)
-   (artifacts (Vec core/ArtifactHashV0))] core/PassReceiptV0
+   (artifacts (Vec core/ArtifactHashV0))]
+  core/PassReceiptV0
   (let [(output-digest String) (artifact-set-digest artifacts)]
     (core/->PassReceiptV0
       (core/->NativeId
