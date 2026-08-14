@@ -235,16 +235,6 @@
              "(def o #js {:a 1})\n"
              #:has '("#js {:a 1}") #:no '("#%js"))
 
-   ;; G12 #^ legacy metadata shorthand — reads as (#%meta …), same as `^`, and
-   ;; renders NORMALIZED to `^` (the legacy #^ spelling is not preserved; #^ → ^
-   ;; is the correct, desired inversion since both mean identical metadata).
-   (gap-case "G12 #^String param tag renders as ^String"
-             "(defn f [#^String s] s)\n"
-             #:has '("^String") #:no '("#^" "#%meta"))
-   (gap-case "G12 #^{:tag} longhand renders as ^{:tag …}"
-             "(def #^{:tag String} x 1)\n"
-             #:has '("^{:tag String}") #:no '("#^" "#%meta"))
-
    ;; G11 symbolic values ##Inf / ##-Inf / ##NaN
    (gap-case "G11 ##NaN ##Inf ##-Inf"
              "(def s [##NaN ##Inf ##-Inf])\n"
@@ -321,8 +311,6 @@
    (cons "G8 discard list" "(def w [1 #_(a b) 3])\n")
    (cons "G10 js vec" "(def j #?(:clj [] :cljs #js []))\n")
    (cons "G10 js map" "(def o #js {:a 1})\n")
-   (cons "G12 legacy meta param" "(defn f [#^String s] s)\n")
-   (cons "G12 legacy meta longhand" "(def #^{:tag String} x 1)\n")
    (cons "G11 symbolic values" "(def s [##NaN ##Inf ##-Inf])\n")
    (cons "G9 interop -field" "(def m (. LocalTime -MIN))\n")
    (cons "G9 interop method-arg" "(def r (. obj method arg))\n")

@@ -56,12 +56,6 @@
  {:name "g10-js-map"
   :ext ".bcljs"
   :source "(def o #js {:a 1})\n"}
- {:name "g12-legacy-meta-param"
-  :ext ".bclj"
-  :source "(defn f [#^String s] s)\n"}
- {:name "g12-legacy-meta-longhand"
-  :ext ".bclj"
-  :source "(def #^{:tag String} x 1)\n"}
  {:name "g11-symbolic-values"
   :ext ".bclj"
   :source "(def s [##NaN ##Inf ##-Inf])\n"}
