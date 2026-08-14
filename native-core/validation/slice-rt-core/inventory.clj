@@ -1,13 +1,43 @@
 (require '[cheshire.core :as json]
          '[clojure.string :as str])
 
+(load-file
+  (.getCanonicalPath
+    (clojure.java.io/file (.getParentFile (clojure.java.io/file *file*))
+      "../../bin/checked-program.clj")))
+(require '[native.checked-program :as checked-program])
+
 (defn fail! [message data]
   (throw (ex-info message data)))
+
+(defn constrained-binding [value]
+  (cond
+    (map? value)
+    (or (when (and (contains? value "constraint")
+                   (some? (get value "constraint")))
+          value)
+        (some constrained-binding (vals value)))
+    (sequential? value) (some constrained-binding value)
+    :else nil))
+
+(defn require-unconstrained-checked-program! [ast source-path]
+  (checked-program/require-checked-program!
+    ast source-path "rt-core inventory")
+  ;; The inventory consumes declaration structure directly. Reject constraints
+  ;; until they are part of its asserted inventory instead of dropping them.
+  (when-let [binding (constrained-binding ast)]
+    (fail! (str "rt-core inventory does not implement typed-binding constraints; "
+                "refusing to discard constraint metadata: " source-path)
+      {:source-path source-path
+       :binding-node (get binding "node")
+       :binding-name (get binding "name")}))
+  ast)
 
 (let [[ast-path output-path] *command-line-args*]
   (when (or (nil? ast-path) (nil? output-path))
     (fail! "usage: inventory.clj AST.json OUTPUT" {}))
-  (let [ast (json/parse-string (slurp ast-path))
+  (let [ast (require-unconstrained-checked-program!
+              (json/parse-string (slurp ast-path)) ast-path)
         forms (get ast "forms")
         functions (filterv #(= "defn" (get % "node")) forms)
         definitions (filterv #(= "def" (get % "node")) forms)

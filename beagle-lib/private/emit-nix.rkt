@@ -22,18 +22,128 @@
 
 (define current-recur-name (make-parameter #f))
 (define current-nix-record-types (make-parameter (seteq)))
+(define current-nix-program (make-parameter #f))
+(define current-nix-require-prefixes (make-parameter (hash)))
+(define current-nix-semantic-contracts (make-parameter #f))
+(define current-nix-constraint-owners (make-parameter (hasheq)))
 
 ;; --- identifier mangling ---------------------------------------------------
 
 (define (mangle-name sym)
   (define s (symbol->string sym))
-  (define out
+  ;; Compiler ABI symbols occupy the source-reserved `bgl____` host prefix and
+  ;; encode every UTF-8 byte. Merely replacing `$` with `_` is not injective:
+  ;; legal source names containing `$` and `_` can collapse to the same Nix
+  ;; binding. Hex makes the conceptual `$beagle$...` ABI round-trippable and
+  ;; incapable of colliding with either authored names or another helper.
+  (define compiler-owned? (string-prefix? s "$beagle$"))
+  (define (hex-encode text)
+    (apply
+     string-append
+     (for/list ([byte (in-bytes (string->bytes/utf-8 text))])
+       (define hex (number->string byte 16))
+       (if (= (string-length hex) 1) (string-append "0" hex) hex))))
+  (define ordinary
     (string-replace
      (string-replace
-      (string-replace s "->" "mk")
+      (string-replace
+       (string-replace s "$" "_")
+       "->" "mk")
       "?" "_p")
      "!" "_bang"))
+  (define out
+    (if compiler-owned?
+        (string-append "bgl____" (hex-encode s))
+        ordinary))
   (if (nix-reserved? out) (string-append out "'") out))
+
+;; A Beagle namespace separator becomes Nix attr selection, but each selected
+;; binding still needs ordinary host mangling.  Applying only `/` -> `.` left
+;; qualified predicate names containing `?`, and the provider validator ABI's
+;; `$` names, as invalid Nix identifiers.
+(define (mangle-qualified-name sym)
+  (define parts (string-split (symbol->string sym) "/"))
+  (define prefix (car parts))
+  (define runtime-prefix
+    (hash-ref (current-nix-require-prefixes) prefix #f))
+  (string-join
+   (cons (or runtime-prefix (mangle-name (string->symbol prefix)))
+         (for/list ([part (in-list (cdr parts))])
+           (mangle-name (string->symbol part))))
+   "."))
+
+;; Generated Nix modules live at the namespace path. Resolve one provider from
+;; the importing module's directory, rather than repeating the common namespace
+;; prefix underneath that directory (`a/consumer.nix` imports `./provider.nix`,
+;; not `./a/provider.nix`).
+(define (relative-nix-module-path importer-ns imported-ns)
+  (define importer-parts (string-split (symbol->string importer-ns) "."))
+  (define importer-dir
+    (if (null? importer-parts)
+        '()
+        (drop-right importer-parts 1)))
+  (define target-parts (string-split (symbol->string imported-ns) "."))
+  (define-values (remaining-dir remaining-target)
+    (let loop ([dir importer-dir] [target target-parts])
+      (if (and (pair? dir)
+               (pair? target)
+               (string=? (car dir) (car target)))
+          (loop (cdr dir) (cdr target))
+          (values dir target))))
+  (define path
+    (string-append
+     (string-join
+      (append (make-list (length remaining-dir) "..") remaining-target)
+      "/")
+     ".nix"))
+  (if (string-prefix? path "..") path (string-append "./" path)))
+
+(define (require-module-import prog entry)
+  (for/first ([import (in-list (program-imported-module-interfaces prog))]
+              #:when
+              (eq? (module-interface-namespace
+                    (module-import-interface import))
+                   (require-entry-ns entry)))
+    import))
+
+(define NON-RUNTIME-INTERFACE-KINDS
+  '(extern macro protocol-method defmulti))
+
+(define (runtime-interface-binding? interface name)
+  (define binding (module-interface-binding-ref interface name #f))
+  (and binding
+       (not (memq (interface-binding-kind binding)
+                  NON-RUNTIME-INTERFACE-KINDS))))
+
+(define (used-unqualified-record-validators prog)
+  (for/seteq ([(node contract)
+               (in-hash (program-semantic-contracts prog))]
+              #:when
+              (and (record-update-contract? contract)
+                   (record-update-contract-validator-symbol contract)
+                   (not
+                    (string-contains?
+                     (symbol->string
+                      (record-update-contract-validator-symbol contract))
+                     "/"))))
+    (record-update-contract-validator-symbol contract)))
+
+(define (referred-record-validator-symbols prog entry interface)
+  (define used (used-unqualified-record-validators prog))
+  (define referred (or (require-entry-refer entry) '()))
+  (for/list ([(record-name contract)
+              (in-hash (module-interface-record-contracts interface))]
+             #:do
+             [(define validator
+                (interface-record-contract-validator-symbol contract))
+              (define constructor
+                (string->symbol (format "->~a" record-name)))]
+             #:when
+             (and validator
+                  (set-member? used validator)
+                  (or (memq record-name referred)
+                      (memq constructor referred))))
+    validator))
 
 ;; Nix syntactic keywords. `import` is a function (builtins.import), not a
 ;; keyword, so it's intentionally excluded.
@@ -44,6 +154,65 @@
 (define (nix-reserved? s)
   (member s nix-reserved-words))
 
+;; Attribute labels are data, not binders. Preserve authored Map keyword text
+;; and quote any segment that cannot be written as a bare Nix attribute. Record
+;; fields are different: their checked representation uses the same mangled
+;; host spelling as generated constructors/accessors.
+(define nix-bare-attr-rx #px"^[a-zA-Z_][a-zA-Z0-9_'-]*$")
+
+(define (nix-static-attr-segment text)
+  (if (and (regexp-match? nix-bare-attr-rx text)
+           (not (nix-reserved? text)))
+      text
+      (format "\"~a\"" (escape-nix text))))
+
+(define (nix-static-attr-path text)
+  (string-join
+   (for/list ([segment (in-list (string-split text "." #:trim? #f))])
+     (nix-static-attr-segment segment))
+   "."))
+
+(define (record-valued-expr? e)
+  (define table (current-type-table))
+  (define inferred (and table (hash-ref table e #f)))
+  (define name
+    (cond
+      [(type-prim? inferred) (type-prim-name inferred)]
+      [(type-app? inferred) (type-app-ctor inferred)]
+      [else #f]))
+  (or (and name (set-member? (current-nix-record-types) name))
+      ;; Parser-only emission has no inferred-type table. A direct checked
+      ;; record constructor still carries an unambiguous nominal spelling.
+      (and (call-form? e)
+           (symbol? (call-form-fn e))
+           (let ([fn-text (symbol->string (call-form-fn e))])
+             (and (string-prefix? fn-text "->")
+                  (set-member?
+                   (current-nix-record-types)
+                   (string->symbol (substring fn-text 2))))))))
+
+(define (record-field-access? access-node target-expr)
+  (define prog (current-nix-program))
+  (define contracts (and prog (program-semantic-contracts prog)))
+  (define contract
+    (and access-node contracts (hash-ref contracts access-node #f)))
+  (when (and contract (not (record-field-access-contract? contract)))
+    (error 'emit-nix
+           "keyword access has invalid checked representation contract: ~v"
+           contract))
+  (or (record-field-access-contract? contract)
+      ;; Parser-only emission has no checked contract. Preserve the direct
+      ;; constructor case without treating general Map keywords as binders.
+      (and (not (and prog (program-type-table prog)))
+           (record-valued-expr? target-expr))))
+
+(define (keyword-selection-field target-expr keyword [access-node #f])
+  (define raw (symbol->string keyword))
+  (define field (if (string-prefix? raw ":") (substring raw 1) raw))
+  (if (record-field-access? access-node target-expr)
+      (mangle-name (string->symbol field))
+      (nix-static-attr-path field)))
+
 ;; --- params ------------------------------------------------------------------
 
 ;; Param → nix pattern. Plain params curry as `name:`. Map destructuring
@@ -51,7 +220,7 @@
 ;; {:keys [a b] :or {a 1} :as m} IS nix's { a ? 1, b, ... } @ m: — the
 ;; same meaning native on both surfaces. Sequential destructuring has no
 ;; nix analog: pointed error naming the let-binding replacement.
-(define (nix-param-pattern p depth)
+(define (nix-param-pattern p depth [emit-default #f])
   (define target (param-binding-target p))
   (define annotation (and (param? p) (param-type p)))
   (cond
@@ -77,7 +246,11 @@
                   "nested map destructuring in params is not supported by the nix backend — destructure the outer level and bind the rest with let"))
          (define dflt (and ors (assq k ors)))
          (if dflt
-             (format "~a ? ~a" (mangle-name k) (emit-expr (cdr dflt) depth))
+             (format "~a ? ~a"
+                     (mangle-name k)
+                     (if emit-default
+                         (emit-default (car dflt) (cdr dflt))
+                         (emit-expr (cdr dflt) depth)))
              (mangle-name k))))
      (format "{ ~a... }~a:"
              (if (null? entries)
@@ -87,6 +260,261 @@
     [else
      (error 'beagle
             "sequential destructuring in params is not supported by the nix backend — nix functions destructure attrsets only; bind positionally: (let [x (first xs) y (second xs)] ...)")]))
+
+;; Constraints are executable predicates on the complete incoming value.  A
+;; constrained binder therefore needs two lexical phases in Nix: capture the
+;; predicate before the target is in scope, then apply it to the raw argument
+;; before any destructuring pattern runs.  Nix's laziness shares both thunks,
+;; so neither the raw value nor the predicate application is duplicated.
+(define (binding-target-label target)
+  (define b (param-binding-target target))
+  (cond
+    [(symbol? b) (symbol->string b)]
+    [(map-destructure? b)
+     (define keys
+       (string-join
+        (for/list ([key (in-list (map-destructure-keys b))])
+          (binding-target-label key))
+        " "))
+     (format "{:keys [~a]~a}"
+             keys
+             (if (map-destructure-as-name b)
+                 (format " :as ~a" (map-destructure-as-name b))
+                 ""))]
+    [(seq-destructure? b)
+     (define names
+       (for/list ([name (in-list (seq-destructure-names b))])
+         (binding-target-label name)))
+     (define all-names
+       (if (seq-destructure-rest-name b)
+           (append names
+                   (list "&"
+                         (symbol->string (seq-destructure-rest-name b))))
+           names))
+     (format "[~a]" (string-join all-names " "))]
+    [else "<binding>"]))
+
+(define (binding-constraint-failure target)
+  (format "builtins.throw \"Binding constraint failed: ~a\""
+          (escape-nix (binding-target-label target))))
+
+(define (binding-constraint binding)
+  (cond
+    [(param? binding) (param-constraint binding)]
+    [(let-binding? binding) (let-binding-constraint binding)]
+    [(for-binding? binding) (for-binding-constraint binding)]
+    [else #f]))
+
+(define (binding-constraint-proof binding)
+  (define owner
+    (hash-ref (current-nix-constraint-owners) binding binding))
+  (and (current-nix-semantic-contracts)
+       (hash-ref (current-nix-semantic-contracts) owner #f)))
+
+;; A constraint is executable compiler output, so syntax alone is not enough
+;; authority to emit it. The checker owns the positive proof that the predicate
+;; is synchronous; every Nix binding path calls this accessor before touching
+;; the constraint expression. This also makes parser-only emission fail closed.
+(define (checked-binding-constraint binding)
+  (define constraint (binding-constraint binding))
+  (when constraint
+    (define proof (binding-constraint-proof binding))
+    (unless (and (binding-constraint-contract? proof)
+                 (binding-constraint-contract-synchronous? proof))
+      (error
+       'beagle-nix
+       (string-append
+        "binding constraint for ~a lacks the compiler's positive "
+        "synchronization proof; checked emission refuses to call it")
+       (binding-target-label binding))))
+  constraint)
+
+(define (record-validator-symbol name)
+  (string->symbol (format "$beagle$record$~a$validate" name)))
+
+(define (record-validator-name name)
+  (mangle-name (record-validator-symbol name)))
+
+;; Record fields use target-mangled attribute names; general Map keys preserve
+;; their authored keyword text. The distinction belongs to the aggregate type,
+;; never to the punctuation of an individual key.
+(define (nominal-record-param? p)
+  (define annotation (and (param? p) (param-type p)))
+  (define name
+    (cond
+      [(type-prim? annotation) (type-prim-name annotation)]
+      [(type-app? annotation) (type-app-ctor annotation)]
+      [else #f]))
+  (and name (set-member? (current-nix-record-types) name)))
+
+;; Emit curried lambdas through one raw aggregate per source parameter. The
+;; raw value is deep-forced once at its binding event. Predicate/default thunks
+;; are defined outside every authored binder (the checker's incoming callable
+;; scope) and invoked inside the corresponding parameter event.
+;;
+;; Map destructuring is deliberately not reconstructed as a Nix attrset formal:
+;; a formal cannot bind an authored key like `ready?` to the safe local name
+;; `ready_p`. Explicit getAttr/hasAttr projection keeps Map data spelling intact
+;; while nominal records continue to use their generated field spelling.
+(define (emit-param-chain params body depth)
+  (define indexed
+    (for/list ([p (in-list params)] [i (in-naturals)]) (cons i p)))
+  (define (raw-name index) (format "bgl____binding__~a" index))
+  (define (constraint-name index) (format "bgl____constraint__~a" index))
+  (define (constraint-thunk-name index)
+    (format "bgl____constraint__thunk__~a" index))
+  (define (default-thunk-name param-index default-index)
+    (format "bgl____default__thunk__~a__~a"
+            param-index default-index))
+  (define (indexed-defaults p)
+    (define target (param-binding-target p))
+    (if (map-destructure? target)
+        (for/list ([entry (in-list (map-destructure-or-defaults target))]
+                   [default-index (in-naturals)])
+          (cons default-index entry))
+        '()))
+  (define (default-index-for p key)
+    (for/first ([indexed-default (in-list (indexed-defaults p))]
+                #:when (eq? key (car (cdr indexed-default))))
+      (car indexed-default)))
+  (define (emit-projected-binding name value rest)
+    (define emitted (mangle-name name))
+    (format "((~a: builtins.deepSeq ~a (~a)) (~a))"
+            emitted emitted rest value))
+  (define (emit-map-projections index p raw rest)
+    (define target (param-binding-target p))
+    (define keys (map-destructure-keys target))
+    (define defaults (map-destructure-or-defaults target))
+    (define nominal? (nominal-record-param? p))
+    (unless (or nominal? (= (length defaults) (length keys)))
+      (error 'emit-nix
+             "map destructuring parameters require :or defaults for every key on the nix backend — Nix Maps may omit a key, which binds nil in Beagle"))
+    (define with-as
+      (if (map-destructure-as-name target)
+          (emit-projected-binding (map-destructure-as-name target) raw rest)
+          rest))
+    (for/fold ([result with-as])
+              ([key (in-list (reverse keys))])
+      (define authored (symbol->string key))
+      (define attr-name
+        (if nominal? (mangle-name key) authored))
+      (define attr-string (format "\"~a\"" (escape-nix attr-name)))
+      (define default-index (default-index-for p key))
+      (define projected
+        (cond
+          [default-index
+           (format (string-append
+                    "if builtins.hasAttr ~a ~a "
+                    "then builtins.getAttr ~a ~a else ~a null")
+                   attr-string raw attr-string raw
+                   (default-thunk-name index default-index))]
+          [else (format "builtins.getAttr ~a ~a" attr-string raw)]))
+      (emit-projected-binding key projected result)))
+  (define (emit-one index p rest)
+    (define target (param-binding-target p))
+    (define constraint (checked-binding-constraint p))
+    (define raw
+      (if (and (symbol? target) (not constraint))
+          (mangle-name target)
+          (raw-name index)))
+    (define bound-rest
+      (cond
+        [(symbol? target)
+         (if constraint
+             (emit-projected-binding target raw rest)
+             rest)]
+        [(map-destructure? target)
+         (emit-map-projections index p raw rest)]
+        [else
+         (error 'beagle
+                "sequential destructuring in params is not supported by the nix backend — nix functions destructure attrsets only; bind positionally")]))
+    (define guarded-rest
+      (if constraint
+          (format (string-append
+                   "let ~a = ~a null; in "
+                   "if ~a ~a then (~a) else ~a")
+                  (constraint-name index)
+                  (constraint-thunk-name index)
+                  (constraint-name index)
+                  raw
+                  bound-rest
+                  (binding-constraint-failure p))
+          bound-rest))
+    (format "~a: builtins.deepSeq ~a (~a)" raw raw guarded-rest))
+  (define (emit-params remaining)
+    (cond
+      [(null? remaining) body]
+      [else
+       (define index (caar remaining))
+       (define p (cdar remaining))
+       (emit-one index p (emit-params (cdr remaining)))]))
+  (define with-constraint-thunks
+    (for/fold ([result (emit-params indexed)])
+              ([entry (in-list (reverse indexed))]
+               #:when (checked-binding-constraint (cdr entry)))
+      (define index (car entry))
+      (define p (cdr entry))
+      (format "let ~a = _: ~a; in ~a"
+              (constraint-thunk-name index)
+              (emit-expr (checked-binding-constraint p) depth)
+              result)))
+  (define with-default-thunks
+    (for*/fold ([result with-constraint-thunks])
+               ([entry (in-list (reverse indexed))]
+                [indexed-default
+                 (in-list (reverse (indexed-defaults (cdr entry))))])
+      (define default-index (car indexed-default))
+      (define default-entry (cdr indexed-default))
+      (format "let ~a = _: ~a; in ~a"
+              (default-thunk-name (car entry) default-index)
+              (emit-expr (cdr default-entry) depth)
+              result)))
+  ;; Nix has no nullary lambda. Lower the source unit call boundary to one
+  ;; ignored `null` argument so every invocation remains a distinct event.
+  (if (null? params) (format "_: ~a" body) with-default-thunks))
+
+;; Loop bindings are sequential in the checker, unlike function parameters:
+;; a later constraint may reference an earlier loop binder. Raw loop values are
+;; still captured first, and each constraint is evaluated before only its own
+;; authored target enters scope.
+(define (emit-sequential-param-chain params body depth)
+  (let/ec return
+   (define constrained? (ormap checked-binding-constraint params))
+  (unless constrained?
+    (return (emit-param-chain params body depth)))
+  (define indexed
+    (for/list ([p (in-list params)] [i (in-naturals)]) (cons i p)))
+  (define (raw-name index) (format "bgl____binding__~a" index))
+  (define (emit-bindings remaining)
+    (cond
+      [(null? remaining) body]
+      [else
+       (define index (caar remaining))
+       (define p (cdar remaining))
+       (define constraint (checked-binding-constraint p))
+       (define bind
+         (format "((~a ~a) ~a)"
+                 (nix-param-pattern p depth)
+                 (emit-bindings (cdr remaining))
+                 (raw-name index)))
+       (if constraint
+           (let ([predicate-name (format "bgl____constraint__~a" index)])
+             (format (string-append
+                     "let ~a = ~a; in builtins.deepSeq ~a "
+                      "(if ~a ~a then (~a) else ~a)")
+                     predicate-name
+                     (emit-expr constraint depth)
+                     (raw-name index)
+                     predicate-name
+                     (raw-name index)
+                     bind
+                     (binding-constraint-failure p)))
+           (format "builtins.deepSeq ~a (~a)" (raw-name index) bind))]))
+  (if (null? indexed)
+      (format "_: ~a" body)
+      (for/fold ([result (emit-bindings indexed)])
+                ([entry (in-list (reverse indexed))])
+        (format "~a: ~a" (raw-name (car entry)) result)))))
 
 ;; --- special float values ---------------------------------------------------
 
@@ -112,11 +540,49 @@
                   (set-add imported name))])
               ([form (in-list (program-forms prog))])
       (define definition (unwrap-definition-form form))
-      (if (record-form? definition)
-          (set-add names (record-form-name definition))
-          names)))
+      (cond
+        [(record-form? definition)
+         (set-add names (record-form-name definition))]
+        [(and (defunion-form? definition)
+              (defunion-form-member-fields definition))
+         (for/fold ([out names])
+                   ([member
+                     (in-list (defunion-form-members definition))]
+                    #:when
+                    (hash-has-key?
+                     (defunion-form-member-fields definition)
+                     member))
+           (set-add out member))]
+        [(deferror-form? definition)
+         (for/fold ([out names])
+                   ([member (in-list (deferror-form-members definition))])
+           (set-add out member))]
+        [else names])))
+  (define require-prefixes
+    (for/fold ([prefixes (hash)])
+              ([entry (in-list (program-requires prog))]
+               [index (in-naturals)])
+      (define namespace (symbol->string (require-entry-ns entry)))
+      (define default-prefix (last (string-split namespace ".")))
+      (define alias (require-entry-alias entry))
+      (define runtime-prefix
+        (if alias
+            (mangle-name alias)
+            (if (require-entry-refer entry)
+                (format "bgl____module__~a" index)
+                (mangle-name (string->symbol default-prefix)))))
+      (define with-namespace (hash-set prefixes namespace runtime-prefix))
+      (define with-default (hash-set with-namespace default-prefix runtime-prefix))
+      (if alias
+          (hash-set with-default (symbol->string alias) runtime-prefix)
+          with-default)))
   (parameterize ([current-emit-expr emit-expr]
-                 [current-nix-record-types record-types])
+                 [current-nix-record-types record-types]
+                 [current-nix-program prog]
+                 [current-nix-semantic-contracts
+                  (program-semantic-contracts prog)]
+                 [current-nix-require-prefixes require-prefixes]
+                 [current-type-table (program-type-table prog)])
     (nix-emit-program-body prog)))
 
 (define (nix-emit-program-body prog)
@@ -128,11 +594,15 @@
   (define body-exprs '())
 
   ;; Separate top-level defs from expressions
-  (for ([f (in-list forms)])
+  (for ([raw-form (in-list forms)])
+    (define f (unwrap-definition-form raw-form))
     (cond
       [(or (def-form? f) (defn-form? f) (defn-multi? f)
            (defonce-form? f) (record-form? f) (defenum-form? f)
-           (deferror-form? f) (defscalar-form? f) (nix-inherit? f) (nix-inherit-from? f))
+           (defunion-form? f) (deferror-form? f) (defscalar-form? f)
+           (protocol-form? f) (extend-type-form? f)
+           (defmulti-form? f) (defmethod-form? f)
+           (nix-inherit? f) (nix-inherit-from? f))
        (set! defs (cons f defs))]
       [else
        (set! body-exprs (cons f body-exprs))]))
@@ -145,12 +615,55 @@
       ""
       (string-append
        (string-join
-        (for/list ([r (in-list requires)])
-          (format "  ~a = import ./~a.nix;"
-                  (mangle-name (or (require-entry-alias r)
-                                   (let ([parts (string-split (symbol->string (require-entry-ns r)) ".")])
-                                     (string->symbol (last parts)))))
-                  (string-replace (symbol->string (require-entry-ns r)) "." "/")))
+        (apply
+         append
+         (for/list ([r (in-list requires)] [index (in-naturals)])
+           (define namespace (symbol->string (require-entry-ns r)))
+           (define module-name (format "bgl____module__~a" index))
+           (define module-import (require-module-import prog r))
+           (define interface
+             (and module-import (module-import-interface module-import)))
+           (define alias
+             (or (require-entry-alias r)
+                 (and (not (require-entry-refer r))
+                      (string->symbol (last (string-split namespace "."))))))
+           (append
+            (list
+             (format "  ~a = import ~a;"
+                     module-name
+                     (relative-nix-module-path
+                      ns (require-entry-ns r))))
+            (if alias
+                (list (format "  ~a = ~a;" (mangle-name alias) module-name))
+                '())
+            (for/list ([name (in-list (or (require-entry-refer r) '()))]
+                       #:when
+                       (cond
+                         [interface
+                          (runtime-interface-binding? interface name)]
+                         [else
+                          (error
+                           'beagle-nix
+                           (string-append
+                            "Nix :refer import from ~a lacks an authoritative "
+                            "module interface; checked emission refuses to "
+                            "guess its runtime export surface")
+                           namespace)]))
+              (format "  ~a = ~a.~a;"
+                      (mangle-name name)
+                      module-name
+                      (mangle-name name)))
+            (if interface
+                (for/list
+                    ([validator
+                      (in-list
+                       (referred-record-validator-symbols
+                        prog r interface))])
+                  (format "  ~a = ~a.~a;"
+                          (mangle-name validator)
+                          module-name
+                          (mangle-name validator)))
+                '()))))
         "\n")
        "\n")))
 
@@ -159,15 +672,99 @@
       (emit-top-def d 1)))
 
   (define body-str
+    (emit-body body-exprs 0))
+
+  (define local-validator-exports
+    (sort
+     (apply
+      append
+      (for/list ([raw-form (in-list forms)])
+        (define form (unwrap-definition-form raw-form))
+        (define (validator-for name fields)
+          (and (record-fields-constrained? fields)
+               (cons (record-validator-symbol name)
+                     (record-validator-name name))))
+        (cond
+          [(record-form? form)
+           (filter values
+                   (list
+                    (validator-for
+                     (record-form-name form) (record-form-fields form))))]
+          [(and (defunion-form? form)
+                (defunion-form-member-fields form))
+           (filter-map
+            (lambda (member)
+              (validator-for
+               member
+               (hash-ref
+                (defunion-form-member-fields form) member '())))
+            (defunion-form-members form))]
+          [(deferror-form? form)
+           (filter-map
+            (lambda (member)
+              (validator-for
+               member
+               (hash-ref
+                (deferror-form-member-fields form) member '())))
+            (deferror-form-members form))]
+          [else '()])))
+     symbol<?
+     #:key car))
+
+  (define (local-runtime-export-bindings)
+    (define interface
+      (and (pair? defs)
+           (program->module-interface
+            prog
+            #:provisional?
+            (not (hash? (program-effective-definition-types prog))))))
+    (if (not interface)
+        '()
+        (sort
+         (filter-map
+          (lambda (name)
+            (define binding (module-interface-binding-ref interface name #f))
+            (define kind (and binding (interface-binding-kind binding)))
+            ;; Declarations with no Nix runtime binding are rejected earlier by
+            ;; emit-top-def. Externs and macros are provider dependencies or
+            ;; compile-time values, never exports from this generated module.
+            (and binding
+                 (not (memq kind '(extern macro protocol-method defmulti)))
+                 (cons name (mangle-name name))))
+          (hash-keys (module-interface-bindings interface)))
+         symbol<?
+         #:key car)))
+
+  (define runtime-exports
+    (append (local-runtime-export-bindings) local-validator-exports))
+  (define export-attrs
+    (and
+     (pair? runtime-exports)
+     (format "{ ~a }"
+             (string-join
+              (for/list ([entry (in-list runtime-exports)])
+                (format "~a = ~a;"
+                        (mangle-name (car entry))
+                        (cdr entry)))
+              " "))))
+  (define module-result
     (cond
-      [(null? body-exprs) "null"]
-      [(= (length body-exprs) 1) (emit-expr (car body-exprs) 0)]
-      [else (emit-expr (car (reverse body-exprs)) 0)]))
+      [(not export-attrs) body-str]
+      [(null? body-exprs) export-attrs]
+      ;; An authored attrset is explicitly a module product. Add the generated
+      ;; public/ABI surface after it so reserved compiler-owned keys win.
+      [(and (pair? body-exprs) (map-form? (last body-exprs)))
+       (format "(~a // ~a)" body-str export-attrs)]
+      ;; Any other authored result IS the module's product — a Nix module may
+      ;; evaluate to a string, list, or derivation. There is no attrset to
+      ;; merge into, and an importer could not reach an export surface through
+      ;; a non-attrset value anyway, so the defs stay module-internal.
+      [else body-str]))
 
   (cond
     ;; No defs — just emit the body expression
     [(and (null? defs) (null? requires))
-     (string-append body-str "\n")]
+     (string-append module-result "\n")]
     ;; Wrap in let ... in
     [else
      (string-append
@@ -176,7 +773,7 @@
       (string-join def-strs "\n")
       "\n"
       "in\n"
-      body-str "\n")]))
+      module-result "\n")]))
 
 ;; --- top-level def emission ------------------------------------------------
 
@@ -198,15 +795,13 @@
      (define params (defn-form-params f))
      (define rest-p (defn-form-rest-param f))
      (define body (defn-form-body f))
-     (define param-str
-       (string-join
-        (append
-         (for/list ([p (in-list params)])
-           (nix-param-pattern p depth))
-         (if rest-p (list (format "~a:" (mangle-name (param-name rest-p)))) '()))
-        " "))
      (define body-str (emit-body body depth))
-     (format "~a~a = ~a ~a;" ind name param-str body-str)]
+     (define fn-str
+       (emit-param-chain
+        (if rest-p (append params (list rest-p)) params)
+        body-str
+        depth))
+     (format "~a~a = ~a;" ind name fn-str)]
 
     [(defn-multi? f)
      (error 'emit-nix "multi-arity defn not supported for Nix target: ~a"
@@ -215,33 +810,62 @@
     [(record-form? f)
      (emit-record-defs f depth)]
 
+    [(protocol-form? f)
+     (error 'emit-nix
+            "protocol declarations are not supported by the nix backend: ~a"
+            (protocol-form-name f))]
+
+    [(extend-type-form? f)
+     (error 'emit-nix
+            "protocol implementations are not supported by the nix backend: ~a"
+            (extend-type-form-type-name f))]
+
+    [(or (defmulti-form? f) (defmethod-form? f))
+     (error 'emit-nix
+            "multimethod declarations are not supported by the nix backend")]
+
+    [(defunion-form? f)
+     (define name (mangle-name (defunion-form-name f)))
+     (define members (defunion-form-members f))
+     (define member-fields (defunion-form-member-fields f))
+     (if (not member-fields)
+         (format "~a# union ~a = ~a" ind name
+                 (string-join (map symbol->string members) " | "))
+         (string-append
+          (format "~a# union ~a = ~a" ind name
+                  (string-join (map symbol->string members) " | "))
+          "\n"
+          (string-join
+           (for/list ([member (in-list members)]
+                      #:when (hash-has-key? member-fields member))
+             (emit-tagged-type-defs
+              member (hash-ref member-fields member) depth))
+           "\n")))]
+
     [(defenum-form? f)
-     (define name (mangle-name (defenum-form-name f)))
+     (define name (defenum-form-name f))
      (define vals (defenum-form-values f))
      (define entries
        (string-join
         (for/list ([v (in-list vals)])
           (format "\"~a\"" (escape-nix (string-replace (symbol->string v) ":" ""))))
         " "))
-     (format "~a~a_values = [ ~a ];" ind name entries)]
+     (format "~a~a = [ ~a ];"
+             ind
+             (mangle-name
+              (string->symbol (format "~a-values" name)))
+             entries)]
 
     [(deferror-form? f)
      (define name (mangle-name (deferror-form-name f)))
      (define members (deferror-form-members f))
      (define mf (deferror-form-member-fields f))
-     (define ctors
-       (for/list ([m (in-list members)])
-         (define fields (hash-ref mf m '()))
-         (define m-str (mangle-name m))
-         (if (null? fields)
-           (format "~a~a = { __tag = \"~a\"; };" ind m-str (symbol->string m))
-           (let* ([param-names (map (lambda (p) (mangle-name (param-name p))) fields)]
-                  [params-str (string-join param-names ": ")])
-             (format "~a~a = ~a: { __tag = \"~a\"; ~a };" ind m-str params-str
-                     (symbol->string m)
-                     (string-join (map (lambda (n) (format "~a = ~a;" n n)) param-names) " "))))))
      (string-append (format "~a# error ~a" ind name) "\n"
-                    (string-join ctors "\n"))]
+                    (string-join
+                     (for/list ([member (in-list members)])
+                       (emit-tagged-type-defs
+                        member (hash-ref mf member '()) depth))
+                     "\n"))]
 
     [(defscalar-form? f)
      (emit-defscalar-nix f depth)]
@@ -293,6 +917,10 @@
   (define backing (defscalar-form-backing-type f))
   (define preds (defscalar-form-predicates f))
   (define ctor-name (mangle-name (string->symbol (format "->~a" name))))
+  (define accessor-name
+    (mangle-name
+     (string->symbol
+      (format "~a-value" (string-downcase (symbol->string name))))))
   (define v "v")
   (define backing-assert (backing-type-check backing v))
   (define pred-asserts
@@ -302,53 +930,109 @@
   (cond
     [(null? all-asserts)
      ;; No checks — identity function as a brand
-     (format "~a~a = v: v;" ind ctor-name)]
+     (format "~a~a = v: v;\n~a~a = v: v;"
+             ind ctor-name ind accessor-name)]
     [else
      (define assert-block
        (string-join
         (for/list ([a (in-list all-asserts)])
           (format "assert ~a;" a))
         " "))
-     (format "~a~a = v: ~a v;" ind ctor-name assert-block)]))
+     (format "~a~a = v: ~a v;\n~a~a = v: v;"
+             ind ctor-name assert-block ind accessor-name)]))
 
 ;; --- record → attrset constructor + accessors ------------------------------
 
-(define (emit-record-defs rf depth)
+(define (record-fields-constrained? fields)
+  (ormap checked-binding-constraint fields))
+
+(define (emit-record-validator-def name fields depth)
+  (and
+   (record-fields-constrained? fields)
+   (let* ([ind (indent depth)]
+          [value-name "bgl____record__value"]
+          [constrained
+           (for/list ([field (in-list fields)] [index (in-naturals)]
+                      #:when (checked-binding-constraint field))
+             (cons index field))]
+          [guarded
+           (for/fold ([result value-name])
+                     ([entry (in-list (reverse constrained))])
+             (define index (car entry))
+             (define field (cdr entry))
+             (define predicate-name (format "bgl____constraint__~a" index))
+             (define field-name (mangle-name (param-name field)))
+             (format (string-append
+                      "builtins.deepSeq ~a.~a "
+                      "(if ~a ~a.~a then (~a) else ~a)")
+                     value-name
+                     field-name
+                     predicate-name
+                     value-name
+                     field-name
+                     result
+                     (binding-constraint-failure field)))]
+          [with-predicates
+           (for/fold ([result guarded])
+                     ([entry (in-list (reverse constrained))])
+             (define index (car entry))
+             (define field (cdr entry))
+             (format "let bgl____constraint__~a = ~a; in ~a"
+                     index
+                     (emit-expr (checked-binding-constraint field) depth)
+                     result))])
+     (format "~a~a = ~a: ~a;"
+             ind
+             (record-validator-name name)
+             value-name
+             with-predicates))))
+
+(define (emit-tagged-type-defs name fields depth)
   (define ind (indent depth))
-  (define name (record-form-name rf))
-  (define fields (record-form-fields rf))
   (define tag (string-downcase (symbol->string name)))
   (define ctor-name (mangle-name (string->symbol (format "->~a" name))))
-  (define field-names
-    (for/list ([fld (in-list fields)])
-      (param-name fld)))
-
-  ;; Constructor: mkRecord = field1: field2: { _tag = "record"; field1 = field1; ... }
-  (define param-str
-    (string-join
-     (for/list ([fn (in-list field-names)])
-       (format "~a:" (mangle-name fn)))
-     " "))
-  (define body-entries
-    (cons (format "~a  _tag = \"~a\";" ind (escape-nix tag))
-          (for/list ([fn (in-list field-names)])
-            (format "~a  ~a = ~a;" ind (mangle-name fn) (mangle-name fn)))))
+  (define field-names (map param-name fields))
+  (define entries
+    (string-append
+     (format " _tag = \"~a\";" (escape-nix tag))
+     (if (null? field-names)
+         " "
+         (string-append
+          " "
+          (string-join
+           (for/list ([field-name (in-list field-names)])
+             (define emitted (mangle-name field-name))
+             (format "~a = ~a;" emitted emitted))
+           " ")
+          " "))))
+  ;; A local constructor owns the original field declarations. Guard each raw
+  ;; argument before the field is installed in the result object; the aggregate
+  ;; validator remains a provider ABI for `with` and imported consumers, not a
+  ;; second constructor pass over already-installed properties.
+  (define value-str (format "{~a}" entries))
   (define ctor
-    (format "~a~a = ~a {\n~a\n~a};" ind ctor-name param-str
-            (string-join body-entries "\n")
-            ind))
-
-  ;; Accessors: record-field = r: r.field
-  ;; Beagle convention: (typename-field rec) → accessor name uses original hyphenated form
+    (format "~a~a = ~a;"
+            ind
+            ctor-name
+            (emit-param-chain fields value-str depth)))
   (define accessors
-    (for/list ([fn (in-list field-names)])
-      (define acc-name (mangle-name (string->symbol
-                                     (format "~a-~a"
-                                             (string-downcase (symbol->string name))
-                                             (symbol->string fn)))))
-      (format "~a~a = r: r.~a;" ind acc-name (mangle-name fn))))
+    (for/list ([field-name (in-list field-names)])
+      (define emitted (mangle-name field-name))
+      (define accessor
+        (mangle-name
+         (string->symbol
+          (format "~a-~a" tag (symbol->string field-name)))))
+      (format "~a~a = r: r.~a;" ind accessor emitted)))
+  (string-join
+   (filter values
+           (append
+            (list (emit-record-validator-def name fields depth) ctor)
+            accessors))
+   "\n"))
 
-  (string-join (cons ctor accessors) "\n"))
+(define (emit-record-defs rf depth)
+  (emit-tagged-type-defs
+   (record-form-name rf) (record-form-fields rf) depth))
 
 ;; --- expression emission ---------------------------------------------------
 
@@ -370,7 +1054,7 @@
        [(char=? (string-ref sym-str 0) #\:)
         (format "\"~a\"" (escape-nix (substring sym-str 1)))]
        [(string-contains? sym-str "/")
-        (string-replace sym-str "/" ".")]
+        (mangle-qualified-name e)]
        [(string-contains? sym-str ".")
         sym-str]
        [else (mangle-name e)])]
@@ -385,14 +1069,10 @@
      (define params (fn-form-params e))
      (define rest-p (fn-form-rest-param e))
      (define body (fn-form-body e))
-     (define param-str
-       (string-join
-        (append
-         (for/list ([p (in-list params)])
-           (nix-param-pattern p depth))
-         (if rest-p (list (format "~a:" (mangle-name (param-name rest-p)))) '()))
-        " "))
-     (format "~a ~a" param-str (emit-body body depth))]
+     (emit-param-chain
+      (if rest-p (append params (list rest-p)) params)
+      (emit-body body depth)
+      depth)]
 
     [(let-form? e)
      (emit-let e depth)]
@@ -428,9 +1108,11 @@
             "Nix has no set literal. Use a list (#{...} → [...]) or an attrset {:k true} for set-of-keywords semantics.")]
 
     [(kw-access? e)
-     (define target (emit-expr (kw-access-target e) depth))
-     (define kw (symbol->string (kw-access-kw e)))
-     (define field (if (string-prefix? kw ":") (substring kw 1) kw))
+     (define target-expr (kw-access-target e))
+     (define target
+       (paren-wrap (emit-expr target-expr depth) target-expr))
+     (define field
+       (keyword-selection-field target-expr (kw-access-kw e) e))
      (cond
        [(kw-access-default e)
         ;; (get m :k default) → `target.field or default` — same emit as
@@ -491,7 +1173,7 @@
        (map (lambda (a) (paren-wrap (emit-expr a depth) a))
             (recur-form-args e)))
      (if (null? arg-strs)
-       name
+       (string-append name " null")
        (string-append name " " (string-join arg-strs " ")))]
 
     [(check-expr? e)
@@ -512,7 +1194,7 @@
     [(try-form? e)
      ;; Nix's builtins.tryEval returns { success; value; } — unwrap to value-or-null
      ;; so the rest of beagle sees the same semantics as other targets.
-     (format "(let __t = builtins.tryEval (~a); in if __t.success then __t.value else null)"
+     (format "(let bgl____try = builtins.tryEval (~a); in if bgl____try.success then bgl____try.value else null)"
              (emit-body (try-form-body e) depth))]
 
 
@@ -549,16 +1231,16 @@
      (error 'emit-nix "await is only supported in beagle/js")]
 
     [(when-let-form? e)
-     (format "let __v = ~a; in if __v != null then ~a else null"
+     (format "let bgl____value = ~a; in if bgl____value != null then ~a else null"
              (emit-expr (when-let-form-expr e) depth)
-             (format "let ~a = __v; in ~a"
+             (format "let ~a = bgl____value; in ~a"
                      (mangle-name (when-let-form-name e))
                      (emit-body (when-let-form-body e) depth)))]
 
     [(if-let-form? e)
-     (format "let __v = ~a; in if __v != null then ~a else ~a"
+     (format "let bgl____value = ~a; in if bgl____value != null then ~a else ~a"
              (emit-expr (if-let-form-expr e) depth)
-             (format "let ~a = __v; in ~a"
+             (format "let ~a = bgl____value; in ~a"
                      (mangle-name (if-let-form-name e))
                      (emit-body (if-let-form-then-body e) depth))
              (emit-body (if-let-form-else-body e) depth))]
@@ -818,8 +1500,60 @@
 ;; kw-access on `cfg`.
 (define (rewrite-cfg-ref e path-str)
   (define cfg-prefix (string-append path-str "."))
-  (define (walk e)
+  (define prog (current-nix-program))
+  (define semantic-contracts (and prog (program-semantic-contracts prog)))
+  (define type-table (and prog (program-type-table prog)))
+  (define src-table (and prog (program-src-table prog)))
+  ;; This emitter-local rewrite creates fresh AST identities. Preserve every
+  ;; eq?-keyed checked side-table entry so lowering cannot erase contracts,
+  ;; inferred types, or source blame (notably a record-update validator nested
+  ;; beneath nix/with-cfg).
+  (define (preserve-metadata old new)
+    (for ([table (in-list (list semantic-contracts type-table src-table))]
+          #:when (and table (hash-has-key? table old)))
+      (hash-set! table new (hash-ref table old)))
+    new)
+  (define (walk-binding-target target)
     (cond
+      [(map-destructure? target)
+       (map-destructure
+        (map-destructure-keys target)
+        (map-destructure-as-name target)
+        (for/list ([entry (in-list (map-destructure-or-defaults target))])
+          (cons (car entry) (walk (cdr entry)))))]
+      [(seq-destructure? target)
+       (seq-destructure
+        (for/list ([name (in-list (seq-destructure-names target))])
+          (if (symbol? name) name (walk-binding-target name)))
+        (seq-destructure-rest-name target))]
+      [else target]))
+  (define (walk-param p)
+    (param (walk-binding-target (param-name p))
+           (param-type p)
+           (and (param-constraint p) (walk (param-constraint p)))))
+  (define (walk-let-binding b)
+    (let-binding
+     (and (let-binding-name b)
+          (walk-binding-target (let-binding-name b)))
+     (let-binding-type b)
+     (and (let-binding-constraint b) (walk (let-binding-constraint b)))
+     (walk (let-binding-value b))))
+  (define (walk-for-clause clause)
+    (cond
+      [(for-binding? clause)
+       (for-binding
+        (walk-binding-target (for-binding-name clause))
+        (walk (for-binding-expr clause))
+        (for-binding-type clause)
+        (and (for-binding-constraint clause)
+             (walk (for-binding-constraint clause))))]
+      [(for-when? clause) (for-when (walk (for-when-test clause)))]
+      [(for-let? clause)
+       (for-let (map walk-let-binding (for-let-bindings clause)))]
+      [else clause]))
+  (define (walk e)
+    (define rewritten
+      (cond
       [(symbol? e)
        (define s (symbol->string e))
        (cond
@@ -835,17 +1569,46 @@
        (vec-form (map walk (vec-form-items e)))]
       [(call-form? e)
        (call-form (walk (call-form-fn e)) (map walk (call-form-args e)))]
+      [(fn-form? e)
+       (fn-form (map walk-param (fn-form-params e))
+                (and (fn-form-rest-param e)
+                     (walk-param (fn-form-rest-param e)))
+                (fn-form-return-type e)
+                (map walk (fn-form-body e)))]
       [(let-form? e)
        (let-form
-        (for/list ([b (in-list (let-form-bindings e))])
-          (let-binding (let-binding-name b) (walk (let-binding-value b))))
+        (map walk-let-binding (let-form-bindings e))
         (map walk (let-form-body e)))]
+      [(loop-form? e)
+       (loop-form (map walk-let-binding (loop-form-bindings e))
+                  (map walk (loop-form-body e)))]
+      [(for-form? e)
+       (for-form (map walk-for-clause (for-form-clauses e))
+                 (map walk (for-form-body e)))]
+      [(doseq-form? e)
+       (doseq-form (map walk-for-clause (doseq-form-clauses e))
+                   (map walk (doseq-form-body e)))]
+      [(binding-form? e)
+       (binding-form (map walk-let-binding (binding-form-bindings e))
+                     (map walk (binding-form-body e)))]
+      [(with-open-form? e)
+       (with-open-form (map walk-let-binding (with-open-form-bindings e))
+                       (map walk (with-open-form-body e)))]
       [(if-form? e)
        (if-form (walk (if-form-cond-expr e))
                 (walk (if-form-then-expr e))
                 (and (if-form-else-expr e) (walk (if-form-else-expr e))))]
       [(when-form? e)
        (when-form (walk (when-form-cond-expr e)) (map walk (when-form-body e)))]
+      [(when-let-form? e)
+       (when-let-form (when-let-form-name e)
+                      (walk (when-let-form-expr e))
+                      (map walk (when-let-form-body e)))]
+      [(if-let-form? e)
+       (if-let-form (if-let-form-name e)
+                    (walk (if-let-form-expr e))
+                    (map walk (if-let-form-then-body e))
+                    (map walk (if-let-form-else-body e)))]
       [(do-form? e)
        (do-form (map walk (do-form-body e)))]
       [(kw-access? e)
@@ -855,6 +1618,12 @@
        (nix-with (walk (nix-with-ns-expr e)) (walk (nix-with-body e)))]
       [(nix-assert? e)
        (nix-assert (walk (nix-assert-cond-expr e)) (walk (nix-assert-body e)))]
+      [(with-form? e)
+       (with-form
+        (walk (with-form-target e))
+        (for/list ([update (in-list (with-form-updates e))])
+          (with-update (with-update-field-kw update)
+                       (walk (with-update-value update)))))]
       [(nix-get-or? e)
        (nix-get-or (walk (nix-get-or-base-expr e)) (nix-get-or-path e) (walk (nix-get-or-default e)))]
       [(nix-interpolated-string? e)
@@ -862,37 +1631,90 @@
       [(nix-multiline-string? e)
        (nix-multiline-string (map walk (nix-multiline-string-lines e)))]
       [else e]))
+    (if (eq? rewritten e)
+        rewritten
+        (preserve-metadata e rewritten)))
   (walk e))
 
 ;; --- let -------------------------------------------------------------------
 
 (define (emit-let e depth)
-  (define bindings (let-form-bindings e))
-  (define body (let-form-body e))
-  (define ind (indent (+ depth 1)))
-  (define bind-strs
-    (for/list ([b (in-list bindings)])
-      ;; Singleton inherit/inherit-from bindings: name=#f sentinel,
-      ;; value is the parsed nix-inherit/nix-inherit-from form.
-      (define n (let-binding-name b))
-      (define v (let-binding-value b))
-      (cond
-        [(and (not n) (nix-inherit? v))
+  (emit-let-binding-chain
+   (let-form-bindings e)
+   (emit-body (let-form-body e) depth)
+   depth))
+
+;; Bindings nest so each predicate is emitted in the scope that exists just
+;; before its own target.  The guarded case uses function application instead
+;; of a recursive Nix let: the constraint expression cannot accidentally see
+;; the target it is declaring, and the RHS remains one shared argument thunk.
+(define (emit-let-binding-chain bindings body-str depth [index 0])
+  (cond
+    [(null? bindings) body-str]
+    [else
+     (define b (car bindings))
+     (define n (let-binding-name b))
+     (define v (let-binding-value b))
+     (define rest-str
+       (emit-let-binding-chain (cdr bindings) body-str depth (add1 index)))
+     (define ind (indent (+ depth 1)))
+     (cond
+       ;; Singleton inherit/inherit-from bindings: name=#f sentinel, value is
+       ;; the parsed nix-inherit/nix-inherit-from form.
+       [(and (not n) (nix-inherit? v))
+        (string-append
+         "let\n"
          (format "~ainherit ~a;" ind
-                 (string-join (map symbol->string (nix-inherit-names v)) " "))]
-        [(and (not n) (nix-inherit-from? v))
+                 (string-join (map symbol->string (nix-inherit-names v)) " "))
+         "\n" (indent depth) "in\n"
+         (indent depth) rest-str)]
+       [(and (not n) (nix-inherit-from? v))
+        (string-append
+         "let\n"
          (format "~ainherit (~a) ~a;" ind
                  (emit-expr (nix-inherit-from-ns-expr v) (+ depth 1))
-                 (string-join (map symbol->string (nix-inherit-from-names v)) " "))]
-        [else
-         (format "~a~a = ~a;" ind
-                 (emit-binding-target n)
-                 (emit-expr v (+ depth 1)))])))
-  (string-append
-   "let\n"
-   (string-join bind-strs "\n")
-   "\n" (indent depth) "in\n"
-   (indent depth) (emit-body body depth)))
+                 (string-join (map symbol->string (nix-inherit-from-names v)) " "))
+         "\n" (indent depth) "in\n"
+         (indent depth) rest-str)]
+       [else
+        (define target-name (emit-binding-target n))
+        (define value-str (emit-expr v (+ depth 1)))
+        (define constraint (checked-binding-constraint b))
+        (cond
+          [constraint
+           (define predicate-name (format "bgl____constraint__~a" index))
+           (define raw-name (format "bgl____binding__~a" index))
+           (format
+            (string-append
+             "((let ~a = ~a; in ~a: builtins.deepSeq ~a "
+             "(if ~a ~a then (((~a: builtins.deepSeq ~a (~a)) ~a)) "
+             "else ~a)) ~a)")
+            predicate-name
+            (emit-expr constraint (+ depth 1))
+            raw-name
+            raw-name
+            predicate-name
+            raw-name
+            target-name
+            target-name
+            rest-str
+            raw-name
+            (binding-constraint-failure n)
+            (paren-wrap value-str v))]
+          [else
+           ;; Source bindings are sequential and eager. A Nix `let` is both
+           ;; recursive and lazy, which made `(let [x x] x)` self-recursive
+           ;; and allowed an unused RHS (including a constrained call) to
+           ;; escape evaluation. Function application keeps the RHS in the
+           ;; incoming lexical scope; `seq` performs the binding event before
+           ;; evaluating the remaining bindings/body. `deepSeq` is required:
+           ;; an aggregate RHS can contain a constrained call whose failure is
+           ;; otherwise hidden in a lazy list or attrset field.
+           (format "((~a: builtins.deepSeq ~a (~a)) ~a)"
+                   target-name
+                   target-name
+                   rest-str
+                   (paren-wrap value-str v))])])]))
 
 (define (emit-binding-target b)
   (define target (param-binding-target b))
@@ -1018,7 +1840,7 @@
           [is-keyword?
            (format "~a.~a"
                    target-str
-                   (substring (symbol->string key-arg) 1))]
+                   (keyword-selection-field (car args) key-arg))]
           [else
            (format "~a.\"${~a}\""
                    target-str
@@ -1091,9 +1913,9 @@
 
     ;; Nix-specific: qualified calls (lib/mkIf → lib.mkIf, pkgs/foo → pkgs.foo)
     [(and fn-name (string-contains? (symbol->string fn-name) "/"))
-     (define nix-name (string-replace (symbol->string fn-name) "/" "."))
+     (define nix-name (mangle-qualified-name fn-name))
      (format "~a~a" nix-name
-             (if (null? args) ""
+             (if (null? args) " null"
                  (string-append " " (string-join
                                      (map (lambda (a) (paren-wrap (emit-expr a depth) a)) args)
                                      " "))))]
@@ -1107,7 +1929,7 @@
      (define arg-strs
        (map (lambda (a) (paren-wrap (emit-expr a depth) a)) args))
      (if (null? arg-strs)
-       fn-str
+       (string-append fn-str " null")
        (string-append fn-str " " (string-join arg-strs " ")))]))
 
 (define (nix-infix-op sym)
@@ -1124,6 +1946,9 @@
 (define (paren-wrap text expr)
   (cond
     [(flake-input-form? expr) text]
+    ;; In application position Nix parses `f -1` as subtraction, not as a
+    ;; call with a negative numeric literal.
+    [(and (number? expr) (negative? expr)) (format "(~a)" text)]
     [(and (call-form? expr)
           (symbol? (call-form-fn expr))
           (nix-infix-op (call-form-fn expr)))
@@ -1177,7 +2002,7 @@
     [(symbol? key)
      (define s (symbol->string key))
      (if (string-prefix? s ":")
-       (substring s 1)
+       (nix-static-attr-path (substring s 1))
        (format "${~a}" (mangle-name key)))]
     [(string? key)
      ;; If the key contains ${...} interpolation, preserve it so Nix
@@ -1190,7 +2015,7 @@
      (if (symbol? d)
        (let ([s (symbol->string d)])
          (if (string-prefix? s ":")
-           (substring s 1)
+           (nix-static-attr-path (substring s 1))
            s))
        (emit-expr key (+ depth 1)))]
     [(nix-interpolated-string? key)
@@ -1334,14 +2159,78 @@
 ;; --- with form (record update) → attrset merge ----------------------------
 
 (define (emit-with-form e depth)
-  (define target (emit-expr (with-form-target e) depth))
+  (define target-expr (with-form-target e))
+  (define target (emit-expr target-expr depth))
+  (define prog (current-nix-program))
+  (define semantic-contracts (and prog (program-semantic-contracts prog)))
+  (define contract
+    (and semantic-contracts (hash-ref semantic-contracts e #f)))
+  (when (and contract (not (record-update-contract? contract)))
+    (error 'emit-nix "with-form has invalid record-update contract: ~v" contract))
+  (define record-update?
+    (or (record-update-contract? contract)
+        ;; Parser-only direct-record updates have no checked metadata.
+        (and (not (and prog (program-type-table prog)))
+             (record-valued-expr? target-expr))))
   (define updates (with-form-updates e))
+  (define target-name "bgl____update__target")
+  (define update-name
+    (lambda (index) (format "bgl____update__value__~a" index)))
   (define update-entries
-    (for/list ([u (in-list updates)])
+    (for/list ([u (in-list updates)] [index (in-naturals)])
       (define kw (symbol->string (with-update-field-kw u)))
       (define field (if (string-prefix? kw ":") (substring kw 1) kw))
-      (format "~a = ~a;" field (emit-expr (with-update-value u) depth))))
-  (format "(~a // { ~a })" target (string-join update-entries " ")))
+      (format "~a = ~a;"
+              (if record-update?
+                  (mangle-name (string->symbol field))
+                  (nix-static-attr-path field))
+              (update-name index))))
+  (define updated
+    (format "(~a // { ~a })" target-name (string-join update-entries " ")))
+  ;; Checked typed updates always carry this contract. If a caller supplies a
+  ;; captured type table but drops the contract, fail closed rather than
+  ;; silently skipping a declared record invariant. Parser-only/dynamic emit
+  ;; paths have neither and preserve the ordinary attrset merge.
+  (unless contract
+    (define type-table (and prog (program-type-table prog)))
+    (define inferred-type
+      (and type-table
+           (or (hash-ref type-table e #f)
+               (hash-ref type-table (with-form-target e) #f))))
+    (define record-name
+      (cond
+        [(type-prim? inferred-type) (type-prim-name inferred-type)]
+        [(type-app? inferred-type) (type-app-ctor inferred-type)]
+        [else #f]))
+    (when (and record-name
+               (program-record-contract-ref prog record-name #f))
+      (error 'emit-nix
+             "typed with-form lacks its checked record-update contract")))
+  (define validator
+    (and contract (record-update-contract-validator-symbol contract)))
+  (define candidate-name "bgl____update__candidate")
+  (define result
+    (if validator
+        ;; Keep one private candidate between merge and provider validation.
+        ;; No user-visible selection or use occurs before the validator returns.
+        (format "(~a ~a)" (mangle-qualified-name validator) candidate-name)
+        candidate-name))
+  (define with-candidate
+    (format "let ~a = ~a; in ~a" candidate-name updated result))
+  (define with-update-values
+    (for/fold ([body with-candidate])
+              ([update (in-list (reverse updates))]
+               [index (in-list (reverse (range (length updates))))])
+      (format "let ~a = ~a; in builtins.deepSeq ~a (~a)"
+              (update-name index)
+              (emit-expr (with-update-value update) depth)
+              (update-name index)
+              body)))
+  ;; Target and every update RHS are evaluated once in source order before the
+  ;; candidate can be observed. This models Beagle's eager `with` event despite
+  ;; Nix's recursive, lazy lets.
+  (format "let ~a = ~a; in builtins.deepSeq ~a (~a)"
+          target-name target target-name with-update-values))
 
 ;; --- for comprehension ----------------------------------------------------
 ;; (for [x xs :when (pred x) y ys] body) →
@@ -1361,15 +2250,11 @@
   (unless (for-binding? (car clauses))
     (error 'emit-nix "(for ...) must start with a binding clause"))
 
-  (define body-str (emit-body body depth))
-
-  ;; Build the innermost expression: a singleton list of the body so concatMap
-  ;; can flatten across iterations.
-  (define (inner) (format "[ ~a ]" body-str))
-
-  (let loop ([cs clauses] [emit (inner)])
+  ;; Recurse left-to-right so each collection, modifier, and constraint is
+  ;; emitted inside the scope established by every preceding clause.
+  (define (emit-clauses cs)
     (cond
-      [(null? cs) emit]
+      [(null? cs) (format "[ ~a ]" (emit-body body depth))]
       [else
        (define c (car cs))
        (cond
@@ -1378,33 +2263,35 @@
           (unless (symbol? target)
             (error 'emit-nix
                    "destructuring in for bindings is not supported by the nix backend — bind each element to a name, then project it in :let"))
-          (define var (mangle-name target))
           (define coll (emit-expr (for-binding-expr c) depth))
-          (loop (cdr cs)
-                (format "builtins.concatMap (~a: ~a) ~a"
-                        var emit (paren-wrap coll (for-binding-expr c))))]
+          (define parameter
+            (param target (for-binding-type c) (for-binding-constraint c)))
+          (define lambda-str
+            (parameterize
+                ([current-nix-constraint-owners
+                  (hash-set (current-nix-constraint-owners) parameter c)])
+              (emit-param-chain
+               (list parameter) (emit-clauses (cdr cs)) depth)))
+          (format "builtins.concatMap (~a) ~a"
+                  lambda-str
+                  (paren-wrap coll (for-binding-expr c)))]
          [(for-when? c)
           (define test-str (emit-expr (for-when-test c) depth))
-          (loop (cdr cs)
-                (format "(if ~a then ~a else [ ])" test-str emit))]
+          (format "(if ~a then ~a else [ ])"
+                  test-str
+                  (emit-clauses (cdr cs)))]
          [(for-let? c)
-          (define binds (for-let-bindings c))
-          (define ind (indent (+ depth 1)))
-          (define bind-strs
-            (for/list ([b (in-list binds)])
-              (unless (symbol? (let-binding-name b))
-                (error 'emit-nix
-                       "destructuring in for :let is not supported by the nix backend — bind the aggregate to a name, then project it explicitly"))
-              (format "~a~a = ~a;" ind
-                      (mangle-name (let-binding-name b))
-                      (emit-expr (let-binding-value b) (+ depth 1)))))
-          (loop (cdr cs)
-                (string-append
-                 "let\n"
-                 (string-join bind-strs "\n") "\n"
-                 (indent depth) "in " emit))]
+          (for ([b (in-list (for-let-bindings c))])
+            (unless (symbol? (let-binding-name b))
+              (error 'emit-nix
+                     "destructuring in for :let is not supported by the nix backend — bind the aggregate to a name, then project it explicitly")))
+          (emit-let-binding-chain
+           (for-let-bindings c)
+           (emit-clauses (cdr cs))
+           depth)]
          [else
-          (error 'emit-nix ":while is not expressible in Nix without imperative state — use :when with a guard instead")])])))
+          (error 'emit-nix ":while is not expressible in Nix without imperative state — use :when with a guard instead")])]))
+  (emit-clauses clauses))
 
 ;; --- loop/recur → recursive Nix function -----------------------------------
 
@@ -1416,21 +2303,49 @@
     (error 'emit-nix
            "destructuring in loop bindings is not supported by the nix backend — bind the aggregate to one loop name, then project inside the body"))
 
-  (define param-names
-    (for/list ([b (in-list bindings)])
-      (mangle-name (let-binding-name b))))
-  (define init-vals
-    (for/list ([b (in-list bindings)])
-      (emit-expr (let-binding-value b) depth)))
-
-  (define param-str (string-join param-names " "))
   (define body-str
-    (parameterize ([current-recur-name "__loop"])
+    (parameterize ([current-recur-name "bgl____loop"])
       (emit-body body depth)))
+  (define loop-params
+    (for/list ([b (in-list bindings)])
+      (param (let-binding-name b)
+             (let-binding-type b)
+             (let-binding-constraint b))))
+  (define loop-constraint-owners
+    (for/fold ([owners (current-nix-constraint-owners)])
+              ([parameter (in-list loop-params)]
+               [binding (in-list bindings)])
+      (hash-set owners parameter binding)))
+  (define raw-loop-params
+    (for/list ([p (in-list loop-params)])
+      (param (param-name p) (param-type p) #f)))
+  (define loop-args
+    (string-join
+     (for/list ([p (in-list loop-params)])
+       (mangle-name (param-name p)))
+     " "))
+  (define loop-body-fn
+    (emit-param-chain raw-loop-params body-str depth))
+  (define recursive-body
+    (if (null? loop-params)
+        "bgl____loop__body null"
+        (format "bgl____loop__body ~a" loop-args)))
+  (define loop-fn
+    (parameterize
+        ([current-nix-constraint-owners loop-constraint-owners])
+      (emit-sequential-param-chain loop-params recursive-body depth)))
+  ;; Initializers are let-like and therefore sequential: a later initializer
+  ;; and constraint can reference every earlier loop binder.  Keep that path
+  ;; separate from the recursive guard function so the initial constraints run
+  ;; once, while every `(recur ...)` still enters through the guarded loop and is
+  ;; checked once before the next body evaluation.
+  (define initial-body
+    (emit-let-binding-chain bindings recursive-body depth))
 
-  (format "(let __loop = ~a: ~a; in __loop ~a)"
-          param-str body-str
-          (string-join init-vals " ")))
+  (format "(let bgl____loop__body = ~a; bgl____loop = ~a; in ~a)"
+          loop-body-fn
+          loop-fn
+          initial-body))
 
 ;; --- body (sequence of exprs → last one) -----------------------------------
 
@@ -1438,20 +2353,19 @@
   (cond
     [(null? exprs) "null"]
     [(= (length exprs) 1) (emit-expr (car exprs) depth)]
-    ;; Nix is expression-based, no do-blocks. Use let to sequence.
+    ;; Nix let-bindings are lazy, so an unused temporary does not sequence
+    ;; anything. A nested `builtins.deepSeq` chain forces each non-final form
+    ;; in source order before returning the final value. Deep forcing matters
+    ;; when an otherwise-unused aggregate contains a constrained call: plain
+    ;; `seq` would stop at the list/attrset shell and erase the validation.
     [else
      (define last-expr (car (reverse exprs)))
      (define stmts (reverse (cdr (reverse exprs))))
-     (define ind (indent (+ depth 1)))
-     (define binds
-       (for/list ([s (in-list stmts)]
-                  [i (in-naturals)])
-         (format "~a__s~a = ~a;" ind i (emit-expr s (+ depth 1)))))
-     (string-append
-      "let\n"
-      (string-join binds "\n") "\n"
-      (indent depth) "in\n"
-      (indent depth) (emit-expr last-expr depth))]))
+     (for/fold ([result (emit-expr last-expr depth)])
+               ([statement (in-list (reverse stmts))])
+       (format "builtins.deepSeq (~a) (~a)"
+               (emit-expr statement depth)
+               result))]))
 
 ;; --- Nix-specific form helpers ----------------------------------------------
 

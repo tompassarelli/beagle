@@ -52,11 +52,13 @@ replay_forms=(digit-table no-strings char-at split-on index-of last-index-of
   mutate ReplayFrame ReplayResult no-frames replay)
 if [[ -n "${FRAM_REPLAY:-}" ]]; then
   "$repo/bin/beagle-ast" "$FRAM_REPLAY" >"$scratch/replay.json"
-  bb "$here/select-forms.clj" "$scratch/replay.json" "$scratch/replay-sel.json" \
-    "${replay_forms[@]}"
-  bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-    "$scratch/replay-sel.json=fram:src/fram/fri_replay.bclj" \
-    "$scratch/replay_text.facts" --include-defs
+  form_args=()
+  for form in "${replay_forms[@]}"; do
+    form_args+=(--form "$form")
+  done
+  bb "$repo/native-core/bin/source-facts.clj" \
+    --input "$scratch/replay.json=fram:src/fram/fri_replay.bclj" \
+    --output "$scratch/replay_text.facts" --include-defs "${form_args[@]}"
   if [[ -f "$art/replay_text.facts" ]] \
      && ! cmp -s "$scratch/replay_text.facts" "$art/replay_text.facts"; then
     echo "drive.sh: fram.fri-replay slice drifted from the committed projection" >&2

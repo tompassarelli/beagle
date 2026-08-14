@@ -268,12 +268,12 @@ JS
        #<<BJS
 #lang beagle/js
 (ns oracle.types)
-(defrecord Person [name: String])
-(defunion Choice (Chosen [value: Int]))
-(defunion :throwable Failure (Bad [message: String]))
+(defrecord Person [(name String)])
+(defunion Choice (Chosen [(value Int)]))
+(defunion :throwable Failure (Bad [(message String)]))
 (defscalar Checked Int :where (>= 0))
-(def total: Int 7)
-(defonce once: Int 8)
+(def total Int 7)
+(defonce once Int 8)
 (defenum Color :red :blue)
 BJS
        )
@@ -290,8 +290,8 @@ BJS
        #<<BJS
 #lang beagle/js
 (ns oracle.functions)
-(defn ->Amount [value: Int] -> Int (+ value 100))
-(defn amount-value [value: Int] -> Int (+ value 200))
+(defn ->Amount [(value Int)] Int (+ value 100))
+(defn amount-value [(value Int)] Int (+ value 200))
 BJS
        )
       (cons

@@ -19,14 +19,24 @@
 ;; so every entry is "local" (hintable).
 (def record-fields Any (atom {}))
 
-;; scalar ctor/accessor names that erase to identity at call sites.
-;; ast-json carries no defscalar predicates, so ALL scalars erase ctor+accessor
-;; (predicated scalars would keep their ctor upstream — recorded gap).
+;; scalar ctor/accessor names that erase to identity at call sites. Predicated
+;; scalar constructors remain real calls; their accessors still erase.
 (def scalar-fns Any (atom {}))
 
 (def match-counter Any (atom 0))
 
 (def emit-target Any (atom "clj"))
+
+(def checked-program-ref Any (atom false))
+
+;; Clojure binds `& rest` as a seq, while Beagle exposes a Vec to the
+;; constraint and body. Keep the host value compiler-owned and normalize it
+;; once at every callable boundary.
+(def CLJ-HOST-REST String "$beagle$rest$host")
+
+;; A constrained loop carries one hidden first-iteration slot. Recur sites in
+;; that loop append false so every subsequent value is checked again.
+(def loop-constraint-arity Any (atom nil))
 
 ;; SCI (babashka) rejects forward references at load, and beagle emits no
 ;; (declare ...) — so the emit-expr! recursion hub routes through an atom-held
@@ -37,12 +47,12 @@
   (let [(f (Fn [Any] String)) (deref emit-expr-ref)]
     (f e)))
 
-;; --- Racket-~v-compatible string writer --------------------------------------
-;; Escapes match Racket write: named \a \b \t \n \v \f \r \e, then \" and \\,
-;; other control chars (U+0000..U+001F minus named, plus U+007F) as \uXXXX
-;; with UPPERCASE hex. All other chars verbatim.
+;; --- Clojure-readable string writer ------------------------------------------
+;; Clojure accepts the common named escapes, but not Racket's \a / \v / \e.
+;; Every other control character is emitted as lowercase \uXXXX, matching the
+;; oracle and keeping the generated source readable by Clojure and babashka.
 
-(def HEX-DIGITS String "0123456789ABCDEF")
+(def HEX-DIGITS String "0123456789abcdef")
 
 (defn hex4 [(code Int)] String
   ;; codes here are < 256 (ASCII control range + DEL), so two leading zeros
@@ -55,14 +65,11 @@
     (cond
       (= c "\"") "\\\""
       (= c "\\") "\\\\"
-      (= code 7) "\\a"
       (= code 8) "\\b"
       (= code 9) "\\t"
       (= code 10) "\\n"
-      (= code 11) "\\v"
       (= code 12) "\\f"
       (= code 13) "\\r"
-      (= code 27) "\\e"
       (or (< code 32) (= code 127)) (str "\\u" (hex4 code))
       :else c)))
 
@@ -172,22 +179,310 @@
 (defn emit-binding-target [(target Any)] String
   (emit-binding-form (param-binding-target target)))
 
+;; --- binding constraints ---------------------------------------------------
+
+(defn checked-binding-constraint [(binding Any)] Any
+  (let [constraint (get binding "constraint")
+        present? (and (not (nil? constraint)) (not (false? constraint)))]
+    (when (deref checked-program-ref)
+      (when (not (contains? binding "constraint"))
+        (throw (ex-info
+          "checked binding declaration lacks its constraint field" {})))
+      (when (not (contains? binding "constraintSynchronous"))
+        (throw (ex-info
+          "checked binding declaration lacks its constraintSynchronous proof" {})))
+      (let [synchronous? (get binding "constraintSynchronous")]
+        (when (not (boolean? synchronous?))
+          (throw (ex-info
+            "checked binding declaration has an invalid constraintSynchronous proof" {})))
+        (when (not (= synchronous? present?))
+          (throw (ex-info
+            "checked binding declaration constraintSynchronous does not match its constraint"
+            {})))))
+    (if present? constraint nil)))
+
+(defn constraint-present? [(binding Any)] Bool
+  (not (nil? (checked-binding-constraint binding))))
+
+(defn binding-target [(binding Any)] Any
+  (cond
+    (= (get binding "type") "param") (get binding "name")
+    (= (get binding "type") "binding") (get binding "name")
+    (contains? binding "value") (get binding "name")
+    :else (param-binding-target binding)))
+
+(defn binding-target-label [(binding Any)] String
+  (emit-binding-form (binding-target binding)))
+
+(defn binding-constraint-failure [(binding Any) (raw-name String)] String
+  (let [label (binding-target-label binding)]
+    (str "(throw (ex-info "
+         (write-clj-string (str "Binding constraint failed: " label))
+         " {:binding " (write-clj-string label) " :value " raw-name "}))")))
+
+(defn emit-guarded-binding-value
+  [(binding Any) (predicate-name String) (raw-name String)] String
+  (str "(if (" predicate-name " " raw-name ") " raw-name " "
+       (binding-constraint-failure binding raw-name) ")"))
+
+(defn bindings-have-constraints? [(bindings Any)] Bool
+  (> (count (filterv constraint-present? bindings)) 0))
+
+(defn params+rest [(params Any) (rest-p Any)] Any
+  (if (or (nil? rest-p) (false? rest-p))
+    (vec params)
+    (conj (vec params) rest-p)))
+
+(defn callable-has-constraints? [(params Any) (rest-p Any)] Bool
+  (bindings-have-constraints? (params+rest params rest-p)))
+
+(defn callable-raw-name [(index Int) (fixed-count Int)] String
+  (if (= index fixed-count)
+    "$beagle$constraint$raw-rest"
+    (str "$beagle$constraint$raw-param$" index)))
+
+(defn emit-constrained-callable
+  [(params Any) (rest-p Any) (body-str String) (tagged? Bool)] Any
+  (let [all (params+rest params rest-p)
+        fixed-count (count params)
+        raw-names (mapv (fn [(index Int)] String
+                          (callable-raw-name index fixed-count))
+                    (range (count all)))
+        fixed-raw (mapv
+                    (fn [(index Int)] String
+                      (let [raw (nth raw-names index)
+                            param (nth params index)
+                            target (param-binding-target param)]
+                        (if (and tagged?
+                                 (= (get param "type") "param")
+                                 (string? target))
+                          (str (clj-tag-prefix (get param "ann")) raw)
+                          raw)))
+                    (range fixed-count))
+        params-str (str/join " "
+                     (if (or (nil? rest-p) (false? rest-p))
+                       fixed-raw
+                       (into fixed-raw ["&" CLJ-HOST-REST])))
+        rest-normalization
+          (if (or (nil? rest-p) (false? rest-p))
+            []
+            [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
+        predicate-bindings
+          (loop [(index Int) 0 (acc (Vec String)) []]
+            (if (>= index (count all))
+              acc
+              (let [binding (nth all index)]
+                (recur (+ index 1)
+                  (if (constraint-present? binding)
+                    (conj acc
+                      (str "$beagle$constraint$predicate$" index " "
+                           (emit-expr* (checked-binding-constraint binding))))
+                    acc)))))
+        checked-bindings
+          (mapv (fn [(index Int)] String
+                  (let [binding (nth all index)
+                        raw (nth raw-names index)
+                        checked (str "$beagle$constraint$checked-param$" index)]
+                    (str checked " "
+                      (if (constraint-present? binding)
+                        (emit-guarded-binding-value binding
+                          (str "$beagle$constraint$predicate$" index) raw)
+                        raw))))
+            (range (count all)))
+        target-bindings
+          (mapv (fn [(index Int)] String
+                  (str (emit-binding-form (binding-target (nth all index))) " "
+                       "$beagle$constraint$checked-param$" index))
+            (range (count all)))]
+    {"params" params-str
+     "body" (str "(let [" (str/join "\n       "
+                                  (into rest-normalization predicate-bindings)) "]\n"
+                 "  (let [" (str/join "\n       " checked-bindings) "]\n"
+                 "    (let [" (str/join "\n       " target-bindings) "]\n"
+                 "      " body-str ")))")}))
+
+(defn emit-callable-signature+body
+  [(params Any) (rest-p Any) (body-str String) (tagged? Bool)] Any
+  (if (callable-has-constraints? params rest-p)
+    (emit-constrained-callable params rest-p body-str tagged?)
+    (let [fixed (if tagged?
+                  (emit-params-with-rest-tagged params nil)
+                  (emit-params-with-rest params nil))
+          params-str (if (or (nil? rest-p) (false? rest-p))
+                       fixed
+                       (if (= fixed "")
+                         (str "& " CLJ-HOST-REST)
+                         (str fixed " & " CLJ-HOST-REST)))]
+      {"params" params-str
+       "body" (if (or (nil? rest-p) (false? rest-p))
+                body-str
+                (str "(let [" (emit-binding-form (binding-target rest-p))
+                     " (vec " CLJ-HOST-REST ")]\n  " body-str ")"))})))
+
+(defn emit-body-with-loop-context!
+  [(exprs Any) (indent String) (context Any)] String
+  (let [previous (deref loop-constraint-arity)]
+    (reset! loop-constraint-arity context)
+    (let [result (str/join (str "\n" indent) (mapv emit-expr* exprs))]
+      (reset! loop-constraint-arity previous)
+      result)))
+
 (defn emit-let-bindings [(bindings Any)] String
   (str/join "\n   "
-    (mapv (fn [(b Any)] String
-            (str (emit-binding-target (get b "name")) " " (emit-expr* (get b "value"))))
-          bindings)))
+    (loop [(index Int) 0 (acc (Vec String)) []]
+      (if (>= index (count bindings))
+        acc
+        (let [b (nth bindings index)
+              target (emit-binding-target (get b "name"))
+              value (emit-expr* (get b "value"))]
+          (if (constraint-present? b)
+            (let [raw-name (str "$beagle$constraint$raw-binding$" index)
+                  predicate-name (str "$beagle$constraint$predicate$" index)]
+              (recur (+ index 1)
+                (into acc
+                  [(str raw-name " " value)
+                   (str predicate-name " " (emit-expr* (checked-binding-constraint b)))
+                   (str target " "
+                     (emit-guarded-binding-value b predicate-name raw-name))])))
+            (recur (+ index 1) (conj acc (str target " " value)))))))))
+
+(defn emit-with-open-chain [(bindings Any) (body-str String) (index Int)] String
+  (if (= 0 (count bindings))
+    body-str
+    (let [b (nth bindings 0)
+          target (emit-binding-target (get b "name"))
+          value (emit-expr* (get b "value"))
+          inner (emit-with-open-chain (subvec (vec bindings) 1) body-str (+ index 1))]
+      (if (constraint-present? b)
+        (let [predicate-name (str "$beagle$constraint$predicate$" index)
+              raw-name (str "$beagle$constraint$raw-open$" index)]
+          (str "(with-open [" raw-name " " value "]\n"
+               "  (let [" predicate-name " " (emit-expr* (checked-binding-constraint b)) "\n"
+               "        " target " "
+               (emit-guarded-binding-value b predicate-name raw-name) "]\n"
+               "    " inner "))"))
+        (str "(with-open [" target " " value "]\n  " inner ")")))))
+
+(defn emit-dynamic-binding-chain [(bindings Any) (body-str String)] String
+  (let [capture-bindings
+          (loop [(index Int) 0 (acc (Vec String)) []]
+            (if (>= index (count bindings))
+              acc
+              (let [binding (nth bindings index)
+                    raw-name (str "$beagle$constraint$raw-dynamic$" index)
+                    base (conj acc (str raw-name " "
+                                     (emit-expr* (get binding "value"))))]
+                (if (constraint-present? binding)
+                  (let [predicate-name (str "$beagle$constraint$predicate$" index)]
+                    (recur (+ index 1)
+                      (into base
+                        [(str predicate-name " "
+                           (emit-expr* (checked-binding-constraint binding)))
+                         (str "$beagle$constraint$checked-dynamic$" index " "
+                           (emit-guarded-binding-value binding predicate-name raw-name))])))
+                  (recur (+ index 1) base)))))
+        dynamic-bindings
+          (mapv (fn [(index Int)] String
+                  (let [binding (nth bindings index)]
+                    (str (emit-binding-target (get binding "name")) " "
+                      (if (constraint-present? binding)
+                        (str "$beagle$constraint$checked-dynamic$" index)
+                        (str "$beagle$constraint$raw-dynamic$" index)))))
+            (range (count bindings)))]
+    (str "(let [" (str/join "\n       " capture-bindings) "]\n"
+         "  (binding [" (str/join "\n            " dynamic-bindings) "]\n"
+         "    " body-str "))")))
 
 (defn emit-for-clauses [(clauses Any)] String
   (str/join "\n   "
-    (mapv (fn [(c Any)] String
-            (let [t (get c "type")]
-              (cond
-                (= t "binding") (str (emit-binding-target (get c "name")) " " (emit-expr* (get c "expr")))
-                (= t "when") (str ":when " (emit-expr* (get c "test")))
-                (= t "let") (str ":let [" (emit-let-bindings (get c "bindings")) "]")
-                :else "")))
-          clauses)))
+    (loop [(index Int) 0 (acc (Vec String)) []]
+      (if (>= index (count clauses))
+        acc
+        (let [c (nth clauses index)
+              t (get c "type")]
+          (cond
+            (= t "binding")
+            (if (constraint-present? c)
+              (let [raw-name (str "$beagle$constraint$raw-for$" index)
+                    predicate-name (str "$beagle$constraint$predicate$" index)]
+                (recur (+ index 1)
+                  (into acc
+                    [(str raw-name " " (emit-expr* (get c "expr")))
+                     (str ":let [" predicate-name " "
+                       (emit-expr* (checked-binding-constraint c)) "\n"
+                       "         " (emit-binding-target (get c "name")) " "
+                       (emit-guarded-binding-value c predicate-name raw-name) "]")])))
+              (recur (+ index 1)
+                (conj acc (str (emit-binding-target (get c "name")) " "
+                             (emit-expr* (get c "expr"))))))
+
+            (= t "when")
+            (recur (+ index 1) (conj acc (str ":when " (emit-expr* (get c "test")))))
+
+            (= t "let")
+            (recur (+ index 1)
+              (conj acc (str ":let [" (emit-let-bindings (get c "bindings")) "]")))
+
+            :else (recur (+ index 1) acc)))))))
+
+(defn emit-loop-with-constraints! [(e Any)] String
+  (let [bindings (get e "bindings")]
+    (if (not (bindings-have-constraints? bindings))
+      (str "(loop [" (emit-let-bindings bindings) "]\n  "
+           (emit-body-with-loop-context! (get e "body") "  " nil) ")")
+      (let [raw-names
+              (mapv (fn [(index Int)] String
+                      (str "$beagle$constraint$raw-loop$" index))
+                (range (count bindings)))
+            init-bindings
+              (loop [(index Int) 0 (acc (Vec String)) []]
+                (if (>= index (count bindings))
+                  acc
+                  (let [binding (nth bindings index)
+                        raw (nth raw-names index)
+                        target (emit-binding-target (get binding "name"))
+                        base (conj acc
+                               (str raw " " (emit-expr* (get binding "value"))))]
+                    (if (constraint-present? binding)
+                      (let [predicate-name
+                              (str "$beagle$constraint$init-predicate$" index)]
+                        (recur (+ index 1)
+                          (into base
+                            [(str predicate-name " "
+                               (emit-expr* (checked-binding-constraint binding)))
+                             (str target " "
+                               (emit-guarded-binding-value
+                                 binding predicate-name raw))])))
+                      (recur (+ index 1) (conj base (str target " " raw)))))))
+            iteration-bindings
+              (mapv (fn [(index Int)] String
+                      (let [binding (nth bindings index)
+                            raw (nth raw-names index)
+                            target (emit-binding-target (get binding "name"))]
+                        (str target " "
+                          (if (constraint-present? binding)
+                            (str "(if $beagle$constraint$first-iteration " raw " "
+                                 "(let [$beagle$constraint$predicate$" index " "
+                                 (emit-expr* (checked-binding-constraint binding)) "] "
+                                 (emit-guarded-binding-value binding
+                                   (str "$beagle$constraint$predicate$" index) raw)
+                                 "))")
+                            raw))))
+                (range (count bindings)))
+            loop-bindings
+              (mapv (fn [(index Int)] String
+                      (str (nth raw-names index)
+                           " (nth $beagle$constraint$initial-values " index ")"))
+                (range (count bindings)))
+            body (emit-body-with-loop-context!
+                   (get e "body") "    " (count bindings))]
+        (str "(let [$beagle$constraint$initial-values (let ["
+             (str/join "\n       " init-bindings) "] ["
+             (str/join " " raw-names) "])]\n"
+             "  (loop [" (str/join " " loop-bindings)
+             " $beagle$constraint$first-iteration true]\n"
+             "    (let [" (str/join "\n         " iteration-bindings) "]\n"
+             "      " body ")))")))))
 
 (defn emit-body [(exprs Any) (indent String)] String
   (str/join (str "\n" indent) (mapv emit-expr* exprs)))
@@ -244,6 +539,13 @@
            "")
          "]")))
 
+(defn emit-import [(class-name String)] String
+  (let [idx (str/last-index-of class-name ".")]
+    (if (nil? idx)
+      class-name
+      (str "[" (subs class-name 0 idx) " "
+           (subs class-name (+ idx 1)) "]"))))
+
 (defn has-clojure-string? [(rs Any)] Bool
   (> (count (filterv (fn [(r Any)] Bool (= "clojure.string" (get r "ns"))) rs)) 0))
 
@@ -260,7 +562,16 @@
                      (str "(:require "
                           (str/join "\n            " (mapv emit-require rs))
                           ")"))
-        clauses (filterv some? [(if gen-class "(:gen-class)" nil) req-clause])]
+        imports (vec (get prog "imports"))
+        import-clause (if (= 0 (count imports))
+                        nil
+                        (str "(:import "
+                             (str/join "\n           " (mapv emit-import imports))
+                             ")"))
+        clauses (filterv some?
+                  [(if gen-class "(:gen-class)" nil)
+                   req-clause
+                   import-clause])]
     (if (= 0 (count clauses))
       (str "(ns " ns-name ")")
       (str "(ns " ns-name "\n  " (str/join "\n  " clauses) ")"))))
@@ -270,15 +581,73 @@
 (defn field-names-of [(fields Any)] (Vec String)
   (mapv (fn [(f Any)] String (get f "name")) fields))
 
+(defn unqualify-name [(name String)] String
+  (let [index (str/last-index-of name "/")]
+    (if (nil? index) name (subs name (+ index 1)))))
+
+(defn record-validator-name [(name String)] String
+  (str "$beagle$record$" (unqualify-name name) "$validate"))
+
+(defn emit-record-constructor-guards [(name String) (fields Any)] Any
+  (let [constrained
+          (filterv (fn [(entry Any)] Bool
+                     (constraint-present? (nth entry 1)))
+            (mapv (fn [(index Int)] Any [index (nth fields index)])
+              (range (count fields))))]
+    (if (= 0 (count constrained))
+      []
+      (let [positional (str "->" name)
+            map-factory (str "map->" name)
+            raw-positional (str "$beagle$record$" name "$raw-constructor")
+            raw-map (str "$beagle$record$" name "$raw-map-constructor")
+            validator (record-validator-name name)
+            guarded (emit-callable-signature+body
+                      fields false
+                      (str "(" raw-positional
+                        (if (= 0 (count fields))
+                          ""
+                          (str " " (str/join " " (field-names-of fields))))
+                        ")")
+                      false)
+            validation-bindings
+              (loop [(i Int) 0 (acc (Vec String)) []]
+                (if (>= i (count constrained))
+                  acc
+                  (let [entry (nth constrained i)
+                        index (nth entry 0)
+                        field (nth entry 1)
+                        field-name (get field "name")
+                        raw-name (str "$beagle$record$field$" index)
+                        predicate-name (str "$beagle$record$constraint$" index)
+                        checked-name (str "$beagle$record$checked-field$" index)]
+                    (recur (+ i 1)
+                      (into acc
+                        [(str raw-name " (:" field-name " $beagle$record$value)")
+                         (str predicate-name " "
+                           (emit-expr* (checked-binding-constraint field)))
+                         (str checked-name " "
+                           (emit-guarded-binding-value field predicate-name raw-name))])))))]
+        [(str "(def ^:private " raw-positional " " positional ")")
+         (str "(def ^:private " raw-map " " map-factory ")")
+         (str "(defn " validator " [$beagle$record$value]\n"
+              "  (let [" (str/join "\n       " validation-bindings) "]\n"
+              "    $beagle$record$value))")
+         (str "(defn " positional " [" (get guarded "params") "]\n"
+              "  " (get guarded "body") ")")
+         (str "(defn " map-factory " [$beagle$record$raw-map]\n"
+              "  (" raw-map " (" validator " $beagle$record$raw-map)))")]))))
+
 (defn emit-record-form [(e Any)] String
   (let [name (get e "name")
-        fnames (field-names-of (get e "fields"))
+        fields (get e "fields")
+        fnames (field-names-of fields)
         name-lower (str/lower-case name)
         record-line (str "(defrecord " name " [" (str/join " " fnames) "])")
         accessors (mapv (fn [(fname String)] String
                           (str "(defn " name-lower "-" fname " [r] (:" fname " r))"))
                         fnames)]
-    (str/join "\n\n" (into [record-line] accessors))))
+    (str/join "\n\n"
+      (into (into [record-line] (emit-record-constructor-guards name fields)) accessors))))
 
 (defn emit-defenum [(e Any)] String
   (let [vals-str (str/join " " (mapv (fn [(v Any)] String (str ":" v)) (get e "values")))]
@@ -289,14 +658,12 @@
 (defn emit-variant-defrecord [(m String) (fields Any)] String
   (let [fnames (field-names-of fields)
         m-lower (str/lower-case m)
-        record-line (str "(defrecord " m " [" (str/join " " fnames) "])")]
-    (if (= 0 (count fnames))
-      record-line
-      (str/join "\n\n"
-        (into [record-line]
-          (mapv (fn [(fname String)] String
-                  (str "(defn " m-lower "-" fname " [r] (:" fname " r))"))
-                fnames))))))
+        record-line (str "(defrecord " m " [" (str/join " " fnames) "])")
+        accessors (mapv (fn [(fname String)] String
+                          (str "(defn " m-lower "-" fname " [r] (:" fname " r))"))
+                    fnames)]
+    (str/join "\n\n"
+      (into (into [record-line] (emit-record-constructor-guards m fields)) accessors))))
 
 (defn emit-defunion [(e Any)] String
   (let [comment (str ";; " (get e "name") " = " (str/join " | " (get e "members")))
@@ -319,6 +686,136 @@
              (mapv (fn [(m String)] String
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
+
+(defn scalar-backing-label [(backing Any)] String
+  (let [name (get backing "name")]
+    (if (string? name) name (str backing))))
+
+(defn emit-defscalar [(e Any)] String
+  (let [name (get e "name")
+        predicates (vec (get e "predicates"))]
+    (if (= 0 (count predicates))
+      (str ";; " name " : " (scalar-backing-label (get e "backing")) " (scalar)")
+      (let [pre-exprs
+              (mapv (fn [(predicate Any)] String
+                      (let [value (get predicate "value")]
+                        (str "(" (get predicate "op") " v "
+                          (if (double? value) (emit-float value) (str value)) ")")))
+                predicates)]
+        (str "(defn ->" name " [v]\n"
+             "  {:pre [" (str/join " " pre-exprs) "]}\n"
+             "  v)")))))
+
+;; --- protocols -------------------------------------------------------------
+
+(defn protocol-raw-method-name
+  [(protocol-name String) (method-name String)] String
+  (str "$beagle$protocol$" (unqualify-name protocol-name) "$" method-name))
+
+(defn emit-protocol-wrapper [(protocol-name String) (method Any)] String
+  (let [params (get method "params")
+        rest-p (get method "rest")
+        all (params+rest params rest-p)
+        fixed-count (count params)
+        raw-names (mapv (fn [(index Int)] String
+                          (callable-raw-name index fixed-count))
+                    (range (count all)))
+        rest-normalization
+          (if (or (nil? rest-p) (false? rest-p))
+            []
+            [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
+        predicate-bindings
+          (loop [(index Int) 0 (acc (Vec String)) []]
+            (if (>= index (count all))
+              acc
+              (let [param (nth all index)]
+                (recur (+ index 1)
+                  (if (constraint-present? param)
+                    (conj acc
+                      (str "$beagle$constraint$predicate$" index " "
+                           (emit-expr* (checked-binding-constraint param))))
+                    acc)))))
+        checked-names (mapv (fn [(index Int)] String
+                              (str "$beagle$constraint$checked-param$" index))
+                        (range (count all)))
+        checked-bindings
+          (mapv (fn [(index Int)] String
+                  (let [param (nth all index)
+                        raw (nth raw-names index)]
+                    (str (nth checked-names index) " "
+                      (if (constraint-present? param)
+                        (emit-guarded-binding-value param
+                          (str "$beagle$constraint$predicate$" index) raw)
+                        raw))))
+            (range (count all)))
+        call-args (if (= 0 (count predicate-bindings)) raw-names checked-names)
+        raw-method (protocol-raw-method-name protocol-name (get method "name"))
+        call (if (or (nil? rest-p) (false? rest-p))
+               (str "(" raw-method
+                 (if (= 0 (count call-args))
+                   ""
+                   (str " " (str/join " " call-args))) ")")
+               (str "(apply " raw-method " " (str/join " " call-args) ")"))
+        signature (str/join " "
+                    (if (or (nil? rest-p) (false? rest-p))
+                      (subvec raw-names 0 fixed-count)
+                      (into (subvec raw-names 0 fixed-count)
+                        ["&" CLJ-HOST-REST])))]
+    (str "(defn " (get method "name") " [" signature "]\n  "
+      (cond
+        (and (= 0 (count rest-normalization))
+             (= 0 (count predicate-bindings)))
+        call
+        (= 0 (count predicate-bindings))
+        (str "(let [" (str/join "\n       " rest-normalization) "]\n"
+             "    " call ")")
+        :else
+        (str "(let [" (str/join "\n       "
+                              (into rest-normalization predicate-bindings)) "]\n"
+             "    (let [" (str/join "\n         " checked-bindings) "]\n"
+             "      " call "))"))
+      ")")))
+
+(defn emit-protocol [(e Any)] String
+  (let [protocol-name (get e "name")
+        methods (get e "methods")
+        raw-sigs
+          (mapv (fn [(method Any)] String
+                  (let [params (get method "params")
+                        rest-p (get method "rest")
+                        fixed (mapv (fn [(index Int)] String
+                                      (str "$beagle$constraint$raw-param$" index))
+                                (range (count params)))
+                        all (if (or (nil? rest-p) (false? rest-p))
+                              fixed
+                              (into fixed ["&" "$beagle$constraint$raw-rest"]))]
+                    (str "(" (protocol-raw-method-name protocol-name (get method "name"))
+                         " [" (str/join " " all) "])") ))
+            methods)]
+    (str "(defprotocol " protocol-name "\n  " (str/join "\n  " raw-sigs) ")\n\n"
+         (str/join "\n\n"
+           (mapv (fn [(method Any)] String
+                   (emit-protocol-wrapper protocol-name method))
+             methods)))))
+
+(defn emit-type-impl! [(impl Any)] String
+  (let [protocol-name (get impl "protocol")
+        method-lines
+          (mapv (fn [(method Any)] String
+                  (let [body (emit-body-with-loop-context!
+                               (get method "body") "    " nil)
+                        callable (emit-callable-signature+body
+                                   (get method "params") (get method "rest")
+                                   body false)]
+                    (str "(" (protocol-raw-method-name protocol-name (get method "name"))
+                         " [" (get callable "params") "]\n"
+                         "    " (get callable "body") ")")))
+            (get impl "methods"))]
+    (str protocol-name "\n  " (str/join "\n  " method-lines))))
+
+(defn emit-extend-type [(e Any)] String
+  (str "(extend-type " (get e "type-name") "\n  "
+       (str/join "\n  " (mapv emit-type-impl! (get e "impls"))) ")"))
 
 ;; --- match (emit-clj.rkt emit-match!: counter temps + case-fold) -------------------
 
@@ -381,9 +878,7 @@
       :else (str "(= " target-sym " " val ")"))))
 
 (defn emit-case-folded-match
-  [(clauses Any)
-   (target-sym String)
-   (target-str String)] String
+  [(clauses Any) (target-sym String) (target-str String)] String
   (let [cs (vec clauses)
         n (count cs)
         tail (nth cs (- n 1))
@@ -487,6 +982,45 @@
   ;; slot arrives as JSON false, not null.
   (or (nil? x) (false? x)))
 
+(defn exact-object-keys? [(value Any) (expected Any)] Bool
+  (and (map? value)
+       (= (count (keys value)) (count expected))
+       (every? (fn [(key String)] Bool (contains? value key)) expected)))
+
+(defn valid-record-update-contract? [(contract Any)] Bool
+  (and (exact-object-keys?
+         contract ["recordName" "fieldOrder" "validator"])
+       (string? (get contract "recordName"))
+       (vector? (get contract "fieldOrder"))
+       (every? string? (get contract "fieldOrder"))
+       (or (nil? (get contract "validator"))
+           (string? (get contract "validator")))))
+
+(defn record-update-contract [(node Any)] Any
+  (when (and (deref checked-program-ref)
+             (not (contains? node "recordUpdate")))
+    (throw (ex-info
+      "checked with node lacks its recordUpdate semantic contract" {})))
+  (let [contract (get node "recordUpdate")]
+    (when (and (not (nil? contract))
+               (not (valid-record-update-contract? contract)))
+      (throw (ex-info
+        "checked with node has an invalid recordUpdate semantic contract" {})))
+    contract))
+
+(defn record-field-access-contract [(node Any)] Any
+  (when (and (deref checked-program-ref)
+             (not (contains? node "recordFieldAccess")))
+    (throw (ex-info
+      "checked kw-access lacks its recordFieldAccess semantic contract" {})))
+  (let [contract (get node "recordFieldAccess")]
+    (when (and (not (nil? contract))
+               (not (and (exact-object-keys? contract ["recordName"])
+                         (string? (get contract "recordName")))))
+      (throw (ex-info
+        "checked kw-access has an invalid recordFieldAccess semantic contract" {})))
+    contract))
+
 (defn else-less-if? [(els Any)] Bool
   ;; ast-json encodes an absent else branch as expr->json(#f) = literal false.
   ;; Racket's emitter reads the struct slot directly and emits 2-arity for
@@ -550,23 +1084,36 @@
         (let [kw (if (get e "private") "defn-" "defn")
               name (get e "name")
               name-tag (clj-tag-prefix (get e "ret"))
-              params (emit-params-with-rest-tagged (get e "params") (get e "rest"))
-              body (emit-body (get e "body") "  ")]
-          (str "(" kw " " name-tag name " [" params "]\n  " body ")"))
+              body (emit-body-with-loop-context! (get e "body") "  " nil)
+              callable (emit-callable-signature+body
+                         (get e "params") (get e "rest") body true)
+              doc (get e "doc")]
+          (str "(" kw " " name-tag name
+               (if (string? doc) (str "\n  " (write-clj-string doc)) "")
+               " [" (get callable "params") "]\n  " (get callable "body") ")"))
 
       (= node "defn-multi")
         (let [kw (if (get e "private") "defn-" "defn")
               name (get e "name")
               arity-strs (mapv (fn [(a Any)] String
-                                 (str "  ([" (emit-params-with-rest (get a "params") (get a "rest"))
-                                      "]\n    " (emit-body (get a "body") "    ") ")"))
-                               (get e "arities"))]
-          (str "(" kw " " name "\n" (str/join "\n" arity-strs) ")"))
+                                 (let [body (emit-body-with-loop-context!
+                                              (get a "body") "    " nil)
+                                       callable (emit-callable-signature+body
+                                                  (get a "params") (get a "rest")
+                                                  body false)]
+                                   (str "  ([" (get callable "params")
+                                        "]\n    " (get callable "body") ")")))
+                               (get e "arities"))
+              doc (get e "doc")]
+          (str "(" kw " " name
+               (if (string? doc) (str "\n  " (write-clj-string doc)) "")
+               "\n" (str/join "\n" arity-strs) ")"))
 
       (= node "fn")
-        (let [params (emit-params-with-rest (get e "params") (get e "rest"))
-              body (emit-body (get e "body") "  ")]
-          (str "(fn [" params "] " body ")"))
+        (let [body (emit-body-with-loop-context! (get e "body") "  " nil)
+              callable (emit-callable-signature+body
+                         (get e "params") (get e "rest") body false)]
+          (str "(fn [" (get callable "params") "] " (get callable "body") ")"))
 
       (= node "let")
         (str "(let [" (emit-let-bindings (get e "bindings")) "]\n  "
@@ -607,12 +1154,18 @@
                  then-str "\n  " (emit-expr* els) ")")))
 
       (= node "binding")
-        (str "(binding [" (emit-let-bindings (get e "bindings")) "]\n  "
-             (emit-body (get e "body") "  ") ")")
+        (let [bindings (get e "bindings")
+              body (emit-body (get e "body") "  ")]
+          (if (bindings-have-constraints? bindings)
+            (emit-dynamic-binding-chain bindings body)
+            (str "(binding [" (emit-let-bindings bindings) "]\n  " body ")")))
 
       (= node "with-open")
-        (str "(with-open [" (emit-let-bindings (get e "bindings")) "]\n  "
-             (emit-body (get e "body") "  ") ")")
+        (let [bindings (get e "bindings")
+              body (emit-body (get e "body") "  ")]
+          (if (bindings-have-constraints? bindings)
+            (emit-with-open-chain bindings body 0)
+            (str "(with-open [" (emit-let-bindings bindings) "]\n  " body ")")))
 
       (= node "doto")
         (str "(doto " (emit-expr* (get e "target")) "\n  "
@@ -638,11 +1191,13 @@
           (str "(cond\n  " (str/join "\n  " pairs) ")"))
 
       (= node "loop")
-        (str "(loop [" (emit-let-bindings (get e "bindings")) "]\n  "
-             (emit-body (get e "body") "  ") ")")
+        (emit-loop-with-constraints! e)
 
       (= node "recur")
-        (str "(recur" (emit-args (get e "args")) ")")
+        (let [args (get e "args")
+              context (deref loop-constraint-arity)]
+          (str "(recur" (emit-args args)
+            (if (and (number? context) (= (count args) context)) " false" "") ")"))
 
       (= node "for")
         (str "(for [" (emit-for-clauses (get e "clauses")) "]\n  "
@@ -699,7 +1254,8 @@
         (str "(" (get e "class") (emit-args (get e "args")) ")")
 
       (= node "kw-access")
-        (let [dflt (get e "default")]
+        (let [_contract (record-field-access-contract e)
+              dflt (get e "default")]
           (if (absent? dflt)
             (str "(" (get e "kw") " " (emit-expr* (get e "target")) ")")
             (str "(" (get e "kw") " " (emit-expr* (get e "target")) " "
@@ -745,8 +1301,24 @@
       (= node "with")
         (let [update-strs (mapv (fn [(u Any)] String
                                   (str (get u "field") " " (emit-expr* (get u "value"))))
-                                (get e "updates"))]
-          (str "(assoc " (emit-expr* (get e "target")) " " (str/join " " update-strs) ")"))
+                                (get e "updates"))
+              updated (str "(assoc " (emit-expr* (get e "target")) " "
+                            (str/join " " update-strs) ")")
+              contract (record-update-contract e)
+              validator (if (nil? contract) nil (get contract "validator"))]
+          (when (not (nil? contract))
+            (doseq [update (get e "updates")]
+              (when (not (some? (some
+                                  (fn [(field String)] Any
+                                    (when (= field (get update "field")) field))
+                                  (get contract "fieldOrder"))))
+                (throw (ex-info
+                  "checked with node updates a field outside its recordUpdate fieldOrder"
+                  {})))))
+          (if (nil? validator)
+            updated
+            (str "(let [$beagle$record$update$candidate " updated "]\n"
+                 "  (" validator " $beagle$record$update$candidate))")))
 
       (= node "defenum")
         (emit-defenum e)
@@ -758,9 +1330,13 @@
         (emit-deferror e)
 
       (= node "defscalar")
-        ;; upstream prints the backing-type struct via ~a (opaque) for the
-        ;; no-predicate comment; not byte-matchable from JSON — recorded gap.
-        (str ";; " (get e "name") " : scalar")
+        (emit-defscalar e)
+
+      (= node "defprotocol")
+        (emit-protocol e)
+
+      (= node "extend-type")
+        (emit-extend-type e)
 
       (= node "set!")
         (let [target (get e "target")
@@ -771,9 +1347,14 @@
 
       (= node "letfn")
         (let [fn-strs (mapv (fn [(f Any)] String
-                              (str "(" (get f "name") " ["
-                                   (emit-params-with-rest (get f "params") (get f "rest"))
-                                   "] " (emit-body (get f "body") "    ") ")"))
+                              (let [body (emit-body-with-loop-context!
+                                           (get f "body") "    " nil)
+                                    callable (emit-callable-signature+body
+                                               (get f "params") (get f "rest")
+                                               body false)]
+                                (str "(" (get f "name") " ["
+                                     (get callable "params") "] "
+                                     (get callable "body") ")")))
                             (get e "fns"))]
           (str "(letfn [" (str/join "\n          " fn-strs) "]\n  "
                (emit-body (get e "body") "  ") ")"))
@@ -819,15 +1400,20 @@
     (let [node (get f "node")]
       (cond
         (= node "record")
-          (swap! record-fields assoc (get f "name") (field-names-of (get f "fields")))
+          (let [name (get f "name")
+                fields (get f "fields")]
+            (swap! record-fields assoc name (field-names-of fields)))
         (or (= node "defunion") (= node "deferror"))
           (let [mf (get f "member-fields")]
             (when mf
               (doseq [m (get f "members")]
-                (swap! record-fields assoc m (field-names-of (vec (get mf m)))))))
+                (let [fields (vec (get mf m))]
+                  (swap! record-fields assoc m (field-names-of fields))))))
         (= node "defscalar")
-          (let [nm (get f "name")]
-            (swap! scalar-fns assoc (str "->" nm) true)
+          (let [nm (get f "name")
+                predicates (vec (get f "predicates"))]
+            (when (= 0 (count predicates))
+              (swap! scalar-fns assoc (str "->" nm) true))
             (swap! scalar-fns assoc (str (str/lower-case nm) "-value") true))
         :else nil)))
   nil)
@@ -837,7 +1423,12 @@
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
+  (reset! loop-constraint-arity nil)
   (reset! emit-target (get prog "target"))
+  (reset! checked-program-ref
+    (and (= (get prog "kind") "beagle.checked-program")
+         (= (get prog "schemaVersion") 3)
+         (= (get prog "phase") "checked")))
   (register-tables! (get prog "forms"))
   (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
     (str (emit-ns-form prog body) "\n\n" body "\n")))
@@ -858,7 +1449,9 @@
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
+  (reset! loop-constraint-arity nil)
   (reset! emit-target "clj")
+  (reset! checked-program-ref false)
   (reset! passes [])
   (reset! failures [])
 
@@ -868,8 +1461,12 @@
     (= (write-clj-string "a\tb\"c\\d") "\"a\\tb\\\"c\\\\d\""))
   (expect! "string: u0001"
     (= (write-clj-string (str "x" (char 1) "y")) "\"x\\u0001y\""))
-  (expect! "string: u007F" (= (write-clj-string (str (char 127))) "\"\\u007F\""))
-  (expect! "string: bell named" (= (write-clj-string (str (char 7))) "\"\\a\""))
+  (expect! "string: u007f" (= (write-clj-string (str (char 127))) "\"\\u007f\""))
+  (expect! "string: bell unicode" (= (write-clj-string (str (char 7))) "\"\\u0007\""))
+  (expect! "string: vertical-tab unicode"
+    (= (write-clj-string (str (char 11))) "\"\\u000b\""))
+  (expect! "string: escape unicode"
+    (= (write-clj-string (str (char 27))) "\"\\u001b\""))
   (expect! "char: named space" (= (emit-char-lit 32) "\\space"))
   (expect! "char: named tab" (= (emit-char-lit 9) "\\tab"))
   (expect! "char: named newline" (= (emit-char-lit 10) "\\newline"))
@@ -893,6 +1490,19 @@
     (= (emit-require {"ns" "fram.rt" "alias" nil "refer" nil}) "[fram.rt :as rt]"))
   (expect! "require: refer"
     (= (emit-require {"ns" "x.y" "alias" nil "refer" ["a" "b"]}) "[x.y :refer [a b]]"))
+  (expect! "import: qualified class"
+    (= (emit-import "java.util.zip.CRC32") "[java.util.zip CRC32]"))
+  (expect! "ns: imports follow requires"
+    (= (emit-ns-form
+         {"namespace" "fixture.imports"
+          "requires" [{"ns" "clojure.string" "alias" "str" "refer" nil}]
+          "imports" ["java.nio.charset.StandardCharsets" "java.util.zip.CRC32"]
+          "gen-class" false}
+         "")
+       (str "(ns fixture.imports\n"
+            "  (:require [clojure.string :as str])\n"
+            "  (:import [java.nio.charset StandardCharsets]\n"
+            "           [java.util.zip CRC32]))")))
 
   (expect! "defenum keywords"
     (= (emit-defenum {"name" "Color" "values" ["red" "blue"]})
@@ -974,6 +1584,76 @@
          [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false}
            "value" {"node" "ref" "name" "m"}}])
        "{:keys [id b]} m"))
+
+  (expect! "constrained callable captures predicate before authored binder"
+    (let [output
+            (emit-expr!
+              {"node" "defn"
+               "name" "keep"
+               "params" [{"type" "param"
+                           "name" "value"
+                           "ann" {"kind" "prim" "name" "Int"}
+                           "constraint" {"node" "ref" "name" "positive?"}}]
+               "rest" false
+               "ret" {"kind" "prim" "name" "Int"}
+               "body" [{"node" "ref" "name" "value"}]
+               "private" false
+               "doc" false} )]
+      (and (str/includes? output
+             "[$beagle$constraint$raw-param$0]")
+        (str/includes? output
+          "$beagle$constraint$predicate$0 positive?")
+        (str/includes? output
+          "Binding constraint failed: value"))))
+
+  (expect! "constrained let evaluates raw value once before projection"
+    (let [output
+            (emit-let-bindings
+              [{"name" "value"
+                "constraint" {"node" "ref" "name" "positive?"}
+                "value" {"node" "call"
+                         "fn" {"node" "ref" "name" "next-value"}
+                         "args" []}}])]
+      (and (str/includes? output "$beagle$constraint$raw-binding$0 (next-value)")
+        (str/includes? output "$beagle$constraint$predicate$0 positive?"))))
+
+  (expect! "record field constraint guards both constructor ABIs"
+    (let [output
+            (emit-record-form
+              {"name" "Account"
+               "fields" [{"type" "param"
+                           "name" "id"
+                           "ann" {"kind" "prim" "name" "Int"}
+                           "constraint" {"node" "ref" "name" "positive?"}}]})]
+      (and (str/includes? output "$beagle$record$Account$raw-constructor")
+        (str/includes? output "$beagle$record$Account$raw-map-constructor")
+        (str/includes? output "$beagle$record$Account$validate"))))
+
+  (expect! "constrained loop revalidates recur values"
+    (let [output
+            (emit-loop-with-constraints!
+              {"bindings" [{"name" "value"
+                             "constraint" {"node" "ref" "name" "positive?"}
+                             "value" {"node" "literal" "kind" "number" "value" 1}}]
+               "body" [{"node" "recur"
+                        "args" [{"node" "ref" "name" "value"}]}]})]
+      (and (str/includes? output "$beagle$constraint$first-iteration true")
+        (str/includes? output "(recur value false)"))))
+
+  (expect! "protocol constraint uses raw dispatch ABI plus guarded wrapper"
+    (let [output
+            (emit-protocol
+              {"name" "Measured"
+               "methods" [{"name" "measure"
+                            "params" [{"type" "param"
+                                       "name" "value"
+                                       "ann" {"kind" "prim" "name" "Int"}
+                                       "constraint" {"node" "ref" "name" "positive?"}}]
+                            "rest" false
+                            "ret" {"kind" "prim" "name" "Bool"}}]})]
+      (and (str/includes? output "$beagle$protocol$Measured$measure")
+        (str/includes? output "(defn measure")
+        (str/includes? output "Binding constraint failed: value"))))
 
   (doseq [f (deref failures)]
     (println (str "  FAIL: " f)))

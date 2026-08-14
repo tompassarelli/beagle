@@ -12,12 +12,14 @@
 #   5. E021 free-dotted-name       : selfhost + oracle both REJECT the ratchet
 #
 # Runs against the blessed seed (self-host/seed) — run after bin/beagle-remint
-# --promote. Usage: self-host/verify-target-nix.sh [FIXTURE.bnix ...]
+# --promote. Set SELFHOST_OUT=/tmp/stage to verify an isolated authored-source
+# compilation without changing the checked-in seed.
+# Usage: self-host/verify-target-nix.sh [FIXTURE.bnix ...]
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
 source bin/_beagle-racket
-OUT=self-host/seed
+OUT="${SELFHOST_OUT:-self-host/seed}"
 LAB=.lab
 GOLD=beagle-test/conformance/expected/nix
 mkdir -p "$LAB"
@@ -77,10 +79,24 @@ for src in "${FIXTURES[@]}"; do
   if python3 - "$LAB/$name-nix-self-ast.json" "$astj" <<'EOF' >/dev/null 2>&1
 import json, sys
 a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))
-sys.exit(0 if all(a.get(k) == b.get(k) for k in ["forms","requires","namespace","mode","target"]) else 1)
+checked_only = {"provenance", "inferredType", "effectiveType", "raises",
+                "constraintSynchronous", "recordUpdate", "recordFieldAccess"}
+def parser_shape(value):
+    if isinstance(value, dict):
+        return {
+            key: parser_shape(item)
+            for key, item in value.items()
+            if key not in checked_only and not (key == "doc" and item is False)
+        }
+    if isinstance(value, list):
+        return [parser_shape(item) for item in value]
+    return value
+same_forms = parser_shape(a.get("forms")) == parser_shape(b.get("forms"))
+same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","mode","target"])
+sys.exit(0 if same_forms and same_meta else 1)
 EOF
   then
-    ok "$name AST parity (forms/requires/namespace/mode/target)"
+    ok "$name AST parity (forms/requires/imports/namespace/mode/target)"
   else
     bad "$name AST parity — compare $LAB/$name-nix-self-ast.json vs $astj"
   fi
@@ -94,12 +110,34 @@ EOF
   fi
 done
 
+echo "=== 4b. known-valid oracle build control ==="
+VALID_ORACLE_CONTROL=beagle-test/tests/fixtures/nix-simple-pkg.bnix
+oracle_builder_ready=0
+control_out="$LAB/nix-valid-oracle-control.nix"
+control_stdout="$LAB/nix-valid-oracle-control.out"
+control_stderr="$LAB/nix-valid-oracle-control.err"
+if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$VALID_ORACLE_CONTROL" "$control_out" \
+    >"$control_stdout" 2>"$control_stderr"; then
+  ok "known-valid nix oracle control emits"
+  oracle_builder_ready=1
+else
+  bad "known-valid nix oracle control failed — inspect $control_stderr"
+  sed -n '1,8p' "$control_stderr" >&2
+fi
+
 echo "=== 5. E021 free-dotted-name — oracle + selfhost must BOTH reject ==="
 if [ -f "$FREE_DOTTED" ]; then
-  if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$FREE_DOTTED" /dev/null >/dev/null 2>&1; then
-    bad "nix-free-dotted oracle accepted (should reject E021)"
-  elif sh_main check --target nix "$FREE_DOTTED" >/dev/null 2>&1; then
-    bad "nix-free-dotted selfhost accepted (should reject E021)"
+  oracle_out="$LAB/nix-free-dotted-oracle.nix"
+  oracle_stdout="$LAB/nix-free-dotted-oracle.out"
+  oracle_stderr="$LAB/nix-free-dotted-oracle.err"
+  selfhost_out="$LAB/nix-free-dotted-selfhost.out"
+  if [ "$oracle_builder_ready" -ne 1 ]; then
+    bad "nix-free-dotted oracle rejection not evaluated (known-valid build control failed)"
+  elif BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$FREE_DOTTED" "$oracle_out" \
+      >"$oracle_stdout" 2>"$oracle_stderr"; then
+    bad "nix-free-dotted oracle accepted (should reject E021) — emitted $oracle_out"
+  elif sh_main check --target nix "$FREE_DOTTED" >"$selfhost_out" 2>&1; then
+    bad "nix-free-dotted selfhost accepted (should reject E021) — inspect $selfhost_out"
   else
     ok "nix-free-dotted E021 rejected (oracle + selfhost, exit nonzero)"
   fi

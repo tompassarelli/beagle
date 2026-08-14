@@ -1,0 +1,4 @@
+(defscalar Email
+  String
+  :where
+  (> 0))

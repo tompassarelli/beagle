@@ -102,7 +102,8 @@
    (rest-param Any)
    (ret Any)
    (body (Vec Any))
-   (private- Bool)] Any
+   (private- Bool)]
+  Any
   {"node" "defn" "name" name "params" params "rest-param" rest-param
    "ret" ret "body" body "private" private-})
 
@@ -110,10 +111,7 @@
   {"node" "defn-multi" "name" name "arities" arities "private" private-})
 
 (defn make-fn
-  [(params (Vec Any))
-   (rest-param Any)
-   (ret Any)
-   (body (Vec Any))] Any
+  [(params (Vec Any)) (rest-param Any) (ret Any) (body (Vec Any))] Any
   {"node" "fn" "params" params "rest-param" rest-param "ret" ret "body" body})
 
 (defn make-let [(bindings (Vec Any)) (body (Vec Any))] Any
@@ -207,14 +205,13 @@
   [(name String)
    (members (Vec String))
    (type-params Any)
-   (member-fields Any)] Any
+   (member-fields Any)]
+  Any
   {"node" "defunion" "name" name "members" members
    "type-params" type-params "member-fields" member-fields})
 
 (defn make-deferror
-  [(name String)
-   (members (Vec String))
-   (member-fields Any)] Any
+  [(name String) (members (Vec String)) (member-fields Any)] Any
   {"node" "deferror" "name" name "members" members "member-fields" member-fields})
 
 (defn make-defscalar [(name String) (backing Any) (predicates (Vec Any))] Any
@@ -230,17 +227,11 @@
   {"node" "when-some" "name" name "expr" expr "body" body})
 
 (defn make-if-some
-  [(name String)
-   (expr Any)
-   (then-body Any)
-   (else-body Any)] Any
+  [(name String) (expr Any) (then-body Any) (else-body Any)] Any
   {"node" "if-some" "name" name "expr" expr "then" then-body "else" else-body})
 
 (defn make-condp
-  [(pred-fn String)
-   (test-expr Any)
-   (clauses (Vec Any))
-   (fallback Any)] Any
+  [(pred-fn String) (test-expr Any) (clauses (Vec Any)) (fallback Any)] Any
   {"node" "condp" "pred-fn" pred-fn "test-expr" test-expr "clauses" clauses "default" fallback})
 
 (defn make-dotimes [(name String) (count-expr Any) (body (Vec Any))] Any
@@ -260,17 +251,18 @@
 
 ;; --- param constructors ------------------------------------------------------
 
-(defn make-param [(name Any) (ann Any)] Any
-  {"type" "param" "name" name "ann" ann})
+(defn make-param [(name Any) (ann Any) (constraint Any)] Any
+  {"type" "param" "name" name "ann" ann "constraint" constraint})
 
-(defn make-map-destructure [(keys (Vec String)) (as-name Any) (or-defaults Any)] Any
+(defn make-map-destructure
+  [(keys (Vec String)) (as-name Any) (or-defaults Any)] Any
   {"type" "map-destructure" "keys" keys "as" as-name "or" or-defaults})
 
 (defn make-seq-destructure [(names (Vec Any)) (rest-name Any)] Any
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
-(defn make-let-binding [(name Any) (ann Any) (value Any)] Any
-  {"name" name "ann" ann "value" value})
+(defn make-let-binding [(name Any) (ann Any) (constraint Any) (value Any)] Any
+  {"name" name "ann" ann "constraint" constraint "value" value})
 
 ;; --- pattern constructors ----------------------------------------------------
 
@@ -325,10 +317,7 @@
   {"node" "nix-path" "path" path})
 
 (defn make-nix-fn-set
-  [(formals (Vec Any))
-   (rest Bool)
-   (at-name Any)
-   (body Any)] Any
+  [(formals (Vec Any)) (rest Bool) (at-name Any) (body Any)] Any
   {"node" "nix-fn-set" "formals" formals "rest" rest "at-name" at-name "body" body})
 
 (defn make-nix-pipe [(direction String) (lhs Any) (rhs Any)] Any
@@ -349,7 +338,8 @@
    (target String)
    (forms (Vec Any))
    (externs Any)
-   (requires (Vec Any))] Any
+   (requires (Vec Any))]
+  Any
   {"mode" mode "namespace" namespace "target" target
    "forms" forms "externs" externs "requires" requires})
 
@@ -420,7 +410,7 @@
     (expect! "make-def name" (= (get node "name") "x"))
     (expect! "make-def value" (= (get (get node "value") "kind") "number")))
 
-  (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"})]
+  (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"} nil)]
                nil {"kind" "prim" "name" "String"}
                [(make-call "str" [(make-ref "x")])] false)]
     (expect! "make-defn node type" (= (get node "node") "defn"))
@@ -445,10 +435,23 @@
 
   ;; --- param constructors ---
 
-  (let [p (make-param "x" {"kind" "prim" "name" "Int"})]
+  (let [p (make-param "x" {"kind" "prim" "name" "Int"} nil)]
     (expect! "param type" (= (get p "type") "param"))
     (expect! "param name" (= (get p "name") "x"))
-    (expect! "param ann" (= (get (get p "ann") "name") "Int")))
+    (expect! "param ann" (= (get (get p "ann") "name") "Int"))
+    (expect! "param absent constraint" (nil? (get p "constraint"))))
+
+  (let [constraint (make-call "positive?" [(make-ref "x")])
+        p (make-param "x" {"kind" "prim" "name" "Int"} constraint)]
+    (expect! "param owns constraint AST"
+      (= (get (get p "constraint") "node") "call")))
+
+  (let [constraint (make-ref "positive?")
+        binding (make-let-binding
+                  "x" {"kind" "prim" "name" "Int"} constraint
+                  (make-literal "number" 1))]
+    (expect! "binding owns constraint AST"
+      (= (get (get binding "constraint") "name") "positive?")))
 
   (let [d (make-map-destructure ["a" "b"] "m" [])]
     (expect! "map-destructure type" (= (get d "type") "map-destructure"))
@@ -461,7 +464,7 @@
   (let [target (make-seq-destructure
                  ["x" (make-map-destructure ["y"] false [])]
                  false)
-        p (make-param target {"kind" "app" "name" "HVec" "args" []})]
+        p (make-param target {"kind" "app" "name" "HVec" "args" []} nil)]
     (expect! "param accepts structural binding target"
       (= (get (get p "name") "type") "seq-destructure")))
 

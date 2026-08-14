@@ -83,11 +83,11 @@ syntax. Two amputations are deliberate, not oversights:
   what the source *looks like* — see "The Lisp/Clojure/EDN surface" below for
   why the authoring medium stays s-expressions.
 - **No claim to full Hindley-Milner.** Beagle uses structural boundary
-  annotations (`(binding-form Type)`) and mandatory positional return types,
-  plus definition-local inference with bounded SCC generalization. It does not
-  claim principal-type global inference or the rest of HM's machinery. "ADTs
-  and exhaustiveness" is a much smaller, honestly scoped debt than "we
-  implemented ML."
+  declarations (`(binding-form Type [constraint])`) and mandatory positional
+  return types, plus definition-local inference with bounded SCC
+  generalization. It does not claim principal-type global inference or the rest
+  of HM's machinery. "ADTs and exhaustiveness" is a much smaller, honestly
+  scoped debt than "we implemented ML."
 
 *Why it matters here:* exhaustiveness and bounded polymorphism are exactly
 the failures the authoring loop is best at — a missing match arm or a bound
@@ -141,13 +141,15 @@ smuggling logic-programming semantics into the compiled language itself.
 
 - **Clojure as the surface.** Beagle is "Clojure plus types, nothing else." Any
   divergence from Clojure must be load-bearing for the type system or a backend,
-  or it gets removed. Boundary annotations are structural `(binding-form Type)`
-  forms, executable returns occupy one mandatory positional slot, and
-  definition-local interiors are inferred.
-- **Types that erase before emit** (closer to Typed Racket's stance than to a
-  type system that drives codegen). Types check at compile time and vanish — the
-  emitted Nix/JS/Clojure is idiomatic for its host, never a typed-runtime
-  artifact.
+  or it gets removed. Boundary declarations are structural
+  `(binding-form Type [constraint])` forms, executable returns occupy one
+  mandatory positional slot, and definition-local interiors are inferred.
+- **Static types erase before emit** (closer to Typed Racket's stance than to a
+  type system that drives codegen). Type information checks at compile time and
+  vanishes. An explicitly authored binding constraint is an ordinary predicate
+  value rather than type metadata, so it deliberately emits one local runtime
+  guard. The resulting Nix/JS/Clojure remains idiomatic for its host, never a
+  typed-runtime artifact.
 - **Parens as a machine-editable medium.** A fix is a tree splice, not a regex
   over free-form syntax. The s-expression surface is what makes auto-apply
   tractable.

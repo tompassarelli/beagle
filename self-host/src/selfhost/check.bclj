@@ -17,6 +17,7 @@
 
 (def ANY Any {"kind" "prim" "name" "Any"})
 (def NIL-TYPE Any {"kind" "prim" "name" "Nil"})
+(def BOOL-TYPE Any {"kind" "prim" "name" "Bool"})
 
 (defn make-prim [(name String)] Any
   {"kind" "prim" "name" name})
@@ -73,6 +74,21 @@
              nil (make-app "Vec" [(make-var "A")]))
     nil))
 
+;; Registry state must exist before compatibility checks consult enum metadata.
+;; The checker resets the complete map for each program.
+(def STATE Any
+  (atom {"record-fields" {}
+         "record-field-order" {}
+         "record-validators" {}
+         "record-updates" {}
+         "record-field-accesses" {}
+         "binding-constraint-proofs" {}
+         "union-members" {}
+         "enum-types" {}
+         "parametric-unions" {}
+         "parametric-member-union" {}
+         "diagnostics" []}))
+
 ;; --- type predicates ---------------------------------------------------------
 
 (defn prim? [(t Any)] Bool
@@ -96,8 +112,32 @@
 (defn any-type? [(t Any)] Bool
   (and (prim? t) (= (get t "name") "Any")))
 
+(defn dynamic-type? [(t Any)] Bool
+  (and (app-type? t) (= (get t "name") "Dyn")))
+
 (defn nil-type? [(t Any)] Bool
   (and (prim? t) (= (get t "name") "Nil")))
+
+;; Binding constraints are executable contracts, so `Any` anywhere in either
+;; the declared input or predicate signature makes the boundary unknowable.
+(defn type-contains-any? [(t Any)] Bool
+  (cond
+    (nil? t) false
+    (prim? t) (= (get t "name") "Any")
+    (app-type? t)
+      (boolean (some type-contains-any? (get t "args")))
+    (union-type? t)
+      (boolean (some type-contains-any? (get t "members")))
+    (fn-type? t)
+      (or (boolean (some type-contains-any? (get t "params")))
+          (and (not (nil? (get t "rest")))
+               (type-contains-any? (get t "rest")))
+          (type-contains-any? (get t "ret")))
+    (poly-type? t)
+      (or (type-contains-any? (get t "body"))
+          (and (not (nil? (get t "bounds")))
+               (boolean (some type-contains-any? (vals (get t "bounds"))))))
+    :else false))
 
 ;; --- type->string ------------------------------------------------------------
 
@@ -209,6 +249,12 @@
       (every? (fn [(alt Any)] Bool (type-compatible? alt expected))
               (get actual "members"))
 
+    (and (prim? actual)
+         (= (get actual "name") "Keyword")
+         (prim? expected)
+         (some? (get-in (deref STATE) ["enum-types" (get expected "name")])))
+      true
+
     (and (prim? actual) (prim? expected))
       (or (= (get actual "name") (get expected "name"))
           ;; Int widens to Float, one direction only (JVM/Clojure numeric
@@ -266,6 +312,16 @@
       (every? (fn [(a Any)] Bool
                 (type-compatible? a (nth (get expected "args") 0)))
               (get actual "args"))
+
+    (dynamic-type? expected)
+      (if (dynamic-type? actual)
+        (and (= (count (get actual "args")) (count (get expected "args")))
+             (every? (fn [(i Int)] Bool
+                       (type-invariant-equal? (nth (get actual "args") i)
+                         (nth (get expected "args") i)))
+               (range (count (get actual "args")))))
+        (boolean (some (fn [(alt Any)] Bool (type-compatible? actual alt))
+                   (get expected "args"))))
 
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
@@ -469,15 +525,24 @@
     (poly-type? t) t
     :else t))
 
-;; --- global registry + diagnostics (module-level atom) -----------------------
+;; --- global registry + diagnostics -------------------------------------------
 
-(def STATE Any
-  (atom {"record-fields" {}
-         "record-field-order" {}
-         "union-members" {}
-         "parametric-unions" {}
-         "parametric-member-union" {}
-         "diagnostics" []}))
+;; Private traversal identity used only while checking. Self-host AST maps do
+;; not carry source locations, and structurally identical `with` forms can live
+;; in scopes with different target types. A transient per-occurrence id keeps
+;; the semantic contract attached to the exact occurrence without relying on
+;; map equality or asking an emitter to infer ownership.
+(def WITH-CHECK-ID-KEY String "$beagle$selfhost$with-check-id")
+
+(def KW-ACCESS-CHECK-ID-KEY String "$beagle$selfhost$kw-access-check-id")
+
+(def BINDING-CHECK-ID-KEY String "$beagle$selfhost$binding-check-id")
+
+(def IMPORTED-RECORD-CONTRACTS-KEY String
+  "$beagle$selfhost$imported-record-contracts")
+
+(def IMPORTED-CALLABLE-SYNCHRONIZATION-KEY String
+  "$beagle$selfhost$imported-callable-synchronization")
 
 (defn emit-diag! [(msg String)] Nil
   (swap! STATE update "diagnostics" conj msg)
@@ -591,6 +656,467 @@
         (if (nil? rest-name) base (conj base rest-name)))
       :else [])))
 
+(defn binding-target->string [(target Any)] String
+  (if (string? target)
+    target
+    (let [names (destructure-bound-names target)]
+      (if (= (count names) 0)
+        "<binding>"
+        (str "[" (str/join " " names) "]")))))
+
+(defn binding-constraint [(binding Any)] Any
+  (opt-field (get binding "constraint")))
+
+(defn remember-binding-constraint-proof! [(binding Any) (proved? Bool)] Nil
+  (let [check-id (get binding BINDING-CHECK-ID-KEY)]
+    (when (not (nil? check-id))
+      (swap! STATE assoc-in
+        ["binding-constraint-proofs" check-id]
+        proved?)))
+  nil)
+
+;; Synchronization is a callable effect, not a return-type property. Constraint
+;; predicates are runtime guards and cannot suspend, so every statically named
+;; call in a predicate must have a positive local/imported/extern proof. The
+;; generic structural walk is deliberate: it catches Beagle and typed-JS AST
+;; variants without reconstructing semantic declarations from adjacent values.
+(defn constraint-value-synchronous? [(value Any) (proofs Any)] Bool
+  (cond
+    (vector? value)
+      (every?
+        (fn [(item Any)] Bool
+          (constraint-value-synchronous? item proofs))
+        value)
+
+    (map? value)
+      (let [node (get value "node")
+            jsk (get value "jsk")]
+        (cond
+          (= node "quoted") true
+          (= node "await") false
+          (and (= node "static-call") (= (get value "name") "js/await")) false
+          (= jsk "await") false
+          (and (or (= jsk "function") (= jsk "method"))
+               (= (get value "async") true)) false
+          (and (= node "js-class")
+               (boolean
+                 (some (fn [(method Any)] Bool (= (get method "async") true))
+                   (get value "methods")))) false
+
+          (= node "call")
+            (let [callee (get value "fn")
+                  named? (and (map? callee)
+                              (= (get callee "node") "ref")
+                              (string? (get callee "name")))
+                  callee-ok (if named?
+                              (= true (get proofs (get callee "name")))
+                              (constraint-value-synchronous? callee proofs))]
+              (and callee-ok
+                   (constraint-value-synchronous? (get value "args") proofs)))
+
+          (= node "static-call")
+            (and (= true (get proofs (get value "name")))
+                 (constraint-value-synchronous? (get value "args") proofs))
+
+          (= node "ref")
+            ;; An ordinary value ref is inert. A ref naming a known callable is
+            ;; itself an effect-bearing callable value, so it must retain a
+            ;; positive proof even when passed through a higher-order helper.
+            (let [name (get value "name")]
+              (if (contains? proofs name)
+                (= true (get proofs name))
+                true))
+
+          :else
+            (every?
+              (fn [(key Any)] Bool
+                (constraint-value-synchronous? (get value key) proofs))
+              (keys value))))
+
+    :else true))
+
+(defn callable-form-clauses [(form Any)] Any
+  (cond
+    (= (get form "node") "defn") [form]
+    (= (get form "node") "defn-multi") (get form "arities")
+    :else []))
+
+(defn callable-clause-synchronous? [(clause Any) (proofs Any)] Bool
+  (and
+    (constraint-value-synchronous? (get clause "params") proofs)
+    (constraint-value-synchronous? (opt-field (get clause "rest")) proofs)
+    (constraint-value-synchronous? (get clause "body") proofs)))
+
+(defn program-callable-synchronization [(prog Any)] Any
+  (let [forms (get prog "forms")
+        local-definitions
+          (reduce
+            (fn [(out Any) (raw-form Any)] Any
+              (let [form (if (= (get raw-form "node") "with-meta")
+                           (get raw-form "expr")
+                           raw-form)
+                    node (get form "node")]
+                (if (or (= node "defn") (= node "defn-multi"))
+                  (assoc out (get form "name") form)
+                  out)))
+            {}
+            forms)
+        imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
+        imported-proofs
+          (reduce
+            (fn [(out Any) (entry Any)] Any
+              (if (and (map? entry)
+                       (string? (get entry "name"))
+                       (boolean? (get entry "synchronous")))
+                (assoc out (get entry "name")
+                  (get entry "synchronous"))
+                out))
+            {}
+            imported)
+        external-proofs
+          (reduce
+            (fn [(out Any) (entry Any)] Any
+              ;; Source `declare-extern` is a typed host boundary. Recursive
+              ;; import facts are authoritative and must not be overwritten by
+              ;; the compatibility extern projection of the same qualified or
+              ;; referred name.
+              (if (and (string? (get entry "name"))
+                       (not (contains? out (get entry "name"))))
+                (assoc out (get entry "name")
+                  (not (= (get entry "synchronous") false)))
+                out))
+            imported-proofs
+            (get prog "externs"))
+        builtin-proofs
+          (reduce
+            (fn [(out Any) (name Any)] Any
+              (assoc out name true))
+            external-proofs
+            (keys STDLIB))
+        assumed
+          (reduce
+            (fn [(out Any) (name Any)] Any
+              (assoc out name true))
+            builtin-proofs
+            (keys local-definitions))]
+    ;; Greatest fixed point. Removed local names remain explicitly false so a
+    ;; caller cannot reinterpret them as an unknown/synchronous host function.
+    (loop [proofs assumed]
+      (let [next
+              (reduce
+                (fn [(out Any) (name Any)] Any
+                  (let [form (get local-definitions name)
+                        clauses (callable-form-clauses form)
+                        synchronous?
+                          (every?
+                            (fn [(clause Any)] Bool
+                              (callable-clause-synchronous? clause proofs))
+                            clauses)]
+                    (assoc out name synchronous?)))
+                proofs
+                (keys local-definitions))]
+        (if (= next proofs) next (recur next))))))
+
+(defn function-valued-type? [(type Any)] Bool
+  (let [body (if (poly-type? type) (get type "body") type)]
+    (cond
+      (fn-type? body) true
+      (union-type? body)
+        (and (> (count (get body "members")) 0)
+             (every? function-valued-type? (get body "members")))
+      :else false)))
+
+(defn definition-returns-callable? [(form Any)] Bool
+  (let [clauses (callable-form-clauses form)]
+    (and (> (count clauses) 0)
+         (every?
+           (fn [(clause Any)] Bool
+             (function-valued-type? (get clause "ret")))
+           clauses))))
+
+(declare callable-value-synchronous?)
+
+(defn callable-body-tail-synchronous?
+  [(body Any) (callable-proofs Any) (return-proofs Any) (aliases Any)] Bool
+  (and (vector? body)
+       (> (count body) 0)
+       (callable-value-synchronous?
+         (nth body (- (count body) 1))
+         callable-proofs return-proofs aliases)))
+
+(defn callable-value-synchronous?
+  [(value Any) (callable-proofs Any) (return-proofs Any) (aliases Any)] Bool
+  (cond
+    (and (map? value) (= (get value "node") "ref"))
+      (let [name (get value "name")]
+        (if (contains? aliases name)
+          (= true (get aliases name))
+          (= true (get callable-proofs name))))
+
+    (and (map? value) (= (get value "node") "fn"))
+      (constraint-value-synchronous? value callable-proofs)
+
+    (and (map? value) (= (get value "node") "call"))
+      (let [callee (get value "fn")
+            name (if (and (map? callee)
+                          (= (get callee "node") "ref"))
+                   (get callee "name")
+                   nil)]
+        (and (string? name)
+             (= true (get return-proofs name))
+             (constraint-value-synchronous? value callable-proofs)))
+
+    (and (map? value) (= (get value "node") "if"))
+      (and (constraint-value-synchronous?
+             (get value "cond") callable-proofs)
+           (callable-value-synchronous?
+             (get value "then") callable-proofs return-proofs aliases)
+           (callable-value-synchronous?
+             (get value "else") callable-proofs return-proofs aliases))
+
+    (and (map? value) (= (get value "node") "cond"))
+      (let [clauses (get value "clauses")]
+        (and (vector? clauses)
+             (> (count clauses) 0)
+             (every?
+               (fn [(clause Any)] Bool
+                 (and (constraint-value-synchronous?
+                        (get clause "test") callable-proofs)
+                      (callable-body-tail-synchronous?
+                        (get clause "body")
+                        callable-proofs return-proofs aliases)))
+               clauses)))
+
+    (and (map? value) (= (get value "node") "do"))
+      (let [body (get value "body")]
+        (and (vector? body)
+             (> (count body) 0)
+             (constraint-value-synchronous?
+               (subvec body 0 (- (count body) 1)) callable-proofs)
+             (callable-body-tail-synchronous?
+               body callable-proofs return-proofs aliases)))
+
+    (and (map? value) (= (get value "node") "let"))
+      (let [bindings (get value "bindings")
+            final-aliases
+              (reduce
+                (fn [(env Any) (binding Any)] Any
+                  (let [target (get binding "name")
+                        proof (callable-value-synchronous?
+                                (get binding "value")
+                                callable-proofs return-proofs env)]
+                    (if (string? target)
+                      (assoc env target proof)
+                      env)))
+                aliases
+                bindings)]
+        (and (constraint-value-synchronous?
+               (mapv (fn [(binding Any)] Any (get binding "value")) bindings)
+               callable-proofs)
+             (callable-body-tail-synchronous?
+               (get value "body")
+               callable-proofs return-proofs final-aliases)))
+
+    :else false))
+
+(defn program-returns-synchronous-callable
+  [(prog Any) (callable-proofs Any)] Any
+  (let [forms (get prog "forms")
+        local-definitions
+          (reduce
+            (fn [(out Any) (raw-form Any)] Any
+              (let [form (if (= (get raw-form "node") "with-meta")
+                           (get raw-form "expr")
+                           raw-form)]
+                (if (and (or (= (get form "node") "defn")
+                             (= (get form "node") "defn-multi"))
+                         (definition-returns-callable? form))
+                  (assoc out (get form "name") form)
+                  out)))
+            {}
+            forms)
+        imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
+        imported-proofs
+          (reduce
+            (fn [(out Any) (entry Any)] Any
+              (if (and (map? entry)
+                       (string? (get entry "name"))
+                       (boolean? (get entry "returnsSynchronousCallable")))
+                (assoc out (get entry "name")
+                  (get entry "returnsSynchronousCallable"))
+                out))
+            {}
+            imported)
+        external-proofs
+          (reduce
+            (fn [(out Any) (entry Any)] Any
+              (let [name (get entry "name")]
+                (if (and (string? name) (not (contains? out name)))
+                  (assoc out name
+                    (= true (get entry "returnsSynchronousCallable")))
+                  out)))
+            imported-proofs
+            (get prog "externs"))
+        assumed
+          (reduce
+            (fn [(out Any) (name Any)] Any (assoc out name true))
+            external-proofs
+            (keys local-definitions))]
+    ;; Greatest fixed point: recursive factories remain proven only when every
+    ;; return path retains positive callable-value provenance.
+    (loop [proofs assumed]
+      (let [next
+              (reduce
+                (fn [(out Any) (name Any)] Any
+                  (let [form (get local-definitions name)
+                        proven?
+                          (every?
+                            (fn [(clause Any)] Bool
+                              (let [body (get clause "body")]
+                                (and (vector? body)
+                                     (> (count body) 0)
+                                     (constraint-value-synchronous?
+                                       (subvec body 0 (- (count body) 1))
+                                       callable-proofs)
+                                     (callable-body-tail-synchronous?
+                                       body callable-proofs proofs {}))))
+                            (callable-form-clauses form))]
+                    (assoc out name proven?)))
+                proofs
+                (keys local-definitions))]
+        (if (= next proofs) next (recur next))))))
+
+(defn constraint-synchronization-proof [(predicate Any) (env Any)] Bool
+  (let [proofs (get env "#%callable-synchronous")
+        return-proofs (get env "#%returns-synchronous-callable")]
+    (cond
+      (and (map? predicate)
+           (= (get predicate "node") "ref")
+           (string? (get predicate "name")))
+      (= true (get proofs (get predicate "name")))
+
+      (and (map? predicate)
+           (= (get predicate "node") "call")
+           (map? (get predicate "fn"))
+           (= (get (get predicate "fn") "node") "ref")
+           (string? (get (get predicate "fn") "name")))
+      (and (= true
+             (get return-proofs (get (get predicate "fn") "name")))
+           (constraint-value-synchronous? predicate proofs))
+
+      (and (map? predicate) (= (get predicate "node") "fn"))
+      (constraint-value-synchronous? predicate proofs)
+
+      :else false)))
+
+(defn constraint-callable-resolution! [(inferred Any) (effective Any)] Any
+  (if (poly-type? inferred)
+    (let [body (get inferred "body")
+          bindings (atom {})]
+      (when (and (fn-type? body) (= (count (get body "params")) 1))
+        (infer-type-var-bindings! (nth (get body "params") 0) effective bindings))
+      (let [bounds (get inferred "bounds")
+            bounds-ok?
+              (or (nil? bounds)
+                  (every?
+                    (fn [(var Any)] Bool
+                      (let [bound (get bounds var)
+                            bound-value (get (deref bindings) var)]
+                        (or (nil? bound-value)
+                            (any-type? bound-value)
+                            (type-compatible? bound-value bound))))
+                    (keys bounds)))]
+        {"type" (apply-type-bindings body bindings)
+         "bounds-ok" bounds-ok?}))
+    {"type" inferred "bounds-ok" true}))
+
+(defn binding-constraint-error!
+  [(target Any)
+   (declared Any)
+   (predicate-type Any)
+   (context String)
+   (reason String)]
+  Nil
+  (let [binding-name (binding-target->string target)
+        expected (if (nil? declared)
+                   "(Fn [DeclaredType] Bool)"
+                   (type->string (make-fn [declared] nil BOOL-TYPE)))
+        actual (if (nil? predicate-type) "Any" (type->string predicate-type))]
+    (emit-diag!
+      (str "beagle: " context " " binding-name
+        " constraint must be a statically known predicate " expected
+        "; got " actual " (" reason ")"))))
+
+;; The predicate expression is checked in the incoming environment. The binder
+;; and every sibling parameter remain out of scope until all constraints at the
+;; boundary have been validated.
+(defn check-binding-constraint!
+  [(owner Any)
+   (declared Any)
+   (effective Any)
+   (predicate Any)
+   (env Any)
+   (context String)]
+  Nil
+  (if (nil? predicate)
+    (remember-binding-constraint-proof! owner false)
+    (do
+      ;; A constrained declaration is pessimistically unproved until every
+      ;; static and synchronization check below succeeds.
+      (remember-binding-constraint-proof! owner false)
+    (cond
+      (nil? declared)
+      (binding-constraint-error! (get owner "name") nil nil context
+        "a constraint requires an explicit declared type")
+
+      (type-contains-any? declared)
+      (binding-constraint-error! (get owner "name") declared declared context
+        "the declared input contains Any")
+
+      :else
+      (let [inferred (infer-expr! predicate env)]
+        (cond
+          (or (nil? inferred) (type-contains-any? inferred))
+          (binding-constraint-error! (get owner "name") declared inferred context
+            "the predicate type contains Any")
+
+          :else
+          (let [resolution (constraint-callable-resolution! inferred effective)
+                callable (get resolution "type")]
+            (cond
+              (not (= (get resolution "bounds-ok") true))
+              (binding-constraint-error! (get owner "name") declared callable context
+                "its input does not satisfy the predicate's type-variable bound")
+
+              (not (fn-type? callable))
+              (binding-constraint-error! (get owner "name") declared callable context
+                "the constraint expression is not callable")
+
+              (or (not= (count (get callable "params")) 1)
+                  (not (nil? (get callable "rest"))))
+              (binding-constraint-error! (get owner "name") declared callable context
+                "the predicate must accept exactly one argument")
+
+              (type-contains-any? callable)
+              (binding-constraint-error! (get owner "name") declared callable context
+                "the predicate signature contains Any")
+
+              (not (type-compatible? effective (nth (get callable "params") 0)))
+              (binding-constraint-error! (get owner "name") declared callable context
+                (str "its input does not accept " (type->string effective)))
+
+              (not (type-compatible? (get callable "ret") BOOL-TYPE))
+              (binding-constraint-error! (get owner "name") declared callable context
+                "the predicate return type is not Bool")
+
+              (not (constraint-synchronization-proof predicate env))
+              (binding-constraint-error! (get owner "name") declared callable context
+                "the predicate is not proven synchronous; js/await, async call chains, and callables without interface synchronization metadata are not allowed")
+
+              :else
+                (remember-binding-constraint-proof! owner true))))))
+  nil)))
+
 (defn destructure-default-exprs [(pattern Any)] Any
   (let [target (param-binding-target pattern)
         t (get target "type")]
@@ -640,7 +1166,7 @@
     (get-in (deref STATE) ["union-members" (get aggregate "name")])
     :else nil))
 
-(defn record-field-type-for [(aggregate Any) (keyword String)] Any
+(defn record-field-type-for! [(aggregate Any) (keyword String)] Any
   (let [field-map (record-field-map-for-type aggregate)]
     (if (not (nil? field-map))
       (if (contains? field-map keyword)
@@ -666,7 +1192,8 @@
                   declaring))
               nil)))))))
 
-(defn destructure-type-error! [(pattern Any) (aggregate Any) (where String) (message String)] Nil
+(defn destructure-type-error!
+  [(pattern Any) (aggregate Any) (where String) (message String)] Nil
   (emit-diag! (str "beagle: " where " destructuring "
                 (if (= (get pattern "type") "map-destructure") "map" "sequential")
                 ": " message " (aggregate type " (type->string aggregate) ")")))
@@ -681,7 +1208,8 @@
 ;; A destructuring annotation describes the incoming aggregate. Project that
 ;; type recursively onto every bound name; do not collapse a typed pattern to
 ;; blanket Any. Explicit `(pattern Any)` remains the dynamic boundary.
-(defn bind-destructure-type! [(env Any) (pattern Any) (aggregate Any) (where String)] Any
+(defn bind-destructure-type!
+  [(env Any) (pattern Any) (aggregate Any) (where String)] Any
   (cond
     (string? pattern)
     (assoc env pattern aggregate)
@@ -758,7 +1286,7 @@
                                    nominal? (or (not (nil? field-map))
                                               (not (nil? union-members)))
                                    projected (if nominal?
-                                               (record-field-type-for aggregate keyword)
+                                               (record-field-type-for! aggregate keyword)
                                                nil)
                                    field-type (cond
                                                 (not (nil? projected)) projected
@@ -801,18 +1329,65 @@
       (= t "seq-destructure") ANY
       :else ANY)))
 
+(defn vec-aggregate-type? [(t Any)] Bool
+  (and (app-type? t)
+       (= (get t "name") "Vec")
+       (= (count (get t "args")) 1)))
+
+(defn rest-param-call-element-type [(rest-param Any)] Any
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
+    (if (vec-aggregate-type? authored)
+      (nth (get authored "args") 0)
+      ANY)))
+
+(defn rest-param-body-type [(rest-param Any)] Any
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
+    (if (vec-aggregate-type? authored)
+      authored
+      (make-app "Vec" [(rest-param-call-element-type rest-param)]))))
+
+(defn check-rest-annotation! [(rest-param Any) (context String)] Nil
+  (when (not (nil? rest-param))
+    (let [authored (get rest-param "ann")]
+      (when (and (not (nil? authored)) (not (vec-aggregate-type? authored)))
+        (emit-diag!
+          (str "beagle: " context
+            " rest parameter annotation must describe its aggregate body binding as "
+            "(Vec Element), got " (type->string authored))))))
+  nil)
+
 (defn extend-with-params! [(env Any) (params (Vec Any)) (rest-param Any)] Any
-  (let [env1 (reduce
-               (fn [(out Any) (p Any)] Any
-                 (let [target (param-binding-target p)
-                       declared (param-type-or-any p)]
-                   (if (string? target)
-                     (assoc out target declared)
-                     (bind-destructure-type! out target declared "parameter"))))
-               env params)]
-    (if (and (not (nil? rest-param)) (= (get rest-param "type") "param"))
-      (assoc env1 (get rest-param "name") (param-type-or-any rest-param))
-      env1)))
+  (let [all-params (if (nil? rest-param)
+                     (vec params)
+                     (conj (vec params) rest-param))
+        effective-types (if (nil? rest-param)
+                          (mapv param-type-or-any params)
+                          (conj (mapv param-type-or-any params)
+                            (rest-param-body-type rest-param)))]
+    (check-rest-annotation! rest-param "parameter")
+    ;; Parameters at one callable boundary are simultaneous. Check every
+    ;; predicate before installing any target so a sibling cannot shadow a
+    ;; top-level predicate or become an implicit input.
+    (doseq [i (range (count all-params))]
+      (let [p (nth all-params i)]
+        (when (= (get p "type") "param")
+          (check-binding-constraint!
+            p
+            (get p "ann")
+            (nth effective-types i)
+            (binding-constraint p)
+            env
+            "parameter"))))
+    (reduce
+      (fn [(out Any) (i Int)] Any
+        (let [p (nth all-params i)
+              target (param-binding-target p)
+              effective (nth effective-types i)]
+          (if (string? target)
+            (assoc out target effective)
+            (bind-destructure-type! out target effective "parameter"))))
+      env
+      (range (count all-params)))))
 
 ;; infer-expr! is mutually recursive with the helpers below (and register-*!);
 ;; beagle/clj has no `declare` combiner, but a passthrough (declare ...) emits a
@@ -823,6 +1398,13 @@
       (let [inferred (infer-expr! (get b "value") out)
             declared (get b "ann")
             bname (get b "name")]
+        (check-binding-constraint!
+          b
+          declared
+          (if (nil? declared) inferred declared)
+          (binding-constraint b)
+          out
+          "let binding")
         (if (or (= (get bname "type") "map-destructure")
               (= (get bname "type") "seq-destructure"))
           (do
@@ -1126,6 +1708,45 @@
 
 ;; --- check-args! --------------------------------------------------------------
 
+(defn enum-member-violation [(expected Any) (arg Any)] Any
+  (if (and (prim? expected)
+        (= (get arg "node") "literal")
+        (= (get arg "kind") "keyword"))
+    (let [members (get-in (deref STATE) ["enum-types" (get expected "name")])
+          raw-value (get arg "value")
+          value (if (and (string? raw-value) (str/starts-with? raw-value ":"))
+                  raw-value
+                  (str ":" raw-value))]
+      (if (and (vector? members)
+            (not (boolean (some (fn [(member Any)] Bool (= member value)) members))))
+        {"enum" (get expected "name") "members" members "value" value}
+        nil))
+    nil))
+
+(defn emit-enum-member-violation! [(violation Any)] Nil
+  (emit-diag! (str "beagle: " (get violation "value")
+               " is not a member of enum "
+               (get violation "enum")
+               " (valid: "
+               (str/join " " (get violation "members"))
+               ")")))
+
+;; Equality has Any-typed stdlib parameters, so validate a literal keyword
+;; against an enum-typed reference explicitly, in either operand order.
+(defn check-enum-comparison! [(fn-name String) (args (Vec Any)) (env Any)] Nil
+  (when (and (or (= fn-name "=") (= fn-name "not=")) (= (count args) 2))
+    (let [check-side! (fn [(value-expr Any) (keyword-expr Any)] Nil
+                        (when (= (get value-expr "node") "ref")
+                          (let [value-type (infer-expr! value-expr env)
+                                violation
+                                (enum-member-violation value-type keyword-expr)]
+                            (when (some? violation)
+                              (emit-enum-member-violation! violation))))
+                        nil)]
+      (check-side! (nth args 0) (nth args 1))
+      (check-side! (nth args 1) (nth args 0))))
+  nil)
+
 ;; Returns the vector of inferred argument types (in order), so callers can
 ;; refine numeric-preserving returns without re-inferring (which would duplicate
 ;; nested-call diagnostics) — mirrors check.rkt check-args. A variadic call
@@ -1135,22 +1756,24 @@
 ;; The per-arg message is "arg N" for BOTH fixed and rest positions (oracle
 ;; check-one-arg does not distinguish a "rest arg").
 (defn check-args!
-  [(fn-name String)
-   (fn-t Any)
-   (args (Vec Any))
-   (env Any)] (Vec Any)
+  [(fn-name String) (fn-t Any) (args (Vec Any)) (env Any)] (Vec Any)
   (let [fixed (get fn-t "params")
         rest-t (get fn-t "rest")
         n-fixed (count fixed)
         n-args (count args)
         check-slot (fn [(i Int)] Any
                      (let [actual (infer-expr! (nth args i) env)
-                           expected (if (< i n-fixed) (nth fixed i) rest-t)]
+                           expected (if (< i n-fixed) (nth fixed i) rest-t)
+                           enum-violation
+                             (enum-member-violation expected (nth args i))]
+                       (when (some? enum-violation)
+                         (emit-enum-member-violation! enum-violation))
                        (when (not (type-compatible? actual expected))
                          (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1)
                                           " expected " (type->string expected)
                                           ", got " (type->string actual))))
                        actual))]
+    (check-enum-comparison! fn-name args env)
     (cond
       (not (nil? rest-t))
         (do (when (< n-args n-fixed)
@@ -1183,6 +1806,69 @@
 
 ;; === register-record =========================================================
 
+(defn fields-have-constraints? [(fields Any)] Bool
+  (boolean
+    (some (fn [(field Any)] Bool
+            (not (nil? (binding-constraint field))))
+      fields)))
+
+(defn record-validator-symbol [(name String)] String
+  (str "$beagle$record$" name "$validate"))
+
+(defn install-imported-record-contracts! [(contracts Any)] Nil
+  (doseq [contract contracts]
+    (let [name (get contract "name")
+          fields (get contract "fields")
+          field-order (get contract "field-order")
+          validator (get contract "validator")
+          constrained (get contract "constrained")
+          synchronous (get contract "synchronous")]
+      (cond
+        (not (and (string? name)
+                  (map? fields)
+                  (vector? field-order)
+                  (boolean? constrained)
+                  (= synchronous true)))
+        (emit-diag! (str "beagle: imported record contract is malformed or lacks a positive synchronization proof: "
+                      (str contract)))
+
+        (and constrained (not (string? validator)))
+        (emit-diag! (str "beagle: imported constrained record " name
+                      " is missing its provider validator contract"))
+
+        (and (not constrained) (not (nil? validator)) (not (false? validator)))
+        (emit-diag! (str "beagle: imported unconstrained record " name
+                      " has an invalid validator contract"))
+
+        :else
+        (do
+          (swap! STATE assoc-in ["record-fields" name] fields)
+          (swap! STATE assoc-in ["record-field-order" name] field-order)
+          (when constrained
+            (swap! STATE assoc-in ["record-validators" name] validator))))))
+  nil)
+
+(defn register-record-validator! [(name String) (fields Any)] Nil
+  (when (fields-have-constraints? fields)
+    (swap! STATE assoc-in
+      ["record-validators" name]
+      (record-validator-symbol name)))
+  nil)
+
+(defn remember-record-update! [(with-node Any) (contract Any)] Nil
+  (let [check-id (get with-node WITH-CHECK-ID-KEY)]
+    (when (not (nil? check-id))
+      (swap! STATE assoc-in ["record-updates" check-id] contract)))
+  nil)
+
+(defn remember-record-field-access! [(access-node Any) (contract Any)] Nil
+  (let [check-id (get access-node KW-ACCESS-CHECK-ID-KEY)]
+    (when (not (nil? check-id))
+      (swap! STATE assoc-in
+        ["record-field-accesses" check-id]
+        contract)))
+  nil)
+
 (defn register-record! [(name String) (fields (Vec Any)) (env Any)] Any
   (let [rec-type (make-prim name)
         name-lower (str/lower-case name)
@@ -1201,6 +1887,7 @@
                              nil rec-type))]
     (swap! STATE assoc-in ["record-fields" name] field-map)
     (swap! STATE assoc-in ["record-field-order" name] field-order)
+    (register-record-validator! name fields)
     env2))
 
 ;; === register-union ==========================================================
@@ -1210,7 +1897,8 @@
    (members (Vec Any))
    (type-params Any)
    (member-fields Any)
-   (env Any)] Any
+   (env Any)]
+  Any
   (do
     (swap! STATE assoc-in ["union-members" name] members)
     (if (or (nil? type-params) (= (count type-params) 0))
@@ -1250,6 +1938,7 @@
                                          e1 fields)]
                           (swap! STATE assoc-in ["record-fields" m] field-map)
                           (swap! STATE assoc-in ["record-field-order" m] field-order)
+                          (register-record-validator! m fields)
                           e2)
                         e)))
                   env1 members)
@@ -1371,14 +2060,27 @@
 
     (= (get e "node") "fn")
       (let [params (get e "params")
+            rest-param (opt-field (get e "rest"))
             p-types (mapv param-type-or-any params)
-            body-env (extend-with-params! env params (opt-field (get e "rest")))
-            ret (if (not (nil? (get e "ret")))
-                  (get e "ret")
-                  (last-expr-type! (get e "body") body-env))]
-        (make-fn p-types nil ret))
+            rest-type (if (nil? rest-param)
+                        nil
+                        (rest-param-call-element-type rest-param))
+            body-env (extend-with-params! env params rest-param)
+            expected-ret (get e "ret")
+            body-type (last-expr-type! (get e "body") body-env)
+            ret (if (not (nil? expected-ret)) expected-ret body-type)]
+        (when (and (not (nil? expected-ret))
+                   (not (type-compatible? body-type expected-ret)))
+          (emit-diag! (str "beagle: fn: expected return "
+                       (type->string expected-ret) ", got "
+                       (type->string body-type))))
+        (make-fn p-types rest-type ret))
 
     (= (get e "node") "let")
+      (let [body-env (extend-with-let-bindings! env (get e "bindings"))]
+        (last-expr-type! (get e "body") body-env))
+
+    (= (get e "node") "with-open")
       (let [body-env (extend-with-let-bindings! env (get e "bindings"))]
         (last-expr-type! (get e "body") body-env))
 
@@ -1392,11 +2094,29 @@
             (let [vt (infer-expr! (get b "value") env)
                   nm (get b "name")
                   dyn-vars (get env "#%dynamic-vars")
-                  declared (get env nm)]
+                  declared (get env nm)
+                  authored (get b "ann")]
               (when (nil? (get dyn-vars nm))
                 (emit-diag! (str "beagle: binding: " nm
                                  " is not a dynamic var — only `(def ^:dynamic " nm
                                  " ...)` vars can be rebound with `binding`")))
+              (when (and (not (nil? authored))
+                         (not (nil? declared))
+                         (not (type-compatible? authored declared)))
+                (emit-diag! (str "beagle: binding " nm ": annotation "
+                                 (type->string authored)
+                                 " does not match dynamic var type "
+                                 (type->string declared))))
+              (check-binding-constraint!
+                b
+                authored
+                (cond
+                  (not (nil? authored)) authored
+                  (not (nil? declared)) declared
+                  :else vt)
+                (binding-constraint b)
+                env
+                "dynamic binding")
               (when (and (not (nil? declared)) (not (type-compatible? vt declared)))
                 (emit-diag! (str "beagle: binding " nm ": expected "
                                  (type->string declared) ", got " (type->string vt))))))
@@ -1406,7 +2126,9 @@
       (let [body-env (reduce (fn [(be Any) (f Any)] Any
                                (let [rp (opt-field (get f "rest"))
                                      p-types (mapv param-type-or-any (get f "params"))
-                                     rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
+                                     rtype (if (not (nil? rp))
+                                             (rest-param-call-element-type rp)
+                                             nil)
                                      ret (if (not (nil? (get f "ret"))) (get f "ret") ANY)]
                                  (assoc be (get f "name") (make-fn p-types rtype ret))))
                              env (get e "fns"))]
@@ -1568,6 +2290,13 @@
                                                  (type->string declared) ", got "
                                                  (type->string elem-type) " from "
                                                  (type->string coll-type))))
+                                 (check-binding-constraint!
+                                   c
+                                   declared
+                                   effective
+                                   (binding-constraint c)
+                                   be
+                                   "for/doseq binding")
                                  (if (string? target)
                                    (assoc be target effective)
                                    (bind-destructure-type! be target effective "for/doseq binding")))
@@ -1599,6 +2328,13 @@
                                                  (type->string declared) ", got "
                                                  (type->string elem-type) " from "
                                                  (type->string coll-type))))
+                                 (check-binding-constraint!
+                                   c
+                                   declared
+                                   effective
+                                   (binding-constraint c)
+                                   be
+                                   "for/doseq binding")
                                  (if (string? target)
                                    (assoc be target effective)
                                    (bind-destructure-type! be target effective "for/doseq binding")))
@@ -1642,17 +2378,34 @@
 
     (= (get e "node") "kw-access")
       (let [target-type (infer-expr! (get e "target") env)
-            dflt (opt-field (get e "default"))]
+            dflt (opt-field (get e "default"))
+            nominal-name (cond
+                           (prim? target-type) (get target-type "name")
+                           (app-type? target-type) (get target-type "name")
+                           :else nil)
+            record-contract
+              (if (and (string? nominal-name)
+                    (not (nil?
+                      (get-in (deref STATE) ["record-fields" nominal-name]))))
+                {"recordName" nominal-name}
+                nil)]
+        (remember-record-field-access! e record-contract)
         (when (not (nil? dflt)) (infer-expr! dflt env))
         (lookup-kw-field-type (get e "kw") target-type))
 
     (= (get e "node") "with")
       (let [target-type (infer-expr! (get e "target") env)]
         (cond
-          (and (prim? target-type)
+          (and (or (prim? target-type) (app-type? target-type))
                (not (nil? (get-in (deref STATE) ["record-fields" (get target-type "name")]))))
             (let [rec-name (get target-type "name")
-                  field-map (get-in (deref STATE) ["record-fields" rec-name])]
+                  field-map (get-in (deref STATE) ["record-fields" rec-name])
+                  field-order (get-in (deref STATE) ["record-field-order" rec-name])
+                  validator (get-in (deref STATE) ["record-validators" rec-name])]
+              (remember-record-update! e
+                {"recordName" rec-name
+                 "fieldOrder" field-order
+                 "validator" validator})
               (doseq [u (get e "updates")]
                 (let [kw (get u "field")
                       val-type (infer-expr! (get u "value") env)
@@ -1667,7 +2420,8 @@
                       (emit-diag! (str "beagle: with " rec-name ": no field " kw)))))
               target-type)
           :else
-            (do (doseq [u (get e "updates")] (infer-expr! (get u "value") env))
+            (do (remember-record-update! e nil)
+                (doseq [u (get e "updates")] (infer-expr! (get u "value") env))
                 ANY)))
 
     (= (get e "node") "record")
@@ -1913,7 +2667,16 @@
                                        (assoc env nm ANY)
                                        env))
                                    env-with-externs CLJ-BUILTIN-DYNAMIC-VARS)
-                           env-with-externs)]
+                           env-with-externs)
+        callable-synchronization
+          (program-callable-synchronization prog)
+        returns-synchronous-callable
+          (program-returns-synchronous-callable prog callable-synchronization)
+        env-with-externs
+          (assoc env-with-externs
+            "#%callable-synchronous" callable-synchronization
+            "#%returns-synchronous-callable"
+              returns-synchronous-callable)]
     (reduce
       (fn [(env Any) (raw-form Any)] Any
         (let [form (if (= (get raw-form "node") "with-meta")
@@ -1933,7 +2696,9 @@
               (let [params (get form "params")
                     rest-param (opt-field (get form "rest"))
                     p-types (mapv param-type-or-any params)
-                    rtype (if (not (nil? rest-param)) (param-type-or-any rest-param) nil)
+                    rtype (if (not (nil? rest-param))
+                            (rest-param-call-element-type rest-param)
+                            nil)
                     ret (if (not (nil? (get form "ret"))) (get form "ret") ANY)]
                 (assoc env (get form "name") (make-fn p-types rtype ret)))
             (= node "defn-multi")
@@ -1941,7 +2706,9 @@
                     alt-types (mapv (fn [(a Any)] Any
                                       (let [rp (opt-field (get a "rest"))
                                             p-types (mapv param-type-or-any (get a "params"))
-                                            rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
+                                            rtype (if (not (nil? rp))
+                                                    (rest-param-call-element-type rp)
+                                                    nil)
                                             ret (if (not (nil? (get a "ret"))) (get a "ret") ANY)]
                                         (make-fn p-types rtype ret)))
                                     arities)]
@@ -1954,11 +2721,115 @@
             (= node "defunion")
               (register-union! (get form "name") (get form "members")
                 (get form "type-params") (get form "member-fields") env)
-            (= node "defenum") env
+            (= node "deferror")
+              (register-union! (get form "name") (get form "members")
+                [] (get form "member-fields") env)
+            (= node "defprotocol")
+              (reduce
+                (fn [(protocol-env Any) (method Any)] Any
+                  (let [rest-param (opt-field (get method "rest"))]
+                    (assoc protocol-env
+                      (get method "name")
+                      (make-fn
+                        (mapv param-type-or-any (get method "params"))
+                        (if (nil? rest-param)
+                          nil
+                          (rest-param-call-element-type rest-param))
+                        (get method "ret")))))
+                env
+                (get form "methods"))
+            (= node "defenum")
+              (do
+                (swap! STATE assoc-in
+                  ["enum-types" (get form "name")] (get form "values"))
+                env)
             (= node "defmulti")
               (assoc env (get form "name") (make-fn [ANY] nil ANY))
             :else env)))
       env-with-externs forms)))
+
+(defn check-parameter-declarations!
+  [(params Any) (rest-param Any) (env Any) (context String)] Nil
+  (check-rest-annotation! rest-param context)
+  (doseq [p params]
+    (when (= (get p "type") "param")
+      (check-binding-constraint!
+        p
+        (get p "ann")
+        (param-type-or-any p)
+        (binding-constraint p)
+        env
+        context)))
+  (when (and (not (nil? rest-param))
+             (= (get rest-param "type") "param"))
+    (check-binding-constraint!
+      rest-param
+      (get rest-param "ann")
+      (rest-param-body-type rest-param)
+      (binding-constraint rest-param)
+      env
+      context))
+  nil)
+
+(defn check-field-declarations! [(fields Any) (env Any) (context String)] Nil
+  (doseq [field fields]
+    (check-binding-constraint!
+      field
+      (get field "ann")
+      (get field "ann")
+      (binding-constraint field)
+      env
+      context))
+  nil)
+
+(def NUMERIC-SCALAR-BACKINGS Any
+  #{"Int" "Float" "U8" "U16" "U32" "U64" "I8" "I16" "I32" "F32"})
+
+(defn check-scalar-predicate-declarations! [(scalar Any)] Nil
+  (let [predicates (get scalar "predicates")
+        backing (get scalar "backing")
+        backing-name (if (prim? backing) (get backing "name") (str backing))]
+    (when (and (not (nil? predicates))
+               (> (count predicates) 0)
+               (not (contains? NUMERIC-SCALAR-BACKINGS backing-name)))
+      (doseq [predicate predicates]
+        (emit-diag!
+          (str "beagle: defscalar " (get scalar "name") ": predicate ("
+            (get predicate "op") " " (get predicate "value")
+            ") requires a numeric backing type; got " backing-name)))))
+  nil)
+
+(defn declared-return-compatible? [(actual Any) (expected Any)] Bool
+  (or (nil? expected)
+      (type-compatible? actual expected)
+      (and (app-type? expected)
+           (= (get expected "name") "Promise")
+           (= (count (get expected "args")) 1)
+           (type-compatible? actual (nth (get expected "args") 0)))))
+
+(defn check-method-body! [(method Any) (env Any) (context String)] Nil
+  (let [rest-param (opt-field (get method "rest"))
+        body-env (extend-with-params! env (get method "params") rest-param)
+        body (get method "body")
+        actual (last-expr-type! body body-env)
+        expected (get method "ret")]
+    (when (not (declared-return-compatible? actual expected))
+      (emit-diag!
+        (str "beagle: " context " " (get method "name")
+          ": expected return " (type->string expected)
+          ", got " (type->string actual)))))
+  nil)
+
+(defn check-extend-type! [(form Any) (env Any)] Nil
+  (doseq [impl (get form "impls")]
+    (doseq [method (get impl "methods")]
+      (check-method-body! method env "method")))
+  nil)
+
+(defn check-js-class! [(form Any) (env Any)] Nil
+  (doseq [method (get form "methods")]
+    (check-method-body! method env "js/method"))
+  nil)
 
 ;; === check-form! (top-level dispatch) =========================================
 
@@ -1969,15 +2840,36 @@
       (= node "defonce") (do (infer-expr! form env) nil)
       (= node "defn") (do (infer-expr! form env) nil)
       (= node "defn-multi") (do (infer-expr! form env) nil)
-      (= node "record") nil
-      (= node "defunion") nil
+      (= node "record")
+        (check-field-declarations! (get form "fields") env "record field")
+      (= node "defunion")
+        (do
+          (when (not (nil? (get form "member-fields")))
+            (doseq [fields (vals (get form "member-fields"))]
+              (check-field-declarations! fields env "union field")))
+          nil)
       (= node "defenum") nil
-      (= node "defscalar") nil
-      (= node "deferror") nil
-      (= node "defprotocol") nil
+      (= node "defscalar") (check-scalar-predicate-declarations! form)
+      (= node "deferror")
+        (do
+          (when (not (nil? (get form "member-fields")))
+            (doseq [fields (vals (get form "member-fields"))]
+              (check-field-declarations! fields env "throwable field")))
+          nil)
+      (= node "defprotocol")
+        (do
+          (doseq [method (get form "methods")]
+            (check-parameter-declarations!
+              (get method "params")
+              (opt-field (get method "rest"))
+              env
+              "protocol parameter"))
+          nil)
       (= node "deftype") nil
+      (= node "extend-type") (check-extend-type! form env)
+      (= node "js-class") (check-js-class! form env)
       (= node "defmulti") nil
-      (= node "defmethod") nil
+      (= node "defmethod") (check-method-body! form env "method")
       (= node "with-meta") (check-form! (get form "expr") env)
       :else (do (infer-expr! form env) nil))))
 
@@ -2131,21 +3023,140 @@
 
 ;; === type-check! (mutates STATE; returns {diagnostics count}) =================
 
+(defn tag-semantic-node-ids-from [(value Any) (next-id Int)] Any
+  (cond
+    (vector? value)
+      (reduce
+        (fn [(state Any) (item Any)] Any
+          (let [tagged (tag-semantic-node-ids-from item (get state "next"))]
+            {"value" (conj (get state "value") (get tagged "value"))
+             "next" (get tagged "next")}))
+        {"value" [] "next" next-id}
+        value)
+
+    (map? value)
+      (let [with-node? (= (get value "node") "with")
+            kw-access-node? (= (get value "node") "kw-access")
+            binding-owner?
+              (or (= (get value "type") "param")
+                  (and (contains? value "name")
+                       (contains? value "constraint")
+                       (or (contains? value "value")
+                           (contains? value "expr")
+                           (contains? value "ann"))))
+            semantic-node? (or with-node? kw-access-node? binding-owner?)
+            own-id (if semantic-node? next-id nil)
+            child-start (if semantic-node? (+ next-id 1) next-id)
+            tagged
+              (reduce
+                (fn [(state Any) (key Any)] Any
+                  (if (or (= key WITH-CHECK-ID-KEY)
+                          (= key KW-ACCESS-CHECK-ID-KEY)
+                          (= key BINDING-CHECK-ID-KEY))
+                    state
+                    (let [child (tag-semantic-node-ids-from
+                                  (get value key)
+                                  (get state "next"))]
+                      {"value" (assoc (get state "value") key (get child "value"))
+                       "next" (get child "next")})))
+                {"value" {} "next" child-start}
+                (keys value))
+            tagged-value
+              (cond
+                with-node?
+                  (assoc (get tagged "value") WITH-CHECK-ID-KEY own-id)
+                kw-access-node?
+                  (assoc (get tagged "value") KW-ACCESS-CHECK-ID-KEY own-id)
+                binding-owner?
+                  (assoc (get tagged "value") BINDING-CHECK-ID-KEY own-id)
+                :else (get tagged "value"))]
+        {"value" tagged-value "next" (get tagged "next")})
+
+    :else {"value" value "next" next-id}))
+
+(defn tag-semantic-node-ids [(prog Any)] Any
+  (get (tag-semantic-node-ids-from prog 0) "value"))
+
+(defn decorate-tagged-value
+  [(value Any)
+   (record-updates Any)
+   (record-field-accesses Any)
+   (binding-constraint-proofs Any)]
+  Any
+  (cond
+    (vector? value)
+      (mapv (fn [(item Any)] Any
+              (decorate-tagged-value
+                item record-updates record-field-accesses
+                binding-constraint-proofs))
+        value)
+
+    (map? value)
+      (let [with-check-id (get value WITH-CHECK-ID-KEY)
+            kw-check-id (get value KW-ACCESS-CHECK-ID-KEY)
+            binding-check-id (get value BINDING-CHECK-ID-KEY)
+            decorated
+              (reduce
+                (fn [(out Any) (key Any)] Any
+                  (if (or (= key WITH-CHECK-ID-KEY)
+                          (= key KW-ACCESS-CHECK-ID-KEY)
+                          (= key BINDING-CHECK-ID-KEY)
+                          (= key IMPORTED-RECORD-CONTRACTS-KEY)
+                          (= key IMPORTED-CALLABLE-SYNCHRONIZATION-KEY))
+                    out
+                    (assoc out key
+                      (decorate-tagged-value
+                        (get value key)
+                        record-updates
+                        record-field-accesses
+                        binding-constraint-proofs))))
+                {}
+                (keys value))]
+        (cond
+          (= (get value "node") "with")
+            (assoc decorated "recordUpdate"
+              (get record-updates with-check-id))
+          (= (get value "node") "kw-access")
+            (assoc decorated "recordFieldAccess"
+              (get record-field-accesses kw-check-id))
+          (not (nil? binding-check-id))
+            (assoc decorated "constraintSynchronous"
+              (= true (get binding-constraint-proofs binding-check-id)))
+          :else decorated))
+
+    :else value))
+
 (defn type-check! [(prog Any)] Any
-  (let [mode (get prog "mode")]
+  (let [checked-input (tag-semantic-node-ids prog)
+        mode (get checked-input "mode")]
+    (reset! STATE {"record-fields" {}
+                   "record-field-order" {}
+                   "record-validators" {}
+                   "record-updates" {}
+                   "record-field-accesses" {}
+                   "binding-constraint-proofs" {}
+                   "union-members" {}
+                   "enum-types" {}
+                   "parametric-unions" {}
+                   "parametric-member-union" {}
+                   "target" (get checked-input "target")
+                   "input-program" prog
+                   "checked-input" checked-input
+                   "diagnostics" []})
+    (install-imported-record-contracts!
+      (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
     (when (= mode "strict")
-      (reset! STATE {"record-fields" {}
-                     "record-field-order" {}
-                     "union-members" {}
-                     "parametric-unions" {}
-                     "parametric-member-union" {}
-                     "target" (get prog "target")
-                     "diagnostics" []})
-      (let [env (build-initial-env! prog)]
-        (doseq [form (get prog "forms")]
+      (let [env (build-initial-env! checked-input)]
+        (doseq [form (get checked-input "forms")]
           (check-form! form env))
-        (check-nix-free-dotted! prog)
-        (check-qualified-resolution! prog env))))
+        (check-nix-free-dotted! checked-input)
+        (check-qualified-resolution! checked-input env)))
+    (swap! STATE assoc "checked-program"
+      (decorate-tagged-value
+        checked-input
+        (get (deref STATE) "record-updates")
+        (get (deref STATE) "record-field-accesses")
+        (get (deref STATE) "binding-constraint-proofs"))))
   (let [diags (get (deref STATE) "diagnostics")]
     {"diagnostics" diags
      "count" (count diags)}))
@@ -2156,6 +3167,96 @@
 
 (defn check-program! [(prog Any)] Any
   (get (type-check! prog) "diagnostics"))
+
+;; Return the checked wire projection produced by the immediately preceding
+;; check of this exact program. Every `with` node owns an always-present
+;; `recordUpdate` contract (or nil for a dynamic update), and every keyword
+;; access owns an always-present `recordFieldAccess` contract (or nil for a
+;; non-record target). Emitters consume these semantic objects directly; they
+;; never reconstruct them from adjacent forms or local registries.
+(defn decorate-checked-program! [(prog Any)] Any
+  (let [state (deref STATE)]
+    (if (= prog (get state "input-program"))
+      (get state "checked-program")
+      (throw
+        (ex-info
+          "decorate-checked-program! requires the program most recently passed to check-program!"
+          {})))))
+
+(defn local-record-names [(prog Any)] Any
+  (reduce
+    (fn [(names Any) (form Any)] Any
+      (let [node (get form "node")]
+        (cond
+          (= node "record")
+          (conj names (get form "name"))
+
+          (or (= node "defunion") (= node "deferror"))
+          (let [member-fields (get form "member-fields")]
+            (if (map? member-fields)
+              (into names (keys member-fields))
+              names))
+
+          :else names)))
+    []
+    (get prog "forms")))
+
+;; Export provider-owned record contracts only after a successful check. A
+;; consumer receives the checked field types and exact provider validator ABI;
+;; it never guesses constraint presence from raw adjacent declarations.
+(defn export-checked-record-contracts! [(prog Any)] Any
+  (let [state (deref STATE)]
+    (if (not (= prog (get state "input-program")))
+      (throw
+        (ex-info
+          "export-checked-record-contracts! requires the program most recently passed to check-program!"
+          {}))
+      (let [namespace (get prog "namespace")]
+        (mapv
+          (fn [(name String)] Any
+            (let [validator (get-in state ["record-validators" name])]
+              {"name" name
+               "fields" (get-in state ["record-fields" name])
+               "field-order" (get-in state ["record-field-order" name])
+               "constrained" (string? validator)
+               "synchronous" true
+               "validator" (if (string? validator)
+                             (str namespace "/" validator)
+                             nil)}))
+          (local-record-names prog))))))
+
+;; Checked providers publish both ordinary call synchronization and the
+;; distinct effect of a returned callable. Import resolution preserves both
+;; facts for alias-qualified and explicitly referred spellings.
+(defn export-checked-callable-synchronization! [(prog Any)] Any
+  (let [state (deref STATE)]
+    (if (not (= prog (get state "input-program")))
+      (throw
+        (ex-info
+          "export-checked-callable-synchronization! requires the program most recently passed to check-program!"
+          {}))
+      (let [proofs (program-callable-synchronization prog)
+            return-proofs
+              (program-returns-synchronous-callable prog proofs)]
+        (reduce
+          (fn [(out Any) (raw-form Any)] Any
+            (let [form (if (= (get raw-form "node") "with-meta")
+                         (get raw-form "expr")
+                         raw-form)
+                  node (get form "node")
+                  name (get form "name")
+                  private? (= (get form "private") true)]
+              (if (and (or (= node "defn") (= node "defn-multi"))
+                       (string? name)
+                       (not private?))
+                (conj out
+                  {"name" name
+                   "synchronous" (= true (get proofs name))
+                   "returnsSynchronousCallable"
+                     (= true (get return-proofs name))})
+                out)))
+          []
+          (get prog "forms"))))))
 
 ;; === test data helpers =======================================================
 
@@ -2169,15 +3270,15 @@
   {"node" "def" "name" name "ann" ann "value" value})
 
 (defn make-defn-node
-  [(name String)
-   (params (Vec Any))
-   (ret Any)
-   (body (Vec Any))] Any
+  [(name String) (params (Vec Any)) (ret Any) (body (Vec Any))] Any
   {"node" "defn" "name" name "params" params "rest" false
    "ret" ret "body" body "private" false})
 
 (defn make-param [(name Any) (ann Any)] Any
   {"type" "param" "name" name "ann" ann})
+
+(defn make-constrained-param [(name Any) (ann Any) (constraint Any)] Any
+  {"type" "param" "name" name "ann" ann "constraint" constraint})
 
 (defn make-seq-target [(names Any) (rest-name Any)] Any
   {"type" "seq-destructure" "names" names "rest" rest-name})
@@ -2203,6 +3304,10 @@
 (defn make-let-binding [(name Any) (ann Any) (value Any)] Any
   {"name" name "ann" ann "value" value})
 
+(defn make-constrained-let-binding
+  [(name Any) (ann Any) (constraint Any) (value Any)] Any
+  {"name" name "ann" ann "constraint" constraint "value" value})
+
 (defn make-vec-node [(items (Vec Any))] Any
   {"node" "vec" "items" items})
 
@@ -2215,6 +3320,20 @@
 (defn make-prog [(forms (Vec Any))] Any
   {"mode" "strict" "namespace" "test" "target" "js"
    "forms" forms "externs" [] "requires" []})
+
+(defn make-prog-with-externs [(forms Any) (externs Any)] Any
+  {"mode" "strict" "namespace" "test" "target" "js"
+   "forms" forms "externs" externs "requires" []})
+
+(defn make-with-node [(target Any) (field String) (value Any)] Any
+  {"node" "with"
+   "target" target
+   "updates" [{"field" field "value" value}]})
+
+(defn diagnostics-include? [(diagnostics Any) (fragment String)] Bool
+  (boolean
+    (some (fn [(message String)] Bool (str/includes? message fragment))
+      diagnostics)))
 
 ;; === test runner =============================================================
 
@@ -2873,6 +3992,537 @@
           (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE})
           [(make-lit "number" 3)] {})
         (= (count (get (deref STATE) "diagnostics")) 0)))
+
+  ;; --- binding constraints: one declaration owns its predicate -------------
+  (expect! "constraint: unary typed parameter accepted"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "keep"
+                    [(make-constrained-param "x" (make-prim "Int") (make-ref "positive?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "positive?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: non-callable expression rejected"
+    (let [prog (make-prog
+                 [(make-defn-node "bad"
+                    [(make-constrained-param "x" (make-prim "Int")
+                       (make-lit "number" 1))]
+                    (make-prim "Int")
+                    [(make-ref "x")])])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "constraint expression is not callable")))
+
+  (expect! "constraint: Any predicate rejected"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "bad"
+                    [(make-constrained-param "x" (make-prim "Int") (make-ref "unknown?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "unknown?" "type" ANY}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "predicate type contains Any")))
+
+  (expect! "constraint: wrong predicate input rejected"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "bad"
+                    [(make-constrained-param "x" (make-prim "Int") (make-ref "string-ok?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "string-ok?"
+                   "type" (make-fn [(make-prim "String")] nil BOOL-TYPE)}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "its input does not accept Int")))
+
+  (expect! "constraint: non-Bool predicate result rejected"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "bad"
+                    [(make-constrained-param "x" (make-prim "Int") (make-ref "describe"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "describe"
+                   "type" (make-fn [(make-prim "Int")] nil (make-prim "String"))}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "predicate return type is not Bool")))
+
+  (expect! "constraint: direct await predicate rejected as asynchronous"
+    (let [predicate {"node" "fn"
+                     "params" [(make-param "value" (make-prim "Int"))]
+                     "rest" false
+                     "ret" BOOL-TYPE
+                     "body" [{"node" "await" "expr" (make-ref "value")}]}
+          prog (make-prog
+                 [(make-defn-node "bad"
+                    [(make-constrained-param "x" (make-prim "Int") predicate)]
+                    (make-prim "Int")
+                    [(make-ref "x")])])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: transitive async named predicate rejected"
+    (let [async-leaf (make-defn-node "async-leaf?"
+                       [(make-param "x" (make-prim "Int"))]
+                       BOOL-TYPE
+                       [{"node" "await" "expr" (make-ref "x")}])
+          wrapper (make-defn-node "wrapper?"
+                    [(make-param "x" (make-prim "Int"))]
+                    BOOL-TYPE
+                    [(make-call "async-leaf?" [(make-ref "x")])])
+          consumer (make-defn-node "bad"
+                     [(make-constrained-param
+                        "x" (make-prim "Int") (make-ref "wrapper?"))]
+                     (make-prim "Int")
+                     [(make-ref "x")])
+          prog (make-prog [async-leaf wrapper consumer])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: higher-order pass-through cannot launder async predicate"
+    (let [predicate-type (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+          async-predicate (make-defn-node "async-predicate?"
+                            [(make-param "x" (make-prim "Int"))]
+                            BOOL-TYPE
+                            [{"node" "await" "expr" (make-ref "x")}])
+          pass-through (make-defn-node "pass-predicate"
+                         [(make-param "predicate" predicate-type)]
+                         predicate-type
+                         [(make-ref "predicate")])
+          consumer (make-defn-node "bad"
+                     [(make-constrained-param
+                        "x" (make-prim "Int")
+                        (make-call "pass-predicate"
+                          [(make-ref "async-predicate?")]))]
+                     (make-prim "Int")
+                     [(make-ref "x")])
+          prog (make-prog [async-predicate pass-through consumer])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: call-produced predicate fails closed without value provenance"
+    (let [predicate-type (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+          consumer (make-defn-node "bad"
+                     [(make-constrained-param
+                        "x" (make-prim "Int")
+                        (make-call "make-predicate" [(make-lit "number" 0)]))]
+                     (make-prim "Int")
+                     [(make-ref "x")])
+          prog (make-prog-with-externs
+                 [consumer]
+                 [{"name" "make-predicate"
+                   "type" (make-fn [(make-prim "Int")] nil predicate-type)}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: call-produced predicate accepts a proven local factory"
+    (let [predicate-type (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+          predicate (make-defn-node "positive?"
+                      [(make-param "x" (make-prim "Int"))]
+                      BOOL-TYPE
+                      [(make-lit "bool" true)])
+          factory (make-defn-node "make-predicate"
+                    [(make-param "seed" (make-prim "Int"))]
+                    predicate-type
+                    [(make-ref "positive?")])
+          consumer (make-defn-node "keep"
+                     [(make-constrained-param
+                        "x" (make-prim "Int")
+                        (make-call "make-predicate" [(make-lit "number" 0)]))]
+                     (make-prim "Int")
+                     [(make-ref "x")])]
+      (= (count (check-program! (make-prog [predicate factory consumer]))) 0)))
+
+  (expect! "constraint: conditional predicate fails closed without value provenance"
+    (let [left (make-defn-node "left?"
+                 [(make-param "x" (make-prim "Int"))]
+                 BOOL-TYPE
+                 [(make-lit "bool" true)])
+          right (make-defn-node "right?"
+                  [(make-param "x" (make-prim "Int"))]
+                  BOOL-TYPE
+                  [(make-lit "bool" true)])
+          predicate (make-if-node
+                      (make-lit "bool" true)
+                      (make-ref "left?")
+                      (make-ref "right?"))
+          consumer (make-defn-node "bad"
+                     [(make-constrained-param "x" (make-prim "Int") predicate)]
+                     (make-prim "Int")
+                     [(make-ref "x")])
+          diagnostics (check-program! (make-prog [left right consumer]))]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: unproved imported predicate rejected"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "bad"
+                    [(make-constrained-param
+                       "x" (make-prim "Int") (make-ref "remote/valid?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "remote/valid?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+                   "synchronous" false}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: checked imported predicate proof accepted"
+    (let [base (make-prog-with-externs
+                 [(make-defn-node "keep"
+                    [(make-constrained-param
+                       "x" (make-prim "Int") (make-ref "remote/valid?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "remote/valid?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+                   "synchronous" false}])
+          prog (assoc base IMPORTED-CALLABLE-SYNCHRONIZATION-KEY
+                 [{"name" "remote/valid?" "synchronous" true}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: checked imported negative proof remains authoritative"
+    (let [base (make-prog-with-externs
+                 [(make-defn-node "bad"
+                    [(make-constrained-param
+                       "x" (make-prim "Int") (make-ref "remote/valid?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "remote/valid?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])
+          prog (assoc base IMPORTED-CALLABLE-SYNCHRONIZATION-KEY
+                 [{"name" "remote/valid?" "synchronous" false}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "not proven synchronous")))
+
+  (expect! "constraint: checked callable synchronization export owns both effects"
+    (let [sync-fn (make-defn-node "sync?"
+                    [(make-param "x" (make-prim "Int"))]
+                    BOOL-TYPE
+                    [(make-lit "bool" true)])
+          async-fn (make-defn-node "async?"
+                     [(make-param "x" (make-prim "Int"))]
+                     BOOL-TYPE
+                     [{"node" "await" "expr" (make-ref "x")}])
+          prog (make-prog [sync-fn async-fn])
+          diagnostics (check-program! prog)
+          exported (export-checked-callable-synchronization! prog)]
+      (and (= (count diagnostics) 0)
+           (= exported
+             [{"name" "sync?"
+               "synchronous" true
+               "returnsSynchronousCallable" false}
+              {"name" "async?"
+               "synchronous" false
+               "returnsSynchronousCallable" false}]))))
+
+  (expect! "constraint: checked declarations own always-present sync proofs"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "keep"
+                    [(make-constrained-param
+                       "x" (make-prim "Int") (make-ref "positive?"))
+                     (make-param "label" (make-prim "String"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "positive?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])
+          diagnostics (check-program! prog)
+          checked (decorate-checked-program! prog)
+          params (get (nth (get checked "forms") 0) "params")]
+      (and (= (count diagnostics) 0)
+           (= (get (nth params 0) "constraintSynchronous") true)
+           (= (get (nth params 1) "constraintSynchronous") false)
+           (not (contains? (nth params 0) BINDING-CHECK-ID-KEY))
+           (not (contains? (nth params 1) BINDING-CHECK-ID-KEY)))))
+
+  (expect! "constraint: polymorphic predicate bound enforced"
+    (let [bounded-predicate
+            (make-poly ["T"]
+              (make-fn [(make-var "T")] nil BOOL-TYPE)
+              {"T" NUMBER-TYPE})
+          prog (make-prog-with-externs
+                 [(make-defn-node "bad"
+                    [(make-constrained-param
+                       "x" (make-prim "String") (make-ref "bounded?"))]
+                    (make-prim "String")
+                    [(make-ref "x")])]
+                 [{"name" "bounded?" "type" bounded-predicate}])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "type-variable bound")))
+
+  (expect! "constraint: destructured typed parameter uses aggregate type"
+    (let [pair-type (make-app "HVec" [(make-prim "Int") (make-prim "Int")])
+          target (make-seq-target ["x" "y"] false)
+          prog (make-prog-with-externs
+                 [(make-defn-node "first-valid"
+                    [(make-constrained-param target pair-type (make-ref "pair-valid?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "pair-valid?"
+                   "type" (make-fn [pair-type] nil BOOL-TYPE)}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: parameter predicate resolves before sibling bindings"
+    (let [prog (make-prog-with-externs
+                 [(make-defn-node "prebinding"
+                    [(make-param "positive?" (make-prim "Int"))
+                     (make-constrained-param "x" (make-prim "Int") (make-ref "positive?"))]
+                    (make-prim "Int")
+                    [(make-ref "x")])]
+                 [{"name" "positive?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: rest parameter checks aggregate body binding"
+    (let [rest-type (make-app "Vec" [(make-prim "Int")])
+          rest-param (make-constrained-param "xs" rest-type (make-ref "nonempty-ints?"))
+          fn-form (assoc
+                    (make-defn-node "collect" [] rest-type [(make-ref "xs")])
+                    "rest" rest-param)
+          prog (make-prog-with-externs
+                 [fn-form]
+                 [{"name" "nonempty-ints?"
+                   "type" (make-fn [rest-type] nil BOOL-TYPE)}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: let and for bindings accepted"
+    (let [predicate {"name" "positive?"
+                     "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+          let-expr (make-let-node
+                     [(make-constrained-let-binding
+                        "seed" (make-prim "Int") (make-ref "positive?")
+                        (make-lit "number" 1))]
+                     [{"node" "for"
+                       "clauses" [{"type" "binding"
+                                   "name" "x"
+                                   "ann" (make-prim "Int")
+                                   "constraint" (make-ref "positive?")
+                                   "expr" (make-vec-node [(make-ref "seed")])}]
+                       "body" [(make-ref "x")]}])
+          prog (make-prog-with-externs
+                 [(make-def-node "values"
+                    (make-app "Vec" [(make-prim "Int")])
+                    let-expr)]
+                 [predicate])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: record, protocol, and implementation declarations accepted"
+    (let [predicate {"name" "positive?"
+                     "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+          constrained (make-constrained-param
+                        "value" (make-prim "Int") (make-ref "positive?"))
+          record (make-record-node "Positive" [constrained])
+          protocol {"node" "defprotocol"
+                    "name" "Measured"
+                    "methods" [{"name" "measure"
+                                "params" [constrained]
+                                "rest" false
+                                "ret" BOOL-TYPE}]}
+          extension {"node" "extend-type"
+                     "name" "Positive"
+                     "impls" [{"protocol" "Measured"
+                               "methods" [{"name" "measure"
+                                           "params" [constrained]
+                                           "rest" false
+                                           "ret" BOOL-TYPE
+                                           "body" [(make-lit "bool" true)]}]}]}
+          prog (make-prog-with-externs [record protocol extension] [predicate])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: dynamic binding accepted against incoming var environment"
+    (let [dyn-def (assoc
+                    (make-def-node "*level*" (make-prim "Int") (make-lit "number" 0))
+                    "dynamic" true)
+          rebinding (make-constrained-let-binding
+                      "*level*" (make-prim "Int") (make-ref "positive?")
+                      (make-lit "number" 1))
+          prog (make-prog-with-externs
+                 [dyn-def
+                  (make-defn-node "level" [] (make-prim "Int")
+                    [{"node" "binding"
+                      "bindings" [rebinding]
+                      "body" [(make-ref "*level*")]}])]
+                 [{"name" "positive?"
+                   "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "constraint: checked with nodes carry exact local validator contracts"
+    (let [predicate {"name" "positive?"
+                     "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+          constrained-field (make-constrained-param
+                              "x" (make-prim "Int") (make-ref "positive?"))
+          plain-field (make-param "x" (make-prim "Int"))
+          same-with (make-with-node
+                      (make-ref "value") ":x" (make-lit "number" 2))
+          prog (make-prog-with-externs
+                 [(make-record-node "Constrained" [constrained-field])
+                  (make-record-node "Plain" [plain-field])
+                  (make-defn-node "update-constrained"
+                    [(make-param "value" (make-prim "Constrained"))]
+                    (make-prim "Constrained")
+                    [same-with])
+                  (make-defn-node "update-plain"
+                    [(make-param "value" (make-prim "Plain"))]
+                    (make-prim "Plain")
+                    [same-with])]
+                 [predicate])
+          diagnostics (check-program! prog)
+          checked (decorate-checked-program! prog)
+          constrained-with (nth (get (nth (get checked "forms") 2) "body") 0)
+          plain-with (nth (get (nth (get checked "forms") 3) "body") 0)]
+      (and (= (count diagnostics) 0)
+           (= (get constrained-with "recordUpdate")
+              {"recordName" "Constrained"
+               "fieldOrder" [":x"]
+               "validator" "$beagle$record$Constrained$validate"})
+           (= (get plain-with "recordUpdate")
+              {"recordName" "Plain"
+               "fieldOrder" [":x"]
+               "validator" nil})
+           (not (contains? constrained-with "validator"))
+           (not (contains? plain-with "validator"))
+           (not (contains? constrained-with WITH-CHECK-ID-KEY))
+           (not (contains? plain-with WITH-CHECK-ID-KEY)))))
+
+  (expect! "constraint: imported record update consumes provider validator contract"
+    (let [contract {"name" "models/Constrained"
+                    "fields" {":x" (make-prim "Int")}
+                    "field-order" [":x"]
+                    "constrained" true
+                    "synchronous" true
+                    "validator" "models/$beagle$record$Constrained$validate"}
+          base (make-prog
+                 [(make-defn-node "update-imported"
+                    [(make-param "value" (make-prim "models/Constrained"))]
+                    (make-prim "models/Constrained")
+                    [(make-with-node
+                       (make-ref "value") ":x" (make-lit "number" 2))])])
+          prog (assoc base IMPORTED-RECORD-CONTRACTS-KEY [contract])
+          diagnostics (check-program! prog)
+          checked (decorate-checked-program! prog)
+          with-node (nth (get (nth (get checked "forms") 0) "body") 0)]
+      (and (= (count diagnostics) 0)
+           (= (get with-node "recordUpdate")
+              {"recordName" "models/Constrained"
+               "fieldOrder" [":x"]
+               "validator" "models/$beagle$record$Constrained$validate"})
+           (not (contains? with-node "validator"))
+           (not (contains? checked IMPORTED-RECORD-CONTRACTS-KEY)))))
+
+  (expect! "constraint: imported unconstrained and dynamic updates are distinguished"
+    (let [contract {"name" "models/Plain"
+                    "fields" {":x" (make-prim "Int")}
+                    "field-order" [":x"]
+                    "constrained" false
+                    "synchronous" true
+                    "validator" nil}
+          imported-with (make-with-node
+                          (make-ref "value") ":x" (make-lit "number" 2))
+          dynamic-with (make-with-node
+                         (make-ref "value") ":x" (make-lit "number" 2))
+          base (make-prog
+                 [(make-defn-node "update-imported"
+                    [(make-param "value" (make-prim "models/Plain"))]
+                    (make-prim "models/Plain")
+                    [imported-with])
+                  (make-defn-node "update-dynamic"
+                    [(make-param "value" ANY)]
+                    ANY
+                    [dynamic-with])])
+          prog (assoc base IMPORTED-RECORD-CONTRACTS-KEY [contract])
+          diagnostics (check-program! prog)
+          checked (decorate-checked-program! prog)
+          checked-imported (nth (get (nth (get checked "forms") 0) "body") 0)
+          checked-dynamic (nth (get (nth (get checked "forms") 1) "body") 0)]
+      (and (= (count diagnostics) 0)
+           (= (get checked-imported "recordUpdate")
+              {"recordName" "models/Plain"
+               "fieldOrder" [":x"]
+               "validator" nil})
+           (nil? (get checked-dynamic "recordUpdate"))
+           (not (contains? checked-imported "validator"))
+           (not (contains? checked-dynamic "validator")))))
+
+  (expect! "constraint: imported record contract without sync proof rejected"
+    (let [contract {"name" "models/Constrained"
+                    "fields" {":x" (make-prim "Int")}
+                    "field-order" [":x"]
+                    "constrained" true
+                    "synchronous" false
+                    "validator" "models/$beagle$record$Constrained$validate"}
+          prog (assoc (make-prog []) IMPORTED-RECORD-CONTRACTS-KEY [contract])
+          diagnostics (check-program! prog)]
+      (diagnostics-include? diagnostics "positive synchronization proof")))
+
+  (expect! "constraint: checked kw-access facts are exact and always present"
+    (let [record (make-record-node "Person"
+                   [(make-param "name" (make-prim "String"))])
+          same-access {"node" "kw-access"
+                       "kw" ":name"
+                       "target" (make-ref "value")
+                       "default" false}
+          prog (make-prog
+                 [record
+                  (make-defn-node "record-name"
+                    [(make-param "value" (make-prim "Person"))]
+                    (make-prim "String")
+                    [same-access])
+                  (make-defn-node "map-name"
+                    [(make-param "value"
+                       (make-app "Map" [(make-prim "Keyword") (make-prim "String")]))]
+                    ANY
+                    [same-access])])
+          diagnostics (check-program! prog)
+          checked (decorate-checked-program! prog)
+          record-access (nth (get (nth (get checked "forms") 1) "body") 0)
+          map-access (nth (get (nth (get checked "forms") 2) "body") 0)]
+      (and (= (count diagnostics) 0)
+           (= (get record-access "recordFieldAccess")
+              {"recordName" "Person"})
+           (nil? (get map-access "recordFieldAccess"))
+           (not (contains? record-access KW-ACCESS-CHECK-ID-KEY))
+           (not (contains? map-access KW-ACCESS-CHECK-ID-KEY)))))
+
+  (expect! "constraint: imported nominal kw-access carries checked record fact"
+    (let [contract {"name" "models/Person"
+                    "fields" {":name" (make-prim "String")}
+                    "field-order" [":name"]
+                    "constrained" false
+                    "synchronous" true
+                    "validator" nil}
+          access {"node" "kw-access"
+                  "kw" ":name"
+                  "target" (make-ref "value")
+                  "default" false}
+          base (make-prog
+                 [(make-defn-node "imported-name"
+                    [(make-param "value" (make-prim "models/Person"))]
+                    (make-prim "String")
+                    [access])])
+          prog (assoc base IMPORTED-RECORD-CONTRACTS-KEY [contract])
+          diagnostics (check-program! prog)
+          checked (decorate-checked-program! prog)
+          checked-access (nth (get (nth (get checked "forms") 0) "body") 0)]
+      (and (= (count diagnostics) 0)
+           (= (get checked-access "recordFieldAccess")
+              {"recordName" "models/Person"}))))
+
+  (expect! "constraint: checked record contract export carries provider ABI"
+    (let [predicate {"name" "positive?"
+                     "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
+          field (make-constrained-param
+                  "x" (make-prim "Int") (make-ref "positive?"))
+          prog (make-prog-with-externs
+                 [(make-record-node "Constrained" [field])]
+                 [predicate])
+          diagnostics (check-program! prog)
+          exported (export-checked-record-contracts! prog)
+          contract (nth exported 0)]
+      (and (= (count diagnostics) 0)
+           (= (get contract "name") "Constrained")
+           (= (get contract "field-order") [":x"])
+           (= (get contract "constrained") true)
+           (= (get contract "synchronous") true)
+           (= (get contract "validator")
+              "test/$beagle$record$Constrained$validate"))))
 
   ;; --- summary ---
   (doseq [f (deref failures)]

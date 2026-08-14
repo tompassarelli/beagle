@@ -1,0 +1,14 @@
+#lang beagle/clj
+(ns fixtures.enums)
+(define-mode strict)
+
+(defenum Mode :on :off)
+
+(defrecord Setting [(mode Mode)])
+
+(defn choose [(mode Mode)] Mode
+  mode)
+
+(def current Setting (->Setting :on))
+
+(def selected Mode (choose :off))

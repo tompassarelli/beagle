@@ -3,13 +3,28 @@
 (require rackunit
          racket/string
          racket/port
+         racket/file
+         racket/system
          beagle/private/parse
-         beagle/private/emit
+         (only-in beagle/private/check type-check! current-check-profile)
+         beagle/private/emit-dispatch
+         beagle/private/emit-nix
          beagle/private/types
          (only-in beagle/lang/reader-impl beagle-readtable))
 
+(define (emit-program prog)
+  ((emitter-backend-emit-program (resolve-backend 'nix)) prog))
+
+(define (substring-index text needle)
+  (define matches
+    (regexp-match-positions (regexp (regexp-quote needle)) text))
+  (and matches (caar matches)))
+
 (define (mt . xs) (cons MAP-TAG xs))
 (define (br . xs) (cons '#%brackets xs))
+
+(define FOO-VALIDATOR-NIX-NAME
+  "bgl____24626561676c65247265636f726424466f6f2476616c6964617465")
 
 ;; The real Beagle readtable keeps reader tags and container forms identical to
 ;; source compilation; a bracket-tag approximation would lose that fidelity.
@@ -37,6 +52,66 @@
        (with-handlers ([exn:fail? (lambda (e) (exn-message e))])
          (string-trim (emit-program prog)))))
 
+(define (nix-check-and-emit src)
+  (define stxs
+    (parameterize ([current-readtable beagle-readtable])
+      (with-input-from-string src
+        (lambda ()
+          (let loop ([acc '()])
+            (define d (read-syntax 'test))
+            (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+  (define prog (parse-program stxs))
+  (parameterize ([current-check-profile 2])
+    (type-check! prog))
+  (string-trim (emit-program prog)))
+
+;; A binding constraint is executable compiler output gated on the checker's
+;; positive synchronization proof, so a constrained program must be type-checked
+;; before it may be emitted at all — parser-only emission fails closed. These
+;; predicates are what supplies that proof.
+(define CONSTRAINT-PRELUDE
+  (string-append
+   "(define-target nix) "
+   "(defn positive? [(v Int)] Bool (> v 0)) "
+   "(defn nonnegative? [(v Int)] Bool (>= v 0)) "
+   "(defn valid-more? [(v (Vec Int))] Bool (> (count v) 0)) "
+   "(defn greater-than-x? [(v Int)] Bool (> v 0)) "
+   "(defn global-predicate [(v Int)] Bool (> v 0)) "))
+
+(define (constrained-emit src)
+  (nix-check-and-emit (string-append CONSTRAINT-PRELUDE src)))
+
+(define (nix-eval emitted)
+  (define nix (find-executable-path "nix-instantiate"))
+  (and
+   nix
+   (let ([source (make-temporary-file "beagle-emit-nix-eval-~a.nix")]
+         [stdout (open-output-string)]
+         [stderr (open-output-string)])
+     (dynamic-wind
+       void
+       (lambda ()
+         (call-with-output-file
+          source
+          (lambda (out) (display emitted out))
+          #:exists 'truncate/replace)
+         (define ok?
+           (parameterize ([current-output-port stdout]
+                          [current-error-port stderr])
+             (system* nix "--eval" "--strict" source)))
+         (values ok? (string-trim (get-output-string stdout))
+                 (get-output-string stderr)))
+       (lambda () (delete-file source))))))
+
+(test-case "unchecked constraint emission fails closed without a sync proof"
+  (define out
+    (nix-emit
+     "(define-target nix) (defn accept [(value Int positive?)] Int value)"))
+  (check-true
+   (string-contains?
+    out
+    "binding constraint for value lacks the compiler's positive synchronization proof")))
+
 ;; --- basic forms -----------------------------------------------------------
 
 (test-case "def emits let binding"
@@ -47,25 +122,51 @@
 
 (test-case "defn emits curried function"
   (define out (nix-emit "(define-target nix) (defn add [(a Int) (b Int)] Int (+ a b))"))
-  (check-true (string-contains? out "add = a: b:"))
+  (check-true (string-contains? out "add = a: builtins.deepSeq a (b:"))
+  (check-true (string-contains? out "builtins.deepSeq b"))
   (check-true (string-contains? out "a + b")))
+
+(test-case "nullary source functions retain a unit call boundary"
+  (define out
+    (nix-emit
+     "(define-target nix) (defn answer [] Int 42) (answer)"))
+  (check-true (string-contains? out "answer = _: 42;"))
+  (check-true (string-contains? out "answer null")))
 
 (test-case "fn emits lambda"
   (define out (nix-emit "(define-target nix) (def f (fn [(x Int)] Int (+ x 1)))"))
   (check-true (string-contains? out "x:"))
   (check-true (string-contains? out "x + 1")))
 
+(test-case "negative numeric function arguments are atomic"
+  (define out
+    (nix-emit
+     "(define-target nix) (defn identity [(x Int)] Int x) (identity -1)"))
+  (check-true (string-contains? out "identity (-1)")))
+
 (test-case "if emits if/then/else"
   (define out (nix-emit "(define-target nix) (if true 1 0)"))
   (check-true (string-contains? out "if true then 1 else 0")))
 
-(test-case "let emits let/in"
+(test-case "let emits sequential non-recursive binding applications"
   (define out (nix-emit "(define-target nix) (let [x 1 y 2] (+ x y))"))
-  (check-true (string-contains? out "let"))
-  (check-true (string-contains? out "x = 1;"))
-  (check-true (string-contains? out "y = 2;"))
-  (check-true (string-contains? out "in"))
+  (check-true (string-contains? out "x: builtins.deepSeq x"))
+  (check-true (string-contains? out "y: builtins.deepSeq y"))
   (check-true (string-contains? out "x + y")))
+
+(test-case "unconstrained let RHS stays outside its own binder and is forced"
+  (define out
+    (constrained-emit
+     (string-append
+      "(def x 7) "
+      "(let [x x ignored (let [(bad Int positive?) -1] 0)] x)")))
+  (check-true (string-contains? out "((x: builtins.deepSeq x"))
+  ;; The source `x` is the application argument, not a recursive `x = x`.
+  (check-false (string-contains? out "x = x;"))
+  ;; The unused `ignored` RHS is still sequenced, so its nested constraint
+  ;; cannot disappear under Nix laziness.
+  (check-true (string-contains? out "ignored: builtins.deepSeq ignored"))
+  (check-true (string-contains? out "Binding constraint failed: bad")))
 
 ;; --- data structures -------------------------------------------------------
 
@@ -93,10 +194,196 @@
 
 (test-case "defrecord emits constructor + accessors"
   (define out (nix-emit "(define-target nix) (defrecord Point [(x Int) (y Int)])"))
-  (check-true (string-contains? out "mkPoint = x: y:"))
+  (check-true (string-contains? out "mkPoint = x: builtins.deepSeq x (y:"))
+  (check-true (string-contains? out "builtins.deepSeq y"))
   (check-true (string-contains? out "_tag = \"point\""))
   (check-true (string-contains? out "point-x = r: r.x;"))
   (check-true (string-contains? out "point-y = r: r.y;")))
+
+(test-case "nullary record constructors retain a unit call boundary"
+  (define out
+    (nix-emit
+     "(define-target nix) (defunion :throwable Failure Timeout) (->Timeout)"))
+  (check-true (string-contains? out "mkTimeout = _:"))
+  (check-true (string-contains? out "mkTimeout null")))
+
+;; --- semantic binding constraints -----------------------------------------
+
+(test-case "constrained parameter guards its raw value with a stable failure"
+  (define out
+    (constrained-emit "(defn accept [(x Int positive?)] Int x)"))
+  (check-true (string-contains? out "bgl____binding__0:"))
+  (check-true
+   (string-contains?
+    out
+    "bgl____constraint__thunk__0 = _: positive_p"))
+  (check-true
+   (string-contains?
+    out
+    "bgl____constraint__0 = bgl____constraint__thunk__0 null"))
+  (check-true
+   (string-contains? out "builtins.deepSeq bgl____binding__0"))
+  (check-true
+   (string-contains?
+    out
+    "Binding constraint failed: x")))
+
+(test-case "parameter predicates are captured before every authored parameter"
+  (define out
+    (constrained-emit
+     "(defn guarded [(x Int global-predicate) (global-predicate Int)] Int x)"))
+  (define predicate-pos
+    (substring-index out
+                     "bgl____constraint__thunk__0 = _: global-predicate"))
+  (define binder-pos
+    (substring-index out "x: builtins.deepSeq x (global-predicate:"))
+  (check-not-false predicate-pos)
+  (check-not-false binder-pos)
+  (check-true (< predicate-pos binder-pos)))
+
+(test-case "constrained rest parameter is guarded as its aggregate argument"
+  (define out
+    (constrained-emit
+     "(defn collect [(x Int) & (more (Vec Int) valid-more?)] Int x)"))
+  (check-true (string-contains? out "bgl____binding__1:"))
+  (check-true
+   (string-contains?
+    out
+    "bgl____constraint__thunk__1 = _: valid-more_p"))
+  (check-true (string-contains? out "Binding constraint failed: more")))
+
+(test-case "constrained let binding is a single guarded application"
+  (define out
+    (constrained-emit
+     (string-append
+      "(declare-extern expensive (Fn [] Int)) "
+      "(let [(x Int positive?) (expensive)] x)")))
+  (check-true (string-contains? out "bgl____constraint__0 = positive_p"))
+  (check-equal? (length (regexp-match* #rx"expensive" out)) 1)
+  (check-true
+   (string-contains? out "bgl____binding__0: builtins.deepSeq bgl____binding__0"))
+  (check-true (string-contains? out "Binding constraint failed: x")))
+
+(test-case "non-final constrained forms are forced in eager body order"
+  (define out
+    (constrained-emit "(do (let [(x Int positive?) -1] x) 42)"))
+  (check-true (string-contains? out "builtins.deepSeq"))
+  (check-true (string-contains? out "Binding constraint failed: x")))
+
+(test-case "top-level body expressions are sequenced instead of dropped"
+  (define out
+    (nix-emit
+     "(define-target nix) (println \"first\") 42"))
+  (check-true
+   (string-contains? out "builtins.deepSeq (builtins.trace \"first\" null) (42)")))
+
+(test-case "constrained loop guard lives in the recursive function"
+  (define out
+    (constrained-emit
+     "(loop [(n Int nonnegative?) 2] (if (= n 0) n (recur (- n 1))))"))
+  (check-true (string-contains? out "bgl____loop = bgl____binding__0:"))
+  (check-true (string-contains? out "bgl____constraint__0 = nonnegative_p"))
+  (check-true (string-contains? out "Binding constraint failed: n")))
+
+(test-case "loop initializers are sequential without double-running constraints"
+  (define out
+    (constrained-emit "(loop [(x Int positive?) 1 (y Int greater-than-x?) x] y)"))
+  (check-true
+   (string-contains? out "bgl____loop__body = x: builtins.deepSeq x (y:"))
+  (check-true (string-contains? out "bgl____loop = bgl____binding__0:"))
+  (check-true
+   (string-contains?
+    out
+    (string-append
+     "builtins.deepSeq bgl____binding__1 "
+     "(if bgl____constraint__1 bgl____binding__1 then")))
+  ;; One guard is on the initial let path and one is in the recur function.
+  (check-equal?
+   (length (regexp-match* #rx"Binding constraint failed: x" out))
+   2))
+
+(test-case "constrained for binding guards each callback value"
+  (define out
+    (constrained-emit "(for [(x Int positive?) [1 2]] x)"))
+  (check-true (string-contains? out "builtins.concatMap"))
+  (check-true
+   (string-contains?
+    out
+    "bgl____constraint__thunk__0 = _: positive_p"))
+  (check-true (string-contains? out "Binding constraint failed: x")))
+
+(test-case "record constraint emits provider validator and constructor route"
+  (define out
+    (constrained-emit
+     (string-append
+      "(defrecord Point [(x Int positive?) (y Int)]) "
+      "(->Point 1 2)")))
+  (check-true
+   (string-contains?
+    out
+    "bgl____24626561676c65247265636f726424506f696e742476616c6964617465 ="))
+  (check-true
+   (string-contains?
+    out
+    "mkPoint = let bgl____constraint__thunk__0 = _: positive_p;"))
+  (check-true
+   (string-contains?
+    out
+    "(x: builtins.deepSeq x (y: builtins.deepSeq y ("))
+  (check-true
+   (string-contains?
+    out
+    "bgl____24626561676c65247265636f726424506f696e742476616c6964617465"))
+  (check-true (string-contains? out "Binding constraint failed: x")))
+
+(test-case "union and throwable variants use constrained tagged validators"
+  (define union-out
+    (constrained-emit
+     (string-append
+      "(defunion Shape (Circle [(radius Int positive?)])) "
+      "(->Circle 1)")))
+  (check-true
+   (string-contains?
+    union-out
+    "bgl____24626561676c65247265636f726424436972636c652476616c6964617465 ="))
+  (check-true
+   (string-contains? union-out "(radius: builtins.deepSeq radius ("))
+  (check-true (string-contains? union-out "_tag = \"circle\""))
+  (check-true (string-contains? union-out "circle-radius = r: r.radius"))
+  (define error-out
+    (constrained-emit
+     (string-append
+      "(defunion :throwable Failure (Bad [(code Int positive?)])) "
+      "(->Bad 1)")))
+  (check-true
+   (string-contains?
+    error-out
+    "bgl____24626561676c65247265636f7264244261642476616c6964617465 ="))
+  (check-true
+   (string-contains? error-out "(code: builtins.deepSeq code ("))
+  (check-true (string-contains? error-out "_tag = \"bad\"")))
+
+(test-case "unsupported protocol declarations fail instead of disappearing"
+  (define protocol-out
+    (nix-emit
+     (string-append
+      "(define-target nix) "
+      "(defprotocol Sized (size [(self Any)] Int)) "
+      "42")))
+  (check-true
+   (string-contains?
+    protocol-out
+    "protocol declarations are not supported by the nix backend"))
+  (define implementation-out
+    (nix-emit
+     (string-append
+      "(define-target nix) "
+      "(extend-type String Sized (size [(self String)] Int 1)) "
+      "42")))
+  (check-true
+   (string-contains?
+    implementation-out
+    "protocol implementations are not supported by the nix backend")))
 
 ;; --- nix builtins ----------------------------------------------------------
 
@@ -204,6 +491,98 @@
   (define out (nix-emit "(define-target nix) (defrecord Foo [(a Int)]) (with (->Foo 1) [:a 2])"))
   (check-true (string-contains? out "//")))
 
+(test-case "dynamic Map with updates preserve keyword attribute spelling"
+  (define out
+    (nix-emit
+     "(define-target nix) (with {:ready? 1} [:ready? 2])"))
+  (check-true (string-contains? out "\"ready?\" = 1;"))
+  (check-true
+   (string-contains? out "// { \"ready?\" = bgl____update__value__0; }"))
+  (check-false (string-contains? out "ready_p = 2;")))
+
+(test-case "dynamic Map with updates preserve keyword attribute spelling"
+  (define out
+    (nix-emit
+     "(define-target nix) (with {:ready? 1} [:ready? 2])"))
+  (check-true (string-contains? out "\"ready?\" = 1;"))
+  (check-true
+   (string-contains? out "// { \"ready?\" = bgl____update__value__0; }"))
+  (check-false (string-contains? out "ready_p = 2;")))
+
+(test-case "with update fields use the same Nix property spelling as records"
+  (define out
+    (nix-emit
+     (string-append
+      "(define-target nix) "
+      "(defrecord Flags [(ready? Bool) (if Int)]) "
+      "(with (->Flags false 1) [:ready? true] [:if 2])")))
+  (check-true
+   (string-contains? out "ready_p = bgl____update__value__0;"))
+  (check-true (string-contains? out "if' = bgl____update__value__1;")))
+
+(test-case "checked record keyword reads use the generated field spelling"
+  (define out
+    (nix-check-and-emit
+     (string-append
+      "(define-mode strict) (define-target nix) "
+      "(defrecord Flags [(ready? Bool)]) "
+      "(:ready? (->Flags true))")))
+  (check-true (string-contains? out ").ready_p")))
+
+(test-case "Map keyword labels preserve punctuation as quoted attributes"
+  (define out
+    (nix-emit
+     "(define-target nix) (:ready? {:ready? true})"))
+  (check-true (string-contains? out "\"ready?\" = true;"))
+  (check-true (string-contains? out ".\"ready?\"")))
+
+(test-case "typed constrained record update routes through its checked validator"
+  (define out
+    (nix-check-and-emit
+     (string-append
+      "(define-mode strict) (define-target nix) "
+      "(defn positive? [(value Int)] Bool (> value 0)) "
+      "(defrecord Foo [(a Int positive?)]) "
+      "(with (->Foo 1) [:a 2])")))
+  ;; Defined once, called once on the update candidate.
+  (check-equal?
+   (length (regexp-match* (regexp FOO-VALIDATOR-NIX-NAME) out))
+   2)
+  ;; The target and every update value are bound and forced before the merge,
+  ;; so a constrained field cannot slip past the validator under Nix laziness.
+  (check-true
+   (string-contains?
+    out
+    "bgl____update__candidate = (bgl____update__target // { a = bgl____update__value__0; })"))
+  (check-true
+   (string-contains?
+    out
+    (format "(~a bgl____update__candidate)" FOO-VALIDATOR-NIX-NAME))))
+
+(test-case "qualified validator ABI is mangled as a Nix attr selection"
+  (define stxs
+    (parameterize ([current-readtable beagle-readtable])
+      (with-input-from-string
+          "(define-target nix) (with base [:a 2])"
+        (lambda ()
+          (let loop ([acc '()])
+            (define d (read-syntax 'test))
+            (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+  (define prog (parse-program stxs))
+  (define update (car (program-forms prog)))
+  (hash-set!
+   (program-semantic-contracts prog)
+   update
+   (record-update-contract
+    'Foo 'provider/$beagle$record$Foo$validate '(:a)))
+  (define out (string-trim (emit-program prog)))
+  (check-true
+   (string-contains?
+    out
+    (format
+     "(provider.~a bgl____update__candidate)"
+     FOO-VALIDATOR-NIX-NAME))))
+
 ;; --- string ops ------------------------------------------------------------
 
 (test-case "str emits string concatenation"
@@ -240,7 +619,9 @@
 (test-case "overlay emits curried (final: prev: body)"
   (define out (nix-emit-forms '(define-target nix)
     `(nix/overlay ,(br 'final 'prev) ,(mt ':foo 1))))
-  (check-true (and out (string-contains? out "final: prev:")))
+  (check-true
+   (and out
+        (string-contains? out "final: builtins.deepSeq final (prev:")))
   (check-false (and out (string-contains? out "{ final, prev"))))
 
 (test-case "inherit emits inherit"

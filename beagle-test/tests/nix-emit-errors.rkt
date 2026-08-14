@@ -99,8 +99,8 @@
 (test-case "try-form unwraps tryEval to value-or-null"
   (define out (nix-emit "(def x (try (foo)))"))
   (check-true (string-contains? out "builtins.tryEval"))
-  (check-true (string-contains? out "__t.success"))
-  (check-true (string-contains? out "__t.value")))
+  (check-true (string-contains? out "bgl____try.success"))
+  (check-true (string-contains? out "bgl____try.value")))
 
 ;; --- import is not mangled --------------------------------------------------
 

@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fixtures.invalid.enum-comparison-non-member)
+(define-mode strict)
+
+(defenum Mode :on :off)
+
+(defn enabled? [(mode Mode)] Bool
+  (= mode :other))

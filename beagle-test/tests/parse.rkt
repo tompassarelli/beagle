@@ -43,6 +43,24 @@
       (parse-program (read-beagle-syntax tmp) #:source-path tmp))
     (lambda () (delete-file tmp))))
 
+(test-case "declaration and binding collections require source brackets"
+  (for ([case
+         (in-list
+          (list
+           (cons "defn parameters" "(defn f (x) Any x)\n")
+           (cons "record fields" "(defrecord R ((id String)))\n")
+           (cons "let bindings" "(def value (let (x 1) x))\n")
+           (cons "letfn declarations"
+                 "(def value (letfn ((f [x] Any x)) (f 1)))\n")
+           (cons "for clauses" "(def value (for (x xs) x))\n")
+           (cons "binding conditional"
+                 "(def value (if-let (x candidate) x nil))\n")
+           (cons "defmacro parameters" "(defmacro m (x) x)\n")))])
+    (check-exn
+     #rx"(in `\\[[^]]*\\]`|must be written in `\\[[^]]*\\]`)"
+     (lambda () (parse-source-text (cdr case)))
+     (car case))))
+
 ;; --- meta forms ------------------------------------------------------------
 
 (test-case "default namespace and mode"
@@ -67,6 +85,10 @@
 
 (parse-err "unknown define-mode errors"
   '(define-mode wat))
+
+(parse-err/rx "compiler host prefix is reserved source-wide"
+  #rx"reserved compiler identifier prefix"
+  '(def bgl____record__Point__validate 1))
 
 ;; --- def -------------------------------------------------------------------
 
@@ -125,6 +147,34 @@
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-false (param-type (cadr (defn-form-params f)))))
 
+(test-case "each parameter independently owns its optional constraint"
+  (define f
+    (car
+     (parse-one
+      (L 'defn 'mixed-constraints
+         (br 'a (L 'b 'Int 'positive?) (L 'c 'String))
+         'Any
+         'b))))
+  (define params (defn-form-params f))
+  (check-equal? (map param-name params) '(a b c))
+  (check-false (param-type (car params)))
+  (check-eq? (type-prim-name (param-type (cadr params))) 'Int)
+  (check-equal? (param-constraint (cadr params)) 'positive?)
+  (check-false (param-constraint (caddr params))))
+
+(test-case "typed destructuring owns its aggregate constraint"
+  (define f
+    (car
+     (parse-one
+      (L 'defn 'point-x
+         (br (L (br 'x 'y) 'Point 'valid-point?))
+         'Int
+         'x))))
+  (define p (car (defn-form-params f)))
+  (check-true (seq-destructure? (param-name p)))
+  (check-eq? (type-prim-name (param-type p)) 'Point)
+  (check-equal? (param-constraint p) 'valid-point?))
+
 (test-case "(defn mixed [(a Int) (b Any)] Any ...) preserves explicit Any"
   (define f (car (parse-one (L 'defn 'mixed
                                (br (L 'a 'Int) (L 'b 'Any))
@@ -168,6 +218,15 @@
     (car (parse-one (L 'let (br (L 'n 'Int) 42 'm "foo") 'n))))
   (check-not-false (let-binding-type (car (let-form-bindings f))))
   (check-false (let-binding-type (cadr (let-form-bindings f)))))
+
+(test-case "let binding constraint stays inside its declaration form"
+  (define f
+    (car (parse-one
+          (L 'let (br (L 'n 'Int 'positive?) 42) 'n))))
+  (define b (car (let-form-bindings f)))
+  (check-eq? (let-binding-name b) 'n)
+  (check-eq? (type-prim-name (let-binding-type b)) 'Int)
+  (check-equal? (let-binding-constraint b) 'positive?))
 
 (test-case "(let [(n Int) 42 (m Any) \"foo\"] ...) preserves explicit Any"
   (define f
@@ -341,48 +400,77 @@
   (check-false (param-type (car (defn-form-params f))))
   (check-false (param-type (cadr (defn-form-params f)))))
 
-;; --- defn multi-arity (accept-and-canonicalize) ----------------------------
-;;
-;; Two surface forms produce identical defn-multi ASTs:
-;;
-;;   Clojure list-wrapped:  (defn add ([a] Any a) ([a b] Any (+ a b)))
-;;   Bare-vector:           (defn add [a] Any a [a b] Any (+ a b))
-;;
-;; The bare-vector form is canonicalized to the list-wrapped form at parse
-;; time. Identity-preserving — both forms produce the same emitted code.
-;;
-;; In Racket source, `[…]` reads as a plain list (no BRACKET-TAG), so we
-;; build bracket-tagged datums explicitly with `(br …)` to mirror what
-;; the beagle reader produces from real .bgl source.
-(test-case "defn multi-arity: bare-vector == list-wrapped (identity)"
-  (define bare
-    (car (parse-one `(defn add ,(br 'a) Any a ,(br 'a 'b) Any (+ a b)))))
-  (define wrapped
-    (car (parse-one `(defn add (,(br 'a) Any a) (,(br 'a 'b) Any (+ a b))))))
-  (check-true   (defn-multi? bare))
-  (check-true   (defn-multi? wrapped))
-  (check-equal? bare wrapped))
-
-(test-case "defn multi-arity: three arities, bare-vector"
+;; --- defn multi-arity -------------------------------------------------------
+;; Each arity is one complete list-wrapped declaration. A flat stream of
+;; parameter vectors, return types, and bodies is never repartitioned.
+(test-case "defn multi-arity: three structural clauses"
   (define f
     (car (parse-one `(defn greet
-                       ,(br)       String "hi"
-                       ,(br 'x)    String (str "hi " x)
-                       ,(br 'x 'y) String (str y " " x)))))
+                       (,(br) String "hi")
+                       (,(br 'x) String (str "hi " x))
+                       (,(br 'x 'y) String (str y " " x))))))
   (check-true (defn-multi? f))
   (check-equal? (length (defn-multi-arities f)) 3))
 
-(test-case "defn multi-arity: typed params, bare-vector == list-wrapped"
-  (define bare
-    (car (parse-one `(defn f
-                       ,(br (L 'x 'Int)) Int x
-                       ,(br (L 'x 'Int) (L 'y 'Int)) Int (+ x y)))))
-  (define wrapped
+(test-case "defn multi-arity: typed params remain local to each clause"
+  (define f
     (car (parse-one `(defn f
                        (,(br (L 'x 'Int)) Int x)
                        (,(br (L 'x 'Int) (L 'y 'Int)) Int (+ x y))))))
-  (check-true   (defn-multi? bare))
-  (check-equal? bare wrapped))
+  (check-true (defn-multi? f))
+  (check-equal? (map (lambda (arity) (length (arity-clause-params arity)))
+                     (defn-multi-arities f))
+                '(1 2)))
+
+(test-case "later multi-arity clauses retain constraint source locations"
+  (define p
+    (parse-source-text
+     (string-append
+      "(defn choose\n"
+      "  ([(x Int positive?)] Int x)\n"
+      "  ([(x Int)\n"
+      "    (fallback Int\n"
+      "              valid-fallback?)]\n"
+      "   Int fallback))\n")))
+  (define f (car (program-forms p)))
+  (define second-arity (cadr (defn-multi-arities f)))
+  (define constrained-param (cadr (arity-clause-params second-arity)))
+  (check-equal? (param-constraint constrained-param) 'valid-fallback?)
+  (define loc (hash-ref (program-src-table p) constrained-param #f))
+  (check-true (src-loc? loc))
+  (check-equal? (src-loc-line loc) 4)
+  (check-equal? (src-loc-col loc) 4)
+  (check-equal? (src-loc-span loc) 44))
+
+(test-case "defn rejects flattened multi-arity at the stray parameter vector"
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-regexp-match #rx"Invalid multi-arity declaration: \\[a b\\]"
+                              (exn-message e))
+          (define details (beagle-parse-error-details e))
+          (check-equal? (hash-ref details 'stray-form) "[a b]")
+          (check-equal? (hash-ref details 'error-line) 1)
+          (check-true (exact-nonnegative-integer?
+                       (hash-ref details 'error-col)))
+          (check-true (exact-positive-integer?
+                       (hash-ref details 'error-pos)))
+          (check-equal? (hash-ref details 'error-span) 5))])
+    (parse-source-text "(defn add [a] Any a [a b] Any (+ a b))\n")
+    (fail "flattened multi-arity unexpectedly parsed")))
+
+(test-case "a later data vector in a single-arity body is not an arity"
+  (define f
+    (car
+     (parse-one
+      `(defn f ,(br 'x) Any
+         (side)
+         ,(br 1 2)
+         (side2)
+         x))))
+  (check-true (defn-form? f))
+  (check-equal? (length (defn-form-body f)) 4)
+  (check-true (vec-form? (cadr (defn-form-body f)))))
 
 ;; A single-arity defn whose body returns a vec literal must NOT be misread
 ;; as bare-vector multi-arity. The detection rule requires each top-level
@@ -406,6 +494,24 @@
   (define f (car (parse-one '(let [(x Int) 1 (y Int) 2] x))))
   (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Int)
   (check-eq? (type-prim-name (let-binding-type (cadr (let-form-bindings f)))) 'Int))
+
+(test-case "letfn retains constrained parameter source locations"
+  (define p
+    (parse-source-text
+     (string-append
+      "(letfn [(accept [(value Int\n"
+      "                  acceptable?)]\n"
+      "                 Int value)]\n"
+      "  (accept 1))\n")))
+  (define f (car (program-forms p)))
+  (define local-fn (car (letfn-form-fns f)))
+  (define constrained-param (car (letfn-fn-params local-fn)))
+  (check-equal? (param-constraint constrained-param) 'acceptable?)
+  (define loc (hash-ref (program-src-table p) constrained-param #f))
+  (check-true (src-loc? loc))
+  (check-equal? (src-loc-line loc) 1)
+  (check-equal? (src-loc-col loc) 17)
+  (check-equal? (src-loc-span loc) 41))
 
 
 (test-case "fn (lambda)"
@@ -691,6 +797,72 @@
   (check-equal? (param-type (car (record-form-fields f))) (type-prim 'String))
   (check-eq? (param-name (cadr (record-form-fields f))) 'rate)
   (check-equal? (param-type (cadr (record-form-fields f))) (type-prim 'Int)))
+
+(test-case "defrecord accepts one complete constrained field form"
+  (define f
+    (car
+     (parse-one
+      `(defrecord Character ,(br (L 'id 'String 'character-id-wire?))))))
+  (define field (car (record-form-fields f)))
+  (check-eq? (param-name field) 'id)
+  (check-eq? (type-prim-name (param-type field)) 'String)
+  (check-equal? (param-constraint field) 'character-id-wire?))
+
+(test-case "literal false cannot disappear into the no-constraint sentinel"
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-regexp-match #rx"invalid parameter constraint `false`"
+                              (exn-message e))
+          (define details (beagle-parse-error-details e))
+          (check-equal? (hash-ref details 'error-line) 1)
+          (check-true (exact-nonnegative-integer?
+                       (hash-ref details 'error-col))))])
+    ;; `#f` is the reader-level boolean datum that collides with the AST's
+    ;; absence sentinel. The ordinary Beagle name `false` remains a symbol and
+    ;; reaches the checker's callable-type diagnostic normally.
+    (parse-source-text "(defn impossible [(x Int #f)] Int x)\n")
+    (fail "false constraint unexpectedly became absent")))
+
+(test-case "defrecord rejects flattened field metadata at the stray form"
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-regexp-match
+           #rx"Invalid field declaration: character-id-wire\\?"
+           (exn-message e))
+          (check-regexp-match
+           #rx"Did you mean:\n  \\(id String character-id-wire\\?\\)"
+           (exn-message e))
+          (define details (beagle-parse-error-details e))
+          (check-equal? (hash-ref details 'stray-form) "character-id-wire?")
+          (check-equal? (hash-ref details 'error-line) 1)
+          (check-true
+           (exact-nonnegative-integer? (hash-ref details 'error-col)))
+          (check-true
+           (exact-positive-integer? (hash-ref details 'error-pos)))
+          (check-equal? (hash-ref details 'error-span) 18))])
+    (parse-source-text
+     "(defrecord Character [(id String) character-id-wire?])\n")
+    (fail "flattened field metadata unexpectedly parsed")))
+
+(test-case "defrecord targets a non-symbol flattened field form"
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-regexp-match
+           #rx"Invalid field declaration: \\(wire-validator id\\)"
+           (exn-message e))
+          (check-regexp-match
+           #rx"Did you mean:\n  \\(id String \\(wire-validator id\\)\\)"
+           (exn-message e))
+          (define details (beagle-parse-error-details e))
+          (check-equal? (hash-ref details 'stray-form) "(wire-validator id)")
+          (check-equal? (hash-ref details 'error-line) 1)
+          (check-equal? (hash-ref details 'error-span) 19))])
+    (parse-source-text
+     "(defrecord Character [(id String) (wire-validator id)])\n")
+    (fail "non-symbol flattened field metadata unexpectedly parsed")))
 
 (parse-err "defrecord rejects bare fields without types"
   `(defrecord Foo ,(br 'x 'y)))
@@ -1001,6 +1173,21 @@
                                (perimeter ,(br (L 'self 'Any)) Float)))))
   (check-equal? (length (protocol-form-methods f)) 2))
 
+(test-case "defprotocol preserves constrained rest parameter structurally"
+  (define f
+    (car
+     (parse-one
+      `(defprotocol Joinable
+         (join ,(br (L 'self 'Any) '&
+                    (L 'parts (L 'Vec 'String) 'nonempty?))
+               String)))))
+  (define method (car (protocol-form-methods f)))
+  (check-equal? (map param-name (protocol-method-params method)) '(self))
+  (define rest-p (protocol-method-rest-param method))
+  (check-eq? (param-name rest-p) 'parts)
+  (check-equal? (param-type rest-p) (type-app 'Vec (list (type-prim 'String))))
+  (check-equal? (param-constraint rest-p) 'nonempty?))
+
 ;; defmulti / defmethod removed — multimethods had ~zero usage in the
 ;; corpus. Use defprotocol + extend-type for type-based dispatch.
 
@@ -1076,6 +1263,22 @@
   (check-true (extend-type-form? f))
   (check-eq? (extend-type-form-type-name f) 'String)
   (check-equal? (length (extend-type-form-impls f)) 1))
+
+(test-case "extend-type preserves constrained rest parameter structurally"
+  (define f
+    (car
+     (parse-one
+      `(extend-type String
+         Joinable
+         (join ,(br (L 'self 'String) '&
+                    (L 'parts (L 'Vec 'String) 'nonempty?))
+               String
+               (str self parts))))))
+  (define method
+    (car (type-impl-methods (car (extend-type-form-impls f)))))
+  (define rest-p (impl-method-rest-param method))
+  (check-eq? (param-name rest-p) 'parts)
+  (check-equal? (param-constraint rest-p) 'nonempty?))
 
 ;; --- fmt: removed 2026-06-12 -------------------------------------------------
 ;; Zero corpus hits; not Clojure. str/format are the canonical spellings.
@@ -1157,6 +1360,52 @@
   (define f (car (parse-one '(defscalar PositiveInt Int :where (> 0)))))
   (check-equal? (length (defscalar-form-predicates f)) 1)
   (check-eq? (scalar-predicate-op (car (defscalar-form-predicates f))) '>))
+
+(test-case "defscalar canonicalizes primitive backing aliases"
+  (define int-scalar (car (parse-one '(defscalar Count Long))))
+  (define float-scalar (car (parse-one '(defscalar Ratio Double))))
+  (check-eq? (defscalar-form-backing-type int-scalar) 'Int)
+  (check-eq? (defscalar-form-backing-type float-scalar) 'Float))
+
+(parse-err/rx "defscalar rejects a nominal backing"
+  #rx"backing must resolve to one primitive type"
+  '(defscalar Wrapped DomainValue))
+
+(parse-err/rx "defscalar rejects an alias whose expansion is not primitive"
+  #rx"backing must resolve to one primitive type"
+  '(defalias Scalarish (U Int String))
+  '(defscalar Wrapped Scalarish))
+
+(parse-err/rx "defscalar rejects malformed predicate declarations structurally"
+  #rx"predicate must be [(]op numeric-literal[)]"
+  '(defscalar Broken Int :where (>)))
+
+(test-case "standalone source import canonicalizes defscalar backing aliases"
+  (define root (make-temporary-file "beagle-defscalar-import-~a" 'directory))
+  (define provider (build-path root "provider.bclj"))
+  (define consumer (build-path root "consumer.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file provider
+        (lambda (out)
+          (display "#lang beagle/clj\n" out)
+          (display "(ns provider)\n" out)
+          (display "(defscalar Count Long :where (= 0))\n" out))
+        #:exists 'truncate/replace)
+      (call-with-output-file consumer
+        (lambda (out)
+          (display "#lang beagle/clj\n" out)
+          (display "(ns consumer (:require [provider :refer [->Count Count]]))\n" out)
+          (display "(def zero Count (->Count 0))\n" out))
+        #:exists 'truncate/replace)
+      (define prog (parse-program/file consumer))
+      (define ctor-type (hash-ref (program-externs prog) '->Count))
+      (check-eq? (type-prim-name (car (type-fn-params ctor-type))) 'Int)
+      (define imported-predicates
+        (hash-ref (program-imported-scalar-preds prog) 'Count))
+      (check-eq? (scalar-predicate-op (car imported-predicates)) '=))
+    (lambda () (delete-directory/files root))))
 
 ;; --- varargs (& rest) in defn/fn params ---
 
@@ -1401,6 +1650,66 @@
   (check-equal? (deferror-form-members f) '(NotFound RateLimit))
   (check-equal? (length (hash-ref (deferror-form-member-fields f) 'NotFound)) 1))
 
+(test-case "throwable union fields own constraints"
+  (define f
+    (car
+     (parse-one
+      `(defunion :throwable ApiError
+         (NotFound ,(br (L 'id 'String 'valid-id?)))))))
+  (define field
+    (car (hash-ref (deferror-form-member-fields f) 'NotFound)))
+  (check-equal? (param-constraint field) 'valid-id?))
+
+(test-case "ordinary union fields own constraints"
+  (define f
+    (car
+     (parse-one
+      `(defunion ApiResult
+         Empty
+         (Found ,(br (L 'id 'String 'valid-id?)))))))
+  (define field
+    (car (hash-ref (defunion-form-member-fields f) 'Found)))
+  (check-equal? (defunion-form-members f) '(Empty Found))
+  (check-equal? (param-constraint field) 'valid-id?))
+
+(test-case "ordinary union rejects trailing member metadata at the whole form"
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-eq? (beagle-parse-error-kind e) 'bad-defunion)
+          (check-true
+           (string-contains?
+            (exn-message e)
+            "Invalid union member declaration: (Shifted junk [(value String validator?)])"))
+          (check-regexp-match #rx"Each member must be one complete form"
+                              (exn-message e))
+          (check-equal?
+           (hash-ref (beagle-parse-error-details e) 'stray-form)
+           "(Shifted junk [(value String validator?)])"))])
+    (parse-source-text
+     "(defunion Shifted (Shifted junk [(value String validator?)]))\n")
+    (fail "malformed union member unexpectedly parsed")))
+
+(parse-err/rx "throwable union rejects trailing member metadata"
+  #rx"Invalid union member declaration"
+  `(defunion :throwable ApiError
+     (NotFound ,(br (L 'id 'String)) ignored)))
+
+(parse-err/rx "parametric union rejects trailing member metadata"
+  #rx"Invalid union member declaration"
+  `(defunion (Result T)
+     (Ok ,(br (L 'value 'T)) ignored)))
+
+(test-case "parametric union accepts a complete bare member"
+  (define f
+    (car
+     (parse-one
+      `(defunion (Maybe T)
+         Missing
+         (Present ,(br (L 'value 'T)))))))
+  (check-equal? (defunion-form-members f) '(Missing Present))
+  (check-equal? (hash-ref (defunion-form-member-fields f) 'Missing) '()))
+
 ;; --- :raises on defn ---------------------------------------------------------
 
 ;; `:raises` on defn previously combined with an inline `: RET` annotation
@@ -1613,7 +1922,6 @@
      "(defn two\n  [(x Int)\n   (y Int)]\n  Int\n  (+ x y))\n"
      "(defn varied\n  [(abc Int)\n   (b String)\n   (bc (Vec Int))]\n  Int\n  abc)\n"
      "(defn multi\n  ([x] Any x)\n  ([x\n    y] Any (+ x y)))\n"
-     "(defn bare [x] Any x\n  [x\n   y] Any (+ x y))\n"
      "(def anon (fn\n            [x\n             y] Any (+ x y)))\n"
      "(def nested (letfn [(step\n                      [x\n                       y] Any (+ x y))] step))\n"
      "(defprotocol P\n  (one-m [this] Any)\n  (two-m\n    [this\n     x] Int))\n"
@@ -1638,7 +1946,6 @@
      (cons "record typed spacing" "(defrecord R [(x  Int)])\n")
      (cons "multi-arity" "(defn f ([x] Any x) ([x y] Any (+ x y)))\n")
      (cons "multi-arity clause placement" "(defn f\n  (\n   [x] Any x))\n")
-     (cons "bare multi-arity" "(defn f [x] Any x [x y] Any (+ x y))\n")
      (cons "letfn" "(def f (letfn [(step [x y] Any (+ x y))] step))\n")
      (cons "protocol" "(defprotocol P (m [this x] Int))\n")
      (cons "implementation" "(extend-type String P (m [this x] Any x))\n")

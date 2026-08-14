@@ -392,6 +392,72 @@ BNIX
   (check-equal? (validator-count (list source-file)) 1)
   (delete-directory/files dir))
 
+(test-case "Nix validation walks option keys inside binding constraints"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "services.demo.enable" 't "bool"))))
+  (define source-file
+    (write-bnix-file
+     dir "constraint-option-typo.bnix"
+     (string-append
+      "(ns constraint-option-typo)\n"
+      "(defn guarded [(value Int (fn [(candidate Int)] Bool "
+      "(do {:services.demo.enabel true} (> candidate 0))))] Int value)")))
+  (check-equal? (validator-count (list source-file)) 1)
+  (delete-directory/files dir))
+
+(test-case "Nix validation walks protocol, implementation, and letfn constraints"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "services.demo.enable" 't "bool"))))
+  (define source-file
+    (write-bnix-file
+     dir "declaration-constraint-option-typos.bnix"
+     #<<BNIX
+(ns declaration-constraint-option-typos)
+(defprotocol Checked
+  (check-value
+    [(value String
+       (fn [(candidate String)] Bool
+         (do {:services.demo.protocol-typo true} true)))]
+    Bool))
+(extend-type String
+  Checked
+  (check-value
+    [(value String
+       (fn [(candidate String)] Bool
+         (do {:services.demo.implementation-typo true} true)))]
+    Bool
+    true))
+(def result
+  (letfn [(accept
+            [(value Int
+               (fn [(candidate Int)] Bool
+                 (do {:services.demo.letfn-typo true} true)))]
+            Int
+            value)]
+    (accept 1)))
+BNIX
+     ))
+  (check-equal? (validator-count (list source-file)) 3)
+  (delete-directory/files dir))
+
+(test-case "Nix validation walks map-destructuring defaults in incoming scope"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "services.demo.enable" 't "bool"))))
+  (define source-file
+    (write-bnix-file
+     dir "destructuring-default-option-typo.bnix"
+     (string-append
+      "(ns destructuring-default-option-typo)\n"
+      "(defn unpack "
+      "[({:keys [value] :or {value (do {:services.demo.default-typo true} 1)}} "
+      "  (Map Keyword Int))] "
+      "Int value)")))
+  (check-equal? (validator-count (list source-file)) 1)
+  (delete-directory/files dir))
+
 ;; ============================================================================
 ;; myConfig introspective validation
 ;; ============================================================================

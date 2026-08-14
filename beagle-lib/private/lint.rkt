@@ -101,11 +101,22 @@
   (for ([name (in-list (binding-target-bound-names p))])
     (hash-set! scope name #t)))
 
+(define (check-param-constraints params scope ctx)
+  (for ([p (in-list params)]
+        #:when (and (param? p) (param-constraint p)))
+    (check-shadow (param-constraint p) scope ctx)))
+
 (define (lint-shadows prog)
   (for ([form (in-list (program-forms prog))])
     (cond
       [(defn-form? form)
        (define scope (make-hasheq))
+       (check-param-constraints (defn-form-params form) scope
+                                (defn-form-name form))
+       (when (and (defn-form-rest-param form)
+                  (param-constraint (defn-form-rest-param form)))
+         (check-shadow (param-constraint (defn-form-rest-param form))
+                       scope (defn-form-name form)))
        (for ([p (in-list (defn-form-params form))])
          (add-param-to-scope! p scope))
        (for ([e (in-list (defn-form-body form))])
@@ -113,6 +124,12 @@
       [(defn-multi? form)
        (for ([a (in-list (defn-multi-arities form))])
          (define scope (make-hasheq))
+         (check-param-constraints (arity-clause-params a) scope
+                                  (defn-multi-name form))
+         (when (and (arity-clause-rest-param a)
+                    (param-constraint (arity-clause-rest-param a)))
+           (check-shadow (param-constraint (arity-clause-rest-param a))
+                         scope (defn-multi-name form)))
          (for ([p (in-list (arity-clause-params a))])
            (add-param-to-scope! p scope))
          (for ([e (in-list (arity-clause-body a))])
@@ -123,6 +140,8 @@
        (check-shadow (defonce-form-value form) (make-hasheq) #f)]
       [(defmethod-form? form)
        (define scope (make-hasheq))
+       (check-param-constraints (defmethod-form-params form) scope
+                                (defmethod-form-name form))
        (for ([p (in-list (defmethod-form-params form))])
          (add-param-to-scope! p scope))
        (for ([e (in-list (defmethod-form-body form))])
@@ -131,16 +150,56 @@
        (for ([impl (in-list (extend-type-form-impls form))])
          (for ([m (in-list (type-impl-methods impl))])
            (define scope (make-hasheq))
+           (check-param-constraints (impl-method-params m) scope
+                                    (impl-method-name m))
+           (when (and (impl-method-rest-param m)
+                      (param-constraint (impl-method-rest-param m)))
+             (check-shadow
+              (param-constraint (impl-method-rest-param m))
+              scope
+              (impl-method-name m)))
            (for ([p (in-list (impl-method-params m))])
              (add-param-to-scope! p scope))
+           (when (impl-method-rest-param m)
+             (add-param-to-scope! (impl-method-rest-param m) scope))
            (for ([e (in-list (impl-method-body m))])
              (check-shadow e scope (impl-method-name m)))))]
+      [(record-form? form)
+       (check-param-constraints (record-form-fields form)
+                                (make-hasheq) (record-form-name form))]
+      [(protocol-form? form)
+       (for ([method (in-list (protocol-form-methods form))])
+         (define scope (make-hasheq))
+         (check-param-constraints (protocol-method-params method)
+                                  scope (protocol-method-name method))
+         (when (and (protocol-method-rest-param method)
+                    (param-constraint (protocol-method-rest-param method)))
+           (check-shadow
+            (param-constraint (protocol-method-rest-param method))
+            scope
+            (protocol-method-name method))))]
+      [(defunion-form? form)
+       (define member-fields (defunion-form-member-fields form))
+       (when member-fields
+         (for ([fields (in-hash-values member-fields)])
+           (check-param-constraints fields (make-hasheq)
+                                    (defunion-form-name form))))]
+      [(deferror-form? form)
+       (for ([fields (in-hash-values (deferror-form-member-fields form))])
+         (check-param-constraints fields (make-hasheq)
+                                  (deferror-form-name form)))]
+      [(or (jst-class? form) (jst-export? form)
+           (jst-export-default? form))
+       (check-shadow form (make-hasheq) #f)]
       [else (void)])))
 
 (define (check-shadow form scope ctx)
   (match form
     [(fn-form params _rest-p _ body)
      (define inner (scope-copy scope))
+     (check-param-constraints params scope ctx)
+     (when (and _rest-p (param-constraint _rest-p))
+       (check-shadow (param-constraint _rest-p) scope ctx))
      (for ([p (in-list params)])
        (for ([n (in-list (binding-target-bound-names p))])
          (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
@@ -152,6 +211,8 @@
        ;; Initializers and :or defaults see the bindings installed by earlier
        ;; entries, never the names introduced by this entry itself.
        (check-shadow (let-binding-value b) inner ctx)
+       (when (let-binding-constraint b)
+         (check-shadow (let-binding-constraint b) inner ctx))
        (for ([default (in-list
                        (destructure-or-default-exprs (let-binding-name b)))])
          (check-shadow default inner ctx))
@@ -161,10 +222,15 @@
            (warn-shadow "let binding" name ctx))
          (hash-set! inner name #t)))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
+    [(loop-form bindings body)
+     (check-shadow (let-form bindings body) scope ctx)]
     [(binding-form bindings body)
      ;; `binding` introduces no new locals — targets reference existing
      ;; dynamic vars. Walk values + body in the current scope (no shadowing).
-     (for ([b (in-list bindings)]) (check-shadow (let-binding-value b) scope ctx))
+     (for ([b (in-list bindings)])
+       (check-shadow (let-binding-value b) scope ctx)
+       (when (let-binding-constraint b)
+         (check-shadow (let-binding-constraint b) scope ctx)))
      (for ([e (in-list body)]) (check-shadow e scope ctx))]
     [(letfn-form fns body)
      (define inner (scope-copy scope))
@@ -177,6 +243,12 @@
      ;; Check each fn body with params in scope
      (for ([f (in-list fns)])
        (define fn-scope (scope-copy inner))
+       (check-param-constraints (letfn-fn-params f) inner
+                                (letfn-fn-name f))
+       (when (and (letfn-fn-rest-param f)
+                  (param-constraint (letfn-fn-rest-param f)))
+         (check-shadow (param-constraint (letfn-fn-rest-param f))
+                       inner (letfn-fn-name f)))
        (for ([p (in-list (letfn-fn-params f))])
          (add-param-to-scope! p fn-scope))
        (when (letfn-fn-rest-param f)
@@ -186,12 +258,20 @@
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(defn-form name params _rest-p _ body _private? _raises _doc)
      (define inner (scope-copy scope))
+     (check-param-constraints params scope name)
+     (when (and _rest-p (param-constraint _rest-p))
+       (check-shadow (param-constraint _rest-p) scope name))
      (for ([p (in-list params)])
        (add-param-to-scope! p inner))
      (for ([e (in-list body)]) (check-shadow e inner name))]
     [(defn-multi name arities _private? _doc)
      (for ([a (in-list arities)])
        (define inner (scope-copy scope))
+       (check-param-constraints (arity-clause-params a) scope name)
+       (when (and (arity-clause-rest-param a)
+                  (param-constraint (arity-clause-rest-param a)))
+         (check-shadow (param-constraint (arity-clause-rest-param a))
+                       scope name))
        (for ([p (in-list (arity-clause-params a))])
          (add-param-to-scope! p inner))
        (for ([e (in-list (arity-clause-body a))]) (check-shadow e inner name)))]
@@ -208,7 +288,8 @@
      (for ([cl (in-list clauses)])
        (check-shadow (cond-clause-test cl) scope ctx)
        (for ([e (in-list (cond-clause-body cl))]) (check-shadow e scope ctx)))]
-    [(call-form _ args)
+    [(call-form fn args)
+     (unless (symbol? fn) (check-shadow fn scope ctx))
      (for ([a (in-list args)]) (check-shadow a scope ctx))]
     [(method-call _ target args)
      (check-shadow target scope ctx)
@@ -270,6 +351,8 @@
      (define inner (scope-copy scope))
      (for ([b (in-list bindings)])
        (check-shadow (let-binding-value b) inner ctx)
+       (when (let-binding-constraint b)
+         (check-shadow (let-binding-constraint b) inner ctx))
        (for ([name (in-list
                     (binding-target-bound-names (let-binding-name b)))])
          (hash-set! inner name #t)))
@@ -301,14 +384,26 @@
      (for ([c (in-list clauses)])
        (when (for-binding? c)
          (check-shadow (for-binding-expr c) inner ctx)
+         (when (for-binding-constraint c)
+           (check-shadow (for-binding-constraint c) inner ctx))
          (for ([name (in-list
                       (binding-target-bound-names (for-binding-name c)))])
            (when (hash-has-key? inner name)
              (warn-shadow "doseq binding" name ctx))
            (hash-set! inner name #t)))
        (when (for-when? c)
-         (check-shadow (for-when-test c) inner ctx)))
+         (check-shadow (for-when-test c) inner ctx))
+       (when (for-let? c)
+         (for ([b (in-list (for-let-bindings c))])
+           (check-shadow (let-binding-value b) inner ctx)
+           (when (let-binding-constraint b)
+             (check-shadow (let-binding-constraint b) inner ctx))
+           (for ([name (in-list
+                        (binding-target-bound-names (let-binding-name b)))])
+             (hash-set! inner name #t)))))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
+    [(for-form clauses body)
+     (check-shadow (doseq-form clauses body) scope ctx)]
     [(case-form test clauses default)
      (check-shadow test scope ctx)
      (for ([c (in-list clauses)])
@@ -356,7 +451,19 @@
     [(jst-class _ extends methods _)
      (when extends (check-shadow extends scope ctx))
      (for ([m (in-list methods)])
-       (for ([e (in-list (jst-method-body m))]) (check-shadow e scope ctx)))]
+       (define method-scope (scope-copy scope))
+       (check-param-constraints (jst-method-params m) scope
+                                (jst-method-name m))
+       (when (and (jst-method-rest-param m)
+                  (param-constraint (jst-method-rest-param m)))
+         (check-shadow (param-constraint (jst-method-rest-param m))
+                       scope (jst-method-name m)))
+       (for ([p (in-list (jst-method-params m))])
+         (add-param-to-scope! p method-scope))
+       (when (jst-method-rest-param m)
+         (add-param-to-scope! (jst-method-rest-param m) method-scope))
+       (for ([e (in-list (jst-method-body m))])
+         (check-shadow e method-scope ctx)))]
     [(jst-dot obj _) (check-shadow obj scope ctx)]
     [(jst-spread expr) (check-shadow expr scope ctx)]
     [(jst-typeof expr) (check-shadow expr scope ctx)]
@@ -429,26 +536,61 @@
                 (imported-name? name))
       (warn "unused declare-extern: ~a" name))))
 
+(define (collect-param-constraints params used)
+  (for ([p (in-list params)]
+        #:when (and (param? p) (param-constraint p)))
+    (collect-symbols (param-constraint p) used)))
+
+(define (collect-binding-expressions bindings used)
+  (for ([b (in-list bindings)])
+    (collect-symbols (let-binding-value b) used)
+    (when (let-binding-constraint b)
+      (collect-symbols (let-binding-constraint b) used))))
+
 (define (collect-symbols form used)
   (match form
     [(? symbol?) (hash-set! used form #t)]
     [(def-form _ _ value _ _) (collect-symbols value used)]
     [(defonce-form _ _ value _) (collect-symbols value used)]
-    [(defn-form _ _ _ _ body _ _ _)
+    [(defn-form _ params rest-p _ body _ _ _)
+     (collect-param-constraints params used)
+     (when (and rest-p (param-constraint rest-p))
+       (collect-symbols (param-constraint rest-p) used))
      (for ([e (in-list body)]) (collect-symbols e used))]
-    [(fn-form _ _ _ body)
+    [(defn-multi _ arities _ _)
+     (for ([arity (in-list arities)])
+       (collect-param-constraints (arity-clause-params arity) used)
+       (when (and (arity-clause-rest-param arity)
+                  (param-constraint (arity-clause-rest-param arity)))
+         (collect-symbols
+          (param-constraint (arity-clause-rest-param arity)) used))
+       (for ([e (in-list (arity-clause-body arity))])
+         (collect-symbols e used)))]
+    [(fn-form params rest-p _ body)
+     (collect-param-constraints params used)
+     (when (and rest-p (param-constraint rest-p))
+       (collect-symbols (param-constraint rest-p) used))
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(let-form bindings body)
-     (for ([b (in-list bindings)]) (collect-symbols (let-binding-value b) used))
+     (collect-binding-expressions bindings used)
+     (for ([e (in-list body)]) (collect-symbols e used))]
+    [(loop-form bindings body)
+     (collect-binding-expressions bindings used)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(binding-form bindings body)
      ;; target names are uses of dynamic vars; values + body are exprs
      (for ([b (in-list bindings)])
        (when (symbol? (let-binding-name b)) (hash-set! used (let-binding-name b) #t))
-       (collect-symbols (let-binding-value b) used))
+       (collect-symbols (let-binding-value b) used)
+       (when (let-binding-constraint b)
+         (collect-symbols (let-binding-constraint b) used)))
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(letfn-form fns body)
      (for ([f (in-list fns)])
+       (collect-param-constraints (letfn-fn-params f) used)
+       (when (and (letfn-fn-rest-param f)
+                  (param-constraint (letfn-fn-rest-param f)))
+         (collect-symbols (param-constraint (letfn-fn-rest-param f)) used))
        (for ([e (in-list (letfn-fn-body f))]) (collect-symbols e used)))
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(if-form c t e)
@@ -465,7 +607,9 @@
        (collect-symbols (cond-clause-test cl) used)
        (for ([e (in-list (cond-clause-body cl))]) (collect-symbols e used)))]
     [(call-form fn args)
-     (hash-set! used fn #t)
+     (if (symbol? fn)
+         (hash-set! used fn #t)
+         (collect-symbols fn used))
      (for ([a (in-list args)]) (collect-symbols a used))]
     [(method-call mname target args)
      (hash-set! used mname #t)
@@ -502,7 +646,7 @@
      (collect-symbols then-body used)
      (collect-symbols else-body used)]
     [(with-open-form bindings body)
-     (for ([b (in-list bindings)]) (collect-symbols (let-binding-value b) used))
+     (collect-binding-expressions bindings used)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(doto-form target forms)
      (collect-symbols target used)
@@ -536,9 +680,15 @@
     [(doseq-form clauses body)
      (for ([c (in-list clauses)])
        (cond
-         [(for-binding? c) (collect-symbols (for-binding-expr c) used)]
-         [(for-when? c) (collect-symbols (for-when-test c) used)]))
+         [(for-binding? c)
+          (collect-symbols (for-binding-expr c) used)
+          (when (for-binding-constraint c)
+            (collect-symbols (for-binding-constraint c) used))]
+         [(for-when? c) (collect-symbols (for-when-test c) used)]
+         [(for-let? c) (collect-binding-expressions (for-let-bindings c) used)]))
      (for ([e (in-list body)]) (collect-symbols e used))]
+    [(for-form clauses body)
+     (collect-symbols (doseq-form clauses body) used)]
     [(case-form test clauses default)
      (collect-symbols test used)
      (for ([c (in-list clauses)])
@@ -567,12 +717,33 @@
      (for ([u (in-list updates)])
        (collect-symbols (with-update-value u) used))]
     [(defenum-form _ _) (void)]
-    [(deferror-form _ _ _) (void)]
-    [(defmethod-form _ _ _ body)
+    [(record-form _ fields)
+     (collect-param-constraints fields used)]
+    [(protocol-form _ methods)
+     (for ([method (in-list methods)])
+       (collect-param-constraints (protocol-method-params method) used)
+       (when (and (protocol-method-rest-param method)
+                  (param-constraint (protocol-method-rest-param method)))
+         (collect-symbols
+          (param-constraint (protocol-method-rest-param method)) used)))]
+    [(defunion-form _ _ _ member-fields)
+     (when member-fields
+       (for ([fields (in-hash-values member-fields)])
+         (collect-param-constraints fields used)))]
+    [(deferror-form _ _ member-fields)
+     (for ([fields (in-hash-values member-fields)])
+       (collect-param-constraints fields used))]
+    [(defmethod-form _ _ params body)
+     (collect-param-constraints params used)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(extend-type-form _ impls)
      (for ([impl (in-list impls)])
        (for ([m (in-list (type-impl-methods impl))])
+         (collect-param-constraints (impl-method-params m) used)
+         (when (and (impl-method-rest-param m)
+                    (param-constraint (impl-method-rest-param m)))
+           (collect-symbols
+            (param-constraint (impl-method-rest-param m)) used))
          (for ([e (in-list (impl-method-body m))]) (collect-symbols e used))))]
     [(await-form expr)
      (collect-symbols expr used)]
@@ -582,6 +753,10 @@
     [(jst-class _ extends methods _)
      (when extends (collect-symbols extends used))
      (for ([m (in-list methods)])
+       (collect-param-constraints (jst-method-params m) used)
+       (when (and (jst-method-rest-param m)
+                  (param-constraint (jst-method-rest-param m)))
+         (collect-symbols (param-constraint (jst-method-rest-param m)) used))
        (for ([e (in-list (jst-method-body m))]) (collect-symbols e used)))]
     [(jst-dot obj _) (collect-symbols obj used)]
     [(jst-spread expr) (collect-symbols expr used)]

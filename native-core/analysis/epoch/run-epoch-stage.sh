@@ -46,11 +46,17 @@ ast_of() {  # source path -> AST JSON path, generated once per run
 deps_of() {  # AST JSON path -> native.* module names it requires
   bb -e '(require (quote [cheshire.core :as json])
                   (quote [clojure.string :as str]))
-         (doseq [r (get (json/parse-string (slurp (first *command-line-args*)))
-                        "requires")
-                 :let [n (str (get r "ns"))]
-                 :when (str/starts-with? n "native.")]
-           (println n))' "$1"
+         (load-file (second *command-line-args*))
+         (require (quote [native.checked-program :as checked-program]))
+         (let [ast-path (first *command-line-args*)
+               ast (checked-program/require-checked-program!
+                     (json/parse-string (slurp ast-path))
+                     ast-path
+                     "epoch dependency discovery")]
+           (doseq [r (get ast "requires")
+                   :let [n (str (get r "ns"))]
+                   :when (str/starts-with? n "native.")]
+             (println n)))' "$1" "$repo/native-core/bin/checked-program.clj"
 }
 
 for mod in "${mods[@]}"; do

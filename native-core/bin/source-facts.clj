@@ -5,9 +5,16 @@
 (require '[cheshire.core :as json]
          '[clojure.string])
 
+(load-file
+  (.getCanonicalPath
+    (clojure.java.io/file (.getParentFile (clojure.java.io/file *file*))
+      "checked-program.clj")))
+(require '[native.checked-program :as checked-program])
+
 (def counter (atom 0))
 (defn nid [] (str (swap! counter inc)))
 (def rows (atom (transient [])))
+(def constraint-emissions (atom 0))
 (defn escape-text [value]
   (let [last-position (dec (count value))
         unsafe? (or (empty? value)
@@ -37,6 +44,10 @@
 
 (declare emit-ann emit-expr emit-pattern emit-binding-target)
 
+(defn require-native-compatible-ast! [ast relative-path]
+  (checked-program/require-checked-program!
+    ast relative-path "native source-fact projection"))
+
 (defn emit-seq [items emit-one]
   (let [n (nid)]
     (row! n "form-kind" "t" "seq")
@@ -46,6 +57,35 @@
 
 (defn emit-node-seq [items]
   (emit-seq items identity))
+
+(defn emit-binding-constraint! [owner declaration]
+  (let [constraint (get declaration "constraint")
+        synchronous (get declaration "constraintSynchronous")]
+    ;; This fact is checker-owned evidence, not a downstream inference.  It is
+    ;; retained even for an unconstrained declaration so a consumer can
+    ;; distinguish an explicit negative proof from a lossy projection.
+    (row! owner "constraint-synchronous" "t" (str synchronous))
+    (when constraint
+      (swap! constraint-emissions inc)
+      (row! owner "constraint" "n" (emit-expr constraint))
+      (let [source (get-in constraint ["provenance" "source"])]
+        (when-let [source-id (get source "sourceId")]
+          (row! owner "constraint-source-id" "t" source-id))
+        (when-let [line (get source "line")]
+          (row! owner "constraint-source-line" "t" (str line)))
+        (when-let [column (get source "col")]
+          (row! owner "constraint-source-column" "t" (str column)))))))
+
+(defn binding-constraint-count [value]
+  (cond
+    (map? value)
+    (+ (if (some? (get value "constraint")) 1 0)
+       (reduce + 0 (map binding-constraint-count (vals value))))
+
+    (sequential? value)
+    (reduce + 0 (map binding-constraint-count value))
+
+    :else 0))
 
 (defn emit-body [forms]
   (if (= 1 (count forms))
@@ -101,7 +141,13 @@
         (row! n "name" "t" target)
         (row! n "name" "n" (emit-binding-target target))))
     (when-let [a (get p "ann")] (row! n "ann" "n" (emit-ann a)))
+    (emit-binding-constraint! n p)
     n))
+
+(defn emit-owned-binding-target [n target]
+  (if (string? target)
+    (row! n "name" "t" target)
+    (row! n "name" "n" (emit-binding-target target))))
 
 ;; Binding targets keep their recursive structure in source facts.  A param is
 ;; still one ABI slot: lowering projects these leaves from that slot at function
@@ -156,9 +202,35 @@
 (defn emit-binding [b]
   (let [n (nid)]
     (row! n "form-kind" "t" "binding")
-    (row! n "name" "t" (str (get b "name")))
+    (emit-owned-binding-target n (get b "name"))
     (when-let [a (get b "ann")] (row! n "ann" "n" (emit-ann a)))
+    (emit-binding-constraint! n b)
     (row! n "value" "n" (emit-expr (get b "value")))
+    n))
+
+(defn emit-for-clause [clause]
+  (let [n (nid)
+        clause-kind (get clause "type")]
+    (row! n "form-kind" "t" "for-clause")
+    (row! n "clause-kind" "t" (str clause-kind))
+    (case clause-kind
+      "binding"
+      (do
+        (emit-owned-binding-target n (get clause "name"))
+        (when-let [a (get clause "ann")]
+          (row! n "ann" "n" (emit-ann a)))
+        (emit-binding-constraint! n clause)
+        (row! n "value" "n" (emit-expr (get clause "expr"))))
+
+      "when"
+      (row! n "test" "n" (emit-expr (get clause "test")))
+
+      "let"
+      (row! n "bindings" "n"
+        (emit-seq (get clause "bindings") emit-binding))
+
+      (throw
+        (ex-info "unsupported checked-AST for clause" {:clause clause})))
     n))
 
 (defn emit-doseq-clause [clause]
@@ -168,8 +240,9 @@
     (row! n "form-kind" "t" "doseq-clause")
     (row! n "clause-kind" "t" clause-kind)
     (row! n "simple" "t" (str (string? name)))
-    (when (string? name) (row! n "name" "t" name))
+    (when name (emit-owned-binding-target n name))
     (when-let [a (get clause "ann")] (row! n "ann" "n" (emit-ann a)))
+    (emit-binding-constraint! n clause)
     (when-let [value (get clause "expr")]
       (row! n "value" "n" (emit-expr value)))
     n))
@@ -205,12 +278,38 @@
                    (emit-expr (get update "value"))])
                 (get e "updates"))))
 
+(defn emit-record-update-contract! [owner contract]
+  (row! owner "record-update-contract" "t" (str (some? contract)))
+  (when contract
+    (row! owner "record-update-name" "t" (get contract "recordName"))
+    (row! owner "record-update-field-order" "n"
+      (emit-seq (get contract "fieldOrder") emit-keyword-literal))
+    (if-let [validator (get contract "validator")]
+      (row! owner "record-update-validator" "t" validator)
+      (row! owner "record-update-validator" "t" ""))))
+
+(defn emit-record-field-access-contract! [owner contract]
+  (row! owner "record-field-access-contract" "t" (str (some? contract)))
+  (when contract
+    (row! owner "record-field-access-name" "t" (get contract "recordName"))))
+
 (defn emit-catch-clause [clause]
   (let [n (nid)]
     (row! n "form-kind" "t" "catch-clause")
     (row! n "exception-type" "t" (get clause "type"))
     (row! n "name" "t" (get clause "name"))
     (row! n "body" "n" (emit-seq (get clause "body") emit-expr))
+    n))
+
+(defn emit-letfn-entry [entry]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "letfn-entry")
+    (row! n "name" "t" (get entry "name"))
+    (row! n "params" "n" (emit-seq (get entry "params") emit-param))
+    (when-let [rest-param (get entry "rest")]
+      (row! n "rest" "n" (emit-param rest-param)))
+    (row! n "ret" "n" (emit-ann (get entry "ret")))
+    (row! n "body" "n" (emit-body (get entry "body")))
     n))
 
 (defn keyword-datum [value]
@@ -324,7 +423,9 @@
                     (row! n "body" "n" (emit-seq (get e "body") emit-expr)))
       "fn"      (do (row! n "form-kind" "t" "fn")
                     (row! n "params" "n" (emit-seq (get e "params") emit-param))
-                    (row! n "rest" "t" (str (boolean (get e "rest"))))
+                    (row! n "variadic" "t" (str (boolean (get e "rest"))))
+                    (when-let [rest-param (get e "rest")]
+                      (row! n "rest" "n" (emit-param rest-param)))
                     (when-let [r (get e "ret")] (row! n "ret" "n" (emit-ann r)))
                     (row! n "body" "n" (emit-body (get e "body"))))
       "if"      (do (row! n "form-kind" "t" "if")
@@ -344,6 +445,23 @@
                     (row! n "bindings" "n"
                           (emit-seq (get e "bindings") emit-binding))
                     (row! n "body" "n" (emit-body (get e "body"))))
+      "letfn"   (do (row! n "form-kind" "t" "unsupported-letfn")
+                    (row! n "fns" "n"
+                          (emit-seq (get e "fns") emit-letfn-entry))
+                    (row! n "body" "n" (emit-body (get e "body"))))
+      "binding" (do (row! n "form-kind" "t" "unsupported-binding-form")
+                    (row! n "bindings" "n"
+                          (emit-seq (get e "bindings") emit-binding))
+                    (row! n "body" "n" (emit-body (get e "body"))))
+      "with-open"
+      (do (row! n "form-kind" "t" "unsupported-with-open")
+          (row! n "bindings" "n"
+                (emit-seq (get e "bindings") emit-binding))
+          (row! n "body" "n" (emit-body (get e "body"))))
+      "for"     (do (row! n "form-kind" "t" "unsupported-for")
+                    (row! n "clauses" "n"
+                          (emit-seq (get e "clauses") emit-for-clause))
+                    (row! n "body" "n" (emit-body (get e "body"))))
       "recur"   (do (row! n "form-kind" "t" "recur")
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "doseq"   (do (row! n "form-kind" "t" "doseq")
@@ -359,6 +477,7 @@
                     (row! n "pairs" "n" (emit-seq (get e "pairs") emit-map-pair)))
       "with"    (do (row! n "form-kind" "t" "call")
                     (row! n "callee" "t" "assoc")
+                    (emit-record-update-contract! n (get e "recordUpdate"))
                     (row! n "args" "n" (emit-node-seq (emit-with-arguments e))))
       "cond"    (do (row! n "form-kind" "t" "cond")
                     (row! n "clauses" "n"
@@ -376,6 +495,7 @@
       "kw-access"
       (do (row! n "form-kind" "t" "kw-access")
           (row! n "keyword" "t" (subs (get e "kw") 1))
+          (emit-record-field-access-contract! n (get e "recordFieldAccess"))
           (row! n "target" "n" (emit-expr (get e "target"))))
       (row! n "form-kind" "t" (str "unsupported-" (get e "node"))))
       n)))
@@ -384,12 +504,83 @@
 ;; reference semantics of a native primitive the lowering already carries.
 (def native-ops (atom {}))
 
+(defn emit-protocol-method [method]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "protocol-method")
+    (row! n "name" "t" (get method "name"))
+    (row! n "params" "n" (emit-seq (get method "params") emit-param))
+    (when-let [rest-param (get method "rest")]
+      (row! n "rest" "n" (emit-param rest-param)))
+    (row! n "ret" "n" (emit-ann (get method "ret")))
+    n))
+
+(defn emit-impl-method [method]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "impl-method")
+    (row! n "name" "t" (get method "name"))
+    (row! n "params" "n" (emit-seq (get method "params") emit-param))
+    (when-let [rest-param (get method "rest")]
+      (row! n "rest" "n" (emit-param rest-param)))
+    (row! n "ret" "n" (emit-ann (get method "ret")))
+    (row! n "body" "n" (emit-body (get method "body")))
+    n))
+
+(defn emit-type-impl [implementation]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "type-impl")
+    (row! n "protocol" "t" (get implementation "protocol"))
+    (row! n "methods" "n"
+      (emit-seq (get implementation "methods") emit-impl-method))
+    n))
+
+(defn emit-member-field-group [member fields inline?]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "member-field-group")
+    (row! n "name" "t" member)
+    (row! n "inline" "t" (str inline?))
+    (row! n "fields" "n" (emit-seq fields emit-param))
+    n))
+
+(defn emit-member-field-groups [form]
+  (let [fields-by-member (get form "member-fields" {})]
+    (emit-seq
+      (get form "members")
+      (fn [member]
+        (emit-member-field-group member (get fields-by-member member [])
+          (contains? fields-by-member member))))))
+
+(defn emit-arity-clause [clause]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "arity-clause")
+    (row! n "params" "n" (emit-seq (get clause "params") emit-param))
+    (when-let [rest-param (get clause "rest")]
+      (row! n "rest" "n" (emit-param rest-param)))
+    (row! n "ret" "n" (emit-ann (get clause "ret")))
+    (row! n "body" "n" (emit-body (get clause "body")))
+    n))
+
 (defn emit-form [f]
   (let [n (nid)]
     (case (get f "node")
       "record" (do (row! n "form-kind" "t" "record")
                    (row! n "name" "t" (get f "name"))
                    (row! n "fields" "n" (emit-seq (get f "fields") emit-param)))
+      "defunion"
+      (do (row! n "form-kind" "t" "defunion")
+          (row! n "name" "t" (get f "name"))
+          (row! n "members" "n" (emit-member-field-groups f)))
+      "deferror"
+      (do (row! n "form-kind" "t" "deferror")
+          (row! n "name" "t" (get f "name"))
+          (row! n "members" "n" (emit-member-field-groups f)))
+      "defprotocol"
+      (do (row! n "form-kind" "t" "unsupported-defprotocol")
+          (row! n "name" "t" (get f "name"))
+          (row! n "methods" "n"
+            (emit-seq (get f "methods") emit-protocol-method)))
+      "extend-type"
+      (do (row! n "form-kind" "t" "unsupported-extend-type")
+          (row! n "impls" "n" (emit-seq (get f "impls") emit-type-impl)))
       "def"    (do (row! n "form-kind" "t" "def")
                    (row! n "name" "t" (get f "name"))
                    (when-let [a (get f "ann")] (row! n "ann" "n" (emit-ann a)))
@@ -410,6 +601,8 @@
       (do (row! n "form-kind" "t" "defn-multi")
           (row! n "name" "t" (get f "name"))
           (row! n "private" "t" (str (= true (get f "private"))))
+          (row! n "arities" "n"
+            (emit-seq (get f "arities") emit-arity-clause))
           (when-let [effective (get f "effectiveType")]
             (row! n "effective-type" "n" (emit-ann effective))))
       nil)
@@ -427,13 +620,20 @@
     (row! n "refer" "t" (str (boolean (get required "refer"))))
     n))
 
-(defn selected-form? [include-defs? form]
-  (or (#{"record" "defn" "defn-multi"} (get form "node"))
-      (and include-defs? (= "def" (get form "node")))))
+(defn selected-form? [include-defs? selected-names form]
+  (and (or (empty? selected-names)
+           (contains? selected-names (get form "name")))
+       (or (#{"record" "defn" "defn-multi" "defunion" "deferror"
+              "defprotocol" "extend-type"} (get form "node"))
+           (and include-defs? (= "def" (get form "node"))))))
 
-(defn emit-module [ast relative-path include-defs?]
-  (let [definitions (mapv emit-form
-                      (filter #(selected-form? include-defs? %) (get ast "forms")))
+(defn emit-module [ast relative-path include-defs? selected-names]
+  (let [selected-forms (filterv
+                         #(selected-form? include-defs? selected-names %)
+                         (get ast "forms"))
+        expected-constraints (binding-constraint-count selected-forms)
+        constraints-before @constraint-emissions
+        definitions (mapv emit-form selected-forms)
         imports (mapv emit-import (get ast "requires"))
         root (nid)]
     (row! root "form-kind" "t" "module-root")
@@ -441,6 +641,16 @@
     (row! root "relative-path" "t" relative-path)
     (row! root "definitions" "n" (emit-node-seq definitions))
     (row! root "imports" "n" (emit-node-seq imports))
+    (let [emitted-constraints (- @constraint-emissions constraints-before)]
+      (when (not= expected-constraints emitted-constraints)
+        (throw
+          (ex-info
+            (str "native source-fact projection retained " emitted-constraints
+                 " of " expected-constraints " binding constraints: "
+                 relative-path)
+            {:relative-path relative-path
+             :expected-binding-constraints expected-constraints
+             :emitted-binding-constraints emitted-constraints}))))
     root))
 
 (defn option-values [arguments option]
@@ -464,6 +674,7 @@
             legacy-out)
       arguments (if explicit? *command-line-args* legacy-arguments)
       include-defs? (some #{"--include-defs"} arguments)
+      selected-names (set (option-values arguments "--form"))
       annotations (if explicit?
                     (option-values arguments "--native-op")
                     (remove #{"--include-defs"} arguments))]
@@ -473,13 +684,43 @@
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
-  (let [modules
+  (let [inputs
         (mapv
           (fn [input-spec]
             (let [[in relative-path] (parse-input-spec input-spec)
                   ast (json/parse-string (slurp in))]
-              (emit-module ast relative-path include-defs?)))
-          input-specs)]
+              (require-native-compatible-ast! ast relative-path)
+              [ast relative-path]))
+          input-specs)
+        selected-counts
+        (frequencies
+          (for [[ast _] inputs
+                form (get ast "forms")
+                :let [name (get form "name")]
+                :when (and (contains? selected-names name)
+                           (selected-form? include-defs? #{} form))]
+            name))
+        missing-names
+        (filterv #(zero? (get selected-counts % 0)) (sort selected-names))
+        ambiguous-names
+        (filterv #(< 1 (get selected-counts % 0)) (sort selected-names))
+        missing-check (when (seq missing-names)
+            (throw
+              (ex-info
+                (str "native source-fact projection could not select forms "
+                     (clojure.string/join ", " missing-names))
+                {:missing-form-names missing-names})))
+        ambiguity-check (when (seq ambiguous-names)
+            (throw
+              (ex-info
+                (str "native source-fact projection form selection is ambiguous: "
+                     (clojure.string/join ", " ambiguous-names))
+                {:ambiguous-form-names ambiguous-names})))
+        modules
+        (mapv
+          (fn [[ast relative-path]]
+            (emit-module ast relative-path include-defs? selected-names))
+          inputs)]
     (row! "0" "form-kind" "t" "program-root")
     (row! "0" "modules" "n" (emit-node-seq modules)))
   (spit out (apply str (for [[s p k o] (persistent! @rows)]

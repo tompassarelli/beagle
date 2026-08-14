@@ -100,7 +100,16 @@
     [(def-form? x)    (emit-def! x)]
     [(call-form? x)   (emit-call! x)]
     [(record-form? x) (emit-record! x)]
+    [(defunion-form? x) (emit-defunion! x)]
+    [(deferror-form? x) (emit-deferror! x)]
     [(param? x)       (emit-param! x)]
+    [(let-binding? x) (emit-let-binding! x)]
+    [(for-binding? x) (emit-for-binding! x)]
+    [(protocol-form? x) (emit-protocol! x)]
+    [(protocol-method? x) (emit-protocol-method! x)]
+    [(extend-type-form? x) (emit-extend-type! x)]
+    [(type-impl? x) (emit-type-impl! x)]
+    [(impl-method? x) (emit-impl-method! x)]
     [else             (emit-generic! x)]))
 
 ;; Signature vocabulary mirrors ast-json.rkt's param->json / defn-form case.
@@ -113,6 +122,119 @@
       (emit! id "name" (symbol->string (param-name x)))
       (field! id "name" (param-name x)))
   (when (param-type x) (field! id "ann" (param-type x)))
+  (when (param-constraint x)
+    (field! id "constraint" (param-constraint x)))
+  id)
+
+(define (emit-binding-target! id target)
+  (if (symbol? target)
+      (emit! id "name" (symbol->string target))
+      (field! id "name" target)))
+
+(define (emit-let-binding! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "let-binding")
+  (emit-binding-target! id (let-binding-name x))
+  (when (let-binding-type x) (field! id "ann" (let-binding-type x)))
+  (when (let-binding-constraint x)
+    (field! id "constraint" (let-binding-constraint x)))
+  (field! id "value" (let-binding-value x))
+  id)
+
+(define (emit-for-binding! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "for-binding")
+  (emit-binding-target! id (for-binding-name x))
+  (when (for-binding-type x) (field! id "ann" (for-binding-type x)))
+  (when (for-binding-constraint x)
+    (field! id "constraint" (for-binding-constraint x)))
+  (field! id "expr" (for-binding-expr x))
+  id)
+
+(define (emit-protocol-method! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "protocol-method")
+  (emit! id "name" (symbol->string (protocol-method-name x)))
+  (field! id "params" (protocol-method-params x))
+  (when (protocol-method-rest-param x)
+    (field! id "rest" (protocol-method-rest-param x)))
+  (field! id "ret" (protocol-method-return-type x))
+  id)
+
+(define (emit-protocol! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "defprotocol")
+  (emit! id "name" (symbol->string (protocol-form-name x)))
+  (field! id "methods" (protocol-form-methods x))
+  id)
+
+(define (emit-impl-method! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "impl-method")
+  (emit! id "name" (symbol->string (impl-method-name x)))
+  (field! id "params" (impl-method-params x))
+  (when (impl-method-rest-param x)
+    (field! id "rest" (impl-method-rest-param x)))
+  (field! id "ret" (impl-method-return-type x))
+  (field! id "body" (impl-method-body x))
+  id)
+
+(define (emit-type-impl! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "type-impl")
+  (emit! id "protocol" (symbol->string (type-impl-protocol-name x)))
+  (field! id "methods" (type-impl-methods x))
+  id)
+
+(define (emit-extend-type! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "extend-type")
+  (emit! id "type-name" (symbol->string (extend-type-form-type-name x)))
+  (field! id "impls" (extend-type-form-impls x))
+  id)
+
+(define (emit-member-field-group! name fields)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "member-field-group")
+  (emit! id "name" (symbol->string name))
+  (field! id "fields" fields)
+  id)
+
+(define (emit-member-field-groups! members member-fields)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "seq")
+  (for ([member (in-list members)] [i (in-naturals)])
+    (define group
+      (emit-member-field-group!
+       member
+       (if member-fields (hash-ref member-fields member '()) '())))
+    (emit! id (string-append "f" (number->string i)) group)
+    (emit! id "child" group))
+  id)
+
+(define (emit-defunion! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "defunion")
+  (emit! id "name" (symbol->string (defunion-form-name x)))
+  (field! id "type-params" (or (defunion-form-type-params x) '()))
+  (define members
+    (emit-member-field-groups!
+     (defunion-form-members x)
+     (defunion-form-member-fields x)))
+  (emit! id "members" members)
+  (emit! id "child" members)
+  id)
+
+(define (emit-deferror! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "deferror")
+  (emit! id "name" (symbol->string (deferror-form-name x)))
+  (define members
+    (emit-member-field-groups!
+     (deferror-form-members x)
+     (deferror-form-member-fields x)))
+  (emit! id "members" members)
+  (emit! id "child" members)
   id)
 
 (define (emit-defn! x)

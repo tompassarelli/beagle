@@ -17,11 +17,21 @@
 
 (provide macro-eval
          macro-eval-body
-         make-macro-env)
+         make-macro-env
+         (struct-out exn:fail:macro-source))
 
 ;; --- Closures ----------------------------------------------------------------
 
 (struct macro-closure (params body env) #:transparent)
+
+;; A procedural macro can reject one exact element of an input collection.
+;; Keep the original collection identity and logical element index in the
+;; exception: parse.rkt owns the parallel datum/syntax tree and is therefore
+;; the only layer that can turn this into the caller child's source span.
+;; `context` is attached by macros.rkt, which owns expansion provenance.
+(struct exn:fail:macro-source exn:fail
+  (collection index form context)
+  #:transparent)
 
 ;; --- Environment -------------------------------------------------------------
 
@@ -113,6 +123,17 @@
   (or (list? value)
       (and (pair? value) (eq? (car value) BRACKET-TAG))))
 
+;; Reader delimiters are semantic at macro time.  Racket represents every
+;; Beagle container as a list, so the reader tags -- not the host predicate --
+;; distinguish `(field Type)` from `[field Type]`.
+(define (macro-list-datum? value)
+  (and (list? value)
+       (or (null? value)
+           (not (memq (car value) (list BRACKET-TAG MAP-TAG SET-TAG))))))
+
+(define (macro-vector-datum? value)
+  (and (pair? value) (eq? (car value) BRACKET-TAG)))
+
 (define (macro-seq value who)
   (cond
     [(and (pair? value) (eq? (car value) BRACKET-TAG)) (cdr value)]
@@ -132,7 +153,7 @@
         [(and (pair? (cdr rest))
               (or (symbol? (car rest))
                   (and (list? (car rest))
-                       (= (length (car rest)) 2)
+                       (memv (length (car rest)) '(2 3))
                        (symbol? (caar rest)))))
          (define binding (car rest))
          (define name (if (symbol? binding) binding (car binding)))
@@ -201,7 +222,10 @@
     (map (lambda (p)
            (cond
              [(symbol? p) p]
-             [(and (pair? p) (symbol? (car p))) (car p)]
+             [(and (list? p)
+                   (memv (length p) '(2 3))
+                   (symbol? (car p)))
+              (car p)]
              [else (error 'macro-eval "bad fn param: ~v" p)]))
          (macro-seq raw-params "fn params")))
   (macro-closure param-names body env))
@@ -323,33 +347,104 @@
 (define (macro-error . parts)
   (error 'macro-eval "~a" (apply beagle-str parts)))
 
+;; `(syntax-error-at collection index message ...)` is the source-local
+;; rejection primitive for structural declaration macros. COLLECTION must be
+;; an original macro input list/vector (or one of its `rest` tails), and INDEX
+;; is zero-based after a vector's reader tag. Keeping declarations structural
+;; lets a macro validate with map-indexed and point at the complete stray form
+;; without reconstructing or repartitioning adjacent tokens.
+(define (macro-syntax-error-at collection index . parts)
+  (define items (macro-seq collection "syntax-error-at"))
+  (unless (and (exact-integer? index)
+               (>= index 0)
+               (< index (length items)))
+    (error 'macro-eval
+           "syntax-error-at: index ~v out of range for a collection of ~a item(s)"
+           index
+           (length items)))
+  (define form (list-ref items index))
+  (define message
+    (if (null? parts)
+        (format "Invalid syntax: ~a" (beagle-datum->src form))
+        (apply beagle-str parts)))
+  (raise
+   (exn:fail:macro-source
+    message
+    (current-continuation-marks)
+    collection
+    index
+    form
+    #f)))
+
 ;; --- Syntax constructors -----------------------------------------------------
 
 (define (syntax-binding-datum s)
-  (define datum
-    (if (and (pair? s) (eq? (car s) BRACKET-TAG)) (cdr s) s))
-  (if (and (list? datum) (= (length datum) 1)
-           (list? (car datum)) (= (length (car datum)) 2))
-      (car datum)
-      datum))
+  ;; A vector is a binding collection only when it contains one complete list
+  ;; declaration.  Bare `[x Point]` is itself a sequential binding form, never
+  ;; a flattened spelling of `(x Point)`.
+  (if (and (pair? s)
+           (eq? (car s) BRACKET-TAG)
+           (= (length (cdr s)) 1)
+           (list? (cadr s))
+           (memv (length (cadr s)) '(2 3)))
+      (cadr s)
+      s))
+
+(define (syntax-binding-form? datum)
+  (or (symbol? datum)
+      (and (pair? datum)
+           (memq (car datum) (list BRACKET-TAG MAP-TAG)))))
+
+(define (typed-syntax-datum? datum)
+  (and (list? datum)
+       (memv (length datum) '(2 3))
+       (not (memq (car datum) (list BRACKET-TAG MAP-TAG SET-TAG)))
+       (syntax-binding-form? (car datum))))
 
 (define (syntax-name s)
   (define datum (syntax-binding-datum s))
   (cond
-    [(pair? datum) (car datum)]
-    [(symbol? datum) datum]
-    [else (error 'syntax-name "expected syntax, got: ~v" s)]))
+    [(typed-syntax-datum? datum) (car datum)]
+    [(syntax-binding-form? datum) datum]
+    [else
+     (error 'syntax-name
+            "expected a binding form or (binding-form Type [constraint]) datum, got: ~v"
+            s)]))
 
 (define (syntax-type s)
   (define datum (syntax-binding-datum s))
   (cond
-    [(and (list? datum) (= (length datum) 2) (symbol? (car datum)))
-     (cadr datum)]
-    [else (error 'syntax-type "expected a (name Type) binding datum, got: ~v" s)]))
+    [(typed-syntax-datum? datum) (cadr datum)]
+    [else
+     (error 'syntax-type
+            "expected a (binding-form Type [constraint]) datum, got: ~v"
+            s)]))
 
-(define (make-param-form name type) (ann name type))
+(define (syntax-constraint s)
+  (define datum (syntax-binding-datum s))
+  (cond
+    [(typed-syntax-datum? datum)
+     (if (= (length datum) 3) (caddr datum) '())]
+    [else
+     (error 'syntax-constraint
+            "expected a (binding-form Type [constraint]) datum, got: ~v"
+            s)]))
 
-(define (make-field name type) (ann name type))
+(define (make-binding-form who args)
+  (case (length args)
+    [(2) (ann (car args) (cadr args))]
+    [(3) (list (car args) (cadr args) (caddr args))]
+    [else
+     (error 'macro-eval
+            "~a expected 2 or 3 argument(s), got ~a"
+            who
+            (length args))]))
+
+(define (make-param-form . args) (make-binding-form 'make-param args))
+
+(define (make-field . args) (make-binding-form 'make-field args))
+
+(define (make-ann-form . args) (make-binding-form 'ann args))
 
 ;; Tagged like the reader's own `[...]`, so the result is a vector in every
 ;; position — a binding vector AND an expression literal.
@@ -373,6 +468,24 @@
 
 ;; --- str (coercing) ----------------------------------------------------------
 
+(define (beagle-datum->src datum)
+  (define (container open close items)
+    (string-append open
+                   (string-join (map beagle-datum->src items) " ")
+                   close))
+  (cond
+    [(and (pair? datum) (eq? (car datum) BRACKET-TAG))
+     (container "[" "]" (cdr datum))]
+    [(and (pair? datum) (eq? (car datum) MAP-TAG))
+     (container "{" "}" (cdr datum))]
+    [(and (pair? datum) (eq? (car datum) SET-TAG))
+     (container "#{" "}" (cdr datum))]
+    [(and (pair? datum) (list? datum))
+     (container "(" ")" datum)]
+    [(symbol? datum) (symbol->string datum)]
+    [(number? datum) (number->string datum)]
+    [else (format "~s" datum)]))
+
 (define (beagle-str . args)
   (apply string-append
          (map (lambda (v)
@@ -380,7 +493,7 @@
                   [(string? v) v]
                   [(symbol? v) (symbol->string v)]
                   [(number? v) (number->string v)]
-                  [else (format "~a" v)]))
+                  [else (beagle-datum->src v)]))
               args)))
 
 ;; --- Built-in environment ----------------------------------------------------
@@ -398,6 +511,8 @@
    'rest macro-rest
    'null? null?
    'pair? pair?
+   'list? macro-list-datum?
+   'vector? macro-vector-datum?
    'empty? (lambda (xs) (null? (macro-seq xs "empty?")))
    'length macro-count
    'count macro-count
@@ -444,11 +559,13 @@
 
    'syntax-name syntax-name
    'syntax-type syntax-type
+   'syntax-constraint syntax-constraint
+   'syntax-error-at macro-syntax-error-at
    'make-param make-param-form
    'make-field make-field
    'make-defrecord make-defrecord
    'make-defn make-defn
    'make-get make-get
    'make-keyword make-keyword
-   'ann ann
+   'ann make-ann-form
    'error macro-error))

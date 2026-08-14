@@ -27,6 +27,7 @@
   (define source
     (string-append
      "(defn one [(x Int)] Int x)\n"
+     "(defn positive [(x Int positive?)] Int x)\n"
      "(defn add [(x Int) (y Int)] Int (+ x y))\n"
      "(defn clamp [(value Int) (minimum Int) (maximum Int)] Int value)\n"))
   (define-values (actual edits) (formatted source))
@@ -44,6 +45,94 @@
     (format "(defn ~a\n" name)
     "  [(value Int) (minimum Int) (maximum Int)] Int value)\n"))
   (check-equal? (length edits) 1))
+
+(test-case "expanded signatures keep each constrained binding structurally whole"
+  (define source
+    (string-append
+     "(defn constrained-distance "
+     "[(anchor Coordinate coordinate?) (coord Coordinate coordinate?) "
+     "(world WorldState ready-world?) (options DistanceOptions valid-options?)] "
+     "Float world)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal?
+   actual
+   (string-append
+    "(defn constrained-distance\n"
+    "  [(anchor Coordinate coordinate?)\n"
+    "   (coord Coordinate coordinate?)\n"
+    "   (world WorldState ready-world?)\n"
+    "   (options DistanceOptions valid-options?)]\n"
+    "  Float\n"
+    "  world)\n"))
+  (check-equal? (length edits) 1))
+
+(test-case "an individually over-width binding expands inside its vector"
+  (define source
+    (string-append
+     "(defn validated-coordinate "
+     "[(coordinate InternationalCoordinateReferenceSystem "
+     "coordinate-inside-supported-world-boundaries?)] Float coordinate)\n"))
+  (define expected
+    (string-append
+     "(defn validated-coordinate\n"
+     "  [(coordinate\n"
+     "    InternationalCoordinateReferenceSystem\n"
+     "    coordinate-inside-supported-world-boundaries?)]\n"
+     "  Float\n"
+     "  coordinate)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual expected)
+  (check-equal? (length edits) 1)
+  (define-values (fixed-point fixed-point-edits) (formatted expected))
+  (check-equal? fixed-point expected)
+  (check-equal? fixed-point-edits '()))
+
+(test-case "an over-width constraint expression expands inside its declaration"
+  (define source
+    (string-append
+     "(defn validated-coordinate "
+     "[(coordinate Coordinate (and coordinate-inside-supported-world-boundaries? "
+     "coordinate-has-supported-reference-system?))] Float coordinate)\n"))
+  (define expected
+    (string-append
+     "(defn validated-coordinate\n"
+     "  [(coordinate\n"
+     "    Coordinate\n"
+     "    (and\n"
+     "     coordinate-inside-supported-world-boundaries?\n"
+     "     coordinate-has-supported-reference-system?))]\n"
+     "  Float\n"
+     "  coordinate)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual expected)
+  (check-true
+   (for/and ([line (in-list (string-split actual "\n"))])
+     (<= (string-length line) 80)))
+  (check-equal? (length edits) 1)
+  (define-values (fixed-point fixed-point-edits) (formatted expected))
+  (check-equal? fixed-point expected)
+  (check-equal? fixed-point-edits '()))
+
+(test-case "the vector closer participates in the binding width boundary"
+  (define predicate-at-80 (make-string 68 #\p))
+  (define predicate-at-81 (string-append predicate-at-80 "p"))
+  (define-values (at-80 at-80-edits)
+    (formatted
+     (format "(defn f [(x Int ~a)] Int x)\n" predicate-at-80)))
+  (check-true
+   (string-contains? at-80 (format "  [(x Int ~a)]\n" predicate-at-80)))
+  (check-true
+   (for/and ([line (in-list (string-split at-80 "\n"))])
+     (<= (string-length line) 80)))
+  (check-equal? (length at-80-edits) 1)
+  (define-values (at-81 at-81-edits)
+    (formatted
+     (format "(defn f [(x Int ~a)] Int x)\n" predicate-at-81)))
+  (check-true (string-contains? at-81 "  [(x\n    Int\n"))
+  (check-true
+   (for/and ([line (in-list (string-split at-81 "\n"))])
+     (<= (string-length line) 80)))
+  (check-equal? (length at-81-edits) 1))
 
 (test-case "an over-width signature unit expands bindings and isolates return"
   (define source
@@ -89,6 +178,31 @@
   (check-equal? actual
                 "(defn collect [(a Int) & (more (Vec Int))] Int a)\n")
   (check-equal? (length edits) 1))
+
+(test-case "an over-width constrained rest binding expands structurally"
+  (define source
+    (string-append
+     "(defn collect [(first Int) & "
+     "(remaining-values (Vec InternationalCoordinateReferenceSystem) "
+     "all-coordinates-inside-supported-world-boundaries?)] Int first)\n"))
+  (define expected
+    (string-append
+     "(defn collect\n"
+     "  [(first Int)\n"
+     "   & (remaining-values\n"
+     "      (Vec InternationalCoordinateReferenceSystem)\n"
+     "      all-coordinates-inside-supported-world-boundaries?)]\n"
+     "  Int\n"
+     "  first)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual expected)
+  (check-true
+   (for/and ([line (in-list (string-split actual "\n"))])
+     (<= (string-length line) 80)))
+  (check-equal? (length edits) 1)
+  (define-values (fixed-point fixed-point-edits) (formatted expected))
+  (check-equal? fixed-point expected)
+  (check-equal? fixed-point-edits '()))
 
 (test-case "the positional return participates in the inclusive width boundary"
   (define signature-skeleton "(defn ~a [(x Int)] ExtremelyLongReturnType")

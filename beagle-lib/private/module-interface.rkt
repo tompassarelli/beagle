@@ -17,23 +17,35 @@
          "ast.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 3)
-;; V3 publishes finalized definition signatures rather than reconstructing
-;; omitted annotations as Any. It still does not encode every cross-module
-;; semantic contract (notably ^:dynamic status).
+(define INTERFACE-SCHEMA-VERSION 6)
+;; V6 preserves binding-local constraints structurally alongside finalized
+;; definition signatures and publishes positive synchronization proofs for
+;; public callables, callable-return effects, and every binding constraint. It
+;; still does not encode
+;; every cross-module semantic contract (notably ^:dynamic status).
 ;; Therefore an unchanged interface digest MUST NOT prune reverse-require
 ;; consumers: Fram must keep selecting the complete reverse closure from the
 ;; changed source/overlay digest until this flag can truthfully become #t.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #f)
 (define ANY (type-prim 'Any))
 
-(struct interface-binding (name kind type raises) #:transparent)
+(struct interface-constraint (expression synchronous? provider) #:transparent)
+(struct interface-binding
+  (name kind type raises constraints synchronous?
+        returns-synchronous-callable?)
+  #:transparent)
 (struct interface-error (name members member-fields) #:transparent)
 (struct interface-type-declaration (name kind details) #:transparent)
 (struct interface-type-export (name kind arity expansion) #:transparent)
+(struct interface-record-contract (name kind fields validator-symbol)
+  #:transparent)
+(struct interface-protocol-method-contract
+  (name params rest-param return-type)
+  #:transparent)
+(struct interface-protocol-contract (name methods) #:transparent)
 (struct module-interface
   (schema-version namespace target bindings macro-fingerprints
-                  type-declarations type-exports errors requires
+                  type-declarations type-exports record-contracts errors requires
                   digest source-digest source-id)
   #:transparent)
 
@@ -57,7 +69,140 @@
            (and rest-param (param-interface-type rest-param))
            return-type))
 
-(define (record-bindings name fields kind map-constructor?)
+(define (param-interface-constraint p)
+  (and (param? p) (param-constraint p)))
+
+(define (constraint-expression value)
+  (if (interface-constraint? value)
+      (interface-constraint-expression value)
+      value))
+
+(define (constraint-contract-for prog parameter [provisional? #f])
+  (define expression (param-interface-constraint parameter))
+  (cond
+    [(not expression) #f]
+    [provisional?
+     (interface-constraint expression #f #f)]
+    [else
+     (define proof
+       (hash-ref
+        (program-semantic-contracts prog)
+        parameter
+        #f))
+     (unless (and (binding-constraint-contract? proof)
+                  (binding-constraint-contract-synchronous? proof))
+       (error
+        'program->module-interface
+        "cannot publish binding constraint without a positive synchronization proof: ~a"
+        (param-name parameter)))
+     (interface-constraint
+      expression
+      #t
+      (binding-constraint-contract-provider proof))]))
+
+(define (callable-constraints prog params [rest-param #f]
+                              #:provisional? [provisional? #f])
+  (for/list
+      ([parameter
+        (in-list
+         (if rest-param
+             (append params (list rest-param))
+             params))])
+    (constraint-contract-for prog parameter provisional?)))
+
+(define (interface-field prog field provisional?)
+  (struct-copy
+   param field
+   [constraint (constraint-contract-for prog field provisional?)]))
+
+(define (interface-fields prog fields provisional?)
+  (for/list ([field (in-list fields)])
+    (interface-field prog field provisional?)))
+
+(define (record-validator-symbol name)
+  (string->symbol
+   (format "$beagle$record$~a$validate" name)))
+
+(define (constrained-fields? fields)
+  (for/or ([field (in-list fields)])
+    (and (param? field)
+         (constraint-expression (param-constraint field)))))
+
+(define (make-interface-record-contract prog name kind fields provisional?)
+  (interface-record-contract
+   name
+   kind
+   (for/list ([field (in-list fields)])
+     (interface-field prog field provisional?))
+   (and (constrained-fields? fields)
+        (record-validator-symbol name))))
+
+(define (program-record-contracts prog [provisional? #f])
+  (define contracts (make-hasheq))
+  (define (add! name kind fields)
+    (hash-set!
+     contracts name
+     (make-interface-record-contract
+      prog name kind fields provisional?)))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (unwrap-public-form raw-form))
+    (match form
+      [(record-form name fields)
+       (add! name 'record fields)]
+      [(defunion-form _ members _ member-fields)
+       (when member-fields
+         (for ([member (in-list members)]
+               #:when (hash-has-key? member-fields member))
+           (add! member 'union-member
+                 (hash-ref member-fields member '()))))]
+      [(deferror-form _ members member-fields)
+       (for ([member (in-list members)])
+         (add! member 'throwable-member
+               (hash-ref member-fields member '())))]
+      [_ (void)]))
+  contracts)
+
+(define (make-interface-protocol-contract prog name methods provisional?)
+  (define contracts (make-hasheq))
+  (for ([method (in-list methods)])
+    (define method-name (protocol-method-name method))
+    (when (hash-has-key? contracts method-name)
+      (error 'beagle
+             "protocol ~a declares method ~a more than once"
+             name method-name))
+    (hash-set!
+     contracts
+     method-name
+     (interface-protocol-method-contract
+      method-name
+      (for/list ([parameter (in-list (protocol-method-params method))])
+        (struct-copy
+         param parameter
+         [constraint
+          (constraint-contract-for prog parameter provisional?)]))
+      (and
+       (protocol-method-rest-param method)
+       (let ([parameter (protocol-method-rest-param method)])
+         (struct-copy
+          param parameter
+          [constraint
+           (constraint-contract-for prog parameter provisional?)])))
+      (protocol-method-return-type method))))
+  (interface-protocol-contract name contracts))
+
+(define (program-protocol-contracts prog [provisional? #f])
+  (for/hasheq ([raw-form (in-list (program-forms prog))]
+               #:do [(define form (unwrap-public-form raw-form))]
+               #:when (protocol-form? form))
+    (values
+     (protocol-form-name form)
+     (make-interface-protocol-contract
+      prog
+      (protocol-form-name form)
+      (protocol-form-methods form)
+      provisional?))))
+
+(define (record-bindings prog name fields kind map-constructor? provisional?)
   (define record-type (type-prim name))
   (define name-string (symbol->string name))
   (define lower-name (string-downcase name-string))
@@ -67,6 +212,9 @@
      (string->symbol (string-append "->" name-string))
      kind
      (type-fn (map param-interface-type fields) #f record-type)
+     #f
+     (callable-constraints prog fields #:provisional? provisional?)
+     #t
      #f))
    (if map-constructor?
        (list
@@ -74,6 +222,9 @@
          (string->symbol (string-append "map->" name-string))
          'map-constructor
          (type-fn (list ANY) #f record-type)
+         #f
+         (list #f)
+         #t
          #f))
        '())
    (for/list ([field (in-list fields)])
@@ -82,6 +233,9 @@
        (string-append lower-name "-" (symbol->string (param-name field))))
       'accessor
       (type-fn (list record-type) #f (param-interface-type field))
+      #f
+      (list #f)
+      #t
       #f))))
 
 (define unwrap-public-form unwrap-definition-form)
@@ -121,7 +275,7 @@
      name))
   published)
 
-(define (ast-interface-bindings prog effective)
+(define (ast-interface-bindings prog effective provisional?)
   (define forms (program-forms prog))
   (define target (program-target prog))
   (define out (make-hasheq))
@@ -129,15 +283,17 @@
     (hash-set! out (interface-binding-name binding) binding))
   (define (add-record! name fields kind)
     (for ([binding
-           (in-list (record-bindings name fields kind (eq? target 'clj)))])
+           (in-list
+            (record-bindings
+             prog name fields kind (eq? target 'clj) provisional?))])
       (add! binding)))
   (for ([raw-form (in-list forms)])
     (define form (unwrap-public-form raw-form))
     (match form
       [(def-form name type _ _ _)
-       (add! (interface-binding name 'def (or type ANY) #f))]
+       (add! (interface-binding name 'def (or type ANY) #f '() #f #f))]
       [(defonce-form name type _ _)
-       (add! (interface-binding name 'defonce (or type ANY) #f))]
+       (add! (interface-binding name 'defonce (or type ANY) #f '() #f #f))]
       [(defn-form name params rest-param return-type _ private? raises _)
        (unless private?
          (define authored
@@ -147,7 +303,15 @@
            name
            'defn
            (published-definition-type effective name authored)
-           raises)))]
+           raises
+           (callable-constraints
+            prog params rest-param #:provisional? provisional?)
+           (and
+            (not provisional?)
+            (program-callable-synchronous? prog name #f))
+           (and
+            (not provisional?)
+            (program-returns-synchronous-callable? prog name #f)))))]
       [(defn-multi name arities private? _)
        (unless private?
          (define alternatives
@@ -166,7 +330,19 @@
             (if (= (length alternatives) 1)
                 (car alternatives)
                 (type-union alternatives)))
-           #f)))]
+           #f
+           (for/list ([arity (in-list arities)])
+             (callable-constraints
+              prog
+              (arity-clause-params arity)
+              (arity-clause-rest-param arity)
+              #:provisional? provisional?))
+           (and
+            (not provisional?)
+            (program-callable-synchronous? prog name #f))
+           (and
+            (not provisional?)
+            (program-returns-synchronous-callable? prog name #f)))))]
       [(record-form name fields)
        (add-record! name fields 'record-constructor)]
       [(protocol-form _ methods)
@@ -177,18 +353,28 @@
            'protocol-method
            (function-type
             (protocol-method-params method)
-            #f
+            (protocol-method-rest-param method)
             (protocol-method-return-type method))
+           #f
+           (callable-constraints
+            prog
+            (protocol-method-params method)
+            (protocol-method-rest-param method)
+            #:provisional? provisional?)
+           #t
            #f)))]
       [(defmulti-form name _)
        (add! (interface-binding name 'defmulti
-                                (type-fn (list ANY) ANY ANY) #f))]
+                                (type-fn (list ANY) ANY ANY) #f '() #f #f))]
       [(defenum-form name _)
        (add!
         (interface-binding
          (string->symbol (string-append (symbol->string name) "-values"))
          'enum-values
          (type-app 'Set (list (type-prim name)))
+         #f
+         '()
+         #f
          #f))]
       [(defunion-form _ members _ member-fields)
        (when member-fields
@@ -210,6 +396,9 @@
          (string->symbol (string-append "->" name-string))
          'scalar-constructor
          (type-fn (list backing) #f scalar-type)
+         #f
+         (list #f)
+         #t
          #f))
        (add!
         (interface-binding
@@ -217,6 +406,9 @@
           (string-append (string-downcase name-string) "-value"))
          'scalar-accessor
          (type-fn (list scalar-type) #f backing)
+         #f
+         (list #f)
+         #t
          #f))]
       [_ (void)]))
   out)
@@ -228,7 +420,7 @@
     (match datum
       [(list 'defmacro (? symbol? name) _ _)
        (hash-set out name
-                 (interface-binding name 'macro ANY #f))]
+                 (interface-binding name 'macro ANY #f '() #f #f))]
       [(list 'declare-extern (? symbol? name) type-expression)
        (hash-set out name
                  (interface-binding
@@ -237,7 +429,10 @@
                   (hash-ref
                    externs
                    name
-                   (lambda () (parse-type type-expression)))
+                  (lambda () (parse-type type-expression)))
+                  #f
+                  '()
+                  #f
                   #f))]
       [(list 'declare-extern names-form type-expression)
        #:when (bracketed? names-form)
@@ -250,6 +445,9 @@
                      externs
                      name
                      (lambda () (parse-type type-expression)))
+                    #f
+                    '()
+                    #f
                     #f)))]
       [_ out])))
 
@@ -261,8 +459,8 @@
        (hash-set fingerprints name (sha256-datum datum))]
       [_ fingerprints])))
 
-(define (program-errors forms)
-  (for/hasheq ([raw-form (in-list forms)]
+(define (program-errors prog provisional?)
+  (for/hasheq ([raw-form (in-list (program-forms prog))]
                #:do [(define form (unwrap-public-form raw-form))]
                #:when (deferror-form? form))
     (values
@@ -272,9 +470,14 @@
       (deferror-form-members form)
       (for/hasheq ([member (in-list (deferror-form-members form))])
         (values member
-                (hash-ref (deferror-form-member-fields form) member '())))))))
+                (for/list
+                    ([field
+                      (in-list
+                       (hash-ref
+                        (deferror-form-member-fields form) member '()))])
+                  (interface-field prog field provisional?))))))))
 
-(define (program-type-declarations forms declared-type-aliases)
+(define (program-type-declarations prog declared-type-aliases provisional?)
   (define alias-declarations
     (for/hasheq ([(name expansion) (in-hash declared-type-aliases)])
       (values
@@ -284,26 +487,21 @@
         'alias
         `(expansion ,(type->canonical-datum expansion))))))
   (for/fold ([declarations alias-declarations])
-            ([raw-form (in-list forms)])
+            ([raw-form (in-list (program-forms prog))])
     (define form (unwrap-public-form raw-form))
     (define declaration
       (match form
         [(record-form name fields)
          (interface-type-declaration
           name 'record
-          `(fields ,@(map field->canonical-datum fields)))]
+          `(fields
+            ,@(map field->canonical-datum
+                   (interface-fields prog fields provisional?))))]
         [(protocol-form name methods)
          (interface-type-declaration
           name 'protocol
-          `(methods
-            ,@(for/list ([method (in-list methods)])
-                (list
-                 (protocol-method-name method)
-                 (type->canonical-datum
-                  (function-type
-                   (protocol-method-params method)
-                   #f
-                   (protocol-method-return-type method)))))))]
+          (make-interface-protocol-contract
+           prog name methods provisional?))]
         [(defenum-form name values)
          (interface-type-declaration name 'enum `(values ,@values))]
         [(defunion-form name members type-params member-fields)
@@ -315,9 +513,12 @@
                (list
                 member
                 (map field->canonical-datum
-                     (if member-fields
-                         (hash-ref member-fields member '())
-                         '()))))))]
+                     (interface-fields
+                      prog
+                      (if member-fields
+                          (hash-ref member-fields member '())
+                          '())
+                      provisional?))))))]
         [(deferror-form name members member-fields)
          (interface-type-declaration
           name 'throwable-union
@@ -326,7 +527,10 @@
                (list
                 member
                 (map field->canonical-datum
-                     (hash-ref member-fields member '()))))))]
+                     (interface-fields
+                      prog
+                      (hash-ref member-fields member '())
+                      provisional?))))))]
         [(defscalar-form name backing-type predicates)
          (interface-type-declaration
           name 'scalar
@@ -432,6 +636,71 @@
      qualified]
     [else type]))
 
+(define (qualify-interface-record-contract
+         contract namespace local-type-names)
+  (struct-copy
+   interface-record-contract
+   contract
+   [fields
+    (for/list ([field
+                (in-list (interface-record-contract-fields contract))])
+      (struct-copy
+       param field
+       [type
+        (qualify-provider-local-type-references
+         (param-interface-type field)
+         namespace
+         local-type-names)]))]))
+
+(define (qualify-interface-param parameter namespace local-type-names)
+  (if (param? parameter)
+      (struct-copy
+       param parameter
+       [type
+        (qualify-provider-local-type-references
+         (param-interface-type parameter)
+         namespace
+         local-type-names)])
+      parameter))
+
+(define (qualify-interface-protocol-contract
+         contract namespace local-type-names)
+  (interface-protocol-contract
+   (interface-protocol-contract-name contract)
+   (for/hasheq
+       ([(name method)
+         (in-hash (interface-protocol-contract-methods contract))])
+     (values
+      name
+      (interface-protocol-method-contract
+       name
+       (for/list
+           ([param
+             (in-list (interface-protocol-method-contract-params method))])
+         (qualify-interface-param param namespace local-type-names))
+       (and
+        (interface-protocol-method-contract-rest-param method)
+        (qualify-interface-param
+         (interface-protocol-method-contract-rest-param method)
+         namespace
+         local-type-names))
+       (qualify-provider-local-type-references
+        (interface-protocol-method-contract-return-type method)
+        namespace
+        local-type-names))))))
+
+(define (qualify-interface-type-declaration
+         declaration namespace local-type-names)
+  (define details (interface-type-declaration-details declaration))
+  (if (interface-protocol-contract? details)
+      (struct-copy
+       interface-type-declaration
+       declaration
+       [details
+        (qualify-interface-protocol-contract
+         details namespace local-type-names)])
+      declaration))
+
 (define (canonical-exported-aliases
          namespace forms declared-type-aliases)
   (define local-type-names
@@ -481,13 +750,108 @@
        ,(type->canonical-datum (type-poly-body type)))]
     [else `(other ,(format "~s" type))]))
 
+(define (canonical-sort-key datum)
+  (call-with-output-string
+   (lambda (out) (write datum out))))
+
+;; Constraint expressions cross the module boundary as transparent AST, not as
+;; formatted source.  The digest mirrors that structure recursively so a
+;; predicate edit invalidates consumers without making whitespace significant.
+(define (constraint->canonical-datum value)
+  (cond
+    [(type? value) `(type ,(type->canonical-datum value))]
+    [(null? value) '(list)]
+    [(char? value) `(char ,(char->integer value))]
+    [(bytes? value) `(bytes ,@(bytes->list value))]
+    [(or (symbol? value) (string? value) (number? value)
+         (boolean? value) (keyword? value))
+     value]
+    [(pair? value)
+     (if (list? value)
+         `(list ,@(map constraint->canonical-datum value))
+         `(pair ,(constraint->canonical-datum (car value))
+                ,(constraint->canonical-datum (cdr value))))]
+    [(vector? value)
+     `(vector
+       ,@(for/list ([item (in-vector value)])
+           (constraint->canonical-datum item)))]
+    [(hash? value)
+     (define entries
+       (for/list ([(key item) (in-hash value)])
+         (list (constraint->canonical-datum key)
+               (constraint->canonical-datum item))))
+     `(hash
+       ,@(sort entries string<?
+               #:key (lambda (entry)
+                       (canonical-sort-key (car entry)))))]
+    [(struct? value)
+     (define parts (vector->list (struct->vector value)))
+     `(struct ,(car parts)
+              ,@(map constraint->canonical-datum (cdr parts)))]
+    [(void? value) '(void)]
+    [else
+     (error
+      'program->module-interface
+      "cannot publish unsupported value in binding constraint AST: ~v"
+      value)]))
+
+(define (interface-constraint->canonical-datum value)
+  (cond
+    [(not value) '(none)]
+    [(interface-constraint? value)
+     `(constraint
+       (expression
+        ,(constraint->canonical-datum
+          (interface-constraint-expression value)))
+       (synchronous ,(interface-constraint-synchronous? value))
+       (provider ,(interface-constraint-provider value)))]
+    ;; Fail closed in the digest for malformed hand-built schema-v5 values.
+    [else
+     `(invalid-constraint ,(constraint->canonical-datum value))]))
+
 (define (field->canonical-datum field)
   (list (param-name field)
-        (type->canonical-datum (param-interface-type field))))
+        (type->canonical-datum (param-interface-type field))
+        (interface-constraint->canonical-datum
+         (param-interface-constraint field))))
+
+(define (protocol-method-contract->canonical-datum method)
+  `(method
+    ,(interface-protocol-method-contract-name method)
+    (params
+     ,@(map field->canonical-datum
+            (interface-protocol-method-contract-params method)))
+    (rest
+     ,(and
+       (interface-protocol-method-contract-rest-param method)
+       (field->canonical-datum
+        (interface-protocol-method-contract-rest-param method))))
+    (return
+     ,(type->canonical-datum
+       (interface-protocol-method-contract-return-type method)))))
+
+(define (type-declaration-details->canonical-datum declaration)
+  (define details (interface-type-declaration-details declaration))
+  (cond
+    [(interface-protocol-contract? details)
+     `(protocol
+       (name ,(interface-protocol-contract-name details))
+       (methods
+        ,@(for/list
+              ([name
+                (in-list
+                 (sort
+                  (hash-keys (interface-protocol-contract-methods details))
+                  symbol<?))])
+            (protocol-method-contract->canonical-datum
+             (hash-ref
+              (interface-protocol-contract-methods details)
+              name)))))]
+    [else details]))
 
 (define (interface-canonical-datum
          namespace mode target gen-class? bindings macro-fingerprints
-         type-declarations type-exports errors requires)
+         type-declarations type-exports record-contracts errors requires)
   `(module-interface
     (schema ,INTERFACE-SCHEMA-VERSION)
     (consumer-pruning-safe
@@ -509,7 +873,11 @@
          (list name
                (interface-binding-kind binding)
                (type->canonical-datum (interface-binding-type binding))
-               (type->canonical-datum (interface-binding-raises binding)))))
+               (type->canonical-datum (interface-binding-raises binding))
+               (map interface-constraint->canonical-datum
+                    (interface-binding-constraints binding))
+               (interface-binding-synchronous? binding)
+               (interface-binding-returns-synchronous-callable? binding))))
     (macros
      ,@(for/list ([name (in-list (sort (hash-keys macro-fingerprints)
                                       symbol<?))])
@@ -521,7 +889,7 @@
          (list
           name
           (interface-type-declaration-kind declaration)
-          (interface-type-declaration-details declaration))))
+          (type-declaration-details->canonical-datum declaration))))
     (type-exports
      ,@(for/list
         ([name (in-list (sort (hash-keys type-exports) symbol<?))])
@@ -534,6 +902,16 @@
            (interface-type-export-expansion export)
            (type->canonical-datum
             (interface-type-export-expansion export))))))
+    (record-contracts
+     ,@(for/list
+        ([name (in-list (sort (hash-keys record-contracts) symbol<?))])
+         (define contract (hash-ref record-contracts name))
+         (list
+          name
+          (interface-record-contract-kind contract)
+          (interface-record-contract-validator-symbol contract)
+          (map field->canonical-datum
+               (interface-record-contract-fields contract)))))
     (errors
      ,@(for/list ([name (in-list (sort (hash-keys errors) symbol<?))])
          (define error (hash-ref errors name))
@@ -564,13 +942,13 @@
   (define effective
     (publication-effective-definition-types prog provisional?))
   (define ast-bindings
-    (ast-interface-bindings prog effective))
+    (ast-interface-bindings prog effective provisional?))
   (define bindings (hash-copy ast-bindings))
   (for ([(name binding)
          (in-hash
           (raw-interface-bindings datums (program-externs prog)))])
     (hash-set! bindings name binding))
-  (define errors (program-errors (program-forms prog)))
+  (define errors (program-errors prog provisional?))
   (define macro-fingerprints (raw-macro-fingerprints datums))
   (define exported-aliases
     (canonical-exported-aliases
@@ -579,13 +957,33 @@
      (program-declared-type-aliases prog)))
   (define type-declarations
     (program-type-declarations
-     (program-forms prog)
-     exported-aliases))
+     prog
+     exported-aliases
+     provisional?))
   (define type-exports
     (program-type-exports
      (program-forms prog)
      exported-aliases))
   (define local-type-names (list->seteq (hash-keys type-exports)))
+  (define qualified-type-declarations
+    (for/hasheq
+        ([(name declaration) (in-hash type-declarations)])
+      (values
+       name
+       (qualify-interface-type-declaration
+        declaration
+        (program-namespace prog)
+        local-type-names))))
+  (define record-contracts
+    (for/hasheq
+        ([(name contract)
+          (in-hash (program-record-contracts prog provisional?))])
+      (values
+       name
+       (qualify-interface-record-contract
+        contract
+        (program-namespace prog)
+        local-type-names))))
   (define qualified-bindings
     (for/hasheq ([(name binding) (in-hash bindings)])
       (values
@@ -606,8 +1004,9 @@
      (program-gen-class? prog)
      qualified-bindings
      macro-fingerprints
-     type-declarations
+     qualified-type-declarations
      type-exports
+     record-contracts
      errors
      (program-requires prog)))
   (module-interface
@@ -616,8 +1015,9 @@
    (program-target prog)
    qualified-bindings
    macro-fingerprints
-   type-declarations
+   qualified-type-declarations
    type-exports
+   record-contracts
    errors
    (program-requires prog)
    (sha256-datum canonical)
@@ -635,6 +1035,175 @@
 
 (define (module-interface-type-export-ref interface name [failure #f])
   (hash-ref (module-interface-type-exports interface) name failure))
+
+(define (module-interface-record-contract-ref interface name [failure #f])
+  (hash-ref (module-interface-record-contracts interface) name failure))
+
+(define (module-interface-record-validator-ref interface name [failure #f])
+  (define contract
+    (module-interface-record-contract-ref interface name #f))
+  (if contract
+      (interface-record-contract-validator-symbol contract)
+      (if (procedure? failure) (failure) failure)))
+
+(define (module-interface-protocol-contract-ref interface name [failure #f])
+  (define declaration
+    (hash-ref (module-interface-type-declarations interface) name #f))
+  (define details
+    (and declaration
+         (eq? (interface-type-declaration-kind declaration) 'protocol)
+         (interface-type-declaration-details declaration)))
+  (if (interface-protocol-contract? details)
+      details
+      (if (procedure? failure) (failure) failure)))
+
+(define (module-interface-protocol-method-contract-ref
+         interface protocol-name method-name [failure #f])
+  (define protocol
+    (module-interface-protocol-contract-ref interface protocol-name #f))
+  (if protocol
+      (hash-ref
+       (interface-protocol-contract-methods protocol)
+       method-name
+       failure)
+      (if (procedure? failure) (failure) failure)))
+
+(define (record-constructor-symbol name)
+  (string->symbol (format "->~a" name)))
+
+(define (record-referred? refer name)
+  (and refer
+       (or (memq name refer)
+           (memq (record-constructor-symbol name) refer))))
+
+(define (type-referred? refer name)
+  (and refer (memq name refer)))
+
+(define (program-protocol-contract-ref prog protocol-name [failure #f])
+  (define local-contracts
+    (program-protocol-contracts prog))
+  (define local-namespace (program-namespace prog))
+  (define found
+    (or
+     (for/first ([(name contract) (in-hash local-contracts)]
+                 #:when
+                 (or (eq? protocol-name name)
+                     (eq? protocol-name
+                          (qualify-type-name local-namespace name))))
+       contract)
+     (for*/first
+         ([import (in-list (program-imported-module-interfaces prog))]
+          [entry
+           (in-value
+            (let* ([interface (module-import-interface import)]
+                   [prefix (module-import-prefix import)]
+                   [namespace (module-interface-namespace interface)]
+                   [refer (module-import-refer import)])
+              (for/first
+                  ([name
+                    (in-list
+                     (sort
+                      (hash-keys
+                       (module-interface-type-declarations interface))
+                      symbol<?))]
+                   #:when
+                   (or
+                    (eq? protocol-name (qualify-type-name prefix name))
+                    (eq? protocol-name (qualify-type-name namespace name))
+                    (and (eq? protocol-name name)
+                         (type-referred? refer name))))
+                (module-interface-protocol-contract-ref
+                 interface name #f))))]
+          #:when entry)
+       entry)))
+  (if found
+      found
+      (if (procedure? failure) (failure) failure)))
+
+(define (program-protocol-method-contract-ref
+         prog protocol-name method-name [failure #f])
+  (define protocol
+    (program-protocol-contract-ref prog protocol-name #f))
+  (if protocol
+      (hash-ref
+       (interface-protocol-contract-methods protocol)
+       method-name
+       failure)
+      (if (procedure? failure) (failure) failure)))
+
+;; Resolve the record-like declaration whose nominal spelling appears in a
+;; checked consumer.  Interfaces remain the authority for imported records;
+;; the returned constraint AST is contract metadata and must never be emitted
+;; in the consumer's lexical scope.
+(define (program-record-contract-resolution prog type-name)
+  (define local-contracts (program-record-contracts prog))
+  (define local-namespace (program-namespace prog))
+  (or
+   (for/first ([(name contract) (in-hash local-contracts)]
+               #:when
+               (or (eq? type-name name)
+                   (eq? type-name (qualify-type-name local-namespace name))))
+     (cons contract #f))
+   (for*/first
+       ([import (in-list (program-imported-module-interfaces prog))]
+        [entry
+         (in-value
+          (let* ([interface (module-import-interface import)]
+                 [prefix (module-import-prefix import)]
+                 [namespace (module-interface-namespace interface)]
+                 [refer (module-import-refer import)])
+            (for/first
+                ([(name contract)
+                  (in-hash (module-interface-record-contracts interface))]
+                 #:when
+                 (or (eq? type-name (qualify-type-name prefix name))
+                     (eq? type-name (qualify-type-name namespace name))
+                     (and (eq? type-name name)
+                          (record-referred? refer name))))
+              (cons
+               contract
+               (cond
+                 [(eq? type-name name) #f]
+                 ;; Runtime module bindings use the require prefix (an authored
+                 ;; alias or the default namespace leaf), even when type
+                 ;; canonicalization rewrote TYPE-NAME to the provider's full
+                 ;; namespace. Preserve that executable identity in semantic
+                 ;; contracts instead of leaking a non-bound source namespace.
+                 [else prefix])))))]
+        #:when entry)
+     entry)))
+
+(define (program-record-contract-ref prog type-name [failure #f])
+  (define resolution (program-record-contract-resolution prog type-name))
+  (if resolution
+      (car resolution)
+      (if (procedure? failure) (failure) failure)))
+
+;; Returns the conceptual provider-owned validator binding. Target emitters
+;; apply their ordinary identifier mangling to this symbol. Imported results
+;; retain the use-site qualifier so module lowering can import/call the provider
+;; helper without re-resolving type ownership.
+(define (program-record-validator-ref prog type-name [failure #f])
+  (define resolution (program-record-contract-resolution prog type-name))
+  (cond
+    [resolution
+     (define validator
+       (interface-record-contract-validator-symbol (car resolution)))
+     (define qualifier (cdr resolution))
+     (and validator
+          (if qualifier
+              (qualify-type-name qualifier validator)
+              validator))]
+    [else (if (procedure? failure) (failure) failure)]))
+
+(define (program-record-runtime-name-ref prog type-name [failure #f])
+  (define resolution (program-record-contract-resolution prog type-name))
+  (cond
+    [resolution
+     (define name (interface-record-contract-name (car resolution)))
+     (define qualifier (cdr resolution))
+     (if qualifier (qualify-type-name qualifier name) name)]
+    [else (if (procedure? failure) (failure) failure)]))
 
 (define (module-interfaces-overlay-digest interfaces)
   (sha256-datum
@@ -662,16 +1231,32 @@
  INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?
  qualify-provider-local-type-references
  type->canonical-datum
+ constraint->canonical-datum
+ interface-constraint->canonical-datum
+ record-validator-symbol
  program->module-interface
  module-interface-export?
  module-interface-binding-ref
  module-interface-type-export?
  module-interface-type-export-ref
+ module-interface-record-contract-ref
+ module-interface-record-validator-ref
+ module-interface-protocol-contract-ref
+ module-interface-protocol-method-contract-ref
+ program-record-contract-ref
+ program-record-validator-ref
+ program-record-runtime-name-ref
+ program-protocol-contract-ref
+ program-protocol-method-contract-ref
  module-interfaces-overlay-digest
  (struct-out interface-binding)
+ (struct-out interface-constraint)
  (struct-out interface-error)
  (struct-out interface-type-declaration)
  (struct-out interface-type-export)
+ (struct-out interface-record-contract)
+ (struct-out interface-protocol-method-contract)
+ (struct-out interface-protocol-contract)
  (struct-out module-interface)
  (struct-out module-source)
  (struct-out module-import))

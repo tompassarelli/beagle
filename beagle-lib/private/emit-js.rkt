@@ -17,6 +17,10 @@
 
 (define current-js-semantic-contracts (make-parameter #f))
 
+(define (binding-constraint-proof binding)
+  (and (current-js-semantic-contracts)
+       (hash-ref (current-js-semantic-contracts) binding #f)))
+
 (define (error-payload-keyword field)
   (define contract
     (and (current-js-semantic-contracts)
@@ -51,6 +55,13 @@
 (define logical-counter (make-parameter (box 0)))
 (define (next-logical-id!)
   (define b (logical-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  n)
+
+(define constrained-binding-counter (make-parameter (box 0)))
+(define (next-constrained-binding-id!)
+  (define b (constrained-binding-counter))
   (define n (unbox b))
   (set-box! b (add1 n))
   n)
@@ -583,6 +594,117 @@
     [(parse-boolean) (if (= n 1) (format "(~a === 'true')" (emit-expr (car args))) #f)]
     [else #f]))
 
+;; --- binding constraints ---------------------------------------------------
+
+(define (binding-target binding)
+  (cond
+    [(param? binding) (param-name binding)]
+    [(let-binding? binding) (let-binding-name binding)]
+    [(for-binding? binding) (for-binding-name binding)]
+    [else (param-binding-target binding)]))
+
+(define (binding-constraint binding)
+  (cond
+    [(param? binding) (param-constraint binding)]
+    [(let-binding? binding) (let-binding-constraint binding)]
+    [(for-binding? binding) (for-binding-constraint binding)]
+    [else #f]))
+
+(define (binding-target-label binding)
+  (define target (binding-target binding))
+  (define (label item)
+    (cond
+      [(symbol? item) (symbol->string item)]
+      [(seq-destructure? item)
+       (define fixed
+         (map label (seq-destructure-names item)))
+       (define parts
+         (if (seq-destructure-rest-name item)
+             (append fixed
+                     (list "&"
+                           (symbol->string
+                            (seq-destructure-rest-name item))))
+             fixed))
+       (format "[~a]" (string-join parts " "))]
+      [(map-destructure? item)
+       (define keys
+         (format ":keys [~a]"
+                 (string-join
+                  (map symbol->string (map-destructure-keys item))
+                  " ")))
+       (define as
+         (and (map-destructure-as-name item)
+              (format ":as ~a"
+                      (symbol->string (map-destructure-as-name item)))))
+       (format "{~a}" (string-join (filter values (list keys as)) " "))]
+      [else (format "~v" item)]))
+  (label target))
+
+;; Constraints are synchronous unary predicates. Generic structural descent is
+;; deliberate: an await hidden inside a nested fn/js-quote must not escape the
+;; normal async walker merely because constraint metadata is not executable as
+;; the surrounding body.
+(define (constraint-contains-async? node)
+  (cond
+    [(or (await-form? node)
+         (js-ast-await? node)
+         (and (js-ast-function? node) (js-ast-function-async? node))
+         (and (js-ast-method? node) (js-ast-method-async? node))
+         (and (jst-method? node) (jst-method-async? node)))
+     #t]
+    [(pair? node)
+     (or (constraint-contains-async? (car node))
+         (constraint-contains-async? (cdr node)))]
+    [(vector? node)
+     (for/or ([item (in-vector node)])
+       (constraint-contains-async? item))]
+    [(hash? node)
+     (for/or ([(key value) (in-hash node)])
+       (or (constraint-contains-async? key)
+           (constraint-contains-async? value)))]
+    [(struct? node)
+     (define fields (struct->vector node))
+     (for/or ([i (in-range 1 (vector-length fields))])
+       (constraint-contains-async? (vector-ref fields i)))]
+    [else #f]))
+
+(define (binding-constraint-has-await? binding)
+  (define constraint (binding-constraint binding))
+  (and constraint (constraint-contains-async? constraint)))
+
+(define (params-have-constraint-await? params [rest-param #f])
+  (for/or ([binding (in-list
+                     (if rest-param
+                         (append params (list rest-param))
+                         params))])
+    (binding-constraint-has-await? binding)))
+
+(define (emit-binding-constraint-statement binding source)
+  (define constraint (binding-constraint binding))
+  (cond
+    [(not constraint) #f]
+    [(constraint-contains-async? constraint)
+     (error 'beagle-js
+            (string-append
+             "binding constraint for ~a must be a synchronous unary predicate; "
+             "js/await and async functions are not allowed")
+            (binding-target-label binding))]
+    [(let ([proof (binding-constraint-proof binding)])
+       (not (and (binding-constraint-contract? proof)
+                 (binding-constraint-contract-synchronous? proof))))
+     (error 'beagle-js
+            (string-append
+             "binding constraint for ~a lacks the compiler's positive "
+             "synchronization proof; checked emission refuses to call it")
+            (binding-target-label binding))]
+    [else
+     (format "if (!(~a)(~a)) throw new Error(~a);"
+             (emit-expr constraint)
+             source
+             (js-string-lit
+              (format "Binding constraint failed: ~a"
+                      (binding-target-label binding))))]))
+
 ;; --- async detection -------------------------------------------------------
 
 (define (contains-await? exprs)
@@ -597,11 +719,12 @@
                       (expr-has-await? (if-form-then-expr e))
                       (expr-has-await? (if-form-else-expr e)))]
     [(let-form? e) (or (for/or ([b (let-form-bindings e)])
-                         (expr-has-await? (let-binding-value b)))
+                         (or (binding-constraint-has-await? b)
+                             (expr-has-await? (let-binding-value b))))
                        (contains-await? (let-form-body e)))]
-    [(letfn-form? e) (or (for/or ([f (letfn-form-fns e)])
-                            (contains-await? (letfn-fn-body f)))
-                         (contains-await? (letfn-form-body e)))]
+    ;; A nested callable owns its own async status. Its body must not make the
+    ;; enclosing function/IIFE async merely because the callable is created.
+    [(letfn-form? e) (contains-await? (letfn-form-body e))]
     [(do-form? e) (contains-await? (do-form-body e))]
     [(cond-form? e) (for/or ([c (cond-form-clauses e)])
                       (or (and (not (symbol? (cond-clause-test c)))
@@ -615,13 +738,35 @@
                            (contains-await? (match-clause-body c))))]
     [(when-form? e) (or (expr-has-await? (when-form-cond-expr e))
                         (contains-await? (when-form-body e)))]
-    [(for-form? e) (contains-await? (for-form-body e))]
-    [(doseq-form? e) (contains-await? (doseq-form-body e))]
+    [(for-form? e)
+     (or (for/or ([clause (in-list (for-form-clauses e))])
+           (cond
+             [(for-binding? clause)
+              (or (binding-constraint-has-await? clause)
+                  (expr-has-await? (for-binding-expr clause)))]
+             [(for-let? clause)
+              (for/or ([binding (in-list (for-let-bindings clause))])
+                (or (binding-constraint-has-await? binding)
+                    (expr-has-await? (let-binding-value binding))))]
+             [(for-when? clause) (expr-has-await? (for-when-test clause))]
+             [else #f]))
+         (contains-await? (for-form-body e)))]
+    [(doseq-form? e)
+     (or (for/or ([clause (in-list (doseq-form-clauses e))])
+           (and (for-binding? clause)
+                (or (binding-constraint-has-await? clause)
+                    (expr-has-await? (for-binding-expr clause)))))
+         (contains-await? (doseq-form-body e)))]
     [(loop-form? e) (or (for/or ([b (in-list (loop-form-bindings e))])
-                          (expr-has-await? (let-binding-value b)))
+                          (or (binding-constraint-has-await? b)
+                              (expr-has-await? (let-binding-value b))))
                         (contains-await? (loop-form-body e)))]
+    [(fn-form? e) #f]
     [(recur-form? e) (contains-await? (recur-form-args e))]
-    [(with-form? e) (expr-has-await? (with-form-target e))]
+    [(with-form? e)
+     (or (expr-has-await? (with-form-target e))
+         (for/or ([update (in-list (with-form-updates e))])
+           (expr-has-await? (with-update-value update))))]
     [(kw-access? e) (expr-has-await? (kw-access-target e))]
     [(set!-form? e) (or (expr-has-await? (set!-form-target e))
                         (expr-has-await? (set!-form-value e)))]
@@ -659,10 +804,16 @@
 (define current-js-context (make-parameter 'stmt))
 (define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
+(define current-js-record-field-bindings (make-parameter (hasheq)))
 (define current-js-record-ns (make-parameter (hasheq)))
+(define current-js-record-validator-refs (make-parameter (hasheq)))
 (define current-js-record-constructors (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
+;; The active loop's source bindings paired with their mutable aggregate slots.
+;; `recur` is a fresh binding operation, so constraints validate its temporary
+;; values before any loop slot is reassigned.
+(define current-loop-binding-slots (make-parameter #f))
 
 ;; --- type-based scalar equality optimization (P3) ---------------------------
 ;; A type is ===-safe iff its core.js value-equality (equiv) coincides with JS
@@ -1016,13 +1167,31 @@
   (parameterize ([current-js-bound (set-union (current-js-bound) (list->set syms))])
     (thunk)))
 
+;; Typed-JS class methods are emitted in a separate module, but their bodies
+;; may contain ordinary Beagle AST that routes back through `emit-expr`. Bridge
+;; the method's hidden constrained-parameter names into this emitter too.
+(current-jst-with-binding-env
+ (lambda (names rename-additions thunk)
+   (define merged-rename-env
+     (for/fold ([env (current-rename-env)])
+               ([(name js-name) (in-hash rename-additions)])
+       (hash-set env name js-name)))
+   (parameterize
+       ([current-js-bound
+         (set-union (current-js-bound) (list->set names))]
+        [current-rename-env merged-rename-env])
+     (thunk))))
+
 ;; Seed the rep-selection envs from a param list (typed `:-` params): a param's
 ;; declared type populates current-type-env (so var key/elem args resolve) and,
 ;; when the type is a compound-keyed map / compound-elem set, current-rep-env (so
 ;; reads through the param route to HAMT ops). Composes with with-bindings.
-(define (with-param-envs params thunk)
+(define (with-param-envs params thunk [rest-param #f])
   (define-values (te re)
-    (extend-binding-type-envs params (current-type-env) (current-rep-env)))
+    (extend-binding-type-envs
+     (if rest-param (append params (list rest-param)) params)
+     (current-type-env)
+     (current-rep-env)))
   (parameterize ([current-type-env te] [current-rep-env re])
     (thunk)))
 
@@ -1048,7 +1217,7 @@
             (if (eq? rep 'native) re (hash-set re name rep)))))
 
 (define (names-from-binding-target name)
-  (binding-target-bound-names name))
+  (binding-target-bound-names (binding-target name)))
 
 (define (binding-names-from-params params [rest-param #f])
   (append
@@ -1056,6 +1225,38 @@
      (names-from-binding-target p))
      params))
    (if rest-param (names-from-binding-target rest-param) '())))
+
+(define (param-bindings params rest-param)
+  (if rest-param (append params (list rest-param)) params))
+
+(define (bindings-have-constraints? bindings)
+  (for/or ([binding (in-list bindings)])
+    (binding-constraint binding)))
+
+(define (hidden-binding-rename-env bindings prefix [base (current-rename-env)])
+  (for/fold ([env base]) ([binding (in-list bindings)]
+                          [index (in-naturals)])
+    (for/fold ([inner env])
+              ([name (in-list (names-from-binding-target binding))])
+      (hash-set inner name
+                (format "$beagle$~a$~a$~a"
+                        prefix index (mangle-name name))))))
+
+(define (binding-indexed-rename-env
+         bindings prefix index [base (current-rename-env)])
+  (for/fold ([env base])
+            ([name (in-list
+                    (names-from-binding-target
+                     (list-ref bindings index)))])
+    (hash-set env name
+              (format "$beagle$~a$~a$~a"
+                      prefix index (mangle-name name)))))
+
+(define (callable-param-rename-env params rest-param)
+  (define bindings (param-bindings params rest-param))
+  (if (bindings-have-constraints? bindings)
+      (hidden-binding-rename-env bindings "param")
+      (current-rename-env)))
 
 ;; --- entry point -----------------------------------------------------------
 
@@ -1079,6 +1280,85 @@
         [else h])))
   (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
     (hash-set h rec-name field-names)))
+
+(define (build-record-field-binding-table prog)
+  (for/fold ([table (hasheq)]) ([raw (in-list (program-forms prog))])
+    (define form (unwrap-definition-form raw))
+    (cond
+      [(record-form? form)
+       (hash-set table (record-form-name form) (record-form-fields form))]
+      [(and (defunion-form? form) (defunion-form-member-fields form))
+       (for/fold ([next table])
+                 ([member (in-list (defunion-form-members form))])
+         (hash-set next member
+                   (hash-ref (defunion-form-member-fields form) member '())))]
+      [(deferror-form? form)
+       (for/fold ([next table])
+                 ([member (in-list (deferror-form-members form))])
+         (hash-set next member
+                   (hash-ref (deferror-form-member-fields form) member '())))]
+      [else table])))
+
+;; A checked record-update contract names the declaration by its canonical
+;; provider identity. JavaScript, however, must call that provider through the
+;; consumer's actual require spelling: `p.$validator` for `:as p`, or the
+;; hidden named import for `:refer`. Keep that projection explicit and derived
+;; from the authoritative module interface; never turn a namespace string into
+;; an identifier and hope it matches the runtime import.
+(define (build-record-validator-reference-table prog)
+  (for*/fold ([table (hasheq)])
+             ([import (in-list (program-imported-module-interfaces prog))]
+              [entry
+               (in-value
+                (let ([interface (module-import-interface import)])
+                  (list interface
+                        (module-import-prefix import)
+                        (module-interface-namespace interface)
+                        (module-import-refer import))))]
+              [(record-name contract)
+               (in-hash
+                (module-interface-record-contracts (car entry)))]
+              #:when (interface-record-contract-validator-symbol contract))
+    (define prefix (cadr entry))
+    (define namespace (caddr entry))
+    (define refer (cadddr entry))
+    (define validator
+      (interface-record-contract-validator-symbol contract))
+    (define referred?
+      (and refer
+           (or (memq record-name refer)
+               (memq
+                (string->symbol (format "->~a" record-name))
+                refer))))
+    (define runtime-ref
+      (if referred?
+          validator
+          (qualified-binding prefix validator)))
+    (define qualified-record
+      (qualified-binding namespace record-name))
+    (define prefixed-record
+      (qualified-binding prefix record-name))
+    (define next
+      (hash-set
+       (hash-set table qualified-record runtime-ref)
+       prefixed-record runtime-ref))
+    (if referred? (hash-set next record-name runtime-ref) next)))
+
+(define (record-update-runtime-validator contract)
+  (define validator (record-update-contract-validator-symbol contract))
+  (cond
+    [(not validator) #f]
+    [(hash-ref
+      (current-js-record-validator-refs)
+      (record-update-contract-record-name contract)
+      #f)
+     => values]
+    [(not (string-contains? (symbol->string validator) "/")) validator]
+    [else
+     (error
+      'beagle-js
+      "record update for ~a lacks an authoritative runtime validator import"
+      (record-update-contract-record-name contract))]))
 
 (define RECORD-CONSTRUCTOR-KINDS
   '(record-constructor union-constructor error-constructor))
@@ -1278,13 +1558,20 @@
                  [current-js-context 'stmt]
                  [match-counter (box 0)]
                  [logical-counter (box 0)]
+                 [constrained-binding-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
+                 [current-js-record-field-bindings
+                  (build-record-field-binding-table prog)]
                  [current-js-record-ns (program-imported-record-ns prog)]
+                 [current-js-record-validator-refs
+                  (build-record-validator-reference-table prog)]
                  [current-js-record-constructors
                   (build-record-constructor-set prog)]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
                  [current-js-semantic-contracts (program-semantic-contracts prog)]
+                 [current-jst-semantic-contracts
+                  (program-semantic-contracts prog)]
                  [current-type-table (program-type-table prog)]  ; P3: per-node arg types for scalar-=== dispatch (#f when capture off)
                  [current-binder-types (program-binder-type-table prog)]
                  [needs-runtime? #f]
@@ -1376,6 +1663,37 @@
   (define rs (program-requires prog))
   (define imported-scalar-fns
     (list->set (program-imported-scalar-fns prog)))
+  (define used-unqualified-record-validators
+    (for/set ([(node contract)
+               (in-hash (program-semantic-contracts prog))]
+              #:when
+              (and (record-update-contract? contract)
+                   (record-update-runtime-validator contract)
+                   (not
+                    (string-contains?
+                     (symbol->string
+                      (record-update-runtime-validator contract))
+                     "/"))))
+      (record-update-runtime-validator contract)))
+  (define (referred-record-validators entry refer)
+    (define import (require-module-import prog entry))
+    (define interface (and import (module-import-interface import)))
+    (if (not interface)
+        '()
+        (for/list
+            ([(record-name contract)
+              (in-hash (module-interface-record-contracts interface))]
+             #:when
+             (let ([validator
+                    (interface-record-contract-validator-symbol contract)])
+               (and validator
+                    (set-member?
+                     used-unqualified-record-validators validator)
+                    (or (memq record-name refer)
+                        (memq
+                         (string->symbol (format "->~a" record-name))
+                         refer)))))
+          (interface-record-contract-validator-symbol contract))))
   (define (runtime-import-name entry name)
     (define import (require-module-import prog entry))
     (define interface (and import (module-import-interface import)))
@@ -1440,11 +1758,13 @@
        (if refer
          (let ([runtime-refer
                 (remove-duplicates
-                 (filter-map
-                  (lambda (name)
-                    (and (not (hash-ref macros name #f))
-                         (runtime-import-name r name)))
-                  refer))])
+                 (append
+                  (filter-map
+                   (lambda (name)
+                     (and (not (hash-ref macros name #f))
+                          (runtime-import-name r name)))
+                   refer)
+                  (referred-record-validators r refer)))])
            (if (null? runtime-refer)
              ""
              (format "import { ~a } from '~a';"
@@ -1478,14 +1798,25 @@
 
     [(defn-form? f)
      (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
-     (define setup (emit-js-param-setup (defn-form-params f)))
-     (define async? (contains-await? (defn-form-body f)))
+     (define param-rename-env
+       (callable-param-rename-env
+        (defn-form-params f) (defn-form-rest-param f)))
+     (define setup
+       (emit-js-param-setup
+        (defn-form-params f) (defn-form-rest-param f)
+        param-rename-env))
+     (define async?
+       (or (params-have-constraint-await?
+            (defn-form-params f) (defn-form-rest-param f))
+           (contains-await? (defn-form-body f))))
      (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
      (define emitted-body
        (with-param-envs (defn-form-params f)
          (lambda ()
-           (with-bindings bound
-             (lambda () (emit-body-return (defn-form-body f) "  "))))))
+           (parameterize ([current-rename-env param-rename-env])
+             (with-bindings bound
+               (lambda () (emit-body-return (defn-form-body f) "  ")))))
+         (defn-form-rest-param f)))
      (define inner
        (string-join (append setup (list emitted-body)) "\n  "))
      (format "~a~a {\n  ~a\n}"
@@ -1502,29 +1833,49 @@
      (define name (mangle-name (defn-multi-name f)))
      (define arities (defn-multi-arities f))
      (define async? (for/or ([a (in-list arities)])
-                      (contains-await? (arity-clause-body a))))
+                      (or (params-have-constraint-await?
+                           (arity-clause-params a)
+                           (arity-clause-rest-param a))
+                          (contains-await? (arity-clause-body a)))))
      (define branches
        (for/list ([a (in-list arities)])
          (define n (length (arity-clause-params a)))
          (define rest? (arity-clause-rest-param a))
-         (define destructure-strs
+         (define arity-bindings
+           (param-bindings (arity-clause-params a) rest?))
+         (define arity-rename-env
+           (if (bindings-have-constraints? arity-bindings)
+               (hidden-binding-rename-env arity-bindings "arity")
+               (current-rename-env)))
+         (define param-binding-strs
            (apply append
                   (for/list ([p (in-list (arity-clause-params a))]
                              [i (in-naturals)])
-                    (define target (param-binding-target p))
-                    (if (or (map-destructure? target) (seq-destructure? target))
-                        (emit-pattern-binding-statements target (format "$beagle$args[~a]" i))
-                        (list (format "const ~a = $beagle$args[~a];"
-                                      (emit-js-param p) i))))))
+                    (emit-js-argument-binding-setup
+                     p
+                     (format "$beagle$args[~a]" i)
+                     (format "$beagle$arg$~a" i)
+                     #:install-rename-env arity-rename-env))))
          (define rest-str
            (if rest?
-             (list (format "const ~a = $beagle$args.slice(~a);" (emit-js-param rest?) n))
+             (emit-js-argument-binding-setup
+              rest?
+              (format "$beagle$args.slice(~a)" n)
+              "$beagle$arg$rest"
+              #:install-rename-env arity-rename-env)
              '()))
-         (define all-bindings (append destructure-strs rest-str))
+         (define all-bindings (append param-binding-strs rest-str))
          (define arity-bound (binding-names-from-params (arity-clause-params a) (arity-clause-rest-param a)))
          (define body (with-param-envs (arity-clause-params a)
                         (lambda ()
-                          (with-bindings arity-bound (lambda () (emit-body-return (arity-clause-body a) "    "))))))
+                          (parameterize
+                              ([current-rename-env
+                                arity-rename-env])
+                            (with-bindings arity-bound
+                              (lambda ()
+                                (emit-body-return
+                                 (arity-clause-body a) "    ")))))
+                        (arity-clause-rest-param a)))
          (define bindings-str (string-join all-bindings "\n    "))
          (define inner (if (null? all-bindings) body (format "~a\n    ~a" bindings-str body)))
          (if rest?
@@ -1844,116 +2195,284 @@
     [(loop-form? e)
      (define bindings (loop-form-bindings e))
      (define body (loop-form-body e))
+     (define constrained-loop? (bindings-have-constraints? bindings))
      (define has-await (or (for/or ([b (in-list bindings)])
                              (expr-has-await? (let-binding-value b)))
                            (contains-await? body)))
      (define loop-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
+     (define outer-bound (current-js-bound))
+     (define outer-rename-env (current-rename-env))
+     (define outer-type-env (current-type-env))
+     (define outer-rep-env (current-rep-env))
      ;; Recur has one value per SOURCE binding. A destructuring pattern must
      ;; therefore own one stable aggregate slot; projecting leaves into recur
      ;; slots would change arity and lose the aggregate on the next iteration.
      (define bind-names
        (for/list ([b (in-list bindings)] [i (in-naturals)])
          (define target (let-binding-name b))
-         (if (or (map-destructure? target) (seq-destructure? target))
+         (if (or constrained-loop?
+                 (map-destructure? target)
+                 (seq-destructure? target))
              (format "$beagle$loop$~a" i)
              (emit-binding-target target))))
+     ;; The body projects stable aggregate slots into authored bindings once per
+     ;; iteration. Default expressions use the progressive pre-binding scope.
+     (define-values
+       (iteration-pre-bounds iteration-pre-rename-envs
+        loop-bound loop-rename-env)
+       (for/fold ([rename-envs '()]
+                  [bound-envs '()]
+                  [bound outer-bound]
+                  [rename-env outer-rename-env]
+                  #:result (values bound-envs rename-envs bound rename-env))
+                 ([binding (in-list bindings)] [i (in-naturals)])
+         (define names (names-from-binding-target binding))
+         (define rename-env*
+           (if constrained-loop?
+               (for/fold ([next rename-env]) ([name (in-list names)])
+                 (hash-set next name
+                           (format "$beagle$loop$~a$~a"
+                                   i (mangle-name name))))
+               rename-env))
+         (values (append rename-envs (list rename-env))
+                 (append bound-envs (list bound))
+                 (set-union bound (list->set names))
+                 rename-env*)))
+     ;; In a constrained loop, initialize sequentially: RHS, predicate, authored
+     ;; install, then the next declaration. This matches the checker's scope and
+     ;; prevents later effects from running after an earlier failed constraint.
      (define bind-strs
-       (for/list ([b (in-list bindings)] [slot (in-list bind-names)])
-         (format "let ~a = ~a;"
-                 slot
-                 (await-async-iife (emit-expr (let-binding-value b))))))
-     (define projection-strs
+       (if constrained-loop?
+           (let-values
+               ([(strs _bound _rename-env _type-env _rep-env)
+                 (for/fold ([strs '()]
+                            [bound outer-bound]
+                            [rename-env outer-rename-env]
+                            [type-env outer-type-env]
+                            [rep-env outer-rep-env])
+                           ([binding (in-list bindings)]
+                            [slot (in-list bind-names)]
+                            [i (in-naturals)])
+                   (define rhs
+                     (parameterize ([current-js-bound bound]
+                                    [current-rename-env rename-env]
+                                    [current-type-env type-env]
+                                    [current-rep-env rep-env])
+                       (await-async-iife
+                        (emit-expr (let-binding-value binding)))))
+                   (define check
+                     (parameterize ([current-js-bound bound]
+                                    [current-rename-env rename-env]
+                                    [current-type-env type-env]
+                                    [current-rep-env rep-env])
+                       (emit-binding-constraint-statement binding slot)))
+                   (define names (names-from-binding-target binding))
+                   (define bound*
+                     (set-union bound (list->set names)))
+                   (define rename-env*
+                     (for/fold ([next rename-env]) ([name (in-list names)])
+                       (hash-set next name
+                                 (format "$beagle$loop$init$~a$~a"
+                                         i (mangle-name name)))))
+                   (define target (let-binding-name binding))
+                   (define installs
+                     (parameterize ([current-js-bound bound*]
+                                    [current-rename-env rename-env*])
+                       (if (or (map-destructure? target)
+                               (seq-destructure? target))
+                           (emit-pattern-binding-statements
+                            target slot
+                            #:default-bound bound
+                            #:default-rename-env rename-env)
+                           (list (format "const ~a = ~a;"
+                                         (emit-binding-target target) slot)))))
+                   (define-values (type-env* rep-env*)
+                     (extend-binding-type-envs
+                      (list target) type-env rep-env))
+                   (values
+                    (append strs
+                            (list (format "let ~a = ~a;" slot rhs))
+                            (if check (list check) '())
+                            installs)
+                    bound* rename-env* type-env* rep-env*))])
+             strs)
+           (for/list ([binding (in-list bindings)]
+                      [slot (in-list bind-names)])
+             (format "let ~a = ~a;"
+                     slot
+                     (await-async-iife
+                      (emit-expr (let-binding-value binding)))))))
+     (define iteration-setup-strs
        (apply append
-              (for/list ([b (in-list bindings)] [slot (in-list bind-names)])
+              (for/list ([b (in-list bindings)]
+                         [slot (in-list bind-names)]
+                         [default-bound (in-list iteration-pre-bounds)]
+                         [default-rename-env
+                          (in-list iteration-pre-rename-envs)])
                 (define target (let-binding-name b))
-                (if (or (map-destructure? target) (seq-destructure? target))
-                    (emit-pattern-binding-statements target slot)
-                    '()))))
+                (define installs
+                  (parameterize ([current-rename-env loop-rename-env]
+                                 [current-js-bound loop-bound])
+                    (cond
+                      [(or (map-destructure? target) (seq-destructure? target))
+                       (emit-pattern-binding-statements
+                        target slot
+                        #:default-bound default-bound
+                        #:default-rename-env default-rename-env)]
+                      [constrained-loop?
+                       (list (format "let ~a = ~a;"
+                                     (emit-binding-target target) slot))]
+                      [else '()])))
+                installs)))
      (define-values (loop-type-env loop-rep-env)
        (extend-binding-type-envs
         (map let-binding-name bindings)
         (current-type-env)
         (current-rep-env)))
+     ;; Recur validates every candidate exactly once before committing any slot.
+     ;; Later predicates see earlier candidate bindings, never stale loop values.
+     (define recur-binding-contexts
+       (and constrained-loop?
+            (let-values
+                ([(entries _bound _rename-env _type-env _rep-env)
+                  (for/fold ([entries '()]
+                             [bound outer-bound]
+                             [rename-env outer-rename-env]
+                             [type-env outer-type-env]
+                             [rep-env outer-rep-env])
+                            ([binding (in-list bindings)]
+                             [slot (in-list bind-names)]
+                             [i (in-naturals)])
+                    (define names (names-from-binding-target binding))
+                    (define bound*
+                      (set-union bound (list->set names)))
+                    (define rename-env*
+                      (for/fold ([next rename-env]) ([name (in-list names)])
+                        (hash-set next name
+                                  (format "$beagle$recur$~a$~a"
+                                          i (mangle-name name)))))
+                    (define-values (type-env* rep-env*)
+                      (extend-binding-type-envs
+                       (list (let-binding-name binding)) type-env rep-env))
+                    (values
+                     (append entries
+                             (list (list binding slot
+                                         bound rename-env type-env rep-env
+                                         bound* rename-env*)))
+                     bound* rename-env* type-env* rep-env*))])
+              entries)))
      (with-bindings loop-names
        (lambda ()
          (parameterize ([current-type-env loop-type-env]
-                        [current-rep-env loop-rep-env])
+                        [current-rep-env loop-rep-env]
+                        [current-rename-env loop-rename-env]
+                        [current-loop-binding-slots recur-binding-contexts])
            (define body-str
              (string-join (map (lambda (e) (emit-loop-stmt e bind-names)) body) "\n    "))
            (define prefix (if has-await "async " ""))
            (format "(~a() => { ~a while (true) {\n    ~a~a~a\n  } })()"
                    prefix
                    (string-join bind-strs " ")
-                   (string-join projection-strs " ")
-                   (if (null? projection-strs) "" "\n    ")
+                   (string-join iteration-setup-strs " ")
+                   (if (null? iteration-setup-strs) "" "\n    ")
                    body-str))))]
 
     [(recur-form? e)
-     (define assignments
-       (for/list ([a (in-list (recur-form-args e))]
-                  [i (in-naturals)])
-         (format "_recur_~a = ~a" i (emit-expr a))))
-     (string-append (string-join assignments "; ") "; continue")]
+     (error 'beagle-js
+            "recur reached ordinary expression emission; loop tail lowering is required")]
 
     [(for-form? e)
      (emit-for e)]
 
     [(fn-form? e)
      (define params (emit-js-params (fn-form-params e) (fn-form-rest-param e)))
-     (define setup (emit-js-param-setup (fn-form-params e)))
+     (define param-rename-env
+       (callable-param-rename-env
+        (fn-form-params e) (fn-form-rest-param e)))
+     (define setup
+       (emit-js-param-setup
+        (fn-form-params e) (fn-form-rest-param e) param-rename-env))
      (define body (fn-form-body e))
-     (define async? (contains-await? body))
+     (define async?
+       (or (params-have-constraint-await?
+            (fn-form-params e) (fn-form-rest-param e))
+           (contains-await? body)))
      (define prefix (if async? "async " ""))
      (define bound (binding-names-from-params (fn-form-params e) (fn-form-rest-param e)))
-     (with-param-envs (fn-form-params e)
+     (with-param-envs
+      (fn-form-params e)
       (lambda ()
-       (with-bindings bound
-       (lambda ()
-         (if (and (null? setup)
-                  (= (length body) 1) (not (stmt-inline? (car body))))
-           (let ([body-str (emit-expr (car body))])
-             ;; An expression-body arrow whose body emits an OBJECT LITERAL must be
-             ;; parenthesized: `=> {…}` is a JS block (a labeled-statement parse),
-             ;; whereas `=> ({…})` returns the object. Any expression that emits
-             ;; starting with `{` is an object literal in this position, so wrap it.
-             (if (regexp-match? #rx"^[ \t\r\n]*[{]" body-str)
-               (format "~a(~a) => (~a)" prefix params body-str)
-               (format "~a(~a) => ~a" prefix params body-str)))
-           (format "~a(~a) => { ~a }"
-                   prefix params
-                   (string-join
-                    (append setup (list (emit-body-return body "")))
-                    " "))))))) ]
+       (parameterize ([current-rename-env param-rename-env])
+         (with-bindings bound
+           (lambda ()
+             (if (and (null? setup)
+                      (= (length body) 1) (not (stmt-inline? (car body))))
+               (let ([body-str (emit-expr (car body))])
+                 ;; An expression-body arrow whose body emits an OBJECT LITERAL must be
+                 ;; parenthesized: `=> {…}` is a JS block (a labeled-statement parse),
+                 ;; whereas `=> ({…})` returns the object. Any expression that emits
+                 ;; starting with `{` is an object literal in this position, so wrap it.
+                 (if (regexp-match? #rx"^[ \t\r\n]*[{]" body-str)
+                   (format "~a(~a) => (~a)" prefix params body-str)
+                   (format "~a(~a) => ~a" prefix params body-str)))
+               (format "~a(~a) => { ~a }"
+                       prefix params
+                       (string-join
+                        (append setup (list (emit-body-return body "")))
+                        " ")))))))
+      (fn-form-rest-param e))]
 
     [(letfn-form? e)
      (define fns (letfn-form-fns e))
      (define body (letfn-form-body e))
      (define fn-names (map letfn-fn-name fns))
-     (define has-await (or (for/or ([f (in-list fns)])
-                             (contains-await? (letfn-fn-body f)))
-                           (contains-await? body)))
-     (with-bindings fn-names
-       (lambda ()
+     (define letfn-rename-env
+       (for/fold ([env (current-rename-env)])
+                 ([fn-name (in-list fn-names)])
+         (hash-set env fn-name (mangle-name fn-name))))
+     ;; Nested functions own their async status. Their bodies must not make
+     ;; the surrounding letfn IIFE async: declaring an async local while the
+     ;; letfn body returns a plain value must still return that value directly.
+     (define has-await (contains-await? body))
+     (parameterize ([current-rename-env letfn-rename-env])
+       (with-bindings fn-names
+        (lambda ()
          (define fn-strs
            (for/list ([f (in-list fns)])
              (define name (mangle-name (letfn-fn-name f)))
              (define params
                (emit-js-params
                 (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (define setup (emit-js-param-setup (letfn-fn-params f)))
+             (define param-rename-env
+               (callable-param-rename-env
+                (letfn-fn-params f) (letfn-fn-rest-param f)))
+             (define setup
+               (emit-js-param-setup
+                (letfn-fn-params f)
+                (letfn-fn-rest-param f)
+                param-rename-env))
              (define fn-body (letfn-fn-body f))
-             (define fn-async? (contains-await? fn-body))
+             (define fn-async?
+               (or (params-have-constraint-await?
+                    (letfn-fn-params f) (letfn-fn-rest-param f))
+                   (contains-await? fn-body)))
              (define prefix (if fn-async? "async " ""))
              (define fn-bound (binding-names-from-params (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (with-bindings fn-bound
-               (lambda ()
-                 (format "~afunction ~a(~a) { ~a }"
-                         prefix name params
-                         (string-join
-                          (append setup (list (emit-body-return fn-body "")))
-                          " "))))))
+             (with-param-envs
+              (letfn-fn-params f)
+              (lambda ()
+                (parameterize ([current-rename-env param-rename-env])
+                  (with-bindings fn-bound
+                    (lambda ()
+                      (format "~afunction ~a(~a) { ~a }"
+                              prefix name params
+                              (string-join
+                               (append setup
+                                       (list (emit-body-return fn-body "")))
+                               " "))))))
+              (letfn-fn-rest-param f))))
          (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
-                #:async? has-await)))]
+                #:async? has-await))))]
 
     [(method-call? e)
      (define method-str (symbol->string (method-call-method-name e)))
@@ -2164,7 +2683,7 @@
             (mangle-prop (substring method-str 1))))
         (format "(~a.~a = ~a)" (emit-expr (method-call-target target)) prop val)]
        [(symbol? target)
-        (format "(~a = ~a)" (mangle-name target) val)]
+        (format "(~a = ~a)" (resolved-name target) val)]
        [else
         (format "(~a = ~a)" (emit-expr target) val)])]
 
@@ -2314,15 +2833,52 @@
      (string-append "->" (symbol->string member-name))))
   ;; params are BINDINGS (reserved-word-suffixed); the object KEYS are
   ;; PROPERTIES (char-mangle only). Split them so `{ delete: delete$ }`.
-  (define field-params (map (compose mangle-name param-name) fields))
+  (define constrained? (bindings-have-constraints? fields))
+  (define field-raw-params
+    (for/list ([field (in-list fields)] [i (in-naturals)])
+      (if constrained?
+          (format "$beagle$field$~a" i)
+          (mangle-name (param-name field)))))
+  ;; Keep installed field locals hidden too. A predicate may legitimately have
+  ;; the same authored name as its field; a later `const field = ...` would
+  ;; otherwise capture that predicate through JavaScript's TDZ.
+  (define field-params
+    (for/list ([field (in-list fields)] [i (in-naturals)])
+      (if constrained?
+          (format "$beagle$field$~a$~a"
+                  i (mangle-name (param-name field)))
+          (mangle-name (param-name field)))))
   (define field-props (map (compose mangle-prop symbol->string param-name) fields))
+  (define field-installs
+    (if constrained?
+        (for/list ([name (in-list field-params)]
+                   [raw (in-list field-raw-params)])
+          (format "const ~a = ~a;" name raw))
+        '()))
+  (define field-checks
+    (filter
+     values
+     (for/list ([field (in-list fields)]
+                [raw (in-list field-raw-params)])
+       (emit-binding-constraint-statement field raw))))
+  (define validator (emit-record-validator member-name fields))
   (define factory
-    (format "~afunction ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
+    (format "~afunction ~a(~a) { ~a~areturn Object.freeze({ _tag: ~v~a }); }"
             (if (or (current-js-export-marked?) (exported-binding? constructor-name))
                 "export "
                 "")
             m-str
-            (string-join field-params ", ")
+            (string-join field-raw-params ", ")
+            (if (null? field-checks)
+                ""
+                (string-append
+                 (string-join field-checks " ")
+                 " "))
+            (if (null? field-installs)
+                ""
+                (string-append
+                 (string-join field-installs " ")
+                 " "))
             (symbol->string member-name)
             (if (null? field-params) ""
                 (string-append ", "
@@ -2342,7 +2898,27 @@
               (if (or (current-js-export-marked?) (exported-binding? accessor-name)) "export " "")
               (mangle-name accessor-name)
               prop)))
-  (string-join (cons factory accessors) "\n\n"))
+  (string-join
+   (append (if validator (list validator) '())
+           (cons factory accessors))
+   "\n\n"))
+
+(define (record-validator-name name)
+  (format "$beagle$record$~a$validate" (mangle-name name)))
+
+(define (emit-record-validator name fields)
+  (define checks
+    (filter values
+            (for/list ([field (in-list fields)])
+              (define source
+                (format "$beagle$record.~a"
+                        (mangle-prop
+                         (symbol->string (param-name field)))))
+              (emit-binding-constraint-statement field source))))
+  (and (pair? checks)
+       (format "export function ~a($beagle$record) {\n  ~a\n  return $beagle$record;\n}"
+               (record-validator-name name)
+               (string-join checks "\n  "))))
 
 (define (emit-record f)
   (define name (record-form-name f))
@@ -2353,8 +2929,37 @@
   ;; positions. The accessor name mirrors the `<lcname>-<field>` call site,
   ;; so mangle that whole authored binding independently of the property.
   (define field-source-names (map (compose symbol->string param-name) fields))
-  (define field-params (map (compose mangle-name param-name) fields))
+  (define constrained? (bindings-have-constraints? fields))
+  (define field-raw-params
+    (for/list ([field (in-list fields)] [i (in-naturals)])
+      (if constrained?
+          (format "$beagle$field$~a" i)
+          (mangle-name (param-name field)))))
+  ;; Constrained constructors keep their installed locals hidden as well as
+  ;; their raw parameters. A field may have the same authored name as its
+  ;; predicate; spelling that local `const value` would capture a top-level
+  ;; predicate named `value` through JavaScript's whole-block TDZ even though
+  ;; the guard text appears before the declaration.
+  (define field-params
+    (for/list ([field (in-list fields)] [i (in-naturals)])
+      (if constrained?
+          (format "$beagle$field$~a$~a"
+                  i (mangle-name (param-name field)))
+          (mangle-name (param-name field)))))
   (define field-props (map mangle-prop field-source-names))
+  (define field-installs
+    (if constrained?
+        (for/list ([name (in-list field-params)]
+                   [raw (in-list field-raw-params)])
+          (format "const ~a = ~a;" name raw))
+        '()))
+  (define field-checks
+    (filter
+     values
+     (for/list ([field (in-list fields)]
+                [raw (in-list field-raw-params)])
+       (emit-binding-constraint-statement field raw))))
+  (define validator (emit-record-validator name fields))
   ;; Keep the object shorthand `{x}` when prop == param (the common,
   ;; non-reserved case, byte-identical to before); only reserved fields need
   ;; the explicit `delete: delete$` split.
@@ -2365,12 +2970,22 @@
   (define constructor-name
     (string->symbol (string-append "->" name-str)))
   (define factory
-    (format "~afunction ~a(~a) {\n  return Object.freeze({_tag: ~v, ~a});\n}"
+    (format "~afunction ~a(~a) {\n  ~a~areturn Object.freeze({_tag: ~v, ~a});\n}"
             (if (or (current-js-export-marked?) (exported-binding? constructor-name))
                 "export "
                 "")
             name-mangled
-            (string-join field-params ", ")
+            (string-join field-raw-params ", ")
+            (if (null? field-checks)
+                ""
+                (string-append
+                 (string-join field-checks "\n  ")
+                 "\n  "))
+            (if (null? field-installs)
+                ""
+                (string-append
+                 (string-join field-installs "\n  ")
+                 "\n  "))
             name-str
             (string-join field-entries ", ")))
   (define accessors
@@ -2382,18 +2997,51 @@
               (if (or (current-js-export-marked?) (exported-binding? accessor-name)) "export " "")
               (mangle-name accessor-name)
               prop)))
-  (string-join (cons factory accessors) "\n\n"))
+  (string-join
+   (append (if validator (list validator) '())
+           (cons factory accessors))
+   "\n\n"))
 
 ;; --- with (record update) --------------------------------------------------
 
 (define (emit-with e)
   (define target-str (emit-expr (with-form-target e)))
+  (define record-type
+    (or (node-type (with-form-target e))
+        (and (symbol? (with-form-target e))
+             (type-of-binding (with-form-target e)))))
+  (define record-name
+    (cond
+      [(type-prim? record-type) (type-prim-name record-type)]
+      [(type-app? record-type) (type-app-ctor record-type)]
+      [else #f]))
+  (define contract
+    (and (current-js-semantic-contracts)
+         (hash-ref (current-js-semantic-contracts) e #f)))
+  (define statically-record?
+    (and record-name
+         (hash-has-key? (current-js-record-fields) record-name)))
+  (when (and statically-record? (not (record-update-contract? contract)))
+    (error 'beagle-js
+           "with ~a: checked record update contract is missing"
+           record-name))
   (define update-strs
     (for/list ([u (in-list (with-form-updates e))])
       (format "~a: ~a"
               (kw->prop (with-update-field-kw u))
               (emit-expr (with-update-value u)))))
-  (format "Object.freeze({...~a, ~a})" target-str (string-join update-strs ", ")))
+  (define value
+    (format "{...~a, ~a}"
+            target-str (string-join update-strs ", ")))
+  (define validator
+    (and (record-update-contract? contract)
+         (record-update-runtime-validator contract)))
+  (if validator
+      ;; The checker resolves this conceptual symbol to the provider-owned
+      ;; helper. Qualified imports route through their namespace object;
+      ;; referred helpers are synthesized into the named ESM import list.
+      (format "Object.freeze(~a(~a))" (emit-expr validator) value)
+      (format "Object.freeze(~a)" value)))
 
 ;; --- match -----------------------------------------------------------------
 
@@ -2511,83 +3159,195 @@
 
 ;; --- for comprehension → .map / .filter ------------------------------------
 
+(define (extend-js-binding-context binding prefix index bound rename-env)
+  (define names (names-from-binding-target binding))
+  (define rename-env*
+    (for/fold ([next rename-env]) ([name (in-list names)])
+      (hash-set
+       next name
+       (if (binding-constraint binding)
+           (format "$beagle$~a$~a$~a" prefix index (mangle-name name))
+           (mangle-name name)))))
+  (values (set-union bound (list->set names)) rename-env*))
+
+(define (build-for-binding-contexts clauses)
+  (define contexts (make-hasheq))
+  (define bound (current-js-bound))
+  (define rename-env (current-rename-env))
+  (define index 0)
+  (for ([clause (in-list clauses)])
+    (cond
+      [(for-binding? clause)
+       (define pre-bound bound)
+       (define pre-rename-env rename-env)
+       (define-values (bound* rename-env*)
+         (extend-js-binding-context
+          clause "for" index bound rename-env))
+       (hash-set! contexts clause
+                  (list pre-bound pre-rename-env bound* rename-env* index))
+       (set! bound bound*)
+       (set! rename-env rename-env*)
+       (set! index (add1 index))]
+      [(for-let? clause)
+       (define binding-contexts
+         (for/list ([binding (in-list (for-let-bindings clause))])
+           (define pre-bound bound)
+           (define pre-rename-env rename-env)
+           (define-values (bound* rename-env*)
+             (extend-js-binding-context
+              binding "for_let" index bound rename-env))
+           (define context
+             (list pre-bound pre-rename-env bound* rename-env* index))
+           (set! bound bound*)
+           (set! rename-env rename-env*)
+           (set! index (add1 index))
+           context))
+       (hash-set! contexts clause binding-contexts)]
+      [else (hash-set! contexts clause (list bound rename-env))]))
+  (values contexts bound rename-env))
+
 (define (emit-for e)
   (define clauses (for-form-clauses e))
   (define body (for-form-body e))
-  (define for-names (apply append
-    (for/list ([c (in-list clauses)])
-      (cond
-        [(for-binding? c) (names-from-binding-target (for-binding-name c))]
-        [(for-let? c)
-         (apply append
-                (map (lambda (binding)
-                       (names-from-binding-target (let-binding-name binding)))
-                     (for-let-bindings c)))]
-        [else '()]))))
-  (with-bindings for-names
-    (lambda ()
-      (define body-str
-        (if (= (length body) 1)
+  (define-values (contexts final-bound final-rename-env)
+    (build-for-binding-contexts clauses))
+  (define body-str
+    (parameterize ([current-js-bound final-bound]
+                   [current-rename-env final-rename-env])
+      (if (= (length body) 1)
           (emit-expr (car body))
-          (format "(() => { ~a })()" (emit-body-return body ""))))
-      (emit-for-clauses clauses body-str))))
+          (format "(() => { ~a })()" (emit-body-return body "")))))
+  (emit-for-clauses clauses body-str contexts))
 
-(define (emit-for-clauses clauses body-str)
+(define (emit-for-clauses clauses body-str contexts)
   (match clauses
-    [(list (for-binding name expr _))
+    [(list (and binding (for-binding name expr _ _)))
+     (match-define
+       (list pre-bound pre-rename-env post-bound post-rename-env _)
+       (hash-ref contexts binding))
      (define-values (arg setup)
-       (emit-js-binding-parameter name "$beagle$item"))
+       (emit-js-binding-parameter
+        binding "$beagle$item"
+        #:constraint-bound pre-bound
+        #:constraint-rename-env pre-rename-env
+        #:install-bound post-bound
+        #:install-rename-env post-rename-env))
+     (define collection-str
+       (parameterize ([current-js-bound pre-bound]
+                      [current-rename-env pre-rename-env])
+         (emit-expr expr)))
      (format "~a.map((~a) => ~a)"
-             (emit-expr expr)
+             collection-str
              arg
              (if (null? setup)
                  body-str
                  (format "{ ~a return ~a; }" (string-join setup " ") body-str)))]
-    [(list (for-binding name expr _) (for-when test) rest ...)
+    [(list (and binding (for-binding name expr _ _))
+           (for-when test)
+           rest ...)
+     (match-define
+       (list pre-bound pre-rename-env post-bound post-rename-env _)
+       (hash-ref contexts binding))
      (define inner
        (if (null? rest) body-str
-           (emit-for-clauses rest body-str)))
+           (emit-for-clauses rest body-str contexts)))
      (define-values (arg setup)
-       (emit-js-binding-parameter name "$beagle$item"))
-     (define filter-body
-       (if (null? setup)
-           (emit-expr test)
-           (format "{ ~a return ~a; }" (string-join setup " ") (emit-expr test))))
-     (define map-body
-       (if (null? setup)
-           inner
-           (format "{ ~a return ~a; }" (string-join setup " ") inner)))
-     (format "~a.filter((~a) => ~a).map((~a) => ~a)"
-             (emit-expr expr)
-             arg filter-body arg map-body)]
-    [(list (for-binding name expr _) rest ...)
+       (emit-js-binding-parameter
+        binding "$beagle$item"
+        #:constraint-bound pre-bound
+        #:constraint-rename-env pre-rename-env
+        #:install-bound post-bound
+        #:install-rename-env post-rename-env))
+     (define test-str
+       (parameterize ([current-js-bound post-bound]
+                      [current-rename-env post-rename-env])
+         (emit-expr test)))
+     (define collection-str
+       (parameterize ([current-js-bound pre-bound]
+                      [current-rename-env pre-rename-env])
+         (emit-expr expr)))
+     ;; A binding with setup (destructuring/defaults/constraint) must perform
+     ;; that binding operation exactly once per source item, so the established
+     ;; filter-before-body ordering is preserved by carrying a delayed producer
+     ;; through the filter. Without setup there is nothing to share, and plain
+     ;; filter-then-map is the same evaluation in the idiomatic shape.
+     (define entry "$beagle$filtered$entry")
+     (if (null? setup)
+         (format "~a.filter((~a) => ~a).map((~a) => ~a)"
+                 collection-str arg test-str arg inner)
+         (format
+          "~a.map((~a) => { ~a return [~a, () => ~a]; }).filter((~a) => ~a[0]).map((~a) => ~a[1]())"
+          collection-str arg (string-join setup " ")
+          test-str inner entry entry entry entry))]
+    [(list (and binding (for-binding name expr _ _)) rest ...)
+     (match-define
+       (list pre-bound pre-rename-env post-bound post-rename-env _)
+       (hash-ref contexts binding))
      (define inner
        (if (null? rest) body-str
-           (emit-for-clauses rest body-str)))
+           (emit-for-clauses rest body-str contexts)))
      (define-values (arg setup)
-       (emit-js-binding-parameter name "$beagle$item"))
+       (emit-js-binding-parameter
+        binding "$beagle$item"
+        #:constraint-bound pre-bound
+        #:constraint-rename-env pre-rename-env
+        #:install-bound post-bound
+        #:install-rename-env post-rename-env))
+     (define collection-str
+       (parameterize ([current-js-bound pre-bound]
+                      [current-rename-env pre-rename-env])
+         (emit-expr expr)))
      (format "~a.map((~a) => ~a)"
-             (emit-expr expr)
+             collection-str
              arg
              (if (null? setup)
                  inner
                  (format "{ ~a return ~a; }" (string-join setup " ") inner)))]
     [(list (? for-let? fl) rest ...)
      (define binds (for-let-bindings fl))
+     (define binding-contexts (hash-ref contexts fl))
      (define let-strs
        (apply append
-              (for/list ([b (in-list binds)] [i (in-naturals)])
+              (for/list ([b (in-list binds)]
+                         [context (in-list binding-contexts)])
+                (match-define
+                  (list pre-bound pre-rename-env
+                        post-bound post-rename-env index)
+                  context)
                 (define target (let-binding-name b))
-                (define value (await-async-iife (emit-expr (let-binding-value b))))
-                (if (or (map-destructure? target) (seq-destructure? target))
-                    (let ([slot (format "$beagle$let$~a" i)])
-                      (cons (format "const ~a = ~a" slot value)
-                            (emit-pattern-binding-statements target slot)))
-                    (list (format "const ~a = ~a"
-                                  (mangle-name target) value))))))
+                (define value
+                  (parameterize ([current-js-bound pre-bound]
+                                 [current-rename-env pre-rename-env])
+                    (await-async-iife
+                     (emit-expr (let-binding-value b)))))
+                (if (binding-constraint b)
+                    (parameterize ([current-js-bound post-bound]
+                                   [current-rename-env post-rename-env])
+                      (emit-let-binding-stmts
+                       b value #f
+                       (format "$beagle$for$let$~a" index)
+                       #:constraint-bound pre-bound
+                       #:constraint-rename-env pre-rename-env))
+                    ;; Preserve the established unconstrained rendering.
+                    (if (or (map-destructure? target)
+                            (seq-destructure? target))
+                        (let ([slot (format "$beagle$let$~a" index)])
+                          (parameterize ([current-js-bound post-bound]
+                                         [current-rename-env post-rename-env])
+                            (append
+                             (list (format "const ~a = ~a" slot value))
+                             (emit-pattern-binding-statements
+                              target slot
+                              #:default-bound pre-bound
+                              #:default-rename-env pre-rename-env))))
+                        (parameterize ([current-js-bound post-bound]
+                                       [current-rename-env post-rename-env])
+                          (list
+                           (format "const ~a = ~a"
+                                   (emit-binding-target target) value))))))))
      (define inner
        (if (null? rest) body-str
-           (emit-for-clauses rest body-str)))
+           (emit-for-clauses rest body-str contexts)))
      (format "(() => { ~a; return ~a; })()"
              (string-join let-strs "; ")
              inner)]
@@ -2599,33 +3359,60 @@
   (define clauses (doseq-form-clauses e))
   (define body (doseq-form-body e))
   (match clauses
-    [(list (for-binding name expr _))
-     (define doseq-names (names-from-binding-target name))
-     (with-bindings doseq-names
-       (lambda ()
-         (define body-str (emit-body-stmts body "  "))
-         (define-values (arg setup)
-           (emit-js-binding-parameter name "$beagle$item"))
-         (define setup-str (string-join setup "\n  "))
-         (define inner-body
-           (if (null? setup)
-               body-str
-               (string-append setup-str "\n  " body-str)))
-         (if (contains-await? body)
-           ;; A forEach callback can't `await` sequentially (and the arrow
-           ;; isn't async), so when the body awaits, emit a for-of loop —
-           ;; which sequences awaits correctly inside the enclosing async fn.
-           (format "for (const ~a of ~a) {\n  ~a\n}"
-                   arg
-                   (emit-expr expr)
-                   inner-body)
-           (format "~a.forEach((~a) => {\n  ~a\n});"
-                   (emit-expr expr)
-                   arg
-                   inner-body))))]
+    [(list (and binding (for-binding name expr _ _)))
+     (define pre-bound (current-js-bound))
+     (define pre-rename-env (current-rename-env))
+     (define-values (post-bound post-rename-env)
+       (extend-js-binding-context
+        binding "doseq" 0 pre-bound pre-rename-env))
+     (define body-str
+       (parameterize ([current-js-bound post-bound]
+                      [current-rename-env post-rename-env])
+         (emit-body-stmts body "  ")))
+     (define-values (arg setup)
+       (emit-js-binding-parameter
+        binding "$beagle$item"
+        #:constraint-bound pre-bound
+        #:constraint-rename-env pre-rename-env
+        #:install-bound post-bound
+        #:install-rename-env post-rename-env))
+     (define collection-str
+       (parameterize ([current-js-bound pre-bound]
+                      [current-rename-env pre-rename-env])
+         (emit-expr expr)))
+     (define setup-str (string-join setup "\n  "))
+     (define inner-body
+       (if (null? setup)
+           body-str
+           (string-append setup-str "\n  " body-str)))
+     (if (contains-await? body)
+         ;; A forEach callback can't `await` sequentially (and the arrow
+         ;; isn't async), so when the body awaits, emit a for-of loop —
+         ;; which sequences awaits correctly inside the enclosing async fn.
+         (format "for (const ~a of ~a) {\n  ~a\n}"
+                 arg collection-str inner-body)
+         (format "~a.forEach((~a) => {\n  ~a\n});"
+                 collection-str arg inner-body))]
     [_ (error 'beagle-js "complex doseq clauses not yet supported for JS target")]))
 
 ;; --- defscalar -------------------------------------------------------------
+
+(define (emit-scalar-predicate p)
+  (define op
+    (case (scalar-predicate-op p)
+      [(>) ">"]
+      [(>=) ">="]
+      [(<) "<"]
+      [(<=) "<="]
+      ;; A Beagle equality predicate is a comparison. Rendering its source
+      ;; spelling directly would turn `=` into JS assignment and `not=` into
+      ;; an invalid token.
+      [(=) "==="]
+      [(not=) "!=="]
+      [else
+       (error 'beagle-js "defscalar: unsupported predicate operator: ~a"
+              (scalar-predicate-op p))]))
+  (format "v ~a ~a" op (emit-js-number (scalar-predicate-value p))))
 
 (define (emit-defscalar f)
   (define name (defscalar-form-name f))
@@ -2637,9 +3424,7 @@
            [ctor (mangle-name constructor-name)]
            [checks (string-join
                     (for/list ([p (in-list preds)])
-                      (format "v ~a ~a"
-                              (scalar-predicate-op p)
-                              (scalar-predicate-value p)))
+                      (emit-scalar-predicate p))
                     " && ")])
       (format "~afunction ~a(v) {\n  if (!(~a)) throw new Error('scalar constraint violated');\n  return v;\n}"
               (if (exported-binding? constructor-name) "export " "")
@@ -2664,24 +3449,28 @@
 ;; --- helpers ---------------------------------------------------------------
 
 (define (emit-js-params params rest-p)
+  (define hide-all?
+    (bindings-have-constraints? (param-bindings params rest-p)))
   (define fixed
     (string-join
      (for/list ([p (in-list params)] [i (in-naturals)])
-       (if (memq (let ([target (param-binding-target p)])
-                   (cond [(map-destructure? target) 'map]
-                         [(seq-destructure? target) 'seq]
-                         [else #f]))
-                 '(map seq))
+       (if (or hide-all? (pattern-param? p))
            (format "$beagle$param$~a" i)
            (emit-js-param p)))
      ", "))
   (if rest-p
-    (if (string=? fixed "")
-      (format "...~a" (emit-js-param rest-p))
-      (format "~a, ...~a" fixed (emit-js-param rest-p)))
+    (let ([rest-name
+           (if hide-all? "$beagle$param$rest" (emit-js-param rest-p))])
+      (if (string=? fixed "")
+          (format "...~a" rest-name)
+          (format "~a, ...~a" fixed rest-name)))
     fixed))
 
-(define (emit-pattern-binding-statements target source)
+(define (emit-pattern-binding-statements
+         target source
+         #:default-bound [default-bound (current-js-bound)]
+         #:default-rename-env
+         [default-rename-env (current-rename-env)])
   (cond
     [(symbol? target)
      ;; `set!` may target any lexical binding. Pattern leaves therefore use
@@ -2693,10 +3482,12 @@
              (for/list ([item (in-list (seq-destructure-names target))]
                         [i (in-naturals)])
                (emit-pattern-binding-statements
-                item (format "~a[~a]" source i))))
+                item (format "~a[~a]" source i)
+                #:default-bound default-bound
+                #:default-rename-env default-rename-env)))
       (if (seq-destructure-rest-name target)
           (list
-           (format "const ~a = ~a.slice(~a);"
+           (format "let ~a = ~a.slice(~a);"
                    (resolved-name (seq-destructure-rest-name target))
                    source
                    (length (seq-destructure-names target))))
@@ -2717,28 +3508,129 @@
         (format "let ~a = ~a;"
                 (resolved-name name)
                 (if default
-                    (format "(~a ?? ~a)" value (emit-expr (cdr default)))
+                    (parameterize ([current-js-bound default-bound]
+                                   [current-rename-env default-rename-env])
+                      (format "(~a ?? ~a)"
+                              value (emit-expr (cdr default))))
                     value))))]
     [else (error 'beagle-js "unsupported destructuring target: ~v" target)]))
 
 (define (pattern-param? binding)
-  (define target (param-binding-target binding))
+  (define target (binding-target binding))
   (or (map-destructure? target) (seq-destructure? target)))
 
-(define (emit-js-binding-parameter binding source)
-  (define target (param-binding-target binding))
-  (if (pattern-param? binding)
-      (values "$beagle$item"
-              (emit-pattern-binding-statements target source))
-      (values (emit-binding-target target) '())))
+(define (emit-js-binding-parameter
+         binding source
+         #:constraint? [constraint? #t]
+         #:constraint-bound [constraint-bound (current-js-bound)]
+         #:constraint-rename-env
+         [constraint-rename-env (current-rename-env)]
+         #:install-bound [install-bound (current-js-bound)]
+         #:install-rename-env [install-rename-env (current-rename-env)])
+  (define target (binding-target binding))
+  (define constrained? (and (binding-constraint binding) #t))
+  (define argument
+    (parameterize ([current-js-bound install-bound]
+                   [current-rename-env install-rename-env])
+      (if (or (pattern-param? binding) constrained?)
+          "$beagle$item"
+          (emit-binding-target target))))
+  (define incoming
+    (if (or (pattern-param? binding) constrained?) source argument))
+  (define check
+    (and constraint?
+         (parameterize ([current-js-bound constraint-bound]
+                        [current-rename-env constraint-rename-env])
+           (emit-binding-constraint-statement binding incoming))))
+  (values
+   argument
+   (append
+    (if check (list check) '())
+    (parameterize ([current-js-bound install-bound]
+                   [current-rename-env install-rename-env])
+      (cond
+        [(pattern-param? binding)
+         (emit-pattern-binding-statements
+          target source
+          #:default-bound constraint-bound
+          #:default-rename-env constraint-rename-env)]
+        [constrained?
+         (list (format "let ~a = ~a;"
+                       (emit-binding-target target) source))]
+        [else '()])))))
 
-(define (emit-js-param-setup params)
-  (apply append
-         (for/list ([p (in-list params)] [i (in-naturals)])
-           (define target (param-binding-target p))
-           (if (or (map-destructure? target) (seq-destructure? target))
-               (emit-pattern-binding-statements target (format "$beagle$param$~a" i))
-               '()))))
+;; Multi-arity dispatch has one `$beagle$args` array instead of lexical
+;; parameters. Materialize one source item, validate it, then project/bind it.
+(define (emit-js-argument-binding-setup
+         binding source [aggregate-slot "$beagle$arg"]
+         #:constraint-bound [constraint-bound (current-js-bound)]
+         #:constraint-rename-env
+         [constraint-rename-env (current-rename-env)]
+         #:install-bound [install-bound (current-js-bound)]
+         #:install-rename-env [install-rename-env (current-rename-env)])
+  (define target (param-binding-target binding))
+  (define slot
+    (and (or (pattern-param? binding) (binding-constraint binding))
+         aggregate-slot))
+  (define declaration
+    (if slot
+        (list (format "const ~a = ~a;" slot source))
+        '()))
+  (define value (or slot source))
+  (define check
+    (parameterize ([current-js-bound constraint-bound]
+                   [current-rename-env constraint-rename-env])
+      (emit-binding-constraint-statement binding value)))
+  (append declaration
+          (if check (list check) '())
+          (parameterize ([current-js-bound install-bound]
+                         [current-rename-env install-rename-env])
+            (if (pattern-param? binding)
+                (emit-pattern-binding-statements
+                 target value
+                #:default-bound constraint-bound
+                 #:default-rename-env constraint-rename-env)
+                (list (format "~a ~a = ~a;"
+                              (if (binding-constraint binding) "let" "const")
+                              (emit-binding-target target) value))))))
+
+(define (emit-js-param-setup
+         params [rest-param #f]
+         [rename-env (current-rename-env)])
+  (define bindings (param-bindings params rest-param))
+  (define hide-all? (bindings-have-constraints? bindings))
+  (define default-bound (current-js-bound))
+  (define default-rename-env (current-rename-env))
+  (define sources
+    (for/list ([p (in-list bindings)] [i (in-naturals)])
+      (cond
+        [(and rest-param (= i (length params)))
+         (if hide-all? "$beagle$param$rest" (emit-js-param rest-param))]
+        [(or hide-all? (pattern-param? p))
+         (format "$beagle$param$~a" i)]
+        [else (emit-js-param p)])))
+  ;; Emit predicates in the declaration environment. Authored parameter names
+  ;; are deliberately absent here, matching the checker.
+  (define checks
+    (filter values
+            (map emit-binding-constraint-statement bindings sources)))
+  (define projections
+    (parameterize ([current-rename-env rename-env])
+      (apply append
+             (for/list ([p (in-list bindings)]
+                        [source (in-list sources)])
+               (define target (param-binding-target p))
+               (cond
+                 [(pattern-param? p)
+                  (emit-pattern-binding-statements
+                   target source
+                   #:default-bound default-bound
+                   #:default-rename-env default-rename-env)]
+                 [hide-all?
+                  (list (format "let ~a = ~a;"
+                                (emit-binding-target target) source))]
+                 [else '()])))))
+  (append checks projections))
 
 ;; Render a destructuring pattern to its JS form. Returns #f for non-destructure
 ;; inputs so callers can fall through to their own handling.
@@ -2802,22 +3694,48 @@
       [(if-form? e) (walk (if-form-cond-expr e)) (walk (if-form-then-expr e))
                     (when (if-form-else-expr e) (walk (if-form-else-expr e)))]
       [(let-form? e) (for ([b (in-list (let-form-bindings e))]) (walk (let-binding-value b)))
+                     (for ([b (in-list (let-form-bindings e))]
+                           #:when (let-binding-constraint b))
+                       (walk (let-binding-constraint b)))
                      (for-each walk (let-form-body e))]
       [(when-form? e) (walk (when-form-cond-expr e)) (for-each walk (when-form-body e))]
       [(do-form? e) (for-each walk (do-form-body e))]
-      [(fn-form? e) (for-each walk (fn-form-body e))]
+      [(fn-form? e)
+       (for ([p (in-list
+                 (param-bindings (fn-form-params e) (fn-form-rest-param e)))]
+             #:when (param-constraint p))
+         (walk (param-constraint p)))
+       (for-each walk (fn-form-body e))]
       [(cond-form? e) (for ([c (in-list (cond-form-clauses e))])
                         (walk (cond-clause-test c)) (for-each walk (cond-clause-body c)))]
       [(for-form? e) (for ([c (in-list (for-form-clauses e))])
-                       (when (for-binding? c) (walk (for-binding-expr c))))
+                       (cond
+                         [(for-binding? c)
+                          (walk (for-binding-expr c))
+                          (when (for-binding-constraint c)
+                            (walk (for-binding-constraint c)))]
+                         [(for-let? c)
+                          (for ([b (in-list (for-let-bindings c))])
+                            (walk (let-binding-value b))
+                            (when (let-binding-constraint b)
+                              (walk (let-binding-constraint b))))]
+                         [(for-when? c) (walk (for-when-test c))]))
                      (for-each walk (for-form-body e))]
       [(doseq-form? e) (for ([c (in-list (doseq-form-clauses e))])
-                         (when (for-binding? c) (walk (for-binding-expr c))))
+                         (when (for-binding? c)
+                           (walk (for-binding-expr c))
+                           (when (for-binding-constraint c)
+                             (walk (for-binding-constraint c)))))
                        (for-each walk (doseq-form-body e))]
       [(case-form? e) (walk (case-form-test e))
                       (for ([c (in-list (case-form-clauses e))]) (walk (case-clause-body c)))
                       (when (case-form-default e) (walk (case-form-default e)))]
-      [(loop-form? e) (for-each walk (loop-form-body e))]
+      [(loop-form? e)
+       (for ([b (in-list (loop-form-bindings e))])
+         (walk (let-binding-value b))
+         (when (let-binding-constraint b)
+           (walk (let-binding-constraint b))))
+       (for-each walk (loop-form-body e))]
       [(match-form? e) (walk (match-form-target e))
                        (for ([c (in-list (match-form-clauses e))]) (for-each walk (match-clause-body c)))]
       [(try-form? e) (for-each walk (try-form-body e))
@@ -2837,20 +3755,56 @@
 
 (define (collect-let-set!-target-syms bindings body)
   (collect-set!-target-syms
-   (append (map let-binding-value bindings) body)))
+   (append
+    (apply append
+           (for/list ([binding (in-list bindings)])
+             (filter values
+                     (list (let-binding-value binding)
+                           (let-binding-constraint binding)))))
+    body)))
 
 ;; mutable? — emit `let` (the binding is reassigned via set! in its scope) instead
 ;; of the default `const`. Without this, `(set! <bare-local> v)` compiled to
 ;; `const x = …; x = …;` and threw "Assignment to constant variable" at runtime.
-(define (emit-let-binding-stmts target val-str [mutable? #f]
-                                [aggregate-slot "$beagle$binding"])
+(define (emit-let-binding-stmts binding val-str [mutable? #f]
+                                [aggregate-slot "$beagle$binding"]
+                                #:constraint-bound
+                                [constraint-bound (current-js-bound)]
+                                #:constraint-rename-env
+                                [constraint-rename-env (current-rename-env)]
+                                #:constraint-type-env
+                                [constraint-type-env (current-type-env)]
+                                #:constraint-rep-env
+                                [constraint-rep-env (current-rep-env)])
+  (define target (let-binding-name binding))
   (define kw (if mutable? "let" "const"))
+  (define (constraint-check source)
+    (parameterize ([current-js-bound constraint-bound]
+                   [current-rename-env constraint-rename-env]
+                   [current-type-env constraint-type-env]
+                   [current-rep-env constraint-rep-env])
+      (emit-binding-constraint-statement binding source)))
   (cond
-    [(or (map-destructure? target) (seq-destructure? target))
-     (cons (format "const ~a = ~a;" aggregate-slot val-str)
-           (emit-pattern-binding-statements target aggregate-slot))]
+    [(or (map-destructure? target)
+         (seq-destructure? target)
+         (binding-constraint binding))
+     (define check (constraint-check aggregate-slot))
+     (append
+      (list (format "const ~a = ~a;" aggregate-slot val-str))
+      (if check (list check) '())
+      (if (or (map-destructure? target) (seq-destructure? target))
+          (emit-pattern-binding-statements
+           target aggregate-slot
+           #:default-bound constraint-bound
+           #:default-rename-env constraint-rename-env)
+          (list (format "~a ~a = ~a;"
+                        kw (emit-binding-target target) aggregate-slot))))]
     [else
-     (list (format "~a ~a = ~a;" kw (emit-binding-target target) val-str))]))
+     (define name (emit-binding-target target))
+     (define check (constraint-check name))
+     (append
+      (list (format "~a ~a = ~a;" kw name val-str))
+      (if check (list check) '()))]))
 
 ;; Shared binding-sequence emitter for BOTH `let`-as-IIFE (emit-expr-core) and
 ;; the return-position inline `let` (emit-return-position) — same flat
@@ -2862,6 +3816,11 @@
 ;; rename-env-out); callers still compute `let-names` themselves for
 ;; `with-bindings`/inline-scope tracking.
 (define (emit-let-bindings bindings mutated-syms)
+  ;; Constraints and RHS expressions resolve in the progressively extended
+  ;; environment *before* the binding they belong to is installed. When any
+  ;; declaration is constrained, hidden authored slots prevent a same-named
+  ;; outer predicate from being captured by the new JS local's TDZ.
+  (define constrained-sequence? (bindings-have-constraints? bindings))
   (define-values (strs _bound rep-env type-env rename-env _seen)
     (for/fold ([strs '()]
                [bound (current-js-bound)]
@@ -2877,6 +3836,8 @@
                                        [current-type-env type-env]
                                        [current-rename-env rename-env])
                           (emit-expr (let-binding-value b)))))
+      (define constrained-id
+        (and constrained-sequence? (next-constrained-binding-id!)))
       (define new-names (names-from-binding-target (let-binding-name b)))
       ;; Freshen any name this SAME let-sequence already declared: 1st
       ;; occurrence keeps its plain mangled name (also overrides any stale
@@ -2887,13 +3848,26 @@
       (define-values (rename-env* seen*)
         (for/fold ([re rename-env] [sn seen]) ([nm (in-list new-names)])
           (define n (hash-ref sn nm 0))
-          (define js-name (if (zero? n) (mangle-name nm) (format "~a_shadow~a" (mangle-name nm) n)))
+          (define js-name
+            (cond
+              [constrained-sequence?
+               (format "$beagle$constrained$binding$~a$~a"
+                       constrained-id (mangle-name nm))]
+              [(zero? n) (mangle-name nm)]
+              [else (format "~a_shadow~a" (mangle-name nm) n)]))
           (values (hash-set re nm js-name) (hash-set sn nm (add1 n)))))
       (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
       (define stmts (parameterize ([current-rename-env rename-env*])
                       (emit-let-binding-stmts
-                       (let-binding-name b) val-str mutable?
-                       (format "$beagle$binding$~a" i))))
+                       b val-str mutable?
+                       (if constrained-sequence?
+                           (format "$beagle$constrained$binding$~a"
+                                   constrained-id)
+                           (format "$beagle$binding$~a" i))
+                       #:constraint-bound bound
+                       #:constraint-rename-env rename-env
+                       #:constraint-type-env type-env
+                       #:constraint-rep-env rep-env)))
       (define name (let-binding-name b))
       (define bty (and (symbol? name)
                        (or (let-binding-type b) (node-type (let-binding-value b)))))
@@ -2931,10 +3905,17 @@
        (body-contains-recur? (cond-clause-body c)))]
     [(when-let-form? e)
      (body-contains-recur? (when-let-form-body e))]
+    [(when-form? e)
+     (body-contains-recur? (when-form-body e))]
+    [(when-some-form? e)
+     (body-contains-recur? (when-some-form-body e))]
     [(if-let-form? e)
      (or (expr-contains-recur? (if-let-form-then-body e))
          (and (if-let-form-else-body e)
               (expr-contains-recur? (if-let-form-else-body e))))]
+    [(if-some-form? e)
+     (or (expr-contains-recur? (if-some-form-then-body e))
+         (expr-contains-recur? (if-some-form-else-body e)))]
     [else #f]))
 
 (define (body-contains-recur? body)
@@ -2950,7 +3931,48 @@
     (for/list ([name (in-list bind-names)]
                [i (in-naturals)])
       (format "~a = _recur_~a;" name i)))
-  (string-append (string-join (append temps assigns) " ") " continue;"))
+  (define contexts (current-loop-binding-slots))
+  (if (not contexts)
+      (string-append
+       (string-join (append temps assigns) " ")
+       " continue;")
+      (let ([candidate-setups
+             (apply append
+                    (for/list ([entry (in-list contexts)]
+                               [i (in-naturals)])
+                      (match-define
+                        (list binding _slot
+                              constraint-bound constraint-rename-env
+                              constraint-type-env constraint-rep-env
+                              install-bound install-rename-env)
+                        entry)
+                      (define source (format "_recur_~a" i))
+                      (define check
+                        (parameterize
+                            ([current-js-bound constraint-bound]
+                             [current-rename-env constraint-rename-env]
+                             [current-type-env constraint-type-env]
+                             [current-rep-env constraint-rep-env])
+                          (emit-binding-constraint-statement binding source)))
+                      (define target (let-binding-name binding))
+                      (define install
+                        (parameterize
+                            ([current-js-bound install-bound]
+                             [current-rename-env install-rename-env])
+                          (if (or (map-destructure? target)
+                                  (seq-destructure? target))
+                              (emit-pattern-binding-statements
+                               target source
+                               #:default-bound constraint-bound
+                               #:default-rename-env constraint-rename-env)
+                              (list
+                               (format "const ~a = ~a;"
+                                       (emit-binding-target target) source)))))
+                      (append (if check (list check) '()) install)))])
+        (format "{ ~a continue; }"
+                (string-join
+                 (append temps candidate-setups assigns)
+                 " ")))))
 
 (define (logical-call? e)
   (and (call-form? e)
@@ -2988,6 +4010,11 @@
 (define (emit-loop-stmt e bind-names
                         [emit-value (lambda (value-str)
                                       (format "return ~a;" value-str))])
+  (define (emit-loop-body-seq forms)
+    (string-append
+     (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
+     (if (> (length forms) 1) " " "")
+     (emit-loop-stmt (last forms) bind-names emit-value)))
   (cond
     [(logical-call? e)
      (emit-logical-loop-stmt e bind-names emit-value)]
@@ -3002,6 +4029,62 @@
        ;; enclosing `while (true)` spins forever when the condition goes false.
        (format "if (~a) { ~a } else { ~a }" cond-str then-str
                (emit-value "null")))]
+    [(and (when-form? e) (body-contains-recur? (when-form-body e)))
+     (format "if (~a) { ~a } else { ~a }"
+             (emit-expr (when-form-cond-expr e))
+             (emit-loop-body-seq (when-form-body e))
+             (emit-value "null"))]
+    [(and (or (when-let-form? e) (when-some-form? e))
+          (body-contains-recur?
+           (if (when-let-form? e)
+               (when-let-form-body e)
+               (when-some-form-body e))))
+     (define name
+       (if (when-let-form? e)
+           (when-let-form-name e)
+           (when-some-form-name e)))
+     (define value
+       (if (when-let-form? e)
+           (when-let-form-expr e)
+           (when-some-form-expr e)))
+     (define forms
+       (if (when-let-form? e)
+           (when-let-form-body e)
+           (when-some-form-body e)))
+     (define js-name (mangle-name name))
+     (parameterize ([current-rename-env
+                     (hash-set (current-rename-env) name js-name)])
+       (with-bindings (list name)
+         (lambda ()
+           (format "{ const ~a = ~a; if (~a != null) { ~a } else { ~a } }"
+                   js-name (emit-expr value) js-name
+                   (emit-loop-body-seq forms)
+                   (emit-value "null")))))]
+    [(and (or (if-let-form? e) (if-some-form? e))
+          (expr-contains-recur? e))
+     (define name
+       (if (if-let-form? e) (if-let-form-name e) (if-some-form-name e)))
+     (define value
+       (if (if-let-form? e) (if-let-form-expr e) (if-some-form-expr e)))
+     (define then-expr
+       (if (if-let-form? e)
+           (if-let-form-then-body e)
+           (if-some-form-then-body e)))
+     (define else-expr
+       (if (if-let-form? e)
+           (if-let-form-else-body e)
+           (if-some-form-else-body e)))
+     (define js-name (mangle-name name))
+     (parameterize ([current-rename-env
+                     (hash-set (current-rename-env) name js-name)])
+       (with-bindings (list name)
+         (lambda ()
+           (format "{ const ~a = ~a; if (~a != null) { ~a } else { ~a } }"
+                   js-name (emit-expr value) js-name
+                   (emit-loop-stmt then-expr bind-names emit-value)
+                   (if else-expr
+                       (emit-loop-stmt else-expr bind-names emit-value)
+                       (emit-value "null"))))))]
     [(and (let-form? e) (body-contains-recur? (let-form-body e)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
      (define mutated-syms
@@ -3017,24 +4100,15 @@
            ;; side-effecting statements. Running emit-loop-stmt over all of them
            ;; would `return` a non-tail expression and make the recur unreachable.
            (define forms (let-form-body e))
-           (define body-str
-             (string-append
-               (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
-               (if (> (length forms) 1) " " "")
-               (emit-loop-stmt (last forms) bind-names emit-value)))
+           (define body-str (emit-loop-body-seq forms))
            (string-append (string-join binding-strs " ") " " body-str))))]
     [(and (cond-form? e) (for/or ([c (in-list (cond-form-clauses e))]) (body-contains-recur? (cond-clause-body c))))
      (define (else-clause? c)
        (let ([t (cond-clause-test c)]) (and (symbol? t) (or (eq? t ':else) (eq? t 'else)))))
-     (define (loop-body-seq forms)
-       (string-append
-         (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
-         (if (> (length forms) 1) " " "")
-         (emit-loop-stmt (last forms) bind-names emit-value)))
      (define parts
        (for/list ([c (in-list (cond-form-clauses e))])
          (define test (cond-clause-test c))
-         (define body-str (loop-body-seq (cond-clause-body c)))
+         (define body-str (emit-loop-body-seq (cond-clause-body c)))
          (if (else-clause? c)
            (format "{ ~a }" body-str)
            (format "if (~a) { ~a }" (emit-expr test) body-str))))

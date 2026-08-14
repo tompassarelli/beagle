@@ -4,16 +4,19 @@
 # Rungs (each isolates one stage against the Racket compiler as oracle):
 #   1. module self-tests under bb
 #   2. emit parity, stage-isolated: Racket AST -> self emit-clj vs Racket emit
-#   3. AST parity: self reader+parse vs bin/beagle-ast (data-identical forms)
+#   3. AST parity: self reader+parse vs bin/beagle-ast (parser-shape-identical
+#      after removing fields added only by the oracle checker projection)
 #   4. full chain: self reader -> parse -> check -> emit-clj vs Racket emit (byte diff)
 #
 # Usage: self-host/verify-selfhost.sh [MODULE.bclj ...]
+#   SELFHOST_OUT=/tmp/stage runs the ladder against an isolated authored-source
+#   compilation without changing the checked-in seed.
 #   default corpus: every tracked fixture under self-host/fixtures/, plus
 #   $FRAM_REPO/src/fram/fold.bclj when that checkout exists
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
-OUT=self-host/seed
+OUT="${SELFHOST_OUT:-self-host/seed}"
 LAB=.lab
 mkdir -p "$LAB"
 
@@ -32,7 +35,10 @@ FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj)
-  [ -f "$FRAM_REPO/src/fram/fold.bclj" ] && MODULES+=("$FRAM_REPO/src/fram/fold.bclj")
+  for fram_module in fold branch kernel_classify import provider_host tools; do
+    [ -f "$FRAM_REPO/src/fram/$fram_module.bclj" ] && \
+      MODULES+=("$FRAM_REPO/src/fram/$fram_module.bclj")
+  done
 fi
 
 PASS=0; FAIL=0
@@ -73,11 +79,25 @@ for src in "${MODULES[@]}"; do
   if python3 - "$LAB/$name-self-ast.json" "$astj" <<'EOF' >/dev/null 2>&1
 import json, sys
 a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))
-# externs delta is a documented tranche-1 gap (no module resolution self-side)
-sys.exit(0 if all(a.get(k) == b.get(k) for k in ["forms","requires","namespace","mode","target"]) else 1)
+checked_only = {"provenance", "inferredType", "effectiveType", "raises",
+                "constraintSynchronous", "recordUpdate", "recordFieldAccess"}
+def parser_shape(value):
+    if isinstance(value, dict):
+        return {
+            key: parser_shape(item)
+            for key, item in value.items()
+            if key not in checked_only and not (key == "doc" and item is False)
+        }
+    if isinstance(value, list):
+        return [parser_shape(item) for item in value]
+    return value
+# Externs need driver-level module resolution and are checked in rung 6.
+same_forms = parser_shape(a.get("forms")) == parser_shape(b.get("forms"))
+same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","mode","target"])
+sys.exit(0 if same_forms and same_meta else 1)
 EOF
   then
-    ok "$name AST parity (forms/requires/namespace/mode/target)"
+    ok "$name AST parity (forms/requires/imports/namespace/mode/target)"
   else
     bad "$name AST parity — compare $LAB/$name-self-ast.json vs $astj"
   fi
@@ -89,15 +109,53 @@ EOF
   else
     bad "$name FULL-CHAIN byte-parity — diff $oracle $LAB/$name-chain.clj"
   fi
+
+  # These fixtures exercise the two regressions where byte differences were
+  # immediately product-breaking: a lost :import left CRC32 unresolved, and
+  # Racket-only string escapes made kernel_classify unreadable by Clojure.
+  case "$name" in
+    branch|kernel_classify|imports|control-strings)
+      if bb "$LAB/$name-chain.clj" >/dev/null 2>"$LAB/$name-load.err"; then
+        ok "$name emitted Clojure loads under bb"
+      else
+        bad "$name emitted Clojure is unreadable/unloadable — see $LAB/$name-load.err"
+      fi
+      ;;
+  esac
 done
 
 echo "=== 5. invalid fixtures — selfhost must exit 1 with pointed error ==="
+VALID_ORACLE_CONTROL=self-host/fixtures/mixed-binding-vector.bclj
+oracle_builder_ready=0
+if [ -f "$VALID_ORACLE_CONTROL" ]; then
+  control_out="$LAB/valid-mixed-binding-oracle.clj"
+  control_stdout="$LAB/valid-mixed-binding-oracle.out"
+  control_stderr="$LAB/valid-mixed-binding-oracle.err"
+  if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$VALID_ORACLE_CONTROL" "$control_out" \
+      >"$control_stdout" 2>"$control_stderr"; then
+    ok "known-valid mixed-binding oracle control emits"
+    oracle_builder_ready=1
+  else
+    bad "known-valid mixed-binding oracle control failed — inspect $control_stderr"
+    sed -n '1,8p' "$control_stderr" >&2
+  fi
+else
+  bad "known-valid mixed-binding oracle control missing: $VALID_ORACLE_CONTROL"
+fi
 if [ -d "self-host/fixtures/invalid" ]; then
   for inv in self-host/fixtures/invalid/*.bclj; do
     iname="$(basename "$inv" .bclj)"
+    if [ "$oracle_builder_ready" -ne 1 ]; then
+      bad "$iname oracle rejection not evaluated (known-valid build control failed)"
+      continue
+    fi
+    oracle_out="$LAB/$iname-inv-oracle.clj"
+    oracle_stdout="$LAB/$iname-inv-oracle.out"
+    oracle_stderr="$LAB/$iname-inv-oracle.err"
     # oracle must also reject
-    if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$inv" /dev/null >/dev/null 2>&1; then
-      bad "$iname oracle accepted (should reject)"
+    if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$inv" "$oracle_out" \
+        >"$oracle_stdout" 2>"$oracle_stderr"; then
+      bad "$iname oracle accepted (should reject) — emitted $oracle_out"
       continue
     fi
     # selfhost must exit nonzero
@@ -162,9 +220,23 @@ if [ -d "self-host/fixtures/modules" ]; then
     if python3 - "$LAB/$name-mod-self.json" "$oast" <<'EOF' >/dev/null 2>&1
 import json, sys
 a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))
+checked_only = {"provenance", "inferredType", "effectiveType", "raises",
+                "constraintSynchronous", "recordUpdate", "recordFieldAccess"}
+def parser_shape(value):
+    if isinstance(value, dict):
+        return {
+            key: parser_shape(item)
+            for key, item in value.items()
+            if key not in checked_only and not (key == "doc" and item is False)
+        }
+    if isinstance(value, list):
+        return [parser_shape(item) for item in value]
+    return value
 an = {(e["name"], json.dumps(e["type"], sort_keys=True)) for e in a.get("externs", [])}
 bn = {(e["name"], json.dumps(e["type"], sort_keys=True)) for e in b.get("externs", [])}
-core = all(a.get(k) == b.get(k) for k in ["forms","requires","namespace","mode","target"])
+same_forms = parser_shape(a.get("forms")) == parser_shape(b.get("forms"))
+same_meta = all(a.get(k) == b.get(k) for k in ["requires","imports","namespace","mode","target"])
+core = same_forms and same_meta
 sys.exit(0 if (an == bn and core) else 1)
 EOF
     then

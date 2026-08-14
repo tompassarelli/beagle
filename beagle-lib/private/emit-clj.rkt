@@ -4,22 +4,24 @@
 ;;
 ;; Registers the 'clj target.
 ;;
-;; Surface decisions for v0.16:
+;; Surface decisions:
 ;;
-;;  - Inline `:- T` type annotations: lowered to Clojure-family `^Tag`
-;;    metadata at emit time. The type info lives directly on the
-;;    def-form / defonce-form / defn-form / param structs (populated by
-;;    Phase B parsing); no separate claim-env or pre-pass is needed.
+;;  - Structural type annotations are lowered to Clojure-family `^Tag`
+;;    metadata at emit time. Each outer parameter-vector entry remains one
+;;    binding: a bare binding requests inference, while `(binding-form Type)`
+;;    and `(binding-form Type constraint)` own their local metadata. The type
+;;    info lives directly on the def-form / defonce-form / defn-form / param
+;;    structs; no separate claim-env or pre-pass is needed.
 ;;
-;;        (def x :- Int 42)                 -> (def ^long x 42)
-;;        (defn add [a :- Int b :- Int]
-;;          :- Int
-;;          (+ a b))                        -> (defn ^long add
-;;                                                [^long a ^long b]
-;;                                                (+ a b))
-;;        (defn mixed [a :- Int b] (* a b)) -> (defn mixed
-;;                                                [^long a b]
-;;                                                (* a b))
+;;        (def x String "ready")              -> (def ^String x "ready")
+;;        (defn join [(a String) (b String)]
+;;          String
+;;          (str a b))                        -> (defn ^String join
+;;                                                   [^String a ^String b]
+;;                                                   (str a b))
+;;        (defn mixed [a (b String)] Any b)    -> (defn mixed
+;;                                                   [a ^String b]
+;;                                                   b)
 ;;
 ;;    Param-level tags only emit when the type is a simple primitive or
 ;;    user record name (Clojure cannot tag with generic/parametric
@@ -90,6 +92,13 @@
 ;; Unqualified imported symbol → module prefix (for qualifying in output)
 (define current-emit-symbol-ns (make-parameter (hasheq)))
 (define current-emit-local-names (make-parameter (set)))
+(define current-clj-loop-recur-context (make-parameter #f))
+
+;; Clojure binds `& rest` as a seq, while Beagle's rest binding is the
+;; aggregate `(Vec Element)` seen by the checker, constraints, and body. Keep
+;; the host sequence compiler-owned and normalize it exactly once at every
+;; callable boundary.
+(define CLJ-HOST-REST "$beagle$rest$host")
 
 (define clj-sha256-runtime
   #<<CLJ
@@ -207,13 +216,12 @@ CLJ
       [(defmulti-form? form) (set-add names (defmulti-form-name form))]
       [else names])))
 
-;; --- inline `:- T` lowering ------------------------------------------
+;; --- structural type-hint lowering ----------------------------------------
 ;;
-;; v0.16 carries type information directly on def-form / defonce-form /
-;; defn-form / param structs (populated by Phase B parsing). The emitter
-;; reads the type slot for each binding and lowers it to Clojure-family
-;; `^Tag` metadata. No separate env or pre-pass is needed — the type is
-;; right next to the name it annotates.
+;; Type information lives directly on def-form / defonce-form / defn-form /
+;; param structs. The emitter reads that binding-local slot and lowers it to
+;; Clojure-family `^Tag` metadata. No separate environment or adjacency pass is
+;; involved.
 
 ;; Translate a Beagle type to a Clojure tag string, or #f when the type
 ;; has no useful primitive hint. Clojure type-hint metadata is used by
@@ -262,6 +270,7 @@ CLJ
 
 (define (clj-emit-program prog)
   (parameterize ([current-emit-src-table (program-src-table prog)]
+                 [current-type-table (program-type-table prog)]
                  [current-emit-record-fields (build-record-field-table prog)]
                  [current-emit-record-ns (program-imported-record-ns prog)]
                  [current-emit-target (program-target prog)]
@@ -294,6 +303,8 @@ CLJ
   (define ns (program-namespace prog))
   (define rs (auto-inject-clj-string (program-requires prog) needs-clj-string?))
   (define is (program-imports prog))
+  (define emitted-requires
+    (filter-map (lambda (entry) (emit-require prog entry)) rs))
   (define clauses
     (filter values
       (list
@@ -301,9 +312,9 @@ CLJ
        ;; no-op.
        (and (program-gen-class? prog)
             "(:gen-class)")
-       (and (not (null? rs))
+       (and (not (null? emitted-requires))
             (format "(:require ~a)"
-                    (string-join (map emit-require rs) "\n            ")))
+                    (string-join emitted-requires "\n            ")))
        (and (not (null? is))
             (format "(:import ~a)"
                     (string-join (map emit-import is) "\n           "))))))
@@ -329,9 +340,90 @@ CLJ
       [(char=? (string-ref s i) #\.) i]
       [else (loop (- i 1))])))
 
-(define (emit-require r)
+(define (qualified-binding prefix name)
+  (string->symbol
+   (string-append (symbol->string prefix) "/" (symbol->string name))))
+
+(define (require-prefix entry)
+  (or (require-entry-alias entry)
+      (string->symbol
+       (last (string-split (symbol->string (require-entry-ns entry)) ".")))))
+
+(define (require-module-import prog entry)
+  (for/first ([import (in-list (program-imported-module-interfaces prog))]
+              #:when
+              (eq? (module-interface-namespace
+                    (module-import-interface import))
+                   (require-entry-ns entry)))
+    import))
+
+(define (used-unqualified-record-validators prog)
+  (for/set ([(node contract)
+             (in-hash (program-semantic-contracts prog))]
+            #:when
+            (and (record-update-contract? contract)
+                 (record-update-contract-validator-symbol contract)
+                 (not
+                  (string-contains?
+                   (symbol->string
+                    (record-update-contract-validator-symbol contract))
+                   "/"))))
+    (record-update-contract-validator-symbol contract)))
+
+(define (referred-record-validators prog entry refer)
+  (define import (require-module-import prog entry))
+  (define interface (and import (module-import-interface import)))
+  (define used (used-unqualified-record-validators prog))
+  (if (not interface)
+      '()
+      (for/list
+          ([(record-name contract)
+            (in-hash (module-interface-record-contracts interface))]
+           #:when
+           (let ([validator
+                  (interface-record-contract-validator-symbol contract)])
+             (and validator
+                  (set-member? used validator)
+                  (or (memq record-name refer)
+                      (memq
+                       (string->symbol (format "->~a" record-name))
+                       refer)))))
+        (interface-record-contract-validator-symbol contract))))
+
+(define (runtime-refer-name prog entry name)
+  (define import (require-module-import prog entry))
+  (define interface (and import (module-import-interface import)))
+  (define binding
+    (and interface (module-interface-binding-ref interface name #f)))
+  (cond
+    ;; Type declarations and macros exist only during Beagle compilation; a
+    ;; Clojure namespace cannot refer them as Vars.
+    [(and interface
+          (module-interface-type-export? interface name)
+          (not binding))
+     #f]
+    [(hash-ref (program-macros prog) name #f) #f]
+    [(and binding (eq? (interface-binding-kind binding) 'extern)) #f]
+    ;; Legacy source import still records known type-only names even when no
+    ;; candidate interface is available.
+    [(and (not interface)
+          (set-member?
+           (program-imported-type-names prog)
+           (qualified-binding (require-prefix entry) name)))
+     #f]
+    [else name]))
+
+(define (emit-require prog r)
   (define ns (require-entry-ns r))
   (define refer-syms (require-entry-refer r))
+  (define runtime-refer
+    (and refer-syms
+         (remove-duplicates
+          (append
+           (filter-map
+            (lambda (name) (runtime-refer-name prog r name))
+            refer-syms)
+           (referred-record-validators prog r refer-syms)))))
   (define alias
     (or (require-entry-alias r)
         ;; Default alias: the last `.`-separated segment of the namespace.
@@ -340,12 +432,16 @@ CLJ
              (let* ([ns-str (symbol->string ns)]
                     [idx (string-last-dot ns-str)])
                (if idx (substring ns-str (+ idx 1)) ns-str)))))
-  (format "[~a~a~a]"
-          ns
-          (if alias (format " :as ~a" alias) "")
-          (if (and refer-syms (pair? refer-syms))
-              (format " :refer [~a]" (string-join (map symbol->string refer-syms) " "))
-              "")))
+  (cond
+    [(and refer-syms (null? runtime-refer)) #f]
+    [else
+     (format "[~a~a~a]"
+             ns
+             (if alias (format " :as ~a" alias) "")
+             (if (and runtime-refer (pair? runtime-refer))
+                 (format " :refer [~a]"
+                         (string-join (map symbol->string runtime-refer) " "))
+                 ""))]))
 
 ;; Split a fully-qualified Java class symbol like 'java.io.File into
 ;; package ("java.io") and class name ("File"), then emit Clojure-style
@@ -388,6 +484,12 @@ CLJ
          (cond
            [(param? p) (clj-tag-prefix (param-type p))]
            [else ""])))
+     (define-values (params-str body-str)
+       (emit-callable-signature+body
+        (defn-form-params f)
+        (defn-form-rest-param f)
+        (emit-body (defn-form-body f) "  ")
+        #:param-tags param-tags))
      (format "(~a ~a~a~a [~a]\n  ~a)"
              kw
              name-tag
@@ -395,18 +497,20 @@ CLJ
              (if (defn-form-doc f)
                  (format "\n  ~v" (defn-form-doc f))
                  "")
-             (emit-params-with-rest (defn-form-params f)
-                                    (defn-form-rest-param f)
-                                    #:param-tags param-tags)
-             (emit-body (defn-form-body f) "  "))]
+             params-str
+             body-str)]
 
     [(defn-multi? f)
      (define kw (if (defn-multi-private? f) "defn-" "defn"))
      (define arity-strs
        (for/list ([a (in-list (defn-multi-arities f))])
+         (define-values (params-str body-str)
+           (emit-callable-signature+body
+            (arity-clause-params a)
+            (arity-clause-rest-param a)
+            (emit-body (arity-clause-body a) "    ")))
          (format "  ([~a]\n    ~a)"
-                 (emit-params-with-rest (arity-clause-params a) (arity-clause-rest-param a))
-                 (emit-body (arity-clause-body a) "    "))))
+                 params-str body-str)))
      (format "(~a ~a~a\n~a)"
              kw
              (defn-multi-name f)
@@ -417,20 +521,21 @@ CLJ
      (emit-record f)]
 
     [(protocol-form? f)
-     (define sigs
-       (for/list ([m (protocol-form-methods f)])
-         (format "(~a [~a])" (protocol-method-name m) (emit-params (protocol-method-params m)))))
-     (format "(defprotocol ~a\n  ~a)" (protocol-form-name f) (string-join sigs "\n  "))]
+     (emit-protocol f)]
 
     [(defmulti-form? f)
      (format "(defmulti ~a ~a)" (defmulti-form-name f) (emit-expr (defmulti-form-dispatch-fn f)))]
 
     [(defmethod-form? f)
+     (define-values (params-str body-str)
+       (emit-callable-signature+body
+        (defmethod-form-params f) #f
+        (emit-body (defmethod-form-body f) "  ")))
      (format "(defmethod ~a ~a [~a]\n  ~a)"
              (defmethod-form-name f)
              (emit-expr (defmethod-form-dispatch-val f))
-             (emit-params (defmethod-form-params f))
-             (emit-body (defmethod-form-body f) "  "))]
+             params-str
+             body-str)]
 
     [(extend-type-form? f)
      (emit-extend-type f)]
@@ -619,13 +724,21 @@ CLJ
                       (if-some-form-then-body e)
                       (if-some-form-else-body e))]
     [(with-open-form? e)
-     (format "(with-open [~a]\n  ~a)"
-             (emit-let-bindings (with-open-form-bindings e))
-             (emit-body (with-open-form-body e) "  "))]
+     (define bindings (with-open-form-bindings e))
+     (if (bindings-have-constraints? bindings)
+         (emit-with-open-chain
+          bindings (emit-body (with-open-form-body e) "  "))
+         (format "(with-open [~a]\n  ~a)"
+                 (emit-let-bindings bindings)
+                 (emit-body (with-open-form-body e) "  ")))]
     [(binding-form? e)
-     (format "(binding [~a]\n  ~a)"
-             (emit-let-bindings (binding-form-bindings e))
-             (emit-body (binding-form-body e) "  "))]
+     (define bindings (binding-form-bindings e))
+     (if (bindings-have-constraints? bindings)
+         (emit-dynamic-binding-chain
+          bindings (emit-body (binding-form-body e) "  "))
+         (format "(binding [~a]\n  ~a)"
+                 (emit-let-bindings bindings)
+                 (emit-body (binding-form-body e) "  ")))]
     [(doto-form? e)
      (format "(doto ~a\n  ~a)"
              (emit-expr (doto-form-target e))
@@ -651,27 +764,40 @@ CLJ
     [(letfn-form? e)
      (define fn-strs
        (for/list ([f (in-list (letfn-form-fns e))])
+         (define-values (params-str body-str)
+           (emit-callable-signature+body
+            (letfn-fn-params f)
+            (letfn-fn-rest-param f)
+            (parameterize ([current-clj-loop-recur-context #f])
+              (emit-body (letfn-fn-body f) "    "))))
          (format "(~a [~a] ~a)"
                  (symbol->string (letfn-fn-name f))
-                 (emit-params-with-rest (letfn-fn-params f) (letfn-fn-rest-param f))
-                 (emit-body (letfn-fn-body f) "    "))))
+                 params-str
+                 body-str)))
      (format "(letfn [~a]\n  ~a)"
              (string-join fn-strs "\n          ")
              (emit-body (letfn-form-body e) "  "))]
     [(loop-form? e)
-     (format "(loop [~a]\n  ~a)"
-             (emit-let-bindings (loop-form-bindings e))
-             (emit-body (loop-form-body e) "  "))]
+     (emit-loop-with-constraints e)]
     [(recur-form? e)
-     (format "(recur~a)" (emit-args (recur-form-args e)))]
+     (define args (recur-form-args e))
+     (define context (current-clj-loop-recur-context))
+     (format "(recur~a~a)"
+             (emit-args args)
+             (if (and context (= (length args) context)) " false" ""))]
     [(for-form? e)
      (format "(for [~a]\n  ~a)"
              (emit-for-clauses (for-form-clauses e))
              (emit-body (for-form-body e) "  "))]
     [(fn-form? e)
+     (define-values (params-str body-str)
+       (emit-callable-signature+body
+        (fn-form-params e)
+        (fn-form-rest-param e)
+        (parameterize ([current-clj-loop-recur-context #f])
+          (emit-body (fn-form-body e) "  "))))
      (format "(fn [~a] ~a)"
-             (emit-params-with-rest (fn-form-params e) (fn-form-rest-param e))
-             (emit-body (fn-form-body e) "  "))]
+             params-str body-str)]
     [(method-call? e)
      (format "(~a ~a~a)"
              (symbol->string (method-call-method-name e))
@@ -890,7 +1016,93 @@ CLJ
     (for/list ([p (in-list fields)])
       (define fname (symbol->string (param-name p)))
       (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
-  (string-join (cons record-line accessor-lines) "\n\n"))
+  (string-join
+   (append (list record-line)
+           (emit-record-constructor-guards name fields)
+           accessor-lines)
+   "\n\n"))
+
+;; `defrecord` publishes both a positional factory and a map factory.  Snapshot
+;; those generated factories before replacing them, and publish one validator
+;; ABI used by both constructor wrappers and by cross-module `with` updates.
+(define (record-validator-name name)
+  (format "$beagle$record$~a$validate" (unqualify-type-name name)))
+
+(define (statically-known-record-type? type)
+  (define name
+    (cond
+      [(type-prim? type) (type-prim-name type)]
+      [(type-app? type) (type-app-ctor type)]
+      [else #f]))
+  (and name (hash-has-key? (current-emit-record-fields) name)))
+
+(define (emit-record-constructor-guards name fields)
+  (define constrained
+    (for/list ([field (in-list fields)] [index (in-naturals)]
+               #:when (param-constraint field))
+      (cons index field)))
+  (cond
+    [(null? constrained) '()]
+    [else
+     (define name-str (symbol->string name))
+     (define positional (format "->~a" name-str))
+     (define map-factory (format "map->~a" name-str))
+     (define raw-positional
+       (format "$beagle$record$~a$raw-constructor" name-str))
+     (define raw-map
+       (format "$beagle$record$~a$raw-map-constructor" name-str))
+     (define validator (record-validator-name name))
+     (define-values (guarded-positional-params guarded-positional-body)
+       (emit-callable-signature+body
+        fields
+        #f
+        (format
+         "(~a~a)"
+         raw-positional
+         (if (null? fields)
+             ""
+             (string-append
+              " "
+              (string-join
+               (for/list ([field (in-list fields)])
+                 (symbol->string (param-name field)))
+               " "))))))
+     (define validation-bindings
+       (apply
+        append
+        (for/list ([entry (in-list constrained)])
+          (define index (car entry))
+          (define field (cdr entry))
+          (define field-name (symbol->string (param-name field)))
+          (define raw-name (format "$beagle$record$field$~a" index))
+          (define predicate-name
+            (format "$beagle$record$constraint$~a" index))
+          (define checked-name
+            (format "$beagle$record$checked-field$~a" index))
+          (list
+           (format "~a (:~a $beagle$record$value)" raw-name field-name)
+           (format "~a ~a" predicate-name
+                   (emit-expr (param-constraint field)))
+           (format "~a ~a" checked-name
+                   (emit-guarded-binding-value
+                    field predicate-name raw-name))))))
+     (list
+      (format "(def ^:private ~a ~a)" raw-positional positional)
+      (format "(def ^:private ~a ~a)" raw-map map-factory)
+      (format
+       "(defn ~a [$beagle$record$value]\n  (let [~a]\n    $beagle$record$value))"
+       validator
+       (string-join validation-bindings "\n       "))
+      (format
+       "(defn ~a [~a]\n  ~a)"
+       positional
+       guarded-positional-params
+       guarded-positional-body)
+      (format
+       "(defn ~a [$beagle$record$raw-map]\n  (~a (~a $beagle$record$raw-map)))"
+       map-factory
+       raw-map
+       validator))]))
 
 (define (emit-with e)
   (define target-str (emit-expr (with-form-target e)))
@@ -898,7 +1110,56 @@ CLJ
     (for/list ([u (in-list (with-form-updates e))])
       (format "~a ~a" (symbol->string (with-update-field-kw u))
                        (emit-expr (with-update-value u)))))
-  (format "(assoc ~a ~a)" target-str (string-join update-strs " ")))
+  (define updated
+    (format "(assoc ~a ~a)" target-str (string-join update-strs " ")))
+  (define missing-contract (gensym 'missing-record-update-contract))
+  (define contract
+    (hash-ref
+     (current-clj-semantic-contracts)
+     e
+     missing-contract))
+  (cond
+    [(record-update-contract? contract)
+     (define record-name (record-update-contract-record-name contract))
+     (define field-order (record-update-contract-field-order contract))
+     (unless (and (symbol? record-name)
+                  (list? field-order)
+                  (andmap
+                   (lambda (field)
+                     (and (symbol? field)
+                          (string-prefix? (symbol->string field) ":")))
+                   field-order))
+       (error
+        'beagle-clj
+        "with-form has malformed checked record-update contract: ~v"
+        contract))
+     (define validator (record-update-contract-validator-symbol contract))
+     (if validator
+         ;; A persistent assoc may privately construct the complete candidate,
+         ;; but that candidate must cross the provider-owned aggregate
+         ;; validator before any authored return, projection, or use can see
+         ;; it. The compiler-owned let makes that boundary explicit and keeps
+         ;; target/update expressions single-evaluation.
+         (format
+          "(let [$beagle$record$update$candidate ~a]\n  (~a $beagle$record$update$candidate))"
+          updated
+          (symbol->string validator))
+         updated)]
+    [(eq? contract missing-contract)
+     ;; Direct emitter-unit callers historically omit the checker entirely.
+     ;; Production compilation supplies a type table; a typed update in that
+     ;; mode must never guess record ownership or silently skip validation.
+     (define type-table (current-type-table))
+     (if (and type-table
+              (statically-known-record-type? (hash-ref type-table e #f)))
+         (error
+          'beagle-clj
+          "typed with-form lacks its checked record-update contract")
+         updated)]
+    [else
+     (error 'beagle-clj
+            "with-form has invalid record-update contract: ~v"
+            contract)]))
 
 (define (emit-defenum f)
   (define name (defenum-form-name f))
@@ -917,12 +1178,16 @@ CLJ
     [else
      (define name-lower (string-downcase (symbol->string name)))
      (string-join
-      (cons (format "(defrecord ~a [~a])"
-                    name
-                    (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " "))
-            (for/list ([p (in-list fields)])
-              (define fname (symbol->string (param-name p)))
-              (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
+      (append
+       (list (format "(defrecord ~a [~a])"
+                     name
+                     (string-join
+                      (map (lambda (p) (symbol->string (param-name p))) fields)
+                      " ")))
+       (emit-record-constructor-guards name fields)
+       (for/list ([p (in-list fields)])
+         (define fname (symbol->string (param-name p)))
+         (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
       "\n\n")]))
 
 (define (emit-defunion f)
@@ -1161,6 +1426,107 @@ CLJ
          (format "~a ~a" test body-str)
          (format "~a (let [~a] ~a)" test (string-join binds " ") body-str))]))
 
+(define (protocol-raw-method-name protocol-name method-name)
+  (format "$beagle$protocol$~a$~a"
+          (unqualify-type-name protocol-name)
+          method-name))
+
+(define (emit-protocol-wrapper protocol-name method)
+  (define params (protocol-method-params method))
+  (define rest-p (protocol-method-rest-param method))
+  (define all-params (params+rest params rest-p))
+  (define raw-names
+    (for/list ([param (in-list all-params)] [index (in-naturals)])
+      (if (= index (length params))
+          "$beagle$constraint$raw-rest"
+          (format "$beagle$constraint$raw-param$~a" index))))
+  (define rest-normalization
+    (if rest-p
+        (list
+         (format "~a (vec ~a)" (last raw-names) CLJ-HOST-REST))
+        '()))
+  (define predicate-bindings
+    (for/list ([param (in-list all-params)]
+               [index (in-naturals)]
+               #:when (param-constraint param))
+      (format "$beagle$constraint$predicate$~a ~a"
+              index (emit-expr (param-constraint param)))))
+  (define checked-names
+    (for/list ([param (in-list all-params)] [index (in-naturals)])
+      (format "$beagle$constraint$checked-param$~a" index)))
+  (define checked-bindings
+    (for/list ([param (in-list all-params)]
+               [raw (in-list raw-names)]
+               [checked (in-list checked-names)]
+               [index (in-naturals)])
+      (format
+       "~a ~a"
+       checked
+       (if (param-constraint param)
+           (emit-guarded-binding-value
+            param (format "$beagle$constraint$predicate$~a" index) raw)
+           raw))))
+  (define call-args
+    (if (null? predicate-bindings) raw-names checked-names))
+  (define call
+    (if rest-p
+        (format "(apply ~a ~a)"
+                (protocol-raw-method-name
+                 protocol-name (protocol-method-name method))
+                (string-join call-args " "))
+        (format "(~a~a)"
+                (protocol-raw-method-name
+                 protocol-name (protocol-method-name method))
+                (if (null? call-args)
+                    ""
+                    (string-append " " (string-join call-args " "))))))
+  (format
+   "(defn ~a [~a]\n  ~a)"
+   (protocol-method-name method)
+   (string-join
+    (append (take raw-names (length params))
+            (if rest-p (list "&" CLJ-HOST-REST) '()))
+    " ")
+   (cond
+     [(and (null? rest-normalization) (null? predicate-bindings)) call]
+     [(null? predicate-bindings)
+      (format "(let [~a]\n    ~a)"
+              (string-join rest-normalization "\n       ")
+              call)]
+     [else
+      (format "(let [~a]\n    (let [~a]\n      ~a))"
+              (string-join
+               (append rest-normalization predicate-bindings)
+               "\n       ")
+              (string-join checked-bindings "\n         ")
+              call)])))
+
+(define (emit-protocol f)
+  (define protocol-name (protocol-form-name f))
+  (define methods (protocol-form-methods f))
+  (define raw-sigs
+    (for/list ([method (in-list methods)])
+      (format
+       "(~a [~a])"
+       (protocol-raw-method-name protocol-name (protocol-method-name method))
+       (string-join
+        (append
+         (for/list ([param (in-list (protocol-method-params method))]
+                    [index (in-naturals)])
+           (format "$beagle$constraint$raw-param$~a" index))
+         (if (protocol-method-rest-param method)
+             (list "&" "$beagle$constraint$raw-rest")
+             '()))
+        " "))))
+  (string-append
+   (format "(defprotocol ~a\n  ~a)"
+           protocol-name (string-join raw-sigs "\n  "))
+   "\n\n"
+   (string-join
+    (for/list ([method (in-list methods)])
+      (emit-protocol-wrapper protocol-name method))
+    "\n\n")))
+
 (define (emit-extend-type f)
   (define impl-strs (map emit-type-impl (extend-type-form-impls f)))
   (format "(extend-type ~a\n  ~a)"
@@ -1171,10 +1537,15 @@ CLJ
   (define proto-line (symbol->string (type-impl-protocol-name impl)))
   (define method-lines
     (for/list ([m (type-impl-methods impl)])
+      (define-values (params-str body-str)
+        (emit-callable-signature+body
+         (impl-method-params m) (impl-method-rest-param m)
+         (emit-body (impl-method-body m) "    ")))
       (format "(~a [~a]\n    ~a)"
-              (impl-method-name m)
-              (emit-params (impl-method-params m))
-              (emit-body (impl-method-body m) "    "))))
+              (protocol-raw-method-name
+               (type-impl-protocol-name impl) (impl-method-name m))
+              params-str
+              body-str)))
   (string-append proto-line "\n  " (string-join method-lines "\n  ")))
 
 (define (emit-seq-destructure d)
@@ -1222,6 +1593,161 @@ CLJ
 
 (define (emit-param p) (emit-binding-name p))
 
+;; --- binding constraints ---------------------------------------------------
+
+(define (binding-target binding)
+  (cond
+    [(param? binding) (param-name binding)]
+    [(let-binding? binding) (let-binding-name binding)]
+    [(for-binding? binding) (for-binding-name binding)]
+    [else (param-binding-target binding)]))
+
+(define (binding-constraint binding)
+  (cond
+    [(param? binding) (param-constraint binding)]
+    [(let-binding? binding) (let-binding-constraint binding)]
+    [(for-binding? binding) (for-binding-constraint binding)]
+    [else #f]))
+
+(define (binding-target-label binding)
+  (define target (binding-target binding))
+  (cond
+    [(symbol? target) (symbol->string target)]
+    [else (emit-binding-name target)]))
+
+(define (binding-constraint-failure binding raw-name)
+  (define label (binding-target-label binding))
+  (format
+   (string-append
+    "(throw (ex-info ~a {:binding ~a :value ~a}))")
+   (emit-clj-string (format "Binding constraint failed: ~a" label))
+   (emit-clj-string label)
+   raw-name))
+
+(define (binding-constraint-proof binding)
+  (and (current-clj-semantic-contracts)
+       (hash-ref (current-clj-semantic-contracts) binding #f)))
+
+(define (emit-guarded-binding-value binding predicate-name raw-name)
+  (define proof (binding-constraint-proof binding))
+  (unless (and (binding-constraint-contract? proof)
+               (binding-constraint-contract-synchronous? proof))
+    (error
+     'beagle-clj
+     (string-append
+      "binding constraint for ~a lacks the compiler's positive "
+      "synchronization proof; checked emission refuses to call it")
+     (binding-target-label binding)))
+  (format "(if (~a ~a) ~a ~a)"
+          predicate-name raw-name raw-name
+          (binding-constraint-failure binding raw-name)))
+
+(define (bindings-have-constraints? bindings)
+  (for/or ([binding (in-list bindings)])
+    (and (binding-constraint binding) #t)))
+
+(define (params+rest params rest-p)
+  (if rest-p (append params (list rest-p)) params))
+
+(define (callable-has-constraints? params rest-p)
+  (bindings-have-constraints? (params+rest params rest-p)))
+
+;; A constrained callable cannot expose any authored parameter name before all
+;; parameter predicates have been captured. Otherwise a predicate expression
+;; that resolved to an outer name could be captured accidentally by a sibling
+;; or its own parameter. Every source parameter therefore receives a reserved
+;; raw slot; an outer let captures predicates, and an inner let guards then
+;; binds/projects the source targets.
+(define (emit-constrained-callable params rest-p body-str
+                                   #:param-tags [param-tags #f])
+  (define all (params+rest params rest-p))
+  (define fixed-count (length params))
+  (define raw-names
+    (for/list ([binding (in-list all)] [index (in-naturals)])
+      (if (= index fixed-count)
+          "$beagle$constraint$raw-rest"
+          (format "$beagle$constraint$raw-param$~a" index))))
+  (define fixed-raw
+    (for/list ([raw (in-list (take raw-names fixed-count))]
+               [index (in-naturals)])
+      (define tag
+        (if param-tags
+            (list-ref (pad-tags param-tags fixed-count) index)
+            ""))
+      (string-append tag raw)))
+  (define params-str
+    (string-join
+     (append fixed-raw
+             (if rest-p
+                 (list "&" CLJ-HOST-REST)
+                 '()))
+     " "))
+  (define rest-normalization
+    (if rest-p
+        (list
+         (format "~a (vec ~a)" (last raw-names) CLJ-HOST-REST))
+        '()))
+  (define predicate-bindings
+    (for/list ([binding (in-list all)]
+               [index (in-naturals)]
+               #:when (binding-constraint binding))
+      (format "$beagle$constraint$predicate$~a ~a"
+              index (emit-expr (binding-constraint binding)))))
+  (define checked-names
+    (for/list ([binding (in-list all)] [index (in-naturals)])
+      (format "$beagle$constraint$checked-param$~a" index)))
+  (define checked-bindings
+    (for/list ([binding (in-list all)]
+               [raw (in-list raw-names)]
+               [checked (in-list checked-names)]
+               [index (in-naturals)])
+      (format
+       "~a ~a"
+       checked
+       (if (binding-constraint binding)
+           (emit-guarded-binding-value
+            binding (format "$beagle$constraint$predicate$~a" index) raw)
+           raw))))
+  (define target-bindings
+    (for/list ([binding (in-list all)]
+               [checked (in-list checked-names)])
+      (format "~a ~a"
+              (emit-binding-name (binding-target binding))
+              checked)))
+  (values
+   params-str
+   (format "(let [~a]\n  (let [~a]\n    (let [~a]\n      ~a)))"
+           (string-join
+            (append rest-normalization predicate-bindings)
+            "\n       ")
+           (string-join checked-bindings "\n       ")
+           (string-join target-bindings "\n       ")
+           body-str)))
+
+(define (emit-unconstrained-callable params rest-p body-str
+                                     #:param-tags [param-tags #f])
+  (define params-str
+    (emit-params-with-rest
+     params rest-p
+     #:param-tags param-tags
+     #:rest-name (and rest-p CLJ-HOST-REST)))
+  (values
+   params-str
+   (if rest-p
+       (format "(let [~a (vec ~a)]\n  ~a)"
+               (emit-binding-name (param-binding-target rest-p))
+               CLJ-HOST-REST
+               body-str)
+       body-str)))
+
+(define (emit-callable-signature+body params rest-p body-str
+                                      #:param-tags [param-tags #f])
+  (if (callable-has-constraints? params rest-p)
+      (emit-constrained-callable params rest-p body-str
+                                 #:param-tags param-tags)
+      (emit-unconstrained-callable params rest-p body-str
+                                   #:param-tags param-tags)))
+
 ;; Emit one param with an optional type-hint prefix. tag-prefix is a
 ;; pre-formatted string like "^Int " or "" — see clj-tag-prefix.
 (define (emit-param/tag p tag-prefix)
@@ -1239,7 +1765,9 @@ CLJ
 ;; runs parallel to `params` (a list of tag-prefix strings, "" for no
 ;; hint). When #f, emits the legacy untagged shape. The rest-param never
 ;; gets a tag (Clojure rest-args are heterogeneous lists).
-(define (emit-params-with-rest params rest-p #:param-tags [param-tags #f])
+(define (emit-params-with-rest params rest-p
+                               #:param-tags [param-tags #f]
+                               #:rest-name [rest-name #f])
   (define fixed
     (cond
       [param-tags
@@ -1250,9 +1778,10 @@ CLJ
         " ")]
       [else (emit-params params)]))
   (if rest-p
+      (let ([emitted-rest (or rest-name (emit-param rest-p))])
       (if (string=? fixed "")
-          (format "& ~a" (emit-param rest-p))
-          (format "~a & ~a" fixed (emit-param rest-p)))
+          (format "& ~a" emitted-rest)
+          (format "~a & ~a" fixed emitted-rest)))
       fixed))
 
 ;; Right-pad a tag list to length n with "" entries. Defensive — the
@@ -1267,24 +1796,188 @@ CLJ
 
 (define (emit-let-bindings bindings)
   (string-join
-   (for/list ([b (in-list bindings)])
-     (format "~a ~a"
-             (emit-binding-name (let-binding-name b))
-             (emit-expr (let-binding-value b))))
+   (apply
+    append
+    (for/list ([b (in-list bindings)] [index (in-naturals)])
+      (define target (emit-binding-name (let-binding-name b)))
+      (define value (emit-expr (let-binding-value b)))
+      (define constraint (let-binding-constraint b))
+      (cond
+        [constraint
+         (define raw-name (format "$beagle$constraint$raw-binding$~a" index))
+         (define predicate-name
+           (format "$beagle$constraint$predicate$~a" index))
+         (list
+          (format "~a ~a" raw-name value)
+          (format "~a ~a" predicate-name (emit-expr constraint))
+          (format "~a ~a" target
+                  (emit-guarded-binding-value b predicate-name raw-name)))]
+        [else (list (format "~a ~a" target value))])))
    "\n   "))
+
+(define (emit-with-open-chain bindings body-str [index 0])
+  (cond
+    [(null? bindings) body-str]
+    [else
+     (define b (car bindings))
+     (define target (emit-binding-name (let-binding-name b)))
+     (define value (emit-expr (let-binding-value b)))
+     (define inner
+       (emit-with-open-chain (cdr bindings) body-str (add1 index)))
+     (define constraint (let-binding-constraint b))
+     (if constraint
+         (let ([predicate-name
+                (format "$beagle$constraint$predicate$~a" index)]
+               [raw-name (format "$beagle$constraint$raw-open$~a" index)])
+           (format
+            "(with-open [~a ~a]\n  (let [~a ~a\n        ~a ~a]\n    ~a))"
+            raw-name value
+            predicate-name (emit-expr constraint)
+            target (emit-guarded-binding-value b predicate-name raw-name)
+            inner))
+         (format "(with-open [~a ~a]\n  ~a)" target value inner))]))
+
+(define (emit-dynamic-binding-chain bindings body-str)
+  (define capture-bindings
+    (apply
+     append
+     (for/list ([binding (in-list bindings)] [index (in-naturals)])
+       (define raw-name
+         (format "$beagle$constraint$raw-dynamic$~a" index))
+       (define constraint (let-binding-constraint binding))
+       (append
+        (list (format "~a ~a" raw-name
+                      (emit-expr (let-binding-value binding))))
+        (if constraint
+            (list
+             (format "$beagle$constraint$predicate$~a ~a"
+                     index (emit-expr constraint))
+             (format "$beagle$constraint$checked-dynamic$~a ~a"
+                     index
+                     (emit-guarded-binding-value
+                      binding
+                      (format "$beagle$constraint$predicate$~a" index)
+                      raw-name)))
+            '())))))
+  (define dynamic-bindings
+    (for/list ([binding (in-list bindings)] [index (in-naturals)])
+      (define raw-name
+        (format "$beagle$constraint$raw-dynamic$~a" index))
+      (define constraint (let-binding-constraint binding))
+      (format
+       "~a ~a"
+       (emit-binding-name (let-binding-name binding))
+       (if constraint
+           (format "$beagle$constraint$checked-dynamic$~a" index)
+           raw-name))))
+  (format "(let [~a]\n  (binding [~a]\n    ~a))"
+          (string-join capture-bindings "\n       ")
+          (string-join dynamic-bindings "\n            ")
+          body-str))
+
+(define (emit-loop-with-constraints e)
+  (define bindings (loop-form-bindings e))
+  (cond
+    [(not (bindings-have-constraints? bindings))
+     (format "(loop [~a]\n  ~a)"
+             (emit-let-bindings bindings)
+             (parameterize ([current-clj-loop-recur-context #f])
+               (emit-body (loop-form-body e) "  ")))]
+    [else
+     (define raw-names
+       (for/list ([binding (in-list bindings)] [index (in-naturals)])
+         (format "$beagle$constraint$raw-loop$~a" index)))
+     (define init-bindings
+       (apply
+        append
+        (for/list ([binding (in-list bindings)]
+                   [raw (in-list raw-names)]
+                   [index (in-naturals)])
+          (define constraint (let-binding-constraint binding))
+          (define target (emit-binding-name (let-binding-name binding)))
+          (append
+           (list (format "~a ~a" raw
+                         (emit-expr (let-binding-value binding))))
+           (if constraint
+               (list
+                (format "$beagle$constraint$init-predicate$~a ~a"
+                        index (emit-expr constraint)))
+               '())
+           (list
+            (format
+             "~a ~a"
+             target
+             (if constraint
+                 (emit-guarded-binding-value
+                  binding
+                  (format "$beagle$constraint$init-predicate$~a" index)
+                  raw)
+                 raw)))))))
+     (define iteration-bindings
+       (for/list ([binding (in-list bindings)]
+                  [raw (in-list raw-names)]
+                  [index (in-naturals)])
+         (define constraint (let-binding-constraint binding))
+         (format
+          "~a ~a"
+          (emit-binding-name (let-binding-name binding))
+          (if constraint
+              (format
+               (string-append
+                "(if $beagle$constraint$first-iteration ~a "
+                "(let [$beagle$constraint$predicate$~a ~a] ~a))")
+               raw index (emit-expr constraint)
+               (emit-guarded-binding-value
+                binding (format "$beagle$constraint$predicate$~a" index) raw))
+              raw))))
+     (define body-str
+       (parameterize ([current-clj-loop-recur-context (length bindings)])
+         (emit-body (loop-form-body e) "    ")))
+     (format
+      (string-append
+       "(let [$beagle$constraint$initial-values (let [~a] [~a])]\n"
+       "  (loop [~a $beagle$constraint$first-iteration true]\n"
+       "    (let [~a]\n"
+       "      ~a)))")
+      (string-join init-bindings "\n       ")
+      (string-join raw-names " ")
+      (string-join
+       (for/list ([raw (in-list raw-names)] [index (in-naturals)])
+         (format "~a (nth $beagle$constraint$initial-values ~a)" raw index))
+       " ")
+      (string-join iteration-bindings "\n         ")
+      body-str)]))
 
 (define (emit-for-clauses clauses)
   (string-join
-   (for/list ([c (in-list clauses)])
-     (cond
-       [(for-binding? c)
-        (format "~a ~a"
-                (emit-binding-name (for-binding-name c))
-                (emit-expr (for-binding-expr c)))]
-       [(for-when? c)
-        (format ":when ~a" (emit-expr (for-when-test c)))]
-       [(for-let? c)
-        (format ":let [~a]" (emit-let-bindings (for-let-bindings c)))]))
+   (apply
+    append
+    (for/list ([c (in-list clauses)] [index (in-naturals)])
+      (cond
+        [(for-binding? c)
+         (define constraint (for-binding-constraint c))
+         (if constraint
+             (let ([raw-name (format "$beagle$constraint$raw-for$~a" index)]
+                   [predicate-name
+                    (format "$beagle$constraint$predicate$~a" index)])
+               (list
+                (format "~a ~a" raw-name (emit-expr (for-binding-expr c)))
+                (format
+                 ":let [~a ~a\n         ~a ~a]"
+                 predicate-name (emit-expr constraint)
+                 (emit-binding-name (for-binding-name c))
+                 (emit-guarded-binding-value c predicate-name raw-name))))
+             (list
+              (format "~a ~a"
+                      (emit-binding-name (for-binding-name c))
+                      (emit-expr (for-binding-expr c)))))]
+        [(for-when? c)
+         (list (format ":when ~a" (emit-expr (for-when-test c))))]
+        [(for-let? c)
+         (list
+          (format ":let [~a]"
+                  (emit-let-bindings (for-let-bindings c))))]
+        [else '()])))
    "\n   "))
 
 (define (emit-body exprs indent)

@@ -283,13 +283,6 @@
         (parameterize ([current-lint-prefix inherited-lint-prefix])
           (walk val scope)))))
 
-  ;; Extract binding names from a let-form
-  (define (let-scope bindings)
-    (for*/hash ([b (in-list bindings)]
-                [name (in-list
-                       (binding-target-bound-names (let-binding-name b)))])
-      (values (symbol->string name) #t)))
-
   ;; Extract formal names from nix-fn-set
   (define (fn-set-scope formals)
     (for/hash ([f (in-list formals)])
@@ -302,6 +295,57 @@
       (hash-set! result k v))
     result)
 
+  (define (binding-scope target)
+    (for/hash ([name (in-list (binding-target-bound-names target))])
+      (values (symbol->string name) #t)))
+
+  (define (params-scope params [rest-param #f])
+    (for/fold ([result (make-immutable-hash)])
+              ([p (in-list (if rest-param
+                               (append params (list rest-param))
+                               params))])
+      (scope-merge result (binding-scope p))))
+
+  ;; Values and constraints are checked in the scope immediately before their
+  ;; own declaration.  The target enters scope only for subsequent bindings.
+  (define (walk-let-bindings bindings scope)
+    (for/fold ([current scope]) ([b (in-list bindings)])
+      (walk (let-binding-value b) current)
+      (when (let-binding-constraint b)
+        (walk (let-binding-constraint b) current))
+      (if (let-binding-name b)
+          (scope-merge current (binding-scope (let-binding-name b)))
+          current)))
+
+  (define (walk-param-constraints params rest-param scope)
+    (for ([p (in-list (if rest-param
+                          (append params (list rest-param))
+                          params))])
+      ;; Destructuring defaults belong to the incoming callable scope, just
+      ;; like constraints; no authored parameter (including a sibling or the
+      ;; projected key itself) exists while the default expression is formed.
+      (for ([default
+             (in-list
+              (destructure-or-default-exprs (param-binding-target p)))])
+        (walk default scope))
+      (when (param-constraint p)
+        (walk (param-constraint p) scope))))
+
+  (define (walk-for-clauses clauses scope)
+    (for/fold ([current scope]) ([clause (in-list clauses)])
+      (cond
+        [(for-binding? clause)
+         (walk (for-binding-expr clause) current)
+         (when (for-binding-constraint clause)
+           (walk (for-binding-constraint clause) current))
+         (scope-merge current (binding-scope (for-binding-name clause)))]
+        [(for-when? clause)
+         (walk (for-when-test clause) current)
+         current]
+        [(for-let? clause)
+         (walk-let-bindings (for-let-bindings clause) current)]
+        [else current])))
+
   (define (walk e scope)
     (cond
       [(map-form? e)       (walk-map-pairs (map-form-pairs e) scope)]
@@ -310,15 +354,70 @@
        (walk (nix-fn-set-body e) new-scope)]
       [(nix-rec-attrs? e)  (walk-map-pairs (nix-rec-attrs-pairs e) scope)]
       [(def-form? e)       (walk (def-form-value e) scope)]
-      [(defn-form? e)      (for-each (lambda (b) (walk b scope)) (defn-form-body e))]
+      [(defonce-form? e)   (walk (defonce-form-value e) scope)]
+      [(defn-form? e)
+       (walk-param-constraints (defn-form-params e) (defn-form-rest-param e) scope)
+       (define body-scope
+         (scope-merge scope
+                      (params-scope (defn-form-params e)
+                                    (defn-form-rest-param e))))
+       (for-each (lambda (b) (walk b body-scope)) (defn-form-body e))]
       [(defn-multi? e)
        (for ([a (in-list (defn-multi-arities e))])
-         (for-each (lambda (b) (walk b scope)) (arity-clause-body a)))]
-      [(fn-form? e)        (for-each (lambda (b) (walk b scope)) (fn-form-body e))]
+         (walk-param-constraints
+          (arity-clause-params a) (arity-clause-rest-param a) scope)
+         (define body-scope
+           (scope-merge scope
+                        (params-scope (arity-clause-params a)
+                                      (arity-clause-rest-param a))))
+         (for-each (lambda (b) (walk b body-scope)) (arity-clause-body a)))]
+      [(fn-form? e)
+       (walk-param-constraints (fn-form-params e) (fn-form-rest-param e) scope)
+       (define body-scope
+         (scope-merge scope
+                      (params-scope (fn-form-params e)
+                                    (fn-form-rest-param e))))
+       (for-each (lambda (b) (walk b body-scope)) (fn-form-body e))]
+      [(record-form? e)
+       (walk-param-constraints (record-form-fields e) #f scope)]
+      [(protocol-form? e)
+       (for ([method (in-list (protocol-form-methods e))])
+         (walk-param-constraints
+          (protocol-method-params method)
+          (protocol-method-rest-param method)
+          scope))]
+      [(extend-type-form? e)
+       (for* ([impl (in-list (extend-type-form-impls e))]
+              [method (in-list (type-impl-methods impl))])
+         (walk-param-constraints
+          (impl-method-params method)
+          (impl-method-rest-param method)
+          scope)
+         (define body-scope
+           (scope-merge
+            scope
+            (params-scope (impl-method-params method)
+                          (impl-method-rest-param method))))
+         (for-each
+          (lambda (body-expr) (walk body-expr body-scope))
+          (impl-method-body method)))]
+      [(defmethod-form? e)
+       (walk (defmethod-form-dispatch-val e) scope)
+       (walk-param-constraints (defmethod-form-params e) #f scope)
+       (define body-scope
+         (scope-merge scope (params-scope (defmethod-form-params e))))
+       (for-each
+        (lambda (body-expr) (walk body-expr body-scope))
+        (defmethod-form-body e))]
+      [(defunion-form? e)
+       (when (defunion-form-member-fields e)
+         (for ([fields (in-hash-values (defunion-form-member-fields e))])
+           (walk-param-constraints fields #f scope)))]
+      [(deferror-form? e)
+       (for ([fields (in-hash-values (deferror-form-member-fields e))])
+         (walk-param-constraints fields #f scope))]
       [(let-form? e)
-       (define new-scope (scope-merge scope (let-scope (let-form-bindings e))))
-       (for ([b (in-list (let-form-bindings e))])
-         (walk (let-binding-value b) scope))
+       (define new-scope (walk-let-bindings (let-form-bindings e) scope))
        (for-each (lambda (b) (walk b new-scope)) (let-form-body e))]
       [(if-form? e)
        (walk (if-form-cond-expr e) scope)
@@ -335,6 +434,9 @@
       [(call-form? e)
        (when (call-form-fn e) (walk (call-form-fn e) scope))
        (for-each (lambda (a) (walk a scope)) (call-form-args e))]
+      [(method-call? e)
+       (walk (method-call-target e) scope)
+       (for-each (lambda (a) (walk a scope)) (method-call-args e))]
       [(vec-form? e)       (for-each (lambda (i) (walk i scope)) (vec-form-items e))]
       [(set-form? e)       (for-each (lambda (i) (walk i scope)) (set-form-items e))]
       [(nix-with? e)
@@ -357,6 +459,22 @@
       [(nix-get-or? e)
        (walk (nix-get-or-base-expr e) scope)
        (walk (nix-get-or-default e) scope)]
+      [(nix-has-attr? e)
+       (walk (nix-has-attr-base-expr e) scope)]
+      [(nix-interpolated-string? e)
+       (for ([part (in-list (nix-interpolated-string-parts e))]
+             #:unless (string? part))
+         (walk part scope))]
+      [(nix-multiline-string? e)
+       (for ([line (in-list (nix-multiline-string-lines e))]
+             #:unless (string? line))
+         (walk line scope))]
+      [(target-case-form? e)
+       ;; This validator projects Nix. Other hosted branches are intentionally
+       ;; irrelevant, but the branch the Nix emitter executes must receive the
+       ;; same schema walk as an ordinary expression.
+       (define nix-branch (hash-ref (target-case-form-cases e) 'nix #f))
+       (when nix-branch (walk nix-branch scope))]
       [(match-form? e)
        (walk (match-form-target e) scope)
        (for ([c (in-list (match-form-clauses e))])
@@ -365,6 +483,10 @@
       [(kw-access? e)
        (walk (kw-access-target e) scope)
        (when (kw-access-default e) (walk (kw-access-default e) scope))]
+      [(with-form? e)
+       (walk (with-form-target e) scope)
+       (for ([update (in-list (with-form-updates e))])
+         (walk (with-update-value update) scope))]
       [(when-let-form? e)
        (define new-scope (hash-set (hash-copy scope) (symbol->string (when-let-form-name e)) #t))
        (walk (when-let-form-expr e) scope)
@@ -374,15 +496,54 @@
        (walk (if-let-form-expr e) scope)
        (for-each (lambda (b) (walk b new-scope)) (if-let-form-then-body e))
        (for-each (lambda (b) (walk b new-scope)) (if-let-form-else-body e))]
-      [(for-form? e)       (for-each (lambda (b) (walk b scope)) (for-form-body e))]
-      [(loop-form? e)      (for-each (lambda (b) (walk b scope)) (loop-form-body e))]
-      [(doseq-form? e)     (for-each (lambda (b) (walk b scope)) (doseq-form-body e))]
+      [(for-form? e)
+       (define body-scope (walk-for-clauses (for-form-clauses e) scope))
+       (for-each (lambda (b) (walk b body-scope)) (for-form-body e))]
+      [(loop-form? e)
+       (define body-scope (walk-let-bindings (loop-form-bindings e) scope))
+       (for-each (lambda (b) (walk b body-scope)) (loop-form-body e))]
+      [(doseq-form? e)
+       (define body-scope (walk-for-clauses (doseq-form-clauses e) scope))
+       (for-each (lambda (b) (walk b body-scope)) (doseq-form-body e))]
+      [(binding-form? e)
+       (define body-scope (walk-let-bindings (binding-form-bindings e) scope))
+       (for-each (lambda (b) (walk b body-scope)) (binding-form-body e))]
+      [(with-open-form? e)
+       (define body-scope (walk-let-bindings (with-open-form-bindings e) scope))
+       (for-each (lambda (b) (walk b body-scope)) (with-open-form-body e))]
       [(with-meta? e)      (walk (with-meta-expr e) scope)]
       [(threading-marker? e) (walk (threading-marker-desugared e) scope)]
       [(letfn-form? e)
+       (define group-scope
+         (for/fold ([current scope])
+                   ([local-fn (in-list (letfn-form-fns e))])
+           (scope-merge
+            current
+            (hash (symbol->string (letfn-fn-name local-fn)) #t))))
        (for ([f (in-list (letfn-form-fns e))])
-         (for-each (lambda (b) (walk b scope)) (letfn-fn-body f)))
-       (for-each (lambda (b) (walk b scope)) (letfn-form-body e))]
+         (walk-param-constraints
+          (letfn-fn-params f) (letfn-fn-rest-param f) group-scope)
+         (define fn-scope
+           (scope-merge
+            group-scope
+            (params-scope (letfn-fn-params f) (letfn-fn-rest-param f))))
+         (for-each (lambda (b) (walk b fn-scope)) (letfn-fn-body f)))
+       (for-each (lambda (b) (walk b group-scope)) (letfn-form-body e))]
+      [(jst-class? e)
+       (when (jst-class-extends e) (walk (jst-class-extends e) scope))
+       (for ([method (in-list (jst-class-methods e))])
+         (walk-param-constraints
+          (jst-method-params method) (jst-method-rest-param method) scope)
+         (define method-scope
+           (scope-merge
+            (scope-merge
+             scope
+             (params-scope (jst-method-params method)
+                           (jst-method-rest-param method)))
+            (hash "this" #t)))
+         (for-each
+          (lambda (body-expr) (walk body-expr method-scope))
+          (jst-method-body method)))]
       [else (void)]))
 
   (define empty-scope (make-immutable-hash))

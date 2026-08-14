@@ -21,9 +21,10 @@
   '("(def answer Int 42)"
     "(defonce once Int 1)"
     "(defn add [(x Int) (y Int)] Int (+ x y))"
+    "(defn positive [(x Int positive?)] Int x)"
     "(defn hof [(cb (Fn [Int] String))] String (cb 1))"
-    "(defrecord P [(x Int) (y (Vec Int))])"
-    "(let [(v Int) e] v)"
+    "(defrecord P [(x Int) (y (Vec Int) nonempty?)])"
+    "(let [(v Int positive?) e] v)"
     "(fn [(b Int)] Int b)"
     "(defn m ([(a Int)] Int a) ([(a Int) (b Int)] Int b))"))
 
@@ -91,6 +92,10 @@
   (check-equal? (pp "(defn f [(a Int) (b Int) (c Int)] Int a)")
                 "(defn f [(a Int) (b Int) (c Int)] Int a)"))
 
+(test-case "compact constrained bindings preserve their structural owner form"
+  (check-equal? (pp "(defn f [(a Int positive?)] Int a)")
+                "(defn f [(a Int positive?)] Int a)"))
+
 (test-case "complete signature width is inclusive at 80 columns"
   (define prefix "(defn ")
   (define suffix " [(x Int) (y Int)] Int")
@@ -130,6 +135,101 @@
     "   (options DistanceOptions)]\n"
     "  Float\n"
     "  world)")))
+
+(test-case "expanded signatures keep constrained declarations whole"
+  (define source
+    (string-append
+     "(defn constrained-distance "
+     "[(anchor Coordinate coordinate?) (coord Coordinate coordinate?) "
+     "(world WorldState ready-world?) (options DistanceOptions valid-options?)] "
+     "Float world)"))
+  (check-equal?
+   (pp source)
+   (string-append
+    "(defn constrained-distance\n"
+    "  [(anchor Coordinate coordinate?)\n"
+    "   (coord Coordinate coordinate?)\n"
+    "   (world WorldState ready-world?)\n"
+    "   (options DistanceOptions valid-options?)]\n"
+    "  Float\n"
+    "  world)")))
+
+(test-case "an individually over-width declaration expands internally"
+  (define source
+    (string-append
+     "(defn validated-coordinate "
+     "[(coordinate InternationalCoordinateReferenceSystem "
+     "coordinate-inside-supported-world-boundaries?)] Float coordinate)"))
+  (define expected
+    (string-append
+     "(defn validated-coordinate\n"
+     "  [(coordinate\n"
+     "    InternationalCoordinateReferenceSystem\n"
+     "    coordinate-inside-supported-world-boundaries?)]\n"
+     "  Float\n"
+     "  coordinate)"))
+  (check-equal? (pp source) expected)
+  (check-equal? (pp expected) expected))
+
+(test-case "a long constraint expression expands inside its declaration"
+  (define source
+    (string-append
+     "(defn validated-coordinate "
+     "[(coordinate Coordinate (and coordinate-inside-supported-world-boundaries? "
+     "coordinate-has-supported-reference-system?))] Float coordinate)"))
+  (define expected
+    (string-append
+     "(defn validated-coordinate\n"
+     "  [(coordinate\n"
+     "    Coordinate\n"
+     "    (and\n"
+     "     coordinate-inside-supported-world-boundaries?\n"
+     "     coordinate-has-supported-reference-system?))]\n"
+     "  Float\n"
+     "  coordinate)"))
+  (check-equal? (pp source) expected)
+  (check-true
+   (for/and ([line (in-list (string-split expected "\n"))])
+     (<= (string-length line) 80)))
+  (check-equal? (pp expected) expected))
+
+(test-case "a long constrained rest declaration expands as one structural entry"
+  (define source
+    (string-append
+     "(defn collect [(first Int) & "
+     "(remaining-values (Vec InternationalCoordinateReferenceSystem) "
+     "all-coordinates-inside-supported-world-boundaries?)] Int first)"))
+  (define expected
+    (string-append
+     "(defn collect\n"
+     "  [(first Int)\n"
+     "   & (remaining-values\n"
+     "      (Vec InternationalCoordinateReferenceSystem)\n"
+     "      all-coordinates-inside-supported-world-boundaries?)]\n"
+     "  Int\n"
+     "  first)"))
+  (check-equal? (pp source) expected)
+  (check-true
+   (for/and ([line (in-list (string-split expected "\n"))])
+     (<= (string-length line) 80)))
+  (check-equal? (pp expected) expected))
+
+(test-case "the enclosing vector closer counts at the 80-column boundary"
+  (define predicate-at-80 (make-string 68 #\p))
+  (define predicate-at-81 (string-append predicate-at-80 "p"))
+  (define at-80
+    (pp (format "(defn f [(x Int ~a)] Int x)" predicate-at-80)))
+  (check-true
+   (string-contains? at-80 (format "  [(x Int ~a)]\n" predicate-at-80)))
+  (check-true
+   (for/and ([line (in-list (string-split at-80 "\n"))])
+     (<= (string-length line) 80)))
+  (define at-81
+    (pp (format "(defn f [(x Int ~a)] Int x)" predicate-at-81)))
+  (check-true (string-contains? at-81 "  [(x\n    Int\n"))
+  (check-true
+   (for/and ([line (in-list (string-split at-81 "\n"))])
+     (<= (string-length line) 80))))
 
 (test-case "typed destructuring is one structural binding form"
   (check-equal?

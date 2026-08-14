@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns fixtures.control-strings)
+(define-mode strict)
+
+(def controls String "\u000b\u0007\u001b")

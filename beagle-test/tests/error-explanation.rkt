@@ -22,7 +22,7 @@
 ;; code, add it here too and the coverage test will demand a registry entry.
 (define checker-kinds
   '(arity type-mismatch return-type def-type let-binding exhaustive-match
-    scalar-predicate type-bound target-form sql-group-by sql-table
+    scalar-predicate scalar-predicate-declaration type-bound target-form sql-group-by sql-table
     sql-column sql-type nixos-unknown-option nixos-type-mismatch
     template-splice macro-expansion-type-error unresolved-alias unresolved-call))
 
@@ -89,8 +89,8 @@
        #t))
    (lambda () (delete-file tmp))))
 
-(test-case "registry examples parse as current beagle surface (E001-E008)"
-  (for ([code (in-list '("E001" "E002" "E003" "E004" "E005" "E006" "E007" "E008"))])
+(test-case "target-agnostic registry examples parse as current beagle surface"
+  (for ([code (in-list '("E001" "E002" "E003" "E004" "E005" "E006" "E007" "E008" "E028"))])
     (define e (error-explanation-ref code))
     (for ([which (in-list (list (cons 'bad (error-explanation-bad e))
                                 (cons 'good (error-explanation-good e))))])

@@ -10,9 +10,12 @@
          beagle/private/parse
          beagle/private/check
          beagle/private/emit
+         beagle/private/module-interface
          beagle/private/types)
 
 (define (br . xs) (cons BRACKET-TAG xs))
+;; Canonical function-type datum: (Fn [P ...] R).
+(define (fn-ty params ret) (list 'Fn (apply br params) ret))
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
 
@@ -27,7 +30,10 @@
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
      #:source-path "test.rkt"))
-  (type-check! prog)
+  (type-check-with-locs!
+   prog
+   (lambda (failure _stx) (raise failure))
+   #:capture-types? #t)
   (emit-program prog))
 
 (define (run-clj-test beagle-forms assertions-clj)
@@ -67,6 +73,107 @@
     (define-values (code out err clj) (run-clj-test forms assertions-clj))
     (check-equal? code 0
                   (format "exit ~a\n--- stderr ---\n~a\n--- clj ---\n~a" code err clj))
+    (check-equal? (string-trim out) expected-out
+                  (format "wrong output\n--- clj ---\n~a" clj))))
+
+(define (checked-module ns forms #:module-resolver [module-resolver #f])
+  (define stxs
+    (map (lambda (form) (datum->syntax #f form))
+         (append (list (list 'ns ns)
+                       '(define-mode strict)
+                       '(define-target clj))
+                 forms)))
+  (define program
+    (parse-program
+     stxs
+     #:source-path (format "~a.bclj" ns)
+     #:module-resolver module-resolver))
+  (type-check-with-locs!
+   program
+   (lambda (failure _stx) (raise failure))
+   #:capture-types? #t)
+  (values program stxs))
+
+(define (run-linked-clj-test provider-ns provider-forms
+                             consumer-ns consumer-forms
+                             assertions-clj)
+  (define-values (provider provider-stxs)
+    (checked-module provider-ns provider-forms))
+  (define provider-interface
+    (program->module-interface
+     provider
+     #:source-id (format "~a.bclj" provider-ns)
+     #:datums (map syntax->datum provider-stxs)))
+  (define provider-source
+    (module-source
+     provider-ns
+     (format "~a.bclj" provider-ns)
+     provider-stxs
+     (map syntax->datum provider-stxs)
+     provider-interface))
+  (define-values (consumer _consumer-stxs)
+    (checked-module
+     consumer-ns
+     consumer-forms
+     #:module-resolver
+     (lambda (namespace _importer-source)
+       (and (eq? namespace provider-ns) provider-source))))
+  (define modules
+    (list (cons provider-ns (emit-program provider))
+          (cons consumer-ns (emit-program consumer))))
+  (define tmpdir (make-temporary-directory))
+  (define all-clj "")
+  (dynamic-wind
+    void
+    (lambda ()
+      (for ([module (in-list modules)])
+        (define ns (car module))
+        (define emitted (cdr module))
+        (define relative
+          (string-append
+           (string-replace
+            (string-replace (symbol->string ns) "." "/") "-" "_")
+           ".clj"))
+        (define path (build-path tmpdir relative))
+        (make-directory* (path-only path))
+        (call-with-output-file path #:exists 'truncate
+          (lambda (out) (display emitted out)))
+        (set! all-clj
+              (string-append
+               all-clj (format ";;; --- ~a ---\n~a\n\n" ns emitted))))
+      (define main-path (build-path tmpdir "main.clj"))
+      (call-with-output-file main-path #:exists 'truncate
+        (lambda (out) (display assertions-clj out)))
+      (set! all-clj
+            (string-append all-clj
+                           (format ";;; --- main.clj ---\n~a\n" assertions-clj)))
+      (define-values (proc stdout stdin stderr)
+        (subprocess #f #f #f BB-PATH
+                    "--classpath" (path->string tmpdir)
+                    (path->string main-path)))
+      (close-output-port stdin)
+      (define out-str (port->string stdout))
+      (define err-str (port->string stderr))
+      (subprocess-wait proc)
+      (define code (subprocess-status proc))
+      (close-input-port stdout)
+      (close-input-port stderr)
+      (values code out-str err-str all-clj))
+    (lambda ()
+      (when (directory-exists? tmpdir)
+        (delete-directory/files tmpdir)))))
+
+(define-syntax-rule
+  (check-linked-clj-output name provider-ns provider-forms
+                           consumer-ns consumer-forms
+                           assertions-clj expected-out)
+  (test-case name
+    (define-values (code out err clj)
+      (run-linked-clj-test provider-ns provider-forms
+                           consumer-ns consumer-forms assertions-clj))
+    (check-equal? code 0
+                  (format "exit ~a\n--- stderr ---\n~a\n--- clj ---\n~a"
+                          code err clj))
     (check-equal? (string-trim out) expected-out
                   (format "wrong output\n--- clj ---\n~a" clj))))
 
@@ -419,6 +526,284 @@
      "(println (combine))"
      "30")
 
+   ;; --- structural binding constraints ------------------------------------
+
+   (check-clj-output "constraints guard params, rest, let, fn, and preserve ex-data"
+     (list
+      '(defn positive? [(value Int)] Bool (> value 0))
+      '(defn all-positive? [(values (Vec Int))] Bool
+         (and (vector? values) (every? positive? values)))
+      '(defn constrained-rest
+         [(head Int positive?) & (tail (Vec Int) all-positive?)]
+         Int
+         (+ head (count tail)))
+      '(defn constrained-let [(input Int)] Int
+         (let [(checked Int positive?) input] checked))
+      '(defn constrained-fn [(input Int)] Int
+         ((fn [(value Int positive?)] Int value) input))
+      ;; The parameter intentionally shadows the global predicate.  The
+      ;; constraint expression must be captured before the authored binder.
+      '(defn captures-global [(positive? Int positive?)] Int positive?)
+      ;; Sibling parameters are simultaneous too: an earlier authored binder
+      ;; must not capture the predicate owned by a later declaration.
+      '(defn captures-before-sibling
+         [(positive? Int) (value Int positive?)]
+         Int
+         value))
+     (string-append
+      "(println (constrained-rest 3 4 5))\n"
+      "(println (constrained-let 6))\n"
+      "(println (constrained-fn 7))\n"
+      "(println (captures-global 8))\n"
+      "(println (captures-before-sibling 100 9))\n"
+      "(let [error (try (constrained-rest -1) nil "
+      "                 (catch Exception error error))]\n"
+      "  (println (.getMessage error))\n"
+      "  (println (= {:binding \"head\" :value -1} (ex-data error))))\n"
+      "(doseq [call [(fn [] (constrained-rest 1 -2)) "
+      "              (fn [] (constrained-let -3)) "
+      "              (fn [] (constrained-fn -4))]]\n"
+      "  (try (call) (catch Exception error (println (.getMessage error)))))")
+     (string-append
+      "5\n6\n7\n8\n9\nBinding constraint failed: head\ntrue\n"
+      "Binding constraint failed: tail\n"
+      "Binding constraint failed: checked\n"
+      "Binding constraint failed: value"))
+
+   (check-clj-output "rest bindings are Vec at every callable boundary"
+     (list
+      `(defn ordinary-rest
+         ,(br '& '(values (Vec Int)))
+         Bool
+         (vector? values))
+      `(defn anonymous-rest [] Bool
+         ((fn ,(br '& '(values (Vec Int))) Bool (vector? values)) 1 2))
+      `(defn local-rest [] Bool
+         (letfn
+          ,(br (list 'collect
+                     (br '& '(values (Vec Int)))
+                     'Bool
+                     '(vector? values)))
+          (collect 1 2)))
+      (list
+       'defn
+       'multi-rest
+       (list (br) 'Bool 'true)
+       (list (br '& '(values (Vec Int))) 'Bool '(vector? values)))
+      `(defprotocol RestAware
+         (rest-vector
+          ,(br '(self RestAware) '& '(values (Vec Int)))
+          Bool))
+      (list 'defrecord 'RestBox (br '(label String)))
+      `(extend-type RestBox
+         RestAware
+         (rest-vector
+          ,(br '(self RestBox) '& '(values (Vec Int)))
+          Bool
+          (vector? values))))
+     (string-append
+      "(println [(ordinary-rest 1 2) (anonymous-rest) (local-rest) "
+      "(multi-rest 1 2) (rest-vector (->RestBox \"r\") 1 2)])")
+     "[true true true true true]")
+
+   (check-clj-output "constraint and incoming expressions each evaluate once"
+     (list
+      '(def factory-calls (Atom Int) (atom 0))
+      '(def predicate-calls (Atom Int) (atom 0))
+      '(def incoming-calls (Atom Int) (atom 0))
+      '(def phase (Atom Int) (atom 0))
+      '(defn increment [(value Int)] Int (+ value 1))
+      '(defn count-positive! [(value Int)] Bool
+         (do (swap! predicate-calls increment) (> value 0)))
+      `(defn make-predicate! [] ,(fn-ty '(Int) 'Bool)
+         (do (swap! factory-calls increment) count-positive!))
+      '(defn next-negative! [] Int
+         (do (swap! incoming-calls increment) -1))
+      '(defn ordered-value! [] Int (do (reset! phase 1) 2))
+      `(defn ordered-predicate! [] ,(fn-ty '(Int) 'Bool)
+         (if (= (deref phase) 1)
+             count-positive!
+             (fn [(value Int)] Bool false)))
+      '(defn generated! [(value Int (make-predicate!))] Int value)
+      '(defn guarded-rhs! [] Int
+         (let [(value Int count-positive!) (next-negative!)] value))
+      '(defn ordered! [] Int
+         (let [(value Int (ordered-predicate!)) (ordered-value!)] value)))
+     (string-append
+      "(println (generated! 2))\n"
+      "(try (generated! -1) (catch Exception _ nil))\n"
+      "(try (guarded-rhs!) (catch Exception _ nil))\n"
+      "(println (ordered!))\n"
+      "(println [@factory-calls @predicate-calls @incoming-calls])")
+     "2\n2\n[2 4 1]")
+
+   (check-clj-output "destructuring constraint sees the aggregate before projection"
+     (list
+      '(defn positive-point? [(point (HVec Int Int))] Bool
+         (and (> (first point) 0) (> (second point) 0)))
+      '(defn positive-map? [(value (Map Keyword Int))] Bool
+         (> (:x value) 0))
+      `(defn point-x
+         ,(br (list (br 'x 'y) '(HVec Int Int) 'positive-point?))
+         Int
+         x)
+      `(defn local-y [(point (HVec Int Int))] Int
+         (let ,(br (list (br 'x 'y)
+                         '(HVec Int Int)
+                         'positive-point?)
+                    'point)
+           y))
+      `(defn mapped-x
+         ,(br (list (mt ':keys (br 'x))
+                    '(Map Keyword Int)
+                    'positive-map?))
+         Int?
+         x))
+     (string-append
+      "(println (point-x [2 3])) (println (local-y [4 5])) "
+      "(println (mapped-x {:x 6}))\n"
+      "(doseq [call [(fn [] (point-x [-1 3])) "
+      "              (fn [] (local-y [4 -5])) "
+      "              (fn [] (mapped-x {:x -6}))]]\n"
+      "  (try (call) (catch Exception error (println (.getMessage error)))))")
+     (string-append
+      "2\n5\n6\nBinding constraint failed: [x y]\n"
+      "Binding constraint failed: [x y]\n"
+      "Binding constraint failed: {:keys [x]}"))
+
+   (check-clj-output "constraints guard multi-arity, letfn, for, loop/recur, and binding"
+     (list
+      '(defn positive? [(value Int)] Bool (> value 0))
+      `(defn choose
+         ,(list (br '(value Int positive?)) 'Int 'value)
+         ,(list (br '(value Int positive?) '(extra Int))
+                'Int '(+ value extra)))
+      '(defn nested [(value Int)] Int
+         (letfn [(accept [(item Int positive?)] Int item)]
+           (accept value)))
+      '(defn projected [(values (Vec Int))] (Vec Int)
+         (for [(value Int positive?) values] value))
+      '(defn projected-let [(values (Vec Int))] (Vec Int)
+         (for [value values :let [(checked Int positive?) value]] checked))
+      '(defn visit! [(values (Vec Int))] Nil
+         (doseq [(value Int positive?) values] (println value)))
+      '(defn countdown [(start Int)] Int
+         (loop [(value Int positive?) start]
+           (if (= value 1) value (recur (- value 1)))))
+      '(defn nested-tail [(start Int)] Int
+         (loop [(outer Int positive?) start]
+           (loop [inner outer]
+             (if (= inner 0) outer (recur (- inner 1))))))
+      '(def (#%meta :dynamic *limit*) Int 1)
+      '(defn limited [(value Int)] Int
+         (binding [(*limit* Int positive?) value] *limit*)))
+     (string-append
+      "(println (choose 2)) (println (choose 2 3)) (println (nested 4))\n"
+      "(println (vec (projected [5 6])))\n"
+      "(println (vec (projected-let [7 8])))\n"
+      "(visit! [9 10])\n"
+      "(println (countdown 3)) (println (nested-tail 3)) (println (limited 9))\n"
+      "(doseq [call [(fn [] (choose 0)) (fn [] (nested -1)) "
+      "              (fn [] (vec (projected [1 0]))) "
+      "              (fn [] (vec (projected-let [1 -1]))) "
+      "              (fn [] (visit! [1 0])) "
+      "              (fn [] (countdown 0)) (fn [] (limited -2))]]\n"
+      "  (try (call) (catch Exception error (println (.getMessage error)))))")
+     (string-append
+      "2\n5\n4\n[5 6]\n[7 8]\n9\n10\n1\n3\n9\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: item\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: checked\n"
+      "1\nBinding constraint failed: value\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: *limit*"))
+
+   (check-clj-output "record, union, and throwable fields guard all mutation surfaces"
+     (list
+      '(defn positive? [(value Int)] Bool (> value 0))
+      '(defrecord Score [(value Int positive?) (label String)])
+      `(defn change [(score Score) (value Int)] Score
+         (with score ,(br ':value 'value)))
+      `(defunion Shape (Circle ,(br '(radius Int positive?))))
+      `(defunion :throwable Failure (Bad ,(br '(code Int positive?)))))
+     (string-append
+      "(let [score (->Score 7 \"positional\") "
+      "      mapped (map->Score {:value 8 :label \"mapped\"})]\n"
+      "  (println (:value score)) (println (:value mapped))\n"
+      "  (println (:value (change score 9))))\n"
+      "(println (:radius (->Circle 10))) (println (:code (->Bad 11)))\n"
+      "(doseq [call [(fn [] (->Score 0 \"bad\")) "
+      "              (fn [] (map->Score {:value -1 :label \"bad\"})) "
+      "              (fn [] (change (->Score 1 \"ok\") 0)) "
+      "              (fn [] (->Circle 0)) (fn [] (->Bad -1))]]\n"
+      "  (try (call) (catch Exception error (println (.getMessage error)))))")
+     (string-append
+      "7\n8\n9\n10\n11\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: radius\n"
+      "Binding constraint failed: code"))
+
+   (check-clj-output "with validates its private candidate before downstream use"
+     (list
+      '(def target-calls (Atom Int) (atom 0))
+      '(def update-calls (Atom Int) (atom 0))
+      '(def predicate-calls (Atom Int) (atom 0))
+      '(def downstream-calls (Atom Int) (atom 0))
+      '(defn increment [(value Int)] Int (+ value 1))
+      '(defn positive! [(value Int)] Bool
+         (do (swap! predicate-calls increment) (> value 0)))
+      '(defrecord GuardedScore [(value Int positive!)])
+      '(def initial GuardedScore (->GuardedScore 1))
+      '(defn target! [] GuardedScore
+         (do (swap! target-calls increment) initial))
+      '(defn update! [(value Int)] Int
+         (do (swap! update-calls increment) value))
+      '(defn consume! [(score GuardedScore)] Int
+         (do (swap! downstream-calls increment) (:value score)))
+      `(defn update-and-consume! [(value Int)] Int
+         (consume!
+          (with (target!) ,(br ':value '(update! value))))))
+     (string-append
+      "(reset! target-calls 0) (reset! update-calls 0) "
+      "(reset! predicate-calls 0) (reset! downstream-calls 0)\n"
+      "(println (update-and-consume! 2))\n"
+      "(try (update-and-consume! 0) "
+      "     (catch Exception error (println (.getMessage error))))\n"
+      "(println [@target-calls @update-calls "
+      "          @predicate-calls @downstream-calls])")
+     (string-append
+      "2\nBinding constraint failed: value\n[2 2 2 1]"))
+
+   (check-clj-output "with-open validates before projection and still closes on failure"
+     (list
+      '(def captured (Atom java.net.Socket?) (atom nil))
+      '(defn reject-socket! [(value java.net.Socket)] Bool
+         (do (reset! captured value) false))
+      '(defn rejected-open [] Bool
+         (with-open
+          [(socket java.net.Socket reject-socket!) (java.net.Socket.)]
+          true)))
+     (string-append
+      "(try (rejected-open) "
+      "     (catch Exception error (println (.getMessage error))))\n"
+     "(println (.isClosed @captured))")
+     "Binding constraint failed: socket\ntrue")
+
+   (check-clj-output "dynamic binding captures every incoming value in pre-binding scope"
+     (list
+      '(defn positive? [(value Int)] Bool (> value 0))
+      '(def (#%meta :dynamic *first*) Int 1)
+      '(def (#%meta :dynamic *second*) Int 2)
+      '(defn snapshot [] (Vec Int)
+         (binding [(*first* Int positive?) 10
+                   (*second* Int positive?) *first*]
+           (vector *first* *second*))))
+     "(println (snapshot))"
+     "[10 1]")
+
    ;; --- nil -----------------------------------------------------------------
 
    (check-clj-output "nil? on nil"
@@ -575,6 +960,118 @@
                 (str "Hello, " (:name self)))))
      "(println (greet (->Person \"Alice\")))"
      "Hello, Alice")
+
+   (check-clj-output "protocol declaration and impl constraints guard distinct ABI layers"
+     (list
+      '(defn positive? [(value Int)] Bool (> value 0))
+      '(defn under-ten? [(value Int)] Bool (< value 10))
+      `(defprotocol Measurable
+         (measure ,(br '(self Measurable) '(declared Int positive?)) Int))
+      '(defrecord Meter [(label String)])
+      `(extend-type Meter
+         Measurable
+         (measure ,(br '(self Meter) '(candidate Int under-ten?)) Int
+           candidate)))
+     (string-append
+      "(let [meter (->Meter \"m\")]\n"
+      "  (println (measure meter 5))\n"
+      "  (doseq [call [(fn [] (measure meter -1)) "
+      "                (fn [] (measure meter 12))]]\n"
+      "    (try (call) "
+      "         (catch Exception error (println (.getMessage error))))))")
+     (string-append
+      "5\nBinding constraint failed: declared\n"
+      "Binding constraint failed: candidate"))
+
+   (check-clj-output "variadic protocol guards its aggregate rest argument"
+     (list
+      '(defn positive? [(value Int)] Bool (> value 0))
+      '(defn all-positive? [(values (Vec Int))] Bool
+         (and (vector? values) (every? positive? values)))
+      `(defprotocol Collectable
+         (collect ,(br '(self Collectable)
+                       '&
+                       '(values (Vec Int) all-positive?)) Int))
+      '(defrecord Bucket [(label String)])
+      `(extend-type Bucket
+         Collectable
+         (collect ,(br '(self Bucket) '& '(items (Vec Int))) Int
+           (count items))))
+     (string-append
+      "(let [bucket (->Bucket \"b\")]\n"
+      "  (println (collect bucket 1 2 3))\n"
+      "  (try (collect bucket 1 -2) "
+      "       (catch Exception error (println (.getMessage error)))))")
+     "3\nBinding constraint failed: values")
+
+   (check-linked-clj-output
+    "cross-module protocol keeps declaration and impl constraint layers"
+    'constraints.protocol
+    (list
+     '(defn positive? [(value Int)] Bool (> value 0))
+     `(defprotocol Measurable
+        (measure ,(br '(self Measurable) '(declared Int positive?)) Int)))
+    'constraints.protocol-impl
+    (list
+     '(require constraints.protocol :as p)
+     '(defn under-ten? [(value Int)] Bool (< value 10))
+     '(defrecord Meter [(label String)])
+     `(extend-type Meter
+        p/Measurable
+        (measure ,(br '(self Meter) '(candidate Int under-ten?)) Int
+          candidate)))
+    (string-append
+     "(require '[constraints.protocol :as p])\n"
+     "(require '[constraints.protocol-impl :as impl])\n"
+     "(let [meter (impl/->Meter \"m\")]\n"
+     "  (println (p/measure meter 5))\n"
+     "  (doseq [call [(fn [] (p/measure meter -1)) "
+     "                (fn [] (p/measure meter 12))]]\n"
+     "    (try (call) "
+     "         (catch Exception error (println (.getMessage error))))))")
+    (string-append
+     "5\nBinding constraint failed: declared\n"
+     "Binding constraint failed: candidate"))
+
+   (check-linked-clj-output
+    "cross-module with calls the provider-owned record validator"
+    'constraints.records
+    (list
+     '(defn positive? [(value Int)] Bool (> value 0))
+     '(defrecord Score [(value Int positive?) (label String)]))
+    'constraints.record-user
+    (list
+     '(require constraints.records :as records)
+     `(defn change [(score records/Score) (value Int)] records/Score
+        (with score ,(br ':value 'value))))
+    (string-append
+     "(require '[constraints.records :as records])\n"
+     "(require '[constraints.record-user :as user])\n"
+     "(let [score (records/->Score 7 \"ok\")]\n"
+     "  (println (:value (user/change score 8)))\n"
+     "  (try (user/change score -1) "
+     "       (catch Exception error (println (.getMessage error)))))")
+    "8\nBinding constraint failed: value")
+
+   (check-linked-clj-output
+    "referred record with calls the provider-owned record validator"
+    'constraints.referred-records
+    (list
+     '(defn positive? [(value Int)] Bool (> value 0))
+     '(defrecord Score [(value Int positive?) (label String)]))
+    'constraints.referred-record-user
+    (list
+     `(require constraints.referred-records :refer ,(br 'Score '->Score))
+     `(defn change [(score Score) (value Int)] Score
+        (with score ,(br ':value 'value))))
+    (string-append
+     "(require '[constraints.referred-records :refer [->Score]])\n"
+     "(require '[constraints.referred-record-user :as user])\n"
+     "(let [score (->Score 7 \"ok\")]\n"
+     "  (println (:value (user/change score 8)))\n"
+     "  (try (user/change score -1) "
+     "       (catch Exception error (println (.getMessage error)))))")
+    "8\nBinding constraint failed: value")
 
    (check-clj-output "defrecord + extend-type with multiple methods"
      (list `(defprotocol Shape

@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns mixed-binding-vector.test)
+
+;; Every parameter owns its optional type. Mixed vectors stay structural in
+;; either order; no neighboring entry supplies metadata to another binding.
+(defn typed-then-bare [(a Int) b] Int a)
+
+(defn bare-then-typed [a (b Int)] Int b)

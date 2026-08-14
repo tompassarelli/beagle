@@ -1,0 +1,10 @@
+#lang beagle/clj
+(ns fixtures.imports
+  (:import [java.nio.charset StandardCharsets]
+           [java.util.zip CRC32]))
+(define-mode strict)
+
+(def charset Any StandardCharsets/UTF_8)
+
+(defn fresh-crc [] Any
+  (CRC32.))

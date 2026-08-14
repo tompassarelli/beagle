@@ -27,8 +27,9 @@
 (define current-json-source-id (make-parameter #f))
 (define current-checked-projection? (make-parameter #f))
 (define current-json-effective-definition-types (make-parameter #f))
+(define current-json-semantic-contracts (make-parameter #f))
 
-(define CHECKED-PROGRAM-SCHEMA-VERSION 2)
+(define CHECKED-PROGRAM-SCHEMA-VERSION 3)
 
 (define (sha256-prefixed bytes)
   (string-append "sha256:"
@@ -106,12 +107,32 @@
     (hasheq 'key (symbol->string (car entry))
             'value (expr->json (cdr entry)))))
 
+(define (binding-contract->json owner constraint wire)
+  (if (not (current-checked-projection?))
+      wire
+      (let ([contract
+             (and (current-json-semantic-contracts)
+                  (hash-ref (current-json-semantic-contracts) owner #f))])
+        (when (and constraint
+                   (not (and (binding-constraint-contract? contract)
+                             (binding-constraint-contract-synchronous?
+                              contract))))
+          (error
+           'beagle-ast-json
+           "checked binding constraint lacks a positive synchronization contract: ~v"
+           constraint))
+        (hash-set wire 'constraintSynchronous (and constraint #t)))))
+
 (define (param->json p)
   (cond
     [(param? p)
-     (hasheq 'type "param"
-             'name (binding-target->json (param-name p))
-             'ann (type->json (param-type p)))]
+     (binding-contract->json
+      p
+      (param-constraint p)
+      (hasheq 'type "param"
+              'name (binding-target->json (param-name p))
+              'ann (type->json (param-type p))
+              'constraint (constraint->json (param-constraint p))))]
     [(map-destructure? p)
      (hasheq 'type "map-destructure"
              'keys (map symbol->string (map-destructure-keys p))
@@ -149,9 +170,34 @@
     [else (error 'beagle-ast-json "unsupported binding target: ~v" target)]))
 
 (define (binding->json b)
-  (hasheq 'name (binding-target->json (let-binding-name b))
-          'ann (type->json (let-binding-type b))
-          'value (expr->json (let-binding-value b))))
+  (binding-contract->json
+   b
+   (let-binding-constraint b)
+   (hasheq 'name (binding-target->json (let-binding-name b))
+           'ann (type->json (let-binding-type b))
+           'constraint (constraint->json (let-binding-constraint b))
+           'value (expr->json (let-binding-value b)))))
+
+(define (field->json field)
+  (binding-contract->json
+   field
+   (param-constraint field)
+   (hasheq 'name (symbol->string (param-name field))
+           'ann (type->json (param-type field))
+           'constraint (constraint->json (param-constraint field)))))
+
+(define (for-binding->json binding)
+  (binding-contract->json
+   binding
+   (for-binding-constraint binding)
+   (hasheq 'type "binding"
+           'name (binding-target->json (for-binding-name binding))
+           'ann (type->json (for-binding-type binding))
+           'constraint (constraint->json (for-binding-constraint binding))
+           'expr (expr->json (for-binding-expr binding)))))
+
+(define (constraint->json constraint)
+  (if constraint (expr->json constraint) 'null))
 
 (define (sym->js s)
   (if s (symbol->string s) 'null))
@@ -494,10 +540,7 @@
     [(record-form? e)
      (hasheq 'node "record"
              'name (symbol->string (record-form-name e))
-             'fields (map (lambda (f)
-                            (hasheq 'name (symbol->string (param-name f))
-                                    'ann (type->json (param-type f))))
-                          (record-form-fields e)))]
+             'fields (map field->json (record-form-fields e)))]
 
     [(quoted? e)
      (hasheq 'node "quoted" 'datum (datum->json (quoted-datum e)))]
@@ -522,10 +565,32 @@
              'args (map expr->json (static-call-args e)))]
 
     [(kw-access? e)
-     (hasheq 'node "kw-access"
-             'kw (symbol->string (kw-access-kw e))
-             'target (expr->json (kw-access-target e))
-             'default (and (kw-access-default e) (expr->json (kw-access-default e))))]
+     (define wire
+       (hasheq 'node "kw-access"
+               'kw (symbol->string (kw-access-kw e))
+               'target (expr->json (kw-access-target e))
+               'default
+               (and (kw-access-default e)
+                    (expr->json (kw-access-default e)))))
+     (if (not (current-checked-projection?))
+         wire
+         (let ([contract
+                (and (current-json-semantic-contracts)
+                     (hash-ref (current-json-semantic-contracts) e #f))])
+           (when (and contract (not (record-field-access-contract? contract)))
+             (error
+              'beagle-ast-json
+              "kw-access node has invalid checked record-field contract: ~v"
+              contract))
+           (hash-set
+            wire
+            'recordFieldAccess
+            (if contract
+                (hasheq
+                 'recordName
+                 (symbol->string
+                  (record-field-access-contract-record-name contract)))
+                'null))))]
 
     [(try-form? e)
      (hasheq 'node "try"
@@ -560,11 +625,7 @@
              'clauses (map (lambda (c)
                              (cond
                                [(for-binding? c)
-                                (hasheq 'type "binding"
-                                        'name (binding-target->json
-                                               (for-binding-name c))
-                                        'ann (type->json (for-binding-type c))
-                                        'expr (expr->json (for-binding-expr c)))]
+                                (for-binding->json c)]
                                [(for-when? c)
                                 (hasheq 'type "when" 'test (expr->json (for-when-test c)))]
                                [(for-let? c)
@@ -576,12 +637,40 @@
              'body (map expr->json (for-form-body e)))]
 
     [(with-form? e)
-     (hasheq 'node "with"
-             'target (expr->json (with-form-target e))
-             'updates (map (lambda (u)
-                             (hasheq 'field (symbol->string (with-update-field-kw u))
-                                     'value (expr->json (with-update-value u))))
-                           (with-form-updates e)))]
+     (define semantic-contracts (current-json-semantic-contracts))
+     (define contract
+       (and semantic-contracts (hash-ref semantic-contracts e #f)))
+     (when (and contract (not (record-update-contract? contract)))
+       (error 'beagle-ast-json
+              "with node has invalid checked record-update contract: ~v"
+              contract))
+     (define wire
+       (hasheq 'node "with"
+               'target (expr->json (with-form-target e))
+               'updates
+               (map (lambda (u)
+                      (hasheq
+                       'field (symbol->string (with-update-field-kw u))
+                       'value (expr->json (with-update-value u))))
+                    (with-form-updates e))))
+     (if (not (current-checked-projection?))
+         wire
+         (hash-set
+          wire
+          'recordUpdate
+          (if contract
+              (hasheq
+               'recordName
+               (symbol->string (record-update-contract-record-name contract))
+               'fieldOrder
+               (map symbol->string
+                    (record-update-contract-field-order contract))
+               'validator
+               (if (record-update-contract-validator-symbol contract)
+                   (symbol->string
+                    (record-update-contract-validator-symbol contract))
+                   'null))
+              'null)))]
 
     [(defenum-form? e)
      (hasheq 'node "defenum"
@@ -599,9 +688,7 @@
      (if mf
          (hash-set base 'member-fields
                    (for/hasheq ([(k v) (in-hash mf)])
-                     (values k
-                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p))
-                                                    'ann (type->json (param-type p)))) v))))
+                     (values k (map field->json v))))
          base)]
 
     [(deferror-form? e)
@@ -613,9 +700,7 @@
      (if mf
          (hash-set base 'member-fields
                    (for/hasheq ([(k v) (in-hash mf)])
-                     (values k
-                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p))
-                                                    'ann (type->json (param-type p)))) v))))
+                     (values k (map field->json v))))
          base)]
 
     [(defscalar-form? e)
@@ -708,11 +793,7 @@
              'clauses (map (lambda (c)
                              (cond
                                [(for-binding? c)
-                                (hasheq 'type "binding"
-                                        'name (binding-target->json
-                                               (for-binding-name c))
-                                        'ann (type->json (for-binding-type c))
-                                        'expr (expr->json (for-binding-expr c)))]
+                                (for-binding->json c)]
                                [(for-when? c)
                                 (hasheq 'type "when" 'test (expr->json (for-when-test c)))]
                                [(for-let? c)
@@ -956,6 +1037,10 @@
              (for/list ([method (in-list (protocol-form-methods e))])
                (hasheq 'name (symbol->string (protocol-method-name method))
                        'params (map param->json (protocol-method-params method))
+                       'rest (if (protocol-method-rest-param method)
+                                 (param->json
+                                  (protocol-method-rest-param method))
+                                 'null)
                        'ret (type->json (protocol-method-return-type method)))))]
 
     [(extend-type-form? e)
@@ -969,6 +1054,10 @@
                 (for/list ([method (in-list (type-impl-methods impl))])
                   (hasheq 'name (symbol->string (impl-method-name method))
                           'params (map param->json (impl-method-params method))
+                          'rest (if (impl-method-rest-param method)
+                                    (param->json
+                                     (impl-method-rest-param method))
+                                    'null)
                           'ret (type->json (impl-method-return-type method))
                           'body (map expr->json (impl-method-body method)))))))]
 
@@ -997,7 +1086,9 @@
     [else (error 'beagle-ast-json "unsupported match pattern: ~v" p)]))
 
 (define (program->json prog)
-  (parameterize ([current-json-src-table (program-src-table prog)])
+  (parameterize ([current-json-src-table (program-src-table prog)]
+                 [current-json-semantic-contracts
+                  (program-semantic-contracts prog)])
     (hasheq 'target (symbol->string (program-target prog))
             'namespace (symbol->string (program-namespace prog))
             'mode (symbol->string (program-mode prog))
@@ -1048,7 +1139,9 @@
                    [current-json-source-id source-id]
                    [current-checked-projection? #t]
                    [current-json-effective-definition-types
-                    effective-definition-types])
+                    effective-definition-types]
+                   [current-json-semantic-contracts
+                    (program-semantic-contracts prog)])
       (hasheq
        'kind "beagle.checked-program"
        'schemaVersion CHECKED-PROGRAM-SCHEMA-VERSION

@@ -1025,6 +1025,43 @@
 (check-fixture-ok "defscalar :where with dynamic arg passes (no compile-time check)"
   "defscalar-pred-dynamic.bclj")
 
+(check-ok "defscalar permits a nonnumeric primitive backing without :where"
+  '(defscalar Email String))
+
+(check-err/rx "defscalar numeric :where rejects a String backing"
+  #rx"predicate .* requires a numeric backing type; got String"
+  '(defscalar Email String :where (> 0)))
+
+(test-case "defscalar backing diagnostic points at the predicate declaration"
+  (define result
+    (with-handlers ([beagle-diagnostic? values])
+      (check-fixture "defscalar-pred-backing-invalid.bclj")
+      'no-error-raised))
+  (check-pred beagle-diagnostic? result)
+  (check-eq? (beagle-diagnostic-kind result)
+             'scalar-predicate-declaration)
+  (check-equal? (hash-ref (beagle-diagnostic-details result) 'error-code)
+                "E028")
+  (check-equal? (hash-ref (beagle-diagnostic-details result) 'error-line)
+                4))
+
+(check-ok "defscalar :where accepts a canonicalized numeric backing alias"
+  '(defscalar Percentage Long :where (>= 0) (not= 101)))
+
+(check-ok "defscalar equality accepts its matching literal"
+  '(defscalar Zero Int :where (= 0))
+  '(def zero Zero (->Zero 0)))
+
+(check-err/rx "defscalar equality rejects a nonmatching literal"
+  #rx"violates constraint \\(= 0\\)"
+  '(defscalar Zero Int :where (= 0))
+  '(def one Zero (->Zero 1)))
+
+(check-err/rx "defscalar inequality rejects its excluded literal"
+  #rx"violates constraint \\(not= 0\\)"
+  '(defscalar Nonzero Int :where (not= 0))
+  '(def zero Nonzero (->Nonzero 0)))
+
 ;; --- collection element type inference ---
 
 (check-fixture-ok "vec of records infers element type"

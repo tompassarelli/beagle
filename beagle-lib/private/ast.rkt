@@ -20,17 +20,23 @@
 (define (set-tagged? d)       (and (pair? d) (eq? (car d) ST)))
 (define (set-body d)          (cdr d))
 
-(define (unwrap-items d what)
+(define (bracket-items form what)
+  (define d (->datum form))
   (cond
     [(bracketed? d) (bracket-body d)]
-    [(list? d)      d]
-    [else (error 'beagle "expected ~a, got: ~v" what d)]))
+    ;; Tests and compiler-internal rewrites may supply an unlocated raw datum.
+    ;; It has no source delimiter to validate. Real reader syntax always keeps
+    ;; the #%brackets tag, so a located ordinary list is unambiguously `(...)`
+    ;; and is rejected below.
+    [(and (list? d)
+          (or (not (syntax? form))
+              (not (syntax-source form))))
+     d]
+    [else (error 'beagle "expected ~a in `[...]`, got: ~v" what d)]))
 
-(define (unwrap-stxs psubs d)
-  (cond
-    [(and psubs (bracketed? d)) (cdr psubs)]
-    [psubs psubs]
-    [else #f]))
+(define (bracket-stxs psubs d)
+  (and psubs
+       (if (bracketed? d) (cdr psubs) psubs)))
 
 ;; --- identifier safety -----------------------------------------------------
 (define unsafe-ident-rx #rx"[;'\"` \t\n\r(){}\\[\\]\\\\,]")
@@ -38,9 +44,11 @@
 (define (validate-identifier! sym [context "identifier"])
   (when (symbol? sym)
     (define s (symbol->string sym))
-    (when (string-prefix? s "$beagle$")
+    (when (for/or ([segment (in-list (string-split s "/"))])
+            (or (string-prefix? segment "$beagle$")
+                (string-prefix? segment "bgl____")))
       (error 'beagle
-             "~a '~a' uses the reserved compiler identifier prefix $beagle$"
+             "~a '~a' uses a reserved compiler identifier prefix"
              context s))
     (when (regexp-match? unsafe-ident-rx s)
       (error 'beagle
@@ -239,6 +247,30 @@
   (define table (program-effective-definition-types prog))
   (if table (hash-ref table name fallback) fallback))
 
+;; Callable synchronization effects are inferred transitively without
+;; rewriting authored function signatures. Module-interface publication and
+;; binding-constraint proof both read this program-identity-scoped authority.
+(define PROGRAM->CALLABLE-SYNCHRONOUS (make-weak-hasheq))
+(define (register-program-callable-synchronous! prog table)
+  (hash-set! PROGRAM->CALLABLE-SYNCHRONOUS prog table))
+(define (program-callable-synchronous-table prog)
+  (hash-ref PROGRAM->CALLABLE-SYNCHRONOUS prog #f))
+(define (program-callable-synchronous? prog name [fallback #f])
+  (define table (program-callable-synchronous-table prog))
+  (if table (hash-ref table name fallback) fallback))
+
+;; Distinct from executing a callable synchronously: this proves that invoking
+;; it returns a callable whose own invocation is synchronous on every path.
+;; Binding constraints need this effect when their predicate is call-produced.
+(define PROGRAM->RETURNS-SYNCHRONOUS-CALLABLE (make-weak-hasheq))
+(define (register-program-returns-synchronous-callable! prog table)
+  (hash-set! PROGRAM->RETURNS-SYNCHRONOUS-CALLABLE prog table))
+(define (program-returns-synchronous-callable-table prog)
+  (hash-ref PROGRAM->RETURNS-SYNCHRONOUS-CALLABLE prog #f))
+(define (program-returns-synchronous-callable? prog name [fallback #f])
+  (define table (program-returns-synchronous-callable-table prog))
+  (if table (hash-ref table name fallback) fallback))
+
 ;; --- symbol predicates -----------------------------------------------------
 (define (dot-method-sym? sym)
   (and (symbol? sym)
@@ -327,7 +359,7 @@
 (struct loop-form  (bindings body)                          #:transparent)
 (struct recur-form (args)                                   #:transparent)
 (struct for-form   (clauses body)                           #:transparent)
-(struct for-binding (name expr type)                        #:transparent)  ; G7: type = #f | a declared binding type
+(struct for-binding (name expr type constraint)             #:transparent)
 (struct for-when   (test)                                   #:transparent)
 (struct record-form (name fields)                           #:transparent)
 (struct method-call (method-name target args)               #:transparent)
@@ -343,7 +375,7 @@
 (struct case-clause (value body)                           #:transparent)
 (struct new-form    (class-name args)                      #:transparent)
 (struct protocol-form (name methods)                       #:transparent)
-(struct protocol-method (name params return-type)          #:transparent)
+(struct protocol-method (name params rest-param return-type) #:transparent)
 (struct defmulti-form (name dispatch-fn)                   #:transparent)
 (struct defmethod-form (name dispatch-val params body)     #:transparent)
 
@@ -486,10 +518,11 @@
     [else form]))
 
 ;; --- Shared utility structs ------------------------------------------------
-(struct param       (name type)                             #:transparent)
+(struct param       (name type constraint)                  #:transparent)
 ;; NAME is the parsed binding form, not necessarily an identifier.  Simple
 ;; binders store a symbol; typed destructuring stores a map-destructure or
-;; seq-destructure and TYPE describes the incoming aggregate value.
+;; seq-destructure and TYPE describes the incoming aggregate value. CONSTRAINT
+;; is #f or a predicate expression applied to that aggregate before projection.
 ;; or-defaults: alist of (key-sym . default-AST) from {:keys [...] :or {...}};
 ;; '() when absent. keys/as-name as before. seq-destructure names may contain
 ;; nested map-destructure/seq-destructure structs (Clojure nested binding).
@@ -550,8 +583,8 @@
 ;; for claim; downstream consumers must not pattern-match on one.
 
 (struct type-impl    (protocol-name methods)                 #:transparent)
-(struct impl-method  (name params return-type body)          #:transparent)
-(struct let-binding (name type value)                       #:transparent)
+(struct impl-method  (name params rest-param return-type body) #:transparent)
+(struct let-binding (name type constraint value)            #:transparent)
 (struct require-entry (ns alias refer) #:transparent)
 
 ;; --- program structure -----------------------------------------------------
@@ -563,6 +596,19 @@
 (struct allocation-contract (region failure) #:transparent)
 (struct error-contract (error-type payload-layout mode) #:transparent)
 (struct error-payload-key-contract (keyword) #:transparent)
+(struct binding-constraint-contract (synchronous? provider) #:transparent)
+;; Checked representation fact for `(:field target)`. RECORD-NAME is the
+;; nominal record or record-union type whose fields use Beagle's target-name
+;; mangling. Emitters must not infer this from target syntax or symbol spelling.
+(struct record-field-access-contract (record-name) #:transparent)
+;; Checked metadata for a typed `(with record ...)` update. RECORD-NAME is the
+;; exact nominal identity accepted by the checker. VALIDATOR-SYMBOL is #f for
+;; an explicitly unconstrained record or the conceptual provider-owned
+;; `$beagle$record$Name$validate` binding (qualified at imported use sites).
+;; FIELD-ORDER is the declaration-order keyword list. Emitters require this
+;; contract rather than guessing ownership from an interned symbol target.
+(struct record-update-contract (record-name validator-symbol field-order)
+  #:transparent)
 
 (struct program (mode
                  namespace
@@ -599,7 +645,7 @@
 (provide
  ;; Tag utilities
  bracketed? bracket-body map-tagged? map-body set-tagged? set-body
- unwrap-items unwrap-stxs
+ bracket-items bracket-stxs
  ;; Identifier safety
  validate-identifier! unsafe-ident-rx validate-module-path! valid-module-path-rx
  ;; Source locations
@@ -616,6 +662,12 @@
  register-program-effective-definition-types!
  program-effective-definition-types
  program-effective-definition-type
+ register-program-callable-synchronous!
+ program-callable-synchronous-table
+ program-callable-synchronous?
+ register-program-returns-synchronous-callable!
+ program-returns-synchronous-callable-table
+ program-returns-synchronous-callable?
  ;; Symbol predicates
  dot-method-sym? static-method-sym? dynamic-var-sym? constructor-sym? keyword-sym?
  ;; Parse injection
@@ -667,6 +719,9 @@
  (struct-out allocation-contract)
  (struct-out error-contract)
  (struct-out error-payload-key-contract)
+ (struct-out binding-constraint-contract)
+ (struct-out record-field-access-contract)
+ (struct-out record-update-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

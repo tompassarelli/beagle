@@ -5,7 +5,7 @@
 ;; here proves, against the Racket compiler:
 ;;   - (get m :k) / (get m :k default) canonicalize to kw-access — emit as
 ;;     (:k m) / (:k m default), identical to keyword-head access
-;;   - bare-vector multi-arity defn canonicalizes to wrapped arity clauses
+;;   - multi-arity defn uses one complete list form per arity clause
 ;;   - doseq :let (+ :when) clauses survive the chain (ast-json for-let)
 ;;   - target-case parses per-target branches; emit picks the clj branch
 ;;   - ^:dynamic def + `binding` round-trip (def emits the ^:dynamic tag;
@@ -23,9 +23,10 @@
 (defn kw-get-default [(m Any)] Any
   (get m :count 0))
 
-;; bare-vector multi-arity (no wrapping parens around the clauses)
-(defn arity-sum [(a Int)] a
-  [(a Int) (b Int)] (+ a b))
+;; each arity is one complete declaration form
+(defn arity-sum
+  ([(a Int)] Int a)
+  ([(a Int) (b Int)] Int (+ a b)))
 
 (defn sum-doubled! [(xs (Vec Int))] Int
   (let [total (atom 0)]

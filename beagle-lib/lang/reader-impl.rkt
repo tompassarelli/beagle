@@ -217,10 +217,10 @@
        result)]
     [(and (char? next) (char=? next #\{))
      (read-char port)
-     (define items (read-until-close port #\}))
+     (define items (read-until-close port #\} src))
      (define result (cons '#%set items))
      (if src
-       (datum->syntax #f result (vector src line col pos #f))
+       (datum->syntax #f result (vector src line col pos (container-span port pos)))
        result)]
     ;; #(...) anonymous fn shorthand → (fn [%1 ...] body)
     [(and (char? next) (char=? next #\())
@@ -306,6 +306,18 @@
        (define item (if src (read-syntax src port) (read port)))
        (loop (cons item acc))])))
 
+;; Reader-macro callbacks receive POS at the opening delimiter.  Once
+;; read-until-close has consumed the matching close, port-next-location is the
+;; first position after the complete container.  Recording that distance keeps
+;; delimiter syntax exact (including comments and newlines) instead of leaving
+;; container spans unknown.
+(define (container-span port pos)
+  (define-values (_line _col end-pos) (port-next-location port))
+  (and (exact-positive-integer? pos)
+       (exact-positive-integer? end-pos)
+       (>= end-pos pos)
+       (- end-pos pos)))
+
 (define (skip-whitespace-and-comments port)
   (let loop ()
     (define c (peek-char port))
@@ -328,14 +340,14 @@
   (define items (read-until-close port #\] src))
   (define result (cons '#%brackets items))
   (if src
-    (datum->syntax #f result (vector src line col pos #f))
+    (datum->syntax #f result (vector src line col pos (container-span port pos)))
     result))
 
 (define (curly-reader ch port src line col pos)
-  (define items (read-until-close port #\}))
+  (define items (read-until-close port #\} src))
   (define result (cons '#%map items))
   (if src
-    (datum->syntax #f result (vector src line col pos #f))
+    (datum->syntax #f result (vector src line col pos (container-span port pos)))
     result))
 
 ;; Quote-prefix reader. `'X` reads as `(quote X)` for any next datum X:

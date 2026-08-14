@@ -289,7 +289,7 @@
 
 (test-case "fields: retired flat fields are refused by the canonical parser"
   (check-exn
-   #rx"use \\[\\(name Type\\) \\(name2 Type2\\) \\.\\.\\.\\]"
+   #rx"use \\[\\(name Type\\) \\(name2 Type2 validator\\) \\.\\.\\.\\]"
    (lambda ()
      (fixture-query-output
       RETIRED-FLAT-FIXTURE

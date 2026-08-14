@@ -1,0 +1,10 @@
+#lang beagle/clj
+(ns fixtures.alias-owner)
+(define-mode strict)
+
+(defrecord Box [(value String)])
+
+(defalias StoreValue (Dyn String Int Box))
+
+(defn store [(value StoreValue)] StoreValue
+  value)

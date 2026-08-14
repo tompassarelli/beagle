@@ -26,10 +26,12 @@ compiler, not an optional native path from `.bclj`. Fram stays Beagle source in
 both cases.
 
 Types exist here for a specific job: making authoring, diagnostics, and
-automated repair reliable. They check at compile time and erase before emit. The
-point isn't rejection for its own sake — it's to give an authoring loop exact
-facts: *what* kind of mistake happened, *where* in the source, after *which*
-canonicalization, against *which* target.
+automated repair reliable. Static type information checks at compile time and
+erases before emit. An explicitly authored binding constraint is different: it
+is an ordinary predicate value and emits a local runtime guard. The point isn't
+rejection for its own sake — it's to give an authoring loop exact facts: *what*
+kind of mistake happened, *where* in the source, after *which* canonicalization,
+against *which* target.
 
 ## Documentation
 
@@ -89,24 +91,37 @@ path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 
 ## One canonical source shape
 
-A typed parameter is `(binding-form Type)`; the type annotates the entire
-binding operation. A symbol is the simplest binding form, while sequential and
-associative destructuring keep their ordinary Clojure shape:
+The outer `[...]` is only the collection of bindings. Each entry owns its own
+type and optional constraint:
+
+```text
+binding := symbol
+         | (binding-form Type)
+         | (binding-form Type constraint)
+```
+
+A bare symbol requests inference. In a typed entry, `binding-form` may be a
+symbol or an ordinary Clojure sequential or associative destructuring form; the
+type annotates the entire binding operation:
 
 ```clojure
-[x y]                                  ; inferred bindings
-[(x Int) (y String)]                   ; typed names
-[([x y] (HVec Float Float)) options]   ; typed destructure + inferred name
+[a]                                    ; one inferred binding
+[(a Point)]                            ; one typed binding
+[a b]                                  ; two inferred bindings
+[(a Point) (b Point)]                  ; two typed bindings
+[a (b Point)]                          ; mixed: a inferred, b typed
+[([x y] (HVec Float Float)) options]   ; typed destructure + inferred symbol
 [({:keys [host port]} Config)]         ; typed map destructure
 ```
 
-Bare simple binders request inference. A bare destructuring form in a strict
-typed signature is rejected because there is no aggregate type to project;
-wrap it with that type. Explicit `(value Any)` remains available for a
-deliberately dynamic boundary; omission does not silently mean `Any`. Typed and
-bare bindings may mix in one vector. The nesting is semantic structure, not
-visual decoration. Executable signatures have a mandatory positional return
-type, so no annotation punctuation is needed:
+Each outer entry is interpreted independently; adjacent tokens are never
+repartitioned into a declaration. A bare destructuring form in a strict typed
+signature is rejected because there is no aggregate type to project; wrap the
+pattern and aggregate type in one form. Explicit `(value Any)` remains
+available for a deliberately dynamic boundary; omission does not silently mean
+`Any`. The nesting is semantic structure, not visual decoration. Executable
+signatures have a mandatory positional return type, so no annotation
+punctuation is needed:
 
 ```clojure
 (defrecord Point [(x Float) (y Float)])
@@ -117,6 +132,50 @@ type, so no annotation punctuation is needed:
 (defn point-x [({:keys [x y]} Point)] Float
   x)
 ```
+
+The optional third element is a statically known, synchronous unary predicate
+of type `[T -> Bool]`, where `T` is the declared binding type. Its signature may
+not contain `Any`, take extra/rest arguments, return a non-`Bool`, or perform
+asynchronous work. Call-produced predicates are accepted only when the callee
+publishes an explicit positive returned-callable synchronization proof;
+executing the factory synchronously is not sufficient:
+
+```clojure
+(defn positive? [(value Int)] Bool (> value 0))
+
+(defn add-positive [(left Int positive?) (right Int positive?)] Int
+  (+ left right))
+```
+
+At runtime the predicate receives the complete incoming value before the
+binding target is installed or a destructuring pattern projects any names. A
+false result raises a binding-constraint error; the body does not run. This
+ordering also makes `([x y] Point2 valid-point?)` validate the `Point2` value,
+not either projected coordinate.
+
+Fields and other declaration DSLs obey the same structural ownership rule. A
+complete constrained record field is `(id String character-id-wire?)`, so this
+is valid:
+
+```clojure
+(defrecord Character
+  [(id String character-id-wire?)
+   (name String character-name-wire?)])
+```
+
+The flattened `[(id String) character-id-wire?]` is rejected in a field DSL;
+the compiler never reconstructs declarations from adjacent entries. A DSL with
+more field-local metadata likewise keeps its validator, encoder, and decoder in
+the one declaration form that owns them, for example
+`(name Type value-validator wire-validator encoder decoder)` or
+`(name encoder-expression validator)`.
+
+Procedural macros reject a particular caller declaration with
+`(syntax-error-at collection index message ...)`, normally from
+`map-indexed`. The index is zero-based over logical list/vector elements (the
+vector reader tag is excluded), and `collection` must be the original macro
+input collection or one of its `rest` tails. This preserves source identity so
+the diagnostic reports the stray form's own line, column, and span.
 
 Layout is driven only by the 80-column width. When the complete owner and
 signature fit, they stay together. If the owner makes the line overflow but
@@ -139,6 +198,18 @@ line:
    (coord Coordinate)
    (world WorldState)
    (options DistanceOptions)]
+  Float
+  ...)
+```
+
+If one declaration is itself too wide, it expands internally without alignment
+whitespace pretending its parts are separate bindings:
+
+```clojure
+(defn validated-coordinate
+  [(coordinate
+    InternationalCoordinateReferenceSystem
+    coordinate-inside-supported-world-boundaries?)]
   Float
   ...)
 ```
@@ -251,8 +322,10 @@ on an empty exemption list — [`docs/self-hosting.md`](docs/self-hosting.md).
 
 ## What it isn't
 
-- **Not a schema language, not a validation runtime** — types check at compile
-  time, then erase.
+- **Not a schema language or general validation framework** — static type
+  information erases, and only an explicitly authored binding constraint emits
+  its local predicate guard. There is no schema/spec registry or conforming
+  runtime.
 - **Not a new Lisp in spirit** — a strict typed subset of Clojure; divergence
   from Clojure must serve the type system or a backend, or it dies.
 - **Not a universal idiomatic-native transpiler** — hosted emitters exist where

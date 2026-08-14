@@ -21,7 +21,7 @@
          (only-in "../lang/reader-impl.rkt" beagle-readtable)
          (only-in "../nix/lang/reader-impl.rkt" beagle-nix-readtable))
 
-(define CHECKED-BUNDLE-SCHEMA-VERSION 2)
+(define CHECKED-BUNDLE-SCHEMA-VERSION 3)
 (define REQUEST-KIND "beagle.checked-bundle.request")
 (define RESPONSE-KIND "beagle.checked-bundle")
 (define ALLOWED-AUTHORITIES '("package" "trusted"))

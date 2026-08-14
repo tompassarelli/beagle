@@ -6,7 +6,8 @@
 ;; The reader wraps `` `X ``, `,X`, and `,@X` as `(quasiquote X)`,
 ;; `(unquote X)`, and `(unquote-splicing X)` for that evaluator.
 
-(require racket/list
+(require racket/file
+         racket/list
          rackunit
          (for-syntax racket/base)
          beagle/private/parse
@@ -20,6 +21,17 @@
 (define (parse-prog/source source-path . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)
                  #:source-path source-path))
+
+(define (parse-source-text source)
+  (define tmp (make-temporary-file "beagle-macro-source-~a.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file tmp
+        (lambda (out) (display source out))
+        #:exists 'truncate)
+      (parse-program (read-beagle-syntax tmp) #:source-path tmp))
+    (lambda () (delete-file tmp))))
 
 (define (br . xs) (cons BRACKET-TAG xs))
 
@@ -184,19 +196,428 @@
   (check-eq? (car body) '+)
   (check-eq? (cadr body) binder-name))
 
-(test-case "defmacro: typed local hygiene preserves the annotation type"
+(test-case "defmacro: typed local hygiene preserves type and constraint metadata"
   (define reg (make-macro-registry))
   (register-macro!
    reg 'typed-local 'defmacro '()
    (list 'quasiquote
-         (list 'let (br (list 'shifted 'Int) 1)
+         (list 'let (br (list 'shifted 'Int 'positive?) 1)
                (list '+ 'shifted 1))))
   (define expanded (expand-fully reg '(typed-local)))
   (define bindings (cadr expanded))
   (define binder-name (car (cadr bindings)))
   (check-false (eq? binder-name 'shifted))
   (check-eq? (cadr (cadr bindings)) 'Int)
+  (check-eq? (caddr (cadr bindings)) 'positive?)
   (check-eq? (cadr (caddr expanded)) binder-name))
+
+(test-case "defmacro: constrained fn hygiene renames binding slot zero only"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'constrained-fn 'defmacro '()
+   (list 'quasiquote
+         (list 'fn
+               (br (list 'item 'Int 'positive?))
+               'Int
+               'item)))
+  (define expanded (expand-fully reg '(constrained-fn)))
+  (define parameter (cadr (cadr expanded)))
+  (define binder-name (car parameter))
+  (check-false (eq? binder-name 'item))
+  (check-eq? (cadr parameter) 'Int)
+  (check-eq? (caddr parameter) 'positive?)
+  (check-eq? (cadddr expanded) binder-name))
+
+(test-case "defmacro: let hygiene starts after its own incoming expression"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-let 'defmacro '()
+   (list 'quasiquote
+         (list 'let (br 'x 'x) 'x)))
+  (define expanded (expand-fully reg '(scoped-let)))
+  (define bindings (cadr expanded))
+  (define binder-name (cadr bindings))
+  (check-false (eq? binder-name 'x))
+  (check-eq? (caddr bindings) 'x)
+  (check-eq? (caddr expanded) binder-name))
+
+(test-case "defmacro: nested shadowing gives each binder its lexical scope"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'nested-shadow 'defmacro '()
+   (list 'quasiquote
+         (list 'let (br 'x 1)
+               (list 'let (br 'x 'x) 'x)
+               'x)))
+  (define expanded (expand-fully reg '(nested-shadow)))
+  (define outer-name (cadr (cadr expanded)))
+  (define inner (caddr expanded))
+  (define inner-bindings (cadr inner))
+  (define inner-name (cadr inner-bindings))
+  (check-false (eq? outer-name 'x))
+  (check-false (eq? inner-name 'x))
+  (check-false (eq? outer-name inner-name))
+  (check-eq? (caddr inner-bindings) outer-name)
+  (check-eq? (caddr inner) inner-name)
+  (check-eq? (cadddr expanded) outer-name))
+
+(test-case "defmacro: typed parameter metadata stays in pre-binding scope"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-parameter 'defmacro '()
+   (list 'quasiquote
+         (list 'fn (br (list 'x 'Int 'x)) 'Bool 'x)))
+  (define expanded (expand-fully reg '(scoped-parameter)))
+  (define parameter (cadr (cadr expanded)))
+  (define binder-name (car parameter))
+  (check-false (eq? binder-name 'x))
+  (check-eq? (cadr parameter) 'Int)
+  (check-eq? (caddr parameter) 'x)
+  (check-eq? (caddr expanded) 'Bool)
+  (check-eq? (cadddr expanded) binder-name))
+
+(test-case "defmacro: lexical binders do not suppress definition-site aliases"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-aliases 'defmacro '()
+   (list 'quasiquote
+         (list 'fn
+               (br (list 'x 'Int 'predicate))
+               'Bool
+               (list 'helper 'x))))
+  (define aliases (make-hasheq))
+  (define expanded
+    (parameterize ([current-module-def-names
+                    (hasheq 'predicate #t 'helper #t)]
+                   [current-hygiene-alias-table aliases])
+      (expand-fully reg '(scoped-aliases))))
+  (define parameter (cadr (cadr expanded)))
+  (define binder-name (car parameter))
+  (check-eq? (caddr parameter) 'predicate__hyg)
+  (check-eq? (car (cadddr expanded)) 'helper__hyg)
+  (check-eq? (cadr (cadddr expanded)) binder-name)
+  (check-eq? (hash-ref aliases 'predicate) 'predicate__hyg)
+  (check-eq? (hash-ref aliases 'helper) 'helper__hyg))
+
+(test-case "defmacro: same-spelling RHS remains a free definition-site reference"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-definition 'defmacro '()
+   (list 'quasiquote (list 'let (br 'x 'x) 'x)))
+  (define aliases (make-hasheq))
+  (define expanded
+    (parameterize ([current-module-def-names (hasheq 'x #t)]
+                   [current-hygiene-alias-table aliases])
+      (expand-fully reg '(scoped-definition))))
+  (define binder-name (cadr (cadr expanded)))
+  (check-eq? (caddr (cadr expanded)) 'x__hyg)
+  (check-eq? (caddr expanded) binder-name)
+  (check-eq? (hash-ref aliases 'x) 'x__hyg))
+
+(test-case "imported macro qualification follows lexical declaration scope"
+  (define qualified
+    (qualify-imported-macro-template
+     (list 'quasiquote
+           (list 'let (br 'x 'x)
+                 (list 'helper 'x)))
+     '()
+     (hasheq 'x #t 'helper #t)
+     'provider))
+  (check-equal?
+   qualified
+   (list 'quasiquote
+         (list 'let (br 'x 'provider/x)
+               (list 'provider/helper 'x)))))
+
+(test-case "imported macro qualification resolves structural type slots at definition site"
+  (define qualified
+    (qualify-imported-macro-template
+     (list 'quasiquote
+           (list 'fn
+                 (br (list 'x 'Box))
+                 (list 'Result 'Box)
+                 'x))
+     '()
+     (hasheq 'Box #t 'Result #t)
+     'provider))
+  (check-equal?
+   qualified
+   (list 'quasiquote
+         (list 'fn
+               (br (list 'x 'provider/Box))
+               (list 'provider/Result 'provider/Box)
+               'x))))
+
+(test-case "metadata-wrapped macro definitions freshen their real name and parameters"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'define-helper 'defmacro '(value)
+   (list 'quasiquote
+         (list 'defn
+               (list '#%meta ':private 'helper)
+               (br (list 'tmp 'Int))
+               'Int
+               (list '+ 'tmp (list 'unquote 'value)))))
+  (define expanded (expand-fully reg '(define-helper tmp)))
+  (define metadata-name (cadr expanded))
+  (define generated-name (caddr metadata-name))
+  (define generated-param (car (cadr (caddr expanded))))
+  (define generated-body (list-ref expanded 4))
+  (check-equal? (take metadata-name 2) '(#%meta :private))
+  (check-not-eq? generated-name 'helper)
+  (check-not-eq? generated-param 'tmp)
+  (check-eq? (cadr generated-body) generated-param)
+  (check-eq? (caddr generated-body) 'tmp))
+
+(test-case "defmacro: sequential binding forms expose only prior declarations"
+  (for ([head (in-list '(loop with-open))])
+    (define reg (make-macro-registry))
+    (register-macro!
+     reg 'scoped-sequence 'defmacro '()
+     (list 'quasiquote
+           (list head (br 'x 'x 'y 'x) 'y)))
+    (define expanded (expand-fully reg '(scoped-sequence)))
+    (define bindings (cadr expanded))
+    (define x-name (cadr bindings))
+    (define y-name (list-ref bindings 3))
+    (check-false (eq? x-name 'x))
+    (check-false (eq? y-name 'y))
+    (check-eq? (caddr bindings) 'x)
+    (check-eq? (list-ref bindings 4) x-name)
+    (check-eq? (caddr expanded) y-name)))
+
+(test-case "defmacro: dynamic binding names remain existing Var references"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-dynamic 'defmacro '()
+   (list 'quasiquote
+         (list 'binding
+               (br (list '*limit* 'Int '*limit*) '*limit*)
+               '*limit*)))
+  (define aliases (make-hasheq))
+  (define expanded
+    (parameterize ([current-module-def-names (hasheq '*limit* #t)]
+                   [current-hygiene-alias-table aliases])
+      (expand-fully reg '(scoped-dynamic))))
+  (define declaration (cadr (cadr expanded)))
+  (check-eq? (car declaration) '*limit*)
+  (check-eq? (cadr declaration) 'Int)
+  (check-eq? (caddr declaration) '*limit*)
+  (check-eq? (caddr (cadr expanded)) '*limit*)
+  (check-eq? (caddr expanded) '*limit*)
+  (check-false (hash-has-key? aliases '*limit*)))
+
+(test-case "defmacro: comprehension and conditional declarations are scoped"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-for 'defmacro '()
+   (list 'quasiquote
+         (list 'for
+               (br (list 'x 'Int 'x)
+                   'values
+                   ':let (br (list 'y 'Int 'y) 'x)
+                   ':when 'y)
+               'y)))
+  (define expanded-for (expand-fully reg '(scoped-for)))
+  (define clauses (cadr expanded-for))
+  (define x-declaration (cadr clauses))
+  (define x-name (car x-declaration))
+  (define y-bindings (list-ref clauses 4))
+  (define y-declaration (cadr y-bindings))
+  (define y-name (car y-declaration))
+  (check-eq? (caddr x-declaration) 'x)
+  (check-eq? (caddr y-declaration) 'y)
+  (check-eq? (caddr y-bindings) x-name)
+  (check-eq? (list-ref clauses 6) y-name)
+  (check-eq? (caddr expanded-for) y-name)
+
+  (register-macro!
+   reg 'scoped-if 'defmacro '()
+   (list 'quasiquote
+         (list 'if-let (br (list 'x 'Int 'x) 'x) 'x 'x)))
+  (define expanded-if (expand-fully reg '(scoped-if)))
+  (define conditional-bindings (cadr expanded-if))
+  (define conditional-declaration (cadr conditional-bindings))
+  (define conditional-name (car conditional-declaration))
+  (check-eq? (caddr conditional-declaration) 'x)
+  (check-eq? (caddr conditional-bindings) 'x)
+  (check-eq? (caddr expanded-if) conditional-name)
+  (check-eq? (cadddr expanded-if) 'x))
+
+(test-case "defmacro: letfn, catch, rescue, and as-> bind only their bodies"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'scoped-letfn 'defmacro '()
+   (list 'quasiquote
+         (list 'letfn
+               (br (list 'left (br (list 'x 'Int 'x)) 'Int
+                         (list 'right 'x))
+                   (list 'right (br (list 'y 'Int 'y)) 'Int 'y))
+               (list 'left 1))))
+  (define expanded-letfn (expand-fully reg '(scoped-letfn)))
+  (define functions (cdr (cadr expanded-letfn)))
+  (define left (car functions))
+  (define right (cadr functions))
+  (define left-name (car left))
+  (define right-name (car right))
+  (define left-parameter (cadr (cadr left)))
+  (define right-parameter (cadr (cadr right)))
+  (check-false (eq? left-name 'left))
+  (check-false (eq? right-name 'right))
+  (check-eq? (caddr left-parameter) 'x)
+  (check-eq? (caddr right-parameter) 'y)
+  (check-eq? (car (cadddr left)) right-name)
+  (check-eq? (car (caddr expanded-letfn)) left-name)
+
+  (register-macro!
+   reg 'scoped-errors 'defmacro '()
+   (list 'quasiquote
+         (list 'try
+               (list 'as-> 'source 'value (list 'use 'value))
+               (list 'catch (list 'error 'Exception)
+                     (list 'rescue 'fallback 'cause
+                           (list 'handle 'error 'cause))))))
+  (define expanded-errors (expand-fully reg '(scoped-errors)))
+  (define as-form (cadr expanded-errors))
+  (define as-name (caddr as-form))
+  (define catch-form (caddr expanded-errors))
+  (define catch-name (car (cadr catch-form)))
+  (define rescue-form (caddr catch-form))
+  (define rescue-name (caddr rescue-form))
+  (check-eq? (cadr as-form) 'source)
+  (check-eq? (cadr (cadddr as-form)) as-name)
+  (check-eq? (cadr (cadr catch-form)) 'Exception)
+  (check-eq? (cadr rescue-form) 'fallback)
+  (check-eq? (cadr (cadddr rescue-form)) catch-name)
+  (check-eq? (caddr (cadddr rescue-form)) rescue-name))
+
+(test-case "defmacro: declaration shape is local and flattened metadata is stray"
+  (define reg (make-macro-registry))
+  (define declaration-name-body
+    `(map
+      (fn ,(br 'field) Any
+        (if (list? field)
+            (if (= (count field) 2)
+                (syntax-name field)
+                (if (= (count field) 3)
+                    (syntax-name field)
+                    (error "Invalid field declaration: " field
+                           "\n\nEach field must be one complete form:\n  (name Type validator)")))
+            (error "Invalid field declaration: " field
+                   "\n\nEach field must be one complete form:\n  (name Type validator)")))
+      fields))
+  (register-macro! reg 'field-names 'defmacro '(fields) declaration-name-body)
+  (check-equal?
+   (expand-macro
+    reg
+    'field-names
+    (list (br '(id String valid-id?) '(name String valid-name?))))
+   '(id name))
+  (check-exn
+   (lambda (e)
+     (and (exn:fail? e)
+          (regexp-match? #rx"Invalid field declaration: valid-id-wire\\?"
+                         (exn-message e))
+          (regexp-match? #rx"Each field must be one complete form"
+                         (exn-message e))))
+   (lambda ()
+     (expand-macro
+      reg
+      'field-names
+      (list (br '(id String) 'valid-id-wire?))))))
+
+(test-case "defmacro: syntax-error-at points at the stray caller declaration"
+  (define source
+    (string-append
+     "(defmacro field-names [fields]\n"
+     "  (map-indexed\n"
+     "   (fn [i field] Any\n"
+     "     (if (list? field)\n"
+     "         (syntax-name field)\n"
+     "         (syntax-error-at fields i\n"
+     "           \"Invalid field declaration: \" field\n"
+     "           \"\\n\\nEach field must be one complete form:\\n  (name Type validator)\")))\n"
+     "   fields))\n"
+     "(field-names [(id String)\n"
+     "              valid-id-wire?])\n"))
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-eq? (beagle-parse-error-kind e)
+                     'macro-expansion-parse-error)
+          (check-regexp-match #rx"Invalid field declaration: valid-id-wire\\?"
+                              (exn-message e))
+          (define details (beagle-parse-error-details e))
+          (check-equal? (hash-ref details 'macro-name) "field-names")
+          (check-equal? (hash-ref details 'stray-form) "valid-id-wire?")
+          (check-equal? (hash-ref details 'error-line) 11)
+          (check-equal? (hash-ref details 'error-col) 14)
+          (check-equal? (hash-ref details 'error-span) 14))])
+    (parse-source-text source)
+    (fail "source-local macro rejection unexpectedly parsed")))
+
+(test-case "defmacro: syntax-error-at targets a complete wrong-arity list declaration"
+  (define source
+    (string-append
+     "(defmacro field-names [fields]\n"
+     "  (map-indexed\n"
+     "   (fn [i field] Any\n"
+     "     (if (list? field)\n"
+     "         (if (= (count field) 2)\n"
+     "             (syntax-name field)\n"
+     "             (if (= (count field) 3)\n"
+     "                 (syntax-name field)\n"
+     "                 (syntax-error-at fields i\n"
+     "                   \"Invalid field declaration: \" field)))\n"
+     "         (syntax-error-at fields i\n"
+     "           \"Invalid field declaration: \" field)))\n"
+     "   fields))\n"
+     "(field-names [(id String valid-id? extra)])\n"))
+  (with-handlers
+      ([beagle-parse-error?
+        (lambda (e)
+          (check-regexp-match
+           #rx"Invalid field declaration: \\(id String valid-id\\? extra\\)"
+           (exn-message e))
+          (define details (beagle-parse-error-details e))
+          (check-equal? (hash-ref details 'stray-form)
+                        "(id String valid-id? extra)")
+          (check-equal? (hash-ref details 'error-line) 14)
+          (check-equal? (hash-ref details 'error-col) 14)
+          (check-equal? (hash-ref details 'error-pos) 443)
+          (check-equal? (hash-ref details 'error-span) 27))])
+    (parse-source-text source)
+    (fail "wrong-arity source-local macro declaration unexpectedly parsed")))
+
+(test-case "defmacro: source-local collection diagnostics preserve delimiters and spans"
+  (for ([case (in-list
+               (list (list "[id String]" #rx"\\[id String\\]" 11)
+                     (list "{:keys [id]}" #rx"\\{:keys \\[id\\]\\}" 12)))])
+    (define form (car case))
+    (define form-rx (cadr case))
+    (define expected-span (caddr case))
+    (define source
+      (string-append
+       "(defmacro reject-first [fields]\n"
+       "  (syntax-error-at fields 0 \"Invalid field declaration: \" (first fields)))\n"
+       "(reject-first [" form "])\n"))
+    (define expected-pos
+      (add1 (caar (regexp-match-positions form-rx source))))
+    (with-handlers
+        ([beagle-parse-error?
+          (lambda (e)
+            (check-regexp-match
+             (regexp (string-append "Invalid field declaration: "
+                                    (regexp-quote form)))
+             (exn-message e))
+            (define details (beagle-parse-error-details e))
+            (check-equal? (hash-ref details 'stray-form) form)
+            (check-equal? (hash-ref details 'error-line) 3)
+            (check-equal? (hash-ref details 'error-col) 15)
+            (check-equal? (hash-ref details 'error-pos) expected-pos)
+            (check-equal? (hash-ref details 'error-span) expected-span))])
+      (parse-source-text source)
+      (fail "source-local collection rejection unexpectedly parsed"))))
 
 ;; --- (f) arity error ------------------------------------------------------
 

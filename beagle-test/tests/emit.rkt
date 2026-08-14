@@ -42,6 +42,20 @@
   (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
+(test-case "each mixed parameter entry lowers independently"
+  (define out (compile '(defn select [a (b String)] Any b)))
+  (check-true (matches? #rx"\\(defn select \\[a \\^String b\\]" out)))
+
+(test-case "unchecked constraint emission fails closed without a sync proof"
+  (check-exn
+   (lambda (failure)
+     (and (exn:fail? failure)
+          (regexp-match?
+           #rx"binding constraint for value lacks.*positive synchronization proof"
+           (exn-message failure))))
+   (lambda ()
+     (compile '(defn accept [(value Int positive?)] Int value)))))
+
 (test-case "let emits with brackets"
   (define out (compile '(def y (let [x 1 y 2] (+ x y)))))
   (check-true (matches? #rx"\\(let \\[" out)))
@@ -365,7 +379,9 @@
   (define out (compile `(defprotocol Greetable
                           (greet ,(br (list 'self 'Any)) String))))
   (check-true (matches? #rx"defprotocol Greetable" out))
-  (check-true (matches? #rx"\\(greet \\[self\\]\\)" out)))
+  (check-true
+   (matches? #rx"\\(\\$beagle\\$protocol\\$Greetable\\$greet \\[" out))
+  (check-true (matches? #rx"\\(defn greet \\[" out)))
 
 ;; defmulti / defmethod removed (zero corpus usage).
 
@@ -424,7 +440,8 @@
                           (show ,(br (list 'self 'String)) String (str self)))))
   (check-true (matches? #rx"\\(extend-type String" out))
   (check-true (matches? #rx"Showable" out))
-  (check-true (matches? #rx"\\(show \\[self\\]" out)))
+  (check-true
+   (matches? #rx"\\(\\$beagle\\$protocol\\$Showable\\$show \\[self\\]" out)))
 
 ;; --- threading macros: surface reconstruction at emit ------------------------
 ;;
@@ -563,20 +580,28 @@
 
 (test-case "defn with & rest emits Clojure varargs"
   ;; Int/Float params emit bare (their ^long/^double primitive hints are
-  ;; dropped — babashka ignores them, GraalVM AOT rejects them); the rest
-  ;; param is heterogeneous and emits bare too (see emit-params-with-rest).
+  ;; dropped — babashka ignores them, GraalVM AOT rejects them). The host rest
+  ;; seq stays compiler-owned and is normalized to Beagle's aggregate Vec.
   (define out (compile '(defn my-sum [(x Int) & (rest (Vec Int))] Int
                           (+ x (reduce + 0 rest)))))
-  (check-true (matches? #rx"\\(defn my-sum \\[x & rest\\]" out)))
+  (check-true
+   (matches? #rx"\\(defn my-sum \\[x & \\$beagle\\$rest\\$host\\]" out))
+  (check-true
+   (matches? #rx"\\(let \\[rest \\(vec \\$beagle\\$rest\\$host\\)\\]" out)))
 
 (test-case "fn with & rest emits varargs"
   (define out (compile '(def f (fn [(a Int) & (b (Vec Int))] Int (+ a 1)))))
-  (check-true (matches? #rx"\\(fn \\[a & b\\]" out)))
+  (check-true (matches? #rx"\\(fn \\[a & \\$beagle\\$rest\\$host\\]" out))
+  (check-true
+   (matches? #rx"\\(let \\[b \\(vec \\$beagle\\$rest\\$host\\)\\]" out)))
 
 (test-case "defn with only & rest and no fixed params"
   (define out (compile '(defn log-it [& (msgs (Vec String))] String
                           (clojure.string/join ", " msgs))))
-  (check-true (matches? #rx"log-it \\[& msgs\\]" out)))
+  (check-true
+   (matches? #rx"log-it \\[& \\$beagle\\$rest\\$host\\]" out))
+  (check-true
+   (matches? #rx"\\(let \\[msgs \\(vec \\$beagle\\$rest\\$host\\)\\]" out)))
 
 ;; --- metadata emission -------------------------------------------------------
 
@@ -651,7 +676,10 @@
                           (letfn [(f [(x Int) & (rest (Vec Int))] Int x)]
                             (f 1 2 3)))))
   (check-true (matches? #rx"\\(letfn \\[" out))
-  (check-true (matches? #rx"\\(f \\[x & rest\\]" out)))
+  (check-true
+   (matches? #rx"\\(f \\[x & \\$beagle\\$rest\\$host\\]" out))
+  (check-true
+   (matches? #rx"\\(let \\[rest \\(vec \\$beagle\\$rest\\$host\\)\\]" out)))
 
 ;; --- check/rescue ------------------------------------------------------------
 

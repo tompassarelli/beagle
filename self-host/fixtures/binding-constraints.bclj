@@ -1,0 +1,37 @@
+#lang beagle/clj
+(ns selfhost.fixtures.binding-constraints)
+(define-mode strict)
+
+(defn positive? [(value Int)] Bool
+  (> value 0))
+
+(defn nonempty? [(values (Vec Int))] Bool
+  (> (count values) 0))
+
+(defrecord Account [(id Int positive?)])
+
+(defscalar Percentage Int :where (>= 0) (<= 100))
+
+(defn constrained-param [(value Int positive?) & (more (Vec Int) nonempty?)] Int
+  value)
+
+(defn constrained-let [(value Int)] Int
+  (let [(checked Int positive?) value]
+    checked))
+
+(defn constrained-for [(values (Vec Int))] (Vec Int)
+  (for [(value Int positive?) values]
+    value))
+
+(defn update-account [(account Account) (id Int positive?)] Account
+  (with account [:id id]))
+
+(defprotocol Measurable
+  (measure
+    [(self Account) (value Int positive?) & (more (Vec Int) nonempty?)] Bool))
+
+(extend-type Account
+  Measurable
+  (measure
+    [(self Account) (value Int positive?) & (more (Vec Int) nonempty?)] Bool
+    true))

@@ -5,7 +5,7 @@
 ;; the shapes the parser accepts.
 
 (require rackunit
-         (only-in beagle/private/tags BRACKET-TAG)
+         (only-in beagle/private/tags BRACKET-TAG MAP-TAG)
          beagle/private/macro-eval)
 
 (define (ev expr) (macro-eval expr (make-macro-env)))
@@ -68,17 +68,98 @@
   (check-equal? (ev '(vec (make-field (quote x) (quote Float))))
                 (list BRACKET-TAG '(x Float))))
 
+(test-case "binding constructors preserve an optional local constraint"
+  (check-equal?
+   (ev '(list (make-param (quote x) (quote Int) (quote positive?))
+              (make-field (quote id) (quote String) (quote valid-id?))
+              (ann (quote point) (quote Point) (quote in-world?))))
+   '((x Int positive?) (id String valid-id?) (point Point in-world?)))
+  (check-exn #rx"make-param expected 2 or 3 argument"
+             (lambda () (ev '(make-param (quote x))))))
+
 (test-case "vec leaves ordinary values alone"
   (check-equal? (ev '(vec 1 2 3)) (list BRACKET-TAG 1 2 3)))
 
 (test-case "vec does not splice an ordinary list"
   (check-equal? (ev '(vec (list 1 2 3))) (list BRACKET-TAG '(1 2 3))))
 
-(test-case "syntax-name/type read one typed binder from its raw bracketed form"
+(test-case "syntax accessors read a constrained binder from its raw bracketed form"
   (check-equal?
-   (ev-let `((binding . (,BRACKET-TAG (value sim/Player))))
-           '(list (syntax-name binding) (syntax-type binding)))
-   '(value sim/Player)))
+   (ev-let `((binding . (,BRACKET-TAG (value sim/Player valid-player?))))
+           '(list (syntax-name binding)
+                  (syntax-type binding)
+                  (syntax-constraint binding)))
+   '(value sim/Player valid-player?))
+  (check-equal?
+   (ev '(syntax-constraint (quote (value sim/Player))))
+   '()))
+
+(test-case "syntax accessors preserve a destructuring binding form"
+  (define sequence-binding
+    (list (list BRACKET-TAG 'x 'y) 'Point 'valid-point?))
+  (define map-binding
+    (list (list MAP-TAG ':keys (list BRACKET-TAG 'x 'y))
+          'Point
+          'valid-point?))
+  (for ([binding (in-list (list sequence-binding map-binding))])
+    (check-equal? (ev `(syntax-name (quote ,binding))) (car binding))
+    (check-eq? (ev `(syntax-type (quote ,binding))) 'Point)
+    (check-eq? (ev `(syntax-constraint (quote ,binding))) 'valid-point?)))
+
+(test-case "syntax accessors never flatten a bare binding vector"
+  (define sequence-binding (list BRACKET-TAG 'x 'Point))
+  (check-equal? (ev `(syntax-name (quote ,sequence-binding))) sequence-binding)
+  (check-exn #rx"expected a \\(binding-form Type"
+             (lambda () (ev `(syntax-type (quote ,sequence-binding)))))
+  (check-eq?
+   (ev `(syntax-type (quote (,BRACKET-TAG (x Point)))))
+   'Point))
+
+(test-case "list? and vector? preserve source delimiter meaning"
+  (check-true (ev '(list? (quote (id String valid-id?)))))
+  (check-false (ev '(vector? (quote (id String valid-id?)))))
+  (check-false (ev '(list? (vec (quote id) (quote String)))))
+  (check-true (ev '(vector? (vec (quote id) (quote String)))))
+  (check-false (ev `(list? (quote (,BRACKET-TAG id String))))))
+
+(test-case "syntax-error-at preserves the original collection, index, and form"
+  (define fields (list BRACKET-TAG '(id String) 'valid-id-wire?))
+  (with-handlers
+      ([exn:fail:macro-source?
+        (lambda (e)
+          (check-eq? (exn:fail:macro-source-collection e) fields)
+          (check-equal? (exn:fail:macro-source-index e) 1)
+          (check-eq? (exn:fail:macro-source-form e) 'valid-id-wire?)
+          (check-regexp-match #rx"Invalid field declaration"
+                              (exn-message e)))])
+    (macro-eval
+     `(syntax-error-at (quote ,fields) 1 "Invalid field declaration")
+     (make-macro-env))
+    (fail "syntax-error-at unexpectedly returned")))
+
+(test-case "syntax-error-at renders tagged declarations with source delimiters"
+  (define fields
+    (list BRACKET-TAG
+          (list BRACKET-TAG 'id 'String)
+          (list MAP-TAG ':keys (list BRACKET-TAG 'name))))
+  (with-handlers
+      ([exn:fail:macro-source?
+        (lambda (e)
+          (check-equal? (exn-message e)
+                        "Invalid field declaration: [id String]")
+          (check-equal? (exn:fail:macro-source-form e)
+                        (list BRACKET-TAG 'id 'String)))])
+    (macro-eval
+     `(syntax-error-at (quote ,fields) 0
+                       "Invalid field declaration: "
+                       (first (quote ,fields)))
+     (make-macro-env))
+    (fail "syntax-error-at unexpectedly returned")))
+
+(test-case "macro fn parameters accept a constraint without binding its metadata"
+  (check-equal?
+   (ev '((fn [(value Int positive?)] Any value) 7))
+   7))
 
 (test-case "make-defn with a structural param vector builds a typed signature"
   (check-equal? (ev '(make-defn (quote f)

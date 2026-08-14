@@ -124,6 +124,10 @@ digest_line() {
   digest_line "$source_file" 'fram:src/fram/rt_core.bclj'
   digest_line "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
     'beagle:native-core/validation/slice-bodies/ast-facts.clj'
+  digest_line "$repo/native-core/bin/source-facts.clj" \
+    'beagle:native-core/bin/source-facts.clj'
+  digest_line "$repo/native-core/bin/checked-program.clj" \
+    'beagle:native-core/bin/checked-program.clj'
   digest_line "$here/inventory.clj" \
     'beagle:native-core/validation/slice-rt-core/inventory.clj'
   digest_line "$here/frontier.clj" \

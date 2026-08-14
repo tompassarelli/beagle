@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns fixtures.invalid.fn-explicit-return-body)
+(define-mode strict)
+
+(def invalid (Fn [String] Int)
+  (fn [(value String)] Int
+    value))

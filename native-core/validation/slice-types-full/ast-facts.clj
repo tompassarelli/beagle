@@ -6,6 +6,37 @@
 ;; pass downstream are native.slice / native.lower.
 (require '[cheshire.core :as json])
 
+(load-file
+  (.getCanonicalPath
+    (clojure.java.io/file (.getParentFile (clojure.java.io/file *file*))
+      "../../bin/checked-program.clj")))
+(require '[native.checked-program :as checked-program])
+
+(defn constrained-binding [value]
+  (cond
+    (map? value)
+    (or (when (and (contains? value "constraint")
+                   (some? (get value "constraint")))
+          value)
+        (some constrained-binding (vals value)))
+    (sequential? value) (some constrained-binding value)
+    :else nil))
+
+(defn require-unconstrained-checked-program! [ast source-path]
+  (checked-program/require-checked-program!
+    ast source-path "slice-types-full projection")
+  ;; This specialized projector does not own the canonical constraint facts.
+  ;; Reject them before projection so no binding predicate can disappear.
+  (when-let [binding (constrained-binding ast)]
+    (throw
+      (ex-info
+        (str "slice-types-full projection does not implement typed-binding "
+             "constraints; refusing to discard constraint metadata: " source-path)
+        {:source-path source-path
+         :binding-node (get binding "node")
+         :binding-name (get binding "name")})))
+  ast)
+
 (def counter (atom 0))
 (defn nid [] (str (swap! counter inc)))
 (def rows (atom (transient [])))
@@ -53,7 +84,8 @@
     n))
 
 (let [[in out] *command-line-args*
-      ast (json/parse-string (slurp in))]
+      ast (require-unconstrained-checked-program!
+            (json/parse-string (slurp in)) in)]
   (doseq [f (get ast "forms")]
     (when (#{"record" "defn"} (get f "node")) (emit-form f)))
   (row! "0" "form-kind" "t" "module-root")

@@ -32,8 +32,38 @@ if [[ -z "$clang_bin" ]]; then
   exit 1
 fi
 
+"$repo/bin/beagle" ast "$here/sequence.bgl" >"$scratch/sequence.checked.json"
+bb -e '
+  (require (quote [cheshire.core :as json]))
+  (load-file (nth *command-line-args* 2))
+  (let [ast (json/parse-string (slurp (first *command-line-args*)))
+        empty-do {"node" "do" "body" []}
+        empty-doseq {"node" "doseq" "clauses" [] "body" []}
+        x-ref {"node" "ref" "name" "x"}
+        forms (mapv
+                (fn [form]
+                  (case (get form "name")
+                    "do-empty" (assoc form "body" [empty-do])
+                    "do-doseq" (assoc form "body"
+                                 [{"node" "do"
+                                   "body" [empty-doseq x-ref]}])
+                    form))
+                (get ast "forms"))]
+    (assert (= "beagle.checked-program" (get ast "kind")))
+    (assert (= 3 (get ast "schemaVersion")))
+    ;; The source stays compiler-valid. These two AST replacements are explicit
+    ;; lowering refusals that cannot be authored because the checker rejects
+    ;; them earlier; re-attest the mutated checked payload before projection.
+    (assert (every? #(contains? % "constraint")
+              (mapcat #(get % "params") forms)))
+    (spit (second *command-line-args*)
+      (json/generate-string
+        (native.checked-program/with-projection-digest
+          (assoc ast "forms" forms)))))' \
+  "$scratch/sequence.checked.json" "$scratch/sequence.ast.json" \
+  "$repo/native-core/bin/checked-program.clj"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$here/sequence.ast.json=beagle:native-core/validation/slice-do-sequence/sequence.ast.json" \
+  --input "$scratch/sequence.ast.json=beagle:native-core/validation/slice-do-sequence/sequence.bgl" \
   --output "$scratch/sequence.facts"
 
 "$repo/bin/beagle-build-all" \
@@ -68,7 +98,7 @@ bb -cp "$scratch/out" -e "
 (spit \"$scratch/report.txt\"
   (native.body-slice/emit-slice! \"$scratch/sequence.facts\"
     \"native.do-sequence-validation\"
-    \"beagle:native-core/validation/slice-do-sequence/sequence.ast.json\"
+    \"beagle:native-core/validation/slice-do-sequence/sequence.bgl\"
     \"$scratch\" \"native-do-sequence-v0\" \"$abi\"))"
 
 report="$scratch/report.txt"

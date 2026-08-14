@@ -12,7 +12,11 @@ affordance_source="$here/affordance_fixture.bgl"
 polymorphic_source="$here/polymorphic_fixture.bgl"
 variadic_source="$here/variadic_fixture.bgl"
 multi_source="$here/multi_fixture.bgl"
+constraint_source="$here/constraint_fixture.bgl"
 ast="$scratch/fixture.ast.json"
+constraint_ast="$scratch/constraint.ast.json"
+tampered_constraint_ast="$scratch/tampered-constraint.ast.json"
+schema_v2_ast="$scratch/schema-v2.ast.json"
 affordance_ast="$scratch/affordance.ast.json"
 facts="$scratch/fixture.facts"
 mismatch_ast="$scratch/mismatch.ast.json"
@@ -21,6 +25,83 @@ report="$scratch/affordance.json"
 
 "$repo/bin/beagle" check --agent "$source_file"
 "$repo/bin/beagle" ast "$source_file" >"$ast"
+
+"$repo/bin/beagle" check --agent "$constraint_source"
+"$repo/bin/beagle" ast "$constraint_source" >"$constraint_ast"
+bb -e '
+  (require (quote [cheshire.core :as json]))
+  (let [ast (json/parse-string (slurp (first *command-line-args*)))
+        tampered
+        (update ast "forms"
+          (fn [forms]
+            (mapv
+              (fn [form]
+                (if (= "constrained" (get form "name"))
+                  (assoc-in form ["params" 0 "constraint"] nil)
+                  form))
+              forms)))]
+    (spit (second *command-line-args*) (json/generate-string tampered)))' \
+  "$constraint_ast" "$tampered_constraint_ast"
+if bb "$repo/native-core/bin/source-facts.clj" \
+    --input "$tampered_constraint_ast=native-core/validation/structured-params/constraint_fixture.bgl" \
+    --output "$scratch/tampered-constraint.facts" --include-defs \
+    >"$scratch/tampered-constraint.stdout" \
+    2>"$scratch/tampered-constraint.stderr"; then
+  echo "drive.sh: tampered checked-program projection crossed the Native boundary" >&2
+  exit 1
+fi
+rg -F 'projectionSha256 does not match its canonical payload' \
+  "$scratch/tampered-constraint.stderr"
+bb -e '
+  (require (quote [cheshire.core :as json]))
+  (load-file (second *command-line-args*))
+  (let [ast (json/parse-string (slurp (first *command-line-args*)))]
+    (spit (nth *command-line-args* 2)
+      (json/generate-string
+        (native.checked-program/with-projection-digest
+          (assoc ast "schemaVersion" 2)))))' \
+  "$constraint_ast" "$repo/native-core/bin/checked-program.clj" "$schema_v2_ast"
+if bb "$repo/native-core/bin/source-facts.clj" \
+    --input "$schema_v2_ast=native-core/validation/structured-params/constraint_fixture.bgl" \
+    --output "$scratch/schema-v2.facts" --include-defs \
+    >"$scratch/schema-v2.stdout" 2>"$scratch/schema-v2.stderr"; then
+  echo "drive.sh: checked-program schema v2 unexpectedly crossed the Native boundary" >&2
+  exit 1
+fi
+rg -F 'requires checked-program schemaVersion 3, got 2' "$scratch/schema-v2.stderr"
+bb "$repo/native-core/bin/source-facts.clj" \
+  --input "$constraint_ast=native-core/validation/structured-params/constraint_fixture.bgl" \
+  --output "$scratch/constraint.facts" --include-defs
+rg -q $'\tconstraint\tn\t' "$scratch/constraint.facts"
+
+bb -e '
+  (let [rows (map #(clojure.string/split % #"\t")
+                  (clojure.string/split-lines (slurp (first *command-line-args*))))
+        objects (into {} (map (fn [[s p _ o]] [[s p] o]) rows))
+        constraint-owners (keep (fn [[s p k o]]
+                                  (when (and (= p "constraint") (= k "n"))
+                                    [s o]))
+                                rows)
+        owner-kinds (frequencies
+                      (map (fn [[owner _]]
+                             (get objects [owner "form-kind"]))
+                           constraint-owners))]
+    (assert (= {"param" 10
+                "binding" 2
+                "for-clause" 1
+                "doseq-clause" 1}
+               owner-kinds))
+    (doseq [kind ["arity-clause" "unsupported-letfn" "fn"]]
+      (assert (some (fn [[[subject predicate] object]]
+                      (and (= predicate "form-kind") (= object kind)))
+                    objects)))
+    (let [constraint-owner (first constraint-owners)]
+      (assert constraint-owner)
+      (let [[_ constraint] constraint-owner]
+        (assert (= "ref" (get objects [constraint "form-kind"])))
+        (assert (= "positive?" (get objects [constraint "name"]))))))' \
+  "$scratch/constraint.facts"
+[[ "$(rg -c $'\tconstraint\tn\t' "$scratch/constraint.facts")" -eq 14 ]]
 
 bb -e '
   (require (quote [cheshire.core :as json]))
@@ -76,6 +157,7 @@ bb -e '
 
 bb -e '
   (require (quote [cheshire.core :as json]))
+  (load-file (nth *command-line-args* 2))
   (let [ast (json/parse-string (slurp (first *command-line-args*)))
         malformed
         (update ast "forms"
@@ -86,8 +168,10 @@ bb -e '
                   (assoc-in form ["effectiveType" "params"] [])
                   form))
               forms)))]
-    (spit (second *command-line-args*) (json/generate-string malformed)))' \
-  "$ast" "$mismatch_ast"
+    (spit (second *command-line-args*)
+      (json/generate-string
+        (native.checked-program/with-projection-digest malformed))))' \
+  "$ast" "$mismatch_ast" "$repo/native-core/bin/checked-program.clj"
 bb "$repo/native-core/bin/source-facts.clj" \
   --input "$mismatch_ast=native-core/validation/structured-params/fixture.bgl" \
   --output "$mismatch_facts" --include-defs
@@ -131,6 +215,11 @@ for refusal in polymorphic variadic multi; do
     echo "drive.sh: ${refusal} Native ABI unexpectedly lowered" >&2
     exit 1
   fi
+  if [[ ! -f "$output/source.facts" ]]; then
+    sed -n '1,200p' "$scratch/${refusal}.log" >&2
+    echo "drive.sh: ${refusal} failed before Native source projection" >&2
+    exit 1
+  fi
 done
 
 compiled_candidates=("$BEAGLE_CORE_BUILD_CACHE"/*/compiled)
@@ -166,5 +255,7 @@ diagnostic_codes "$scratch/multi-artifacts/source.facts" \
   | rg -Fx 'LOWER-MULTI-ARITY-FUNCTION-ABI'
 diagnostic_codes "$mismatch_facts" \
   | rg -Fx 'LOWER-EFFECTIVE-PARAMETER-COUNT'
+diagnostic_codes "$scratch/constraint.facts" \
+  | rg -Fx 'LOWER-BINDING-CONSTRAINT'
 
 echo "drive.sh: effective signatures, recursive source facts, one-slot aggregates, and named ABI refusals PASS"

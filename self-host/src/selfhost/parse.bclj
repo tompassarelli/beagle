@@ -9,7 +9,7 @@
 ;; Input: vector of top-level datums (selfhost.reader encoding).
 ;; Output: program AST matching beagle-lib/private/ast-json.rkt exactly.
 ;;
-;; MODULE RESOLUTION — CLOSED. `import-module-surface` (below) is the port of
+;; MODULE RESOLUTION — CLOSED. `import-module-surface!` (below) is the port of
 ;; parse.rkt import-module-types!'s reg! calls: given a required module's RAW
 ;; datums + the import prefix (alias / last ns segment) + optional :refer list,
 ;; it returns the alias-qualified externs the importer sees — declare-extern,
@@ -153,7 +153,7 @@
 
 ;; --- forward-reference cells ----------------------------------------------------
 ;; bb/SCI resolves defn bodies eagerly, and emit-clj has no `declare`, so the
-;; parser's mutual recursion (parse-type <-> parse-fn-type-items, parse-expr! <->
+;; parser's mutual recursion (parse-type! <-> parse-fn-type-items, parse-expr! <->
 ;; parse-list-form! and every form helper) routes through atom cells wired by
 ;; top-level reset! at the end of the module. Computed calls ((f) x) don't emit
 ;; on the clj target — `apply` carries the deref'd fn as a value instead.
@@ -310,14 +310,22 @@
 (def CLJ-ALIASES (Map String String)
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
+(def SCALAR-BACKING-PRIMITIVES Any
+  #{"String" "Int" "Float" "Bool" "Keyword" "Symbol" "Nil" "Any" "Regex"
+    "NixType" "U8" "U16" "U32" "U64" "I8" "I16" "I32" "F32"})
+
+(def SCALAR-PREDICATE-OPS Any #{">=" "<=" ">" "<" "=" "not="})
+
 ;; user parametric-union names mapped to their exact declared arity
 (def USER-PARAMETRIC-ARITIES Any (atom {}))
 
 ;; One-shot import context installed by the IO-owning driver before the full
 ;; parse. parse-program! consumes and clears it immediately, keeping ordinary
 ;; parses isolated while making imported constructors available at every
-;; annotation's normal parse-type boundary.
+;; annotation's normal parse-type! boundary.
 (def PRELOADED-PARAMETRIC-ARITIES Any (atom {}))
+
+(def PRELOADED-TYPE-ALIASES Any (atom {}))
 
 (def TYPE-ALIASES Any (atom {}))
 
@@ -346,7 +354,7 @@
       (make-fn-type (mapv parse-type* items) nil (parse-type* ret)))))
 
 ;; Convert prim types whose name is a forall var into type-vars. The oracle
-;; parse-type consults current-type-vars while parsing the forall body; this
+;; parse-type! consults current-type-vars while parsing the forall body; this
 ;; checker parses bottom-up, so we var-ize the parsed body afterwards. Without
 ;; this, `T` inside a forall body parses as a nominal prim and never binds.
 (defn varize-type [(t Any) (vars Any)] Any
@@ -404,7 +412,7 @@
             " requires at least one type parameter; use (defunion "
             display-name " ...) for a non-parametric union"))))
 
-(defn parse-type [(t Any)] Any
+(defn parse-type! [(t Any)] Any
   (cond
     (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG))
     (type-error! (if (has-item? (subvec t 1) "->")
@@ -417,19 +425,28 @@
         (type-error! "function type requires exactly (Fn [ParamType ...] ReturnType)")))
     (and (vector? t) (= (count t) 3) (= (nth t 0) "forall"))
     (let [vars-form (nth t 1) raw-vars (if (and (vector? vars-form) (> (count vars-form) 0) (= (nth vars-form 0) BRACKET-TAG)) (subvec vars-form 1) vars-form) _ (doseq [entry raw-vars] (let [name (if (string? entry) entry (if (and (vector? entry) (> (count entry) 0) (string? (nth entry 0))) (nth entry 0) nil))] (when (some? name) (reject-reserved-type-name! name "forall type parameter")))) vars (vec (filter (fn
-                                                                                                                                                                                   [(x Any)] Bool (not (nil? x))) (mapv forall-entry-var raw-vars))) bounds (reduce (fn
-                                                                                                                                                                                                                                                                      [(acc Any)
-                                                                                                                                                                                                                                                                       (e Any)] Any (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars)) acc)) {} raw-vars)]
+                                                                                                                                                                                                                                                                                                                                                                                                                             [(x
+                                                                                                                                                                                                                                                                                                                                                                                                                               Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                             Bool
+                                                                                                                                                                                                                                                                                                                                                                                                                             (not (nil? x))) (mapv forall-entry-var raw-vars))) bounds (reduce (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 [(acc
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  (e
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 Any
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type! (nth e 2)) vars)) acc)) {} raw-vars)]
       {"kind"
        "poly"
        "vars"
        vars
        "body"
-       (varize-type (parse-type (nth t 2)) vars)
+       (varize-type (parse-type! (nth t 2)) vars)
        "bounds"
        (if (= (count bounds) 0) nil bounds)})
     (and (vector? t) (> (count t) 1) (= (nth t 0) "U"))
-    (make-union (mapv parse-type (subvec t 1)))
+    (make-union (mapv parse-type! (subvec t 1)))
+    (and (vector? t) (> (count t) 0) (= (nth t 0) "Dyn"))
+    (make-app "Dyn" (mapv parse-type! (subvec t 1)))
     (and (vector? t)
       (> (count t) 0)
       (string? (nth t 0))
@@ -438,7 +455,7 @@
     (let [name (nth t 0) expected (get (deref USER-PARAMETRIC-ARITIES) name) actual (- (count t) 1)]
       (if (and (some? expected) (not (= expected actual)))
         (do (type-arity-error! name expected actual) (make-prim "Any"))
-        (make-app name (mapv parse-type (subvec t 1)))))
+        (make-app name (mapv parse-type! (subvec t 1)))))
     (and (string? t) (= t "Fn"))
     (type-error! "bare Fn is an incomplete function type; write (Fn [ParamType ...] ReturnType)")
     (and (string? t) (some? (get (deref TYPE-ALIASES) t)))
@@ -449,7 +466,7 @@
       (make-prim "Any"))
     (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?"))
     (let [base (subs t 0 (- (count t) 1))]
-      (make-union [(parse-type base) (make-prim "Nil")]))
+      (make-union [(parse-type! base) (make-prim "Nil")]))
     (and (string? t) (= t "Number"))
     (make-union [(make-prim "Int") (make-prim "Float")])
     (and (string? t) (some? (get CLJ-ALIASES t)))
@@ -459,7 +476,7 @@
     :else
     (make-prim "Any")))
 
-(reset! PARSE-TYPE-CELL parse-type)
+(reset! PARSE-TYPE-CELL parse-type!)
 
 ;; --- AST constructors ----------------------------------------------------------
 ;; JSON-absent = false where ast-json.rkt uses (and x ...), null where it
@@ -507,7 +524,8 @@
    (rest-param Any)
    (ret Any)
    (body Any)
-   (priv Bool)] Any
+   (priv Bool)]
+  Any
   {"node"
    "defn"
    "name"
@@ -690,10 +708,7 @@
   {"node" "defenum" "name" name "values" values})
 
 (defn make-defunion
-  [(name String)
-   (members Any)
-   (type-params Any)
-   (member-fields Any)] Any
+  [(name String) (members Any) (type-params Any) (member-fields Any)] Any
   (if (nil? member-fields)
     {"node" "defunion" "name" name "members" members "type-params" type-params}
     {"node"
@@ -719,14 +734,35 @@
      "member-fields"
      member-fields}))
 
-(defn make-defscalar [(name String) (backing Any)] Any
-  {"node" "defscalar" "name" name "backing" backing})
+(defn make-defscalar [(name String) (backing Any) (predicates Any)] Any
+  {"node" "defscalar" "name" name "backing" backing "predicates" predicates})
+
+(defn parse-scalar-backing! [(backing Any)] Any
+  (let [parsed (parse-type* backing)
+        name (get parsed "name")]
+    (if (and (= (get parsed "kind") "prim")
+             (contains? SCALAR-BACKING-PRIMITIVES name))
+      parsed
+      (do
+        (err! (str "defscalar backing must resolve to one primitive type, got: "
+                (binding-datum->src backing)))
+        parsed))))
+
+(defn parse-scalar-predicate! [(predicate Any)] Any
+  (if (and (vector? predicate)
+           (not (bracketed? predicate))
+           (= (count predicate) 2)
+           (string? (nth predicate 0))
+           (contains? SCALAR-PREDICATE-OPS (nth predicate 0))
+           (number? (nth predicate 1)))
+    {"op" (nth predicate 0) "value" (nth predicate 1)}
+    (do
+      (err! (str "defscalar :where predicate must be one complete (op numeric-literal) form, got: "
+              (binding-datum->src predicate)))
+      {"op" "=" "value" 0})))
 
 (defn make-condp
-  [(pred-fn Any)
-   (test-expr Any)
-   (clauses Any)
-   (fallback Any)] Any
+  [(pred-fn Any) (test-expr Any) (clauses Any) (fallback Any)] Any
   {"node"
    "condp"
    "pred"
@@ -758,8 +794,8 @@
   {"node" "dynamic-var" "name" name})
 
 ;; --- param / binding / pattern constructors ------------------------------------
-(defn make-param [(name Any) (ann Any)] Any
-  {"type" "param" "name" name "ann" ann})
+(defn make-param [(name Any) (ann Any) (constraint Any)] Any
+  {"type" "param" "name" name "ann" ann "constraint" constraint})
 
 (defn make-map-destructure [(keys Any) (as-name Any) (or-defaults Any)] Any
   {"type" "map-destructure"
@@ -775,8 +811,8 @@
    "rest"
    (if (nil? rest-name) false rest-name)})
 
-(defn make-let-binding [(name Any) (ann Any) (value Any)] Any
-  {"name" name "ann" ann "value" value})
+(defn make-let-binding [(name Any) (ann Any) (constraint Any) (value Any)] Any
+  {"name" name "ann" ann "constraint" constraint "value" value})
 
 (defn make-pat-wildcard [] Any {"type" "wildcard"})
 
@@ -834,7 +870,7 @@
         (= (nth body 0) ":keys")
         (bracketed? (nth body 1))))))
 
-(defn parse-map-destructure [(item Any)] Any
+(defn parse-map-destructure! [(item Any)] Any
   (let [body (map-body item)
         keys-bracket (nth body 1)
         key-names (bracket-body keys-bracket)
@@ -886,7 +922,7 @@
                   " — supported: {:keys [names] :or {name default} :as name}"))
           (recur (+ i 1) as-name or-defaults))))))
 
-(defn parse-seq-destructure [(item Any)] Any
+(defn parse-seq-destructure! [(item Any)] Any
   (let [body (bracket-body item) n (count body)]
     (when (bracketed-annotation? body) (raise-bracketed-annotation! body))
     (loop [(i Int) 0 (names Any) [] (rest-name Any) nil]
@@ -906,9 +942,9 @@
           (validate-identifier! (nth body i) "sequential destructuring binding")
           (recur (+ i 1) (conj names (nth body i)) rest-name))
         (bracketed? (nth body i))
-        (recur (+ i 1) (conj names (parse-seq-destructure (nth body i))) rest-name)
+        (recur (+ i 1) (conj names (parse-seq-destructure! (nth body i))) rest-name)
         (map-destructure-form? (nth body i))
-        (recur (+ i 1) (conj names (parse-map-destructure (nth body i))) rest-name)
+        (recur (+ i 1) (conj names (parse-map-destructure! (nth body i))) rest-name)
         :else
         (do
           (err! (str "sequential destructure: expected a name, nested [..] pattern, or {:keys [..]} pattern, got: "
@@ -922,9 +958,10 @@
 
 (defn structured-binding? [(item Any)] Bool
   (and (vector? item)
-    (= (count item) 2)
+    (or (= (count item) 2) (= (count item) 3))
     (not (bracketed? item))
     (not (map-tagged? item))
+    (= (count (filterv retired-binding-marker? item)) 0)
     (binding-form-datum? (nth item 0))))
 
 (defn- parse-binding-form! [(item Any) (where String)] Any
@@ -935,9 +972,9 @@
       (note-capitalized-binding! item where)
       item)
     (bracketed? item)
-    (parse-seq-destructure item)
+    (parse-seq-destructure! item)
     (map-destructure-form? item)
-    (parse-map-destructure item)
+    (parse-map-destructure! item)
     :else
     (err! (str "bad " where " binding form `" (binding-datum->src item)
             "` — expected a name, [pattern ...], or {:keys [...]}"))))
@@ -945,20 +982,23 @@
 (defn- parse-structured-binding! [(item Any) (where String)] Any
   (if (structured-binding? item)
     {"name" (parse-binding-form! (nth item 0) where)
-     "ann" (parse-type* (nth item 1))}
+     "ann" (parse-type* (nth item 1))
+     "constraint" (if (= (count item) 3) (parse-expr* (nth item 2)) nil)}
     (err! (str "bad typed " where " `" (binding-datum->src item)
-            "` — write `(binding-form Type)`"))))
+            "` — write `(binding-form Type)` or `(binding-form Type constraint)`"))))
 
 (defn- parse-rest-param! [(after Any)] Any
   (cond
     (and (= (count after) 1) (string? (nth after 0)))
     (do
       (validate-identifier! (nth after 0) "rest parameter")
-      (make-param (nth after 0) nil))
+      (make-param (nth after 0) nil nil))
     (and (= (count after) 1) (structured-binding? (nth after 0)))
     (let [binding (parse-structured-binding! (nth after 0) "rest parameter")]
       (if (string? (get binding "name"))
-        (make-param (get binding "name") (get binding "ann"))
+        (make-param (get binding "name")
+          (get binding "ann")
+          (get binding "constraint"))
         (do
           (err! "rest parameter must bind one name, not a destructuring pattern")
           nil)))
@@ -986,7 +1026,8 @@
         (if (or (nil? rest-name) (false? rest-name)) fixed (conj fixed rest-name)))
       :else [])))
 
-;; Grammar: each item is a bare name or `(binding-form Type)`.
+;; Grammar: each item is a bare name, `(binding-form Type)`, or
+;; `(binding-form Type constraint)`.
 ;; Bare and typed parameters may mix; `&` owns exactly one bare or typed rest.
 (defn parse-params! [(params-form Any)] Any
   (let [(items Any) (unwrap-items params-form)
@@ -1010,7 +1051,10 @@
             (structured-binding? item)
             (let [binding (parse-structured-binding! item "parameter")]
               (recur (+ i 1)
-                (conj fixed (make-param (get binding "name") (get binding "ann")))
+                (conj fixed
+                  (make-param (get binding "name")
+                    (get binding "ann")
+                    (get binding "constraint")))
                 rest-param))
             (or (retired-binding-marker? item)
               (and (< (+ i 1) n) (retired-binding-marker? (nth items (+ i 1))))
@@ -1031,10 +1075,11 @@
             (do
               (validate-identifier! item "parameter")
               (note-capitalized-binding! item "parameter")
-              (recur (+ i 1) (conj fixed (make-param item nil)) rest-param))
+              (recur (+ i 1) (conj fixed (make-param item nil nil)) rest-param))
             :else
             (do
-              (err! (str "bad parameter: " (str item) " — expected name or (binding-form Type)"))
+              (err! (str "bad parameter: " (str item)
+                      " — expected name, (binding-form Type), or (binding-form Type constraint)"))
               (recur (+ i 1) fixed rest-param))))))
         all-bound (into
                     (vec (apply concat
@@ -1056,8 +1101,9 @@
     parsed))
 
 ;; --- parse-let-bindings! ------------------------------------------------------
-;; Each binding target and value remain an ordinary pair. A typed target is
-;; one structural `(name Type)` datum, so it never perturbs pair arity.
+;; Each binding target and value remain an ordinary pair. A typed target is one
+;; structural `(binding-form Type [constraint])` datum, so it never perturbs
+;; pair arity.
 (defn parse-let-bindings! [(b Any)] Any
   (let [items (unwrap-items b)
         n (count items)
@@ -1073,13 +1119,15 @@
         (and (< (+ i 1) n) (map-destructure-form? (nth items i)))
         (recur (+ i 2)
           (conj acc
-            (make-let-binding (parse-map-destructure (nth items i))
+            (make-let-binding (parse-map-destructure! (nth items i))
+              nil
               nil
               (parse-expr* (nth items (+ i 1))))))
         (and (< (+ i 1) n) (bracketed? (nth items i)))
         (recur (+ i 2)
           (conj acc
-            (make-let-binding (parse-seq-destructure (nth items i))
+            (make-let-binding (parse-seq-destructure! (nth items i))
+              nil
               nil
               (parse-expr* (nth items (+ i 1))))))
         (and (< (+ i 1) n) (structured-binding? (nth items i)))
@@ -1088,6 +1136,7 @@
             (conj acc
               (make-let-binding (get binding "name")
                 (get binding "ann")
+                (get binding "constraint")
                 (parse-expr* (nth items (+ i 1)))))))
         (and (< (+ i 1) n) (string? (nth items i)))
         (do
@@ -1096,25 +1145,43 @@
             (conj acc
               (make-let-binding (nth items i)
                 nil
+                nil
                 (parse-expr* (nth items (+ i 1)))))))
         :else
         (do (err! (str "bad let bindings at: " (str (nth items i)))) acc)))]
     parsed))
 
 ;; --- parse-record-fields! -----------------------------------------------------
-;; Every field is one `(name Type)` datum. Untyped fields remain invalid.
+;; Every field is one `(name Type)` or `(name Type constraint)` datum. Untyped
+;; fields remain invalid and adjacent tokens never complete a declaration.
 (defn parse-record-fields! [(f Any)] Any
   (let [items (unwrap-items f) n (count items)]
     (loop [(i Int) 0 (acc Any) []]
       (cond
         (>= i n)
         acc
+        (and (structured-binding? (nth items i))
+          (= (count (nth items i)) 2)
+          (< (+ i 1) n)
+          (string? (nth items (+ i 1))))
+        (let [declaration (nth items i)
+              stray (nth items (+ i 1))]
+          (err! (str "Invalid field declaration: " stray "\n\n"
+                  "Each field must be one complete form:\n"
+                  "  (name Type validator)\n\n"
+                  "Did you mean:\n"
+                  "  (" (binding-datum->src (nth declaration 0)) " "
+                  (binding-datum->src (nth declaration 1)) " "
+                  (binding-datum->src stray) ")"))
+          (recur (+ i 2) acc))
         (structured-binding? (nth items i))
         (let [binding (parse-structured-binding! (nth items i) "record field")]
           (if (string? (get binding "name"))
             (recur (+ i 1)
               (conj acc
-                {"name" (get binding "name") "ann" (get binding "ann")}))
+                {"name" (get binding "name")
+                 "ann" (get binding "ann")
+                 "constraint" (get binding "constraint")}))
             (do
               (err! (str "defrecord field name must be a name, got destructuring pattern: "
                       (binding-datum->src (nth items i))))
@@ -1125,7 +1192,8 @@
         (do (raise-retired-binding-annotation! "record fields") (recur (+ i 1) acc))
         :else
         (do
-          (err! (str "defrecord field needs a type — use [(name Type) (name2 Type2) ...], got: " (str (nth items i))))
+          (err! (str "defrecord field needs a type — use [(name Type) "
+                  "(name2 Type2 validator) ...], got: " (str (nth items i))))
           (recur (+ i 1) acc))))))
 
 ;; --- parse-cond-clauses ------------------------------------------------------
@@ -1159,8 +1227,8 @@
           :else
           acc)))))
 
-;; --- parse-for-clauses -------------------------------------------------------
-(defn parse-for-clauses [(b Any)] Any
+;; --- parse-for-clauses! ------------------------------------------------------
+(defn parse-for-clauses! [(b Any)] Any
   (let [items (unwrap-items b) n (count items)]
     (loop [(i Int) 0 (acc Any) []]
       (cond
@@ -1182,15 +1250,17 @@
         (recur (+ i 2)
           (conj acc
             {"type" "binding"
-             "name" (parse-seq-destructure (nth items i))
+             "name" (parse-seq-destructure! (nth items i))
              "ann" nil
+             "constraint" nil
              "expr" (parse-expr* (nth items (+ i 1))) }))
         (and (< (+ i 1) n) (map-destructure-form? (nth items i)))
         (recur (+ i 2)
           (conj acc
             {"type" "binding"
-             "name" (parse-map-destructure (nth items i))
+             "name" (parse-map-destructure! (nth items i))
              "ann" nil
+             "constraint" nil
              "expr" (parse-expr* (nth items (+ i 1))) }))
         (and (< (+ i 1) n) (structured-binding? (nth items i)))
         (let [binding (parse-structured-binding! (nth items i) "for/doseq binding")]
@@ -1199,6 +1269,7 @@
               {"type" "binding"
                "name" (get binding "name")
                "ann" (get binding "ann")
+               "constraint" (get binding "constraint")
                "expr" (parse-expr* (nth items (+ i 1)))})))
         (and (< (+ i 1) n) (string? (nth items i)))
         (recur (+ i 2)
@@ -1206,13 +1277,14 @@
             {"type" "binding"
              "name" (nth items i)
              "ann" nil
+             "constraint" nil
              "expr" (parse-expr* (nth items (+ i 1)))}))
         :else
         (do
           (err! (str "bad for/doseq clause at: " (binding-datum->src (nth items i))))
           (recur (+ i 1) acc))))))
 
-;; --- parse-try-form ----------------------------------------------------------
+;; --- parse-try-form! ---------------------------------------------------------
 (defn- catch-clause? [(item Any)] Bool
   (and (vector? item)
     (not (bracketed? item))
@@ -1225,7 +1297,7 @@
     (> (count item) 0)
     (= (nth item 0) "finally")))
 
-(defn parse-try-form [(rest-items Any)] Any
+(defn parse-try-form! [(rest-items Any)] Any
   (let [n (count rest-items)]
     (loop [(i Int) 0 (body Any) [] (catches Any) [] (finally-body Any) nil]
       (if (>= i n)
@@ -1233,7 +1305,9 @@
         (let [item (nth rest-items i)]
           (cond
             (catch-clause? item)
-            (if (and (>= (count item) 3) (structured-binding? (nth item 1)))
+            (if (and (>= (count item) 3)
+                  (structured-binding? (nth item 1))
+                  (= (count (nth item 1)) 2))
               (let [binding (parse-structured-binding! (nth item 1) "catch binding")]
                 (if (string? (get binding "name"))
                   (recur (+ i 1)
@@ -1375,7 +1449,7 @@
             {"name" name
              "params" (get parsed-params "params")
              "rest" (if (nil? rp) false rp)
-             "ret" (parse-type (nth item 2))
+             "ret" (parse-type* (nth item 2))
              "body" (mapv parse-expr* (subvec item 3))})
           (do
             (err! (str "letfn function needs (name [params] ReturnType body...), got: "
@@ -1390,12 +1464,14 @@
         (string? (nth item 0))
         (bracketed? (nth item 1)))
     (let [name (nth item 0)
-          parsed-params (parse-params! (nth item 1))]
+          parsed-params (parse-params! (nth item 1))
+          rp (get parsed-params "rest-param")]
       (when (retired-return-marker? (nth item 2))
         (raise-retired-return-annotation! (str "defprotocol method " name)))
       {"name" name
        "params" (get parsed-params "params")
-       "ret" (parse-type (nth item 2))})
+       "rest" (if (nil? rp) false rp)
+       "ret" (parse-type* (nth item 2))})
     (do
       (err! (str "defprotocol method needs (name [params] ReturnType), got: "
               (binding-datum->src item)))
@@ -1407,12 +1483,14 @@
         (string? (nth item 0))
         (bracketed? (nth item 1)))
     (let [name (nth item 0)
-          parsed-params (parse-params! (nth item 1))]
+          parsed-params (parse-params! (nth item 1))
+          rp (get parsed-params "rest-param")]
       (when (retired-return-marker? (nth item 2))
         (raise-retired-return-annotation! (str "method " name)))
       {"name" name
        "params" (get parsed-params "params")
-       "ret" (parse-type (nth item 2))
+       "rest" (if (nil? rp) false rp)
+       "ret" (parse-type* (nth item 2))
        "body" (mapv parse-expr* (subvec item 3))})
     (do
       (err! (str "protocol implementation method needs (name [params] ReturnType body...), got: "
@@ -1454,9 +1532,7 @@
 
 ;; --- parse-condp-form --------------------------------------------------------
 (defn parse-condp-form
-  [(pred-datum Any)
-   (test-datum Any)
-   (clause-datums Any)] Any
+  [(pred-datum Any) (test-datum Any) (clause-datums Any)] Any
   (let [pred-expr (parse-expr* pred-datum) test-expr (parse-expr* test-datum) n (count clause-datums)]
     (loop [(i Int) 0 (pairs Any) [] (fallback Any) nil]
       (cond
@@ -1496,7 +1572,7 @@
         (raise-retired-return-annotation! "multi-arity clause"))
       {"params" (get parsed-params "params")
        "rest" (if (nil? rp) false rp)
-       "ret" (parse-type (nth clause 1))
+       "ret" (parse-type* (nth clause 1))
        "body" (mapv parse-expr* (subvec clause 2))})
     (err! (str "multi-arity clause needs ([params] ReturnType body...), got: "
             (binding-datum->src clause)))))
@@ -1519,7 +1595,7 @@
     init
     steps))
 
-(defn expand-cond-thread [(kind String) (init Any) (clauses Any)] Any
+(defn expand-cond-thread! [(kind String) (init Any) (clauses Any)] Any
   (when (not= (mod (count clauses) 2) 0)
     (err! (str kind ": expected pairs of (test step) after init; got " (str (mod (count clauses) 2)) " trailing form(s)")))
   (let [n (count clauses) pairs (loop [(i Int) 0 (acc Any) []] (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))])))) pos (if (= kind "cond->") "first" "last") k (count pairs) temps (loop [(i Int) 0 (acc Any) [(fresh-lowered-sym! "cond-thread")]] (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread"))))) inner (loop [(i Any) (- k 1) (acc Any) (nth temps k)] (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
@@ -1555,9 +1631,7 @@
   (if (or (= head "if-let") (= head "when-let")) v ["not" ["nil?" v]]))
 
 (defn- lower-binding-cond!
-  [(head String)
-   (bindings-form Any)
-   (rest-items Any)] Any
+  [(head String) (bindings-form Any) (rest-items Any)] Any
   (let [items (unwrap-items bindings-form)]
     (if (< (count items) 2)
       (do
@@ -1579,7 +1653,7 @@
                ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
 
 ;; --- defunion / deferror helpers ----------------------------------------------
-(defn parse-simple-defunion [(name String) (raw-members Any)] Any
+(defn parse-simple-defunion! [(name String) (raw-members Any)] Any
   (reject-reserved-type-name! name "defunion")
   (validate-identifier! name "defunion")
   (let [n (count raw-members)]
@@ -1587,23 +1661,34 @@
       (if (>= i n)
         (make-defunion name mnames nil (if has-fields mf nil))
         (let [m (nth raw-members i)]
-          (when (string? m)
-            (reject-reserved-type-name! m "defunion member"))
-          (when (and (vector? m) (> (count m) 0) (string? (nth m 0)))
-            (reject-reserved-type-name! (nth m 0) "defunion member"))
-          (if (and (vector? m) (not (bracketed? m)) (> (count m) 0))
-            (if (and (>= (count m) 2) (vector? (nth m 1)))
+          (cond
+            (string? m)
+            (do
+              (reject-reserved-type-name! m "defunion member")
+              (validate-identifier! m "defunion member")
+              (recur (+ i 1) (conj mnames m) mf has-fields))
+
+            (and (vector? m)
+                 (not (bracketed? m))
+                 (= (count m) 2)
+                 (string? (nth m 0))
+                 (bracketed? (nth m 1)))
+            (let [member-name (nth m 0)]
+              (reject-reserved-type-name! member-name "defunion member")
+              (validate-identifier! member-name "defunion member")
               (recur (+ i 1)
-                (conj mnames (nth m 0))
-                (assoc mf (nth m 0) (parse-record-fields! (nth m 1)))
-                true)
-              (recur (+ i 1) (conj mnames (nth m 0)) mf has-fields))
-            (recur (+ i 1) (conj mnames m) mf has-fields)))))))
+                (conj mnames member-name)
+                (assoc mf member-name (parse-record-fields! (nth m 1)))
+                true))
+
+            :else
+            (do
+              (err! (str "defunion member must be a name or one complete (Name [fields...]) form, got: "
+                      (binding-datum->src m)))
+              (recur (+ i 1) mnames mf has-fields))))))))
 
 (defn parse-parametric-defunion!
-  [(name String)
-   (type-vars Any)
-   (member-defs Any)] Any
+  [(name String) (type-vars Any) (member-defs Any)] Any
   (validate-identifier! name "defunion")
   (reject-reserved-type-name! name "parametric defunion")
   (doseq [type-var type-vars]
@@ -1615,19 +1700,36 @@
       (if (>= i n)
         (make-defunion name mnames type-vars mf)
         (let [md (nth member-defs i)]
-          (when (string? md)
-            (reject-reserved-type-name! md "defunion member"))
-          (when (and (vector? md) (> (count md) 0) (string? (nth md 0)))
-            (reject-reserved-type-name! (nth md 0) "defunion member"))
-          (if (and (vector? md) (>= (count md) 2) (string? (nth md 0)))
-            (let [fields (parse-record-fields! (nth md 1)) typed-fields (mapv (fn
-                                                                                [(p Any)] Any (assoc p "ann" (varize-type (get p "ann") type-vars))) fields)]
-              (recur (+ i 1)
-                (conj mnames (nth md 0))
-                (assoc mf (nth md 0) typed-fields)))
-            (recur (+ i 1) mnames mf)))))))
+          (cond
+            (string? md)
+            (do
+              (reject-reserved-type-name! md "defunion member")
+              (validate-identifier! md "defunion member")
+              (recur (+ i 1) (conj mnames md) (assoc mf md [])))
 
-(defn parse-deferror-form [(name String) (member-defs Any)] Any
+            (and (vector? md)
+                 (not (bracketed? md))
+                 (= (count md) 2)
+                 (string? (nth md 0))
+                 (bracketed? (nth md 1)))
+            (let [member-name (nth md 0)
+                  fields (parse-record-fields! (nth md 1))
+                  typed-fields (mapv (fn [(p Any)] Any
+                                       (assoc p "ann" (varize-type (get p "ann") type-vars)))
+                                 fields)]
+              (reject-reserved-type-name! member-name "defunion member")
+              (validate-identifier! member-name "defunion member")
+              (recur (+ i 1)
+                (conj mnames member-name)
+                (assoc mf member-name typed-fields)))
+
+            :else
+            (do
+              (err! (str "parametric defunion member must be a name or one complete (Name [fields...]) form, got: "
+                      (binding-datum->src md)))
+              (recur (+ i 1) mnames mf))))))))
+
+(defn parse-deferror-form! [(name String) (member-defs Any)] Any
   (reject-reserved-type-name! name "defunion :throwable")
   (validate-identifier! name "deferror")
   (let [n (count member-defs)]
@@ -1641,16 +1743,27 @@
             (reject-reserved-type-name! (nth md 0) "defunion :throwable member"))
           (cond
             (string? md)
-            (recur (+ i 1) (conj mnames md) (assoc mf md []))
-            (and (vector? md) (>= (count md) 2) (string? (nth md 0)))
-            (recur (+ i 1)
-              (conj mnames (nth md 0))
-              (assoc mf (nth md 0) (parse-record-fields! (nth md 1))))
+            (do
+              (validate-identifier! md "deferror member")
+              (recur (+ i 1) (conj mnames md) (assoc mf md [])))
+            (and (vector? md)
+                 (not (bracketed? md))
+                 (= (count md) 2)
+                 (string? (nth md 0))
+                 (bracketed? (nth md 1)))
+            (let [member-name (nth md 0)]
+              (validate-identifier! member-name "deferror member")
+              (recur (+ i 1)
+                (conj mnames member-name)
+                (assoc mf member-name (parse-record-fields! (nth md 1)))))
             :else
-            (recur (+ i 1) mnames mf)))))))
+            (do
+              (err! (str "deferror member must be a name or one complete (Name [fields...]) form, got: "
+                      (binding-datum->src md)))
+              (recur (+ i 1) mnames mf))))))))
 
 ;; --- parse-map-literal -------------------------------------------------------
-(defn parse-map-literal [(items Any)] Any
+(defn parse-map-literal! [(items Any)] Any
   (let [n (count items)]
     (loop [(i Int) 0 (pairs Any) []]
       (cond
@@ -1675,51 +1788,17 @@
           (make-map pairs))))))
 
 ;; --- defn family --------------------------------------------------------------
-;; Bare-vector multi-arity (parse.rkt bare-multi-arity-clauses):
-;;   (defn name [a] ReturnA body [a b] ReturnB body)
-;; canonicalizes to list-wrapped clauses ((params body…) …). Returns nil
-;; unless the strict shape holds: first arg is a params vec, >= 2 top-level
-;; vecs, every vec followed by a return type and >= 1 body form, and no retired
-;; top-level annotation punctuation.
-(defn- has-retired-marker? [(args Any)] Bool
-  (let [n (count args)]
-    (loop [i 0]
-      (cond
-        (>= i n) false
-        (retired-return-marker? (nth args i)) true
-        :else (recur (+ i 1))))))
-
-(defn- bare-multi-arity-clauses [(args Any)] Any
-  (cond
-    (or (= (count args) 0) (not (bracketed? (nth args 0))))
-    nil
-    (has-retired-marker? args)
-    nil
-    :else
-        (let [n (count args) state (loop [(i Int) 0 (segments Any) [] (cur Any) [] (ok Any) true] (if (or (>= i n) (not ok)) {"segments" segments "cur" cur "ok" ok} (let [arg (nth args i)] (if (bracketed? arg) (cond (= (count cur) 0) (recur (+ i 1) segments [arg] ok) (<= (count cur) 2) (recur (+ i 1) segments cur false) :else (recur (+ i 1) (conj segments cur) [arg] ok)) (if (= (count cur) 0) (recur (+ i 1) segments cur false) (recur (+ i 1) segments (conj cur arg) ok))))))]
-      (cond
-        (not (get state "ok"))
-        nil
-        (<= (count (get state "cur")) 2)
-        nil
-        :else
-        (let [all (conj (get state "segments") (get state "cur"))]
-          (if (>= (count all) 2) all nil))))))
 
 (defn- parse-defn-tail! [(name String) (after-name Any) (priv Bool)] Any
   (validate-identifier! name "definition")
   (cond
     (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0)))
     (make-defn-multi name (mapv parse-arity-clause! after-name) priv)
-    (some? (bare-multi-arity-clauses after-name))
-    (make-defn-multi name
-      (mapv parse-arity-clause! (bare-multi-arity-clauses after-name))
-      priv)
     (and (>= (count after-name) 2) (retired-return-marker? (nth after-name 1)))
     (raise-retired-return-annotation! (str "defn " name))
     (>= (count after-name) 3)
     (let [parsed-params (parse-params! (nth after-name 0))
-          ret (parse-type (nth after-name 1))
+          ret (parse-type* (nth after-name 1))
           tail (subvec after-name 2)
           body-forms (if (and (>= (count tail) 3) (= (nth tail 0) ":raises"))
                        (subvec tail 2)
@@ -1760,12 +1839,7 @@
     false))
 
 (defn- mk-def-node
-  [(kw String)
-   (name String)
-   (ann Any)
-   (value Any)
-   (doc Any)
-   (dyn Bool)] Any
+  [(kw String) (name String) (ann Any) (value Any) (doc Any) (dyn Bool)] Any
   (if (= kw "defonce")
     (make-defonce name ann value doc)
     (make-def name ann value doc dyn)))
@@ -1791,7 +1865,7 @@
       (and (= (count items) 3) (string-literal-datum? (nth items 1)))
       (mk-def-node kw
         name
-        (parse-type (nth items 0))
+        (parse-type* (nth items 0))
         (parse-expr* (nth items 2))
         (extract-string (nth items 1))
         dyn)
@@ -1805,7 +1879,7 @@
       (= (count items) 2)
       (mk-def-node kw
         name
-        (parse-type (nth items 0))
+        (parse-type* (nth items 0))
         (parse-expr* (nth items 1))
         nil
         dyn)
@@ -1965,7 +2039,7 @@
 
 (defn- pj-stmt [(d Any)] Any (apply (deref JSQ-STMT-CELL) [d]))
 
-(defn- pj-param-list [(d Any)] Any
+(defn- pj-param-list! [(d Any)] Any
   (let [items (cond (bracketed? d) (bracket-body d) (vector? d) d :else [])]
     (mapv (fn [(item Any)] Any (cond (jsq-sym? item) item (and (jsq-list? item) (= (count item) 2) (= (nth item 0) "spread")) {"spread" (nth item 1)} :else (do (err! (str "js/quote: parameter must be a symbol, got " (str item))) "_")))
       items)))
@@ -1983,7 +2057,10 @@
     (cond
       (and (jsq-sym? head) (dot-method-sym? head))
       (let [method-name (subs head 1) obj (pj-expr (nth d 1)) args (mapv (fn
-                                                                           [(a Any)] Any (pj-expr a)) (subvec d 2))]
+                                                                           [(a
+                                                                             Any)]
+                                                                           Any
+                                                                           (pj-expr a)) (subvec d 2))]
         {"jsk"
          "call"
          "callee"
@@ -2006,21 +2083,21 @@
        "args"
        (mapv (fn [(a Any)] Any (pj-expr a)) (subvec d 1))})))
 
-(defn- pj-list-expr [(d Any)] Any
+(defn- pj-list-expr! [(d Any)] Any
   (let [h (nth d 0) n (count d)]
     (cond
       (and (= h "=>") (= n 3))
       {"jsk"
        "arrow"
        "params"
-       (pj-param-list (nth d 1))
+       (pj-param-list! (nth d 1))
        "body"
        (pj-expr (nth d 2))}
       (and (= h "=>") (> n 3))
       {"jsk"
        "arrow"
        "params"
-       (pj-param-list (nth d 1))
+       (pj-param-list! (nth d 1))
        "body"
        (pj-block-body (subvec d 2))}
       (and (= h "?") (= n 4))
@@ -2087,7 +2164,7 @@
       :else
       (pj-call-or-member d))))
 
-(defn- pj-expr-impl [(d Any)] Any
+(defn- pj-expr-impl! [(d Any)] Any
   (cond
     (jsq-strlit? d)
     {"jsk" "literal" "kind" "string" "value" (extract-string d)}
@@ -2126,14 +2203,14 @@
     (map-tagged? d)
     (pj-object-literal (map-body d))
     (jsq-list? d)
-    (pj-list-expr d)
+    (pj-list-expr! d)
     :else
     (do
       (err! (str "js/quote: unsupported expression: " (str d)))
       {"jsk" "ident" "name" "_"})))
 
-(defn- pj-function [(rest Any) (async? Bool)] Any
-  (let [name-d (nth rest 0) params (pj-param-list (nth rest 1)) body-forms (subvec rest 2)]
+(defn- pj-function! [(rest Any) (async? Bool)] Any
+  (let [name-d (nth rest 0) params (pj-param-list! (nth rest 1)) body-forms (subvec rest 2)]
     {"jsk"
      "function"
      "name"
@@ -2147,16 +2224,16 @@
      "export"
      false}))
 
-(defn- pj-method-modifiers [(d Any)] Any
+(defn- pj-method-modifiers! [(d Any)] Any
   (let [head (nth d 0)]
     (cond
       (= head "constructor")
       [false false "constructor" (subvec d 1)]
       (= head "static")
-      (let [r (pj-method-modifiers (subvec d 1))]
+      (let [r (pj-method-modifiers! (subvec d 1))]
         [true (nth r 1) (nth r 2) (nth r 3)])
       (= head "async")
-      (let [r (pj-method-modifiers (subvec d 1))]
+      (let [r (pj-method-modifiers! (subvec d 1))]
         [(nth r 0) true (nth r 2) (nth r 3)])
       (= head "get")
       [false false "get" (subvec d 1)]
@@ -2171,15 +2248,15 @@
         (err! (str "js/quote method: unexpected modifier " (str head)))
         [false false "method" d]))))
 
-(defn- pj-method [(d Any)] Any
-  (let [mods (pj-method-modifiers d) static? (nth mods 0) async? (nth mods 1) kind (nth mods 2) rest (nth mods 3)]
+(defn- pj-method! [(d Any)] Any
+  (let [mods (pj-method-modifiers! d) static? (nth mods 0) async? (nth mods 1) kind (nth mods 2) rest (nth mods 3)]
     (if (= kind "constructor")
       {"jsk"
        "method"
        "name"
        "constructor"
        "params"
-       (pj-param-list (nth rest 0))
+       (pj-param-list! (nth rest 0))
        "body"
        (pj-block-body (subvec rest 1))
        "static"
@@ -2193,7 +2270,7 @@
        "name"
        (nth rest 0)
        "params"
-       (pj-param-list (nth rest 1))
+       (pj-param-list! (nth rest 1))
        "body"
        (pj-block-body (subvec rest 2))
        "static"
@@ -2203,7 +2280,7 @@
        "kind"
        kind})))
 
-(defn- pj-class [(rest Any) (export? Bool)] Any
+(defn- pj-class! [(rest Any) (export? Bool)] Any
   (let [name-d (nth rest 0) remaining (subvec rest 1) has-extends (and (> (count remaining) 0) (= (nth remaining 0) "extends") (> (count remaining) 1)) extends-expr (if has-extends (pj-expr (nth remaining 1)) false) methods-raw (if has-extends (subvec remaining 2) remaining)]
     {"jsk"
      "class"
@@ -2212,11 +2289,11 @@
      "extends"
      extends-expr
      "methods"
-     (mapv (fn [(m Any)] Any (pj-method m)) methods-raw)
+     (mapv (fn [(m Any)] Any (pj-method! m)) methods-raw)
      "export"
      export?}))
 
-(defn- pj-try [(rest Any)] Any
+(defn- pj-try! [(rest Any)] Any
   (let [split (loop [(forms Any) rest (body-acc (Vec Any)) []] (if (= 0 (count forms)) [body-acc []] (let [f (nth forms 0)] (if (and (jsq-list? f) (or (= (nth f 0) "catch") (= (nth f 0) "finally"))) [body-acc forms] (recur (subvec forms 1) (conj body-acc f)))))) body-forms (nth split 0) cf (nth split 1)]
     (loop [items cf catch-name false catch-body false finally-body false]
       (if (= 0 (count items))
@@ -2257,31 +2334,31 @@
       :else
       (recur (subvec rest 1) (conj then-acc (nth rest 0))))))
 
-(defn- pj-export [(inner Any)] Any
+(defn- pj-export! [(inner Any)] Any
   (cond
     (and (jsq-list? inner) (= (nth inner 0) "function"))
-    (assoc (pj-function (subvec inner 1) false) "export" true)
+    (assoc (pj-function! (subvec inner 1) false) "export" true)
     (and (jsq-list? inner) (= (nth inner 0) "async"))
     (let [rest-items (subvec inner 1)]
       (cond
         (and (> (count rest-items) 0)
           (jsq-list? (nth rest-items 0))
           (= (nth (nth rest-items 0) 0) "function"))
-        (assoc (pj-function (subvec (nth rest-items 0) 1) true) "export" true)
+        (assoc (pj-function! (subvec (nth rest-items 0) 1) true) "export" true)
         (and (> (count rest-items) 0) (= (nth rest-items 0) "function"))
-        (assoc (pj-function (subvec rest-items 1) true) "export" true)
+        (assoc (pj-function! (subvec rest-items 1) true) "export" true)
         :else
         (do
           (err! "js/quote: export async must be followed by function")
           {"jsk" "block" "stmts" []})))
     (and (jsq-list? inner) (= (nth inner 0) "class"))
-    (pj-class (subvec inner 1) true)
+    (pj-class! (subvec inner 1) true)
     :else
     (do
       (err! (str "js/quote: export requires function/async function/class, got " (str inner)))
       {"jsk" "block" "stmts" []})))
 
-(defn- pj-list-stmt [(d Any)] Any
+(defn- pj-list-stmt! [(d Any)] Any
   (let [h (nth d 0) n (count d)]
     (cond
       (and (= h "const") (= n 3) (jsq-sym? (nth d 1)))
@@ -2355,17 +2432,17 @@
       (and (= h "throw") (= n 2))
       {"jsk" "throw" "expr" (pj-expr (nth d 1))}
       (= h "try")
-      (pj-try (subvec d 1))
+      (pj-try! (subvec d 1))
       (and (= h "export") (= n 2))
-      (pj-export (nth d 1))
+      (pj-export! (nth d 1))
       (and (= h "async") (> n 1) (= (nth d 1) "function"))
-      (pj-function (subvec d 2) true)
+      (pj-function! (subvec d 2) true)
       (and (= h "async") (= n 2))
-      (pj-function (subvec (nth d 1) 1) true)
+      (pj-function! (subvec (nth d 1) 1) true)
       (= h "function")
-      (pj-function (subvec d 1) false)
+      (pj-function! (subvec d 1) false)
       (= h "class")
-      (pj-class (subvec d 1) false)
+      (pj-class! (subvec d 1) false)
       (and (jsq-binary-op? h) (= n 3))
       {"jsk"
        "expr-stmt"
@@ -2383,10 +2460,10 @@
       :else
       {"jsk" "expr-stmt" "expr" (pj-expr d)})))
 
-(defn- pj-stmt-impl [(d Any)] Any
+(defn- pj-stmt-impl! [(d Any)] Any
   (cond
     (jsq-list? d)
-    (pj-list-stmt d)
+    (pj-list-stmt! d)
     (jsq-splice-sym? d)
     (let [sk (jsq-splice-kind d) kind (nth sk 0)]
       (cond
@@ -2406,11 +2483,11 @@
     {"jsk" "expr-stmt" "expr" (pj-expr d)}))
 
 (defn- install-jsq! [] Nil
-  (reset! JSQ-EXPR-CELL pj-expr-impl)
-  (reset! JSQ-STMT-CELL pj-stmt-impl)
+  (reset! JSQ-EXPR-CELL pj-expr-impl!)
+  (reset! JSQ-STMT-CELL pj-stmt-impl!)
   nil)
 
-(defn- pj-body [(forms Any)] Any
+(defn- pj-body! [(forms Any)] Any
   (install-jsq!)
   (cond
     (= 0 (count forms))
@@ -2434,7 +2511,7 @@
       (= head "fmt")
       (err! "(fmt ...) is not supported — use str / format")
       (= head "js/quote")
-      {"node" "js-quote" "body" (pj-body rest-items)}
+      {"node" "js-quote" "body" (pj-body! rest-items)}
       (= head "def")
       (parse-def-form! "def" rest-items)
       (= head "defonce")
@@ -2481,7 +2558,7 @@
         (>= (count rest-items) 2)
         (= (nth rest-items 0) ":throwable")
         (string? (nth rest-items 1)))
-      (parse-deferror-form (nth rest-items 1) (subvec rest-items 2))
+      (parse-deferror-form! (nth rest-items 1) (subvec rest-items 2))
       (and (= head "defunion")
         (>= (count rest-items) 1)
         (vector? (nth rest-items 0))
@@ -2499,14 +2576,29 @@
       (and (= head "defunion")
         (>= (count rest-items) 1)
         (string? (nth rest-items 0)))
-      (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))
+      (parse-simple-defunion! (nth rest-items 0) (subvec rest-items 1))
       (and (= head "deferror") (>= (count rest-items) 1))
-      (parse-deferror-form (nth rest-items 0) (subvec rest-items 1))
-      (and (= head "defscalar") (>= (count rest-items) 2))
+      (parse-deferror-form! (nth rest-items 0) (subvec rest-items 1))
+      (and (= head "defscalar") (= (count rest-items) 2))
       (do
         (reject-reserved-type-name! (nth rest-items 0) "defscalar")
         (validate-identifier! (nth rest-items 0) "defscalar")
-        (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1))))
+        (make-defscalar
+          (nth rest-items 0)
+          (parse-scalar-backing! (nth rest-items 1))
+          []))
+      (and (= head "defscalar")
+           (>= (count rest-items) 3)
+           (= (nth rest-items 2) ":where"))
+      (do
+        (validate-identifier! (nth rest-items 0) "defscalar")
+        (make-defscalar
+          (nth rest-items 0)
+          (parse-scalar-backing! (nth rest-items 1))
+          (mapv parse-scalar-predicate! (subvec rest-items 3))))
+      (= head "defscalar")
+      (err! (str "defscalar needs (defscalar Name Backing) or (defscalar Name Backing :where (op value)...), got: "
+              (binding-datum->src d)))
       (and (= head "defprotocol")
         (>= (count rest-items) 1)
         (string? (nth rest-items 0)))
@@ -2526,8 +2618,7 @@
        "impls" (parse-type-impls! (subvec rest-items 1))}
       (and (= head "fn")
         (>= (count rest-items) 1)
-        (or (multi-arity-form? (nth rest-items 0))
-          (some? (bare-multi-arity-clauses rest-items))))
+        (multi-arity-form? (nth rest-items 0)))
       (err! "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")
       (and (= head "fn")
         (>= (count rest-items) 2)
@@ -2537,7 +2628,7 @@
       (let [parsed-params (parse-params! (nth rest-items 0))]
         (make-fn (get parsed-params "params")
           (get parsed-params "rest-param")
-          (parse-type (nth rest-items 1))
+          (parse-type* (nth rest-items 1))
           (mapv parse-expr* (subvec rest-items 2))))
       (= head "fn")
       (err! "fn needs (fn [params] ReturnType body...)")
@@ -2567,7 +2658,7 @@
       (make-set! (parse-expr* (nth rest-items 0))
         (parse-expr* (nth rest-items 1)))
       (and (= head "for") (>= (count rest-items) 1))
-      (make-for (parse-for-clauses (nth rest-items 0))
+      (make-for (parse-for-clauses! (nth rest-items 0))
         (mapv parse-expr* (subvec rest-items 1)))
       (and (= head "if") (= (count rest-items) 3))
       (make-if (parse-expr* (nth rest-items 0))
@@ -2608,7 +2699,7 @@
         (nth rest-items 1)
         (subvec rest-items 2))
       (= head "try")
-      (parse-try-form rest-items)
+      (parse-try-form! rest-items)
       (and (= head "match") (>= (count rest-items) 1))
       (parse-match-form (nth rest-items 0) (subvec rest-items 1))
       (= head "case")
@@ -2616,7 +2707,7 @@
       (= head "target-case")
       (parse-target-case! rest-items)
       (and (= head "doseq") (>= (count rest-items) 1))
-      (make-doseq (parse-for-clauses (nth rest-items 0))
+      (make-doseq (parse-for-clauses! (nth rest-items 0))
         (mapv parse-expr* (subvec rest-items 1)))
       (= head "dotimes")
       (err! "dotimes removed — use (doseq [i (range n)] body...)")
@@ -2679,7 +2770,7 @@
       (let [fl (parse-nix-fn-set-formals! (nth rest-items 0)) formals (get fl "formals")]
         (if (not= (count formals) 2)
           (err! "nix/overlay: expected exactly two formals [final prev]")
-          (make-fn (mapv (fn [(f Any)] Any (make-param (get f "name") nil)) formals)
+          (make-fn (mapv (fn [(f Any)] Any (make-param (get f "name") nil nil)) formals)
             nil
             nil
             [(parse-expr* (nth rest-items 1))])))
@@ -2722,12 +2813,12 @@
       (let [args (mapv parse-expr* rest-items)]
         (make-threading "cond->"
           args
-          (parse-expr* (expand-cond-thread "cond->" (nth rest-items 0) (subvec rest-items 1)))))
+          (parse-expr* (expand-cond-thread! "cond->" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "cond->>") (>= (count rest-items) 1))
       (let [args (mapv parse-expr* rest-items)]
         (make-threading "cond->>"
           args
-          (parse-expr* (expand-cond-thread "cond->>" (nth rest-items 0) (subvec rest-items 1)))))
+          (parse-expr* (expand-cond-thread! "cond->>" (nth rest-items 0) (subvec rest-items 1)))))
       (and (= head "some->") (>= (count rest-items) 1))
       (let [args (mapv parse-expr* rest-items)]
         (make-threading "some->"
@@ -2810,7 +2901,7 @@
     (bracketed? d)
     (make-vec (mapv parse-expr* (bracket-body d)))
     (map-tagged? d)
-    (parse-map-literal (map-body d))
+    (parse-map-literal! (map-body d))
     (set-tagged? d)
     (make-set-form (mapv parse-expr* (set-body d)))
     (and (vector? d) (= (count d) 2) (= (nth d 0) "quote"))
@@ -2835,7 +2926,7 @@
 ;; REPORT? is false only for the driver's pure pre-parse dependency discovery;
 ;; the authoritative parse immediately follows and reports the same malformed
 ;; libspec through this one decoder.
-(defn- decode-require-libspec [(spec Any) (report? Bool)] Any
+(defn- decode-require-libspec! [(spec Any) (report? Bool)] Any
   (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
     (cond
       (string? unq)
@@ -2872,9 +2963,39 @@
         nil))))
 
 (defn- parse-require-libspec! [(spec Any)] Any
-  (decode-require-libspec spec true))
+  (decode-require-libspec! spec true))
 
-(defn discover-requires [(datums Any)] Any
+;; One import declaration owns one package plus one or more classes, or one
+;; already-qualified class symbol. Preserve the complete declarations in the
+;; program instead of reconstructing them from adjacent tokens later.
+(defn- parse-import-spec! [(spec Any) (context String)] Any
+  (let [unq (if (and (vector? spec)
+                  (= (count spec) 2)
+                  (= (nth spec 0) "quote"))
+              (nth spec 1)
+              spec)]
+    (cond
+      (string? unq)
+      [unq]
+      (vector? unq)
+      (let [items (if (bracketed? unq) (bracket-body unq) unq)]
+        (if (and (>= (count items) 2) (every? string? items))
+          (let [package-name (nth items 0)]
+            (mapv (fn [(class-name String)] String
+                    (str package-name "." class-name))
+              (subvec items 1)))
+          (do
+            (err! (str context
+                    ": import spec must be (package Class ...) with symbols, got: "
+                    (str unq)))
+            [])))
+      :else
+      (do
+        (err! (str context
+                ": bad import spec — expected ClassName or (package Class1 Class2 ...)"))
+        []))))
+
+(defn discover-requires! [(datums Any)] Any
   (let [requires (atom [])]
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (> (count d) 0))
@@ -2884,15 +3005,15 @@
             (doseq [clause (subvec d 2)]
               (when (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":require"))
                 (doseq [spec (subvec clause 1)]
-                  (let [r (decode-require-libspec spec false)]
+                  (let [r (decode-require-libspec! spec false)]
                     (when (some? r) (swap! requires conj r))))))
             (= head "require")
             (let [specs (subvec d 1)]
               (if (and (> (count specs) 0) (string? (nth specs 0)))
-                (let [r (decode-require-libspec (vec (concat [BRACKET-TAG] specs)) false)]
+                (let [r (decode-require-libspec! (vec (concat [BRACKET-TAG] specs)) false)]
                   (when (some? r) (swap! requires conj r)))
                 (doseq [spec specs]
-                  (let [r (decode-require-libspec spec false)]
+                  (let [r (decode-require-libspec! spec false)]
                     (when (some? r) (swap! requires conj r))))))
             :else
             nil))))
@@ -2905,7 +3026,8 @@
   (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
   (reset! USER-PARAMETRIC-ARITIES (deref PRELOADED-PARAMETRIC-ARITIES))
   (reset! PRELOADED-PARAMETRIC-ARITIES {})
-  (reset! TYPE-ALIASES {})
+  (reset! TYPE-ALIASES (deref PRELOADED-TYPE-ALIASES))
+  (reset! PRELOADED-TYPE-ALIASES {})
   (doseq [datum datums]
     (validate-reserved-type-declaration! datum))
   ;; Import discovery retains arity zero so an invalid required declaration is
@@ -2914,7 +3036,7 @@
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
     (when (= (get (deref USER-PARAMETRIC-ARITIES) name) 0)
       (zero-parametric-declaration-error! name)))
-  (let [mode (atom "strict") mode-set (atom false) namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) gen-class (atom false) forms (atom [])]
+  (let [mode (atom "strict") mode-set (atom false) namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) imports (atom []) gen-class (atom false) forms (atom [])]
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0)))
         (let [name-form (nth d 1)]
@@ -2923,7 +3045,7 @@
             (swap! USER-PARAMETRIC-ARITIES assoc (nth name-form 0) (- (count name-form) 1))))))
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (= (count d) 3) (= (nth d 0) "defalias") (string? (nth d 1)))
-        (swap! TYPE-ALIASES assoc (nth d 1) (parse-type (nth d 2)))))
+        (swap! TYPE-ALIASES assoc (nth d 1) (parse-type* (nth d 2)))))
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2))
         (let [head (nth d 0)]
@@ -2961,7 +3083,8 @@
                   (and (vector? clause)
                     (> (count clause) 0)
                     (= (nth clause 0) ":import"))
-                  nil
+                  (doseq [spec (subvec clause 1)]
+                    (swap! imports into (parse-import-spec! spec "ns :import")))
                   (and (vector? clause)
                     (> (count clause) 0)
                     (= (nth clause 0) ":gen-class"))
@@ -2996,8 +3119,11 @@
             nil
             (= head "declare-extern")
             (if (>= (count d) 3)
-              (let [name-form (nth d 1) t (parse-type (nth d 2)) add-extern! (fn
-                                                                               [(nm Any)] Nil (if (string? nm) (do (validate-identifier! nm "extern") (if (some? (get (deref extern-seen) nm)) (do (err! (str "duplicate declare-extern: " nm)) nil) (do (swap! extern-seen assoc nm true) (swap! extern-list conj {"name" nm "type" t}) nil))) (do (err! (str "declare-extern: each name must be a name, got: " (str nm))) nil)))]
+              (let [name-form (nth d 1) t (parse-type* (nth d 2)) add-extern! (fn
+                                                                                [(nm
+                                                                                  Any)]
+                                                                                Nil
+                                                                                (if (string? nm) (do (validate-identifier! nm "extern") (if (some? (get (deref extern-seen) nm)) (do (err! (str "duplicate declare-extern: " nm)) nil) (do (swap! extern-seen assoc nm true) (swap! extern-list conj {"name" nm "type" t}) nil))) (do (err! (str "declare-extern: each name must be a name, got: " (str nm))) nil)))]
                 (if (bracketed? name-form)
                   (doseq [nm (bracket-body name-form)] (add-extern! nm))
                   (add-extern! name-form)))
@@ -3011,7 +3137,8 @@
                   (let [r (parse-require-libspec! spec)]
                     (when (some? r) (swap! requires conj r))))))
             (= head "import")
-            nil
+            (doseq [spec (subvec d 1)]
+              (swap! imports into (parse-import-spec! spec "import")))
             :else
             nil))))
     (let [hygiene-capable (has-item? ["clj" "nix" "js"] (deref target))
@@ -3068,12 +3195,20 @@
      "externs"
      (deref extern-list)
      "requires"
-     (deref requires)}))
+     (deref requires)
+     "imports"
+     (deref imports)}))
 
 (defn parse-program-with-parametric-arities!
-  [(datums Any)
-   (imported-arities Any)] Any
+  [(datums Any) (imported-arities Any)] Any
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
+  (reset! PRELOADED-TYPE-ALIASES {})
+  (parse-program! datums))
+
+(defn parse-program-with-imports!
+  [(datums Any) (imported-arities Any) (imported-aliases Any)] Any
+  (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
+  (reset! PRELOADED-TYPE-ALIASES imported-aliases)
   (parse-program! datums))
 
 ;; --- module surface import (PURE) --------------------------------------------
@@ -3121,10 +3256,161 @@
 (defn- import-normalize [(d Any)] Any
   (import-strip-doc (import-strip-export d)))
 
+(defn- module-namespace [(datums Any)] String
+  (loop [(remaining Any) datums]
+    (if (= (count remaining) 0)
+      "beagle.user"
+      (let [d (import-normalize (first remaining))]
+        (if (and (vector? d)
+              (>= (count d) 2)
+              (= (nth d 0) "ns")
+              (string? (nth d 1)))
+          (nth d 1)
+          (recur (rest remaining)))))))
+
+(defn- member-type-name [(member Any)] Any
+  (cond
+    (string? member) member
+    (and (vector? member) (> (count member) 0) (string? (nth member 0)))
+    (nth member 0)
+    :else nil))
+
+(defn- module-local-type-names [(datums Any)] Any
+  (reduce
+    (fn [(names Any) (d0 Any)] Any
+      (let [d (import-normalize d0)]
+        (if (and (vector? d) (>= (count d) 2) (string? (nth d 0)))
+          (let [head (nth d 0)]
+            (cond
+              (and (has-item?
+                     ["defalias" "defrecord" "defprotocol" "defenum" "defscalar"]
+                     head)
+                (string? (nth d 1)))
+              (assoc names (nth d 1) true)
+              (= head "defunion")
+              (let [throwable? (= (nth d 1) ":throwable")
+                    name-form (if throwable?
+                                (if (>= (count d) 3) (nth d 2) nil)
+                                (nth d 1))
+                    union-name (member-type-name name-form)
+                    members (if throwable? (subvec d 3) (subvec d 2))
+                    with-union (if (string? union-name)
+                                 (assoc names union-name true)
+                                 names)]
+                (reduce (fn [(out Any) (member Any)] Any
+                          (let [member-name (member-type-name member)]
+                            (if (string? member-name)
+                              (assoc out member-name true)
+                              out)))
+                  with-union members))
+              :else names))
+          names)))
+    {}
+    datums))
+
+(defn- qualify-provider-type
+  [(t Any) (provider-ns String) (local-type-names Any)] Any
+  (if (not (map? t))
+    t
+    (let [kind (get t "kind")
+          qualify-name (fn [(name String)] String
+                         (if (= true (get local-type-names name))
+                           (str provider-ns "/" name)
+                           name))]
+      (cond
+        (= kind "prim")
+        (assoc t "name" (qualify-name (get t "name")))
+        (= kind "app")
+        (assoc (assoc t "name" (qualify-name (get t "name")))
+          "args"
+          (mapv (fn [(arg Any)] Any
+                  (qualify-provider-type arg provider-ns local-type-names))
+            (get t "args")))
+        (= kind "union")
+        (assoc t "members"
+          (mapv (fn [(member Any)] Any
+                  (qualify-provider-type member provider-ns local-type-names))
+            (get t "members")))
+        (= kind "fn")
+        (assoc
+          (assoc
+            (assoc t "params"
+              (mapv (fn [(param Any)] Any
+                      (qualify-provider-type param provider-ns local-type-names))
+                (get t "params")))
+            "rest"
+            (if (nil? (get t "rest"))
+              nil
+              (qualify-provider-type (get t "rest") provider-ns local-type-names)))
+          "ret"
+          (qualify-provider-type (get t "ret") provider-ns local-type-names))
+        (= kind "poly")
+        (let [bounds (get t "bounds")]
+          (assoc
+            (assoc t "body"
+              (qualify-provider-type (get t "body") provider-ns local-type-names))
+            "bounds"
+            (if (map? bounds)
+              (reduce (fn [(out Any) (name Any)] Any
+                        (assoc out name
+                          (qualify-provider-type
+                            (get bounds name) provider-ns local-type-names)))
+                {}
+                (keys bounds))
+              bounds)))
+        :else t))))
+
+(defn- module-local-type-aliases-with-imports!
+  [(datums Any) (imported-aliases Any)] Any
+  (let [saved (deref TYPE-ALIASES)
+        aliases (atom {})
+        provider-ns (module-namespace datums)
+        local-type-names (module-local-type-names datums)]
+    (doseq [d0 datums]
+      (let [d (import-normalize d0)]
+        (when (and (vector? d)
+                (= (count d) 3)
+                (= (nth d 0) "defalias")
+                (string? (nth d 1)))
+          (reset! TYPE-ALIASES
+            (merge saved imported-aliases (deref aliases)))
+          (swap! aliases assoc (nth d 1)
+            (qualify-provider-type
+              (parse-type* (nth d 2)) provider-ns local-type-names)))))
+    (let [result (deref aliases)]
+      (reset! TYPE-ALIASES saved)
+      result)))
+
+(defn- module-local-type-aliases! [(datums Any)] Any
+  (module-local-type-aliases-with-imports! datums {}))
+
+(defn module-type-aliases-with-imports!
+  [(datums Any) (prefix String) (refer-syms Any) (imported-aliases Any)] Any
+  (let [local-aliases
+          (module-local-type-aliases-with-imports! datums imported-aliases)
+        provider-ns (module-namespace datums)
+        refer-set (if (some? refer-syms)
+                    (reduce (fn [(out Any) (name Any)] Any
+                              (assoc out name true))
+                      {}
+                      refer-syms)
+                    {})]
+    (reduce
+      (fn [(out Any) (name Any)] Any
+        (let [expansion (get local-aliases name)
+              prefixed (assoc out (str prefix "/" name) expansion)
+              full (assoc prefixed (str provider-ns "/" name) expansion)]
+          (if (= true (get refer-set name))
+            (assoc full name expansion)
+            full)))
+      {}
+      (keys local-aliases))))
+
+(defn module-type-aliases! [(datums Any) (prefix String) (refer-syms Any)] Any
+  (module-type-aliases-with-imports! datums prefix refer-syms {}))
+
 (defn module-parametric-arities
-  [(datums Any)
-   (prefix String)
-   (refer-syms Any)] Any
+  [(datums Any) (prefix String) (refer-syms Any)] Any
   (doseq [datum datums]
     (validate-reserved-type-declaration! (import-normalize datum)))
   (let [refer-set (if (some? refer-syms) (reduce (fn [(m Any) (s Any)] Any (assoc m s true)) {} refer-syms) nil)]
@@ -3151,17 +3437,18 @@
       datums)))
 
 ;; Fn parameter/rest types for an imported defn signature.
-(defn- import-fn-ptypes [(params-form Any)] Any
+(defn- import-fn-ptypes! [(params-form Any)] Any
   (mapv (fn [(p Any)] Any (let [a (get p "ann")] (if (some? a) a (make-prim "Any"))))
     (get (parse-params! params-form) "params")))
 
-(defn- import-fn-rest [(params-form Any)] Any
+(defn- import-fn-rest! [(params-form Any)] Any
   (let [rp (get (parse-params! params-form) "rest-param")]
     (if (some? rp)
       (let [a (get rp "ann")] (if (some? a) a (make-prim "Any")))
       nil)))
 
-(defn import-module-surface [(datums Any) (prefix String) (refer-syms Any)] Any
+(defn- import-module-surface*!
+  [(datums Any) (prefix String) (refer-syms Any)] Any
   (doseq [datum datums]
     (validate-reserved-type-declaration! (import-normalize datum)))
   (doseq [d0 datums]
@@ -3171,9 +3458,16 @@
           (swap! USER-PARAMETRIC-ARITIES assoc name arity)
           (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity)))))
   (let [refer-set (if (some? refer-syms) (reduce (fn [(m Any) (s Any)] Any (assoc m s true)) {} refer-syms) nil) referred? (fn
-                                                                                                                             [(nm Any)] Bool (and (some? refer-set) (= true (get refer-set nm)))) out (atom []) seen (atom {}) emit! (fn
-                                                                                                                                                                                                                                       [(nm Any)
-                                                                                                                                                                                                                                        (t Any)] Nil (let [q (str prefix "/" nm)] (when (not (= true (get (deref seen) q))) (swap! seen assoc q true) (swap! out conj {"name" q "type" t})) (when (and (referred? nm) (not (= true (get (deref seen) nm)))) (swap! seen assoc nm true) (swap! out conj {"name" nm "type" t}))) nil)]
+                                                                                                                             [(nm
+                                                                                                                               Any)]
+                                                                                                                             Bool
+                                                                                                                             (and (some? refer-set) (= true (get refer-set nm)))) out (atom []) seen (atom {}) emit! (fn
+                                                                                                                                                                                                                       [(nm
+                                                                                                                                                                                                                         Any)
+                                                                                                                                                                                                                        (t
+                                                                                                                                                                                                                         Any)]
+                                                                                                                                                                                                                       Nil
+                                                                                                                                                                                                                       (let [q (str prefix "/" nm)] (when (not (= true (get (deref seen) q))) (swap! seen assoc q true) (swap! out conj {"name" q "type" t})) (when (and (referred? nm) (not (= true (get (deref seen) nm)))) (swap! seen assoc nm true) (swap! out conj {"name" nm "type" t}))) nil)]
     (doseq [d0 datums]
       (let [d (import-normalize d0)]
         (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (string? (nth d 0)))
@@ -3181,7 +3475,7 @@
             (cond
               (= head "declare-extern")
               (when (>= (count d) 3)
-                (let [name-form (nth d 1) t (parse-type (nth d 2))]
+                (let [name-form (nth d 1) t (parse-type* (nth d 2))]
                   (if (bracketed? name-form)
                     (doseq [nm (bracket-body name-form)] (emit! nm t))
                     (emit! name-form t))))
@@ -3198,7 +3492,7 @@
                 (>= (count d) 3)
                 (string? (nth d 1))
                 (string? (nth d 2)))
-              (let [nm (nth d 1) backing (parse-type (nth d 2)) nlow (str/lower-case nm)]
+              (let [nm (nth d 1) backing (parse-type* (nth d 2)) nlow (str/lower-case nm)]
                 (emit! (str "->" nm)
                   (make-fn-type [backing] nil (make-prim nm)))
                 (emit! (str nlow "-value")
@@ -3220,11 +3514,11 @@
               (or (= head "def") (= head "defonce"))
               (cond
                 (and (= (count d) 4) (string? (nth d 1)))
-                (emit! (nth d 1) (parse-type (nth d 2)))
+                (emit! (nth d 1) (parse-type* (nth d 2)))
                 (and (>= (count d) 3) (meta-name? (nth d 1)))
                 (let [nm (nth (nth d 1) 2)]
                   (if (= (count d) 4)
-                    (emit! nm (parse-type (nth d 2)))
+                    (emit! nm (parse-type* (nth d 2)))
                     (emit! nm (make-prim "Any"))))
                 :else
                 nil)
@@ -3236,13 +3530,62 @@
                     (raise-retired-return-annotation! (str "defn " (nth d 1))))
                   (if (and (>= (count after) 3) (bracketed? (nth after 0)))
                     (emit! (nth d 1)
-                      (make-fn-type (import-fn-ptypes (nth after 0))
-                        (import-fn-rest (nth after 0))
-                        (parse-type (nth after 1))))
+                      (make-fn-type (import-fn-ptypes! (nth after 0))
+                        (import-fn-rest! (nth after 0))
+                        (parse-type* (nth after 1))))
                     nil)))
               :else
               nil)))))
     (deref out)))
+
+(defn import-module-surface-with-aliases!
+  [(datums Any) (prefix String) (refer-syms Any) (imported-aliases Any)] Any
+  (let [saved (deref TYPE-ALIASES)
+        local-aliases
+          (module-local-type-aliases-with-imports! datums imported-aliases)]
+    (reset! TYPE-ALIASES (merge saved imported-aliases local-aliases))
+    (let [result (import-module-surface*! datums prefix refer-syms)]
+      (reset! TYPE-ALIASES saved)
+      result)))
+
+(defn import-module-surface! [(datums Any) (prefix String) (refer-syms Any)] Any
+  (import-module-surface-with-aliases! datums prefix refer-syms {}))
+
+(defn qualify-imported-record-contracts
+  [(contracts Any) (prefix String) (refer-syms Any)] Any
+  (let [refer-set (if (some? refer-syms)
+                    (reduce (fn [(out Any) (name String)] Any
+                              (assoc out name true))
+                      {} refer-syms)
+                    {})]
+    (vec
+      (apply concat
+        (mapv
+          (fn [(contract Any)] Any
+            (let [name (get contract "name")
+                  qualified (assoc contract "name" (str prefix "/" name))]
+              (if (= true (get refer-set name))
+                [qualified (assoc contract "name" name)]
+                [qualified])))
+          contracts)))))
+
+(defn qualify-imported-callable-synchronization
+  [(entries Any) (prefix String) (refer-syms Any)] Any
+  (let [refer-set (if (some? refer-syms)
+                    (reduce (fn [(out Any) (name String)] Any
+                              (assoc out name true))
+                      {} refer-syms)
+                    {})]
+    (vec
+      (apply concat
+        (mapv
+          (fn [(entry Any)] Any
+            (let [name (get entry "name")
+                  qualified (assoc entry "name" (str prefix "/" name))]
+              (if (= true (get refer-set name))
+                [qualified (assoc entry "name" name)]
+                [qualified])))
+          entries)))))
 
 ;; === tests ===================================================================
 (def PASSES Any (atom 0))
@@ -3400,10 +3743,37 @@
       (> (count (parse-errors)) 0)))
   (expect! "structural let binding accepted"
     (let [bs (parse-let-bindings! [BRACKET-TAG ["n" "Int"] 1])]
-      (= (get (get (nth bs 0) "ann") "name") "Int")))
+      (and (= (get (get (nth bs 0) "ann") "name") "Int")
+        (nil? (get (nth bs 0) "constraint")))))
+  (expect! "typed binding owns parsed constraint expression"
+    (let [bs (parse-let-bindings!
+               [BRACKET-TAG ["n" "Int" ["positive?" "n"]] 1])
+          constraint (get (nth bs 0) "constraint")]
+      (and (= (get constraint "node") "call")
+        (= (get (get constraint "fn") "name") "positive?")
+        (= (get (nth (get constraint "args") 0) "name") "n"))))
   (expect! "structural record field accepted"
     (let [fs (parse-record-fields! [BRACKET-TAG ["x" "Int"]])]
-      (= (get (get (nth fs 0) "ann") "name") "Int")))
+      (and (= (get (get (nth fs 0) "ann") "name") "Int")
+        (nil? (get (nth fs 0) "constraint")))))
+  (expect! "record field owns parsed constraint expression"
+    (let [fs (parse-record-fields!
+               [BRACKET-TAG ["id" "String" "character-id-wire?"]])]
+      (= (get (get (nth fs 0) "constraint") "name")
+        "character-id-wire?")))
+  (expect! "flattened record field token is rejected with a structural repair"
+    (do
+      (reset-errors!)
+      (parse-record-fields!
+        [BRACKET-TAG ["id" "String"] "character-id-wire?"])
+      (let [errors (parse-errors)]
+        (and (= (count errors) 1)
+          (str/includes? (nth errors 0)
+            "Invalid field declaration: character-id-wire?")
+          (str/includes? (nth errors 0)
+            "Each field must be one complete form:")
+          (str/includes? (nth errors 0)
+            "(id String character-id-wire?)")))))
   (expect! "defn without return type rejected"
     (do
       (reset-errors!)
@@ -3417,6 +3787,27 @@
         (= (get (nth (get node "params") 1) "name") "b")
         (nil? (get (nth (get node "params") 1) "ann"))
         (= (get (get (nth (get node "params") 2) "ann") "name") "String"))))
+  (expect! "mixed parameter vector retains each local constraint"
+    (let [node (parse-expr*
+                 ["defn" "f"
+                  [BRACKET-TAG "a" ["b" "Point" ["valid-point?" "b"]]]
+                  "Any"
+                  "b"])
+          params (get node "params")
+          constraint (get (nth params 1) "constraint")]
+      (and (= (count params) 2)
+        (= (get (nth params 0) "name") "a")
+        (nil? (get (nth params 0) "constraint"))
+        (= (get (nth params 1) "name") "b")
+        (= (get (get (nth params 1) "ann") "name") "Point")
+        (= (get constraint "node") "call")
+        (= (get (get constraint "fn") "name") "valid-point?"))))
+  (expect! "structured binding rejects arity beyond type and constraint"
+    (do
+      (reset-errors!)
+      (parse-params!
+        [BRACKET-TAG ["x" "Int" "positive?" "unexpected"]])
+      (> (count (parse-errors)) 0)))
   (expect! "defn with docstring (stripped)"
     (let [node (parse-expr* ["defn" "f" ["#%string" "doc"] [BRACKET-TAG "x"] "Any" "x"])]
       (and (= (get node "node") "defn")
@@ -3445,6 +3836,8 @@
           {"name"
            "*out*"
            "ann"
+           nil
+           "constraint"
            nil
            "value"
            {"node" "dynamic-var" "name" "*err*"}})
@@ -3502,6 +3895,14 @@
       (and (= (get node "node") "for")
         (= (count (get node "clauses")) 1)
         (= (get (nth (get node "clauses") 0) "type") "binding"))))
+  (expect! "for binding retains its local constraint"
+    (let [node (parse-expr*
+                 ["for"
+                  [BRACKET-TAG ["x" "Int" ["positive?" "x"]] "items"]
+                  "x"])
+          constraint (get (nth (get node "clauses") 0) "constraint")]
+      (and (= (get constraint "node") "call")
+        (= (get (get constraint "fn") "name") "positive?"))))
   (expect! "for with :when"
     (let [node (parse-expr* ["for" [BRACKET-TAG "x" "items" ":when" ["even?" "x"]] "x"])]
       (and (= (count (get node "clauses")) 2)
@@ -3530,13 +3931,22 @@
          ["catch" [[MAP-TAG ":keys" [BRACKET-TAG "message"]] "Exception"]
           "message"]])
       (> (count (parse-errors)) 0)))
+  (expect! "catch binding rejects a constraint and retains exact arity two"
+    (do
+      (reset-errors!)
+      (parse-expr*
+        ["try" ["foo"]
+         ["catch" ["e" "Exception" "recoverable?"] "e"]])
+      (> (count (parse-errors)) 0)))
   (expect! "defrecord structural fields"
     (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG ["tx" "Int"] ["op" "String"]]])]
       (and (= (get node "node") "record")
         (= (get node "name") "Assertion")
         (= (count (get node "fields")) 2)
         (= (nth (get node "fields") 0)
-          {"name" "tx" "ann" {"kind" "prim" "name" "Int"}})
+          {"name" "tx"
+           "ann" {"kind" "prim" "name" "Int"}
+           "constraint" nil})
         (nil? (get node "private")))))
   (expect! "defrecord punctuation fields rejected"
     (do
@@ -3562,6 +3972,15 @@
         (= (get node "name") "RewriteError")
         (= (get node "members") ["RewriteCrash"])
         (= (count (get (get node "member-fields") "RewriteCrash")) 1))))
+  (expect! "defunion rejects trailing forms outside one member declaration"
+    (do
+      (reset-errors!)
+      (parse-expr*
+        ["defunion" "Shape"
+         ["Circle" [BRACKET-TAG ["radius" "Float"]] "stray"]])
+      (let [errors (parse-errors)]
+        (and (= (count errors) 1)
+          (str/includes? (nth errors 0) "one complete (Name [fields...]) form")))))
   (expect! "defenum"
     (let [node (parse-expr* ["defenum" "Color" "Red" "Green" "Blue"])]
       (and (= (get node "node") "defenum")
@@ -3569,12 +3988,45 @@
         (= (count (get node "values")) 3))))
   (expect! "defscalar"
     (let [node (parse-expr* ["defscalar" "Email" "String"])]
-      (and (= (get node "node") "defscalar") (= (get node "name") "Email"))))
+      (and (= (get node "node") "defscalar")
+        (= (get node "name") "Email")
+        (= (get node "predicates") []))))
+  (expect! "defscalar owns every predicate declaration structurally"
+    (let [node (parse-expr*
+                 ["defscalar" "Percentage" "Int" ":where" [">=" 0] ["<=" 100]])]
+      (= (get node "predicates")
+        [{"op" ">=" "value" 0} {"op" "<=" "value" 100}])))
+  (expect! "defscalar rejects a flattened predicate token"
+    (do
+      (reset-errors!)
+      (parse-expr* ["defscalar" "Percentage" "Int" ":where" ">=" 0])
+      (> (count (parse-errors)) 0)))
   (expect! "deferror"
     (let [node (parse-expr* ["deferror" "AppError" "NotFound" "Forbidden"])]
       (and (= (get node "node") "deferror")
         (= (get node "name") "AppError")
         (= (count (get node "members")) 2))))
+  (expect! "protocol and implementation preserve constrained rest params"
+    (let [protocol (parse-expr*
+                     ["defprotocol" "Measure"
+                      ["measure"
+                       [BRACKET-TAG ["x" "Int" "positive?"]
+                        "&" ["more" ["Vec" "Int"] "nonempty?"]]
+                       "Bool"]])
+          extension (parse-expr*
+                      ["extend-type" "Widget" "Measure"
+                       ["measure"
+                        [BRACKET-TAG ["x" "Int" "positive?"]
+                         "&" ["more" ["Vec" "Int"] "nonempty?"]]
+                        "Bool" true]])
+          declared-rest (get (nth (get protocol "methods") 0) "rest")
+          impl-rest (get
+                      (nth (get (nth (get extension "impls") 0) "methods") 0)
+                      "rest")]
+      (and (= (get declared-rest "name") "more")
+        (= (get (get declared-rest "constraint") "name") "nonempty?")
+        (= (get impl-rest "name") "more")
+        (= (get (get impl-rest "constraint") "name") "nonempty?"))))
   (expect! "method-call"
     (let [node (parse-expr* [".push" "arr" 42])]
       (and (= (get node "node") "method-call")
@@ -3643,9 +4095,6 @@
         (= (get node "name") "f")
         (= (count (get node "arities")) 2)
         (= (get (nth (get node "arities") 0) "rest") false))))
-  (expect! "bare-vector multi-arity defn canonicalizes to wrapped clauses"
-    (= (parse-expr* ["defn" "f" [BRACKET-TAG "a"] "Any" "a" [BRACKET-TAG "a" "b"] "Any" ["+" "a" "b"]])
-      (parse-expr* ["defn" "f" [[BRACKET-TAG "a"] "Any" "a"] [[BRACKET-TAG "a" "b"] "Any" ["+" "a" "b"]]])))
   (expect! "single-arity defn with vec body is NOT multi-arity"
     (= (get (parse-expr* ["defn" "f" [BRACKET-TAG "a"] "Any" [BRACKET-TAG 1 2]]) "node")
       "defn"))
@@ -3757,6 +4206,11 @@
     (let [result (parse-params! [BRACKET-TAG "x" "&" ["args" ["Vec" "String"]]])]
       (and (= (get (get result "rest-param") "name") "args")
         (= (get (get (get result "rest-param") "ann") "kind") "app"))))
+  (expect! "parse-params! structural rest owns constraint"
+    (let [result (parse-params!
+                   [BRACKET-TAG "x" "&"
+                    ["args" ["Vec" "String"] ["seq" "args"]]])]
+      (= (get (get (get result "rest-param") "constraint") "node") "call")))
   (expect! "reserved compiler identifier prefix rejected"
     (do
       (reset-errors!)
@@ -3797,21 +4251,27 @@
         (reset-errors!)
         (and folded (= (count (parse-errors)) 0)))))
   (expect! "parse-type primitive"
-    (= (parse-type "Int") {"kind" "prim" "name" "Int"}))
+    (= (parse-type! "Int") {"kind" "prim" "name" "Int"}))
   (expect! "parse-type nullable"
-    (let [t (parse-type "String?")]
+    (let [t (parse-type! "String?")]
       (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
   (expect! "parse-type fn"
-    (let [t (parse-type ["Fn" [BRACKET-TAG "Int"] "String"])]
+    (let [t (parse-type! ["Fn" [BRACKET-TAG "Int"] "String"])]
       (and (= (get t "kind") "fn") (= (count (get t "params")) 1))))
   (expect! "parse-type Vec app"
-    (let [t (parse-type ["Vec" "String"])]
+    (let [t (parse-type! ["Vec" "String"])]
       (and (= (get t "kind") "app") (= (get t "name") "Vec"))))
+  (expect! "parse-type Dyn preserves ordered alternatives"
+    (= (parse-type! ["Dyn" "String" "Int"])
+      {"kind" "app"
+       "name" "Dyn"
+       "args" [{"kind" "prim" "name" "String"}
+               {"kind" "prim" "name" "Int"}]}))
   (expect! "parse-type union"
-    (let [t (parse-type ["U" "Int" "String"])]
+    (let [t (parse-type! ["U" "Int" "String"])]
       (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
   (expect! "parse-type clj alias Long"
-    (= (parse-type "Long") {"kind" "prim" "name" "Int"}))
+    (= (parse-type! "Long") {"kind" "prim" "name" "Int"}))
   (expect! "local parametric type accepts exact arity"
     (let [_ (parse-program!
               [["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG ["value" "T"]]]]
@@ -3887,6 +4347,14 @@
     (let [prog (parse-program! [["ns" "my.app" [":require" ["#%brackets" "clojure.string" ":as" "str"]]]])]
       (= (get prog "requires")
         [{"ns" "clojure.string" "alias" "str" "refer" false}])))
+  (expect! "parse-program! ns :import retains complete declarations"
+    (let [prog (parse-program!
+                 [["ns" "my.app"
+                   [":import"
+                    ["java.nio.charset" "StandardCharsets"]
+                    "java.util.zip.CRC32"]]])]
+      (= (get prog "imports")
+        ["java.nio.charset.StandardCharsets" "java.util.zip.CRC32"])))
   (expect! "parse-program! require :refer"
     (let [prog (parse-program! [["require" "my.lib" ":refer" ["#%brackets" "f" "g"]]])]
       (= (get prog "requires")
@@ -3894,7 +4362,7 @@
   (expect! "require discovery matches authoritative require parsing"
     (let [datums [["ns" "my.app" [":require" ["#%brackets" "my.lib" ":as" "m"]]]
                   ["require" "other.lib" ":refer" ["#%brackets" "f"]]]]
-      (= (discover-requires datums)
+      (= (discover-requires! datums)
         (get (parse-program! datums) "requires"))))
   (expect! "parse-program! default mode strict + target clj + gen-class false"
     (let [prog (parse-program! [["ns" "x.y"]])]
@@ -3944,7 +4412,7 @@
       (= (parse-expr* ["inherit" "a" "b"])
         {"node" "nix-inherit" "names" ["a" "b"]}))
     (expect! "nix: map literal keeps singleton inherit before ordinary pairs"
-      (= (parse-map-literal [["inherit" "pkgs"] ":beagle" "beagle"])
+      (= (parse-map-literal! [["inherit" "pkgs"] ":beagle" "beagle"])
         {"node"
          "map"
          "pairs"
@@ -3954,7 +4422,7 @@
            "val"
            {"node" "ref" "name" "beagle"}}]}))
     (expect! "nix: map literal keeps singleton inherit-from"
-      (= (parse-map-literal [["inherit-from" "inputs" "north"]])
+      (= (parse-map-literal! [["inherit-from" "inputs" "north"]])
         {"node"
          "map"
          "pairs"
@@ -3968,7 +4436,7 @@
            "val"
            FALSE-LITERAL}]}))
     (expect! "map literal rejects an unpaired non-inherit tail"
-      (let [_ (reset-errors!) _ (parse-map-literal [":a" 1 ":dangling"]) errs (parse-errors) rejected (and (= (count errs) 1) (str/includes? (nth errs 0) "map literal: odd number of forms"))]
+      (let [_ (reset-errors!) _ (parse-map-literal! [":a" 1 ":dangling"]) errs (parse-errors) rejected (and (= (count errs) 1) (str/includes? (nth errs 0) "map literal: odd number of forms"))]
         (reset-errors!)
         rejected)))
   (expect! "nix: (inherit-from (ns) a) -> nix-inherit-from"

@@ -100,44 +100,80 @@ Beagle is Clojure plus types. Any divergence must be load-bearing for the type
 system or a backend. Bare names must behave as their Clojure namesake; qualify
 every target-specific meaning, such as `nix/assert`.
 
-Canonical typed parameters are structural `(binding-form Type)` forms; the
-type annotates the entire binding operation. A bare simple binder requests
-inference; explicit `Any` marks a deliberately dynamic boundary. A bare
-destructure in a strict typed signature is rejected without an aggregate type
-to project. Typed and bare bindings may mix:
+The outer `[...]` is only the collection of bindings. Each entry is either a
+bare symbol or one structural `(binding-form Type [constraint])` declaration;
+each binding independently decides whether it carries a type. The type
+annotates the entire binding operation. A bare symbol requests inference;
+explicit `Any` marks a deliberately dynamic boundary. A bare destructure in a
+strict typed signature is rejected without an aggregate type to project. Typed
+and bare bindings may mix:
 
 ```clojure
 (def total Int 0)
-(defn add [(left Int) (right Int)] Int
+(defn add [left (right Int)] Int
   (+ left right))
 ```
 
+Thus `[a]` and `[a b]` are inferred bindings, `[(a Point)]` and
+`[(a Point) (b Point)]` are typed bindings, and `[a (b Point)]` mixes the two
+without a special case.
+
 - Type boundaries: `def`, `defonce`, `defn` parameters and return, and
   required `defrecord` fields. Infer interiors.
-- Parameter grammar: `binding-form | (binding-form Type)`. A symbol, sequential
-  destructure, or associative destructure can be the binding form. The nesting
-  is semantic structure, not decoration. Mixed vectors need no special case:
-  `[([x y] (HVec Float Float)) opts]`.
+- Binding grammar: `symbol | (binding-form Type) | (binding-form Type
+  constraint)`. A symbol, sequential destructure, or associative destructure
+  can occupy `binding-form`. The nesting is semantic structure, not decoration.
+  Mixed vectors need no special case: `[([x y] (HVec Float Float)) opts]`.
 - Treat each outer parameter-vector entry independently. `[a (b Point)]` is a
   bare binding followed by a typed binding; `([x y] Point)` is one typed
   destructuring binding. Never attach an adjacent entry to its predecessor.
+- A constraint is a statically known synchronous unary predicate
+  `[Type -> Bool]`. Its signature must contain no `Any`, extra/rest parameter,
+  non-`Bool` return, or asynchronous work. The target guards the complete raw
+  value before installing the binder or projecting a destructure; false raises
+  a runtime binding-constraint error and the body does not run. Call-produced
+  predicates are accepted only when the callee publishes an explicit positive
+  returned-callable synchronization proof; executing the factory synchronously
+  is not sufficient.
 - Executable return types occupy one mandatory positional slot after the
   parameter vector: `[params] Return body...`. Type-level function arrows such
   as `(Fn [Int] String)` remain.
 - `def`, `defonce`, `let`, `loop`, and typed record/union/error fields use the
-  same noun-then-type structure. A typed rest parameter is
-  `& (more (Vec Int))`.
+  same noun-then-type structure. A typed rest parameter is `& (more (Vec Int))`;
+  its constrained form is `& (more (Vec Int) nonempty?)`.
 - `name: Type`, `name :- Type`, and executable `-> Return` are rejected; never
   introduce compatibility syntax for them.
 
-For macro DSLs with field-local metadata, put the entire declaration in one
-form, such as `[(id String validator?)]`. Iterate those forms directly. First
+Fields and macro DSLs with field-local metadata put the entire declaration in
+one form, such as `[(id String validator?)]`. A DSL with more metadata likewise
+uses a complete form such as
+`(name Type value-validator wire-validator encoder decoder)` or
+`(name encoder-expression validator)`. Iterate those forms directly. First
 guard a possible stray token (for example with `pair?`), then check the exact
 arity, and only then call `first`, `nth`, or another destructuring operation on
 that entry. Never `partition`, pair, or normalize adjacent tokens into a field.
-Reject `[(id String) validator?]` at macro expansion with a targeted declaration
-diagnostic. This rejection is contextual: in a parameter vector those outer
-entries remain two independent bindings.
+Reject `[(id String) validator?]` at macro expansion with a targeted
+declaration diagnostic. Use
+`(syntax-error-at collection zero-based-index message ...)` from a
+`map-indexed` validation pass so the compiler points at the exact caller form,
+not the whole macro invocation. `collection` must be the original macro input
+list/vector (or one of its `rest` tails); the vector reader tag is not counted
+in the logical index. Do not pass a copied/reconstructed collection, because
+source identity belongs to the input structure. This rejection is contextual:
+in a parameter vector those outer entries remain two independent bindings.
+
+```clojure
+(map-indexed
+  (fn [i field] Any
+    (if (list? field)
+        (if (= (count field) 3)
+            (syntax-name field)
+            (syntax-error-at fields i
+              "Invalid field declaration: " field))
+        (syntax-error-at fields i
+          "Invalid field declaration: " field)))
+  fields)
+```
 
 Typed destructuring annotates the binding operation rather than only an
 identifier. Use a positional type for sequential destructuring and a
@@ -180,7 +216,9 @@ Canonical function layout is width-driven, with no parameter-count threshold:
 ```
 
 The width boundary is inclusive at 80 columns. Never partially pack an expanded
-vector. The reader accepts any physical layout; run `beagle fmt --write .`
+vector. If one declaration still exceeds the width, expand its binding form,
+type, and constraint internally; never use alignment whitespace to simulate
+grouping. The reader accepts any physical layout; run `beagle fmt --write .`
 instead of formatting by hand, and use `beagle fmt --check .` in CI/review.
 
 ## Treat `Any` as an explicit gap

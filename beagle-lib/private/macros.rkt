@@ -136,7 +136,20 @@
          (hash-set e pname arg)))
      (define env+rest (if rest-name (hash-set env rest-name rest-args) env))
      (with-handlers
-       ([exn:fail?
+       ([exn:fail:macro-source?
+         (lambda (e)
+           ;; Preserve the exact input collection/index for parse.rkt's
+           ;; datum-to-syntax source lookup. Only this layer knows the full
+           ;; recursive expansion chain, so attach it before re-raising.
+           (raise
+            (exn:fail:macro-source
+             (exn-message e)
+             (exn-continuation-marks e)
+             (exn:fail:macro-source-collection e)
+             (exn:fail:macro-source-index e)
+             (exn:fail:macro-source-form e)
+             (or (exn:fail:macro-source-context e) ctx))))]
+        [exn:fail?
          (lambda (e)
            (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
            (error 'beagle
@@ -377,118 +390,638 @@
 
 (define (typed-binding-form? form)
   (and (list? form)
-       (= (length form) 2)
+       (memv (length form) '(2 3))
        (not (bracketed? form))
        (not (map-tagged? form))
+       (not (and (pair? form)
+                 (memq (car form) '(unquote unquote-splicing))))
        (let ([target (car form)])
          (or (symbol? target) (bracketed? target) (map-tagged? target)))))
-
-(define (collect-param-binders! form macro-params add!)
-  (let loop ([items (unwrap-brackets* form)])
-    (cond
-      [(null? items) (void)]
-      [(typed-binding-form? (car items))
-       ;; `(binding-form Type)` annotates the whole binding operation.  The
-       ;; type is data, never a binder source.
-       (binding-form-binders! (caar items) macro-params add!)
-       (loop (cdr items))]
-      [else
-       (binding-form-binders! (car items) macro-params add!)
-       (loop (cdr items))])))
-
-(define (collect-let-binders! form macro-params add!)
-  (let loop ([rest (unwrap-brackets* form)])
-    (cond
-      [(or (null? rest) (null? (cdr rest))) (void)]
-      [(typed-binding-form? (car rest))
-       (binding-form-binders! (caar rest) macro-params add!)
-       (loop (cddr rest))]
-      [else
-       (binding-form-binders! (car rest) macro-params add!)
-       (loop (cddr rest))])))
 
 (define (unquote-form? d)
   (and (pair? d)
        (or (eq? (car d) 'unquote)
            (eq? (car d) 'unquote-splicing))))
 
-(define (collect-template-binders template macro-params)
-  (define binders '())
-  (define (add! name)
-    (unless (memq name binders) (set! binders (cons name binders))))
-  (let walk ([datum template])
-    (when (pair? datum)
-      (cond
-        ;; Don't descend into (unquote …) / (unquote-splicing …) — their
-        ;; payloads are evaluated at expansion time, not part of the
-        ;; template. A defmacro body like `(let ,bindings ,body) treats
-        ;; `bindings` as user-supplied data, not a binder source.
-        [(unquote-form? datum) (void)]
-        ;; Quoted templates are inert.
-        [(eq? (car datum) 'quote) (void)]
-        [(eq? (car datum) 'let)
-         ;; Only interpret a literal bindings vec; skip if the bindings
-         ;; slot is an (unquote …) escape.
-         (when (and (pair? (cdr datum)) (pair? (cddr datum))
-                    (not (unquote-form? (cadr datum))))
-           (collect-let-binders! (cadr datum) macro-params add!))
-         (for-each walk (cdr datum))]
-        [(eq? (car datum) 'fn)
-         (when (and (pair? (cdr datum)) (pair? (cddr datum))
-                    (not (unquote-form? (cadr datum))))
-           (collect-param-binders! (cadr datum) macro-params add!))
-         (for-each walk (cdr datum))]
-        [(eq? (car datum) 'defn)
-         (when (and (pair? (cdr datum)) (pair? (cddr datum)) (pair? (cdddr datum)))
-           (when (and (symbol? (cadr datum)) (not (memq (cadr datum) macro-params)))
-             (add! (cadr datum)))
-           (when (not (unquote-form? (caddr datum)))
-             (collect-param-binders! (caddr datum) macro-params add!)))
-         (for-each walk (cdr datum))]
-        [else (for-each walk datum)])))
-  binders)
+(struct hygiene-inert (datum) #:transparent)
+(struct hygiene-deferred (datum forbidden) #:transparent)
 
-(define (rename-in-template template renames)
-  (cond
-    [(and (symbol? template) (hash-has-key? renames template))
-     (hash-ref renames template)]
-    [(and (list? template)
-          (= (length template) 2)
-          (eq? (car template) 'quote)
-          (symbol? (cadr template))
-          (hash-has-key? renames (cadr template)))
-     (list 'quote (hash-ref renames (cadr template)))]
-    [(and (pair? template) (eq? (car template) 'quote))
-     template]
-    [(pair? template)
-     (cons (rename-in-template (car template) renames)
-           (rename-in-template (cdr template) renames))]
-    [else template]))
+(define (binding-form-binders form macro-params)
+  (define names '())
+  (binding-form-binders!
+   form macro-params
+   (lambda (name)
+     (unless (memq name names)
+       (set! names (append names (list name))))))
+  names)
+
+(define (scope-extend env additions)
+  (for/fold ([result env]) ([(name replacement) (in-hash additions)])
+    (hash-set result name replacement)))
+
+;; Transform one macro template while carrying the lexical meaning of every
+;; introduced binder.  Binding metadata is handled at its owning declaration:
+;; the target extends only the body scope, the Type slot is inert, and an
+;; optional constraint is transformed in the same pre-binding scope as the
+;; incoming value.
+(define (transform-template/scoped template macro-params
+                                   #:freshen-binders? freshen-binders?
+                                   #:resolve-free resolve-free
+                                   #:preserve-unquotes? preserve-unquotes?)
+  (define binder-renames (make-hasheq))
+
+  (define (remember-binder! name replacement)
+    (when freshen-binders?
+      (hash-update! binder-renames name
+                    (lambda (replacements)
+                      (if (memq replacement replacements)
+                          replacements
+                          (cons replacement replacements)))
+                    '())))
+
+  (define (fresh-binding-map names)
+    (for/fold ([renames (hasheq)]) ([name (in-list names)])
+      (cond
+        [(hash-has-key? renames name) renames]
+        [else
+         (define replacement
+           (if freshen-binders? (fresh-lowered-sym name) name))
+         (remember-binder! name replacement)
+         (hash-set renames name replacement)])))
+
+  (define (resolve-symbol datum env)
+    (cond
+      [(hash-has-key? env datum) (hash-ref env datum)]
+      [(memq datum macro-params) datum]
+      [else (resolve-free datum)]))
+
+  ;; Value binders do not shadow the type namespace. During local hygiene type
+  ;; syntax remains inert, while imported templates resolve every free type
+  ;; name in its own structural slot against the provider definition context.
+  ;; Unquotes stay owned by the macro caller and are never traversed here.
+  (define (transform-type datum [bound '()])
+    (cond
+      [(symbol? datum)
+       (if (or (memq datum bound) (memq datum macro-params))
+           datum
+           (resolve-free datum))]
+      [(not (pair? datum)) datum]
+      [(and preserve-unquotes? (unquote-form? datum)) datum]
+      [(and (list? datum)
+            (= (length datum) 3)
+            (eq? (car datum) 'forall))
+       (define vars-form (cadr datum))
+       (define vars (unwrap-brackets* vars-form))
+       (define names
+         (for/list ([entry (in-list vars)])
+           (if (symbol? entry) entry (car entry))))
+       (define rendered-vars
+         (for/list ([entry (in-list vars)])
+           (cond
+             [(symbol? entry) entry]
+             [(and (list? entry) (= (length entry) 3)
+                   (eq? (cadr entry) '<:))
+              (list (car entry) '<: (transform-type (caddr entry) bound))]
+             [else entry])))
+       (list 'forall
+             (rewrap vars-form rendered-vars)
+             (transform-type (caddr datum) (append names bound)))]
+      [else
+       (cons (transform-type (car datum) bound)
+             (transform-type (cdr datum) bound))]))
+
+  (define (protect-type datum)
+    (if freshen-binders?
+        (hygiene-inert datum)
+        (transform-type datum)))
+
+  (define (defer-forward-quotes datum forbidden)
+    (if freshen-binders?
+        (hygiene-deferred datum forbidden)
+        datum))
+
+  (define (rewrap original items)
+    (if (bracketed? original)
+        (cons (car original) items)
+        items))
+
+  (define (render-binding-target target local-renames pre-env forbidden)
+    (cond
+      [(symbol? target) (hash-ref local-renames target target)]
+      [(bracketed? target)
+       (cons
+        (car target)
+        (let loop ([items (bracket-body target)])
+          (cond
+            [(null? items) '()]
+            [(and (eq? (car items) '&) (pair? (cdr items)))
+             (list '&
+                   (render-binding-target
+                    (cadr items) local-renames pre-env forbidden))]
+            [else
+             (cons
+              (render-binding-target
+               (car items) local-renames pre-env forbidden)
+              (loop (cdr items)))])))]
+      [(map-tagged? target)
+       (define (render-or-map value)
+         (if (map-tagged? value)
+             (cons
+              (car value)
+              (let loop ([items (map-body value)])
+                (cond
+                  [(or (null? items) (null? (cdr items))) items]
+                  [else
+                   (cons
+                    (hash-ref local-renames (car items) (car items))
+                    (cons
+                     (defer-forward-quotes
+                      (walk (cadr items) pre-env)
+                      forbidden)
+                     (loop (cddr items))))])))
+             value))
+       (cons
+        (car target)
+        (let loop ([items (map-body target)])
+          (cond
+            [(null? items) '()]
+            [(and (eq? (car items) ':keys)
+                  (pair? (cdr items))
+                  (bracketed? (cadr items)))
+             (cons
+              ':keys
+              (cons
+               (cons
+                (car (cadr items))
+                (for/list ([name (in-list (bracket-body (cadr items)))])
+                  (hash-ref local-renames name name)))
+               (loop (cddr items))))]
+            [(and (eq? (car items) ':as) (pair? (cdr items)))
+             (cons ':as
+                   (cons (hash-ref local-renames (cadr items) (cadr items))
+                         (loop (cddr items))))]
+            [(and (eq? (car items) ':or) (pair? (cdr items)))
+             (cons ':or
+                   (cons (render-or-map (cadr items))
+                         (loop (cddr items))))]
+            [else (cons (car items) (loop (cdr items)))])))]
+      [else target]))
+
+  (define (transform-declaration declaration pre-env
+                                 #:forbidden [all-forbidden #f])
+    (define typed? (typed-binding-form? declaration))
+    (define target (if typed? (car declaration) declaration))
+    (define names (binding-form-binders target macro-params))
+    (define forbidden (or all-forbidden names))
+    (define local-renames (fresh-binding-map names))
+    (define rendered-target
+      (render-binding-target target local-renames pre-env forbidden))
+    (values
+     (cond
+       [(and typed? (= (length declaration) 3))
+        (list rendered-target
+              (protect-type (cadr declaration))
+              (defer-forward-quotes
+               (walk (caddr declaration) pre-env)
+               forbidden))]
+       [typed?
+        (list rendered-target (protect-type (cadr declaration)))]
+       [else rendered-target])
+     local-renames
+     names))
+
+  (define (transform-sequential-bindings bindings env)
+    (let loop ([items (unwrap-brackets* bindings)]
+               [current-env env]
+               [result '()])
+      (cond
+        [(null? items) (values (rewrap bindings (reverse result)) current-env)]
+        [(null? (cdr items))
+         (values
+          (rewrap bindings
+                  (reverse (cons (walk (car items) current-env) result)))
+          current-env)]
+        [else
+         (define declaration (car items))
+         (define rhs (cadr items))
+         (define-values (rendered-declaration local-renames names)
+           (transform-declaration declaration current-env))
+         (define rendered-rhs
+           (defer-forward-quotes (walk rhs current-env) names))
+         (loop (cddr items)
+               (scope-extend current-env local-renames)
+               (cons rendered-rhs (cons rendered-declaration result)))])))
+
+  (define (param-declarations params)
+    (let loop ([items (unwrap-brackets* params)] [result '()])
+      (cond
+        [(null? items) (reverse result)]
+        [(eq? (car items) '&)
+         (if (pair? (cdr items))
+             (reverse (cons (cadr items) result))
+             (reverse result))]
+        [else (loop (cdr items) (cons (car items) result))])))
+
+  (define (transform-params params env)
+    (define declarations (param-declarations params))
+    (define all-names
+      (apply append
+             (for/list ([declaration (in-list declarations)])
+               (binding-form-binders
+                (if (typed-binding-form? declaration)
+                    (car declaration)
+                    declaration)
+                macro-params))))
+    (let loop ([items (unwrap-brackets* params)]
+               [body-env env]
+               [result '()])
+      (cond
+        [(null? items) (values (rewrap params (reverse result)) body-env)]
+        [(eq? (car items) '&)
+         (cond
+           [(pair? (cdr items))
+            (define-values (rendered local-renames _names)
+              (transform-declaration
+               (cadr items) env #:forbidden all-names))
+            (values
+             (rewrap params (reverse (cons rendered (cons '& result))))
+             (scope-extend body-env local-renames))]
+           [else (values (rewrap params (reverse (cons '& result))) body-env)])]
+        [else
+         (define-values (rendered local-renames _names)
+           (transform-declaration
+            (car items) env #:forbidden all-names))
+         (loop (cdr items)
+               (scope-extend body-env local-renames)
+               (cons rendered result))])))
+
+  (define (walk-let-like datum env)
+    (define-values (bindings body-env)
+      (transform-sequential-bindings (cadr datum) env))
+    (cons (car datum)
+          (cons bindings
+                (for/list ([form (in-list (cddr datum))])
+                  (walk form body-env)))))
+
+  ;; `binding` names existing dynamic Vars; it does not introduce fresh
+  ;; lexical locals. Pin those names to their definition-site spelling (or to
+  ;; the provider qualification pass's spelling) throughout values and body.
+  (define (walk-dynamic-binding datum env)
+    (define bindings (cadr datum))
+    (define items (unwrap-brackets* bindings))
+    (define declarations
+      (for/list ([index (in-range 0 (length items) 2)]
+                 #:when (< index (length items)))
+        (list-ref items index)))
+    (define dynamic-names
+      (apply append
+             (for/list ([declaration (in-list declarations)])
+               (binding-form-binders
+                (if (typed-binding-form? declaration)
+                    (car declaration)
+                    declaration)
+                macro-params))))
+    (define pinned
+      (for/fold ([result (hasheq)]) ([name (in-list dynamic-names)])
+        (hash-set result name
+                  (if freshen-binders?
+                      name
+                      (resolve-symbol name env)))))
+    (define pinned-env (scope-extend env pinned))
+    (define rendered-bindings
+      (let loop ([rest items] [result '()])
+        (cond
+          [(null? rest) (rewrap bindings (reverse result))]
+          [(null? (cdr rest))
+           (rewrap bindings
+                   (reverse (cons (walk (car rest) pinned-env) result)))]
+          [else
+           (define declaration (car rest))
+           (define typed? (typed-binding-form? declaration))
+           (define target (if typed? (car declaration) declaration))
+           (define rendered-target
+             (cond
+               [(symbol? target) (hash-ref pinned target target)]
+               [else target]))
+           (define rendered-declaration
+             (cond
+               [(and typed? (= (length declaration) 3))
+                (list rendered-target
+                      (protect-type (cadr declaration))
+                      (walk (caddr declaration) pinned-env))]
+               [typed?
+                (list rendered-target (protect-type (cadr declaration)))]
+               [else rendered-target]))
+           (loop (cddr rest)
+                 (cons (walk (cadr rest) pinned-env)
+                       (cons rendered-declaration result)))])))
+    (cons 'binding
+          (cons rendered-bindings
+                (for/list ([form (in-list (cddr datum))])
+                  (walk form pinned-env)))))
+
+  (define (walk-fn datum env)
+    (cond
+      [(and (>= (length datum) 3) (bracketed? (cadr datum)))
+       (define-values (params body-env) (transform-params (cadr datum) env))
+       (if (>= (length datum) 4)
+           (append (list 'fn params (protect-type (caddr datum)))
+                   (for/list ([form (in-list (cdddr datum))])
+                     (walk form body-env)))
+           (list 'fn params (walk (caddr datum) body-env)))]
+      [else
+       (cons 'fn (for/list ([form (in-list (cdr datum))]) (walk form env)))]))
+
+  (define (walk-arity-clause clause env)
+    (cond
+      [(and (list? clause)
+            (>= (length clause) 3)
+            (bracketed? (car clause)))
+       (define-values (params body-env) (transform-params (car clause) env))
+       (append (list params (protect-type (cadr clause)))
+               (for/list ([form (in-list (cddr clause))])
+                 (walk form body-env)))]
+      [else (walk clause env)]))
+
+  (define (walk-defn datum env)
+    (define name-form (and (pair? (cdr datum)) (cadr datum)))
+    (define plain-name
+      (cond
+        [(symbol? name-form) name-form]
+        [(and (list? name-form) (= (length name-form) 3)
+              (eq? (car name-form) '#%meta)
+              (symbol? (caddr name-form)))
+         (caddr name-form)]
+        [else #f]))
+    (cond
+      [(and (>= (length datum) 4) plain-name)
+       (define-values (rendered-symbol local-renames _names)
+         (transform-declaration plain-name env))
+       (define rendered-name
+         (if (symbol? name-form)
+             rendered-symbol
+             (list '#%meta (cadr name-form) rendered-symbol)))
+       (define definition-env (scope-extend env local-renames))
+       (define rest (cddr datum))
+       (define-values (doc signature)
+         (if (and (pair? rest) (string? (car rest)))
+             (values (list (car rest)) (cdr rest))
+             (values '() rest)))
+       (cond
+         [(and (>= (length signature) 3) (bracketed? (car signature)))
+          (define-values (params body-env)
+            (transform-params (car signature) definition-env))
+          (append
+           (list (car datum) rendered-name)
+           doc
+           (list params (protect-type (cadr signature)))
+           (for/list ([form (in-list (cddr signature))])
+             (walk form body-env)))]
+         [else
+          (append
+           (list (car datum) rendered-name)
+           doc
+           (for/list ([clause (in-list signature)])
+             (walk-arity-clause clause definition-env)))])]
+      [else
+       (cons (car datum)
+             (for/list ([form (in-list (cdr datum))]) (walk form env)))]))
+
+  (define (walk-letfn datum env)
+    (define functions (cadr datum))
+    (define items (unwrap-brackets* functions))
+    (define function-names
+      (for/list ([function (in-list items)]
+                 #:when (and (list? function)
+                             (pair? function)
+                             (symbol? (car function))
+                             (not (memq (car function) macro-params))))
+        (car function)))
+    (define function-renames (fresh-binding-map function-names))
+    (define group-env (scope-extend env function-renames))
+    (define rendered-functions
+      (rewrap
+       functions
+       (for/list ([function (in-list items)])
+         (cond
+           [(and (list? function)
+                 (>= (length function) 4)
+                 (symbol? (car function))
+                 (bracketed? (cadr function)))
+            (define-values (params body-env)
+              (transform-params (cadr function) group-env))
+            (append
+             (list (hash-ref function-renames (car function) (car function))
+                   params
+                   (protect-type (caddr function)))
+             (for/list ([form (in-list (cdddr function))])
+               (walk form body-env)))]
+           [else (walk function group-env)]))))
+    (cons 'letfn
+          (cons rendered-functions
+                (for/list ([form (in-list (cddr datum))])
+                  (walk form group-env)))))
+
+  (define (walk-for-like datum env)
+    (define clauses (cadr datum))
+    (define-values (rendered-clauses body-env)
+      (let loop ([items (unwrap-brackets* clauses)]
+                 [current-env env]
+                 [result '()])
+        (cond
+          [(null? items)
+           (values (rewrap clauses (reverse result)) current-env)]
+          [(and (memq (car items) '(:when :while)) (pair? (cdr items)))
+           (loop (cddr items) current-env
+                 (cons (walk (cadr items) current-env)
+                       (cons (car items) result)))]
+          [(and (eq? (car items) ':let)
+                (pair? (cdr items)))
+           (define-values (bindings next-env)
+             (transform-sequential-bindings (cadr items) current-env))
+           (loop (cddr items) next-env
+                 (cons bindings (cons ':let result)))]
+          [(pair? (cdr items))
+           (define-values (declaration local-renames names)
+             (transform-declaration (car items) current-env))
+           (define incoming
+             (defer-forward-quotes
+              (walk (cadr items) current-env)
+              names))
+           (loop (cddr items)
+                 (scope-extend current-env local-renames)
+                 (cons incoming (cons declaration result)))]
+          [else
+           (values
+            (rewrap clauses
+                    (reverse (cons (walk (car items) current-env) result)))
+            current-env)])))
+    (cons (car datum)
+          (cons rendered-clauses
+                (for/list ([form (in-list (cddr datum))])
+                  (walk form body-env)))))
+
+  (define (walk-conditional-binding datum env)
+    (define-values (bindings success-env)
+      (transform-sequential-bindings (cadr datum) env))
+    (define head (car datum))
+    (cond
+      [(memq head '(if-let if-some))
+       (append
+        (list head bindings)
+        (if (pair? (cddr datum))
+            (list (walk (caddr datum) success-env))
+            '())
+        (if (pair? (cdddr datum))
+            (list (walk (cadddr datum) env))
+            '()))]
+      [else
+       (cons head
+             (cons bindings
+                   (for/list ([form (in-list (cddr datum))])
+                     (walk form success-env))))]))
+
+  (define (walk-catch datum env)
+    (cond
+      [(and (>= (length datum) 3)
+            (typed-binding-form? (cadr datum)))
+       (define-values (binding local-renames _names)
+         (transform-declaration (cadr datum) env))
+       (define body-env (scope-extend env local-renames))
+       (cons 'catch
+             (cons binding
+                   (for/list ([form (in-list (cddr datum))])
+                     (walk form body-env))))]
+      [else
+       (cons 'catch
+             (for/list ([form (in-list (cdr datum))]) (walk form env)))]))
+
+  (define (walk-rescue datum env)
+    (cond
+      [(and (= (length datum) 4) (symbol? (caddr datum)))
+       (define-values (name local-renames _names)
+         (transform-declaration (caddr datum) env))
+       (list 'rescue
+             (walk (cadr datum) env)
+             name
+             (walk (cadddr datum) (scope-extend env local-renames)))]
+      [else
+       (cons 'rescue
+             (for/list ([form (in-list (cdr datum))]) (walk form env)))]))
+
+  (define (walk-as-thread datum env)
+    (cond
+      [(and (>= (length datum) 4) (symbol? (caddr datum)))
+       (define-values (name local-renames _names)
+         (transform-declaration (caddr datum) env))
+       (define body-env (scope-extend env local-renames))
+       (append (list 'as-> (walk (cadr datum) env) name)
+               (for/list ([form (in-list (cdddr datum))])
+                 (walk form body-env)))]
+      [else
+       (cons 'as->
+             (for/list ([form (in-list (cdr datum))]) (walk form env)))]))
+
+  (define (walk datum env)
+    (cond
+      [(symbol? datum) (resolve-symbol datum env)]
+      [(not (pair? datum)) datum]
+      [(and (list? datum) (= (length datum) 2) (eq? (car datum) 'quote))
+       (define quoted (cadr datum))
+       (if (and (symbol? quoted) (hash-has-key? env quoted))
+           (list 'quote (hash-ref env quoted))
+           datum)]
+      [(eq? (car datum) 'quote) datum]
+      [(unquote-form? datum)
+       (if preserve-unquotes?
+           datum
+           (cons (car datum)
+                 (for/list ([form (in-list (cdr datum))])
+                   (walk form env))))]
+      [(bracketed? datum)
+       (cons (car datum)
+             (for/list ([form (in-list (bracket-body datum))])
+               (walk form env)))]
+      [(map-tagged? datum)
+       (cons (car datum)
+             (for/list ([form (in-list (map-body datum))])
+               (walk form env)))]
+      [(not (list? datum))
+       (cons (walk (car datum) env) (walk (cdr datum) env))]
+      [(and (memq (car datum) '(let loop with-open))
+            (>= (length datum) 3)
+            (not (unquote-form? (cadr datum))))
+       (walk-let-like datum env)]
+      [(and (eq? (car datum) 'binding)
+            (>= (length datum) 3)
+            (not (unquote-form? (cadr datum))))
+       (walk-dynamic-binding datum env)]
+      [(eq? (car datum) 'fn) (walk-fn datum env)]
+      [(memq (car datum) '(defn defn-)) (walk-defn datum env)]
+      [(and (eq? (car datum) 'letfn)
+            (>= (length datum) 3)
+            (not (unquote-form? (cadr datum))))
+       (walk-letfn datum env)]
+      [(and (memq (car datum) '(for doseq))
+            (>= (length datum) 3)
+            (not (unquote-form? (cadr datum))))
+       (walk-for-like datum env)]
+      [(and (memq (car datum) '(when-let if-let when-some if-some))
+            (>= (length datum) 3)
+            (not (unquote-form? (cadr datum))))
+       (walk-conditional-binding datum env)]
+      [(eq? (car datum) 'catch) (walk-catch datum env)]
+      [(eq? (car datum) 'rescue) (walk-rescue datum env)]
+      [(eq? (car datum) 'as->) (walk-as-thread datum env)]
+      [else
+       (for/list ([form (in-list datum)]) (walk form env))]))
+
+  ;; `(quote name)` can be used by a procedural macro to assemble a reference
+  ;; to a binder that appears in a later quasiquoted template.  Retain that
+  ;; supported bridge when the source name identifies exactly one introduced
+  ;; binder, while each pre-binding region carries the names it must not see.
+  (define (unique-binder-rename name)
+    (define replacements (hash-ref binder-renames name '()))
+    (and (= (length replacements) 1) (car replacements)))
+
+  (define (finish datum [forbidden '()])
+    (cond
+      [(hygiene-inert? datum) (hygiene-inert-datum datum)]
+      [(hygiene-deferred? datum)
+       (finish (hygiene-deferred-datum datum)
+               (append (hygiene-deferred-forbidden datum) forbidden))]
+      [(and (list? datum)
+            (= (length datum) 2)
+            (eq? (car datum) 'quote)
+            (symbol? (cadr datum))
+            (not (memq (cadr datum) forbidden)))
+       (define replacement (unique-binder-rename (cadr datum)))
+       (if replacement (list 'quote replacement) datum)]
+      [(and (pair? datum) (eq? (car datum) 'quote)) datum]
+      [(pair? datum)
+       (cons (finish (car datum) forbidden)
+             (finish (cdr datum) forbidden))]
+      [else datum]))
+
+  (finish (walk template (hasheq))))
 
 ;; Imported macros expand in the consumer, but their free references were
-;; written in the provider. Resolve those references against the provider's
-;; exported definition set before registration. Macro parameters, generated
-;; binders, quoted data, and unquote payloads remain use-site syntax.
+;; written in the provider. Resolve only lexically free references against the
+;; provider export set; binding targets shadow in their bodies but not in their
+;; own RHS or constraint, and Type slots remain untouched.
 (define (qualify-imported-macro-template template params provider-names prefix)
   (define-values (fixed-params rest-param) (parse-macro-params params))
   (define macro-params
     (if rest-param (cons rest-param fixed-params) fixed-params))
-  (define binders (collect-template-binders template macro-params))
-  (define (provider-ref? datum)
-    (and (symbol? datum)
-         (hash-has-key? provider-names datum)
-         (not (memq datum macro-params))
-         (not (memq datum binders))))
-  (define (qualify name)
-    (string->symbol (format "~a/~a" prefix name)))
-  (let walk ([datum template])
-    (cond
-      [(provider-ref? datum) (qualify datum)]
-      [(pair? datum)
-       (cond
-         [(or (eq? (car datum) 'quote) (unquote-form? datum)) datum]
-         [else (cons (walk (car datum)) (walk (cdr datum)))])]
-      [else datum])))
+  (define (qualify-free datum)
+    (if (hash-has-key? provider-names datum)
+        (string->symbol (format "~a/~a" prefix datum))
+        datum))
+  (transform-template/scoped
+   template macro-params
+   #:freshen-binders? #f
+   #:resolve-free qualify-free
+   #:preserve-unquotes? #t))
 
 ;; Is `s` a top-level definition name of the program being compiled?
 (define (module-def-name? s)
@@ -507,34 +1040,6 @@
                          cand))])
         (hash-set! tbl orig alias)
         alias)))
-
-;; Free references in TEMPLATE that name a module-level definition and are
-;; neither macro params nor template-introduced binders — the macro author's
-;; globals that must survive use-site shadowing. Skips quote/unquote payloads
-;; (the latter is user-supplied data, not template).
-(define (collect-template-free-refs template macro-params binders)
-  (define refs '())
-  (define (add! s) (unless (memq s refs) (set! refs (cons s refs))))
-  (let walk ([datum template])
-    (cond
-      [(symbol? datum)
-       (when (and (module-def-name? datum)
-                  (not (memq datum macro-params))
-                  (not (memq datum binders))
-                  ;; A name that is ALSO a registered macro must not be
-                  ;; aliased — it expands, and renaming it would suppress the
-                  ;; expansion (a defmacro/defn name collision is pathological
-                  ;; but must stay correct).
-                  (not (and (current-registry)
-                            (lookup-macro (current-registry) datum))))
-         (add! datum))]
-      [(pair? datum)
-       (cond
-         [(unquote-form? datum) (void)]
-         [(eq? (car datum) 'quote) (void)]
-         [else (for-each walk datum)])]
-      [else (void)]))
-  refs)
 
 ;; Deterministic lowering temps — build reproducibility, not just uniqueness.
 ;; Racket's `gensym` numbers from a process-global counter, so a minted name
@@ -555,19 +1060,21 @@
 (define (hygienize-template template fixed-params rest-param)
   (define macro-params
     (if rest-param (cons rest-param fixed-params) fixed-params))
-  (define binders (collect-template-binders template macro-params))
-  ;; Mode-2: rewrite free refs to module defs to their hygienic aliases
-  ;; (inert unless parse.rkt set the def-name set + alias table).
-  (define free-refs
-    (if (and (current-module-def-names) (current-hygiene-alias-table))
-        (collect-template-free-refs template macro-params binders)
-        '()))
-  (define renames (make-hasheq))
-  (for ([b (in-list binders)]) (hash-set! renames b (fresh-lowered-sym b)))
-  (for ([r (in-list free-refs)]) (hash-set! renames r (hygiene-alias-for! r)))
-  (cond
-    [(zero? (hash-count renames)) template]
-    [else (rename-in-template template renames)]))
+  (define (resolve-free datum)
+    (cond
+      [(and (module-def-name? datum)
+            (current-hygiene-alias-table)
+            ;; A name that is ALSO a registered macro must retain its head so
+            ;; recursive expansion still sees it.
+            (not (and (current-registry)
+                      (lookup-macro (current-registry) datum))))
+       (hygiene-alias-for! datum)]
+      [else datum]))
+  (transform-template/scoped
+   template macro-params
+   #:freshen-binders? #t
+   #:resolve-free resolve-free
+   #:preserve-unquotes? #f))
 
 (provide
  (struct-out macro-def)
@@ -594,3 +1101,11 @@
  make-root-ctx
  push-ctx
  format-expansion-chain)
+
+;; Re-export only the source-local macro exception's inspection surface. The
+;; constructor stays an implementation detail of macro-eval/macros.
+(provide exn:fail:macro-source?
+         exn:fail:macro-source-collection
+         exn:fail:macro-source-index
+         exn:fail:macro-source-form
+         exn:fail:macro-source-context)

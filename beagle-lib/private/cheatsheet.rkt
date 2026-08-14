@@ -56,8 +56,10 @@
           "(defenum Color Red Green Blue)")
 
    (cheat "structural binding annotations" "Types"
-          "A typed parameter is `(binding-form Type)`; the type annotates the entire binding operation. Examples are `(x Int)`, `([x y] (HVec Float Float))`, and `({:keys [host port]} Config)`; mixed vectors are direct, as in `[([x y] (HVec Float Float)) opts]`. Nesting represents the binding semantics. Bare simple binders request inference; a bare destructure in a strict typed signature is rejected without an aggregate type to project. Explicit `Any` marks a deliberately dynamic boundary. Executable signatures place their mandatory return type directly after the parameter vector; type-level function signatures retain `->` inside the type vector."
-          "(defn clamp [(n Int)] Int (if (> n 100) 100 n))")
+          "The outer `[...]` is only a collection; each entry is `symbol`, `(binding-form Type)`, or `(binding-form Type constraint)`. Thus `[a (b Point)]` directly mixes an inferred and a typed binding. Sequential and associative destructures may occupy `binding-form`; their complete incoming aggregate is typed and, when present, passed to the constraint before any names are projected. A constraint must be a statically known synchronous unary `(Fn [Type] Bool)` predicate without `Any`; false raises a runtime binding-constraint error. Call-produced predicates require an explicit positive returned-callable synchronization proof from the callee; executing the factory synchronously is not sufficient. Every field or macro declaration likewise owns all its validators/encoders/decoders in one form; flattened adjacent metadata is rejected. Executable signatures place their mandatory return directly after the parameter vector; a type-level function signature is written `(Fn [ParamType ...] ReturnType)`."
+          (string-append
+           "(defn positive? [(value Int)] Bool (> value 0))\n"
+           "(defn clamp [(n Int positive?)] Int (if (> n 100) 100 n))"))
 
    ;; --- bindings & functions ------------------------------------------------
    (cheat "def / defonce" "Bindings"
@@ -80,7 +82,7 @@
 
    ;; --- macros & interop ----------------------------------------------------
    (cheat "defmacro + quasiquote" "Macros"
-          "Hygienic macros. Quasiquote `` ` ``, unquote `~`, splice `~@`. Free references resolve at the macro's definition site (mode-2 hygiene)."
+          "Hygienic macros. Quasiquote `` ` ``, unquote `~`, splice `~@`. Free references resolve at the macro's definition site (mode-2 hygiene). Structural declaration macros use `(syntax-error-at original-input index message ...)` from `map-indexed` to point at one exact caller form; indices are zero-based over logical elements."
           "(defmacro twice [x] `(do ~x ~x))")
 
    (cheat "declare-extern" "Interop"

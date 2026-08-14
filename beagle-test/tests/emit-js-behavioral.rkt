@@ -196,6 +196,18 @@ try { p.x = 99; } catch(e) { threw = true; }
 console.assert(threw, 'frozen record should reject mutation');
 ")
 
+   (check-js-output "defscalar equality and inequality predicates guard at runtime"
+     (list '(defscalar Zero Int :where (= 0))
+           '(defscalar Nonzero Int :where (not= 0)))
+     (string-append
+      "console.log(__gtZero(0));\n"
+      "console.log(__gtNonzero(1));\n"
+      "for (const [ctor, value] of [[__gtZero, 1], [__gtNonzero, 0]]) {\n"
+      "  try { ctor(value); console.log('missed'); }\n"
+      "  catch (_error) { console.log('rejected'); }\n"
+      "}")
+     "0\n1\nrejected\nrejected")
+
    (check-js-output "record _tag for pattern dispatch"
      (list '(defrecord Circle [(radius Int)])
            '(defrecord Rect [(w Int) (h Int)])
@@ -416,6 +428,227 @@ console.log(JSON.stringify(snapshot()));"
                 x)))
      "if (f() !== 2) throw new Error('expected 2');")
 
+   ;; --- structural binding constraints --------------------------------------
+
+   (check-js-output "binding constraints guard params, rest, let, and fn"
+     (list '(defn positive? [(value Int)] Bool (> value 0))
+           '(defn all-positive? [(values (Vec Int))] Bool
+              (every? positive? values))
+           '(defn constrained-rest
+              [(head Int positive?) & (tail (Vec Int) all-positive?)]
+              Int
+              (+ head (count tail)))
+           '(defn local [(input Int)] Int
+              (let [(checked Int positive?) input]
+                checked))
+           '(defn call-constrained [(input Int)] Int
+              ((fn [(value Int positive?)] Int value) input)))
+     (string-append
+      "console.log(constrained_rest(3, 4, 5));\n"
+      "console.log(local(6)); console.log(call_constrained(7));\n"
+      "for (const [call, binding] of ["
+      "[() => constrained_rest(-1), 'head'],"
+      "[() => constrained_rest(1, -2), 'tail'],"
+      "[() => local(-3), 'checked'],"
+      "[() => call_constrained(-4), 'value']]) {"
+      "try { call(); throw new Error('missing failure'); } "
+      "catch (error) { console.log(error.message === "
+      "'Binding constraint failed: ' + binding); }}")
+     "5\n6\n7\ntrue\ntrue\ntrue\ntrue")
+
+   (check-js-output "destructuring constraints see aggregate before projection"
+     (list '(defn positive-point? [(point (HVec Int Int))] Bool
+              (and (> (first point) 0) (> (second point) 0)))
+           `(defn point-x
+              ,(br (list (br 'x 'y) '(HVec Int Int) 'positive-point?))
+              Int
+              x)
+           `(defn local-point [(point (HVec Int Int))] Int
+              (let ,(br (list (br 'x 'y)
+                              '(HVec Int Int)
+                              'positive-point?)
+                         'point)
+                y)))
+     (string-append
+      "console.log(point_x([2, 3])); console.log(local_point([4, 5]));\n"
+      "for (const call of [() => point_x([-1, 3]), "
+      "() => local_point([4, -5])]) { try { call(); } "
+      "catch (error) { console.log(error.message); }}")
+     (string-append
+      "2\n5\nBinding constraint failed: [x y]\n"
+      "Binding constraint failed: [x y]"))
+
+   (check-js-output "binding constraints guard multi arity, letfn, for, and loop recur"
+     (list '(defn positive? [(value Int)] Bool (> value 0))
+           `(defn choose
+              ,(list (br '(value Int positive?)) 'Int 'value)
+              ,(list (br '(value Int positive?) '(extra Int))
+                     'Int '(+ value extra)))
+           '(defn nested [(value Int)] Int
+              (letfn [(accept [(item Int positive?)] Int item)]
+                (accept value)))
+           '(defn projected [(values (Vec Int))] (Vec Int)
+              (for [(value Int positive?) values] value))
+           '(defn countdown [(start Int)] Int
+              (loop [(value Int positive?) start]
+                (if (= value 1) value (recur (- value 1))))))
+     (string-append
+      "console.log(choose(2)); console.log(choose(2, 3)); "
+      "console.log(nested(4)); console.log(JSON.stringify(projected([5,6]))); "
+      "console.log(countdown(3));\n"
+      "for (const call of [() => choose(0), () => nested(-1), "
+      "() => projected([1,0]), () => countdown(0)]) { try { call(); } "
+      "catch (error) { console.log(error.message); }}")
+     (string-append
+      "2\n5\n4\n[5,6]\n1\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: item\n"
+      "Binding constraint failed: value\n"
+      "Binding constraint failed: value"))
+
+   (check-js-output "multi-arity constraints resolve predicates before parameter installs"
+     (list
+      '(defn value [(candidate Int)] Bool (> candidate 0))
+      `(defn choose
+         ,(list (br '(value Int value)) 'Int 'value)
+         ,(list (br '(value Int value) '(extra Int))
+                'Int '(+ value extra))))
+     (string-append
+      "console.log(choose(2)); console.log(choose(2, 3));\n"
+      "try { choose(0); } catch (error) { console.log(error.message); }")
+     "2\n5\nBinding constraint failed: value")
+
+   (check-js-output "record constraints guard constructor and with update"
+     (list '(defn positive? [(value Int)] Bool (> value 0))
+           '(defrecord Score [(value Int positive?) (label String)])
+           `(defn change [(score Score) (value Int)] Score
+              (with score ,(br ':value 'value))))
+     (string-append
+      "const score = Score(7, 'ok'); console.log(score.value); "
+      "console.log(change(score, 8).value);\n"
+      "for (const call of [() => Score(0, 'bad'), "
+      "() => change(score, -1)]) { try { call(); } "
+      "catch (error) { console.log(error.message); }}")
+     (string-append
+      "7\n8\nBinding constraint failed: value\n"
+      "Binding constraint failed: value"))
+
+   (check-js-output "record field predicates are resolved before hidden installs"
+     (list '(defn value [(candidate Int)] Bool (> candidate 0))
+           '(defrecord Meter [(value Int value)]))
+     (string-append
+      "console.log(Meter(4).value);\n"
+      "try { Meter(0); } catch (error) { console.log(error.message); }")
+     "4\nBinding constraint failed: value")
+
+   (check-js-output "constraint scopes, sequential loops, and mutation stay structural"
+     (list
+      '(defn checked [(candidate Int)] Bool (> candidate 0))
+      '(defn parameter-collision! [(checked Int checked)] Int
+         (do (set! checked (+ checked 1)) checked))
+      '(defn let-collision! [(input Int)] Int
+         (let [(checked Int checked) input]
+           (do (set! checked (+ checked 1)) checked)))
+      `(def outer Int 11)
+      `(defn destructure-default
+         ,(br (list (mt ':keys (br 'outer)
+                        ':or (mt 'outer 'outer))
+                    '(Map Keyword Int))
+              '(guard Int checked))
+         Int
+         outer)
+      `(def observations Any ,(br))
+      '(defn observe-positive! [(candidate Int)] Bool
+         (do (.push observations candidate) (> candidate 0)))
+      '(defn sequential-loop! [(start Int)] Int
+         (loop [(left Int observe-positive!) start
+                (right Int (fn [(candidate Int)] Bool (> candidate left)))
+                (+ left 1)]
+           (if (= left 1)
+               right
+               (recur (- left 1) left)))))
+     (string-append
+      "console.log(parameter_collision_bang(2)); console.log(let_collision_bang(3));\n"
+      "console.log(destructure_default({}, 1)); console.log(sequential_loop_bang(2));\n"
+      "console.log(JSON.stringify(observations));\n"
+      "for (const call of [() => parameter_collision_bang(0), "
+      "() => let_collision_bang(0), () => sequential_loop_bang(0)]) { try { call(); } "
+      "catch (error) { console.log(error.message); }}")
+     (string-append
+      "3\n4\n11\n2\n[2,1]\n"
+      "Binding constraint failed: checked\n"
+      "Binding constraint failed: checked\n"
+      "Binding constraint failed: left"))
+
+   (check-js-output "sibling constrained lets use distinct compiler slots"
+     (list
+      '(defn positive? [(candidate Int)] Bool (> candidate 0))
+      '(defn sibling-lets [] Int
+         (do
+           (let [(first-value Int positive?) 1] first-value)
+           (let [(second-value Int positive?) 2] second-value)
+           3)))
+     "console.log(sibling_lets());"
+     "3")
+
+   (check-js-output "typed JS methods enforce constraints before hidden installs"
+     (list
+      '(defn value [(candidate Int)] Bool (> candidate 0))
+      '(js/class Meter
+         (constructor [(value Int value)]
+           Any
+           (set! (.-value this) value))
+         (read [] Int (js/return (.-value this)))))
+     (string-append
+      "console.log(new Meter(4).read());\n"
+      "try { new Meter(0); } catch (error) { console.log(error.message); }")
+     "4\nBinding constraint failed: value")
+
+   (check-js-output "for modifiers and doseq enforce constraints exactly once"
+     (list
+      '(def row-checks Any (atom 0))
+      '(def default-builds Any (atom 0))
+      `(def observed Any (atom ,(br)))
+      '(defn positive? [(candidate Int)] Bool (> candidate 0))
+      '(defn row-valid! [(row (Map Keyword Int))] Bool
+         (do (swap! row-checks inc) true))
+      '(defn build-default! [] Int
+         (do (swap! default-builds inc) 7))
+      `(defn project! [(rows (Vec (Map Keyword Int)))] (Vec Int)
+         (for [(
+                ,(mt ':keys (br 'value)
+                     ':or (mt 'value '(build-default!)))
+                (Map Keyword Int)
+                row-valid!)
+               rows
+               :when (> value 1)
+               :let [(twice Int positive?) (* value 2)]]
+           twice))
+      '(defn collect! [(values (Vec Int))] Nil
+         (doseq [(value Int positive?) values]
+           (.push (deref observed) value))))
+     (string-append
+      "console.log(JSON.stringify(project_bang([{}, {value: 2}, {value: -2}])));\n"
+      "console.log(row_checks.value); console.log(default_builds.value);\n"
+      "collect_bang([1, 2]);\n"
+      "try { collect_bang([3, 0]); } catch (error) { console.log(error.message); }\n"
+      "console.log(JSON.stringify(observed.value));")
+     (string-append
+      "[14,4]\n3\n1\nBinding constraint failed: value\n[1,2,3]"))
+
+   (check-js-output "tagged union and throwable constructors use record validators"
+     (list
+      '(defn positive? [(candidate Int)] Bool (> candidate 0))
+      `(defunion Result (Accepted ,(br '(value Int positive?))))
+      `(defunion :throwable Failure (Rejected ,(br '(value Int positive?)))))
+     (string-append
+      "console.log(Accepted(4).value); console.log(Rejected(5).value);\n"
+      "for (const call of [() => Accepted(0), () => Rejected(-1)]) {"
+      "try { call(); } catch (error) { console.log(error.message); }}")
+     (string-append
+      "4\n5\nBinding constraint failed: value\n"
+      "Binding constraint failed: value"))
+
    (test-case "let with repeated binding name never emits duplicate const/let in one block"
      (define js (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
                                 '(defn f [] Int
@@ -586,6 +819,14 @@ globalThis.get_val = async (n) => n * 10;
 f(3).then(r => console.log(r));
 "
      "70")
+
+   (check-js-behavior "async letfn declarations do not async-wrap a sync body"
+     (list `(declare-extern fetch-value ,(fn-ty '(Int) '(Promise Int)))
+           '(defn outer [] Int
+              (letfn [(later [(value Int)] (Promise Int)
+                        (js/await (fetch-value value)))]
+                42)))
+     "if (outer() !== 42) throw new Error('letfn body became a Promise');")
 
    ;; --- munge disambiguation ------------------------------------------------
 

@@ -3,6 +3,7 @@
 ;; End-to-end backend contract for `(binding-form Type)` parameters.
 
 (require rackunit
+         racket/list
          racket/string
          beagle/lang/reader-impl
          beagle/private/parse
@@ -100,7 +101,14 @@
     (compile
      'nix
      "(defn host [({:keys [host] :or {host \"localhost\"}} (Map Keyword String))] String host)"))
-  (check-true (string-contains? output "{ host ? \"localhost\", ... }:")))
+  (check-true
+   (string-contains?
+    output
+    "let bgl____default__thunk__0__host = _: \"localhost\"; in"))
+  (check-true
+   (string-contains?
+    output
+    "{ host ? bgl____default__thunk__0__host null, ... }:")))
 
 (test-case "Nix nominal-record map parameters require keys without defaults"
   (define output
@@ -117,7 +125,7 @@
     (compile 'nix source)
     ""))
 
-(test-case "Nix Map aliases still require defaults and emit them in parameter scope"
+(test-case "Nix Map aliases still require declaration-scope defaults"
   (check-regexp-match
    #rx"require :or defaults"
    (nix-error
@@ -129,10 +137,12 @@
      'nix
      (string-append
       "(defalias ConfigMap (Map Keyword String))\n"
-      "(defn host [(fallback String) "
-      "({:keys [host] :or {host fallback}} ConfigMap)] String host)")))
+      "(def fallback String \"localhost\")\n"
+      "(defn host [({:keys [host] :or {host fallback}} ConfigMap)] String host)")))
   (check-true
-   (string-contains? output "fallback: { host ? fallback, ... }:")))
+   (string-contains?
+    output
+    "let bgl____default__thunk__0__host = _: fallback; in")))
 
 (test-case "Nix rejects primitive annotations as map aggregates"
   (check-regexp-match
@@ -147,6 +157,71 @@
   (check-true (string-contains? output "\"form-kind\" \"seq-destructure\""))
   (check-true (regexp-match? #rx"\\[[0-9]+ \"name\" [0-9]+\\]" output))
   (check-false (string-contains? output "\"binding\"")))
+
+(test-case "facts retain explicit constraint edges on binding owners"
+  (define output
+    (compile-facts
+     (string-append
+      "(defn positive? [(value Int)] Bool (> value 0))\n"
+      "(defrecord Score [(value Int positive?)])\n"
+      "(defn constrained [(input Int positive?)] (Vec (U Int Nil)) "
+      "(let [(local Int positive?) input] "
+      "(for [(item Int positive?) [local]] item)))")))
+  (check-equal?
+   (length (regexp-match* #rx"\\[[0-9]+ \"constraint\" (?:[0-9]+|\"positive\\?\")\\]" output))
+   4)
+  (check-true (string-contains? output "\"form-kind\" \"let-binding\""))
+  (check-true (string-contains? output "\"form-kind\" \"for-binding\"")))
+
+(test-case "facts preserve constrained union fields under their owning members"
+  (define output
+    (compile-facts
+     (string-append
+      "(defn positive? [(value Int)] Bool (> value 0))\n"
+      "(defunion Choice "
+      "  (Left [(value Int positive?)]) "
+      "  (Right [(value Int positive?)]))\n"
+      "(defunion :throwable Problem "
+      "  (Bad [(value Int positive?)]) "
+      "  (Worse [(value Int positive?)]))")))
+  (define triples
+    (for/list ([line (in-list (string-split output "\n"))]
+               #:unless (string=? line ""))
+      (read (open-input-string line))))
+  (define (objects subject predicate)
+    (for/list ([triple (in-list triples)]
+               #:when (and (equal? (list-ref triple 0) subject)
+                           (equal? (list-ref triple 1) predicate)))
+      (list-ref triple 2)))
+  (define group-ids
+    (for/list ([triple (in-list triples)]
+               #:when (and (equal? (list-ref triple 1) "form-kind")
+                           (equal? (list-ref triple 2) "member-field-group")))
+      (list-ref triple 0)))
+  (check-equal? (length group-ids) 4)
+  (check-equal?
+   (sort (for/list ([group (in-list group-ids)]) (car (objects group "name")))
+         string<?)
+   '("Bad" "Left" "Right" "Worse"))
+  (for ([group (in-list group-ids)])
+    (define fields (car (objects group "fields")))
+    (define field (car (objects fields "f0")))
+    (check-equal? (length (objects field "constraint")) 1)))
+
+(test-case "facts retain constrained protocol and implementation rest bindings"
+  (define output
+    (compile-facts
+     (string-append
+      "(defn nonempty? [(values (Vec Int))] Bool (> (count values) 0))\n"
+      "(defprotocol Variadic "
+      "(combine [(self Any) & (values (Vec Int) nonempty?)] Int))\n"
+      "(extend-type String Variadic "
+      "(combine [(self String) & (values (Vec Int) nonempty?)] Int "
+      "(count values)))")))
+  (check-true (string-contains? output "\"form-kind\" \"protocol-method\""))
+  (check-true (string-contains? output "\"form-kind\" \"impl-method\""))
+  (check-equal? (length (regexp-match* #rx"\"rest\"" output)) 2)
+  (check-equal? (length (regexp-match* #rx"\"constraint\"" output)) 2))
 
 (test-case "Nix rejects missing-key, positional, let, for, and loop patterns pointedly"
   (check-regexp-match

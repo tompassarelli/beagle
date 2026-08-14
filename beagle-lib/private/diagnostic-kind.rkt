@@ -58,8 +58,13 @@
 ;;                        declared positional type.
 ;;   let-binding        : let-bound value type doesn't match its
 ;;                        annotation.
+;;   binding-constraint : a binding-local constraint is not statically a
+;;                        one-argument predicate from the binding's declared
+;;                        aggregate type to Bool.
 ;;   type-bound         : type parameter violates its bound.
 ;;   scalar-predicate   : value violates a defscalar :where predicate.
+;;   scalar-predicate-declaration : a defscalar :where predicate is not
+;;                        meaningful for its declared backing type.
 ;;   exhaustive-match   : match expression isn't exhaustive over the
 ;;                        union it scrutinizes.
 ;;   nixos-type-mismatch: nixos-option value's type doesn't match its
@@ -121,8 +126,10 @@
    'return-type         'type-error
    'def-type            'type-error
    'let-binding         'type-error
+   'binding-constraint  'type-error
    'type-bound          'type-error
    'scalar-predicate    'type-error
+   'scalar-predicate-declaration 'type-error
    'exhaustive-match    'type-error
    'nixos-type-mismatch 'type-error
    'nixos-unknown-option 'type-error
@@ -204,6 +211,11 @@
 ;;                         histogram can attribute the rejection to the
 ;;                         macro author rather than the call-site
 ;;                         author.
+;;   macro-source-error  : a procedural macro rejected one exact element of
+;;                         an input collection via `syntax-error-at`. Normally
+;;                         rebucketed to macro-expansion-parse-error while the
+;;                         expansion context is present; retained here for
+;;                         direct expander clients. Surface-divergence.
 ;;   reader-conditional-no-match
 ;;                       : a #?(:tag form ...) or #?@(:tag form ...)
 ;;                         reader-conditional had no branch matching the
@@ -223,8 +235,10 @@
    'bare-nix-form          'surface-divergence
    'legacy-macro-form      'surface-divergence
    'legacy-pipe-form       'surface-divergence
+   'macro-source-error      'surface-divergence
    'macro-expansion-parse-error 'surface-divergence
    'reader-conditional-no-match 'surface-divergence
+   'bad-defunion           'surface-divergence
    'duplicate-meta         'type-error
    'bad-meta-value         'type-error
    'missing-type-export    'type-error

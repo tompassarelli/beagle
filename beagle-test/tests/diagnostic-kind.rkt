@@ -153,7 +153,8 @@
   ;; map to 'logic-error.
   (define documented-kinds
     '(target-form template-splice arity type-mismatch return-type def-type
-                  let-binding type-bound scalar-predicate exhaustive-match
+                  let-binding type-bound scalar-predicate
+                  scalar-predicate-declaration exhaustive-match
                   nixos-type-mismatch sql-group-by sql-table sql-column
                   sql-type nixos-unknown-option
                   removed-form unknown-form duplicate-meta bad-meta-value

@@ -49,6 +49,8 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
+             "binding-constraint-check.rkt"     ; unary Any-free synchronous binding constraints — checker contract
+             "binding-constraint-interface.rkt" ; the same contract as published module-interface schema v6
              "scratch-containment-test.rkt" ; identity-scoped direct-run scratch reaper — normal/exception/child-reap/identity-scope
 
              "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)

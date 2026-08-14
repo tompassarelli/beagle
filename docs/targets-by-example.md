@@ -43,9 +43,10 @@ null
 
 Same logic, three back-ends. `even?` becomes `even_p` where the target's
 identifiers can't carry a `?` — names follow each language's rules, the shape
-follows each language's idiom. Types erase: they did their job at check time.
+follows each language's idiom. Static type information erases after doing its
+job at check time; an explicitly authored binding constraint remains only as
+its target-idiomatic runtime guard.
 
-## Typed against the target's real schema
 ## Typed against the target's real schema
 
 Types aren't only shapes you declare — they can come from the target itself. A

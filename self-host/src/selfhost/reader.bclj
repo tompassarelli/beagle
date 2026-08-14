@@ -31,9 +31,9 @@
 (def REGEX-TAG String "#%regex")
 (def CHAR-TAG String "#%char")
 
-;; Postfix annotation marker: `x: Int` reads as the FLAT datums `x` `#%:` `Int`,
-;; mirroring the legacy `x :- Int` triple so every index/arity computation in
-;; selfhost.parse stays valid. Reader-internal — never valid in printed output.
+;; Retired postfix annotation marker: `x: Int` is preserved as the flat datums
+;; `x` `#%:` `Int` solely so selfhost.parse can produce its pointed migration
+;; diagnostic. Reader-internal — never valid in parsed AST or printed output.
 (def ANN-MARKER String "#%:")
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
@@ -264,8 +264,8 @@
           (make-result (subs src pos i) i)
           (recur (+ i 1)))))))
 
-;; Plain-token text: like read-symbol-text but `:` also ends the token, which is
-;; what makes the postfix `x: Int` split into three datums.
+;; Plain-token text: like read-symbol-text but `:` also ends the token, preserving
+;; retired postfix `x: Int` as three datums for parser-level rejection.
 (defn read-token-text [(src String) (pos Int)] Any
   (let [len (count src)]
     (loop [i pos]
@@ -419,8 +419,9 @@
                    (digit? (char-at src (+ p 1)))))
             (read-number src p)
 
-          ;; `:` + delimiter/EOF -> the postfix annotation marker; `:` + anything
-          ;; else -> today's keyword, byte-identical (`:foo`, `::kw`, `:-`).
+          ;; `:` + delimiter/EOF -> the retired annotation marker for a pointed
+          ;; parser diagnostic; `:` + anything else -> a keyword (`:foo`, `::kw`,
+          ;; `:-`) byte-identically.
           (and (= ch ":")
                (or (>= (+ p 1) len)
                    (delimiter? (char-at src (+ p 1)))))
@@ -556,17 +557,17 @@
   (expect! "keyword" (= (rd1 ":name") ":name"))
   (expect! "standalone colon at EOF is the annotation marker"
     (= (rd1 ":") ANN-MARKER))
-  (expect! "legacy type marker :-" (= (rd1 ":-") ":-"))
-  (expect! "return marker ->" (= (rd1 "->") "->"))
+  (expect! "retired type marker :- remains lexical input" (= (rd1 ":-") ":-"))
+  (expect! "retired return marker -> remains lexical input" (= (rd1 "->") "->"))
   (expect! "auto-resolved keyword ::kw stays one keyword" (= (rd1 "::kw") "::kw"))
   (expect! "keyword unaffected by the marker split" (= (rd1 ":foo") ":foo"))
   ;; `x:Int` — colon glued to the TYPE, so the reader yields a symbol + a
   ;; keyword. There is no reader-level diagnosis; selfhost.parse points at it.
   (expect! "x:Int reads as symbol + keyword"
     (= (rd "x:Int") ["x" ":Int"]))
-  (expect! "postfix marker splits mid-token"
+  (expect! "retired postfix marker is preserved for parser rejection"
     (= (rd "x: Int") ["x" ANN-MARKER "Int"]))
-  (expect! "postfix marker with no space"
+  (expect! "retired compact postfix text remains symbol plus keyword"
     (= (rd "x:Int") ["x" ":Int"]))
   (expect! "<: stays one symbol" (= (rd1 "<:") "<:"))
   (expect! "<: inside a forall bound"
@@ -668,8 +669,8 @@
   (expect! "unknown targets have no language path"
     (nil? (target-lang-line "missing")))
 
-  ;; --- realistic forms (canonical: postfix `name: T`, return `-> T`) ---
-  (expect! "defn form postfix params"
+  ;; --- retired annotation forms remain readable diagnostic input ---
+  (expect! "retired defn postfix params remain diagnostic input"
     (let [result (rd1 "(defn foo [x: Int] -> String x)")]
       (and (= (nth result 0) "defn")
            (= (nth result 1) "foo")
@@ -677,21 +678,21 @@
            (= (nth result 3) "->")
            (= (nth result 4) "String")
            (= (nth result 5) "x"))))
-  (expect! "defn form postfix params, space before colon"
+  (expect! "retired defn postfix spacing is lexically stable"
     (= (rd1 "(defn foo [x : Int] -> String x)")
        (rd1 "(defn foo [x: Int] -> String x)")))
-  (expect! "defrecord postfix fields"
+  (expect! "retired defrecord postfix fields remain diagnostic input"
     (= (rd1 "(defrecord Point [x: Int y: Int])")
        ["defrecord" "Point" [BRACKET-TAG "x" ANN-MARKER "Int" "y" ANN-MARKER "Int"]]))
-  (expect! "def postfix annotation"
+  (expect! "retired def postfix annotation remains diagnostic input"
     (= (rd1 "(def greeting: String \"hi\")")
        ["def" "greeting" ANN-MARKER "String" [STRING-TAG "hi"]]))
-  (expect! "mixed param vector"
+  (expect! "retired mixed postfix vector remains diagnostic input"
     (= (rd1 "[a: Int b c: String]")
        [BRACKET-TAG "a" ANN-MARKER "Int" "b" "c" ANN-MARKER "String"]))
 
-  ;; --- realistic forms (legacy `:-`, still read at this cut) ---
-  (expect! "defn form flat params"
+  ;; --- older `:-` spelling is likewise preserved only for rejection ---
+  (expect! "retired defn flat params remain diagnostic input"
     (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
       (and (= (nth result 0) "defn")
            (= (nth result 1) "foo")
@@ -699,7 +700,7 @@
            (= (nth result 3) ":-")
            (= (nth result 4) "String")
            (= (nth result 5) "x"))))
-  (expect! "defrecord flat fields"
+  (expect! "retired defrecord flat fields remain diagnostic input"
     (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]
       (and (= (nth result 0) "defrecord")
            (= (nth result 1) "Point")
@@ -711,6 +712,9 @@
            (= (nth result 2) ":-")
            (= (nth result 3) "String")
            (= (nth result 4) [STRING-TAG "hello"]))))
+  (expect! "structural typed binding reads as one nested declaration"
+    (= (rd1 "[(x Point) y]")
+       [BRACKET-TAG ["x" "Point"] "y"]))
   (expect! "declare-extern with fn type"
     (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
       (and (= (nth result 0) "declare-extern")

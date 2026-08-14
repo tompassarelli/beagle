@@ -559,6 +559,83 @@
 (define (logical-elem->src item)
   (string-join (map datum->src item) " "))
 
+(define (binding-form-datum? d)
+  (or (symbol? d)
+      (vector? d)
+      (and (pair? d) (memq (car d) (list %brackets %map)))))
+
+(define (structured-binding-datum? d)
+  (and (list? d)
+       (memq (length d) '(2 3))
+       (binding-form-datum? (car d))))
+
+(define (nested-datum->pretty d col [suffix-width 0])
+  (define oneline (datum->src d))
+  (define-values (open close elems) (pp-seq-parts d))
+  (cond
+    [(<= (+ col (string-length oneline) suffix-width) PP-WIDTH) oneline]
+    [(or (not open) (null? elems)) oneline]
+    [else
+     (define inner-col (+ col (string-length open)))
+     (define pad (make-string inner-col #\space))
+     (define last-index (sub1 (length elems)))
+     (string-append
+      open
+      (nested-datum->pretty (car elems) inner-col
+                            (if (zero? last-index)
+                                (+ suffix-width (string-length close))
+                                0))
+      (apply string-append
+             (for/list ([elem (in-list (cdr elems))]
+                        [index (in-naturals 1)])
+               (string-append "\n" pad
+                              (nested-datum->pretty
+                               elem inner-col
+                               (if (= index last-index)
+                                   (+ suffix-width (string-length close))
+                                   0)))))
+      close)]))
+
+(define (structured-binding->pretty d col [suffix-width 0])
+  (define oneline (datum->src d))
+  (cond
+    [(<= (+ col (string-length oneline) suffix-width) PP-WIDTH) oneline]
+    [else
+     (define elems (list-elems d))
+     (define inner-col (add1 col))
+     (define pad (make-string inner-col #\space))
+     (define last-index (sub1 (length elems)))
+     (string-append
+      "("
+      (nested-datum->pretty (car elems) inner-col
+                            (if (zero? last-index)
+                                (add1 suffix-width)
+                                0))
+      (apply string-append
+             (for/list ([elem (in-list (cdr elems))]
+                        [index (in-naturals 1)])
+               (string-append "\n" pad
+                              (nested-datum->pretty
+                               elem inner-col
+                               (if (= index last-index)
+                                   (add1 suffix-width)
+                                   0)))))
+      ")")]))
+
+(define (logical-elem->pretty item col [suffix-width 0])
+  (cond
+    [(and (= (length item) 1)
+          (structured-binding-datum? (car item)))
+     (structured-binding->pretty (car item) col suffix-width)]
+    [(and (= (length item) 2)
+          (eq? (car item) '&)
+          (structured-binding-datum? (cadr item)))
+     (string-append
+      "& "
+      (structured-binding->pretty
+       (cadr item) (+ col 2) suffix-width))]
+    [else (logical-elem->src item)]))
+
 (define (grammar-vector->pretty d col)
   (define logical (logical-vector-elems d))
   (define inner-col (add1 col))
@@ -566,10 +643,17 @@
   (if (null? logical)
       "[]"
       (string-append
-       "[" (logical-elem->src (car logical))
+       "[" (logical-elem->pretty
+             (car logical) inner-col
+             (if (null? (cdr logical)) 1 0))
        (apply string-append
-              (for/list ([item (in-list (cdr logical))])
-                (string-append "\n" pad (logical-elem->src item))))
+              (for/list ([item (in-list (cdr logical))]
+                         [index (in-naturals 1)])
+                (string-append
+                 "\n" pad
+                 (logical-elem->pretty
+                  item inner-col
+                  (if (= index (sub1 (length logical))) 1 0)))))
        "]")))
 
 ;; A function signature has three canonical width states. Keep the owner and
@@ -614,32 +698,6 @@
               #:when (and (>= i start) (bracket-datum? e)))
     i))
 
-(define (bare-arity-vector-indexes elems)
-  (cond
-    [(or (< (length elems) 4)
-         (not (memq (car elems) '(defn defn-))))
-     #f]
-    [else
-     (define docstring? (and (> (length elems) 2) (string? (list-ref elems 2))))
-     (define start (if docstring? 3 2))
-     (define tail (drop elems start))
-     (and (pair? tail)
-          (bracket-datum? (car tail))
-          (let loop ([rest tail]
-                     [index start]
-                     [current? #f]
-                     [body? #f]
-                     [indexes '()])
-            (cond
-              [(null? rest)
-               (and current? body? (>= (length indexes) 2) (reverse indexes))]
-              [(bracket-datum? (car rest))
-               (if (and current? (not body?))
-                   #f
-                   (loop (cdr rest) (add1 index) #t #f (cons index indexes)))]
-              [current? (loop (cdr rest) (add1 index) #t #t indexes)]
-              [else #f])))]))
-
 ;; Context is assigned only by grammar owners. A vector in an ordinary call,
 ;; data literal, or let binding zone therefore keeps the generic formatter.
 (define (grammar-child-context d ctx i child)
@@ -656,10 +714,7 @@
     [(not elems) 'normal]
     [else
      (define head (and (pair? elems) (symbol? (car elems)) (car elems)))
-     (define bare-indexes (and head (bare-arity-vector-indexes elems)))
      (cond
-       [(and bare-indexes (member i bare-indexes) (bracket-datum? child))
-        'params]
        [(and (memq head '(defn defn- defmacro fn))
              (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
         'params]

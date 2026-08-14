@@ -149,6 +149,12 @@
               #:when (equal? (hash-ref form 'node #f) node-name))
     form))
 
+(define (find-named-form json node-name name)
+  (for/first ([form (in-list (hash-ref json 'forms))]
+              #:when (and (equal? (hash-ref form 'node #f) node-name)
+                          (equal? (hash-ref form 'name #f) name)))
+    form))
+
 (define (run-ast-cli source)
   (parameterize ([current-directory root])
     (define-values (process stdout stdin stderr)
@@ -240,13 +246,13 @@
                   (parse+check-json/js
                    "(ns t)\n(js/quote (const x (object dangling-key)))"))))
 
-   (test-case "checked-program v2 expands an imported typed declaration macro"
+   (test-case "checked-program v3 expands an imported typed declaration macro"
      (define path
        (root/ "beagle-test/tests/fixtures/checked-projection/wiki.bjs"))
      (define-values (_prog json)
        (parse+checked-json/path path "checked-projection/wiki.bjs"))
      (check-equal? (hash-ref json 'kind) "beagle.checked-program")
-     (check-equal? (hash-ref json 'schemaVersion) 2)
+     (check-equal? (hash-ref json 'schemaVersion) 3)
      (check-equal? (hash-ref json 'phase) "checked")
      (check-equal? (hash-ref json 'sourceId) "checked-projection/wiki.bjs")
      (check-equal? (hash-ref json 'sourceSha256)
@@ -317,7 +323,151 @@
      (check-equal? (hash-ref name 'type) "seq-destructure")
      (check-equal? (hash-ref name 'names) '("a" "b")))
 
-   (test-case "checked-program v2 keeps one aggregate parameter with a structural name"
+   (test-case "checked-program v3 retains binding-local constraints"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.binding-constraints)\n"
+         "(defn positive? [(value Int)] Bool (> value 0))\n"
+         "(defrecord Score [(value Int positive?)])\n"
+         "(defunion Sample (Present [(value Int positive?)]))\n"
+         "(defunion :throwable SampleError (Invalid [(value Int positive?)]))\n"
+         "(defn constrained [(input Int positive?)] (Vec (U Int Nil))\n"
+         "  (let [(local Int positive?) input]\n"
+         "    (doseq [(seen Int positive?) [local]] seen)\n"
+         "    (for [(item Int positive?) [local]] item)))\n")
+        ".bclj"
+        "checked-binding-constraints.bclj"))
+     (check-equal? (hash-ref json 'schemaVersion) 3)
+     (define predicate (find-named-form json "defn" "positive?"))
+     (check-equal?
+      (hash-ref (car (hash-ref predicate 'params)) 'constraint)
+      'null)
+     (check-false
+      (hash-ref (car (hash-ref predicate 'params))
+                'constraintSynchronous))
+     (define record (find-named-form json "record" "Score"))
+     (check-equal?
+      (hash-ref (hash-ref (car (hash-ref record 'fields)) 'constraint) 'name)
+      "positive?")
+     (check-true
+      (hash-ref (car (hash-ref record 'fields)) 'constraintSynchronous))
+     (define union (find-named-form json "defunion" "Sample"))
+     (check-equal?
+      (hash-ref
+       (hash-ref
+        (car (hash-ref (hash-ref union 'member-fields) 'Present))
+        'constraint)
+       'name)
+      "positive?")
+     (check-true
+      (hash-ref
+       (car (hash-ref (hash-ref union 'member-fields) 'Present))
+       'constraintSynchronous))
+     (define error (find-named-form json "deferror" "SampleError"))
+     (check-equal?
+      (hash-ref
+       (hash-ref
+        (car (hash-ref (hash-ref error 'member-fields) 'Invalid))
+        'constraint)
+       'name)
+      "positive?")
+     (check-true
+      (hash-ref
+       (car (hash-ref (hash-ref error 'member-fields) 'Invalid))
+       'constraintSynchronous))
+     (define function (find-named-form json "defn" "constrained"))
+     (check-equal?
+      (hash-ref (hash-ref (car (hash-ref function 'params)) 'constraint) 'name)
+      "positive?")
+     (check-true
+      (hash-ref (car (hash-ref function 'params))
+                'constraintSynchronous))
+     (define let-node (car (hash-ref function 'body)))
+     (check-equal?
+      (hash-ref
+      (hash-ref (car (hash-ref let-node 'bindings)) 'constraint)
+       'name)
+      "positive?")
+     (check-true
+      (hash-ref (car (hash-ref let-node 'bindings))
+                'constraintSynchronous))
+     (define doseq-node (car (hash-ref let-node 'body)))
+     (check-equal?
+      (hash-ref
+       (hash-ref (car (hash-ref doseq-node 'clauses)) 'constraint)
+       'name)
+      "positive?")
+     (check-true
+      (hash-ref (car (hash-ref doseq-node 'clauses))
+                'constraintSynchronous))
+     (define for-node (cadr (hash-ref let-node 'body)))
+     (check-equal?
+      (hash-ref
+       (hash-ref (car (hash-ref for-node 'clauses)) 'constraint)
+       'name)
+      "positive?")
+     (check-true
+      (hash-ref (car (hash-ref for-node 'clauses))
+                'constraintSynchronous)))
+
+   (test-case "checked-program v3 publishes the record validator for with"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.with-contract)\n"
+         "(defn positive? [(value Int)] Bool (> value 0))\n"
+         "(defrecord Score [(value Int positive?)])\n"
+         "(defn replace [(score Score)] Score\n"
+         "  (with score [:value 2]))\n")
+        ".bclj"
+        "checked-with-contract.bclj"))
+     (define function (find-named-form json "defn" "replace"))
+     (define update (car (hash-ref function 'body)))
+     (check-equal? (hash-ref update 'node) "with")
+     (check-false (hash-has-key? update 'validator))
+     (define contract (hash-ref update 'recordUpdate))
+     (check-equal? (sort (hash-keys contract) symbol<?)
+                   '(fieldOrder recordName validator))
+     (check-equal? (hash-ref contract 'recordName) "Score")
+     (check-equal? (hash-ref contract 'fieldOrder) '(":value"))
+     (check-equal? (hash-ref contract 'validator)
+                   "$beagle$record$Score$validate")
+     (check-equal? (hash-ref json 'projectionSha256)
+                   (projection-sha256 json)))
+
+   (test-case "checked-program v3 always emits null validator for dynamic with"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.dynamic-with)\n"
+         "(defn replace [(value Any)] Any (with value [:field 2]))\n")
+        ".bclj"
+        "checked-dynamic-with.bclj"))
+     (define update
+       (car (hash-ref (find-named-form json "defn" "replace") 'body)))
+     (check-equal? (hash-ref update 'recordUpdate) 'null)
+     (check-false (hash-has-key? update 'validator)))
+
+   (test-case "checked-program v3 publishes exact record field access identity"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.field-contract)\n"
+         "(defrecord Score [(value Int)])\n"
+         "(defn read-score [(score Score)] Int (:value score))\n"
+         "(defn read-map [(value Any)] Any (:value value))\n")
+        ".bclj"
+        "checked-field-contract.bclj"))
+     (define typed
+       (car (hash-ref (find-named-form json "defn" "read-score") 'body)))
+     (define dynamic
+       (car (hash-ref (find-named-form json "defn" "read-map") 'body)))
+     (check-equal? (hash-ref (hash-ref typed 'recordFieldAccess) 'recordName)
+                   "Score")
+     (check-equal? (hash-ref dynamic 'recordFieldAccess) 'null))
+
+   (test-case "checked-program v3 keeps one aggregate parameter with a structural name"
      (define json
        (parse+checked-json
         (string-append
@@ -328,12 +478,12 @@
      (define parameter
        (car (hash-ref (car (hash-ref json 'forms)) 'params)))
      (define binding (hash-ref parameter 'name))
-     (check-equal? (hash-ref json 'schemaVersion) 2)
+     (check-equal? (hash-ref json 'schemaVersion) 3)
      (check-equal? (hash-ref binding 'type) "seq-destructure")
      (check-equal? (hash-ref binding 'names) '("x" "y"))
      (check-equal? (hash-ref (hash-ref parameter 'ann) 'name) "HVec"))
 
-   (test-case "checked-program v2 publishes inference separately from authored annotations"
+   (test-case "checked-program v3 publishes inference separately from authored annotations"
      (define json
        (parse+checked-json
         (string-append
@@ -344,7 +494,7 @@
      (define definition (car (hash-ref json 'forms)))
      (define parameter (car (hash-ref definition 'params)))
      (define effective (hash-ref definition 'effectiveType))
-     (check-equal? (hash-ref json 'schemaVersion) 2)
+     (check-equal? (hash-ref json 'schemaVersion) 3)
      (check-equal? (hash-ref parameter 'ann) 'null)
      (check-equal? (hash-ref effective 'kind) "fn")
      (check-equal?
@@ -352,7 +502,7 @@
       "Int")
      (check-equal? (hash-ref (hash-ref effective 'ret) 'name) "Int"))
 
-   (test-case "checked-program v2 publishes one finalized multi-arity signature"
+   (test-case "checked-program v3 publishes one finalized multi-arity signature"
      (define json
        (parse+checked-json
         (string-append
@@ -487,12 +637,43 @@
         (string-append
          "(ns checked.protocol)\n"
          "(defrecord Box [(value String)])\n"
-         "(defprotocol Labelled (label [self] String))\n"
-         "(extend-type Box Labelled (label [self] String (:value self)))\n")
+         "(defprotocol Labelled (label [(self Any)] String))\n"
+         "(extend-type Box Labelled (label [(self Box)] String (:value self)))\n")
         ".bclj"
         "checked-protocol.bclj"))
      (check-not-false (find-form-node json "defprotocol"))
      (check-not-false (find-form-node json "extend-type")))
+
+   (test-case "checked-program v3 retains constrained protocol rest bindings"
+     (define json
+       (parse+checked-json
+        (string-append
+         "(ns checked.protocol-rest)\n"
+         "(defn nonempty? [(values (Vec Int))] Bool (> (count values) 0))\n"
+         "(defprotocol Variadic\n"
+         "  (combine [(self Any) & (values (Vec Int) nonempty?)] Int))\n"
+         "(extend-type String Variadic\n"
+         "  (combine [(self String) & (values (Vec Int) nonempty?)] Int\n"
+         "    (count values)))\n")
+        ".bclj"
+        "checked-protocol-rest.bclj"))
+     (define protocol (find-named-form json "defprotocol" "Variadic"))
+     (define signature (car (hash-ref protocol 'methods)))
+     (check-equal?
+      (hash-ref (hash-ref (hash-ref signature 'rest) 'constraint) 'name)
+      "nonempty?")
+     (check-true
+      (hash-ref (hash-ref signature 'rest) 'constraintSynchronous))
+     (define extension (find-form-node json "extend-type"))
+     (define implementation
+       (car (hash-ref (car (hash-ref extension 'impls)) 'methods)))
+     (check-equal?
+      (hash-ref
+       (hash-ref (hash-ref implementation 'rest) 'constraint)
+       'name)
+      "nonempty?")
+     (check-true
+      (hash-ref (hash-ref implementation 'rest) 'constraintSynchronous)))
 
    (test-case "checked-program preserves live typed JavaScript nodes"
      (define json

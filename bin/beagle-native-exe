@@ -169,6 +169,7 @@ done
     die "Core build command is unavailable: $CORE_BUILD"
 [[ -x "$BIN/beagle-ast" ]] || die "AST command is unavailable: $BIN/beagle-ast"
 command -v python3 >/dev/null 2>&1 || die "required command is unavailable: python3"
+command -v bb >/dev/null 2>&1 || die "required command is unavailable: bb"
 cc_path="$(command -v -- "$cc" 2>/dev/null || true)"
 [[ -n "$cc_path" && -x "$cc_path" ]] || die "C17 compiler is unavailable: $cc"
 
@@ -188,6 +189,11 @@ for source in "${sources[@]}"; do
     if [[ $ast_rc -ne 0 ]]; then
         sed -n '1,200p' "$ast_log" >&2
         die "could not inspect exports in source: $source"
+    fi
+    if ! bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
+        >"$work/source_${source_index}.verify.log" 2>&1; then
+        sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2
+        die "could not authenticate checked AST for source: $source"
     fi
     ast_args+=("$source" "$ast")
     source_index=$((source_index + 1))

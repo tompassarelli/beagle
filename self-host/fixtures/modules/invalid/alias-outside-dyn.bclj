@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fixtures.invalid.alias-outside-dyn)
+(define-mode strict)
+
+(require fixtures.alias-owner :as owner)
+
+(defn invalid [] Any
+  (owner/store 1.5))

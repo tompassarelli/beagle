@@ -257,6 +257,16 @@
                 (type-compatible? a (nth (get expected "args") 0)))
               (get actual "args"))
 
+    (and (app-type? expected) (= (get expected "name") "Dyn"))
+      (if (and (app-type? actual) (= (get actual "name") "Dyn"))
+        (and (= (count (get actual "args")) (count (get expected "args")))
+             (every? (fn [(i Int)] Bool
+                       (type-invariant-equal? (nth (get actual "args") i)
+                         (nth (get expected "args") i)))
+               (range (count (get actual "args")))))
+        (boolean (some (fn [(alt Any)] Bool (type-compatible? actual alt))
+                   (get expected "args"))))
+
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
@@ -361,9 +371,10 @@
     (and (vector? t) (> (count t) 1) (= (nth t 0) "U"))
       (make-union (mapv parse-type (subvec t 1)))
 
-    ;; Parametric app: ["Vec", "T"], ["Map", "K", "V"]
+    ;; Parametric app: ["Vec", "T"], ["Map", "K", "V"], ["Dyn", ...]
     (and (vector? t) (> (count t) 0) (string? (nth t 0))
-         (or (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0)
+         (or (= (nth t 0) "Dyn")
+             (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0)
              (= (get user-parametric (nth t 0)) true)))
       (make-app (nth t 0) (mapv parse-type (subvec t 1)))
 
@@ -577,6 +588,18 @@
     (not (type-compatible?
       (make-app "Vec" [(make-prim "Int")])
       (make-app "Set" [(make-prim "Int")]))))
+  (expect! "tc: concrete alternative fits expected Dyn"
+    (type-compatible?
+      (make-prim "String")
+      (make-app "Dyn" [(make-prim "String") (make-prim "Int")])))
+  (expect! "tc: value outside expected Dyn is rejected"
+    (not (type-compatible?
+      (make-prim "Float")
+      (make-app "Dyn" [(make-prim "String") (make-prim "Int")]))))
+  (expect! "tc: Dyn alternatives are invariant and ordered"
+    (not (type-compatible?
+      (make-app "Dyn" [(make-prim "String") (make-prim "Int")])
+      (make-app "Dyn" [(make-prim "Int") (make-prim "String")]))))
   (expect! "tc: qualified name"
     (type-compatible? (make-prim "mymod/Type") (make-prim "Type")))
   (expect! "tc: poly unwrap"
@@ -625,6 +648,9 @@
   (expect! "pt: nested (Vec (Map String Int))"
     (= (parse-type ["Vec" ["Map" "String" "Int"]])
        (make-app "Vec" [(make-app "Map" [(make-prim "String") (make-prim "Int")])])))
+  (expect! "pt: Dyn"
+    (= (parse-type ["Dyn" "String" "Int"])
+       (make-app "Dyn" [(make-prim "String") (make-prim "Int")])))
 
   ;; --- ML soundness: Atom invariance ---
   (expect! "tc: (Atom Int) ~ (Atom Int)"

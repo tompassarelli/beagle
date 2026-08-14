@@ -81,7 +81,7 @@
    (E "E006" "Non-exhaustive match"
       "A match expression on a defunion does not cover all members."
       "Agents forget to add branches for all union members. This is the most important error to fix — missing cases cause runtime crashes."
-      "(defunion Shape (Circle r) (Square s))\n(match shape\n  [(Circle r) (* 3.14 r r)])  ;; ERROR: missing case: Square"
+      "(defunion Shape (Circle [(r Float)]) (Square [(s Float)]))\n(match shape\n  [(Circle r) (* 3.14 r r)])  ;; ERROR: missing case: Square"
       "(match shape\n  [(Circle r) (* 3.14 r r)]\n  [(Square s) (* s s)])"
       "Add the missing match branches. The diagnostic lists which cases are missing.")
 
@@ -160,7 +160,15 @@
       "(pointer-gesture-pointer-id gesture)  ;; ERROR: no such generated accessor"
       "(pointergesture-pointer-id gesture)"
       "Use the pointed suggestion, import or define the function, or declare an intentional host binding with declare-extern."
-      #:since "0.17")))
+      #:since "0.17")
+
+   (E "E028" "Invalid scalar constraint declaration"
+      "A defscalar :where predicate is incompatible with the scalar backing type."
+      "The :where grammar compares the backing value to a numeric literal, so it requires a numeric primitive backing type."
+      "(defscalar Email String :where (> 0))  ;; ERROR: String is not numeric"
+      "(defscalar Score Int :where (> 0))"
+      "Use a numeric primitive backing type for :where, or omit :where from a nonnumeric scalar."
+      #:since "0.18")))
 
 (define CODE->EXPL
   (let ([h (make-hash)])

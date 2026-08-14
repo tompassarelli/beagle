@@ -30,6 +30,37 @@
 (require '[cheshire.core :as json]
          '[clojure.string :as str])
 
+(load-file
+  (.getCanonicalPath
+    (clojure.java.io/file (.getParentFile (clojure.java.io/file *file*))
+      "../../bin/checked-program.clj")))
+(require '[native.checked-program :as checked-program])
+
+(defn constrained-binding [value]
+  (cond
+    (map? value)
+    (or (when (and (contains? value "constraint")
+                   (some? (get value "constraint")))
+          value)
+        (some constrained-binding (vals value)))
+    (sequential? value) (some constrained-binding value)
+    :else nil))
+
+(defn require-unconstrained-checked-program! [ast source-path]
+  (checked-program/require-checked-program!
+    ast source-path "affordance analysis")
+  ;; This analyzer reads binding structure directly. Reject constraints until it
+  ;; models their predicate evaluation rather than silently dropping the edge.
+  (when-let [binding (constrained-binding ast)]
+    (throw
+      (ex-info
+        (str "affordance analysis does not implement typed-binding constraints; "
+             "refusing to discard constraint metadata: " source-path)
+        {:source-path source-path
+         :binding-node (get binding "node")
+         :binding-name (get binding "name")})))
+  ast)
+
 ;; ---------------------------------------------------------------------------
 ;; Tree indexing: JSON AST -> node records with ids, parents, ancestor sets.
 ;; ---------------------------------------------------------------------------
@@ -1983,9 +2014,15 @@
       (println "usage: bb affordance.clj --item NAME --ast out.ast.json=/abs/src [--ast|--context ...] --out report.json"))
     (System/exit 2))
   (doseq [[ast-path src-path] asts]
-    (index-module! (json/parse-string (slurp ast-path)) src-path false))
+    (index-module!
+      (require-unconstrained-checked-program!
+        (json/parse-string (slurp ast-path)) src-path)
+      src-path false))
   (doseq [[ast-path src-path] contexts]
-    (index-module! (json/parse-string (slurp ast-path)) src-path true))
+    (index-module!
+      (require-unconstrained-checked-program!
+        (json/parse-string (slurp ast-path)) src-path)
+      src-path true))
   (build-ref-index!)
   (build-defn-binding-vals!)
   (build-callsite-index!)

@@ -110,7 +110,9 @@ absolute checkout paths and remain byte-stable across machines.
   its typed surface via `parse.bclj` `import-module-surface` — a port of
   `import-module-types!` `reg!`: alias-qualified externs for declare-extern,
   `defrecord` ctor/accessors, `defscalar`, `defunion`, typed `def`/`defonce`,
-  `^:dynamic` vars, and `defn` signatures (`:refer` also binds bare). These
+  `^:dynamic` vars, and `defn` signatures (`:refer` also binds bare). Exported
+  `defalias` declarations are imported structurally as well, including
+  provider-qualified local references and ordered `Dyn` alternatives. These
   merge into `prog.externs` before `check`, so `k/x` refs type against real
   signatures and cross-module type errors are caught like the oracle. The
   `check.rkt` unresolved-alias diagnostic is ported too (`check.bclj`
@@ -120,16 +122,18 @@ absolute checkout paths and remain byte-stable across machines.
   `verify-selfhost.sh` rungs 6/7 and the fram corpus (byte-identical emit +
   externs parity). Externs are compared as a SET: `ast-json.rkt` serializes
   the oracle's externs in hash order, so byte order is not reproducible.
+  Checked providers also publish record field order, field types, and their
+  provider-owned constraint validator ABI. Imported nominal keyword access and
+  `with` updates consume that contract rather than guessing from flat externs.
   Remaining sub-gaps (none exercised by any current corpus): cross-module
   MACRO import (qualified `defmacro` — surfaced to the macro
-  registry by the oracle, not ported here; ast-json externs carry none),
-  keyword field access on an imported record (needs the oracle's
-  per-record field table, not the flat externs), and parametric-union
-  member ctors/accessors (only the union name is imported).
+  registry by the oracle, not ported here; ast-json externs carry none), and
+  parametric-union member ctors/accessors (only the union name is imported).
 - **Source locations** — the chain carries none; seed emission is
   srcloc-free by construction, so this cannot affect seed bytes.
-- **Non-clj targets** — this gap is target-specific: the chain emits the `clj`
-  target only (no nix reader macros / `nix-*` forms or js emitters).
+- **Non-clj target surface** — JS and Nix emitters are present, but complete
+  parity still follows the target-specific verification ladders; target-only
+  reader forms and runtime behavior can remain ahead of the shared core.
 
 ## Native distribution binary (stage0)
 

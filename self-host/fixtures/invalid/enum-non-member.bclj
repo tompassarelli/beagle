@@ -1,0 +1,10 @@
+#lang beagle/clj
+(ns fixtures.invalid.enum-non-member)
+(define-mode strict)
+
+(defenum Mode :on :off)
+
+(defn choose [(mode Mode)] Mode
+  mode)
+
+(def invalid Mode (choose :other))

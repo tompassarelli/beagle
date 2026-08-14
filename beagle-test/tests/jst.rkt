@@ -49,14 +49,17 @@
 
      (check-jst-parse-ok "js/class"
        '(js/class Animal
-          (constructor [name #%: String]
+          (constructor [(name String)]
+            Any
             (set! (.-name this) name))
           (speak []
+            String
             (js/return (.-name this)))))
 
      (check-jst-parse-ok "js/class with extends"
        '(js/class Dog extends Animal
           (speak []
+            String
             (js/return "woof"))))
 
      (check-jst-parse-ok "js/template"
@@ -69,18 +72,19 @@
        '(js/typeof x))
 
      (check-jst-parse-ok "js/export function"
-       '(js/export (defn main [] 0)))
+       '(js/export (defn main [] Int 0)))
 
      (check-jst-parse-ok "js/export class"
        '(js/export (js/class App
           (constructor []
+            Nil
             (js/return)))))
 
      (check-jst-parse-ok "js/return bare"
-       '(defn f [] (js/return)))
+       '(defn f [] Nil (js/return)))
 
      (check-jst-parse-ok "js/return with value"
-       '(defn f [] (js/return 42)))
+       '(defn f [] Int (js/return 42)))
 
      (check-jst-parse-ok "js/! unary"
        '(js/! done))
@@ -107,7 +111,7 @@
         exn:fail?
         (lambda ()
           (define prog (jst-parse (list '(ns test.app) '(define-mode strict)
-                                        '(js/class Foo (constructor [] (js/return))))))
+                                        '(js/class Foo (constructor [] Nil (js/return))))))
           (type-check! prog))))
 
    ) ;; end type-check suite
@@ -117,70 +121,74 @@
 
      (check-jst-emit "js/+ binary"
        "(a + b)"
-       '(def r #%: Any (js/+ a b)))
+       '(def r Any (js/+ a b)))
 
      (check-jst-emit "js/=== binary"
        "(a === b)"
-       '(def r #%: Any (js/=== a b)))
+       '(def r Any (js/=== a b)))
 
      (check-jst-emit "js/&& binary"
        "(a && b)"
-       '(def r #%: Any (js/&& a b)))
+       '(def r Any (js/&& a b)))
 
      (check-jst-emit "js/|| binary"
        "(a || b)"
-       '(def r #%: Any (js/|| a b)))
+       '(def r Any (js/|| a b)))
 
      (check-jst-emit "js/?? binary"
        "(a ?? b)"
-       '(def r #%: Any (js/?? a b)))
+       '(def r Any (js/?? a b)))
 
      (check-jst-emit "js/! unary"
        "!done"
-       '(def r #%: Any (js/! done)))
+       '(def r Any (js/! done)))
 
      (check-jst-emit "js/typeof"
        "typeof x"
-       '(def r #%: Any (js/typeof x)))
+       '(def r Any (js/typeof x)))
 
      (check-jst-emit "js/template"
        "`Hello, ${name}!`"
-       '(def msg #%: Any (js/template "Hello, " name "!")))
+       '(def msg Any (js/template "Hello, " name "!")))
 
      (check-jst-emit "js/spread"
        "...items"
-       '(def arr #%: Any (js/spread items)))
+       '(def arr Any (js/spread items)))
 
      (check-jst-emit "js/return"
        "return 42;"
-       '(defn f [] (js/return 42)))
+       '(defn f [] Int (js/return 42)))
 
      (check-jst-emit "bare js/return"
        "return;"
-       '(defn f [] (js/return)))
+       '(defn f [] Nil (js/return)))
 
      (check-jst-emit "js/class declaration"
        "class Animal {"
        '(js/class Animal
-          (constructor [name #%: String]
+          (constructor [(name String)]
+            Any
             (set! (.-name this) name))))
 
      (check-jst-emit "class constructor"
        "constructor(name)"
        '(js/class Animal
-          (constructor [name #%: String]
+          (constructor [(name String)]
+            Any
             (set! (.-name this) name))))
 
      (check-jst-emit "class with extends"
        "class Dog extends Animal {"
        '(js/class Dog extends Animal
           (speak []
+            String
             (js/return "woof"))))
 
      (check-jst-emit "js/export class"
        "export class"
        '(js/export (js/class App
           (constructor []
+            Nil
             (js/return)))))
 
      (check-jst-emit "js/export def"
@@ -189,7 +197,7 @@
 
      (check-jst-emit "js/export defn"
        "export function"
-       '(js/export (defn main [] 0)))
+       '(js/export (defn main [] Int 0)))
 
    ) ;; end emit suite
 
@@ -199,9 +207,11 @@
      (check-jst-emit "class with static method"
        "static create"
        '(js/class Config
-          (constructor [data #%: Any]
+          (constructor [(data Any)]
+            Any
             (set! (.-data this) data))
-          (static create [path #%: String]
+          (static create [(path String)]
+            Any
             (js/return (Config. (JSON/parse path))))))
 
    ) ;; end complex suite

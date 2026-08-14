@@ -1,3 +1,6 @@
+(defprotocol Showable
+  (show [(self Any)] String))
+
 (extend-type String
   Showable
   (show [(self String)] String (str self)))

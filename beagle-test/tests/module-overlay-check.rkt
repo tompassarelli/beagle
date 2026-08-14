@@ -228,6 +228,46 @@
       (regexp-match? #rx"export function (Person|Chosen)"
                      (checked-overlay-module-emitted provider))))))
 
+(test-case "candidate overlay preserves equality predicates on imported scalars"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "scalar-equality-provider" provider-source
+        (string-append
+         "#lang beagle/js\n"
+         "(ns overlay.provider)\n"
+         "(js/export (defscalar Zero Int :where (= 0)))\n")))
+     (define consumer-edn
+       (candidate!
+        root "scalar-equality-consumer" consumer-source
+        (string-append
+         "#lang beagle/js\n"
+         "(ns overlay.consumer\n"
+         "  (:require [overlay.provider :refer [->Zero Zero]]))\n"
+         "(def zero Zero (->Zero 0))\n")))
+     (define result (check-edn-overlay (list consumer-edn provider-edn)))
+     (check-true (overlay-check-result-ok? result)
+                 (diagnostic-text result))
+     (define provider
+       (for/first ([module (in-list (overlay-check-result-modules result))]
+                   #:when (eq? (checked-overlay-module-namespace module)
+                               'overlay.provider))
+         module))
+     (define consumer
+       (for/first ([module (in-list (overlay-check-result-modules result))]
+                   #:when (eq? (checked-overlay-module-namespace module)
+                               'overlay.consumer))
+         module))
+     (check-not-false provider)
+     (check-not-false consumer)
+     (check-true
+      (string-contains? (checked-overlay-module-emitted provider)
+                        "v === 0"))
+     (check-true
+      (string-contains? (checked-overlay-module-emitted consumer)
+                        "import { __gtZero }")))))
+
 (test-case "full overlay can provide context while only an explicit set is checked"
   (with-overlay-files
    (lambda (root provider-source consumer-source)
@@ -527,7 +567,7 @@
       malformed-edn
       (lambda (out)
         (displayln "@file graph.fixture.unwrapped" out)
-        (for ([line (in-list (datum->edn-lines '(def answer #%: Int 42)))])
+        (for ([line (in-list (datum->edn-lines '(def answer Int 42)))])
           (displayln line out)))
       #:exists 'truncate/replace)
      (define result (check-edn-overlay (list malformed-edn)))
@@ -1039,7 +1079,7 @@
       #rx"p/Box expects 1 argument, got 0"
       (diagnostic-text unapplied)))))
 
-(test-case "interface v3 rejects stale schemas and malformed export arity"
+(test-case "interface v6 rejects stale schemas and malformed export arity"
   (with-overlay-files
    (lambda (_root provider-source consumer-source)
      (write-text!
@@ -1084,7 +1124,7 @@
         valid-interface
         [schema-version 1]))
      (check-exn
-      #rx"uses interface schema v1; this compiler requires v3"
+      #rx"uses interface schema v1; this compiler requires v6"
       (lambda () (parse-consumer stale-interface)))
      (define valid-box
        (module-interface-type-export-ref valid-interface 'Box))
@@ -1130,10 +1170,10 @@
       (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
-(test-case "interface v3 forbids interface-only consumer pruning"
+(test-case "interface v6 forbids interface-only consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 3)
+     (check-equal? INTERFACE-SCHEMA-VERSION 6)
      (check-false INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!

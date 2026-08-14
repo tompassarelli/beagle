@@ -1,0 +1,50 @@
+#lang beagle
+(ns native.structured-constraint)
+(define-mode strict)
+
+(defn positive? [(value Int)] Bool
+  (> value 0))
+
+(defn nonempty? [(values (Vec Int))] Bool
+  (> (count values) 0))
+
+(defunion Sample
+  (Present [(value Int positive?)]))
+
+(defunion :throwable SampleError
+  (Invalid [(value Int positive?)]))
+
+(defn constrained [(value Int positive?)] Int
+  (let [(local Int positive?) value]
+    local))
+
+(defn constrained-loop [(value Int)] Int
+  (loop [(local Int positive?) value]
+    local))
+
+(defn constrained-for [(values (Vec Int))] (Vec (U Int Nil))
+  (for [(value Int positive?) values]
+    value))
+
+(defn constrained-doseq [(values (Vec Int))] Nil
+  (doseq [(value Int positive?) values]
+    (println value)))
+
+(def constrained-callback Any
+  (fn [(value Int positive?)] Int
+    value))
+
+(def constrained-rest-callback Any
+  (fn [& (values (Vec Int) nonempty?)] Int
+    (count values)))
+
+(defn constrained-rest [& (values (Vec Int) nonempty?)] Int
+  (count values))
+
+(defn constrained-multi
+  ([(value Int positive?)] Int value)
+  ([(left Int positive?) (right Int positive?)] Int (+ left right)))
+
+(defn constrained-local [(value Int)] Int
+  (letfn [(accept [(item Int positive?)] Int item)]
+    (accept value)))
