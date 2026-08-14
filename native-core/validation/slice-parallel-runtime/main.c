@@ -29,18 +29,19 @@ static void delay_partition(int64_t partition) {
   (void)nanosleep(&delay, NULL);
 }
 
-static int32_t step_kernel(const native_buffer *current, native_buffer *next,
+static int32_t step_kernel(const native_arena *arena,
+                           const native_buffer *current, native_buffer *next,
                            int64_t partition, int64_t lo, int64_t hi,
-                           const native_capability *capability,
-                           void *opaque) {
+                           const native_capability *capability, void *opaque) {
   fixture_context *context = (fixture_context *)opaque;
   int64_t index;
   delay_partition(partition);
   if (partition == INT64_C(0)) {
     const double periodic_left =
-        *(const double *)native_buffer_at(current, capability,
-                                         current->length - INT64_C(1),
-                                         INT64_C(8));
+        *(const double *)native_buffer_at(
+            arena, current, capability,
+            native_buffer_length(arena, current, capability) - INT64_C(1),
+            INT64_C(8), _Alignof(double));
     context->periodic_left_observed = periodic_left == 8.0;
   }
   if ((context->failing_mask & (UINT64_C(1) << (uint64_t)partition)) != 0U) {
@@ -51,22 +52,13 @@ static int32_t step_kernel(const native_buffer *current, native_buffer *next,
     if (context->omit_last_write && index + INT64_C(1) == hi) {
       continue;
     }
-    value = *(const double *)native_buffer_at(current, capability, index,
-                                               INT64_C(8)) + 1.0;
-    native_buffer_set(next, capability, index, &value, INT64_C(8));
+    value = *(const double *)native_buffer_at(arena, current, capability, index,
+                                               INT64_C(8), _Alignof(double)) +
+            1.0;
+    native_buffer_set(arena, next, capability, index, &value, INT64_C(8),
+                      _Alignof(double));
   }
   return 0;
-}
-
-static native_buffer buffer_of(double *elements, int64_t length,
-                               uint64_t owner) {
-  native_buffer buffer;
-  buffer.elements = elements;
-  buffer.length = length;
-  buffer.stride = INT64_C(8);
-  buffer.alignment = _Alignof(double);
-  buffer.owner_capability_token = owner;
-  return buffer;
 }
 
 static uint64_t double_bits(double value) {
@@ -134,11 +126,11 @@ static void test_worker_count_and_creation_failure(void) {
 static void test_step_contract(void) {
   double current_elements[8] = {1.0, 2.0, 3.0, 4.0,
                                 5.0, 6.0, 7.0, 8.0};
-  double next_elements[8];
   double published[8];
+  native_arena arena;
   native_capability owner = {UINT64_C(71)};
-  native_buffer current = buffer_of(current_elements, INT64_C(8), owner.token);
-  native_buffer next = buffer_of(next_elements, INT64_C(8), owner.token);
+  native_buffer *current;
+  native_buffer *next;
   native_parallel_runtime *runtime = native_parallel_runtime_create(4);
   native_parallel_report_v0 report;
   fixture_context context = {UINT64_C(0), false, false};
@@ -146,61 +138,72 @@ static void test_step_contract(void) {
   uint64_t workers_started;
   int iteration;
   int index;
+  require(native_arena_init_growable(&arena, (size_t)4096U),
+          "parallel Buffer arena creation failed");
+  current = native_buffer_new(&arena, &owner, INT64_C(8), INT64_C(8),
+                              _Alignof(double));
+  next = native_buffer_new(&arena, &owner, INT64_C(8), INT64_C(8),
+                           _Alignof(double));
+  for (index = 0; index < 8; ++index) {
+    native_buffer_set(&arena, current, &owner, index, &current_elements[index],
+                      INT64_C(8), _Alignof(double));
+  }
   require(runtime != NULL, "four-worker pool creation failed");
   require(native_parallel_runtime_reserve(runtime, INT64_C(8), INT64_C(4)),
           "parallel scratch reservation failed");
   allocations = native_parallel_scratch_allocations;
   workers_started = native_parallel_workers_started;
-  memset(next_elements, 0, sizeof(next_elements));
   report = native_parallel_tiled_step_f64_v0(
-      runtime, &current, &next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
+      runtime, &arena, current, next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
       NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0, step_kernel, &context);
   require(report.outcome == NATIVE_PARALLEL_OK_V0,
           "valid periodic step failed");
   require(context.periodic_left_observed,
           "partition zero did not read N-1 through its periodic left halo");
   for (index = 0; index < 8; ++index) {
-    require(next_elements[index] == current_elements[index] + 1.0,
+    require(*(const double *)native_buffer_at(
+                &arena, next, &owner, index, INT64_C(8), _Alignof(double)) ==
+                current_elements[index] + 1.0,
             "successful step published the wrong cell");
   }
-  memcpy(published, next_elements, sizeof(published));
+  memcpy(published, next->elements, sizeof(published));
   context.failing_mask = (UINT64_C(1) << 1U) | (UINT64_C(1) << 3U);
   report = native_parallel_tiled_step_f64_v0(
-      runtime, &current, &next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
+      runtime, &arena, current, next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
       NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0, step_kernel, &context);
   require(report.outcome == NATIVE_PARALLEL_WORKER_FAILED_V0,
           "multi-failure step did not fail");
   require(report.failing_partition == INT64_C(1),
           "failure identity followed completion order instead of partition ID");
-  require(memcmp(next_elements, published, sizeof(published)) == 0,
+  require(memcmp(next->elements, published, sizeof(published)) == 0,
           "failed step published transaction-private writes");
   context.failing_mask = UINT64_C(0);
   context.omit_last_write = true;
   report = native_parallel_tiled_step_f64_v0(
-      runtime, &current, &next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
+      runtime, &arena, current, next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
       NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0, step_kernel, &context);
   require(report.outcome == NATIVE_PARALLEL_WORKER_FAILED_V0,
           "missing write ownership was not detected");
-  require(memcmp(next_elements, published, sizeof(published)) == 0,
+  require(memcmp(next->elements, published, sizeof(published)) == 0,
           "coverage failure published a partial destination");
   context.omit_last_write = false;
   require(native_parallel_runtime_cancel_next(runtime),
           "pre-launch cancellation was not accepted");
   report = native_parallel_tiled_step_f64_v0(
-      runtime, &current, &next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
+      runtime, &arena, current, next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
       NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0, step_kernel, &context);
   require(report.outcome == NATIVE_PARALLEL_CANCELLED_V0,
           "pre-launch cancellation did not stop before writes");
-  require(memcmp(next_elements, published, sizeof(published)) == 0,
+  require(memcmp(next->elements, published, sizeof(published)) == 0,
           "cancelled step changed the destination");
   report = native_parallel_tiled_step_f64_v0(
-      runtime, &current, &current, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
+      runtime, &arena, current, current, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
       NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0, step_kernel, &context);
   require(report.outcome == NATIVE_PARALLEL_INVALID_V0,
           "aliased buffers were not refused before launch");
   for (iteration = 0; iteration < 16; ++iteration) {
     report = native_parallel_tiled_step_f64_v0(
-        runtime, &current, &next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
+        runtime, &arena, current, next, &owner, INT64_C(2), INT64_C(1), INT64_C(0),
         NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0, step_kernel, &context);
     require(report.outcome == NATIVE_PARALLEL_OK_V0,
             "reserved repeated step failed");
@@ -210,6 +213,7 @@ static void test_step_contract(void) {
   require(native_parallel_workers_started == workers_started,
           "a timestep recreated persistent workers");
   native_parallel_runtime_destroy(runtime);
+  native_arena_destroy(&arena);
   require(native_parallel_live_workers == UINT64_C(0),
           "step fixture leaked a worker");
 }
@@ -217,11 +221,21 @@ static void test_step_contract(void) {
 static void test_fixed_reduction(void) {
   const int32_t worker_counts[] = {1, 2, 3, 8};
   double values[5] = {1.0e16, 1.0, -1.0e16, -0.0, 3.0};
+  native_arena arena;
   native_capability owner = {UINT64_C(83)};
-  native_buffer source = buffer_of(values, INT64_C(5), owner.token);
+  native_buffer *source;
   uint64_t expected = double_bits(adjacent_pair_oracle(values, INT64_C(5),
                                                         INT64_C(2)));
   size_t position;
+  int64_t value_index;
+  require(native_arena_init_growable(&arena, (size_t)4096U),
+          "reduction Buffer arena creation failed");
+  source = native_buffer_new(&arena, &owner, INT64_C(5), INT64_C(8),
+                             _Alignof(double));
+  for (value_index = INT64_C(0); value_index < INT64_C(5); ++value_index) {
+    native_buffer_set(&arena, source, &owner, value_index,
+                      &values[value_index], INT64_C(8), _Alignof(double));
+  }
   for (position = 0; position < sizeof(worker_counts) / sizeof(worker_counts[0]);
        ++position) {
     native_parallel_runtime *runtime =
@@ -234,7 +248,7 @@ static void test_fixed_reduction(void) {
             "reduction scratch reservation failed");
     allocations = native_parallel_scratch_allocations;
     report = native_parallel_f64_buffer_sum_v0(
-        runtime, &source, &owner, INT64_C(2), &result);
+        runtime, &arena, source, &owner, INT64_C(2), &result);
     require(report.outcome == NATIVE_PARALLEL_OK_V0,
             "fixed-tree reduction failed");
     require(double_bits(result) == expected,
@@ -245,6 +259,7 @@ static void test_fixed_reduction(void) {
   }
   require(native_parallel_live_workers == UINT64_C(0),
           "reduction fixture leaked a worker");
+  native_arena_destroy(&arena);
 }
 
 int main(void) {

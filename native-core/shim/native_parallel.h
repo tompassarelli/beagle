@@ -32,12 +32,13 @@ typedef struct native_parallel_report_v0 {
   uint64_t generation;
 } native_parallel_report_v0;
 
-/* The callback is always a statically generated adapter. `next` is the
-   transaction-private shadow buffer; the capability still records the exact
-   public destination identity and checks every access interval. */
+/* The callback is always a statically generated adapter. `next` remains the
+   exact public destination identity; checked writes are redirected into the
+   transaction-private shadow while the worker capability is active. */
 typedef int32_t (*native_parallel_f64_tile_fn_v0)(
-    const native_buffer *current, native_buffer *next, int64_t partition_id,
-    int64_t write_lo, int64_t write_hi,
+    const native_arena *arena, const native_buffer *current,
+    native_buffer *next, int64_t partition_id, int64_t write_lo,
+    int64_t write_hi,
     const native_capability *capability, void *context);
 
 native_parallel_runtime *native_parallel_runtime_create(int32_t workers);
@@ -50,25 +51,27 @@ bool native_parallel_runtime_reserve(native_parallel_runtime *runtime,
 bool native_parallel_runtime_cancel_next(native_parallel_runtime *runtime);
 
 native_parallel_report_v0 native_parallel_tiled_step_f64_v0(
-    native_parallel_runtime *runtime, const native_buffer *current,
-    native_buffer *next, const native_capability *owner, int64_t tile_width,
-    int64_t left_halo, int64_t right_halo,
+    native_parallel_runtime *runtime, const native_arena *arena,
+    const native_buffer *current, native_buffer *next,
+    const native_capability *owner, int64_t tile_width, int64_t left_halo,
+    int64_t right_halo,
     native_parallel_boundary_v0 boundary, native_parallel_f64_tile_fn_v0 kernel,
     void *context);
 
 native_parallel_report_v0 native_parallel_f64_buffer_sum_v0(
-    native_parallel_runtime *runtime, const native_buffer *source,
-    const native_capability *owner, int64_t tile_width, double *result);
+    native_parallel_runtime *runtime, const native_arena *arena,
+    const native_buffer *source, const native_capability *owner,
+    int64_t tile_width, double *result);
 
 bool native_parallel_configure_default_workers(int32_t workers);
 native_parallel_report_v0 native_parallel_tiled_step_f64_default_v0(
-    const native_buffer *current, native_buffer *next,
-    const native_capability *owner, int64_t tile_width, int64_t left_halo,
-    int64_t right_halo, native_parallel_boundary_v0 boundary,
+    const native_arena *arena, const native_buffer *current,
+    native_buffer *next, const native_capability *owner, int64_t tile_width,
+    int64_t left_halo, int64_t right_halo, native_parallel_boundary_v0 boundary,
     native_parallel_f64_tile_fn_v0 kernel, void *context);
 native_parallel_report_v0 native_parallel_f64_buffer_sum_default_v0(
-    const native_buffer *source, const native_capability *owner,
-    int64_t tile_width, double *result);
+    const native_arena *arena, const native_buffer *source,
+    const native_capability *owner, int64_t tile_width, double *result);
 
 extern uint64_t native_parallel_workers_started;
 extern uint64_t native_parallel_workers_joined;

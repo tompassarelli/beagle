@@ -2630,6 +2630,7 @@
               "NATIVE_PARALLEL_BOUNDARY_BOUNDED_V0")]
         (str "  native_parallel_report_v0 " report-name " =\n"
           "      native_parallel_tiled_step_f64_default_v0("
+          "(const native_arena *)arena, "
           (value-name function slots
             (core/tiledstepf64instructionv0-current-id instruction))
           ", "
@@ -2655,6 +2656,7 @@
       (let [(report-name String) (str "native_parallel_report_" target)]
         (str "  native_parallel_report_v0 " report-name " =\n"
           "      native_parallel_f64_buffer_sum_default_v0("
+          "(const native_arena *)arena, "
           (value-name function slots
             (core/f64buffersuminstructionv0-source-id instruction))
           ", capability, INT64_C("
@@ -3321,12 +3323,13 @@
             result
             (str result
               "static int32_t native_parallel_kernel_" position "(\n"
-              "    const native_buffer *current, native_buffer *next,\n"
+              "    const native_arena *arena, const native_buffer *current,\n"
+              "    native_buffer *next,\n"
               "    int64_t partition_id, int64_t write_lo, int64_t write_hi,\n"
               "    const native_capability *capability, void *context) {\n"
               "  (void)context;\n"
               "  (void)" (function-name module-index position)
-              "(NULL, capability, ("
+              "((native_arena *)arena, capability, ("
               (c17/c-type types module-index
                 (core/parameter-type-id
                   (nth (core/functiondef-parameters kernel) 0)))

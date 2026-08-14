@@ -43,6 +43,7 @@ struct native_parallel_runtime {
   int64_t completed;
   int64_t lowest_failure;
   native_parallel_job_kind job_kind;
+  const native_arena *arena;
   const native_buffer *current;
   native_buffer *next;
   native_buffer *shadow;
@@ -193,7 +194,6 @@ static int32_t native_parallel_execute_partition(
     native_parallel_runtime *runtime, int64_t partition) {
   int64_t lo;
   int64_t hi;
-  native_capability capability;
   native_parallel_access_v0 access;
   if (partition > INT64_MAX / runtime->tile_width) {
     return EOVERFLOW;
@@ -202,13 +202,12 @@ static int32_t native_parallel_execute_partition(
   hi = runtime->current->length - lo < runtime->tile_width
            ? runtime->current->length
            : lo + runtime->tile_width;
-  capability.token = runtime->owner->token;
   access = native_parallel_partition_access(runtime, partition, lo, hi);
   native_parallel_access_current = &access;
   if (runtime->job_kind == NATIVE_PARALLEL_JOB_STEP) {
-    int32_t status = runtime->kernel(runtime->current, runtime->shadow,
-                                     partition, lo, hi, &capability,
-                                     runtime->context);
+    int32_t status = runtime->kernel(
+        runtime->arena, runtime->current, runtime->next, partition, lo, hi,
+        runtime->owner, runtime->context);
     native_parallel_access_current = NULL;
     return status;
   }
@@ -222,7 +221,8 @@ static int32_t native_parallel_execute_partition(
     access.read_hi_1 = INT64_C(0);
     for (index = lo; index < hi; ++index) {
       partial += *(const double *)native_buffer_at(
-          runtime->current, &capability, index, INT64_C(8));
+          runtime->arena, runtime->current, runtime->owner, index, INT64_C(8),
+          _Alignof(double));
     }
     runtime->partials[partition] = partial;
   }
@@ -468,7 +468,7 @@ bool native_parallel_runtime_cancel_next(native_parallel_runtime *runtime) {
 
 static native_parallel_report_v0 native_parallel_run(
     native_parallel_runtime *runtime, native_parallel_job_kind kind,
-    const native_buffer *current, native_buffer *next,
+    const native_arena *arena, const native_buffer *current, native_buffer *next,
     const native_capability *owner, int64_t tile_width, int64_t left_halo,
     int64_t right_halo, native_parallel_boundary_v0 boundary,
     native_parallel_f64_tile_fn_v0 kernel, void *context,
@@ -500,6 +500,7 @@ static native_parallel_report_v0 native_parallel_run(
   runtime->completed = INT64_C(0);
   runtime->lowest_failure = INT64_C(-1);
   runtime->job_kind = kind;
+  runtime->arena = arena;
   runtime->current = current;
   runtime->next = next;
   runtime->shadow = shadow;
@@ -550,47 +551,56 @@ static native_parallel_report_v0 native_parallel_run(
 }
 
 native_parallel_report_v0 native_parallel_tiled_step_f64_v0(
-    native_parallel_runtime *runtime, const native_buffer *current,
-    native_buffer *next, const native_capability *owner, int64_t tile_width,
-    int64_t left_halo, int64_t right_halo,
+    native_parallel_runtime *runtime, const native_arena *arena,
+    const native_buffer *current, native_buffer *next,
+    const native_capability *owner, int64_t tile_width, int64_t left_halo,
+    int64_t right_halo,
     native_parallel_boundary_v0 boundary, native_parallel_f64_tile_fn_v0 kernel,
     void *context) {
   int64_t partitions;
   size_t bytes;
   native_buffer shadow;
   native_parallel_report_v0 report;
+  int64_t current_length;
+  int64_t next_length;
   int64_t index;
-  if (runtime == NULL || current == NULL || next == NULL || owner == NULL ||
+  if (runtime == NULL || arena == NULL || current == NULL || next == NULL ||
+      owner == NULL ||
       owner->token == UINT64_C(0) || kernel == NULL || left_halo < INT64_C(0) ||
       right_halo < INT64_C(0) ||
       (boundary != NATIVE_PARALLEL_BOUNDARY_BOUNDED_V0 &&
        boundary != NATIVE_PARALLEL_BOUNDARY_PERIODIC_V0) ||
-      current->length != next->length || current->stride != INT64_C(8) ||
-      next->stride != INT64_C(8) ||
-      current->owner_capability_token != owner->token ||
-      next->owner_capability_token != owner->token ||
-      !native_parallel_buffers_disjoint(current, next) ||
-      !native_parallel_partition_count(current->length, tile_width,
-                                       &partitions) ||
       left_halo > INT64_MAX - right_halo ||
-      (current->length > INT64_C(0) &&
-       left_halo + right_halo > INT64_MAX - tile_width)) {
+      tile_width <= INT64_C(0)) {
     return native_parallel_report(NATIVE_PARALLEL_INVALID_V0,
                                   runtime == NULL ? 0 : runtime->workers,
                                   INT64_C(0), INT64_C(0), INT64_C(-1),
                                   runtime == NULL ? UINT64_C(0)
                                                   : runtime->generation);
   }
-  if ((uint64_t)current->length > SIZE_MAX / sizeof(double) ||
+  current_length = native_buffer_length(arena, current, owner);
+  next_length = native_buffer_length(arena, next, owner);
+  if (current_length != next_length || current->stride != INT64_C(8) ||
+      next->stride != INT64_C(8) ||
+      !native_parallel_buffers_disjoint(current, next) ||
+      !native_parallel_partition_count(current_length, tile_width,
+                                       &partitions) ||
+      (current_length > INT64_C(0) &&
+       left_halo + right_halo > INT64_MAX - tile_width)) {
+    return native_parallel_report(NATIVE_PARALLEL_INVALID_V0, runtime->workers,
+                                  INT64_C(0), INT64_C(0), INT64_C(-1),
+                                  runtime->generation);
+  }
+  if ((uint64_t)current_length > SIZE_MAX / sizeof(double) ||
       (uint64_t)partitions > SIZE_MAX / sizeof(int32_t) ||
-      !native_parallel_runtime_reserve(runtime, current->length, partitions)) {
+      !native_parallel_runtime_reserve(runtime, current_length, partitions)) {
     return native_parallel_report(NATIVE_PARALLEL_INVALID_V0, runtime->workers,
                                   partitions, INT64_C(0), INT64_C(-1),
                                   runtime->generation);
   }
-  bytes = (size_t)current->length * sizeof(double);
+  bytes = (size_t)current_length * sizeof(double);
   if (bytes != 0U) {
-    memset(runtime->coverage, 0, (size_t)current->length * sizeof(uint8_t));
+    memset(runtime->coverage, 0, (size_t)current_length * sizeof(uint8_t));
   }
   if (partitions != INT64_C(0)) {
     memset(runtime->statuses, 0, (size_t)partitions * sizeof(int32_t));
@@ -598,10 +608,10 @@ native_parallel_report_v0 native_parallel_tiled_step_f64_v0(
   shadow = *next;
   shadow.elements = runtime->shadow_elements;
   report = native_parallel_run(
-      runtime, NATIVE_PARALLEL_JOB_STEP, current, next, owner, tile_width,
+      runtime, NATIVE_PARALLEL_JOB_STEP, arena, current, next, owner, tile_width,
       left_halo, right_halo, boundary, kernel, context, &shadow, partitions);
   if (report.outcome == NATIVE_PARALLEL_OK_V0) {
-    for (index = 0; index < current->length; ++index) {
+    for (index = 0; index < current_length; ++index) {
       if (runtime->coverage[index] == UINT8_C(0)) {
         report.outcome = NATIVE_PARALLEL_WORKER_FAILED_V0;
         report.failing_partition = index / tile_width;
@@ -616,15 +626,25 @@ native_parallel_report_v0 native_parallel_tiled_step_f64_v0(
 }
 
 native_parallel_report_v0 native_parallel_f64_buffer_sum_v0(
-    native_parallel_runtime *runtime, const native_buffer *source,
-    const native_capability *owner, int64_t tile_width, double *result) {
+    native_parallel_runtime *runtime, const native_arena *arena,
+    const native_buffer *source, const native_capability *owner,
+    int64_t tile_width, double *result) {
   int64_t partitions;
+  int64_t source_length;
   native_parallel_report_v0 report;
   int64_t active;
-  if (runtime == NULL || source == NULL || owner == NULL || result == NULL ||
-      owner->token == UINT64_C(0) || source->stride != INT64_C(8) ||
-      source->owner_capability_token != owner->token ||
-      !native_parallel_partition_count(source->length, tile_width, &partitions) ||
+  if (runtime == NULL || arena == NULL || source == NULL || owner == NULL ||
+      result == NULL || owner->token == UINT64_C(0) ||
+      tile_width <= INT64_C(0)) {
+    return native_parallel_report(NATIVE_PARALLEL_INVALID_V0,
+                                  runtime == NULL ? 0 : runtime->workers,
+                                  INT64_C(0), INT64_C(0), INT64_C(-1),
+                                  runtime == NULL ? UINT64_C(0)
+                                                  : runtime->generation);
+  }
+  source_length = native_buffer_length(arena, source, owner);
+  if (source->stride != INT64_C(8) ||
+      !native_parallel_partition_count(source_length, tile_width, &partitions) ||
       (uint64_t)partitions > SIZE_MAX / sizeof(double) ||
       (uint64_t)partitions > SIZE_MAX / sizeof(int32_t) ||
       !native_parallel_runtime_reserve(runtime, INT64_C(0), partitions)) {
@@ -640,7 +660,7 @@ native_parallel_report_v0 native_parallel_f64_buffer_sum_v0(
     memset(runtime->statuses, 0, (size_t)partitions * sizeof(int32_t));
   }
   report = native_parallel_run(
-      runtime, NATIVE_PARALLEL_JOB_SUM, source, NULL, owner, tile_width,
+      runtime, NATIVE_PARALLEL_JOB_SUM, arena, source, NULL, owner, tile_width,
       INT64_C(0), INT64_C(0), NATIVE_PARALLEL_BOUNDARY_BOUNDED_V0, NULL, NULL,
       NULL, partitions);
   if (report.outcome == NATIVE_PARALLEL_OK_V0 && partitions != INT64_C(0)) {
@@ -708,9 +728,9 @@ static native_parallel_runtime *native_parallel_get_default(void) {
 }
 
 native_parallel_report_v0 native_parallel_tiled_step_f64_default_v0(
-    const native_buffer *current, native_buffer *next,
-    const native_capability *owner, int64_t tile_width, int64_t left_halo,
-    int64_t right_halo, native_parallel_boundary_v0 boundary,
+    const native_arena *arena, const native_buffer *current,
+    native_buffer *next, const native_capability *owner, int64_t tile_width,
+    int64_t left_halo, int64_t right_halo, native_parallel_boundary_v0 boundary,
     native_parallel_f64_tile_fn_v0 kernel, void *context) {
   native_parallel_runtime *runtime = native_parallel_get_default();
   if (runtime == NULL) {
@@ -719,19 +739,19 @@ native_parallel_report_v0 native_parallel_tiled_step_f64_default_v0(
                                   UINT64_C(0));
   }
   return native_parallel_tiled_step_f64_v0(
-      runtime, current, next, owner, tile_width, left_halo, right_halo,
+      runtime, arena, current, next, owner, tile_width, left_halo, right_halo,
       boundary, kernel, context);
 }
 
 native_parallel_report_v0 native_parallel_f64_buffer_sum_default_v0(
-    const native_buffer *source, const native_capability *owner,
-    int64_t tile_width, double *result) {
+    const native_arena *arena, const native_buffer *source,
+    const native_capability *owner, int64_t tile_width, double *result) {
   native_parallel_runtime *runtime = native_parallel_get_default();
   if (runtime == NULL) {
     return native_parallel_report(NATIVE_PARALLEL_RUNTIME_FAILED_V0, 0,
                                   INT64_C(0), INT64_C(0), INT64_C(-1),
                                   UINT64_C(0));
   }
-  return native_parallel_f64_buffer_sum_v0(runtime, source, owner, tile_width,
-                                           result);
+  return native_parallel_f64_buffer_sum_v0(runtime, arena, source, owner,
+                                           tile_width, result);
 }
