@@ -1681,7 +1681,7 @@
   (= head "define-target") (do
   (if (deref target-set) (do
   (err! "duplicate define-target")))
-  (if (has-item? ["clj" "js" "nix" "py" "rkt"] (nth d 1)) (reset! target (nth d 1)) (err! (str "unknown target: " (str (nth d 1)))))
+  (if (has-item? ["core" "clj" "js" "nix" "py" "rkt"] (nth d 1)) (reset! target (nth d 1)) (err! (str "unknown target: " (str (nth d 1)))))
   (reset! target-set true))
   (= head "ns") (do
   (if (deref ns-set) (do
