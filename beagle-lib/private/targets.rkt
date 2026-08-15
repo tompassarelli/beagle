@@ -40,16 +40,17 @@
   #:transparent)
 
 ;; Native materializers are projections of the authoritative frozen program, not
-;; language targets or source emitters.
-(struct materializer (id name out-ext artifact note) #:transparent)
+;; language targets or source emitters. `abis` is the complete list of ABI
+;; profiles that the materializer accepts.
+(struct materializer (id name out-ext artifact abis note) #:transparent)
 
 (define MATERIALIZERS
   (list
-   (materializer 'c17 "Restricted C17" ".c" "module_0.c"
+   (materializer 'c17 "Restricted C17" ".c" "module_0.c" '(lp64 wasm32)
                  "bootstrap/reference projection with strict C17 compilation")
-   (materializer 'qbe "QBE IL" ".ssa" "module_0.ssa"
+   (materializer 'qbe "QBE IL" ".ssa" "module_0.ssa" '(lp64)
                  "direct-native projection and anti-C-capture check")
-   (materializer 'wasm "WebAssembly (C17/WASI bootstrap)" ".wasm" "module_0.wasm"
+   (materializer 'wasm "WebAssembly (C17/WASI bootstrap)" ".wasm" "module_0.wasm" '(wasm32)
                  "bootstrap projection through Restricted C17 and wasi-clang; not a direct Wasm emitter")))
 
 ;; Bare `#lang beagle` is the canonical Core language. Its build product is a

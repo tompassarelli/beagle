@@ -66,6 +66,23 @@
   (check-equal? (core-profile-source-ext CORE-PROFILE) ".bgl")
   (check-equal? (core-profile-lang CORE-PROFILE) "beagle")
   (check-equal? (materializer-ids) '(c17 qbe wasm))
+  (check-equal?
+   (for/hasheq ([materializer (in-list MATERIALIZERS)])
+     (values (materializer-id materializer) (materializer-abis materializer)))
+   #hasheq((c17 . (lp64 wasm32)) (qbe . (lp64)) (wasm . (wasm32))))
+  (check-equal?
+   (for/list ([materializer
+               (in-list (hash-ref (hash-ref (targets-jsexpr) 'coreTarget)
+                                  'materializers))])
+     (list (hash-ref materializer 'id)
+           (hash-ref materializer 'abiProfiles)))
+   '(("c17" ("lp64" "wasm32"))
+     ("qbe" ("lp64"))
+     ("wasm" ("wasm32"))))
+  (check-true
+   (string-contains?
+    (render-view 'shell)
+    "declare -A BEAGLE_MATERIALIZER_ABIS=([c17]='lp64 wasm32' [qbe]='lp64' [wasm]='wasm32')"))
   (for ([materializer (in-list MATERIALIZERS)])
     (check-true (string-prefix? (materializer-out-ext materializer) "."))
     (check-true (> (string-length (materializer-note materializer)) 20)))

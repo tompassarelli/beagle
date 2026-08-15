@@ -218,6 +218,14 @@
                 (substring (materializer-out-ext m) 1)))
       " ")
      ")")
+    (string-append
+     "declare -A BEAGLE_MATERIALIZER_ABIS=("
+     (string-join
+      (for/list ([m (in-list MATERIALIZERS)])
+        (format "[~a]='~a'" (materializer-id-str m)
+                (string-join (map symbol->string (materializer-abis m)) " ")))
+      " ")
+     ")")
     ""
     "beagle_known_target() {"
     "    local t=\"$1\""
@@ -287,6 +295,7 @@
                      'name (materializer-name m)
                      'outputExtension (materializer-out-ext m)
                      'artifact (materializer-artifact m)
+                     'abiProfiles (map symbol->string (materializer-abis m))
                      'note (materializer-note m))))
           'hostedTargetCount (target-count)
           'targets (for/list ([t (in-list TARGETS)])

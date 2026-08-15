@@ -16,6 +16,7 @@ declare -A BEAGLE_TARGET_PIPELINE=([core]=native-program [clj]=hosted-emitter [j
 BEAGLE_MATERIALIZER_IDS=(c17 qbe wasm)
 BEAGLE_MATERIALIZER_IDS_LIST='c17, qbe, and wasm'
 declare -A BEAGLE_MATERIALIZER_OUT_EXT=([c17]=c [qbe]=ssa [wasm]=wasm)
+declare -A BEAGLE_MATERIALIZER_ABIS=([c17]='lp64 wasm32' [qbe]='lp64' [wasm]='wasm32')
 
 beagle_known_target() {
     local t="$1"
