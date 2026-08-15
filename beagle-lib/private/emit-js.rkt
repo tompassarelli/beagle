@@ -36,7 +36,9 @@
       (format "err__exception.data.~a" prop)))
 
 (define current-js-export-names (make-parameter #f))
-;; Set while emitting a js/export-marked definition that emits several bindings.
+;; Set while emitting a js/export-marked definition. Multi-binding forms use it
+;; to export every binding; single-binding forms use it to suppress a second
+;; export prefix from the batch demand plan.
 (define current-js-export-marked? (make-parameter #f))
 
 (define (js-defn-signature form #:async? async? #:name name #:params params)
@@ -1515,6 +1517,7 @@
 (define (exported-binding? name [private? #f])
   (define names (current-js-export-names))
   (and (not private?)
+       (not (current-js-export-marked?))
        names
        (or (set-member? names '*)
            (set-member? names name))))
@@ -1911,9 +1914,10 @@
     [(jst-class? f)    (emit-jst-class f)]
     [(jst-export? f)
      (define inner (jst-export-form f))
-     (if (multi-binding-form? inner)
-         (parameterize ([current-js-export-marked? #t]) (emit-form inner))
-         (string-append "export " (emit-form inner)))]
+     (parameterize ([current-js-export-marked? #t])
+       (if (multi-binding-form? inner)
+           (emit-form inner)
+           (string-append "export " (emit-form inner))))]
     [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
     [(jst-return? f)   (emit-jst-return f)]
 
@@ -2031,9 +2035,10 @@
     [(jst-return? e)   (emit-jst-return e)]
     [(jst-export? e)
      (define inner (jst-export-form e))
-     (if (multi-binding-form? inner)
-         (parameterize ([current-js-export-marked? #t]) (emit-form inner))
-         (string-append "export " (emit-form inner)))]
+     (parameterize ([current-js-export-marked? #t])
+       (if (multi-binding-form? inner)
+           (emit-form inner)
+           (string-append "export " (emit-form inner))))]
     [(jst-export-default? e) (string-append "export default " (emit-form (jst-export-default-form e)))]
 
     [(if-form? e)

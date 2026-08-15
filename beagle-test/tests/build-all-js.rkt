@@ -245,6 +245,14 @@
          (check-true (string-contains? stderr "2 built, 0 error(s)"))
          (check-true (file-exists? provider))
          (check-true (file-exists? consumer))
+         (define provider-text (file->string provider))
+         (check-equal?
+          (length (regexp-match* #rx"export const BRANDING_SRC" provider-text))
+          1)
+         (check-equal?
+          (length (regexp-match* #rx"export const REPO_ROOT" provider-text))
+          1)
+         (check-false (string-contains? provider-text "export export"))
          (check-true
           (string-contains?
            (file->string consumer)
@@ -252,7 +260,22 @@
          (check-true
           (file-exists?
            (simplify-path
-            (build-path (path-only consumer) ".." "prep" "paths.js")))))
+            (build-path (path-only consumer) ".." "prep" "paths.js"))))
+         (write-source (build-path scratch "out" "package.json")
+                       "{\"type\":\"module\"}\n")
+         (define node (find-executable-path "node"))
+         (check-not-false node)
+         (when node
+           (define node-out (open-output-string))
+           (define node-err (open-output-string))
+           (define node-code
+             (parameterize ([current-directory (path-only consumer)]
+                            [current-output-port node-out]
+                            [current-error-port node-err])
+               (system*/exit-code node (path->string consumer))))
+           (check-equal? node-code 0 (get-output-string node-err))
+           (check-equal? (get-output-string node-out)
+                         ". configs/branding/gjoa\n")))
        (lambda () (delete-directory/files scratch #:must-exist? #f)))))))
 
 (exit (if (zero? failures) 0 1))
