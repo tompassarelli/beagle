@@ -1,0 +1,59 @@
+#lang beagle
+(ns native.json-codec-test
+  (:require [native.json :as json]))
+
+(defn decode-event-contract? [(text String)] Bool
+  (match (json/decode text)
+    [(JsonDecoded events)
+     (and (= 9 (count events))
+          (match (nth events 0) [(JsonObjectStart offset) (= offset 0)] [_ false])
+          (match (nth events 1) [(JsonKey offset value) (= value "key")] [_ false])
+          (match (nth events 2) [(JsonArrayStart offset) true] [_ false])
+          (match (nth events 3) [(JsonString offset value) (= value "value")] [_ false])
+          (match (nth events 4) [(JsonNumber offset value) (= value "-12.5e+2")] [_ false])
+          (match (nth events 5) [(JsonBoolean offset value) value] [_ false])
+          (match (nth events 6) [(JsonNull offset) true] [_ false])
+          (match (nth events 7) [(JsonArrayEnd offset) true] [_ false])
+          (match (nth events 8) [(JsonObjectEnd offset) true] [_ false]))]
+    [(JsonDecodeError offset message) false]))
+
+(defn roundtrip [(text String)] String
+  (match (json/decode text)
+    [(JsonDecoded events)
+     (match (json/encode events)
+       [(JsonEncoded encoded) encoded]
+       [(JsonEncodeError event-index message)
+        (str "encode-error@" event-index ":" message)])]
+    [(JsonDecodeError offset message)
+     (str "decode-error@" offset ":" message)]))
+
+(defn diagnose [(text String)] String
+  (match (json/decode text)
+    [(JsonDecoded events) "ok"]
+    [(JsonDecodeError offset message) (str offset ":" message)]))
+
+(defn invalid-encode [] String
+  (let [(events (Vec json/JsonEvent))
+        [(json/->JsonObjectStart 0)
+         (json/->JsonKey 1 "missing")
+         (json/->JsonObjectEnd 2)]]
+    (match (json/encode events)
+      [(JsonEncoded encoded) encoded]
+      [(JsonEncodeError event-index message)
+       (str event-index ":" message)])))
+
+(defn cli-main [(args (Vec String))] Int
+  (cond
+    (and (= 2 (count args)) (= "roundtrip" (nth args 0)))
+    (do (println (roundtrip (nth args 1))) 0)
+
+    (and (= 2 (count args)) (= "diagnose" (nth args 0)))
+    (do (println (diagnose (nth args 1))) 0)
+
+    (and (= 2 (count args)) (= "contract" (nth args 0)))
+    (if (decode-event-contract? (nth args 1)) 0 1)
+
+    (and (= 1 (count args)) (= "invalid-encode" (nth args 0)))
+    (do (println (invalid-encode)) 0)
+
+    :else 64))
