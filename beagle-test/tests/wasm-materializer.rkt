@@ -613,7 +613,13 @@ SH
                          #:entries buffer-fixture-entries))
      (check-equal? code 0 (string-append stdout stderr))
      (define exports (append (map entry-export-name buffer-fixture-entries)
-                             '("beagle_wasm_arena_reset_v1")))
+                             '("beagle_wasm_env_base_v1"
+                               "beagle_wasm_env_capacity_v1"
+                               "beagle_wasm_arena_reset_v1"
+                               "beagle_wasm_buffer_count_v1"
+                               "beagle_wasm_buffer_address_v1"
+                               "beagle_wasm_buffer_length_v1"
+                               "beagle_wasm_buffer_stride_v1")))
      (check-equal? (file->string (build-path artifacts "module_0.wasm.seams"))
                    (expected-seams exports))
      (define adapter (file->string (build-path artifacts "wasm.adapter.c")))
@@ -623,6 +629,10 @@ SH
                   adapter "static void beagle_wasm_state_initialize(void)"))
      (check-true (string-contains?
                   adapter "int64_t beagle_wasm_arena_reset_v1(void)"))
+     (check-true (string-contains?
+                  adapter "bool native_host_environment_lookup_v0("))
+     (check-true (string-contains?
+                  adapter "int64_t beagle_wasm_buffer_address_v1(int64_t index)"))
      (for ([entry (in-list buffer-fixture-entries)])
        (check-true (string-contains?
                     adapter (format "int64_t ~a(void)" (entry-export-name entry)))
@@ -634,9 +644,12 @@ SH
                    "wasm-export-policy reactor-initialize-memory-and-entries-v1"
                    "wasm-entry-count 2"
                    "wasm-entry-abi parameterless-int-to-i64-v1"
+                   "wasm-io-env env-records-v1 capacity-bytes=65536"
+                   "wasm-io-env-base beagle_wasm_env_base_v1"
                    "wasm-state-arena static-bytes=16777216 lifetime=instance"
                    "wasm-state-arena-reset beagle_wasm_arena_reset_v1"
                    "wasm-state-capability constant-nonzero-token"
+                   "wasm-io-buffers registration-order-v1"
                    "wasm-validation PASS source-entries-invoked"
                    "wasm-result PASS"))])
        (check-true (string-contains? report (string-append line "\n")) line))
@@ -1310,7 +1323,9 @@ SH
           (check-true (file-exists? (build-path out name)) name))
         (define e2e-export (entry-export-name "native.wasm-e2e/entry"))
         (check-equal? (file->string (build-path out "module_0.wasm.seams"))
-                      (expected-seams (list e2e-export)))
+                      (expected-seams (list e2e-export
+                                            "beagle_wasm_env_base_v1"
+                                            "beagle_wasm_env_capacity_v1")))
         (define report (file->string (build-path out "report.txt")))
         (check-true (string-contains? report
                                      "source-entry native.wasm-e2e/entry\n"))
@@ -1359,6 +1374,196 @@ SH
           (check-equal? (file->bytes (build-path out name))
                         (file->bytes (build-path baseline name))
                         (format "~a changed across identical full builds" name))))
+      (lambda () (delete-directory/files scratch)))]))
+
+)
+
+(define bun-driver-source
+  #<<JS
+const modulePath = process.argv[2];
+const bytes = await Bun.file(modulePath).arrayBuffer();
+const encoder = new TextEncoder();
+
+function fail(message) {
+  console.error("bun-driver: " + message);
+  process.exit(1);
+}
+
+async function makeInstance() {
+  // Zero imports is the contract: instantiation takes an empty import object.
+  const { instance } = await WebAssembly.instantiate(bytes, {});
+  instance.exports._initialize();
+  return instance.exports;
+}
+
+function writeEnv(exports, records) {
+  const base = Number(exports.beagle_wasm_env_base_v1());
+  const view = new DataView(exports.memory.buffer);
+  let cursor = base;
+  for (const [name, value] of records) {
+    const n = encoder.encode(name);
+    const v = encoder.encode(value);
+    view.setUint32(cursor, n.length, true);
+    view.setUint32(cursor + 4, v.length, true);
+    new Uint8Array(exports.memory.buffer, cursor + 8, n.length).set(n);
+    new Uint8Array(exports.memory.buffer, cursor + 8 + n.length, v.length).set(v);
+    cursor += 8 + n.length + v.length;
+  }
+  view.setUint32(cursor, 0, true);
+}
+
+function bitsToF64(bits) {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setBigInt64(0, BigInt(bits), true);
+  return view.getFloat64(0, true);
+}
+
+const exports = await makeInstance();
+const boot = exports.beagle_wasm_entry_v1__native_envsim__boot_;
+const step = exports.beagle_wasm_entry_v1__native_envsim__step_;
+
+if (bitsToF64(boot()) !== 100.0) fail("boot did not return the bits of 100.0");
+writeEnv(exports, [["tick-delta", "2.5"]]);
+if (bitsToF64(step()) !== 2.5) fail("step did not read tick-delta 2.5");
+writeEnv(exports, [["other", "9"], ["tick-delta", "-7.25"]]);
+if (bitsToF64(step()) !== -7.25) fail("step did not read the second record");
+writeEnv(exports, []);
+if (bitsToF64(step()) !== 0.0) fail("an empty mailbox is not the 0.0 default");
+
+// Buffer introspection: the last step call allocated the cells Buffer.
+const count = Number(exports.beagle_wasm_buffer_count_v1());
+if (count < 1) fail("no live Buffer registrations after stepping");
+const index = BigInt(count - 1);
+const address = Number(exports.beagle_wasm_buffer_address_v1(index));
+const length = Number(exports.beagle_wasm_buffer_length_v1(index));
+const stride = Number(exports.beagle_wasm_buffer_stride_v1(index));
+if (length !== 4 || stride !== 8) fail("cells Buffer facts are wrong");
+const cells = new DataView(exports.memory.buffer);
+if (cells.getFloat64(address, true) !== 0.0) fail("cells[0] readback is wrong");
+if (Number(exports.beagle_wasm_buffer_address_v1(BigInt(count))) !== -1) {
+  fail("an out-of-range registration index must answer -1");
+}
+
+// Explicit host reset invalidates registrations and restores determinism.
+exports.beagle_wasm_arena_reset_v1();
+if (Number(exports.beagle_wasm_buffer_count_v1()) !== 0) {
+  fail("arena reset did not clear live registrations");
+}
+
+async function trace(deltas) {
+  const fresh = await makeInstance();
+  const results = [];
+  for (const delta of deltas) {
+    writeEnv(fresh, [["tick-delta", delta]]);
+    results.push(bitsToF64(
+      fresh.beagle_wasm_entry_v1__native_envsim__step_()));
+    fresh.beagle_wasm_arena_reset_v1();
+  }
+  return results.join(",");
+}
+const first = await trace(["1.5", "2.5", "3.5"]);
+const second = await trace(["1.5", "2.5", "3.5"]);
+if (first !== second) fail("two instances diverged on one command trace");
+if (first !== "1.5,2.5,3.5") fail("command trace produced " + first);
+
+console.log("bun-driver: PASS");
+JS
+)
+
+(phase-test "runtime io surface drives an interactive simulation under bun" (lambda ()
+  (define cc (supported-tool "wasm32-wasi compiler"
+                             '("BEAGLE_WASI_CC" "WASI_CC")
+                             "wasm32-unknown-wasi-clang"))
+  (define ld (supported-tool "wasm linker"
+                             '("BEAGLE_WASM_LD" "WASM_LD")
+                             "wasm-ld"))
+  (define runtime (supported-tool "WebAssembly runtime"
+                                  '("BEAGLE_WASMTIME" "WASMTIME")
+                                  "wasmtime"))
+  (define bun (find-executable-path "bun"))
+  (cond
+    [(not (and cc ld runtime bun))
+     (printf "  (skipped — supported wasm toolchain plus bun is not in this environment)\n")
+     (check-true #t)]
+    [else
+     (define scratch (make-temporary-file "beagle-wasm-io-e2e-~a" 'directory))
+     (dynamic-wind
+      void
+      (lambda ()
+        (define source (build-path scratch "envsim.bgl"))
+        (define out (build-path scratch "out"))
+        (define driver (build-path scratch "driver.js"))
+        (write-text source
+                    (string-append
+                     "#lang beagle\n"
+                     "(ns native.envsim)\n"
+                     "\n"
+                     "(def cells (Buffer Float) (double-array 4))\n"
+                     "\n"
+                     "(defn lookup [(name String)] (U String Nil)\n"
+                     "  (System/getenv name))\n"
+                     "\n"
+                     "(defn parsed-delta [(raw String)] (U Float Nil)\n"
+                     "  (parse-double raw))\n"
+                     "\n"
+                     "(defn command-delta [] Float\n"
+                     "  (let [raw (lookup \"tick-delta\")]\n"
+                     "    (if (nil? raw)\n"
+                     "      0.0\n"
+                     "      (let [parsed (parsed-delta raw)]\n"
+                     "        (if (nil? parsed) 0.0 parsed)))))\n"
+                     "\n"
+                     "(defn boot! [] Int\n"
+                     "  (do (aset-double! cells 0 100.0) (float-to-bits (aget cells 0))))\n"
+                     "\n"
+                     "(defn step! [] Int\n"
+                     "  (do\n"
+                     "    (aset-double! cells 0 (+ (aget cells 0) (command-delta)))\n"
+                     "    (float-to-bits (aget cells 0))))\n"))
+        (write-text driver bun-driver-source)
+        (define env (environment-variables-copy (current-environment-variables)))
+        (environment-variables-set! env #"BEAGLE_WASI_CC" (string->bytes/utf-8 cc))
+        (environment-variables-set! env #"BEAGLE_WASM_LD" (string->bytes/utf-8 ld))
+        (environment-variables-set! env #"BEAGLE_WASMTIME"
+                                    (string->bytes/utf-8 runtime))
+        (define stdout (open-output-string))
+        (define stderr (open-output-string))
+        (define exit-code
+          (parameterize ([current-directory repo-root]
+                         [current-environment-variables env]
+                         [current-output-port stdout]
+                         [current-error-port stderr])
+            (run-owned/bounded
+             120 beagle "build"
+             "--materializer" "wasm"
+             "--abi" "wasm32"
+             "--entry" "native.envsim/boot!"
+             "--entry" "native.envsim/step!"
+             "--out" (path->string out)
+             (path->string source))))
+        (check-equal? exit-code 0
+                      (string-append (get-output-string stdout)
+                                     (get-output-string stderr)))
+        (define report (file->string (build-path out "report.txt")))
+        (check-true (string-contains? report "wasm-import-count 0\n")
+                    "the io surface must preserve zero imports")
+        (check-true (string-contains? report
+                                      "wasm-io-env env-records-v1 capacity-bytes=65536\n"))
+        (check-true (string-contains? report "wasm-io-buffers registration-order-v1\n"))
+        (define bun-stdout (open-output-string))
+        (define bun-stderr (open-output-string))
+        (define bun-exit-code
+          (parameterize ([current-directory scratch]
+                         [current-output-port bun-stdout]
+                         [current-error-port bun-stderr])
+            (run-owned/bounded
+             60 bun (path->string driver)
+             (path->string (build-path out "module_0.wasm")))))
+        (check-equal? bun-exit-code 0
+                      (string-append (get-output-string bun-stdout)
+                                     (get-output-string bun-stderr)))
+        (check-true (string-contains? (get-output-string bun-stdout)
+                                      "bun-driver: PASS")))
       (lambda () (delete-directory/files scratch)))]))
 
 )

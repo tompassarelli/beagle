@@ -121,7 +121,45 @@ The module keeps the zero-import contract (`wasm-import-count 0` in the
 report), so `WebAssembly.instantiate(module, {})` works in any browser or JS
 runtime; call `instance.exports._initialize()` once, then entries in any
 order. The entry list, each entry's lowered resource shape, and the export
-policy (`entries-v1`) are receipt-covered in `wasm.receipt`.
+policy (`entries-v1`) are receipt-covered in `wasm.receipt`, and the complete
+generated adapter (`wasm.adapter.c`) is a receipt input, so the runtime
+contract below is bound to the artifact identity.
+
+### Wasm runtime io (v1)
+
+Every executable build publishes a runtime byte channel in each direction,
+still with zero imports; all exported functions below are `(i64...) -> i64`.
+
+**Bytes in — `env-records-v1`.** The host environment of a zero-import
+reactor is an exported mailbox, never an OS environment:
+`beagle_wasm_env_base_v1()` returns its linear-memory address and
+`beagle_wasm_env_capacity_v1()` its capacity (65536 bytes). The host writes
+consecutive records `[u32le name-length][u32le value-length][name bytes]
+[value bytes]`; a zero name-length, exhausted capacity, or truncated record
+ends the sequence, and the first matching name wins. `System/getenv` inside
+the program reads exactly this region, so per-tick commands are fed by
+rewriting the mailbox between entry calls (`parse-double` turns command text
+into `Float`). A name that is absent reads as `nil`.
+
+**Bytes out — `registration-order-v1`.** Builds with a resource-bearing
+entry export the live Buffer registrations of the instance arena, index 0
+oldest, in allocation order (deterministic for a deterministic program):
+`beagle_wasm_buffer_count_v1()`, and per index
+`beagle_wasm_buffer_address_v1(i)` / `beagle_wasm_buffer_length_v1(i)` /
+`beagle_wasm_buffer_stride_v1(i)` (each answers -1 for an out-of-range
+index; an empty Buffer's address is 0). The host reads element bytes
+directly out of the exported `memory` at `address + index * stride`.
+`beagle_wasm_arena_reset_v1()` empties the registration view along with the
+arena, and an identical call sequence after a reset reproduces identical
+addresses. Scalar results also flow out through each entry's i64 return
+(`float-to-bits` publishes a `Float` result losslessly).
+
+One semantic caveat governs interactive use: module-level `def` state is
+lowered per use site, so state does not flow between two entry calls through
+a `def` — each call reconstructs what it names inside the arena. An
+interactive host therefore treats the module as a deterministic step
+function: write command records, call an entry, read Buffers/result back,
+reset the arena, repeat.
 
 Without an explicit `OUT` argument, `beagle build` writes to
 `${BEAGLE_OUT:-<beagle-checkout>/.beagle-out}/<ns-path>.<ext>` — that is the

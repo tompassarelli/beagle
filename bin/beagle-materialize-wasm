@@ -490,6 +490,7 @@ report_lines+=("wasm-input-c17-receipt-sha256 $(sha256sum "$artifacts/c17.receip
 report_lines+=("wasm-provenance PASS checked-projection-to-native-receipts-to-c17-receipt")
 
 entry_link_flags=()
+entry_compile_defines=()
 entry_symbols=()
 entry_lowered_abis=()
 entry_call_arguments=()
@@ -606,12 +607,13 @@ if [[ ${#entries[@]} -gt 0 ]]; then
 /* Generated stable wasm-callable adapter for validated Beagle Int entries. */
 #include "module_0.h"
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 EOF
         if [[ "$adapter_needs_state" == "1" ]]; then
             cat <<'EOF'
-
-#include <stddef.h>
 
 /* wasm-state-v1: one adapter-owned arena and capability live for the whole
    instance. The arena is fixed static storage initialized during _initialize
@@ -632,8 +634,103 @@ int64_t beagle_wasm_arena_reset_v1(void) {
   native_arena_reset(&beagle_wasm_arena);
   return (int64_t)BEAGLE_WASM_ARENA_BYTES;
 }
+
+/* wasm-io-buffers-v1: live Buffer registrations in allocation order, read
+   directly out of exported memory by the host. -1 marks an invalid index. */
+int64_t beagle_wasm_buffer_count_v1(void) {
+  return native_arena_buffer_registration_count(&beagle_wasm_arena);
+}
+
+int64_t beagle_wasm_buffer_address_v1(int64_t index) {
+  const native_buffer *buffer =
+      native_arena_buffer_registration_at(&beagle_wasm_arena, index);
+  return (buffer == NULL) ? INT64_C(-1) : (int64_t)(uintptr_t)buffer->elements;
+}
+
+int64_t beagle_wasm_buffer_length_v1(int64_t index) {
+  const native_buffer *buffer =
+      native_arena_buffer_registration_at(&beagle_wasm_arena, index);
+  return (buffer == NULL) ? INT64_C(-1) : buffer->length;
+}
+
+int64_t beagle_wasm_buffer_stride_v1(int64_t index) {
+  const native_buffer *buffer =
+      native_arena_buffer_registration_at(&beagle_wasm_arena, index);
+  return (buffer == NULL) ? INT64_C(-1) : buffer->stride;
+}
 EOF
         fi
+        cat <<'EOF'
+
+/* wasm-io-env-v1: the host environment of a zero-import reactor is this
+   exported record region, never an OS environment. Records are consecutive
+   [u32le name-length][u32le value-length][name bytes][value bytes]; a zero
+   name-length, exhausted capacity, or truncated record ends the sequence and
+   the first matching name wins. The host writes records between entry calls;
+   System/getenv inside the program reads them through this ABI. */
+#define BEAGLE_WASM_ENV_BYTES ((size_t)(64U * 1024U))
+
+static uint8_t beagle_wasm_env_records[BEAGLE_WASM_ENV_BYTES];
+
+int64_t beagle_wasm_env_base_v1(void) {
+  return (int64_t)(uintptr_t)beagle_wasm_env_records;
+}
+
+int64_t beagle_wasm_env_capacity_v1(void) {
+  return (int64_t)BEAGLE_WASM_ENV_BYTES;
+}
+
+static uint32_t beagle_wasm_env_u32le(size_t offset) {
+  return (uint32_t)beagle_wasm_env_records[offset] |
+         ((uint32_t)beagle_wasm_env_records[offset + 1U] << 8) |
+         ((uint32_t)beagle_wasm_env_records[offset + 2U] << 16) |
+         ((uint32_t)beagle_wasm_env_records[offset + 3U] << 24);
+}
+
+bool native_host_environment_lookup_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t name, uint64_t *out) {
+  uint64_t name_length;
+  const uint8_t *name_bytes;
+  size_t cursor = 0U;
+
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  *out = UINT64_C(0);
+  name_length = native_text_length(name);
+  name_bytes = native_text_bytes(name);
+  while ((cursor + 8U) <= BEAGLE_WASM_ENV_BYTES) {
+    uint32_t record_name_length = beagle_wasm_env_u32le(cursor);
+    uint32_t record_value_length = beagle_wasm_env_u32le(cursor + 4U);
+    const uint8_t *record_name = beagle_wasm_env_records + cursor + 8U;
+    if (record_name_length == UINT32_C(0)) {
+      break;
+    }
+    if (((size_t)record_name_length >
+         BEAGLE_WASM_ENV_BYTES - cursor - 8U) ||
+        ((size_t)record_value_length >
+         BEAGLE_WASM_ENV_BYTES - cursor - 8U - (size_t)record_name_length)) {
+      break;
+    }
+    if (((uint64_t)record_name_length == name_length) &&
+        (memcmp(record_name, name_bytes, (size_t)name_length) == 0)) {
+      uint8_t *destination;
+      uint64_t handle = native_text_alloc(arena, (uint64_t)record_value_length,
+                                          &destination);
+      if (record_value_length != UINT32_C(0)) {
+        memcpy(destination, record_name + record_name_length,
+               (size_t)record_value_length);
+      }
+      *out = handle;
+      return true;
+    }
+    cursor += 8U + (size_t)record_name_length + (size_t)record_value_length;
+  }
+  return false;
+}
+EOF
         for entry_index in "${!entries[@]}"; do
             printf '\nint64_t %s(void) {\n  return (int64_t)%s%s;\n}\n' \
                 "${entry_exports[$entry_index]}" \
@@ -641,11 +738,25 @@ EOF
                 "${entry_call_arguments[$entry_index]}"
         done
     } >"$work/wasm.adapter.c"
+    entry_compile_defines+=("-DNATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL")
+    entry_link_flags+=(
+        "-Wl,--export=beagle_wasm_env_base_v1"
+        "-Wl,--export=beagle_wasm_env_capacity_v1"
+    )
+    report_lines+=("wasm-io-env env-records-v1 capacity-bytes=65536")
+    report_lines+=("wasm-io-env-base beagle_wasm_env_base_v1")
     if [[ "$adapter_needs_state" == "1" ]]; then
-        entry_link_flags+=("-Wl,--export=beagle_wasm_arena_reset_v1")
+        entry_link_flags+=(
+            "-Wl,--export=beagle_wasm_arena_reset_v1"
+            "-Wl,--export=beagle_wasm_buffer_count_v1"
+            "-Wl,--export=beagle_wasm_buffer_address_v1"
+            "-Wl,--export=beagle_wasm_buffer_length_v1"
+            "-Wl,--export=beagle_wasm_buffer_stride_v1"
+        )
         report_lines+=("wasm-state-arena static-bytes=16777216 lifetime=instance")
         report_lines+=("wasm-state-arena-reset beagle_wasm_arena_reset_v1")
         report_lines+=("wasm-state-capability constant-nonzero-token")
+        report_lines+=("wasm-io-buffers registration-order-v1")
     fi
 else
     printf '%s\n' '/* No executable source entry was requested. */' \
@@ -804,6 +915,7 @@ compile_once() {
         "-fuse-ld=$ld" \
         -mexec-model=reactor \
         -std=c17 -pedantic -Wall -Wextra -Werror \
+        "${entry_compile_defines[@]}" \
         "${entry_link_flags[@]}" \
         -I "$compiler_snapshot_dir" \
         -o "$work/module_0.wasm" \
@@ -846,8 +958,15 @@ ascii_hex() {
 expected_function_exports=(_initialize)
 if [[ ${#entries[@]} -gt 0 ]]; then
     expected_function_exports+=("${entry_exports[@]}")
+    expected_function_exports+=(beagle_wasm_env_base_v1 beagle_wasm_env_capacity_v1)
     if [[ "$adapter_needs_state" == "1" ]]; then
-        expected_function_exports+=(beagle_wasm_arena_reset_v1)
+        expected_function_exports+=(
+            beagle_wasm_arena_reset_v1
+            beagle_wasm_buffer_count_v1
+            beagle_wasm_buffer_address_v1
+            beagle_wasm_buffer_length_v1
+            beagle_wasm_buffer_stride_v1
+        )
     fi
 fi
 {

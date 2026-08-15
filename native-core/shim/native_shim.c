@@ -3745,6 +3745,56 @@ size_t native_arena_reserved_bytes(const native_arena *arena) {
   return total;
 }
 
+int64_t native_arena_buffer_registration_count(const native_arena *arena) {
+  const native_buffer_registration *registration;
+  int64_t count = 0;
+
+  if (arena == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (arena->buffer_registry == NULL) {
+    return 0;
+  }
+  registration = arena->buffer_registry->registrations;
+  while (registration != NULL) {
+    if (registration->generation == arena->buffer_registry->generation) {
+      count += 1;
+    }
+    registration = registration->next;
+  }
+  return count;
+}
+
+const native_buffer *native_arena_buffer_registration_at(
+    const native_arena *arena, int64_t index) {
+  const native_buffer_registration *registration;
+  int64_t remaining;
+
+  if (arena == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((index < 0) || (arena->buffer_registry == NULL)) {
+    return NULL;
+  }
+  /* The registration list is newest-first; the published order is oldest-first
+     so a deterministic allocation sequence keeps every index stable. */
+  remaining = native_arena_buffer_registration_count(arena) - index;
+  if (remaining <= 0) {
+    return NULL;
+  }
+  registration = arena->buffer_registry->registrations;
+  while (registration != NULL) {
+    if (registration->generation == arena->buffer_registry->generation) {
+      remaining -= 1;
+      if (remaining == 0) {
+        return &registration->handle;
+      }
+    }
+    registration = registration->next;
+  }
+  return NULL;
+}
+
 uint32_t native_last_trap_code = UINT32_C(0);
 
 static native_trap_reporter native_registered_trap_reporter = NULL;
@@ -9238,6 +9288,11 @@ int64_t native_host_clock_monotonic_nanoseconds_v0(
   return seconds * INT64_C(1000000000) + (int64_t)now.tv_nsec;
 }
 
+/* The embedding host may own the environment instead of the OS: the Wasm
+   adapter defines this ABI over its exported mailbox and compiles the shim
+   with NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL so a zero-import reactor never
+   links getenv. Exactly one definition exists in any link. */
+#ifndef NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL
 bool native_host_environment_lookup_v0(
     native_arena *arena, const native_capability *capability,
     uint64_t name, uint64_t *out) {
@@ -9281,6 +9336,7 @@ bool native_host_environment_lookup_v0(
   *out = handle;
   return true;
 }
+#endif /* NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL */
 
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text) {

@@ -355,6 +355,13 @@ void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment);
 void native_arena_reset(native_arena *arena);
 void native_arena_destroy(native_arena *arena);
 size_t native_arena_reserved_bytes(const native_arena *arena);
+/* Ordered, generation-checked view of the arena's live Buffer registrations,
+   index 0 oldest. Registration order is allocation order, so a deterministic
+   program makes the index a stable external handle; the Wasm adapter exports
+   exactly this surface for host-side state readback. */
+int64_t native_arena_buffer_registration_count(const native_arena *arena);
+const native_buffer *native_arena_buffer_registration_at(
+    const native_arena *arena, int64_t index);
 /* Report-only: a trap still aborts, and nothing here resumes a trapped program. */
 extern uint32_t native_last_trap_code;
 
