@@ -8,13 +8,17 @@
 #include <limits.h>
 #include <math.h>
 #include <poll.h>
+#include <spawn.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+extern char **environ;
 
 /* BEGIN vendored ffc.h; see third_party/ffc/PROVENANCE. */
 #define FFC_IMPL
@@ -9785,6 +9789,86 @@ int32_t native_host_filesystem_write_text_atomic_v0(
   return 0;
 }
 #endif /* __wasi__ */
+
+static void native_host_process_free_argv(char **argv, size_t count) {
+  size_t index;
+  if (argv == NULL) {
+    return;
+  }
+  for (index = (size_t)0U; index < count; ++index) {
+    free(argv[index]);
+  }
+  free(argv);
+}
+
+int64_t native_host_process_run_inherit_v0(
+    const native_capability *capability, const native_vec *argv_value) {
+  const uint64_t *source;
+  char **argv;
+  size_t count;
+  size_t index;
+  pid_t child;
+  pid_t waited;
+  int spawn_status;
+  int wait_status;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (argv_value == NULL) || (argv_value->length <= INT64_C(0)) ||
+      (argv_value->elements == NULL)) {
+    return -((int64_t)EINVAL);
+  }
+  if ((uint64_t)argv_value->length >
+      (uint64_t)((SIZE_MAX / sizeof(char *)) - (size_t)1U)) {
+    return -((int64_t)EOVERFLOW);
+  }
+  count = (size_t)argv_value->length;
+  argv = (char **)calloc(count + (size_t)1U, sizeof(char *));
+  if (argv == NULL) {
+    return -((int64_t)ENOMEM);
+  }
+  source = (const uint64_t *)argv_value->elements;
+  for (index = (size_t)0U; index < count; ++index) {
+    uint64_t length = native_text_length(source[index]);
+    const uint8_t *bytes = native_text_bytes(source[index]);
+    if (length > (uint64_t)(SIZE_MAX - (size_t)1U)) {
+      native_host_process_free_argv(argv, index);
+      return -((int64_t)EOVERFLOW);
+    }
+    if (((index == (size_t)0U) && (length == UINT64_C(0))) ||
+        (memchr(bytes, '\0', (size_t)length) != NULL)) {
+      native_host_process_free_argv(argv, index);
+      return -((int64_t)EINVAL);
+    }
+    argv[index] = (char *)malloc((size_t)length + (size_t)1U);
+    if (argv[index] == NULL) {
+      native_host_process_free_argv(argv, index);
+      return -((int64_t)ENOMEM);
+    }
+    if (length != UINT64_C(0)) {
+      memcpy(argv[index], bytes, (size_t)length);
+    }
+    argv[index][length] = '\0';
+  }
+
+  spawn_status = posix_spawnp(&child, argv[0], NULL, NULL, argv, environ);
+  native_host_process_free_argv(argv, count);
+  if (spawn_status != 0) {
+    return -((int64_t)spawn_status);
+  }
+  do {
+    waited = waitpid(child, &wait_status, 0);
+  } while ((waited < (pid_t)0) && (errno == EINTR));
+  if (waited < (pid_t)0) {
+    return -((int64_t)((errno == 0) ? EIO : errno));
+  }
+  if (WIFEXITED(wait_status)) {
+    return (int64_t)WEXITSTATUS(wait_status);
+  }
+  if (WIFSIGNALED(wait_status)) {
+    return INT64_C(256) + (int64_t)WTERMSIG(wait_status);
+  }
+  return -((int64_t)EIO);
+}
 
 static int32_t native_host_socket_check(
     const native_capability *capability, int64_t value, int *out) {

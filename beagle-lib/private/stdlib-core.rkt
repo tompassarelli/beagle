@@ -56,6 +56,13 @@
    (type-fn
     (list (type-app 'Vec (list (p 'Int))) (p 'Int))
     #f
-    (p 'NativeBytes))))
+    (p 'NativeBytes))
+   ;; Native process execution takes an already-tokenized argv vector. The
+   ;; result encodes exit 0..255, signal 256+signal, or spawn/wait -errno.
+   'host.process/run-inherit
+   (type-fn
+    (list (type-app 'Vec (list (p 'String))))
+    #f
+    (p 'Int))))
 
 (provide STDLIB-CORE)

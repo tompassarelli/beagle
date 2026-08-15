@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.process-probe)
+
+
+(defn run [(argv (Vec String))] Int
+  (host.process/run-inherit argv))

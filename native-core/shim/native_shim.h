@@ -638,6 +638,10 @@ int32_t native_host_filesystem_list_directory_bounded_v0(
     int64_t max_entries, native_vec **out);
 int32_t native_host_filesystem_write_text_atomic_v0(
     const native_capability *capability, uint64_t path, uint64_t text);
+/* Runs argv directly through PATH with inherited environment and stdio.
+   Result: normal exit 0..255, signal 256+signal, spawn/wait failure -errno. */
+int64_t native_host_process_run_inherit_v0(
+    const native_capability *capability, const native_vec *argv);
 /* Listener ownership is inherited at FD 3; this ABI never creates a socket. */
 int32_t native_host_socket_inherited_listener_v0(
     const native_capability *capability, int64_t fd, int64_t *out);

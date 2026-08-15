@@ -2590,6 +2590,17 @@
                 (core/abideclv0-symbol abi))))
       (core/nativecoreprogram-abis program))))
 
+(defn program-has-process-extern? [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some (fn [(abi core/AbiDeclV0)] Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (instance? native.core.RestrictedCAbiV0
+                (core/abideclv0-convention abi))
+              (= "native_host_process_run_inherit_v0"
+                (core/abideclv0-symbol abi))))
+      (core/nativecoreprogram-abis program))))
+
 (defn socket-extern-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_socket_inherited_listener_v0")
       (= symbol "native_host_socket_accept_v0")
@@ -2679,6 +2690,9 @@
       (program-has-filesystem-extern? program)
       (->QbeFailure
         "QBE filesystem extern ABI is unsupported: typed host outcomes have no QBE call representation")
+      (program-has-process-extern? program)
+      (->QbeFailure
+        "QBE process extern ABI is unsupported: inherited process execution has no QBE call representation")
       (program-has-clock-extern? program)
       (->QbeFailure
         "QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation")

@@ -274,6 +274,9 @@
       (= symbol "native_host_filesystem_path_kind_v0")
       (= symbol "native_host_filesystem_write_text_atomic_v0")))
 
+(defn host-process-symbol? [(symbol String)] Bool
+  (= symbol "native_host_process_run_inherit_v0"))
+
 (defn host-direct-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_stdout_write_line_v0")
       (or (= symbol "native_host_stdout_write_v0")
@@ -298,7 +301,8 @@
                 (core/abideclv0-symbol abi)))
             (and (instance? native.core.RestrictedCAbiV0
                    (core/abideclv0-convention abi))
-              (host-direct-symbol? (core/abideclv0-symbol abi)))
+              (or (host-direct-symbol? (core/abideclv0-symbol abi))
+                (host-process-symbol? (core/abideclv0-symbol abi))))
             (and (instance? native.core.RestrictedCOutcomeOutAbiV0
                    (core/abideclv0-convention abi))
               (or (host-socket-symbol? (core/abideclv0-symbol abi))

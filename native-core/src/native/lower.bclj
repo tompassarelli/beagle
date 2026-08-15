@@ -1952,6 +1952,21 @@
       (same-id? candidate (host-filesystem-abi-id "path-kind"))
       (same-id? candidate (host-filesystem-abi-id "write-text-atomic"))))
 
+(defn host-process-effect-id [] core/NativeId
+  (lower-id "effect" ["host-process-run-inherit-v0"]))
+
+(defn host-process-capability-id [] core/NativeId
+  (lower-id "capability" ["host-process-run-inherit-v0"]))
+
+(defn host-process-abi-id [] core/NativeId
+  (lower-id "abi" ["host-process-run-inherit-v0"]))
+
+(defn host-process-function-id [] core/NativeId
+  (lower-id "extern" ["host-process-run-inherit-v0"]))
+
+(defn host-process-callee? [(name String)] Bool
+  (= name "host.process/run-inherit"))
+
 (defn host-socket-effect-id [] core/NativeId
   (lower-id "effect" ["host-socket-peer-lifecycle-v0"]))
 
@@ -1992,6 +2007,7 @@
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
+   (include-process Bool)
    (include-socket Bool)
    (include-clock Bool)]
   (Vec core/EffectDef)
@@ -2028,12 +2044,18 @@
             (core/->EffectDef (host-filesystem-effect-id)
               (core/->IoEffect (host-filesystem-capability-id))))
           with-stderr)
+        (with-process (Vec core/EffectDef))
+        (if include-process
+          (conj with-filesystem
+            (core/->EffectDef (host-process-effect-id)
+              (core/->IoEffect (host-process-capability-id))))
+          with-filesystem)
         (with-socket (Vec core/EffectDef))
         (if include-socket
-          (conj with-filesystem
+          (conj with-process
             (core/->EffectDef (host-socket-effect-id)
               (core/->SocketEffect (host-socket-capability-id))))
-          with-filesystem)]
+          with-process)]
       (if include-clock
         (conj with-socket
           (core/->EffectDef (host-clock-effect-id)
@@ -8049,6 +8071,30 @@
       (str "TODO-NATIVE-HOST-OUTPUT-OPERAND: " callee
         " takes one native Text value"))))
 
+(defn lower-host-process-call
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (callee String)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (if (not (and (= callee "host.process/run-inherit")
+            (= 1 (count value-types))
+            (text-vector-value? types (nth value-types 0))))
+    (fail-result state
+      "TODO-NATIVE-HOST-PROCESS-OPERANDS: host.process/run-inherit needs exactly one (Vec String) argv")
+    (let [(result-id core/NativeId) (state-id state owner "host-process")]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 result-id (int-type-id))
+            (host-process-abi-id)
+            values
+            nil
+            (core/->TokenFlowV0 [] [])))
+         result-id (int-type-id) false))))
+
 (defn lower-int-step
   [(types (Vec core/TypeDef))
    (owner core/NativeId)
@@ -12700,6 +12746,7 @@
           (and (= "static-call" kind)
             (or (host-environment-callee? (fact-text index expr "callee"))
                 (host-filesystem-callee? (fact-text index expr "callee"))
+                (host-process-callee? (fact-text index expr "callee"))
                 (host-socket-callee? (fact-text index expr "callee"))
                 (host-clock-callee? (fact-text index expr "callee")))))
         (let [(callee String) (fact-text index expr "callee")
@@ -14256,6 +14303,9 @@
 
                 (host-filesystem-callee? callee)
                 (lower-host-filesystem-call owner current callee values value-types)
+
+                (host-process-callee? callee)
+                (lower-host-process-call types owner current callee values value-types)
 
                 (host-socket-callee? callee)
                 (lower-host-socket-call owner current callee values value-types)
@@ -16224,6 +16274,19 @@
             (core/basicblock-instructions block))))
       blocks)))
 
+(defn blocks-use-host-process? [(blocks (Vec core/BasicBlock))] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (and (instance? native.core.ExternCallInstruction instruction)
+                (same-id? (core/externcallinstruction-abi-id instruction)
+                  (host-process-abi-id))))
+            (core/basicblock-instructions block))))
+      blocks)))
+
 (defn blocks-use-host-socket? [(blocks (Vec core/BasicBlock))] Bool
   (some?
     (some
@@ -16299,6 +16362,12 @@
     [(NativeLoweredV0 entry-block blocks) (blocks-use-host-filesystem? blocks)]
     [(NativeTodoV0 code detail) false]))
 
+(defn readiness-uses-host-process? [(readiness NativeReadinessV0)] Bool
+  (match readiness
+    [(NativeReadyV0 operation) false]
+    [(NativeLoweredV0 entry-block blocks) (blocks-use-host-process? blocks)]
+    [(NativeTodoV0 code detail) false]))
+
 (defn with-effect
   [(effects (Vec core/NativeId)) (effect core/NativeId)] (Vec core/NativeId)
   (if (core/id-in? effects effect) effects (conj effects effect)))
@@ -16332,6 +16401,10 @@
   (core/id-in? (typedfunctionv0-effects function)
     (host-filesystem-effect-id)))
 
+(defn function-uses-host-process? [(function TypedFunctionV0)] Bool
+  (core/id-in? (typedfunctionv0-effects function)
+    (host-process-effect-id)))
+
 (defn function-uses-host-socket? [(function TypedFunctionV0)] Bool
   (core/id-in? (typedfunctionv0-effects function) (host-socket-effect-id)))
 
@@ -16356,6 +16429,10 @@
 (defn any-function-uses-host-filesystem?
   [(functions (Vec TypedFunctionV0))] Bool
   (some? (some function-uses-host-filesystem? functions)))
+
+(defn any-function-uses-host-process?
+  [(functions (Vec TypedFunctionV0))] Bool
+  (some? (some function-uses-host-process? functions)))
 
 (defn any-function-uses-host-socket? [(functions (Vec TypedFunctionV0))] Bool
   (some? (some function-uses-host-socket? functions)))
@@ -16419,10 +16496,14 @@
         (if (blocks-use-host-filesystem? (readiness-blocks readiness))
           (with-effect stderr-effects (host-filesystem-effect-id))
           stderr-effects)
+        (process-effects (Vec core/NativeId))
+        (if (blocks-use-host-process? (readiness-blocks readiness))
+          (with-effect filesystem-effects (host-process-effect-id))
+          filesystem-effects)
         (socket-effects (Vec core/NativeId))
         (if (blocks-use-host-socket? (readiness-blocks readiness))
-          (with-effect filesystem-effects (host-socket-effect-id))
-          filesystem-effects)
+          (with-effect process-effects (host-socket-effect-id))
+          process-effects)
         (effects (Vec core/NativeId))
         (if (blocks-use-host-clock? (readiness-blocks readiness))
           (with-effect socket-effects (host-clock-effect-id))
@@ -16618,8 +16699,10 @@
         (settle-effect stdout-settled (host-stderr-effect-id))
         (filesystem-settled (Vec TypedFunctionV0))
         (settle-effect stderr-settled (host-filesystem-effect-id))
+        (process-settled (Vec TypedFunctionV0))
+        (settle-effect filesystem-settled (host-process-effect-id))
         (socket-settled (Vec TypedFunctionV0))
-        (settle-effect filesystem-settled (host-socket-effect-id))]
+        (settle-effect process-settled (host-socket-effect-id))]
     (settle-effect socket-settled (host-clock-effect-id))))
 
 (defn slice-regions [] (Vec core/RegionDef)
@@ -16631,6 +16714,7 @@
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
+   (include-process Bool)
    (include-socket Bool)
    (include-clock Bool)]
   (Vec core/CapabilityDef)
@@ -16691,15 +16775,24 @@
               nil
               false))
           with-stderr)
+        (with-process (Vec core/CapabilityDef))
+        (if include-process
+          (conj with-filesystem
+            (core/->CapabilityDef
+              (host-process-capability-id)
+              (core/->HostCapability true)
+              nil
+              false))
+          with-filesystem)
         (with-socket (Vec core/CapabilityDef))
         (if include-socket
-          (conj with-filesystem
+          (conj with-process
             (core/->CapabilityDef
               (host-socket-capability-id)
               (core/->HostCapability true)
               nil
               false))
-          with-filesystem)]
+          with-process)]
     (if include-clock
       (conj with-socket
         (core/->CapabilityDef
@@ -16714,6 +16807,7 @@
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
+   (include-process Bool)
    (include-socket Bool)
    (include-clock Bool)]
   (Vec core/NativeId)
@@ -16736,10 +16830,14 @@
         (if include-filesystem
           (conj with-stderr (host-filesystem-capability-id))
           with-stderr)
+        (with-process (Vec core/NativeId))
+        (if include-process
+          (conj with-filesystem (host-process-capability-id))
+          with-filesystem)
         (with-socket (Vec core/NativeId))
         (if include-socket
-          (conj with-filesystem (host-socket-capability-id))
-          with-filesystem)]
+          (conj with-process (host-socket-capability-id))
+          with-process)]
     (if include-clock
       (conj with-socket (host-clock-capability-id))
       with-socket)))
@@ -16942,6 +17040,7 @@
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
+   (include-process Bool)
    (include-socket Bool)
    (include-clock Bool)]
   (Vec stages/TermNodeV0)
@@ -17014,6 +17113,15 @@
                   "host-filesystem-v0"
                   "non-affine"])))]
           [])
+        (process-capability-nodes (Vec stages/TermNodeV0))
+        (if include-process
+          [(stages/->TermNodeV0 (host-process-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
+                 [(id-value (host-process-capability-id))
+                  "host-process-run-inherit-v0"
+                  "non-affine"])))]
+          [])
         (socket-capability-nodes (Vec stages/TermNodeV0))
         (if include-socket
           [(stages/->TermNodeV0 (host-socket-capability-id)
@@ -17035,7 +17143,7 @@
     (vec (concat type-nodes function-nodes effect-nodes
            [region-node capability-node] environment-capability-nodes
            stdout-capability-nodes stderr-capability-nodes
-           filesystem-capability-nodes
+           filesystem-capability-nodes process-capability-nodes
            socket-capability-nodes
            clock-capability-nodes))))
 
@@ -17139,6 +17247,7 @@
         (uses-stdout Bool) (any-function-uses-stdout? functions)
         (uses-stderr Bool) (any-function-uses-stderr? functions)
         (uses-filesystem Bool) (any-function-uses-host-filesystem? functions)
+        (uses-process Bool) (any-function-uses-host-process? functions)
         (sockets Bool) (any-function-uses-host-socket? functions)
         (clock Bool) (any-function-uses-host-clock? functions)
         ;; Bodies contribute types of their own (checked arithmetic answers an
@@ -17155,15 +17264,16 @@
           arena-types)
         (effects (Vec core/EffectDef))
         (slice-effects uses-environment uses-stdout uses-stderr
-          uses-filesystem sockets clock)
+          uses-filesystem uses-process
+          sockets clock)
         (regions (Vec core/RegionDef)) (slice-regions)
         (capabilities (Vec core/CapabilityDef))
         (slice-capabilities uses-environment uses-stdout uses-stderr
-          uses-filesystem sockets clock)
+          uses-filesystem uses-process sockets clock)
         (root core/NativeId) (lower-id "typed-stage" [source-digest])
         (nodes (Vec stages/TermNodeV0))
         (typed-term-nodes types functions effects uses-environment uses-stdout
-          uses-stderr uses-filesystem sockets clock)
+          uses-stderr uses-filesystem uses-process sockets clock)
         (terms stages/TermGraphV0)
         (stages/->TermGraphV0 root
           (conj nodes
@@ -17180,8 +17290,8 @@
           (mapv (fn [(effect core/EffectDef)] core/NativeId
                   (core/effectdef-id effect)) effects)
           [(arena-region-id) (atom-state-region-id)]
-          (slice-capability-ids uses-environment uses-stdout uses-stderr
-            uses-filesystem sockets clock)
+        (slice-capability-ids uses-environment uses-stdout uses-stderr
+          uses-filesystem uses-process sockets clock)
           [(type-id "LowerFailure")])
         (encoding String) (stages/encode-typed-stage typed-stage)
         (digest String) (stages/content-digest encoding)
@@ -17632,10 +17742,14 @@
         (if (function-uses-host-filesystem? function)
           (conj with-stderr (host-filesystem-capability-id))
           with-stderr)
+        (with-process (Vec core/NativeId))
+        (if (function-uses-host-process? function)
+          (conj with-filesystem (host-process-capability-id))
+          with-filesystem)
         (with-socket (Vec core/NativeId))
         (if (function-uses-host-socket? function)
-          (conj with-filesystem (host-socket-capability-id))
-          with-filesystem)]
+          (conj with-process (host-socket-capability-id))
+          with-process)]
     (if (function-uses-host-clock? function)
       (conj with-socket (host-clock-capability-id))
       with-socket)))
@@ -17645,6 +17759,7 @@
       (same-id? capability (host-stdout-capability-id))
       (same-id? capability (host-stderr-capability-id))
       (same-id? capability (host-filesystem-capability-id))
+      (same-id? capability (host-process-capability-id))
       (same-id? capability (host-socket-capability-id))
       (same-id? capability (host-clock-capability-id))))
 
@@ -18191,6 +18306,22 @@
      false
      layouts-digest)])
 
+(defn host-process-abi [(layouts-digest String)] core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-process-abi-id)
+    (host-process-function-id)
+    "native_host_process_run_inherit_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    [(borrowed-abi-value "argv" (closed-vector-type-id (text-type-id)))]
+    (core/->AbiValueV0 "status" (int-type-id)
+      (core/->OwnedV0 true) nil)
+    (type-id "LowerFailure")
+    [(host-process-effect-id)]
+    [(host-process-capability-id)]
+    "v0"
+    layouts-digest))
+
 (defn slice-abis
   [(functions (Vec TypedFunctionV0))
    (native-functions (Vec core/FunctionDef))
@@ -18229,10 +18360,14 @@
         (if (any-function-uses-host-filesystem? functions)
           (vec (concat with-stderr (host-filesystem-abis digest)))
           with-stderr)
+        (with-process (Vec core/AbiDeclV0))
+        (if (any-function-uses-host-process? functions)
+          (conj with-filesystem (host-process-abi digest))
+          with-filesystem)
         (with-clock (Vec core/AbiDeclV0))
         (if (any-function-uses-host-clock? functions)
-          (conj with-filesystem (host-clock-abi digest))
-          with-filesystem)]
+          (conj with-process (host-clock-abi digest))
+          with-process)]
     (if (any-function-uses-host-socket? functions)
       (vec (concat with-clock (host-socket-abis digest)))
       with-clock)))
@@ -19333,6 +19468,16 @@
                (stages/canonical-record "capability-v0"
                  [(id-value (host-filesystem-capability-id))
                   "host-filesystem-v0"
+                 "non-affine"])))]
+          [])
+        (process-capability-nodes (Vec stages/TermNodeV0))
+        (if (core/id-in? (core/capability-ids capabilities)
+              (host-process-capability-id))
+          [(stages/->TermNodeV0 (host-process-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
+                 [(id-value (host-process-capability-id))
+                  "host-process-run-inherit-v0"
                   "non-affine"])))]
           [])
         (socket-capability-nodes (Vec stages/TermNodeV0))
@@ -19358,7 +19503,7 @@
     (vec (concat type-nodes effect-nodes layout-nodes function-nodes abi-nodes
            obligation-nodes environment-capability-nodes
            stdout-capability-nodes stderr-capability-nodes
-           filesystem-capability-nodes
+           filesystem-capability-nodes process-capability-nodes
            socket-capability-nodes
            clock-capability-nodes
            [(stages/->TermNodeV0 (arena-region-id)
@@ -19565,6 +19710,7 @@
                (if (any-function-calls-abi? typed-functions
                      (host-stderr-write-line-abi-id)) 1 0)
                (if (any-function-uses-host-filesystem? typed-functions) 4 0)
+               (if (any-function-uses-host-process? typed-functions) 1 0)
                (if (any-function-uses-host-clock? typed-functions) 1 0)
                (if (any-function-uses-host-socket? typed-functions) 5 0))
             (count abis)))
