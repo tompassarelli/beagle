@@ -9639,6 +9639,20 @@ int32_t native_host_filesystem_list_directory_bounded_v0(
   return 0;
 }
 
+#ifdef __wasi__
+/* wasi-libc deliberately omits mkstemp ("WASI has no temp directories"), so
+   the temp-then-rename atomicity contract cannot be delivered on wasm32.
+   Compile-clean and fail closed by name instead of emulating a weaker write. */
+int32_t native_host_filesystem_write_text_atomic_v0(
+    const native_capability *capability, uint64_t path_text, uint64_t text) {
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return EINVAL;
+  }
+  (void)path_text;
+  (void)text;
+  return ENOTSUP;
+}
+#else
 int32_t native_host_filesystem_write_text_atomic_v0(
     const native_capability *capability, uint64_t path_text, uint64_t text) {
   char *path = NULL;
@@ -9748,6 +9762,7 @@ int32_t native_host_filesystem_write_text_atomic_v0(
   free(path);
   return 0;
 }
+#endif /* __wasi__ */
 
 static int32_t native_host_socket_check(
     const native_capability *capability, int64_t value, int *out) {
