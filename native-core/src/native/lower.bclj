@@ -5704,6 +5704,28 @@
     expected
     nil))
 
+;; Equality is heterogeneous, so only an empty collection may borrow the exact
+;; type of an already-evaluated peer. Non-empty operands keep their own inferred
+;; type and therefore preserve Clojure equality between unlike values.
+(defn equality-empty-argument-type
+  [(types (Vec core/TypeDef))
+   (index SourceIndexV0)
+   (callee String)
+   (position Int)
+   (prior-types (Vec core/NativeId))
+   (argument core/NativeId)]
+  (U core/NativeId Nil)
+  (if (and (= position 1)
+           (= 1 (count prior-types))
+           (or (= "=" callee) (= "not=" callee)))
+    (let [(peer core/NativeId) (nth prior-types 0)]
+      (cond
+        (and (empty-vector-form? index argument) (vector-type? types peer)) peer
+        (and (empty-map-form? index argument) (map-type? types peer)) peer
+        (and (empty-set-form? index argument) (set-type? types peer)) peer
+        :else nil))
+    nil))
+
 (defn lower-contextual-empty
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -13375,11 +13397,16 @@
                             (preserved-expected (U core/NativeId Nil))
                             (preserved-collection-argument-type types bare-callee
                               (count args) position expected)
+                            (equality-expected (U core/NativeId Nil))
+                            (equality-empty-argument-type types index bare-callee
+                              position value-types argument-node)
                             (argument-expected (U core/NativeId Nil))
                             (if (some? declared-expected)
                               declared-expected
                               (if (some? receiver-expected)
-                                receiver-expected preserved-expected))
+                                receiver-expected
+                                (if (some? preserved-expected)
+                                  preserved-expected equality-expected)))
                             (argument ExprResultV0)
                             (lower-expr-expected env owner current argument-node
                               argument-expected)]
