@@ -88,12 +88,13 @@
             mkdir -p "$out"
             cp -r beagle-lib "$out/beagle-lib"
             cp -r bin "$out/bin"
+            cp -r native-core "$out/native-core"
             # bin/test/ is the test-harness DIRECTORY, not an executable — if it
             # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
             # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).
             rm -rf "$out/bin/test"
             if [ -d share ]; then cp -r share "$out/share"; fi
-            chmod -R u+w "$out/beagle-lib" "$out/bin"
+            chmod -R u+w "$out/beagle-lib" "$out/bin" "$out/native-core"
 
             # Collection link: racket resolves a collection by directory NAME on
             # the search path. The collection is named "beagle" but the dir is
@@ -137,6 +138,12 @@
               "$raco" make "''${extra[@]}" || \
                 echo "beagle: note — some peripheral modules did not precompile (will compile at first use under the pinned racket)"
             fi
+
+            # The immutable package is compiled completely above. Publish the
+            # same freshness receipt used by checkout invocations so wrappers
+            # never try to rebuild bytecode inside the read-only Nix store.
+            mkdir -p "$out/.beagle"
+            printf '%s' "${racket}/bin/racket" > "$out/.beagle/zo-fresh"
 
             runHook postBuild
           '';
