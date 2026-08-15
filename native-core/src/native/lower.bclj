@@ -1990,14 +1990,37 @@
   (loop [(position Int) 0 (definitions (Vec core/TypeDef)) []]
     (if (>= position (count globals))
       definitions
-      (let [(effective-type (U core/NativeId Nil))
-            (globalbindingv0-effective-type (nth globals position))]
+      (let [(global GlobalBindingV0) (nth globals position)
+            (effective-type (U core/NativeId Nil))
+            (globalbindingv0-effective-type global)]
         (recur (+ position 1)
           (if (nil? effective-type)
             definitions
-            (append-type-defs definitions
-              (typeresolutionv0-definitions
-                (resolve-source-type index effective-type)))))))))
+            (let [(resolution TypeResolutionV0)
+                  (resolve-source-type index effective-type)
+                  (resolved-type core/NativeId)
+                  (typeresolutionv0-type-id resolution)
+                  (resolved-definitions (Vec core/TypeDef))
+                  (typeresolutionv0-definitions resolution)
+                  ;; A ref-valued Function is a transparent direct-call alias,
+                  ;; including the aliases injected by macro hygiene. Its
+                  ;; callable signature belongs to the resolved FunctionDef;
+                  ;; adding it here would invent a runtime closure obligation.
+                  (materialized-definitions (Vec core/TypeDef))
+                  (if (= "ref"
+                        (fact-text index (globalbindingv0-value global)
+                          "form-kind"))
+                    (filterv
+                      (fn [(definition core/TypeDef)] Bool
+                        (not
+                          (and
+                            (same-id? resolved-type
+                              (core/typedef-id definition))
+                            (instance? native.core.FunctionType
+                              (core/typedef-shape definition)))))
+                      resolved-definitions)
+                    resolved-definitions)]
+              (append-type-defs definitions materialized-definitions))))))))
 
 ;; Local annotations participate in body typing just as signatures and globals
 ;; do. Collect them before lowering so a body's first nullable value already

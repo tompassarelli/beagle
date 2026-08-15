@@ -87,19 +87,22 @@ projection_c17="$scratch/projection-c17"
     --entry native.entry-projection/entry \
     --entry native.entry-projection/second \
     --entry native.entry-projection/alias-entry \
+    --entry native.entry-projection/hygienic-entry \
     "$projection_source" >"$scratch/projection-c17.log"
 
 for expected in \
     "source-entry native.entry-projection/entry" \
     "source-entry native.entry-projection/second" \
     "source-entry native.entry-projection/alias-entry" \
-    "source-definitions 8" \
-    "program-functions 5" \
+    "source-entry native.entry-projection/hygienic-entry" \
+    "source-definitions 10" \
+    "program-functions 6" \
     "lowered fn_0 box-value 1 blocks" \
     "lowered fn_1 helper 1 blocks" \
     "lowered fn_2 entry 1 blocks" \
     "lowered fn_3 second 3 blocks" \
     "lowered fn_4 alias-entry 1 blocks" \
+    "lowered fn_5 hygienic-entry 1 blocks" \
     "stage typed-to-native COMPLETE" \
     "materialize-c17 OK module_0.h module_0.c" \
     "result PASS"; do

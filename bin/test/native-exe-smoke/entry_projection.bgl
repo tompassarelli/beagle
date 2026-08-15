@@ -23,6 +23,12 @@
 (defn alias-entry [] Int
   (helper-alias))
 
+(defmacro call-helper []
+  `(helper))
+
+(defn hygienic-entry [] Int
+  (call-helper))
+
 (defn unreachable [] Int
   ((fn [(value Int)] Int value) 0))
 
