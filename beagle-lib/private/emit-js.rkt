@@ -715,70 +715,37 @@
 
 (define (expr-has-await? e)
   (cond
-    [(await-form? e) #t]
-    [(call-form? e) (contains-await? (call-form-args e))]
-    [(if-form? e) (or (expr-has-await? (if-form-cond-expr e))
-                      (expr-has-await? (if-form-then-expr e))
-                      (expr-has-await? (if-form-else-expr e)))]
-    [(let-form? e) (or (for/or ([b (let-form-bindings e)])
-                         (or (binding-constraint-has-await? b)
-                             (expr-has-await? (let-binding-value b))))
-                       (contains-await? (let-form-body e)))]
-    ;; A nested callable owns its own async status. Its body must not make the
-    ;; enclosing function/IIFE async merely because the callable is created.
+    [(or (await-form? e) (js-ast-await? e)) #t]
+    ;; A nested callable owns its own async status. Creating one must not make
+    ;; the enclosing function or IIFE async merely because its body awaits.
+    [(or (fn-form? e)
+         (letfn-fn? e)
+         (defn-form? e)
+         (defn-multi? e)
+         (js-ast-function? e)
+         (js-ast-method? e)
+         (jst-method? e))
+     #f]
+    ;; letfn's declarations are callable boundaries, but its executable body
+    ;; still belongs to the enclosing function.
     [(letfn-form? e) (contains-await? (letfn-form-body e))]
-    [(do-form? e) (contains-await? (do-form-body e))]
-    [(cond-form? e) (for/or ([c (cond-form-clauses e)])
-                      (or (and (not (symbol? (cond-clause-test c)))
-                               (expr-has-await? (cond-clause-test c)))
-                          (contains-await? (cond-clause-body c))))]
-    [(try-form? e) (or (contains-await? (try-form-body e))
-                       (for/or ([c (try-form-catches e)])
-                         (contains-await? (catch-clause-body c))))]
-    [(match-form? e) (or (expr-has-await? (match-form-target e))
-                         (for/or ([c (match-form-clauses e)])
-                           (contains-await? (match-clause-body c))))]
-    [(when-form? e) (or (expr-has-await? (when-form-cond-expr e))
-                        (contains-await? (when-form-body e)))]
-    [(for-form? e)
-     (or (for/or ([clause (in-list (for-form-clauses e))])
-           (cond
-             [(for-binding? clause)
-              (or (binding-constraint-has-await? clause)
-                  (expr-has-await? (for-binding-expr clause)))]
-             [(for-let? clause)
-              (for/or ([binding (in-list (for-let-bindings clause))])
-                (or (binding-constraint-has-await? binding)
-                    (expr-has-await? (let-binding-value binding))))]
-             [(for-when? clause) (expr-has-await? (for-when-test clause))]
-             [else #f]))
-         (contains-await? (for-form-body e)))]
-    [(doseq-form? e)
-     (or (for/or ([clause (in-list (doseq-form-clauses e))])
-           (and (for-binding? clause)
-                (or (binding-constraint-has-await? clause)
-                    (expr-has-await? (for-binding-expr clause)))))
-         (contains-await? (doseq-form-body e)))]
-    [(loop-form? e) (or (for/or ([b (in-list (loop-form-bindings e))])
-                          (or (binding-constraint-has-await? b)
-                              (expr-has-await? (let-binding-value b))))
-                        (contains-await? (loop-form-body e)))]
-    [(fn-form? e) #f]
-    [(recur-form? e) (contains-await? (recur-form-args e))]
-    [(with-form? e)
-     (or (expr-has-await? (with-form-target e))
-         (for/or ([update (in-list (with-form-updates e))])
-           (expr-has-await? (with-update-value update))))]
-    [(kw-access? e) (expr-has-await? (kw-access-target e))]
-    [(set!-form? e) (or (expr-has-await? (set!-form-target e))
-                        (expr-has-await? (set!-form-value e)))]
-    [(threading-marker? e) (expr-has-await? (threading-marker-desugared e))]
-    [(check-expr? e) (expr-has-await? (check-expr-expr e))]
-    [(rescue-form? e) (or (expr-has-await? (rescue-form-expr e))
-                          (expr-has-await? (rescue-form-fallback e)))]
-    [(target-case-form? e)
-     (for/or ([(k v) (in-hash (target-case-form-cases e))])
-       (expr-has-await? v))]
+    ;; Await may sit beneath any expression container, including typed-JS
+    ;; forms such as js/call and js/set!. Structural descent keeps new forms
+    ;; from silently emitting await into a synchronous function.
+    [(pair? e)
+     (or (expr-has-await? (car e))
+         (expr-has-await? (cdr e)))]
+    [(vector? e)
+     (for/or ([item (in-vector e)])
+       (expr-has-await? item))]
+    [(hash? e)
+     (for/or ([(key value) (in-hash e)])
+       (or (expr-has-await? key)
+           (expr-has-await? value)))]
+    [(struct? e)
+     (define fields (struct->vector e))
+     (for/or ([i (in-range 1 (vector-length fields))])
+       (expr-has-await? (vector-ref fields i)))]
     [else #f]))
 
 ;; --- IIFE helper -----------------------------------------------------------

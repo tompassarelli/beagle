@@ -385,6 +385,20 @@
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
 
+   (check-js-contains "await nested in js/call -> async function"
+     "async function parse_loaded"
+     `(declare-extern load-text ,(fn-ty '() '(Promise String)))
+     '(declare-extern JSON Any)
+     '(defn parse-loaded [] Any
+        (js/call JSON .parse (js/await (load-text)))))
+
+   (check-js-contains "await nested in js/set! -> async function"
+     "async function set_loaded_bang"
+     `(declare-extern load-text ,(fn-ty '() '(Promise String)))
+     '(declare-extern globalThis Any)
+     '(defn set-loaded! [] Any
+        (js/set! globalThis .loaded (js/await (load-text)))))
+
    (check-js-contains "fn with await -> async arrow"
      "async ("
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
