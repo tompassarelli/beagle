@@ -234,6 +234,18 @@
 
 (define unwrap-public-form unwrap-definition-form)
 
+;; On the js target, `js/export` is the deliberate publication surface: the
+;; emitter exports exactly the wrapped definitions, so the interface must not
+;; publish anything else or a consumer's checked reference dies at runtime as
+;; a missing namespace-object member. `js/export-default` publishes only the
+;; module's `default` slot, never the definition's own name.
+(define (js-published? raw-form)
+  (let loop ([form raw-form])
+    (cond
+      [(jst-export? form) #t]
+      [(with-meta? form) (loop (with-meta-expr form))]
+      [else #f])))
+
 (define (publication-effective-definition-types prog provisional?)
   (cond
     ;; Candidate-overlay bootstrap parsing needs names before checking can run.
@@ -278,7 +290,8 @@
             (record-bindings
              prog name fields kind (eq? target 'clj) provisional?))])
       (add! binding)))
-  (for ([raw-form (in-list forms)])
+  (for ([raw-form (in-list forms)]
+        #:unless (and (eq? target 'js) (not (js-published? raw-form))))
     (define form (unwrap-public-form raw-form))
     (match form
       [(def-form name type _ _ _)

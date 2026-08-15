@@ -8594,19 +8594,24 @@
       (walk-exprs-for-syms form (program-src-table prog) visit!))
     (when (pair? violations)
       (define ordered (reverse violations))
+      (define js? (eq? (program-target prog) 'js))
       (define lines
         (for/list ([violation (in-list ordered)])
           (define sym (car violation))
           (define interface (caddr violation))
           (define loc (cadddr violation))
           (format
-           "  ~a~a — ~a does not export ~a"
+           "  ~a~a — ~a does not export ~a~a"
            sym
            (if (and loc (src-loc-line loc))
                (format " (line ~a)" (src-loc-line loc))
                "")
            (module-interface-namespace interface)
-           (cadr violation))))
+           (cadr violation)
+           (if js?
+               (format "; only js/export-wrapped definitions cross the js module boundary — wrap ~a in (js/export ...) in the provider"
+                       (cadr violation))
+               ""))))
       (raise-diag
        'missing-export
        (format

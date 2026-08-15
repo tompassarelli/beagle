@@ -5,7 +5,10 @@
   `(def ~name Box
      (->Box (normalize ~value))))
 
-(defrecord Box [(value String)])
+;; The exported macro expands to these references in the consumer, so they
+;; must cross the js module boundary with it.
+(js/export (defrecord Box [(value String)]))
 
-(defn normalize [(value String)] String
-  value)
+(js/export
+  (defn normalize [(value String)] String
+    value))

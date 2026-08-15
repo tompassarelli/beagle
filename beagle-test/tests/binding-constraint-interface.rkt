@@ -159,8 +159,9 @@
         "(ns interface.async-provider)\n"
         "(define-target js)\n"
         "(declare-extern fetch-flag (Fn [Int] (Promise Bool)))\n"
-        "(defn remote-valid? [(value Int)] Bool\n"
-        "  (js/await (fetch-flag value)))\n"))
+        "(js/export\n"
+        "  (defn remote-valid? [(value Int)] Bool\n"
+        "    (js/await (fetch-flag value))))\n"))
      (define provider-stxs (read-forms provider-source))
      (define provider-program
        (checked-program

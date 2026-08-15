@@ -1,0 +1,6 @@
+#lang beagle/js
+(ns export-xmodule.refer-internal
+  (:require [export-xmodule.provider :refer [internal]]))
+
+(js/export
+  (defn go [(x Float)] Float (internal x)))

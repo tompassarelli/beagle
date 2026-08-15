@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns export-xmodule.clj-prov)
+
+(defn open-scale [(x Float) (k Float)] Float (* x k))
+
+(defn- hidden-scale [(x Float) (k Float)] Float (* x k))

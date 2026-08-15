@@ -76,3 +76,37 @@
   ;; The constructor is called by the name it is defined under.
   (check-regexp-match #rx"return Pos\\(0[.]0, 0[.]0\\)" js)
   (check-false (regexp-match? #rx"__gtPos" js)))
+
+;; `js/export` is the deliberate publication surface on the js target: the
+;; emitter exports exactly the wrapped definitions, so the checker must reject
+;; a cross-module reference to anything else — the emitted namespace object
+;; has no such member and the reference would only die at runtime.
+(test-case "a qualified reference to a non-exported js function is rejected at check time"
+  (check-exn #rx"does not export internal.*js/export"
+             (lambda () (check-file "internal-consumer.bjs"))))
+
+(test-case "a qualified reference to a non-exported js def is rejected at check time"
+  (check-exn #rx"does not export hidden-offset.*js/export"
+             (lambda () (check-file "def-consumer.bjs"))))
+
+(test-case "a :refer of a non-exported js member is rejected"
+  (check-exn #rx"does not export referred name internal"
+             (lambda () (check-file "refer-internal.bjs"))))
+
+(test-case "the emitter leaves a non-exported js definition unexported"
+  (define src (build-path fixtures-dir "provider.bjs"))
+  (define js (emit-program (parse-program (read-beagle-syntax src) #:source-path src)))
+  (check-regexp-match #rx"function internal\\(" js)
+  (check-false (regexp-match? #rx"export function internal" js)))
+
+;; The clj target keeps its own rules: a plain defn crosses the module
+;; boundary, only defn- is private — js/export gating is js-only.
+(test-case "a clj cross-module call to a plain defn still checks"
+  (check-not-exn (lambda () (check-file "clj-open.bclj"))))
+
+(test-case "a clj cross-module call to a defn- stays rejected without js guidance"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"does not export hidden-scale" (exn-message e))
+                    (not (regexp-match? #rx"js/export" (exn-message e)))))
+             (lambda () (check-file "clj-hidden.bclj"))))

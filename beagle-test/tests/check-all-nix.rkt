@@ -128,7 +128,7 @@
    "flat-provider.bjs"
    (string-append
     "(ns library.precise)\n"
-    "(defn identity [value] Int value)"))
+    "(js/export (defn identity [value] Int value))"))
   (write-bjs
    consumer-root
    "consumer.bjs"

@@ -1,0 +1,6 @@
+#lang beagle/js
+(ns export-xmodule.def-consumer
+  (:require [export-xmodule.provider :as p]))
+
+(js/export
+  (defn go [] Float (+ p/hidden-offset 1.0)))

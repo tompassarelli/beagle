@@ -36,7 +36,7 @@
   (string-append
    "#lang beagle/js\n"
    "(ns wake.core)\n"
-   "(defn greeting [(name String)] String name)\n"))
+   "(js/export (defn greeting [(name String)] String name))\n"))
 
 (define entry-source
   (string-append
@@ -48,8 +48,8 @@
   (string-append
    "#lang beagle/js\n"
    "(ns union.provider)\n"
-   "(defunion FieldValueType (StringField [(unit Nil)]))\n"
-   "(defrecord FieldSpec [(value-type FieldValueType)])\n"))
+   "(js/export (defunion FieldValueType (StringField [(unit Nil)])))\n"
+   "(js/export (defrecord FieldSpec [(value-type FieldValueType)]))\n"))
 
 (define closed-union-entry-source
   (string-append
@@ -85,7 +85,7 @@
    "  (:require #?@(:js [[shared.types :as shared]]\n"
    "                  :nix [[missing.types :as missing]])))\n"
    "(defalias WakeText shared/Text)\n"
-   "(defn pass [(value WakeText)] WakeText value)\n"))
+   "(js/export (defn pass [(value WakeText)] WakeText value))\n"))
 
 (define nested-entry-source
   (string-append

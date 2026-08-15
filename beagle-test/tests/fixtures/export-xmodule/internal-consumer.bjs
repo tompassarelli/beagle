@@ -1,0 +1,6 @@
+#lang beagle/js
+(ns export-xmodule.internal-consumer
+  (:require [export-xmodule.provider :as p]))
+
+(js/export
+  (defn go [(x Float)] Float (p/internal x)))
