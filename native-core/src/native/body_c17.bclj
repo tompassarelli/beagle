@@ -267,6 +267,12 @@
       (= symbol "native_host_socket_write_bounded_v0")
       (= symbol "native_host_socket_close_v0")))
 
+(defn host-filesystem-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_filesystem_read_text_bounded_v0")
+      (= symbol "native_host_filesystem_list_directory_bounded_v0")
+      (= symbol "native_host_filesystem_path_kind_v0")
+      (= symbol "native_host_filesystem_write_text_atomic_v0")))
+
 (defn host-direct-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_stdout_write_line_v0")
       (= symbol "native_host_clock_monotonic_nanoseconds_v0")))
@@ -291,7 +297,8 @@
               (host-direct-symbol? (core/abideclv0-symbol abi)))
             (and (instance? native.core.RestrictedCOutcomeOutAbiV0
                    (core/abideclv0-convention abi))
-              (host-socket-symbol? (core/abideclv0-symbol abi)))))
+              (or (host-socket-symbol? (core/abideclv0-symbol abi))
+                  (host-filesystem-symbol? (core/abideclv0-symbol abi))))))
         (core/nativecoreprogram-abis program))
       (every? function-supported? (core/nativecoreprogram-functions program)))))
 
@@ -1733,9 +1740,10 @@
             (core/abideclv0-result abi)
             (arena-id (U core/NativeId Nil))
             (core/externcallinstruction-arena-id instruction)]
-        (if (or (nil? ok-variant) (nil? peer-variant) (nil? error-variant)
+        (if (or (nil? ok-variant) (nil? error-variant)
               (nil? error-payload) (nil? result-value)
-              (< ok-tag 0) (< peer-tag 0) (< error-tag 0))
+              (< ok-tag 0) (< error-tag 0)
+              (and (some? peer-variant) (< peer-tag 0)))
           ""
           (let [(hidden (Vec String))
                 (if (nil? arena-id)
@@ -1769,9 +1777,11 @@
               (join-c-arguments call-arguments) ");\n"
               "    if (" status " == INT32_C(0)) {\n"
               "      " target ".tag = INT64_C(" ok-tag ");\n"
-              "    } else if (" status
-              " == NATIVE_HOST_SOCKET_PEER_CLOSED) {\n"
-              "      " target ".tag = INT64_C(" peer-tag ");\n"
+              (if (nil? peer-variant)
+                ""
+                (str "    } else if (" status
+                  " == NATIVE_HOST_SOCKET_PEER_CLOSED) {\n"
+                  "      " target ".tag = INT64_C(" peer-tag ");\n"))
               "    } else {\n"
               "      " target ".tag = INT64_C(" error-tag ");\n"
               "      " target ".payload.variant_" error-tag

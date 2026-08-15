@@ -1,0 +1,11 @@
+#lang beagle
+(ns native.filesystem-probe)
+
+
+(defn probe [(path String) (text String)] Int
+  (do
+    (host.fs/path-kind path)
+    (host.fs/read-text-bounded path 1048576)
+    (host.fs/list-directory-bounded path 4096)
+    (host.fs/write-text-atomic path text)
+    0))

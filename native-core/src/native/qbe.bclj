@@ -2555,6 +2555,22 @@
               (socket-extern-symbol? (core/abideclv0-symbol abi))))
       (core/nativecoreprogram-abis program))))
 
+(defn filesystem-extern-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_filesystem_read_text_bounded_v0")
+      (= symbol "native_host_filesystem_list_directory_bounded_v0")
+      (= symbol "native_host_filesystem_path_kind_v0")
+      (= symbol "native_host_filesystem_write_text_atomic_v0")))
+
+(defn program-has-filesystem-extern? [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some (fn [(abi core/AbiDeclV0)] Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (instance? native.core.RestrictedCOutcomeOutAbiV0
+                (core/abideclv0-convention abi))
+              (filesystem-extern-symbol? (core/abideclv0-symbol abi))))
+      (core/nativecoreprogram-abis program))))
+
 ;; --- entry point ----------------------------------------------------------
 
 (defn emit-module
@@ -2608,6 +2624,9 @@
       (program-has-socket-extern? program)
       (->QbeFailure
         "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")
+      (program-has-filesystem-extern? program)
+      (->QbeFailure
+        "QBE filesystem extern ABI is unsupported: typed host outcomes have no QBE call representation")
       (program-has-clock-extern? program)
       (->QbeFailure
         "QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation")

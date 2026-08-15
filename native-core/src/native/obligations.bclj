@@ -1060,7 +1060,7 @@
    (type-id (U core/NativeId Nil))] Bool
   (if (nil? type-id) false (i64-type? types type-id)))
 
-(defn socket-outcome-result-legal?
+(defn host-outcome-result-legal?
   [(types (Vec core/TypeDef))
    (result core/AbiValueV0)] Bool
   (let [(outcome (U core/TypeDef Nil))
@@ -1086,13 +1086,16 @@
                         (named-variant variants "peer-closed")
                         (error (U core/TypeVariant Nil))
                         (named-variant variants "error")]
-                    (and (= 3 (count variants))
-                      (not (nil? ok)) (not (nil? peer)) (not (nil? error))
+                    (and (or (= 2 (count variants)) (= 3 (count variants)))
+                      (not (nil? ok)) (not (nil? error))
+                      (= (= 3 (count variants)) (not (nil? peer)))
                       (or (and (unit-type? types value-type)
                             (nil? (core/typevariant-payload-type ok)))
                         (dynamic-id= value-type
                           (core/typevariant-payload-type ok)))
-                      (nil? (core/typevariant-payload-type peer))
+                      (if (nil? peer)
+                        true
+                        (nil? (core/typevariant-payload-type peer)))
                       (optional-i64-type? types
                         (core/typevariant-payload-type error)))))))))))))
 
@@ -1133,7 +1136,7 @@
               (core/abideclv0-convention abi))
             (and (not (nil? result))
               (import-abi-value-legal? program types layouts result)
-              (socket-outcome-result-legal? types result))
+              (host-outcome-result-legal? types result))
 
             :else
             (or (nil? result)

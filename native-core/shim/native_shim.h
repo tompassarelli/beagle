@@ -613,6 +613,18 @@ int64_t native_host_clock_monotonic_nanoseconds_v0(
     const native_capability *capability);
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text);
+/* Path kind result: 1 regular file, 2 directory, 3 symbolic link, 4 other. */
+int32_t native_host_filesystem_path_kind_v0(
+    const native_capability *capability, uint64_t path, int64_t *out);
+int32_t native_host_filesystem_read_text_bounded_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path,
+    int64_t max_bytes, uint64_t *out);
+/* Entries exclude . and .. and are returned in bytewise ascending order. */
+int32_t native_host_filesystem_list_directory_bounded_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path,
+    int64_t max_entries, native_vec **out);
+int32_t native_host_filesystem_write_text_atomic_v0(
+    const native_capability *capability, uint64_t path, uint64_t text);
 /* Listener ownership is inherited at FD 3; this ABI never creates a socket. */
 int32_t native_host_socket_inherited_listener_v0(
     const native_capability *capability, int64_t fd, int64_t *out);

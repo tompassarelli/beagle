@@ -3,6 +3,7 @@
 #include "native_shim.h"
 
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -9294,6 +9296,401 @@ void native_host_stdout_write_line_v0(
       (fputc('\n', stdout) == EOF)) {
     native_trap(NATIVE_TRAP_IO);
   }
+}
+
+static int32_t native_host_filesystem_errno(void) {
+  return (errno == 0) ? EIO : (int32_t)errno;
+}
+
+static int32_t native_host_filesystem_path(uint64_t text, char **out) {
+  uint64_t length;
+  const uint8_t *bytes;
+  char *path;
+  if (out == NULL) {
+    return EINVAL;
+  }
+  *out = NULL;
+  length = native_text_length(text);
+  bytes = native_text_bytes(text);
+  if (length > (uint64_t)(SIZE_MAX - (size_t)1U)) {
+    return EOVERFLOW;
+  }
+  if (memchr(bytes, '\0', (size_t)length) != NULL) {
+    return EINVAL;
+  }
+  path = (char *)malloc((size_t)length + (size_t)1U);
+  if (path == NULL) {
+    return ENOMEM;
+  }
+  if (length != UINT64_C(0)) {
+    memcpy(path, bytes, (size_t)length);
+  }
+  path[length] = '\0';
+  *out = path;
+  return 0;
+}
+
+static bool native_host_filesystem_capability_valid(
+    const native_capability *capability) {
+  return (capability != NULL) && (capability->token != UINT64_C(0));
+}
+
+int32_t native_host_filesystem_path_kind_v0(
+    const native_capability *capability, uint64_t path_text, int64_t *out) {
+  char *path = NULL;
+  struct stat metadata;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability) || (out == NULL)) {
+    return EINVAL;
+  }
+  *out = INT64_C(0);
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  if (lstat(path, &metadata) != 0) {
+    status = native_host_filesystem_errno();
+    free(path);
+    return status;
+  }
+  free(path);
+  if (S_ISREG(metadata.st_mode)) {
+    *out = INT64_C(1);
+  } else if (S_ISDIR(metadata.st_mode)) {
+    *out = INT64_C(2);
+  } else if (S_ISLNK(metadata.st_mode)) {
+    *out = INT64_C(3);
+  } else {
+    *out = INT64_C(4);
+  }
+  return 0;
+}
+
+int32_t native_host_filesystem_read_text_bounded_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, int64_t max_bytes, uint64_t *out) {
+  char *path = NULL;
+  uint8_t *buffer = NULL;
+  uint8_t *destination = NULL;
+  size_t length = (size_t)0U;
+  size_t capacity;
+  size_t bound;
+  int descriptor = -1;
+  int32_t status;
+  uint64_t result;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (out == NULL) || (max_bytes < INT64_C(0)) ||
+      ((uint64_t)max_bytes > (uint64_t)SIZE_MAX)) {
+    return EINVAL;
+  }
+  *out = UINT64_C(0);
+  bound = (size_t)max_bytes;
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  descriptor = open(path, O_RDONLY | O_CLOEXEC);
+  free(path);
+  if (descriptor < 0) {
+    return native_host_filesystem_errno();
+  }
+  capacity = (bound < (size_t)4096U) ? bound : (size_t)4096U;
+  if (capacity != (size_t)0U) {
+    buffer = (uint8_t *)malloc(capacity);
+    if (buffer == NULL) {
+      close(descriptor);
+      return ENOMEM;
+    }
+  }
+  for (;;) {
+    ssize_t amount;
+    if (length == capacity) {
+      size_t grown;
+      uint8_t *replacement;
+      if (capacity == bound) {
+        uint8_t extra;
+        amount = read(descriptor, &extra, (size_t)1U);
+        if (amount < 0) {
+          if (errno == EINTR) {
+            continue;
+          }
+          status = native_host_filesystem_errno();
+          free(buffer);
+          close(descriptor);
+          return status;
+        }
+        if (amount > 0) {
+          free(buffer);
+          close(descriptor);
+          return EFBIG;
+        }
+        break;
+      }
+      grown = (capacity == (size_t)0U) ? (size_t)1U : capacity * (size_t)2U;
+      if ((grown < capacity) || (grown > bound)) {
+        grown = bound;
+      }
+      replacement = (uint8_t *)realloc(buffer, grown);
+      if (replacement == NULL) {
+        free(buffer);
+        close(descriptor);
+        return ENOMEM;
+      }
+      buffer = replacement;
+      capacity = grown;
+    }
+    amount = read(descriptor, buffer + length, capacity - length);
+    if (amount < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      status = native_host_filesystem_errno();
+      free(buffer);
+      close(descriptor);
+      return status;
+    }
+    if (amount == 0) {
+      break;
+    }
+    length += (size_t)amount;
+  }
+  if (close(descriptor) != 0) {
+    status = native_host_filesystem_errno();
+    free(buffer);
+    return status;
+  }
+  if (!native_utf8_valid(buffer, (uint64_t)length)) {
+    free(buffer);
+    return EILSEQ;
+  }
+  result = native_text_alloc(arena, (uint64_t)length, &destination);
+  if (length != (size_t)0U) {
+    memcpy(destination, buffer, length);
+  }
+  free(buffer);
+  *out = result;
+  return 0;
+}
+
+static int native_host_filesystem_name_compare(const void *left,
+                                               const void *right) {
+  const char *left_name = *(const char *const *)left;
+  const char *right_name = *(const char *const *)right;
+  return strcmp(left_name, right_name);
+}
+
+static void native_host_filesystem_free_names(char **names, size_t count) {
+  size_t index;
+  if (names == NULL) {
+    return;
+  }
+  for (index = (size_t)0U; index < count; index++) {
+    free(names[index]);
+  }
+  free(names);
+}
+
+int32_t native_host_filesystem_list_directory_bounded_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, int64_t max_entries, native_vec **out) {
+  char *path = NULL;
+  char **names = NULL;
+  size_t count = (size_t)0U;
+  size_t bound;
+  DIR *directory;
+  int32_t status;
+  native_vec *result;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (out == NULL) || (max_entries < INT64_C(0)) ||
+      ((uint64_t)max_entries > (uint64_t)(SIZE_MAX / sizeof(char *)))) {
+    return EINVAL;
+  }
+  *out = NULL;
+  bound = (size_t)max_entries;
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  directory = opendir(path);
+  free(path);
+  if (directory == NULL) {
+    return native_host_filesystem_errno();
+  }
+  if (bound != (size_t)0U) {
+    names = (char **)calloc(bound, sizeof(char *));
+    if (names == NULL) {
+      closedir(directory);
+      return ENOMEM;
+    }
+  }
+  for (;;) {
+    struct dirent *entry;
+    size_t length;
+    errno = 0;
+    entry = readdir(directory);
+    if (entry == NULL) {
+      if (errno != 0) {
+        status = native_host_filesystem_errno();
+        native_host_filesystem_free_names(names, count);
+        closedir(directory);
+        return status;
+      }
+      break;
+    }
+    if ((strcmp(entry->d_name, ".") == 0) ||
+        (strcmp(entry->d_name, "..") == 0)) {
+      continue;
+    }
+    if (count == bound) {
+      native_host_filesystem_free_names(names, count);
+      closedir(directory);
+      return EOVERFLOW;
+    }
+    length = strlen(entry->d_name);
+    if (!native_utf8_valid((const uint8_t *)entry->d_name, (uint64_t)length)) {
+      native_host_filesystem_free_names(names, count);
+      closedir(directory);
+      return EILSEQ;
+    }
+    names[count] = strdup(entry->d_name);
+    if (names[count] == NULL) {
+      native_host_filesystem_free_names(names, count);
+      closedir(directory);
+      return ENOMEM;
+    }
+    count += (size_t)1U;
+  }
+  if (closedir(directory) != 0) {
+    status = native_host_filesystem_errno();
+    native_host_filesystem_free_names(names, count);
+    return status;
+  }
+  qsort(names, count, sizeof(char *), native_host_filesystem_name_compare);
+  result = native_vec_new(arena, (int64_t)count, INT64_C(8),
+                          _Alignof(uint64_t));
+  for (size_t index = (size_t)0U; index < count; index++) {
+    size_t length = strlen(names[index]);
+    uint8_t *bytes = NULL;
+    uint64_t text = native_text_alloc(arena, (uint64_t)length, &bytes);
+    if (length != (size_t)0U) {
+      memcpy(bytes, names[index], length);
+    }
+    ((uint64_t *)result->elements)[index] = text;
+  }
+  native_vec_set_length(result, (int64_t)count);
+  native_host_filesystem_free_names(names, count);
+  *out = result;
+  return 0;
+}
+
+int32_t native_host_filesystem_write_text_atomic_v0(
+    const native_capability *capability, uint64_t path_text, uint64_t text) {
+  char *path = NULL;
+  char *temporary = NULL;
+  const uint8_t *bytes;
+  uint64_t length;
+  size_t suffix_length = sizeof(".tmp.XXXXXX");
+  size_t path_length;
+  size_t written = (size_t)0U;
+  int descriptor = -1;
+  int32_t status;
+  struct stat prior;
+  mode_t mode = (mode_t)0644;
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return EINVAL;
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  path_length = strlen(path);
+  if (path_length > (SIZE_MAX - suffix_length)) {
+    free(path);
+    return EOVERFLOW;
+  }
+  temporary = (char *)malloc(path_length + suffix_length);
+  if (temporary == NULL) {
+    free(path);
+    return ENOMEM;
+  }
+  memcpy(temporary, path, path_length);
+  memcpy(temporary + path_length, ".tmp.XXXXXX", suffix_length);
+  if ((lstat(path, &prior) == 0) && S_ISREG(prior.st_mode)) {
+    mode = prior.st_mode & (mode_t)0777;
+  }
+  descriptor = mkstemp(temporary);
+  if (descriptor < 0) {
+    status = native_host_filesystem_errno();
+    free(temporary);
+    free(path);
+    return status;
+  }
+  if (fchmod(descriptor, mode) != 0) {
+    status = native_host_filesystem_errno();
+    close(descriptor);
+    unlink(temporary);
+    free(temporary);
+    free(path);
+    return status;
+  }
+  bytes = native_text_bytes(text);
+  length = native_text_length(text);
+  if (length > (uint64_t)SIZE_MAX) {
+    close(descriptor);
+    unlink(temporary);
+    free(temporary);
+    free(path);
+    return EOVERFLOW;
+  }
+  while (written < (size_t)length) {
+    ssize_t amount = write(descriptor, bytes + written,
+                           (size_t)length - written);
+    if (amount < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      status = native_host_filesystem_errno();
+      close(descriptor);
+      unlink(temporary);
+      free(temporary);
+      free(path);
+      return status;
+    }
+    if (amount == 0) {
+      close(descriptor);
+      unlink(temporary);
+      free(temporary);
+      free(path);
+      return EIO;
+    }
+    written += (size_t)amount;
+  }
+  if (fsync(descriptor) != 0) {
+    status = native_host_filesystem_errno();
+    close(descriptor);
+    unlink(temporary);
+    free(temporary);
+    free(path);
+    return status;
+  }
+  if (close(descriptor) != 0) {
+    status = native_host_filesystem_errno();
+    unlink(temporary);
+    free(temporary);
+    free(path);
+    return status;
+  }
+  descriptor = -1;
+  if (rename(temporary, path) != 0) {
+    status = native_host_filesystem_errno();
+    unlink(temporary);
+    free(temporary);
+    free(path);
+    return status;
+  }
+  free(temporary);
+  free(path);
+  return 0;
 }
 
 static int32_t native_host_socket_check(
