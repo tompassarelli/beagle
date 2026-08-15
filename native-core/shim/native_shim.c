@@ -9338,20 +9338,42 @@ bool native_host_environment_lookup_v0(
 }
 #endif /* NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL */
 
-void native_host_stdout_write_line_v0(
-    const native_capability *capability, uint64_t text) {
+static void native_host_stream_write_v0(
+    const native_capability *capability, FILE *stream, uint64_t text,
+    bool newline) {
   uint64_t length;
-  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (stream == NULL)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   length = native_text_length(text);
   if (length > (uint64_t)SIZE_MAX) {
     native_trap(NATIVE_TRAP_OVERFLOW);
   }
-  if (!native_byte_write(stdout, native_text_bytes(text), (size_t)length) ||
-      (fputc('\n', stdout) == EOF)) {
+  if (!native_byte_write(stream, native_text_bytes(text), (size_t)length) ||
+      (newline && (fputc('\n', stream) == EOF))) {
     native_trap(NATIVE_TRAP_IO);
   }
+}
+
+void native_host_stdout_write_v0(
+    const native_capability *capability, uint64_t text) {
+  native_host_stream_write_v0(capability, stdout, text, false);
+}
+
+void native_host_stdout_write_line_v0(
+    const native_capability *capability, uint64_t text) {
+  native_host_stream_write_v0(capability, stdout, text, true);
+}
+
+void native_host_stderr_write_v0(
+    const native_capability *capability, uint64_t text) {
+  native_host_stream_write_v0(capability, stderr, text, false);
+}
+
+void native_host_stderr_write_line_v0(
+    const native_capability *capability, uint64_t text) {
+  native_host_stream_write_v0(capability, stderr, text, true);
 }
 
 static int32_t native_host_filesystem_errno(void) {

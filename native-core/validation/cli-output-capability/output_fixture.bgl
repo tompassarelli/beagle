@@ -1,0 +1,10 @@
+#lang beagle
+(ns native.cli-output-capability)
+
+(defn -main [] Int
+  (do
+    (print "stdout")
+    (println "-line")
+    (host.stderr/write-text "stderr")
+    (host.stderr/write-line "-line")
+    19))

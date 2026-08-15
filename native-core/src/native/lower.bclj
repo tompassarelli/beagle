@@ -1892,6 +1892,34 @@
 (defn host-stdout-function-id [] core/NativeId
   (lower-id "extern" ["host-stdout-write-line-v0"]))
 
+(defn host-stdout-write-abi-id [] core/NativeId
+  (lower-id "abi" ["host-stdout-write-v0"]))
+
+(defn host-stdout-write-function-id [] core/NativeId
+  (lower-id "extern" ["host-stdout-write-v0"]))
+
+(defn host-stderr-effect-id [] core/NativeId
+  (lower-id "effect" ["host-stderr-write"]))
+
+(defn host-stderr-capability-id [] core/NativeId
+  (lower-id "capability" ["host-stderr"]))
+
+(defn host-stderr-write-abi-id [] core/NativeId
+  (lower-id "abi" ["host-stderr-write-v0"]))
+
+(defn host-stderr-write-function-id [] core/NativeId
+  (lower-id "extern" ["host-stderr-write-v0"]))
+
+(defn host-stderr-write-line-abi-id [] core/NativeId
+  (lower-id "abi" ["host-stderr-write-line-v0"]))
+
+(defn host-stderr-write-line-function-id [] core/NativeId
+  (lower-id "extern" ["host-stderr-write-line-v0"]))
+
+(defn host-stderr-callee? [(name String)] Bool
+  (or (= name "host.stderr/write-text")
+      (= name "host.stderr/write-line")))
+
 (defn host-filesystem-effect-id [] core/NativeId
   (lower-id "effect" ["host-filesystem-v0"]))
 
@@ -1962,6 +1990,7 @@
 (defn slice-effects
   [(include-environment Bool)
    (include-stdout Bool)
+   (include-stderr Bool)
    (include-filesystem Bool)
    (include-socket Bool)
    (include-clock Bool)]
@@ -1987,12 +2016,18 @@
             (core/->EffectDef (host-stdout-effect-id)
               (core/->IoEffect (host-stdout-capability-id))))
           with-environment)
+        (with-stderr (Vec core/EffectDef))
+        (if include-stderr
+          (conj with-stdout
+            (core/->EffectDef (host-stderr-effect-id)
+              (core/->IoEffect (host-stderr-capability-id))))
+          with-stdout)
         (with-filesystem (Vec core/EffectDef))
         (if include-filesystem
-          (conj with-stdout
+          (conj with-stderr
             (core/->EffectDef (host-filesystem-effect-id)
               (core/->IoEffect (host-filesystem-capability-id))))
-          with-stdout)
+          with-stderr)
         (with-socket (Vec core/EffectDef))
         (if include-socket
           (conj with-filesystem
@@ -7988,6 +8023,31 @@
             arena
             (core/->TokenFlowV0 [] [])))
         result-id result-type false))))
+
+(defn lower-host-text-output-call
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (callee String)
+   (abi-id core/NativeId)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (if (and (= 1 (count values))
+        (text-operand? (nth value-types 0)))
+    (let [(result-id core/NativeId)
+          (state-id state owner (str "host-output-" callee))]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 result-id (type-id "Nil"))
+            abi-id
+            values
+            nil
+            (core/->TokenFlowV0 [] [])))
+        result-id (type-id "Nil") false))
+    (fail-result state
+      (str "TODO-NATIVE-HOST-OUTPUT-OPERAND: " callee
+        " takes one native Text value"))))
 
 (defn lower-int-step
   [(types (Vec core/TypeDef))
@@ -14136,24 +14196,22 @@
                       (lower-checked-arith-values settled owner callee
                         (argsresultv0-values coerced)))))
 
-                (and (= "println" callee)
-                  (= 1 (count values))
-                  (text-operand? (nth value-types 0)))
-                (let [(result-id core/NativeId)
-                      (state-id current owner "host-stdout")]
-                  (->ExprResultV0
-                    (state-emit (state-bump current)
-                      (core/->ExternCallInstruction
-                        (core/->SsaValueV0 result-id (type-id "Nil"))
-                        (host-stdout-abi-id)
-                        values
-                        nil
-                        (core/->TokenFlowV0 [] [])))
-                    result-id (type-id "Nil") false))
+                (= "print" callee)
+                (lower-host-text-output-call owner current callee
+                  (host-stdout-write-abi-id) values value-types)
 
                 (= "println" callee)
-                (fail-result current
-                  "TODO-NATIVE-HOST-STDOUT-OPERAND: println takes one native Text value")
+                (lower-host-text-output-call owner current callee
+                  (host-stdout-abi-id) values value-types)
+
+                (and (host-stderr-callee? callee)
+                  (= callee "host.stderr/write-text"))
+                (lower-host-text-output-call owner current callee
+                  (host-stderr-write-abi-id) values value-types)
+
+                (host-stderr-callee? callee)
+                (lower-host-text-output-call owner current callee
+                  (host-stderr-write-line-abi-id) values value-types)
 
                 (and (host-clock-callee? callee) (= 0 (count values)))
                 (let [(result-id core/NativeId)
@@ -16102,10 +16160,56 @@
           (some
             (fn [(instruction core/Instruction)] Bool
               (and (instance? native.core.ExternCallInstruction instruction)
-                (same-id? (core/externcallinstruction-abi-id instruction)
-                  (host-stdout-abi-id))))
+                (or
+                  (same-id? (core/externcallinstruction-abi-id instruction)
+                    (host-stdout-abi-id))
+                  (same-id? (core/externcallinstruction-abi-id instruction)
+                    (host-stdout-write-abi-id)))))
             (core/basicblock-instructions block))))
       blocks)))
+
+(defn blocks-use-host-stderr? [(blocks (Vec core/BasicBlock))] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (and (instance? native.core.ExternCallInstruction instruction)
+                (or
+                  (same-id? (core/externcallinstruction-abi-id instruction)
+                    (host-stderr-write-abi-id))
+                  (same-id? (core/externcallinstruction-abi-id instruction)
+                    (host-stderr-write-line-abi-id)))))
+            (core/basicblock-instructions block))))
+      blocks)))
+
+(defn blocks-call-abi?
+  [(blocks (Vec core/BasicBlock)) (abi-id core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (and (instance? native.core.ExternCallInstruction instruction)
+                (same-id? (core/externcallinstruction-abi-id instruction)
+                  abi-id)))
+            (core/basicblock-instructions block))))
+      blocks)))
+
+(defn function-calls-abi?
+  [(function TypedFunctionV0) (abi-id core/NativeId)] Bool
+  (blocks-call-abi? (readiness-blocks (typedfunctionv0-readiness function))
+    abi-id))
+
+(defn any-function-calls-abi?
+  [(functions (Vec TypedFunctionV0)) (abi-id core/NativeId)] Bool
+  (some?
+    (some
+      (fn [(function TypedFunctionV0)] Bool
+        (function-calls-abi? function abi-id))
+      functions)))
 
 (defn blocks-use-host-filesystem? [(blocks (Vec core/BasicBlock))] Bool
   (some?
@@ -16221,6 +16325,9 @@
 (defn function-uses-stdout? [(function TypedFunctionV0)] Bool
   (core/id-in? (typedfunctionv0-effects function) (host-stdout-effect-id)))
 
+(defn function-uses-stderr? [(function TypedFunctionV0)] Bool
+  (core/id-in? (typedfunctionv0-effects function) (host-stderr-effect-id)))
+
 (defn function-uses-host-filesystem? [(function TypedFunctionV0)] Bool
   (core/id-in? (typedfunctionv0-effects function)
     (host-filesystem-effect-id)))
@@ -16242,6 +16349,9 @@
 
 (defn any-function-uses-stdout? [(functions (Vec TypedFunctionV0))] Bool
   (some? (some function-uses-stdout? functions)))
+
+(defn any-function-uses-stderr? [(functions (Vec TypedFunctionV0))] Bool
+  (some? (some function-uses-stderr? functions)))
 
 (defn any-function-uses-host-filesystem?
   [(functions (Vec TypedFunctionV0))] Bool
@@ -16301,10 +16411,14 @@
         (if (blocks-use-host-stdout? (readiness-blocks readiness))
           (with-effect environment-effects (host-stdout-effect-id))
           environment-effects)
+        (stderr-effects (Vec core/NativeId))
+        (if (blocks-use-host-stderr? (readiness-blocks readiness))
+          (with-effect stdout-effects (host-stderr-effect-id))
+          stdout-effects)
         (filesystem-effects (Vec core/NativeId))
         (if (blocks-use-host-filesystem? (readiness-blocks readiness))
-          (with-effect stdout-effects (host-filesystem-effect-id))
-          stdout-effects)
+          (with-effect stderr-effects (host-filesystem-effect-id))
+          stderr-effects)
         (socket-effects (Vec core/NativeId))
         (if (blocks-use-host-socket? (readiness-blocks readiness))
           (with-effect filesystem-effects (host-socket-effect-id))
@@ -16487,24 +16601,26 @@
 
 (defn settle-effects [(functions (Vec TypedFunctionV0))] (Vec TypedFunctionV0)
   (let [(pure-settled (Vec TypedFunctionV0))
-        (settle-effect functions (pure-effect-id))]
-    (settle-effect
-      (settle-effect
-        (settle-effect
-          (settle-effect
-          (settle-effect
-            (settle-effect
-              (settle-effect
-                (settle-effect
-                  (settle-effect pure-settled (read-effect-id))
-                    (write-effect-id))
-                  (allocate-effect-id))
-                (atom-state-effect-id))
-              (host-environment-effect-id))
-            (host-stdout-effect-id))
-          (host-filesystem-effect-id))
-        (host-socket-effect-id))
-      (host-clock-effect-id))))
+        (settle-effect functions (pure-effect-id))
+        (read-settled (Vec TypedFunctionV0))
+        (settle-effect pure-settled (read-effect-id))
+        (write-settled (Vec TypedFunctionV0))
+        (settle-effect read-settled (write-effect-id))
+        (allocate-settled (Vec TypedFunctionV0))
+        (settle-effect write-settled (allocate-effect-id))
+        (atom-settled (Vec TypedFunctionV0))
+        (settle-effect allocate-settled (atom-state-effect-id))
+        (environment-settled (Vec TypedFunctionV0))
+        (settle-effect atom-settled (host-environment-effect-id))
+        (stdout-settled (Vec TypedFunctionV0))
+        (settle-effect environment-settled (host-stdout-effect-id))
+        (stderr-settled (Vec TypedFunctionV0))
+        (settle-effect stdout-settled (host-stderr-effect-id))
+        (filesystem-settled (Vec TypedFunctionV0))
+        (settle-effect stderr-settled (host-filesystem-effect-id))
+        (socket-settled (Vec TypedFunctionV0))
+        (settle-effect filesystem-settled (host-socket-effect-id))]
+    (settle-effect socket-settled (host-clock-effect-id))))
 
 (defn slice-regions [] (Vec core/RegionDef)
   [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)
@@ -16513,6 +16629,7 @@
 (defn slice-capabilities
   [(include-environment Bool)
    (include-stdout Bool)
+   (include-stderr Bool)
    (include-filesystem Bool)
    (include-socket Bool)
    (include-clock Bool)]
@@ -16556,15 +16673,24 @@
               nil
               false))
           with-environment)
+        (with-stderr (Vec core/CapabilityDef))
+        (if include-stderr
+          (conj with-stdout
+            (core/->CapabilityDef
+              (host-stderr-capability-id)
+              (core/->HostCapability true)
+              nil
+              false))
+          with-stdout)
         (with-filesystem (Vec core/CapabilityDef))
         (if include-filesystem
-          (conj with-stdout
+          (conj with-stderr
             (core/->CapabilityDef
               (host-filesystem-capability-id)
               (core/->HostCapability true)
               nil
               false))
-          with-stdout)
+          with-stderr)
         (with-socket (Vec core/CapabilityDef))
         (if include-socket
           (conj with-filesystem
@@ -16586,6 +16712,7 @@
 (defn slice-capability-ids
   [(include-environment Bool)
    (include-stdout Bool)
+   (include-stderr Bool)
    (include-filesystem Bool)
    (include-socket Bool)
    (include-clock Bool)]
@@ -16601,10 +16728,14 @@
         (if include-stdout
           (conj with-environment (host-stdout-capability-id))
           with-environment)
+        (with-stderr (Vec core/NativeId))
+        (if include-stderr
+          (conj with-stdout (host-stderr-capability-id))
+          with-stdout)
         (with-filesystem (Vec core/NativeId))
         (if include-filesystem
-          (conj with-stdout (host-filesystem-capability-id))
-          with-stdout)
+          (conj with-stderr (host-filesystem-capability-id))
+          with-stderr)
         (with-socket (Vec core/NativeId))
         (if include-socket
           (conj with-filesystem (host-socket-capability-id))
@@ -16809,6 +16940,7 @@
    (effects (Vec core/EffectDef))
    (include-environment Bool)
    (include-stdout Bool)
+   (include-stderr Bool)
    (include-filesystem Bool)
    (include-socket Bool)
    (include-clock Bool)]
@@ -16864,6 +16996,15 @@
                   "host-stdout"
                   "non-affine"])))]
           [])
+        (stderr-capability-nodes (Vec stages/TermNodeV0))
+        (if include-stderr
+          [(stages/->TermNodeV0 (host-stderr-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
+                 [(id-value (host-stderr-capability-id))
+                  "host-stderr"
+                  "non-affine"])))]
+          [])
         (filesystem-capability-nodes (Vec stages/TermNodeV0))
         (if include-filesystem
           [(stages/->TermNodeV0 (host-filesystem-capability-id)
@@ -16893,7 +17034,8 @@
           [])]
     (vec (concat type-nodes function-nodes effect-nodes
            [region-node capability-node] environment-capability-nodes
-           stdout-capability-nodes filesystem-capability-nodes
+           stdout-capability-nodes stderr-capability-nodes
+           filesystem-capability-nodes
            socket-capability-nodes
            clock-capability-nodes))))
 
@@ -16995,6 +17137,7 @@
         (settle-effects (settle-readiness (collect-functions function-resolutions)))
         (uses-environment Bool) (any-function-uses-environment? functions)
         (uses-stdout Bool) (any-function-uses-stdout? functions)
+        (uses-stderr Bool) (any-function-uses-stderr? functions)
         (uses-filesystem Bool) (any-function-uses-host-filesystem? functions)
         (sockets Bool) (any-function-uses-host-socket? functions)
         (clock Bool) (any-function-uses-host-clock? functions)
@@ -17011,14 +17154,16 @@
           (append-type-def arena-types (atom-state-handle-type))
           arena-types)
         (effects (Vec core/EffectDef))
-        (slice-effects uses-environment uses-stdout uses-filesystem sockets clock)
+        (slice-effects uses-environment uses-stdout uses-stderr
+          uses-filesystem sockets clock)
         (regions (Vec core/RegionDef)) (slice-regions)
         (capabilities (Vec core/CapabilityDef))
-        (slice-capabilities uses-environment uses-stdout uses-filesystem sockets clock)
+        (slice-capabilities uses-environment uses-stdout uses-stderr
+          uses-filesystem sockets clock)
         (root core/NativeId) (lower-id "typed-stage" [source-digest])
         (nodes (Vec stages/TermNodeV0))
         (typed-term-nodes types functions effects uses-environment uses-stdout
-          uses-filesystem sockets clock)
+          uses-stderr uses-filesystem sockets clock)
         (terms stages/TermGraphV0)
         (stages/->TermGraphV0 root
           (conj nodes
@@ -17035,8 +17180,8 @@
           (mapv (fn [(effect core/EffectDef)] core/NativeId
                   (core/effectdef-id effect)) effects)
           [(arena-region-id) (atom-state-region-id)]
-          (slice-capability-ids uses-environment uses-stdout uses-filesystem
-            sockets clock)
+          (slice-capability-ids uses-environment uses-stdout uses-stderr
+            uses-filesystem sockets clock)
           [(type-id "LowerFailure")])
         (encoding String) (stages/encode-typed-stage typed-stage)
         (digest String) (stages/content-digest encoding)
@@ -17479,10 +17624,14 @@
         (if (function-uses-stdout? function)
           (conj with-environment (host-stdout-capability-id))
           with-environment)
+        (with-stderr (Vec core/NativeId))
+        (if (function-uses-stderr? function)
+          (conj with-stdout (host-stderr-capability-id))
+          with-stdout)
         (with-filesystem (Vec core/NativeId))
         (if (function-uses-host-filesystem? function)
-          (conj with-stdout (host-filesystem-capability-id))
-          with-stdout)
+          (conj with-stderr (host-filesystem-capability-id))
+          with-stderr)
         (with-socket (Vec core/NativeId))
         (if (function-uses-host-socket? function)
           (conj with-filesystem (host-socket-capability-id))
@@ -17494,6 +17643,7 @@
 (defn host-capability-id? [(capability core/NativeId)] Bool
   (or (same-id? capability (host-environment-capability-id))
       (same-id? capability (host-stdout-capability-id))
+      (same-id? capability (host-stderr-capability-id))
       (same-id? capability (host-filesystem-capability-id))
       (same-id? capability (host-socket-capability-id))
       (same-id? capability (host-clock-capability-id))))
@@ -17831,6 +17981,56 @@
     "v0"
     layouts-digest))
 
+(defn host-text-output-abi
+  [(abi-id core/NativeId)
+   (function-id core/NativeId)
+   (symbol String)
+   (effect-id core/NativeId)
+   (capability-id core/NativeId)
+   (layouts-digest String)]
+  core/AbiDeclV0
+  (core/->AbiDeclV0
+    abi-id
+    function-id
+    symbol
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    [(core/->AbiValueV0 "text" (text-type-id)
+       (core/->BorrowedV0 true) nil)]
+    nil
+    (type-id "LowerFailure")
+    [effect-id]
+    [capability-id]
+    "v0"
+    layouts-digest))
+
+(defn host-stdout-write-abi [(layouts-digest String)] core/AbiDeclV0
+  (host-text-output-abi
+    (host-stdout-write-abi-id)
+    (host-stdout-write-function-id)
+    "native_host_stdout_write_v0"
+    (host-stdout-effect-id)
+    (host-stdout-capability-id)
+    layouts-digest))
+
+(defn host-stderr-write-abi [(layouts-digest String)] core/AbiDeclV0
+  (host-text-output-abi
+    (host-stderr-write-abi-id)
+    (host-stderr-write-function-id)
+    "native_host_stderr_write_v0"
+    (host-stderr-effect-id)
+    (host-stderr-capability-id)
+    layouts-digest))
+
+(defn host-stderr-write-line-abi [(layouts-digest String)] core/AbiDeclV0
+  (host-text-output-abi
+    (host-stderr-write-line-abi-id)
+    (host-stderr-write-line-function-id)
+    "native_host_stderr_write_line_v0"
+    (host-stderr-effect-id)
+    (host-stderr-capability-id)
+    layouts-digest))
+
 (defn host-clock-abi [(layouts-digest String)] core/AbiDeclV0
   (core/->AbiDeclV0
     (host-clock-abi-id)
@@ -18008,14 +18208,27 @@
             (if (nil? optional)
               exports
               (conj exports (host-environment-abi optional digest)))))
-        (with-stdout (Vec core/AbiDeclV0))
-        (if (any-function-uses-stdout? functions)
-          (conj with-environment (host-stdout-abi digest))
+        (with-stdout-write (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions (host-stdout-write-abi-id))
+          (conj with-environment (host-stdout-write-abi digest))
           with-environment)
+        (with-stdout (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions (host-stdout-abi-id))
+          (conj with-stdout-write (host-stdout-abi digest))
+          with-stdout-write)
+        (with-stderr-write (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions (host-stderr-write-abi-id))
+          (conj with-stdout (host-stderr-write-abi digest))
+          with-stdout)
+        (with-stderr (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-stderr-write-line-abi-id))
+          (conj with-stderr-write (host-stderr-write-line-abi digest))
+          with-stderr-write)
         (with-filesystem (Vec core/AbiDeclV0))
         (if (any-function-uses-host-filesystem? functions)
-          (vec (concat with-stdout (host-filesystem-abis digest)))
-          with-stdout)
+          (vec (concat with-stderr (host-filesystem-abis digest)))
+          with-stderr)
         (with-clock (Vec core/AbiDeclV0))
         (if (any-function-uses-host-clock? functions)
           (conj with-filesystem (host-clock-abi digest))
@@ -19102,6 +19315,16 @@
                   "host-stdout"
                   "non-affine"])))]
           [])
+        (stderr-capability-nodes (Vec stages/TermNodeV0))
+        (if (core/id-in? (core/capability-ids capabilities)
+              (host-stderr-capability-id))
+          [(stages/->TermNodeV0 (host-stderr-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
+                 [(id-value (host-stderr-capability-id))
+                  "host-stderr"
+                  "non-affine"])))]
+          [])
         (filesystem-capability-nodes (Vec stages/TermNodeV0))
         (if (core/id-in? (core/capability-ids capabilities)
               (host-filesystem-capability-id))
@@ -19134,7 +19357,8 @@
           [])]
     (vec (concat type-nodes effect-nodes layout-nodes function-nodes abi-nodes
            obligation-nodes environment-capability-nodes
-           stdout-capability-nodes filesystem-capability-nodes
+           stdout-capability-nodes stderr-capability-nodes
+           filesystem-capability-nodes
            socket-capability-nodes
            clock-capability-nodes
            [(stages/->TermNodeV0 (arena-region-id)
@@ -19332,7 +19556,14 @@
         (and (> (count functions) 0)
           (= (+ (count (public-ready-functions typed-functions functions))
                (if (any-function-uses-environment? typed-functions) 1 0)
-               (if (any-function-uses-stdout? typed-functions) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-stdout-write-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-stdout-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-stderr-write-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-stderr-write-line-abi-id)) 1 0)
                (if (any-function-uses-host-filesystem? typed-functions) 4 0)
                (if (any-function-uses-host-clock? typed-functions) 1 0)
                (if (any-function-uses-host-socket? typed-functions) 5 0))
