@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns host.consumer
+  (:require [game.notifications :as game]
+            [host.notifications :as host]))
+
+(defn both [] (Vec String)
+  [(game/game-token) (host/host-token)])

@@ -974,6 +974,10 @@
      '(declare-extern obj Any)
      '(defn f! [(obj Any)] Any (js/set! obj .my-prop 99)))
 
+   (check-js-contains "js/set! emits nil as null"
+     "target.value = null"
+     '(defn clear! [(target Any)] Any (js/set! target .value nil)))
+
    (check-js-contains "js/get keeps a static selector byte-exact"
      "obj[\"my-prop\"]"
      '(declare-extern obj Any)

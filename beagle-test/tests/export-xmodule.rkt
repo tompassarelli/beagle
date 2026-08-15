@@ -20,6 +20,11 @@
 (test-case "a correct call to a js/export'd function still checks"
   (check-not-exn (lambda () (check-file "ok.bjs"))))
 
+(test-case "same-basename required modules resolve by full namespace"
+  (check-not-exn
+   (lambda ()
+     (check-file "same-basename/host/consumer.bjs"))))
+
 (test-case "a bad call to a :refer'd js/export'd function is rejected"
   (check-exn #rx"arg 1 expected Float, got String"
              (lambda () (check-file "bad.bjs"))))

@@ -12,6 +12,7 @@
 
 (define (emit-jst-expr e)
   (cond
+    [(eq? e 'nil) "null"]
     [(symbol? e) (jst-resolved-name e)]
     [(string? e) (~v e)]
     [(boolean? e) (if e "true" "false")]

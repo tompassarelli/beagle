@@ -215,28 +215,47 @@
          (define source-dir
            (let-values ([(d _n _d?) (split-path abs-source)])
              d))
-         (define (try-at dir-root)
-           (define (try-extensions dir-prefix)
-             (for/or ([ext BEAGLE-EXTENSIONS])
-               (define p (if (null? dir-prefix)
-                           (build-path dir-root (string-append base-name ext))
-                           (apply build-path dir-root
-                                  (append dir-prefix (list (string-append base-name ext))))))
-               (and (file-exists? p) p)))
-           (or (try-extensions dir-segs)
-               (and (not (null? dir-segs))
-                    (let ([flat (try-extensions '())])
-                      (and flat
-                           (not (equal? (simplify-path flat)
-                                        (simplify-path abs-source)))
-                           flat)))))
-         (or (try-at source-dir)
-             (let walk ([cur source-dir])
-               (define-values (parent _name _dir?) (split-path cur))
-               (and (path? parent)
-                    (not (equal? (simplify-path parent) (simplify-path cur)))
-                    (or (try-at parent)
-                        (walk parent))))))))
+         (define (try-extensions dir-root dir-prefix)
+           (for/or ([ext BEAGLE-EXTENSIONS])
+             (define p
+               (if (null? dir-prefix)
+                   (build-path dir-root (string-append base-name ext))
+                   (apply build-path dir-root
+                          (append dir-prefix
+                                  (list (string-append base-name ext))))))
+             (and (file-exists? p) p)))
+         (define (walk-roots find-at)
+           (let walk ([cur source-dir])
+             (or
+              (find-at cur)
+              (let-values ([(parent _name _dir?) (split-path cur)])
+                (and (path? parent)
+                     (not (equal? (simplify-path parent)
+                                  (simplify-path cur)))
+                     (walk parent))))))
+         (define (declares-namespace? path)
+           (for/or ([datum (in-list (read-beagle-datums path))])
+             (match datum
+               [(list* 'ns (? symbol? declared) _)
+                (eq? declared ns-sym)]
+               [_ #f])))
+         ;; Namespace identity outranks proximity. Search the complete authored
+         ;; namespace path at every ancestor before considering a flat sibling;
+         ;; otherwise host/notifications can steal game.notifications merely
+         ;; because an importer happens to live under host/.
+         (or
+          (walk-roots
+           (lambda (root) (try-extensions root dir-segs)))
+          (and
+           (not (null? dir-segs))
+           (walk-roots
+            (lambda (root)
+              (define flat (try-extensions root '()))
+              (and flat
+                   (not (equal? (simplify-path flat)
+                                (simplify-path abs-source)))
+                   (declares-namespace? flat)
+                   flat))))))))
 
 (define (qualify-name prefix-sym name-sym)
   (string->symbol

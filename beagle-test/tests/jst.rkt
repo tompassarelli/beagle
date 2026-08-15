@@ -153,6 +153,35 @@
    ;; ===== Type checking =====
    (test-suite "type-check"
 
+     (test-case "super is lexical only inside a derived js/class"
+       (define emitted
+         (jst-emit
+          (jst-preamble
+           '(declare-extern Error Any)
+           '(js/class Child extends Error
+              (constructor [(message String)]
+                Nil
+                (super message)
+                (js/return))))))
+       (check-true (string-contains? emitted "super(message);"))
+       (for ([forms
+              (in-list
+               (list
+                (jst-preamble
+                 '(js/class Child
+                    (constructor [(message String)]
+                      Nil
+                      (super message)
+                      (js/return))))
+                (jst-preamble
+                 '(declare-extern Error Any)
+                 '(js/class Child extends Error
+                    (constructor [(message String)] Nil (js/return)))
+                 '(defn stray [(message String)] Any (super message)))))])
+         (check-exn
+          #rx"unresolved function `super`"
+          (lambda () (type-check! (jst-parse forms))))))
+
      (test-case "js/class rejected in CLJ target"
        (check-exn
         exn:fail?

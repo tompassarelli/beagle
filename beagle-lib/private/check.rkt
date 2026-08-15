@@ -5875,16 +5875,18 @@
   (when (jst-class-extends e)
     (infer-expr (jst-class-extends e) env))
   (for ([m (in-list (jst-class-methods e))])
-    (infer-jst-method m env))
+    (infer-jst-method m env (and (jst-class-extends e) #t)))
   ANY)
 
-(define (infer-jst-method e env)
+(define (infer-jst-method e env [derived? #f])
   (define all-params
     (if (jst-method-rest-param e)
         (append (jst-method-params e) (list (jst-method-rest-param e)))
         (jst-method-params e)))
   (define body-env (extend-with-params env all-params))
   (hash-set! body-env 'this ANY)
+  (when derived?
+    (hash-set! body-env 'super ANY))
   (define body (jst-method-body e))
   (define actual-ret (jst-infer-body body body-env))
   (define expected-ret (jst-method-return-type e))
@@ -7148,7 +7150,11 @@
              (jst-method-params method)
              (jst-method-rest-param method))
             'this))
-         (parameterize ([current-local-bindings param-locals])
+         (define class-locals
+           (if (jst-class-extends e)
+               (set-add param-locals 'super)
+               param-locals))
+         (parameterize ([current-local-bindings class-locals])
            (for-each walk (jst-method-body method))))]
       [(match-form? e)
        (walk (match-form-target e))

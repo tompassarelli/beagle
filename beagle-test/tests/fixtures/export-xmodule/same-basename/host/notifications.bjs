@@ -1,0 +1,4 @@
+#lang beagle/js
+(ns host.notifications)
+
+(js/export (defn host-token [] String "host"))

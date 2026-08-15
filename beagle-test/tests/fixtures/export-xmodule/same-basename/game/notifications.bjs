@@ -1,0 +1,4 @@
+#lang beagle/js
+(ns game.notifications)
+
+(js/export (defn game-token [] String "game"))
