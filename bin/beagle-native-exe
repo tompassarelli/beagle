@@ -179,19 +179,44 @@ for source in "${sources[@]}"; do
     [[ -f "$source" ]] || die "source file not found: $source"
 done
 
+bundle_ast="$work/source_bundle.ast.json"
+bundle_log="$work/source_bundle.ast.log"
+set +e
+"$BIN/beagle-ast" --bundle "${sources[@]}" >"$bundle_ast" 2>"$bundle_log"
+bundle_rc=$?
+set -e
+if [[ $bundle_rc -ne 0 ]]; then
+    sed -n '1,200p' "$bundle_log" >&2
+    die "could not inspect exports in coherent source bundle"
+fi
+
+python3 - "$bundle_ast" "$work" "${sources[@]}" <<'PY'
+import json
+import pathlib
+import sys
+
+bundle_path = pathlib.Path(sys.argv[1])
+work = pathlib.Path(sys.argv[2])
+sources = [str(pathlib.Path(source).resolve()) for source in sys.argv[3:]]
+bundle = json.loads(bundle_path.read_text())
+modules = {module["source"]: module["program"] for module in bundle["modules"]}
+if set(modules) != set(sources):
+    missing = sorted(set(sources) - set(modules))
+    extra = sorted(set(modules) - set(sources))
+    raise SystemExit(
+        f"beagle native-exe: bundle AST source mismatch: missing={missing} extra={extra}"
+    )
+for index, source in enumerate(sources):
+    destination = work / f"source_{index}.ast.json"
+    destination.write_text(
+        json.dumps(modules[source], sort_keys=True, separators=(",", ":")) + "\n"
+    )
+PY
+
 ast_args=()
 source_index=0
 for source in "${sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
-    ast_log="$work/source_${source_index}.ast.log"
-    set +e
-    "$BIN/beagle-ast" "$source" >"$ast" 2>"$ast_log"
-    ast_rc=$?
-    set -e
-    if [[ $ast_rc -ne 0 ]]; then
-        sed -n '1,200p' "$ast_log" >&2
-        die "could not inspect exports in source: $source"
-    fi
     if ! bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
         >"$work/source_${source_index}.verify.log" 2>&1; then
         sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2

@@ -3,6 +3,7 @@
 #
 # Usage:
 #   beagle ast <source.bgl|.bclj|.bjs|.bnix>
+#   beagle ast --bundle <source>...
 #
 # Parses and checks without executing or emitting the source program. Output is
 # canonical JSON for deterministic external consumers.
@@ -10,48 +11,106 @@
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
-if [[ $# -ne 1 ]]; then
-    echo "usage: beagle ast <source>" >&2
+bundle=0
+if [[ "${1:-}" == "--bundle" ]]; then
+    bundle=1
+    shift
+fi
+
+if [[ $# -lt 1 || ( $bundle -eq 0 && $# -ne 1 ) ]]; then
+    echo "usage: beagle ast [--bundle] <source>..." >&2
     exit 2
 fi
 
-src="$1"
-
-if [[ ! -f "$src" ]]; then
-    echo "beagle ast: source file not found: $src" >&2
-    exit 1
-fi
+for src in "$@"; do
+    if [[ ! -f "$src" ]]; then
+        echo "beagle ast: source file not found: $src" >&2
+        exit 1
+    fi
+done
 
 # Require by file path (not collection) so the WORKTREE's beagle-lib — which
 # carries ast-json.rkt — is what loads, instead of the canonical checkout's
 # collection link (which lacks it).
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-src_abs="$(realpath "$src")"
-source_root="$(git -C "$(dirname "$src_abs")" rev-parse --show-toplevel 2>/dev/null || true)"
-source_id="$src_abs"
-if [[ -n "$source_root" ]]; then
-    source_root="$(realpath "$source_root")"
-    case "$src_abs" in
-        "$source_root"/*) source_id="${src_abs#"$source_root"/}" ;;
-    esac
+if [[ $bundle -eq 0 ]]; then
+    src_abs="$(realpath "$1")"
+    source_root="$(git -C "$(dirname "$src_abs")" rev-parse --show-toplevel 2>/dev/null || true)"
+    source_id="$src_abs"
+    if [[ -n "$source_root" ]]; then
+        source_root="$(realpath "$source_root")"
+        case "$src_abs" in
+            "$source_root"/*) source_id="${src_abs#"$source_root"/}" ;;
+        esac
+    fi
+
+    "$RACKET" -e "
+    (require (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
+             (file \"$BEAGLE_ROOT/beagle-lib/private/check.rkt\")
+             (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\"))
+
+    (define src (vector-ref (current-command-line-arguments) 0))
+    (define prog (parse-program/file src))
+    (type-check-with-locs!
+     prog
+     (lambda (e _loc-stx) (raise e))
+     #:capture-types? #t)
+    (define source-id (vector-ref (current-command-line-arguments) 1))
+    (define output (open-output-string))
+    (write-checked-program-json
+     prog output
+     #:source-id source-id)
+    (display (get-output-string output))
+    " -- "$src_abs" "$source_id"
+    exit
 fi
 
-"$RACKET" -e "
-(require (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
-         (file \"$BEAGLE_ROOT/beagle-lib/private/check.rkt\")
-         (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\"))
+bundle_args=()
+for src in "$@"; do
+    bundle_args+=("$(realpath "$src")")
+done
 
-(define src (vector-ref (current-command-line-arguments) 0))
-(define prog (parse-program/file src))
-(type-check-with-locs!
- prog
- (lambda (e _loc-stx) (raise e))
- #:capture-types? #t)
-(define source-id (vector-ref (current-command-line-arguments) 1))
-(define output (open-output-string))
-(write-checked-program-json
- prog output
- #:source-id source-id)
-(display (get-output-string output))
-" -- "$src_abs" "$source_id"
+"$RACKET" -e "
+(require json
+         racket/file
+         (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
+         (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\")
+         (file \"$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt\"))
+
+(define paths (vector->list (current-command-line-arguments)))
+(define sources
+  (for/list ([path (in-list paths)])
+    (stxs->module-source (read-beagle-syntax path) path)))
+(define checked
+  (check-module-overlay
+   sources
+   #:emit? #f
+   #:capture-types? #t
+   #:closed? #t
+   #:parse-source
+   (lambda (source resolver)
+     (define path (format \"~a\" (module-source-source-id source)))
+     (parse-program/bytes
+      (file->bytes path)
+      #:source-path path
+      #:module-resolver resolver))))
+(unless (overlay-check-result-ok? checked)
+  (for ([diagnostic (in-list (overlay-check-result-diagnostics checked))])
+    (eprintf \"beagle ast: ~a: ~a~n\"
+             (or (overlay-diagnostic-source diagnostic) \"bundle\")
+             (overlay-diagnostic-message diagnostic)))
+  (exit 1))
+(define modules
+  (for/list ([module (in-list (overlay-check-result-modules checked))])
+    (define output (open-output-string))
+    (write-checked-program-json
+     (checked-overlay-module-program module)
+     output
+     #:source-id (format \"~a\" (checked-overlay-module-source module)))
+    (hasheq
+     'source (format \"~a\" (checked-overlay-module-source module))
+     'program (string->jsexpr (get-output-string output)))))
+(write-json (hasheq 'schemaVersion 1 'modules modules))
+(newline)
+" -- "${bundle_args[@]}"

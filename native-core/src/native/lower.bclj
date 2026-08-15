@@ -10009,19 +10009,72 @@
       candidate
       nil)))
 
+(defn union-variant-named
+  [(types (Vec core/TypeDef))
+   (target-type core/NativeId)
+   (name String)]
+  (U core/TypeVariant Nil)
+  (let [(variants (Vec core/TypeVariant))
+        (union-variants-of types target-type)]
+    (loop [(position Int) 0]
+      (if (>= position (count variants))
+        nil
+        (if (= name (core/typevariant-name (nth variants position)))
+          (nth variants position)
+          (recur (+ position 1)))))))
+
+(defn variant-record-type-id
+  [(types (Vec core/TypeDef)) (variant core/TypeVariant)] (U core/NativeId Nil)
+  (let [(payload (U core/NativeId Nil)) (core/typevariant-payload-type variant)
+        (definition (U core/TypeDef Nil))
+        (if (nil? payload) nil (lookup-type types payload))]
+    (if (nil? definition)
+      nil
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
+        (if (instance? native.core.ReferenceType shape)
+          (core/referencetype-target-type shape)
+          nil)))))
+
+(defn match-record-type-id-for-target
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (target-type core/NativeId)
+   (pattern core/NativeId)]
+  (U core/NativeId Nil)
+  (let [(resolved (U core/NativeId Nil))
+        (match-record-type-id env owner pattern)]
+    (if (some? resolved)
+      resolved
+      (let [(index SourceIndexV0) (bodyenvv0-index env)
+            (variant (U core/TypeVariant Nil))
+            (union-variant-named (bodyenvv0-types env) target-type
+              (fact-text index pattern "name"))]
+        (if (nil? variant)
+          nil
+          (variant-record-type-id (bodyenvv0-types env) variant))))))
+
 (defn match-record-variant-id
   [(env BodyEnvV0)
    (owner core/NativeId)
    (target-type core/NativeId)
    (pattern core/NativeId)]
   (U core/NativeId Nil)
-  (let [(record-type (U core/NativeId Nil))
-        (match-record-type-id env owner pattern)]
-    (if (nil? record-type)
-      nil
-      (let [(hit NarrowHitV0)
-            (reference-variant-for (bodyenvv0-types env) target-type record-type)]
-        (if (narrowhitv0-found hit) (narrowhitv0-variant-id hit) nil)))))
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (named (U core/TypeVariant Nil))
+        (union-variant-named (bodyenvv0-types env) target-type
+          (fact-text index pattern "name"))]
+    (if (some? named)
+      (core/typevariant-id named)
+      (let [(record-type (U core/NativeId Nil))
+            (match-record-type-id env owner pattern)]
+        (if (nil? record-type)
+          nil
+          (let [(hit NarrowHitV0)
+                (reference-variant-for
+                  (bodyenvv0-types env) target-type record-type)]
+            (if (narrowhitv0-found hit)
+              (narrowhitv0-variant-id hit)
+              nil)))))))
 
 (defn native-id-count [(ids (Vec core/NativeId)) (target core/NativeId)] Int
   (loop [(position Int) 0 (found Int) 0]
@@ -10049,7 +10102,8 @@
           (and (some? pattern)
             (= "record" (match-pattern-kind index pattern))
             (let [(record-type (U core/NativeId Nil))
-                  (match-record-type-id env owner pattern)]
+                  (match-record-type-id-for-target
+                    env owner target-type pattern)]
               (and (some? record-type) (same-id? target-type record-type))))))
       (if (= 0 (count variants))
         false
@@ -10241,7 +10295,7 @@
 
       (= "record" kind)
       (let [(record-type (U core/NativeId Nil))
-            (match-record-type-id env owner pattern)]
+            (match-record-type-id-for-target env owner target-type pattern)]
         (cond
           (nil? record-type)
           (fail-result state
@@ -10314,7 +10368,7 @@
       (let [(bindings (Vec core/NativeId))
             (match-pattern-binding-items index pattern)
             (record-type (U core/NativeId Nil))
-            (match-record-type-id env owner pattern)]
+            (match-record-type-id-for-target env owner target-type pattern)]
         (if (nil? record-type)
           (state-fail state
             (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "

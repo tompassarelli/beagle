@@ -204,7 +204,7 @@ for source in "${sources[@]}"; do
         die "$source must begin with bare #lang beagle"
 done
 
-for command in bb flock sha256sum sync; do
+for command in bb flock python3 sha256sum sync; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
@@ -285,15 +285,46 @@ projector_args=()
 wasm_checked_sources=()
 source_snapshot_paths=()
 source_snapshot_digests=()
-source_index=0
+normalized_sources=()
+source_digest_befores=()
 for source in "${sources[@]}"; do
     source="$(realpath "$source")"
+    normalized_sources+=("$source")
+    source_digest_befores+=("$(sha256sum "$source" | awk '{print $1}')")
+done
+
+bundle_ast="$work/source_bundle.ast.json"
+run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
+    "$BIN/beagle-ast" --bundle "${normalized_sources[@]}" >"$bundle_ast"
+
+python3 - "$bundle_ast" "$work" "${normalized_sources[@]}" <<'PY'
+import json
+import pathlib
+import sys
+
+bundle_path = pathlib.Path(sys.argv[1])
+work = pathlib.Path(sys.argv[2])
+sources = [str(pathlib.Path(source).resolve()) for source in sys.argv[3:]]
+bundle = json.loads(bundle_path.read_text())
+modules = {module["source"]: module["program"] for module in bundle["modules"]}
+if set(modules) != set(sources):
+    missing = sorted(set(sources) - set(modules))
+    extra = sorted(set(modules) - set(sources))
+    raise SystemExit(
+        f"beagle build: bundle AST source mismatch: missing={missing} extra={extra}"
+    )
+for index, source in enumerate(sources):
+    destination = work / f"source_{index}.ast.json"
+    destination.write_text(
+        json.dumps(modules[source], sort_keys=True, separators=(",", ":")) + "\n"
+    )
+PY
+
+source_index=0
+for source in "${normalized_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
-    source_digest_before="$(sha256sum "$source" | awk '{print $1}')"
-    run_phase "ast-$source_index" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
-        "$BIN/beagle-ast" "$source" >"$ast"
     source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
-    [[ "$source_digest_before" == "$source_digest_after" ]] ||
+    [[ "${source_digest_befores[$source_index]}" == "$source_digest_after" ]] ||
         die "source changed while its checked projection was captured: $source"
     ast_metadata="$work/source_${source_index}.metadata"
     run_phase "ast-verify-$source_index" \
