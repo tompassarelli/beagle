@@ -28,22 +28,17 @@ core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
     echo "beagle build: bounded supervisor is unavailable: $SUPERVISOR" >&2
     exit 2
 }
-command -v unshare >/dev/null 2>&1 || {
-    echo "beagle build: required command is unavailable: unshare" >&2
-    exit 2
-}
-
-# One private PID namespace owns the entire build tree. Individual phases use
-# nested namespaces with tighter deadlines, so every boundary adopts and reaps
-# descendants instead of waiting on a shell or a GNU-timeout process group.
+# One bounded supervisor owns the entire build tree. It prefers a private PID
+# namespace and falls back to a scoped process group when the host forbids
+# unprivileged user namespaces. Individual phases use the same supervisor with
+# tighter deadlines.
 if [[ "${BEAGLE_CORE_SUPERVISED:-0}" != "1" ]]; then
     overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
     [[ "$overall_timeout" =~ ^[1-9][0-9]*$ ]] || {
         echo "beagle build: BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS must be a positive integer" >&2
         exit 2
     }
-    exec unshare --user --map-current-user --pid --fork --kill-child \
-        "$RACKET" "$SUPERVISOR" \
+    exec "$RACKET" "$SUPERVISOR" \
         "$overall_timeout" "$core_kill_grace" -- \
         env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
 fi
@@ -63,8 +58,7 @@ run_bounded() {
     local seconds="$1"
     local kill_grace="$2"
     shift 2
-    unshare --user --map-current-user --pid --fork --kill-child \
-        "$RACKET" "$SUPERVISOR" \
+    "$RACKET" "$SUPERVISOR" \
         "$seconds" "$kill_grace" -- "$@"
 }
 
@@ -198,7 +192,7 @@ for source in "${sources[@]}"; do
         die "$source must begin with bare #lang beagle"
 done
 
-for command in bb flock sha256sum sync unshare; do
+for command in bb flock sha256sum sync; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"

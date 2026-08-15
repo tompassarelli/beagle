@@ -1,13 +1,15 @@
 #lang racket/base
 
-;; Run as PID 1 in a private PID namespace. The command has an accountable
-;; deadline, and every descendant is signaled and reaped before this process
-;; returns—even if an intermediate shell exits without waiting for its child.
+;; Run as PID 1 in a private PID namespace when the host permits it. Otherwise
+;; become a child subreaper and contain the command in a new process group. The
+;; command has an accountable deadline, and every descendant is signaled and
+;; reaped before this process returns—even if an intermediate shell exits
+;; without waiting for its child.
 ;;
-;; Invoked bare (not PID 1), the supervisor re-execs itself under unshare
-;; before any other work: kill(-1) outside a private PID namespace addresses
-;; every process the invoking user owns, so a stray un-namespaced run must
-;; become a contained one, never a session-wide sweep.
+;; Invoked bare (not PID 1), the supervisor probes and prefers unshare. A host
+;; that installs unshare but disables unprivileged user namespaces falls back
+;; to a process group whose exact ID is the direct child's PID; it never uses
+;; kill(-1) outside a private namespace.
 ;;
 ;; CLI: run-bounded.rkt SECONDS KILL-GRACE -- COMMAND [ARG ...]
 ;; Status: child exit status; 124 on deadline; 2 on supervisor contract/setup
@@ -29,10 +31,14 @@
   (get-ffi-obj "waitpid" libc (_fun _int _pointer _int -> _int)))
 (define getpid
   (get-ffi-obj "getpid" libc (_fun -> _int)))
+(define become-subreaper
+  (get-ffi-obj "prctl" libc
+               (_fun _int _ulong _ulong _ulong _ulong -> _int)))
 
 (define SIGTERM 15)
 (define SIGKILL 9)
 (define WNOHANG 1)
+(define PR_SET_CHILD_SUBREAPER 36)
 
 (define (fail detail)
   (eprintf "beagle supervisor: ~a\n" detail)
@@ -60,22 +66,34 @@
 (define command (list-ref arguments 3))
 (define command-arguments (drop arguments 4))
 
-;; Safety by construction: everything below assumes PID 1 of a private PID
-;; namespace. A bare invocation re-execs into one; the wrapped run is PID 1
-;; and falls through. Callers' explicit unshare wrappers remain the API —
-;; this is the net under them, so refusal (no unshare) beats running bare.
-(unless (= (getpid) 1)
-  (define unshare-executable
-    (or (find-executable-path "unshare")
-        (fail "util-linux unshare is required to self-contain a bare run")))
+;; Safety by construction: namespace mode may signal PID -1 because this
+;; process is PID 1 there. Fallback mode signals only the process group it
+;; created and adopts orphaned descendants as a subreaper.
+(define namespace-mode? (= (getpid) 1))
+(define force-process-group?
+  (equal? "1" (getenv "BEAGLE_BOUNDED_FORCE_PROCESS_GROUP")))
+(when (and (not namespace-mode?) (not force-process-group?))
+  (define unshare-executable (find-executable-path "unshare"))
   (define racket-executable
     (or (find-executable-path (find-system-path 'exec-file))
         (find-system-path 'exec-file)))
   (define self (path->complete-path (find-system-path 'run-file)))
-  (exit (apply system*/exit-code unshare-executable
-               "--user" "--map-current-user" "--pid" "--fork" "--kill-child"
-               racket-executable self
-               arguments)))
+  (define true-executable (find-executable-path "true"))
+  (define unshare-usable?
+    (and unshare-executable true-executable
+         (parameterize ([current-output-port (open-output-nowhere)]
+                        [current-error-port (open-output-nowhere)])
+           (zero? (system*/exit-code
+                   unshare-executable
+                   "--user" "--map-current-user" "--pid" "--fork"
+                   "--kill-child" true-executable)))))
+  (when unshare-usable?
+    (exit (apply system*/exit-code unshare-executable
+                 "--user" "--map-current-user" "--pid" "--fork"
+                 "--kill-child" racket-executable self arguments))))
+(unless namespace-mode?
+  (unless (zero? (become-subreaper PR_SET_CHILD_SUBREAPER 1 0 0 0))
+    (fail "could not become a child subreaper for process-group fallback")))
 (define executable
   (or (find-executable-path command)
       (and (file-exists? command) command)
@@ -88,15 +106,18 @@
 (define child #f)
 (define stdout-thread #f)
 (define stderr-thread #f)
+(define child-group-id #f)
 
 (define (signal-descendants signal)
-  ;; PID -1 addresses every signalable process in this PID namespace except
-  ;; this PID-1 supervisor. ESRCH is the successful no-descendants case.
-  ;; Outside a private PID namespace -1 is the user's entire session, so any
-  ;; refactor that reaches here un-namespaced must die before the sweep.
-  (unless (= (getpid) 1)
-    (fail "signal-descendants outside a private PID namespace"))
-  (void (kill-processes -1 signal)))
+  (cond
+    [namespace-mode?
+     ;; PID -1 addresses every signalable process in this private namespace
+     ;; except this PID-1 supervisor.
+     (void (kill-processes -1 signal))]
+    [child-group-id
+     ;; subprocess-group-enabled makes the child's PID its process-group ID.
+     ;; A negative target reaches that group only, even if its leader exited.
+     (void (kill-processes (- child-group-id) signal))]))
 
 (define (reap-adopted-children)
   (define status (malloc _int 'atomic))
@@ -141,6 +162,7 @@
                     [subprocess-group-enabled #t])
        (apply subprocess #f #f #f executable command-arguments)))
    (set! child process)
+   (set! child-group-id (subprocess-pid process))
    (close-output-port stdin)
    (set! stdout-thread
          (parameterize ([current-custodian child-custodian])
