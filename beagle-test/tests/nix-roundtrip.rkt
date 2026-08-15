@@ -41,9 +41,10 @@
   (check-true (string-contains? out "lib.mkOption"))
   (check-true (string-contains? out "lib.types.int"))
   (check-true (string-contains? out "lib.mkIf cfg.enable"))
-  ;; A Nix `let` binder is emitted as a strict, non-recursive application,
-  ;; so the bound value arrives as the argument rather than a `let` entry.
-  (check-true (string-contains? out "(cfg: builtins.deepSeq cfg"))
+  ;; A Nix `let` binder is emitted as a lazy, non-recursive application, so the
+  ;; bound value arrives as the argument rather than a recursive `let` entry.
+  (check-true (string-contains? out "(cfg:"))
+  (check-false (string-contains? out "builtins.deepSeq cfg"))
   (check-true (string-contains? out "config.hardware.custom)"))
   (check-true (string-contains? out "pkgs.htop"))
   (check-true (string-contains? out "${pkgs.runtimeShell}"))
@@ -99,9 +100,11 @@
 
 (test-case "nix-let-cond round-trip"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-let-cond.bnix")))
-  (check-true (string-contains? out "(cfg: builtins.deepSeq cfg"))
+  (check-true (string-contains? out "(cfg:"))
+  (check-false (string-contains? out "builtins.deepSeq cfg"))
   (check-true (string-contains? out "config.services.demo)"))
-  (check-true (string-contains? out "(isDev: builtins.deepSeq isDev"))
+  (check-true (string-contains? out "(isDev:"))
+  (check-false (string-contains? out "builtins.deepSeq isDev"))
   (check-true (string-contains? out "(cfg.environment == \"development\")"))
   (check-true (string-contains? out "lib.mkEnableOption"))
   (check-true (string-contains? out "lib.mkIf cfg.enable"))
@@ -145,7 +148,8 @@
 (test-case "nix-overlay round-trip — curried not attrset"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-overlay.bnix")))
   (check-true
-   (string-contains? out "final: builtins.deepSeq final (prev:"))
+   (string-contains? out "final: prev:"))
+  (check-false (string-contains? out "builtins.deepSeq final"))
   (check-false (string-contains? out "{ final, prev"))
   (check-true (string-contains? out "prev.callPackage"))
   (check-true (string-contains? out "prev.hello.overrideAttrs")))

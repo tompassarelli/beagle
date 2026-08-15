@@ -122,8 +122,9 @@
 
 (test-case "defn emits curried function"
   (define out (nix-emit "(define-target nix) (defn add [(a Int) (b Int)] Int (+ a b))"))
-  (check-true (string-contains? out "add = a: builtins.deepSeq a (b:"))
-  (check-true (string-contains? out "builtins.deepSeq b"))
+  (check-true (string-contains? out "add = a: b:"))
+  (check-false (string-contains? out "builtins.deepSeq a"))
+  (check-false (string-contains? out "builtins.deepSeq b"))
   (check-true (string-contains? out "a + b")))
 
 (test-case "nullary source functions retain a unit call boundary"
@@ -150,22 +151,20 @@
 
 (test-case "let emits sequential non-recursive binding applications"
   (define out (nix-emit "(define-target nix) (let [x 1 y 2] (+ x y))"))
-  (check-true (string-contains? out "x: builtins.deepSeq x"))
-  (check-true (string-contains? out "y: builtins.deepSeq y"))
+  (check-false (string-contains? out "builtins.deepSeq x"))
+  (check-false (string-contains? out "builtins.deepSeq y"))
   (check-true (string-contains? out "x + y")))
 
-(test-case "unconstrained let RHS stays outside its own binder and is forced"
+(test-case "unconstrained let RHS stays outside its own binder and lazy"
   (define out
     (constrained-emit
      (string-append
       "(def x 7) "
       "(let [x x ignored (let [(bad Int positive?) -1] 0)] x)")))
-  (check-true (string-contains? out "((x: builtins.deepSeq x"))
+  (check-true (string-contains? out "((x:"))
   ;; The source `x` is the application argument, not a recursive `x = x`.
   (check-false (string-contains? out "x = x;"))
-  ;; The unused `ignored` RHS is still sequenced, so its nested constraint
-  ;; cannot disappear under Nix laziness.
-  (check-true (string-contains? out "ignored: builtins.deepSeq ignored"))
+  (check-false (string-contains? out "ignored: builtins.deepSeq ignored"))
   (check-true (string-contains? out "Binding constraint failed: bad")))
 
 ;; --- data structures -------------------------------------------------------
@@ -194,8 +193,9 @@
 
 (test-case "defrecord emits constructor + accessors"
   (define out (nix-emit "(define-target nix) (defrecord Point [(x Int) (y Int)])"))
-  (check-true (string-contains? out "mkPoint = x: builtins.deepSeq x (y:"))
-  (check-true (string-contains? out "builtins.deepSeq y"))
+  (check-true (string-contains? out "mkPoint = x: y:"))
+  (check-false (string-contains? out "builtins.deepSeq x"))
+  (check-false (string-contains? out "builtins.deepSeq y"))
   (check-true (string-contains? out "_tag = \"point\""))
   (check-true (string-contains? out "point-x = r: r.x;"))
   (check-true (string-contains? out "point-y = r: r.y;")))
@@ -236,7 +236,7 @@
     (substring-index out
                      "bgl____constraint__thunk__0 = _: global-predicate"))
   (define binder-pos
-    (substring-index out "x: builtins.deepSeq x (global-predicate:"))
+    (substring-index out "x: global-predicate:"))
   (check-not-false predicate-pos)
   (check-not-false binder-pos)
   (check-true (< predicate-pos binder-pos)))
@@ -289,7 +289,7 @@
   (define out
     (constrained-emit "(loop [(x Int positive?) 1 (y Int greater-than-x?) x] y)"))
   (check-true
-   (string-contains? out "bgl____loop__body = x: builtins.deepSeq x (y:"))
+   (string-contains? out "bgl____loop__body = x: y:"))
   (check-true (string-contains? out "bgl____loop = bgl____binding__0:"))
   (check-true
    (string-contains?
@@ -329,7 +329,9 @@
   (check-true
    (string-contains?
     out
-    "(x: builtins.deepSeq x (y: builtins.deepSeq y ("))
+    "x: y:"))
+  (check-false (string-contains? out "builtins.deepSeq x"))
+  (check-false (string-contains? out "builtins.deepSeq y"))
   (check-true
    (string-contains?
     out
@@ -346,8 +348,8 @@
    (string-contains?
     union-out
     "bgl____24626561676c65247265636f726424436972636c652476616c6964617465 ="))
-  (check-true
-   (string-contains? union-out "(radius: builtins.deepSeq radius ("))
+  (check-true (string-contains? union-out "radius:"))
+  (check-false (string-contains? union-out "builtins.deepSeq radius"))
   (check-true (string-contains? union-out "_tag = \"circle\""))
   (check-true (string-contains? union-out "circle-radius = r: r.radius"))
   (define error-out
@@ -359,8 +361,8 @@
    (string-contains?
     error-out
     "bgl____24626561676c65247265636f7264244261642476616c6964617465 ="))
-  (check-true
-   (string-contains? error-out "(code: builtins.deepSeq code ("))
+  (check-true (string-contains? error-out "code:"))
+  (check-false (string-contains? error-out "builtins.deepSeq code"))
   (check-true (string-contains? error-out "_tag = \"bad\"")))
 
 (test-case "unsupported protocol declarations fail instead of disappearing"
@@ -621,8 +623,22 @@
     `(nix/overlay ,(br 'final 'prev) ,(mt ':foo 1))))
   (check-true
    (and out
-        (string-contains? out "final: builtins.deepSeq final (prev:")))
+        (string-contains? out "final: prev:")))
+  (check-false (and out (string-contains? out "builtins.deepSeq final")))
   (check-false (and out (string-contains? out "{ final, prev"))))
+
+(test-case "overlay parameters stay lazy across a recursive Nix fixed point"
+  (define overlay
+    (nix-emit-forms '(define-target nix)
+      `(nix/overlay ,(br 'final 'prev) final.pkgs)))
+  (when (find-executable-path "nix-instantiate")
+    (define-values (ok? stdout stderr)
+      (nix-eval
+       (format
+        "let overlay = ~a; final = { pkgs = 42; self = final; }; in overlay final {}"
+        overlay)))
+    (check-true ok? stderr)
+    (check-equal? stdout "42")))
 
 (test-case "inherit emits inherit"
   (define out (nix-emit "(define-target nix) (inherit a b c)"))

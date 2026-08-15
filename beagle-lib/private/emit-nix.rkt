@@ -347,10 +347,11 @@
       [else #f]))
   (and name (set-member? (current-nix-record-types) name)))
 
-;; Emit curried lambdas through one raw aggregate per source parameter. The
-;; raw value is deep-forced once at its binding event. Predicate/default thunks
-;; are defined outside every authored binder (the checker's incoming callable
-;; scope) and invoked inside the corresponding parameter event.
+;; Emit curried lambdas through one raw aggregate per source parameter.
+;; Ordinary Nix parameters remain lazy; only an authored constraint forces its
+;; raw value. Predicate/default thunks are defined outside every authored
+;; binder (the checker's incoming callable scope) and invoked inside the
+;; corresponding parameter event.
 ;;
 ;; Map destructuring is deliberately not reconstructed as a Nix attrset formal:
 ;; a formal cannot bind an authored key like `ready?` to the safe local name
@@ -379,8 +380,7 @@
       (car indexed-default)))
   (define (emit-projected-binding name value rest)
     (define emitted (mangle-name name))
-    (format "((~a: builtins.deepSeq ~a (~a)) (~a))"
-            emitted emitted rest value))
+    (format "((~a: ~a) (~a))" emitted rest value))
   (define (emit-map-projections index p raw rest)
     (define target (param-binding-target p))
     (define keys (map-destructure-keys target))
@@ -440,7 +440,9 @@
                   bound-rest
                   (binding-constraint-failure p))
           bound-rest))
-    (format "~a: builtins.deepSeq ~a (~a)" raw raw guarded-rest))
+    (if constraint
+        (format "~a: builtins.deepSeq ~a (~a)" raw raw guarded-rest)
+        (format "~a: ~a" raw guarded-rest)))
   (define (emit-params remaining)
     (cond
       [(null? remaining) body]
@@ -509,7 +511,7 @@
                      (raw-name index)
                      bind
                      (binding-constraint-failure p)))
-           (format "builtins.deepSeq ~a (~a)" (raw-name index) bind))]))
+           bind)]))
   (if (null? indexed)
       (format "_: ~a" body)
       (for/fold ([result (emit-bindings indexed)])
@@ -1702,19 +1704,11 @@
             (binding-constraint-failure n)
             (paren-wrap value-str v))]
           [else
-           ;; Source bindings are sequential and eager. A Nix `let` is both
-           ;; recursive and lazy, which made `(let [x x] x)` self-recursive
-           ;; and allowed an unused RHS (including a constrained call) to
-           ;; escape evaluation. Function application keeps the RHS in the
-           ;; incoming lexical scope; `seq` performs the binding event before
-           ;; evaluating the remaining bindings/body. `deepSeq` is required:
-           ;; an aggregate RHS can contain a constrained call whose failure is
-           ;; otherwise hidden in a lazy list or attrset field.
-           (format "((~a: builtins.deepSeq ~a (~a)) ~a)"
-                   target-name
-                   target-name
-                   rest-str
-                   (paren-wrap value-str v))])])]))
+           ;; Function application keeps the RHS outside its own binder while
+           ;; preserving Nix laziness. Only the constrained branch above owns
+           ;; an evaluation event.
+           (format "((~a: ~a) ~a)"
+                   target-name rest-str (paren-wrap value-str v))])])]))
 
 (define (emit-binding-target b)
   (define target (param-binding-target b))
