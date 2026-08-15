@@ -163,6 +163,21 @@
           (row-text row)
           (recur (+ position 1)))))))
 
+(defn row-node-objects
+  [(rows (Vec SliceFactV0))
+   (subject String)
+   (predicate String)] (Vec String)
+  (loop [(position Int) 0 (objects (Vec String)) []]
+    (if (>= position (count rows))
+      objects
+      (let [(row SliceFactV0) (nth rows position)]
+        (recur (+ position 1)
+          (if (and (= subject (slicefactv0-subject row))
+                   (= predicate (slicefactv0-predicate row))
+                   (not (text-row? row)))
+            (conj objects (slicefactv0-object row))
+            objects))))))
+
 (defn form-node-names [(rows (Vec SliceFactV0)) (kind String)] (Vec String)
   (loop [(position Int) 0 (selected (Vec String)) []]
     (if (>= position (count rows))
@@ -179,36 +194,102 @@
   [(rows (Vec SliceFactV0))
    (root-name String)
    (fallback-name String)
-   (fallback-path String)] stages/SourceModuleV0
+   (fallback-path String)] stages/SourceModuleV1
   (let [(declared-name (U String Nil)) (row-first-text rows root-name "namespace")
         (declared-path (U String Nil)) (row-first-text rows root-name "relative-path")
         (source-digest (U String Nil))
         (row-first-text rows root-name "source-sha256")
-        (interface-digest (U String Nil))
+        (projection-digest (U String Nil))
         (row-first-text rows root-name "checked-projection-sha256")
+        (interface-digest (U String Nil))
+        (row-first-text rows root-name "interface-sha256")
         (module-name String)
         (if (or (nil? declared-name) (= "" declared-name)) fallback-name declared-name)
         (relative-path String)
         (if (or (nil? declared-path) (= "" declared-path)) fallback-path declared-path)]
-    (stages/->SourceModuleV0
+    (stages/->SourceModuleV1
       (slice-id "module" [module-name relative-path])
       module-name
       relative-path
       (if (nil? source-digest) "" source-digest)
+      (if (nil? projection-digest) "" projection-digest)
       (if (nil? interface-digest) "" interface-digest)
       (node-id root-name))))
 
 (defn source-modules
   [(rows (Vec SliceFactV0))
    (fallback-name String)
-   (fallback-path String)] (Vec stages/SourceModuleV0)
+   (fallback-path String)] (Vec stages/SourceModuleV1)
   (let [(roots (Vec String)) (form-node-names rows "module-root")]
     (if (= 0 (count roots))
       [(source-module rows "0" fallback-name fallback-path)]
       (mapv
-        (fn [(root-name String)] stages/SourceModuleV0
+        (fn [(root-name String)] stages/SourceModuleV1
           (source-module rows root-name fallback-name fallback-path))
         roots))))
+
+(defn source-module-id
+  [(modules (Vec stages/SourceModuleV1))
+   (module-name String)] core/NativeId
+  (loop [(position Int) 0]
+    (if (>= position (count modules))
+      (slice-id "missing-module" [module-name])
+      (let [(module stages/SourceModuleV1) (nth modules position)]
+        (if (= module-name (stages/sourcemodulev1-name module))
+          (stages/sourcemodulev1-id module)
+          (recur (+ position 1)))))))
+
+(defn semantic-unit-node-names [(rows (Vec SliceFactV0))] (Vec String)
+  (loop [(position Int) 0 (unique UniqueStringsV0) (->UniqueStringsV0 [] {})]
+    (if (>= position (count rows))
+      (uniquestringsv0-values unique)
+      (let [(row SliceFactV0) (nth rows position)]
+        (recur (+ position 1)
+          (if (and (= "semantic-unit-sha256" (slicefactv0-predicate row))
+                   (text-row? row))
+            (add-unique-string unique (slicefactv0-subject row))
+            unique))))))
+
+(defn sorted-node-ids [(node-names (Vec String))] (Vec core/NativeId)
+  (mapv
+    (fn [(identity String)] core/NativeId (core/->NativeId identity))
+    (sort
+      (mapv
+        (fn [(node-name String)] String
+          (core/nativeid-value (node-id node-name)))
+        node-names))))
+
+(defn source-unit
+  [(rows (Vec SliceFactV0))
+   (modules (Vec stages/SourceModuleV1))
+   (root-name String)] stages/SourceUnitV0
+  (let [(kind (U String Nil))
+        (row-first-text rows root-name "semantic-unit-kind")
+        (name (U String Nil))
+        (row-first-text rows root-name "semantic-unit-name")
+        (module-name (U String Nil))
+        (row-first-text rows root-name "semantic-unit-module")
+        (semantic-digest (U String Nil))
+        (row-first-text rows root-name "semantic-unit-sha256")
+        (root core/NativeId) (node-id root-name)
+        (read-names (Vec String))
+        (sort (row-node-objects rows root-name "semantic-read"))]
+    (stages/->SourceUnitV0
+      root
+      (source-module-id modules (if (nil? module-name) "" module-name))
+      (if (nil? kind) "" kind)
+      (if (nil? name) "" name)
+      (if (nil? semantic-digest) "" semantic-digest)
+      root
+      (sorted-node-ids read-names))))
+
+(defn source-units
+  [(rows (Vec SliceFactV0))
+   (modules (Vec stages/SourceModuleV1))] (Vec stages/SourceUnitV0)
+  (mapv
+    (fn [(root-name String)] stages/SourceUnitV0
+      (source-unit rows modules root-name))
+    (semantic-unit-node-names rows)))
 
 (defn source-imports [(rows (Vec SliceFactV0))] (Vec core/NativeId)
   (mapv
@@ -220,15 +301,18 @@
 (defn source-program
   [(rows (Vec SliceFactV0))
    (module-name String)
-   (relative-path String)] stages/SourceStageV0
+   (relative-path String)] stages/SourceStageV1
   (let [(root core/NativeId) (node-id "0")
         (nodes (Vec stages/TermNodeV0))
         (vec (concat (marker-nodes (node-names rows))
                (text-nodes (text-values rows))
-               (fact-nodes rows)))]
-    (stages/->SourceStageV0
+               (fact-nodes rows)))
+        (modules (Vec stages/SourceModuleV1))
+        (source-modules rows module-name relative-path)]
+    (stages/->SourceStageV1
       (stages/->TermGraphV0 root nodes)
-      (source-modules rows module-name relative-path)
+      modules
+      (source-units rows modules)
       (source-imports rows)
       [])))
 
@@ -447,13 +531,13 @@
   (let [(rows (Vec SliceFactV0)) (parse-facts (slurp facts-path))
         (configuration (Vec String))
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        (program stages/SourceStageV0)
+        (program stages/SourceStageV1)
         (source-program rows module-name relative-path)
         (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage program compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [(frozen-source stages/FrozenSourceStageV0)
+      (let [(frozen-source stages/FrozenSourceStageV1)
             (lower/sourcefreezeacceptedv0-frozen freeze-result)
             (typing-result lower/TypingResultV0)
             (lower/lower-typed-stage frozen-source compiler-commit configuration)]

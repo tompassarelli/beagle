@@ -371,17 +371,19 @@
                   (text-id (factspecv0-object fact))
                   (node-id (factspecv0-object fact)))))))))))
 
-(def source-program stages/SourceStageV0
-  (stages/->SourceStageV0
+(def source-program stages/SourceStageV1
+  (stages/->SourceStageV1
     (stages/->TermGraphV0 (node-id module-name)
       (vec (concat marker-nodes text-nodes fact-nodes)))
-    [(stages/->SourceModuleV0
+    [(stages/->SourceModuleV1
        (slice-id "module" module-name)
        module-name
        module-path
        "fram-fold-source-v0"
+       "fram-fold-projection-v0"
        "fram-fold-interface-v0"
        (node-id module-name))]
+    []
     []
     []))
 
@@ -440,7 +442,7 @@
 (defn slice-state [(abi core/AbiProfileV0)] SliceStateV0
   (let [(frozen-result lower/SourceFreezeResultV0) (freeze-result abi)
         (frozen-accepted lower/SourceFreezeAcceptedV0) (require-freeze-accepted frozen-result)
-        (frozen-source stages/FrozenSourceStageV0)
+        (frozen-source stages/FrozenSourceStageV1)
         (lower/sourcefreezeacceptedv0-frozen frozen-accepted)
         (typed lower/TypingAcceptedV0)
         (require-typing-accepted

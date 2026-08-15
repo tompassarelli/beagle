@@ -27,7 +27,7 @@
   (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
         (configuration (Vec String))
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        (source stages/SourceStageV0)
+        (source stages/SourceStageV1)
         (slice/source-program rows "native.promote-probe"
           "native-core/validation/slice-promote/promote_probe.bgl")
         (freeze-result lower/SourceFreezeResultV0)

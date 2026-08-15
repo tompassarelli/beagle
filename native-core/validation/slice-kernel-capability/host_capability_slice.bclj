@@ -56,13 +56,13 @@
    (source-logical-id String)] String
   (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
         (configuration (Vec String)) ["profile=3"]
-        (source stages/SourceStageV0)
+        (source stages/SourceStageV1)
         (slice/source-program rows "fram.kernel" source-logical-id)
         (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [(frozen-source stages/FrozenSourceStageV0)
+      (let [(frozen-source stages/FrozenSourceStageV1)
             (lower/sourcefreezeacceptedv0-frozen freeze-result)
             (typing-result lower/TypingResultV0)
             (lower/lower-typed-stage frozen-source compiler-commit configuration)]
@@ -107,9 +107,9 @@
                   (if (lower/epoch-result-complete? epoch-result)
                     "COMPLETE" "PENDING") "\n"
                   "source-modules "
-                  (str (count (stages/sourcestagev0-modules source))) "\n"
+                  (str (count (stages/sourcestagev1-modules source))) "\n"
                   "source-imports "
-                  (str (count (stages/sourcestagev0-imports source))) "\n"
+                  (str (count (stages/sourcestagev1-imports source))) "\n"
                   "full-program-functions "
                   (str (count (core/nativecoreprogram-functions full))) "\n"
                   "full-program-abis "

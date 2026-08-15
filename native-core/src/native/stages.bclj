@@ -21,17 +21,28 @@
 (defrecord SourceLocationV0
   [(module-id core/NativeId) (relative-path String) (line Int) (column Int)])
 
-(defrecord SourceModuleV0
+(defrecord SourceModuleV1
   [(id core/NativeId)
    (name String)
    (relative-path String)
    (source-digest String)
+   (projection-digest String)
    (interface-digest String)
    (root-term core/NativeId)])
 
-(defrecord SourceStageV0
+(defrecord SourceUnitV0
+  [(id core/NativeId)
+   (module-id core/NativeId)
+   (kind String)
+   (name String)
+   (semantic-digest String)
+   (root-term core/NativeId)
+   (read-set (Vec core/NativeId))])
+
+(defrecord SourceStageV1
   [(terms TermGraphV0)
-   (modules (Vec SourceModuleV0))
+   (modules (Vec SourceModuleV1))
+   (units (Vec SourceUnitV0))
    (imports (Vec core/NativeId))
    (locations (Vec SourceLocationV0))])
 
@@ -53,8 +64,8 @@
    (program core/NativeCoreProgram)
    (obligation-roots (Vec core/NativeId))])
 
-(defrecord FrozenSourceStageV0
-  [(stage SourceStageV0) (encoding String) (digest String)])
+(defrecord FrozenSourceStageV1
+  [(stage SourceStageV1) (encoding String) (digest String)])
 
 (defrecord FrozenTypedStageV0
   [(stage TypedStageV0) (encoding String) (digest String)])
@@ -176,25 +187,39 @@
      (encode-int (sourcelocationv0-line location))
      (encode-int (sourcelocationv0-column location))]))
 
-(defn encode-source-module [(module SourceModuleV0)] String
-  (canonical-record "source-module-v0"
-    [(encode-id (sourcemodulev0-id module))
-     (encode-string (sourcemodulev0-name module))
-     (encode-string (sourcemodulev0-relative-path module))
-     (encode-string (sourcemodulev0-source-digest module))
-     (encode-string (sourcemodulev0-interface-digest module))
-     (encode-id (sourcemodulev0-root-term module))]))
+(defn encode-source-module [(module SourceModuleV1)] String
+  (canonical-record "source-module-v1"
+    [(encode-id (sourcemodulev1-id module))
+     (encode-string (sourcemodulev1-name module))
+     (encode-string (sourcemodulev1-relative-path module))
+     (encode-string (sourcemodulev1-source-digest module))
+     (encode-string (sourcemodulev1-projection-digest module))
+     (encode-string (sourcemodulev1-interface-digest module))
+     (encode-id (sourcemodulev1-root-term module))]))
 
-(defn encode-source-stage [(stage SourceStageV0)] String
-  (canonical-record "source-stage-v0"
-    [(encode-term-graph (sourcestagev0-terms stage))
+(defn encode-source-unit [(unit SourceUnitV0)] String
+  (canonical-record "source-unit-v0"
+    [(encode-id (sourceunitv0-id unit))
+     (encode-id (sourceunitv0-module-id unit))
+     (encode-string (sourceunitv0-kind unit))
+     (encode-string (sourceunitv0-name unit))
+     (encode-string (sourceunitv0-semantic-digest unit))
+     (encode-id (sourceunitv0-root-term unit))
+     (encode-ids "read-set" (sourceunitv0-read-set unit))]))
+
+(defn encode-source-stage [(stage SourceStageV1)] String
+  (canonical-record "source-stage-v1"
+    [(encode-term-graph (sourcestagev1-terms stage))
      (canonical-set "modules"
-       (mapv (fn [(module SourceModuleV0)] String (encode-source-module module))
-         (sourcestagev0-modules stage)))
-     (encode-ids "imports" (sourcestagev0-imports stage))
+       (mapv (fn [(module SourceModuleV1)] String (encode-source-module module))
+         (sourcestagev1-modules stage)))
+     (canonical-set "units"
+       (mapv (fn [(unit SourceUnitV0)] String (encode-source-unit unit))
+         (sourcestagev1-units stage)))
+     (encode-ids "imports" (sourcestagev1-imports stage))
      (canonical-set "locations"
        (mapv (fn [(location SourceLocationV0)] String (encode-source-location location))
-         (sourcestagev0-locations stage)))]))
+         (sourcestagev1-locations stage)))]))
 
 (defn encode-typed-stage [(stage TypedStageV0)] String
   (canonical-record "typed-stage-v0"

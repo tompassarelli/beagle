@@ -1,7 +1,8 @@
 ;; Canonical bin/beagle-ast JSON -> source facts, including function bodies.
 ;; Columns: subject TAB predicate TAB ("t" text | "e" escaped text | "n" node)
-;; TAB object; node "0" is the program root, each AST gets its own module root,
-;; and ordinals come from a pre-order walk, so the projection is byte-stable.
+;; TAB object; node "0" is the program root and each AST gets its own module
+;; root. Nested syntax uses pre-order ordinals, while top-level semantic units
+;; use stable names derived from their checked module/kind/name selector.
 (require '[cheshire.core :as json]
          '[clojure.string])
 
@@ -15,6 +16,7 @@
 (defn nid [] (str (swap! counter inc)))
 (def rows (atom (transient [])))
 (def constraint-emissions (atom 0))
+(def native-ops (atom {}))
 (defn escape-text [value]
   (let [last-position (dec (count value))
         unsafe? (or (empty? value)
@@ -45,6 +47,55 @@
 (declare emit-ann emit-expr emit-pattern emit-binding-target)
 
 (def sha256-pattern #"sha256:[0-9a-f]{64}")
+
+(defn without-provenance [value]
+  (cond
+    (map? value)
+    (into {}
+      (for [[key child] value :when (not= "provenance" key)]
+        [key (without-provenance child)]))
+
+    (sequential? value)
+    (mapv without-provenance value)
+
+    :else value))
+
+(defn semantic-unit-selector [form]
+  (let [kind (get form "node")
+        selector
+        (if (= "extend-type" kind)
+          (str (get form "type-name") "["
+            (clojure.string/join ","
+              (sort (mapv #(get % "protocol") (get form "impls"))))
+            "]")
+          (get form "name"))]
+    (when-not (and (string? selector) (not-empty selector))
+      (throw
+        (ex-info "semantic source unit has no stable declaration selector"
+          {:kind kind :form form})))
+    selector))
+
+(defn semantic-unit-descriptor [ast form]
+  {"kind" "beagle.semantic-unit"
+   "schemaVersion" 0
+   "namespace" (get ast "namespace")
+   "target" (get ast "target")
+   "definitionKind" (get form "node")
+   "name" (semantic-unit-selector form)})
+
+(defn semantic-unit-node-name [ast form]
+  (str "semantic-unit-v0:"
+    (subs (checked-program/projection-digest
+            (semantic-unit-descriptor ast form))
+      7)))
+
+(defn semantic-unit-digest [ast form]
+  (checked-program/projection-digest
+    {"kind" "beagle.semantic-unit-content"
+     "schemaVersion" 0
+     "descriptor" (semantic-unit-descriptor ast form)
+     "definition" (without-provenance form)
+     "nativeOp" (get @native-ops (get form "name"))}))
 
 ;; native.checked-program owns kind, schemaVersion, and projection
 ;; authenticity. What remains here are this projector's own preconditions:
@@ -529,7 +580,6 @@
 
 ;; `<fn>=<native-op>` arguments name the functions whose Beagle body is only the
 ;; reference semantics of a native primitive the lowering already carries.
-(def native-ops (atom {}))
 
 (defn emit-protocol-method [method]
   (let [n (nid)]
@@ -586,8 +636,13 @@
     (row! n "body" "n" (emit-body (get clause "body")))
     n))
 
-(defn emit-form [f]
-  (let [n (nid)]
+(defn emit-form [ast f n]
+  (let [kind (get f "node")
+        unit-name (semantic-unit-selector f)]
+    (row! n "semantic-unit-kind" "t" kind)
+    (row! n "semantic-unit-name" "t" unit-name)
+    (row! n "semantic-unit-module" "t" (get ast "namespace"))
+    (row! n "semantic-unit-sha256" "t" (semantic-unit-digest ast f))
     (case (get f "node")
       "record" (do (row! n "form-kind" "t" "record")
                    (row! n "name" "t" (get f "name"))
@@ -656,20 +711,30 @@
               "defprotocol" "extend-type"} (get form "node"))
            (and include-defs? (= "def" (get form "node"))))))
 
-(defn emit-module [ast relative-path include-defs? selected-names]
+(defn emit-module
+  [ast relative-path interface-sha256 include-defs? selected-names]
   (let [selected-forms (filterv
                          #(selected-form? include-defs? selected-names %)
                          (get ast "forms"))
+        unit-names (mapv #(semantic-unit-node-name ast %) selected-forms)
         expected-constraints (binding-constraint-count selected-forms)
         constraints-before @constraint-emissions
-        definitions (mapv emit-form selected-forms)
+        definitions
+        (mapv (fn [form unit-name] (emit-form ast form unit-name))
+          selected-forms unit-names)
         imports (mapv emit-import (get ast "requires"))
         root (nid)]
+    (when (not= (count unit-names) (count (distinct unit-names)))
+      (throw
+        (ex-info "semantic source unit selectors collide within one module"
+          {:namespace (get ast "namespace") :unit-names unit-names})))
     (row! root "form-kind" "t" "module-root")
     (row! root "namespace" "t" (get ast "namespace"))
     (row! root "relative-path" "t" relative-path)
     (row! root "source-sha256" "t" (get ast "sourceSha256"))
     (row! root "checked-projection-sha256" "t" (get ast "projectionSha256"))
+    (when interface-sha256
+      (row! root "interface-sha256" "t" interface-sha256))
     (row! root "definitions" "n" (emit-node-seq definitions))
     (row! root "imports" "n" (emit-node-seq imports))
     (let [emitted-constraints (- @constraint-emissions constraints-before)]
@@ -695,8 +760,26 @@
 (defn option-value [arguments option]
   (first (option-values arguments option)))
 
+(defn key-value-specs [arguments option]
+  (let [specs (option-values arguments option)
+        parsed
+        (mapv
+          (fn [spec]
+            (let [[key value] (clojure.string/split spec #"=" 2)]
+              (when-not (and (not-empty key) (not-empty value))
+                (throw
+                  (ex-info (str option " expects KEY=VALUE") {:spec spec})))
+              [key value]))
+          specs)
+        keys (mapv first parsed)]
+    (when (not= (count keys) (count (distinct keys)))
+      (throw (ex-info (str option " contains duplicate keys") {:keys keys})))
+    (into {} parsed)))
+
 (let [arguments *command-line-args*
       input-specs (option-values arguments "--input")
+      interface-sha256-by-source
+      (key-value-specs arguments "--interface-sha256")
       out (option-value arguments "--output")
       include-defs? (some #{"--include-defs"} arguments)
       selected-names (set (option-values arguments "--form"))
@@ -707,22 +790,42 @@
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
+  (doseq [[source-id digest] interface-sha256-by-source]
+    (when-not (re-matches sha256-pattern digest)
+      (throw
+        (ex-info "--interface-sha256 carries a malformed SHA-256 digest"
+          {:source-id source-id :digest digest}))))
   (let [parsed
         (mapv
           (fn [input-spec]
             (let [[in relative-path] (parse-input-spec input-spec)
                   ast (json/parse-string (slurp in))]
               (require-native-compatible-ast! ast relative-path)
-              {:path in :relative-path relative-path :ast ast}))
+              {:path in
+               :relative-path relative-path
+               :interface-sha256
+               (get interface-sha256-by-source relative-path)
+               :ast ast}))
           input-specs)
         source-ids (mapv #(get (:ast %) "sourceId") parsed)
-        namespaces (mapv #(get (:ast %) "namespace") parsed)]
+        namespaces (mapv #(get (:ast %) "namespace") parsed)
+        relative-paths (mapv :relative-path parsed)]
     (when (not= (count source-ids) (count (distinct source-ids)))
       (throw (ex-info "checked projections contain duplicate sourceId values"
                       {:sourceIds source-ids})))
     (when (not= (count namespaces) (count (distinct namespaces)))
       (throw (ex-info "checked projections contain duplicate namespaces"
                       {:namespaces namespaces})))
+    (when (seq interface-sha256-by-source)
+      (let [missing
+            (filterv #(nil? (get interface-sha256-by-source %)) relative-paths)
+            unknown
+            (filterv #(not (some #{%} relative-paths))
+              (sort (keys interface-sha256-by-source)))]
+        (when (or (seq missing) (seq unknown))
+          (throw
+            (ex-info "--interface-sha256 keys must exactly cover source inputs"
+              {:missing missing :unknown unknown})))))
     (let [selected-counts
           (frequencies
             (for [{:keys [ast]} parsed
@@ -749,8 +852,9 @@
             {:ambiguous-form-names ambiguous-names})))
       (let [modules
             (mapv
-              (fn [{:keys [ast relative-path]}]
-                (emit-module ast relative-path include-defs? selected-names))
+              (fn [{:keys [ast relative-path interface-sha256]}]
+                (emit-module ast relative-path interface-sha256
+                  include-defs? selected-names))
               parsed)]
         (row! "0" "form-kind" "t" "program-root")
         (row! "0" "modules" "n" (emit-node-seq modules)))))

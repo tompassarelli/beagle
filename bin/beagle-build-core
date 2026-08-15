@@ -306,7 +306,11 @@ bundle_path = pathlib.Path(sys.argv[1])
 work = pathlib.Path(sys.argv[2])
 sources = [str(pathlib.Path(source).resolve()) for source in sys.argv[3:]]
 bundle = json.loads(bundle_path.read_text())
-modules = {module["source"]: module["program"] for module in bundle["modules"]}
+if bundle.get("schemaVersion") != 2:
+    raise SystemExit(
+        f"beagle build: expected bundle AST schemaVersion 2, got {bundle.get('schemaVersion')}"
+    )
+modules = {module["source"]: module for module in bundle["modules"]}
 if set(modules) != set(sources):
     missing = sorted(set(sources) - set(modules))
     extra = sorted(set(modules) - set(sources))
@@ -314,10 +318,13 @@ if set(modules) != set(sources):
         f"beagle build: bundle AST source mismatch: missing={missing} extra={extra}"
     )
 for index, source in enumerate(sources):
+    module = modules[source]
     destination = work / f"source_{index}.ast.json"
     destination.write_text(
-        json.dumps(modules[source], sort_keys=True, separators=(",", ":")) + "\n"
+        json.dumps(module["program"], sort_keys=True, separators=(",", ":")) + "\n"
     )
+    interface_destination = work / f"source_{index}.interface.sha256"
+    interface_destination.write_text(module["interfaceSha256"] + "\n")
 PY
 
 source_index=0
@@ -334,7 +341,12 @@ for source in "${normalized_sources[@]}"; do
     [[ ${#checked_fields[@]} -eq 4 ]] ||
         die "checked AST verifier returned malformed metadata for $source"
     logical_path="${checked_fields[0]}"
-    projector_args+=(--input "$ast=$logical_path")
+    interface_sha256_path="$work/source_${source_index}.interface.sha256"
+    interface_sha256="$(tr -d '\r\n' <"$interface_sha256_path")"
+    [[ "$interface_sha256" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        die "checked AST bundle returned a malformed interface digest for $source"
+    projector_args+=(--input "$ast=$logical_path"
+        --interface-sha256 "$logical_path=$interface_sha256")
     if $wasm_selected; then
         wasm_checked_sources+=(--checked-source "$source" "$ast")
     fi
@@ -557,19 +569,53 @@ bb -cp "$compiled" -e '
 (defn id-value [id]
   (core/nativeid-value id))
 
-(defn definition-key [index definition]
-  (str (lower/source-module-name index definition) "/"
-       (lower/fact-text index definition "name")))
-
 (defn definition-nodes [index]
   (vec
    (mapcat #(lower/index-form-ids index %)
-           ["record" "defunion" "deferror" "def" "defn"])))
+           ["record" "defunion" "deferror" "def" "defn" "defn-multi"
+            "unsupported-defprotocol" "unsupported-extend-type"])))
+
+(defn definition-child-items [index definition predicate]
+  (if-let [items (lower/index-first-object index definition predicate)]
+    (lower/index-sequence-items index items)
+    []))
+
+(defn definition-child-names [index definition predicate]
+  (vec
+   (remove str/blank?
+           (map #(lower/fact-text index % "name")
+                (definition-child-items index definition predicate)))))
+
+(defn definition-provided-names [index definition]
+  (let [kind (lower/fact-text index definition "form-kind")
+        declared (lower/fact-text index definition "name")
+        primary (if (str/blank? declared)
+                  (lower/fact-text index definition "semantic-unit-name")
+                  declared)
+        own (if (str/blank? primary) [] [primary])]
+    (vec
+     (distinct
+      (concat
+       own
+       (cond
+         (= "record" kind) [(str "->" declared) (str "map->" declared)]
+         (or (= "defunion" kind) (= "deferror" kind))
+         (definition-child-names index definition "members")
+         (= "unsupported-defprotocol" kind)
+         (definition-child-names index definition "methods")
+         :else []))))))
 
 (defn definitions-by-key [index]
   (reduce
    (fn [definitions definition]
-     (update definitions (definition-key index definition) (fnil conj []) definition))
+     (reduce
+      (fn [indexed provided-name]
+        (update indexed
+                (str (lower/source-module-name index definition) "/" provided-name)
+                (fnil conj [])
+                definition))
+      definitions
+      (definition-provided-names index definition)))
    {}
    (definition-nodes index)))
 
@@ -585,22 +631,6 @@ bb -cp "$compiled" -e '
         resolved (lower/resolved-source-key
                   (lower/resolve-source-name index module-name spelling))]
     (unique-nodes (concat exact (get definitions resolved [])))))
-
-(defn record-definition-nodes [definitions index module-name spelling]
-  (let [unqualified (lower/unqualified-name spelling)
-        local (cond
-                (str/starts-with? unqualified "map->") (subs unqualified 5)
-                (str/starts-with? unqualified "->") (subs unqualified 2)
-                :else unqualified)
-        resolved (resolved-definition-nodes definitions index module-name local)
-        named (mapcat second
-                      (filter (fn [[key nodes]]
-                                (and (str/ends-with? key (str "/" local))
-                                     (= "record"
-                                        (definition-kind index (first nodes)))))
-                              definitions))]
-    (filter #(= "record" (definition-kind index %))
-            (unique-nodes (concat resolved named)))))
 
 (defn nested-texts [index node kind predicate fuel]
   (if (<= fuel 0)
@@ -628,17 +658,11 @@ bb -cp "$compiled" -e '
                 (mapcat #(type-spellings index % (dec fuel))
                         (lower/index-child-nodes index node))))))))
 
-(defn definition-bound-names [index definition]
-  (if (= "defn" (definition-kind index definition))
-    (lower/source-parameters-bound-names
-     index (lower/function-parameter-items index definition))
-    []))
-
 (defn dependency-nodes [definitions index definition]
   (let [module-name (lower/source-module-name index definition)
         fuel (inc (lower/index-facts index))
         references (lower/source-free-ref-names
-                    index definition (definition-bound-names index definition) fuel)
+                    index definition [] fuel)
         calls (vec
                (distinct
                 (concat (nested-texts index definition "call" "callee" fuel)
@@ -648,9 +672,54 @@ bb -cp "$compiled" -e '
      (concat
       (mapcat #(resolved-definition-nodes definitions index module-name %) references)
       (mapcat #(resolved-definition-nodes definitions index module-name %) calls)
-      (mapcat #(record-definition-nodes definitions index module-name %) calls)
-      (mapcat #(resolved-definition-nodes definitions index module-name %) types)
-      (mapcat #(record-definition-nodes definitions index module-name %) types)))))
+      (mapcat #(resolved-definition-nodes definitions index module-name %) types)))))
+
+(defn source-node-name-index [rows]
+  (reduce
+   (fn [names row]
+     (let [with-subject
+           (assoc names
+                  (id-value (slice/node-id (slice/slicefactv0-subject row)))
+                  (slice/slicefactv0-subject row))]
+       (if (= "n" (slice/slicefactv0-kind row))
+         (assoc with-subject
+                (id-value (slice/node-id (slice/slicefactv0-object row)))
+                (slice/slicefactv0-object row))
+         with-subject)))
+   {}
+   rows))
+
+(defn semantic-read-set-rows [rows]
+  (let [source (slice/source-program rows "native.module" "source.facts")
+        index (lower/build-source-index
+               (stages/sourcestagev1-terms source)
+               (stages/sourcestagev1-modules source))
+        definitions (definitions-by-key index)
+        node-names (source-node-name-index rows)
+        reads
+        (vec
+         (mapcat
+          (fn [definition]
+            (let [definition-id (id-value definition)
+                  subject (get node-names definition-id)
+                  dependencies
+                  (sort-by id-value
+                           (remove #(= definition-id (id-value %))
+                                   (dependency-nodes definitions index definition)))]
+              (when-not subject
+                (throw (ex-info "semantic unit has no source-fact node name"
+                                {:definition definition-id})))
+              (mapv
+               (fn [dependency]
+                 (let [object (get node-names (id-value dependency))]
+                   (when-not object
+                     (throw (ex-info "semantic read has no source-fact node name"
+                                     {:definition definition-id
+                                      :dependency (id-value dependency)})))
+                   (slice/->SliceFactV0 subject "semantic-read" "n" object)))
+               dependencies)))
+          (sort-by id-value (definition-nodes index))))]
+    (vec (concat rows reads))))
 
 (defn reachable-definition-ids [definitions index seeds]
   (loop [queue (vec seeds) selected #{}]
@@ -784,8 +853,8 @@ bb -cp "$compiled" -e '
     {:ok? true :rows rows}
     (let [source (slice/source-program rows "native.module" "source.facts")
           index (lower/build-source-index
-                 (stages/sourcestagev0-terms source)
-                 (stages/sourcestagev0-modules source))
+                 (stages/sourcestagev1-terms source)
+                 (stages/sourcestagev1-modules source))
           definitions (definitions-by-key index)
           seeds (entry-seeds definitions index entries strict-entry-abi?)]
       (if-not (:ok? seeds)
@@ -887,7 +956,7 @@ bb -cp "$compiled" -e '
 (defn native-provenance-report
   [source-receipt frozen-source typing-result frozen-typed native-result native-frozen
    epoch-result frozen-native compiler-commit configuration]
-  (let [source-digest (stages/frozensourcestagev0-digest frozen-source)
+  (let [source-digest (stages/frozensourcestagev1-digest frozen-source)
         typing-receipt (lower/typingacceptedv0-receipt typing-result)
         typed-digest (stages/frozentypedstagev0-digest frozen-typed)
         native-receipt (lower/nativeloweringcompletev0-receipt native-result)
@@ -949,8 +1018,8 @@ bb -cp "$compiled" -e '
        (- (count (core/nativecoreprogram-regions program))
           (count (core/nativecoreprogram-regions native-program))) "\n"
        (epoch-pending-report epoch-result)
-       "source-modules " (count (stages/sourcestagev0-modules source)) "\n"
-       "source-imports " (count (stages/sourcestagev0-imports source)) "\n"
+       "source-modules " (count (stages/sourcestagev1-modules source)) "\n"
+       "source-imports " (count (stages/sourcestagev1-imports source)) "\n"
        "source-definitions " (source-definition-count rows) "\n"
        "program-types " (count (core/nativecoreprogram-types program)) "\n"
        "program-functions " (count (core/nativecoreprogram-functions program)) "\n"
@@ -1119,7 +1188,7 @@ bb -cp "$compiled" -e '
          :report (str "stage source-projection REJECTED\n"
                       "entry-error " (:detail projection) "\n"
                       "result FAIL entry projection\n")})
-      (let [rows (:rows projection)
+      (let [rows (semantic-read-set-rows (:rows projection))
             projected-facts (rows-text rows)
             _ (spit projected-facts-path projected-facts)
             configuration ["profile=3" (str "abi=" abi-id)

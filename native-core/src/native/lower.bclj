@@ -24,7 +24,7 @@
 
 (defunion SourceFreezeResultV0
   (SourceFreezeAcceptedV0
-    [(frozen stages/FrozenSourceStageV0) (receipt core/PassReceiptV0)])
+    [(frozen stages/FrozenSourceStageV1) (receipt core/PassReceiptV0)])
   (SourceFreezeRejectedV0
     [(failure LowerFailureV0) (receipt core/PassReceiptV0)]))
 
@@ -313,17 +313,17 @@
 ;; The module table, not the term graph, is authoritative for a module's root
 ;; and name; a projection that spells neither is still a named module.
 (defn seed-module-table
-  [(index SourceIndexV0) (modules (Vec stages/SourceModuleV0))] SourceIndexV0
+  [(index SourceIndexV0) (modules (Vec stages/SourceModuleV1))] SourceIndexV0
   (loop [(position Int) 0 (seeded SourceIndexV0) index]
     (if (>= position (count modules))
       seeded
-      (let [(module stages/SourceModuleV0) (nth modules position)
-            (root core/NativeId) (stages/sourcemodulev0-root-term module)
+      (let [(module stages/SourceModuleV1) (nth modules position)
+            (root core/NativeId) (stages/sourcemodulev1-root-term module)
             (texts (Map String String))
             (if (nil? (index-first-text seeded root "namespace"))
               (assoc (sourceindexv0-first-texts seeded)
                 (source-index-key root "namespace")
-                (stages/sourcemodulev0-name module))
+                (stages/sourcemodulev1-name module))
               (sourceindexv0-first-texts seeded))
             (roots (Vec core/NativeId)) (index-form-ids seeded "module-root")
             (listed (Vec core/NativeId))
@@ -335,7 +335,7 @@
 
 (defn build-source-index
   [(graph stages/TermGraphV0)
-   (modules (Vec stages/SourceModuleV0))]
+   (modules (Vec stages/SourceModuleV1))]
   SourceIndexV0
   (let [(facts (Vec SourceFactV0)) (source-facts graph)
         (graph-texts (Map String String)) (graph-text-index graph)
@@ -412,28 +412,81 @@
                   (conj collected key))))))]
     (with indexed [:record-keys keys])))
 
-(defn source-stage-valid? [(stage stages/SourceStageV0)] Bool
-  (let [(graph stages/TermGraphV0) (stages/sourcestagev0-terms stage)
+(defn source-module-identity-index
+  [(modules (Vec stages/SourceModuleV1))] (Map String Bool)
+  (reduce
+    (fn [(found (Map String Bool)) (module stages/SourceModuleV1)]
+      (Map String Bool)
+      (assoc found (id-value (stages/sourcemodulev1-id module)) true))
+    {}
+    modules))
+
+(defn source-unit-identity-index
+  [(units (Vec stages/SourceUnitV0))] (Map String Bool)
+  (reduce
+    (fn [(found (Map String Bool)) (unit stages/SourceUnitV0)]
+      (Map String Bool)
+      (assoc found (id-value (stages/sourceunitv0-id unit)) true))
+    {}
+    units))
+
+(defn source-unit-valid?
+  [(unit stages/SourceUnitV0)
+   (graph-identities (Map String Bool))
+   (module-identities (Map String Bool))
+   (unit-identities (Map String Bool))] Bool
+  (and (core/native-id=
+         (stages/sourceunitv0-id unit)
+         (stages/sourceunitv0-root-term unit))
+       (= true
+         (get graph-identities
+           (id-value (stages/sourceunitv0-root-term unit))))
+       (= true
+         (get module-identities
+           (id-value (stages/sourceunitv0-module-id unit))))
+       (not= "" (stages/sourceunitv0-kind unit))
+       (not= "" (stages/sourceunitv0-name unit))
+       (stages/sha256-digest? (stages/sourceunitv0-semantic-digest unit))
+       (every?
+         (fn [(read core/NativeId)] Bool
+           (= true (get unit-identities (id-value read))))
+         (stages/sourceunitv0-read-set unit))))
+
+(defn source-stage-valid? [(stage stages/SourceStageV1)] Bool
+  (let [(graph stages/TermGraphV0) (stages/sourcestagev1-terms stage)
         (nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)
         (identities (Map String Bool)) (graph-identity-index graph)
-        (modules (Vec stages/SourceModuleV0))
-        (stages/sourcestagev0-modules stage)]
+        (modules (Vec stages/SourceModuleV1))
+        (stages/sourcestagev1-modules stage)
+        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units stage)
+        (module-identities (Map String Bool))
+        (source-module-identity-index modules)
+        (unit-identities (Map String Bool))
+        (source-unit-identity-index units)]
     (and (= true (get identities (id-value (stages/termgraphv0-root graph))))
          (= (count nodes) (count identities))
          (graph-reference-closed-in? graph identities)
+         (= (count modules) (count module-identities))
          (every?
-           (fn [(module stages/SourceModuleV0)] Bool
+           (fn [(module stages/SourceModuleV1)] Bool
              (and (= true
                     (get identities
-                      (id-value (stages/sourcemodulev0-root-term module))))
+                      (id-value (stages/sourcemodulev1-root-term module))))
                   (stages/sha256-digest?
-                    (stages/sourcemodulev0-source-digest module))
+                    (stages/sourcemodulev1-source-digest module))
                   (stages/sha256-digest?
-                    (stages/sourcemodulev0-interface-digest module))))
-           modules))))
+                    (stages/sourcemodulev1-projection-digest module))
+                  (stages/sha256-digest?
+                    (stages/sourcemodulev1-interface-digest module))))
+           modules)
+         (= (count units) (count unit-identities))
+         (every?
+           (fn [(unit stages/SourceUnitV0)] Bool
+             (source-unit-valid? unit identities module-identities unit-identities))
+           units))))
 
-(defn source-failure [(stage stages/SourceStageV0)] LowerFailureV0
-  (let [(graph stages/TermGraphV0) (stages/sourcestagev0-terms stage)
+(defn source-failure [(stage stages/SourceStageV1)] LowerFailureV0
+  (let [(graph stages/TermGraphV0) (stages/sourcestagev1-terms stage)
         (root core/NativeId) (stages/termgraphv0-root graph)
         (nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)
         (identities (Map String Bool)) (graph-identity-index graph)]
@@ -449,7 +502,7 @@
 
       :else
       (->InvalidSourceModuleV0 root
-        "a module root or its checked source/projection digest is invalid"))))
+        "a module/unit root, read set, or checked digest is invalid"))))
 
 (defn encode-configuration [(configuration (Vec String))] String
   (stages/canonical-set "configuration" configuration))
@@ -488,7 +541,7 @@
     detail))
 
 (defn freeze-source-stage
-  [(stage stages/SourceStageV0)
+  [(stage stages/SourceStageV1)
    (compiler-commit String)
    (configuration (Vec String))]
   SourceFreezeResultV0
@@ -496,7 +549,7 @@
         (digest String) (stages/content-digest encoding)]
     (if (source-stage-valid? stage)
       (->SourceFreezeAcceptedV0
-        (stages/->FrozenSourceStageV0 stage encoding digest)
+        (stages/->FrozenSourceStageV1 stage encoding digest)
         (make-receipt digest compiler-commit "source-freeze" configuration []
           [(source-closure-obligation digest true
              "source Term identities and module roots are closed")]
@@ -3300,7 +3353,8 @@
         (let [(name String) (fact-text index node "name")]
           (if (or (= "" name) (= "else" name) (string-member? bound name)) [] [name]))
 
-        (or (= "defn" kind) (= "fn" kind))
+        (or (= "defn" kind) (= "fn" kind) (= "arity-clause" kind)
+            (= "protocol-method" kind) (= "impl-method" kind))
         (let [(parameters (Vec core/NativeId))
               (function-parameter-items index node)
               (constraint-refs (Vec String))
@@ -17203,16 +17257,16 @@
      "typed Terms contain no raw Any, host exception, host collection, or target syntax")])
 
 (defn lower-typed-stage
-  [(frozen-source stages/FrozenSourceStageV0)
+  [(frozen-source stages/FrozenSourceStageV1)
    (compiler-commit String)
    (configuration (Vec String))]
   TypingResultV0
-  (let [(source stages/SourceStageV0)
-        (stages/frozensourcestagev0-stage frozen-source)
-        (source-digest String) (stages/frozensourcestagev0-digest frozen-source)
-        (graph stages/TermGraphV0) (stages/sourcestagev0-terms source)
+  (let [(source stages/SourceStageV1)
+        (stages/frozensourcestagev1-stage frozen-source)
+        (source-digest String) (stages/frozensourcestagev1-digest frozen-source)
+        (graph stages/TermGraphV0) (stages/sourcestagev1-terms source)
         (index SourceIndexV0)
-        (build-source-index graph (stages/sourcestagev0-modules source))
+        (build-source-index graph (stages/sourcestagev1-modules source))
         (record-keys (Vec String)) (sourceindexv0-record-keys index)
         (record-resolutions (Vec RecordResolutionV0)) (resolve-records index)
         (function-sources (Vec core/NativeId)) (index-form-ids index "defn")
@@ -18617,11 +18671,33 @@
      (stages/canonical-record "unsigned-bit-shift-right-i64-v0"
        [(id-value value-id) (id-value distance-id)])]))
 
+(defn encode-native-atom [(atom core/NativeAtom)] String
+  (match atom
+    [(BoolAtom value)
+     (stages/canonical-record "native-atom-bool-v0"
+       [(stages/encode-bool value)])]
+    [(I64Atom value)
+     (stages/canonical-record "native-atom-i64-v0"
+       [(stages/encode-int value)])]
+    [(F64Atom value)
+     (stages/canonical-record "native-atom-f64-v0"
+       [(stages/encode-int (Double/doubleToRawLongBits value))])]
+    [(TextAtom value)
+     (stages/canonical-record "native-atom-text-v0"
+       [(stages/encode-string value)])]
+    [(KeywordAtom value)
+     (stages/canonical-record "native-atom-keyword-v0"
+       [(stages/encode-string value)])]
+    [(RefAtom target)
+     (stages/canonical-record "native-atom-ref-v0"
+       [(stages/encode-id target)])]))
+
 (defn encode-instruction [(instruction core/Instruction)] String
   (cond
     (instance? native.core.AtomInstruction instruction)
-    (stages/canonical-record "atom-instruction"
-      [(encode-ssa-value (core/atominstruction-result instruction))])
+    (stages/canonical-record "atom-instruction-v1"
+      [(encode-ssa-value (core/atominstruction-result instruction))
+       (encode-native-atom (core/atominstruction-atom instruction))])
 
     (instance? native.core.CopyInstruction instruction)
     (stages/canonical-record "copy-instruction"
@@ -21130,7 +21206,7 @@
     (emptycollectioncontextcorpusv0-wrong-arity-uncontextual
       empty-collection-context-corpus)))
 
-(def fixture-source-program stages/SourceStageV0
+(def fixture-source-program stages/SourceStageV1
   (let [(root core/NativeId) (fixture-marker-id "root")
         (record core/NativeId) (fixture-marker-id "record")
         (fields core/NativeId) (fixture-marker-id "fields")
@@ -21177,21 +21253,23 @@
          (fixture-fact-node 20 parameter "ann" int-type)]
         (nodes (Vec stages/TermNodeV0))
         (vec (concat marker-nodes text-nodes facts))]
-    (stages/->SourceStageV0
+    (stages/->SourceStageV1
       (stages/->TermGraphV0 root nodes)
-      [(stages/->SourceModuleV0
+      [(stages/->SourceModuleV1
          (fixture-id "module" "fixture")
          "native.lower.fixture"
          "native-core/fixtures/lower-fixture.bgl"
          "fixture-source-digest-v0"
+         "fixture-projection-digest-v0"
          "fixture-interface-digest-v0"
          root)]
+      []
       []
       [])))
 
 ;; This fold-only insurance program is the empty-input specialization of
 ;; fram.fold/max-sequence; the full vector loop remains outside the v0 C17 subset.
-(def fold-empty-source-program stages/SourceStageV0
+(def fold-empty-source-program stages/SourceStageV1
   (let [(root core/NativeId) (fixture-id "fold" "root")
         (function core/NativeId) (fixture-id "fold" "max-sequence")
         (parameters core/NativeId) (fixture-id "fold" "parameters")
@@ -21235,15 +21313,17 @@
          (fact 8 int-type "name" (text-id "Int"))]
         (nodes (Vec stages/TermNodeV0))
         (vec (concat marker-nodes text-nodes facts))]
-    (stages/->SourceStageV0
+    (stages/->SourceStageV1
       (stages/->TermGraphV0 root nodes)
-      [(stages/->SourceModuleV0
+      [(stages/->SourceModuleV1
          (fixture-id "fold" "module")
          "fram.fold"
          "src/fram/fold.bclj"
          "sha256:0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
+         "sha256:1c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
          "fold-empty-max-sequence-v0"
          root)]
+      []
       []
       [])))
 
@@ -21252,7 +21332,7 @@
   (FixturePipelineFailedV0 [(stage String) (detail String)]))
 
 (defn lower-pipeline-fixture
-  [(source-program stages/SourceStageV0)
+  [(source-program stages/SourceStageV1)
    (compiler-commit String)]
   FixturePipelineResultV0
   (let [(configuration (Vec String))

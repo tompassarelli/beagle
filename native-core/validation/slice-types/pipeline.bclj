@@ -186,7 +186,7 @@
 
 (defn source-program
   [(facts (Vec Any))
-   (source-text String)] stages/SourceStageV0
+   (source-text String)] stages/SourceStageV1
   (let [(root-number Int) (instant-root facts)
         (subjects (Vec Int)) (descendant-ids facts root-number)
         (selected (Vec FactV0)) (select-facts facts subjects)
@@ -196,20 +196,22 @@
         (conj
           (conj (source-nodes selected)
             (stages/->TermNodeV0 root
-              (stages/->TextTermV0 "source-stage-v0")))
+              (stages/->TextTermV0 "source-stage-v1")))
           (stages/->TermNodeV0 source-text-id
             (stages/->TextTermV0 source-text)))]
     (if (< root-number 0)
       (throw (ex-info "fram.types Instant declaration is absent" {}))
-      (stages/->SourceStageV0
+      (stages/->SourceStageV1
         (stages/->TermGraphV0 root nodes)
-        [(stages/->SourceModuleV0
+        [(stages/->SourceModuleV1
            (slice-id "module" ["fram.types"])
            "fram.types"
            "src/fram/types.bgl"
            (stages/content-digest source-text)
+           (stages/content-digest (str "projection:" root-number))
            (stages/content-digest (str root-number ":Instant:Int:Int"))
            (node-id root-number))]
+        []
         []
         []))))
 
@@ -301,7 +303,7 @@
       value)))
 
 (defn require-source-freeze
-  [(result lower/SourceFreezeResultV0)] stages/FrozenSourceStageV0
+  [(result lower/SourceFreezeResultV0)] stages/FrozenSourceStageV1
   (if (instance? native.lower.SourceFreezeAcceptedV0 result)
     (lower/sourcefreezeacceptedv0-frozen result)
     (throw (ex-info "source program freezing failed" {}))))
@@ -362,8 +364,8 @@
         (source-text String) (slurp source-path)
         (configuration (Vec String))
         ["profile=3" "module=fram.types" "slice=Instant"]
-        (source stages/SourceStageV0) (source-program facts source-text)
-        (source-freeze stages/FrozenSourceStageV0)
+        (source stages/SourceStageV1) (source-program facts source-text)
+        (source-freeze stages/FrozenSourceStageV1)
         (require-source-freeze
           (lower/freeze-source-stage source "e50f806" configuration))
         (typing-result lower/TypingResultV0)
@@ -390,7 +392,7 @@
           [(str "source-path=" source-path)
            (str "source-bytes=" (count source-text))
            (str "source-digest-bytes="
-             (count (stages/frozensourcestagev0-digest source-freeze)))
+             (count (stages/frozensourcestagev1-digest source-freeze)))
            (str "typed-digest-bytes="
              (count (stages/frozentypedstagev0-digest typed-freeze)))
            (str "native-digest-bytes="
@@ -398,7 +400,7 @@
            (str "typed-source-bound="
              (= (stages/typedstagev0-source-digest
                   (stages/frozentypedstagev0-stage typed-freeze))
-                (stages/frozensourcestagev0-digest source-freeze)))
+                (stages/frozensourcestagev1-digest source-freeze)))
            (str "native-typed-bound="
              (= (stages/nativestagev0-typed-digest
                   (stages/frozennativestagev0-stage native-freeze))

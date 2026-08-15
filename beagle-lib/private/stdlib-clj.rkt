@@ -315,6 +315,7 @@
    'Integer/parseInt   (fn-of '(String) 'Int)
    'Long/parseLong     (fn-of '(String) 'Int)
    'Double/parseDouble (fn-of '(String) 'Float)
+   'Double/doubleToRawLongBits (fn-of '(Float) 'Int)
    'System/getProperty       (fn-of '(String) 'String)
    'System/getenv            (type-fn (list (p 'String)) #f
                                       (type-union (list (p 'String) (p 'Nil))))
@@ -522,7 +523,8 @@
    'Math/tan 'Math/PI 'Math/E
    'Integer/parseInt 'Integer/valueOf 'Integer/MAX_VALUE 'Integer/MIN_VALUE
    'Long/parseLong 'Long/valueOf 'Long/MAX_VALUE 'Long/MIN_VALUE
-   'Double/parseDouble 'Double/valueOf 'Double/NaN 'Double/POSITIVE_INFINITY
+   'Double/parseDouble 'Double/doubleToRawLongBits
+   'Double/valueOf 'Double/NaN 'Double/POSITIVE_INFINITY
    'Double/NEGATIVE_INFINITY 'Double/isNaN 'Double/isInfinite
    'Float/parseFloat 'Float/valueOf
    'Boolean/parseBoolean 'Boolean/valueOf
