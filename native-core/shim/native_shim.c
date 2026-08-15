@@ -8,17 +8,23 @@
 #include <limits.h>
 #include <math.h>
 #include <poll.h>
+#if !defined(__wasi__)
 #include <spawn.h>
+#endif
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#if !defined(__wasi__)
 #include <sys/wait.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 
+#if !defined(__wasi__)
 extern char **environ;
+#endif
 
 /* BEGIN vendored ffc.h; see third_party/ffc/PROVENANCE. */
 #define FFC_IMPL
@@ -9790,6 +9796,14 @@ int32_t native_host_filesystem_write_text_atomic_v0(
 }
 #endif /* __wasi__ */
 
+#if defined(__wasi__)
+int64_t native_host_process_run_inherit_v0(
+    const native_capability *capability, const native_vec *argv_value) {
+  (void)capability;
+  (void)argv_value;
+  return -((int64_t)ENOTSUP);
+}
+#else
 static void native_host_process_free_argv(char **argv, size_t count) {
   size_t index;
   if (argv == NULL) {
@@ -9869,6 +9883,7 @@ int64_t native_host_process_run_inherit_v0(
   }
   return -((int64_t)EIO);
 }
+#endif /* __wasi__ */
 
 static int32_t native_host_socket_check(
     const native_capability *capability, int64_t value, int *out) {
