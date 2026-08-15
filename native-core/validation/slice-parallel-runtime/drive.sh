@@ -50,6 +50,9 @@ test -s "$scratch/c17-workers-1/build.manifest.sha256"
 grep -Fq 'native_parallel.h' "$scratch/c17-workers-1/build.manifest"
 grep -Fq 'native_parallel.c' "$scratch/c17-workers-1/build.manifest"
 report="$scratch/c17-workers-1/report.txt"
+test "$(head -n 1 "$report")" = "beagle-native-report/v1"
+test "$(grep -Fxc 'beagle-native-report/v1' "$report")" = 1
+test "$(tail -n 1 "$report")" = "result PASS"
 grep -Fqx "program-functions 2" "$report"
 grep -Fqx "program-abis 1" "$report"
 grep -Fqx "parallel-kernel advect-tile!" "$report"
@@ -87,6 +90,11 @@ fi
 grep -Fqx \
   "qbe-parallel REFUSED QBE deterministic parallel F64 instructions are unsupported" \
   "$scratch/qbe.log"
+test "$(grep -Fxc 'beagle-native-report/v1' "$scratch/qbe.log")" = 1
+sed -n '/^beagle-native-report\/v1$/,/^result FAIL materialization$/p' \
+  "$scratch/qbe.log" >"$scratch/qbe-report.txt"
+test "$(head -n 1 "$scratch/qbe-report.txt")" = "beagle-native-report/v1"
+test "$(tail -n 1 "$scratch/qbe-report.txt")" = "result FAIL materialization"
 test ! -e "$scratch/qbe/report.txt"
 if [[ -e "$scratch/qbe/module_0.ssa" ]]; then
   echo "parallel-runtime fixture: refused QBE build emitted module_0.ssa" >&2

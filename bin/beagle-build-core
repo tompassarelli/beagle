@@ -431,6 +431,7 @@ bb -cp "$compiled" -e '
                 StandardCopyOption StandardOpenOption]))
 
 (def report-path (System/getenv "BEAGLE_CORE_REPORT"))
+(def native-report-format "beagle-native-report/v1")
 (def stage-progress (atom []))
 (def active-stage (atom nil))
 
@@ -1239,7 +1240,9 @@ bb -cp "$compiled" -e '
                  (compile-core! facts-path projected-facts-path artifacts-dir
                                 compiler-commit entries materializers abi-id abi
                                 simd-required?))
-        final-report (report-with-stage-progress (:report result))]
+        final-report
+        (report-with-stage-progress
+         (str native-report-format "\n" (:report result)))]
     (durable-write! report-path final-report)
     (spit (str artifacts-dir "/report.txt") final-report)
     (print final-report)
