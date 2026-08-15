@@ -517,6 +517,23 @@
 (defn remove-from-union [(current-type Any) (remove-type Any)] Any
   (cond
     (any-type? current-type) current-type
+    (dynamic-type? current-type)
+      (let [removed (if (dynamic-type? remove-type)
+                      (get remove-type "args")
+                      [remove-type])
+            remaining
+              (filterv
+                (fn [(alternative Any)] Bool
+                  (not (boolean
+                    (some
+                      (fn [(candidate Any)] Bool
+                        (type-invariant-equal? alternative candidate))
+                      removed))))
+                (get current-type "args"))]
+        (cond
+          (= (count remaining) 0) current-type
+          (= (count remaining) 1) (first remaining)
+          :else (make-app "Dyn" remaining)))
     (union-type? current-type)
       (let [alts (get current-type "members")
             remaining (filterv (fn [(alt Any)] Bool (not (type-equal? alt remove-type))) alts)]
@@ -748,6 +765,10 @@
    "inc"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
    "dec"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
    "count"    (make-fn [ANY] nil (make-prim "Int"))
+   "int"      (make-fn [ANY] nil (make-prim "Int"))
+   "bigint"   (make-fn [ANY] nil (make-prim "Int"))
+   "double"   (make-fn [ANY] nil (make-prim "Float"))
+   "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int"))
    "str"      (make-fn [] ANY (make-prim "String"))
    "get"      (make-fn [ANY ANY] ANY ANY)
    "get-in"   (make-fn [ANY ANY] ANY ANY)
@@ -1645,10 +1666,34 @@
 ;; flow-narrow on them, so neither do we (narrowing `(int? s)` on a String would
 ;; wrongly retype it Int).
 (def TYPE-PREDICATES Any
-  {"nil?" "Nil" "string?" "String" "number?" "Int" "integer?" "Int"
+  {"nil?" "Nil" "string?" "String" "number?" "Number" "integer?" "Int"
    "keyword?" "Keyword" "symbol?" "Symbol" "boolean?" "Bool"})
 
-(defn extract-narrowing [(cond-expr Any)] Any
+(defn type-matches-predicate? [(value Any) (predicate-name String)] Bool
+  (cond
+    (= predicate-name "Number")
+      (and (prim? value)
+           (or (= (get value "name") "Int")
+               (= (get value "name") "Float")))
+    :else
+      (and (prim? value) (= (get value "name") predicate-name))))
+
+(defn predicate-narrowing-type [(current Any) (predicate-name String)] Any
+  (if (dynamic-type? current)
+    (let [matches
+          (filterv
+            (fn [(alternative Any)] Bool
+              (type-matches-predicate? alternative predicate-name))
+            (get current "args"))]
+      (cond
+        (= (count matches) 0) nil
+        (= (count matches) 1) (first matches)
+        :else (make-app "Dyn" matches)))
+    (if (= predicate-name "Number")
+      NUMBER-TYPE
+      (make-prim predicate-name))))
+
+(defn extract-narrowing [(cond-expr Any) (env Any)] Any
   (cond
     (not= (get cond-expr "node") "call") {"var" nil "type" nil "negated" false}
 
@@ -1663,9 +1708,14 @@
                (not (nil? (get TYPE-PREDICATES fn-name)))
                (= (count args) 1)
                (= (get (nth args 0) "node") "ref"))
-            {"var" (get (nth args 0) "name")
-             "type" (make-prim (get TYPE-PREDICATES fn-name))
-             "negated" false}
+            (let [var-name (get (nth args 0) "name")
+                  narrowed
+                    (predicate-narrowing-type
+                      (get env var-name ANY)
+                      (get TYPE-PREDICATES fn-name))]
+              (if (some? narrowed)
+                {"var" var-name "type" narrowed "negated" false}
+                {"var" nil "type" nil "negated" false}))
 
           (and (not (nil? fn-name)) (= fn-name "some?")
                (= (count args) 1)
@@ -1689,7 +1739,7 @@
 
           (and (not (nil? fn-name)) (= fn-name "not")
                (= (count args) 1))
-            (let [inner (extract-narrowing (nth args 0))]
+            (let [inner (extract-narrowing (nth args 0) env)]
               (if (not (nil? (get inner "var")))
                 {"var" (get inner "var") "type" (get inner "type")
                  "negated" (not (get inner "negated"))}
@@ -1714,6 +1764,31 @@
         (if (string? fn-ref) fn-ref nil)))
     nil))
 
+(defn instance-narrowings [(cond-expr Any) (env Any)] Any
+  (let [fn-name (call-fn-name cond-expr)
+        args (get cond-expr "args")]
+    (if (and (= fn-name "instance?")
+             (= (count args) 2)
+             (= (get (nth args 0) "node") "ref")
+             (= (get (nth args 1) "node") "ref"))
+      (let [member-name (get (nth args 0) "name")
+            var-name (get (nth args 1) "name")
+            current (get env var-name)
+            members (if (union-type? current)
+                      (get current "members")
+                      [current])
+            matches (filterv
+                      (fn [(member Any)] Bool
+                        (and (prim? member)
+                             (= (get member "name") member-name)))
+                      members)]
+        (if (= (count matches) 1)
+          (let [member (first matches)]
+            {"then" {var-name member}
+             "else" {var-name (remove-from-union current member)}})
+          nil))
+      nil)))
+
 ;; test-narrowings — flow-narrowing composition, per check.rkt test-narrowings.
 ;; Returns {"then" {name type ..} "else" {name type ..}}: bindings refined in
 ;; the true/false branch. (not T) swaps branches. (and T1 T2 ..) accumulates
@@ -1726,6 +1801,7 @@
 (defn test-narrowings [(cond-expr Any) (env Any)] Any
   (let [fn-name (call-fn-name cond-expr)
         args (get cond-expr "args")
+        instance-result (instance-narrowings cond-expr env)
         fold-branch (fn [(xs Any) (pick-then Bool)] Any
                       (reduce (fn [(acc Any) (a Any)] Any
                                 (let [tn (test-narrowings a (merge env acc))]
@@ -1746,6 +1822,9 @@
           (test-narrowings (nth args 0) env)
           {"then" {} "else" (fold-branch args false)})
 
+      (some? instance-result)
+        instance-result
+
       (= (get cond-expr "node") "ref")
         (let [v (get cond-expr "name")
               cur (get env v)]
@@ -1758,7 +1837,7 @@
                         {v (make-prim "Nil")})})))
 
       :else
-        (let [info (extract-narrowing cond-expr)
+        (let [info (extract-narrowing cond-expr env)
               v (get info "var")]
           (if (nil? v)
             {"then" {} "else" {}}

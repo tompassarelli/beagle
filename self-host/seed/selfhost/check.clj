@@ -240,6 +240,12 @@
 (defn remove-from-union [current-type remove-type]
   (cond
   (any-type? current-type) current-type
+  (dynamic-type? current-type) (let [removed (if (dynamic-type? remove-type) (get remove-type "args") [remove-type])
+   remaining (filterv (fn [alternative] (not (boolean (some (fn [candidate] (type-invariant-equal? alternative candidate)) removed)))) (get current-type "args"))]
+  (cond
+  (= (count remaining) 0) current-type
+  (= (count remaining) 1) (first remaining)
+  :else (make-app "Dyn" remaining)))
   (union-type? current-type) (let [alts (get current-type "members")
    remaining (filterv (fn [alt] (not (type-equal? alt remove-type))) alts)]
   (cond
@@ -352,7 +358,7 @@
   (let [name (js-target-form-name value)]
   (and (not (nil? name)) (not (= (get (deref STATE) "target") "js")))))
 
-(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
+(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
 
@@ -716,16 +722,30 @@
   (and (app-type? collection-type) (= (get collection-type "name") "HVec") (> (count (get collection-type "args")) 0)) (merge-types-list (vec (get collection-type "args")))
   :else ANY))
 
-(def TYPE-PREDICATES {"nil?" "Nil" "string?" "String" "number?" "Int" "integer?" "Int" "keyword?" "Keyword" "symbol?" "Symbol" "boolean?" "Bool"})
+(def TYPE-PREDICATES {"nil?" "Nil" "string?" "String" "number?" "Number" "integer?" "Int" "keyword?" "Keyword" "symbol?" "Symbol" "boolean?" "Bool"})
 
-(defn extract-narrowing [cond-expr]
+(defn ^Boolean type-matches-predicate? [value ^String predicate-name]
+  (cond
+  (= predicate-name "Number") (and (prim? value) (or (= (get value "name") "Int") (= (get value "name") "Float")))
+  :else (and (prim? value) (= (get value "name") predicate-name))))
+
+(defn predicate-narrowing-type [current ^String predicate-name]
+  (if (dynamic-type? current) (let [matches (filterv (fn [alternative] (type-matches-predicate? alternative predicate-name)) (get current "args"))]
+  (cond
+  (= (count matches) 0) nil
+  (= (count matches) 1) (first matches)
+  :else (make-app "Dyn" matches))) (if (= predicate-name "Number") NUMBER-TYPE (make-prim predicate-name))))
+
+(defn extract-narrowing [cond-expr env]
   (cond
   (not= (get cond-expr "node") "call") {"var" nil "type" nil "negated" false}
   :else (let [fn-ref (get cond-expr "fn")
    fn-name (if (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref")) (get fn-ref "name") (if (string? fn-ref) fn-ref nil))
    args (get cond-expr "args")]
   (cond
-  (and (not (nil? fn-name)) (not (nil? (get TYPE-PREDICATES fn-name))) (= (count args) 1) (= (get (nth args 0) "node") "ref")) {"var" (get (nth args 0) "name") "type" (make-prim (get TYPE-PREDICATES fn-name)) "negated" false}
+  (and (not (nil? fn-name)) (not (nil? (get TYPE-PREDICATES fn-name))) (= (count args) 1) (= (get (nth args 0) "node") "ref")) (let [var-name (get (nth args 0) "name")
+   narrowed (predicate-narrowing-type (get env var-name ANY) (get TYPE-PREDICATES fn-name))]
+  (if (some? narrowed) {"var" var-name "type" narrowed "negated" false} {"var" nil "type" nil "negated" false}))
   (and (not (nil? fn-name)) (= fn-name "some?") (= (count args) 1) (= (get (nth args 0) "node") "ref")) {"var" (get (nth args 0) "name") "type" (make-prim "Nil") "negated" true}
   (and (not (nil? fn-name)) (or (= fn-name "=") (= fn-name "not=")) (= (count args) 2)) (let [a1 (nth args 0)
    a2 (nth args 1)
@@ -734,7 +754,7 @@
   (and (= (get a1 "node") "ref") (= (get a2 "node") "literal") (= (get a2 "kind") "nil")) {"var" (get a1 "name") "type" (make-prim "Nil") "negated" neg}
   (and (= (get a1 "node") "literal") (= (get a1 "kind") "nil") (= (get a2 "node") "ref")) {"var" (get a2 "name") "type" (make-prim "Nil") "negated" neg}
   :else {"var" nil "type" nil "negated" false}))
-  (and (not (nil? fn-name)) (= fn-name "not") (= (count args) 1)) (let [inner (extract-narrowing (nth args 0))]
+  (and (not (nil? fn-name)) (= fn-name "not") (= (count args) 1)) (let [inner (extract-narrowing (nth args 0) env)]
   (if (not (nil? (get inner "var"))) {"var" (get inner "var") "type" (get inner "type") "negated" (not (get inner "negated"))} {"var" nil "type" nil "negated" false}))
   :else {"var" nil "type" nil "negated" false}))))
 
@@ -749,9 +769,21 @@
   (if (= (get e "node") "call") (let [fn-ref (get e "fn")]
   (if (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref")) (get fn-ref "name") (if (string? fn-ref) fn-ref nil))) nil))
 
+(defn instance-narrowings [cond-expr env]
+  (let [fn-name (call-fn-name cond-expr)
+   args (get cond-expr "args")]
+  (if (and (= fn-name "instance?") (= (count args) 2) (= (get (nth args 0) "node") "ref") (= (get (nth args 1) "node") "ref")) (let [member-name (get (nth args 0) "name")
+   var-name (get (nth args 1) "name")
+   current (get env var-name)
+   members (if (union-type? current) (get current "members") [current])
+   matches (filterv (fn [member] (and (prim? member) (= (get member "name") member-name))) members)]
+  (if (= (count matches) 1) (let [member (first matches)]
+  {"then" {var-name member} "else" {var-name (remove-from-union current member)}}) nil)) nil)))
+
 (defn test-narrowings [cond-expr env]
   (let [fn-name (call-fn-name cond-expr)
    args (get cond-expr "args")
+   instance-result (instance-narrowings cond-expr env)
    fold-branch (fn [xs ^Boolean pick-then] (reduce (fn [acc a] (let [tn (test-narrowings a (merge env acc))]
   (merge acc (get tn (if pick-then "then" "else"))))) {} xs))]
   (cond
@@ -759,11 +791,12 @@
   {"then" (get tn "else") "else" (get tn "then")})
   (and (= fn-name "and") (> (count args) 0)) (if (= (count args) 1) (test-narrowings (nth args 0) env) {"then" (fold-branch args true) "else" {}})
   (and (= fn-name "or") (> (count args) 0)) (if (= (count args) 1) (test-narrowings (nth args 0) env) {"then" {} "else" (fold-branch args false)})
+  (some? instance-result) instance-result
   (= (get cond-expr "node") "ref") (let [v (get cond-expr "name")
    cur (get env v)]
   (if (nil? cur) {"then" {} "else" {}} (let [non-nil (remove-from-union cur (make-prim "Nil"))]
   {"then" {v non-nil} "else" (if (type-could-be-false? non-nil) {} {v (make-prim "Nil")})})))
-  :else (let [info (extract-narrowing cond-expr)
+  :else (let [info (extract-narrowing cond-expr env)
    v (get info "var")]
   (if (nil? v) {"then" {} "else" {}} (let [cur (get env v)]
   (if (nil? cur) {"then" {} "else" {}} (let [pos {v (get info "type")}

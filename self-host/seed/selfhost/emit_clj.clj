@@ -62,7 +62,7 @@
   (= n "Float") nil
   (= n "Nil") nil
   (= n "Any") nil
-  :else (if (contains? (deref record-fields) n) n nil)))))
+  :else (if (and (contains? (deref record-fields) n) (not (contains? (deref record-namespaces) n))) n nil)))))
 
 (defn ^String clj-tag-prefix [t]
   (let [tag (clj-tag-for-type t)]
