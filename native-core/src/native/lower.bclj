@@ -20425,6 +20425,46 @@
             (core/basicblock-instructions block))))
       (core/functiondef-blocks function))))
 
+;; A Buffer handle is bound to the durable root arena that created it. Because
+;; every internal call forwards its current arena unless the epoch stage
+;; redirects that call, this requirement propagates through callers: a frame
+;; with no direct Buffer instruction still requires the root when one of its
+;; callees uses a Buffer.
+(defn root-arena-required-pass
+  [(functions (Vec core/FunctionDef))
+   (required (Map String Bool))]
+  (Map String Bool)
+  (loop [(position Int) 0 (current (Map String Bool)) required]
+    (if (>= position (count functions))
+      current
+      (let [(function core/FunctionDef) (nth functions position)
+            (key String) (id-value (core/functiondef-id function))]
+        (recur (+ position 1)
+          (if (= true (get current key))
+            current
+            (if (some?
+                  (some
+                    (fn [(callee-id core/NativeId)] Bool
+                      (= true (get current (id-value callee-id))))
+                    (function-callee-ids function)))
+              (assoc current key true)
+              current)))))))
+
+(defn root-arena-required-functions
+  [(functions (Vec core/FunctionDef))] (Map String Bool)
+  (loop [(required (Map String Bool))
+         (loop [(position Int) 0 (seeded (Map String Bool)) {}]
+           (if (>= position (count functions))
+             seeded
+             (let [(function core/FunctionDef) (nth functions position)]
+               (recur (+ position 1)
+                 (assoc seeded
+                   (id-value (core/functiondef-id function))
+                   (function-uses-buffer-v0? function))))))]
+    (let [(next (Map String Bool))
+          (root-arena-required-pass functions required)]
+      (if (= next required) next (recur next)))))
+
 ;; An epoch-safe callee that declares a region may take one of the caller's
 ;; epoch arenas: its allocations then die at that epoch's close. The call's own
 ;; result must stay interior too — a call whose value leaves the function keeps
@@ -20432,7 +20472,8 @@
 (defn epoch-redirectable-call?
   [(instruction core/Instruction)
    (functions (Vec core/FunctionDef))
-   (safe (Map String Bool))]
+   (safe (Map String Bool))
+   (root-required (Map String Bool))]
   Bool
   (and (instance? native.core.CallInstruction instruction)
     (let [(callee (U core/FunctionDef Nil))
@@ -20441,9 +20482,12 @@
       (and (some? callee)
         (> (count (core/functiondef-regions callee)) 0)
         ;; Buffer v0's explicit ownership contract is root-only. Redirecting a
-        ;; buffer callee's arena to a child epoch would make the runtime handle
-        ;; disagree with its frozen region/capability operands.
-        (not (function-uses-buffer-v0? callee))
+        ;; direct or transitive Buffer user's arena to a child epoch would make
+        ;; the runtime handle disagree with its frozen region/capability
+        ;; operands.
+        (not (= true
+               (get root-required
+                 (id-value (core/functiondef-id callee)))))
         (= true
           (get safe
             (id-value
@@ -20452,7 +20496,8 @@
 (defn epoch-rewrite-function
   [(function core/FunctionDef)
    (functions (Vec core/FunctionDef))
-   (safe (Map String Bool))]
+   (safe (Map String Bool))
+   (root-required (Map String Bool))]
   EpochRewriteV0
   (let [(root-arena (U EpochRootArenaV0 Nil)) (entry-arena-instruction function)]
     (if (nil? root-arena)
@@ -20479,7 +20524,7 @@
                           (if (and
                                 (or (allocating-instruction? instruction)
                                   (epoch-redirectable-call? instruction
-                                    functions safe))
+                                    functions safe root-required))
                                 ;; A promote already names the epoch it wants,
                                 ;; so it is never a reason to mint one.
                                 (not (instance? native.core.PromoteInstructionV0
@@ -20685,12 +20730,13 @@
   [(assignment EpochAssignmentV0)
    (function core/FunctionDef)
    (functions (Vec core/FunctionDef))
-   (safe (Map String Bool))]
+   (safe (Map String Bool))
+   (root-required (Map String Bool))]
   EpochRewriteV0
   (match assignment
     [(EpochIdentityV0 token) (->EpochRewriteV0 function [] [] [])]
     [(EpochDerivedV0 token)
-     (epoch-rewrite-function function functions safe)]))
+     (epoch-rewrite-function function functions safe root-required)]))
 
 (defn lower-epoch-stage
   [(frozen-native stages/FrozenNativeStageV0)
@@ -20705,11 +20751,14 @@
         (program core/NativeCoreProgram) (stages/nativestagev0-program stage)
         (safe (Map String Bool))
         (epoch-safe-functions (core/nativecoreprogram-functions program))
+        (root-required (Map String Bool))
+        (root-arena-required-functions
+          (core/nativecoreprogram-functions program))
         (rewrites (Vec EpochRewriteV0))
         (mapv
           (fn [(function core/FunctionDef)] EpochRewriteV0
             (epoch-assign-function assignment function
-              (core/nativecoreprogram-functions program) safe))
+              (core/nativecoreprogram-functions program) safe root-required))
           (core/nativecoreprogram-functions program))
         (functions (Vec core/FunctionDef))
         (mapv

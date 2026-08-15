@@ -3,6 +3,16 @@
 #ifndef BUFFER_HOLDER_FN
 #error "drive.sh must name the generated Holder field-return symbol"
 #endif
+#ifndef BUFFER_DERIVED_HOLDER_FN
+#error "drive.sh must name the generated derived Holder-call symbol"
+#endif
+
+static void report_trap(uint32_t code) {
+  if (code == NATIVE_TRAP_INVALID_ARGUMENT) {
+    fputs("derived-holder-trap: invalid-argument\n", stdout);
+    fflush(stdout);
+  }
+}
 
 int main(void) {
   native_arena arena;
@@ -14,6 +24,7 @@ int main(void) {
   if (!native_arena_init_growable(&arena, (size_t)4096U)) {
     return 1;
   }
+  native_set_trap_reporter(report_trap);
   before = arena.buffer_storage_allocation_count;
   buffer = BUFFER_HOLDER_FN(&arena, &capability);
   if (buffer == NULL ||
@@ -24,6 +35,9 @@ int main(void) {
       &arena, buffer, &capability, INT64_C(1), INT64_C(8), (size_t)8U);
   if (value != 6.0) {
     return 3;
+  }
+  if (BUFFER_DERIVED_HOLDER_FN(&arena, &capability) != INT64_C(0)) {
+    return 4;
   }
   native_arena_destroy(&arena);
   return 0;

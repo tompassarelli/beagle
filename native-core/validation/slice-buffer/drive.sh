@@ -352,11 +352,12 @@ run_frozen_ir_corpus() {
 }
 
 compile_holder_probe() {
-  local compiler="$1" output="$2" suffix="$3" function="$4"
+  local compiler="$1" output="$2" suffix="$3" function="$4" derived="$5"
   phase "$suffix Holder compile"
   run_bounded "$suffix Holder compile" 60 5 \
     "$compiler" -std=c17 -Wall -Wextra -Werror \
     "-DBUFFER_HOLDER_FN=$function" -I "$output" \
+    "-DBUFFER_DERIVED_HOLDER_FN=$derived" \
     "$output/module_0.c" "$output/native_shim.c" \
     "$here/holder_main.c" -o "$scratch/holder-$suffix"
   phase "$suffix Holder execute"
@@ -550,14 +551,18 @@ run_bounded_logged "Holder C17 build" 60 5 "$holder_output/build.log" \
 grep -qx 'result PASS' "$holder_output/report.txt"
 grep -qx 'obligation-projection PASS closed-layouts' \
   "$holder_output/report.txt"
+grep -qx 'epoch-regions-minted 0' "$holder_output/report.txt"
 holder_index="$(function_index 'make-holder-buffer!' \
   "$holder_output/report.txt")"
+derived_holder_index="$(function_index 'derived-holder-call!' \
+  "$holder_output/report.txt")"
 test -n "$holder_index"
+test -n "$derived_holder_index"
 compile_holder_probe gcc "$holder_output" gcc-holder \
-  "native_m0_fn_${holder_index}"
+  "native_m0_fn_${holder_index}" "native_m0_fn_${derived_holder_index}"
 if [[ -n "$clang_bin" ]]; then
   compile_holder_probe "$clang_bin" "$holder_output" clang-holder \
-    "native_m0_fn_${holder_index}"
+    "native_m0_fn_${holder_index}" "native_m0_fn_${derived_holder_index}"
 fi
 
 native_exe_output="$scratch/native-exe"

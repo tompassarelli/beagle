@@ -10,3 +10,20 @@
         holder (->Holder buffer)]
     (aset-double! buffer 1 6.0)
     (holder-buffer holder)))
+
+(defn holder-first [(holder Holder)] Float
+  (aget (holder-buffer holder) 0))
+
+;; The intermediate frame has no direct Buffer instruction. Its arena must
+;; still remain the holder's durable arena because the callee reads that
+;; Buffer through the record parameter.
+(defn indirect-holder-first [(holder Holder)] Float
+  (holder-first holder))
+
+(defn derived-holder-call! [] Int
+  (let [buffer (double-array 1)
+        holder (->Holder buffer)
+        value (indirect-holder-first holder)]
+    (do
+      (aset-double! buffer 0 (+ value 1.0))
+      0)))
