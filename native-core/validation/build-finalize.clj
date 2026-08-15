@@ -239,12 +239,34 @@
         (vec (remove #(str/starts-with? % "input-sha256=")
                      (:configuration receipt)))
         required-prefixes
-        ["abi=wasm32" "entry=" "export-policy=" "c17-output="
+        ["abi=wasm32" "entry-count=" "export-policy=" "c17-output="
          "cc-identity-sha256=" "ld-identity-sha256="
          "runtime-identity-sha256="]
-        entry-configuration
-        (first (filter #(str/starts-with? % "entry=")
+        entry-count-configuration
+        (first (filter #(str/starts-with? % "entry-count=")
                        non-input-configuration))
+        entry-count
+        (when (and (some? entry-count-configuration)
+                   (re-matches #"entry-count=(0|[1-9][0-9]*)"
+                               entry-count-configuration))
+          (parse-long (subs entry-count-configuration
+                            (count "entry-count="))))
+        entry-configurations
+        (filterv #(re-matches #"entry-[0-9]+=.*" %) non-input-configuration)
+        exact-entry-configurations?
+        (and (some? entry-count)
+             (= entry-count (count entry-configurations))
+             (every?
+               (fn [position]
+                 (let [prefix (str "entry-" position "=")
+                       rows (filterv #(str/starts-with? % prefix)
+                                     entry-configurations)]
+                   (and (= 1 (count rows))
+                        (some?
+                          (re-matches
+                            #"[^\s/]+/[^\s/]+=(pure|arena|capability|arena\+capability)"
+                            (subs (first rows) (count prefix)))))))
+               (range entry-count)))
         export-configuration
         (first (filter #(str/starts-with? % "export-policy=")
                        non-input-configuration))
@@ -269,7 +291,9 @@
                    (= "v0" (:backend-version receipt))
                    (= (:id receipt) (artifact-receipt-id receipt))
                    (= (:commit c17-receipt) (:commit receipt))
-                   (= 7 (count non-input-configuration))
+                   (some? entry-count)
+                   exact-entry-configurations?
+                   (= (+ 7 entry-count) (count non-input-configuration))
                    (every?
                      (fn [prefix]
                        (= 1 (count (filter #(str/starts-with? % prefix)
@@ -283,13 +307,11 @@
                              non-input-configuration))
                    (every? (set non-input-configuration)
                            identity-configurations)
-                   (or (and (= "entry=none" entry-configuration)
+                   (or (and (= 0 entry-count)
                             (= "export-policy=reactor-v0"
                                export-configuration))
-                       (and (some? (re-matches
-                                     #"entry=[^\s/]+/[^\s/]+"
-                                     entry-configuration))
-                            (= "export-policy=entry-v0"
+                       (and (pos? entry-count)
+                            (= "export-policy=entries-v1"
                                export-configuration)))
                    (= expected-input (:input receipt))
                    (= (:output receipt)

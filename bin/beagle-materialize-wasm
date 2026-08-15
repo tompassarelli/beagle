@@ -20,12 +20,12 @@ SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
 
 usage() {
     echo "usage: beagle-materialize-wasm --artifacts DIR" \
-        "--compiled DIR --checked-source SOURCE AST... [--entry NS/NAME]" >&2
+        "--compiled DIR --checked-source SOURCE AST... [--entry NS/NAME]..." >&2
 }
 
 artifacts=""
 compiled=""
-entry=""
+entries=()
 checked_source_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -40,19 +40,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --entry)
             [[ $# -ge 2 ]] || { usage; exit 2; }
-            [[ -z "$entry" ]] || {
-                echo "beagle wasm: --entry may be specified only once" >&2
-                exit 2
-            }
-            entry="$2"
+            entries+=("$2")
             shift 2
             ;;
         --entry=*)
-            [[ -z "$entry" ]] || {
-                echo "beagle wasm: --entry may be specified only once" >&2
-                exit 2
-            }
-            entry="${1#*=}"
+            entries+=("${1#*=}")
             shift
             ;;
         --compiled)
@@ -88,12 +80,40 @@ done
     exit 2
 }
 compiled="$(cd "$compiled" && pwd -P)"
-if [[ -n "$entry" ]]; then
+
+# Every executable entry keeps the parameterless ()->i64 wasm ABI; the export
+# name flattens the qualified source name into one C identifier deterministically.
+mangle_identifier() {
+    printf '%s' "$1" | LC_ALL=C sed 's/[^A-Za-z0-9]/_/g'
+}
+
+entry_export_name() {
+    printf 'beagle_wasm_entry_v1__%s__%s' \
+        "$(mangle_identifier "${1%/*}")" "$(mangle_identifier "${1##*/}")"
+}
+
+entry_exports=()
+declare -A seen_entries=()
+declare -A seen_entry_exports=()
+for entry in "${entries[@]}"; do
     [[ "$entry" =~ ^[^[:space:]/]+/[^[:space:]/]+$ ]] || {
         echo "beagle wasm: --entry must be one whitespace-free NS/NAME" >&2
         exit 2
     }
-fi
+    [[ -z "${seen_entries[$entry]:-}" ]] || {
+        echo "beagle wasm: duplicate --entry: $entry" >&2
+        exit 2
+    }
+    seen_entries["$entry"]=1
+    entry_export="$(entry_export_name "$entry")"
+    [[ -z "${seen_entry_exports[$entry_export]:-}" ]] || {
+        echo "beagle wasm: entries ${seen_entry_exports[$entry_export]} and" \
+            "$entry flatten to one Wasm export name ($entry_export)" >&2
+        exit 2
+    }
+    seen_entry_exports["$entry_export"]="$entry"
+    entry_exports+=("$entry_export")
+done
 if (( ${#checked_source_args[@]} == 0 || ${#checked_source_args[@]} % 2 != 0 )); then
     echo "beagle wasm: at least one complete --checked-source pair is required" >&2
     exit 2
@@ -167,10 +187,13 @@ report_lines+=("wasm-materializer-direct false")
 report_lines+=("wasm-abi wasm32")
 report_lines+=("wasm-input module.native-program")
 report_lines+=("wasm-bootstrap-input module_0.c")
-if [[ -n "$entry" ]]; then
-    report_lines+=("wasm-projection-kind executable-entry-v0")
-    report_lines+=("wasm-export-policy reactor-initialize-memory-and-executable-entry-v0")
-    report_lines+=("wasm-entry-name $entry")
+if [[ ${#entries[@]} -gt 0 ]]; then
+    report_lines+=("wasm-projection-kind executable-entries-v1")
+    report_lines+=("wasm-export-policy reactor-initialize-memory-and-entries-v1")
+    report_lines+=("wasm-entry-count ${#entries[@]}")
+    for entry in "${entries[@]}"; do
+        report_lines+=("wasm-entry-name $entry")
+    done
 else
     report_lines+=("wasm-projection-kind non-executable-projection")
     report_lines+=("wasm-export-policy reactor-initialize-and-memory-only")
@@ -227,7 +250,7 @@ for required in \
     "$SUPERVISOR"; do
     [[ -f "$required" ]] || fail missing-input "bootstrap input is unavailable: $required"
 done
-if [[ -n "$entry" && ! -f "$ENTRY_CONTRACT" ]]; then
+if [[ ${#entries[@]} -gt 0 && ! -f "$ENTRY_CONTRACT" ]]; then
     fail missing-input "entry contract validator is unavailable: $ENTRY_CONTRACT"
 fi
 
@@ -466,91 +489,164 @@ report_lines+=("wasm-input-native-receipts-sha256 $(sha256sum "$artifacts/native
 report_lines+=("wasm-input-c17-receipt-sha256 $(sha256sum "$artifacts/c17.receipt" | awk '{print $1}')")
 report_lines+=("wasm-provenance PASS checked-projection-to-native-receipts-to-c17-receipt")
 
-entry_export="beagle_wasm_entry_v0"
-entry_compile_sources=()
 entry_link_flags=()
-if [[ -n "$entry" ]]; then
-    entry_contract_error="$work/entry-contract.err"
-    if ! run_bounded "$validation_timeout" \
-            bb "$ENTRY_CONTRACT" "$entry" "${checked_source_args[@]}" \
-            >"$work/entry-contract.out" 2>"$entry_contract_error"; then
-        report_lines+=("wasm-entry-contract REFUSED")
-        entry_detail="$(sed -n '1s/^beagle wasm: //p' "$entry_contract_error")"
-        fail unsupported-entry "${entry_detail:-entry '$entry' failed source contract validation}"
-    fi
-    read_single_printable_line "$work/entry-contract.out" entry_return \
-        "entry contract result"
-    [[ "$entry_return" == "Int" ]] || {
-        report_lines+=("wasm-entry-contract REFUSED")
-        fail unsupported-entry "entry '$entry' has unsupported source return '$entry_return'"
-    }
-
-    source_entry_count="$(grep -Fxc -- "source-entry $entry" \
-        "$artifacts/native.entry-map" || true)"
-    [[ "$source_entry_count" == "1" ]] || {
-        report_lines+=("wasm-entry-contract REFUSED")
-        fail unsupported-entry \
-            "entry '$entry' is not uniquely bound to the frozen Core report"
-    }
-    entry_name="${entry##*/}"
-    mapfile -t entry_rows < <(
-        awk -v name="$entry_name" \
-            '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == name { print $2 }' \
-            "$artifacts/native.entry-map"
-    )
-    [[ ${#entry_rows[@]} -eq 1 ]] || {
-        report_lines+=("wasm-entry-contract REFUSED")
-        fail unsupported-entry \
-            "entry '$entry' does not map to one unique lowered Core function"
-    }
-    function_index="${entry_rows[0]#fn_}"
-    entry_symbol="native_m0_fn_$function_index"
-    mapfile -t entry_prototypes < <(
-        grep -E "^[A-Za-z_][A-Za-z0-9_]* ${entry_symbol}\\(.*\\);$" \
-            "$artifacts/module_0.h" || true
-    )
-    [[ ${#entry_prototypes[@]} -eq 1 ]] || {
-        report_lines+=("wasm-entry-contract REFUSED")
-        fail unsupported-entry \
-            "entry '$entry' does not map to one unique generated C symbol ($entry_symbol)"
-    }
-    entry_prototype="${entry_prototypes[0]}"
-    entry_pattern="^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+${entry_symbol}\\((.*)\\);$"
-    if [[ "$entry_prototype" =~ $entry_pattern ]]; then
-        entry_c_return="${BASH_REMATCH[1]}"
-        entry_c_parameters="${BASH_REMATCH[2]}"
-    else
-        report_lines+=("wasm-entry-contract REFUSED")
-        fail unsupported-entry "entry '$entry' generated malformed C ABI: $entry_prototype"
-    fi
-    [[ "$entry_c_parameters" == "void" ]] || {
-        report_lines+=("wasm-entry-contract REFUSED")
-        fail unsupported-entry \
-            "entry '$entry' requires unsupported generated ABI parameters ($entry_c_parameters)"
-    }
-    [[ "$entry_c_return" =~ ^native_m0_type_[0-9]+$ ]] &&
-        grep -Fqx "typedef int64_t $entry_c_return;" "$artifacts/module_0.h" || {
-            report_lines+=("wasm-entry-contract REFUSED")
+entry_symbols=()
+entry_lowered_abis=()
+entry_call_arguments=()
+adapter_needs_state=0
+if [[ ${#entries[@]} -gt 0 ]]; then
+    for entry_index in "${!entries[@]}"; do
+        entry="${entries[$entry_index]}"
+        entry_export="${entry_exports[$entry_index]}"
+        entry_contract_error="$work/entry-contract-$entry_index.err"
+        if ! run_bounded "$validation_timeout" \
+                bb "$ENTRY_CONTRACT" "$entry" "${checked_source_args[@]}" \
+                >"$work/entry-contract-$entry_index.out" \
+                2>"$entry_contract_error"; then
+            report_lines+=("wasm-entry-contract REFUSED $entry")
+            entry_detail="$(sed -n '1s/^beagle wasm: //p' "$entry_contract_error")"
             fail unsupported-entry \
-                "entry '$entry' Int result is not represented by the generated int64 ABI"
+                "${entry_detail:-entry '$entry' failed source contract validation}"
+        fi
+        read_single_printable_line "$work/entry-contract-$entry_index.out" \
+            entry_return "entry contract result"
+        [[ "$entry_return" == "Int" ]] || {
+            report_lines+=("wasm-entry-contract REFUSED $entry")
+            fail unsupported-entry \
+                "entry '$entry' has unsupported source return '$entry_return'"
         }
 
-    cat >"$work/wasm.adapter.c" <<EOF
-/* Generated stable wasm-callable adapter for one validated Beagle Int entry. */
+        source_entry_count="$(grep -Fxc -- "source-entry $entry" \
+            "$artifacts/native.entry-map" || true)"
+        [[ "$source_entry_count" == "1" ]] || {
+            report_lines+=("wasm-entry-contract REFUSED $entry")
+            fail unsupported-entry \
+                "entry '$entry' is not uniquely bound to the frozen Core report"
+        }
+        entry_name="${entry##*/}"
+        mapfile -t entry_rows < <(
+            awk -v name="$entry_name" \
+                '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == name { print $2 }' \
+                "$artifacts/native.entry-map"
+        )
+        [[ ${#entry_rows[@]} -eq 1 ]] || {
+            report_lines+=("wasm-entry-contract REFUSED $entry")
+            fail unsupported-entry \
+                "entry '$entry' does not map to one unique lowered Core function"
+        }
+        function_index="${entry_rows[0]#fn_}"
+        entry_symbol="native_m0_fn_$function_index"
+        mapfile -t entry_prototypes < <(
+            grep -E "^[A-Za-z_][A-Za-z0-9_]* ${entry_symbol}\\(.*\\);$" \
+                "$artifacts/module_0.h" || true
+        )
+        [[ ${#entry_prototypes[@]} -eq 1 ]] || {
+            report_lines+=("wasm-entry-contract REFUSED $entry")
+            fail unsupported-entry \
+                "entry '$entry' does not map to one unique generated C symbol ($entry_symbol)"
+        }
+        entry_prototype="${entry_prototypes[0]}"
+        entry_pattern="^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+${entry_symbol}\\((.*)\\);$"
+        if [[ "$entry_prototype" =~ $entry_pattern ]]; then
+            entry_c_return="${BASH_REMATCH[1]}"
+            entry_c_parameters="${BASH_REMATCH[2]}"
+        else
+            report_lines+=("wasm-entry-contract REFUSED $entry")
+            fail unsupported-entry \
+                "entry '$entry' generated malformed C ABI: $entry_prototype"
+        fi
+        # The four lowered resource shapes mirror beagle native-exe. The
+        # adapter owns one instance arena and capability, so every shape still
+        # exports the parameterless ()->i64 wasm ABI.
+        case "$entry_c_parameters" in
+            void)
+                entry_lowered_abi="pure"
+                entry_call="()"
+                ;;
+            "native_arena *arena")
+                entry_lowered_abi="arena"
+                entry_call="(&beagle_wasm_arena)"
+                adapter_needs_state=1
+                ;;
+            "const native_capability *capability")
+                entry_lowered_abi="capability"
+                entry_call="(&beagle_wasm_capability)"
+                adapter_needs_state=1
+                ;;
+            "native_arena *arena, const native_capability *capability")
+                entry_lowered_abi="arena+capability"
+                entry_call="(&beagle_wasm_arena, &beagle_wasm_capability)"
+                adapter_needs_state=1
+                ;;
+            *)
+                report_lines+=("wasm-entry-contract REFUSED $entry")
+                fail unsupported-entry \
+                    "entry '$entry' requires unsupported generated ABI parameters ($entry_c_parameters)"
+                ;;
+        esac
+        [[ "$entry_c_return" =~ ^native_m0_type_[0-9]+$ ]] &&
+            grep -Fqx "typedef int64_t $entry_c_return;" "$artifacts/module_0.h" || {
+                report_lines+=("wasm-entry-contract REFUSED $entry")
+                fail unsupported-entry \
+                    "entry '$entry' Int result is not represented by the generated int64 ABI"
+            }
+        entry_symbols+=("$entry_symbol")
+        entry_lowered_abis+=("$entry_lowered_abi")
+        entry_call_arguments+=("$entry_call")
+        entry_link_flags+=("-Wl,--export=$entry_export")
+        report_lines+=("wasm-entry-contract PASS $entry source-ast-to-lowered-header")
+        report_lines+=("wasm-entry-symbol $entry $entry_symbol")
+        report_lines+=("wasm-entry-export $entry $entry_export")
+        report_lines+=("wasm-entry-lowered-abi $entry $entry_lowered_abi")
+    done
+    report_lines+=("wasm-entry-abi parameterless-int-to-i64-v1")
+
+    {
+        cat <<'EOF'
+/* Generated stable wasm-callable adapter for validated Beagle Int entries. */
 #include "module_0.h"
 
 #include <stdint.h>
+EOF
+        if [[ "$adapter_needs_state" == "1" ]]; then
+            cat <<'EOF'
 
-int64_t $entry_export(void) {
-  return (int64_t)$entry_symbol();
+#include <stddef.h>
+
+/* wasm-state-v1: one adapter-owned arena and capability live for the whole
+   instance. The arena is fixed static storage initialized during _initialize
+   (reactor constructors), is never reset by the adapter itself, and traps on
+   exhaustion; the nonzero capability mirrors the beagle native-exe host. */
+#define BEAGLE_WASM_ARENA_BYTES ((size_t)(16U * 1024U * 1024U))
+
+static uint8_t beagle_wasm_arena_storage[BEAGLE_WASM_ARENA_BYTES];
+static native_arena beagle_wasm_arena;
+static const native_capability beagle_wasm_capability = { UINT64_C(1) };
+
+__attribute__((constructor)) static void beagle_wasm_state_initialize(void) {
+  native_arena_init(&beagle_wasm_arena, beagle_wasm_arena_storage,
+                    BEAGLE_WASM_ARENA_BYTES);
+}
+
+int64_t beagle_wasm_arena_reset_v1(void) {
+  native_arena_reset(&beagle_wasm_arena);
+  return (int64_t)BEAGLE_WASM_ARENA_BYTES;
 }
 EOF
-    entry_compile_sources+=("$work/wasm.adapter.c")
-    entry_link_flags+=("-Wl,--export=$entry_export")
-    report_lines+=("wasm-entry-contract PASS source-ast-to-lowered-header")
-    report_lines+=("wasm-entry-symbol $entry_symbol")
-    report_lines+=("wasm-entry-export $entry_export")
-    report_lines+=("wasm-entry-abi parameterless-int-to-i64-v0")
+        fi
+        for entry_index in "${!entries[@]}"; do
+            printf '\nint64_t %s(void) {\n  return (int64_t)%s%s;\n}\n' \
+                "${entry_exports[$entry_index]}" \
+                "${entry_symbols[$entry_index]}" \
+                "${entry_call_arguments[$entry_index]}"
+        done
+    } >"$work/wasm.adapter.c"
+    if [[ "$adapter_needs_state" == "1" ]]; then
+        entry_link_flags+=("-Wl,--export=beagle_wasm_arena_reset_v1")
+        report_lines+=("wasm-state-arena static-bytes=16777216 lifetime=instance")
+        report_lines+=("wasm-state-arena-reset beagle_wasm_arena_reset_v1")
+        report_lines+=("wasm-state-capability constant-nonzero-token")
+    fi
 else
     printf '%s\n' '/* No executable source entry was requested. */' \
         >"$work/wasm.adapter.c"
@@ -739,18 +835,27 @@ if ! run_bounded "$validation_timeout" \
 fi
 awk '$1 == "export" { print }' "$work/module_0.wasm.seams" \
     >"$work/actual-exports.txt"
-if [[ -n "$entry" ]]; then
-    printf '%s\n' \
-        "export func 5f696e697469616c697a65" \
-        "export func 626561676c655f7761736d5f656e7472795f7630" \
-        "export memory 6d656d6f7279" \
-        >"$work/expected-exports.txt"
-else
-    printf '%s\n' \
-        "export func 5f696e697469616c697a65" \
-        "export memory 6d656d6f7279" \
-        >"$work/expected-exports.txt"
+# Export names are ASCII by construction; the seam inventory carries them as
+# lowercase hex so the comparison never trusts terminal-hostile bytes.
+ascii_hex() {
+    local text="$1" position
+    for ((position = 0; position < ${#text}; position++)); do
+        printf '%02x' "'${text:$position:1}"
+    done
+}
+expected_function_exports=(_initialize)
+if [[ ${#entries[@]} -gt 0 ]]; then
+    expected_function_exports+=("${entry_exports[@]}")
+    if [[ "$adapter_needs_state" == "1" ]]; then
+        expected_function_exports+=(beagle_wasm_arena_reset_v1)
+    fi
 fi
+{
+    for export_name in "${expected_function_exports[@]}"; do
+        printf 'export func %s\n' "$(ascii_hex "$export_name")"
+    done
+    printf 'export memory %s\n' "$(ascii_hex "memory")"
+} | LC_ALL=C sort >"$work/expected-exports.txt"
 if ! cmp -s "$work/expected-exports.txt" "$work/actual-exports.txt"; then
     sed -n '1,80p' "$work/module_0.wasm.seams" >&2
     fail export-policy \
@@ -779,36 +884,38 @@ seams_digest="$(sha256sum "$work/module_0.wasm.seams" | awk '{print $1}')"
 report_lines+=("wasm-seams module_0.wasm.seams")
 report_lines+=("wasm-seams-sha256 $seams_digest")
 report_lines+=("wasm-import-count $import_count")
-if [[ -n "$entry" ]]; then
-    report_lines+=("wasm-export-count 3")
-else
-    report_lines+=("wasm-export-count 2")
-fi
-report_lines+=("wasm-export func _initialize")
-if [[ -n "$entry" ]]; then
-    report_lines+=("wasm-export func $entry_export")
-fi
+report_lines+=("wasm-export-count $(( ${#expected_function_exports[@]} + 1 ))")
+for export_name in "${expected_function_exports[@]}"; do
+    report_lines+=("wasm-export func $export_name")
+done
 report_lines+=("wasm-export memory memory")
 
-if [[ -n "$entry" ]]; then
-    echo "beagle wasm: bounded source entry invocation" >&2
-    if ! run_bounded "$instantiate_timeout" \
-        "$runtime" run --invoke "$entry_export" "$work/module_0-1.wasm" \
-        >"$work/runtime.stdout" 2>"$work/runtime.stderr"; then
-        sed -n '1,80p' "$work/runtime.stderr" >&2
-        fail invoke-entry \
-            "entry '$entry' invocation failed or exceeded ${instantiate_timeout}s"
-    fi
-    mapfile -t entry_outputs < <(tr -d '\r' <"$work/runtime.stdout")
-    [[ ${#entry_outputs[@]} -eq 1 &&
-       "${entry_outputs[0]}" =~ ^(0|-?[1-9][0-9]*)$ ]] || {
-        sed -n '1,80p' "$work/runtime.stdout" >&2
-        fail entry-result \
-            "entry '$entry' did not produce exactly one canonical i64 result"
-    }
-    report_lines+=("wasm-validation PASS source-entry-invoked")
-    report_lines+=("wasm-entry-result ${entry_outputs[0]}")
-    report_lines+=("wasm-validation-boundary executable-entry-v0-only")
+if [[ ${#entries[@]} -gt 0 ]]; then
+    # Each entry is invoked in its own fresh instance, so every recorded
+    # result is a function of that entry alone, not of invocation order.
+    for entry_index in "${!entries[@]}"; do
+        entry="${entries[$entry_index]}"
+        entry_export="${entry_exports[$entry_index]}"
+        echo "beagle wasm: bounded source entry invocation ($entry)" >&2
+        if ! run_bounded "$instantiate_timeout" \
+            "$runtime" run --invoke "$entry_export" "$work/module_0-1.wasm" \
+            >"$work/runtime-$entry_index.stdout" \
+            2>"$work/runtime-$entry_index.stderr"; then
+            sed -n '1,80p' "$work/runtime-$entry_index.stderr" >&2
+            fail invoke-entry \
+                "entry '$entry' invocation failed or exceeded ${instantiate_timeout}s"
+        fi
+        mapfile -t entry_outputs < <(tr -d '\r' <"$work/runtime-$entry_index.stdout")
+        [[ ${#entry_outputs[@]} -eq 1 &&
+           "${entry_outputs[0]}" =~ ^(0|-?[1-9][0-9]*)$ ]] || {
+            sed -n '1,80p' "$work/runtime-$entry_index.stdout" >&2
+            fail entry-result \
+                "entry '$entry' did not produce exactly one canonical i64 result"
+        }
+        report_lines+=("wasm-entry-result $entry ${entry_outputs[0]}")
+    done
+    report_lines+=("wasm-validation PASS source-entries-invoked")
+    report_lines+=("wasm-validation-boundary executable-entries-v1-only")
 else
     echo "beagle wasm: bounded reactor instantiation" >&2
     if ! run_bounded "$instantiate_timeout" \
@@ -835,16 +942,20 @@ wasm_receipt_args=(
     wasm-receipt "$work/wasm.receipt" "$epoch_commit"
     --configuration "c17-output=$c17_output"
     --configuration "abi=wasm32"
-    --configuration "entry=${entry:-none}"
+    --configuration "entry-count=${#entries[@]}"
     --configuration "cc-identity-sha256=sha256:$cc_version"
     --configuration "ld-identity-sha256=sha256:$ld_version"
     --configuration "runtime-identity-sha256=sha256:$runtime_version"
-    --configuration "export-policy=$(if [[ -n "$entry" ]]; then
-        printf entry-v0
+    --configuration "export-policy=$(if [[ ${#entries[@]} -gt 0 ]]; then
+        printf entries-v1
     else
         printf reactor-v0
     fi)"
 )
+for entry_index in "${!entries[@]}"; do
+    wasm_receipt_args+=(--configuration
+        "entry-$entry_index=${entries[$entry_index]}=${entry_lowered_abis[$entry_index]}")
+done
 for input_index in "${!compiler_input_paths[@]}"; do
     wasm_receipt_args+=(--input "${compiler_input_names[$input_index]}" \
                        "$artifacts/.${compiler_input_names[$input_index]}.$$")

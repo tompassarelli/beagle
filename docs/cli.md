@@ -82,12 +82,46 @@ adds `module_0.wasm`, its SHA-256 digest, `module_0.wasm.seams`, and two reports
 `wasm-report.txt` contains the deterministic bootstrap/tool-identity contract;
 `wasm-audit.txt` records environment-specific resolved compiler, linker, and
 runtime paths. With no `--entry`, the reactor is classified as a non-executable
-projection and exports only `_initialize` and `memory`. With exactly one public,
-parameterless `Int` entry, the build proves its qualified source definition,
-unique lowered function, and generated C symbol are one chain, exports
-`beagle_wasm_entry_v0 : () -> i64`, and invokes it under Wasmtime. Other entry
-shapes and multiple Wasm entries are refused. No materializer is implicit, and
-hosted `.bclj` is not accepted by the Core build path.
+projection and exports only `_initialize` and `memory`. No materializer is
+implicit, and hosted `.bclj` is not accepted by the Core build path.
+
+### Wasm executable entries (wasm-entry-abi v1)
+
+Each repeated `--entry NS/NAME` names one public, parameterless `Int` source
+function. The build proves each entry's qualified source definition, unique
+lowered function, and generated C symbol are one chain, then exports it as
+
+```
+beagle_wasm_entry_v1__<ns>__<name> : () -> i64
+```
+
+where `<ns>` and `<name>` replace every byte outside `[A-Za-z0-9]` with `_`.
+Two entries that flatten to one export name, duplicate entries, and any other
+callable shape are refused by qualified name. During the build every entry is
+invoked under Wasmtime in its own fresh instance and its i64 result is
+recorded in `wasm-report.txt` (`wasm-entry-result NS/NAME R`).
+
+Entries whose lowered form takes the generated resource parameters
+(`native_arena *arena`, `const native_capability *capability` — the same four
+shapes `beagle native-exe` links) are served by an adapter-owned instance
+state surface: one arena over 16 MiB of static linear-memory storage and one
+constant nonzero capability, both constructed while the host runs the exported
+`_initialize` (reactor convention: the host must call `_initialize` exactly
+once before any entry; skipping it makes the first allocation trap). The arena
+lives for the whole instance, allocations accumulate monotonically across
+entry calls, exhaustion traps, and the adapter itself never resets it. Builds
+with at least one resource-bearing entry additionally export
+`beagle_wasm_arena_reset_v1 : () -> i64`, which resets the arena under
+explicit host control — invalidating every Buffer allocated so far — and
+returns the arena capacity. A module-level `def` is lowered per use site, so
+each entry call reconstructs the state it names inside the arena; persistence
+across calls is the arena's, not the def's.
+
+The module keeps the zero-import contract (`wasm-import-count 0` in the
+report), so `WebAssembly.instantiate(module, {})` works in any browser or JS
+runtime; call `instance.exports._initialize()` once, then entries in any
+order. The entry list, each entry's lowered resource shape, and the export
+policy (`entries-v1`) are receipt-covered in `wasm.receipt`.
 
 Without an explicit `OUT` argument, `beagle build` writes to
 `${BEAGLE_OUT:-<beagle-checkout>/.beagle-out}/<ns-path>.<ext>` — that is the

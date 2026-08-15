@@ -169,7 +169,94 @@
 (define (fixture-path fixture field)
   (hash-ref fixture field))
 
-(define (run-materializer fixture cc ld runtime extra-env #:entry [entry #f])
+(define buffer-fixture #f)
+(define buffer-fixture-entries '("fixture.state/boot!" "fixture.state/step!"))
+
+(define (canonical-buffer-fixture)
+  ;; A Buffer-touching corpus lowers every entry to the arena+capability ABI,
+  ;; so this fixture is the compiler-owned evidence for the adapter state
+  ;; surface. Entries ride the C17 build so native.entry-map binds them.
+  (unless buffer-fixture
+    (define root (make-temporary-file "beagle-wasm-buffer-fixture-~a" 'directory))
+    (define source (build-path root "state.bgl"))
+    (define ast (build-path root "state.ast.json"))
+    (define artifacts (build-path root "artifacts"))
+    (write-text source
+                (string-append
+                 "#lang beagle\n"
+                 "(ns fixture.state)\n"
+                 "(def cells (Buffer Float) (double-array 4))\n"
+                 "(defn boot! [] Int\n"
+                 "  (do (aset-double! cells 0 1.5) 0))\n"
+                 "(defn step! [] Int\n"
+                 "  (do (aset-double! cells 0 (+ (aget cells 0) 1.0)) 0))\n"))
+    (check-equal?
+     (apply run-bounded beagle "build" "--materializer" "c17" "--abi" "wasm32"
+            (append
+             (apply append (for/list ([entry (in-list buffer-fixture-entries)])
+                             (list "--entry" entry)))
+             (list "--out" (path->string artifacts) (path->string source))))
+     0 "canonical Buffer C17 fixture build failed")
+    (define ast-output (open-output-string))
+    (define ast-error (open-output-string))
+    (define ast-code
+      (parameterize ([current-directory repo-root]
+                     [current-output-port ast-output]
+                     [current-error-port ast-error])
+        (run-owned/bounded 120 beagle-ast (path->string source))))
+    (check-equal? ast-code 0 (string-append (get-output-string ast-output)
+                                            (get-output-string ast-error)))
+    (write-text ast (get-output-string ast-output))
+    (set! buffer-fixture
+          (hasheq 'root root
+                  'artifacts artifacts
+                  'compiled (fixture-path (canonical-base-fixture) 'compiled)
+                  'source source 'ast ast)))
+  buffer-fixture)
+
+(define (make-buffer-artifacts scratch)
+  (define base (canonical-buffer-fixture))
+  (define artifacts (build-path scratch "artifacts"))
+  (define source (build-path scratch "state.bgl"))
+  (define ast (build-path scratch "state.ast.json"))
+  (copy-directory/files (fixture-path base 'artifacts) artifacts)
+  (copy-file (fixture-path base 'source) source)
+  (copy-file (fixture-path base 'ast) ast)
+  (for ([name (in-list '("build.manifest" "build.manifest.sha256"))])
+    (delete-file (build-path artifacts name)))
+  (hasheq 'artifacts artifacts
+          'compiled (fixture-path base 'compiled)
+          'source source
+          'ast ast))
+
+(define (ascii-hex text)
+  (apply string-append
+         (for/list ([character (in-string text)])
+           (define value (number->string (char->integer character) 16))
+           (if (= (string-length value) 1) (string-append "0" value) value))))
+
+(define (entry-export-name entry)
+  (define (mangle text)
+    (list->string
+     (for/list ([character (in-string text)])
+       (if (or (char<=? #\a character #\z)
+               (char<=? #\A character #\Z)
+               (char<=? #\0 character #\9))
+           character
+           #\_))))
+  (define parts (string-split entry "/"))
+  (string-append "beagle_wasm_entry_v1__" (mangle (car parts))
+                 "__" (mangle (cadr parts))))
+
+(define (expected-seams function-exports)
+  (string-append
+   (apply string-append
+          (sort (for/list ([name (in-list (cons "_initialize" function-exports))])
+                  (format "export func ~a\n" (ascii-hex name)))
+                string<?))
+   (format "export memory ~a\n" (ascii-hex "memory"))))
+
+(define (run-materializer fixture cc ld runtime extra-env #:entries [entries '()])
   (define artifacts (fixture-path fixture 'artifacts))
   (define env (environment-variables-copy (current-environment-variables)))
   (environment-variables-set! env #"BEAGLE_WASI_CC"
@@ -199,7 +286,9 @@
                     "--compiled" (path->string (fixture-path fixture 'compiled))
                     "--checked-source" (path->string (fixture-path fixture 'source))
                     (path->string (fixture-path fixture 'ast)))
-              (if entry (list "--entry" entry) '())))))
+              (apply append
+                     (for/list ([entry (in-list entries)])
+                       (list "--entry" entry)))))))
   (values exit-code (get-output-string stdout) (get-output-string stderr)))
 
 (define (run-core-wasm source out cc ld runtime extra-env)
@@ -280,10 +369,14 @@ if [[ -f "${FAKE_CC_COUNT:?}" ]]; then
 fi
 printf '%s\n' "$((count + 1))" >"$FAKE_CC_COUNT"
 output=""
+exports=()
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == "-o" ]]; then
     output="$2"
     shift 2
+  elif [[ "$1" == -Wl,--export=* ]]; then
+    exports+=("${1#-Wl,--export=}")
+    shift
   else
     shift
   fi
@@ -292,7 +385,46 @@ if [[ -z "$output" ]]; then
   printf 'fake-wasi-clang: no -o output argument\n' >&2
   exit 1
 fi
-printf '\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x05\x03\x01\x00\x01\x07\x18\x02\x06\x6d\x65\x6d\x6f\x72\x79\x02\x00\x0b\x5f\x69\x6e\x69\x74\x69\x61\x6c\x69\x7a\x65\x00\x00\x0a\x04\x01\x02\x00\x0b' >"$output"
+# Synthesize a minimal valid reactor whose export section carries memory,
+# _initialize, and exactly the requested --export names, so the materializer's
+# seam policy sees the surface a real link would publish.
+byte_hex() { printf '%02x' "$1"; }
+uleb_hex() {
+  local value=$1 out="" septet
+  while :; do
+    septet=$((value & 0x7f))
+    value=$((value >> 7))
+    if (( value > 0 )); then
+      out+="$(byte_hex $((septet | 0x80)))"
+    else
+      out+="$(byte_hex "$septet")"
+      break
+    fi
+  done
+  printf '%s' "$out"
+}
+ascii_hex() {
+  local text=$1 position
+  for ((position = 0; position < ${#text}; position++)); do
+    byte_hex "$(printf '%d' "'${text:$position:1}")"
+  done
+}
+export_entry_hex() { # <name> <kind-hex>
+  printf '%s%s%s00' "$(uleb_hex "${#1}")" "$(ascii_hex "$1")" "$2"
+}
+export_body="$(uleb_hex $((2 + ${#exports[@]})))"
+export_body+="$(export_entry_hex memory 02)"
+export_body+="$(export_entry_hex _initialize 00)"
+for name in "${exports[@]}"; do
+  export_body+="$(export_entry_hex "$name" 00)"
+done
+module_hex="0061736d01000000"
+module_hex+="010401600000"  # type section: one () -> () type
+module_hex+="03020100"      # function section: one function of type 0
+module_hex+="0503010001"    # memory section: one memory, min 1 page
+module_hex+="07$(uleb_hex $((${#export_body} / 2)))$export_body"
+module_hex+="0a040102000b"  # code section: one empty body
+printf '%b' "$(printf '%s' "$module_hex" | sed 's/../\\x&/g')" >"$output"
 SH
 )
 
@@ -313,8 +445,19 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'fake-wasmtime 1.0\n'
   exit 0
 fi
-[[ "${1:-}" == "run" && -s "${2:-}" ]]
-printf 'instantiated\n' >"${FAKE_RUNTIME_MARKER:?}"
+[[ "${1:-}" == "run" ]]
+shift
+invoked=""
+if [[ "${1:-}" == "--invoke" ]]; then
+  invoked="$2"
+  shift 2
+fi
+[[ -s "${1:-}" ]]
+printf 'instantiated %s\n' "${invoked:-_initialize-only}" \
+  >>"${FAKE_RUNTIME_MARKER:?}"
+if [[ -n "$invoked" ]]; then
+  printf '42\n'
+fi
 SH
 )
 
@@ -407,7 +550,8 @@ SH
                 (string->bytes/utf-8 (path->string runtime-marker)))))
      (check-equal? exit-code 0 (string-append stdout stderr))
      (check-equal? (string-trim (file->string cc-count)) "2")
-     (check-equal? (string-trim (file->string runtime-marker)) "instantiated")
+     (check-equal? (string-trim (file->string runtime-marker))
+                   "instantiated _initialize-only")
      (check-true (file-exists? (build-path artifacts "module_0.wasm")))
      (check-equal?
       (file->string (build-path artifacts "module_0.wasm.seams"))
@@ -452,6 +596,90 @@ SH
       (string-contains? audit
                         (format "wasm-tool-runtime-path-shell ~a\n"
                                 (resolved-tool-path runtime)))))
+   (lambda () (delete-directory/files scratch))))
+
+)
+
+(phase-test "multiple arena-bearing entries export the v1 entry and state surface" (lambda ()
+  (define scratch (make-temporary-file "beagle-wasm-multi-entry-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define fixture (make-buffer-artifacts scratch))
+     (define artifacts (fixture-path fixture 'artifacts))
+     (define-values (cc ld runtime env) (make-fake-toolchain scratch))
+     (define-values (code stdout stderr)
+       (run-materializer fixture cc ld runtime env
+                         #:entries buffer-fixture-entries))
+     (check-equal? code 0 (string-append stdout stderr))
+     (define exports (append (map entry-export-name buffer-fixture-entries)
+                             '("beagle_wasm_arena_reset_v1")))
+     (check-equal? (file->string (build-path artifacts "module_0.wasm.seams"))
+                   (expected-seams exports))
+     (define adapter (file->string (build-path artifacts "wasm.adapter.c")))
+     (check-true (string-contains?
+                  adapter "static native_arena beagle_wasm_arena;"))
+     (check-true (string-contains?
+                  adapter "static void beagle_wasm_state_initialize(void)"))
+     (check-true (string-contains?
+                  adapter "int64_t beagle_wasm_arena_reset_v1(void)"))
+     (for ([entry (in-list buffer-fixture-entries)])
+       (check-true (string-contains?
+                    adapter (format "int64_t ~a(void)" (entry-export-name entry)))
+                   entry))
+     (define report (file->string (build-path artifacts "wasm-report.txt")))
+     (for ([line (in-list
+                  (list
+                   "wasm-projection-kind executable-entries-v1"
+                   "wasm-export-policy reactor-initialize-memory-and-entries-v1"
+                   "wasm-entry-count 2"
+                   "wasm-entry-abi parameterless-int-to-i64-v1"
+                   "wasm-state-arena static-bytes=16777216 lifetime=instance"
+                   "wasm-state-arena-reset beagle_wasm_arena_reset_v1"
+                   "wasm-state-capability constant-nonzero-token"
+                   "wasm-validation PASS source-entries-invoked"
+                   "wasm-result PASS"))])
+       (check-true (string-contains? report (string-append line "\n")) line))
+     (for ([entry (in-list buffer-fixture-entries)])
+       (for ([line (in-list
+                    (list
+                     (format "wasm-entry-contract PASS ~a source-ast-to-lowered-header"
+                             entry)
+                     (format "wasm-entry-export ~a ~a"
+                             entry (entry-export-name entry))
+                     (format "wasm-entry-lowered-abi ~a arena+capability" entry)
+                     (format "wasm-entry-result ~a 42" entry)))])
+         (check-true (string-contains? report (string-append line "\n")) line)))
+     ;; Every entry is invoked in its own fresh instance, in --entry order.
+     (define marker (file->string (build-path scratch "runtime-marker")))
+     (check-equal? marker
+                   (apply string-append
+                          (for/list ([entry (in-list buffer-fixture-entries)])
+                            (format "instantiated ~a\n"
+                                    (entry-export-name entry))))))
+   (lambda () (delete-directory/files scratch))))
+
+)
+
+(phase-test "entries that flatten to one export name are refused" (lambda ()
+  (define scratch (make-temporary-file "beagle-wasm-entry-collision-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define fixture (make-buffer-artifacts scratch))
+     (define-values (cc ld runtime env) (make-fake-toolchain scratch))
+     (define-values (code stdout stderr)
+       (run-materializer fixture cc ld runtime env
+                         #:entries '("fixture.state/boot!" "fixture.state/boot?")))
+     (check-not-equal? code 0 stdout)
+     (check-true (string-contains? stderr "flatten to one Wasm export name")
+                 stderr)
+     (define-values (duplicate-code duplicate-stdout duplicate-stderr)
+       (run-materializer fixture cc ld runtime env
+                         #:entries '("fixture.state/boot!" "fixture.state/boot!")))
+     (check-not-equal? duplicate-code 0 duplicate-stdout)
+     (check-true (string-contains? duplicate-stderr "duplicate --entry")
+                 duplicate-stderr))
    (lambda () (delete-directory/files scratch))))
 
 )
@@ -909,7 +1137,8 @@ SH
        (hash-set validator-env #"BEAGLE_BOUNDED_COMPLETION_RECEIPT"
                  (string->bytes/utf-8 (path->string completion-receipt))))
      (define-values (code stdout stderr)
-       (run-materializer fixture cc ld runtime full-env #:entry "fixture.core/entry"))
+       (run-materializer fixture cc ld runtime full-env
+                         #:entries '("fixture.core/entry")))
      (check-not-equal? code 0 (string-append stdout stderr))
      (check-true (subtree-reaped? completion-receipt)
                  (format "entry subtree receipt: ~a; stderr: ~a"
@@ -1079,23 +1308,26 @@ SH
                                "wasm-audit.txt"
                                "report.txt"))])
           (check-true (file-exists? (build-path out name)) name))
+        (define e2e-export (entry-export-name "native.wasm-e2e/entry"))
         (check-equal? (file->string (build-path out "module_0.wasm.seams"))
-                      (string-append
-                       "export func 5f696e697469616c697a65\n"
-                       "export func 626561676c655f7761736d5f656e7472795f7630\n"
-                       "export memory 6d656d6f7279\n"))
+                      (expected-seams (list e2e-export)))
         (define report (file->string (build-path out "report.txt")))
         (check-true (string-contains? report
                                      "source-entry native.wasm-e2e/entry\n"))
         (check-true (string-contains? report
-                                     "wasm-projection-kind executable-entry-v0\n"))
+                                     "wasm-projection-kind executable-entries-v1\n"))
         (check-true (string-contains? report
-                                     "wasm-entry-contract PASS source-ast-to-lowered-header\n"))
+                                     "wasm-entry-contract PASS native.wasm-e2e/entry source-ast-to-lowered-header\n"))
         (check-true (string-contains? report
-                                     "wasm-entry-abi parameterless-int-to-i64-v0\n"))
+                                     "wasm-entry-lowered-abi native.wasm-e2e/entry pure\n"))
         (check-true (string-contains? report
-                                     "wasm-validation PASS source-entry-invoked\n"))
-        (check-true (string-contains? report "wasm-entry-result 42\n"))
+                                     "wasm-entry-abi parameterless-int-to-i64-v1\n"))
+        (check-true (string-contains? report
+                                     "wasm-validation PASS source-entries-invoked\n"))
+        (check-true (string-contains? report
+                                      "wasm-entry-result native.wasm-e2e/entry 42\n"))
+        (check-false (string-contains? report "wasm-state-arena")
+                     "a pure entry earns no adapter state surface")
         (check-true (string-suffix? report "result PASS\n"))
         (define invoke-stdout (open-output-string))
         (define invoke-stderr (open-output-string))
@@ -1105,7 +1337,7 @@ SH
                          [current-output-port invoke-stdout]
                          [current-error-port invoke-stderr])
             (run-owned/bounded
-             30 runtime "run" "--invoke" "beagle_wasm_entry_v0"
+             30 runtime "run" "--invoke" e2e-export
              (path->string (build-path out "module_0.wasm")))))
         (check-equal? invoke-exit-code 0 (get-output-string invoke-stderr))
         (check-equal? (get-output-string invoke-stdout) "42\n"

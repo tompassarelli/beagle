@@ -169,10 +169,8 @@ for materializer in "${materializers[@]}"; do
 done
 $wasm_selected && [[ "$abi" != "wasm32" ]] &&
     die "materializer 'wasm' requires --abi wasm32 (got '$abi')"
-if $wasm_selected && [[ ${#entries[@]} -gt 1 ]]; then
-    die "materializer 'wasm' supports at most one executable --entry" \
-        "(got ${#entries[@]}); omit --entry for a non-executable projection"
-fi
+declare -A seen_entries=()
+declare -A seen_entry_exports=()
 for entry in "${entries[@]}"; do
     [[ "$entry" =~ ^[^[:space:]/]+/[^[:space:]/]+$ ]] ||
         die "--entry must be one whitespace-free NS/NAME: $entry"
@@ -180,6 +178,20 @@ for entry in "${entries[@]}"; do
     entry_name="${entry##*/}"
     [[ -n "$entry_namespace" && -n "$entry_name" && "$entry_namespace" != */* ]] ||
         die "--entry must contain exactly one namespace separator: $entry"
+    [[ -z "${seen_entries[$entry]:-}" ]] || die "duplicate --entry: $entry"
+    seen_entries["$entry"]=1
+    if $wasm_selected; then
+        # The Wasm export name flattens NS/NAME into one C identifier, so two
+        # distinct entries may only build together when their flattened names
+        # stay distinct.
+        entry_export="beagle_wasm_entry_v1__$(printf '%s' "$entry_namespace" |
+            LC_ALL=C sed 's/[^A-Za-z0-9]/_/g')__$(printf '%s' "$entry_name" |
+            LC_ALL=C sed 's/[^A-Za-z0-9]/_/g')"
+        [[ -z "${seen_entry_exports[$entry_export]:-}" ]] ||
+            die "entries ${seen_entry_exports[$entry_export]} and $entry" \
+                "flatten to one Wasm export name ($entry_export)"
+        seen_entry_exports["$entry_export"]="$entry"
+    fi
 done
 [[ ${#sources[@]} -gt 0 ]] || die "provide at least one canonical .bgl source"
 
@@ -1310,9 +1322,9 @@ merge_wasm_report() {
 if $wasm_selected; then
     wasm_args=(--artifacts "$work/artifacts" --compiled "$compiled"
                "${wasm_checked_sources[@]}")
-    if [[ ${#entries[@]} -eq 1 ]]; then
-        wasm_args+=(--entry "${entries[0]}")
-    fi
+    for entry in "${entries[@]}"; do
+        wasm_args+=(--entry "$entry")
+    done
     materializer_timeout="${BEAGLE_WASM_MATERIALIZER_TIMEOUT_SECONDS:-180}"
     materializer_kill_grace="${BEAGLE_WASM_KILL_GRACE_SECONDS:-5}"
     [[ "$materializer_timeout" =~ ^[1-9][0-9]*$ ]] ||

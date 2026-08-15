@@ -89,10 +89,13 @@ build always writes `module.native-program` and its digest; only explicitly
 selected artifacts are projected beside it. Wasm requires `--abi wasm32` and
 writes a reactor, digest, import/export seam inventory, deterministic report,
 and environment-specific tool-path audit. With no `--entry`, that reactor is a
-clearly named non-executable projection. One public, parameterless `Int` entry
-earns the narrow `beagle_wasm_entry_v0 : () -> i64` export and is invoked under
-the resolved Wasmtime during the build; other callable shapes are refused by the
-qualified entry name.
+clearly named non-executable projection. Each repeated `--entry` names one
+public, parameterless `Int` source function; every accepted entry earns its own
+`beagle_wasm_entry_v1__<ns>__<name> : () -> i64` export and is invoked under
+the resolved Wasmtime during the build. Entries whose lowered form takes the
+generated arena/capability parameters run against one adapter-owned instance
+arena constructed during `_initialize`; other callable shapes are refused by
+the qualified entry name (`docs/cli.md` documents the v1 contract).
 Run `beagle doctor --deep` before authoring to verify the complete diagnostic
 path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
 --hooks` makes a project invoke it on each edit.
