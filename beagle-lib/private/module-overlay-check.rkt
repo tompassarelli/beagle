@@ -315,7 +315,7 @@
        (reject-inferred-interface-cycles!
         bootstrap-programs
         bootstrap-overlay)))
-    (define provisional-sources
+    (define bootstrap-sources
       (for/list ([entry (in-list bootstrap-programs)])
         (define source (car entry))
         (define prog (cdr entry))
@@ -327,6 +327,56 @@
            prog
            #:source-id (module-source-source-id source)
            #:provisional? #t)])))
+    (define max-rounds (add1 (length sources)))
+    ;; Imported aliases can cross more than one candidate boundary before a
+    ;; checked consumer sees them.  Converge the deliberately weak parse-only
+    ;; interfaces first; otherwise the first checked round can reject an exact
+    ;; downstream value against an opaque bootstrap name before authoritative
+    ;; interfaces have a chance to be reminted.
+    (define provisional-sources
+      (let stabilize-provisional ([current-sources bootstrap-sources]
+                                  [round 1])
+        (when (> round max-rounds)
+          (abort
+           (failed-result
+            #f
+            'interface
+            (make-exn:fail
+             (format
+              "check-module-overlay: provisional interfaces did not converge after ~a parse-only rounds"
+              max-rounds)
+             (current-continuation-marks)))))
+        (define current-overlay
+          (guard #f 'index (lambda () (source-overlay current-sources))))
+        (define current-resolver
+          (overlay-resolver current-overlay #:closed? closed?))
+        (define round-programs
+          (for/list ([source (in-list current-sources)])
+            (cons
+             source
+             (guard
+              (module-source-source-id source)
+              'parse
+              (lambda () (parse-source* source current-resolver))))))
+        (define next-sources
+          (for/list ([entry (in-list round-programs)])
+            (define source (car entry))
+            (define prog (cdr entry))
+            (struct-copy
+             module-source
+             source
+             [interface
+              (guard
+               (module-source-source-id source)
+               'interface
+               (lambda ()
+                 (program->module-interface
+                  prog
+                  #:source-id (module-source-source-id source)
+                  #:provisional? #t)))])))
+        (if (interfaces-stable? current-sources next-sources)
+            next-sources
+            (stabilize-provisional next-sources (add1 round)))))
     (define provisional-overlay
       (guard #f 'index (lambda () (source-overlay provisional-sources))))
     (define selected-namespaces
@@ -425,7 +475,6 @@
        (and selected-sources
             (member (module-source-id-string source) selected-sources))))
     (define (select entries) (filter selected-entry? entries))
-    (define max-rounds (add1 (length sources)))
     (define-values (final-programs final-sources)
       (let stabilize ([current-sources provisional-sources] [round 1])
         (when (> round max-rounds)

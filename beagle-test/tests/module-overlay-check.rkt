@@ -850,6 +850,36 @@
       (overlay-check-result-ok? result)
       (diagnostic-text result)))))
 
+(test-case "imported aliases stabilize before downstream binding checks"
+  (with-overlay-files
+   (lambda (root provider-source consumer-source)
+     (define bridge-source (build-path root "overlay" "bridge.bclj"))
+     (define provider-edn
+       (candidate!
+        root "binding-alias-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.provider)\n"
+         "(defalias Text String)\n")))
+     (define bridge-edn
+       (candidate!
+        root "binding-alias-bridge" bridge-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.bridge (:require [overlay.provider :as p]))\n"
+         "(defn forward [(value p/Text)] p/Text value)\n")))
+     (define consumer-edn
+       (candidate!
+        root "binding-alias-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns overlay.consumer (:require [overlay.bridge :as b]))\n"
+         "(defn use [] String (b/forward \"ok\"))\n")))
+     (define result
+       (check-edn-overlay (list consumer-edn bridge-edn provider-edn)
+                          #:emit? #f))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result)))))
+
 (test-case "exported alias to provider record keeps provider-qualified identity"
   (with-overlay-files
    (lambda (root provider-source consumer-source)
