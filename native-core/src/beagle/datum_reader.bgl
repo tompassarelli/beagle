@@ -1,0 +1,262 @@
+#lang beagle
+(ns beagle.datum-reader)
+
+(defrecord ReaderEvent
+  [(kind Keyword) (value String) (literal String) (offset Int) (depth Int)])
+
+(defrecord DatumRead
+  [(events (Vec ReaderEvent)) (error String?) (error-offset Int)])
+
+(defrecord TokenScan
+  [(next-offset Int) (value String) (literal String) (error String?)])
+
+(defn character-at [(source String) (offset Int)] String
+  (subs source offset (+ offset 1)))
+
+(defn whitespace? [(character String)] Bool
+  (or (= character " ")
+      (= character "\t")
+      (= character "\r")
+      (= character "\n")
+      (= character ",")))
+
+(defn delimiter? [(character String)] Bool
+  (or (whitespace? character)
+      (= character "(")
+      (= character ")")
+      (= character "[")
+      (= character "]")
+      (= character "{")
+      (= character "}")
+      (= character "\"")
+      (= character ";")
+      (= character "^")
+      (= character "`")
+      (= character "~")
+      (= character "\\")))
+
+(defn escape-character [(character String)] String?
+  (cond
+    (= character "\"") "\""
+    (= character "\\") "\\"
+    (= character "n") "\n"
+    (= character "r") "\r"
+    (= character "t") "\t"
+    (= character "b") "\b"
+    (= character "f") "\f"
+    :else nil))
+
+(defn render-string-character [(character String)] String
+  (cond
+    (= character "\"") "\\\""
+    (= character "\\") "\\\\"
+    (= character "\n") "\\n"
+    (= character "\r") "\\r"
+    (= character "\t") "\\t"
+    (= character "\b") "\\b"
+    (= character "\f") "\\f"
+    :else character))
+
+(defn render-string-literal [(value String)] String
+  (loop [(offset Int) 0
+         (rendered String) "\""]
+    (if (= offset (count value))
+      (str rendered "\"")
+      (recur (inc offset)
+             (str rendered
+                  (render-string-character (character-at value offset)))))))
+
+(defn scan-string [(source String) (start Int)] TokenScan
+  (loop [(offset Int) (inc start)
+         (value String) ""]
+    (if (= offset (count source))
+      (->TokenScan offset value "" "unterminated string literal")
+      (let [(character String) (character-at source offset)]
+        (cond
+          (= character "\"")
+          (->TokenScan (inc offset)
+                       value
+                       (render-string-literal value)
+                       nil)
+
+          (= character "\\")
+          (if (= (inc offset) (count source))
+            (->TokenScan (inc offset) value "" "unterminated string escape")
+            (let [(escaped String) (character-at source (inc offset))
+                  (decoded String?) (escape-character escaped)]
+              (if (nil? decoded)
+                (->TokenScan (+ offset 2)
+                             value
+                             ""
+                             (str "unsupported string escape: \\" escaped))
+                (recur (+ offset 2) (str value decoded)))))
+
+          :else
+          (recur (inc offset) (str value character)))))))
+
+(defn scan-atom [(source String) (start Int)] TokenScan
+  (loop [(offset Int) start]
+    (if (or (= offset (count source))
+            (delimiter? (character-at source offset)))
+      (let [(value String) (subs source start offset)]
+        (->TokenScan offset value value nil))
+      (recur (inc offset)))))
+
+(defn atom-kind [(value String)] Keyword
+  (cond
+    (and (> (count value) 0) (= (subs value 0 1) ":")) :keyword
+    (or (= value "true") (= value "false")) :boolean
+    (= value "nil") :nil
+    :else :symbol))
+
+(defn open-kind [(character String)] Keyword
+  (cond
+    (= character "(") :list/open
+    (= character "[") :vector/open
+    (= character "{") :map/open
+    :else :set/open))
+
+(defn close-kind [(opened Keyword)] Keyword
+  (cond
+    (= opened :list/open) :list/close
+    (= opened :vector/open) :vector/close
+    (= opened :map/open) :map/close
+    :else :set/close))
+
+(defn matching-close? [(opened Keyword) (character String)] Bool
+  (or (and (= opened :list/open) (= character ")"))
+      (and (= opened :vector/open) (= character "]"))
+      (and (= opened :map/open) (= character "}"))
+      (and (= opened :set/open) (= character "}"))))
+
+(defn opening? [(character String)] Bool
+  (or (= character "(")
+      (= character "[")
+      (= character "{")))
+
+(defn closing? [(character String)] Bool
+  (or (= character ")")
+      (= character "]")
+      (= character "}")))
+
+(defn prefix-kind [(source String) (offset Int)] Keyword?
+  (let [(character String) (character-at source offset)]
+    (cond
+      (= character "'") :quote
+      (= character "`") :quasiquote
+      (= character "^") :metadata
+      (= character "~")
+      (if (and (< (inc offset) (count source))
+               (= (character-at source (inc offset)) "@"))
+        :unquote-splicing
+        :unquote)
+      :else nil)))
+
+(defn prefix-width [(kind Keyword)] Int
+  (if (= kind :unquote-splicing) 2 1))
+
+(defn success [(events (Vec ReaderEvent))] DatumRead
+  (->DatumRead events nil -1))
+
+(defn failure
+  [(events (Vec ReaderEvent)) (message String) (offset Int)] DatumRead
+  (->DatumRead events message offset))
+
+(defn read-events [(source String)] DatumRead
+  (loop [(offset Int) 0
+         (stack (Vec Keyword)) []
+         (events (Vec ReaderEvent)) []]
+    (if (= offset (count source))
+      (if (empty? stack)
+        (success events)
+        (failure events "unterminated data container" offset))
+      (let [(character String) (character-at source offset)
+            (prefix Keyword?) (prefix-kind source offset)]
+        (cond
+          (whitespace? character)
+          (recur (inc offset) stack events)
+
+          (= character ";")
+          (let [(next-offset Int)
+                (loop [(cursor Int) (inc offset)]
+                  (if (or (= cursor (count source))
+                          (= (character-at source cursor) "\n"))
+                    cursor
+                    (recur (inc cursor))))]
+            (recur next-offset stack events))
+
+          (and (= character "#")
+               (< (inc offset) (count source))
+               (= (character-at source (inc offset)) "{"))
+          (let [(kind Keyword) :set/open]
+            (recur (+ offset 2)
+                   (conj stack kind)
+                   (conj events
+                         (->ReaderEvent kind "" "#{" offset (count stack)))))
+
+          (opening? character)
+          (let [(kind Keyword) (open-kind character)]
+            (recur (inc offset)
+                   (conj stack kind)
+                   (conj events
+                         (->ReaderEvent kind
+                                        ""
+                                        character
+                                        offset
+                                        (count stack)))))
+
+          (closing? character)
+          (if (empty? stack)
+            (failure events "unexpected closing delimiter" offset)
+            (let [(opened Keyword) (peek stack)]
+              (if (matching-close? opened character)
+                (recur (inc offset)
+                       (pop stack)
+                       (conj events
+                             (->ReaderEvent (close-kind opened)
+                                            ""
+                                            character
+                                            offset
+                                            (dec (count stack)))))
+                (failure events "mismatched closing delimiter" offset))))
+
+          (= character "\"")
+          (let [(scan TokenScan) (scan-string source offset)
+                (error String?) (tokenscan-error scan)]
+            (if (some? error)
+              (failure events error offset)
+              (recur (tokenscan-next-offset scan)
+                     stack
+                     (conj events
+                           (->ReaderEvent :string
+                                          (tokenscan-value scan)
+                                          (tokenscan-literal scan)
+                                          offset
+                                          (count stack))))))
+
+          (some? prefix)
+          (let [(width Int) (prefix-width prefix)
+                (literal String) (subs source offset (+ offset width))]
+            (recur (+ offset width)
+                   stack
+                   (conj events
+                         (->ReaderEvent prefix "" literal offset (count stack)))))
+
+          :else
+          (let [(scan TokenScan) (scan-atom source offset)]
+            (if (= (tokenscan-next-offset scan) offset)
+              (failure events "unsupported reader character" offset)
+              (recur (tokenscan-next-offset scan)
+                     stack
+                     (conj events
+                           (->ReaderEvent (atom-kind (tokenscan-value scan))
+                                          (tokenscan-value scan)
+                                          (tokenscan-literal scan)
+                                          offset
+                                          (count stack)))))))))))
+
+(defn read-ok? [(result DatumRead)] Bool
+  (nil? (datumread-error result)))
+
+(defn render-literal [(kind Keyword) (value String)] String
+  (if (= kind :string) (render-string-literal value) value))
