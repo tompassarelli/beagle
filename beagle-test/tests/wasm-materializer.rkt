@@ -353,7 +353,9 @@ SH
                          "build.manifest.sha256"))])
     (check-false (file-exists? (build-path artifacts name)) name)))
 
-(define (run-entry-build source-text entry)
+(define (run-entry-build source-text entry
+                         #:materializers [materializers '("wasm")]
+                         #:abi [abi "wasm32"])
   (define scratch (make-temporary-file "beagle-wasm-entry-contract-~a" 'directory))
   (dynamic-wind
    void
@@ -367,9 +369,15 @@ SH
        (parameterize ([current-directory repo-root]
                       [current-output-port stdout]
                       [current-error-port stderr])
-         (run-owned/bounded 120 beagle "build" "--materializer" "wasm"
-                            "--abi" "wasm32" "--entry" entry "--out"
-                            (path->string out) (path->string source))))
+         (apply
+          run-owned/bounded 120 beagle
+          (append
+           (list "build")
+           (apply append
+                  (for/list ([materializer (in-list materializers)])
+                    (list "--materializer" materializer)))
+           (list "--abi" abi "--entry" entry "--out"
+                 (path->string out) (path->string source))))))
      (values code (get-output-string stdout) (get-output-string stderr)
              (file-exists? (build-path out "build.manifest.sha256"))))
    (lambda () (delete-directory/files scratch))))
@@ -944,6 +952,32 @@ SH
     (check-true (string-contains? stderr (list-ref case 3))
                 (format "missing precise refusal for ~a: ~a" (list-ref case 0) stderr))
     (check-false marker?)))
+
+)
+
+(phase-test "strict source entry ABI applies only to Wasm" (lambda ()
+  (define namespace "native.entry-materializer-scope")
+  (define entry (string-append namespace "/entry"))
+  (define source-text
+    (string-append
+     "#lang beagle\n"
+     "(ns " namespace ")\n"
+     "(defn entry [(value Int)] Int value)\n"))
+  (define-values (native-code native-stdout native-stderr native-marker?)
+    (run-entry-build source-text entry
+                     #:materializers '("c17" "qbe")
+                     #:abi "lp64"))
+  (check-equal? native-code 0 (string-append native-stdout native-stderr))
+  (check-true native-marker?)
+  (define-values (wasm-code wasm-stdout wasm-stderr wasm-marker?)
+    (run-entry-build source-text entry))
+  (check-not-equal? wasm-code 0 wasm-stdout)
+  (check-true
+   (string-contains? wasm-stderr
+                     (string-append "entry " entry
+                                    " must have zero source parameters"))
+   wasm-stderr)
+  (check-false wasm-marker?))
 
 )
 

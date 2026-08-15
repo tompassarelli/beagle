@@ -689,7 +689,7 @@ bb -cp "$compiled" -e '
                 (slice/slicefactv0-kind row) "\t"
                 (slice/slicefactv0-object row) "\n"))))
 
-(defn entry-seeds [definitions index entries]
+(defn entry-seeds [definitions index entries strict-entry-abi?]
   (loop [remaining entries seeds []]
     (if (empty? remaining)
       {:ok? true :seeds seeds}
@@ -712,27 +712,35 @@ bb -cp "$compiled" -e '
           (not= "false" (lower/fact-text index (first matches) "private"))
           {:ok? false :detail (str "entry export visibility is unavailable: " entry)}
 
-          (not= 0 (count (lower/function-parameter-items index (first matches))))
+          (and strict-entry-abi?
+               (not= 0
+                     (count
+                      (lower/function-parameter-items index (first matches)))))
           {:ok? false
            :detail
            (str "entry " entry " must have zero source parameters (got "
                 (count (lower/function-parameter-items index (first matches))) ")")}
 
-          (some? (lower/index-first-object index (first matches) "rest"))
+          (and strict-entry-abi?
+               (some? (lower/index-first-object index (first matches) "rest")))
           {:ok? false
            :detail (str "entry " entry " must not have a rest parameter")}
 
-          (let [return-type (lower/index-first-object index (first matches) "ret")]
-            (or (nil? return-type)
-                (not= "type-prim" (lower/fact-text index return-type "form-kind"))
-                (not= "Int" (lower/fact-text index return-type "name"))))
+          (and strict-entry-abi?
+               (let [return-type
+                     (lower/index-first-object index (first matches) "ret")]
+                 (or
+                  (nil? return-type)
+                  (not= "type-prim"
+                        (lower/fact-text index return-type "form-kind"))
+                  (not= "Int" (lower/fact-text index return-type "name")))))
           {:ok? false
            :detail (str "entry " entry " must have an explicit Int return")}
 
           :else
           (recur (rest remaining) (conj seeds (first matches))))))))
 
-(defn project-entry-rows [rows entries]
+(defn project-entry-rows [rows entries strict-entry-abi?]
   (if (empty? entries)
     {:ok? true :rows rows}
     (let [source (slice/source-program rows "native.module" "source.facts")
@@ -740,7 +748,7 @@ bb -cp "$compiled" -e '
                  (stages/sourcestagev0-terms source)
                  (stages/sourcestagev0-modules source))
           definitions (definitions-by-key index)
-          seeds (entry-seeds definitions index entries)]
+          seeds (entry-seeds definitions index entries strict-entry-abi?)]
       (if-not (:ok? seeds)
         seeds
         {:ok? true
@@ -1063,7 +1071,8 @@ bb -cp "$compiled" -e '
    materializers abi-id abi simd-required?]
   (start-stage! "source-projection")
   (let [raw-rows (slice/parse-facts (slurp facts-path))
-        projection (project-entry-rows raw-rows entries)]
+        strict-entry-abi? (boolean (some #{"wasm"} materializers))
+        projection (project-entry-rows raw-rows entries strict-entry-abi?)]
     (if-not (:ok? projection)
       (do
         (finish-stage! "source-projection" "REJECTED")
