@@ -600,7 +600,8 @@ bb -cp "$compiled" -e '
        (cond
          (= "record" kind) [(str "->" declared) (str "map->" declared)]
          (or (= "defunion" kind) (= "deferror" kind))
-         (definition-child-names index definition "members")
+         (let [members (definition-child-names index definition "members")]
+           (concat members (map #(str "->" %) members)))
          (= "unsupported-defprotocol" kind)
          (definition-child-names index definition "methods")
          :else []))))))
@@ -627,23 +628,9 @@ bb -cp "$compiled" -e '
    (reduce (fn [found node] (assoc found (id-value node) node)) {} nodes)))
 
 (defn resolved-definition-nodes [definitions index module-name spelling]
-  (let [exact (get definitions spelling [])
-        resolved (lower/resolved-source-key
+  (let [resolved (lower/resolved-source-key
                   (lower/resolve-source-name index module-name spelling))]
-    (unique-nodes (concat exact (get definitions resolved [])))))
-
-(defn nested-texts [index node kind predicate fuel]
-  (if (<= fuel 0)
-    []
-    (let [own (if (= kind (lower/fact-text index node "form-kind"))
-                (let [value (lower/fact-text index node predicate)]
-                  (if (= "" value) [] [value]))
-                [])]
-      (vec
-       (distinct
-        (concat own
-                (mapcat #(nested-texts index % kind predicate (dec fuel))
-                        (lower/index-child-nodes index node))))))))
+    (unique-nodes (get definitions resolved []))))
 
 (defn type-spellings [index node fuel]
   (if (<= fuel 0)
@@ -661,17 +648,20 @@ bb -cp "$compiled" -e '
 (defn dependency-nodes [definitions index definition]
   (let [module-name (lower/source-module-name index definition)
         fuel (inc (lower/index-facts index))
-        references (lower/source-free-ref-names
-                    index definition [] fuel)
-        calls (vec
-               (distinct
-                (concat (nested-texts index definition "call" "callee" fuel)
-                        (nested-texts index definition "static-call" "callee" fuel))))
+        references
+        (vec
+         (distinct
+          (concat
+           (lower/source-direct-ref-names index definition [] fuel)
+           (if (= "unsupported-extend-type" (definition-kind index definition))
+             (remove str/blank?
+                     (map #(lower/fact-text index % "protocol")
+                          (definition-child-items index definition "impls")))
+             []))))
         types (type-spellings index definition fuel)]
     (unique-nodes
      (concat
       (mapcat #(resolved-definition-nodes definitions index module-name %) references)
-      (mapcat #(resolved-definition-nodes definitions index module-name %) calls)
       (mapcat #(resolved-definition-nodes definitions index module-name %) types)))))
 
 (defn source-node-name-index [rows]

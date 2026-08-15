@@ -3339,10 +3339,11 @@
 
       :else [])))
 
-(defn source-free-ref-names
+(defn source-free-names
   [(index SourceIndexV0)
    (node core/NativeId)
    (bound (Vec String))
+   (include-callees Bool)
    (fuel Int)]
   (Vec String)
   (if (<= fuel 0)
@@ -3352,6 +3353,21 @@
         (= "ref" kind)
         (let [(name String) (fact-text index node "name")]
           (if (or (= "" name) (= "else" name) (string-member? bound name)) [] [name]))
+
+        (or (= "call" kind) (= "static-call" kind))
+        (let [(callee String) (fact-text index node "callee")
+              (own (Vec String))
+              (if (or (not include-callees) (= "" callee)
+                      (string-member? bound callee))
+                [] [callee])
+              (children (Vec core/NativeId)) (index-child-nodes index node)]
+          (loop [(position Int) 0 (names (Vec String)) own]
+            (if (>= position (count children))
+              names
+              (recur (+ position 1)
+                (append-unique-strings names
+                  (source-free-names index (nth children position) bound
+                    include-callees (- fuel 1)))))))
 
         (or (= "defn" kind) (= "fn" kind) (= "arity-clause" kind)
             (= "protocol-method" kind) (= "impl-method" kind))
@@ -3368,7 +3384,7 @@
                       (if (nil? constraint)
                         names
                         (append-unique-strings names
-                          (source-free-ref-names index constraint bound
+                          (source-free-names index constraint bound include-callees
                             (- fuel 1))))))))
               (body-bound (Vec String))
               (append-unique-strings bound
@@ -3378,7 +3394,8 @@
           (if (nil? body)
             constraint-refs
             (append-unique-strings constraint-refs
-              (source-free-ref-names index body body-bound (- fuel 1)))))
+              (source-free-names index body body-bound include-callees
+                (- fuel 1)))))
 
         (or (= "let" kind) (= "loop" kind))
         (let [(bindings-node (U core/NativeId Nil))
@@ -3399,11 +3416,11 @@
                         (found (Vec String))
                         (append-unique-strings
                           (if (nil? constraint) []
-                            (source-free-ref-names index constraint current-bound
-                              (- fuel 1)))
+                            (source-free-names index constraint current-bound
+                              include-callees (- fuel 1)))
                           (if (nil? value) []
-                            (source-free-ref-names index value current-bound
-                              (- fuel 1))))
+                            (source-free-names index value current-bound
+                              include-callees (- fuel 1))))
                         (binding-names (Vec String))
                         (source-parameter-bound-names index binding)]
                     (recur (+ position 1)
@@ -3422,7 +3439,8 @@
           (if (nil? body)
             binding-refs
             (append-unique-strings binding-refs
-              (source-free-ref-names index body body-bound (- fuel 1)))))
+              (source-free-names index body body-bound include-callees
+                (- fuel 1)))))
 
         (= "doseq" kind)
         (let [(clauses-node (U core/NativeId Nil))
@@ -3448,10 +3466,10 @@
                       (append-unique-strings names
                         (append-unique-strings
                           (if (nil? constraint) []
-                            (source-free-ref-names index constraint bound
+                            (source-free-names index constraint bound include-callees
                               (- fuel 1)))
                           (if (nil? value) []
-                            (source-free-ref-names index value bound
+                            (source-free-names index value bound include-callees
                               (- fuel 1)))))))))
               (body-node (U core/NativeId Nil))
               (index-first-object index node "body")
@@ -3464,8 +3482,8 @@
               names
               (recur (+ position 1)
                 (append-unique-strings names
-                  (source-free-ref-names index (nth bodies position) body-bound
-                    (- fuel 1)))))))
+                  (source-free-names index (nth bodies position) body-bound
+                    include-callees (- fuel 1)))))))
 
         (= "match" kind)
         (let [(target (U core/NativeId Nil))
@@ -3473,7 +3491,8 @@
               (clauses (Vec core/NativeId)) (match-clause-items index node)
               (target-refs (Vec String))
               (if (nil? target) []
-                (source-free-ref-names index target bound (- fuel 1)))]
+                (source-free-names index target bound include-callees
+                  (- fuel 1)))]
           (loop [(position Int) 0 (names (Vec String)) target-refs]
             (if (>= position (count clauses))
               names
@@ -3488,7 +3507,8 @@
                         (match-pattern-bound-names index pattern)))
                     (arm-refs (Vec String))
                     (if (nil? body) []
-                      (source-free-ref-names index body arm-bound (- fuel 1)))]
+                      (source-free-names index body arm-bound include-callees
+                        (- fuel 1)))]
                 (recur (+ position 1)
                   (append-unique-strings names arm-refs))))))
 
@@ -3499,8 +3519,24 @@
               names
               (recur (+ position 1)
                 (append-unique-strings names
-                  (source-free-ref-names index (nth children position) bound
-                    (- fuel 1)))))))))))
+                  (source-free-names index (nth children position) bound
+                    include-callees (- fuel 1)))))))))))
+
+(defn source-free-ref-names
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (bound (Vec String))
+   (fuel Int)]
+  (Vec String)
+  (source-free-names index node bound false fuel))
+
+(defn source-direct-ref-names
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (bound (Vec String))
+   (fuel Int)]
+  (Vec String)
+  (source-free-names index node bound true fuel))
 
 (defn source-ref-keys
   [(index SourceIndexV0)
