@@ -7,7 +7,6 @@
          openssl/sha1
          racket/file
          racket/list
-         racket/match
          racket/path
          racket/port
          racket/string
@@ -383,24 +382,11 @@
                                     (require-entry-ns candidate)))))])
     (symbol->string (require-entry-ns entry))))
 
-(define (stxs-declared-namespace stxs)
-  (for/first ([stx (in-list stxs)]
-              #:do [(define datum (syntax->datum stx))]
-              #:when
-              (match datum
-                [(list* 'ns (? symbol?) _) #t]
-                [_ #f]))
-    (cadr (syntax->datum stx))))
-
 (define (source-pair->module-source source-pair)
   (define rel (car source-pair))
   (define source (cdr source-pair))
   (define stxs (read-beagle-syntax source))
-  (module-source
-   (stxs-declared-namespace stxs)
-   rel
-   stxs
-   #f))
+  (stxs->module-source stxs rel))
 
 (define (overlay-failure->error result)
   (define diagnostics (overlay-check-result-diagnostics result))

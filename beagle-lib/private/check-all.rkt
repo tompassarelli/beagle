@@ -9,6 +9,7 @@
          "query.rkt"
          "blame.rkt"
          "lint.rkt"
+         "module-overlay-check.rkt"
          "validate-nix.rkt"
          "extensions.rkt"
          "targets.rkt")
@@ -464,6 +465,119 @@
   (define parts (regexp-split #rx"/" path))
   (if (null? parts) path (last parts)))
 
+(define (canonical-source-id path)
+  (path->string (simplify-path (path->complete-path path))))
+
+(define (check-file-overlay files json? profile file-error-counts)
+  (define agent? (agent-mode?))
+  (define error-count 0)
+  (define agent-errors '())
+  (define lint-count 0)
+  (define parsed-programs '())
+  (define captured '())
+  (define source->file (make-hash))
+
+  (define (capture! source phase value location)
+    (set! captured (cons (list source phase value location) captured)))
+
+  (define (report-error source value loc-stx)
+    (define source-id (and source (format "~a" source)))
+    (define path
+      (hash-ref source->file source-id
+                (lambda () (or source-id (car files)))))
+    (define error
+      (if (exn? value)
+          value
+          (make-exn:fail (format "~a" value) (current-continuation-marks))))
+    (set! error-count (add1 error-count))
+    (when (hash-has-key? file-error-counts path)
+      (hash-update! file-error-counts path add1 0))
+    (cond
+      [agent?
+       (set! agent-errors
+             (cons (extract-agent-error error loc-stx path) agent-errors))]
+      [json?
+       (write-json (diagnostic->json error loc-stx path) (current-error-port))
+       (newline (current-error-port))
+       (flush-output (current-error-port))]
+      [else
+       (display (format-diagnostic error loc-stx path)
+                (current-error-port))]))
+
+  (define source-candidates
+    (for/list ([path (in-list files)])
+      (define source-id (canonical-source-id path))
+      (hash-set! source->file source-id path)
+      (with-handlers
+          ([exn:fail?
+            (lambda (error)
+              (capture! source-id 'read error #f)
+              #f)])
+        (define stxs (read-beagle-syntax source-id))
+        (stxs->module-source stxs source-id))))
+
+  (define sources (filter values source-candidates))
+
+  (define checked
+    (and
+     (pair? sources)
+     (parameterize
+         ([current-purity-warning-port
+           (and agent? (open-output-string))])
+       (check-module-overlay
+        sources
+        #:check-profile profile
+        #:emit? #f
+        #:diagnostic-sink capture!))))
+
+  (when (and checked
+             (not (overlay-check-result-ok? checked))
+             (null? captured))
+    (for ([diagnostic
+           (in-list (overlay-check-result-diagnostics checked))])
+      (capture!
+       (overlay-diagnostic-source diagnostic)
+       (overlay-diagnostic-phase diagnostic)
+       (make-exn:fail
+        (overlay-diagnostic-message diagnostic)
+        (current-continuation-marks))
+       #f)))
+
+  (for ([entry (in-list (reverse captured))])
+    (report-error (car entry) (caddr entry) (cadddr entry)))
+
+  (when checked
+    (for ([module (in-list (overlay-check-result-modules checked))])
+      (define source-id (format "~a" (checked-overlay-module-source module)))
+      (define path (hash-ref source->file source-id source-id))
+      (define prog (checked-overlay-module-program module))
+      (set! parsed-programs (cons (cons path prog) parsed-programs))
+      (with-handlers ([exn:fail? (lambda (error) (report-error path error #f))])
+        (when (extension-target-mismatch? path (program-target prog))
+          (define ext-str
+            (car (findf (lambda (pair) (string-suffix? path (car pair)))
+                        EXTENSION-TARGET-MAP)))
+          (error
+           (format "extension/header mismatch: ~a expects #lang ~a, found #lang ~a"
+                   ext-str
+                   (lang-for-target-id (expected-target-for-extension path))
+                   (lang-for-target-id (program-target prog)))))
+        (when (>= profile 1)
+          (if agent?
+              (let ([sink (open-output-string)])
+                (parameterize ([current-error-port sink])
+                  (check-scalar-provenance! prog)
+                  (run-semantic-analysis! prog #:file path)))
+              (begin
+                (check-scalar-provenance! prog)
+                (run-semantic-analysis! prog #:file path)))
+          (set! lint-count (+ lint-count (count-lint-warnings prog)))))))
+
+  (values error-count
+          lint-count
+          (reverse agent-errors)
+          (reverse parsed-programs)))
+
 (define (check-one-file path json?)
   (define agent? (agent-mode?))
   (define error-count 0)
@@ -577,15 +691,27 @@
     (hash-set! file-error-counts file 0))
 
   (parameterize ([current-check-profile profile])
-    (for ([f (in-list files)])
-      (define-values (errs lints aerrs prog) (check-one-file f json?))
-      (set! total-errors (+ total-errors errs))
-      (hash-set! file-error-counts f errs)
-      (set! total-lint (+ total-lint lints))
-      (set! all-agent-errors (append all-agent-errors aerrs))
-      (when (and prog (string-suffix? f ".bnix"))
-        (set! parsed-nix-files
-              (append parsed-nix-files (list (cons f prog))))))
+    (cond
+      [(or (zero? profile) (null? (cdr files)))
+       (for ([file (in-list files)])
+         (define-values (errors lint agent-errors program)
+           (check-one-file file json?))
+         (set! total-errors (+ total-errors errors))
+         (hash-set! file-error-counts file errors)
+         (set! total-lint (+ total-lint lint))
+         (set! all-agent-errors (append all-agent-errors agent-errors))
+         (when (and program (string-suffix? file ".bnix"))
+           (set! parsed-nix-files
+                 (append parsed-nix-files (list (cons file program))))))]
+      [else
+       (define-values (errors lint agent-errors parsed-programs)
+         (check-file-overlay files json? profile file-error-counts))
+       (set! total-errors errors)
+       (set! total-lint lint)
+       (set! all-agent-errors agent-errors)
+       (set! parsed-nix-files
+             (filter (lambda (entry) (string-suffix? (car entry) ".bnix"))
+                     parsed-programs))])
 
     ;; Schema and collection checks consume the exact Programs parsed above.
     ;; Profile 0 remains explicitly parse-only.

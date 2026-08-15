@@ -64,6 +64,13 @@
             source namespaces)]
     [else (car namespaces)]))
 
+(define (stxs->module-source stxs source)
+  (module-source
+   (stxs-declared-namespace stxs source)
+   source
+   stxs
+   #f))
+
 (define (edn->module-source edn-path)
   (define source (edn-source-id edn-path))
   (define triples (read-edn-triples edn-path))
@@ -71,11 +78,7 @@
     (error 'check-edn-overlay "~a: candidate EDN contains no triples" edn-path))
   (define wrapper (edn-triples->syntax triples source))
   (define stxs (drop-beagle-file-wrapper wrapper source))
-  (module-source
-   (stxs-declared-namespace stxs source)
-   source
-   stxs
-   #f))
+  (stxs->module-source stxs source))
 
 (struct candidate-overlay (by-namespace by-source) #:transparent)
 
@@ -273,11 +276,13 @@
                               #:emit? [emit? #t]
                               #:capture-types? [capture-types? #f]
                               #:closed? [closed? #f]
+                              #:diagnostic-sink [diagnostic-sink void]
                               #:parse-source [parse-source* parse-source])
   (let/ec abort
     (define (guard source phase thunk)
       (with-handlers ([(lambda (_value) #t)
                        (lambda (value)
+                         (diagnostic-sink source phase value #f)
                          (abort (failed-result source phase value)))])
         (thunk)))
     (when (null? sources)
@@ -454,7 +459,12 @@
             (define source (car entry))
             (type-check-with-locs!
              (cdr entry)
-             (lambda (error _location)
+             (lambda (error location)
+               (diagnostic-sink
+                (module-source-source-id source)
+                'check
+                error
+                location)
                (set!
                 diagnostics
                 (cons
@@ -557,6 +567,7 @@
 (provide
  check-edn-overlay
  check-module-overlay
+ stxs->module-source
  (struct-out overlay-diagnostic)
  (struct-out checked-overlay-module)
  (struct-out overlay-check-result))

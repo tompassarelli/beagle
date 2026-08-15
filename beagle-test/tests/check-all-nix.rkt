@@ -38,6 +38,16 @@
     #:exists 'truncate/replace)
   path)
 
+(define (write-bjs root name body)
+  (define path (build-path root name))
+  (call-with-output-file path
+    (lambda (out)
+      (display "#lang beagle/js\n" out)
+      (display body out)
+      (newline out))
+    #:exists 'truncate/replace)
+  path)
+
 (define (check-agent . files)
   (define-values (process stdout stdin stderr)
     (apply subprocess #f #f #f beagle "check" "--agent"
@@ -105,6 +115,39 @@
   (define-values (status _out errors) (check-agent first second))
   (check-not-equal? status 0)
   (check-equal? (length (regexp-match* #rx"cross-file conflict" errors)) 1)
+  (delete-directory/files root))
+
+(test-case "check forms one precisely typed namespace overlay across roots"
+  (define root (make-temporary-directory))
+  (define provider-root (build-path root "providers"))
+  (define consumer-root (build-path root "consumers"))
+  (make-directory provider-root)
+  (make-directory consumer-root)
+  (write-bjs
+   provider-root
+   "flat-provider.bjs"
+   (string-append
+    "(ns library.precise)\n"
+    "(defn identity [value] Int value)"))
+  (write-bjs
+   consumer-root
+   "consumer.bjs"
+   (string-append
+    "(ns app.consumer (:require [library.precise :as precise]))\n"
+    "(defn use [] Int (precise/identity 1))"))
+  (define-values (valid-status _valid-out valid-errors)
+    (check-agent provider-root consumer-root))
+  (check-equal? valid-status 0 valid-errors)
+  (write-bjs
+   consumer-root
+   "consumer.bjs"
+   (string-append
+    "(ns app.consumer (:require [library.precise :as precise]))\n"
+    "(defn use [] Int (precise/identity \"wrong\"))"))
+  (define-values (invalid-status _invalid-out invalid-errors)
+    (check-agent provider-root consumer-root))
+  (check-not-equal? invalid-status 0)
+  (check-true (string-contains? invalid-errors "expected Int, got String"))
   (delete-directory/files root))
 
 (test-case "check descends through nix/module and accepts a valid control"
