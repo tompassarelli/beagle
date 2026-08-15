@@ -39,7 +39,7 @@ run_phase() {
   set +e
   BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
     "$unshare_bin" --user --map-current-user --pid --fork --kill-child \
-      --forward-signals "$RACKET" "$supervisor" "$deadline" 5 -- "$@"
+      "$RACKET" "$supervisor" "$deadline" 5 -- "$@"
   status=$?
   set -e
 

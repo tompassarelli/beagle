@@ -33,7 +33,7 @@ PHASE_KILL_GRACE="${BEAGLE_SELFHOST_KILL_GRACE:-5}"
 exec 3>&2
 source bin/_beagle-racket
 RUN_BOUNDED=(unshare --user --map-current-user --pid --fork --kill-child \
-             --forward-signals "$RACKET" native-core/bin/run-bounded.rkt)
+             "$RACKET" native-core/bin/run-bounded.rkt)
 BEAGLE_PHASE_SERIAL=0
 RUN_PHASE_INFRA=0
 RUN_PHASE_STATUS=0

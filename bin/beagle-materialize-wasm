@@ -261,7 +261,7 @@ run_bounded() {
     local seconds="$1"
     shift
     unshare --user --map-current-user --pid --fork --kill-child \
-        --forward-signals "$RACKET" "$SUPERVISOR" \
+        "$RACKET" "$SUPERVISOR" \
         "$seconds" "$kill_grace" -- "$@"
 }
 

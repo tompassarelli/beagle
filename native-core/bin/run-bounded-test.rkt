@@ -21,7 +21,7 @@
     (define-values (process stdout stdin stderr)
       (apply subprocess #f #f #f unshare-executable
              "--user" "--map-current-user" "--pid" "--fork" "--kill-child"
-             "--forward-signals" racket-executable supervisor arguments))
+             racket-executable supervisor arguments))
     (close-output-port stdin)
     (define out-thread (thread (lambda () (copy-port stdout output))))
     (define err-thread (thread (lambda () (copy-port stderr error))))

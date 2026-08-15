@@ -22,7 +22,7 @@ if [[ "${BEAGLE_SIMD_F64_BOUNDED:-0}" != "1" ]]; then
   if BEAGLE_SIMD_F64_BOUNDED=1 \
       BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
       unshare --user --map-current-user --pid --fork --kill-child \
-        --forward-signals "$RACKET" "$supervisor" 180 5 -- "$0"; then
+        "$RACKET" "$supervisor" 180 5 -- "$0"; then
     rc=0
   else
     rc=$?

@@ -86,7 +86,7 @@
                    [subprocess-group-enabled #t])
       (apply subprocess #f #f #f unshare-command
              "--user" "--map-current-user" "--pid" "--fork" "--kill-child"
-             "--forward-signals" racket-command supervisor
+             racket-command supervisor
              (number->string seconds) "5" "--" command command-arguments)))
   (close-output-port stdin)
   (define stdout-thread

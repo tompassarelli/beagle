@@ -38,7 +38,7 @@ run_bounded() {
     "$label" "$seconds" "$kill_grace" >&2
   if BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
       unshare --user --map-current-user --pid --fork --kill-child \
-        --forward-signals "$RACKET" "$supervisor" \
+        "$RACKET" "$supervisor" \
         "$seconds" "$kill_grace" -- "$@"; then
     rc=0
   else

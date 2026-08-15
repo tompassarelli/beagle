@@ -74,7 +74,7 @@
   (define self (path->complete-path (find-system-path 'run-file)))
   (exit (apply system*/exit-code unshare-executable
                "--user" "--map-current-user" "--pid" "--fork" "--kill-child"
-               "--forward-signals" racket-executable self
+               racket-executable self
                arguments)))
 (define executable
   (or (find-executable-path command)

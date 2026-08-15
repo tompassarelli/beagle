@@ -20,7 +20,7 @@ if [[ "${BEAGLE_PARALLEL_RUNTIME_BOUNDED:-0}" != "1" ]]; then
   if BEAGLE_PARALLEL_RUNTIME_BOUNDED=1 \
       BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
       unshare --user --map-current-user --pid --fork --kill-child \
-        --forward-signals "$RACKET" "$supervisor" 90 5 -- "$0"; then
+        "$RACKET" "$supervisor" 90 5 -- "$0"; then
     rc=0
   else
     rc=$?
