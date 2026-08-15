@@ -131,6 +131,45 @@
        (check-equal? (get-output-string node-out) "42\n")))
    (lambda () (delete-directory/files scratch #:must-exist? #f))))
 
+(define (build-gjoa-public-module-pair)
+  (define scratch
+    (make-temporary-file "beagle-build-all-gjoa-public-~a" 'directory))
+  (define src-dir (build-path scratch "tools"))
+  (define out-dir (build-path scratch "out"))
+  (define provider (build-path src-dir "prep" "paths.bjs"))
+  (define consumer (build-path src-dir "icons" "generate.bjs"))
+  (write-source
+   provider
+   (string-append
+    "#lang beagle/js\n"
+    "(ns gjoa.tools.prep.paths)\n"
+    "(js/export (def BRANDING-SRC String \"configs/branding/gjoa\"))\n"
+    "(js/export (def REPO-ROOT String \".\"))\n"))
+  (write-source
+   consumer
+   (string-append
+    "#lang beagle/js\n"
+    "(ns gjoa.tools.icons.generate\n"
+    "  (:require [gjoa.tools.prep.paths\n"
+    "             :refer [BRANDING-SRC REPO-ROOT]]))\n"
+    "(println REPO-ROOT BRANDING-SRC)\n"))
+  (define stdout (open-output-string))
+  (define stderr (open-output-string))
+  (define exit-code
+    (parameterize ([current-directory repo-root]
+                   [current-output-port stdout]
+                   [current-error-port stderr])
+      (system*/exit-code beagle "build"
+                         (path->string provider)
+                         (path->string consumer)
+                         "--out" (path->string out-dir))))
+  (values scratch
+          exit-code
+          (build-path out-dir "gjoa" "tools" "prep" "paths.js")
+          (build-path out-dir "gjoa" "tools" "icons" "generate.js")
+          (get-output-string stdout)
+          (get-output-string stderr)))
+
 (define failures
   (run-tests
    (test-suite
@@ -194,6 +233,26 @@
                (system*/exit-code node (path->string entry))))
            (check-equal? node-code 0 (get-output-string node-err))
            (check-equal? (get-output-string node-out) "42\n")))
+       (lambda () (delete-directory/files scratch #:must-exist? #f))))
+
+    (test-case "batch resolves Gjoa public provider before consumer"
+      (define-values (scratch exit-code provider consumer stdout stderr)
+        (build-gjoa-public-module-pair))
+      (dynamic-wind
+       void
+       (lambda ()
+         (check-equal? exit-code 0 (string-append stdout stderr))
+         (check-true (string-contains? stderr "2 built, 0 error(s)"))
+         (check-true (file-exists? provider))
+         (check-true (file-exists? consumer))
+         (check-true
+          (string-contains?
+           (file->string consumer)
+           "import { BRANDING_SRC, REPO_ROOT } from '../prep/paths.js';"))
+         (check-true
+          (file-exists?
+           (simplify-path
+            (build-path (path-only consumer) ".." "prep" "paths.js")))))
        (lambda () (delete-directory/files scratch #:must-exist? #f)))))))
 
 (exit (if (zero? failures) 0 1))

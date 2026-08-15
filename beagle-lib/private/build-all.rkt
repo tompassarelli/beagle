@@ -10,6 +10,7 @@
          "emit.rkt"
          (only-in "emit-js.rkt" current-js-export-names)
          "lint.rkt"
+         "module-overlay-check.rkt"
          "error-format.rkt"
          "query.rkt"
          "extensions.rkt"
@@ -33,6 +34,57 @@
         s))
   (string-append (regexp-replace* #rx"\\." file-ns "/")
                  (extension-for-target target)))
+
+(define (canonical-source-id path)
+  (path->string (simplify-path (path->complete-path path))))
+
+(define (emit-checked-program prog path out-dir in-place? export-plan
+                              #:warning-count [warning-count 0])
+  ;; Extension/header mismatch check
+  (define expected-tgt (expected-target-for-extension path))
+  (when (extension-target-mismatch? path (program-target prog))
+    (define ext-str
+      (car (findf (lambda (pair) (string-suffix? path (car pair)))
+                  EXTENSION-TARGET-MAP)))
+    (error (format "extension/header mismatch: ~a expects #lang ~a, found #lang ~a"
+                   ext-str
+                   (lang-for-target-id expected-tgt)
+                   (lang-for-target-id (program-target prog)))))
+
+  (unless (getenv "BEAGLE_NO_LINT")
+    (lint-program! prog))
+
+  (define ns (program-namespace prog))
+  (define target (program-target prog))
+  (define source
+    (parameterize
+      ([current-js-export-names
+        (and (eq? target 'js)
+             (hash-ref export-plan ns (set)))])
+      (emit-program prog)))
+  (define out-path
+    (cond
+      [in-place?
+       (string->path
+        (string-append (regexp-replace #rx"\\.b[a-z]+$" path "")
+                       (extension-for-target target)))]
+      [out-dir
+       (build-path out-dir (ns->path ns target))]
+      [else
+       (string->path (ns->path ns target))]))
+
+  (define out-dir-part (path-only out-path))
+  (when out-dir-part
+    (make-directory* out-dir-part))
+
+  (with-output-to-file out-path #:exists 'replace
+    (lambda () (display source)))
+
+  (if (positive? warning-count)
+      (eprintf "  ~a -> ~a [~a warning(s)]\n"
+               path (path->string out-path) warning-count)
+      (eprintf "  ~a -> ~a\n" path (path->string out-path)))
+  #t)
 
 ;; Compile a syntax list to a target file. Shared by the text path
 ;; (build-one-file → read-beagle-syntax) and the datum-IR path (build-one-edn →
@@ -67,17 +119,6 @@
     ([exn:fail? (lambda (e) (handle-error e #f))])
     (define prog (parse-program stxs #:source-path path))
 
-    ;; Extension/header mismatch check
-    (define expected-tgt (expected-target-for-extension path))
-    (when (extension-target-mismatch? path (program-target prog))
-      (define ext-str
-        (car (findf (lambda (pair) (string-suffix? path (car pair)))
-                    EXTENSION-TARGET-MAP)))
-      (error (format "extension/header mismatch: ~a expects #lang ~a, found #lang ~a"
-                     ext-str
-                     (lang-for-target-id expected-tgt)
-                     (lang-for-target-id (program-target prog)))))
-
     (define ok? #t)
     (type-check-with-locs! prog
       (lambda (e loc-stx)
@@ -98,43 +139,9 @@
     (unless (or ok? (and warn? (zero? hard-errors)))
       (reject-build #f))
 
-    (unless (getenv "BEAGLE_NO_LINT")
-      (lint-program! prog))
-
-    (define ns (program-namespace prog))
-    (define target (program-target prog))
-    (define source
-      (parameterize
-        ([current-js-export-names
-          (and (eq? target 'js)
-               (hash-ref export-plan ns (set)))])
-        (emit-program prog)))
-    (define out-path
-      (cond
-        [in-place?
-         (string->path
-          (string-append (regexp-replace #rx"\\.b[a-z]+$" path "")
-                         (extension-for-target target)))]
-        [out-dir
-         (build-path out-dir (ns->path ns target))]
-        [else
-         (string->path (ns->path ns target))]))
-
-    (define out-dir-part (path-only out-path))
-    (when out-dir-part
-      (make-directory* out-dir-part))
-
-    (with-output-to-file out-path #:exists 'replace
-      (lambda () (display source)))
-
-    (if (and warn? (not ok?))
-        (begin
-          (eprintf "  ~a -> ~a [~a warning(s)]\n"
-                   path (path->string out-path) type-errors)
-          #t)
-        (begin
-          (eprintf "  ~a -> ~a\n" path (path->string out-path))
-          #t)))))
+    (emit-checked-program
+     prog path out-dir in-place? export-plan
+     #:warning-count (if (and warn? (not ok?)) type-errors 0)))))
 
 ;; Text front-end: read source text → syntax → shared compile tail.
 (define (build-one-file path out-dir json? export-plan
@@ -202,6 +209,21 @@
 ;; Exact ESM export demand for a batch. A named `:refer` requests only those
 ;; bindings; a namespace import requests every public defn. The emitter keeps
 ;; declaration rendering separate and receives only this set-valued sink plan.
+(define (programs->export-plan programs)
+  (for/fold ([plan (hash)])
+            ([prog (in-list programs)]
+             #:when prog)
+    (for/fold ([next plan])
+              ([r (in-list (program-requires prog))])
+      (define ns (require-entry-ns r))
+      (define requested
+        (if (require-entry-refer r)
+            (list->set (require-entry-refer r))
+            (set '*)))
+      (hash-update next ns
+                   (lambda (prior) (set-union prior requested))
+                   (set)))))
+
 (define (build-export-plan files build-edn?)
   (define programs
     (for/list ([f (in-list files)])
@@ -221,19 +243,82 @@
            (parse-program stxs #:source-path src-path)]
           [else
            (parse-program (read-beagle-syntax f) #:source-path f)]))))
-  (for/fold ([plan (hash)])
-            ([prog (in-list programs)]
-             #:when prog)
-    (for/fold ([next plan])
-              ([r (in-list (program-requires prog))])
-      (define ns (require-entry-ns r))
-      (define requested
-        (if (require-entry-refer r)
-            (list->set (require-entry-refer r))
-            (set '*)))
-      (hash-update next ns
-                   (lambda (prior) (set-union prior requested))
-                   (set)))))
+  (programs->export-plan (filter values programs)))
+
+(define (build-text-overlay files out-dir json? in-place?)
+  (define captured '())
+  (define source->file (make-hash))
+  (define (capture! source _phase value location)
+    (set! captured (cons (list source value location) captured)))
+  (define (report! source value location)
+    (define source-id (and source (format "~a" source)))
+    (define path
+      (hash-ref source->file source-id
+                (lambda () (or source-id (car files)))))
+    (define error
+      (if (exn? value)
+          value
+          (make-exn:fail (format "~a" value) (current-continuation-marks))))
+    (if json?
+        (begin
+          (write-json-error error location)
+          (flush-output (current-error-port)))
+        (eprintf "  ~a: ~a\n" path (exn-message error))))
+  (define source-candidates
+    (for/list ([path (in-list files)])
+      (define source-id (canonical-source-id path))
+      (hash-set! source->file source-id path)
+      (with-handlers
+          ([exn:fail?
+            (lambda (error)
+              (capture! source-id 'read error #f)
+              #f)])
+        (stxs->module-source (read-beagle-syntax source-id) source-id))))
+  (define sources (filter values source-candidates))
+  (define checked
+    (and (pair? sources)
+         (null? captured)
+         (check-module-overlay
+          sources
+          #:capture-types? #t
+          #:emit? #f
+          #:diagnostic-sink capture!)))
+  (when (and checked
+             (not (overlay-check-result-ok? checked))
+             (null? captured))
+    (for ([diagnostic
+           (in-list (overlay-check-result-diagnostics checked))])
+      (capture!
+       (overlay-diagnostic-source diagnostic)
+       (overlay-diagnostic-phase diagnostic)
+       (make-exn:fail
+        (overlay-diagnostic-message diagnostic)
+        (current-continuation-marks))
+       #f)))
+  (for ([entry (in-list (reverse captured))])
+    (report! (car entry) (cadr entry) (caddr entry)))
+  (cond
+    [(or (not checked) (not (overlay-check-result-ok? checked)))
+     (values 0 (max 1 (length captured)))]
+    [else
+     (define modules (overlay-check-result-modules checked))
+     (define export-plan
+       (programs->export-plan
+        (map checked-overlay-module-program modules)))
+     (for/fold ([built 0] [errors 0])
+               ([module (in-list modules)])
+       (define source-id (format "~a" (checked-overlay-module-source module)))
+       (define path (hash-ref source->file source-id source-id))
+       (if (with-handlers
+               ([exn:fail?
+                 (lambda (error)
+                   (report! source-id error #f)
+                   #f)])
+             (emit-checked-program
+              (checked-overlay-module-program module)
+              path out-dir in-place? export-plan))
+           (values (add1 built) errors)
+           (values built (add1 errors))))]))
 
 (define (expand-args args)
   (sort
@@ -305,21 +390,31 @@
     (exit 2))
 
   (define json? (json-error-mode?))
-  (define export-plan (build-export-plan files build-edn?))
   (define built 0)
   (define errors 0)
 
-  (for ([f (in-list files)])
-    (define ok?
-      (cond
-        [build-edn?
-         (build-one-edn f out-dir json? export-plan
-                        #:warn? warn? #:in-place? in-place?)]
-        [target-override (build-one-file-target f out-dir json? target-override)]
-        [else
-         (build-one-file f out-dir json? export-plan
-                         #:warn? warn? #:in-place? in-place?)]))
-    (if ok? (set! built (+ built 1)) (set! errors (+ errors 1))))
+  (cond
+    [(and (not build-edn?) (not target-override) (not warn?))
+     (define-values (overlay-built overlay-errors)
+       (build-text-overlay files out-dir json? in-place?))
+     (set! built overlay-built)
+     (set! errors overlay-errors)]
+    [else
+     ;; Retargeted, EDN-authored, and explicitly warning builds retain their
+     ;; dedicated paths; they do not claim checked text-overlay semantics.
+     (define export-plan (build-export-plan files build-edn?))
+     (for ([f (in-list files)])
+       (define ok?
+         (cond
+           [build-edn?
+            (build-one-edn f out-dir json? export-plan
+                           #:warn? warn? #:in-place? in-place?)]
+           [target-override
+            (build-one-file-target f out-dir json? target-override)]
+           [else
+            (build-one-file f out-dir json? export-plan
+                            #:warn? warn? #:in-place? in-place?)]))
+       (if ok? (set! built (+ built 1)) (set! errors (+ errors 1))))])
 
   (unless json?
     (eprintf "\n~a built, ~a error(s)\n" built errors))
