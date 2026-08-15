@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Link one public zero-argument Beagle function as a native executable.
+# Link one public Beagle function as a native executable. The entry may take no
+# source parameters or one `(Vec String)` containing process arguments after
+# argv[0].
 #
 # Usage:
 #   beagle native-exe --out FILE --entry NS/NAME [--cc CC] [--static]
@@ -200,7 +202,7 @@ for source in "${sources[@]}"; do
 done
 
 set +e
-entry_return="$(python3 - "$entry" "${ast_args[@]}" <<'PY'
+entry_metadata="$(python3 - "$entry" "${ast_args[@]}" <<'PY'
 import json
 import sys
 
@@ -241,11 +243,36 @@ if form.get("private") is True:
 if form.get("private") is not False:
     fail(f"entry export visibility is unavailable: {target} ({source})")
 parameters = form.get("params")
-if not isinstance(parameters, list) or parameters:
-    count = len(parameters) if isinstance(parameters, list) else "unknown"
-    fail(f"entry must have zero source parameters: {target} has {count}")
+if not isinstance(parameters, list):
+    fail(f"entry parameters are unavailable: {target}")
 if form.get("rest") is not False:
     fail(f"entry must not have a rest parameter: {target}")
+entry_mode = "zero"
+if parameters:
+    if len(parameters) != 1:
+        fail(
+            f"entry must have zero parameters or one (Vec String) parameter: "
+            f"{target} has {len(parameters)}"
+        )
+    parameter = parameters[0]
+    annotation = parameter.get("ann") if isinstance(parameter, dict) else None
+    arguments = annotation.get("args") if isinstance(annotation, dict) else None
+    string_argument = arguments[0] if isinstance(arguments, list) and len(arguments) == 1 else None
+    if not (
+        isinstance(parameter, dict)
+        and parameter.get("type") == "param"
+        and parameter.get("constraint") is None
+        and isinstance(annotation, dict)
+        and annotation.get("kind") == "app"
+        and annotation.get("name") == "Vec"
+        and isinstance(string_argument, dict)
+        and string_argument.get("kind") == "prim"
+        and string_argument.get("name") == "String"
+    ):
+        fail(
+            f"entry parameter must be exactly (Vec String): {target}"
+        )
+    entry_mode = "argv"
 return_type = form.get("ret")
 if not isinstance(return_type, dict):
     fail(f"entry needs an explicit -> Int or -> Nil return: {target}")
@@ -254,11 +281,17 @@ if return_type.get("kind") != "prim" or return_type.get("name") not in {"Int", "
     fail(f"entry return must be Int or Nil: {target} returns {rendered}")
 
 print(return_type["name"])
+print(entry_mode)
 PY
 )"
 metadata_rc=$?
 set -e
 [[ $metadata_rc -eq 0 ]] || exit "$metadata_rc"
+mapfile -t entry_metadata_lines <<<"$entry_metadata"
+[[ ${#entry_metadata_lines[@]} -eq 2 ]] ||
+    die "entry metadata is incomplete: $entry"
+entry_return="${entry_metadata_lines[0]}"
+entry_mode="${entry_metadata_lines[1]}"
 
 module_dir="$work/module"
 mkdir -p "$module_dir"
@@ -326,7 +359,19 @@ fi
 
 needs_arena=0
 needs_capability=0
-case "$c_parameters" in
+entry_parameter_type=""
+implicit_parameters="$c_parameters"
+if [[ "$entry_mode" == "argv" ]]; then
+    if [[ "$c_parameters" =~ ^(.*)(native_m0_type_[0-9]+)[[:space:]]+native_v_0$ ]]; then
+        implicit_parameters="${BASH_REMATCH[1]}"
+        entry_parameter_type="${BASH_REMATCH[2]}"
+        implicit_parameters="${implicit_parameters%, }"
+        [[ -n "$implicit_parameters" ]] || implicit_parameters="void"
+    else
+        die "argv entry has unsupported generated parameter ABI: $entry ($c_parameters)"
+    fi
+fi
+case "$implicit_parameters" in
     void)
         abi="pure"
         call_arguments=""
@@ -351,6 +396,14 @@ case "$c_parameters" in
         die "entry has unsupported generated ABI parameters: $entry ($c_parameters)"
         ;;
 esac
+if [[ "$entry_mode" == "argv" ]]; then
+    needs_arena=1
+    if [[ -n "$call_arguments" ]]; then
+        call_arguments="$call_arguments, arguments"
+    else
+        call_arguments="arguments"
+    fi
+fi
 
 [[ "$c_return" =~ ^native_m0_type_[0-9]+$ ]] ||
     die "entry has unsupported generated ABI return: $entry ($c_return)"
@@ -369,6 +422,7 @@ entry_source="$work/entry.c"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 EOF
     if [[ "$needs_arena" == "1" ]]; then
         cat <<'EOF'
@@ -376,10 +430,17 @@ EOF
 #define BEAGLE_NATIVE_ARENA_BYTES ((size_t)(64U * 1024U * 1024U))
 EOF
     fi
-    cat <<'EOF'
+    if [[ "$entry_mode" == "argv" ]]; then
+        cat <<'EOF'
+
+int main(int argc, char **argv) {
+EOF
+    else
+        cat <<'EOF'
 
 int main(void) {
 EOF
+    fi
     if [[ "$needs_arena" == "1" ]]; then
         cat <<'EOF'
   uint8_t *arena_storage = (uint8_t *)malloc(BEAGLE_NATIVE_ARENA_BYTES);
@@ -394,8 +455,27 @@ EOF
     if [[ "$needs_capability" == "1" ]]; then
         cat <<'EOF'
   /* One process-local nonzero authority backs the root region capabilities
-     projected into this zero-argument executable. */
+     projected into this executable. */
   const native_capability capability = { UINT64_C(1) };
+EOF
+    fi
+    if [[ "$entry_mode" == "argv" ]]; then
+        cat <<EOF
+  $entry_parameter_type arguments = native_vec_new(
+      &arena, (int64_t)(argc > 1 ? argc - 1 : 0),
+      (int64_t)sizeof(uint64_t), _Alignof(uint64_t));
+  for (int argument_index = 1; argument_index < argc; argument_index += 1) {
+    size_t argument_length = strlen(argv[argument_index]);
+    uint8_t *argument_bytes = NULL;
+    uint64_t argument = native_text_alloc(
+        &arena, (uint64_t)argument_length, &argument_bytes);
+    if (argument_length > 0U) {
+      memcpy(argument_bytes, argv[argument_index], argument_length);
+    }
+    arguments = native_vec_push(
+        &arena, arguments, &argument, (int64_t)sizeof(uint64_t),
+        _Alignof(uint64_t));
+  }
 EOF
     fi
     if [[ "$entry_return" == "Int" ]]; then
@@ -478,6 +558,9 @@ cp -- "$entry_source" "$artifacts/entry.c"
 cp -- "$work/native-exe.log" "$artifacts/native-exe.log"
 
 entry_line="native-exe-entry PASS name=$entry symbol=$symbol return=$entry_return abi=$abi"
+if [[ "$entry_mode" == "argv" ]]; then
+    entry_line="$entry_line args=vec-string"
+fi
 c17_line="native-exe-c17 PASS compiler=$cc_path output=$out"
 printf '%s\n%s\n' "$entry_line" "$c17_line" >"$artifacts/native-exe.report.txt"
 mv -f -- "$linked" "$out"

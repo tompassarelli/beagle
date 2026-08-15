@@ -66,7 +66,8 @@ Project / loop:
   daemon start|status|stop  Watch + cache type results
   promote [REV]             Promote clean checkout HEAD + restart its daemon
   native-exe --out FILE --entry NS/NAME PATH...
-                            Link a complete native C17 executable
+                            Link a native C17 executable; entry accepts [] or
+                            one typed (Vec String) process-argument parameter
   test [--active-only]      Run the test tiers
   rejection-stats DIR       Diagnostics by cause-class
   lsp | repl                LSP server / typed REPL

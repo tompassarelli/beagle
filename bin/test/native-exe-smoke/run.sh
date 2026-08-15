@@ -14,6 +14,7 @@ threading_source="$repo/bin/test/native-exe-smoke/entry_threading.bgl"
 record_with_source="$repo/bin/test/native-exe-smoke/entry_record_with.bgl"
 record_with_unknown_field="$repo/bin/test/native-exe-smoke/entry_record_with_unknown_field.bgl"
 record_with_wrong_type="$repo/bin/test/native-exe-smoke/entry_record_with_wrong_type.bgl"
+cli_source="$repo/bin/test/native-exe-smoke/entry_cli.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-exe-smoke.XXXXXX")"
 cleanup() { rm -rf "${scratch:?}"; }
 trap cleanup EXIT
@@ -80,6 +81,28 @@ run_frontend() {
 
 run_frontend gcc "$gcc_bin" global-size native_m0_fn_0 arena+capability 2
 run_frontend clang "$clang_bin" local-shadow-size native_m0_fn_0 arena+capability 3
+
+cli_stage="$scratch/cli"
+cli_executable="$cli_stage/bin/cli"
+mkdir -p "$cli_stage/bin"
+"$repo/bin/beagle" native-exe \
+    --out "$cli_executable" \
+    --entry native.cli-entry/cli-main \
+    --cc "$gcc_bin" \
+    --artifacts "$cli_stage" \
+    "$cli_source" >"$cli_stage/build.log"
+grep -Eq \
+    '^native-exe-entry PASS name=native.cli-entry/cli-main symbol=native_m0_fn_0 return=Int abi=pure args=vec-string$' \
+    "$cli_stage/native-exe.report.txt"
+set +e
+env -i "$cli_executable" left right
+cli_match_rc=$?
+env -i "$cli_executable"
+cli_empty_rc=$?
+set -e
+[[ $cli_match_rc -eq 0 ]]
+[[ $cli_empty_rc -eq 17 ]]
+printf 'native-exe smoke: typed process argv enters as (Vec String)\n'
 
 projection_c17="$scratch/projection-c17"
 "$repo/bin/beagle" build --materializer c17 \
