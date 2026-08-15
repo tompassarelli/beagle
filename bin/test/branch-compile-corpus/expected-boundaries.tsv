@@ -1,0 +1,6 @@
+# case	current-identity	changed-member
+comment-layout	module-source	corpus/foundation.bgl
+private-implementation	module-source	corpus/foundation.bgl
+public-interface	module-interface	corpus/foundation.bgl
+public-interface	module-source	corpus/feature.bgl
+public-interface	module-source	corpus/foundation.bgl

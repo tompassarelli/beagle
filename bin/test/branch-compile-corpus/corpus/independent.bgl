@@ -1,0 +1,5 @@
+#lang beagle
+(ns corpus.independent)
+
+(defn independent-value [] Int
+  7)

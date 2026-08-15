@@ -1,0 +1,10 @@
+# qualified-unit	definition-kind	visibility	direct-semantic-reads
+corpus.foundation/private-offset	defn	private	-
+corpus.foundation/adjust	defn	public	corpus.foundation/private-offset
+corpus.foundation/double-value	defn	public	-
+corpus.feature/score-value	defn	public	corpus.foundation/adjust
+corpus.feature/stable-score	defn	public	corpus.foundation/double-value
+corpus.independent/independent-value	defn	public	-
+corpus.app/run-score	defn	public	corpus.feature/score-value
+corpus.app/run-stable	defn	public	corpus.feature/stable-score
+corpus.app/run-independent	defn	public	corpus.independent/independent-value

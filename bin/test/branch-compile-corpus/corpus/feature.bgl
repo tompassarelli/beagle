@@ -1,0 +1,9 @@
+#lang beagle
+(ns corpus.feature
+  (:require [corpus.foundation :as foundation]))
+
+(defn score-value [(value Int)] Int
+  (+ (foundation/adjust value) 10))
+
+(defn stable-score [(value Int)] Int
+  (foundation/double-value value))

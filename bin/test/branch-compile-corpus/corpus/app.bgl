@@ -1,0 +1,13 @@
+#lang beagle
+(ns corpus.app
+  (:require [corpus.feature :as feature]
+            [corpus.independent :as independent]))
+
+(defn run-score [] Int
+  (feature/score-value 5))
+
+(defn run-stable [] Int
+  (feature/stable-score 5))
+
+(defn run-independent [] Int
+  (independent/independent-value))

@@ -1,0 +1,19 @@
+# case	identity-or-stage	invalidated
+comment-layout	exact-source-provenance	corpus/foundation.bgl
+comment-layout	module-interface	-
+comment-layout	typed-unit	-
+comment-layout	native-unit	-
+comment-layout	assembled-native-program	-
+comment-layout	materialized-artifact	-
+private-implementation	exact-source-provenance	corpus/foundation.bgl
+private-implementation	module-interface	-
+private-implementation	typed-unit	corpus.foundation/private-offset
+private-implementation	native-unit	corpus.foundation/private-offset
+private-implementation	assembled-native-program	module.native-program
+private-implementation	materialized-artifact	module_0.c
+public-interface	exact-source-provenance	corpus/feature.bgl,corpus/foundation.bgl
+public-interface	module-interface	corpus/foundation.bgl
+public-interface	typed-unit	corpus.feature/score-value,corpus.foundation/adjust
+public-interface	native-unit	corpus.feature/score-value,corpus.foundation/adjust
+public-interface	assembled-native-program	module.native-program
+public-interface	materialized-artifact	module_0.c,module_0.h

@@ -1,0 +1,13 @@
+#lang beagle
+(ns corpus.foundation)
+
+;; Exact source provenance changes; the checked interface and behavior do not.
+(defn- private-offset
+  [(value Int)] Int
+  (+ value 1))
+
+(defn adjust [(value Int)] Int
+  (private-offset value))
+
+(defn double-value [(value Int)] Int
+  (* value 2))
