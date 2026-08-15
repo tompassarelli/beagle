@@ -60,6 +60,7 @@
           pkgs.gnused
           pkgs.gawk
           pkgs.findutils
+          pkgs.util-linux
         ];
         runtimePath = pkgs.lib.makeBinPath runtimeDeps;
 
