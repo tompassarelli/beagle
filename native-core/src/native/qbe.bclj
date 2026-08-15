@@ -12,6 +12,8 @@
 
 (def trap-overflow Int 2)
 
+(def trap-out-of-range Int 4)
+
 (defrecord QbeArtifact [(module-name String) (module-text String)])
 
 (defunion QbeMaterialization
@@ -246,6 +248,8 @@
      (core/divf64instructionv0-result instruction)]
     [(I64ToF64InstructionV0 value)
      (core/i64tof64instructionv0-result instruction)]
+    [(F64ToI64InstructionV0 value)
+     (core/f64toi64instructionv0-result instruction)]
     [(CheckedInstruction value) (core/checkedinstruction-result instruction)]
     [(BitwiseInstructionV0 value)
      (core/bitwiseinstructionv0-result instruction)]
@@ -1054,6 +1058,7 @@
     [(MulF64InstructionV0 value) false]
     [(DivF64InstructionV0 value) true]
     [(I64ToF64InstructionV0 value) false]
+    [(F64ToI64InstructionV0 value) true]
     [(CheckedInstruction value) true]
     [(BitwiseInstructionV0 value) false]
     [(StoreInstruction value) false]
@@ -1238,6 +1243,34 @@
       (emit-trap-block trap-label trap-invalid-argument)
       continue-label "\n"
       "  " result-name " =d div " left ", " right "\n")))
+
+(defn emit-f64-truncate
+  [(context QbeFn)
+   (block-index-value Int)
+   (position Int)
+   (result-name String)
+   (source-id core/NativeId)] String
+  (let [(source String) (value-name context source-id)
+        (trap-label String) (str (block-label block-index-value) "_t" position)
+        (continue-label String) (str (block-label block-index-value) "_c" position)]
+    (str
+      ;; Bounds are the exact doubles -2^63 (inclusive) and 2^63 (exclusive);
+      ;; NaN fails both ordered comparisons and traps. The negative bound is
+      ;; built by negation because the literal grammar keeps one spelling.
+      "  " (temp-name block-index-value position 0)
+      " =d neg d_9223372036854775808.0\n"
+      "  " (temp-name block-index-value position 1) " =w cged " source ", "
+      (temp-name block-index-value position 0) "\n"
+      "  " (temp-name block-index-value position 2) " =w cltd " source
+      ", d_9223372036854775808.0\n"
+      "  " (temp-name block-index-value position 3) " =w and "
+      (temp-name block-index-value position 1) ", "
+      (temp-name block-index-value position 2) "\n"
+      "  jnz " (temp-name block-index-value position 3) ", " continue-label ", "
+      trap-label "\n"
+      (emit-trap-block trap-label trap-out-of-range)
+      continue-label "\n"
+      "  " result-name " =l dtosi " source "\n")))
 
 ;; Mirrors the C materializer's overflow predicate; INT64_MIN is built by
 ;; subtraction because QBE's literal grammar cannot spell it directly.
@@ -1574,6 +1607,9 @@
        (str "  " result-name " =d sltof "
          (value-name context (core/i64tof64instructionv0-source-id instruction))
          "\n")]
+      [(F64ToI64InstructionV0 value)
+       (emit-f64-truncate context block-index-value position result-name
+         (core/f64toi64instructionv0-source-id instruction))]
       [(CheckedInstruction value)
        (let [(checked core/CheckedOperationV0) (core/checkedinstruction-operation instruction)]
          (match checked
@@ -2125,6 +2161,7 @@
     [(MulF64InstructionV0 value) true]
     [(DivF64InstructionV0 value) true]
     [(I64ToF64InstructionV0 value) true]
+    [(F64ToI64InstructionV0 value) true]
     [(CheckedInstruction value)
      (let [(operation core/CheckedOperationV0)
            (core/checkedinstruction-operation instruction)]

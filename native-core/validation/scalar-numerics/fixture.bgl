@@ -34,6 +34,9 @@
 (defn f64-from-bits [(value Int)] Float
   (float-from-bits value))
 
+(defn i64-truncate-bits [(value Int)] Int
+  (long (float-from-bits value)))
+
 (defn f64-add-bits [(left Int) (right Int)] Int
   (float-to-bits
     (+ (float-from-bits left) (float-from-bits right))))

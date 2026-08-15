@@ -133,8 +133,8 @@ for expected in \
   rg -Fx "$expected" "$report" >/dev/null \
     || die "build report is missing: $expected"
 done
-[[ "$(rg -c '^obligation-projection PASS ' "$report")" -eq 9 ]] \
-  || die "Native program did not pass all nine obligations"
+[[ "$(rg -c '^obligation-projection PASS ' "$report")" -eq 10 ]] \
+  || die "Native program did not pass all ten obligations"
 if rg -q '^pending ' "$report"; then
   rg '^pending ' "$report" >&2
   die "fixture left a Native lowering root"
@@ -164,6 +164,7 @@ I64_REMAINDER_FN	i64-remainder
 I64_MODULUS_FN	i64-modulus
 F64_TO_BITS_FN	f64-to-bits
 F64_FROM_BITS_FN	f64-from-bits
+I64_TRUNCATE_BITS_FN	i64-truncate-bits
 F64_ADD_BITS_FN	f64-add-bits
 F64_SUBTRACT_BITS_FN	f64-subtract-bits
 F64_MULTIPLY_BITS_FN	f64-multiply-bits

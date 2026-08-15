@@ -2598,6 +2598,7 @@
       (instance? native.core.MulF64InstructionV0 instruction) true
       (instance? native.core.DivF64InstructionV0 instruction) true
       (instance? native.core.I64ToF64InstructionV0 instruction) true
+      (instance? native.core.F64ToI64InstructionV0 instruction) true
       (instance? native.core.CheckedInstruction instruction) true
       (instance? native.core.BitwiseInstructionV0 instruction) true
       (instance? native.core.CompareInstruction instruction) true

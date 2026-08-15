@@ -6821,6 +6821,18 @@
           (core/->SsaValueV0 result-id (float-type-id)) source-id))
       result-id (float-type-id) false)))
 
+(defn lower-float-to-int
+  [(state BodyStateV0)
+   (owner core/NativeId)
+   (source-id core/NativeId)]
+  ExprResultV0
+  (let [(result-id core/NativeId) (state-id state owner "long-float")]
+    (->ExprResultV0
+      (state-emit (state-bump state)
+        (core/->F64ToI64InstructionV0
+          (core/->SsaValueV0 result-id (int-type-id)) source-id))
+      result-id (int-type-id) false)))
+
 (defn double-payload-id? [(payload core/NativeId)] Bool
   (or (same-id? payload (int-type-id))
       (same-id? payload (float-type-id))))
@@ -13814,6 +13826,17 @@
                   (same-id? (nth value-types 0) (int-type-id)))
                 (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
 
+                ;; Clojure truncation toward zero. The materialized form traps
+                ;; on NaN and out-of-int64-range sources instead of minting a
+                ;; silent sentinel value.
+                (and (= "long" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (float-type-id)))
+                (lower-float-to-int current owner (nth values 0))
+
+                (= "long" callee)
+                (fail-result current
+                  "TODO-NATIVE-LONG-OPERAND: long takes one closed Int or Float value")
+
                 (and (= "min" callee)
                   (or (= 2 (count values)) (= 3 (count values)))
                   (int-value-types? value-types))
@@ -18175,6 +18198,11 @@
     (stages/canonical-record "i64-to-f64-instruction-v0"
       [(encode-ssa-value (core/i64tof64instructionv0-result instruction))
        (id-value (core/i64tof64instructionv0-source-id instruction))])
+
+    (instance? native.core.F64ToI64InstructionV0 instruction)
+    (stages/canonical-record "f64-to-i64-instruction-v0"
+      [(encode-ssa-value (core/f64toi64instructionv0-result instruction))
+       (id-value (core/f64toi64instructionv0-source-id instruction))])
 
     (instance? native.core.CheckedInstruction instruction)
     (let [(operation core/CheckedOperationV0)

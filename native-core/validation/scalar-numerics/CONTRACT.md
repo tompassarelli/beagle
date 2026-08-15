@@ -17,7 +17,9 @@ The exact guarantees are:
   false; positive and negative zero compare equal.
 - `trap-exact`: execution terminates through `native_trap` with abort status
   `134` and byte-exact reporter output `trap<TAB>CODE<LF>`, where `CODE` is the
-  value in `expected`. Code 1 is invalid argument; code 2 is overflow.
+  value in `expected`. Code 1 is invalid argument; code 2 is overflow; code 4
+  is out of range (`long` truncation of NaN or a Float outside int64,
+  deliberately fail-closed where the JVM cast mints a sentinel).
 
 `f64-tolerance` is deliberately narrower. It checks a finite derived kernel by
 `abs(actual - expected) <= abs-tol + rel-tol * abs(expected)`. It does not

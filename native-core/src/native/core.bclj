@@ -394,6 +394,8 @@
      (left-id NativeId)
      (right-id NativeId)])
   (I64ToF64InstructionV0 [(result SsaValueV0) (source-id NativeId)])
+  ;; Truncation toward zero; out-of-range and NaN sources trap at runtime.
+  (F64ToI64InstructionV0 [(result SsaValueV0) (source-id NativeId)])
   (CheckedInstruction [(result SsaValueV0) (operation CheckedOperationV0)])
   (BitwiseInstructionV0 [(result SsaValueV0) (operation BitwiseOperationV0)])
   (StoreInstruction
@@ -1009,6 +1011,7 @@
     [(MulF64InstructionV0 result left-id right-id) (ssavaluev0-id result)]
     [(DivF64InstructionV0 result left-id right-id) (ssavaluev0-id result)]
     [(I64ToF64InstructionV0 result source-id) (ssavaluev0-id result)]
+    [(F64ToI64InstructionV0 result source-id) (ssavaluev0-id result)]
     [(CheckedInstruction result operation) (ssavaluev0-id result)]
     [(BitwiseInstructionV0 result operation) (ssavaluev0-id result)]
     [(StoreInstruction result store tokens) (ssavaluev0-id result)]
@@ -1960,6 +1963,7 @@
     [(MulF64InstructionV0 result left-id right-id) true]
     [(DivF64InstructionV0 result left-id right-id) true]
     [(I64ToF64InstructionV0 result source-id) true]
+    [(F64ToI64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
     [(BitwiseInstructionV0 result operation) true]
     [(StoreInstruction result store tokens)
@@ -2257,6 +2261,7 @@
     [(MulF64InstructionV0 result left-id right-id) [left-id right-id]]
     [(DivF64InstructionV0 result left-id right-id) [left-id right-id]]
     [(I64ToF64InstructionV0 result source-id) [source-id]]
+    [(F64ToI64InstructionV0 result source-id) [source-id]]
     [(CheckedInstruction result operation) (checked-operation-ssa-refs operation)]
     [(BitwiseInstructionV0 result operation)
      (bitwise-operation-ssa-refs operation)]
@@ -2443,6 +2448,7 @@
     [(MulF64InstructionV0 result left-id right-id) true]
     [(DivF64InstructionV0 result left-id right-id) true]
     [(I64ToF64InstructionV0 result source-id) true]
+    [(F64ToI64InstructionV0 result source-id) true]
     [(CheckedInstruction result operation) true]
     [(BitwiseInstructionV0 result operation) true]
     [(StoreInstruction result store tokens)

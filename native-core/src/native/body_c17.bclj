@@ -172,6 +172,7 @@
     (instance? native.core.MulF64InstructionV0 instruction) true
     (instance? native.core.DivF64InstructionV0 instruction) true
     (instance? native.core.I64ToF64InstructionV0 instruction) true
+    (instance? native.core.F64ToI64InstructionV0 instruction) true
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
@@ -2142,6 +2143,19 @@
         (value-name function slots
           (core/i64tof64instructionv0-source-id instruction))
         ";\n")
+
+      ;; Truncation toward zero. The guard bounds are the exact doubles
+      ;; -2^63 (representable, inclusive) and 2^63 (exclusive); NaN fails
+      ;; both comparisons, so it traps instead of minting a sentinel.
+      (instance? native.core.F64ToI64InstructionV0 instruction)
+      (let [(source String)
+            (value-name function slots
+              (core/f64toi64instructionv0-source-id instruction))]
+        (str "  if (!((" source " >= -9223372036854775808.0) && ("
+          source " < 9223372036854775808.0))) {\n"
+          "    native_trap(NATIVE_TRAP_OUT_OF_RANGE);\n"
+          "  }\n"
+          "  " target " = (int64_t)" source ";\n"))
 
       (instance? native.core.CompareInstruction instruction)
       (let [(left String)

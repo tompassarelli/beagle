@@ -40,6 +40,9 @@
 #ifndef F64_FROM_BITS_FN
 #error "F64_FROM_BITS_FN is required"
 #endif
+#ifndef I64_TRUNCATE_BITS_FN
+#error "I64_TRUNCATE_BITS_FN is required"
+#endif
 #ifndef F64_ADD_BITS_FN
 #error "F64_ADD_BITS_FN is required"
 #endif
@@ -177,6 +180,9 @@ int main(int argc, char **argv) {
     print_f64_bits_from_i64(F64_TO_BITS_FN(f64_from_raw_bits(argv[2])));
   } else if (strcmp(operation, "f64-from-bits") == 0) {
     print_f64_bits_from_double(F64_FROM_BITS_FN(parse_f64_bits(argv[2])));
+  } else if (strcmp(operation, "i64-truncate-bits") == 0) {
+    (void)printf("%" PRId64 "\n",
+                 I64_TRUNCATE_BITS_FN(parse_f64_bits(argv[2])));
   } else if (strcmp(operation, "f64-add-bits") == 0) {
     print_f64_bits_from_i64(
         F64_ADD_BITS_FN(parse_f64_bits(argv[2]), parse_f64_bits(argv[3])));
