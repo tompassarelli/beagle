@@ -526,7 +526,7 @@ bb -cp "$compiled" -e '
 (defn definition-nodes [index]
   (vec
    (mapcat #(lower/index-form-ids index %)
-           ["record" "def" "defn"])))
+           ["record" "defunion" "deferror" "def" "defn"])))
 
 (defn definitions-by-key [index]
   (reduce
@@ -611,6 +611,7 @@ bb -cp "$compiled" -e '
       (mapcat #(resolved-definition-nodes definitions index module-name %) references)
       (mapcat #(resolved-definition-nodes definitions index module-name %) calls)
       (mapcat #(record-definition-nodes definitions index module-name %) calls)
+      (mapcat #(resolved-definition-nodes definitions index module-name %) types)
       (mapcat #(record-definition-nodes definitions index module-name %) types)))))
 
 (defn reachable-definition-ids [definitions index seeds]
@@ -758,7 +759,7 @@ bb -cp "$compiled" -e '
 
 (defn source-definition-count [rows]
   (reduce + (map #(count (slice/form-node-names rows %))
-                 ["record" "def" "defn"])))
+                 ["record" "defunion" "deferror" "def" "defn"])))
 
 (defn obligation-pass? [verdicts]
   (and (= 10 (count verdicts))

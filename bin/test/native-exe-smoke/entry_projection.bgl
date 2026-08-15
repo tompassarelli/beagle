@@ -29,6 +29,18 @@
 (defn hygienic-entry [] Int
   (call-helper))
 
+(defunion ProjectionUnion
+  (ProjectionValue [(value Int)]))
+
+(defunion :throwable ProjectionError
+  (ProjectionFailure [(value ProjectionUnion)]))
+
+(defn typed-helper [(problem ProjectionError)] Int
+  4)
+
+(defn typed-entry [] Int
+  (typed-helper (->ProjectionFailure (->ProjectionValue 4))))
+
 (defn unreachable [] Int
   ((fn [(value Int)] Int value) 0))
 
