@@ -1,0 +1,9 @@
+#lang beagle
+(ns native.driver)
+
+(defn main [] Int
+  (if (and (= (native.kernel/scale 21 2) 42)
+           (= (native.bridge/doubled 21) 42)
+           (= (native.bridge/relay 40 2) 42))
+    0
+    1))

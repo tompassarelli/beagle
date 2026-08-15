@@ -1,0 +1,22 @@
+#lang beagle
+(ns native.vector-literal-types)
+
+;; No (Vec Int) annotation exists anywhere in this module: every vector type
+;; below must be minted from the literal itself.
+
+(defn pick-argument-position [] Int
+  (nth [10 20 30] 1))
+
+(defn count-argument-position [] Int
+  (count ["alpha" "beta"]))
+
+(defn from-typed-binding [] Int
+  (let [(values (Vec Bool)) [true false true]]
+    (if (nth values 2) 7 0)))
+
+(defn main [] Int
+  (if (and (= (pick-argument-position) 20)
+           (= (count-argument-position) 2)
+           (= (from-typed-binding) 7))
+    0
+    1))

@@ -624,8 +624,15 @@
             (if (= alias module-name)
               module-name
               (imported-module-name index module-name alias))
+            ;; The checker admits a fully-qualified reference to any module in
+            ;; the closed source set, aliased or not; a declared import alias
+            ;; still wins over a module that happens to share its spelling.
             (imported (U String Nil))
-            (if (some? declared) declared (sole-module-name index module-name))]
+            (if (some? declared)
+              declared
+              (if (some? (module-root-named index alias))
+                alias
+                (sole-module-name index module-name)))]
         (if (or (nil? imported) (= "" local-name))
           (->ResolvedSourceNameV0 "" local-name false)
           (->ResolvedSourceNameV0 imported local-name true))))))
@@ -2159,6 +2166,52 @@
               (append-type-defs definitions
                 (typeresolutionv0-definitions
                   (resolve-source-type index annotation))))))))))
+
+;; A vector literal made of scalar literals names its element type by itself.
+;; Mint the closed vector TypeDef up front so such a literal lowers in a
+;; module that never spells (Vec T) in any annotation.
+(defn scalar-literal-kind-type [(kind String)] (U core/NativeId Nil)
+  (cond
+    (= "int" kind) (type-id "Int")
+    (= "number" kind) (type-id "Int")
+    (= "float" kind) (type-id "Float")
+    (= "bool" kind) (type-id "Bool")
+    (= "string" kind) (type-id "String")
+    (= "keyword" kind) (type-id "Keyword")
+    :else nil))
+
+(defn literal-vector-element-type
+  [(index SourceIndexV0) (literal core/NativeId)] (U core/NativeId Nil)
+  (let [(items-node (U core/NativeId Nil))
+        (index-first-object index literal "items")
+        (items (Vec core/NativeId))
+        (if (nil? items-node) [] (index-sequence-items index items-node))]
+    (if (= 0 (count items))
+      nil
+      (loop [(position Int) 0 (agreed (U core/NativeId Nil)) nil]
+        (if (>= position (count items))
+          agreed
+          (let [(item core/NativeId) (nth items position)
+                (item-type (U core/NativeId Nil))
+                (if (= "literal" (fact-text index item "form-kind"))
+                  (scalar-literal-kind-type (fact-text index item "literal-kind"))
+                  nil)]
+            (cond
+              (nil? item-type) nil
+              (and (some? agreed) (not (same-id? agreed item-type))) nil
+              :else (recur (+ position 1) item-type))))))))
+
+(defn literal-vector-type-definitions [(index SourceIndexV0)] (Vec core/TypeDef)
+  (let [(literals (Vec core/NativeId)) (index-form-ids index "vec")]
+    (loop [(position Int) 0 (definitions (Vec core/TypeDef)) []]
+      (if (>= position (count literals))
+        definitions
+        (let [(element (U core/NativeId Nil))
+              (literal-vector-element-type index (nth literals position))]
+          (recur (+ position 1)
+            (if (nil? element)
+              definitions
+              (append-type-def definitions (closed-vector-type element)))))))))
 
 (defn lookup-type
   [(types (Vec core/TypeDef)) (target core/NativeId)] (U core/TypeDef Nil)
@@ -4828,8 +4881,9 @@
   [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (promote-domain-type-inner? types target []))
 
-;; The vector TypeDef for an element type exists only when some annotation in
-;; the module named (Vec T); a literal cannot mint one, so it looks one up.
+;; The vector TypeDef for an element type exists when some annotation named
+;; (Vec T) or a scalar-literal vector pre-minted it (literal-vector-type-
+;; definitions); body lowering cannot mint one, so it looks one up.
 (defn vector-type-of
   [(types (Vec core/TypeDef)) (element core/NativeId)] (U core/NativeId Nil)
   (loop [(position Int) 0]
@@ -16872,8 +16926,10 @@
         (globals (Vec GlobalBindingV0)) (source-globals index)
         (declared-types (Vec core/TypeDef))
         (append-type-defs
-          (append-type-defs record-types (global-type-definitions index globals))
-          (binding-type-definitions index))
+          (append-type-defs
+            (append-type-defs record-types (global-type-definitions index globals))
+            (binding-type-definitions index))
+          (literal-vector-type-definitions index))
         (source-types (Vec core/TypeDef))
         (collect-function-types declared-types signature-resolutions)
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)

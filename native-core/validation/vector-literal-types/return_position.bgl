@@ -1,0 +1,11 @@
+#lang beagle
+(ns native.vector-literal-return)
+
+;; The literal in return position is typed by the return annotation; keep it
+;; in its own module so the fixture module stays annotation-free for Int.
+
+(defn build [] (Vec Int)
+  [4 5 6])
+
+(defn main [] Int
+  (if (= (nth (build) 2) 6) 0 1))

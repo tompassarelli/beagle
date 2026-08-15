@@ -1,0 +1,8 @@
+#lang beagle
+(ns native.bridge
+  (:require [native.kernel :as kernel]))
+
+(def relay (Fn [Int Int] Int) kernel/advance)
+
+(defn doubled [(state Int)] Int
+  (kernel/scale state 2))

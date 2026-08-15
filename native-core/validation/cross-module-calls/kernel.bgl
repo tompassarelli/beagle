@@ -1,0 +1,8 @@
+#lang beagle
+(ns native.kernel)
+
+(defn advance [(state Int) (delta Int)] Int
+  (+ state delta))
+
+(defn scale [(state Int) (factor Int)] Int
+  (* state factor))
