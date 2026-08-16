@@ -16,6 +16,7 @@
 (def ANY Any {"kind" "prim" "name" "Any"})
 (def NIL-TYPE Any {"kind" "prim" "name" "Nil"})
 (def BOOL-TYPE Any {"kind" "prim" "name" "Bool"})
+(def INFERENCE-BOTTOM Any nil)
 
 (defn make-prim [(name String)] Any
   {"kind" "prim" "name" name})
@@ -517,9 +518,10 @@
 
 (defn merge-types [(t1 Any) (t2 Any)] Any
   (cond
-    (and (any-type? t1) (any-type? t2)) ANY
-    (any-type? t1) t2
-    (any-type? t2) t1
+    (and (nil? t1) (nil? t2)) INFERENCE-BOTTOM
+    (nil? t1) t2
+    (nil? t2) t1
+    (or (any-type? t1) (any-type? t2)) ANY
     ;; JOIN, single-direction — mirror check.rkt merge-types: collapse only when
     ;; the SECOND type is a subtype of the first (t2 <: t1 ⇒ t1). The reverse
     ;; direction is deliberately NOT collapsed, so [Int Float] stays (U Int Float)
@@ -2176,7 +2178,7 @@
                           body-type (last-expr-type! (get c "body") then-env)]
                       {"result" (merge-types (get state "result") body-type)
                        "env" else-env})))
-                {"result" ANY "env" env} clauses)]
+                {"result" INFERENCE-BOTTOM "env" env} clauses)]
     (get final "result")))
 
 ;; === register-record =========================================================
@@ -2678,7 +2680,7 @@
 
     (= (get e "node") "recur")
       (do (doseq [a (get e "args")] (infer-expr! a env))
-          ANY)
+          INFERENCE-BOTTOM)
 
     (= (get e "node") "set!")
       ;; A set! target must be an assignable place. JavaScript member mutation

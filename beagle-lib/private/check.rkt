@@ -55,16 +55,24 @@
 ;; errors, which still travel through their ordinary error callback.
 (define current-purity-warning-port (make-parameter #f))
 
+(define INFERENCE-BOTTOM #f)
+
+(define (inference-bottom? type)
+  (not type))
+
 (define (merge-types . ts)
-  (define non-any (filter (λ (t) (not (any-type? t))) ts))
+  (define known
+    (filter (λ (type) (not (inference-bottom? type))) ts))
   (cond
-    [(null? non-any) ANY]
-    [(= (length non-any) 1) (car non-any)]
-    [(andmap (λ (t) (type-compatible? t (car non-any))) (cdr non-any))
-     (car non-any)]
+    [(null? ts) ANY]
+    [(null? known) INFERENCE-BOTTOM]
+    [(ormap any-type? known) ANY]
+    [(= (length known) 1) (car known)]
+    [(andmap (λ (t) (type-compatible? t (car known))) (cdr known))
+     (car known)]
     [else
      (define flat
-       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) non-any))
+       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) known))
      (define deduped
        (for/fold ([acc '()]) ([t (in-list flat)])
          (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))
@@ -5118,7 +5126,7 @@
      (last-expr-type (loop-form-body e) body-env)]
     [(recur-form? e)
      (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
-     ANY]
+     INFERENCE-BOTTOM]
     [(set!-form? e)
      ;; A set! target must be an assignable PLACE. The only places are a bare
      ;; local variable and a field access
