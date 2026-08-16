@@ -7,10 +7,6 @@ repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 if [[ "${BEAGLE_PARALLEL_RUNTIME_BOUNDED:-0}" != "1" ]]; then
   source "$repo/bin/_beagle-racket"
   supervisor="$repo/native-core/bin/run-bounded.rkt"
-  command -v unshare >/dev/null 2>&1 || {
-    echo "parallel-runtime fixture: util-linux unshare is required" >&2
-    exit 2
-  }
   [[ -f "$supervisor" ]] || {
     echo "parallel-runtime fixture: shared bounded supervisor is unavailable" >&2
     exit 2
@@ -19,8 +15,7 @@ if [[ "${BEAGLE_PARALLEL_RUNTIME_BOUNDED:-0}" != "1" ]]; then
   trap 'rm -f -- "$receipt"' EXIT
   if BEAGLE_PARALLEL_RUNTIME_BOUNDED=1 \
       BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
-      unshare --user --map-current-user --pid --fork --kill-child \
-        "$RACKET" "$supervisor" 90 5 -- "$0"; then
+      "$RACKET" "$supervisor" 90 5 -- "$0"; then
     rc=0
   else
     rc=$?

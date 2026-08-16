@@ -14,9 +14,6 @@
 (define beagle (build-path repo-root "bin" "beagle"))
 (define beagle-ast (build-path repo-root "bin" "beagle-ast"))
 (define supervisor (build-path repo-root "native-core/bin/run-bounded.rkt"))
-(define unshare-command
-  (or (find-executable-path "unshare")
-      (error 'wasm-materializer-test "util-linux unshare is required")))
 (define env-command
   (or (find-executable-path "env")
       (error 'wasm-materializer-test "env is required")))
@@ -84,9 +81,7 @@
                    [current-custodian custodian]
                    [current-subprocess-custodian-mode 'kill]
                    [subprocess-group-enabled #t])
-      (apply subprocess #f #f #f unshare-command
-             "--user" "--map-current-user" "--pid" "--fork" "--kill-child"
-             racket-command supervisor
+      (apply subprocess #f #f #f racket-command supervisor
              (number->string seconds) "5" "--" command command-arguments)))
   (close-output-port stdin)
   (define stdout-thread
@@ -1183,7 +1178,7 @@ SH
                  "(defn entry [] Bool true)\n" "must have an explicit Int return")
            (list "duplicate qualified" "native.entry-duplicate"
                  "(defn entry [] Int 1)\n(defn entry [] Int 2)\n"
-                 "entry is ambiguous")))])
+                 "semantic source unit selectors collide within one module")))])
     (define namespace (list-ref case 1))
     (define source-text (string-append prefix "(ns " namespace ")\n"
                                        (list-ref case 2)))

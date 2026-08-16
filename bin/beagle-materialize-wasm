@@ -254,7 +254,7 @@ if [[ ${#entries[@]} -gt 0 && ! -f "$ENTRY_CONTRACT" ]]; then
     fail missing-input "entry contract validator is unavailable: $ENTRY_CONTRACT"
 fi
 
-for command in awk bb cmp cp grep mktemp mv sed sha256sum sort tr unshare wc; do
+for command in awk bb cmp cp grep mktemp mv sed sha256sum sort tr wc; do
     command -v "$command" >/dev/null 2>&1 ||
         fail missing-tool "required command is unavailable: $command"
 done
@@ -275,16 +275,14 @@ kill_grace="${BEAGLE_WASM_KILL_GRACE_SECONDS:-5}"
 [[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] ||
     fail invalid-timeout "BEAGLE_WASM_KILL_GRACE_SECONDS must be a positive integer"
 
-# A private PID namespace makes the supervised command's root PID 1.  The
-# kernel reparents every orphaned descendant to that root. The pinned Racket
-# supervisor owns the explicit TERM/KILL deadline and reaps the whole namespace.
-# Returning therefore means the complete command tree is gone, not merely that
-# an intermediate shell exited.
+# The pinned Racket supervisor prefers a private PID namespace and otherwise
+# becomes a subreaper for one owned process group. Returning therefore means
+# the complete command tree is gone, not merely that an intermediate shell
+# exited.
 run_bounded() {
     local seconds="$1"
     shift
-    unshare --user --map-current-user --pid --fork --kill-child \
-        "$RACKET" "$SUPERVISOR" \
+    "$RACKET" "$SUPERVISOR" \
         "$seconds" "$kill_grace" -- "$@"
 }
 
