@@ -6148,7 +6148,9 @@
                                "let binding" (src-for (let-binding-value b)))]
       [else
        (when declared
-         (unless (or (check-atom-ctor (let-binding-value b) declared out
+         (unless (or (check-hvec-literal (let-binding-value b) declared out
+                                          (src-for (let-binding-value b)))
+                     (check-atom-ctor (let-binding-value b) declared out
                                       (src-for (let-binding-value b)))
                      (type-compatible? inferred declared))
            (raise-diag 'let-binding
@@ -6245,7 +6247,8 @@
      (cond
        [(eq? op '/)
         (if (and (= (length classes) 2)
-                 (andmap (lambda (class) (eq? class 'float)) classes))
+                 (andmap (lambda (class) (memq class '(int float))) classes)
+                 (memq 'float classes))
             (type-prim 'Float)
             declared)]
        [(memq 'other classes) declared]

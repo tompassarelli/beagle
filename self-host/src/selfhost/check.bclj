@@ -106,7 +106,9 @@
    "deref" JS-DEREF-POLY
    "reset!" JS-RESET-POLY
    "swap!" JS-SWAP-POLY
-   "Math" (make-prim "JsMath")})
+   "Math" (make-prim "JsMath")
+   "Date" (make-prim "JsDate")
+   "performance" (make-prim "JsPerformance")})
 
 ;; Registry state must exist before compatibility checks consult enum metadata.
 ;; The checker resets the complete map for each program.
@@ -659,7 +661,10 @@
         (cond
           (= op "/")
             (if (and (= 2 (count classes))
-                     (every? (fn [(class String)] Bool (= class "float")) classes))
+                     (every? (fn [(class String)] Bool
+                               (or (= class "int") (= class "float"))) classes)
+                     (boolean
+                       (some (fn [(class String)] Bool (= class "float")) classes)))
               FLOAT-TYPE
               declared)
           (boolean (some (fn [(c Any)] Bool (= c "other")) classes)) declared
@@ -769,9 +774,18 @@
    {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE)
     "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE)
-    "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)}
+    "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)
+    "abs" (make-poly ["A"]
+            (make-fn [(make-var "A")] nil (make-var "A"))
+            {"A" NUMBER-TYPE})}
    "String"
-   {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE)}})
+   {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE)
+    "trim" (make-fn [] nil (make-prim "String"))
+    "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))}
+   "Date"
+   {"now" (make-fn [] nil INT-TYPE)}
+   "performance"
+   {"now" (make-fn [] nil FLOAT-TYPE)}})
 
 ;; --- stdlib signature table --------------------------------------------------
 
@@ -842,7 +856,8 @@
    "filterv"  FILTERV-POLY
    "remove"   (make-fn [ANY ANY] nil ANY)
    "some"     (make-fn [ANY ANY] nil ANY)
-   "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))})
+   "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))
+   "range"    (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
 (def BUFFER-FLOAT-TYPE Any
   (make-app "Buffer" [FLOAT-TYPE]))
@@ -1687,6 +1702,7 @@
               "let binding"))
           (do
             (when (and (not (nil? declared))
+                     (not (check-hvec-literal! (get b "value") declared out))
                      (not (check-atom-ctor! (get b "value") declared out))
                      (not (type-compatible? inferred declared)))
               (emit-diag! (str "beagle: let binding " bname ": expected "
@@ -2342,6 +2358,12 @@
 
     (and (prim? receiver-type) (= (get receiver-type "name") "String"))
     "String"
+
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsDate"))
+    "Date"
+
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsPerformance"))
+    "performance"
 
     :else nil))
 
@@ -6251,7 +6273,6 @@
                   (make-app "HVec" [(make-prim "Int") (make-prim "String")])
                   (make-vec-node [(make-lit "string" "x") (make-lit "string" "hi")]))])]
       (> (count (check-program! prog)) 0)))
-
   ;; Bounded forall: render + reject/accept a call by inferred binding.
   (expect! "bound: render (forall [(T <: Number)] (Fn [T] T))"
     (= (type->string (make-poly ["T"]

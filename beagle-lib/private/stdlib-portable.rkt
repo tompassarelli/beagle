@@ -177,7 +177,10 @@
    ;; with no Clojure namesake and no single owning target.
    'bgl/promote (poly-fn '(A) (list (tv 'A)) (tv 'A))
    ;; --- sequence generators / iteration ------------------------------------
-   'range      (fn-of '() 'Any #:rest 'Any)    ; (range), (range n), (range a b), (range a b step)
+   ;; (range), (range n), (range a b), (range a b step). Every yielded value
+   ;; is an Int when the authored bounds/step are Int; target representations
+   ;; differ (lazy seq / array / Nix list), so the portable iterable is List.
+   'range      (type-fn '() (p 'Int) (type-app 'List (list (p 'Int))))
    'repeat     (fn-of '(Any) 'Any #:rest 'Any) ; (repeat x), (repeat n x)
    'iterate    (fn-of '(Any Any) 'Any)
    'take       (fn-of '(Int Any) 'Any)

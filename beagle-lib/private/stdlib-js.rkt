@@ -30,7 +30,8 @@
    'Math/pow          (fn-of '(Number Number) 'Float)
    'Math/exp          (fn-of '(Any) 'Float)
    'Math/random       (fn-of '() 'Float)
-   'Math/abs          (fn-of '(Any) 'Any)
+   'Math/abs          (poly-fn '(A) (list (tv 'A)) (tv 'A)
+                              #:bounds (hasheq 'A (p 'Number)))
    'Math/sign         (fn-of '(Any) 'Int)
    'Math/min          (fn-of '() 'Any #:rest 'Any)
    'Math/max          (fn-of '() 'Any #:rest 'Any)
@@ -170,6 +171,8 @@
 
    ;; --- globals ---------------------------------------------------------------
    'Math             (p 'JsMath)
+   'Date             (p 'JsDate)
+   'performance      (p 'JsPerformance)
    'globalThis       (p 'Any)
    ))
 
@@ -190,7 +193,9 @@
    (hasheq 'vars '()
            'members
            (hasheq
-            'indexOf (type-fn (list (p 'String)) #f (p 'Int))))
+            'indexOf (type-fn (list (p 'String)) #f (p 'Int))
+            'trim (type-fn '() #f (p 'String))
+            'slice (type-fn '() (p 'Number) (p 'String))))
    'JsMath
    (hasheq 'vars '()
            'members
@@ -198,7 +203,16 @@
             'sqrt (hash-ref STDLIB-JS 'Math/sqrt)
             'pow (hash-ref STDLIB-JS 'Math/pow)
             'floor (hash-ref STDLIB-JS 'Math/floor)
-            'round (hash-ref STDLIB-JS 'Math/round)))))
+            'round (hash-ref STDLIB-JS 'Math/round)
+            'abs (hash-ref STDLIB-JS 'Math/abs)))
+   'JsDate
+   (hasheq 'vars '()
+           'members
+           (hasheq 'now (hash-ref STDLIB-JS 'Date/now)))
+   'JsPerformance
+   (hasheq 'vars '()
+           'members
+           (hasheq 'now (fn-of '() 'Float)))))
 
 (define JS-NO-EMIT
   (set-subtract (list->set (hash-keys STDLIB-PORTABLE))
