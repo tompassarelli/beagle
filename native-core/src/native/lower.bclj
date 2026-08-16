@@ -14004,9 +14004,10 @@
               (fail-result state
                 "TODO-NATIVE-INSTANCE-ARITY: instance? takes a type and a value")
               (let [(record-spelling String) (fact-text index (nth args 0) "name")
+                    (value ExprResultV0) (lower-expr env owner state (nth args 1))
                     (record-type (U core/NativeId Nil))
-                    (match-record-type-id env owner (nth args 0))
-                    (value ExprResultV0) (lower-expr env owner state (nth args 1))]
+                    (match-record-type-id-for-target env owner
+                      (exprresultv0-type-id value) (nth args 0))]
                 (cond
                   (exprresultv0-terminated value) value
                   (state-blocked? (exprresultv0-state value))
@@ -15576,18 +15577,26 @@
                          (holder core/NativeId) (nth values 0)]
                     (if (>= position (count values))
                       (->ExprResultV0 settled holder vector-type false)
-                      (if (not (same-id? element (nth value-types position)))
-                        (fail-result settled
-                          "TODO-NATIVE-CONJ-ELEMENT: a pushed value is not the vector's element type")
-                        (let [(result-id core/NativeId)
-                              (state-id settled owner "vec-push")]
-                          (recur (+ position 1)
-                            (state-emit (state-bump settled)
-                              (core/->VecPushInstruction
-                                (core/->SsaValueV0 result-id vector-type)
-                                holder (nth values position)
-                                (arena-value-id owner)))
-                            result-id))))))
+                      (let [(coerced ExprResultV0)
+                            (lower-boundary-coerce types owner settled
+                              (nth values position) (nth value-types position)
+                              element)
+                            (next-state BodyStateV0)
+                            (exprresultv0-state coerced)]
+                        (if (or (state-blocked? next-state)
+                                (not (same-id? element
+                                  (exprresultv0-type-id coerced))))
+                          (fail-result next-state
+                            "TODO-NATIVE-CONJ-ELEMENT: a pushed value is not the vector's element type")
+                          (let [(result-id core/NativeId)
+                                (state-id next-state owner "vec-push")]
+                            (recur (+ position 1)
+                              (state-emit (state-bump next-state)
+                                (core/->VecPushInstruction
+                                  (core/->SsaValueV0 result-id vector-type)
+                                  holder (exprresultv0-value-id coerced)
+                                  (arena-value-id owner)))
+                              result-id)))))))
 
                 (and (= "conj" callee) (> (count values) 0)
                   (set-type? types (nth value-types 0)))

@@ -3,8 +3,9 @@
 # like same-module calls across a three-module chain. Covers the alias-
 # qualified call (bridge -> kernel), the transparent ref re-export
 # (driver -> bridge/relay -> kernel/advance), and the fully-qualified call
-# with no :require (driver -> native.kernel/scale), then proves the chain by
-# executing the linked C17 program.
+# with no :require (driver -> native.kernel/scale), plus imported union-member
+# `instance?` and vector `conj` coercions. It proves the chain by executing the
+# linked C17 program.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,9 +44,13 @@ rg -q '^lowered .* scale ' "$scratch/artifacts/report.txt" \
   || die "kernel/scale did not lower"
 rg -q '^lowered .* doubled ' "$scratch/artifacts/report.txt" \
   || die "bridge/doubled did not lower"
+rg -Fq ' integer-signal? ' "$scratch/artifacts/report.txt" \
+  || die "bridge/integer-signal? did not lower"
+rg -q '^lowered .* append-signals ' "$scratch/artifacts/report.txt" \
+  || die "bridge/append-signals did not lower"
 rg -q '^lowered .* main ' "$scratch/artifacts/report.txt" \
   || die "driver/main did not lower"
 rg -q 'TODO-NATIVE-CALL' "$scratch/artifacts/report.txt" \
   && die "a qualified cross-module call failed to lower"
 
-echo "drive.sh: qualified cross-module calls lowered and executed across the three-module chain"
+echo "drive.sh: qualified calls and imported union members lowered across three modules"

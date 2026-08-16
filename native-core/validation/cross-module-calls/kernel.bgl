@@ -1,6 +1,10 @@
 #lang beagle
 (ns native.kernel)
 
+(defunion Signal
+  (IntegerSignal [(value Int)])
+  (TextSignal [(value String)]))
+
 (defn advance [(state Int) (delta Int)] Int
   (+ state delta))
 

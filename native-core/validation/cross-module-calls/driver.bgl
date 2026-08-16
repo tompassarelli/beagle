@@ -2,8 +2,13 @@
 (ns native.driver)
 
 (defn main [] Int
-  (if (and (= (native.kernel/scale 21 2) 42)
-           (= (native.bridge/doubled 21) 42)
-           (= (native.bridge/relay 40 2) 42))
-    0
-    1))
+  (let [(signals (Vec native.kernel/Signal))
+        (native.bridge/append-signals [])]
+    (if (and (= (native.kernel/scale 21 2) 42)
+             (= (native.bridge/doubled 21) 42)
+             (= (native.bridge/relay 40 2) 42)
+             (= (count signals) 2)
+             (native.bridge/integer-signal? (nth signals 0))
+             (not (native.bridge/integer-signal? (nth signals 1))))
+      0
+      1)))

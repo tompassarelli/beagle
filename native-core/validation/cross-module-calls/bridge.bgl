@@ -6,3 +6,12 @@
 
 (defn doubled [(state Int)] Int
   (kernel/scale state 2))
+
+(defn integer-signal? [(signal kernel/Signal)] Bool
+  (instance? IntegerSignal signal))
+
+(defn append-signals
+  [(signals (Vec kernel/Signal))] (Vec kernel/Signal)
+  (conj signals
+    (kernel/->IntegerSignal 42)
+    (kernel/->TextSignal "forty-two")))
