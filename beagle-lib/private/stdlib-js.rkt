@@ -173,7 +173,10 @@
 
    ;; --- globals ---------------------------------------------------------------
    'Math             (p 'JsMath)
-   'Map              (fn-of '() 'JsMap #:rest 'Any)
+   'Map              (poly-fn
+                      '(K V)
+                      '()
+                      (type-app 'JsMap (list (tv 'K) (tv 'V))))
    'Date             (p 'JsDate)
    'performance      (p 'JsPerformance)
    'globalThis       (p 'Any)
@@ -227,9 +230,18 @@
            'members
            (hasheq 'now (fn-of '() 'Float)))
    'JsMap
-   (hasheq 'vars '()
+   (hasheq 'vars '(K V)
            'members
-           (hasheq 'size (p 'Int)))
+           (hasheq
+            'size (p 'Int)
+            'get (type-fn
+                  (list (tv 'K))
+                  #f
+                  (type-union (list (tv 'V) (p 'Nil))))
+            'set (type-fn
+                  (list (tv 'K) (tv 'V))
+                  #f
+                  (type-app 'JsMap (list (tv 'K) (tv 'V))))))
    'JsCanvas
    (hasheq 'vars '()
            'members

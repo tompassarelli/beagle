@@ -3021,7 +3021,9 @@
                        rest-p (type-fn-rest-type signature)))
                 '())))
   (define body-env (extend-with-params env all-params effective-param-types))
-  (define actual (last-expr-type (inference-clause-body clause) body-env))
+  (define actual
+    (last-expr-type
+     (inference-clause-body clause) body-env (type-fn-ret signature)))
   ;; A concrete mismatch remains the ordinary return-type diagnostic in the
   ;; normal check pass. The solver only needs to run when a return constraint
   ;; can actually solve a parameter metavariable.
@@ -3723,13 +3725,18 @@
                        (hasheq) #:src src))
          #t)))
 
+(define (infer-expr-with-expected e env expected)
+  (if (and expected (jst-new? e))
+      (infer-jst-new e env expected)
+      (infer-expr e env)))
+
 (define (check-form form env)
   (match form
     [(def-form name expected-type value _ _)
-     (define inferred (infer-expr value env))
      ;; The declared type lives in expected-type; the pre-pass mirrors it into
      ;; env. Either lookup is fine — both point at the same type.
      (define effective-type (or expected-type (hash-ref env name #f)))
+     (define inferred (infer-expr-with-expected value env effective-type))
      (when effective-type
        (unless (or (check-hvec-literal value effective-type env (src-for value))
                    (check-atom-ctor value effective-type env (src-for value))
@@ -3741,8 +3748,8 @@
                                'name (symbol->string name))
                      #:src (src-for value))))]
     [(defonce-form name expected-type value _)
-     (define inferred (infer-expr value env))
      (define effective-type (or expected-type (hash-ref env name #f)))
+     (define inferred (infer-expr-with-expected value env effective-type))
      (when effective-type
        (unless (or (check-atom-ctor value effective-type env (src-for value))
                    (type-compatible? inferred effective-type))
@@ -3779,7 +3786,7 @@
                      (hash-ref (current-raising-functions) name #f)])
        (for ([expr (in-list body)])
          (check-error-expr! expr body-env))
-       (define last-type (last-expr-type body body-env))
+       (define last-type (last-expr-type body body-env expected-ret))
        (unless (declared-return-compatible? last-type expected-ret)
          (define rtype (and rest-p (param-or-destr-type rest-p)))
          (define sig (type->string (type-fn (map param-or-destr-type params) rtype expected-ret)))
@@ -3824,8 +3831,8 @@
        (define body-env
          (extend-with-params env all-params effective-param-types))
        (define a-body (arity-clause-body a))
-       (define last-type (last-expr-type a-body body-env))
        (define expected-ret (arity-clause-return-type a))
+       (define last-type (last-expr-type a-body body-env expected-ret))
        (unless (declared-return-compatible? last-type expected-ret)
          (define sig (type->string alternative))
          (raise-diag 'return-type
@@ -3852,8 +3859,8 @@
                 '())))
          (define m-env (extend-with-params env all-params))
          (define body (impl-method-body m))
-         (define actual-ret (last-expr-type body m-env))
          (define expected-ret (impl-method-return-type m))
+         (define actual-ret (last-expr-type body m-env expected-ret))
          (unless (declared-return-compatible? actual-ret expected-ret)
            (raise-diag 'return-type
                        (format "method ~a: expected return ~a, got ~a"
@@ -3961,12 +3968,12 @@
 ;; re-adopted as the typed projection surface. The kw-access form is now
 ;; equally canonical alongside (field-name record) — no nag warranted.
 
-(define (last-expr-type body env)
+(define (last-expr-type body env [expected-result #f])
   (let loop ([forms body] [current-env env] [result #f])
     (cond
       [(null? forms) result]
       [(null? (cdr forms))
-       (infer-expr (car forms) current-env)]
+       (infer-expr-with-expected (car forms) current-env expected-result)]
       [else
        (define e (car forms))
        (define t (infer-expr e current-env))
@@ -6024,12 +6031,12 @@
         (for-each (lambda (arg) (infer-expr arg env)) args)
         ANY])]))
 
-(define (infer-jst-new e env)
+(define (infer-jst-new e env [expected-result #f])
   (define args (jst-new-args e))
   (define raw-contract (infer-expr (jst-new-callee e) env))
   (define contract
     (if (type-poly? raw-contract)
-        (resolve-poly-call raw-contract args env)
+        (resolve-poly-call raw-contract args env expected-result #t)
         raw-contract))
   (cond
     [(type-fn? contract)
@@ -6089,7 +6096,7 @@
        (define body-type (last-expr-type (cond-clause-body c) then-env))
        (loop (cdr cls) else-env (cons body-type acc))])))
 
-(define (resolve-poly-call poly-type args env)
+(define (resolve-poly-call poly-type args env [expected-result #f] [require-complete? #f])
   (define body (type-poly-body poly-type))
   (define bounds (type-poly-bounds poly-type))
   (define bindings (make-hasheq))
@@ -6116,6 +6123,8 @@
   (when (and rest-t (> (length arg-types) n-fixed))
     (for ([at (in-list (list-tail arg-types n-fixed))])
       (infer-type-var-bindings rest-t at bindings)))
+  (when expected-result
+    (infer-type-var-bindings (type-fn-ret body) expected-result bindings))
   (when bounds
     (for ([(var bound) (in-hash bounds)])
       (define inferred (hash-ref bindings var #f))
@@ -6127,6 +6136,16 @@
           (hasheq 'var var
                   'inferred (type->string inferred)
                   'bound (type->string bound))))))
+  (when require-complete?
+    (define missing
+      (filter (lambda (var) (not (hash-has-key? bindings var)))
+              (type-poly-vars poly-type)))
+    (when (pair? missing)
+      (raise-diag 'cannot-infer
+                  (format "js/new cannot infer type parameter~a ~a without an expected result type"
+                          (if (= (length missing) 1) "" "s")
+                          (string-join (map symbol->string missing) ", "))
+                  (hasheq 'parameters (map symbol->string missing)))))
   (apply-type-bindings body bindings))
 
 ;; Lint: warn when a let-binding name doesn't match the record accessor field.
@@ -6166,8 +6185,9 @@
 (define (extend-with-let-bindings env bindings)
   (define out (mut-copy env))
   (for ([b (in-list bindings)])
-    (define inferred (infer-expr (let-binding-value b) out))
     (define declared (let-binding-type b))
+    (define inferred
+      (infer-expr-with-expected (let-binding-value b) out declared))
     (define bname (let-binding-name b))
     (check-binding-constraint!
      bname declared (or declared inferred) (let-binding-constraint b)

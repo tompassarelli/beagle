@@ -1,0 +1,5 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-js-map-key)
+
+(defn invalid-map-key [(values (JsMap String Int))] (U Int Nil)
+  (js/call values .get 1))

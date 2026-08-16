@@ -176,7 +176,7 @@
   (selfhost.rt/eprint (str "warning [capitalized-binding-name] `" (str name) "` bound as a " where " name — possible missing `(name Type)` wrapper?\n")))))))
   nil)
 
-(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Buffer"])
+(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Buffer" "JsMap"])
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
@@ -256,7 +256,10 @@
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (= (nth t 0) "Dyn")) (make-app "Dyn" (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (has-item? PARAMETRIC-CTORS (nth t 0)) (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0))))) (let [name (nth t 0)
-   expected (or (get (deref USER-PARAMETRIC-ARITIES) name) (if (= name "Buffer") 1 nil))
+   expected (or (get (deref USER-PARAMETRIC-ARITIES) name) (cond
+  (= name "Buffer") 1
+  (= name "JsMap") 2
+  :else nil))
    actual (- (count t) 1)]
   (if (and (some? expected) (not (= expected actual))) (do
   (type-arity-error! name expected actual)
@@ -268,6 +271,9 @@
   (make-prim "Any"))
   (and (string? t) (= t "Buffer")) (do
   (type-arity-error! t 1 0)
+  (make-prim "Any"))
+  (and (string? t) (= t "JsMap")) (do
+  (type-arity-error! t 2 0)
   (make-prim "Any"))
   (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?")) (let [base (subs t 0 (- (count t) 1))]
   (make-union [(parse-type! base) (make-prim "Nil")]))

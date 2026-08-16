@@ -72,20 +72,57 @@
     (check-exn #rx"(Int|Number|Float).*String|String.*(Int|Number|Float)"
                (lambda () (check-js-prog invalid)))))
 
-(test-case "native Map construction returns JsMap with an Int size member"
+(test-case "native Map construction is invariant and exposes precise members"
   (check-not-exn
    (lambda ()
      (check-js-prog
       '(defn empty-map-size [] Int
-         (let [values (js/new Map)]
-           (js/get values .size))))))
+         (let [(values (JsMap String Int)) (js/new Map)]
+           (js/get values .size)))
+      '(defn string-index [] (JsMap String Int)
+         (js/new Map))
+      '(defn lookup [(values (JsMap String Int)) (key String)] (U Int Nil)
+         (js/call values .get key))
+      '(defn insert
+         [(values (JsMap String Int)) (key String) (value Int)]
+         (JsMap String Int)
+         (js/call values .set key value)))))
   (check-exn
    #rx"expected (return )?String, got Int"
    (lambda ()
      (check-js-prog
       '(defn invalid-map-size [] String
-         (let [values (js/new Map)]
-           (js/get values .size)))))))
+         (let [(values (JsMap String Int)) (js/new Map)]
+           (js/get values .size))))))
+  (check-exn
+   #rx"expected .*String.*got Int|expected String, got Int"
+   (lambda ()
+     (check-js-prog
+      '(defn invalid-map-key [(values (JsMap String Int))] (U Int Nil)
+         (js/call values .get 1)))))
+  (check-exn
+   #rx"expected .*Int.*got String|expected Int, got String"
+   (lambda ()
+     (check-js-prog
+      '(defn invalid-map-value [(values (JsMap String Int))] (JsMap String Int)
+         (js/call values .set "key" "bad")))))
+  (check-exn
+   #rx"JsMap String Int.*JsMap String Any|JsMap String Any.*JsMap String Int"
+   (lambda ()
+     (check-js-prog
+      '(defn consume-dynamic-values [(values (JsMap String Any))] Int
+         (js/get values .size))
+      '(defn invalid-map-widening [(values (JsMap String Int))] Int
+         (consume-dynamic-values values)))))
+  (check-exn
+   #rx"js/new cannot infer type parameters K, V without an expected result type"
+   (lambda ()
+     (check-js-prog '(def empty-native-map (js/new Map)))))
+  (check-not-exn
+   (lambda ()
+     (check-js-prog
+      '(declare-extern Map Any)
+      '(defn shadowed-map-constructor [] Any (js/new Map))))))
 
 (test-case "hosted Math and performance contracts preserve numeric results"
   (check-not-exn

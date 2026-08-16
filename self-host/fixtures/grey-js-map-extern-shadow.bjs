@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns selfhost.fixtures.grey-js-map-extern-shadow)
+
+(declare-extern Map Any)
+
+(defn shadowed-map-constructor [] Any
+  (js/new Map))

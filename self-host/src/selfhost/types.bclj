@@ -43,7 +43,7 @@
 
 (def PARAMETRIC-CTORS (Vec String)
   ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"
-   "Buffer"])
+   "Buffer" "JsMap"])
 
 ;; --- type constructors (same JSON format as ast-json.rkt) --------------------
 
@@ -259,6 +259,15 @@
            (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
+
+    ;; Native JavaScript Map is mutable in both key and value positions.
+    (and (app-type? actual) (app-type? expected)
+         (= (get actual "name") "JsMap") (= (get expected "name") "JsMap"))
+      (and (= (count (get actual "args")) (count (get expected "args")))
+           (every? (fn [(i Int)] Bool
+                     (type-invariant-equal? (nth (get actual "args") i)
+                       (nth (get expected "args") i)))
+             (range (count (get actual "args")))))
 
     ;; (HVec a b ..) <: (Vec T) when every position fits T; one direction only.
     (and (app-type? actual) (= (get actual "name") "HVec")

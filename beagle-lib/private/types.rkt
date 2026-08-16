@@ -37,11 +37,12 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec TransientVec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+  '(Vec TransientVec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer JsMap))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
 (define BUILTIN-PARAMETRIC-ARITIES
   (hasheq 'Buffer 1
-          'TransientVec 1))
+          'TransientVec 1
+          'JsMap 2))
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -482,7 +483,7 @@
             (and a-rest (type-compatible? e-rest a-rest)))
         (type-compatible? (type-fn-ret actual) (type-fn-ret expected))))]
 
-    ;; G2 — Atom is a MUTABLE cell, so it is INVARIANT in its element type: (Atom A) is
+    ;; G2 — mutable containers are INVARIANT in their element types: (Atom A) is
     ;; compatible with (Atom B) iff A and B are structurally EQUAL. Covariance here is
     ;; UNSOUND (a callee holding (Atom Any) could reset! a wrong type into an aliased
     ;; (Atom Int) while a deref at the original site still statically promises Int). We
@@ -491,15 +492,10 @@
     ;; "Any atom" is written polymorphic (Fn [(Atom A)] ..); the tvar binds via
     ;; infer-type-var-bindings (resolve-poly-call), NOT this arm — by the time
     ;; type-compatible? runs, the element is concrete, so deref on a typed atom still resolves.
+    ;; Mutable dense buffers, transient builders, and native JS maps are
+    ;; invariant for the same aliasing reason as Atom.
     [(and (type-app? actual) (type-app? expected)
-          (eq? (type-app-ctor actual) 'Atom) (eq? (type-app-ctor expected) 'Atom))
-     (and (= (length (type-app-args actual)) (length (type-app-args expected)))
-          (andmap type-invariant-equal? (type-app-args actual) (type-app-args expected)))]
-
-    ;; Mutable dense buffers and transient builders are invariant for the same
-    ;; aliasing reason as Atom.
-    [(and (type-app? actual) (type-app? expected)
-          (memq (type-app-ctor actual) '(Buffer TransientVec))
+          (memq (type-app-ctor actual) INVARIANT-TYPE-CONSTRUCTORS)
           (eq? (type-app-ctor actual) (type-app-ctor expected)))
      (and (= (length (type-app-args actual)) (length (type-app-args expected)))
           (andmap type-invariant-equal? (type-app-args actual)
@@ -729,8 +725,8 @@
      (unify-types! (type-fn-ret left) (type-fn-ret right))
      (zonk-type right)]
     [(and (type-app? left) (type-app? right)
-          (eq? (type-app-ctor left) 'Atom)
-          (eq? (type-app-ctor right) 'Atom))
+          (memq (type-app-ctor left) INVARIANT-TYPE-CONSTRUCTORS)
+          (eq? (type-app-ctor left) (type-app-ctor right)))
      (unless (= (length (type-app-args left)) (length (type-app-args right)))
        (raise-type-unification left right "different arity"))
      (for ([left-arg (in-list (type-app-args left))]
@@ -1068,7 +1064,7 @@
 
 ;; --- polymorphic type inference helpers ------------------------------------
 
-(define INVARIANT-TYPE-CONSTRUCTORS '(Atom Buffer TransientVec))
+(define INVARIANT-TYPE-CONSTRUCTORS '(Atom Buffer TransientVec JsMap))
 
 (define (infer-type-var-bindings expected actual bindings [invariant-context? #f])
   (cond

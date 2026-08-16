@@ -108,7 +108,10 @@
    "reset!" JS-RESET-POLY
    "swap!" JS-SWAP-POLY
    "Math" (make-prim "JsMath")
-   "Map" (make-fn [] ANY (make-prim "JsMap"))
+   "Map" (make-poly ["K" "V"]
+           (make-fn [] nil
+             (make-app "JsMap" [(make-var "K") (make-var "V")]))
+           nil)
    "Date" (make-prim "JsDate")
    "performance" (make-prim "JsPerformance")})
 
@@ -480,6 +483,15 @@
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
+    ;; Native JavaScript Map is mutable in both key and value positions.
+    (and (app-type? actual) (app-type? expected)
+         (= (get actual "name") "JsMap") (= (get expected "name") "JsMap"))
+      (and (= (count (get actual "args")) (count (get expected "args")))
+           (every? (fn [(i Int)] Bool
+                     (type-invariant-equal? (nth (get actual "args") i)
+                       (nth (get expected "args") i)))
+             (range (count (get actual "args")))))
+
     ;; A heterogeneous tuple IS a vector: (HVec a b ..) <: (Vec T) when every
     ;; position is compatible with T (immutable, so this widening is sound). One
     ;; direction only — a plain (Vec T) is NOT an (HVec ..). Mirrors the oracle
@@ -678,7 +690,7 @@
 ;; --- polymorphic helpers (bindings is an atom holding a String->type map) -----
 
 (def INVARIANT-TYPE-CONSTRUCTORS Any
-  #{"Atom" "Buffer" "TransientVec"})
+  #{"Atom" "Buffer" "TransientVec" "JsMap"})
 
 (defn infer-type-var-bindings-context!
   [(expected Any) (actual Any) (bindings Any) (invariant-context? Bool)] Nil
@@ -822,7 +834,11 @@
    "performance"
    {"now" (make-fn [] nil FLOAT-TYPE)}
    "Map"
-   {"size" INT-TYPE}
+   {"size" INT-TYPE
+    "get" (make-fn [(make-var "K")] nil
+            (make-union [(make-var "V") NIL-TYPE]))
+    "set" (make-fn [(make-var "K") (make-var "V")] nil
+            (make-app "JsMap" [(make-var "K") (make-var "V")]))}
    "Canvas"
    {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))}
    "PointerEvent"
@@ -999,7 +1015,7 @@
 (defn opt-field [(x Any)] Any
   (if (= x false) nil x))
 
-(declare infer-expr! check-atom-ctor! check-hvec-literal!)
+(declare infer-expr! infer-expr-expected! check-atom-ctor! check-hvec-literal!)
 
 (defn param-binding-target [(p Any)] Any
   (if (= (get p "type") "param") (get p "name") p))
@@ -1788,8 +1804,8 @@
 (defn extend-with-let-bindings! [(env Any) (bindings (Vec Any))] Any
   (reduce
     (fn [(out Any) (b Any)] Any
-      (let [inferred (infer-expr! (get b "value") out)
-            declared (get b "ann")
+      (let [declared (get b "ann")
+            inferred (infer-expr-expected! (get b "value") out declared)
             bname (get b "name")]
         (check-binding-constraint!
           b
@@ -2101,7 +2117,9 @@
 
 ;; --- resolve polymorphic call ------------------------------------------------
 
-(defn resolve-poly-call! [(poly-t Any) (args (Vec Any)) (env Any)] Any
+(defn resolve-poly-call-expected!
+  [(poly-t Any) (args (Vec Any)) (env Any) (expected-result Any)
+   (require-complete? Bool)] Any
   (let [body (get poly-t "body")
         bindings (atom {})
         arg-types (mapv (fn [(a Any)] Any (infer-expr! a env)) args)
@@ -2114,6 +2132,8 @@
     (when (and (not (nil? rest-t)) (> (count arg-types) n-fixed))
       (doseq [at (drop n-fixed arg-types)]
         (infer-type-var-bindings! rest-t at bindings)))
+    (when (not (nil? expected-result))
+      (infer-type-var-bindings! (get body "ret") expected-result bindings))
     ;; Bounded forall: a var inferred to a type outside its (T <: Bound) bound is
     ;; a static error. Mirrors resolve-poly-call bound enforcement (check.rkt).
     (let [bounds (get poly-t "bounds")]
@@ -2126,7 +2146,19 @@
               (emit-diag! (str "beagle: type variable " var " was inferred as "
                                (type->string inferred) ", which doesn't satisfy bound "
                                (type->string bound))))))))
+    (when require-complete?
+      (let [missing (filterv (fn [(var String)] Bool
+                               (nil? (get (deref bindings) var)))
+                      (get poly-t "vars"))]
+        (when (> (count missing) 0)
+          (emit-diag! (str "beagle: js/new cannot infer type parameter"
+                        (if (= (count missing) 1) " " "s ")
+                        (str/join ", " missing)
+                        " without an expected result type")))))
     (apply-type-bindings body bindings)))
+
+(defn resolve-poly-call! [(poly-t Any) (args (Vec Any)) (env Any)] Any
+  (resolve-poly-call-expected! poly-t args env nil false))
 
 ;; --- last-expr-type! ----------------------------------------------------------
 
@@ -2142,7 +2174,7 @@
        (nil? (str/index-of (get e "name") "/"))
        (nil? (str/index-of (get e "name") "."))))
 
-(defn last-expr-type! [(body (Vec Any)) (env Any)] Any
+(defn last-expr-type-expected! [(body (Vec Any)) (env Any) (expected-result Any)] Any
   (let [n (count body)]
     (if (= n 0)
       ANY
@@ -2155,8 +2187,13 @@
                                      " an imbalanced paren in a previous `let` binding's value."
                                      " Check the enclosing `let` bindings for a missing `)`."
                                      " If you meant a call, write `(" (get e "name") " ...)`.")))
-                  (infer-expr! e env)))
+                  (if (and (= i (- n 1)) (not (nil? expected-result)))
+                    (infer-expr-expected! e env expected-result)
+                    (infer-expr! e env))))
               ANY (range n)))))
+
+(defn last-expr-type! [(body (Vec Any)) (env Any)] Any
+  (last-expr-type-expected! body env nil))
 
 ;; --- check-args! --------------------------------------------------------------
 
@@ -2501,7 +2538,8 @@
     (and (prim? receiver-type) (= (get receiver-type "name") "JsPerformance"))
     "performance"
 
-    (and (prim? receiver-type) (= (get receiver-type "name") "JsMap"))
+    (and (app-type? receiver-type) (= (get receiver-type "name") "JsMap")
+      (= (count (get receiver-type "args")) 2))
     "Map"
 
     (and (prim? receiver-type) (= (get receiver-type "name") "JsCanvas"))
@@ -2537,9 +2575,15 @@
         {"closed" false "type" contract "owner" (type->string receiver-type)})
 
       (not (nil? builtin))
-      {"closed" false
-       "type" (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector])
-       "owner" builtin}
+      (let [contract (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector])
+            resolved-contract
+              (if (and (= builtin "Map") (not (nil? contract)))
+                (let [bindings
+                        (atom {"K" (nth (get receiver-type "args") 0)
+                               "V" (nth (get receiver-type "args") 1)})]
+                  (apply-type-bindings contract bindings))
+                contract)]
+        {"closed" false "type" resolved-contract "owner" builtin})
 
       :else {"closed" false "type" nil "owner" nil})))
 
@@ -2614,10 +2658,12 @@
           (infer-js-member-call!
             selector (get resolved "owner") member-type trailing env))))))
 
-(defn infer-js-new! [(callee Any) (args (Vec Any)) (env Any)] Any
+(defn infer-js-new-expected!
+  [(callee Any) (args (Vec Any)) (env Any) (expected-result Any)] Any
   (let [raw-contract (infer-expr! callee env)
         contract (if (poly-type? raw-contract)
-                   (resolve-poly-call! raw-contract args env)
+                   (resolve-poly-call-expected!
+                     raw-contract args env expected-result true)
                    raw-contract)]
     (if (fn-type? contract)
       (do
@@ -2626,6 +2672,15 @@
       (do
         (doseq [arg args] (infer-expr! arg env))
         ANY))))
+
+(defn infer-js-new! [(callee Any) (args (Vec Any)) (env Any)] Any
+  (infer-js-new-expected! callee args env nil))
+
+(defn infer-expr-expected! [(e Any) (env Any) (expected-result Any)] Any
+  (if (and (not (nil? expected-result)) (= (get e "node") "js-new"))
+    (infer-js-new-expected!
+      (get e "callee") (get e "args") env expected-result)
+    (infer-expr! e env)))
 
 (defn infer-expr! [(e Any) (env Any)] Any
   (cond
@@ -2657,7 +2712,7 @@
         (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env)
                                            (check-atom-ctor! (get e "value") expected env)))
           expected
-          (let [inferred (infer-expr! (get e "value") env)]
+          (let [inferred (infer-expr-expected! (get e "value") env expected)]
             (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
               (emit-diag! (str "beagle: def " (get e "name") ": expected "
                                (type->string expected) ", got " (type->string inferred))))
@@ -2668,7 +2723,7 @@
         (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env)
                                            (check-atom-ctor! (get e "value") expected env)))
           expected
-          (let [inferred (infer-expr! (get e "value") env)]
+          (let [inferred (infer-expr-expected! (get e "value") env expected)]
             (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
               (emit-diag! (str "beagle: defonce " (get e "name") ": expected "
                                (type->string expected) ", got " (type->string inferred))))
@@ -2679,7 +2734,7 @@
             rest-param (opt-field (get e "rest"))
             expected-ret (get e "ret")
             body-env (extend-with-params! env params rest-param)
-            body-type (last-expr-type! (get e "body") body-env)]
+            body-type (last-expr-type-expected! (get e "body") body-env expected-ret)]
         (when (and (not (nil? expected-ret)) (not (type-compatible? body-type expected-ret)))
           (let [is-promise (and (app-type? expected-ret)
                                 (= (get expected-ret "name") "Promise")
@@ -2695,8 +2750,8 @@
     (= (get e "node") "defn-multi")
       (do (doseq [a (get e "arities")]
             (let [body-env (extend-with-params! env (get a "params") (opt-field (get a "rest")))
-                  body-type (last-expr-type! (get a "body") body-env)
-                  expected-ret (get a "ret")]
+                  expected-ret (get a "ret")
+                  body-type (last-expr-type-expected! (get a "body") body-env expected-ret)]
               (when (and (not (nil? expected-ret))
                          (not (type-compatible? body-type expected-ret)))
                 (emit-diag! (str "beagle: defn " (get e "name")
@@ -2714,7 +2769,7 @@
                         (rest-param-call-element-type rest-param))
             body-env (extend-with-params! env params rest-param)
             expected-ret (get e "ret")
-            body-type (last-expr-type! (get e "body") body-env)
+            body-type (last-expr-type-expected! (get e "body") body-env expected-ret)
             ret (if (not (nil? expected-ret)) expected-ret body-type)]
         (when (and (not (nil? expected-ret))
                    (not (type-compatible? body-type expected-ret)))
@@ -3583,7 +3638,8 @@
                   rest-param (opt-field (get clause "rest"))
                   body-env (extend-with-effective-params!
                              env (get clause "params") rest-param signature)
-                  actual (last-expr-type! (get clause "body") body-env)]
+                  actual (last-expr-type-expected!
+                           (get clause "body") body-env (get signature "ret"))]
               (unify-inference-types! actual (get signature "ret"))))))))
   nil)
 
@@ -3743,8 +3799,8 @@
   (let [rest-param (opt-field (get method "rest"))
         body-env (extend-with-params! env (get method "params") rest-param)
         body (get method "body")
-        actual (last-expr-type! body body-env)
-        expected (get method "ret")]
+        expected (get method "ret")
+        actual (last-expr-type-expected! body body-env expected)]
     (when (not (declared-return-compatible? actual expected))
       (emit-diag!
         (str "beagle: " context " " (get method "name")

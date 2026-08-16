@@ -50,7 +50,7 @@
 
 (def JS-SWAP-POLY (make-poly ["A"] (make-fn [(make-app "Atom" [(make-var "A")]) (make-union [(make-fn [(make-var "A")] nil (make-var "A")) (make-fn [(make-var "A") ANY] nil (make-var "A")) (make-fn [(make-var "A") ANY ANY] nil (make-var "A")) (make-fn [(make-var "A") ANY ANY ANY] nil (make-var "A"))])] ANY (make-var "A")) nil))
 
-(def JS-ATOM-STDLIB {"atom" JS-ATOM-POLY "deref" JS-DEREF-POLY "reset!" JS-RESET-POLY "swap!" JS-SWAP-POLY "Math" (make-prim "JsMath") "Map" (make-fn [] ANY (make-prim "JsMap")) "Date" (make-prim "JsDate") "performance" (make-prim "JsPerformance")})
+(def JS-ATOM-STDLIB {"atom" JS-ATOM-POLY "deref" JS-DEREF-POLY "reset!" JS-RESET-POLY "swap!" JS-SWAP-POLY "Math" (make-prim "JsMath") "Map" (make-poly ["K" "V"] (make-fn [] nil (make-app "JsMap" [(make-var "K") (make-var "V")])) nil) "Date" (make-prim "JsDate") "performance" (make-prim "JsPerformance")})
 
 (def STATE (atom {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "definition-inference-counter" 0 "definition-inference-bindings" {} "diagnostics" []}))
 
@@ -223,6 +223,7 @@
   (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ep i) (nth ap i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? p ar)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? er ar))) (type-compatible? (get actual "ret") (get expected "ret"))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Buffer") (= (get expected "name") "Buffer")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
+  (and (app-type? actual) (app-type? expected) (= (get actual "name") "JsMap") (= (get expected "name") "JsMap")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (dynamic-type? expected) (if (dynamic-type? actual) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args"))))) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "args"))))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
@@ -314,7 +315,7 @@
   (boolean (some (fn [c] (= c "number")) classes)) NUMBER-TYPE
   :else INT-TYPE))))
 
-(def INVARIANT-TYPE-CONSTRUCTORS #{"Atom" "Buffer" "TransientVec"})
+(def INVARIANT-TYPE-CONSTRUCTORS #{"Atom" "Buffer" "TransientVec" "JsMap"})
 
 (defn infer-type-var-bindings-context! [expected actual bindings ^Boolean invariant-context?]
   (cond
@@ -380,7 +381,7 @@
   (let [name (js-target-form-name value)]
   (and (not (nil? name)) (not (= (get (deref STATE) "target") "js")))))
 
-(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "ceil" (make-fn [NUMBER-TYPE] nil INT-TYPE) "min" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "max" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "PI" FLOAT-TYPE "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)} "Map" {"size" INT-TYPE} "Canvas" {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))} "PointerEvent" {"clientX" FLOAT-TYPE "clientY" FLOAT-TYPE} "DOMRect" {"left" FLOAT-TYPE "top" FLOAT-TYPE "width" FLOAT-TYPE "height" FLOAT-TYPE}})
+(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "ceil" (make-fn [NUMBER-TYPE] nil INT-TYPE) "min" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "max" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "PI" FLOAT-TYPE "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)} "Map" {"size" INT-TYPE "get" (make-fn [(make-var "K")] nil (make-union [(make-var "V") NIL-TYPE])) "set" (make-fn [(make-var "K") (make-var "V")] nil (make-app "JsMap" [(make-var "K") (make-var "V")]))} "Canvas" {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))} "PointerEvent" {"clientX" FLOAT-TYPE "clientY" FLOAT-TYPE} "DOMRect" {"left" FLOAT-TYPE "top" FLOAT-TYPE "width" FLOAT-TYPE "height" FLOAT-TYPE}})
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
@@ -408,7 +409,7 @@
 (defn opt-field [x]
   (if (= x false) nil x))
 
-(declare infer-expr! check-atom-ctor! check-hvec-literal!)
+(declare infer-expr! infer-expr-expected! check-atom-ctor! check-hvec-literal!)
 
 (defn param-binding-target [p]
   (if (= (get p "type") "param") (get p "name") p))
@@ -740,8 +741,8 @@
   (if (string? target) (assoc out target effective) (bind-destructure-type! out target effective "parameter")))) env (range (count all-params)))))
 
 (defn extend-with-let-bindings! [env bindings]
-  (reduce (fn [out b] (let [inferred (infer-expr! (get b "value") out)
-   declared (get b "ann")
+  (reduce (fn [out b] (let [declared (get b "ann")
+   inferred (infer-expr-expected! (get b "value") out declared)
    bname (get b "name")]
   (check-binding-constraint! b declared (if (nil? declared) inferred declared) (binding-constraint b) out "let binding")
   (if (or (= (get bname "type") "map-destructure") (= (get bname "type") "seq-destructure")) (do
@@ -881,7 +882,7 @@
   (if (nil? result) ANY result))
   :else ANY))
 
-(defn resolve-poly-call! [poly-t args env]
+(defn resolve-poly-call-expected! [poly-t args env expected-result ^Boolean require-complete?]
   (let [body (get poly-t "body")
    bindings (atom {})
    arg-types (mapv (fn [a] (infer-expr! a env)) args)
@@ -894,6 +895,8 @@
   (if (and (not (nil? rest-t)) (> (count arg-types) n-fixed)) (do
   (doseq [at (drop n-fixed arg-types)]
   (infer-type-var-bindings! rest-t at bindings))))
+  (if (not (nil? expected-result)) (do
+  (infer-type-var-bindings! (get body "ret") expected-result bindings)))
   (let [bounds (get poly-t "bounds")]
   (if (not (nil? bounds)) (do
   (doseq [var (keys bounds)]
@@ -901,17 +904,27 @@
    inferred (get (deref bindings) var)]
   (if (and (not (nil? inferred)) (not (any-type? inferred)) (not (type-compatible? inferred bound))) (do
   (emit-diag! (str "beagle: type variable " var " was inferred as " (type->string inferred) ", which doesn't satisfy bound " (type->string bound))))))))))
+  (if require-complete? (do
+  (let [missing (filterv (fn [^String var] (nil? (get (deref bindings) var))) (get poly-t "vars"))]
+  (if (> (count missing) 0) (do
+  (emit-diag! (str "beagle: js/new cannot infer type parameter" (if (= (count missing) 1) " " "s ") (str/join ", " missing) " without an expected result type")))))))
   (apply-type-bindings body bindings)))
+
+(defn resolve-poly-call! [poly-t args env]
+  (resolve-poly-call-expected! poly-t args env nil false))
 
 (defn ^Boolean bare-swallowed-ref? [e env]
   (and (= (get e "node") "ref") (nil? (get env (get e "name"))) (nil? (str/index-of (get e "name") "/")) (nil? (str/index-of (get e "name") "."))))
 
-(defn last-expr-type! [body env]
+(defn last-expr-type-expected! [body env expected-result]
   (let [n (count body)]
   (if (= n 0) ANY (reduce (fn [acc i] (let [e (nth body i)]
   (if (and (< i (- n 1)) (bare-swallowed-ref? e env)) (do
   (emit-diag! (str "beagle: bare symbol `" (get e "name") "` in non-final statement position resolves to nothing" " and has no effect — usually a binding name swallowed by" " an imbalanced paren in a previous `let` binding's value." " Check the enclosing `let` bindings for a missing `)`." " If you meant a call, write `(" (get e "name") " ...)`."))))
-  (infer-expr! e env))) ANY (range n)))))
+  (if (and (= i (- n 1)) (not (nil? expected-result))) (infer-expr-expected! e env expected-result) (infer-expr! e env)))) ANY (range n)))))
+
+(defn last-expr-type! [body env]
+  (last-expr-type-expected! body env nil))
 
 (defn enum-member-violation [expected arg]
   (if (and (prim? expected) (= (get arg "node") "literal") (= (get arg "kind") "keyword")) (let [members (get-in (deref STATE) ["enum-types" (get expected "name")])
@@ -1094,7 +1107,7 @@
   (and (prim? receiver-type) (= (get receiver-type "name") "String")) "String"
   (and (prim? receiver-type) (= (get receiver-type "name") "JsDate")) "Date"
   (and (prim? receiver-type) (= (get receiver-type "name") "JsPerformance")) "performance"
-  (and (prim? receiver-type) (= (get receiver-type "name") "JsMap")) "Map"
+  (and (app-type? receiver-type) (= (get receiver-type "name") "JsMap") (= (count (get receiver-type "args")) 2)) "Map"
   (and (prim? receiver-type) (= (get receiver-type "name") "JsCanvas")) "Canvas"
   (and (prim? receiver-type) (= (get receiver-type "name") "JsPointerEvent")) "PointerEvent"
   (and (prim? receiver-type) (= (get receiver-type "name") "JsDomRect")) "DOMRect"
@@ -1110,7 +1123,10 @@
   (= selector "indexOf") (make-fn [element] nil INT-TYPE)
   :else nil)]
   {"closed" false "type" contract "owner" (type->string receiver-type)})
-  (not (nil? builtin)) {"closed" false "type" (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector]) "owner" builtin}
+  (not (nil? builtin)) (let [contract (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector])
+   resolved-contract (if (and (= builtin "Map") (not (nil? contract))) (let [bindings (atom {"K" (nth (get receiver-type "args") 0) "V" (nth (get receiver-type "args") 1)})]
+  (apply-type-bindings contract bindings)) contract)]
+  {"closed" false "type" resolved-contract "owner" builtin})
   :else {"closed" false "type" nil "owner" nil})))
 
 (defn infer-js-member-call! [^String selector ^String owner member-type args env]
@@ -1160,15 +1176,21 @@
   (= operation "get") member-type
   :else (infer-js-member-call! selector (get resolved "owner") member-type trailing env))))))
 
-(defn infer-js-new! [callee args env]
+(defn infer-js-new-expected! [callee args env expected-result]
   (let [raw-contract (infer-expr! callee env)
-   contract (if (poly-type? raw-contract) (resolve-poly-call! raw-contract args env) raw-contract)]
+   contract (if (poly-type? raw-contract) (resolve-poly-call-expected! raw-contract args env expected-result true) raw-contract)]
   (if (fn-type? contract) (do
   (check-args! "js/new" contract args env)
   (get contract "ret")) (do
   (doseq [arg args]
   (infer-expr! arg env))
   ANY))))
+
+(defn infer-js-new! [callee args env]
+  (infer-js-new-expected! callee args env nil))
+
+(defn infer-expr-expected! [e env expected-result]
+  (if (and (not (nil? expected-result)) (= (get e "node") "js-new")) (infer-js-new-expected! (get e "callee") (get e "args") env expected-result) (infer-expr! e env)))
 
 (defn infer-expr! [e env]
   (cond
@@ -1182,12 +1204,12 @@
   (= (get e "node") "ref") (let [found (get env (get e "name"))]
   (if (nil? found) ANY found))
   (= (get e "node") "def") (let [expected (get e "ann")]
-  (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr! (get e "value") env)]
+  (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr-expected! (get e "value") env expected)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
   (emit-diag! (str "beagle: def " (get e "name") ": expected " (type->string expected) ", got " (type->string inferred)))))
   inferred)))
   (= (get e "node") "defonce") (let [expected (get e "ann")]
-  (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr! (get e "value") env)]
+  (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr-expected! (get e "value") env expected)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
   (emit-diag! (str "beagle: defonce " (get e "name") ": expected " (type->string expected) ", got " (type->string inferred)))))
   inferred)))
@@ -1195,7 +1217,7 @@
    rest-param (opt-field (get e "rest"))
    expected-ret (get e "ret")
    body-env (extend-with-params! env params rest-param)
-   body-type (last-expr-type! (get e "body") body-env)]
+   body-type (last-expr-type-expected! (get e "body") body-env expected-ret)]
   (if (and (not (nil? expected-ret)) (not (type-compatible? body-type expected-ret))) (do
   (let [is-promise (and (app-type? expected-ret) (= (get expected-ret "name") "Promise") (= (count (get expected-ret "args")) 1) (type-compatible? body-type (nth (get expected-ret "args") 0)))]
   (if (not is-promise) (do
@@ -1204,8 +1226,8 @@
   (= (get e "node") "defn-multi") (do
   (doseq [a (get e "arities")]
   (let [body-env (extend-with-params! env (get a "params") (opt-field (get a "rest")))
-   body-type (last-expr-type! (get a "body") body-env)
-   expected-ret (get a "ret")]
+   expected-ret (get a "ret")
+   body-type (last-expr-type-expected! (get a "body") body-env expected-ret)]
   (if (and (not (nil? expected-ret)) (not (type-compatible? body-type expected-ret))) (do
   (emit-diag! (str "beagle: defn " (get e "name") " (" (count (get a "params")) "-arity): expected return " (type->string expected-ret) ", got " (type->string body-type)))))))
   ANY)
@@ -1215,7 +1237,7 @@
    rest-type (if (nil? rest-param) nil (rest-param-call-element-type rest-param))
    body-env (extend-with-params! env params rest-param)
    expected-ret (get e "ret")
-   body-type (last-expr-type! (get e "body") body-env)
+   body-type (last-expr-type-expected! (get e "body") body-env expected-ret)
    ret (if (not (nil? expected-ret)) expected-ret body-type)]
   (if (and (not (nil? expected-ret)) (not (type-compatible? body-type expected-ret))) (do
   (emit-diag! (str "beagle: fn: expected return " (type->string expected-ret) ", got " (type->string body-type)))))
@@ -1672,7 +1694,7 @@
    signature (nth alternatives i)
    rest-param (opt-field (get clause "rest"))
    body-env (extend-with-effective-params! env (get clause "params") rest-param signature)
-   actual (last-expr-type! (get clause "body") body-env)]
+   actual (last-expr-type-expected! (get clause "body") body-env (get signature "ret"))]
   (unify-inference-types! actual (get signature "ret")))))))))
   nil)
 
@@ -1751,8 +1773,8 @@
   (let [rest-param (opt-field (get method "rest"))
    body-env (extend-with-params! env (get method "params") rest-param)
    body (get method "body")
-   actual (last-expr-type! body body-env)
-   expected (get method "ret")]
+   expected (get method "ret")
+   actual (last-expr-type-expected! body body-env expected)]
   (if (not (declared-return-compatible? actual expected)) (do
   (emit-diag! (str "beagle: " context " " (get method "name") ": expected return " (type->string expected) ", got " (type->string actual))))))
   nil)
