@@ -7619,6 +7619,9 @@
                                     #:implicit-call-events [implicit-events '()]
                                     #:result-escapes? [result-escapes? #t])
   (define witnesses '())
+  ;; The innermost loop's positional binding targets. A tail recur may transfer
+  ;; a live transient successor only back into the same lexical owner slot.
+  (define current-recur-targets (make-parameter #f))
   ;; Event producers own evaluation placement. They attach one or more ordered
   ;; events to the exact containing AST node; this analyzer owns lexical scope,
   ;; primitive shadowing, fixed-point edges, and transient argument semantics.
@@ -7704,12 +7707,22 @@
      purity-state base
      [owners
       (for/fold ([owners (hasheq)]) ([origin (in-set owner-ids)])
-        (hash-set
-         owners origin
-         (if (for/and ([state (in-list states)])
-               (eq? (owner-status state origin) 'live))
-             'live
-             'dead)))]))
+        (define statuses
+          (for/list ([state (in-list states)]) (owner-status state origin)))
+        (hash-set owners origin
+                  (cond
+                    [(andmap (lambda (status) (eq? status 'live)) statuses)
+                     'live]
+                    [(andmap (lambda (status) (memq status '(dead absent))) statuses)
+                     'dead]
+                    [else 'maybe-live])))]))
+  (define (close-local-owners outer-state inner-state node)
+    (define local-live
+      (for/seteq ([(origin status) (in-hash (purity-state-owners inner-state))]
+                  #:unless (hash-has-key? (purity-state-owners outer-state) origin)
+                  #:unless (eq? status 'dead))
+        origin))
+    (escape-origins inner-state local-live node))
   (define (analyze-sequence body state)
     (cond
       [(null? body) (values state (seteq))]
@@ -7719,9 +7732,7 @@
          (if (null? (cdr remaining))
              (values next origins)
              (loop (cdr remaining)
-                   (if (direct-primitive-call? (car remaining) 'conj! current)
-                       (escape-origins next origins (car remaining))
-                       next)))) ]))
+                   (escape-origins next origins (car remaining)))))]))
   (define (analyze-and-discard value state)
     (define-values (next _origins) (analyze value state))
     next)
@@ -7996,13 +8007,61 @@
        (define bound (analyze-bindings (let-form-bindings value) state))
        (define-values (after-body origins)
          (analyze-sequence (let-form-body value) bound))
-       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+       (define closed (close-local-owners state after-body value))
+       (values (struct-copy purity-state closed [scope outer-scope]) origins)]
       [(loop-form? value)
        (define outer-scope (purity-state-scope state))
        (define bound (analyze-bindings (loop-form-bindings value) state))
        (define-values (after-body origins)
-         (analyze-sequence (loop-form-body value) bound))
-       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+         (parameterize
+             ([current-recur-targets
+               (map let-binding-name (loop-form-bindings value))])
+           (analyze-sequence (loop-form-body value) bound)))
+       (define closed (close-local-owners state after-body value))
+       (values (struct-copy purity-state closed [scope outer-scope]) origins)]
+      [(recur-form? value)
+       (define targets (current-recur-targets))
+       (cond
+         [(not targets) (analyze-unknown-children value state)]
+         [else
+          (define-values (after-args reversed-results)
+            (for/fold ([next state] [results '()])
+                      ([arg (in-list (recur-form-args value))])
+              (define-values (after origins) (analyze arg next))
+              (values after (cons (cons arg origins) results))))
+          (define results (reverse reversed-results))
+          (define-values (transferred _seen)
+            (for/fold ([next after-args] [seen (seteq)])
+                      ([target (in-list targets)] [result (in-list results)])
+              (define arg (car result))
+              (define origins (cdr result))
+              (define binding
+                (and (symbol? target)
+                     (hash-ref (purity-state-scope state) target #f)))
+              (define prior
+                (if binding (purity-binding-origins binding) (seteq)))
+              (define prior-still-live
+                (for/seteq ([origin (in-set prior)]
+                            #:unless (eq? (owner-status next origin) 'dead))
+                  origin))
+              (define safe-transfer?
+                (and binding
+                     (not (set-empty? prior))
+                     (or (and (symbol? arg) (eq? arg target))
+                         (binding-acquires-owner? target arg state))
+                     (set-empty? (set-intersect seen origins))))
+              (define without-abandoned
+                (if (or (set-empty? prior-still-live)
+                        (set=? prior origins))
+                    next
+                    (escape-origins next prior-still-live value)))
+              (define checked
+                (if (or (set-empty? origins) safe-transfer?)
+                    without-abandoned
+                    (escape-origins without-abandoned origins value)))
+              (values (set-origin-status checked origins 'dead)
+                      (set-union seen origins))))
+          (values transferred (seteq))])]
       [(fn-form? value)
        (define nested
          (struct-copy purity-state state

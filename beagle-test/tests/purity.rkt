@@ -266,6 +266,18 @@
        (let [owned (transient xs)]
          (persistent! (dissoc! (assoc! owned :k 1) :k)))))
    '())
+  (check-equal?
+   (violations
+    '(defn loop-build [xs ys] Any
+       (loop [index 0
+              left (transient xs)
+              right (transient ys)]
+         (if (= index 3)
+             [(persistent! left) (persistent! right)]
+             (recur (+ index 1)
+                    (conj! left index)
+                    (conj! right index))))))
+   '())
   ;; Borrowed receivers remain effects even beside a valid local owner.
   (check-equal?
    (violations
@@ -308,7 +320,27 @@
              frozen (persistent! owned)]
          (conj! owned 1)
          frozen)))
-   '(after-freeze)))
+   '(after-freeze))
+  (for ([form
+         (in-list
+          '((defn borrowed-loop [work] Any
+              (loop [index 0 owner work]
+                (if (= index 1)
+                    (persistent! owner)
+                    (recur (+ index 1) (conj! owner index)))))
+            (defn escaping-loop [xs] Any
+              (loop [index 0 owner (transient xs)]
+                (if (= index 1)
+                    owner
+                    (recur (+ index 1) (conj! owner index)))))
+            (defn aliased-loop [xs ys] Any
+              (loop [index 0
+                     left (transient xs)
+                     right (transient ys)]
+                (recur (+ index 1) (conj! left index) left)))
+            (defn unconsumed [xs] Any
+              (let [owner (transient xs)] nil))))])
+    (check-equal? (violations form) (list (cadr form))))))
 
 (test-case "module effect edges honor lexical binding identity"
   (define p
