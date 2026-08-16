@@ -17521,127 +17521,417 @@
                   (recur (+ inner 1)
                     (if (nil? callee) collected (conj collected callee))))))))))))
 
-;; A CallInstruction must name a function the program actually carries, so a
-;; caller is only ready once every callee it reaches is ready too.
-(defn settle-readiness [(functions (Vec TypedFunctionV0))] (Vec TypedFunctionV0)
-  (loop [(round Int) 0 (current (Vec TypedFunctionV0)) functions]
-    (if (> round (count functions))
-      current
-      (let [(ready (Vec core/NativeId))
-            (loop [(position Int) 0 (ids (Vec core/NativeId)) []]
-              (if (>= position (count current))
-                ids
-                (let [(function TypedFunctionV0) (nth current position)]
-                  (recur (+ position 1)
-                    (if (ready-function? function)
-                      (conj ids (typedfunctionv0-id function))
-                      ids)))))
-            (next (Vec TypedFunctionV0))
-            (mapv
-              (fn [(function TypedFunctionV0)] TypedFunctionV0
-                (if (and (ready-function? function)
-                      (not (core/ids-in? (body-call-targets function) ready)))
-                  (with function
-                    [:readiness
-                     (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
-                       (str "TODO-NATIVE-CALLEE: " (typedfunctionv0-name function)
-                         " calls a function whose own body is not lowered"))])
-                  function))
-              current)
-            (settled Bool)
-            (loop [(position Int) 0]
-              (if (>= position (count current))
-                true
-                (if (= (ready-function? (nth current position))
-                       (ready-function? (nth next position)))
-                  (recur (+ position 1))
-                  false)))]
-        (if settled current (recur (+ round 1) next))))))
+;; The graph is constructed once in source function and instruction order.
+;; Reverse caller vectors retain that order, so both worklists are deterministic.
+(defrecord FunctionCallGraphV0
+  [(function-count Int)
+   (call-edge-count Int)
+   (reverse-callers (Map String (Vec core/NativeId)))
+   (unresolved-callers (Map String Bool))])
 
-;; Effects admitted by a callee are admitted by every caller before the ABI is frozen.
-(defn settle-effect
+(defrecord CallGraphBuildV0
+  [(reverse-callers (Map String (Vec core/NativeId)))
+   (unresolved-callers (Map String Bool))
+   (call-edge-count Int)])
+
+(defrecord ReadinessSeedV0
+  [(not-ready (Map String Bool)) (queue (Vec core/NativeId))])
+
+(defrecord ReadinessPropagationV0
+  [(not-ready (Map String Bool)) (queue (Vec core/NativeId)) (edge-visits Int)])
+
+(defrecord ReadinessSettlementV0
+  [(functions (Vec TypedFunctionV0)) (edge-visits Int)])
+
+(defrecord EffectSeedV0
+  [(masks (Map String (Map String Bool)))
+   (pending (Map String (Map String Bool)))
+   (queued (Map String Bool))
+   (queue (Vec core/NativeId))])
+
+(defrecord EffectMaskMergeV0
+  [(mask (Map String Bool)) (added (Map String Bool)) (changed Bool)])
+
+(defrecord EffectPropagationV0
+  [(masks (Map String (Map String Bool)))
+   (pending (Map String (Map String Bool)))
+   (queued (Map String Bool))
+   (queue (Vec core/NativeId))
+   (edge-visits Int)])
+
+(defrecord EffectSettlementV0
+  [(functions (Vec TypedFunctionV0)) (edge-visits Int)])
+
+(defrecord FunctionClosureMetricsV0
+  [(function-count Int)
+   (call-edge-count Int)
+   (effect-kind-count Int)
+   (readiness-edge-visits Int)
+   (effect-edge-visits Int)])
+
+(defrecord FunctionClosureSettlementV0
+  [(functions (Vec TypedFunctionV0)) (metrics FunctionClosureMetricsV0)])
+
+(defn function-id-index [(functions (Vec TypedFunctionV0))] (Map String Bool)
+  (loop [(position Int) 0 (ids (Map String Bool)) {}]
+    (if (>= position (count functions))
+      ids
+      (recur (+ position 1)
+        (assoc ids
+          (id-value (typedfunctionv0-id (nth functions position))) true)))))
+
+(defn reverse-callers-at
+  [(graph FunctionCallGraphV0) (callee core/NativeId)] (Vec core/NativeId)
+  (let [(found (U (Vec core/NativeId) Nil))
+        (get (functioncallgraphv0-reverse-callers graph) (id-value callee))]
+    (if (nil? found) [] found)))
+
+(defn build-function-call-graph
+  [(functions (Vec TypedFunctionV0))] FunctionCallGraphV0
+  (let [(known (Map String Bool)) (function-id-index functions)
+        (built CallGraphBuildV0)
+        (loop [(position Int) 0
+               (reverse-callers (Map String (Vec core/NativeId))) {}
+               (unresolved-callers (Map String Bool)) {}
+               (call-edge-count Int) 0]
+          (if (>= position (count functions))
+            (->CallGraphBuildV0 reverse-callers unresolved-callers
+              call-edge-count)
+            (let [(caller TypedFunctionV0) (nth functions position)
+                  (caller-id core/NativeId) (typedfunctionv0-id caller)
+                  (targets (Vec core/NativeId)) (body-call-targets caller)
+                  (next CallGraphBuildV0)
+                  (loop [(target-position Int) 0
+                         (current-reverse (Map String (Vec core/NativeId)))
+                         reverse-callers
+                         (current-unresolved (Map String Bool))
+                         unresolved-callers
+                         (current-count Int) call-edge-count]
+                    (if (>= target-position (count targets))
+                      (->CallGraphBuildV0 current-reverse current-unresolved
+                        current-count)
+                      (let [(target core/NativeId) (nth targets target-position)
+                            (target-key String) (id-value target)
+                            (internal Bool) (= true (get known target-key))
+                            (prior (U (Vec core/NativeId) Nil))
+                            (get current-reverse target-key)
+                            (callers (Vec core/NativeId))
+                            (if (nil? prior) [] prior)]
+                        (recur (+ target-position 1)
+                          (if internal
+                            (assoc current-reverse target-key
+                              (conj callers caller-id))
+                            current-reverse)
+                          (if internal
+                            current-unresolved
+                            (assoc current-unresolved (id-value caller-id) true))
+                          (if internal (+ current-count 1) current-count)))))]
+              (recur (+ position 1)
+                (callgraphbuildv0-reverse-callers next)
+                (callgraphbuildv0-unresolved-callers next)
+                (callgraphbuildv0-call-edge-count next)))))]
+    (->FunctionCallGraphV0 (count functions)
+      (callgraphbuildv0-call-edge-count built)
+      (callgraphbuildv0-reverse-callers built)
+      (callgraphbuildv0-unresolved-callers built))))
+
+(defn seed-not-ready
   [(functions (Vec TypedFunctionV0))
-   (effect-id core/NativeId)]
-  (Vec TypedFunctionV0)
-  (loop [(round Int) 0 (current (Vec TypedFunctionV0)) functions]
-    (if (> round (count functions))
-      current
-      (let [(effectful (Vec core/NativeId))
-            (loop [(position Int) 0 (ids (Vec core/NativeId)) []]
-              (if (>= position (count current))
-                ids
-                (let [(function TypedFunctionV0) (nth current position)]
-                  (recur (+ position 1)
-                    (if (core/id-in? (typedfunctionv0-effects function)
-                          effect-id)
-                      (conj ids (typedfunctionv0-id function))
-                      ids)))))
-            (next (Vec TypedFunctionV0))
-            (mapv
-              (fn [(function TypedFunctionV0)] TypedFunctionV0
-                (let [(targets (Vec core/NativeId)) (body-call-targets function)
-                      (prior-effects (Vec core/NativeId))
-                      (typedfunctionv0-effects function)
-                      (needs-effect Bool)
-                      (some? (some
-                               (fn [(target core/NativeId)] Bool
-                                 (core/id-in? effectful target))
-                               targets))
-                      (effects (Vec core/NativeId))
-                      (if needs-effect
-                        (with-effect prior-effects effect-id)
-                        prior-effects)]
-                (if (= (count prior-effects) (count effects))
-                  function
-                  (with
-                    (with function [:effects effects])
-                    [:encoding
-                     (encode-typed-function
-                       (typedfunctionv0-id function)
-                       (typedfunctionv0-name function)
-                       (typedfunctionv0-abi-symbol function)
-                       (typedfunctionv0-parameters function)
-                       (typedfunctionv0-return-type function)
-                       (typedfunctionv0-failure-type function)
-                       effects
-                       (readiness-code (typedfunctionv0-readiness function)))]))))
-              current)
-            (settled Bool)
-            (loop [(position Int) 0]
-              (if (>= position (count current))
-                true
-                (if (= (count (typedfunctionv0-effects (nth current position)))
-                       (count (typedfunctionv0-effects (nth next position))))
-                  (recur (+ position 1))
-                  false)))]
-        (if settled current (recur (+ round 1) next))))))
+   (graph FunctionCallGraphV0)]
+  ReadinessSeedV0
+  (loop [(position Int) 0
+         (not-ready (Map String Bool)) {}
+         (queue (Vec core/NativeId)) []]
+    (if (>= position (count functions))
+      (->ReadinessSeedV0 not-ready queue)
+      (let [(function TypedFunctionV0) (nth functions position)
+            (function-id core/NativeId) (typedfunctionv0-id function)
+            (key String) (id-value function-id)
+            (seed Bool)
+            (or (not (ready-function? function))
+              (= true
+                (get (functioncallgraphv0-unresolved-callers graph) key)))]
+        (recur (+ position 1)
+          (if seed (assoc not-ready key true) not-ready)
+          (if seed (conj queue function-id) queue))))))
 
-(defn settle-effects [(functions (Vec TypedFunctionV0))] (Vec TypedFunctionV0)
-  (let [(pure-settled (Vec TypedFunctionV0))
-        (settle-effect functions (pure-effect-id))
-        (read-settled (Vec TypedFunctionV0))
-        (settle-effect pure-settled (read-effect-id))
-        (write-settled (Vec TypedFunctionV0))
-        (settle-effect read-settled (write-effect-id))
-        (allocate-settled (Vec TypedFunctionV0))
-        (settle-effect write-settled (allocate-effect-id))
-        (atom-settled (Vec TypedFunctionV0))
-        (settle-effect allocate-settled (atom-state-effect-id))
-        (environment-settled (Vec TypedFunctionV0))
-        (settle-effect atom-settled (host-environment-effect-id))
-        (context-settled (Vec TypedFunctionV0))
-        (settle-effect environment-settled (host-context-effect-id))
-        (stdout-settled (Vec TypedFunctionV0))
-        (settle-effect context-settled (host-stdout-effect-id))
-        (stderr-settled (Vec TypedFunctionV0))
-        (settle-effect stdout-settled (host-stderr-effect-id))
-        (filesystem-settled (Vec TypedFunctionV0))
-        (settle-effect stderr-settled (host-filesystem-effect-id))
-        (process-settled (Vec TypedFunctionV0))
-        (settle-effect filesystem-settled (host-process-effect-id))
-        (socket-settled (Vec TypedFunctionV0))
-        (settle-effect process-settled (host-socket-effect-id))]
-    (settle-effect socket-settled (host-clock-effect-id))))
+(defn propagate-not-ready
+  [(graph FunctionCallGraphV0) (seed ReadinessSeedV0)] ReadinessPropagationV0
+  (loop [(cursor Int) 0
+         (not-ready (Map String Bool)) (readinessseedv0-not-ready seed)
+         (queue (Vec core/NativeId)) (readinessseedv0-queue seed)
+         (edge-visits Int) 0]
+    (if (>= cursor (count queue))
+      (->ReadinessPropagationV0 not-ready queue edge-visits)
+      (let [(callers (Vec core/NativeId))
+            (reverse-callers-at graph (nth queue cursor))
+            (next ReadinessPropagationV0)
+            (loop [(position Int) 0
+                   (current-not-ready (Map String Bool)) not-ready
+                   (current-queue (Vec core/NativeId)) queue
+                   (current-visits Int) edge-visits]
+              (if (>= position (count callers))
+                (->ReadinessPropagationV0 current-not-ready current-queue
+                  current-visits)
+                (let [(caller core/NativeId) (nth callers position)
+                      (key String) (id-value caller)
+                      (already Bool) (= true (get current-not-ready key))]
+                  (recur (+ position 1)
+                    (if already current-not-ready
+                      (assoc current-not-ready key true))
+                    (if already current-queue (conj current-queue caller))
+                    (+ current-visits 1)))))]
+        (recur (+ cursor 1)
+          (readinesspropagationv0-not-ready next)
+          (readinesspropagationv0-queue next)
+          (readinesspropagationv0-edge-visits next))))))
+
+(defn apply-readiness-closure
+  [(functions (Vec TypedFunctionV0))
+   (not-ready (Map String Bool))]
+  (Vec TypedFunctionV0)
+  (mapv
+    (fn [(function TypedFunctionV0)] TypedFunctionV0
+      (if (and (ready-function? function)
+            (= true
+              (get not-ready (id-value (typedfunctionv0-id function)))))
+        (with function
+          [:readiness
+           (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
+             (str "TODO-NATIVE-CALLEE: " (typedfunctionv0-name function)
+               " calls a function whose own body is not lowered"))])
+        function))
+    functions))
+
+(defn settle-readiness-on-graph
+  [(functions (Vec TypedFunctionV0))
+   (graph FunctionCallGraphV0)]
+  ReadinessSettlementV0
+  (let [(propagated ReadinessPropagationV0)
+        (propagate-not-ready graph (seed-not-ready functions graph))]
+    (->ReadinessSettlementV0
+      (apply-readiness-closure functions
+        (readinesspropagationv0-not-ready propagated))
+      (readinesspropagationv0-edge-visits propagated))))
+
+;; Pure remains the first serialized marker. The structural metric counts the
+;; twelve transitive effect bits that authorize reads, writes, allocation and
+;; host capabilities; C123's host-context bit is included.
+(defn closure-effect-order [] (Vec core/NativeId)
+  [(pure-effect-id)
+   (read-effect-id)
+   (write-effect-id)
+   (allocate-effect-id)
+   (atom-state-effect-id)
+   (host-environment-effect-id)
+   (host-context-effect-id)
+   (host-stdout-effect-id)
+   (host-stderr-effect-id)
+   (host-filesystem-effect-id)
+   (host-process-effect-id)
+   (host-socket-effect-id)
+   (host-clock-effect-id)])
+
+(defn closure-effect-kind-count [] Int 12)
+
+(defn function-effect-mask [(function TypedFunctionV0)] (Map String Bool)
+  (let [(order (Vec core/NativeId)) (closure-effect-order)]
+    (loop [(position Int) 0 (mask (Map String Bool)) {}]
+      (if (>= position (count order))
+        mask
+        (let [(effect core/NativeId) (nth order position)]
+          (recur (+ position 1)
+            (if (core/id-in? (typedfunctionv0-effects function) effect)
+              (assoc mask (id-value effect) true)
+              mask)))))))
+
+(defn effect-mask-at
+  [(masks (Map String (Map String Bool)))
+   (function-id core/NativeId)]
+  (Map String Bool)
+  (let [(found (U (Map String Bool) Nil)) (get masks (id-value function-id))]
+    (if (nil? found) {} found)))
+
+(defn merge-effect-mask
+  [(mask (Map String Bool)) (incoming (Map String Bool))] EffectMaskMergeV0
+  (let [(order (Vec core/NativeId)) (closure-effect-order)]
+    (loop [(position Int) 0
+           (current (Map String Bool)) mask
+           (added (Map String Bool)) {}
+           (changed Bool) false]
+      (if (>= position (count order))
+        (->EffectMaskMergeV0 current added changed)
+        (let [(key String) (id-value (nth order position))
+              (new Bool)
+              (and (= true (get incoming key))
+                (not (= true (get current key))))]
+          (recur (+ position 1)
+            (if new (assoc current key true) current)
+            (if new (assoc added key true) added)
+            (or changed new)))))))
+
+(defn seed-effects [(functions (Vec TypedFunctionV0))] EffectSeedV0
+  (loop [(position Int) 0
+         (masks (Map String (Map String Bool))) {}
+         (pending (Map String (Map String Bool))) {}
+         (queued (Map String Bool)) {}
+         (queue (Vec core/NativeId)) []]
+    (if (>= position (count functions))
+      (->EffectSeedV0 masks pending queued queue)
+      (let [(function TypedFunctionV0) (nth functions position)
+            (function-id core/NativeId) (typedfunctionv0-id function)
+            (key String) (id-value function-id)
+            (mask (Map String Bool)) (function-effect-mask function)
+            (seed Bool) (and (ready-function? function) (> (count mask) 0))]
+        (recur (+ position 1)
+          (assoc masks key mask)
+          (if seed (assoc pending key mask) pending)
+          (if seed (assoc queued key true) queued)
+          (if seed (conj queue function-id) queue))))))
+
+(defn ready-function-index [(functions (Vec TypedFunctionV0))] (Map String Bool)
+  (loop [(position Int) 0 (ready (Map String Bool)) {}]
+    (if (>= position (count functions))
+      ready
+      (let [(function TypedFunctionV0) (nth functions position)]
+        (recur (+ position 1)
+          (assoc ready (id-value (typedfunctionv0-id function))
+            (ready-function? function)))))))
+
+(defn propagate-effects
+  [(functions (Vec TypedFunctionV0))
+   (graph FunctionCallGraphV0)]
+  EffectPropagationV0
+  (let [(ready (Map String Bool)) (ready-function-index functions)
+        (seed EffectSeedV0) (seed-effects functions)]
+    (loop [(cursor Int) 0
+           (masks (Map String (Map String Bool))) (effectseedv0-masks seed)
+           (pending (Map String (Map String Bool))) (effectseedv0-pending seed)
+           (queued (Map String Bool)) (effectseedv0-queued seed)
+           (queue (Vec core/NativeId)) (effectseedv0-queue seed)
+           (edge-visits Int) 0]
+      (if (>= cursor (count queue))
+        (->EffectPropagationV0 masks pending queued queue edge-visits)
+        (let [(callee core/NativeId) (nth queue cursor)
+              (callee-key String) (id-value callee)
+              (incoming (Map String Bool)) (effect-mask-at pending callee)
+              (callers (Vec core/NativeId)) (reverse-callers-at graph callee)
+              (base-pending (Map String (Map String Bool)))
+              (assoc pending callee-key {})
+              (base-queued (Map String Bool)) (assoc queued callee-key false)
+              (next EffectPropagationV0)
+              (loop [(position Int) 0
+                     (current-masks (Map String (Map String Bool))) masks
+                     (current-pending (Map String (Map String Bool))) base-pending
+                     (current-queued (Map String Bool)) base-queued
+                     (current-queue (Vec core/NativeId)) queue
+                     (current-visits Int) edge-visits]
+                (if (>= position (count callers))
+                  (->EffectPropagationV0 current-masks current-pending
+                    current-queued current-queue current-visits)
+                  (let [(caller core/NativeId) (nth callers position)
+                        (caller-key String) (id-value caller)
+                        (caller-ready Bool) (= true (get ready caller-key))
+                        (prior-mask (Map String Bool))
+                        (effect-mask-at current-masks caller)
+                        (merged EffectMaskMergeV0)
+                        (if caller-ready
+                          (merge-effect-mask prior-mask incoming)
+                          (->EffectMaskMergeV0 prior-mask {} false))
+                        (changed Bool) (effectmaskmergev0-changed merged)
+                        (prior-pending (Map String Bool))
+                        (effect-mask-at current-pending caller)
+                        (pending-merged EffectMaskMergeV0)
+                        (merge-effect-mask prior-pending
+                          (effectmaskmergev0-added merged))
+                        (already-queued Bool)
+                        (= true (get current-queued caller-key))]
+                    (recur (+ position 1)
+                      (if changed
+                        (assoc current-masks caller-key
+                          (effectmaskmergev0-mask merged))
+                        current-masks)
+                      (if changed
+                        (assoc current-pending caller-key
+                          (effectmaskmergev0-mask pending-merged))
+                        current-pending)
+                      (if (and changed (not already-queued))
+                        (assoc current-queued caller-key true)
+                        current-queued)
+                      (if (and changed (not already-queued))
+                        (conj current-queue caller)
+                        current-queue)
+                      (+ current-visits 1)))))]
+          (recur (+ cursor 1)
+            (effectpropagationv0-masks next)
+            (effectpropagationv0-pending next)
+            (effectpropagationv0-queued next)
+            (effectpropagationv0-queue next)
+            (effectpropagationv0-edge-visits next)))))))
+
+(defn apply-effect-mask
+  [(function TypedFunctionV0) (mask (Map String Bool))] TypedFunctionV0
+  (let [(order (Vec core/NativeId)) (closure-effect-order)
+        (prior-effects (Vec core/NativeId)) (typedfunctionv0-effects function)
+        (effects (Vec core/NativeId))
+        (loop [(position Int) 0 (current (Vec core/NativeId)) prior-effects]
+          (if (>= position (count order))
+            current
+            (let [(effect core/NativeId) (nth order position)]
+              (recur (+ position 1)
+                (if (= true (get mask (id-value effect)))
+                  (with-effect current effect)
+                  current)))))]
+    (if (= (count prior-effects) (count effects))
+      function
+      (with
+        (with function [:effects effects])
+        [:encoding
+         (encode-typed-function
+           (typedfunctionv0-id function)
+           (typedfunctionv0-name function)
+           (typedfunctionv0-abi-symbol function)
+           (typedfunctionv0-parameters function)
+           (typedfunctionv0-return-type function)
+           (typedfunctionv0-failure-type function)
+           effects
+           (readiness-code (typedfunctionv0-readiness function)))]))))
+
+(defn settle-effects-on-graph
+  [(functions (Vec TypedFunctionV0))
+   (graph FunctionCallGraphV0)]
+  EffectSettlementV0
+  (let [(propagated EffectPropagationV0) (propagate-effects functions graph)]
+    (->EffectSettlementV0
+      (mapv
+        (fn [(function TypedFunctionV0)] TypedFunctionV0
+          (apply-effect-mask function
+            (effect-mask-at (effectpropagationv0-masks propagated)
+              (typedfunctionv0-id function))))
+        functions)
+      (effectpropagationv0-edge-visits propagated))))
+
+(defn settle-function-closures-with-metrics
+  [(functions (Vec TypedFunctionV0))] FunctionClosureSettlementV0
+  (let [(graph FunctionCallGraphV0) (build-function-call-graph functions)
+        (readiness ReadinessSettlementV0)
+        (settle-readiness-on-graph functions graph)
+        (effects EffectSettlementV0)
+        (settle-effects-on-graph
+          (readinesssettlementv0-functions readiness) graph)]
+    (->FunctionClosureSettlementV0
+      (effectsettlementv0-functions effects)
+      (->FunctionClosureMetricsV0
+        (functioncallgraphv0-function-count graph)
+        (functioncallgraphv0-call-edge-count graph)
+        (closure-effect-kind-count)
+        (readinesssettlementv0-edge-visits readiness)
+        (effectsettlementv0-edge-visits effects)))))
+
+(defn settle-function-closures
+  [(functions (Vec TypedFunctionV0))] (Vec TypedFunctionV0)
+  (functionclosuresettlementv0-functions
+    (settle-function-closures-with-metrics functions)))
 
 (defn slice-regions [] (Vec core/RegionDef)
   [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)
@@ -18235,7 +18525,7 @@
           (->BodyEnvV0 index process-source-types signatures function-sources globals)
           signature-resolutions function-sources)
         (functions (Vec TypedFunctionV0))
-        (settle-effects (settle-readiness (collect-functions function-resolutions)))
+        (settle-function-closures (collect-functions function-resolutions))
         (uses-environment Bool) (any-function-uses-environment? functions)
         (uses-context Bool) (any-function-uses-host-context? functions)
         (uses-stdout Bool) (any-function-uses-stdout? functions)
