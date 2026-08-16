@@ -888,6 +888,68 @@
    "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))
    "range"    (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
+;; Hosted namespace contracts mirror the Racket checker's canonical catalog.
+;; They are projected through each program's declared require alias below;
+;; keeping the catalog namespace-keyed makes new hosted libraries an explicit
+;; data extension rather than another checker special case.
+(def HOSTED-NAMESPACE-CONTRACTS Any
+  {"clojure.string"
+   {"join" (make-fn [ANY] ANY (make-prim "String"))
+    "split" (make-fn [(make-prim "String") (make-prim "Regex")]
+              INT-TYPE (make-app "Vec" [(make-prim "String")]))
+    "replace" (make-fn [(make-prim "String")
+                         (make-union [(make-prim "String") (make-prim "Regex")])
+                         (make-prim "String")]
+                nil (make-prim "String"))
+    "trim" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "triml" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "trimr" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "upper-case" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "lower-case" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "capitalize" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "blank?" (make-fn [ANY] nil BOOL-TYPE)
+    "includes?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE)
+    "starts-with?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE)
+    "ends-with?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE)
+    "reverse" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "escape" (make-fn [(make-prim "String") ANY] nil (make-prim "String"))
+    "re-quote-replacement" (make-fn [(make-prim "String")] nil (make-prim "String"))
+    "index-of" (make-fn [(make-prim "String") ANY]
+                 INT-TYPE (make-union [INT-TYPE NIL-TYPE]))
+    "last-index-of" (make-fn [(make-prim "String") ANY]
+                      INT-TYPE (make-union [INT-TYPE NIL-TYPE]))
+    "split-lines" (make-fn [(make-prim "String")] nil
+                    (make-app "Vec" [(make-prim "String")]))
+    "replace-first" (make-fn [(make-prim "String") ANY ANY]
+                      nil (make-prim "String"))}})
+
+(defn hosted-require-contracts [(requires Any)] Any
+  (reduce
+    (fn [(env Any) (require-spec Any)] Any
+      (let [namespace (get require-spec "ns")
+            contracts (get HOSTED-NAMESPACE-CONTRACTS namespace)
+            alias (get require-spec "alias")
+            prefix (if (string? alias) alias namespace)
+            referred (get require-spec "refer")]
+        (if (nil? contracts)
+          env
+          (let [qualified
+                (reduce
+                  (fn [(out Any) (member Any)] Any
+                    (assoc out (str prefix "/" member) (get contracts member)))
+                  env
+                  (keys contracts))]
+            (if (vector? referred)
+              (reduce
+                (fn [(out Any) (member Any)] Any
+                  (let [contract (get contracts member)]
+                    (if (nil? contract) out (assoc out member contract))))
+                qualified
+                referred)
+              qualified)))))
+    {}
+    requires))
+
 (def BUFFER-FLOAT-TYPE Any
   (make-app "Buffer" [FLOAT-TYPE]))
 
@@ -3243,12 +3305,14 @@
 (defn build-initial-env! [(prog Any)] Any
   (let [externs (get prog "externs")
         forms (get prog "forms")
-        target-stdlib (cond
+        base-stdlib (cond
                         (= (get prog "target") "core")
                           (merge STDLIB CORE-STDLIB)
                         (= (get prog "target") "js")
                           (merge STDLIB JS-ATOM-STDLIB)
                         :else STDLIB)
+        target-stdlib (merge base-stdlib
+                        (hosted-require-contracts (get prog "requires" [])))
         env-with-externs (if (not (nil? externs))
                            (reduce (fn [(env Any) (ext Any)] Any
                                      (assoc env (get ext "name") (get ext "type")))
