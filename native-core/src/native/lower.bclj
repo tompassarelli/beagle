@@ -6102,7 +6102,8 @@
 
 (defn closed-transient-source?
   [(index SourceIndexV0) (node core/NativeId) (collection-kind String)] Bool
-  (or (closed-transient-reduce? index node collection-kind "")
+  (or (source-call-named? index node "transient")
+    (closed-transient-reduce? index node collection-kind "")
     (closed-transient-loop? index node collection-kind)))
 
 (defn active-transient-reduce?
