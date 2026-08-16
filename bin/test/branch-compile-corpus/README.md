@@ -1,9 +1,20 @@
 # Branch compilation corpus oracle
 
 This directory contains the Phase-C clean-build oracle and the compiler-owned
-Phase-D unit seam for the bounded branch-native experiment. It supplies four
-Native Core modules, three controlled mutations, and an independent clean
-full-build oracle. It does not add a cache or Fram integration.
+Phase-D unit seam for the bounded branch-native experiment, plus the Phase-E
+lossless unit-wire checkpoint. It supplies four Native Core modules, three
+controlled mutations, and an independent clean full-build oracle. It does not
+add a cache or Fram integration.
+
+`TypedUnitV0` and `NativeUnitV0` now persist under the distinct
+`typed-unit-wire-v1` and `native-unit-wire-v1` tags. The bounded codec binds
+every semantic field of the corpus variants, strictly reconstructs one complete
+canonical string, and requires exact UTF-8 byte count, SHA-256, unit identity,
+record validation, and re-encoding before assembly. Old `typed-unit-v0` and
+`native-unit-v0` payloads are deliberately non-decodable because their nested
+encoders omit switch cases and token flow. Strict Base64 and UTF-8 decoding
+remain the responsibility of the future projection boundary; this unit-local
+seam consumes the resulting canonical string and its raw-byte metadata.
 
 The corpus has two dependency arms:
 
@@ -78,8 +89,10 @@ resolved direct read set in every case. The typed/native rows of
 `expected-cones.tsv` actively check the exact changed semantic-content set,
 and every mutation must preserve every semantic-unit ID. The unit gate now
 checks the corresponding assembled reuse rows, exact clean typed/native/epoch
-and C17 bytes, all ten obligations, canonical input ordering, collision
-rejection, and the nine-`defn` boundary. The tracked `oracle/churn.tsv`
+and C17 bytes, all ten obligations, all nine typed/native wire-v1 round trips,
+the V0 semantic-collision witness, malformed/digest/order/identity/duplicate
+falsifiers, collision rejection, and the nine-`defn` boundary. The tracked
+`oracle/churn.tsv`
 describes clean-full-build output; the gate is still a bounded compiler seam,
 not a production incremental cache.
 
