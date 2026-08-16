@@ -8,6 +8,8 @@
 
 (def BOOL-TYPE {"kind" "prim" "name" "Bool"})
 
+(def INFERENCE-BOTTOM nil)
+
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
 
@@ -231,9 +233,10 @@
 
 (defn merge-types [t1 t2]
   (cond
-  (and (any-type? t1) (any-type? t2)) ANY
-  (any-type? t1) t2
-  (any-type? t2) t1
+  (and (nil? t1) (nil? t2)) INFERENCE-BOTTOM
+  (nil? t1) t2
+  (nil? t2) t1
+  (or (any-type? t1) (any-type? t2)) ANY
   (type-compatible? t2 t1) t1
   :else (let [flat1 (if (union-type? t1) (get t1 "members") [t1])
    flat2 (if (union-type? t2) (get t2 "members") [t2])
@@ -377,9 +380,21 @@
   (let [name (js-target-form-name value)]
   (and (not (nil? name)) (not (= (get (deref STATE) "target") "js")))))
 
-(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)}})
+(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "min" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)}})
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
+
+(def HOSTED-NAMESPACE-CONTRACTS {"clojure.string" {"join" (make-fn [ANY] ANY (make-prim "String")) "split" (make-fn [(make-prim "String") (make-prim "Regex")] INT-TYPE (make-app "Vec" [(make-prim "String")])) "replace" (make-fn [(make-prim "String") (make-union [(make-prim "String") (make-prim "Regex")]) (make-prim "String")] nil (make-prim "String")) "trim" (make-fn [(make-prim "String")] nil (make-prim "String")) "triml" (make-fn [(make-prim "String")] nil (make-prim "String")) "trimr" (make-fn [(make-prim "String")] nil (make-prim "String")) "upper-case" (make-fn [(make-prim "String")] nil (make-prim "String")) "lower-case" (make-fn [(make-prim "String")] nil (make-prim "String")) "capitalize" (make-fn [(make-prim "String")] nil (make-prim "String")) "blank?" (make-fn [ANY] nil BOOL-TYPE) "includes?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE) "starts-with?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE) "ends-with?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE) "reverse" (make-fn [(make-prim "String")] nil (make-prim "String")) "escape" (make-fn [(make-prim "String") ANY] nil (make-prim "String")) "re-quote-replacement" (make-fn [(make-prim "String")] nil (make-prim "String")) "index-of" (make-fn [(make-prim "String") ANY] INT-TYPE (make-union [INT-TYPE NIL-TYPE])) "last-index-of" (make-fn [(make-prim "String") ANY] INT-TYPE (make-union [INT-TYPE NIL-TYPE])) "split-lines" (make-fn [(make-prim "String")] nil (make-app "Vec" [(make-prim "String")])) "replace-first" (make-fn [(make-prim "String") ANY ANY] nil (make-prim "String"))}})
+
+(defn hosted-require-contracts [requires]
+  (reduce (fn [env require-spec] (let [namespace (get require-spec "ns")
+   contracts (get HOSTED-NAMESPACE-CONTRACTS namespace)
+   alias (get require-spec "alias")
+   prefix (if (string? alias) alias namespace)
+   referred (get require-spec "refer")]
+  (if (nil? contracts) env (let [qualified (reduce (fn [out member] (assoc out (str prefix "/" member) (get contracts member))) env (keys contracts))]
+  (if (vector? referred) (reduce (fn [out member] (let [contract (get contracts member)]
+  (if (nil? contract) out (assoc out member contract)))) qualified referred) qualified))))) {} requires))
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
 
@@ -956,7 +971,7 @@
    then-env (get narrowed "then")
    else-env (get narrowed "else")
    body-type (last-expr-type! (get c "body") then-env)]
-  {"result" (merge-types (get state "result") body-type) "env" else-env}))) {"result" ANY "env" env} clauses)]
+  {"result" (merge-types (get state "result") body-type) "env" else-env}))) {"result" INFERENCE-BOTTOM "env" env} clauses)]
   (get final "result")))
 
 (defn ^Boolean fields-have-constraints? [fields]
@@ -1048,10 +1063,19 @@
   (emit-diag! (str "beagle: tuple element " i ": expected " (type->string et) ", got " (type->string at)))))))
   true))) false))
 
+(defn ^Boolean fresh-value-compatible?! [value expected env]
+  (cond
+  (union-type? expected) (boolean (some (fn [alt] (fresh-value-compatible?! value alt env)) (get expected "members")))
+  (and (app-type? expected) (= (get expected "name") "HVec") (not (nil? value)) (= (get value "node") "vec")) (let [items (get value "items")
+   elems (get expected "args")]
+  (and (= (count items) (count elems)) (every? true? (mapv (fn [i] (fresh-value-compatible?! (nth items i) (nth elems i) env)) (range (count items))))))
+  :else (type-compatible? (infer-expr! value env) expected)))
+
 (defn ^Boolean check-atom-ctor! [value expected env]
   (if (and (app-type? expected) (= (get expected "name") "Atom") (= (count (get expected "args")) 1) (not (nil? value)) (= (call-fn-name value) "atom") (= (count (get value "args")) 1)) (let [elem (nth (get expected "args") 0)
-   it (infer-expr! (nth (get value "args") 0) env)]
-  (if (not (type-compatible? it elem)) (do
+   init (nth (get value "args") 0)
+   it (infer-expr! init env)]
+  (if (not (fresh-value-compatible?! init elem env)) (do
   (emit-diag! (str "beagle: atom init: expected " (type->string elem) ", got " (type->string it)))))
   true) false))
 
@@ -1234,7 +1258,7 @@
   (= (get e "node") "recur") (do
   (doseq [a (get e "args")]
   (infer-expr! a env))
-  ANY)
+  INFERENCE-BOTTOM)
   (= (get e "node") "set!") (let [target (get e "target")
    tnode (get target "node")
    tgt (get (deref STATE) "target")
@@ -1531,10 +1555,11 @@
 (defn build-initial-env! [prog]
   (let [externs (get prog "externs")
    forms (get prog "forms")
-   target-stdlib (cond
+   base-stdlib (cond
   (= (get prog "target") "core") (merge STDLIB CORE-STDLIB)
   (= (get prog "target") "js") (merge STDLIB JS-ATOM-STDLIB)
   :else STDLIB)
+   target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])))
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
    dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
