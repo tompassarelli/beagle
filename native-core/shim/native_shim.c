@@ -9,6 +9,7 @@
 #include <math.h>
 #include <poll.h>
 #if !defined(__wasi__)
+#include <signal.h>
 #include <spawn.h>
 #endif
 #include <stdatomic.h>
@@ -9298,6 +9299,99 @@ int64_t native_host_clock_monotonic_nanoseconds_v0(
   return seconds * INT64_C(1000000000) + (int64_t)now.tv_nsec;
 }
 
+int64_t native_host_clock_wall_nanoseconds_v0(
+    const native_capability *capability) {
+  struct timespec now;
+  int64_t seconds;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+    native_trap(NATIVE_TRAP_IO);
+  }
+  if ((now.tv_nsec < 0) || (now.tv_nsec >= 1000000000L) ||
+      ((uintmax_t)now.tv_sec > (uintmax_t)INT64_MAX)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  seconds = (int64_t)now.tv_sec;
+  if ((seconds > (INT64_MAX - (int64_t)now.tv_nsec) /
+                     INT64_C(1000000000)) ||
+      (seconds < INT64_MIN / INT64_C(1000000000))) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  return seconds * INT64_C(1000000000) + (int64_t)now.tv_nsec;
+}
+
+int32_t native_host_clock_format_iso8601_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t epoch_nanoseconds, uint64_t *out) {
+  const int64_t billion = INT64_C(1000000000);
+  int64_t seconds = epoch_nanoseconds / billion;
+  int64_t nanoseconds = epoch_nanoseconds % billion;
+  time_t instant;
+  struct tm utc;
+  char rendered[40];
+  char fraction[10];
+  int fraction_digits;
+  int prefix_length;
+  size_t length;
+  uint8_t *destination = NULL;
+
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL)) {
+    return EINVAL;
+  }
+  *out = UINT64_C(0);
+  if (nanoseconds < INT64_C(0)) {
+    nanoseconds += billion;
+    seconds -= INT64_C(1);
+  }
+  instant = (time_t)seconds;
+  if ((int64_t)instant != seconds) {
+    return EOVERFLOW;
+  }
+  errno = 0;
+  if (gmtime_r(&instant, &utc) == NULL) {
+    return (errno == 0) ? EOVERFLOW : (int32_t)errno;
+  }
+  if ((utc.tm_year < -1900) || (utc.tm_year > 8099)) {
+    return EOVERFLOW;
+  }
+  prefix_length = snprintf(rendered, sizeof rendered,
+                           "%04d-%02d-%02dT%02d:%02d:%02d",
+                           utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
+                           utc.tm_hour, utc.tm_min, utc.tm_sec);
+  if ((prefix_length != 19) || ((size_t)prefix_length >= sizeof rendered)) {
+    return EOVERFLOW;
+  }
+  if (nanoseconds == INT64_C(0)) {
+    fraction_digits = 0;
+  } else if ((nanoseconds % INT64_C(1000000)) == INT64_C(0)) {
+    fraction_digits = 3;
+  } else if ((nanoseconds % INT64_C(1000)) == INT64_C(0)) {
+    fraction_digits = 6;
+  } else {
+    fraction_digits = 9;
+  }
+  if (fraction_digits != 0) {
+    int amount = snprintf(fraction, sizeof fraction, "%09lld",
+                          (long long)nanoseconds);
+    if (amount != 9) {
+      return EOVERFLOW;
+    }
+    rendered[prefix_length] = '.';
+    memcpy(rendered + prefix_length + 1, fraction, (size_t)fraction_digits);
+    prefix_length += 1 + fraction_digits;
+  }
+  rendered[prefix_length] = 'Z';
+  prefix_length += 1;
+  length = (size_t)prefix_length;
+  *out = native_text_alloc(arena, (uint64_t)length, &destination);
+  memcpy(destination, rendered, length);
+  return 0;
+}
+
 /* The embedding host may own the environment instead of the OS: the Wasm
    adapter defines this ABI over its exported mailbox and compiles the shim
    with NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL so a zero-import reactor never
@@ -9796,12 +9890,131 @@ int32_t native_host_filesystem_write_text_atomic_v0(
 }
 #endif /* __wasi__ */
 
+static int32_t native_host_filesystem_make_directory(const char *path) {
+  struct stat metadata;
+  if (mkdir(path, (mode_t)0777) == 0) {
+    return 0;
+  }
+  if (errno != EEXIST) {
+    return native_host_filesystem_errno();
+  }
+  if (stat(path, &metadata) != 0) {
+    return native_host_filesystem_errno();
+  }
+  return S_ISDIR(metadata.st_mode) ? 0 : ENOTDIR;
+}
+
+int32_t native_host_filesystem_make_parent_directories_v0(
+    const native_capability *capability, uint64_t path_text) {
+  char *path = NULL;
+  char *last_separator;
+  char *cursor;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return EINVAL;
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  last_separator = strrchr(path, '/');
+  if (last_separator == NULL) {
+    free(path);
+    return 0;
+  }
+  *last_separator = '\0';
+  if (path[0] == '\0') {
+    free(path);
+    return 0;
+  }
+  cursor = path + ((path[0] == '/') ? 1 : 0);
+  for (; *cursor != '\0'; ++cursor) {
+    if (*cursor == '/') {
+      *cursor = '\0';
+      status = native_host_filesystem_make_directory(path);
+      *cursor = '/';
+      if (status != 0) {
+        free(path);
+        return status;
+      }
+    }
+  }
+  status = native_host_filesystem_make_directory(path);
+  free(path);
+  return status;
+}
+
+int32_t native_host_filesystem_append_text_v0(
+    const native_capability *capability, uint64_t path_text, uint64_t text) {
+  char *path = NULL;
+  const uint8_t *bytes;
+  uint64_t length;
+  size_t written = (size_t)0U;
+  int descriptor;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return EINVAL;
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  descriptor = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
+                    (mode_t)0644);
+  free(path);
+  if (descriptor < 0) {
+    return native_host_filesystem_errno();
+  }
+  bytes = native_text_bytes(text);
+  length = native_text_length(text);
+  if (length > (uint64_t)SIZE_MAX) {
+    (void)close(descriptor);
+    return EOVERFLOW;
+  }
+  while (written < (size_t)length) {
+    ssize_t amount = write(descriptor, bytes + written,
+                           (size_t)length - written);
+    if (amount < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      status = native_host_filesystem_errno();
+      (void)close(descriptor);
+      return status;
+    }
+    if (amount == 0) {
+      (void)close(descriptor);
+      return EIO;
+    }
+    written += (size_t)amount;
+  }
+  if (close(descriptor) != 0) {
+    return native_host_filesystem_errno();
+  }
+  return 0;
+}
+
 #if defined(__wasi__)
 int64_t native_host_process_run_inherit_v0(
     const native_capability *capability, const native_vec *argv_value) {
   (void)capability;
   (void)argv_value;
   return -((int64_t)ENOTSUP);
+}
+
+int32_t native_host_process_run_capture_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *argv_value, uint64_t stdin_text,
+    int64_t max_output_bytes, void **out) {
+  (void)arena;
+  (void)capability;
+  (void)argv_value;
+  (void)stdin_text;
+  (void)max_output_bytes;
+  if (out != NULL) {
+    *out = NULL;
+  }
+  return ENOTSUP;
 }
 #else
 static void native_host_process_free_argv(char **argv, size_t count) {
@@ -9815,30 +10028,27 @@ static void native_host_process_free_argv(char **argv, size_t count) {
   free(argv);
 }
 
-int64_t native_host_process_run_inherit_v0(
-    const native_capability *capability, const native_vec *argv_value) {
+static int32_t native_host_process_build_argv(const native_vec *argv_value,
+                                              char ***out_argv,
+                                              size_t *out_count) {
   const uint64_t *source;
   char **argv;
   size_t count;
   size_t index;
-  pid_t child;
-  pid_t waited;
-  int spawn_status;
-  int wait_status;
-
-  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
-      (argv_value == NULL) || (argv_value->length <= INT64_C(0)) ||
-      (argv_value->elements == NULL)) {
-    return -((int64_t)EINVAL);
+  if ((out_argv == NULL) || (out_count == NULL) || (argv_value == NULL) ||
+      (argv_value->length <= INT64_C(0)) || (argv_value->elements == NULL)) {
+    return EINVAL;
   }
+  *out_argv = NULL;
+  *out_count = (size_t)0U;
   if ((uint64_t)argv_value->length >
       (uint64_t)((SIZE_MAX / sizeof(char *)) - (size_t)1U)) {
-    return -((int64_t)EOVERFLOW);
+    return EOVERFLOW;
   }
   count = (size_t)argv_value->length;
   argv = (char **)calloc(count + (size_t)1U, sizeof(char *));
   if (argv == NULL) {
-    return -((int64_t)ENOMEM);
+    return ENOMEM;
   }
   source = (const uint64_t *)argv_value->elements;
   for (index = (size_t)0U; index < count; ++index) {
@@ -9846,22 +10056,66 @@ int64_t native_host_process_run_inherit_v0(
     const uint8_t *bytes = native_text_bytes(source[index]);
     if (length > (uint64_t)(SIZE_MAX - (size_t)1U)) {
       native_host_process_free_argv(argv, index);
-      return -((int64_t)EOVERFLOW);
+      return EOVERFLOW;
     }
     if (((index == (size_t)0U) && (length == UINT64_C(0))) ||
         (memchr(bytes, '\0', (size_t)length) != NULL)) {
       native_host_process_free_argv(argv, index);
-      return -((int64_t)EINVAL);
+      return EINVAL;
     }
     argv[index] = (char *)malloc((size_t)length + (size_t)1U);
     if (argv[index] == NULL) {
       native_host_process_free_argv(argv, index);
-      return -((int64_t)ENOMEM);
+      return ENOMEM;
     }
     if (length != UINT64_C(0)) {
       memcpy(argv[index], bytes, (size_t)length);
     }
     argv[index][length] = '\0';
+  }
+  *out_argv = argv;
+  *out_count = count;
+  return 0;
+}
+
+static int32_t native_host_process_wait(pid_t child, int64_t *out_status) {
+  pid_t waited;
+  int wait_status;
+  if (out_status == NULL) {
+    return EINVAL;
+  }
+  do {
+    waited = waitpid(child, &wait_status, 0);
+  } while ((waited < (pid_t)0) && (errno == EINTR));
+  if (waited < (pid_t)0) {
+    return (errno == 0) ? EIO : (int32_t)errno;
+  }
+  if (WIFEXITED(wait_status)) {
+    *out_status = (int64_t)WEXITSTATUS(wait_status);
+    return 0;
+  }
+  if (WIFSIGNALED(wait_status)) {
+    *out_status = INT64_C(256) + (int64_t)WTERMSIG(wait_status);
+    return 0;
+  }
+  return EIO;
+}
+
+int64_t native_host_process_run_inherit_v0(
+    const native_capability *capability, const native_vec *argv_value) {
+  char **argv = NULL;
+  size_t count = (size_t)0U;
+  pid_t child;
+  int spawn_status;
+  int32_t status;
+  int64_t child_status;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_process_build_argv(argv_value, &argv, &count);
+  if (status != 0) {
+    return -((int64_t)status);
   }
 
   spawn_status = posix_spawnp(&child, argv[0], NULL, NULL, argv, environ);
@@ -9869,19 +10123,374 @@ int64_t native_host_process_run_inherit_v0(
   if (spawn_status != 0) {
     return -((int64_t)spawn_status);
   }
-  do {
-    waited = waitpid(child, &wait_status, 0);
-  } while ((waited < (pid_t)0) && (errno == EINTR));
-  if (waited < (pid_t)0) {
-    return -((int64_t)((errno == 0) ? EIO : errno));
+  status = native_host_process_wait(child, &child_status);
+  if (status != 0) {
+    return -((int64_t)status);
   }
-  if (WIFEXITED(wait_status)) {
-    return (int64_t)WEXITSTATUS(wait_status);
+  return child_status;
+}
+
+static int32_t native_host_process_set_descriptor_flags(int descriptor,
+                                                        int added_flags) {
+  int flags = fcntl(descriptor, F_GETFL);
+  if ((flags < 0) || (fcntl(descriptor, F_SETFL, flags | added_flags) != 0)) {
+    return (errno == 0) ? EIO : (int32_t)errno;
   }
-  if (WIFSIGNALED(wait_status)) {
-    return INT64_C(256) + (int64_t)WTERMSIG(wait_status);
+  return 0;
+}
+
+static int32_t native_host_process_pipe(int descriptors[2]) {
+  int index;
+  if ((descriptors == NULL) || (pipe(descriptors) != 0)) {
+    return (errno == 0) ? EIO : (int32_t)errno;
   }
-  return -((int64_t)EIO);
+  for (index = 0; index < 2; ++index) {
+    int descriptor = descriptors[index];
+    int replacement = -1;
+    int flags;
+    if (descriptor <= STDERR_FILENO) {
+      replacement = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+      if (replacement >= 0) {
+        (void)close(descriptor);
+        descriptors[index] = replacement;
+        descriptor = replacement;
+      }
+    }
+    flags = fcntl(descriptor, F_GETFD);
+    if (((replacement < 0) && (descriptors[index] <= STDERR_FILENO)) ||
+        (flags < 0) ||
+        (fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) != 0)) {
+      int32_t status = (errno == 0) ? EIO : (int32_t)errno;
+      (void)close(descriptors[0]);
+      (void)close(descriptors[1]);
+      descriptors[0] = -1;
+      descriptors[1] = -1;
+      return status;
+    }
+  }
+  return 0;
+}
+
+static int32_t native_host_process_drain(int *descriptor, uint8_t *buffer,
+                                         size_t bound, size_t *length,
+                                         bool *overflow) {
+  uint8_t chunk[4096];
+  if ((descriptor == NULL) || (length == NULL) || (overflow == NULL) ||
+      (*descriptor < 0)) {
+    return EINVAL;
+  }
+  for (;;) {
+    ssize_t amount = read(*descriptor, chunk, sizeof chunk);
+    if (amount > 0) {
+      size_t received = (size_t)amount;
+      size_t available = bound - *length;
+      size_t copied = (received < available) ? received : available;
+      if (copied != (size_t)0U) {
+        memcpy(buffer + *length, chunk, copied);
+        *length += copied;
+      }
+      if (copied != received) {
+        *overflow = true;
+      }
+    } else if (amount == 0) {
+      (void)close(*descriptor);
+      *descriptor = -1;
+      return 0;
+    } else if (errno == EINTR) {
+      continue;
+    } else if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+      return 0;
+    } else {
+      int32_t status = (errno == 0) ? EIO : (int32_t)errno;
+      (void)close(*descriptor);
+      *descriptor = -1;
+      return status;
+    }
+  }
+}
+
+static int32_t native_host_process_add_close(
+    posix_spawn_file_actions_t *actions, int descriptor, int target) {
+  return (descriptor == target)
+             ? 0
+             : (int32_t)posix_spawn_file_actions_addclose(actions, descriptor);
+}
+
+int32_t native_host_process_run_capture_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *argv_value, uint64_t stdin_text,
+    int64_t max_output_bytes, void **out) {
+  char **argv = NULL;
+  size_t argv_count = (size_t)0U;
+  size_t bound;
+  uint8_t *stdout_buffer = NULL;
+  uint8_t *stderr_buffer = NULL;
+  size_t stdout_length = (size_t)0U;
+  size_t stderr_length = (size_t)0U;
+  bool stdout_overflow = false;
+  bool stderr_overflow = false;
+  FILE *input = NULL;
+  int input_descriptor = -1;
+  bool input_descriptor_owned = false;
+  int stdout_pipe[2] = {-1, -1};
+  int stderr_pipe[2] = {-1, -1};
+  posix_spawn_file_actions_t actions;
+  bool actions_ready = false;
+  pid_t child = (pid_t)-1;
+  int64_t child_status = INT64_C(0);
+  int32_t status;
+  int spawn_status;
+  native_host_process_capture_v0 *capture;
+  uint8_t *destination = NULL;
+
+  if (out != NULL) {
+    *out = NULL;
+  }
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL) ||
+      (max_output_bytes < INT64_C(0)) ||
+      ((uint64_t)max_output_bytes > (uint64_t)SIZE_MAX)) {
+    return EINVAL;
+  }
+  bound = (size_t)max_output_bytes;
+  status = native_host_process_build_argv(argv_value, &argv, &argv_count);
+  if (status != 0) {
+    return status;
+  }
+  if (native_text_length(stdin_text) > (uint64_t)SIZE_MAX) {
+    status = EOVERFLOW;
+    goto cleanup;
+  }
+  if (bound != (size_t)0U) {
+    stdout_buffer = (uint8_t *)malloc(bound);
+    stderr_buffer = (uint8_t *)malloc(bound);
+    if ((stdout_buffer == NULL) || (stderr_buffer == NULL)) {
+      status = ENOMEM;
+      goto cleanup;
+    }
+  }
+  input = tmpfile();
+  if (input == NULL) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    goto cleanup;
+  }
+  if (!native_byte_write(input, native_text_bytes(stdin_text),
+                         (size_t)native_text_length(stdin_text)) ||
+      (fflush(input) != 0) || (fseek(input, 0L, SEEK_SET) != 0)) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    goto cleanup;
+  }
+  input_descriptor = fileno(input);
+  if (input_descriptor < 0) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    goto cleanup;
+  }
+  if (input_descriptor <= STDERR_FILENO) {
+    int replacement = fcntl(
+        input_descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    if (replacement < 0) {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      goto cleanup;
+    }
+    input_descriptor = replacement;
+    input_descriptor_owned = true;
+  }
+  status = native_host_process_pipe(stdout_pipe);
+  if (status != 0) {
+    goto cleanup;
+  }
+  status = native_host_process_pipe(stderr_pipe);
+  if (status != 0) {
+    goto cleanup;
+  }
+  status = native_host_process_set_descriptor_flags(stdout_pipe[0], O_NONBLOCK);
+  if (status != 0) {
+    goto cleanup;
+  }
+  status = native_host_process_set_descriptor_flags(stderr_pipe[0], O_NONBLOCK);
+  if (status != 0) {
+    goto cleanup;
+  }
+  spawn_status = posix_spawn_file_actions_init(&actions);
+  if (spawn_status != 0) {
+    status = (int32_t)spawn_status;
+    goto cleanup;
+  }
+  actions_ready = true;
+  spawn_status = posix_spawn_file_actions_adddup2(
+      &actions, input_descriptor, STDIN_FILENO);
+  if (spawn_status == 0) {
+    spawn_status = posix_spawn_file_actions_adddup2(
+        &actions, stdout_pipe[1], STDOUT_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = posix_spawn_file_actions_adddup2(
+        &actions, stderr_pipe[1], STDERR_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, input_descriptor, STDIN_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, stdout_pipe[0], STDOUT_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, stdout_pipe[1], STDOUT_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, stderr_pipe[0], STDERR_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, stderr_pipe[1], STDERR_FILENO);
+  }
+  if (spawn_status != 0) {
+    status = (int32_t)spawn_status;
+    goto cleanup;
+  }
+  spawn_status = posix_spawnp(&child, argv[0], &actions, NULL, argv, environ);
+  if (spawn_status != 0) {
+    status = (int32_t)spawn_status;
+    child = (pid_t)-1;
+    goto cleanup;
+  }
+  (void)posix_spawn_file_actions_destroy(&actions);
+  actions_ready = false;
+  native_host_process_free_argv(argv, argv_count);
+  argv = NULL;
+  argv_count = (size_t)0U;
+  if (input_descriptor_owned) {
+    (void)close(input_descriptor);
+    input_descriptor_owned = false;
+  }
+  (void)fclose(input);
+  input = NULL;
+  input_descriptor = -1;
+  (void)close(stdout_pipe[1]);
+  stdout_pipe[1] = -1;
+  (void)close(stderr_pipe[1]);
+  stderr_pipe[1] = -1;
+
+  status = 0;
+  while ((stdout_pipe[0] >= 0) || (stderr_pipe[0] >= 0)) {
+    struct pollfd descriptors[2] = {
+        {stdout_pipe[0], POLLIN, 0}, {stderr_pipe[0], POLLIN, 0}};
+    int ready;
+    do {
+      ready = poll(descriptors, (nfds_t)2U, -1);
+    } while ((ready < 0) && (errno == EINTR));
+    if (ready < 0) {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      break;
+    }
+    if ((stdout_pipe[0] >= 0) &&
+        ((descriptors[0].revents & POLLNVAL) != 0)) {
+      status = EBADF;
+      break;
+    }
+    if ((stderr_pipe[0] >= 0) &&
+        ((descriptors[1].revents & POLLNVAL) != 0)) {
+      status = EBADF;
+      break;
+    }
+    if ((stdout_pipe[0] >= 0) &&
+        ((descriptors[0].revents & (POLLIN | POLLHUP | POLLERR)) != 0)) {
+      status = native_host_process_drain(
+          &stdout_pipe[0], stdout_buffer, bound, &stdout_length,
+          &stdout_overflow);
+      if (status != 0) {
+        break;
+      }
+    }
+    if ((stderr_pipe[0] >= 0) &&
+        ((descriptors[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0)) {
+      status = native_host_process_drain(
+          &stderr_pipe[0], stderr_buffer, bound, &stderr_length,
+          &stderr_overflow);
+      if (status != 0) {
+        break;
+      }
+    }
+  }
+  if (status != 0) {
+    if (stdout_pipe[0] >= 0) {
+      (void)close(stdout_pipe[0]);
+      stdout_pipe[0] = -1;
+    }
+    if (stderr_pipe[0] >= 0) {
+      (void)close(stderr_pipe[0]);
+      stderr_pipe[0] = -1;
+    }
+    (void)kill(child, SIGKILL);
+  }
+  {
+    int32_t wait_result = native_host_process_wait(child, &child_status);
+    child = (pid_t)-1;
+    if ((status == 0) && (wait_result != 0)) {
+      status = wait_result;
+    }
+  }
+  if (status != 0) {
+    goto cleanup;
+  }
+  if (stdout_overflow || stderr_overflow) {
+    status = EFBIG;
+    goto cleanup;
+  }
+  if (!native_utf8_valid(stdout_buffer, (uint64_t)stdout_length) ||
+      !native_utf8_valid(stderr_buffer, (uint64_t)stderr_length)) {
+    status = EILSEQ;
+    goto cleanup;
+  }
+  capture = (native_host_process_capture_v0 *)native_arena_alloc(
+      arena, sizeof(*capture), _Alignof(native_host_process_capture_v0));
+  capture->status = child_status;
+  capture->stdout_text = native_text_alloc(
+      arena, (uint64_t)stdout_length, &destination);
+  if (stdout_length != (size_t)0U) {
+    memcpy(destination, stdout_buffer, stdout_length);
+  }
+  capture->stderr_text = native_text_alloc(
+      arena, (uint64_t)stderr_length, &destination);
+  if (stderr_length != (size_t)0U) {
+    memcpy(destination, stderr_buffer, stderr_length);
+  }
+  *out = capture;
+  status = 0;
+
+cleanup:
+  if (actions_ready) {
+    (void)posix_spawn_file_actions_destroy(&actions);
+  }
+  if (child != (pid_t)-1) {
+    (void)kill(child, SIGKILL);
+    (void)native_host_process_wait(child, &child_status);
+  }
+  if (input != NULL) {
+    (void)fclose(input);
+  }
+  if (input_descriptor_owned && (input_descriptor >= 0)) {
+    (void)close(input_descriptor);
+  }
+  if (stdout_pipe[0] >= 0) {
+    (void)close(stdout_pipe[0]);
+  }
+  if (stdout_pipe[1] >= 0) {
+    (void)close(stdout_pipe[1]);
+  }
+  if (stderr_pipe[0] >= 0) {
+    (void)close(stderr_pipe[0]);
+  }
+  if (stderr_pipe[1] >= 0) {
+    (void)close(stderr_pipe[1]);
+  }
+  native_host_process_free_argv(argv, argv_count);
+  free(stdout_buffer);
+  free(stderr_buffer);
+  return status;
 }
 #endif /* __wasi__ */
 

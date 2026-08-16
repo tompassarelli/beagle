@@ -1,0 +1,92 @@
+#lang beagle
+(ns native.edn-codec-test
+  (:require [native.edn :as edn]))
+
+(defn decode-event-contract? [(text String)] Bool
+  (match (edn/decode text)
+    [(EdnDecoded events)
+     (and (= 14 (count events))
+          (match (nth events 0) [(EdnMapStart offset) (= offset 0)] [_ false])
+          (match (nth events 1) [(EdnKeyword offset value) (= value :tx)] [_ false])
+          (match (nth events 2) [(EdnInteger offset value) (= value 1)] [_ false])
+          (match (nth events 4) [(EdnString offset value) (= value "assert")] [_ false])
+          (match (nth events 6) [(EdnVectorStart offset) true] [_ false])
+          (match (nth events 7) [(EdnBoolean offset value) value] [_ false])
+          (match (nth events 8) [(EdnNil offset) true] [_ false])
+          (match (nth events 9) [(EdnInteger offset value) (= value -2)] [_ false])
+          (match (nth events 10) [(EdnVectorEnd offset) true] [_ false])
+          (match (nth events 12) [(EdnString offset value) (= value "line\n☺")] [_ false])
+          (match (nth events 13) [(EdnMapEnd offset) true] [_ false]))]
+    [(EdnDecodeError offset message) false]))
+
+(defn roundtrip [(text String)] String
+  (match (edn/decode text)
+    [(EdnDecoded events)
+     (match (edn/encode events)
+       [(EdnEncoded encoded) encoded]
+       [(EdnEncodeError event-index message)
+        (str "encode-error@" event-index ":" message)])]
+    [(EdnDecodeError offset message)
+     (str "decode-error@" offset ":" message)]))
+
+(defn diagnose [(text String)] String
+  (match (edn/decode text)
+    [(EdnDecoded events) "ok"]
+    [(EdnDecodeError offset message) (str offset ":" message)]))
+
+(defn invalid-map-encode [] String
+  (let [(events (Vec edn/EdnEvent))
+        [(edn/->EdnMapStart 0)
+         (edn/->EdnKeyword 1 :missing)
+         (edn/->EdnMapEnd 2)]]
+    (match (edn/encode events)
+      [(EdnEncoded encoded) encoded]
+      [(EdnEncodeError event-index message)
+       (str event-index ":" message)])))
+
+(defn canonical-contract? [] Bool
+  (and
+    (= "{:tx 1, :op \"assert\", :l \"@mark-a\", :p \"window\", :r \"@w42\", :frame \"wm-mark\", :ts \"1970-01-01T00:00:00Z\"}"
+       (roundtrip
+         " { :tx 1 :op \"assert\" :l \"@mark-a\" :p \"window\" :r \"@w42\" :frame \"wm-mark\" :ts \"1970-01-01T00:00:00Z\" } "))
+    (= "{:tx 2, :op \"assert\", :l \"@w42\", :p \"title\", :r \"Terminal\", :frame \"wm\", :ts \"1970-01-01T00:00:00.000000001Z\"}"
+       (roundtrip
+         "{:tx 2,:op \"assert\",:l \"@w42\",:p \"title\",:r \"Terminal\",:frame \"wm\",:ts \"1970-01-01T00:00:00.000000001Z\"}"))
+    (= "{:a [true nil -2], :title \"line\\n☺\"}"
+       (roundtrip "{:a [true nil -2], :title \"line\\n☺\"}"))
+    (= "[1 -9223372036854775808 9223372036854775807]"
+       (roundtrip "[+001 -9223372036854775808 9223372036854775807]"))))
+
+(defn rejection-contract? [] Bool
+  (and
+    (= "0:expected one EDN value" (diagnose ""))
+    (= "3:map requires an even number of forms" (diagnose "{:a}"))
+    (= "2:unexpected data after EDN value" (diagnose "1 2"))
+    (= "0:keyword requires a name" (diagnose "::auto"))
+    (= "0:unsupported EDN symbol; expected an integer" (diagnose "symbol"))
+    (= "0:unsupported EDN symbol; expected an integer" (diagnose "1.5"))
+    (= "0:unsupported EDN form" (diagnose "(1)"))
+    (= "0:unsupported EDN form" (diagnose "#{1}"))
+    (= "0:unsupported EDN form" (diagnose "'1"))
+    (= "0:integer is outside Int range" (diagnose "9223372036854775808"))
+    (= "2:unexpected map end event" (invalid-map-encode))))
+
+(defn cli-main [(args (Vec String))] Int
+  (cond
+    (and (= 2 (count args)) (= "roundtrip" (nth args 0)))
+    (do (println (roundtrip (nth args 1))) 0)
+
+    (and (= 2 (count args)) (= "diagnose" (nth args 0)))
+    (do (println (diagnose (nth args 1))) 0)
+
+    (and (= 2 (count args)) (= "contract" (nth args 0)))
+    (if (and (decode-event-contract? (nth args 1))
+             (canonical-contract?)
+             (rejection-contract?))
+      0
+      1)
+
+    (and (= 1 (count args)) (= "invalid-encode" (nth args 0)))
+    (do (println (invalid-map-encode)) 0)
+
+    :else 64))

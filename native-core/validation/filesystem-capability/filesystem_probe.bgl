@@ -6,6 +6,20 @@
     [(host.fs/WriteTextAtomicOk) true]
     [(host.fs/WriteTextAtomicError errno) false]))
 
+(defn make-parents-case? [(path String)] Bool
+  (match (host.fs/make-parent-directories path)
+    [(host.fs/MakeParentDirectoriesOk) true]
+    [(host.fs/MakeParentDirectoriesError errno) false]))
+
+(defn append-case? [(path String)] Bool
+  (and
+    (match (host.fs/append-text path "alpha\n")
+      [(host.fs/AppendTextOk) true]
+      [(host.fs/AppendTextError errno) false])
+    (match (host.fs/append-text path "bravo\n")
+      [(host.fs/AppendTextOk) true]
+      [(host.fs/AppendTextError errno) false])))
+
 (defn path-kind-case? [(path String)] Bool
   (match (host.fs/path-kind path)
     [(host.fs/PathKindOk kind) (= kind 1)]
@@ -28,11 +42,15 @@
     [(host.fs/ReadTextBoundedError errno) (= errno 2)]))
 
 (defn probe [(args (Vec String))] Int
-  (if (= (count args) 3)
+  (if (= (count args) 5)
     (let [(directory String) (nth args 0)
           (path String) (nth args 1)
-          (missing String) (nth args 2)]
-      (if (and (write-case? path)
+          (missing String) (nth args 2)
+          (nested String) (nth args 3)
+          (append-path String) (nth args 4)]
+      (if (and (make-parents-case? nested)
+               (append-case? append-path)
+               (write-case? path)
                (path-kind-case? path)
                (read-case? path)
                (list-case? directory)

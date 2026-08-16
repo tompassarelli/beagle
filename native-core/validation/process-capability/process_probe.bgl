@@ -4,3 +4,13 @@
 
 (defn run [(argv (Vec String))] Int
   (host.process/run-inherit argv))
+
+(defn capture [(argv (Vec String))] Int
+  (match (host.process/run-capture argv "exact stdin\n" 4096)
+    [(host.process/CaptureOk status stdout stderr)
+     (if (and (= status 19)
+              (= stdout "stdin=<exact stdin\\n>\n")
+              (= stderr "child-stderr=<captured>\n"))
+       0
+       1)]
+    [(host.process/CaptureError errno) 2]))

@@ -83,6 +83,12 @@ typedef struct native_bytes {
   size_t length;
 } native_bytes;
 
+typedef struct native_host_process_capture_v0 {
+  int64_t status;
+  uint64_t stdout_text;
+  uint64_t stderr_text;
+} native_host_process_capture_v0;
+
 /* The native representation of a (Vec T) value is a POINTER to this header,
    never the header by value: a vector-valued record field is therefore one
    8-byte reference, and the element storage lives in the arena beside it.
@@ -618,6 +624,11 @@ bool native_host_environment_lookup_v0(
     uint64_t name, uint64_t *out);
 int64_t native_host_clock_monotonic_nanoseconds_v0(
     const native_capability *capability);
+int64_t native_host_clock_wall_nanoseconds_v0(
+    const native_capability *capability);
+int32_t native_host_clock_format_iso8601_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t epoch_nanoseconds, uint64_t *out);
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text);
 void native_host_stdout_write_v0(
@@ -638,10 +649,21 @@ int32_t native_host_filesystem_list_directory_bounded_v0(
     int64_t max_entries, native_vec **out);
 int32_t native_host_filesystem_write_text_atomic_v0(
     const native_capability *capability, uint64_t path, uint64_t text);
+int32_t native_host_filesystem_make_parent_directories_v0(
+    const native_capability *capability, uint64_t path);
+int32_t native_host_filesystem_append_text_v0(
+    const native_capability *capability, uint64_t path, uint64_t text);
 /* Runs argv directly through PATH with inherited environment and stdio.
    Result: normal exit 0..255, signal 256+signal, spawn/wait failure -errno. */
 int64_t native_host_process_run_inherit_v0(
     const native_capability *capability, const native_vec *argv);
+/* Captures each output stream up to max_output_bytes while draining both
+   concurrently. Normal exits and signals are CaptureOk; host failures return
+   positive errno and leave out NULL. */
+int32_t native_host_process_run_capture_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *argv, uint64_t stdin_text, int64_t max_output_bytes,
+    void **out);
 /* Listener ownership is inherited at FD 3; this ABI never creates a socket. */
 int32_t native_host_socket_inherited_listener_v0(
     const native_capability *capability, int64_t fd, int64_t *out);

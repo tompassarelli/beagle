@@ -1,0 +1,336 @@
+#lang beagle
+(ns native.edn
+  (:require [beagle.datum-reader :as reader]))
+
+(defunion EdnEvent
+  (EdnMapStart [(offset Int)])
+  (EdnMapEnd [(offset Int)])
+  (EdnVectorStart [(offset Int)])
+  (EdnVectorEnd [(offset Int)])
+  (EdnKeyword [(offset Int) (value Keyword)])
+  (EdnString [(offset Int) (value String)])
+  (EdnInteger [(offset Int) (value Int)])
+  (EdnBoolean [(offset Int) (value Bool)])
+  (EdnNil [(offset Int)]))
+
+(defunion EdnDecodeResult
+  (EdnDecoded [(events (Vec EdnEvent))])
+  (EdnDecodeError [(offset Int) (message String)]))
+
+(defunion EdnEncodeResult
+  (EdnEncoded [(text String)])
+  (EdnEncodeError [(event-index Int) (message String)]))
+
+(defrecord DecodeFrame
+  [(kind Keyword) (items Int)])
+
+(defunion ValueCount
+  (ValueCounted [(frames (Vec DecodeFrame)) (roots Int)])
+  (ValueCountRejected [(token Bool)]))
+
+(defunion EncodeExpectation
+  (EncodeValue [(token Bool)])
+  (EncodeMapKeyFirst [(token Bool)])
+  (EncodeMapKeyNext [(token Bool)])
+  (EncodeMapValue [(token Bool)])
+  (EncodeVectorValueFirst [(token Bool)])
+  (EncodeVectorValueNext [(token Bool)])
+  (EncodeDone [(token Bool)]))
+
+(defunion EncodeStep
+  (ValueEncoded
+    [(fragment String)
+     (expectation EncodeExpectation)
+     (continuations (Vec EncodeExpectation))])
+  (ValueEncodeRejected [(message String)]))
+
+(defn count-value
+  [(frames (Vec DecodeFrame)) (roots Int)] ValueCount
+  (if (empty? frames)
+    (if (= roots 0)
+      (->ValueCounted frames 1)
+      (->ValueCountRejected true))
+    (let [(index Int) (dec (count frames))
+          (frame DecodeFrame) (nth frames index)]
+      (->ValueCounted
+        (assoc frames index
+          (->DecodeFrame
+            (decodeframe-kind frame)
+            (inc (decodeframe-items frame))))
+        roots))))
+
+(defn decimal-digit? [(character String)] Bool
+  (str/includes? "0123456789" character))
+
+(defn integer-token? [(value String)] Bool
+  (let [(length Int) (count value)
+        (start Int)
+        (if (and (> length 0)
+                 (or (= (subs value 0 1) "-")
+                     (= (subs value 0 1) "+")))
+          1
+          0)]
+    (if (>= start length)
+      false
+      (loop [(offset Int) start]
+        (if (>= offset length)
+          true
+          (if (decimal-digit? (subs value offset (inc offset)))
+            (recur (inc offset))
+            false))))))
+
+(defn decode [(text String)] EdnDecodeResult
+  (let [(read reader/DatumRead) (reader/read-events text)
+        (read-error String?) (reader/datumread-error read)]
+    (if (some? read-error)
+      (->EdnDecodeError
+        (reader/datumread-error-offset read)
+        (or read-error "invalid EDN"))
+      (loop [(remaining (Vec reader/ReaderEvent))
+             (reader/datumread-events read)
+             (events (Vec EdnEvent)) []
+             (frames (Vec DecodeFrame)) []
+             (roots Int) 0]
+        (if (empty? remaining)
+          (if (= roots 1)
+            (->EdnDecoded events)
+            (->EdnDecodeError (count text) "expected one EDN value"))
+          (let [(event reader/ReaderEvent) (first remaining)
+                (kind Keyword) (reader/readerevent-kind event)
+                (value String) (reader/readerevent-value event)
+                (offset Int) (reader/readerevent-offset event)]
+            (cond
+              (or (= kind :map/open) (= kind :vector/open))
+              (match (count-value frames roots)
+                [(ValueCountRejected token)
+                 (->EdnDecodeError offset
+                   "unexpected data after EDN value")]
+                [(ValueCounted counted-frames counted-roots)
+                 (let [(frame-kind Keyword)
+                       (if (= kind :map/open) :map :vector)
+                       (semantic EdnEvent)
+                       (if (= kind :map/open)
+                         (->EdnMapStart offset)
+                         (->EdnVectorStart offset))]
+                   (recur (rest remaining)
+                     (conj events semantic)
+                     (conj counted-frames (->DecodeFrame frame-kind 0))
+                     counted-roots))])
+
+              (= kind :map/close)
+              (if (empty? frames)
+                (->EdnDecodeError offset "unexpected map end event")
+                (let [(frame DecodeFrame) (peek frames)]
+                  (cond
+                    (not= (decodeframe-kind frame) :map)
+                    (->EdnDecodeError offset "unexpected map end event")
+
+                    (not= (mod (decodeframe-items frame) 2) 0)
+                    (->EdnDecodeError offset
+                      "map requires an even number of forms")
+
+                    :else
+                    (recur (rest remaining)
+                      (conj events (->EdnMapEnd offset))
+                      (pop frames) roots))))
+
+              (= kind :vector/close)
+              (if (or (empty? frames)
+                      (not= (decodeframe-kind (peek frames)) :vector))
+                (->EdnDecodeError offset "unexpected vector end event")
+                (recur (rest remaining)
+                  (conj events (->EdnVectorEnd offset))
+                  (pop frames) roots))
+
+              (= kind :keyword)
+              (if (or (<= (count value) 1)
+                      (and (> (count value) 1)
+                           (= (subs value 1 2) ":")))
+                (->EdnDecodeError offset "keyword requires a name")
+                (match (count-value frames roots)
+                  [(ValueCountRejected token)
+                   (->EdnDecodeError offset
+                     "unexpected data after EDN value")]
+                  [(ValueCounted counted-frames counted-roots)
+                   (recur (rest remaining)
+                     (conj events
+                       (->EdnKeyword offset
+                         (keyword (subs value 1 (count value)))))
+                     counted-frames counted-roots)]))
+
+              (= kind :string)
+              (match (count-value frames roots)
+                [(ValueCountRejected token)
+                 (->EdnDecodeError offset
+                   "unexpected data after EDN value")]
+                [(ValueCounted counted-frames counted-roots)
+                 (recur (rest remaining)
+                   (conj events (->EdnString offset value))
+                   counted-frames counted-roots)])
+
+              (= kind :boolean)
+              (match (count-value frames roots)
+                [(ValueCountRejected token)
+                 (->EdnDecodeError offset
+                   "unexpected data after EDN value")]
+                [(ValueCounted counted-frames counted-roots)
+                 (recur (rest remaining)
+                   (conj events (->EdnBoolean offset (= value "true")))
+                   counted-frames counted-roots)])
+
+              (= kind :nil)
+              (match (count-value frames roots)
+                [(ValueCountRejected token)
+                 (->EdnDecodeError offset
+                   "unexpected data after EDN value")]
+                [(ValueCounted counted-frames counted-roots)
+                 (recur (rest remaining)
+                   (conj events (->EdnNil offset))
+                   counted-frames counted-roots)])
+
+              (= kind :symbol)
+              (if (not (integer-token? value))
+                (->EdnDecodeError offset
+                  "unsupported EDN symbol; expected an integer")
+                (let [(parsed (U Int Nil)) (parse-long value)]
+                  (if (nil? parsed)
+                    (->EdnDecodeError offset "integer is outside Int range")
+                    (match (count-value frames roots)
+                      [(ValueCountRejected token)
+                       (->EdnDecodeError offset
+                         "unexpected data after EDN value")]
+                      [(ValueCounted counted-frames counted-roots)
+                       (recur (rest remaining)
+                         (conj events (->EdnInteger offset parsed))
+                         counted-frames counted-roots)]))))
+
+              :else
+              (->EdnDecodeError offset "unsupported EDN form"))))))))
+
+(defn encode-value-step
+  [(event EdnEvent)
+   (prefix String)
+   (continuation EncodeExpectation)
+   (continuations (Vec EncodeExpectation))]
+  EncodeStep
+  (match event
+    [(EdnMapStart offset)
+     (->ValueEncoded (str prefix "{") (->EncodeMapKeyFirst true)
+       (conj continuations continuation))]
+    [(EdnVectorStart offset)
+     (->ValueEncoded (str prefix "[") (->EncodeVectorValueFirst true)
+       (conj continuations continuation))]
+    [(EdnKeyword offset value)
+     (->ValueEncoded (str prefix value) continuation continuations)]
+    [(EdnString offset value)
+     (->ValueEncoded (str prefix (reader/render-string-literal value))
+       continuation continuations)]
+    [(EdnInteger offset value)
+     (->ValueEncoded (str prefix value) continuation continuations)]
+    [(EdnBoolean offset value)
+     (->ValueEncoded (str prefix (if value "true" "false"))
+       continuation continuations)]
+    [(EdnNil offset)
+     (->ValueEncoded (str prefix "nil") continuation continuations)]
+    [(EdnMapEnd offset)
+     (->ValueEncodeRejected "unexpected map end event")]
+    [(EdnVectorEnd offset)
+     (->ValueEncodeRejected "unexpected vector end event")]))
+
+(defn encode [(events (Vec EdnEvent))] EdnEncodeResult
+  (loop [(index Int) 0
+         (result String) ""
+         (expectation EncodeExpectation) (->EncodeValue true)
+         (continuations (Vec EncodeExpectation)) [(->EncodeDone true)]]
+    (match expectation
+      [(EncodeValue token)
+       (if (>= index (count events))
+         (->EdnEncodeError index "expected an EDN value event")
+         (match (encode-value-step (nth events index) ""
+                  (peek continuations) (pop continuations))
+           [(ValueEncoded fragment next-expectation next-continuations)
+            (recur (inc index) (str result fragment)
+              next-expectation next-continuations)]
+           [(ValueEncodeRejected message)
+            (->EdnEncodeError index message)]))]
+
+      [(EncodeMapKeyFirst token)
+       (if (>= index (count events))
+         (->EdnEncodeError index "unterminated map event sequence")
+         (match (nth events index)
+           [(EdnMapEnd offset)
+            (recur (inc index) (str result "}")
+              (peek continuations) (pop continuations))]
+           [event
+            (match (encode-value-step event ""
+                     (->EncodeMapValue true) continuations)
+              [(ValueEncoded fragment next-expectation next-continuations)
+               (recur (inc index) (str result fragment)
+                 next-expectation next-continuations)]
+              [(ValueEncodeRejected message)
+               (->EdnEncodeError index message)])]))]
+
+      [(EncodeMapKeyNext token)
+       (if (>= index (count events))
+         (->EdnEncodeError index "unterminated map event sequence")
+         (match (nth events index)
+           [(EdnMapEnd offset)
+            (recur (inc index) (str result "}")
+              (peek continuations) (pop continuations))]
+           [event
+            (match (encode-value-step event ", "
+                     (->EncodeMapValue true) continuations)
+              [(ValueEncoded fragment next-expectation next-continuations)
+               (recur (inc index) (str result fragment)
+                 next-expectation next-continuations)]
+              [(ValueEncodeRejected message)
+               (->EdnEncodeError index message)])]))]
+
+      [(EncodeMapValue token)
+       (if (>= index (count events))
+         (->EdnEncodeError index "map key has no value event")
+         (match (encode-value-step (nth events index) " "
+                  (->EncodeMapKeyNext true) continuations)
+           [(ValueEncoded fragment next-expectation next-continuations)
+            (recur (inc index) (str result fragment)
+              next-expectation next-continuations)]
+           [(ValueEncodeRejected message)
+            (->EdnEncodeError index message)]))]
+
+      [(EncodeVectorValueFirst token)
+       (if (>= index (count events))
+         (->EdnEncodeError index "unterminated vector event sequence")
+         (match (nth events index)
+           [(EdnVectorEnd offset)
+            (recur (inc index) (str result "]")
+              (peek continuations) (pop continuations))]
+           [event
+            (match (encode-value-step event ""
+                     (->EncodeVectorValueNext true) continuations)
+              [(ValueEncoded fragment next-expectation next-continuations)
+               (recur (inc index) (str result fragment)
+                 next-expectation next-continuations)]
+              [(ValueEncodeRejected message)
+               (->EdnEncodeError index message)])]))]
+
+      [(EncodeVectorValueNext token)
+       (if (>= index (count events))
+         (->EdnEncodeError index "unterminated vector event sequence")
+         (match (nth events index)
+           [(EdnVectorEnd offset)
+            (recur (inc index) (str result "]")
+              (peek continuations) (pop continuations))]
+           [event
+            (match (encode-value-step event " "
+                     (->EncodeVectorValueNext true) continuations)
+              [(ValueEncoded fragment next-expectation next-continuations)
+               (recur (inc index) (str result fragment)
+                 next-expectation next-continuations)]
+              [(ValueEncodeRejected message)
+               (->EdnEncodeError index message)])]))]
+
+      [(EncodeDone token)
+       (if (= index (count events))
+         (->EdnEncoded result)
+         (->EdnEncodeError index
+           "unexpected event after complete EDN value"))])))

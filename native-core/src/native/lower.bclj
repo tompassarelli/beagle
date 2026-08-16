@@ -1043,7 +1043,55 @@
    (filesystem-paths-result-type) (filesystem-paths-outcome-type)
    (filesystem-nil-result-type) (filesystem-nil-outcome-type)])
 
-(defn source-filesystem-variant-role
+(defn process-capture-type-id [] core/NativeId
+  (type-id "HostProcessCapture"))
+
+(defn process-capture-reference-type-id [] core/NativeId
+  (type-id "HostProcessCaptureReference"))
+
+(defn process-capture-result-type-id [] core/NativeId
+  (type-id "HostProcessCaptureResult"))
+
+(defn process-capture-outcome-type-id [] core/NativeId
+  (type-id "HostProcessCaptureOutcome"))
+
+(defn process-capture-type [] core/TypeDef
+  (let [(record-key String) "host.process/CaptureOk"]
+    (core/->TypeDef (process-capture-type-id) "HostProcessCapture"
+      (core/->RecordType
+        [(core/->TypeField (field-id record-key "status") "status"
+           (type-id "Int"))
+         (core/->TypeField (field-id record-key "stdout") "stdout"
+           (type-id "String"))
+         (core/->TypeField (field-id record-key "stderr") "stderr"
+           (type-id "String"))]))))
+
+(defn process-capture-reference-type [] core/TypeDef
+  (core/->TypeDef (process-capture-reference-type-id)
+    "HostProcessCaptureReference"
+    (core/->ReferenceType (process-capture-type-id))))
+
+(defn process-capture-result-type [] core/TypeDef
+  (core/->TypeDef (process-capture-result-type-id) "HostProcessCaptureResult"
+    (core/->UnionType
+      [(core/->TypeVariant
+         (variant-id "HostProcessCaptureResult" "ok") "ok"
+         (process-capture-reference-type-id))
+       (core/->TypeVariant
+         (variant-id "HostProcessCaptureResult" "error") "error"
+         (type-id "Int"))])))
+
+(defn process-capture-outcome-type [] core/TypeDef
+  (core/->TypeDef (process-capture-outcome-type-id) "HostProcessCaptureOutcome"
+    (core/->OutcomeType (process-capture-reference-type-id)
+      (process-capture-result-type-id))))
+
+(defn process-outcome-types [] (Vec core/TypeDef)
+  [(i64-type) (text-type)
+   (process-capture-type) (process-capture-reference-type)
+   (process-capture-result-type) (process-capture-outcome-type)])
+
+(defn source-host-variant-role
   [(target-type core/NativeId) (name String)] String
   (cond
     (and (same-id? target-type (filesystem-int-outcome-type-id))
@@ -1062,6 +1110,22 @@
       (= name "host.fs/WriteTextAtomicOk")) "ok"
     (and (same-id? target-type (filesystem-nil-outcome-type-id))
       (= name "host.fs/WriteTextAtomicError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/MakeParentDirectoriesOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/MakeParentDirectoriesError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/AppendTextOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/AppendTextError")) "error"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.clock/FormatIso8601Ok")) "ok"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.clock/FormatIso8601Error")) "error"
+    (and (same-id? target-type (process-capture-outcome-type-id))
+      (= name "host.process/CaptureOk")) "ok"
+    (and (same-id? target-type (process-capture-outcome-type-id))
+      (= name "host.process/CaptureError")) "error"
     :else name))
 
 (defn type-def-in? [(definitions (Vec core/TypeDef)) (id core/NativeId)] Bool
@@ -1180,6 +1244,22 @@
     (= "host.fs/WriteTextAtomicResult" spelling)
     (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
       (filesystem-outcome-types) [] true)
+
+    (= "host.fs/MakeParentDirectoriesResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/AppendTextResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.clock/FormatIso8601Result" spelling)
+    (->TypeResolutionV0 (filesystem-text-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.process/CaptureResult" spelling)
+    (->TypeResolutionV0 (process-capture-outcome-type-id)
+      (process-outcome-types) [] true)
 
     (= "Any" spelling)
     (->TypeResolutionV0
@@ -1968,7 +2048,19 @@
   (lower-id "extern" ["host-clock-monotonic-nanoseconds-v0"]))
 
 (defn host-clock-callee? [(name String)] Bool
-  (= name "monotonic-nanoseconds"))
+  (or (= name "monotonic-nanoseconds")
+      (= name "host.clock/wall-nanoseconds")
+      (= name "host.clock/format-iso8601")))
+
+(defn host-wall-clock-abi-id [(operation String)] core/NativeId
+  (lower-id "abi" [(str "host-clock-" operation "-v0")]))
+
+(defn host-wall-clock-function-id [(operation String)] core/NativeId
+  (lower-id "extern" [(str "host-clock-" operation "-v0")]))
+
+(defn host-wall-clock-abi-id? [(candidate core/NativeId)] Bool
+  (or (same-id? candidate (host-wall-clock-abi-id "wall-nanoseconds"))
+      (same-id? candidate (host-wall-clock-abi-id "format-iso8601"))))
 
 (defn host-stdout-effect-id [] core/NativeId
   (lower-id "effect" ["host-stdout-write"]))
@@ -2026,7 +2118,9 @@
   (or (= name "host.fs/read-text-bounded")
       (= name "host.fs/list-directory-bounded")
       (= name "host.fs/path-kind")
-      (= name "host.fs/write-text-atomic")))
+      (= name "host.fs/write-text-atomic")
+      (= name "host.fs/make-parent-directories")
+      (= name "host.fs/append-text")))
 
 (defn host-filesystem-operation [(name String)] String
   (cond
@@ -2034,13 +2128,18 @@
     (= name "host.fs/list-directory-bounded") "list-directory-bounded"
     (= name "host.fs/path-kind") "path-kind"
     (= name "host.fs/write-text-atomic") "write-text-atomic"
+    (= name "host.fs/make-parent-directories") "make-parent-directories"
+    (= name "host.fs/append-text") "append-text"
     :else ""))
 
 (defn host-filesystem-abi-id? [(candidate core/NativeId)] Bool
   (or (same-id? candidate (host-filesystem-abi-id "read-text-bounded"))
       (same-id? candidate (host-filesystem-abi-id "list-directory-bounded"))
       (same-id? candidate (host-filesystem-abi-id "path-kind"))
-      (same-id? candidate (host-filesystem-abi-id "write-text-atomic"))))
+      (same-id? candidate (host-filesystem-abi-id "write-text-atomic"))
+      (same-id? candidate
+        (host-filesystem-abi-id "make-parent-directories"))
+      (same-id? candidate (host-filesystem-abi-id "append-text"))))
 
 (defn host-process-effect-id [] core/NativeId
   (lower-id "effect" ["host-process-run-inherit-v0"]))
@@ -2054,8 +2153,19 @@
 (defn host-process-function-id [] core/NativeId
   (lower-id "extern" ["host-process-run-inherit-v0"]))
 
+(defn host-process-capture-abi-id [] core/NativeId
+  (lower-id "abi" ["host-process-run-capture-v0"]))
+
+(defn host-process-capture-function-id [] core/NativeId
+  (lower-id "extern" ["host-process-run-capture-v0"]))
+
+(defn host-process-abi-id? [(candidate core/NativeId)] Bool
+  (or (same-id? candidate (host-process-abi-id))
+      (same-id? candidate (host-process-capture-abi-id))))
+
 (defn host-process-callee? [(name String)] Bool
-  (= name "host.process/run-inherit"))
+  (or (= name "host.process/run-inherit")
+      (= name "host.process/run-capture")))
 
 (defn host-socket-effect-id [] core/NativeId
   (lower-id "effect" ["host-socket-peer-lifecycle-v0"]))
@@ -8176,11 +8286,13 @@
       (text-operand? (nth value-types 0))
       (same-id? (nth value-types 1) (int-type-id)))
 
-    (= callee "host.fs/path-kind")
+    (or (= callee "host.fs/path-kind")
+        (= callee "host.fs/make-parent-directories"))
     (and (= 1 (count value-types))
       (text-operand? (nth value-types 0)))
 
-    (= callee "host.fs/write-text-atomic")
+    (or (= callee "host.fs/write-text-atomic")
+        (= callee "host.fs/append-text"))
     (and (= 2 (count value-types))
       (text-operand? (nth value-types 0))
       (text-operand? (nth value-types 1)))
@@ -8207,7 +8319,7 @@
   (if (not (host-filesystem-operands-valid? callee value-types))
     (fail-result state
       (str "TODO-NATIVE-HOST-FILESYSTEM-OPERANDS: " callee
-        " needs Text paths; bounded reads and listings also need an Int bound"))
+        " needs Text paths and payloads; bounded reads and listings also need an Int bound"))
     (let [(result-id core/NativeId)
           (state-id state owner "host-filesystem")
           (result-type core/NativeId) (host-filesystem-result-type callee)
@@ -8260,21 +8372,36 @@
    (values (Vec core/NativeId))
    (value-types (Vec core/NativeId))]
   ExprResultV0
-  (if (not (and (= callee "host.process/run-inherit")
+  (if (not
+        (or
+          (and (= callee "host.process/run-inherit")
             (= 1 (count value-types))
-            (text-vector-value? types (nth value-types 0))))
+            (text-vector-value? types (nth value-types 0)))
+          (and (= callee "host.process/run-capture")
+            (= 3 (count value-types))
+            (text-vector-value? types (nth value-types 0))
+            (text-operand? (nth value-types 1))
+            (same-id? (nth value-types 2) (int-type-id)))))
     (fail-result state
-      "TODO-NATIVE-HOST-PROCESS-OPERANDS: host.process/run-inherit needs exactly one (Vec String) argv")
-    (let [(result-id core/NativeId) (state-id state owner "host-process")]
+      "TODO-NATIVE-HOST-PROCESS-OPERANDS: run-inherit needs (Vec String); run-capture needs (Vec String), String stdin, and Int output bound")
+    (let [(capture Bool) (= callee "host.process/run-capture")
+          (result-id core/NativeId) (state-id state owner "host-process")]
       (->ExprResultV0
         (state-emit (state-bump state)
           (core/->ExternCallInstruction
-            (core/->SsaValueV0 result-id (int-type-id))
-            (host-process-abi-id)
+            (core/->SsaValueV0 result-id
+              (if capture
+                (process-capture-outcome-type-id)
+                (int-type-id)))
+            (if capture
+              (host-process-capture-abi-id)
+              (host-process-abi-id))
             values
-            nil
+            (if capture (arena-value-id owner) nil)
             (core/->TokenFlowV0 [] [])))
-         result-id (int-type-id) false))))
+         result-id
+         (if capture (process-capture-outcome-type-id) (int-type-id))
+         false))))
 
 (defn lower-int-step
   [(types (Vec core/TypeDef))
@@ -10377,7 +10504,7 @@
    (target-type core/NativeId)
    (name String)]
   (U core/TypeVariant Nil)
-  (let [(wanted String) (source-filesystem-variant-role target-type name)
+  (let [(wanted String) (source-host-variant-role target-type name)
         (variants (Vec core/TypeVariant))
         (union-variants-of types target-type)]
     (loop [(position Int) 0]
@@ -14590,7 +14717,8 @@
                 (lower-host-text-output-call owner current callee
                   (host-stderr-write-line-abi-id) values value-types)
 
-                (and (host-clock-callee? callee) (= 0 (count values)))
+                (and (= callee "monotonic-nanoseconds")
+                  (= 0 (count values)))
                 (let [(result-id core/NativeId)
                       (state-id current owner "host-clock")]
                   (->ExprResultV0
@@ -14603,9 +14731,39 @@
                         (core/->TokenFlowV0 [] [])))
                     result-id (int-type-id) false))
 
+                (and (= callee "host.clock/wall-nanoseconds")
+                  (= 0 (count values)))
+                (let [(result-id core/NativeId)
+                      (state-id current owner "host-wall-clock")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ExternCallInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (host-wall-clock-abi-id "wall-nanoseconds")
+                        []
+                        nil
+                        (core/->TokenFlowV0 [] [])))
+                    result-id (int-type-id) false))
+
+                (and (= callee "host.clock/format-iso8601")
+                  (= 1 (count values))
+                  (same-id? (nth value-types 0) (int-type-id)))
+                (let [(result-id core/NativeId)
+                      (state-id current owner "host-clock-format")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ExternCallInstruction
+                        (core/->SsaValueV0 result-id
+                          (filesystem-text-outcome-type-id))
+                        (host-wall-clock-abi-id "format-iso8601")
+                        values
+                        (arena-value-id owner)
+                        (core/->TokenFlowV0 [] [])))
+                    result-id (filesystem-text-outcome-type-id) false))
+
                 (host-clock-callee? callee)
                 (fail-result current
-                  "TODO-NATIVE-HOST-CLOCK-ARITY: monotonic-nanoseconds takes no operands")
+                  "TODO-NATIVE-HOST-CLOCK-OPERANDS: monotonic and wall clocks take no operands; ISO formatting takes one Int epoch nanoseconds")
 
                 (and (host-environment-callee? callee)
                   (= 1 (count values))
@@ -16649,8 +16807,8 @@
           (some
             (fn [(instruction core/Instruction)] Bool
               (and (instance? native.core.ExternCallInstruction instruction)
-                (same-id? (core/externcallinstruction-abi-id instruction)
-                  (host-process-abi-id))))
+                (host-process-abi-id?
+                  (core/externcallinstruction-abi-id instruction))))
             (core/basicblock-instructions block))))
       blocks)))
 
@@ -16675,8 +16833,11 @@
           (some
             (fn [(instruction core/Instruction)] Bool
               (and (instance? native.core.ExternCallInstruction instruction)
-                (same-id? (core/externcallinstruction-abi-id instruction)
-                  (host-clock-abi-id))))
+                (or
+                  (same-id? (core/externcallinstruction-abi-id instruction)
+                    (host-clock-abi-id))
+                  (host-wall-clock-abi-id?
+                    (core/externcallinstruction-abi-id instruction)))))
             (core/basicblock-instructions block))))
       blocks)))
 
@@ -16733,6 +16894,13 @@
   (match readiness
     [(NativeReadyV0 operation) false]
     [(NativeLoweredV0 entry-block blocks) (blocks-use-host-process? blocks)]
+    [(NativeTodoV0 code detail) false]))
+
+(defn readiness-calls-abi?
+  [(readiness NativeReadinessV0) (abi-id core/NativeId)] Bool
+  (match readiness
+    [(NativeReadyV0 operation) false]
+    [(NativeLoweredV0 entry-block blocks) (blocks-call-abi? blocks abi-id)]
     [(NativeTodoV0 code detail) false]))
 
 (defn with-effect
@@ -16897,13 +17065,21 @@
                 (checked-arithmetic-types))
               (functionresolutionv0-definitions resolution))]
         (let [(filesystem-definitions (Vec core/TypeDef))
-              (if (readiness-uses-host-filesystem? readiness)
+            (if (or (readiness-uses-host-filesystem? readiness)
+                    (readiness-calls-abi? readiness
+                      (host-wall-clock-abi-id "format-iso8601")))
                 (append-type-defs checked-definitions
                   (filesystem-outcome-types))
                 checked-definitions)]
-          (if (readiness-uses-host-socket? readiness)
-            (append-type-defs filesystem-definitions (socket-outcome-types))
-            filesystem-definitions)))
+          (let [(process-definitions (Vec core/TypeDef))
+                (if (readiness-calls-abi? readiness
+                      (host-process-capture-abi-id))
+                  (append-type-defs filesystem-definitions
+                    (process-outcome-types))
+                  filesystem-definitions)]
+            (if (readiness-uses-host-socket? readiness)
+              (append-type-defs process-definitions (socket-outcome-types))
+              process-definitions))))
       (if (ready-function? lowered)
         (functionresolutionv0-diagnostics resolution)
         (conj (functionresolutionv0-diagnostics resolution)
@@ -17608,13 +17784,20 @@
               (index-has-callee? index "host.fs/path-kind")
               (index-has-callee? index "host.fs/read-text-bounded")
               (index-has-callee? index "host.fs/list-directory-bounded")
-              (index-has-callee? index "host.fs/write-text-atomic"))
+              (index-has-callee? index "host.fs/write-text-atomic")
+              (index-has-callee? index "host.fs/make-parent-directories")
+              (index-has-callee? index "host.fs/append-text")
+              (index-has-callee? index "host.clock/format-iso8601"))
           (append-type-defs base-source-types (filesystem-outcome-types))
           base-source-types)
+        (process-source-types (Vec core/TypeDef))
+        (if (index-has-callee? index "host.process/run-capture")
+          (append-type-defs source-types (process-outcome-types))
+          source-types)
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)
         (function-resolutions (Vec FunctionResolutionV0))
         (attach-bodies
-          (->BodyEnvV0 index source-types signatures function-sources globals)
+          (->BodyEnvV0 index process-source-types signatures function-sources globals)
           signature-resolutions function-sources)
         (functions (Vec TypedFunctionV0))
         (settle-effects (settle-readiness (collect-functions function-resolutions)))
@@ -17628,7 +17811,7 @@
         ;; Bodies contribute types of their own (checked arithmetic answers an
         ;; Outcome), so the program's type set closes only after they lower.
         (body-types (Vec core/TypeDef))
-        (collect-function-types source-types function-resolutions)
+        (collect-function-types process-source-types function-resolutions)
         (arena-types (Vec core/TypeDef))
         (if (any-function-uses-arena? functions)
           (append-type-def body-types (arena-handle-type))
@@ -18679,23 +18862,84 @@
       (borrowed-abi-value "text" (text-type-id))]
      (filesystem-nil-outcome-type-id)
      false
+     layouts-digest)
+   (host-filesystem-abi
+     "make-parent-directories"
+     "native_host_filesystem_make_parent_directories_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     (filesystem-nil-outcome-type-id)
+     false
+     layouts-digest)
+   (host-filesystem-abi
+     "append-text"
+     "native_host_filesystem_append_text_v0"
+     [(borrowed-abi-value "path" (text-type-id))
+      (borrowed-abi-value "text" (text-type-id))]
+     (filesystem-nil-outcome-type-id)
+     false
      layouts-digest)])
 
-(defn host-process-abi [(layouts-digest String)] core/AbiDeclV0
-  (core/->AbiDeclV0
-    (host-process-abi-id)
-    (host-process-function-id)
-    "native_host_process_run_inherit_v0"
-    (core/->AbiImportV0 true)
-    (core/->RestrictedCAbiV0 true)
-    [(borrowed-abi-value "argv" (closed-vector-type-id (text-type-id)))]
-    (core/->AbiValueV0 "status" (int-type-id)
-      (core/->OwnedV0 true) nil)
-    (type-id "LowerFailure")
-    [(host-process-effect-id)]
-    [(host-process-capability-id)]
-    "v0"
-    layouts-digest))
+(defn host-process-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
+  [(core/->AbiDeclV0
+     (host-process-abi-id)
+     (host-process-function-id)
+     "native_host_process_run_inherit_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     [(borrowed-abi-value "argv" (closed-vector-type-id (text-type-id)))]
+     (core/->AbiValueV0 "status" (int-type-id)
+       (core/->OwnedV0 true) nil)
+     (type-id "LowerFailure")
+     [(host-process-effect-id)]
+     [(host-process-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-capture-abi-id)
+     (host-process-capture-function-id)
+     "native_host_process_run_capture_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCOutcomeOutAbiV0 true)
+     [(borrowed-abi-value "argv" (closed-vector-type-id (text-type-id)))
+      (borrowed-abi-value "stdin" (text-type-id))
+      (borrowed-abi-value "max-output-bytes" (int-type-id))]
+     (core/->AbiValueV0 "result" (process-capture-outcome-type-id)
+       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+     (type-id "LowerFailure")
+     [(allocate-effect-id) (host-process-effect-id)]
+     [(allocate-capability-id) (host-process-capability-id)]
+     "v0"
+     layouts-digest)])
+
+(defn host-wall-clock-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
+  [(core/->AbiDeclV0
+     (host-wall-clock-abi-id "wall-nanoseconds")
+     (host-wall-clock-function-id "wall-nanoseconds")
+     "native_host_clock_wall_nanoseconds_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     []
+     (core/->AbiValueV0 "epoch-nanoseconds" (int-type-id)
+       (core/->OwnedV0 true) nil)
+     (type-id "LowerFailure")
+     [(host-clock-effect-id)]
+     [(host-clock-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-wall-clock-abi-id "format-iso8601")
+     (host-wall-clock-function-id "format-iso8601")
+     "native_host_clock_format_iso8601_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCOutcomeOutAbiV0 true)
+     [(borrowed-abi-value "epoch-nanoseconds" (int-type-id))]
+     (core/->AbiValueV0 "result" (filesystem-text-outcome-type-id)
+       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+     (type-id "LowerFailure")
+     [(allocate-effect-id) (host-clock-effect-id)]
+     [(allocate-capability-id) (host-clock-capability-id)]
+     "v0"
+     layouts-digest)])
 
 (defn slice-abis
   [(functions (Vec TypedFunctionV0))
@@ -18731,18 +18975,60 @@
               (host-stderr-write-line-abi-id))
           (conj with-stderr-write (host-stderr-write-line-abi digest))
           with-stderr-write)
-        (with-filesystem (Vec core/AbiDeclV0))
-        (if (any-function-uses-host-filesystem? functions)
-          (vec (concat with-stderr (host-filesystem-abis digest)))
+        (filesystem-abis (Vec core/AbiDeclV0))
+        (host-filesystem-abis digest)
+        (filesystem-base-used Bool)
+        (or
+          (any-function-calls-abi? functions
+            (host-filesystem-abi-id "read-text-bounded"))
+          (any-function-calls-abi? functions
+            (host-filesystem-abi-id "list-directory-bounded"))
+          (any-function-calls-abi? functions
+            (host-filesystem-abi-id "path-kind"))
+          (any-function-calls-abi? functions
+            (host-filesystem-abi-id "write-text-atomic")))
+        (with-filesystem-base (Vec core/AbiDeclV0))
+        (if filesystem-base-used
+          (vec (concat with-stderr
+            [(nth filesystem-abis 0) (nth filesystem-abis 1)
+             (nth filesystem-abis 2) (nth filesystem-abis 3)]))
           with-stderr)
-        (with-process (Vec core/AbiDeclV0))
-        (if (any-function-uses-host-process? functions)
-          (conj with-filesystem (host-process-abi digest))
+        (with-filesystem-parents (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "make-parent-directories"))
+          (conj with-filesystem-base (nth filesystem-abis 4))
+          with-filesystem-base)
+        (with-filesystem (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "append-text"))
+          (conj with-filesystem-parents (nth filesystem-abis 5))
+          with-filesystem-parents)
+        (process-abis (Vec core/AbiDeclV0)) (host-process-abis digest)
+        (with-process-inherit (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions (host-process-abi-id))
+          (conj with-filesystem (nth process-abis 0))
           with-filesystem)
-        (with-clock (Vec core/AbiDeclV0))
-        (if (any-function-uses-host-clock? functions)
+        (with-process (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-process-capture-abi-id))
+          (conj with-process-inherit (nth process-abis 1))
+          with-process-inherit)
+        (with-monotonic-clock (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions (host-clock-abi-id))
           (conj with-process (host-clock-abi digest))
-          with-process)]
+          with-process)
+        (wall-clock-abis (Vec core/AbiDeclV0))
+        (host-wall-clock-abis digest)
+        (with-wall-clock (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-wall-clock-abi-id "wall-nanoseconds"))
+          (conj with-monotonic-clock (nth wall-clock-abis 0))
+          with-monotonic-clock)
+        (with-clock (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-wall-clock-abi-id "format-iso8601"))
+          (conj with-wall-clock (nth wall-clock-abis 1))
+          with-wall-clock)]
     (if (any-function-uses-host-socket? functions)
       (vec (concat with-clock (host-socket-abis digest)))
       with-clock)))
@@ -20106,9 +20392,30 @@
                      (host-stderr-write-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-stderr-write-line-abi-id)) 1 0)
-               (if (any-function-uses-host-filesystem? typed-functions) 4 0)
-               (if (any-function-uses-host-process? typed-functions) 1 0)
-               (if (any-function-uses-host-clock? typed-functions) 1 0)
+               (if (or
+                     (any-function-calls-abi? typed-functions
+                       (host-filesystem-abi-id "read-text-bounded"))
+                     (any-function-calls-abi? typed-functions
+                       (host-filesystem-abi-id "list-directory-bounded"))
+                     (any-function-calls-abi? typed-functions
+                       (host-filesystem-abi-id "path-kind"))
+                     (any-function-calls-abi? typed-functions
+                       (host-filesystem-abi-id "write-text-atomic")))
+                 4 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "make-parent-directories")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "append-text")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-process-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-process-capture-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-clock-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-wall-clock-abi-id "wall-nanoseconds")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-wall-clock-abi-id "format-iso8601")) 1 0)
                (if (any-function-uses-host-socket? typed-functions) 5 0))
             (count abis)))
         (tokens-discharged Bool)

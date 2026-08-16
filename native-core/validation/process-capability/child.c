@@ -10,6 +10,30 @@ int main(int argc, char **argv) {
   if ((argc == 2) && (strcmp(argv[1], "signal") == 0)) {
     return raise(SIGTERM) == 0 ? 99 : 98;
   }
+  if ((argc == 2) && (strcmp(argv[1], "capture") == 0)) {
+    char input[32];
+    size_t amount = fread(input, (size_t)1U, sizeof input, stdin);
+    if ((amount != (size_t)12U) ||
+        (memcmp(input, "exact stdin\n", (size_t)12U) != 0) ||
+        !feof(stdin)) {
+      return 96;
+    }
+    (void)fputs("stdin=<exact stdin\\n>\n", stdout);
+    (void)fputs("child-stderr=<captured>\n", stderr);
+    return 19;
+  }
+  if ((argc == 2) && (strcmp(argv[1], "capture-large") == 0)) {
+    size_t index;
+    for (index = (size_t)0U; index < (size_t)8192U; ++index) {
+      (void)fputc('o', stdout);
+      (void)fputc('e', stderr);
+    }
+    return 0;
+  }
+  if ((argc == 2) && (strcmp(argv[1], "capture-invalid") == 0)) {
+    (void)fputc(0xff, stdout);
+    return 0;
+  }
   if ((argc != 3) || (inherited == NULL)) {
     return 97;
   }

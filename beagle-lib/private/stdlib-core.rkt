@@ -57,6 +57,11 @@
     (list (type-app 'Vec (list (p 'Int))) (p 'Int))
     #f
     (p 'NativeBytes))
+   'parse-long
+   (type-fn
+    (list (p 'String))
+    #f
+    (type-union (list (p 'Int) (p 'Nil))))
    'host.fs/path-kind
    (type-fn
     (list (p 'String))
@@ -77,13 +82,37 @@
     (list (p 'String) (p 'String))
     #f
     (p 'host.fs/WriteTextAtomicResult))
+   'host.fs/make-parent-directories
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/MakeParentDirectoriesResult))
+   'host.fs/append-text
+   (type-fn
+    (list (p 'String) (p 'String))
+    #f
+    (p 'host.fs/AppendTextResult))
+   'host.clock/wall-nanoseconds
+   (type-fn '() #f (p 'Int))
+   'host.clock/format-iso8601
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'host.clock/FormatIso8601Result))
    ;; Native process execution takes an already-tokenized argv vector. The
    ;; result encodes exit 0..255, signal 256+signal, or spawn/wait -errno.
    'host.process/run-inherit
    (type-fn
     (list (type-app 'Vec (list (p 'String))))
     #f
-    (p 'Int))))
+    (p 'Int))
+   'host.process/run-capture
+   (type-fn
+    (list (type-app 'Vec (list (p 'String)))
+          (p 'String)
+          (p 'Int))
+    #f
+    (p 'host.process/CaptureResult))))
 
 (define CORE-RESULT-UNIONS
   (list
@@ -113,6 +142,34 @@
     (list
      (list 'host.fs/WriteTextAtomicOk '())
      (list 'host.fs/WriteTextAtomicError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/MakeParentDirectoriesResult
+    (list
+     (list 'host.fs/MakeParentDirectoriesOk '())
+     (list 'host.fs/MakeParentDirectoriesError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/AppendTextResult
+    (list
+     (list 'host.fs/AppendTextOk '())
+     (list 'host.fs/AppendTextError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.clock/FormatIso8601Result
+    (list
+     (list 'host.clock/FormatIso8601Ok
+           (list (cons ':text (p 'String))))
+     (list 'host.clock/FormatIso8601Error
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.process/CaptureResult
+    (list
+     (list 'host.process/CaptureOk
+           (list (cons ':status (p 'Int))
+                 (cons ':stdout (p 'String))
+                 (cons ':stderr (p 'String))))
+     (list 'host.process/CaptureError
            (list (cons ':errno (p 'Int))))))))
 
 (provide STDLIB-CORE CORE-RESULT-UNIONS)

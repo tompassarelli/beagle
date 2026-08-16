@@ -2584,10 +2584,12 @@
     (some (fn [(abi core/AbiDeclV0)] Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
-              (instance? native.core.RestrictedCAbiV0
-                (core/abideclv0-convention abi))
-              (= "native_host_clock_monotonic_nanoseconds_v0"
-                (core/abideclv0-symbol abi))))
+              (or (= "native_host_clock_monotonic_nanoseconds_v0"
+                    (core/abideclv0-symbol abi))
+                (or (= "native_host_clock_wall_nanoseconds_v0"
+                      (core/abideclv0-symbol abi))
+                  (= "native_host_clock_format_iso8601_v0"
+                    (core/abideclv0-symbol abi))))))
       (core/nativecoreprogram-abis program))))
 
 (defn program-has-process-extern? [(program core/NativeCoreProgram)] Bool
@@ -2595,10 +2597,10 @@
     (some (fn [(abi core/AbiDeclV0)] Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
-              (instance? native.core.RestrictedCAbiV0
-                (core/abideclv0-convention abi))
-              (= "native_host_process_run_inherit_v0"
-                (core/abideclv0-symbol abi))))
+              (or (= "native_host_process_run_inherit_v0"
+                    (core/abideclv0-symbol abi))
+                (= "native_host_process_run_capture_v0"
+                  (core/abideclv0-symbol abi)))))
       (core/nativecoreprogram-abis program))))
 
 (defn socket-extern-symbol? [(symbol String)] Bool
@@ -2622,7 +2624,9 @@
   (or (= symbol "native_host_filesystem_read_text_bounded_v0")
       (= symbol "native_host_filesystem_list_directory_bounded_v0")
       (= symbol "native_host_filesystem_path_kind_v0")
-      (= symbol "native_host_filesystem_write_text_atomic_v0")))
+      (= symbol "native_host_filesystem_write_text_atomic_v0")
+      (= symbol "native_host_filesystem_make_parent_directories_v0")
+      (= symbol "native_host_filesystem_append_text_v0")))
 
 (defn program-has-filesystem-extern? [(program core/NativeCoreProgram)] Bool
   (some?

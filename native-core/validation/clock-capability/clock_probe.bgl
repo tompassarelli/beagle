@@ -1,0 +1,18 @@
+#lang beagle
+(ns native.clock-probe)
+
+(defn format-case? [(epoch-nanoseconds Int) (expected String)] Bool
+  (match (host.clock/format-iso8601 epoch-nanoseconds)
+    [(host.clock/FormatIso8601Ok text) (= text expected)]
+    [(host.clock/FormatIso8601Error errno) false]))
+
+(defn probe [(args (Vec String))] Int
+  (let [(now Int) (host.clock/wall-nanoseconds)]
+    (if (and (> now 0)
+             (format-case? 0 "1970-01-01T00:00:00Z")
+             (format-case? 1000000 "1970-01-01T00:00:00.001Z")
+             (format-case? 1000 "1970-01-01T00:00:00.000001Z")
+             (format-case? 1 "1970-01-01T00:00:00.000000001Z")
+             (format-case? -1 "1969-12-31T23:59:59.999999999Z"))
+      0
+      1)))

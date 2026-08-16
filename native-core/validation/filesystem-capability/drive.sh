@@ -11,7 +11,7 @@ die() {
   exit 1
 }
 
-for command in cc rg; do
+for command in cc rg cmp; do
   command -v "$command" >/dev/null 2>&1 || die "missing command: $command"
 done
 mkdir -p \
@@ -37,7 +37,9 @@ for symbol in \
   native_host_filesystem_read_text_bounded_v0 \
   native_host_filesystem_list_directory_bounded_v0 \
   native_host_filesystem_path_kind_v0 \
-  native_host_filesystem_write_text_atomic_v0; do
+  native_host_filesystem_write_text_atomic_v0 \
+  native_host_filesystem_make_parent_directories_v0 \
+  native_host_filesystem_append_text_v0; do
   rg -F "$symbol" "$scratch/source-c17/module_0.c" >/dev/null \
     || die "missing C17 import: $symbol"
 done
@@ -68,11 +70,18 @@ set +e
   "$scratch/source-fs" \
   "$scratch/source-fs/probe.txt" \
   "$scratch/source-fs/missing.txt" \
+  "$scratch/source-nested/a/b/marks.log" \
+  "$scratch/source-append.log" \
   >"$scratch/source-runtime.out" 2>"$scratch/source-runtime.err"
 source_status=$?
 set -e
 [[ $source_status -eq 0 ]] \
   || die "typed source filesystem probe returned $source_status"
+printf '%s\n' alpha bravo >"$scratch/source-append.expected"
+cmp "$scratch/source-append.expected" "$scratch/source-append.log" \
+  || die "typed append bytes changed"
+[[ -d "$scratch/source-nested/a/b" ]] \
+  || die "typed parent-directory creation failed"
 
 cc -std=c17 -Wall -Wextra -Werror -pedantic \
   -I"$repo/native-core/shim" \
