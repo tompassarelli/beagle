@@ -1253,9 +1253,11 @@
 
 (def probe-calls (atom {:attach-body [] :lower-ready-function []}))
 (def probe-totals (atom {:attach-body 0 :lower-ready-function 0}))
+(def probe-attached-readiness (atom []))
 
 (defn probe-reset! []
-  (reset! probe-calls {:attach-body [] :lower-ready-function []}))
+  (reset! probe-calls {:attach-body [] :lower-ready-function []})
+  (reset! probe-attached-readiness []))
 
 (defn probe-seen [key] (get @probe-calls key))
 
@@ -1276,6 +1278,8 @@
    [lower/lower-typed-stage (forbidden "lower/lower-typed-stage")
     lower/lower-native-stage (forbidden "lower/lower-native-stage")
     lower/attach-bodies (forbidden "lower/attach-bodies")
+    lower/settle-function-closures
+    (forbidden "lower/settle-function-closures")
     lower/lower-ready-functions (forbidden "lower/lower-ready-functions")
     lower/slice-abis (forbidden "lower/slice-abis")
     unit/extract-unit-payloads (forbidden "unit/extract-unit-payloads")
@@ -1285,7 +1289,12 @@
                      (native-id-text
                       (lower/typedfunctionv0-id
                        (lower/functionresolutionv0-function resolution))))
-      (original-attach-body env resolution source))
+      (let [attached (original-attach-body env resolution source)]
+        (swap! probe-attached-readiness
+               conj
+               (lower/typedfunctionv0-readiness
+                (lower/functionresolutionv0-function attached)))
+        attached))
     lower/lower-ready-function
     (fn [function]
       (probe-record! :lower-ready-function
@@ -1563,6 +1572,154 @@
      (str "branch-compile-corpus: singleton subset rejection PASS "
           "ready+pure+region-free+capability-free only"))))
 
+(defn assert-stale-dependency-context-rejected!
+  [baseline public compiler-context]
+  (let [prepared (prepared-candidate public compiler-context)
+        row (get (rows-by-name public) "corpus.feature/score-value")
+        source-unit (:source row)
+        unit-id (stages/sourceunitv0-id source-unit)
+        stale-contracts
+        [(contract-for baseline "corpus.foundation/adjust")]
+        result-key
+        (unit/unit-result-key compiler-context source-unit stale-contracts)
+        attach-before (probe-total :attach-body)
+        lower-before (probe-total :lower-ready-function)
+        _ (probe-reset!)
+        result
+        (with-singleton-probes
+         (fn []
+           (singleton/compile-typed-unit
+            prepared
+            unit-id
+            (stages/sourceunitv0-semantic-digest source-unit)
+            (stages/sourceunitv0-read-set source-unit)
+            stale-contracts
+            compiler-context
+            result-key)))]
+    (require!
+     (instance? native.unit_compile.TypedUnitCompileRejectedV0 result)
+     "stale score-value dependency context was accepted")
+    (require! (= "UNIT-DEPENDENCY-CONTEXT"
+                 (singleton/typedunitcompilerejectedv0-code result))
+              (str "stale score-value dependency context rejected with "
+                   (singleton/typedunitcompilerejectedv0-code result)
+                   ", expected UNIT-DEPENDENCY-CONTEXT"))
+    (require! (core/native-id= unit-id
+                              (singleton/typedunitcompilerejectedv0-unit-id
+                               result))
+              "stale dependency context rejection named the wrong unit")
+    (require! (= [] (probe-seen :attach-body))
+              "stale dependency context rejection attached a body")
+    (require! (= [] (probe-seen :lower-ready-function))
+              "stale dependency context rejection lowered a native function")
+    (require! (= [] @probe-attached-readiness)
+              "stale dependency context rejection produced a typed payload")
+    (require! (= attach-before (probe-total :attach-body))
+              "stale dependency context rejection changed the body total")
+    (require! (= lower-before (probe-total :lower-ready-function))
+              "stale dependency context rejection changed the native total")
+    (println
+     "branch-compile-corpus: stale dependency context PASS zero activity")))
+
+(defn prepared-with-empty-do [prepared row]
+  (let [source-unit (:source row)
+        unit-id (stages/sourceunitv0-id source-unit)
+        prelude (singleton/preparedcandidatev0-prelude prepared)
+        env (lower/typingpreludev0-env prelude)
+        resolutions (lower/typingpreludev0-signature-resolutions prelude)
+        target-function
+        (lower/function-id unit-id (stages/sourceunitv0-name source-unit))
+        position (singleton/signature-index-for resolutions target-function)
+        sources (lower/bodyenvv0-signature-sources env)
+        _ (require! (and (>= position 0) (< position (count sources)))
+                    "empty-do witness could not locate independent-value")
+        source-function (nth sources position)
+        empty-do (core/->NativeId "unit-gate/independent-value/empty-do")
+        empty-body (core/->NativeId "unit-gate/independent-value/empty-body")
+        index (lower/bodyenvv0-index env)
+        objects
+        (assoc (lower/sourceindexv0-first-objects index)
+               (lower/source-index-key source-function "body") empty-do
+               (lower/source-index-key empty-do "body") empty-body)
+        texts
+        (assoc (lower/sourceindexv0-first-texts index)
+               (lower/source-index-key empty-do "form-kind") "do")
+        altered-index (assoc index :first-objects objects :first-texts texts)
+        altered-env (assoc env :index altered-index)
+        altered-prelude (assoc prelude :env altered-env)]
+    (assoc prepared :prelude altered-prelude)))
+
+(defn assert-unrelated-empty-do-locality!
+  [baseline compiler-context]
+  (let [rows (rows-by-name baseline)
+        private-row (get rows "corpus.foundation/private-offset")
+        independent-row (get rows "corpus.independent/independent-value")
+        prepared
+        (prepared-with-empty-do
+         (prepared-candidate baseline compiler-context)
+         independent-row)
+        attach-before (probe-total :attach-body)
+        lower-before (probe-total :lower-ready-function)
+        private-unit
+        (singleton-typed! baseline prepared private-row compiler-context)
+        source-unit (:source independent-row)
+        unit-id (stages/sourceunitv0-id source-unit)
+        function-text
+        (native-id-text
+         (lower/function-id unit-id (stages/sourceunitv0-name source-unit)))
+        reset-probes (probe-reset!)
+        result
+        (with-singleton-probes
+         (fn []
+           (singleton/compile-typed-unit
+            prepared
+            unit-id
+            (stages/sourceunitv0-semantic-digest source-unit)
+            (stages/sourceunitv0-read-set source-unit)
+            (read-contracts-for baseline source-unit)
+            compiler-context
+            (expected-result-key baseline source-unit compiler-context))))]
+    (require!
+     (instance? native.unit_compile.TypedUnitCompileRejectedV0 result)
+     "empty-do independent-value was accepted")
+    (require! (= "UNIT-TARGET-NOT-SETTLED"
+                 (singleton/typedunitcompilerejectedv0-code result))
+              (str "empty-do independent-value rejected with "
+                   (singleton/typedunitcompilerejectedv0-code result)
+                   ", expected UNIT-TARGET-NOT-SETTLED"))
+    (require! (core/native-id= unit-id
+                              (singleton/typedunitcompilerejectedv0-unit-id
+                               result))
+              "empty-do rejection named the wrong unit")
+    (require! (= [function-text] (probe-seen :attach-body))
+              (str "empty-do rejection attached "
+                   (pr-str (probe-seen :attach-body))
+                   ", expected exactly [" function-text "]"))
+    (require! (= [] (probe-seen :lower-ready-function))
+              "empty-do rejection lowered a native function")
+    (require! (= 1 (count @probe-attached-readiness))
+              "empty-do rejection did not preserve one readiness result")
+    (let [readiness (first @probe-attached-readiness)]
+      (require! (instance? native.lower.NativeTodoV0 readiness)
+                "empty-do rejection did not preserve its NativeTodo")
+      (require! (= "TODO-NATIVE-FUNCTION-BODY"
+                   (lower/nativetodov0-code readiness))
+                "empty-do rejection changed its outer TODO code")
+      (require!
+       (= (str "TODO-NATIVE-DO-EMPTY: empty do is outside the native slice "
+               "[independent-value]")
+          (lower/nativetodov0-detail readiness))
+       (str "empty-do rejection changed its TODO detail: "
+            (lower/nativetodov0-detail readiness))))
+    (require! (= 2 (- (probe-total :attach-body) attach-before))
+              "unrelated-body witness did not attach exactly two targets")
+    (require! (= lower-before (probe-total :lower-ready-function))
+              "unrelated-body witness performed native lowering")
+    (println
+     (str "branch-compile-corpus: unrelated empty-do PASS private-offset exact, "
+          "independent-value rejected with preserved TODO and zero native "
+          "lowering"))))
+
 (defn assert-singleton-repetition! [label first-result second-result]
   (require! (= first-result second-result)
             (str label " singleton repetition changed the exact assembly")))
@@ -1675,6 +1832,10 @@
                   compiler-context compiler-commit abi)
     (assert-prepared-contracts! baseline
                                 (prepared-candidate baseline compiler-context))
+    (assert-stale-dependency-context-rejected! baseline public
+                                                compiler-context)
+    (assert-unrelated-empty-do-locality! baseline compiler-context)
+    (reset! probe-totals {:attach-body 0 :lower-ready-function 0})
     (let [comment-first
           (assert-singleton-case! baseline comment [] compiler-context
                                   compiler-commit abi)
