@@ -39,8 +39,8 @@
    'Math/log          (fn-of '(Any) 'Float)
    'Math/log2         (fn-of '(Any) 'Float)
    'Math/log10        (fn-of '(Any) 'Float)
-   'Math/sin          (fn-of '(Any) 'Float)
-   'Math/cos          (fn-of '(Any) 'Float)
+   'Math/sin          (fn-of '(Number) 'Float)
+   'Math/cos          (fn-of '(Number) 'Float)
    'Math/tan          (fn-of '(Any) 'Float)
    'Math/asin         (fn-of '(Any) 'Float)
    'Math/acos         (fn-of '(Any) 'Float)
@@ -204,7 +204,9 @@
             'pow (hash-ref STDLIB-JS 'Math/pow)
             'floor (hash-ref STDLIB-JS 'Math/floor)
             'round (hash-ref STDLIB-JS 'Math/round)
-            'abs (hash-ref STDLIB-JS 'Math/abs)))
+            'abs (hash-ref STDLIB-JS 'Math/abs)
+            'sin (hash-ref STDLIB-JS 'Math/sin)
+            'cos (hash-ref STDLIB-JS 'Math/cos)))
    'JsDate
    (hasheq 'vars '()
            'members

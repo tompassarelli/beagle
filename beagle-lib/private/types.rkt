@@ -1068,8 +1068,13 @@
 
 ;; --- polymorphic type inference helpers ------------------------------------
 
-(define (infer-type-var-bindings expected actual bindings)
+(define INVARIANT-TYPE-CONSTRUCTORS '(Atom Buffer TransientVec))
+
+(define (infer-type-var-bindings expected actual bindings [invariant-context? #f])
   (cond
+    [(and invariant-context? (type-var? expected) (any-type? actual))
+     (unless (hash-has-key? bindings (type-var-name expected))
+       (hash-set! bindings (type-var-name expected) actual))]
     [(any-type? actual) (void)]
     [(type-var? expected)
      (unless (hash-has-key? bindings (type-var-name expected))
@@ -1078,16 +1083,20 @@
      (when (= (length (type-fn-params expected)) (length (type-fn-params actual)))
        (for ([ep (in-list (type-fn-params expected))]
              [ap (in-list (type-fn-params actual))])
-         (infer-type-var-bindings ep ap bindings)))
+         (infer-type-var-bindings ep ap bindings invariant-context?)))
      (when (and (type-fn-rest-type expected) (type-fn-rest-type actual))
        (infer-type-var-bindings (type-fn-rest-type expected)
-                                (type-fn-rest-type actual) bindings))
-     (infer-type-var-bindings (type-fn-ret expected) (type-fn-ret actual) bindings)]
+                                (type-fn-rest-type actual) bindings invariant-context?))
+     (infer-type-var-bindings (type-fn-ret expected) (type-fn-ret actual)
+                              bindings invariant-context?)]
     [(and (type-app? expected) (type-app? actual)
           (eq? (type-app-ctor expected) (type-app-ctor actual)))
+     (define nested-invariant?
+       (or invariant-context?
+           (memq (type-app-ctor expected) INVARIANT-TYPE-CONSTRUCTORS)))
      (for ([ea (in-list (type-app-args expected))]
            [aa (in-list (type-app-args actual))])
-       (infer-type-var-bindings ea aa bindings))]
+       (infer-type-var-bindings ea aa bindings nested-invariant?))]
     [else (void)]))
 
 (define (apply-type-bindings type bindings)

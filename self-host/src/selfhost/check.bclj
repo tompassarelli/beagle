@@ -517,9 +517,7 @@
 
 (defn merge-types [(t1 Any) (t2 Any)] Any
   (cond
-    (and (any-type? t1) (any-type? t2)) ANY
-    (any-type? t1) t2
-    (any-type? t2) t1
+    (or (any-type? t1) (any-type? t2)) ANY
     ;; JOIN, single-direction — mirror check.rkt merge-types: collapse only when
     ;; the SECOND type is a subtype of the first (t2 <: t1 ⇒ t1). The reverse
     ;; direction is deliberately NOT collapsed, so [Int Float] stays (U Int Float)
@@ -775,6 +773,8 @@
     "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE)
     "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)
+    "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
+    "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "abs" (make-poly ["A"]
             (make-fn [(make-var "A")] nil (make-var "A"))
             {"A" NUMBER-TYPE})}
@@ -2105,11 +2105,15 @@
         n-fixed (count fixed)
         n-args (count args)
         check-slot (fn [(i Int)] Any
-                     (let [actual (infer-expr! (nth args i) env)
-                           expected (if (< i n-fixed) (nth fixed i) rest-t)
+                     (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
+                           expected-atom? (check-atom-ctor! (nth args i) expected env)
+                           actual (if expected-atom?
+                                    expected
+                                    (infer-expr! (nth args i) env))
                            enum-violation
                              (enum-member-violation expected (nth args i))]
-                       (unify-inference-types! actual expected)
+                       (when (not expected-atom?)
+                         (unify-inference-types! actual expected))
                        (let [actual (prune-inference-type actual)
                              expected (prune-inference-type expected)]
                          (when (some? enum-violation)

@@ -56,15 +56,15 @@
 (define current-purity-warning-port (make-parameter #f))
 
 (define (merge-types . ts)
-  (define non-any (filter (λ (t) (not (any-type? t))) ts))
   (cond
-    [(null? non-any) ANY]
-    [(= (length non-any) 1) (car non-any)]
-    [(andmap (λ (t) (type-compatible? t (car non-any))) (cdr non-any))
-     (car non-any)]
+    [(null? ts) ANY]
+    [(ormap any-type? ts) ANY]
+    [(= (length ts) 1) (car ts)]
+    [(andmap (λ (t) (type-compatible? t (car ts))) (cdr ts))
+     (car ts)]
     [else
      (define flat
-       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) non-any))
+       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) ts))
      (define deduped
        (for/fold ([acc '()]) ([t (in-list flat)])
          (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))
@@ -6433,6 +6433,7 @@
        #f]
       [else (type-compatible? a-type expected-type)]))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
+              (check-atom-ctor arg expected-type env call-src)
               compatible?)
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
     (define suggestions (find-accessor-suggestions arg expected-type a-type env))
