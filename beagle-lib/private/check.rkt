@@ -1794,7 +1794,14 @@
   ;; parametric unions imported from other modules (for match narrowing with type-param substitution)
   (for ([(union-name pdef) (in-hash (program-imported-parametric-unions prog))])
     (hash-set! PARAMETRIC-UNIONS union-name pdef)
-    (index-parametric-members! union-name pdef))
+    (index-parametric-members! union-name pdef)
+    (define member-fields (hash-ref pdef 'member-fields #f))
+    (when member-fields
+      (register-union-member-fields!
+       (hash-ref pdef 'members '())
+       member-fields
+       (hash-ref pdef 'params '())
+       env)))
   ;; enums imported from sibling modules — register the name so keyword
   ;; literals type-check against the enum (Keyword <: EnumType, types.rkt).
   (for ([(enum-name _) (in-hash (program-imported-enums prog))])
@@ -2380,7 +2387,8 @@
 
 (define (program-callable-synchronization-table prog)
   (define local-definitions
-    (for/hasheq ([form (in-list (top-level-definitions prog))])
+    (for/hasheq ([form (in-list (top-level-definitions prog))]
+                 #:when (or (defn-form? form) (defn-multi? form)))
       (values (definition-name form) form)))
   (define proofs (make-hash))
   ;; Imported Beagle interfaces are the only authority for cross-module
@@ -5946,7 +5954,9 @@
   (for ([pt (in-list fixed)]
         [at (in-list arg-types)])
     (when (and (type-prim? pt) (type-app? at)
-               (eq? (type-prim-name pt) (type-app-ctor at))
+               (type-compatible?
+                pt
+                (type-prim (type-app-ctor at)))
                (hash-has-key? PARAMETRIC-MEMBER-UNION (type-app-ctor at)))
       (for ([v (in-list (type-poly-vars poly-type))]
             [a (in-list (type-app-args at))])
@@ -6095,13 +6105,17 @@
 (define NUMERIC-PRESERVING-OPS '(+ - * inc dec min max abs))
 
 (define (numeric-class t)
+  (define current (prune-type t))
   (cond
-    [(and (type-prim? t) (eq? (type-prim-name t) 'Int)) 'int]
-    [(and (type-prim? t) (eq? (type-prim-name t) 'Float)) 'float]
-    [(and (type-prim? t) (eq? (type-prim-name t) 'Number)) 'number]
-    [(and (type-union? t)
-          (pair? (type-union-alts t))
-          (for/and ([a (in-list (type-union-alts t))])
+    [(and (type-prim? current)
+          (memq (type-prim-name current) '(Int U8 U16 U32 U64 I8 I16 I32)))
+     'int]
+    [(and (type-prim? current) (memq (type-prim-name current) '(Float F32)))
+     'float]
+    [(and (type-prim? current) (eq? (type-prim-name current) 'Number)) 'number]
+    [(and (type-union? current)
+          (pair? (type-union-alts current))
+          (for/and ([a (in-list (type-union-alts current))])
             (memq (numeric-class a) '(int float number))))
      'number]
     [else 'other]))
@@ -6289,18 +6303,17 @@
   ;; a real operand precondition, so an unchecked value must be narrowed first.
   (define strict-numeric-operand?
     (and (memq fn-name NUMERIC-ARITHMETIC-OPS)
-         (type-prim? expected-type)
-         (eq? (type-prim-name expected-type) 'Number)))
+         (memq (numeric-class expected-type) '(int float number))))
   (define compatible?
     (cond
-      [inference-evidence?
+      [(and inference-evidence? (not (any-type? (prune-type a-type))))
        (with-handlers ([exn:fail:type-unification? (lambda (_error) #f)])
          (unify-types!
           (if (inferred-type-poly? a-type) (instantiate-type a-type) a-type)
           expected-type)
          #t)]
       [(and strict-numeric-operand?
-            (eq? (numeric-class a-type) 'other))
+            (eq? (numeric-class (prune-type a-type)) 'other))
        #f]
       [else (type-compatible? a-type expected-type)]))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param

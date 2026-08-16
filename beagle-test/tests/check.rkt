@@ -174,8 +174,9 @@
   #rx"(return.*type|def-type|expected.*String|got.*Int)"
   '(defn bad [(a Int)] String a))
 
-(check-ok "mixed concrete and explicit Any parameters remain callable"
-  '(defn mixed [(a Int) (b Any)] Any (* a b)))
+(check-ok "mixed concrete and explicit Any parameters remain callable at a total operation"
+  '(defn mixed [(a Int) (b Any)] String (str a b))
+  '(def rendered String (mixed 1 "x")))
 
 ;; =============================================================================
 ;; Tests — negatives
