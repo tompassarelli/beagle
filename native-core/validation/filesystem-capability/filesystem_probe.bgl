@@ -1,11 +1,42 @@
 #lang beagle
 (ns native.filesystem-probe)
 
+(defn write-case? [(path String)] Bool
+  (match (host.fs/write-text-atomic path "alpha\n")
+    [(host.fs/WriteTextAtomicOk) true]
+    [(host.fs/WriteTextAtomicError errno) false]))
 
-(defn probe [(path String) (text String)] Int
-  (do
-    (host.fs/path-kind path)
-    (host.fs/read-text-bounded path 1048576)
-    (host.fs/list-directory-bounded path 4096)
-    (host.fs/write-text-atomic path text)
-    0))
+(defn path-kind-case? [(path String)] Bool
+  (match (host.fs/path-kind path)
+    [(host.fs/PathKindOk kind) (= kind 1)]
+    [(host.fs/PathKindError errno) false]))
+
+(defn read-case? [(path String)] Bool
+  (match (host.fs/read-text-bounded path 16)
+    [(host.fs/ReadTextBoundedOk text) (= text "alpha\n")]
+    [(host.fs/ReadTextBoundedError errno) false]))
+
+(defn list-case? [(directory String)] Bool
+  (match (host.fs/list-directory-bounded directory 1)
+    [(host.fs/ListDirectoryBoundedOk paths)
+     (and (= (count paths) 1) (= (nth paths 0) "probe.txt"))]
+    [(host.fs/ListDirectoryBoundedError errno) false]))
+
+(defn missing-case? [(path String)] Bool
+  (match (host.fs/read-text-bounded path 16)
+    [(host.fs/ReadTextBoundedOk text) false]
+    [(host.fs/ReadTextBoundedError errno) (= errno 2)]))
+
+(defn probe [(args (Vec String))] Int
+  (if (= (count args) 3)
+    (let [(directory String) (nth args 0)
+          (path String) (nth args 1)
+          (missing String) (nth args 2)]
+      (if (and (write-case? path)
+               (path-kind-case? path)
+               (read-case? path)
+               (list-case? directory)
+               (missing-case? missing))
+        0
+        1))
+    64))

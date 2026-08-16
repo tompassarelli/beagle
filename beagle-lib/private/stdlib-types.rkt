@@ -48,6 +48,7 @@
 
 (provide stdlib-for-target target-excludes-for
          STDLIB-CORE
+         CORE-RESULT-UNIONS
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT
          STDLIB-NIX)

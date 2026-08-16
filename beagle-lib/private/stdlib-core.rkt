@@ -57,6 +57,26 @@
     (list (type-app 'Vec (list (p 'Int))) (p 'Int))
     #f
     (p 'NativeBytes))
+   'host.fs/path-kind
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/PathKindResult))
+   'host.fs/read-text-bounded
+   (type-fn
+    (list (p 'String) (p 'Int))
+    #f
+    (p 'host.fs/ReadTextBoundedResult))
+   'host.fs/list-directory-bounded
+   (type-fn
+    (list (p 'String) (p 'Int))
+    #f
+    (p 'host.fs/ListDirectoryBoundedResult))
+   'host.fs/write-text-atomic
+   (type-fn
+    (list (p 'String) (p 'String))
+    #f
+    (p 'host.fs/WriteTextAtomicResult))
    ;; Native process execution takes an already-tokenized argv vector. The
    ;; result encodes exit 0..255, signal 256+signal, or spawn/wait -errno.
    'host.process/run-inherit
@@ -65,4 +85,34 @@
     #f
     (p 'Int))))
 
-(provide STDLIB-CORE)
+(define CORE-RESULT-UNIONS
+  (list
+   (list
+    'host.fs/PathKindResult
+    (list
+     (list 'host.fs/PathKindOk
+           (list (cons ':kind (p 'Int))))
+     (list 'host.fs/PathKindError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/ReadTextBoundedResult
+    (list
+     (list 'host.fs/ReadTextBoundedOk
+           (list (cons ':text (p 'String))))
+     (list 'host.fs/ReadTextBoundedError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/ListDirectoryBoundedResult
+    (list
+     (list 'host.fs/ListDirectoryBoundedOk
+           (list (cons ':paths (type-app 'Vec (list (p 'String))))))
+     (list 'host.fs/ListDirectoryBoundedError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/WriteTextAtomicResult
+    (list
+     (list 'host.fs/WriteTextAtomicOk '())
+     (list 'host.fs/WriteTextAtomicError
+           (list (cons ':errno (p 'Int))))))))
+
+(provide STDLIB-CORE CORE-RESULT-UNIONS)

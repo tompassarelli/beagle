@@ -4765,6 +4765,13 @@
   (match-clause (parse-pattern (car items))
                 (map parse-expr (cdr items))))
 
+(define (record-pattern-name? value)
+  (and (symbol? value)
+       (let* ([spelling (symbol->string value)]
+              [local-name (last (string-split spelling "/"))])
+         (and (positive? (string-length local-name))
+              (char-upper-case? (string-ref local-name 0))))))
+
 (define (parse-pattern p)
   (define d (if (syntax? p) (syntax->datum p) p))
   (cond
@@ -4784,10 +4791,7 @@
      (when (null? (cdr d))
        (error 'beagle "or-pattern requires at least one alternative"))
      (pat-or (map parse-pattern (cdr d)))]
-    [(and (pair? d) (symbol? (car d))
-          (let ([s (symbol->string (car d))])
-            (and (positive? (string-length s))
-                 (char-upper-case? (string-ref s 0)))))
+    [(and (pair? d) (record-pattern-name? (car d)))
      (pat-record (car d) (cdr d))]
     [(symbol? d)        (pat-var d)]
     [else (error 'beagle "unsupported match pattern: ~v" d)]))

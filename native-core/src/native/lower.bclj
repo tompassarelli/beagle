@@ -1043,6 +1043,27 @@
    (filesystem-paths-result-type) (filesystem-paths-outcome-type)
    (filesystem-nil-result-type) (filesystem-nil-outcome-type)])
 
+(defn source-filesystem-variant-role
+  [(target-type core/NativeId) (name String)] String
+  (cond
+    (and (same-id? target-type (filesystem-int-outcome-type-id))
+      (= name "host.fs/PathKindOk")) "ok"
+    (and (same-id? target-type (filesystem-int-outcome-type-id))
+      (= name "host.fs/PathKindError")) "error"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.fs/ReadTextBoundedOk")) "ok"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.fs/ReadTextBoundedError")) "error"
+    (and (same-id? target-type (filesystem-paths-outcome-type-id))
+      (= name "host.fs/ListDirectoryBoundedOk")) "ok"
+    (and (same-id? target-type (filesystem-paths-outcome-type-id))
+      (= name "host.fs/ListDirectoryBoundedError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/WriteTextAtomicOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/WriteTextAtomicError")) "error"
+    :else name))
+
 (defn type-def-in? [(definitions (Vec core/TypeDef)) (id core/NativeId)] Bool
   (loop [(index Int) 0]
     (if (>= index (count definitions))
@@ -1143,6 +1164,22 @@
 
     (= "Nil" spelling)
     (->TypeResolutionV0 (type-id "Nil") [(nil-type)] [] true)
+
+    (= "host.fs/PathKindResult" spelling)
+    (->TypeResolutionV0 (filesystem-int-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/ReadTextBoundedResult" spelling)
+    (->TypeResolutionV0 (filesystem-text-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/ListDirectoryBoundedResult" spelling)
+    (->TypeResolutionV0 (filesystem-paths-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/WriteTextAtomicResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
 
     (= "Any" spelling)
     (->TypeResolutionV0
@@ -2974,9 +3011,14 @@
     (if (nil? definition)
       []
       (let [(shape core/TypeShape) (core/typedef-shape definition)]
-        (if (instance? native.core.UnionType shape)
+        (cond
+          (instance? native.core.UnionType shape)
           (core/uniontype-variants shape)
-          [])))))
+
+          (instance? native.core.OutcomeType shape)
+          (union-variants-of types (core/outcometype-failure-type shape))
+
+          :else [])))))
 
 (defn variant-named
   [(variants (Vec core/TypeVariant)) (name String)] (U core/TypeVariant Nil)
@@ -10210,12 +10252,13 @@
    (target-type core/NativeId)
    (name String)]
   (U core/TypeVariant Nil)
-  (let [(variants (Vec core/TypeVariant))
+  (let [(wanted String) (source-filesystem-variant-role target-type name)
+        (variants (Vec core/TypeVariant))
         (union-variants-of types target-type)]
     (loop [(position Int) 0]
       (if (>= position (count variants))
         nil
-        (if (= name (core/typevariant-name (nth variants position)))
+        (if (= wanted (core/typevariant-name (nth variants position)))
           (nth variants position)
           (recur (+ position 1)))))))
 
@@ -10490,25 +10533,31 @@
               (exprresultv0-type-id literal)))))
 
       (= "record" kind)
-      (let [(record-type (U core/NativeId Nil))
-            (match-record-type-id-for-target env owner target-type pattern)]
-        (cond
-          (nil? record-type)
-          (fail-result state
-            (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "
-              (fact-text index pattern "name")))
-
-          (same-id? target-type record-type)
-          (bool-constant-result state owner "match-record-direct" true)
-
-          :else
-          (let [(variant (U core/NativeId Nil))
-                (match-record-variant-id env owner target-type pattern)]
-            (if (nil? variant)
+      (let [(variant (U core/TypeVariant Nil))
+            (union-variant-named types target-type
+              (fact-text index pattern "name"))]
+        (if (some? variant)
+          (lower-union-variant-test types owner state target-id target-type
+            (core/typevariant-id variant))
+          (let [(record-type (U core/NativeId Nil))
+                (match-record-type-id-for-target env owner target-type pattern)]
+            (cond
+              (nil? record-type)
               (fail-result state
-                "TODO-NATIVE-MATCH-RECORD: record is not a target union alternative")
-              (lower-union-variant-test types owner state target-id target-type
-                variant)))))
+                (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "
+                  (fact-text index pattern "name")))
+
+              (same-id? target-type record-type)
+              (bool-constant-result state owner "match-record-direct" true)
+
+              :else
+              (let [(fallback-variant (U core/NativeId Nil))
+                    (match-record-variant-id env owner target-type pattern)]
+                (if (nil? fallback-variant)
+                  (fail-result state
+                    "TODO-NATIVE-MATCH-RECORD: record is not a target union alternative")
+                  (lower-union-variant-test types owner state target-id target-type
+                    fallback-variant)))))))
 
       :else
       (fail-result state
@@ -10544,6 +10593,88 @@
       (if (< position (count fields)) (nth fields position) nil)
       (record-field-named fields named))))
 
+(defn bind-match-record-fields
+  [(index SourceIndexV0)
+   (types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (target-id core/NativeId)
+   (target-type core/NativeId)
+   (record-type core/NativeId)
+   (bindings (Vec core/NativeId))]
+  BodyStateV0
+  (if (= 0 (count bindings))
+    state
+    (let [(record ExprResultV0)
+          (lower-boundary-coerce types owner state target-id target-type
+            record-type)
+          (current BodyStateV0) (exprresultv0-state record)
+          (fields (Vec core/TypeField)) (record-fields-of types record-type)]
+      (if (state-blocked? current)
+        current
+        (loop [(position Int) 0 (bound BodyStateV0) current]
+          (if (or (>= position (count bindings)) (state-blocked? bound))
+            bound
+            (let [(binding core/NativeId) (nth bindings position)
+                  (name String) (fact-text index binding "name")
+                  (field (U core/TypeField Nil))
+                  (match-binding-field index fields binding position)]
+              (if (or (= "" name) (nil? field))
+                (state-fail bound
+                  "TODO-NATIVE-MATCH-BINDING: record binding does not name a declared field")
+                (if (= "_" name)
+                  (recur (+ position 1) bound)
+                  (let [(value-id core/NativeId)
+                        (state-id bound owner "match-field")]
+                    (recur (+ position 1)
+                      (state-bind
+                        (state-emit (state-bump bound)
+                          (core/->FieldInstruction
+                            (core/->SsaValueV0 value-id
+                              (core/typefield-type-id field))
+                            (exprresultv0-value-id record)
+                            (core/typefield-id field)))
+                        name value-id
+                        (core/typefield-type-id field)))))))))))))
+
+(defn bind-match-direct-variant
+  [(index SourceIndexV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (target-id core/NativeId)
+   (variant core/TypeVariant)
+   (bindings (Vec core/NativeId))]
+  BodyStateV0
+  (let [(payload (U core/NativeId Nil))
+        (core/typevariant-payload-type variant)]
+    (cond
+      (= 0 (count bindings)) state
+
+      (nil? payload)
+      (state-fail state
+        "TODO-NATIVE-MATCH-BINDING: unit variant does not carry a binding")
+
+      (not (= 1 (count bindings)))
+      (state-fail state
+        "TODO-NATIVE-MATCH-BINDING: scalar variant requires exactly one binding")
+
+      :else
+      (let [(binding core/NativeId) (nth bindings 0)
+            (name String) (fact-text index binding "name")]
+        (if (= "" name)
+          (state-fail state
+            "TODO-NATIVE-MATCH-BINDING: scalar variant binding needs a name")
+          (if (= "_" name)
+            state
+            (let [(value-id core/NativeId)
+                  (state-id state owner "match-variant-payload")]
+              (state-bind
+                (state-emit (state-bump state)
+                  (core/->UnionExtractInstruction
+                    (core/->SsaValueV0 value-id payload)
+                    target-id (core/typevariant-id variant)))
+                name value-id payload))))))))
+
 (defn bind-match-pattern
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -10563,45 +10694,25 @@
       (= "record" kind)
       (let [(bindings (Vec core/NativeId))
             (match-pattern-binding-items index pattern)
-            (record-type (U core/NativeId Nil))
-            (match-record-type-id-for-target env owner target-type pattern)]
-        (if (nil? record-type)
-          (state-fail state
-            (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "
-              (fact-text index pattern "name")))
-          (if (= 0 (count bindings))
-            state
-            (let [(record ExprResultV0)
-                  (lower-boundary-coerce types owner state target-id target-type
-                    record-type)
-                  (current BodyStateV0) (exprresultv0-state record)
-                  (fields (Vec core/TypeField)) (record-fields-of types record-type)]
-              (if (state-blocked? current)
-                current
-                (loop [(position Int) 0 (bound BodyStateV0) current]
-                  (if (or (>= position (count bindings)) (state-blocked? bound))
-                    bound
-                    (let [(binding core/NativeId) (nth bindings position)
-                          (name String) (fact-text index binding "name")
-                          (field (U core/TypeField Nil))
-                          (match-binding-field index fields binding position)]
-                      (if (or (= "" name) (nil? field))
-                        (state-fail bound
-                          "TODO-NATIVE-MATCH-BINDING: record binding does not name a declared field")
-                        (if (= "_" name)
-                          (recur (+ position 1) bound)
-                          (let [(value-id core/NativeId)
-                                (state-id bound owner "match-field")]
-                            (recur (+ position 1)
-                              (state-bind
-                                (state-emit (state-bump bound)
-                                  (core/->FieldInstruction
-                                    (core/->SsaValueV0 value-id
-                                      (core/typefield-type-id field))
-                                    (exprresultv0-value-id record)
-                                    (core/typefield-id field)))
-                                name value-id
-                                (core/typefield-type-id field))))))))))))))
+            (variant (U core/TypeVariant Nil))
+            (union-variant-named types target-type
+              (fact-text index pattern "name"))]
+        (if (some? variant)
+          (let [(record-type (U core/NativeId Nil))
+                (variant-record-type-id types variant)]
+            (if (nil? record-type)
+              (bind-match-direct-variant index owner state target-id
+                variant bindings)
+              (bind-match-record-fields index types owner state target-id
+                target-type record-type bindings)))
+          (let [(record-type (U core/NativeId Nil))
+                (match-record-type-id-for-target env owner target-type pattern)]
+            (if (nil? record-type)
+              (state-fail state
+                (str "TODO-NATIVE-MATCH-RECORD: unknown closed record "
+                  (fact-text index pattern "name")))
+              (bind-match-record-fields index types owner state target-id
+                target-type record-type bindings)))))
 
       :else state)))
 
@@ -17324,8 +17435,16 @@
             (append-type-defs record-types (global-type-definitions index globals))
             (binding-type-definitions index))
           (literal-vector-type-definitions index))
-        (source-types (Vec core/TypeDef))
+        (base-source-types (Vec core/TypeDef))
         (collect-function-types declared-types signature-resolutions)
+        (source-types (Vec core/TypeDef))
+        (if (or
+              (index-has-callee? index "host.fs/path-kind")
+              (index-has-callee? index "host.fs/read-text-bounded")
+              (index-has-callee? index "host.fs/list-directory-bounded")
+              (index-has-callee? index "host.fs/write-text-atomic"))
+          (append-type-defs base-source-types (filesystem-outcome-types))
+          base-source-types)
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)
         (function-resolutions (Vec FunctionResolutionV0))
         (attach-bodies

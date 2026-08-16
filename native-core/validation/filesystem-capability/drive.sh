@@ -14,7 +14,12 @@ die() {
 for command in cc rg; do
   command -v "$command" >/dev/null 2>&1 || die "missing command: $command"
 done
-mkdir -p "$scratch/source-c17" "$scratch/source-qbe" "$scratch/fs"
+mkdir -p \
+  "$scratch/source-c17" \
+  "$scratch/source-qbe" \
+  "$scratch/exe-artifacts" \
+  "$scratch/source-fs" \
+  "$scratch/shim-fs"
 
 "$repo/bin/beagle" check --agent "$here/filesystem_probe.bgl"
 "$repo/bin/beagle" build --materializer c17 \
@@ -52,13 +57,31 @@ rg -Fx \
 cc -std=c17 -Wall -Wextra -Werror -pedantic \
   -I"$repo/native-core/shim" -I"$scratch/source-c17" \
   -c "$scratch/source-c17/module_0.c" -o "$scratch/module_0.o"
+
+"$repo/bin/beagle-native-exe" \
+  --out "$scratch/filesystem-probe" \
+  --artifacts "$scratch/exe-artifacts" \
+  --entry native.filesystem-probe/probe \
+  -- "$here/filesystem_probe.bgl" >"$scratch/native-exe.log"
+set +e
+"$scratch/filesystem-probe" \
+  "$scratch/source-fs" \
+  "$scratch/source-fs/probe.txt" \
+  "$scratch/source-fs/missing.txt" \
+  >"$scratch/source-runtime.out" 2>"$scratch/source-runtime.err"
+source_status=$?
+set -e
+[[ $source_status -eq 0 ]] \
+  || die "typed source filesystem probe returned $source_status"
+
 cc -std=c17 -Wall -Wextra -Werror -pedantic \
   -I"$repo/native-core/shim" \
   "$here/main.c" "$repo/native-core/shim/native_shim.c" \
   -o "$scratch/filesystem-capability"
-"$scratch/filesystem-capability" "$scratch/fs" >"$scratch/runtime.out"
+"$scratch/filesystem-capability" "$scratch/shim-fs" >"$scratch/runtime.out"
 rg -Fx 'filesystem capability fixture: ok' "$scratch/runtime.out" >/dev/null \
   || die "runtime filesystem contract failed"
 
 cat "$report"
 cat "$scratch/runtime.out"
+echo "filesystem capability fixture: typed source results pass"

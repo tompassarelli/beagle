@@ -1705,8 +1705,23 @@
 
 ;; --- environment -----------------------------------------------------------
 
+(define (register-core-result-unions!)
+  (for ([union (in-list CORE-RESULT-UNIONS)])
+    (define union-name (car union))
+    (define variants (cadr union))
+    (hash-set! UNION-MEMBERS union-name (map car variants))
+    (for ([variant (in-list variants)])
+      (define variant-name (car variant))
+      (define fields (cadr variant))
+      (hash-set! RECORD-FIELDS variant-name
+                 (for/hasheq ([field (in-list fields)])
+                   (values (car field) (cdr field))))
+      (hash-set! RECORD-FIELD-ORDER variant-name (map car fields)))))
+
 (define (build-initial-env prog)
   (define env (mut-copy (builtin-env-for-target (program-target prog))))
+  (when (eq? (program-target prog) 'core)
+    (register-core-result-unions!))
   ;; user-declared external functions
   (for ([(name t) (in-hash (program-externs prog))])
     (hash-set! env name t))
