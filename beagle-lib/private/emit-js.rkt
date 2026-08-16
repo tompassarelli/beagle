@@ -779,6 +779,7 @@
 (define current-js-record-constructors (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
+(define current-js-module-bindings (make-parameter (hasheq)))
 ;; The active loop's source bindings paired with their mutable aggregate slots.
 ;; `recur` is a fresh binding operation, so constraints validate its temporary
 ;; values before any loop slot is reassigned.
@@ -1481,6 +1482,68 @@
       (if refer (set-union s (list->set refer)) s)))
   (set-union from-forms from-externs from-refers))
 
+;; A namespace alias and a lexical binding occupy distinct source roles even
+;; when they share a spelling: `(state/f x)` still names the imported module
+;; inside `(defn g [state] ...)`. JavaScript puts both in one lexical namespace,
+;; so bind only colliding imports to an emitter-owned identifier and route every
+;; qualified reference through that table. Searching program forms for the
+;; exact alias symbol is deliberately conservative: binders necessarily occur
+;; there, while the qualified `state/f` symbol does not equal `state`.
+(define (tree-contains-symbol? node target)
+  (cond
+    [(symbol? node) (eq? node target)]
+    [(pair? node)
+     (or (tree-contains-symbol? (car node) target)
+         (tree-contains-symbol? (cdr node) target))]
+    [(vector? node)
+     (for/or ([item (in-vector node)])
+       (tree-contains-symbol? item target))]
+    [(hash? node)
+     (for/or ([(key value) (in-hash node)])
+       (or (tree-contains-symbol? key target)
+           (tree-contains-symbol? value target)))]
+    [(struct? node)
+     (define fields (struct->vector node))
+     (for/or ([index (in-range 1 (vector-length fields))])
+       (tree-contains-symbol? (vector-ref fields index) target))]
+    [else #f]))
+
+(define (build-js-module-binding-table prog)
+  (for/fold ([table (hasheq)])
+            ([entry (in-list (program-requires prog))]
+             #:unless (require-entry-refer entry))
+    (define prefix (require-prefix entry))
+    (define namespace (require-entry-ns entry))
+    (define collides?
+      (for/or ([form (in-list (program-forms prog))])
+        (tree-contains-symbol? form prefix)))
+    (define binding
+      (if collides?
+          (format "$beagle$import$~a" (mangle-name prefix))
+          (mangle-name prefix)))
+    (hash-set (hash-set table prefix binding) namespace binding)))
+
+(define (js-module-binding-name prefix)
+  (hash-ref (current-js-module-bindings) prefix
+            (lambda () (mangle-name prefix))))
+
+(define (qualified-import-reference name #:constructor? [constructor? #f])
+  (define authored (symbol->string name))
+  (define slash
+    (for/fold ([last #f]) ([index (in-range (string-length authored))]
+                           #:when (char=? (string-ref authored index) #\/))
+      index))
+  (and slash
+       (let* ([prefix (string->symbol (substring authored 0 slash))]
+              [binding (hash-ref (current-js-module-bindings) prefix #f)]
+              [member (substring authored (add1 slash))]
+              [runtime-member
+               (if (and constructor? (string-prefix? member "->"))
+                   (substring member 2)
+                   member)])
+         (and binding
+              (string-append binding "." (mangle-str runtime-member))))))
+
 (define (exported-binding? name [private? #f])
   (define names (current-js-export-names))
   (and (not private?)
@@ -1525,6 +1588,8 @@
                   (build-record-constructor-set prog)]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-js-module-bindings
+                  (build-js-module-binding-table prog)]
                  [current-js-semantic-contracts (program-semantic-contracts prog)]
                  [current-jst-semantic-contracts
                   (program-semantic-contracts prog)]
@@ -1706,7 +1771,7 @@
                           (let ([parts (string-split ns-str ".")])
                             (string->symbol (last parts))))])
            (format "import * as ~a from '~a';"
-                   (mangle-name alias)
+                   (js-module-binding-name alias)
                    module-path))))))
   (if (null? lines)
     ""
@@ -1916,6 +1981,7 @@
      (cond
        [(eq? e 'nil) "null"]
        [(keyword-symbol? e) (~v (kw->prop e))]
+       [(qualified-import-reference e) => values]
        ;; Slash-bearing names dot even when bound — JS parses `m/x` as division.
        [(and (js-bound? e) (not (string-contains? (resolved-name e) "/")))
         (resolved-name e)]
@@ -2686,13 +2752,21 @@
         ;; ((get o :k) a) — which parse.rkt emits as a call-form with a
         ;; non-symbol head. Emit (callee)(args); never run the symbol-only
         ;; mangle path below, which would `symbol->string` and crash.
-        (format "(~a)(~a)"
+       (format "(~a)(~a)"
                 (emit-expr fn-sym)
                 (string-join (map emit-expr args) ", "))]
        [else
         (define fn-str (symbol->string fn-sym))
+        (define imported-qualified
+          (qualified-import-reference
+           fn-sym
+           #:constructor?
+           (and (string-contains? fn-str "/->")
+                (or (set-member? (current-js-record-constructors) fn-sym)
+                    (not (js-bound? fn-sym))))))
         (define mangled
           (cond
+            [imported-qualified imported-qualified]
             [(and (string-prefix? fn-str "->")
                   (set-member? (current-js-record-constructors) fn-sym))
              (mangle-str (substring fn-str 2))]
@@ -2711,7 +2785,7 @@
               ;; interface makes it known.
               [(and (js-bound? fn-sym) (not (string-contains? mangled "/"))) mangled]
               [(and mod-prefix (not (string-contains? mangled "/")))
-               (string-append (mangle-name mod-prefix) "." mangled)]
+               (string-append (js-module-binding-name mod-prefix) "." mangled)]
               [(string-contains? mangled "/")
                (string-replace mangled "/" ".")]
               [else mangled])))

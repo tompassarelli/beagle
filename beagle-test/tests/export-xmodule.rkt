@@ -6,6 +6,7 @@
 (require rackunit
          racket/runtime-path
          racket/port
+         racket/string
          beagle/private/parse
          beagle/private/check
          beagle/private/emit
@@ -41,6 +42,18 @@
   (define js (emit-program (parse-program (read-beagle-syntax src) #:source-path src)))
   (check-regexp-match #rx"p[.]scale\\(" js)
   (check-false (regexp-match? #rx"p/scale" js)))
+
+(test-case "a local binding cannot capture a qualified import alias"
+  (define src (build-path fixtures-dir "shadowed-alias.bjs"))
+  (define js
+    (emit-program (parse-program (read-beagle-syntax src) #:source-path src)))
+  (check-true
+   (string-contains?
+    js "import * as $beagle$import$p from './provider.js';"))
+  (check-true (string-contains? js "function go(p)"))
+  (check-true
+   (string-contains? js "return $beagle$import$p.scale(p, 2.0);"))
+  (check-false (string-contains? js "return p.scale(p, 2.0);")))
 
 (test-case "js/export'd definitions reach the query surface"
   (define out
