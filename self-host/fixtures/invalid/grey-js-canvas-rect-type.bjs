@@ -1,0 +1,5 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-js-canvas-rect-type)
+
+(defn invalid-canvas-left [(canvas JsCanvas)] String
+  (js/get (js/call canvas .getBoundingClientRect) .left))

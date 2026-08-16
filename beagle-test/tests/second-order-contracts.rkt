@@ -87,6 +87,43 @@
          (let [values (js/new Map)]
            (js/get values .size)))))))
 
+(test-case "hosted Math and performance contracts preserve numeric results"
+  (check-not-exn
+   (lambda ()
+     (check-js-prog
+      '(defn host-metrics [(value Float)] Float
+         (+ (js/call Math .ceil value)
+            (js/call Math .max value 0.0)
+            (js/get Math .PI)
+            (js/call performance .now))))))
+  (check-exn
+   #rx"expected Number, got String"
+   (lambda ()
+     (check-js-prog
+      '(defn invalid-ceiling [] Int
+         (js/call Math .ceil "bad"))))))
+
+(test-case "DOM pointer and rectangle receivers expose numeric geometry"
+  (check-not-exn
+   (lambda ()
+     (check-js-prog
+      '(defn pointer-x [(event JsPointerEvent)] Float
+         (js/get event .clientX))
+      '(defn canvas-left [(canvas JsCanvas)] Float
+         (js/get (js/call canvas .getBoundingClientRect) .left)))))
+  (check-exn
+   #rx"expected return String, got Float"
+   (lambda ()
+     (check-js-prog
+      '(defn invalid-pointer-x [(event JsPointerEvent)] String
+         (js/get event .clientX)))))
+  (check-exn
+   #rx"expected return String, got Float"
+   (lambda ()
+     (check-js-prog
+      '(defn invalid-canvas-left [(canvas JsCanvas)] String
+         (js/get (js/call canvas .getBoundingClientRect) .left))))))
+
 (test-case "an explicit Atom Any accepts concrete writes without alias widening"
   (check-not-exn
    (lambda ()

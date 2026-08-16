@@ -1,0 +1,5 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-js-pointer-event-type)
+
+(defn invalid-pointer-x [(event JsPointerEvent)] String
+  (js/get event .clientX))

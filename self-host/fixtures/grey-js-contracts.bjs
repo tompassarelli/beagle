@@ -50,6 +50,18 @@
 (def monotonic-clock Float
   (js/call performance .now))
 
+(def ceiling Int
+  (js/call Math .ceil 1.5))
+
+(def circle-ratio Float
+  (js/get Math .PI))
+
+(defn pointer-x [(event JsPointerEvent)] Float
+  (js/get event .clientX))
+
+(defn canvas-left [(canvas JsCanvas)] Float
+  (js/get (js/call canvas .getBoundingClientRect) .left))
+
 (def mixed-ratio Float
   (/ 3 2.0))
 

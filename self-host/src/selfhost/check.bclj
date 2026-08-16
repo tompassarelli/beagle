@@ -798,12 +798,14 @@
     "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE)
     "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE)
+    "ceil" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "min" (make-poly ["A"]
             (make-fn [] (make-var "A") (make-var "A"))
             {"A" NUMBER-TYPE})
     "max" (make-poly ["A"]
             (make-fn [] (make-var "A") (make-var "A"))
             {"A" NUMBER-TYPE})
+    "PI" FLOAT-TYPE
     "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
@@ -820,7 +822,17 @@
    "performance"
    {"now" (make-fn [] nil FLOAT-TYPE)}
    "Map"
-   {"size" INT-TYPE}})
+   {"size" INT-TYPE}
+   "Canvas"
+   {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))}
+   "PointerEvent"
+   {"clientX" FLOAT-TYPE
+    "clientY" FLOAT-TYPE}
+   "DOMRect"
+   {"left" FLOAT-TYPE
+    "top" FLOAT-TYPE
+    "width" FLOAT-TYPE
+    "height" FLOAT-TYPE}})
 
 ;; --- stdlib signature table --------------------------------------------------
 
@@ -2491,6 +2503,15 @@
 
     (and (prim? receiver-type) (= (get receiver-type "name") "JsMap"))
     "Map"
+
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsCanvas"))
+    "Canvas"
+
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsPointerEvent"))
+    "PointerEvent"
+
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsDomRect"))
+    "DOMRect"
 
     :else nil))
 

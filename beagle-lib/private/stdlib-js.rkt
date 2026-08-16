@@ -22,7 +22,7 @@
 
    ;; --- Math (statics) --------------------------------------------------------
    'Math/floor        (fn-of '(Number) 'Int)
-   'Math/ceil         (fn-of '(Any) 'Int)
+   'Math/ceil         (fn-of '(Number) 'Int)
    'Math/round        (fn-of '(Number) 'Int)
    'Math/trunc        (fn-of '(Any) 'Int)
    'Math/sqrt         (fn-of '(Number) 'Float)
@@ -206,6 +206,7 @@
             'sqrt (hash-ref STDLIB-JS 'Math/sqrt)
             'pow (hash-ref STDLIB-JS 'Math/pow)
             'floor (hash-ref STDLIB-JS 'Math/floor)
+            'ceil (hash-ref STDLIB-JS 'Math/ceil)
             'round (hash-ref STDLIB-JS 'Math/round)
             'abs (hash-ref STDLIB-JS 'Math/abs)
             'atan (hash-ref STDLIB-JS 'Math/atan)
@@ -213,6 +214,7 @@
             'exp (hash-ref STDLIB-JS 'Math/exp)
             'min (hash-ref STDLIB-JS 'Math/min)
             'max (hash-ref STDLIB-JS 'Math/max)
+            'PI (hash-ref STDLIB-JS 'Math/PI)
             'sin (hash-ref STDLIB-JS 'Math/sin)
             'cos (hash-ref STDLIB-JS 'Math/cos)
             'tan (hash-ref STDLIB-JS 'Math/tan)))
@@ -227,7 +229,23 @@
    'JsMap
    (hasheq 'vars '()
            'members
-           (hasheq 'size (p 'Int)))))
+           (hasheq 'size (p 'Int)))
+   'JsCanvas
+   (hasheq 'vars '()
+           'members
+           (hasheq 'getBoundingClientRect (fn-of '() 'JsDomRect)))
+   'JsPointerEvent
+   (hasheq 'vars '()
+           'members
+           (hasheq 'clientX (p 'Float)
+                   'clientY (p 'Float)))
+   'JsDomRect
+   (hasheq 'vars '()
+           'members
+           (hasheq 'left (p 'Float)
+                   'top (p 'Float)
+                   'width (p 'Float)
+                   'height (p 'Float)))))
 
 (define JS-NO-EMIT
   (set-subtract (list->set (hash-keys STDLIB-PORTABLE))
