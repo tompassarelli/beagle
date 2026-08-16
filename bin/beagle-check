@@ -2,7 +2,9 @@
 # beagle-check: type-check a beagle file without emitting Clojure.
 #
 # Usage:
-#   bin/beagle-check [--agent] [--profile 0|1|2|3] <source.bgl|.bclj|.bjs|.bnix>
+#   bin/beagle-check [--agent] [--profile 0|1|2|3]
+#                    [--module-root LOGICAL=PHYSICAL]...
+#                    <source.bgl|.bclj|.bjs|.bnix>
 #
 # Exits 0 if the file compiles cleanly, non-zero otherwise. Stderr carries
 # warnings and errors. Stdout is suppressed (no generated Clojure).
@@ -23,6 +25,7 @@ source "$(dirname "$0")/_beagle-racket"
 AGENT=false
 PROFILE=""
 FILE=""
+MODULE_ROOT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --agent) AGENT=true; shift ;;
@@ -32,12 +35,25 @@ while [[ $# -gt 0 ]]; do
                 exit 2
             fi
             PROFILE="$2"; shift 2 ;;
-        *) FILE="$1"; shift ;;
+        --module-root)
+            if [[ $# -lt 2 ]]; then
+                echo "beagle-check: --module-root requires LOGICAL_PREFIX=PHYSICAL_DIRECTORY" >&2
+                exit 2
+            fi
+            MODULE_ROOT_ARGS+=(--module-root "$2"); shift 2 ;;
+        --module-root=*) MODULE_ROOT_ARGS+=("$1"); shift ;;
+        -*) echo "beagle-check: unknown option: $1" >&2; exit 2 ;;
+        *)
+            if [[ -n "$FILE" ]]; then
+                echo "beagle-check: expected exactly one source file" >&2
+                exit 2
+            fi
+            FILE="$1"; shift ;;
     esac
 done
 
 if [[ -z "$FILE" ]]; then
-    echo "usage: beagle-check [--agent] [--profile 0|1|2|3] <source.bgl|.bclj|.bjs|.bnix>" >&2
+    echo "usage: beagle-check [--agent] [--profile 0|1|2|3] [--module-root LOGICAL=PHYSICAL]... <source.bgl|.bclj|.bjs|.bnix>" >&2
     exit 2
 fi
 
@@ -48,4 +64,4 @@ fi
 if [[ -n "$PROFILE" ]]; then
     EXTRA_ARGS+=(--profile "$PROFILE")
 fi
-"$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "${EXTRA_ARGS[@]}" "$FILE"
+"$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "${EXTRA_ARGS[@]}" "${MODULE_ROOT_ARGS[@]}" "$FILE"

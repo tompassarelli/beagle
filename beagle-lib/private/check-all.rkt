@@ -10,6 +10,8 @@
          "blame.rkt"
          "lint.rkt"
          "module-overlay-check.rkt"
+         "module-source-root.rkt"
+         "module-source-root-cli.rkt"
          "validate-nix.rkt"
          "extensions.rkt"
          "targets.rkt")
@@ -468,7 +470,7 @@
 (define (canonical-source-id path)
   (path->string (simplify-path (path->complete-path path))))
 
-(define (check-file-overlay files json? profile file-error-counts)
+(define (check-file-overlay files roots json? profile file-error-counts)
   (define agent? (agent-mode?))
   (define error-count 0)
   (define agent-errors '())
@@ -504,28 +506,37 @@
        (display (format-diagnostic error loc-stx path)
                 (current-error-port))]))
 
-  (define source-candidates
+  (define explicit-inputs
     (for/list ([path (in-list files)])
-      (define source-id (canonical-source-id path))
+      (define source-id (module-source-logical-id-for-path roots path))
       (hash-set! source->file source-id path)
-      (with-handlers
-          ([exn:fail?
-            (lambda (error)
-              (capture! source-id 'read error #f)
-              #f)])
-        (define stxs (read-beagle-syntax source-id))
-        (stxs->module-source stxs source-id))))
+      (module-source-input source-id path)))
 
-  (define sources (filter values source-candidates))
+  (define closure
+    (with-handlers
+        ([exn:fail?
+          (lambda (error)
+            (capture! (car files) 'resolve error #f)
+            #f)])
+      (resolve-module-source-closure explicit-inputs roots)))
+
+  (when closure
+    (for ([snapshot (in-list (module-source-closure-snapshots closure))])
+      (define source-id (module-source-snapshot-source-id snapshot))
+      (unless (hash-has-key? source->file source-id)
+        (hash-set!
+         source->file
+         source-id
+         (path->string (module-source-snapshot-physical-path snapshot))))))
 
   (define checked
     (and
-     (pair? sources)
+     closure
      (parameterize
          ([current-purity-warning-port
            (and agent? (open-output-string))])
-       (check-module-overlay
-        sources
+       (check-module-source-closure
+        closure
         #:check-profile profile
         #:emit? #f
         #:diagnostic-sink capture!))))
@@ -670,10 +681,13 @@
 
 (define (run-check-all args)
   (when (null? args)
-    (eprintf "usage: beagle-check-all [--profile 0|1|2|3] <file-or-dir> ...\n")
+    (eprintf
+     "usage: beagle-check-all [--profile 0|1|2|3] [--module-root LOGICAL=PHYSICAL]... <file-or-dir> ...\n")
     (exit 2))
 
-  (define-values (profile file-args) (parse-profile-arg args))
+  (define-values (roots args-without-roots)
+    (parse-module-root-arguments args 'beagle-check-all))
+  (define-values (profile file-args) (parse-profile-arg args-without-roots))
   (define files (expand-args file-args))
 
   (when (null? files)
@@ -691,27 +705,14 @@
     (hash-set! file-error-counts file 0))
 
   (parameterize ([current-check-profile profile])
-    (cond
-      [(or (zero? profile) (null? (cdr files)))
-       (for ([file (in-list files)])
-         (define-values (errors lint agent-errors program)
-           (check-one-file file json?))
-         (set! total-errors (+ total-errors errors))
-         (hash-set! file-error-counts file errors)
-         (set! total-lint (+ total-lint lint))
-         (set! all-agent-errors (append all-agent-errors agent-errors))
-         (when (and program (string-suffix? file ".bnix"))
-           (set! parsed-nix-files
-                 (append parsed-nix-files (list (cons file program))))))]
-      [else
-       (define-values (errors lint agent-errors parsed-programs)
-         (check-file-overlay files json? profile file-error-counts))
-       (set! total-errors errors)
-       (set! total-lint lint)
-       (set! all-agent-errors agent-errors)
-       (set! parsed-nix-files
-             (filter (lambda (entry) (string-suffix? (car entry) ".bnix"))
-                     parsed-programs))])
+    (define-values (errors lint agent-errors parsed-programs)
+      (check-file-overlay files roots json? profile file-error-counts))
+    (set! total-errors errors)
+    (set! total-lint lint)
+    (set! all-agent-errors agent-errors)
+    (set! parsed-nix-files
+          (filter (lambda (entry) (string-suffix? (car entry) ".bnix"))
+                  parsed-programs))
 
     ;; Schema and collection checks consume the exact Programs parsed above.
     ;; Profile 0 remains explicitly parse-only.

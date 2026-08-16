@@ -3,7 +3,8 @@
 #
 # Usage:
 #   beagle build --materializer c17|qbe|wasm [...] --out DIR
-#     [--abi lp64|wasm32] [--entry NS/NAME]... [--simd] SOURCE.bgl...
+#     [--abi lp64|wasm32] [--entry NS/NAME]... [--simd]
+#     [--module-root LOGICAL_PREFIX=PHYSICAL_DIRECTORY]... SOURCE.bgl...
 #
 # A successful run always writes the authoritative frozen native program encoding
 # and digest, plus every explicitly selected materializer projection. The
@@ -17,6 +18,7 @@ PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
+MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rkt"
 source "$BIN/_beagle-racket"
 source "$BIN/_beagle-source-id"
 
@@ -90,6 +92,7 @@ out=""
 abi="lp64"
 materializers=()
 entries=()
+module_roots=()
 sources=()
 simd_required=0
 
@@ -131,6 +134,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --entry=*)
             entries+=("${1#*=}")
+            shift
+            ;;
+        --module-root)
+            [[ $# -ge 2 ]] ||
+                die "--module-root needs LOGICAL_PREFIX=PHYSICAL_DIRECTORY"
+            module_roots+=("$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_roots+=("${1#*=}")
             shift
             ;;
         --simd)
@@ -211,6 +224,8 @@ done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
 [[ -f "$AST_VERIFIER" ]] || die "checked-AST verifier is unavailable: $AST_VERIFIER"
 [[ -f "$FINALIZER" ]] || die "build finalizer is unavailable: $FINALIZER"
+[[ -f "$MODULE_SOURCE_ROOT_CLI" ]] ||
+    die "module source root resolver is unavailable: $MODULE_SOURCE_ROOT_CLI"
 
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
@@ -286,19 +301,52 @@ projector_args=()
 wasm_checked_sources=()
 source_snapshot_paths=()
 source_snapshot_digests=()
+explicit_normalized_sources=()
+explicit_source_ids=()
 normalized_sources=()
 source_ids=()
 source_digest_befores=()
 for source in "${sources[@]}"; do
     source="$(realpath "$source")"
+    explicit_normalized_sources+=("$source")
+    explicit_source_ids+=("$(beagle_source_id "$source")")
+done
+
+module_root_args=()
+for module_root in "${module_roots[@]}"; do
+    module_root_args+=(--module-root "$module_root")
+done
+closure_args=("${module_root_args[@]}")
+for source_index in "${!explicit_normalized_sources[@]}"; do
+    closure_args+=(
+        --source
+        "${explicit_normalized_sources[$source_index]}"
+        "${explicit_source_ids[$source_index]}"
+    )
+done
+closure_fields_path="$work/module-source-closure.fields"
+run_phase module-source-closure "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
+    "$RACKET" "$MODULE_SOURCE_ROOT_CLI" "${closure_args[@]}" \
+    >"$closure_fields_path"
+mapfile -d '' -t closure_fields <"$closure_fields_path"
+(( ${#closure_fields[@]} > 0 && ${#closure_fields[@]} % 2 == 0 )) ||
+    die "module source root resolver returned malformed path/id pairs"
+for ((closure_index = 0; closure_index < ${#closure_fields[@]}; closure_index += 2)); do
+    source="${closure_fields[$closure_index]}"
+    source_id="${closure_fields[$((closure_index + 1))]}"
+    [[ -n "$source" && -n "$source_id" ]] ||
+        die "module source root resolver returned an empty path or source id"
+    [[ -f "$source" ]] ||
+        die "module source root resolver returned a missing source: $source"
     normalized_sources+=("$source")
-    source_ids+=("$(beagle_source_id "$source")")
+    source_ids+=("$source_id")
     source_digest_befores+=("$(sha256sum "$source" | awk '{print $1}')")
 done
 
 bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
-    "$BIN/beagle-ast" --bundle "${normalized_sources[@]}" >"$bundle_ast"
+    "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
+    "${explicit_normalized_sources[@]}" >"$bundle_ast"
 
 python3 - "$bundle_ast" "$work" "${#normalized_sources[@]}" \
     "${normalized_sources[@]}" "${source_ids[@]}" <<'PY'
@@ -1370,6 +1418,9 @@ if [[ $runner_rc -ne 0 ]]; then
         cat "$work/artifacts/report.txt" >&2
     else
         sed -n '1,200p' "$work/run.log" >&2
+        if [[ -f "$BEAGLE_CORE_REPORT" ]]; then
+            cat -- "$BEAGLE_CORE_REPORT" >&2
+        fi
     fi
     exit "$runner_rc"
 fi

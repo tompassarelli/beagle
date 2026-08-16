@@ -6,6 +6,7 @@
          racket/list
          racket/port
          racket/string
+         "../../beagle-lib/private/module-source-root.rkt"
          "../../beagle-lib/private/semantic-index.rkt")
 
 (define module-source
@@ -37,6 +38,12 @@
    " :enabled [desktop [browsers -legacy +demo]]\n"
    " :disabled [legacy]}\n"))
 
+(define shared-source
+  (string-append
+   "#lang beagle/nix\n"
+   "\n"
+   "(ns shared.lib)\n"))
+
 (define (write-source path text)
   (make-parent-directory* path)
   (call-with-output-file path
@@ -64,22 +71,30 @@
     (lambda ()
       (define module-path (build-path root "modules" "demo" "default.bnix"))
       (define host-path (build-path root "hosts" "rabbit" "enabled-tags.bnix"))
+      (define provider-root (build-path root "providers"))
+      (define shared-path (build-path provider-root "shared" "lib.bnix"))
       (write-source module-path module-source)
       (write-source host-path host-source)
+      (write-source shared-path shared-source)
+      (define module-roots
+        (list (make-module-source-root-v0 "providers" provider-root)))
 
       (define first
         (build-semantic-index root (list (build-path root "hosts")
-                                        (build-path root "modules"))))
+                                        (build-path root "modules"))
+                              #:module-roots module-roots))
       (define second
         (build-semantic-index root (list (build-path root "modules")
-                                        (build-path root "hosts"))))
+                                        (build-path root "hosts"))
+                              #:module-roots module-roots))
       (check-equal? (index-bytes first) (index-bytes second))
       (check-equal? (hash-ref first 'schemaVersion) 1)
       (check-regexp-match #px"^[0-9a-f]{64}$" (hash-ref first 'rootHash))
       (check-equal? (map (lambda (entry) (hash-ref entry 'path))
                          (hash-ref first 'files))
                     '("hosts/rabbit/enabled-tags.bnix"
-                      "modules/demo/default.bnix"))
+                      "modules/demo/default.bnix"
+                      "providers/shared/lib.bnix"))
 
       (define module (file-entry first "modules/demo/default.bnix"))
       (check-equal? (hash-ref module 'namespace) "demo.module")
@@ -125,7 +140,8 @@
                     (string-replace module-source
                                     "\"demo\""
                                     "\"demo changed\""))
-      (define changed (build-semantic-index root (list root)))
+      (define changed
+        (build-semantic-index root (list root) #:module-roots module-roots))
       (check-not-equal?
        (hash-ref (file-entry changed "modules/demo/default.bnix") 'sha256)
        old-file-hash)

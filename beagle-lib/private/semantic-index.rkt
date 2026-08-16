@@ -13,6 +13,7 @@
          "extensions.rkt"
          "module-interface.rkt"
          "module-overlay-check.rkt"
+         "module-source-root.rkt"
          "parse.rkt"
          "validate-nix.rkt")
 
@@ -345,7 +346,7 @@
           'pos (src-loc-pos loc)
           'span (src-loc-span loc)))
 
-(define (program-option-refs prog source)
+(define (program-option-refs prog source logical-source-id)
   (define-values (keys _warnings) (collect-program-keys prog))
   (define src-table (program-src-table prog))
   (define locations
@@ -356,8 +357,13 @@
   (for ([loc (in-hash-values src-table)] #:when (src-loc? loc))
     (define loc-source (src-loc-source loc))
     (when (and loc-source
-               (not (equal? (simplify-path (path->complete-path loc-source) #t)
-                            (simplify-path (path->complete-path source) #t))))
+               (not
+                (or
+                 (equal? (format "~a" loc-source)
+                         (format "~a" logical-source-id))
+                 (equal?
+                  (simplify-path (path->complete-path loc-source) #t)
+                  (simplify-path (path->complete-path source) #t)))))
       (error 'semantic-index
              "program source table points outside indexed source: ~a"
              loc-source)))
@@ -412,7 +418,7 @@
           'requires (requires->json interface)
           'moduleMetadata (module-metadata rel prog)
           'hostMetadata (host-metadata rel prog)
-          'optionRefs (program-option-refs prog source)))
+          'optionRefs (program-option-refs prog source rel)))
 
 (define (root-hash entries)
   ;; Domain is the sorted sequence: UTF-8 path, NUL, lowercase file hash, LF.
@@ -426,30 +432,27 @@
          (newline out)))))
   (sha256-hex bytes))
 
-(define (build-semantic-index root inputs)
+(define (build-semantic-index root inputs #:module-roots [module-roots '()])
   (define root-path (absolute-existing-path root))
   (unless (directory-exists? root-path)
     (error 'semantic-index "index root is not a directory: ~a" root))
-  (define source-pairs (collect-source-paths root-path inputs))
-  (define module-sources (map source-pair->module-source source-pairs))
-  (define source-paths
-    (for/hash ([source-pair (in-list source-pairs)])
-      (values (car source-pair) (cdr source-pair))))
-  (define (parse-index-source source resolver)
-    (parse-program
-     (module-source-stxs source)
-     #:source-path
-     (hash-ref source-paths (format "~a" (module-source-source-id source)))
-     #:module-resolver resolver))
+  (define explicit-source-pairs (collect-source-paths root-path inputs))
+  (define closure
+    (resolve-module-source-closure
+     (for/list ([source-pair (in-list explicit-source-pairs)])
+       (module-source-input (car source-pair) (cdr source-pair)))
+     module-roots))
+  (define source-pairs
+    (for/list ([snapshot
+                (in-list (module-source-closure-snapshots closure))])
+      (cons (module-source-snapshot-source-id snapshot)
+            (module-source-snapshot-physical-path snapshot))))
   ;; Publication is authoritative only after every source has checked against
   ;; the same candidate overlay and inferred interfaces have reached a fixed
   ;; point. JSON v1 intentionally exposes only raw file hashes and its own root
   ;; hash, while the checked overlay retains the compiler's interface digest.
   (define checked
-    (check-module-overlay
-     module-sources
-     #:emit? #f
-     #:parse-source parse-index-source))
+    (check-module-source-closure closure #:emit? #f))
   (unless (overlay-check-result-ok? checked)
     (overlay-failure->error checked))
   (define module-by-source

@@ -2,7 +2,9 @@
 # beagle-build: compile one hosted Beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build [--target TARGET] SOURCE [output]   # `beagle langs` lists
+#   bin/beagle-build [--target TARGET]
+#                    [--module-root LOGICAL=PHYSICAL]...
+#                    SOURCE [output]   # `beagle langs` lists
 #                                                        # every TARGET + ext
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
@@ -16,31 +18,81 @@
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-source-id"
 # Target validation and the extension map are DERIVED from
 # beagle-lib/private/targets.rkt via the generated share/targets.sh — never
 # hand-listed here. Regenerate with `bin/beagle doc-fill`.
 source "$(cd "$(dirname "$0")/.." && pwd)/share/targets.sh"
 
 target=""
-if [[ "${1:-}" == "--target" ]]; then
-    [[ $# -ge 3 ]] || {
-        echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT]" >&2
-        exit 2
-    }
-    target="$2"
-    shift 2
-    if ! beagle_known_hosted_target "$target"; then
-        echo "beagle-build: unsupported hosted --target '$target' (expected clj, js, or nix); Core uses --materializer ($BEAGLE_MATERIALIZER_IDS_LIST)" >&2
-        exit 2
-    fi
-fi
+module_root_args=()
+positionals=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target)
+            [[ $# -ge 2 ]] || {
+                echo "beagle-build: --target requires a target" >&2
+                exit 2
+            }
+            [[ -z "$target" ]] || {
+                echo "beagle-build: --target may be specified only once" >&2
+                exit 2
+            }
+            target="$2"
+            shift 2
+            ;;
+        --target=*)
+            [[ -z "$target" ]] || {
+                echo "beagle-build: --target may be specified only once" >&2
+                exit 2
+            }
+            target="${1#*=}"
+            shift
+            ;;
+        --module-root)
+            [[ $# -ge 2 ]] || {
+                echo "beagle-build: --module-root requires LOGICAL_PREFIX=PHYSICAL_DIRECTORY" >&2
+                exit 2
+            }
+            module_root_args+=(--module-root "$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_root_args+=("$1")
+            shift
+            ;;
+        --)
+            shift
+            positionals+=("$@")
+            break
+            ;;
+        -*)
+            echo "beagle-build: unknown option: $1" >&2
+            exit 2
+            ;;
+        *)
+            positionals+=("$1")
+            shift
+            ;;
+    esac
+done
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT]" >&2
+if [[ -n "$target" ]] && ! beagle_known_hosted_target "$target"; then
+    echo "beagle-build: unsupported hosted --target '$target' (expected clj, js, or nix); Core uses --materializer ($BEAGLE_MATERIALIZER_IDS_LIST)" >&2
     exit 2
 fi
 
-src="$1"
+if [[ -n "$target" && ${#module_root_args[@]} -gt 0 ]]; then
+    echo "beagle-build: --module-root cannot be combined with --target" >&2
+    exit 2
+fi
+
+if [[ ${#positionals[@]} -lt 1 || ${#positionals[@]} -gt 2 ]]; then
+    echo "usage: beagle-build [--target TARGET] [--module-root LOGICAL=PHYSICAL]... SOURCE [OUTPUT]" >&2
+    exit 2
+fi
+
+src="${positionals[0]}"
 beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ ! -f "$src" ]]; then
@@ -73,8 +125,8 @@ else
     ext="${BEAGLE_TARGET_OUT_EXT[$source_profile]}"
 fi
 
-if [[ $# -eq 2 ]]; then
-    out="$2"
+if [[ ${#positionals[@]} -eq 2 ]]; then
+    out="${positionals[1]}"
 else
     ns="$(grep -E '^\(ns' "$src" | head -1 | \
           sed -E 's/^\(ns[[:space:]]+([a-zA-Z0-9._-]+).*/\1/' | \
@@ -99,7 +151,11 @@ if [[ -n "$target" ]]; then
     "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \
         "$target" "$src" > "$tmp"
 else
-    "$RACKET" "$src" > "$tmp"
+    src_abs="$(realpath "$src")"
+    source_id="$(beagle_source_id "$src_abs")"
+    "$RACKET" "$beagle_root/beagle-lib/private/build-one-cli.rkt" \
+        "${module_root_args[@]}" \
+        --source "$src_abs" "$source_id" > "$tmp"
 fi
 mv "$tmp" "$out"
 trap - EXIT

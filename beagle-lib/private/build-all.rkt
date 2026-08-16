@@ -11,6 +11,8 @@
          (only-in "emit-js.rkt" current-js-export-names)
          "lint.rkt"
          "module-overlay-check.rkt"
+         "module-source-root.rkt"
+         "module-source-root-cli.rkt"
          "error-format.rkt"
          "query.rkt"
          "extensions.rkt"
@@ -245,7 +247,7 @@
            (parse-program (read-beagle-syntax f) #:source-path f)]))))
   (programs->export-plan (filter values programs)))
 
-(define (build-text-overlay files out-dir json? in-place?)
+(define (build-text-overlay files roots out-dir json? in-place?)
   (define captured '())
   (define source->file (make-hash))
   (define (capture! source _phase value location)
@@ -264,22 +266,31 @@
           (write-json-error error location)
           (flush-output (current-error-port)))
         (eprintf "  ~a: ~a\n" path (exn-message error))))
-  (define source-candidates
+  (define explicit-inputs
     (for/list ([path (in-list files)])
-      (define source-id (canonical-source-id path))
+      (define source-id (module-source-logical-id-for-path roots path))
       (hash-set! source->file source-id path)
-      (with-handlers
-          ([exn:fail?
-            (lambda (error)
-              (capture! source-id 'read error #f)
-              #f)])
-        (stxs->module-source (read-beagle-syntax source-id) source-id))))
-  (define sources (filter values source-candidates))
+      (module-source-input source-id path)))
+  (define closure
+    (with-handlers
+        ([exn:fail?
+          (lambda (error)
+            (capture! (car files) 'resolve error #f)
+            #f)])
+      (resolve-module-source-closure explicit-inputs roots)))
+  (when closure
+    (for ([snapshot (in-list (module-source-closure-snapshots closure))])
+      (define source-id (module-source-snapshot-source-id snapshot))
+      (unless (hash-has-key? source->file source-id)
+        (hash-set!
+         source->file
+         source-id
+         (path->string (module-source-snapshot-physical-path snapshot))))))
   (define checked
-    (and (pair? sources)
+    (and closure
          (null? captured)
-         (check-module-overlay
-          sources
+         (check-module-source-closure
+          closure
           #:capture-types? #t
           #:emit? #f
           #:diagnostic-sink capture!)))
@@ -340,7 +351,10 @@
   (define target-override #f)   ; --target: force every file through this target
   (define file-args '())
 
-  (let loop ([rest args])
+  (define-values (roots args-without-roots)
+    (parse-module-root-arguments args 'beagle-build-all))
+
+  (let loop ([rest args-without-roots])
     (cond
       [(null? rest) (void)]
       [(string=? (car rest) "--out")
@@ -376,8 +390,14 @@
     (eprintf "beagle-build-all: --target and --build-edn are mutually exclusive\n")
     (exit 2))
 
+  (when (and (pair? roots) (or target-override build-edn? warn?))
+    (eprintf
+     "beagle-build-all: --module-root cannot be combined with --target, --build-edn, or --warn\n")
+    (exit 2))
+
   (when (null? file-args)
-    (eprintf "usage: beagle-build-all <file-or-dir> ... [--out <dir>] [--in-place] [--warn]\n")
+    (eprintf
+     "usage: beagle-build-all <file-or-dir> ... [--module-root LOGICAL=PHYSICAL]... [--out <dir>] [--in-place] [--warn]\n")
     (exit 2))
 
   ;; --build-edn args are triple dumps (any extension), not .b* source — take
@@ -396,7 +416,7 @@
   (cond
     [(and (not build-edn?) (not target-override) (not warn?))
      (define-values (overlay-built overlay-errors)
-       (build-text-overlay files out-dir json? in-place?))
+       (build-text-overlay files roots out-dir json? in-place?))
      (set! built overlay-built)
      (set! errors overlay-errors)]
     [else

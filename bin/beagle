@@ -32,10 +32,15 @@ Usage: beagle <command> [args...]
 
 Author:
   syntax FILE               Parse-check (--ledger, --repair --emit-patch)
-  check [--profile N] [PATH...]  Type-check without emitting
+  check [--profile N] [--module-root LOGICAL=PHYSICAL]... [PATH...]
+                            Type-check without emitting
   validate [FILE...]        Parse + check + schema validation
-  build [--target T] PATH   Emit an explicit hosted target
-  build --materializer M... --out DIR [--entry NS/NAME]... PATH.bgl...
+  build [--target T] PATH [OUT]
+                            Emit an explicit hosted target
+  build [--module-root LOGICAL=PHYSICAL]... PATH [OUT]
+                            Emit a hosted source-profile target with a closed module graph
+  build --materializer M... [--module-root LOGICAL=PHYSICAL]...
+        --out DIR [--entry NS/NAME]... PATH.bgl...
                             Freeze Core once, then project each selected materializer
                             ($BEAGLE_MATERIALIZER_IDS_LIST; wasm requires --abi wasm32)
   fmt --check|--write PATH...  Check or rewrite canonical source layout
@@ -65,7 +70,8 @@ Project / loop:
   init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
   daemon start|status|stop  Watch + cache type results
   promote [REV]             Promote clean checkout HEAD + restart its daemon
-  native-exe --out FILE --entry NS/NAME PATH...
+  native-exe --out FILE --entry NS/NAME
+             [--module-root LOGICAL=PHYSICAL]... PATH...
                             Link a native C17 executable; entry accepts [] or
                             one typed (Vec String) process-argument parameter
   test [--active-only]      Run the test tiers
@@ -85,7 +91,7 @@ cmd="$1"; shift
 case "$cmd" in
     check)
         # Count non-flag args to decide single-file vs batch.
-        # --profile takes a value arg, so skip the next arg after it.
+        # Value-taking options do not contribute source-file arguments.
         _check_files=()
         _skip_next=false
         for _a in "$@"; do
@@ -94,7 +100,7 @@ case "$cmd" in
                 continue
             fi
             case "$_a" in
-                --profile) _skip_next=true ;;
+                --profile|--module-root) _skip_next=true ;;
                 --*) ;;
                 *) _check_files+=("$_a") ;;
             esac
@@ -114,10 +120,36 @@ case "$cmd" in
         done
         if $_core_build; then
             exec "$BIN/beagle-build-core" "$@"
-        elif [[ "${1:-}" == "--target" ]] &&
-           [[ $# -ge 3 && $# -le 4 ]]; then
-            exec "$BIN/beagle-build" "$@"
-        elif [[ $# -ge 1 ]] && [[ -f "$1" ]] && [[ $# -le 2 ]] && [[ "${2:-}" != --* ]]; then
+        fi
+
+        # A single hosted source (plus an optional output path) uses the
+        # focused compiler. Count positionals independently of option order;
+        # batch-only or unknown options retain the build-all route.
+        _build_positionals=()
+        _build_skip_next=false
+        _build_after_double_dash=false
+        _build_single=true
+        for _a in "$@"; do
+            if $_build_after_double_dash; then
+                _build_positionals+=("$_a")
+                continue
+            fi
+            if $_build_skip_next; then
+                _build_skip_next=false
+                continue
+            fi
+            case "$_a" in
+                --target|--module-root) _build_skip_next=true ;;
+                --target=*|--module-root=*) ;;
+                --) _build_after_double_dash=true ;;
+                --*) _build_single=false ;;
+                *) _build_positionals+=("$_a") ;;
+            esac
+        done
+        if $_build_single &&
+           [[ ${#_build_positionals[@]} -ge 1 ]] &&
+           [[ ${#_build_positionals[@]} -le 2 ]] &&
+           [[ -f "${_build_positionals[0]}" ]]; then
             exec "$BIN/beagle-build" "$@"
         else
             exec "$BIN/beagle-build-all" "$@"

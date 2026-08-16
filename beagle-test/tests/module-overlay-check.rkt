@@ -13,6 +13,7 @@
          beagle/private/module-interface
          beagle/private/parse
          beagle/private/module-overlay-check
+         beagle/private/module-source-root
          beagle/private/types)
 
 (define-runtime-path overlay-cli
@@ -1470,56 +1471,64 @@
 
 ;; --- required-namespace resolution -----------------------------------------
 ;;
-;; An overlay resolves a require from the candidates it was HANDED. When a
-;; namespace is absent from that set, resolution falls back to searching for a
-;; source file that declares it. Both halves have to hold at once:
+;; A source closure resolves a require only from explicit inputs or exact paths
+;; under declared roots. Both halves have to hold at once:
 ;;
-;;   * absent from BOTH -> reject. Accepting it registered a phantom alias, and
-;;     every qualified call through that alias then typed at an arbitrary type
-;;     with no diagnostic at all.
-;;   * absent from the invocation but present on disk -> resolve it, and
-;;     ENFORCE its interface. "Found" is only meaningful if its types bite.
+;;   * no declared root means no ambient ancestor lookup, even when a matching
+;;     provider happens to sit beside the consumer;
+;;   * a declared root maps the complete namespace to one exact path and the
+;;     resolved provider's interface remains authoritative.
 ;;
-;; The enumerated path is what downstream builds already depend on, so it is
-;; pinned here too: those consumers hand over providers no path search could
-;; find, and that must keep working exactly as it does today.
+;; Explicit enumeration still wins independently of roots and is checked as a
+;; closed source bundle.
 
 (define-runtime-path module-resolution-fixtures "fixtures/module-resolution")
 
-(define (check-resolution-fixture rel)
+(define resolution-root
+  (make-module-source-root-v0
+   "module-resolution"
+   (build-path module-resolution-fixtures "munged")))
+
+(define (resolution-closure rel [roots (list resolution-root)])
   (define src (build-path module-resolution-fixtures rel))
-  (type-check! (parse-program (read-beagle-syntax src) #:source-path src)))
+  (resolve-module-source-closure
+   (list (module-source-input (string-append "explicit/" rel) src))
+   roots))
+
+(define (check-rooted-resolution-fixture rel)
+  (check-module-source-closure (resolution-closure rel) #:emit? #f))
 
 (define (enumerated-overlay . rels)
   (check-module-overlay
    (for/list ([rel (in-list rels)])
      (define src (path->string (build-path module-resolution-fixtures rel)))
      (stxs->module-source (read-beagle-syntax src) src))
-   #:emit? #f))
+   #:emit? #f
+   #:closed? #t))
 
-(test-case "an unresolvable require is rejected, not registered as a phantom"
+(test-case "a declared root with no exact namespace path fails closed"
   (check-exn
-   #rx"required namespace modres.nowhere could not be resolved"
-   (lambda () (check-resolution-fixture "unresolved.bclj"))))
+   #rx"required namespace modres.nowhere.*no declared module root provides it"
+   (lambda () (resolution-closure "unresolved.bclj"))))
 
-(test-case "a consumer resolves a provider it was never handed"
-  (check-not-exn
-   (lambda () (check-resolution-fixture "munged/consumer-ok.bclj"))))
-
-(test-case "an unhanded provider's interface is enforced, not merely present"
+(test-case "no module root means no ambient ancestor resolution"
   (check-exn
+   #rx"required namespace modres.wire-format.*no declared module root provides it"
+   (lambda () (resolution-closure "munged/consumer-ok.bclj" '()))))
+
+(test-case "a declared root resolves the exact munged namespace path"
+  (define result (check-rooted-resolution-fixture "munged/consumer-ok.bclj"))
+  (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+  (check-equal? (length (overlay-check-result-modules result)) 2))
+
+(test-case "a root-resolved provider's interface is enforced"
+  (define result (check-rooted-resolution-fixture "munged/consumer-bad.bclj"))
+  (check-false (overlay-check-result-ok? result))
+  (check-regexp-match
    #rx"arg 1 expected Int, got String"
-   (lambda () (check-resolution-fixture "munged/consumer-bad.bclj"))))
+   (diagnostic-text result)))
 
-;; The compatibility guard's premise: this provider is genuinely unreachable by
-;; path search, so the enumerated cases below prove enumeration itself, not a
-;; search quietly doing the work.
-(test-case "the enumerated provider is genuinely unfindable by path search"
-  (check-exn
-   #rx"required namespace modres.enumerated-provider could not be resolved"
-   (lambda () (check-resolution-fixture "enumerated/consumer.bclj"))))
-
-(test-case "explicit enumeration still resolves a provider no search could find"
+(test-case "explicit enumeration resolves a provider without a root"
   (define result
     (enumerated-overlay "enumerated/toolkit.bclj" "enumerated/consumer.bclj"))
   (check-true (overlay-check-result-ok? result) (diagnostic-text result))

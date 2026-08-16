@@ -204,9 +204,6 @@
 (define (last-of xs)
   (if (null? (cdr xs)) (car xs) (last-of (cdr xs))))
 
-(define (all-but-last xs)
-  (if (null? (cdr xs)) '() (cons (car xs) (all-but-last (cdr xs)))))
-
 ;; A required namespace that resolves to no beagle source is either a mistake
 ;; or a HOST runtime namespace the target loads for itself. The typed stdlib
 ;; catalog already distinguishes them: a host namespace owns `ns/member` keys.
@@ -234,86 +231,6 @@
   (or (string-prefix? text "clojure.")
       (string-prefix? text "babashka.")
       (set-member? (host-namespace-set-for target) text)))
-
-;; Namespace segments are spelled with hyphens; the file names that carry them
-;; may munge each hyphen to an underscore (`beagle.datum-reader` lives in
-;; `beagle/datum_reader.bgl`). The literal spelling is always tried first at
-;; every root, so munging only ever ADDS a resolution where the literal
-;; spelling found nothing — it can never redirect one that already resolved.
-(define (munge-segment seg) (string-replace seg "-" "_"))
-
-(define (resolve-module-path ns-sym source-path
-                             #:extensions [extensions BEAGLE-EXTENSIONS]
-                             #:flat-fallback? [flat-fallback? #t])
-  (and source-path
-       (let ()
-         (define segs (split-ns-segments ns-sym))
-         (define base-name (last-of segs))
-         (define dir-segs (all-but-last segs))
-         (define abs-source
-           (if (complete-path? source-path)
-             source-path
-             (path->complete-path source-path)))
-         (define source-dir
-           (let-values ([(d _n _d?) (split-path abs-source)])
-             d))
-         (define (try-extensions dir-root dir-prefix)
-           (for*/or ([munge? (in-list '(#f #t))]
-                     [ext extensions])
-             (define (spell seg) (if munge? (munge-segment seg) seg))
-             (define leaf (string-append (spell base-name) ext))
-             (define p
-               (if (null? dir-prefix)
-                   (build-path dir-root leaf)
-                   (apply build-path dir-root
-                          (append (map spell dir-prefix)
-                                  (list leaf)))))
-             (and (file-exists? p) p)))
-         (define (walk-roots find-at)
-           (let walk ([cur source-dir])
-             (or
-              (find-at cur)
-              (let-values ([(parent _name _dir?) (split-path cur)])
-                (and (path? parent)
-                     (not (equal? (simplify-path parent)
-                                  (simplify-path cur)))
-                     (walk parent))))))
-         (define (declares-namespace? path)
-           (for/or ([datum (in-list (read-beagle-datums path))])
-             (match datum
-               [(list* 'ns (? symbol? declared) _)
-                (eq? declared ns-sym)]
-               [_ #f])))
-         ;; Namespace identity outranks proximity. Search the complete authored
-         ;; namespace path at every ancestor before considering a flat sibling;
-         ;; otherwise host/notifications can steal game.notifications merely
-         ;; because an importer happens to live under host/.
-         (or
-          (walk-roots
-           (lambda (root) (try-extensions root dir-segs)))
-          (and
-           flat-fallback?
-           (not (null? dir-segs))
-           (walk-roots
-            (lambda (root)
-              (define flat (try-extensions root '()))
-              (and flat
-                   (not (equal? (simplify-path flat)
-                                (simplify-path abs-source)))
-                   (declares-namespace? flat)
-                   flat))))))))
-
-;; A namespace may be provided by a HOST-language file where the namespace says
-;; it should be: self-host's `selfhost.rt` is `selfhost/rt.clj` beside the
-;; beagle sources, typed by `declare-extern`. That require IS satisfied — just
-;; not by beagle source — so it must not be rejected as unresolvable. The flat
-;; fallback is beagle-only because it proves identity by reading an `ns` form.
-(define (host-module-path ns-sym source-path target)
-  (define descriptor (target-by-id target))
-  (and descriptor
-       (resolve-module-path ns-sym source-path
-                            #:extensions (list (target-out-ext descriptor))
-                            #:flat-fallback? #f)))
 
 (define (qualify-name prefix-sym name-sym)
   (string->symbol
@@ -348,10 +265,12 @@
   (simplify-path
    (path->complete-path (if (path? path) path (string->path path)))))
 
-(define (read-beagle-syntax/bytes path source-bytes)
+(define (read-beagle-syntax/bytes path source-bytes
+                                  #:source-id [source-id #f])
   (unless (bytes? source-bytes)
     (raise-argument-error 'read-beagle-syntax/bytes "bytes?" source-bytes))
-  (define src (canonical-source-path path))
+  (define src (or source-id (canonical-source-path path)))
+  (define src-text (if (path? src) (path->string src) (format "~a" src)))
   (define snapshot (bytes->immutable-bytes source-bytes))
   (define in (open-input-bytes snapshot))
   (dynamic-wind
@@ -394,13 +313,13 @@
                (and (pair? d) (eq? (car d) 'define-target))))
            (cond
              [has-define-target? forms]
-             [(expected-target-for-extension (path->string src))
+             [(expected-target-for-extension src-text)
               => (lambda (ext-tgt)
                    (cons (datum->syntax #f (list 'define-target ext-tgt)) forms))]
              [else
               (error 'beagle
                      "~a: unknown Beagle language header — use #lang beagle for Core or an explicit hosted language such as #lang beagle/clj"
-                     (path->string src))])]
+                     src-text)])]
           [else forms])))
     (lambda () (close-input-port in))))
 
@@ -1138,12 +1057,7 @@
 ;; legacy nominal/JVM path.
 (define current-candidate-type-bindings (make-parameter #f))
 (define current-candidate-type-prefixes (make-parameter #f))
-
-;; Standalone parsing resolves sibling Beagle modules to provisional semantic
-;; interfaces. Nested parses share this cache; an active set makes source cycles
-;; fail visibly instead of recursing through the filesystem indefinitely.
-(define current-standalone-interface-cache (make-parameter #f))
-(define current-standalone-interface-active (make-parameter (set)))
+(define current-module-resolution-closed? (make-parameter #f))
 
 (define INTERFACE-TYPE-EXPORT-KINDS
   '(record protocol enum union parametric-union union-member
@@ -1305,8 +1219,6 @@
 (define (parse-program stxs*
                        #:source-path [source-path #f]
                        #:module-resolver [module-resolver #f])
-  (define standalone-cache
-    (or (current-standalone-interface-cache) (make-hash)))
   (parameterize ([lowering-counter (box 0)]
                  ;; Type aliases and parametric declaration names are
                  ;; program-local.  Freshening them here prevents one module
@@ -1316,7 +1228,6 @@
                  [current-type-aliases (hasheq)]
                  [current-candidate-type-bindings (make-hasheq)]
                  [current-candidate-type-prefixes (make-hash)]
-                 [current-standalone-interface-cache standalone-cache]
                  [current-qualified-type-resolver
                   resolve-candidate-qualified-type]
                  [current-type-surface-error
@@ -1328,14 +1239,15 @@
 
 (define (parse-program/bytes source-bytes
                              #:source-path source-path
+                             #:source-id [source-id #f]
                              #:module-resolver [module-resolver #f])
   (unless (bytes? source-bytes)
     (raise-argument-error 'parse-program/bytes "bytes?" source-bytes))
   (define snapshot (bytes->immutable-bytes source-bytes))
   (define prog
     (parse-program
-     (read-beagle-syntax/bytes source-path snapshot)
-     #:source-path source-path
+     (read-beagle-syntax/bytes source-path snapshot #:source-id source-id)
+     #:source-path (or source-id source-path)
      #:module-resolver module-resolver))
   (hash-set! PROGRAM->SOURCE-BYTES prog snapshot)
   prog)
@@ -1353,6 +1265,18 @@
                         #:source-path [source-path #f]
                         #:module-resolver [module-resolver #f])
   (define raw-datums (map syntax->datum stxs*))
+
+  ;; A host namespace outside the typed target catalog is authority-bearing
+  ;; only when this source explicitly declares one of its imported bindings.
+  ;; Inspect the complete authored datum stream so declaration order never
+  ;; changes whether the preceding require is authorized.
+  (define declared-extern-names
+    (for/set ([datum (in-list raw-datums)]
+              #:when
+              (match datum
+                [(list* 'declare-extern (? symbol?) _) #t]
+                [_ #f]))
+      (cadr datum)))
 
   ;; Determine target up-front so reader-conditionals can be resolved before
   ;; any per-form parsing. `define-target` appears as a datum produced by the
@@ -1732,48 +1656,11 @@
              rn))
     candidate)
 
-  (define (standalone-interface-for rn)
-    (define mod-path (resolve-module-path rn source-path))
-    (and
-     mod-path
-     (let* ([canonical-path
-             (simplify-path (path->complete-path mod-path))]
-            [cache (current-standalone-interface-cache)]
-            [active (current-standalone-interface-active)])
-       (hash-ref
-        cache
-        canonical-path
-        (lambda ()
-          (when (set-member? active canonical-path)
-            (error 'beagle
-                   "standalone module cycle reaches ~a; check the module set through the coherent overlay"
-                   canonical-path))
-          (define provider
-            (parameterize
-                ([current-standalone-interface-active
-                  (set-add active canonical-path)])
-              (parse-program/file canonical-path)))
-          (unless (eq? (program-namespace provider) rn)
-            (error 'beagle
-                   "required module ~a resolved to source declaring namespace ~a"
-                   rn
-                   (program-namespace provider)))
-          (define interface
-            (program->module-interface
-             provider
-             #:source-id (path->string canonical-path)
-             #:provisional? #t))
-          (hash-set! cache canonical-path interface)
-          interface)))))
-
   (define (pre-register-require-types! rn alias refer-syms)
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
     (define candidate (candidate-for-require rn))
-    (define interface
-      (if candidate
-          (module-source-interface candidate)
-          (standalone-interface-for rn)))
+    (define interface (and candidate (module-source-interface candidate)))
     (cond
       [interface
        (register-interface-types! interface prefix refer-syms)]
@@ -1789,16 +1676,23 @@
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
     (define candidate (candidate-for-require rn))
-    (define interface
-      (if candidate
-          (module-source-interface candidate)
-          (with-handlers
-              ([exn:fail?
-                (lambda (error)
-                  (eprintf "warning: interface import from ~a failed: ~a\n"
-                           rn (exn-message error))
-                  #f)])
-            (standalone-interface-for rn))))
+    (define interface (and candidate (module-source-interface candidate)))
+    (define (declared-extern? name)
+      (set-member? declared-extern-names name))
+    (define (qualified-extern? qualifier name)
+      (declared-extern? (qualify-name qualifier name)))
+    (define extern-authorized?
+      (if (pair? refer-syms)
+          (for/and ([name (in-list refer-syms)])
+            (or (declared-extern? name)
+                (qualified-extern? prefix name)
+                (qualified-extern? rn name)))
+          (for/or ([name (in-set declared-extern-names)])
+            (define text (symbol->string name))
+            (or (string-prefix? text
+                                (string-append (symbol->string prefix) "/"))
+                (string-prefix? text
+                                (string-append (symbol->string rn) "/"))))))
     (cond
       [interface
        (import-interface! interface prefix refer-syms)]
@@ -1816,7 +1710,7 @@
                 (let ([module-name (symbol->string rn)])
                   (not (string-contains? module-name "."))))
            (host-namespace? rn target)
-           (host-module-path rn source-path target))
+           extern-authorized?)
        ;; Foreign package / host runtime refers are runtime bindings whose
        ;; types come from the catalog or from `declare-extern`, not from
        ;; beagle source.
@@ -1824,13 +1718,15 @@
          (hash-set! externs name (type-prim 'Any))
          (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
          (hash-set! imp-symbol-ns name prefix))]
-      ;; Nothing provides this namespace: not a candidate in this invocation,
-      ;; not beagle source on disk, not a host namespace or host-language
-      ;; file. Accepting it would register a phantom alias whose every
+      ;; Nothing provides this namespace: not a candidate in this invocation
+      ;; and not a catalog/extern-authorized host namespace. Accepting it would
+      ;; register a phantom alias whose every
       ;; qualified call then types at an arbitrary type — silently.
       [else
        (error 'beagle
-              "required namespace ~a could not be resolved (required by ~a); it is absent from this invocation and no source file declares it"
+              (if (current-module-resolution-closed?)
+                  "required namespace ~a is absent from the closed source bundle (required by ~a)"
+                  "required namespace ~a could not be resolved (required by ~a); it is absent from this invocation and no declared module root provides it")
               rn
               (or source-path "<unknown source>"))])
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
@@ -5346,6 +5242,7 @@
  read-beagle-datums
  read-beagle-syntax
  read-beagle-syntax/bytes
+ current-module-resolution-closed?
  strip-target-export
  (struct-out layout-edit)
  signature-layout-edits

@@ -2,8 +2,9 @@
 # beagle-ast: project a strictly checked program as versioned JSON.
 #
 # Usage:
-#   beagle ast [--interface-sha256-out PATH] <source.bgl|.bclj|.bjs|.bnix>
-#   beagle ast --bundle <source>...
+#   beagle ast [--module-root LOGICAL=PHYSICAL]...
+#     [--interface-sha256-out PATH] <source.bgl|.bclj|.bjs|.bnix>
+#   beagle ast --bundle [--module-root LOGICAL=PHYSICAL]... -- <source>...
 #
 # Parses and checks without executing or emitting the source program. Output is
 # canonical JSON for deterministic external consumers.
@@ -14,21 +15,60 @@ source "$(dirname "$0")/_beagle-source-id"
 
 bundle=0
 interface_sha256_out=""
-if [[ "${1:-}" == "--interface-sha256-out" ]]; then
-    [[ $# -ge 3 ]] || {
-        echo "usage: beagle ast --interface-sha256-out PATH <source>" >&2
-        exit 2
-    }
-    interface_sha256_out="$2"
-    shift 2
-fi
-if [[ "${1:-}" == "--bundle" ]]; then
-    bundle=1
-    shift
-fi
+module_root_specs=()
+sources=()
 
-if [[ $# -lt 1 || ( $bundle -eq 0 && $# -ne 1 ) ]]; then
-    echo "usage: beagle ast [--interface-sha256-out PATH] <source> | --bundle <source>..." >&2
+usage() {
+    echo "usage: beagle ast [--module-root LOGICAL=PHYSICAL]... [--interface-sha256-out PATH] <source> | --bundle [--module-root LOGICAL=PHYSICAL]... -- <source>..." >&2
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --bundle)
+            bundle=1
+            shift
+            ;;
+        --interface-sha256-out)
+            [[ $# -ge 2 ]] || {
+                usage
+                exit 2
+            }
+            interface_sha256_out="$2"
+            shift 2
+            ;;
+        --module-root)
+            [[ $# -ge 2 ]] || {
+                usage
+                exit 2
+            }
+            module_root_specs+=("$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_root_specs+=("${1#*=}")
+            shift
+            ;;
+        --)
+            shift
+            while [[ $# -gt 0 ]]; do
+                sources+=("$1")
+                shift
+            done
+            ;;
+        -*)
+            echo "beagle ast: unknown option: $1" >&2
+            usage
+            exit 2
+            ;;
+        *)
+            sources+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#sources[@]} -lt 1 || ( $bundle -eq 0 && ${#sources[@]} -ne 1 ) ]]; then
+    usage
     exit 2
 fi
 [[ $bundle -eq 0 || -z "$interface_sha256_out" ]] || {
@@ -36,7 +76,7 @@ fi
     exit 2
 }
 
-for src in "$@"; do
+for src in "${sources[@]}"; do
     if [[ ! -f "$src" ]]; then
         echo "beagle ast: source file not found: $src" >&2
         exit 1
@@ -48,97 +88,85 @@ done
 # collection link (which lacks it).
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-if [[ $bundle -eq 0 ]]; then
-    src_abs="$(realpath "$1")"
-    source_id="$(beagle_source_id "$src_abs")"
-
-    "$RACKET" -e "
-    (require (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
-             (file \"$BEAGLE_ROOT/beagle-lib/private/check.rkt\")
-             (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\")
-             (file \"$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt\"))
-
-    (define src (vector-ref (current-command-line-arguments) 0))
-    (define prog (parse-program/file src))
-    (type-check-with-locs!
-     prog
-     (lambda (e _loc-stx) (raise e))
-     #:capture-types? #t)
-    (define source-id (vector-ref (current-command-line-arguments) 1))
-    (define interface-sha256-out
-      (vector-ref (current-command-line-arguments) 2))
-    (unless (string=? interface-sha256-out \"\")
-      (call-with-output-file
-       interface-sha256-out
-       #:exists 'truncate/replace
-       (lambda (interface-out)
-         (display
-          (module-interface-digest
-           (program->module-interface prog #:source-id source-id))
-          interface-out)
-         (newline interface-out))))
-    (define output (open-output-string))
-    (write-checked-program-json
-     prog output
-     #:source-id source-id)
-    (display (get-output-string output))
-    " -- "$src_abs" "$source_id" "$interface_sha256_out"
-    exit
-fi
-
-bundle_args=()
-for src in "$@"; do
+source_args=()
+for src in "${sources[@]}"; do
     src_abs="$(realpath "$src")"
-    bundle_args+=("$src_abs" "$(beagle_source_id "$src_abs")")
+    source_args+=("$src_abs" "$(beagle_source_id "$src_abs")")
 done
 
 "$RACKET" -e "
 (require json
-         racket/file
-         (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
+         racket/list
          (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\")
          (file \"$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt\")
-         (file \"$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt\"))
+         (file \"$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt\")
+         (file \"$BEAGLE_ROOT/beagle-lib/private/module-source-root.rkt\"))
 
 (define arguments (vector->list (current-command-line-arguments)))
-(unless (even? (length arguments))
+(unless (>= (length arguments) 3)
+  (error 'beagle-ast \"missing internal invocation arguments\"))
+(define bundle? (string=? (car arguments) \"1\"))
+(define interface-sha256-out (cadr arguments))
+(define root-count (string->number (caddr arguments)))
+(unless (and (exact-nonnegative-integer? root-count)
+             (<= root-count (- (length arguments) 3)))
+  (error 'beagle-ast \"invalid internal module-root count\"))
+(define payload (cdddr arguments))
+(define roots
+  (map parse-module-source-root (take payload root-count)))
+(define input-arguments (drop payload root-count))
+(unless (and (positive? (length input-arguments))
+             (even? (length input-arguments)))
   (error 'beagle-ast
-         \"bundle inputs must pair a physical path with a logical source id\"))
+         \"inputs must pair a physical path with a logical source id\"))
 (define inputs
-  (for/list ([index (in-range 0 (length arguments) 2)])
-    (define physical-path (list-ref arguments index))
-    (define source-id (list-ref arguments (add1 index)))
-    (vector physical-path source-id (file->bytes physical-path))))
-(define snapshots-by-source-id (make-hash))
-(define sources
-  (for/list ([input (in-list inputs)])
-    (define source-id (vector-ref input 1))
-    (define snapshot (vector-ref input 2))
-    (hash-set! snapshots-by-source-id source-id snapshot)
-    (stxs->module-source
-     (read-beagle-syntax/bytes source-id snapshot)
-     source-id)))
+  (for/list ([index (in-range 0 (length input-arguments) 2)])
+    (module-source-input
+     (list-ref input-arguments (add1 index))
+     (list-ref input-arguments index))))
+(define closure (resolve-module-source-closure inputs roots))
 (define checked
-  (check-module-overlay
-   sources
+  (check-module-source-closure
+   closure
    #:emit? #f
    #:capture-types? #t
-   #:closed? #t
-   #:parse-source
-   (lambda (source resolver)
-     (define source-id (format \"~a\" (module-source-source-id source)))
-     (parse-program/bytes
-      (hash-ref snapshots-by-source-id source-id)
-      #:source-path source-id
-      #:module-resolver resolver))))
+   #:check-sources
+   (and (not bundle?)
+        (module-source-closure-explicit-source-ids closure))))
 (unless (overlay-check-result-ok? checked)
   (for ([diagnostic (in-list (overlay-check-result-diagnostics checked))])
     (eprintf \"beagle ast: ~a: ~a~n\"
-             (or (overlay-diagnostic-source diagnostic) \"bundle\")
+             (or (overlay-diagnostic-source diagnostic) \"module closure\")
              (overlay-diagnostic-message diagnostic)))
   (exit 1))
+(define checked-modules
+  (sort
+   (overlay-check-result-modules checked)
+   string<?
+   #:key (lambda (module)
+           (format \"~a\" (checked-overlay-module-source module)))))
+(unless bundle?
+  (unless (= (length checked-modules) 1)
+    (error 'beagle-ast
+           \"single-source projection selected ~a checked modules\"
+           (length checked-modules)))
+  (define module (car checked-modules))
+  (unless (string=? interface-sha256-out \"\")
+    (call-with-output-file
+     interface-sha256-out
+     #:exists 'truncate/replace
+     (lambda (interface-out)
+       (display
+        (module-interface-digest (checked-overlay-module-interface module))
+        interface-out)
+       (newline interface-out))))
+  (write-checked-program-json
+   (checked-overlay-module-program module)
+   (current-output-port)
+   #:source-id (format \"~a\" (checked-overlay-module-source module)))
+  (exit 0))
 (define modules
-  (for/list ([module (in-list (overlay-check-result-modules checked))])
+  (for/list ([module (in-list checked-modules)])
     (define output (open-output-string))
     (write-checked-program-json
      (checked-overlay-module-program module)
@@ -151,4 +179,5 @@ done
      'program (string->jsexpr (get-output-string output)))))
 (write-json (hasheq 'schemaVersion 2 'modules modules))
 (newline)
-" -- "${bundle_args[@]}"
+" -- "$bundle" "$interface_sha256_out" "${#module_root_specs[@]}" \
+    "${module_root_specs[@]}" "${source_args[@]}"

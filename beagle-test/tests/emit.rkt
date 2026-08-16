@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require rackunit
+         racket/file
          racket/string
+         beagle/private/module-source-root
          beagle/private/parse
          beagle/private/emit)
 
@@ -10,6 +12,51 @@
 (define (compile . forms)
   (emit-program
    (parse-program (map (lambda (f) (datum->syntax #f f)) forms))))
+
+(define (write-rooted-source! path source)
+  (make-parent-directory* path)
+  (call-with-output-file path
+    (lambda (out) (display source out))
+    #:exists 'truncate/replace))
+
+(define (compile-rooted-require namespace relative-provider-path require-form)
+  (define root (make-temporary-file "beagle-emit-module-root-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define provider-root (build-path root "providers"))
+      (define provider-path (build-path provider-root relative-provider-path))
+      (define consumer-path (build-path root "consumer.bclj"))
+      (write-rooted-source!
+       provider-path
+       (format "#lang beagle/clj\n(ns ~a)\n" namespace))
+      (write-rooted-source!
+       consumer-path
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns rooted.consumer)\n"
+        (format "~s\n" require-form)
+        "(def x 1)\n"))
+      (define closure
+        (resolve-module-source-closure
+         (list (module-source-input "cases/consumer.bclj" consumer-path))
+         (list (make-module-source-root-v0 "providers" provider-root))))
+      (define sources (module-source-closure-sources closure))
+      (define consumer
+        (for/first ([source (in-list sources)]
+                    #:when (equal? (module-source-source-id source)
+                                   "cases/consumer.bclj"))
+          source))
+      (emit-program
+       (module-source-closure-parse-source
+        closure
+        consumer
+        (lambda (required-namespace _importer)
+          (for/first ([source (in-list sources)]
+                      #:when (eq? (module-source-namespace source)
+                                  required-namespace))
+            source)))))
+    (lambda () (delete-directory/files root))))
 
 (define (matches? rx out) (regexp-match? rx out))
 
@@ -134,14 +181,20 @@
 ;; --- require emits in ns form ---------------------------------------------
 
 (test-case "require with alias emits in ns :require"
-  (define out (compile '(require beagle.example.helpers :as h)
-                       '(def x 1)))
+  (define out
+    (compile-rooted-require
+     'beagle.example.helpers
+     "beagle/example/helpers.bclj"
+     '(require beagle.example.helpers :as h)))
   (check-true (matches? #rx":require" out))
   (check-true (matches? #rx"\\[beagle\\.example\\.helpers :as h\\]" out)))
 
 (test-case "require without alias emits :as with module name"
-  (define out (compile '(require beagle.helpers)
-                       '(def x 1)))
+  (define out
+    (compile-rooted-require
+     'beagle.helpers
+     "beagle/helpers.bclj"
+     '(require beagle.helpers)))
   (check-true (matches? #rx"\\[beagle\\.helpers :as helpers\\]" out)))
 
 (test-case "clojure namespace require emits in ns :require"

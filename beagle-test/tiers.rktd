@@ -70,6 +70,7 @@
              "variant-xmodule.rkt"      ; an imported defunion's ctor/accessor/field/exhaustiveness surface == same-module
              "generic-type-arity.rkt"   ; local/imported parametric constructors require their exact argument count
              "scrutinee-narrowing.rkt"  ; match/instance? narrow a stable scrutinee to the proven member; binders still bind fields
+             "module-source-root.rkt"   ; explicit exact-path source roots + closed immutable transitive closure
              "module-overlay-check.rkt"  ; coherent multi-EDN candidate overlay + cross-module interfaces
              "checked-bundle.rkt"       ; exact-byte closed module closure + checked projection
              "defmacro.rkt"

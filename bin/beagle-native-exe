@@ -5,7 +5,9 @@
 #
 # Usage:
 #   beagle native-exe --out FILE --entry NS/NAME [--cc CC] [--static]
-#                     [--artifacts DIR] SOURCE...
+#                     [--artifacts DIR]
+#                     [--module-root LOGICAL_PREFIX=PHYSICAL_DIRECTORY]...
+#                     SOURCE...
 #
 # The frozen native program report and C17 projection artifacts are copied to DIR (default:
 # FILE.artifacts). FILE is published only after the complete C17 projection,
@@ -16,6 +18,8 @@ set -euo pipefail
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 CORE_BUILD="$BIN/beagle-build-core"
+MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rkt"
+source "$BIN/_beagle-racket"
 source "$BIN/_beagle-source-id"
 
 usage() {
@@ -33,6 +37,7 @@ artifacts=""
 cc="${CC:-cc}"
 static_link=0
 sources=()
+module_root_args=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -80,6 +85,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --static)
             static_link=1
+            shift
+            ;;
+        --module-root)
+            [[ $# -ge 2 ]] ||
+                die "--module-root needs LOGICAL_PREFIX=PHYSICAL_DIRECTORY"
+            module_root_args+=(--module-root "$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_root_args+=(--module-root "${1#*=}")
             shift
             ;;
         --help|-h)
@@ -171,6 +186,8 @@ done
 [[ -x "$CORE_BUILD" ]] ||
     die "Core build command is unavailable: $CORE_BUILD"
 [[ -x "$BIN/beagle-ast" ]] || die "AST command is unavailable: $BIN/beagle-ast"
+[[ -f "$MODULE_SOURCE_ROOT_CLI" ]] ||
+    die "module source root resolver is unavailable: $MODULE_SOURCE_ROOT_CLI"
 command -v python3 >/dev/null 2>&1 || die "required command is unavailable: python3"
 command -v bb >/dev/null 2>&1 || die "required command is unavailable: bb"
 cc_path="$(command -v -- "$cc" 2>/dev/null || true)"
@@ -185,10 +202,41 @@ for source in "${sources[@]}"; do
     source_ids+=("$(beagle_source_id "$source")")
 done
 
+closure_arguments=("${module_root_args[@]}")
+for source_index in "${!normalized_sources[@]}"; do
+    closure_arguments+=(
+        --source
+        "${normalized_sources[$source_index]}"
+        "${source_ids[$source_index]}"
+    )
+done
+closure_fields_file="$work/module-source-closure.nul"
+closure_log="$work/module-source-closure.log"
+set +e
+"$RACKET" "$MODULE_SOURCE_ROOT_CLI" "${closure_arguments[@]}" \
+    >"$closure_fields_file" 2>"$closure_log"
+closure_rc=$?
+set -e
+if [[ $closure_rc -ne 0 ]]; then
+    sed -n '1,200p' "$closure_log" >&2
+    die "could not resolve module source closure"
+fi
+closure_fields=()
+mapfile -d '' -t closure_fields <"$closure_fields_file"
+[[ ${#closure_fields[@]} -gt 0 && $(( ${#closure_fields[@]} % 2 )) -eq 0 ]] ||
+    die "module source root resolver returned malformed closure fields"
+closure_sources=()
+closure_source_ids=()
+for ((field_index = 0; field_index < ${#closure_fields[@]}; field_index += 2)); do
+    closure_sources+=("${closure_fields[$field_index]}")
+    closure_source_ids+=("${closure_fields[$((field_index + 1))]}")
+done
+
 bundle_ast="$work/source_bundle.ast.json"
 bundle_log="$work/source_bundle.ast.log"
 set +e
-"$BIN/beagle-ast" --bundle "${normalized_sources[@]}" \
+"$BIN/beagle-ast" --bundle "${module_root_args[@]}" -- \
+    "${normalized_sources[@]}" \
     >"$bundle_ast" 2>"$bundle_log"
 bundle_rc=$?
 set -e
@@ -197,7 +245,7 @@ if [[ $bundle_rc -ne 0 ]]; then
     die "could not inspect exports in coherent source bundle"
 fi
 
-python3 - "$bundle_ast" "$work" "${source_ids[@]}" <<'PY'
+python3 - "$bundle_ast" "$work" "${closure_source_ids[@]}" <<'PY'
 import json
 import pathlib
 import sys
@@ -225,14 +273,14 @@ PY
 
 ast_args=()
 source_index=0
-for source in "${normalized_sources[@]}"; do
+for source in "${closure_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
     if ! bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
         >"$work/source_${source_index}.verify.log" 2>&1; then
         sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2
         die "could not authenticate checked AST for source: $source"
     fi
-    ast_args+=("${source_ids[$source_index]}" "$ast")
+    ast_args+=("${closure_source_ids[$source_index]}" "$ast")
     source_index=$((source_index + 1))
 done
 
@@ -331,7 +379,8 @@ entry_mode="${entry_metadata_lines[1]}"
 module_dir="$work/module"
 mkdir -p "$module_dir"
 set +e
-"$CORE_BUILD" --materializer c17 --out "$module_dir" --entry "$entry" -- \
+"$CORE_BUILD" --materializer c17 --out "$module_dir" --entry "$entry" \
+    "${module_root_args[@]}" -- \
     "${normalized_sources[@]}" >"$work/core-build.log" 2>&1
 module_rc=$?
 set -e

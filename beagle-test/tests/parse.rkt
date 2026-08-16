@@ -4,6 +4,8 @@
          (for-syntax racket/base)
          racket/file
          racket/string
+         beagle/private/module-overlay-check
+         beagle/private/module-source-root
          beagle/private/parse
          beagle/private/types
          beagle/private/macros)
@@ -42,6 +44,48 @@
         #:exists 'truncate)
       (parse-program (read-beagle-syntax tmp) #:source-path tmp))
     (lambda () (delete-file tmp))))
+
+(define (write-rooted-source! path source)
+  (make-parent-directory* path)
+  (call-with-output-file path
+    (lambda (out) (display source out))
+    #:exists 'truncate/replace))
+
+(define (parse-rooted-require require-form)
+  (define root (make-temporary-file "beagle-parse-module-root-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define provider-root (build-path root "providers"))
+      (define provider-path (build-path provider-root "other" "ns.bclj"))
+      (define consumer-path (build-path root "consumer.bclj"))
+      (write-rooted-source!
+       provider-path
+       "#lang beagle/clj\n(ns other.ns)\n")
+      (write-rooted-source!
+       consumer-path
+       (string-append
+        "#lang beagle/clj\n"
+        "(ns rooted.consumer)\n"
+        (format "~s\n" require-form)))
+      (define closure
+        (resolve-module-source-closure
+         (list (module-source-input "cases/consumer.bclj" consumer-path))
+         (list (make-module-source-root-v0 "providers" provider-root))))
+      (define sources (module-source-closure-sources closure))
+      (define consumer
+        (for/first ([source (in-list sources)]
+                    #:when (equal? (module-source-source-id source)
+                                   "cases/consumer.bclj"))
+          source))
+      (module-source-closure-parse-source
+       closure
+       consumer
+       (lambda (namespace _importer)
+         (for/first ([source (in-list sources)]
+                     #:when (eq? (module-source-namespace source) namespace))
+           source))))
+    (lambda () (delete-directory/files root))))
 
 (test-case "declaration and binding collections require source brackets"
   (for ([case
@@ -641,13 +685,13 @@
 ;; --- require ---------------------------------------------------------------
 
 (test-case "require with no alias"
-  (define p (parse-prog '(require other.ns)))
+  (define p (parse-rooted-require '(require other.ns)))
   (check-equal? (length (program-requires p)) 1)
   (check-eq? (require-entry-ns    (car (program-requires p))) 'other.ns)
   (check-false (require-entry-alias (car (program-requires p)))))
 
 (test-case "require with :as alias"
-  (define p (parse-prog '(require other.ns :as o)))
+  (define p (parse-rooted-require '(require other.ns :as o)))
   (define r (car (program-requires p)))
   (check-eq? (require-entry-ns r)    'other.ns)
   (check-eq? (require-entry-alias r) 'o))
@@ -1325,7 +1369,7 @@
   #rx"predicate must be [(]op numeric-literal[)]"
   '(defscalar Broken Int :where (>)))
 
-(test-case "standalone source import canonicalizes defscalar backing aliases"
+(test-case "rooted source import canonicalizes defscalar backing aliases"
   (define root (make-temporary-file "beagle-defscalar-import-~a" 'directory))
   (define provider (build-path root "provider.bclj"))
   (define consumer (build-path root "consumer.bclj"))
@@ -1344,7 +1388,19 @@
           (display "(ns consumer (:require [provider :refer [->Count Count]]))\n" out)
           (display "(def zero Count (->Count 0))\n" out))
         #:exists 'truncate/replace)
-      (define prog (parse-program/file consumer))
+      (define closure
+        (resolve-module-source-closure
+         (list (module-source-input "cases/consumer.bclj" consumer))
+         (list (make-module-source-root-v0 "rooted" root))))
+      (define checked
+        (check-module-source-closure closure #:emit? #f))
+      (check-true (overlay-check-result-ok? checked))
+      (define consumer-module
+        (for/first ([module (in-list (overlay-check-result-modules checked))]
+                    #:when (equal? (checked-overlay-module-source module)
+                                   "cases/consumer.bclj"))
+          module))
+      (define prog (checked-overlay-module-program consumer-module))
       (define ctor-type (hash-ref (program-externs prog) '->Count))
       (check-eq? (type-prim-name (car (type-fn-params ctor-type))) 'Int)
       (define imported-predicates

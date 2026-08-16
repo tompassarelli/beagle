@@ -12,12 +12,12 @@
 
 (require racket/file
          racket/list
-         racket/match
          racket/string
          "check.rkt"
          "emit.rkt"
          "facts-roundtrip.rkt"
          "module-interface.rkt"
+         "module-source-root.rkt"
          "parse.rkt")
 
 (struct overlay-diagnostic (source phase message) #:transparent)
@@ -44,32 +44,6 @@
            "~a: EDN root is not a beagle-file wrapper"
            source))
   (cdr children))
-
-(define (stxs-declared-namespace stxs source)
-  (define namespaces
-    (for/list ([stx (in-list stxs)]
-               #:do [(define datum (syntax->datum stx))]
-               #:when
-               (match datum
-                 [(list* 'ns (? symbol?) _) #t]
-                 [_ #f]))
-      (cadr (syntax->datum stx))))
-  (cond
-    ;; Namespace-free graph modules are valid standalone candidates.  They are
-    ;; addressable by @file source id, but cannot satisfy a namespace require.
-    [(null? namespaces) #f]
-    [(pair? (cdr namespaces))
-     (error 'check-edn-overlay
-            "~a: candidate has multiple ns declarations: ~a"
-            source namespaces)]
-    [else (car namespaces)]))
-
-(define (stxs->module-source stxs source)
-  (module-source
-   (stxs-declared-namespace stxs source)
-   source
-   stxs
-   #f))
 
 (define (edn->module-source edn-path)
   (define source (edn-source-id edn-path))
@@ -118,14 +92,7 @@
     (define sources
       (hash-ref (candidate-overlay-by-namespace overlay) namespace '()))
     (cond
-      [(null? sources)
-       (if closed?
-           (error
-            'check-module-overlay
-            "required namespace ~a is absent from the closed source bundle (required by ~a)"
-            namespace
-            importer-source)
-           #f)]
+      [(null? sources) #f]
       [(null? (cdr sources)) (car sources)]
       [else
        (error
@@ -269,7 +236,7 @@
        (module-interface-digest (module-source-interface left))
        (module-interface-digest (module-source-interface right)))))))
 
-(define (check-module-overlay sources
+(define (check-module-overlay input-sources
                               #:check-profile [check-profile 2]
                               #:check-namespaces [check-namespaces #f]
                               #:check-sources [check-sources #f]
@@ -279,12 +246,18 @@
                               #:diagnostic-sink [diagnostic-sink void]
                               #:parse-source [parse-source* parse-source])
   (let/ec abort
+    (define sources
+      (sort input-sources string<? #:key module-source-id-string))
     (define (guard source phase thunk)
       (with-handlers ([(lambda (_value) #t)
                        (lambda (value)
                          (diagnostic-sink source phase value #f)
                          (abort (failed-result source phase value)))])
         (thunk)))
+    (define (parse-checked-source source resolver)
+      (parameterize
+          ([current-module-resolution-closed? closed?])
+        (parse-source* source resolver)))
     (when (null? sources)
       (abort
        (failed-result
@@ -307,7 +280,7 @@
          (guard
           (module-source-source-id source)
           'parse
-          (lambda () (parse-source* source bootstrap-resolver))))))
+          (lambda () (parse-checked-source source bootstrap-resolver))))))
     (guard
      #f
      'interface
@@ -357,7 +330,7 @@
              (guard
               (module-source-source-id source)
               'parse
-              (lambda () (parse-source* source current-resolver))))))
+              (lambda () (parse-checked-source source current-resolver))))))
         (define next-sources
           (for/list ([entry (in-list round-programs)])
             (define source (car entry))
@@ -498,7 +471,7 @@
              (guard
               (module-source-source-id source)
               'parse
-              (lambda () (parse-source* source current-resolver))))))
+              (lambda () (parse-checked-source source current-resolver))))))
         ;; Every provider in the candidate context is checked before its
         ;; interface can become authority. Selectors affect only the
         ;; returned/emitted module set, never the proof closure.
@@ -587,6 +560,26 @@
                (lambda () (emit-program prog)))))))
     (overlay-check-result #t modules '() overlay-digest)))
 
+(define (check-module-source-closure closure
+                                     #:check-profile [check-profile 2]
+                                     #:check-namespaces [check-namespaces #f]
+                                     #:check-sources [check-sources #f]
+                                     #:emit? [emit? #t]
+                                     #:capture-types? [capture-types? #f]
+                                     #:diagnostic-sink [diagnostic-sink void])
+  (check-module-overlay
+   (module-source-closure-sources closure)
+   #:check-profile check-profile
+   #:check-namespaces check-namespaces
+   #:check-sources check-sources
+   #:emit? emit?
+   #:capture-types? capture-types?
+   #:closed? #t
+   #:diagnostic-sink diagnostic-sink
+   #:parse-source
+   (lambda (source resolver)
+     (module-source-closure-parse-source closure source resolver))))
+
 (define (check-edn-overlay edn-paths
                            #:check-profile [check-profile 2]
                            #:check-namespaces [check-namespaces #f]
@@ -616,6 +609,7 @@
 (provide
  check-edn-overlay
  check-module-overlay
+ check-module-source-closure
  stxs->module-source
  (struct-out overlay-diagnostic)
  (struct-out checked-overlay-module)
