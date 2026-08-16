@@ -221,6 +221,7 @@
     (instance? native.core.SetVectorInstructionV0 instruction) true
     (instance? native.core.CollectionTransientOpenInstructionV0 instruction) true
     (instance? native.core.CollectionPersistentCloseInstructionV0 instruction) true
+    (instance? native.core.TransientVecPushInstructionV0 instruction) true
     (instance? native.core.TransientMapAssocInstructionV0 instruction) true
     (instance? native.core.TransientSetConjInstructionV0 instruction) true
     (instance? native.core.ArenaInstruction instruction) true
@@ -2982,6 +2983,11 @@
             (value-name function slots
               (core/collectiontransientopeninstructionv0-source-id instruction))]
         (cond
+          (instance? native.core.VectorShapeV0 shape)
+          (str "  " target " = (native_vec *)native_transient_vec_new(" arena
+            ", " source ", INT64_C(" (vector-stride layouts collection-type)
+            "), (size_t)" (vector-element-alignment layouts collection-type)
+            ");\n")
           (instance? native.core.MapShapeV0 shape)
           (str "  " target " = native_map_transient_open(" arena ", " source
             ", (size_t)" (map-key-alignment layouts collection-type)
@@ -3003,6 +3009,10 @@
             (value-name function slots
               (core/collectionpersistentcloseinstructionv0-source-id instruction))]
         (cond
+          (instance? native.core.VectorShapeV0 shape)
+          (str "  " target
+            " = native_transient_vec_freeze((native_transient_vec *)" source
+            ");\n")
           (instance? native.core.MapShapeV0 shape)
           (str "  " target " = native_map_persistent_close(" arena ", " source
             ");\n")
@@ -3010,6 +3020,16 @@
           (str "  " target " = native_set_persistent_close(" arena ", " source
             ");\n")
           :else "  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"))
+
+      (instance? native.core.TransientVecPushInstructionV0 instruction)
+      (str "  " target
+        " = (native_vec *)native_transient_vec_push((native_transient_vec *)"
+        (value-name function slots
+          (core/transientvecpushinstructionv0-source-id instruction))
+        ", &"
+        (value-name function slots
+          (core/transientvecpushinstructionv0-value-id instruction))
+        ");\n")
 
       (instance? native.core.TransientMapAssocInstructionV0 instruction)
       (let [(map-type core/NativeId) (core/ssavaluev0-type-id result)]
