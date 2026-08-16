@@ -17982,6 +17982,15 @@
           (literal-vector-type-definitions index))
         (base-source-types (Vec core/TypeDef))
         (collect-function-types declared-types signature-resolutions)
+        ;; Text search lowers through an optional index even when the authored
+        ;; result is Bool, so its hidden result type must precede body lowering.
+        (text-index-source-types (Vec core/TypeDef))
+        (if (or
+              (index-has-callee? index "str/index-of")
+              (index-has-callee? index "str/includes?"))
+          (append-type-def base-source-types
+            (nullable-map-value-type (int-type-id)))
+          base-source-types)
         (source-types (Vec core/TypeDef))
         (if (or
               (index-has-callee? index "host.fs/path-kind")
@@ -17991,8 +18000,8 @@
               (index-has-callee? index "host.fs/make-parent-directories")
               (index-has-callee? index "host.fs/append-text")
               (index-has-callee? index "host.clock/format-iso8601"))
-          (append-type-defs base-source-types (filesystem-outcome-types))
-          base-source-types)
+          (append-type-defs text-index-source-types (filesystem-outcome-types))
+          text-index-source-types)
         (process-source-types (Vec core/TypeDef))
         (if (or
               (index-has-callee? index "host.process/run-capture")
