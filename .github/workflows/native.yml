@@ -31,6 +31,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Verify authored release notes
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$RELEASE_TAG" ]]; then
+            bash scripts/check-release-notes.sh "$RELEASE_TAG"
+            exit 0
+          fi
+          mapfile -d '' notes_files < <(
+            find .github/release-notes -maxdepth 1 -type f \
+              -name 'v[0-9]*.[0-9]*.[0-9]*.md' -print0 | sort -z
+          )
+          [[ "${#notes_files[@]}" -gt 0 ]] || {
+            echo "no authored release notes are committed" >&2
+            exit 1
+          }
+          for notes_file in "${notes_files[@]}"; do
+            notes_tag="$(basename "$notes_file" .md)"
+            bash scripts/check-release-notes.sh "$notes_tag"
+          done
+
       # GraalVM native-image links against a C toolchain + zlib at build time.
       # The ubuntu runner ships them, but install explicitly so a base-image
       # change can't silently break the image link step.
@@ -100,28 +122,19 @@ jobs:
       - name: Verify native == bb seed == Racket oracle (byte-for-byte)
         run: _BEAGLE_RACKET="$(which racket)" self-host/native/verify-native.sh .fram/src/fram/*.bclj self-host/fixtures/lowering-temps.bclj
 
-      # Version tag -> GitHub release with the built binary attached. Tag is the
-      # release title; the body documents what the artifact is. gh is preinstalled
-      # on the runner (no third-party action); GH_TOKEN is the workflow token.
+      # Version tag -> GitHub release with the built binary attached and the
+      # authored, checked body for that exact tag. gh is preinstalled on the
+      # runner (no third-party action); GH_TOKEN is the workflow token.
       - name: Publish native binary as release artifact (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes_file=".github/release-notes/${{ github.ref_name }}.md"
+          bash scripts/check-release-notes.sh "${{ github.ref_name }}"
           gh release create "${{ github.ref_name }}" \
             self-host/native/beagle-selfhost \
             self-host/native/beagle-selfhost.seed-nar-hash \
             --verify-tag \
             --title "${{ github.ref_name }}" \
-            --notes "$(cat <<'EOF'
-          **beagle-selfhost** — stage0 native compiler (GraalVM native-image of the blessed seed).
-
-          The canonical Beagle builder: emits all certified targets (clj / js / nix) plus module resolution. ~20 MB, ~7 ms startup, zero reflection config.
-
-          Byte-for-byte parity gated in CI: native emit == babashka seed emit == Racket oracle emit, over the fram/src corpus.
-
-          ```sh
-          ./beagle-selfhost emit FILE.bclj          # also: ast | check | emit-from-ast --target js|nix
-          ```
-          EOF
-          )"
+            --notes-file "$notes_file"
