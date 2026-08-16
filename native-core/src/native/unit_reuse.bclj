@@ -2836,7 +2836,7 @@
 (defn collect-effects [(units (Vec TypedUnitV0))] (Vec core/EffectDef)
   (loop [(position Int) 0
          (values (Vec core/EffectDef))
-         (lower/slice-effects false false false false false false false)]
+         (lower/slice-effects false false false false false false false false)]
     (if (>= position (count units)) values
       (let [(additions (Vec core/EffectDef))
             (typedunitv0-effects (nth units position))]
@@ -2849,7 +2849,7 @@
   [(units (Vec TypedUnitV0))] (Vec core/CapabilityDef)
   (loop [(position Int) 0
          (values (Vec core/CapabilityDef))
-         (lower/slice-capabilities false false false false false false false)]
+         (lower/slice-capabilities false false false false false false false false)]
     (if (>= position (count units)) values
       (let [(additions (Vec core/CapabilityDef))
             (typedunitv0-capabilities (nth units position))]
@@ -2976,7 +2976,7 @@
   (let [(root core/NativeId) (lower/lower-id "typed-stage" [source-digest])
         (nodes (Vec stages/TermNodeV0))
         (lower/typed-term-nodes types functions effects
-          false false false false false false false)
+          false false false false false false false false)
         (terms stages/TermGraphV0)
         (stages/->TermGraphV0 root
           (conj nodes
