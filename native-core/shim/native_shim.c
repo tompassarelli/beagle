@@ -9425,6 +9425,105 @@ int64_t native_host_time_sleep_milliseconds_v0(
 #endif
 }
 
+#if defined(__wasi__)
+static const struct {
+  uint64_t length;
+  uint8_t bytes[4];
+} native_host_platform_text_v0 = {UINT64_C(4), {'w', 'a', 's', 'i'}};
+#elif defined(__linux__)
+static const struct {
+  uint64_t length;
+  uint8_t bytes[5];
+} native_host_platform_text_v0 = {UINT64_C(5), {'l', 'i', 'n', 'u', 'x'}};
+#elif defined(__APPLE__) && defined(__MACH__)
+static const struct {
+  uint64_t length;
+  uint8_t bytes[6];
+} native_host_platform_text_v0 = {
+    UINT64_C(6), {'d', 'a', 'r', 'w', 'i', 'n'}};
+#else
+static const struct {
+  uint64_t length;
+  uint8_t bytes[7];
+} native_host_platform_text_v0 = {
+    UINT64_C(7), {'u', 'n', 'k', 'n', 'o', 'w', 'n'}};
+#endif
+
+uint64_t native_host_system_platform_v0(
+    const native_capability *capability) {
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return (uint64_t)(uintptr_t)&native_host_platform_text_v0;
+}
+
+bool native_host_terminal_stdout_tty_v0(
+    const native_capability *capability) {
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+#if defined(__wasi__)
+  return false;
+#else
+  return isatty(STDOUT_FILENO) == 1;
+#endif
+}
+
+int32_t native_host_system_hostname_v0(
+    native_arena *arena, const native_capability *capability, uint64_t *out) {
+  if (out != NULL) {
+    *out = UINT64_C(0);
+  }
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL)) {
+    return EINVAL;
+  }
+#if defined(__wasi__)
+  return ENOTSUP;
+#else
+  long configured_bound;
+  size_t bound;
+  char *hostname;
+  size_t length;
+  uint8_t *destination = NULL;
+
+  errno = 0;
+  configured_bound = sysconf(_SC_HOST_NAME_MAX);
+  if (configured_bound < 0) {
+    if (errno != 0) {
+      return (int32_t)errno;
+    }
+    configured_bound = 255;
+  }
+  if ((uint64_t)configured_bound > (uint64_t)(SIZE_MAX - (size_t)1U)) {
+    return EOVERFLOW;
+  }
+  bound = (size_t)configured_bound + (size_t)1U;
+  hostname = (char *)calloc(bound, (size_t)1U);
+  if (hostname == NULL) {
+    return ENOMEM;
+  }
+  if (gethostname(hostname, bound) != 0) {
+    int32_t status = (errno == 0) ? EIO : (int32_t)errno;
+    free(hostname);
+    return status;
+  }
+  length = strnlen(hostname, bound);
+  if (length == (size_t)0U) {
+    free(hostname);
+    return EIO;
+  }
+  if (length == bound) {
+    free(hostname);
+    return ENAMETOOLONG;
+  }
+  *out = native_text_alloc(arena, (uint64_t)length, &destination);
+  memcpy(destination, hostname, length);
+  free(hostname);
+  return 0;
+#endif
+}
+
 /* The embedding host may own the environment instead of the OS: the Wasm
    adapter defines this ABI over its exported mailbox and compiles the shim
    with NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL so a zero-import reactor never
@@ -10028,6 +10127,13 @@ int32_t native_host_filesystem_append_text_v0(
 }
 
 #if defined(__wasi__)
+int64_t native_host_process_exec_replace_v0(
+    const native_capability *capability, const native_vec *argv_value) {
+  (void)capability;
+  (void)argv_value;
+  return -((int64_t)ENOTSUP);
+}
+
 int64_t native_host_process_run_inherit_v0(
     const native_capability *capability, const native_vec *argv_value) {
   (void)capability;
@@ -10073,6 +10179,82 @@ int32_t native_host_process_read_line_bounded_v0(
     *out = NULL;
   }
   return ENOTSUP;
+}
+
+int32_t native_host_process_read_line_deadline_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t fd, int64_t max_line_bytes, int64_t timeout_ms, void **out) {
+  (void)arena;
+  (void)capability;
+  (void)fd;
+  (void)max_line_bytes;
+  (void)timeout_ms;
+  if (out != NULL) {
+    *out = NULL;
+  }
+  return ENOTSUP;
+}
+
+int64_t native_host_process_fifo_create_v0(
+    const native_capability *capability, uint64_t path) {
+  (void)capability;
+  (void)path;
+  return -((int64_t)ENOTSUP);
+}
+
+int64_t native_host_process_fifo_open_read_v0(
+    const native_capability *capability, uint64_t path) {
+  (void)capability;
+  (void)path;
+  return -((int64_t)ENOTSUP);
+}
+
+int64_t native_host_process_fifo_write_deadline_v0(
+    const native_capability *capability, uint64_t path, uint64_t text,
+    int64_t timeout_ms) {
+  (void)capability;
+  (void)path;
+  (void)text;
+  (void)timeout_ms;
+  return -((int64_t)ENOTSUP);
+}
+
+int64_t native_host_process_poll_readable_v0(
+    const native_capability *capability, const native_vec *fds,
+    int64_t timeout_ms) {
+  (void)capability;
+  (void)fds;
+  (void)timeout_ms;
+  return -((int64_t)ENOTSUP);
+}
+
+int64_t native_host_process_current_pid_v0(
+    const native_capability *capability) {
+  (void)capability;
+  return -((int64_t)ENOTSUP);
+}
+
+bool native_host_process_alive_v0(
+    const native_capability *capability, int64_t pid) {
+  (void)capability;
+  (void)pid;
+  native_trap(NATIVE_TRAP_IO);
+}
+
+int64_t native_host_process_signal_v0(
+    const native_capability *capability, int64_t pid, int64_t signal_number) {
+  (void)capability;
+  (void)pid;
+  (void)signal_number;
+  return -((int64_t)ENOTSUP);
+}
+
+int64_t native_host_process_wait_not_alive_v0(
+    const native_capability *capability, int64_t pid, int64_t timeout_ms) {
+  (void)capability;
+  (void)pid;
+  (void)timeout_ms;
+  return -((int64_t)ENOTSUP);
 }
 
 int64_t native_host_process_wait_v0(
@@ -10150,6 +10332,142 @@ static int32_t native_host_process_build_argv(const native_vec *argv_value,
   return 0;
 }
 
+static int32_t native_host_process_deadline_start(
+    int64_t timeout_ms, struct timespec *out_deadline) {
+  struct timespec now;
+  int64_t seconds;
+  int64_t deadline_seconds;
+  int64_t nanoseconds;
+
+  if ((out_deadline == NULL) || (timeout_ms < INT64_C(0))) {
+    return EINVAL;
+  }
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    return (errno == 0) ? EIO : (int32_t)errno;
+  }
+  if ((now.tv_sec < (time_t)0) || (now.tv_nsec < 0) ||
+      (now.tv_nsec >= 1000000000L) ||
+      ((uintmax_t)now.tv_sec > (uintmax_t)INT64_MAX)) {
+    return EOVERFLOW;
+  }
+  seconds = timeout_ms / INT64_C(1000);
+  if (seconds > INT64_MAX - (int64_t)now.tv_sec) {
+    return EOVERFLOW;
+  }
+  deadline_seconds = (int64_t)now.tv_sec + seconds;
+  nanoseconds = (int64_t)now.tv_nsec +
+                (timeout_ms % INT64_C(1000)) * INT64_C(1000000);
+  if (nanoseconds >= INT64_C(1000000000)) {
+    if (deadline_seconds == INT64_MAX) {
+      return EOVERFLOW;
+    }
+    deadline_seconds += INT64_C(1);
+    nanoseconds -= INT64_C(1000000000);
+  }
+  out_deadline->tv_sec = (time_t)deadline_seconds;
+  if ((int64_t)out_deadline->tv_sec != deadline_seconds) {
+    return EOVERFLOW;
+  }
+  out_deadline->tv_nsec = (long)nanoseconds;
+  return 0;
+}
+
+static int32_t native_host_process_deadline_remaining(
+    const struct timespec *deadline, int *out_milliseconds,
+    bool *out_expired) {
+  struct timespec now;
+  uintmax_t seconds;
+  long nanoseconds;
+  uintmax_t milliseconds;
+
+  if ((deadline == NULL) || (out_milliseconds == NULL) ||
+      (out_expired == NULL)) {
+    return EINVAL;
+  }
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    return (errno == 0) ? EIO : (int32_t)errno;
+  }
+  if ((now.tv_sec > deadline->tv_sec) ||
+      ((now.tv_sec == deadline->tv_sec) &&
+       (now.tv_nsec >= deadline->tv_nsec))) {
+    *out_milliseconds = 0;
+    *out_expired = true;
+    return 0;
+  }
+  seconds = (uintmax_t)(deadline->tv_sec - now.tv_sec);
+  nanoseconds = deadline->tv_nsec - now.tv_nsec;
+  if (nanoseconds < 0) {
+    seconds -= UINTMAX_C(1);
+    nanoseconds += 1000000000L;
+  }
+  if (seconds > ((uintmax_t)INT_MAX / UINTMAX_C(1000))) {
+    *out_milliseconds = INT_MAX;
+  } else {
+    milliseconds = seconds * UINTMAX_C(1000) +
+                   ((uintmax_t)nanoseconds + UINTMAX_C(999999)) /
+                       UINTMAX_C(1000000);
+    *out_milliseconds = (milliseconds > (uintmax_t)INT_MAX)
+                            ? INT_MAX
+                            : (int)milliseconds;
+  }
+  *out_expired = false;
+  return 0;
+}
+
+static int32_t native_host_process_pause_before_retry(
+    const struct timespec *deadline) {
+  int milliseconds;
+  bool expired;
+  int32_t status = native_host_process_deadline_remaining(
+      deadline, &milliseconds, &expired);
+  if (status != 0) {
+    return status;
+  }
+  if (expired) {
+    return ETIMEDOUT;
+  }
+  if (milliseconds > 10) {
+    milliseconds = 10;
+  }
+  while (poll(NULL, (nfds_t)0U, milliseconds) < 0) {
+    if (errno != EINTR) {
+      return (errno == 0) ? EIO : (int32_t)errno;
+    }
+    status = native_host_process_deadline_remaining(
+        deadline, &milliseconds, &expired);
+    if (status != 0) {
+      return status;
+    }
+    if (expired) {
+      return ETIMEDOUT;
+    }
+    if (milliseconds > 10) {
+      milliseconds = 10;
+    }
+  }
+  return 0;
+}
+
+int64_t native_host_process_exec_replace_v0(
+    const native_capability *capability, const native_vec *argv_value) {
+  char **argv = NULL;
+  size_t count = (size_t)0U;
+  int32_t status;
+  int saved_errno;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_process_build_argv(argv_value, &argv, &count);
+  if (status != 0) {
+    return -((int64_t)status);
+  }
+  (void)execvp(argv[0], argv);
+  saved_errno = (errno == 0) ? EIO : errno;
+  native_host_process_free_argv(argv, count);
+  return -((int64_t)saved_errno);
+}
+
 static int32_t native_host_process_wait(pid_t child, int64_t *out_status) {
   pid_t waited;
   int wait_status;
@@ -10206,6 +10524,442 @@ int64_t native_host_process_close_v0(
   /* Do not retry close after EINTR: the descriptor may already be released,
      and a retry could close an unrelated descriptor that reused the number. */
   return -((int64_t)((errno == 0) ? EIO : errno));
+}
+
+int64_t native_host_process_fifo_create_v0(
+    const native_capability *capability, uint64_t path_text) {
+  char *path = NULL;
+  int32_t status;
+
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return -((int64_t)status);
+  }
+  if (mkfifo(path, (mode_t)0600) != 0) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    free(path);
+    return -((int64_t)status);
+  }
+  if (chmod(path, (mode_t)0600) != 0) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    (void)unlink(path);
+    free(path);
+    return -((int64_t)status);
+  }
+  free(path);
+  return INT64_C(0);
+}
+
+int64_t native_host_process_fifo_open_read_v0(
+    const native_capability *capability, uint64_t path_text) {
+  char *path = NULL;
+  int descriptor;
+  int replacement;
+  int32_t status;
+  struct stat metadata;
+
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return -((int64_t)status);
+  }
+  descriptor = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+  free(path);
+  if (descriptor < 0) {
+    return -((int64_t)((errno == 0) ? EIO : errno));
+  }
+  if (fstat(descriptor, &metadata) != 0) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    (void)close(descriptor);
+    return -((int64_t)status);
+  }
+  if (!S_ISFIFO(metadata.st_mode)) {
+    (void)close(descriptor);
+    return -((int64_t)EINVAL);
+  }
+  if (descriptor <= STDERR_FILENO) {
+    replacement = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    if (replacement < 0) {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      (void)close(descriptor);
+      return -((int64_t)status);
+    }
+    (void)close(descriptor);
+    descriptor = replacement;
+  }
+  return (int64_t)descriptor;
+}
+
+static ssize_t native_host_process_fifo_write_once(
+    int descriptor, const uint8_t *bytes, size_t length) {
+  sigset_t blocked;
+  sigset_t prior;
+  sigset_t pending;
+  struct timespec no_wait = {(time_t)0, 0L};
+  bool mask_changed = false;
+  bool pipe_was_pending = false;
+  ssize_t amount;
+  int saved_errno;
+
+  if ((sigemptyset(&blocked) == 0) &&
+      (sigaddset(&blocked, SIGPIPE) == 0) &&
+      (sigprocmask(SIG_BLOCK, &blocked, &prior) == 0)) {
+    mask_changed = true;
+    if ((sigpending(&pending) == 0) &&
+        (sigismember(&pending, SIGPIPE) == 1)) {
+      pipe_was_pending = true;
+    }
+  }
+  amount = write(descriptor, bytes, length);
+  saved_errno = errno;
+  if (mask_changed && !pipe_was_pending && (amount < (ssize_t)0) &&
+      (saved_errno == EPIPE) && (sigpending(&pending) == 0) &&
+      (sigismember(&pending, SIGPIPE) == 1)) {
+    while ((sigtimedwait(&blocked, NULL, &no_wait) < 0) &&
+           (errno == EINTR)) {
+    }
+  }
+  if (mask_changed) {
+    (void)sigprocmask(SIG_SETMASK, &prior, NULL);
+  }
+  errno = saved_errno;
+  return amount;
+}
+
+int64_t native_host_process_fifo_write_deadline_v0(
+    const native_capability *capability, uint64_t path_text,
+    uint64_t text, int64_t timeout_ms) {
+  struct timespec deadline;
+  char *path = NULL;
+  const uint8_t *bytes;
+  uint64_t byte_length;
+  size_t length;
+  int descriptor = -1;
+  int32_t status;
+  long pipe_bound;
+
+  if (!native_host_filesystem_capability_valid(capability) ||
+      (timeout_ms < INT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_process_deadline_start(timeout_ms, &deadline);
+  if (status != 0) {
+    return -((int64_t)status);
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return -((int64_t)status);
+  }
+  for (;;) {
+    descriptor = open(path, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    if (descriptor >= 0) {
+      break;
+    }
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    if ((status != ENXIO) && (status != EINTR)) {
+      free(path);
+      return -((int64_t)status);
+    }
+    status = native_host_process_pause_before_retry(&deadline);
+    if (status != 0) {
+      free(path);
+      return -((int64_t)status);
+    }
+  }
+  free(path);
+  path = NULL;
+
+  {
+    struct stat metadata;
+    if (fstat(descriptor, &metadata) != 0) {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      goto cleanup;
+    }
+    if (!S_ISFIFO(metadata.st_mode)) {
+      status = EINVAL;
+      goto cleanup;
+    }
+  }
+  byte_length = native_text_length(text);
+  bytes = native_text_bytes(text);
+  if (byte_length > (uint64_t)SIZE_MAX) {
+    status = EOVERFLOW;
+    goto cleanup;
+  }
+  length = (size_t)byte_length;
+  errno = 0;
+  pipe_bound = fpathconf(descriptor, _PC_PIPE_BUF);
+  if (pipe_bound < 0) {
+    if (errno != 0) {
+      status = (int32_t)errno;
+      goto cleanup;
+    }
+    pipe_bound = 512L;
+  }
+  if ((uintmax_t)length > (uintmax_t)pipe_bound) {
+    status = EMSGSIZE;
+    goto cleanup;
+  }
+  for (;;) {
+    ssize_t amount = native_host_process_fifo_write_once(
+        descriptor, bytes, length);
+    if (amount == (ssize_t)length) {
+      status = 0;
+      break;
+    }
+    if (amount >= (ssize_t)0) {
+      status = EIO;
+      break;
+    }
+    status = (errno == 0) ? EIO : (int32_t)errno;
+    if ((status == EAGAIN) || (status == EWOULDBLOCK)) {
+      struct pollfd writable;
+      int milliseconds;
+      bool expired;
+      int ready;
+      status = native_host_process_deadline_remaining(
+          &deadline, &milliseconds, &expired);
+      if (status != 0) {
+        break;
+      }
+      if (expired) {
+        status = ETIMEDOUT;
+        break;
+      }
+      writable.fd = descriptor;
+      writable.events = POLLOUT;
+      writable.revents = 0;
+      ready = poll(&writable, (nfds_t)1U, milliseconds);
+      if (ready > 0) {
+        if ((writable.revents & POLLNVAL) != 0) {
+          status = EBADF;
+          break;
+        }
+        continue;
+      }
+      if (ready == 0) {
+        status = ETIMEDOUT;
+        break;
+      }
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      if (status == EINTR) {
+        continue;
+      }
+      break;
+    }
+    if (status == EINTR) {
+      int milliseconds;
+      bool expired;
+      status = native_host_process_deadline_remaining(
+          &deadline, &milliseconds, &expired);
+      if ((status == 0) && !expired) {
+        continue;
+      }
+      if ((status == 0) && expired) {
+        status = ETIMEDOUT;
+      }
+    }
+    break;
+  }
+
+cleanup:
+  if ((close(descriptor) != 0) && (status == 0)) {
+    status = (errno == 0) ? EIO : (int32_t)errno;
+  }
+  return (status == 0) ? INT64_C(0) : -((int64_t)status);
+}
+
+int64_t native_host_process_poll_readable_v0(
+    const native_capability *capability, const native_vec *fds,
+    int64_t timeout_ms) {
+  struct timespec deadline;
+  const int64_t *source;
+  struct pollfd *descriptors;
+  size_t count;
+  size_t index;
+  nfds_t poll_count;
+  int32_t status;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (fds == NULL) || (fds->length <= INT64_C(0)) ||
+      (fds->elements == NULL) || (timeout_ms < INT64_C(0)) ||
+      ((uint64_t)fds->length >
+       (uint64_t)(SIZE_MAX / sizeof(struct pollfd)))) {
+    return -((int64_t)EINVAL);
+  }
+  count = (size_t)fds->length;
+  poll_count = (nfds_t)count;
+  if ((size_t)poll_count != count) {
+    return -((int64_t)EOVERFLOW);
+  }
+  descriptors = (struct pollfd *)calloc(count, sizeof(*descriptors));
+  if (descriptors == NULL) {
+    return -((int64_t)ENOMEM);
+  }
+  source = (const int64_t *)fds->elements;
+  for (index = (size_t)0U; index < count; ++index) {
+    if ((source[index] < INT64_C(0)) ||
+        (source[index] > (int64_t)INT_MAX)) {
+      free(descriptors);
+      return -((int64_t)EINVAL);
+    }
+    descriptors[index].fd = (int)source[index];
+    descriptors[index].events = POLLIN;
+  }
+  status = native_host_process_deadline_start(timeout_ms, &deadline);
+  if (status != 0) {
+    free(descriptors);
+    return -((int64_t)status);
+  }
+  for (;;) {
+    int milliseconds;
+    bool expired;
+    int ready;
+    status = native_host_process_deadline_remaining(
+        &deadline, &milliseconds, &expired);
+    if (status != 0) {
+      free(descriptors);
+      return -((int64_t)status);
+    }
+    ready = poll(descriptors, poll_count, expired ? 0 : milliseconds);
+    if (ready < 0) {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      if (status == EINTR) {
+        continue;
+      }
+      free(descriptors);
+      return -((int64_t)status);
+    }
+    if (ready == 0) {
+      free(descriptors);
+      return -((int64_t)ETIMEDOUT);
+    }
+    for (index = (size_t)0U; index < count; ++index) {
+      if ((descriptors[index].revents & POLLNVAL) != 0) {
+        free(descriptors);
+        return -((int64_t)EBADF);
+      }
+    }
+    for (index = (size_t)0U; index < count; ++index) {
+      if ((descriptors[index].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+        int64_t result = source[index];
+        free(descriptors);
+        return result;
+      }
+    }
+  }
+}
+
+int64_t native_host_process_current_pid_v0(
+    const native_capability *capability) {
+  pid_t pid;
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  pid = getpid();
+  if ((pid <= (pid_t)0) || ((pid_t)(int64_t)pid != pid)) {
+    return -((int64_t)EOVERFLOW);
+  }
+  return (int64_t)pid;
+}
+
+static int32_t native_host_process_liveness(int64_t pid_value,
+                                            bool *out_alive) {
+  pid_t pid;
+  int status;
+  if ((out_alive == NULL) || (pid_value <= INT64_C(0))) {
+    return EINVAL;
+  }
+  pid = (pid_t)pid_value;
+  if ((int64_t)pid != pid_value) {
+    return EINVAL;
+  }
+  status = kill(pid, 0);
+  if (status == 0) {
+    *out_alive = true;
+    return 0;
+  }
+  status = (errno == 0) ? EIO : errno;
+  if (status == EPERM) {
+    *out_alive = true;
+    return 0;
+  }
+  if (status == ESRCH) {
+    *out_alive = false;
+    return 0;
+  }
+  return (int32_t)status;
+}
+
+bool native_host_process_alive_v0(
+    const native_capability *capability, int64_t pid) {
+  bool alive;
+  int32_t status;
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  status = native_host_process_liveness(pid, &alive);
+  if (status == EINVAL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (status != 0) {
+    native_trap(NATIVE_TRAP_IO);
+  }
+  return alive;
+}
+
+int64_t native_host_process_signal_v0(
+    const native_capability *capability, int64_t pid_value,
+    int64_t signal_number) {
+  pid_t pid;
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (pid_value <= INT64_C(0)) || (signal_number <= INT64_C(0)) ||
+      (signal_number > (int64_t)INT_MAX)) {
+    return -((int64_t)EINVAL);
+  }
+  pid = (pid_t)pid_value;
+  if ((int64_t)pid != pid_value) {
+    return -((int64_t)EINVAL);
+  }
+  if (kill(pid, (int)signal_number) == 0) {
+    return INT64_C(0);
+  }
+  return -((int64_t)((errno == 0) ? EIO : errno));
+}
+
+int64_t native_host_process_wait_not_alive_v0(
+    const native_capability *capability, int64_t pid,
+    int64_t timeout_ms) {
+  struct timespec deadline;
+  int32_t status;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (timeout_ms < INT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_process_deadline_start(timeout_ms, &deadline);
+  if (status != 0) {
+    return -((int64_t)status);
+  }
+  for (;;) {
+    bool alive;
+    status = native_host_process_liveness(pid, &alive);
+    if (status != 0) {
+      return -((int64_t)status);
+    }
+    if (!alive) {
+      return INT64_C(0);
+    }
+    status = native_host_process_pause_before_retry(&deadline);
+    if (status != 0) {
+      return -((int64_t)status);
+    }
+  }
 }
 
 int64_t native_host_process_run_inherit_v0(
@@ -10459,6 +11213,130 @@ int32_t native_host_process_read_line_bounded_v0(
       break;
     } else if (errno != EINTR) {
       int32_t status = (errno == 0) ? EIO : (int32_t)errno;
+      free(buffer);
+      return status;
+    }
+  }
+  if (line_ended && (length != (size_t)0U) &&
+      (buffer[length - (size_t)1U] == (uint8_t)'\r')) {
+    length -= (size_t)1U;
+  }
+  if (overflow || (length > bound)) {
+    free(buffer);
+    return EFBIG;
+  }
+  if (!native_utf8_valid(buffer, (uint64_t)length)) {
+    free(buffer);
+    return EILSEQ;
+  }
+  line = (native_host_process_line_v0 *)native_arena_alloc(
+      arena, sizeof(*line), _Alignof(native_host_process_line_v0));
+  line->line_text = native_text_alloc(arena, (uint64_t)length, &destination);
+  if (length != (size_t)0U) {
+    memcpy(destination, buffer, length);
+  }
+  line->eof = eof;
+  free(buffer);
+  *out = line;
+  return 0;
+}
+
+int32_t native_host_process_read_line_deadline_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t fd, int64_t max_line_bytes, int64_t timeout_ms, void **out) {
+  struct timespec deadline;
+  int descriptor;
+  size_t bound;
+  size_t capacity;
+  size_t length = (size_t)0U;
+  uint8_t *buffer;
+  bool line_ended = false;
+  bool overflow = false;
+  bool eof = false;
+  int32_t status;
+  native_host_process_line_v0 *line;
+  uint8_t *destination = NULL;
+
+  if (out != NULL) {
+    *out = NULL;
+  }
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL) ||
+      (fd <= (int64_t)STDERR_FILENO) || (fd > (int64_t)INT_MAX) ||
+      (max_line_bytes < INT64_C(0)) ||
+      (max_line_bytes > NATIVE_HOST_PROCESS_MAX_LINE_BYTES) ||
+      (timeout_ms < INT64_C(0))) {
+    return EINVAL;
+  }
+  status = native_host_process_deadline_start(timeout_ms, &deadline);
+  if (status != 0) {
+    return status;
+  }
+  descriptor = (int)fd;
+  bound = (size_t)max_line_bytes;
+  capacity = bound + (size_t)1U;
+  buffer = (uint8_t *)malloc(capacity);
+  if (buffer == NULL) {
+    return ENOMEM;
+  }
+
+  while (!line_ended) {
+    struct pollfd readable;
+    int milliseconds;
+    bool expired;
+    int ready;
+    uint8_t byte;
+    ssize_t amount;
+
+    status = native_host_process_deadline_remaining(
+        &deadline, &milliseconds, &expired);
+    if (status != 0) {
+      free(buffer);
+      return status;
+    }
+    readable.fd = descriptor;
+    readable.events = POLLIN;
+    readable.revents = 0;
+    ready = poll(&readable, (nfds_t)1U, expired ? 0 : milliseconds);
+    if (ready < 0) {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      if (status == EINTR) {
+        continue;
+      }
+      free(buffer);
+      return status;
+    }
+    if (ready == 0) {
+      status = ((length != (size_t)0U) || overflow) ? EPROTO : ETIMEDOUT;
+      free(buffer);
+      return status;
+    }
+    if ((readable.revents & POLLNVAL) != 0) {
+      free(buffer);
+      return EBADF;
+    }
+    if ((readable.revents & (POLLIN | POLLHUP | POLLERR)) == 0) {
+      continue;
+    }
+    amount = read(descriptor, &byte, (size_t)1U);
+    if (amount > (ssize_t)0) {
+      if (byte == (uint8_t)'\n') {
+        line_ended = true;
+      } else if (length < capacity) {
+        buffer[length] = byte;
+        length += (size_t)1U;
+      } else {
+        overflow = true;
+      }
+    } else if (amount == (ssize_t)0) {
+      eof = (length == (size_t)0U) && !overflow;
+      break;
+    } else {
+      status = (errno == 0) ? EIO : (int32_t)errno;
+      if ((status == EINTR) || (status == EAGAIN) ||
+          (status == EWOULDBLOCK)) {
+        continue;
+      }
       free(buffer);
       return status;
     }

@@ -2599,8 +2599,17 @@
       (= symbol "native_host_process_run_capture_v0")
       (= symbol "native_host_process_spawn_stdout_v0")
       (= symbol "native_host_process_read_line_bounded_v0")
+      (= symbol "native_host_process_read_line_deadline_v0")
       (= symbol "native_host_process_wait_v0")
-      (= symbol "native_host_process_close_v0")))
+      (= symbol "native_host_process_close_v0")
+      (= symbol "native_host_process_fifo_create_v0")
+      (= symbol "native_host_process_fifo_open_read_v0")
+      (= symbol "native_host_process_fifo_write_deadline_v0")
+      (= symbol "native_host_process_poll_readable_v0")
+      (= symbol "native_host_process_current_pid_v0")
+      (= symbol "native_host_process_alive_v0")
+      (= symbol "native_host_process_signal_v0")
+      (= symbol "native_host_process_wait_not_alive_v0")))
 
 (defn program-has-process-extern? [(program core/NativeCoreProgram)] Bool
   (some?
@@ -2608,6 +2617,30 @@
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
               (process-extern-symbol? (core/abideclv0-symbol abi))))
+      (core/nativecoreprogram-abis program))))
+
+(defn program-has-exec-replacement-extern?
+  [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some (fn [(abi core/AbiDeclV0)] Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (= "native_host_process_exec_replace_v0"
+                (core/abideclv0-symbol abi))))
+      (core/nativecoreprogram-abis program))))
+
+(defn host-context-extern-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_system_hostname_v0")
+      (= symbol "native_host_system_platform_v0")
+      (= symbol "native_host_terminal_stdout_tty_v0")))
+
+(defn program-has-host-context-extern?
+  [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some (fn [(abi core/AbiDeclV0)] Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (host-context-extern-symbol? (core/abideclv0-symbol abi))))
       (core/nativecoreprogram-abis program))))
 
 (defn socket-extern-symbol? [(symbol String)] Bool
@@ -2701,6 +2734,12 @@
       (program-has-filesystem-extern? program)
       (->QbeFailure
         "QBE filesystem extern ABI is unsupported: typed host outcomes have no QBE call representation")
+      (program-has-host-context-extern? program)
+      (->QbeFailure
+        "QBE host context extern ABI is unsupported: ambient host identity and terminal state have no QBE call representation")
+      (program-has-exec-replacement-extern? program)
+      (->QbeFailure
+        "QBE exec-replacement extern ABI is unsupported: process image replacement has no QBE call representation")
       (program-has-process-extern? program)
       (->QbeFailure
         "QBE process extern ABI is unsupported: inherited process execution has no QBE call representation")

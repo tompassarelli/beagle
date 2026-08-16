@@ -279,12 +279,29 @@
 (defn host-process-direct-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_process_run_inherit_v0")
       (= symbol "native_host_process_wait_v0")
-      (= symbol "native_host_process_close_v0")))
+      (= symbol "native_host_process_close_v0")
+      (= symbol "native_host_process_exec_replace_v0")
+      (= symbol "native_host_process_fifo_create_v0")
+      (= symbol "native_host_process_fifo_open_read_v0")
+      (= symbol "native_host_process_fifo_write_deadline_v0")
+      (= symbol "native_host_process_poll_readable_v0")
+      (= symbol "native_host_process_current_pid_v0")
+      (= symbol "native_host_process_alive_v0")
+      (= symbol "native_host_process_signal_v0")
+      (= symbol "native_host_process_wait_not_alive_v0")))
 
 (defn host-process-outcome-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_process_run_capture_v0")
       (= symbol "native_host_process_spawn_stdout_v0")
-      (= symbol "native_host_process_read_line_bounded_v0")))
+      (= symbol "native_host_process_read_line_bounded_v0")
+      (= symbol "native_host_process_read_line_deadline_v0")))
+
+(defn host-context-direct-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_system_platform_v0")
+      (= symbol "native_host_terminal_stdout_tty_v0")))
+
+(defn host-context-outcome-symbol? [(symbol String)] Bool
+  (= symbol "native_host_system_hostname_v0"))
 
 (defn host-clock-outcome-symbol? [(symbol String)] Bool
   (= symbol "native_host_clock_format_iso8601_v0"))
@@ -317,12 +334,14 @@
             (and (instance? native.core.RestrictedCAbiV0
                    (core/abideclv0-convention abi))
               (or (host-direct-symbol? (core/abideclv0-symbol abi))
-                (host-process-direct-symbol? (core/abideclv0-symbol abi))))
+                (host-process-direct-symbol? (core/abideclv0-symbol abi))
+                (host-context-direct-symbol? (core/abideclv0-symbol abi))))
             (and (instance? native.core.RestrictedCOutcomeOutAbiV0
                    (core/abideclv0-convention abi))
               (or (host-socket-symbol? (core/abideclv0-symbol abi))
                 (host-filesystem-symbol? (core/abideclv0-symbol abi))
                 (host-process-outcome-symbol? (core/abideclv0-symbol abi))
+                (host-context-outcome-symbol? (core/abideclv0-symbol abi))
                 (host-clock-outcome-symbol?
                   (core/abideclv0-symbol abi))))))
         (core/nativecoreprogram-abis program))

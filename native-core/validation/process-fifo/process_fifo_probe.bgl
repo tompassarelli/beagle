@@ -1,0 +1,33 @@
+#lang beagle
+(ns native.process-fifo-probe)
+
+(defn read-status [(fd Int)] Int
+  (match (host.process/read-line-deadline fd 64 25)
+    [(host.process/ReadLineOk line eof)
+     (if eof 1 (count line))]
+    [(host.process/ReadLineError errno) (- 0 errno)]))
+
+(defn exercise
+  [(path String) (fds (Vec Int)) (target-pid Int)] Int
+  (let [(create-status Int) (host.process/fifo-create path)
+        (reader Int) (host.process/fifo-open-read path)
+        (write-status Int)
+          (host.process/fifo-write-deadline path "message\n" 25)
+        (ready Int) (host.process/poll-readable fds 25)
+        (line-status Int) (read-status reader)
+        (pid Int) (host.process/current-pid)
+        (alive Bool) (host.process/alive? pid)
+        (signal-status Int) (host.process/signal target-pid 15)
+        (death-status Int) (host.process/wait-not-alive target-pid 25)
+        (close-status Int) (host.process/close reader)]
+    (if (and (= create-status 0)
+             (= write-status 0)
+             (>= ready 0)
+             (>= line-status 0)
+             (> pid 0)
+             alive
+             (= signal-status 0)
+             (= death-status 0)
+             (= close-status 0))
+      0
+      1)))

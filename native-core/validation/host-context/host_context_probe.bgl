@@ -1,0 +1,14 @@
+#lang beagle
+(ns native.host-context-probe)
+
+(defn inspect [] Int
+  (match (host.system/hostname)
+    [(host.system/HostnameOk hostname)
+     (if (and (> (count hostname) 0)
+              (> (count (host.system/platform)) 0))
+       (if (host.terminal/stdout-tty?) 1 0)
+       2)]
+    [(host.system/HostnameError errno) errno]))
+
+(defn replace [(argv (Vec String))] Int
+  (host.process/exec-replace argv))

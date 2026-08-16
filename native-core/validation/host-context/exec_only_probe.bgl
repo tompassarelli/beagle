@@ -1,0 +1,5 @@
+#lang beagle
+(ns native.exec-only-probe)
+
+(defn replace [(argv (Vec String))] Int
+  (host.process/exec-replace argv))

@@ -644,6 +644,14 @@ int32_t native_host_clock_format_iso8601_v0(
    remaining interval after EINTR. Result is 0 or -errno. WASI is ENOTSUP. */
 int64_t native_host_time_sleep_milliseconds_v0(
     const native_capability *capability, int64_t milliseconds);
+int32_t native_host_system_hostname_v0(
+    native_arena *arena, const native_capability *capability, uint64_t *out);
+/* Returns a process-lifetime Text handle naming linux, darwin, wasi, or
+   unknown. */
+uint64_t native_host_system_platform_v0(
+    const native_capability *capability);
+bool native_host_terminal_stdout_tty_v0(
+    const native_capability *capability);
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text);
 void native_host_stdout_write_v0(
@@ -672,6 +680,10 @@ int32_t native_host_filesystem_append_text_v0(
    Result: normal exit 0..255, signal 256+signal, spawn/wait failure -errno. */
 int64_t native_host_process_run_inherit_v0(
     const native_capability *capability, const native_vec *argv);
+/* Replaces the current process through PATH. Success never returns; failures
+   are negative errno. Environment and all standard descriptors are inherited. */
+int64_t native_host_process_exec_replace_v0(
+    const native_capability *capability, const native_vec *argv);
 /* Captures each output stream up to max_output_bytes while draining both
    concurrently. Normal exits and signals are CaptureOk; host failures return
    positive errno and leave out NULL. */
@@ -691,6 +703,36 @@ int32_t native_host_process_spawn_stdout_v0(
 int32_t native_host_process_read_line_bounded_v0(
     native_arena *arena, const native_capability *capability,
     int64_t stdout_fd, int64_t max_line_bytes, void **out);
+/* The timeout is relative milliseconds measured once against CLOCK_MONOTONIC.
+   ETIMEDOUT means no byte was consumed; EPROTO means a partial line was
+   consumed and the caller must close/reopen the descriptor. */
+int32_t native_host_process_read_line_deadline_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t fd, int64_t max_line_bytes, int64_t timeout_ms, void **out);
+int64_t native_host_process_fifo_create_v0(
+    const native_capability *capability, uint64_t path);
+/* Returns one caller-owned nonblocking close-on-exec FIFO reader descriptor. */
+int64_t native_host_process_fifo_open_read_v0(
+    const native_capability *capability, uint64_t path);
+/* Opens, atomically writes the exact Text bytes, and closes one temporary FIFO
+   writer within a monotonic relative timeout. */
+int64_t native_host_process_fifo_write_deadline_v0(
+    const native_capability *capability, uint64_t path, uint64_t text,
+    int64_t timeout_ms);
+/* Borrows an ordered nonempty Int descriptor vector and returns its first ready
+   descriptor. HUP/ERR are readiness; invalid is -EBADF; expiry -ETIMEDOUT. */
+int64_t native_host_process_poll_readable_v0(
+    const native_capability *capability, const native_vec *fds,
+    int64_t timeout_ms);
+int64_t native_host_process_current_pid_v0(
+    const native_capability *capability);
+bool native_host_process_alive_v0(
+    const native_capability *capability, int64_t pid);
+int64_t native_host_process_signal_v0(
+    const native_capability *capability, int64_t pid, int64_t signal_number);
+/* Observes arbitrary PID death without waitpid and therefore never reaps. */
+int64_t native_host_process_wait_not_alive_v0(
+    const native_capability *capability, int64_t pid, int64_t timeout_ms);
 /* wait consumes the caller-owned child relationship. Result is exit 0..255,
    signal 256+signal, or -errno; EINTR is retried. */
 int64_t native_host_process_wait_v0(

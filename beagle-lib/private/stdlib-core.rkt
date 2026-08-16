@@ -104,9 +104,20 @@
     (list (p 'Int))
     #f
     (p 'Int))
+   'host.system/hostname
+   (type-fn '() #f (p 'host.system/HostnameResult))
+   'host.system/platform
+   (type-fn '() #f (p 'String))
+   'host.terminal/stdout-tty?
+   (type-fn '() #f (p 'Bool))
    ;; Native process execution takes an already-tokenized argv vector. The
    ;; result encodes exit 0..255, signal 256+signal, or spawn/wait -errno.
    'host.process/run-inherit
+   (type-fn
+    (list (type-app 'Vec (list (p 'String))))
+    #f
+    (p 'Int))
+   'host.process/exec-replace
    (type-fn
     (list (type-app 'Vec (list (p 'String))))
     #f
@@ -132,6 +143,48 @@
     (list (p 'Int) (p 'Int))
     #f
     (p 'host.process/ReadLineResult))
+   'host.process/read-line-deadline
+   (type-fn
+    (list (p 'Int) (p 'Int) (p 'Int))
+    #f
+    (p 'host.process/ReadLineResult))
+   'host.process/fifo-create
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'Int))
+   'host.process/fifo-open-read
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'Int))
+   'host.process/fifo-write-deadline
+   (type-fn
+    (list (p 'String) (p 'String) (p 'Int))
+    #f
+    (p 'Int))
+   'host.process/poll-readable
+   (type-fn
+    (list (type-app 'Vec (list (p 'Int))) (p 'Int))
+    #f
+    (p 'Int))
+   'host.process/current-pid
+   (type-fn '() #f (p 'Int))
+   'host.process/alive?
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'Bool))
+   'host.process/signal
+   (type-fn
+    (list (p 'Int) (p 'Int))
+    #f
+    (p 'Int))
+   'host.process/wait-not-alive
+   (type-fn
+    (list (p 'Int) (p 'Int))
+    #f
+    (p 'Int))
    'host.process/wait
    (type-fn
     (list (p 'Int))
@@ -190,6 +243,13 @@
      (list 'host.clock/FormatIso8601Ok
            (list (cons ':text (p 'String))))
      (list 'host.clock/FormatIso8601Error
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.system/HostnameResult
+    (list
+     (list 'host.system/HostnameOk
+           (list (cons ':hostname (p 'String))))
+     (list 'host.system/HostnameError
            (list (cons ':errno (p 'Int))))))
    (list
     'host.process/CaptureResult

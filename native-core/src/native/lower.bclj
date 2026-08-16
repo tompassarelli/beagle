@@ -1212,6 +1212,10 @@
       (= name "host.clock/FormatIso8601Ok")) "ok"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
       (= name "host.clock/FormatIso8601Error")) "error"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.system/HostnameOk")) "ok"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.system/HostnameError")) "error"
     (and (same-id? target-type (process-capture-outcome-type-id))
       (= name "host.process/CaptureOk")) "ok"
     (and (same-id? target-type (process-capture-outcome-type-id))
@@ -1352,6 +1356,10 @@
       (filesystem-outcome-types) [] true)
 
     (= "host.clock/FormatIso8601Result" spelling)
+    (->TypeResolutionV0 (filesystem-text-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.system/HostnameResult" spelling)
     (->TypeResolutionV0 (filesystem-text-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
@@ -2141,6 +2149,35 @@
 (defn host-environment-callee? [(name String)] Bool
   (or (= name "System/getenv") (= name "java.lang.System/getenv")))
 
+(defn host-context-effect-id [] core/NativeId
+  (lower-id "effect" ["host-context-read-v0"]))
+
+(defn host-context-capability-id [] core/NativeId
+  (lower-id "capability" ["host-context-read-v0"]))
+
+(defn host-context-abi-id [(operation String)] core/NativeId
+  (lower-id "abi" [(str "host-context-" operation "-v0")]))
+
+(defn host-context-function-id [(operation String)] core/NativeId
+  (lower-id "extern" [(str "host-context-" operation "-v0")]))
+
+(defn host-context-callee? [(name String)] Bool
+  (or (= name "host.system/hostname")
+      (= name "host.system/platform")
+      (= name "host.terminal/stdout-tty?")))
+
+(defn host-context-operation [(name String)] String
+  (cond
+    (= name "host.system/hostname") "system-hostname"
+    (= name "host.system/platform") "system-platform"
+    (= name "host.terminal/stdout-tty?") "terminal-stdout-tty"
+    :else ""))
+
+(defn host-context-abi-id? [(candidate core/NativeId)] Bool
+  (or (same-id? candidate (host-context-abi-id "system-hostname"))
+      (same-id? candidate (host-context-abi-id "system-platform"))
+      (same-id? candidate (host-context-abi-id "terminal-stdout-tty"))))
+
 (defn host-clock-effect-id [] core/NativeId
   (lower-id "effect" ["host-monotonic-clock-read-v0"]))
 
@@ -2287,13 +2324,36 @@
       (same-id? candidate
         (host-process-lifecycle-abi-id "read-line-bounded"))
       (same-id? candidate (host-process-lifecycle-abi-id "wait"))
-      (same-id? candidate (host-process-lifecycle-abi-id "close"))))
+      (same-id? candidate (host-process-lifecycle-abi-id "close"))
+      (same-id? candidate (host-process-lifecycle-abi-id "exec-replace"))
+      (same-id? candidate
+        (host-process-lifecycle-abi-id "read-line-deadline"))
+      (same-id? candidate (host-process-lifecycle-abi-id "fifo-create"))
+      (same-id? candidate (host-process-lifecycle-abi-id "fifo-open-read"))
+      (same-id? candidate
+        (host-process-lifecycle-abi-id "fifo-write-deadline"))
+      (same-id? candidate (host-process-lifecycle-abi-id "poll-readable"))
+      (same-id? candidate (host-process-lifecycle-abi-id "current-pid"))
+      (same-id? candidate (host-process-lifecycle-abi-id "alive"))
+      (same-id? candidate (host-process-lifecycle-abi-id "signal"))
+      (same-id? candidate
+        (host-process-lifecycle-abi-id "wait-not-alive"))))
 
 (defn host-process-callee? [(name String)] Bool
   (or (= name "host.process/run-inherit")
       (= name "host.process/run-capture")
       (= name "host.process/spawn-stdout")
       (= name "host.process/read-line-bounded")
+      (= name "host.process/read-line-deadline")
+      (= name "host.process/exec-replace")
+      (= name "host.process/fifo-create")
+      (= name "host.process/fifo-open-read")
+      (= name "host.process/fifo-write-deadline")
+      (= name "host.process/poll-readable")
+      (= name "host.process/current-pid")
+      (= name "host.process/alive?")
+      (= name "host.process/signal")
+      (= name "host.process/wait-not-alive")
       (= name "host.process/wait")
       (= name "host.process/close")))
 
@@ -2334,6 +2394,7 @@
 
 (defn slice-effects
   [(include-environment Bool)
+   (include-context Bool)
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
@@ -2356,12 +2417,18 @@
             (core/->EffectDef (host-environment-effect-id)
               (core/->CapabilityEffect (host-environment-capability-id))))
           base)
+        (with-context (Vec core/EffectDef))
+        (if include-context
+          (conj with-environment
+            (core/->EffectDef (host-context-effect-id)
+              (core/->CapabilityEffect (host-context-capability-id))))
+          with-environment)
         (with-stdout (Vec core/EffectDef))
         (if include-stdout
-          (conj with-environment
+          (conj with-context
             (core/->EffectDef (host-stdout-effect-id)
               (core/->IoEffect (host-stdout-capability-id))))
-          with-environment)
+          with-context)
         (with-stderr (Vec core/EffectDef))
         (if include-stderr
           (conj with-stdout
@@ -5597,6 +5664,19 @@
             (core/basicblock-instructions block))))
       blocks)))
 
+(defn blocks-use-host-context? [(blocks (Vec core/BasicBlock))] Bool
+  (some?
+    (some
+      (fn [(block core/BasicBlock)] Bool
+        (some?
+          (some
+            (fn [(instruction core/Instruction)] Bool
+              (and (instance? native.core.ExternCallInstruction instruction)
+                (host-context-abi-id?
+                  (core/externcallinstruction-abi-id instruction))))
+            (core/basicblock-instructions block))))
+      blocks)))
+
 (defn instructions-allocate? [(instructions (Vec core/Instruction))] Bool
   (some?
     (some (fn [(instruction core/Instruction)] Bool
@@ -6026,6 +6106,11 @@
   [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (and (vector-type? types target)
     (same-id? (vector-element-of types target) (type-id "String"))))
+
+(defn int-vector-value?
+  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (and (vector-type? types target)
+    (same-id? (vector-element-of types target) (type-id "Int"))))
 
 (defn int-vector-value? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (and (vector-type? types target)
@@ -8494,6 +8579,33 @@
       (str "TODO-NATIVE-HOST-OUTPUT-OPERAND: " callee
         " takes one native Text value"))))
 
+(defn lower-host-context-call
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (callee String)
+   (values (Vec core/NativeId))]
+  ExprResultV0
+  (if (not (= 0 (count values)))
+    (fail-result state
+      (str "TODO-NATIVE-HOST-CONTEXT-OPERANDS: " callee
+        " takes no operands"))
+    (let [(result-id core/NativeId) (state-id state owner "host-context")
+          (hostname Bool) (= callee "host.system/hostname")
+          (result-type core/NativeId)
+          (cond
+            hostname (filesystem-text-outcome-type-id)
+            (= callee "host.system/platform") (text-type-id)
+            :else (bool-type-id))]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 result-id result-type)
+            (host-context-abi-id (host-context-operation callee))
+            []
+            (if hostname (arena-value-id owner) nil)
+            (core/->TokenFlowV0 [] [])))
+        result-id result-type false))))
+
 (defn host-process-operands-valid?
   [(types (Vec core/TypeDef))
    (callee String)
@@ -8501,7 +8613,8 @@
   Bool
   (cond
     (or (= callee "host.process/run-inherit")
-        (= callee "host.process/spawn-stdout"))
+        (= callee "host.process/spawn-stdout")
+        (= callee "host.process/exec-replace"))
     (and (= 1 (count value-types))
       (text-vector-value? types (nth value-types 0)))
 
@@ -8512,6 +8625,41 @@
       (same-id? (nth value-types 2) (int-type-id)))
 
     (= callee "host.process/read-line-bounded")
+    (and (= 2 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id))
+      (same-id? (nth value-types 1) (int-type-id)))
+
+    (= callee "host.process/read-line-deadline")
+    (and (= 3 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id))
+      (same-id? (nth value-types 1) (int-type-id))
+      (same-id? (nth value-types 2) (int-type-id)))
+
+    (or (= callee "host.process/fifo-create")
+        (= callee "host.process/fifo-open-read"))
+    (and (= 1 (count value-types))
+      (text-operand? (nth value-types 0)))
+
+    (= callee "host.process/fifo-write-deadline")
+    (and (= 3 (count value-types))
+      (text-operand? (nth value-types 0))
+      (text-operand? (nth value-types 1))
+      (same-id? (nth value-types 2) (int-type-id)))
+
+    (= callee "host.process/poll-readable")
+    (and (= 2 (count value-types))
+      (int-vector-value? types (nth value-types 0))
+      (same-id? (nth value-types 1) (int-type-id)))
+
+    (= callee "host.process/current-pid")
+    (= 0 (count value-types))
+
+    (= callee "host.process/alive?")
+    (and (= 1 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id)))
+
+    (or (= callee "host.process/signal")
+        (= callee "host.process/wait-not-alive"))
     (and (= 2 (count value-types))
       (same-id? (nth value-types 0) (int-type-id))
       (same-id? (nth value-types 1) (int-type-id)))
@@ -8531,6 +8679,10 @@
     (process-spawn-stdout-outcome-type-id)
     (= callee "host.process/read-line-bounded")
     (process-read-line-outcome-type-id)
+    (= callee "host.process/read-line-deadline")
+    (process-read-line-outcome-type-id)
+    (= callee "host.process/alive?")
+    (bool-type-id)
     :else (int-type-id)))
 
 (defn host-process-call-abi-id [(callee String)] core/NativeId
@@ -8541,14 +8693,35 @@
     (host-process-lifecycle-abi-id "spawn-stdout")
     (= callee "host.process/read-line-bounded")
     (host-process-lifecycle-abi-id "read-line-bounded")
+    (= callee "host.process/read-line-deadline")
+    (host-process-lifecycle-abi-id "read-line-deadline")
     (= callee "host.process/wait")
     (host-process-lifecycle-abi-id "wait")
-    :else (host-process-lifecycle-abi-id "close")))
+    (= callee "host.process/close")
+    (host-process-lifecycle-abi-id "close")
+    (= callee "host.process/exec-replace")
+    (host-process-lifecycle-abi-id "exec-replace")
+    (= callee "host.process/fifo-create")
+    (host-process-lifecycle-abi-id "fifo-create")
+    (= callee "host.process/fifo-open-read")
+    (host-process-lifecycle-abi-id "fifo-open-read")
+    (= callee "host.process/fifo-write-deadline")
+    (host-process-lifecycle-abi-id "fifo-write-deadline")
+    (= callee "host.process/poll-readable")
+    (host-process-lifecycle-abi-id "poll-readable")
+    (= callee "host.process/current-pid")
+    (host-process-lifecycle-abi-id "current-pid")
+    (= callee "host.process/alive?")
+    (host-process-lifecycle-abi-id "alive")
+    (= callee "host.process/signal")
+    (host-process-lifecycle-abi-id "signal")
+    :else (host-process-lifecycle-abi-id "wait-not-alive")))
 
 (defn host-process-call-arena? [(callee String)] Bool
   (or (= callee "host.process/run-capture")
       (= callee "host.process/spawn-stdout")
-      (= callee "host.process/read-line-bounded")))
+      (= callee "host.process/read-line-bounded")
+      (= callee "host.process/read-line-deadline")))
 
 (defn lower-host-process-call
   [(types (Vec core/TypeDef))
@@ -8560,7 +8733,8 @@
   ExprResultV0
   (if (not (host-process-operands-valid? types callee value-types))
     (fail-result state
-      "TODO-NATIVE-HOST-PROCESS-OPERANDS: run/spawn need (Vec String); capture also needs String stdin and Int bound; read-line-bounded needs fd and bound Ints; wait/close need one Int")
+      (str "TODO-NATIVE-HOST-PROCESS-OPERANDS: unsupported operands for "
+        callee))
     (let [(result-id core/NativeId) (state-id state owner "host-process")
           (result-type core/NativeId) (host-process-call-result-type callee)
           (arena-owned Bool) (host-process-call-arena? callee)]
@@ -13367,6 +13541,7 @@
         (or (= "call" kind)
           (and (= "static-call" kind)
             (or (host-environment-callee? (fact-text index expr "callee"))
+                (host-context-callee? (fact-text index expr "callee"))
                 (host-filesystem-callee? (fact-text index expr "callee"))
                 (host-process-callee? (fact-text index expr "callee"))
                 (host-socket-callee? (fact-text index expr "callee"))
@@ -14972,6 +15147,9 @@
                 (host-environment-callee? callee)
                 (fail-result current
                   "TODO-NATIVE-HOST-ENVIRONMENT-OPERAND: environment lookup takes one native Text name")
+
+                (host-context-callee? callee)
+                (lower-host-context-call owner current callee values)
 
                 (host-filesystem-callee? callee)
                 (lower-host-filesystem-call owner current callee values value-types)
@@ -17117,6 +17295,10 @@
   (core/id-in? (typedfunctionv0-effects function)
     (host-environment-effect-id)))
 
+(defn function-uses-host-context? [(function TypedFunctionV0)] Bool
+  (core/id-in? (typedfunctionv0-effects function)
+    (host-context-effect-id)))
+
 (defn function-uses-host-clock? [(function TypedFunctionV0)] Bool
   (core/id-in? (typedfunctionv0-effects function) (host-clock-effect-id)))
 
@@ -17145,6 +17327,10 @@
 
 (defn any-function-uses-environment? [(functions (Vec TypedFunctionV0))] Bool
   (some? (some function-uses-environment? functions)))
+
+(defn any-function-uses-host-context?
+  [(functions (Vec TypedFunctionV0))] Bool
+  (some? (some function-uses-host-context? functions)))
 
 (defn any-function-uses-host-clock? [(functions (Vec TypedFunctionV0))] Bool
   (some? (some function-uses-host-clock? functions)))
@@ -17213,10 +17399,14 @@
         (if (blocks-use-host-environment? (readiness-blocks readiness))
           (with-effect atom-effects (host-environment-effect-id))
           atom-effects)
+        (context-effects (Vec core/NativeId))
+        (if (blocks-use-host-context? (readiness-blocks readiness))
+          (with-effect environment-effects (host-context-effect-id))
+          environment-effects)
         (stdout-effects (Vec core/NativeId))
         (if (blocks-use-host-stdout? (readiness-blocks readiness))
-          (with-effect environment-effects (host-stdout-effect-id))
-          environment-effects)
+          (with-effect context-effects (host-stdout-effect-id))
+          context-effects)
         (stderr-effects (Vec core/NativeId))
         (if (blocks-use-host-stderr? (readiness-blocks readiness))
           (with-effect stdout-effects (host-stderr-effect-id))
@@ -17261,7 +17451,9 @@
         (let [(filesystem-definitions (Vec core/TypeDef))
             (if (or (readiness-uses-host-filesystem? readiness)
                     (readiness-calls-abi? readiness
-                      (host-wall-clock-abi-id "format-iso8601")))
+                      (host-wall-clock-abi-id "format-iso8601"))
+                    (readiness-calls-abi? readiness
+                      (host-context-abi-id "system-hostname")))
                 (append-type-defs checked-definitions
                   (filesystem-outcome-types))
                 checked-definitions)]
@@ -17272,7 +17464,9 @@
                       (readiness-calls-abi? readiness
                         (host-process-lifecycle-abi-id "spawn-stdout"))
                       (readiness-calls-abi? readiness
-                        (host-process-lifecycle-abi-id "read-line-bounded")))
+                        (host-process-lifecycle-abi-id "read-line-bounded"))
+                      (readiness-calls-abi? readiness
+                        (host-process-lifecycle-abi-id "read-line-deadline")))
                   (append-type-defs filesystem-definitions
                     (process-outcome-types))
                   filesystem-definitions)]
@@ -17435,8 +17629,10 @@
         (settle-effect allocate-settled (atom-state-effect-id))
         (environment-settled (Vec TypedFunctionV0))
         (settle-effect atom-settled (host-environment-effect-id))
+        (context-settled (Vec TypedFunctionV0))
+        (settle-effect environment-settled (host-context-effect-id))
         (stdout-settled (Vec TypedFunctionV0))
-        (settle-effect environment-settled (host-stdout-effect-id))
+        (settle-effect context-settled (host-stdout-effect-id))
         (stderr-settled (Vec TypedFunctionV0))
         (settle-effect stdout-settled (host-stderr-effect-id))
         (filesystem-settled (Vec TypedFunctionV0))
@@ -17453,6 +17649,7 @@
 
 (defn slice-capabilities
   [(include-environment Bool)
+   (include-context Bool)
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
@@ -17490,15 +17687,24 @@
               nil
               false))
           base)
+        (with-context (Vec core/CapabilityDef))
+        (if include-context
+          (conj with-environment
+            (core/->CapabilityDef
+              (host-context-capability-id)
+              (core/->HostCapability true)
+              nil
+              false))
+          with-environment)
         (with-stdout (Vec core/CapabilityDef))
         (if include-stdout
-          (conj with-environment
+          (conj with-context
             (core/->CapabilityDef
               (host-stdout-capability-id)
               (core/->HostCapability true)
               nil
               false))
-          with-environment)
+          with-context)
         (with-stderr (Vec core/CapabilityDef))
         (if include-stderr
           (conj with-stdout
@@ -17546,6 +17752,7 @@
 
 (defn slice-capability-ids
   [(include-environment Bool)
+   (include-context Bool)
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
@@ -17560,10 +17767,14 @@
         (if include-environment
           (conj base (host-environment-capability-id))
           base)
+        (with-context (Vec core/NativeId))
+        (if include-context
+          (conj with-environment (host-context-capability-id))
+          with-environment)
         (with-stdout (Vec core/NativeId))
         (if include-stdout
-          (conj with-environment (host-stdout-capability-id))
-          with-environment)
+          (conj with-context (host-stdout-capability-id))
+          with-context)
         (with-stderr (Vec core/NativeId))
         (if include-stderr
           (conj with-stdout (host-stderr-capability-id))
@@ -17779,6 +17990,7 @@
    (functions (Vec TypedFunctionV0))
    (effects (Vec core/EffectDef))
    (include-environment Bool)
+   (include-context Bool)
    (include-stdout Bool)
    (include-stderr Bool)
    (include-filesystem Bool)
@@ -17826,6 +18038,15 @@
                (stages/canonical-record "capability-v0"
                  [(id-value (host-environment-capability-id))
                   "host-environment"
+                  "non-affine"])))]
+          [])
+        (context-capability-nodes (Vec stages/TermNodeV0))
+        (if include-context
+          [(stages/->TermNodeV0 (host-context-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
+                 [(id-value (host-context-capability-id))
+                  "host-context-read-v0"
                   "non-affine"])))]
           [])
         (stdout-capability-nodes (Vec stages/TermNodeV0))
@@ -17884,6 +18105,7 @@
           [])]
     (vec (concat type-nodes function-nodes effect-nodes
            [region-node capability-node] environment-capability-nodes
+           context-capability-nodes
            stdout-capability-nodes stderr-capability-nodes
            filesystem-capability-nodes process-capability-nodes
            socket-capability-nodes
@@ -17995,14 +18217,16 @@
               (index-has-callee? index "host.fs/write-text-atomic")
               (index-has-callee? index "host.fs/make-parent-directories")
               (index-has-callee? index "host.fs/append-text")
-              (index-has-callee? index "host.clock/format-iso8601"))
+              (index-has-callee? index "host.clock/format-iso8601")
+              (index-has-callee? index "host.system/hostname"))
           (append-type-defs text-index-source-types (filesystem-outcome-types))
           text-index-source-types)
         (process-source-types (Vec core/TypeDef))
         (if (or
               (index-has-callee? index "host.process/run-capture")
               (index-has-callee? index "host.process/spawn-stdout")
-              (index-has-callee? index "host.process/read-line-bounded"))
+              (index-has-callee? index "host.process/read-line-bounded")
+              (index-has-callee? index "host.process/read-line-deadline"))
           (append-type-defs source-types (process-outcome-types))
           source-types)
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)
@@ -18013,6 +18237,7 @@
         (functions (Vec TypedFunctionV0))
         (settle-effects (settle-readiness (collect-functions function-resolutions)))
         (uses-environment Bool) (any-function-uses-environment? functions)
+        (uses-context Bool) (any-function-uses-host-context? functions)
         (uses-stdout Bool) (any-function-uses-stdout? functions)
         (uses-stderr Bool) (any-function-uses-stderr? functions)
         (uses-filesystem Bool) (any-function-uses-host-filesystem? functions)
@@ -18032,16 +18257,16 @@
           (append-type-def arena-types (atom-state-handle-type))
           arena-types)
         (effects (Vec core/EffectDef))
-        (slice-effects uses-environment uses-stdout uses-stderr
+        (slice-effects uses-environment uses-context uses-stdout uses-stderr
           uses-filesystem uses-process
           sockets clock)
         (regions (Vec core/RegionDef)) (slice-regions)
         (capabilities (Vec core/CapabilityDef))
-        (slice-capabilities uses-environment uses-stdout uses-stderr
+        (slice-capabilities uses-environment uses-context uses-stdout uses-stderr
           uses-filesystem uses-process sockets clock)
         (root core/NativeId) (lower-id "typed-stage" [source-digest])
         (nodes (Vec stages/TermNodeV0))
-        (typed-term-nodes types functions effects uses-environment uses-stdout
+        (typed-term-nodes types functions effects uses-environment uses-context uses-stdout
           uses-stderr uses-filesystem uses-process sockets clock)
         (terms stages/TermGraphV0)
         (stages/->TermGraphV0 root
@@ -18059,7 +18284,7 @@
           (mapv (fn [(effect core/EffectDef)] core/NativeId
                   (core/effectdef-id effect)) effects)
           [(arena-region-id) (atom-state-region-id)]
-        (slice-capability-ids uses-environment uses-stdout uses-stderr
+        (slice-capability-ids uses-environment uses-context uses-stdout uses-stderr
           uses-filesystem uses-process sockets clock)
           [(type-id "LowerFailure")])
         (encoding String) (stages/encode-typed-stage typed-stage)
@@ -18499,10 +18724,14 @@
         (if (function-uses-environment? function)
           (conj with-atom (host-environment-capability-id))
           with-atom)
+        (with-context (Vec core/NativeId))
+        (if (function-uses-host-context? function)
+          (conj with-environment (host-context-capability-id))
+          with-environment)
         (with-stdout (Vec core/NativeId))
         (if (function-uses-stdout? function)
-          (conj with-environment (host-stdout-capability-id))
-          with-environment)
+          (conj with-context (host-stdout-capability-id))
+          with-context)
         (with-stderr (Vec core/NativeId))
         (if (function-uses-stderr? function)
           (conj with-stdout (host-stderr-capability-id))
@@ -18525,6 +18754,7 @@
 
 (defn host-capability-id? [(capability core/NativeId)] Bool
   (or (same-id? capability (host-environment-capability-id))
+      (same-id? capability (host-context-capability-id))
       (same-id? capability (host-stdout-capability-id))
       (same-id? capability (host-stderr-capability-id))
       (same-id? capability (host-filesystem-capability-id))
@@ -18849,6 +19079,50 @@
     "v0"
     layouts-digest))
 
+(defn host-context-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
+  [(core/->AbiDeclV0
+     (host-context-abi-id "system-hostname")
+     (host-context-function-id "system-hostname")
+     "native_host_system_hostname_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCOutcomeOutAbiV0 true)
+     []
+     (core/->AbiValueV0 "result" (filesystem-text-outcome-type-id)
+       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+     (type-id "LowerFailure")
+     [(allocate-effect-id) (host-context-effect-id)]
+     [(allocate-capability-id) (host-context-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-context-abi-id "system-platform")
+     (host-context-function-id "system-platform")
+     "native_host_system_platform_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     []
+     (core/->AbiValueV0 "platform" (text-type-id)
+       (core/->OwnedV0 true) nil)
+     (type-id "LowerFailure")
+     [(host-context-effect-id)]
+     [(host-context-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-context-abi-id "terminal-stdout-tty")
+     (host-context-function-id "terminal-stdout-tty")
+     "native_host_terminal_stdout_tty_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     []
+     (core/->AbiValueV0 "tty" (bool-type-id)
+       (core/->OwnedV0 true) nil)
+     (type-id "LowerFailure")
+     [(host-context-effect-id)]
+     [(host-context-capability-id)]
+     "v0"
+     layouts-digest)])
+
 (defn host-stdout-abi [(layouts-digest String)] core/AbiDeclV0
   (core/->AbiDeclV0
     (host-stdout-abi-id)
@@ -19090,6 +19364,29 @@
      false
      layouts-digest)])
 
+(defn host-process-direct-abi
+  [(operation String)
+   (symbol String)
+   (parameters (Vec core/AbiValueV0))
+   (result-name String)
+   (result-type core/NativeId)
+   (layouts-digest String)]
+  core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-process-lifecycle-abi-id operation)
+    (host-process-lifecycle-function-id operation)
+    symbol
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    parameters
+    (core/->AbiValueV0 result-name result-type
+      (core/->OwnedV0 true) nil)
+    (type-id "LowerFailure")
+    [(host-process-effect-id)]
+    [(host-process-capability-id)]
+    "v0"
+    layouts-digest))
+
 (defn host-process-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
   [(core/->AbiDeclV0
      (host-process-abi-id)
@@ -19177,7 +19474,63 @@
      [(host-process-effect-id)]
      [(host-process-capability-id)]
      "v0"
-     layouts-digest)])
+     layouts-digest)
+   (host-process-direct-abi
+     "exec-replace" "native_host_process_exec_replace_v0"
+     [(borrowed-abi-value "argv" (closed-vector-type-id (text-type-id)))]
+     "status" (int-type-id) layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-lifecycle-abi-id "read-line-deadline")
+     (host-process-lifecycle-function-id "read-line-deadline")
+     "native_host_process_read_line_deadline_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCOutcomeOutAbiV0 true)
+     [(borrowed-abi-value "fd" (int-type-id))
+      (borrowed-abi-value "max-line-bytes" (int-type-id))
+      (borrowed-abi-value "timeout-ms" (int-type-id))]
+     (core/->AbiValueV0 "result" (process-read-line-outcome-type-id)
+       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+     (type-id "LowerFailure")
+     [(allocate-effect-id) (host-process-effect-id)]
+     [(allocate-capability-id) (host-process-capability-id)]
+     "v0"
+     layouts-digest)
+   (host-process-direct-abi
+     "fifo-create" "native_host_process_fifo_create_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     "status" (int-type-id) layouts-digest)
+   (host-process-direct-abi
+     "fifo-open-read" "native_host_process_fifo_open_read_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     "fd" (int-type-id) layouts-digest)
+   (host-process-direct-abi
+     "fifo-write-deadline" "native_host_process_fifo_write_deadline_v0"
+     [(borrowed-abi-value "path" (text-type-id))
+      (borrowed-abi-value "text" (text-type-id))
+      (borrowed-abi-value "timeout-ms" (int-type-id))]
+     "status" (int-type-id) layouts-digest)
+   (host-process-direct-abi
+     "poll-readable" "native_host_process_poll_readable_v0"
+     [(borrowed-abi-value "fds" (closed-vector-type-id (int-type-id)))
+      (borrowed-abi-value "timeout-ms" (int-type-id))]
+     "fd" (int-type-id) layouts-digest)
+   (host-process-direct-abi
+     "current-pid" "native_host_process_current_pid_v0"
+     [] "pid" (int-type-id) layouts-digest)
+   (host-process-direct-abi
+     "alive" "native_host_process_alive_v0"
+     [(borrowed-abi-value "pid" (int-type-id))]
+     "alive" (bool-type-id) layouts-digest)
+   (host-process-direct-abi
+     "signal" "native_host_process_signal_v0"
+     [(borrowed-abi-value "pid" (int-type-id))
+      (borrowed-abi-value "signal" (int-type-id))]
+     "status" (int-type-id) layouts-digest)
+   (host-process-direct-abi
+     "wait-not-alive" "native_host_process_wait_not_alive_v0"
+     [(borrowed-abi-value "pid" (int-type-id))
+      (borrowed-abi-value "timeout-ms" (int-type-id))]
+     "status" (int-type-id) layouts-digest)])
 
 (defn host-time-sleep-abi [(layouts-digest String)] core/AbiDeclV0
   (core/->AbiDeclV0
@@ -19242,10 +19595,26 @@
             (if (nil? optional)
               exports
               (conj exports (host-environment-abi optional digest)))))
+        (context-abis (Vec core/AbiDeclV0)) (host-context-abis digest)
+        (with-context-hostname (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-context-abi-id "system-hostname"))
+          (conj with-environment (nth context-abis 0))
+          with-environment)
+        (with-context-platform (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-context-abi-id "system-platform"))
+          (conj with-context-hostname (nth context-abis 1))
+          with-context-hostname)
+        (with-context (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-context-abi-id "terminal-stdout-tty"))
+          (conj with-context-platform (nth context-abis 2))
+          with-context-platform)
         (with-stdout-write (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions (host-stdout-write-abi-id))
-          (conj with-environment (host-stdout-write-abi digest))
-          with-environment)
+          (conj with-context (host-stdout-write-abi digest))
+          with-context)
         (with-stdout (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions (host-stdout-abi-id))
           (conj with-stdout-write (host-stdout-abi digest))
@@ -19288,35 +19657,13 @@
           (conj with-filesystem-parents (nth filesystem-abis 5))
           with-filesystem-parents)
         (process-abis (Vec core/AbiDeclV0)) (host-process-abis digest)
-        (with-process-inherit (Vec core/AbiDeclV0))
-        (if (any-function-calls-abi? functions (host-process-abi-id))
-          (conj with-filesystem (nth process-abis 0))
-          with-filesystem)
-        (with-process-capture (Vec core/AbiDeclV0))
-        (if (any-function-calls-abi? functions
-              (host-process-capture-abi-id))
-          (conj with-process-inherit (nth process-abis 1))
-          with-process-inherit)
-        (with-process-spawn (Vec core/AbiDeclV0))
-        (if (any-function-calls-abi? functions
-              (host-process-lifecycle-abi-id "spawn-stdout"))
-          (conj with-process-capture (nth process-abis 2))
-          with-process-capture)
-        (with-process-read (Vec core/AbiDeclV0))
-        (if (any-function-calls-abi? functions
-              (host-process-lifecycle-abi-id "read-line-bounded"))
-          (conj with-process-spawn (nth process-abis 3))
-          with-process-spawn)
-        (with-process-wait (Vec core/AbiDeclV0))
-        (if (any-function-calls-abi? functions
-              (host-process-lifecycle-abi-id "wait"))
-          (conj with-process-read (nth process-abis 4))
-          with-process-read)
+        (called-process-abis (Vec core/AbiDeclV0))
+        (filterv
+          (fn [(abi core/AbiDeclV0)] Bool
+            (any-function-calls-abi? functions (core/abideclv0-id abi)))
+          process-abis)
         (with-process (Vec core/AbiDeclV0))
-        (if (any-function-calls-abi? functions
-              (host-process-lifecycle-abi-id "close"))
-          (conj with-process-wait (nth process-abis 5))
-          with-process-wait)
+        (vec (concat with-filesystem called-process-abis))
         (with-time-sleep (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
           (conj with-process (host-time-sleep-abi digest))
@@ -20431,6 +20778,16 @@
                   "host-environment"
                   "non-affine"])))]
           [])
+        (context-capability-nodes (Vec stages/TermNodeV0))
+        (if (core/id-in? (core/capability-ids capabilities)
+              (host-context-capability-id))
+          [(stages/->TermNodeV0 (host-context-capability-id)
+             (stages/->TextTermV0
+               (stages/canonical-record "capability-v0"
+                 [(id-value (host-context-capability-id))
+                  "host-context-read-v0"
+                  "non-affine"])))]
+          [])
         (stdout-capability-nodes (Vec stages/TermNodeV0))
         (if (core/id-in? (core/capability-ids capabilities)
               (host-stdout-capability-id))
@@ -20493,6 +20850,7 @@
           [])]
     (vec (concat type-nodes effect-nodes layout-nodes function-nodes abi-nodes
            obligation-nodes environment-capability-nodes
+           context-capability-nodes
            stdout-capability-nodes stderr-capability-nodes
            filesystem-capability-nodes process-capability-nodes
            socket-capability-nodes
@@ -20693,6 +21051,12 @@
           (= (+ (count (public-ready-functions typed-functions functions))
                (if (any-function-uses-environment? typed-functions) 1 0)
                (if (any-function-calls-abi? typed-functions
+                     (host-context-abi-id "system-hostname")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-context-abi-id "system-platform")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-context-abi-id "terminal-stdout-tty")) 1 0)
+               (if (any-function-calls-abi? typed-functions
                      (host-stdout-write-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-stdout-abi-id)) 1 0)
@@ -20714,18 +21078,12 @@
                      (host-filesystem-abi-id "make-parent-directories")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "append-text")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-process-abi-id)) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-process-capture-abi-id)) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-process-lifecycle-abi-id "spawn-stdout")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-process-lifecycle-abi-id "read-line-bounded")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-process-lifecycle-abi-id "wait")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-process-lifecycle-abi-id "close")) 1 0)
+               (count
+                 (filterv
+                   (fn [(abi core/AbiDeclV0)] Bool
+                     (any-function-calls-abi? typed-functions
+                       (core/abideclv0-id abi)))
+                   (host-process-abis (layout-digest layouts))))
                (if (any-function-calls-abi? typed-functions
                      (host-time-sleep-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
