@@ -399,6 +399,34 @@
      '(defn set-loaded! [] Any
         (js/set! globalThis .loaded (js/await (load-text)))))
 
+   (test-case "exported defn detects await through JS expression containers"
+     (define result
+       (js-emit
+        (list
+         '(ns test.app)
+         '(define-target js)
+         `(declare-extern read-file ,(fn-ty '(String String) '(Promise String)))
+         `(declare-extern fetch-versions ,(fn-ty '() '(Promise Any)))
+         '(declare-extern JSON Any)
+         '(declare-extern state Any)
+         '(js/export
+           (defn check! [] Any
+             (let [parsed (js/call JSON .parse
+                            (js/await (read-file "gjoa.json" "utf8")))]
+               (js/set! state .versions (js/await (fetch-versions)))
+               parsed))))))
+     (check-true
+      (string-contains? result "export async function check_bang()")
+      (format "expected exported async check_bang in:\n~a" result))
+     (check-true
+      (string-contains? result
+                        "JSON.parse(await read_file(\"gjoa.json\", \"utf8\"))")
+      (format "expected await below js/call in:\n~a" result))
+     (check-true
+      (string-contains? result
+                        "state.versions = await fetch_versions()")
+      (format "expected await below js/set! in:\n~a" result)))
+
    (check-js-contains "fn with await -> async arrow"
      "async ("
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
