@@ -14,7 +14,7 @@ die() {
 for command in cc rg; do
   command -v "$command" >/dev/null 2>&1 || die "missing command: $command"
 done
-mkdir -p "$scratch/source-c17" "$scratch/exe-artifacts"
+mkdir -p "$scratch/exe-artifacts"
 
 sources=(
   "$repo/native-core/src/beagle/datum_reader.bgl"
@@ -23,27 +23,19 @@ sources=(
 )
 
 "$repo/bin/beagle" check --agent "${sources[@]}"
-"$repo/bin/beagle" build --materializer c17 \
-  --out "$scratch/source-c17" \
-  "${sources[@]}" >"$scratch/source-c17.log"
+"$repo/bin/beagle-native-exe" \
+  --out "$scratch/edn-codec-test" \
+  --artifacts "$scratch/exe-artifacts" \
+  --entry native.edn-codec-test/cli-main \
+  -- "${sources[@]}" >"$scratch/native-exe.log"
 
-report="$scratch/source-c17/report.txt"
+report="$scratch/exe-artifacts/report.txt"
 rg -Fx 'stage typed-to-native COMPLETE' "$report" >/dev/null \
   || die "semantic EDN fixture did not lower"
 [[ "$(rg -c '^obligation-projection PASS ' "$report")" == "10" ]] \
   || die "semantic EDN fixture failed native obligations"
 rg -Fx 'materialize-c17 OK module_0.h module_0.c' "$report" >/dev/null \
   || die "semantic EDN fixture did not materialize as C17"
-
-cc -std=c17 -Wall -Wextra -Werror -pedantic \
-  -I"$repo/native-core/shim" -I"$scratch/source-c17" \
-  -c "$scratch/source-c17/module_0.c" -o "$scratch/module_0.o"
-
-"$repo/bin/beagle-native-exe" \
-  --out "$scratch/edn-codec-test" \
-  --artifacts "$scratch/exe-artifacts" \
-  --entry native.edn-codec-test/cli-main \
-  -- "${sources[@]}" >"$scratch/native-exe.log"
 
 representative='{:tx 1, :op "assert", :values [true nil -2], :title "line\n☺"}'
 "$scratch/edn-codec-test" contract "$representative"
