@@ -16,6 +16,7 @@ set -euo pipefail
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 CORE_BUILD="$BIN/beagle-build-core"
+source "$BIN/_beagle-source-id"
 
 usage() {
     sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -175,14 +176,20 @@ command -v bb >/dev/null 2>&1 || die "required command is unavailable: bb"
 cc_path="$(command -v -- "$cc" 2>/dev/null || true)"
 [[ -n "$cc_path" && -x "$cc_path" ]] || die "C17 compiler is unavailable: $cc"
 
+normalized_sources=()
+source_ids=()
 for source in "${sources[@]}"; do
     [[ -f "$source" ]] || die "source file not found: $source"
+    source="$(realpath "$source")"
+    normalized_sources+=("$source")
+    source_ids+=("$(beagle_source_id "$source")")
 done
 
 bundle_ast="$work/source_bundle.ast.json"
 bundle_log="$work/source_bundle.ast.log"
 set +e
-"$BIN/beagle-ast" --bundle "${sources[@]}" >"$bundle_ast" 2>"$bundle_log"
+"$BIN/beagle-ast" --bundle "${normalized_sources[@]}" \
+    >"$bundle_ast" 2>"$bundle_log"
 bundle_rc=$?
 set -e
 if [[ $bundle_rc -ne 0 ]]; then
@@ -190,39 +197,42 @@ if [[ $bundle_rc -ne 0 ]]; then
     die "could not inspect exports in coherent source bundle"
 fi
 
-python3 - "$bundle_ast" "$work" "${sources[@]}" <<'PY'
+python3 - "$bundle_ast" "$work" "${source_ids[@]}" <<'PY'
 import json
 import pathlib
 import sys
 
 bundle_path = pathlib.Path(sys.argv[1])
 work = pathlib.Path(sys.argv[2])
-sources = [str(pathlib.Path(source).resolve()) for source in sys.argv[3:]]
+source_ids = sys.argv[3:]
 bundle = json.loads(bundle_path.read_text())
-modules = {module["source"]: module["program"] for module in bundle["modules"]}
-if set(modules) != set(sources):
-    missing = sorted(set(sources) - set(modules))
-    extra = sorted(set(modules) - set(sources))
+module_list = bundle["modules"]
+modules = {module["source"]: module["program"] for module in module_list}
+if len(modules) != len(module_list):
+    raise SystemExit("beagle native-exe: bundle AST contains duplicate source ids")
+if set(modules) != set(source_ids):
+    missing = sorted(set(source_ids) - set(modules))
+    extra = sorted(set(modules) - set(source_ids))
     raise SystemExit(
         f"beagle native-exe: bundle AST source mismatch: missing={missing} extra={extra}"
     )
-for index, source in enumerate(sources):
+for index, source_id in enumerate(source_ids):
     destination = work / f"source_{index}.ast.json"
     destination.write_text(
-        json.dumps(modules[source], sort_keys=True, separators=(",", ":")) + "\n"
+        json.dumps(modules[source_id], sort_keys=True, separators=(",", ":")) + "\n"
     )
 PY
 
 ast_args=()
 source_index=0
-for source in "${sources[@]}"; do
+for source in "${normalized_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
     if ! bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
         >"$work/source_${source_index}.verify.log" 2>&1; then
         sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2
         die "could not authenticate checked AST for source: $source"
     fi
-    ast_args+=("$source" "$ast")
+    ast_args+=("${source_ids[$source_index]}" "$ast")
     source_index=$((source_index + 1))
 done
 
@@ -322,7 +332,7 @@ module_dir="$work/module"
 mkdir -p "$module_dir"
 set +e
 "$CORE_BUILD" --materializer c17 --out "$module_dir" --entry "$entry" -- \
-    "${sources[@]}" >"$work/core-build.log" 2>&1
+    "${normalized_sources[@]}" >"$work/core-build.log" 2>&1
 module_rc=$?
 set -e
 if [[ $module_rc -ne 0 ]]; then
