@@ -18484,11 +18484,20 @@
      (core/->BoundedEffectsObligation true) "v0" digest clean
      "typed Terms contain no raw Any, host exception, host collection, or target syntax")])
 
-(defn lower-typed-stage
-  [(frozen-source stages/FrozenSourceStageV1)
-   (compiler-commit String)
-   (configuration (Vec String))]
-  TypingResultV0
+;; The shared setup every function body reads and no function body produces.
+;; A body may only be attached against a prelude that is already complete, so
+;; the cut is exactly at the body environment: index, resolutions, and every
+;; declaration, global, and literal support type close here, and the types a
+;; body itself contributes close after.
+(defrecord TypingPreludeV0
+  [(env BodyEnvV0)
+   (record-resolutions (Vec RecordResolutionV0))
+   (signature-resolutions (Vec FunctionResolutionV0))
+   (record-keys (Vec String))
+   (source-digest String)])
+
+(defn prepare-typing-prelude
+  [(frozen-source stages/FrozenSourceStageV1)] TypingPreludeV0
   (let [(source stages/SourceStageV1)
         (stages/frozensourcestagev1-stage frozen-source)
         (source-digest String) (stages/frozensourcestagev1-digest frozen-source)
@@ -18549,11 +18558,31 @@
               (index-has-callee? index "host.process/read-line-deadline"))
           (append-type-defs source-types (process-outcome-types))
           source-types)
-        (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)
+        (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)]
+    (->TypingPreludeV0
+      (->BodyEnvV0 index process-source-types signatures function-sources
+        globals)
+      record-resolutions signature-resolutions record-keys source-digest)))
+
+(defn lower-typed-stage
+  [(frozen-source stages/FrozenSourceStageV1)
+   (compiler-commit String)
+   (configuration (Vec String))]
+  TypingResultV0
+  (let [(source stages/SourceStageV1)
+        (stages/frozensourcestagev1-stage frozen-source)
+        (graph stages/TermGraphV0) (stages/sourcestagev1-terms source)
+        (prelude TypingPreludeV0) (prepare-typing-prelude frozen-source)
+        (source-digest String) (typingpreludev0-source-digest prelude)
+        (env BodyEnvV0) (typingpreludev0-env prelude)
+        (record-resolutions (Vec RecordResolutionV0))
+        (typingpreludev0-record-resolutions prelude)
+        (signature-resolutions (Vec FunctionResolutionV0))
+        (typingpreludev0-signature-resolutions prelude)
+        (function-sources (Vec core/NativeId)) (bodyenvv0-signature-sources env)
+        (process-source-types (Vec core/TypeDef)) (bodyenvv0-types env)
         (function-resolutions (Vec FunctionResolutionV0))
-        (attach-bodies
-          (->BodyEnvV0 index process-source-types signatures function-sources globals)
-          signature-resolutions function-sources)
+        (attach-bodies env signature-resolutions function-sources)
         (functions (Vec TypedFunctionV0))
         (settle-function-closures (collect-functions function-resolutions))
         (uses-environment Bool) (any-function-uses-environment? functions)
