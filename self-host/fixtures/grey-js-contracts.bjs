@@ -34,6 +34,13 @@
 (def minimum Float
   (js/call Math .min 0.5 1.0))
 
+(def maximum Int
+  (js/call Math .max 1 2))
+
+(def map-size Int
+  (let [values (js/new Map)]
+    (js/get values .size)))
+
 (def tangent Float
   (js/call Math .tan 0.5))
 

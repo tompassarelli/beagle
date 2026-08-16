@@ -108,6 +108,7 @@
    "reset!" JS-RESET-POLY
    "swap!" JS-SWAP-POLY
    "Math" (make-prim "JsMath")
+   "Map" (make-fn [] ANY (make-prim "JsMap"))
    "Date" (make-prim "JsDate")
    "performance" (make-prim "JsPerformance")})
 
@@ -800,6 +801,9 @@
     "min" (make-poly ["A"]
             (make-fn [] (make-var "A") (make-var "A"))
             {"A" NUMBER-TYPE})
+    "max" (make-poly ["A"]
+            (make-fn [] (make-var "A") (make-var "A"))
+            {"A" NUMBER-TYPE})
     "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
@@ -814,7 +818,9 @@
    "Date"
    {"now" (make-fn [] nil INT-TYPE)}
    "performance"
-   {"now" (make-fn [] nil FLOAT-TYPE)}})
+   {"now" (make-fn [] nil FLOAT-TYPE)}
+   "Map"
+   {"size" INT-TYPE}})
 
 ;; --- stdlib signature table --------------------------------------------------
 
@@ -2483,6 +2489,9 @@
     (and (prim? receiver-type) (= (get receiver-type "name") "JsPerformance"))
     "performance"
 
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsMap"))
+    "Map"
+
     :else nil))
 
 ;; Returns {closed,type,owner}. Authored nominal records are closed. Vec and
@@ -2583,6 +2592,19 @@
           :else
           (infer-js-member-call!
             selector (get resolved "owner") member-type trailing env))))))
+
+(defn infer-js-new! [(callee Any) (args (Vec Any)) (env Any)] Any
+  (let [raw-contract (infer-expr! callee env)
+        contract (if (poly-type? raw-contract)
+                   (resolve-poly-call! raw-contract args env)
+                   raw-contract)]
+    (if (fn-type? contract)
+      (do
+        (check-args! "js/new" contract args env)
+        (get contract "ret"))
+      (do
+        (doseq [arg args] (infer-expr! arg env))
+        ANY))))
 
 (defn infer-expr! [(e Any) (env Any)] Any
   (cond
@@ -2822,10 +2844,7 @@
         ANY)
 
     (= (get e "node") "js-new")
-      (do
-        (infer-expr! (get e "callee") env)
-        (doseq [arg (get e "args")] (infer-expr! arg env))
-        ANY)
+      (infer-js-new! (get e "callee") (get e "args") env)
 
     (= (get e "node") "js-delete")
       (do

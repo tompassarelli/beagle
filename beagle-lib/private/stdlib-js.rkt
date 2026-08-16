@@ -35,7 +35,8 @@
    'Math/sign         (fn-of '(Any) 'Int)
    'Math/min          (poly-fn '(A) '() (tv 'A) #:rest (tv 'A)
                               #:bounds (hasheq 'A (p 'Number)))
-   'Math/max          (fn-of '() 'Any #:rest 'Any)
+   'Math/max          (poly-fn '(A) '() (tv 'A) #:rest (tv 'A)
+                              #:bounds (hasheq 'A (p 'Number)))
    'Math/hypot        (fn-of '() 'Float #:rest 'Any)
    'Math/log          (fn-of '(Any) 'Float)
    'Math/log2         (fn-of '(Any) 'Float)
@@ -172,6 +173,7 @@
 
    ;; --- globals ---------------------------------------------------------------
    'Math             (p 'JsMath)
+   'Map              (fn-of '() 'JsMap #:rest 'Any)
    'Date             (p 'JsDate)
    'performance      (p 'JsPerformance)
    'globalThis       (p 'Any)
@@ -210,6 +212,7 @@
             'atan2 (hash-ref STDLIB-JS 'Math/atan2)
             'exp (hash-ref STDLIB-JS 'Math/exp)
             'min (hash-ref STDLIB-JS 'Math/min)
+            'max (hash-ref STDLIB-JS 'Math/max)
             'sin (hash-ref STDLIB-JS 'Math/sin)
             'cos (hash-ref STDLIB-JS 'Math/cos)
             'tan (hash-ref STDLIB-JS 'Math/tan)))
@@ -220,7 +223,11 @@
    'JsPerformance
    (hasheq 'vars '()
            'members
-           (hasheq 'now (fn-of '() 'Float)))))
+           (hasheq 'now (fn-of '() 'Float)))
+   'JsMap
+   (hasheq 'vars '()
+           'members
+           (hasheq 'size (p 'Int)))))
 
 (define JS-NO-EMIT
   (set-subtract (list->set (hash-keys STDLIB-PORTABLE))

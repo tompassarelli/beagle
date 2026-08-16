@@ -5199,9 +5199,7 @@
       (jst-set-receiver e) (jst-set-key e) (list (jst-set-value e)) env)
      ANY]
     [(jst-new? e)
-     (infer-expr (jst-new-callee e) env)
-     (for-each (lambda (arg) (infer-expr arg env)) (jst-new-args e))
-     ANY]
+     (infer-jst-new e env)]
     [(jst-delete? e)
      (traverse-jst-member
       (jst-delete-receiver e) (jst-delete-key e) '() env)
@@ -6020,11 +6018,26 @@
                     'actual (type->string contract))
             #:src (src-for e))])]
        [(jst-closed-record-receiver? receiver-type)
-        (raise-unknown-jst-record-member
+       (raise-unknown-jst-record-member
          "js/call" receiver-type selector e)]
        [else
         (for-each (lambda (arg) (infer-expr arg env)) args)
         ANY])]))
+
+(define (infer-jst-new e env)
+  (define args (jst-new-args e))
+  (define raw-contract (infer-expr (jst-new-callee e) env))
+  (define contract
+    (if (type-poly? raw-contract)
+        (resolve-poly-call raw-contract args env)
+        raw-contract))
+  (cond
+    [(type-fn? contract)
+     (check-args 'js/new contract args env e)
+     (zonk-type (type-fn-ret contract))]
+    [else
+     (for-each (lambda (arg) (infer-expr arg env)) args)
+     ANY]))
 
 (define (infer-jst-dot-expr e env)
   (infer-expr (jst-dot-object e) env)

@@ -58,16 +58,34 @@
             (js/call Math .exp value)
             (js/call Math .tan value)))
       '(defn minimum [(left Float) (right Float)] Float
-         (js/call Math .min left right)))))
+         (js/call Math .min left right))
+      '(defn maximum [(left Int) (right Int)] Int
+         (js/call Math .max left right)))))
   (for ([invalid
          (in-list
           '((defn invalid-atan [] Float (js/call Math .atan "bad"))
             (defn invalid-atan2 [] Float (js/call Math .atan2 1.0 "bad"))
             (defn invalid-exp [] Float (js/call Math .exp "bad"))
             (defn invalid-tan [] Float (js/call Math .tan "bad"))
-            (defn invalid-min [] Float (js/call Math .min 1.0 "bad"))))])
-    (check-exn #rx"(Number|Float).*String|String.*(Number|Float)"
+            (defn invalid-min [] Float (js/call Math .min 1.0 "bad"))
+            (defn invalid-max [] Int (js/call Math .max 1 "bad"))))])
+    (check-exn #rx"(Int|Number|Float).*String|String.*(Int|Number|Float)"
                (lambda () (check-js-prog invalid)))))
+
+(test-case "native Map construction returns JsMap with an Int size member"
+  (check-not-exn
+   (lambda ()
+     (check-js-prog
+      '(defn empty-map-size [] Int
+         (let [values (js/new Map)]
+           (js/get values .size))))))
+  (check-exn
+   #rx"expected (return )?String, got Int"
+   (lambda ()
+     (check-js-prog
+      '(defn invalid-map-size [] String
+         (let [values (js/new Map)]
+           (js/get values .size)))))))
 
 (test-case "an explicit Atom Any accepts concrete writes without alias widening"
   (check-not-exn
