@@ -1665,6 +1665,28 @@
   #rx"expected Number, got Any"
   '(defn k [(x Any)] Int (+ x 1)))
 
+(test-case "numeric: number? narrows Any to Number for fractional arithmetic"
+  (define predicates
+    (parameterize ([current-namespace
+                    (module->namespace 'beagle/private/check)])
+      (namespace-variable-value 'TYPE-PREDICATES)))
+  (define narrowing-type
+    (parameterize ([current-namespace
+                    (module->namespace 'beagle/private/check)])
+      (namespace-variable-value 'predicate-narrowing-type)))
+  (define refine
+    (parameterize ([current-namespace
+                    (module->namespace 'beagle/private/check)])
+      (namespace-variable-value 'numeric-refine)))
+  (define number-type (parse-type 'Number))
+  (define narrowed (narrowing-type (type-prim 'Any) 'Number))
+  (check-equal? 'Number (hash-ref predicates 'number?))
+  (check-true (type-invariant-equal? narrowed number-type))
+  (check-equal? "Float"
+                (type->string
+                 (refine '+ (list narrowed (type-prim 'Float))
+                         (type-prim 'Any)))))
+
 (check-err/rx "numeric: + rejects a String operand"
   #rx"expected Number, got String"
   '(def invalid-plus Int (+ "s" 1)))

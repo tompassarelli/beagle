@@ -1,0 +1,10 @@
+#lang beagle/js
+(ns fuzz.number-predicate-fractional-js)
+
+;; A JavaScript number may be fractional, so number? cannot justify Int.
+(defn increment-number-as-int [(raw Any)] Any
+  (if (number? raw)
+    (let [(result Int) (+ raw 1)] result)
+    0))
+
+(def fractional-result Int (increment-number-as-int 1.5))

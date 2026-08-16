@@ -3978,7 +3978,7 @@
   (hasheq
    'nil?     'Nil
    'string?  'String
-   'number?  'Int
+   'number?  'Number
    'integer? 'Int
    'int?     'Int
    'keyword? 'Keyword
@@ -3999,6 +3999,10 @@
 
 (define (type-matches-predicate? t predicate-type)
   (case predicate-type
+    [(Number)
+     (and (type-prim? t)
+          (for/or ([alt (in-list (type-union-alts (parse-type 'Number)))])
+            (type-equal? t alt)))]
     [(Map) (and (type-app? t) (eq? (type-app-ctor t) 'Map))]
     [(Vec) (and (type-app? t) (memq (type-app-ctor t) '(Vec HVec)))]
     [else
@@ -4017,6 +4021,7 @@
      (alternatives->closed-type
       (filter (lambda (alt) (type-matches-predicate? alt predicate-type))
               (type-app-args current-type)))]
+    [(eq? predicate-type 'Number) (parse-type 'Number)]
     [(memq predicate-type '(Map Vec)) #f]
     [else (type-prim predicate-type)]))
 
