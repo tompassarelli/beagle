@@ -7643,6 +7643,30 @@
          (eq? (call-form-fn value) 'transient)
          (not (hash-has-key? (purity-state-scope state) 'transient))
          (not (set-member? global-bindings 'transient))))
+  (define (direct-primitive-call? value name state)
+    (and (call-form? value)
+         (eq? (call-form-fn value) name)
+         (not (hash-has-key? (purity-state-scope state) name))
+         (not (set-member? global-bindings name))))
+  (define fresh-transient-root (gensym 'fresh-transient-root))
+  ;; A conj! result may enter a binding only by replacing the exact lexical
+  ;; handle it consumed, or when the pipeline starts from a fresh transient.
+  ;; Returning the root lets nested conj! calls retain the same proof without
+  ;; admitting a second owner name.
+  (define (conj-pipeline-root value state)
+    (and (direct-primitive-call? value 'conj! state)
+         (pair? (call-form-args value))
+         (let ([receiver (car (call-form-args value))])
+           (cond
+             [(direct-transient-call? receiver state) fresh-transient-root]
+             [(symbol? receiver) receiver]
+             [else (conj-pipeline-root receiver state)]))))
+  (define (binding-acquires-owner? target value state)
+    (and (symbol? target)
+         (or (direct-transient-call? value state)
+             (let ([root (conj-pipeline-root value state)])
+               (or (eq? root fresh-transient-root)
+                   (eq? root target))))))
   (define (bind-target state target origins node #:acquire? [acquire? #f])
     (define names (binding-target-bound-names target))
     (define simple? (and (symbol? target) (= (length names) 1)))
@@ -7694,7 +7718,10 @@
          (define-values (next origins) (analyze (car remaining) current))
          (if (null? (cdr remaining))
              (values next origins)
-             (loop (cdr remaining) next))) ]))
+             (loop (cdr remaining)
+                   (if (direct-primitive-call? (car remaining) 'conj! current)
+                       (escape-origins next origins (car remaining))
+                       next)))) ]))
   (define (analyze-and-discard value state)
     (define-values (next _origins) (analyze value state))
     next)
@@ -7718,9 +7745,8 @@
   (define (analyze-bindings bindings state)
     (for/fold ([next state]) ([binding (in-list bindings)])
       (define target (let-binding-name binding))
-      (define acquire? (and (symbol? target)
-                            (direct-transient-call?
-                             (let-binding-value binding) next)))
+      (define acquire?
+        (binding-acquires-owner? target (let-binding-value binding) next))
       (define-values (after-value origins)
         (analyze (let-binding-value binding) next))
       (define after-defaults (analyze-defaults after-value target))
@@ -7883,6 +7909,17 @@
             (set-origin-status after-rest owner-origins 'dead))
           (record-exception-state! result-state)
           (values result-state (seteq))]
+         [(eq? fn 'conj!)
+          ;; conj! consumes the lexical handle and returns its sole successor.
+          ;; A fresh origin distinguishes that successor from every stale
+          ;; binding which still names the consumed generation.
+          (define next-origin (gensym 'transient-owner))
+          (define consumed
+            (set-origin-status after-rest owner-origins 'dead))
+          (define result-state
+            (set-origin-status consumed (seteq next-origin) 'live))
+          (record-exception-state! result-state)
+          (values result-state (seteq next-origin))]
          [else
           (record-exception-state! after-rest)
           (values after-rest owner-origins)])]

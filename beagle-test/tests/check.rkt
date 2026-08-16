@@ -124,6 +124,19 @@
 (check-ok "Any annotation accepts anything"
   '(def x Any "hi"))
 
+(check-ok "TransientVec primitives preserve the Vec element type"
+  '(defn append-one [(values (Vec Int))] (Vec Int)
+     (let [(work (TransientVec Int)) (transient values)
+           (work (TransientVec Int)) (conj! work 1)]
+       (persistent! work))))
+
+(check-err/rx "TransientVec conj! rejects a different element type"
+  #rx"type mismatch|expected.*Int|cannot unify"
+  '(defn append-text [(values (Vec Int))] (Vec Int)
+     (let [(work (TransientVec Int)) (transient values)
+           (work (TransientVec Int)) (conj! work "wrong")]
+       (persistent! work))))
+
 (check-ok "defn with an inferred parameter and explicit return passes"
   '(defn id [x] Any x))
 

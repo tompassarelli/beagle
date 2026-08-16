@@ -51,6 +51,16 @@
   (check-exn #rx"type Buffer expects 1 argument, got 2"
              (lambda () (parse-type '(Buffer Float Int)))))
 
+(test-case "TransientVec requires exactly one type argument"
+  (define t (parse-type '(TransientVec Int)))
+  (check-true (type-app? t))
+  (check-eq? (type-app-ctor t) 'TransientVec)
+  (check-eq? (type-prim-name (car (type-app-args t))) 'Int)
+  (check-exn #rx"type TransientVec expects 1 argument, got 0"
+             (lambda () (parse-type 'TransientVec)))
+  (check-exn #rx"type TransientVec expects 1 argument, got 2"
+             (lambda () (parse-type '(TransientVec Int String)))))
+
 (test-case "parse nested parametric / function types"
   (define t (parse-type `(Map String (Fn (,BRACKET-TAG Int) Int))))
   (check-true (type-app? t))
@@ -166,6 +176,13 @@
   (check-true (type-compatible? bf bf))
   (check-false (type-compatible? bf ba))
   (check-false (type-compatible? ba bf)))
+
+(test-case "TransientVec element type is invariant"
+  (define vi (type-app 'TransientVec (list (type-prim 'Int))))
+  (define va (type-app 'TransientVec (list (type-prim 'Any))))
+  (check-true (type-compatible? vi vi))
+  (check-false (type-compatible? vi va))
+  (check-false (type-compatible? va vi)))
 
 ;; --- polymorphic types (forall) --------------------------------------------
 

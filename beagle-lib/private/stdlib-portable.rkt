@@ -31,6 +31,21 @@
    'into       (fn-of '(Any Any) 'Any)
    'conj       (fn-of '(Any) 'Any #:rest 'Any)
    'cons       (fn-of '(Any Any) 'Any)
+   ;; Native's transient vector builder is a linear lexical value. The type
+   ;; scheme preserves its element type; the checker separately proves that
+   ;; conj!'s returned owner is rebound and persistent! consumes it once.
+   'transient
+   (poly-fn '(A)
+            (list (type-app 'Vec (list (tv 'A))))
+            (type-app 'TransientVec (list (tv 'A))))
+   'conj!
+   (poly-fn '(A)
+            (list (type-app 'TransientVec (list (tv 'A))) (tv 'A))
+            (type-app 'TransientVec (list (tv 'A))))
+   'persistent!
+   (poly-fn '(A)
+            (list (type-app 'TransientVec (list (tv 'A))))
+            (type-app 'Vec (list (tv 'A))))
    ;; concat/distinct/sort: parametric over the element type so the typed
    ;; pipeline carries (Vec A) through (native lowering needs this — it
    ;; can't bind a native loop's element type to Any). concat stays

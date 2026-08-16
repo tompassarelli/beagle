@@ -5,7 +5,7 @@
 ;;   primitives:   String, Int, Float, Bool, Keyword, Symbol, Nil, Any
 ;;   function:     (Fn [A B] R)             fixed arity
 ;;                 (Fn [A B & T] R)          variadic; tail args of type T
-;;   parametric:   (Vec T), (List T), (Set T), (Map K V)
+;;   parametric:   (Vec T), (TransientVec T), (List T), (Set T), (Map K V)
 ;;   union:        (U String Nil)
 ;;
 ;; `Any` is universal; matches anything in either direction.
@@ -37,7 +37,11 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+  '(Vec TransientVec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+
+(define BUILTIN-PARAMETRIC-ARITIES
+  (hasheq 'Buffer 1
+          'TransientVec 1))
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -229,7 +233,7 @@
               (hash-has-key? (current-user-parametric-arities) (car t))))
      (define expected-arity
        (or (hash-ref (current-user-parametric-arities) (car t) #f)
-           (and (eq? (car t) 'Buffer) 1)))
+           (hash-ref BUILTIN-PARAMETRIC-ARITIES (car t) #f)))
      (when (and expected-arity
                 (not (= (length (cdr t)) expected-arity)))
        (error 'beagle
@@ -295,8 +299,11 @@
             expected-arity
             (if (= expected-arity 1) "" "s"))]
 
-    [(eq? t 'Buffer)
-     (error 'beagle "type Buffer expects 1 argument, got 0")]
+    [(and (symbol? t) (hash-ref BUILTIN-PARAMETRIC-ARITIES t #f))
+     => (lambda (expected-arity)
+          (error 'beagle
+                 "type ~a expects ~a argument~a, got 0"
+                 t expected-arity (if (= expected-arity 1) "" "s")))]
 
     ;; G2 — bare `Atom` resolves to (Atom Any): an untyped mutable cell. Atom is a
     ;; PARAMETRIC-CTOR, but a bare symbol would parse to (type-prim 'Atom), which a poly
@@ -489,10 +496,11 @@
      (and (= (length (type-app-args actual)) (length (type-app-args expected)))
           (andmap type-invariant-equal? (type-app-args actual) (type-app-args expected)))]
 
-    ;; Mutable dense buffers are invariant for the same aliasing reason as Atom.
+    ;; Mutable dense buffers and transient builders are invariant for the same
+    ;; aliasing reason as Atom.
     [(and (type-app? actual) (type-app? expected)
-          (eq? (type-app-ctor actual) 'Buffer)
-          (eq? (type-app-ctor expected) 'Buffer))
+          (memq (type-app-ctor actual) '(Buffer TransientVec))
+          (eq? (type-app-ctor actual) (type-app-ctor expected)))
      (and (= (length (type-app-args actual)) (length (type-app-args expected)))
           (andmap type-invariant-equal? (type-app-args actual)
                   (type-app-args expected)))]

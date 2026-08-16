@@ -227,13 +227,14 @@
          (purity-violations
           (apply prog* '(ns t.owner)
                  '(define-target clj) forms))))
-  ;; An established owner may flow through nested transient-family calls, and
-  ;; a fresh origin may be consumed immediately without first being bound.
+  ;; conj! consumes its lexical handle. Its successor may replace the exact
+  ;; same name, or flow directly through a nested transient-family pipeline.
   (check-equal?
    (violations
-    '(defn build [xs flag] Any
-       (let [owned (transient xs)]
-         (if flag (conj! owned 1) (conj! owned 2))
+    '(defn build [xs] Any
+       (let [owned (transient xs)
+             owned (conj! owned 1)
+             owned (conj! owned 2)]
          (persistent!
           (pop! (disj! (conj! owned 1) 1))))))
    '())
@@ -245,6 +246,20 @@
     '(defn direct-pipeline [xs] Any
        (persistent! (conj! (transient xs) 1))))
    '())
+  (check-equal?
+   (violations
+    '(defn discarded [xs] Any
+       (let [owned (transient xs)]
+         (conj! owned 1)
+         nil)))
+   '(discarded))
+  (check-equal?
+   (violations
+    '(defn stale-after-conj [xs] Any
+       (let [owned (transient xs)
+             updated (conj! owned 1)]
+         (persistent! owned))))
+   '(stale-after-conj))
   (check-equal?
    (violations
     '(defn map-build [xs] Any
