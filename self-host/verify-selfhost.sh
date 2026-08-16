@@ -14,6 +14,12 @@
 #   default corpus: every tracked fixture under self-host/fixtures/, plus the
 #   $FRAM_REPO/src/fram modules listed below that exist in that checkout
 #   BEAGLE_ORACLE_ROOT=/path selects the oracle binaries to compare against.
+#
+# Module resolution is closed on BOTH sides: rungs 6 and 7 pass the exact
+# valid-fixture bundle (--source per file to selfhost.main; one
+# beagle-build-all / `beagle ast --bundle` invocation to the oracle). Neither
+# compiler walks ancestors or falls back to flat basenames for a provider;
+# the invalid/absent-provider fixture asserts that refusal.
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
@@ -130,7 +136,12 @@ FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj)
-  for fram_module in fold branch kernel_classify import provider_host tools; do
+  # Hosted fram modules whose require closure stays inside hosted beagle
+  # source. fold/import/tools left this corpus when fram moved their providers
+  # (fram.store, fram.types, fram.schema, ...) to Beagle Core (.bgl): a hosted
+  # module requiring a Core provider is refused by BOTH compilers under closed
+  # module resolution, so those modules cannot serve as emit-parity rungs.
+  for fram_module in branch provider_host; do
     [ -f "$FRAM_REPO/src/fram/$fram_module.bclj" ] && \
       MODULES+=("$FRAM_REPO/src/fram/$fram_module.bclj")
   done
@@ -576,32 +587,56 @@ if [ -d "$PURITY_DIR" ]; then
   done
 fi
 
-echo "=== 6. multi-module fixtures (driver: require resolution + externs import) ==="
-# The driver (selfhost.main) resolves (require ...) across sibling files and
-# imports each dep's typed surface as externs — the module-resolution port.
-# Two checks per fixture: (a) full-chain emit byte-identical to the oracle
-# (resolution must not perturb bytes), (b) AST + externs parity, externs
-# compared as a SET (ast-json serializes them in hash order, so order is not
-# meaningful — the pre-port rung excluded externs entirely; now they must match).
+echo "=== 6. multi-module fixtures (driver: closed-bundle require resolution + externs import) ==="
+# The driver (selfhost.main) resolves (require ...) through the exact closed
+# fixture bundle — every valid module fixture passed as --source, matched by
+# declared namespace, so dash-named files resolve without rename. The oracle
+# compiles the same bundle: one beagle-build-all tree for emitted bytes, one
+# `beagle ast --bundle` projection for AST parity. Two checks per fixture:
+# (a) full-chain emit byte-identical to the oracle (resolution must not
+# perturb bytes), (b) AST + externs parity, externs compared as a SET
+# (ast-json serializes them in hash order, so order is not meaningful).
+VALID_MODS=(self-host/fixtures/modules/*.bclj)
+SELF_BUNDLE_ARGS=()
+for f in "${VALID_MODS[@]}"; do
+  SELF_BUNDLE_ARGS+=(--source "$f")
+done
 if [ -d "self-host/fixtures/modules" ]; then
-  for src in self-host/fixtures/modules/*.bclj; do
+  MODS_ORACLE_TREE="$LAB/mods-oracle-tree"
+  MODS_ORACLE_BUNDLE="$LAB/mods-oracle-bundle.json"
+  rm -rf "$MODS_ORACLE_TREE"
+  mods_oracle_ready=0
+  if run_phase "modules oracle bundle emit" "$PHASE_BUILD" \
+       env BEAGLE_EMIT_SRCLOC=0 "$ORACLE_ROOT/bin/beagle-build-all" \
+       "${VALID_MODS[@]}" --out "$MODS_ORACLE_TREE" >/dev/null 2>&1; then
+    if run_phase "modules oracle bundle AST" "$PHASE_BUILD" \
+         "$ORACLE_AST" --bundle -- "${VALID_MODS[@]}" \
+         > "$MODS_ORACLE_BUNDLE" 2>/dev/null; then
+      mods_oracle_ready=1
+    else
+      bad "modules oracle bundle AST (status $RUN_PHASE_STATUS)"
+    fi
+  else
+    bad "modules oracle bundle emit (status $RUN_PHASE_STATUS)"
+  fi
+  for src in "${VALID_MODS[@]}"; do
     [ -e "$src" ] || continue
     name="$(basename "$src" .bclj)"
-    oracle="$LAB/$name-mod-oracle.clj"; oast="$LAB/$name-mod-oracle.json"
-    if ! run_phase "$name mod oracle emit" "$PHASE_BUILD" \
-         env BEAGLE_EMIT_SRCLOC=0 "$ORACLE_BUILD" "$src" "$oracle" \
-         >/dev/null 2>&1; then
-      bad "$name mod oracle emit"
+    if [ "$mods_oracle_ready" -ne 1 ]; then
+      bad "$name mod parity not evaluated (oracle bundle mint failed)"
       continue
     fi
-    if ! run_phase "$name mod oracle AST" "$PHASE_BUILD" \
-         "$ORACLE_AST" "$src" > "$oast" 2>/dev/null; then
-      bad "$name mod oracle ast"
+    src_ns="$(grep -E '^\(ns' "$src" | head -1 | \
+              sed -E 's/^\(ns[[:space:]]+([a-zA-Z0-9._-]+).*/\1/' | \
+              tr -d '[:space:]')"
+    oracle="$MODS_ORACLE_TREE/$(printf '%s\n' "$src_ns" | tr '.-' '/_').clj"
+    if [ ! -f "$oracle" ]; then
+      bad "$name mod oracle bundle output missing: $oracle"
       continue
     fi
 
     if ! run_phase "$name mod self-host emit" "$PHASE_CHECK" \
-         "${SH_MAIN_CMD[@]}" emit "$src" \
+         "${SH_MAIN_CMD[@]}" emit "${SELF_BUNDLE_ARGS[@]}" "$src" \
          > "$LAB/$name-mod-chain.clj" 2>"$LAB/$name-mod-chain.err"; then
       bad "$name mod self-host emit"
       continue
@@ -613,8 +648,22 @@ if [ -d "self-host/fixtures/modules" ]; then
       bad "$name mod FULL-CHAIN byte-parity — diff $oracle $LAB/$name-mod-chain.clj"
     fi
 
+    oast="$LAB/$name-mod-oracle.json"
+    if ! run_phase "$name mod oracle AST extract" "$PHASE_JSON" \
+         python3 -c '
+import json, sys
+bundle = json.load(open(sys.argv[1]))
+for module in bundle.get("modules", []):
+    if module.get("source") == sys.argv[2]:
+        json.dump(module.get("program"), open(sys.argv[3], "w"))
+        sys.exit(0)
+sys.exit(1)
+' "$MODS_ORACLE_BUNDLE" "$src" "$oast" >/dev/null 2>&1; then
+      bad "$name mod oracle AST extract ($src absent from bundle projection)"
+      continue
+    fi
     if ! run_phase "$name mod self-host AST" "$PHASE_CHECK" \
-         "${SH_MAIN_CMD[@]}" ast "$src" \
+         "${SH_MAIN_CMD[@]}" ast "${SELF_BUNDLE_ARGS[@]}" "$src" \
          > "$LAB/$name-mod-self.json" 2>/dev/null; then
       bad "$name mod self-host AST"
       continue
@@ -650,14 +699,22 @@ sys.exit(0 if (an == bn and core) else 1)
   done
 fi
 
-echo "=== 7. invalid module fixtures — unresolved alias must exit 1 both sides ==="
+echo "=== 7. invalid module fixtures — must exit 1 both sides (valid bundle supplied) ==="
+# Each invalid fixture compiles WITH the valid fixture bundle so a rejection is
+# attributable to the fixture itself: alias-outside-dyn rejects for its Dyn
+# mismatch, unresolved-alias for its phantom alias. absent-provider requires a
+# namespace no bundle member declares and no root provides; only the retired
+# ancestor-walk (flat-basename ../geom.bclj) could satisfy it, so an accept
+# here is fail-open divergence from the closed contract.
 if [ -d "self-host/fixtures/modules/invalid" ]; then
   for inv in self-host/fixtures/modules/invalid/*.bclj; do
     [ -e "$inv" ] || continue
     iname="$(basename "$inv" .bclj)"
+    rm -rf "$LAB/$iname-modinv-out"
     if run_phase "$iname invalid module oracle" "$PHASE_BUILD" \
-         env BEAGLE_EMIT_SRCLOC=0 "$ORACLE_BUILD" \
-         "$inv" "$LAB/$iname-modinv-o.clj" >/dev/null 2>&1; then
+         env BEAGLE_EMIT_SRCLOC=0 "$ORACLE_ROOT/bin/beagle-build-all" \
+         "$inv" "${VALID_MODS[@]}" --out "$LAB/$iname-modinv-out" \
+         >/dev/null 2>&1; then
       o_exit=0
     else
       o_exit=$?
@@ -671,7 +728,8 @@ if [ -d "self-host/fixtures/modules/invalid" ]; then
       continue
     fi
     if run_phase "$iname invalid module self-host" "$PHASE_CHECK" \
-         "${SH_MAIN_CMD[@]}" check "$inv" >"$LAB/$iname-modinv.out" 2>&1; then
+         "${SH_MAIN_CMD[@]}" check "${SELF_BUNDLE_ARGS[@]}" "$inv" \
+         >"$LAB/$iname-modinv.out" 2>&1; then
       s_exit=0
     else
       s_exit=$?

@@ -49,6 +49,15 @@ Racket compiler over the same sources and requires three-way agreement:
 `seed == selfhost-emitted == racket-emitted`. CI runs both; any byte
 divergence fails the build.
 
+Both sides of the remint compile the **exact closed source bundle**: the
+selfhost emits pass every `src/selfhost/*.bclj` as `--source`, and the oracle
+compiles the same enumerated set in one `bin/beagle-build-all` invocation.
+Bundle members resolve by their declared `(ns ...)`, so dash-named sources
+(`emit-clj.bclj` ↔ `selfhost.emit-clj`) need no rename and no filename
+inference. No new Racket surface was added for this: `beagle-build-all`
+already treats its enumerated file set as a closed module bundle, and
+`beagle ast --bundle` already projects one.
+
 ## Running the compiler
 
 Canonical (native stage0 — build once with `nix build .#beagle-selfhost`, or
@@ -71,6 +80,35 @@ bb -cp self-host/seed -m selfhost.main ast   FILE.bclj   # typed-AST JSON
 Both accept the same subcommands (`emit` / `check` / `ast` / `emit-from-ast`,
 `--target <t>`) and emit byte-identical output — that byte-identity is the
 gate.
+
+### Module resolution — explicit and closed
+
+A `(require ...)` resolves only through what the invocation declares; nothing
+walks ancestor directories or guesses filenames:
+
+```sh
+# explicit repeated module roots: ns fram.store -> ROOT/fram/store.bclj
+#   (`-` maps to `_`, `.` to `/`; extension = the importer's extension)
+bb -cp self-host/seed -m selfhost.main emit \
+    --module-root fram=$FRAM_REPO/src $FRAM_REPO/src/fram/fold.bclj
+
+# explicit closed bundle: members resolve by declared (ns ...), so
+#   dash-named files need no rename
+bb -cp self-host/seed -m selfhost.main emit \
+    --source a.bclj --source b.bclj entry.bclj
+```
+
+A require that resolves to no source survives only as a host namespace
+(`clojure.*` / `babashka.*` prefixes, or a bare JS module under `--target js`)
+or when the importer `declare-extern`s names under the required namespace or
+its alias. Anything else is a pointed rejection with exit 1 — the same
+fail-closed contract as the Racket compiler's ModuleSourceRoot.
+
+**Known, deliberate limitation:** the oracle additionally admits host
+namespaces derived from its typed stdlib catalog; the self-host driver admits
+only the prefix families above plus `declare-extern` authorization. No source
+in any current gate corpus requires a catalogued-but-not-prefixed namespace;
+if one ever does, port the catalog set rather than widening a prefix.
 
 ## Lossless source/fact interface
 
@@ -107,18 +145,22 @@ absolute checkout paths and remain byte-stable across machines.
 
 ## Known gaps (vs the Racket compiler)
 
-- **Module resolution / externs** — CLOSED. The driver (`main.bclj`) now
-  resolves each `(require ...)` to a sibling beagle source (mirroring
-  `parse.rkt` `resolve-module-path`: ns-segments → path, source-dir then
-  parent walk, `BEAGLE-EXTENSIONS`), reads + parses it (pure), and imports
-  its typed surface via `parse.bclj` `import-module-surface`: alias-qualified
-  externs for declare-extern,
+- **Module resolution / externs** — CLOSED, and reconciled with the oracle's
+  ModuleSourceRoot contract. The driver (`main.bclj`) resolves each
+  `(require ...)` through the explicit closed bundle (`--source`, matched by
+  declared namespace) or an explicit root (`--module-root`, one exact
+  candidate path per root, `-` → `_`), reads + parses the provider (pure), and
+  imports its typed surface via `parse.bclj` `import-module-surface`:
+  alias-qualified externs for declare-extern,
   `defrecord` ctor/accessors, `defscalar`, `defunion`, typed `def`/`defonce`,
   `^:dynamic` vars, and `defn` signatures (`:refer` also binds bare). Exported
   `defalias` declarations are imported structurally as well, including
   provider-qualified local references and ordered `Dyn` alternatives. These
   merge into `prog.externs` before `check`, so `k/x` refs type against real
-  signatures and cross-module type errors are caught like the oracle. The
+  signatures and cross-module type errors are caught like the oracle. An
+  unresolved require that is not host- or extern-authorized exits 1 with a
+  pointed error; the `invalid/absent-provider` fixture pins that refusal (its
+  require was satisfiable only by the removed ancestor-walk). The
   `check.rkt` unresolved-alias diagnostic is ported too (`check.bclj`
   `check-qualified-resolution!`: a qualified ref whose prefix was never
   required → exit 1). The parse stage stays PURE — all IO lives in the
@@ -129,7 +171,8 @@ absolute checkout paths and remain byte-stable across machines.
   Checked providers also publish record field order, field types, and their
   provider-owned constraint validator ABI. Imported nominal keyword access and
   `with` updates consume that contract rather than guessing from flat externs.
-  Remaining sub-gaps (none exercised by any current corpus): cross-module
+  Remaining sub-gaps: the deliberate host-namespace narrowing documented
+  above, and (none exercised by any current corpus) cross-module
   MACRO import (qualified `defmacro` — surfaced to the macro
   registry by the oracle, not ported here; ast-json externs carry none), and
   parametric-union member ctors/accessors (only the union name is imported).

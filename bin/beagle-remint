@@ -17,6 +17,11 @@
 #                                 # self-tests must pass. Combine with --oracle
 #                                 # to also require Racket agreement on gen1.
 #
+# Module resolution is closed: every emit passes the exact enumerated source
+# bundle (--source per module), and the oracle compiles the same bundle in one
+# bin/beagle-build-all invocation. Nothing walks ancestors or infers filenames
+# from namespaces — dash-named sources resolve by their declared (ns ...).
+#
 # rt.clj is the hand-written bb runtime (never compiled): the gate requires the
 # seed copy to match self-host/src/selfhost/rt.clj byte-for-byte; --promote
 # copies it.
@@ -48,8 +53,10 @@ mkdir -p "$BUILD/gen1/selfhost"
 
 # Module set = every .bclj source. ns selfhost.emit-clj -> file emit_clj.clj.
 MODULES=()
+BUNDLE_ARGS=()
 for f in "$SRC"/*.bclj; do
     MODULES+=("$(basename "$f" .bclj)")
+    BUNDLE_ARGS+=(--source "$f")
 done
 clj_name() { echo "$1" | tr '-' '_'; }
 
@@ -58,7 +65,8 @@ ok()  { echo "  PASS: $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 
 emit_with() { # emit_with <classpath> <module> <outfile>
-    bb -cp "$1" -m selfhost.main emit "$SRC/$2.bclj" > "$3" 2>"$3.err"
+    bb -cp "$1" -m selfhost.main emit "${BUNDLE_ARGS[@]}" "$SRC/$2.bclj" \
+        > "$3" 2>"$3.err"
 }
 
 echo "=== remint: seed compiler ($SEED) over its own sources ==="
@@ -100,29 +108,33 @@ if [ "$PROMOTE" -eq 0 ]; then
 fi
 
 if [ "$ORACLE" -eq 1 ]; then
-    echo "=== oracle: Racket emission of the same sources ==="
+    echo "=== oracle: Racket emission of the same closed source bundle ==="
     source "$root/bin/_beagle-racket"
     # Route the beagle collection at this checkout.
     collects="$root/.beagle/collects"
     mkdir -p "$collects"
     ln -sfn "$root/beagle-lib" "$collects/beagle"
     export PLTCOLLECTS="$collects:"
-    mkdir -p "$BUILD/oracle/selfhost"
-    for m in "${MODULES[@]}"; do
-        out="$BUILD/oracle/selfhost/$(clj_name "$m").clj"
-        if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$SRC/$m.bclj" "$out" >/dev/null 2>"$out.err"; then
+    mkdir -p "$BUILD/oracle"
+    # One closed-bundle build: the enumerated sources are the whole closure.
+    if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build-all "$SRC"/*.bclj \
+        --out "$BUILD/oracle" >/dev/null 2>"$BUILD/oracle-build.err"; then
+        for m in "${MODULES[@]}"; do
+            out="$BUILD/oracle/selfhost/$(clj_name "$m").clj"
             # Reference: the seed in gate mode; gen1 when promoting new sources.
             ref="$SEED/$(clj_name "$m").clj"
             [ "$PROMOTE" -eq 1 ] && ref="$BUILD/gen1/selfhost/$(clj_name "$m").clj"
-            if diff -q "$ref" "$out" >/dev/null 2>&1; then
+            if [ ! -f "$out" ]; then
+                bad "oracle $m — no bundle output at $out"
+            elif diff -q "$ref" "$out" >/dev/null 2>&1; then
                 ok "oracle $m agrees"
             else
                 bad "oracle $m DIVERGES — diff $ref $out"
             fi
-        else
-            bad "oracle emit $m — $(head -3 "$out.err" | tr '\n' ' ')"
-        fi
-    done
+        done
+    else
+        bad "oracle bundle build — $(head -3 "$BUILD/oracle-build.err" | tr '\n' ' ')"
+    fi
 fi
 
 if [ "$PROMOTE" -eq 1 ]; then

@@ -51,17 +51,20 @@
 
 (declare parse-file-target!)
 
-;; --- module resolution (driver-level; parse stays pure) ----------------------
-;; Mirror of beagle-lib parse.rkt resolve-module-path + register-require!: for
-;; each (require ...) resolve a sibling beagle source, read + parse it (pure),
-;; extract its typed surface via p/import-module-surface, and merge the imported
-;; externs into the program so cross-module refs type-check like the oracle. IO
-;; (file-exists?/slurp) lives here; the parse stage takes only datums. A require
-;; that resolves to no beagle source (external / .clj runtime) is skipped, and
-;; its calls type as Any — exactly the oracle's behavior.
+;; --- closed module resolution (driver-level; parse stays pure) ---------------
+;; Mirror of beagle-lib module-source-root.rkt + parse.rkt register-require!:
+;; a (require ...) resolves only through the explicit closed source bundle
+;; (--source, matched by declared namespace) or an explicit module root
+;; (--module-root LOGICAL=PHYSICAL, one exact candidate path per root with
+;; `-` mapped to `_`). No ancestor walking, no flat-basename fallback, no
+;; silent skip: an unresolved require survives only as a host namespace or a
+;; declare-extern-authorized runtime namespace; anything else is a pointed
+;; rejection. A resolved provider is read + parsed (pure), its typed surface
+;; extracted via p/import-module-surface, and the imported externs merged into
+;; the program so cross-module refs type-check like the oracle. IO
+;; (file-exists?/slurp) lives here; the parse stage takes only datums.
 
-(def BEAGLE-EXTENSIONS (Vec String)
-  [".bclj" ".bjs" ".bnix" ".bgl"])
+(def MODULE-RESOLUTION Any (atom {"providers" {} "roots" []}))
 
 (defn- split-dots [(s String)] Any
   (loop [(i Int) 0 (start Int) 0 (acc Any) []]
@@ -70,55 +73,192 @@
       (= (subs s i (+ i 1)) ".") (recur (+ i 1) (+ i 1) (conj acc (subs s start i)))
       :else (recur (+ i 1) start acc))))
 
-(defn- last-slash [(s String)] Int
-  (loop [(i Int) (- (count s) 1)]
+;; module-source-root.rkt namespace-relative-source-id: `-` -> `_`, `.` -> `/`.
+(defn- ns-relative-source-path [(ns String) (extension String)] String
+  (loop [(i Int) 0 (acc String) ""]
+    (if (>= i (count ns))
+      (str acc extension)
+      (let [c (subs ns i (+ i 1))]
+        (recur (+ i 1)
+          (str acc (cond (= c ".") "/" (= c "-") "_" :else c)))))))
+
+(defn- source-extension [(path String)] String
+  (loop [(i Int) (- (count path) 1)]
     (cond
-      (< i 0) -1
-      (= (subs s i (+ i 1)) "/") i
+      (< i 0) ""
+      (= (subs path i (+ i 1)) "/") ""
+      (= (subs path i (+ i 1)) ".") (subs path i (count path))
       :else (recur (- i 1)))))
 
-(defn- dir-of [(path String)] String
-  (let [i (last-slash path)]
-    (if (< i 0) "" (subs path 0 i))))
+(defn- ns-token-end [(text String) (start Int)] Int
+  (loop [(i Int) start]
+    (if (>= i (count text))
+      i
+      (let [c (subs text i (+ i 1))]
+        (if (or (= c " ") (= c ")") (= c "\n") (= c "\r") (= c "\t"))
+          i
+          (recur (+ i 1)))))))
 
-(defn- join-slash [(segs Any)] String
-  (if (= (count segs) 0)
-    ""
-    (reduce (fn [(a String) (s String)] String (str a "/" s))
-            (nth segs 0) (subvec segs 1))))
+;; First line-initial `(ns NAME` — the same lightweight projection
+;; bin/beagle-build uses to derive output paths. Exact verification happens at
+;; load time against the parsed module's declared namespace.
+(defn- declared-ns-of-source [(path String)] Any
+  (let [text (selfhost.rt/slurp-file path)
+        n (count text)]
+    (loop [(i Int) 0 (bol Bool) true]
+      (cond
+        (>= i n) nil
+        (and bol (<= (+ i 4) n) (= (subs text i (+ i 4)) "(ns "))
+          (let [start (+ i 4)
+                end (ns-token-end text start)]
+            (if (> end start) (subs text start end) nil))
+        :else (recur (+ i 1) (= (subs text i (+ i 1)) "\n"))))))
 
-(defn- try-ext [(dir String) (rel String)] Any
-  (loop [i 0]
-    (if (>= i (count BEAGLE-EXTENSIONS))
+(defn- module-declared-ns [(datums Any)] Any
+  (loop [(i Int) 0]
+    (if (>= i (count datums))
       nil
-      (let [p (str dir "/" rel (nth BEAGLE-EXTENSIONS i))]
-        (if (selfhost.rt/file-exists? p) p (recur (+ i 1)))))))
+      (let [d (nth datums i)]
+        (if (and (vector? d) (>= (count d) 2) (= (nth d 0) "ns")
+                 (string? (nth d 1)))
+          (nth d 1)
+          (recur (+ i 1)))))))
 
-;; nested (dir-segs/base) first, then a flat (base) fallback guarded against
-;; resolving to the source file itself — parse.rkt try-at.
-(defn- try-at-dir
-  [(dir String) (dir-segs Any) (base String) (abs-source String)] Any
-  (let [nested-rel (if (> (count dir-segs) 0) (str (join-slash dir-segs) "/" base) base)
-        nested (try-ext dir nested-rel)]
-    (if (some? nested)
-      nested
-      (if (> (count dir-segs) 0)
-        (let [flat (try-ext dir base)]
-          (if (and (some? flat) (not (= flat abs-source))) flat nil))
-        nil))))
+(defn- declared-extern-names [(datums Any)] Any
+  (reduce
+    (fn [(names Any) (d Any)] Any
+      (if (and (vector? d) (>= (count d) 2) (= (nth d 0) "declare-extern"))
+        (let [head (nth d 1)]
+          (cond
+            (string? head) (conj names head)
+            (and (vector? head) (> (count head) 1)
+                 (= (nth head 0) "#%brackets"))
+              (into names (filterv string? (subvec head 1)))
+            :else names))
+        names))
+    []
+    datums))
 
-(defn- resolve-ns-path [(ns String) (source-path String)] Any
-  (let [segs (split-dots ns)
-        base (nth segs (- (count segs) 1))
-        dir-segs (subvec segs 0 (- (count segs) 1))
-        abs-source (selfhost.rt/abs-path source-path)
-        src-dir (dir-of abs-source)]
-    (loop [cur src-dir]
-      (let [hit (try-at-dir cur dir-segs base abs-source)]
-        (if (some? hit)
-          hit
-          (let [parent (dir-of cur)]
-            (if (or (= parent "") (= parent cur)) nil (recur parent))))))))
+(defn- parse-module-root-spec! [(spec String)] Any
+  (let [eq (loop [(i Int) 0]
+             (cond
+               (>= i (count spec)) -1
+               (= (subs spec i (+ i 1)) "=") i
+               :else (recur (+ i 1))))]
+    (if (or (< eq 1) (>= (+ eq 1) (count spec)))
+      (do (selfhost.rt/eprint
+            (str "beagle [module]: --module-root expects"
+              " LOGICAL_PREFIX=PHYSICAL_DIRECTORY, got " spec "\n"))
+          (selfhost.rt/exit 2)
+          nil)
+      {"logical" (subs spec 0 eq)
+       "dir" (subs spec (+ eq 1) (count spec))})))
+
+(defn- register-bundle-source! [(providers Any) (path String)] Any
+  (if (not (selfhost.rt/file-exists? path))
+    (do (selfhost.rt/eprint
+          (str "beagle [module]: bundle source does not exist: " path "\n"))
+        (selfhost.rt/exit 1)
+        providers)
+    (let [ns (declared-ns-of-source path)]
+      (if (nil? ns)
+        providers
+        (let [absolute (selfhost.rt/abs-path path)
+              existing (get providers ns [])
+              already (filterv (fn [(p String)] Bool (= p absolute)) existing)]
+          (if (> (count already) 0)
+            providers
+            (assoc providers ns (conj existing absolute))))))))
+
+(defn- install-module-resolution! [(root-specs Any) (source-paths Any)] Nil
+  (reset! MODULE-RESOLUTION
+    {"providers" (reduce register-bundle-source! {} source-paths)
+     "roots" (mapv parse-module-root-spec! root-specs)})
+  nil)
+
+(defn- join-comma [(xs Any)] String
+  (reduce
+    (fn [(acc String) (x String)] String
+      (if (= acc "") x (str acc ", " x)))
+    ""
+    xs))
+
+(defn- root-candidate-paths [(rn String) (importer-extension String)] Any
+  (let [relative (ns-relative-source-path rn importer-extension)]
+    (reduce
+      (fn [(hits Any) (root Any)] Any
+        (let [candidate (str (get root "dir") "/" relative)]
+          (if (selfhost.rt/file-exists? candidate)
+            (conj hits candidate)
+            hits)))
+      []
+      (get (deref MODULE-RESOLUTION) "roots"))))
+
+;; Provider path, or nil when the closed contract supplies no source; the
+;; caller decides whether nil is authorized (host/extern) or a rejection.
+(defn- resolve-required-source! [(rn String) (source-path String)] Any
+  (let [providers (get (get (deref MODULE-RESOLUTION) "providers") rn [])]
+    (cond
+      (> (count providers) 1)
+      (do (selfhost.rt/eprint
+            (str "beagle [module]: namespace " rn " required by " source-path
+              " has multiple explicit providers: " (join-comma providers)
+              "\n"))
+          (selfhost.rt/exit 1)
+          nil)
+
+      (= (count providers) 1)
+      (nth providers 0)
+
+      :else
+      (let [candidates (root-candidate-paths rn (source-extension source-path))]
+        (cond
+          (> (count candidates) 1)
+          (do (selfhost.rt/eprint
+                (str "beagle [module]: namespace " rn " required by "
+                  source-path " collides across module roots: "
+                  (join-comma candidates) "\n"))
+              (selfhost.rt/exit 1)
+              nil)
+          (= (count candidates) 1) (nth candidates 0)
+          :else nil)))))
+
+(defn- contains-dot? [(s String)] Bool
+  (loop [(i Int) 0]
+    (cond
+      (>= i (count s)) false
+      (= (subs s i (+ i 1)) ".") true
+      :else (recur (+ i 1)))))
+
+;; Narrower than the oracle on purpose (see self-host/README.md): the oracle
+;; also admits typed-stdlib-catalog host namespaces; the self-host driver
+;; admits the prefix-exempt families and bare JS modules only.
+(defn- host-required-ns? [(rn String) (target String)] Bool
+  (or (str/starts-with? rn "clojure.")
+      (str/starts-with? rn "babashka.")
+      (and (= target "js") (not (contains-dot? rn)))))
+
+(defn- extern-authorized-require?
+  [(extern-names Any) (rn String) (prefix String) (refer-syms Any)] Bool
+  (if (and (some? refer-syms) (> (count refer-syms) 0))
+    (every?
+      (fn [(name String)] Bool
+        (> (count
+             (filterv
+               (fn [(e String)] Bool
+                 (or (= e name)
+                     (= e (str prefix "/" name))
+                     (= e (str rn "/" name))))
+               extern-names))
+           0))
+      refer-syms)
+    (> (count
+         (filterv
+           (fn [(e String)] Bool
+             (or (str/starts-with? e (str prefix "/"))
+                 (str/starts-with? e (str rn "/"))))
+           extern-names))
+       0)))
 
 (defn- dedup-externs [(xs Any)] Any
   (loop [(i Int) 0 (seen Any) {} (acc Any) []]
@@ -185,7 +325,12 @@
 (declare load-import-surfaces*!)
 
 (defn- load-import-surfaces*!
-  [(requires Any) (source-path String) (target String) (seen-paths Any)] Any
+  [(requires Any)
+   (source-path String)
+   (target String)
+   (extern-names Any)
+   (seen-paths Any)]
+  Any
   (reduce
     (fn [(surfaces Any) (r Any)] Any
       (let [ns (get r "ns")
@@ -195,41 +340,68 @@
                      alias
                      (let [segs (split-dots ns)] (nth segs (- (count segs) 1))))
             refer-syms (if (and (some? refer) (not (= refer false))) refer nil)
-            path (resolve-ns-path ns source-path)]
-        (if (some? path)
+            path (resolve-required-source! ns source-path)]
+        (cond
+          (some? path)
           (let [absolute-path (selfhost.rt/abs-path path)]
             (if (= true (get seen-paths absolute-path))
               surfaces
               (let [datums (rd/read-program (selfhost.rt/slurp-file path))
-                    dependency-surfaces
-                      (load-import-surfaces*!
-                        (p/discover-requires! datums)
-                        path
-                        target
-                        (assoc seen-paths absolute-path true))
-                    imported-aliases (surface-type-aliases dependency-surfaces)
-                    checked-surface
-                      (checked-module-surface! path target imported-aliases)
-                    type-aliases
-                      (p/module-type-aliases-with-imports!
-                        datums prefix refer-syms imported-aliases)]
-                (conj surfaces
-                  (assoc checked-surface
-                    "path" path
-                    "prefix" prefix
-                    "refer" refer-syms
-                    "imported-aliases" imported-aliases
-                    "type-aliases" type-aliases)))))
-          surfaces)))
+                    provider-ns (module-declared-ns datums)]
+                (if (not (= provider-ns ns))
+                  (do
+                    (selfhost.rt/eprint
+                      (str "beagle [module]: required namespace " ns
+                        " resolved to " path " which declares "
+                        (if (some? provider-ns) provider-ns "no namespace")
+                        "\n"))
+                    (selfhost.rt/exit 1)
+                    surfaces)
+                  (let [dependency-surfaces
+                          (load-import-surfaces*!
+                            (p/discover-requires! datums)
+                            path
+                            target
+                            (declared-extern-names datums)
+                            (assoc seen-paths absolute-path true))
+                        imported-aliases
+                          (surface-type-aliases dependency-surfaces)
+                        checked-surface
+                          (checked-module-surface! path target imported-aliases)
+                        type-aliases
+                          (p/module-type-aliases-with-imports!
+                            datums prefix refer-syms imported-aliases)]
+                    (conj surfaces
+                      (assoc checked-surface
+                        "path" path
+                        "prefix" prefix
+                        "refer" refer-syms
+                        "imported-aliases" imported-aliases
+                        "type-aliases" type-aliases)))))))
+
+          (or (host-required-ns? ns target)
+              (extern-authorized-require? extern-names ns prefix refer-syms))
+          surfaces
+
+          :else
+          (do
+            (selfhost.rt/eprint
+              (str "beagle [module]: required namespace " ns
+                " could not be resolved (required by " source-path
+                "); it is absent from the closed source bundle and no"
+                " declared module root provides it\n"))
+            (selfhost.rt/exit 1)
+            surfaces))))
     []
     requires))
 
 (defn- load-import-surfaces!
-  [(requires Any) (source-path String) (target String)] Any
+  [(requires Any) (source-path String) (target String) (datums Any)] Any
   (load-import-surfaces*!
     requires
     source-path
     target
+    (declared-extern-names datums)
     {(selfhost.rt/abs-path source-path) true}))
 
 (defn- import-parametric-arities! [(surfaces Any)] Any
@@ -308,7 +480,8 @@
         (surfaces Any) (load-import-surfaces!
                          (p/discover-requires! datums)
                          path
-                         target)
+                         target
+                         datums)
         (imported-arities Any) (import-parametric-arities! surfaces)
         (imported-aliases Any) (import-type-aliases surfaces)
         (prog Any) (resolve-imports!
@@ -621,12 +794,22 @@
         (nth args (+ i 1))
         (recur (+ i 1))))))
 
+(defn- flag-values [(args Any) (flag String)] Any
+  (loop [(i Int) 0 (acc Any) []]
+    (if (>= i (count args))
+      acc
+      (if (and (= (nth args i) flag) (< (+ i 1) (count args)))
+        (recur (+ i 2) (conj acc (nth args (+ i 1))))
+        (recur (+ i 1) acc)))))
+
 (defn- first-positional [(args Any)] String
   (loop [i 1]
     (if (>= i (count args)) ""
       (let [a (nth args i)]
         (cond
           (= a "--target") (recur (+ i 2))
+          (= a "--module-root") (recur (+ i 2))
+          (= a "--source") (recur (+ i 2))
           (str/starts-with? a "--") (recur (+ i 1))
           :else a)))))
 
@@ -635,15 +818,23 @@
   (reset! MODULE-LOAD-STACK {})
   (let [cmd (if (> (count args) 0) (nth args 0) "")
         target (flag-value args "--target" "clj")
-        path (first-positional args)]
+        path (first-positional args)
+        roots (flag-values args "--module-root")
+        bundle (flag-values args "--source")]
     (cond
-      (= cmd "ast") (cmd-ast! path target)
-      (= cmd "check") (cmd-check! path target)
-      (= cmd "emit") (cmd-emit! path target)
+      (= cmd "ast")
+      (do (install-module-resolution! roots (conj bundle path))
+          (cmd-ast! path target))
+      (= cmd "check")
+      (do (install-module-resolution! roots (conj bundle path))
+          (cmd-check! path target))
+      (= cmd "emit")
+      (do (install-module-resolution! roots (conj bundle path))
+          (cmd-emit! path target))
       (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
       (= cmd "facts-roundtrip") (fr/run! (rest args))
       :else
-        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, emit-from-ast < ast.json, or facts-roundtrip MODE FILE\n")
+        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] [--module-root LOGICAL=PHYSICAL]... [--source FILE]... ast|check|emit FILE, emit-from-ast < ast.json, or facts-roundtrip MODE FILE\n")
             (selfhost.rt/exit 2)))
     ;; clojure.main flushes *out* in a finally; the gen-class/native-image entry
     ;; bypasses clojure.main, so an unflushed `print` would exit with empty stdout.
