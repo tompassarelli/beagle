@@ -1,0 +1,383 @@
+#lang beagle
+(ns beagle.nix-schema-path
+  (:require [beagle.datum-reader :as reader]))
+
+(defrecord SourceDocument
+  [(source-id String) (text String)])
+
+(defrecord OptionPathOccurrence
+  [(source-id String) (path String) (offset Int)])
+
+(defunion OptionPathExtraction
+  (OptionPaths [(occurrences (Vec OptionPathOccurrence))])
+  (OptionPathError [(source-id String) (offset Int) (message String)]))
+
+(defrecord RemovedPathUse
+  [(path String) (occurrences (Vec OptionPathOccurrence))])
+
+(defrecord PathSuggestion
+  [(path String) (distance Int)])
+
+(defrecord SourceFrame
+  [(kind Keyword)
+   (items Int)
+   (prefix String)
+   (ignored Bool)
+   (pending-path String?)
+   (pending-offset Int)])
+
+(defn event-opening? [(kind Keyword)] Bool
+  (or (= kind :list/open)
+      (= kind :vector/open)
+      (= kind :map/open)
+      (= kind :set/open)))
+
+(defn event-closing? [(kind Keyword)] Bool
+  (or (= kind :list/close)
+      (= kind :vector/close)
+      (= kind :map/close)
+      (= kind :set/close)))
+
+(defn event-prefix? [(kind Keyword)] Bool
+  (or (= kind :quote)
+      (= kind :quasiquote)
+      (= kind :unquote)
+      (= kind :unquote-splicing)))
+
+(defn map-frame? [(frame SourceFrame)] Bool
+  (= (sourceframe-kind frame) :map/open))
+
+(defn string-prefix? [(value String) (prefix String)] Bool
+  (and (>= (count value) (count prefix))
+       (= prefix (subs value 0 (count prefix)))))
+
+(defn path-at-or-under? [(path String) (root String)] Bool
+  (and (> (count root) 0)
+       (or (= path root)
+           (and (> (count path) (count root))
+                (string-prefix? path root)
+                (= "." (subs path (count root) (inc (count root))))))))
+
+(defn ignored-path?
+  [(path String) (ignored-roots (Vec String))]
+  Bool
+  (loop [(remaining (Vec String)) ignored-roots]
+    (if (empty? remaining)
+      false
+      (if (path-at-or-under? path (first remaining))
+        true
+        (recur (rest remaining))))))
+
+(defn keyword-path
+  [(prefix String) (event reader/ReaderEvent)]
+  String?
+  (let [(value String) (reader/readerevent-value event)]
+    (if (or (not= (reader/readerevent-kind event) :keyword)
+            (<= (count value) 1))
+      nil
+      (let [(segment String) (subs value 1 (count value))]
+        (cond
+          (> (count prefix) 0) (str prefix "." segment)
+          (str/includes? segment ".") segment
+          :else nil)))))
+
+(defn occurrence-from-frame
+  [(document SourceDocument) (frame SourceFrame)]
+  OptionPathOccurrence?
+  (let [(path String?) (sourceframe-pending-path frame)]
+    (if (nil? path)
+      nil
+      (->OptionPathOccurrence
+        (sourcedocument-source-id document)
+        path
+        (sourceframe-pending-offset frame)))))
+
+(defn append-frame-occurrence
+  [(document SourceDocument)
+   (frame SourceFrame)
+   (ignored-roots (Vec String))
+   (occurrences (Vec OptionPathOccurrence))]
+  (Vec OptionPathOccurrence)
+  (let [(occurrence OptionPathOccurrence?)
+        (occurrence-from-frame document frame)]
+    (if (nil? occurrence)
+      occurrences
+      (if (or (sourceframe-ignored frame)
+              (ignored-path?
+                (optionpathoccurrence-path occurrence)
+                ignored-roots))
+        occurrences
+        (conj occurrences occurrence)))))
+
+(defn frame-value-ignored?
+  [(frame SourceFrame) (ignored-roots (Vec String))]
+  Bool
+  (let [(path String?) (sourceframe-pending-path frame)]
+    (or (sourceframe-ignored frame)
+        (and (some? path) (ignored-path? path ignored-roots)))))
+
+(defn completed-map-item [(frame SourceFrame)] SourceFrame
+  (->SourceFrame
+    (sourceframe-kind frame)
+    (inc (sourceframe-items frame))
+    (sourceframe-prefix frame)
+    (sourceframe-ignored frame)
+    nil
+    -1))
+
+(defn complete-parent-container
+  [(frames (Vec SourceFrame))]
+  (Vec SourceFrame)
+  (if (empty? frames)
+    frames
+    (let [(index Int) (dec (count frames))
+          (parent SourceFrame) (nth frames index)]
+      (if (map-frame? parent)
+        (assoc frames index (completed-map-item parent))
+        frames))))
+
+(defn consume-map-atom
+  [(document SourceDocument)
+   (ignored-roots (Vec String))
+   (frame SourceFrame)
+   (event reader/ReaderEvent)
+   (occurrences (Vec OptionPathOccurrence))]
+  (Vec OptionPathOccurrence)
+  (if (= (mod (sourceframe-items frame) 2) 0)
+    occurrences
+    (append-frame-occurrence document frame ignored-roots occurrences)))
+
+(defn map-frame-after-atom
+  [(frame SourceFrame) (event reader/ReaderEvent)]
+  SourceFrame
+  (if (= (mod (sourceframe-items frame) 2) 0)
+    (->SourceFrame
+      (sourceframe-kind frame)
+      (inc (sourceframe-items frame))
+      (sourceframe-prefix frame)
+      (sourceframe-ignored frame)
+      (keyword-path (sourceframe-prefix frame) event)
+      (reader/readerevent-offset event))
+    (completed-map-item frame)))
+
+(defn scan-option-path-events
+  [(document SourceDocument)
+   (ignored-roots (Vec String))
+   (events (Vec reader/ReaderEvent))]
+  OptionPathExtraction
+  (loop [(remaining (Vec reader/ReaderEvent)) events
+         (frames (Vec SourceFrame)) []
+         (occurrences (Vec OptionPathOccurrence)) []]
+    (if (empty? remaining)
+      (if (empty? frames)
+        (->OptionPaths occurrences)
+        (->OptionPathError
+          (sourcedocument-source-id document)
+          (count (sourcedocument-text document))
+          "unterminated source container"))
+      (let [(event reader/ReaderEvent) (first remaining)
+            (kind Keyword) (reader/readerevent-kind event)]
+        (cond
+          (= kind :metadata)
+          (->OptionPathError
+            (sourcedocument-source-id document)
+            (reader/readerevent-offset event)
+            "metadata forms are not supported by option-path extraction")
+
+          (event-prefix? kind)
+          (recur (rest remaining) frames occurrences)
+
+          (event-opening? kind)
+          (if (empty? frames)
+            (recur
+              (rest remaining)
+              (conj frames (->SourceFrame kind 0 "" false nil -1))
+              occurrences)
+            (let [(parent SourceFrame) (peek frames)
+                  (parent-map Bool) (map-frame? parent)
+                  (value-position Bool)
+                  (and parent-map (= (mod (sourceframe-items parent) 2) 1))
+                  (value-ignored Bool)
+                  (if value-position
+                    (frame-value-ignored? parent ignored-roots)
+                    (sourceframe-ignored parent))
+                  (child-prefix String)
+                  (if (and value-position
+                           (= kind :map/open)
+                           (some? (sourceframe-pending-path parent)))
+                    (or (sourceframe-pending-path parent) "")
+                    "")
+                  (next-occurrences (Vec OptionPathOccurrence))
+                  (if (and value-position (not= kind :map/open))
+                    (append-frame-occurrence
+                      document parent ignored-roots occurrences)
+                    occurrences)]
+              (recur
+                (rest remaining)
+                (conj frames
+                  (->SourceFrame kind 0 child-prefix value-ignored nil -1))
+                next-occurrences)))
+
+          (event-closing? kind)
+          (if (empty? frames)
+            (->OptionPathError
+              (sourcedocument-source-id document)
+              (reader/readerevent-offset event)
+              "unexpected source container close")
+            (let [(frame SourceFrame) (peek frames)]
+              (if (and (map-frame? frame)
+                       (not= (mod (sourceframe-items frame) 2) 0))
+                (->OptionPathError
+                  (sourcedocument-source-id document)
+                  (reader/readerevent-offset event)
+                  "map requires an even number of forms")
+                (recur
+                  (rest remaining)
+                  (complete-parent-container (pop frames))
+                  occurrences))))
+
+          :else
+          (if (empty? frames)
+            (recur (rest remaining) frames occurrences)
+            (let [(index Int) (dec (count frames))
+                  (frame SourceFrame) (nth frames index)]
+              (if (map-frame? frame)
+                (recur
+                  (rest remaining)
+                  (assoc frames index (map-frame-after-atom frame event))
+                  (consume-map-atom
+                    document ignored-roots frame event occurrences))
+                (recur (rest remaining) frames occurrences)))))))))
+
+(defn extract-nix-option-paths
+  [(document SourceDocument) (ignored-roots (Vec String))]
+  OptionPathExtraction
+  (let [(read reader/DatumRead)
+        (reader/read-events (sourcedocument-text document))
+        (error String?) (reader/datumread-error read)]
+    (if (some? error)
+      (->OptionPathError
+        (sourcedocument-source-id document)
+        (reader/datumread-error-offset read)
+        (or error "invalid Beagle source"))
+      (scan-option-path-events
+        document ignored-roots (reader/datumread-events read)))))
+
+(defn occurrences-for-path
+  [(path String) (occurrences (Vec OptionPathOccurrence))]
+  (Vec OptionPathOccurrence)
+  (loop [(remaining (Vec OptionPathOccurrence)) occurrences
+         (matches (Vec OptionPathOccurrence)) []]
+    (if (empty? remaining)
+      matches
+      (let [(occurrence OptionPathOccurrence) (first remaining)]
+        (recur
+          (rest remaining)
+          (if (= path (optionpathoccurrence-path occurrence))
+            (conj matches occurrence)
+            matches))))))
+
+(defn removed-path-uses
+  [(removed-paths (Vec String))
+   (occurrences (Vec OptionPathOccurrence))]
+  (Vec RemovedPathUse)
+  (loop [(remaining (Vec String)) removed-paths
+         (uses (Vec RemovedPathUse)) []]
+    (if (empty? remaining)
+      uses
+      (let [(path String) (first remaining)
+            (matches (Vec OptionPathOccurrence))
+            (occurrences-for-path path occurrences)]
+        (recur
+          (rest remaining)
+          (if (empty? matches)
+            uses
+            (conj uses (->RemovedPathUse path matches))))))))
+
+(defn integer-row [(last-value Int)] (Vec Int)
+  (loop [(value Int) 0
+         (row (Vec Int)) []]
+    (if (> value last-value)
+      row
+      (recur (inc value) (conj row value)))))
+
+(defn levenshtein-distance [(left String) (right String)] Int
+  (let [(left-length Int) (count left)
+        (right-length Int) (count right)]
+    (cond
+      (= left-length 0) right-length
+      (= right-length 0) left-length
+      :else
+      (loop [(left-index Int) 1
+             (previous (Vec Int)) (integer-row right-length)]
+        (if (> left-index left-length)
+          (nth previous right-length)
+          (let [(current (Vec Int))
+                (loop [(right-index Int) 1
+                       (row (Vec Int)) [left-index]]
+                  (if (> right-index right-length)
+                    row
+                    (let [(cost Int)
+                          (if (= (subs left (dec left-index) left-index)
+                                 (subs right (dec right-index) right-index))
+                            0
+                            1)
+                          (insertion Int) (inc (nth row (dec right-index)))
+                          (deletion Int) (inc (nth previous right-index))
+                          (substitution Int)
+                          (+ cost (nth previous (dec right-index)))]
+                      (recur
+                        (inc right-index)
+                        (conj row (min insertion deletion substitution))))))]
+            (recur (inc left-index) current)))))))
+
+(defn suggestion-before?
+  [(left PathSuggestion) (right PathSuggestion)]
+  Bool
+  (or (< (pathsuggestion-distance left) (pathsuggestion-distance right))
+      (and (= (pathsuggestion-distance left) (pathsuggestion-distance right))
+           (< (compare (pathsuggestion-path left)
+                       (pathsuggestion-path right))
+              0))))
+
+(defn insert-suggestion
+  [(ranked (Vec PathSuggestion)) (suggestion PathSuggestion)]
+  (Vec PathSuggestion)
+  (loop [(remaining (Vec PathSuggestion)) ranked
+         (result (Vec PathSuggestion)) []
+         (inserted Bool) false]
+    (if (empty? remaining)
+      (if inserted result (conj result suggestion))
+      (let [(current PathSuggestion) (first remaining)]
+        (if (and (not inserted) (suggestion-before? suggestion current))
+          (recur remaining (conj result suggestion) true)
+          (recur (rest remaining) (conj result current) inserted))))))
+
+(defn first-suggestions
+  [(ranked (Vec PathSuggestion)) (limit Int)]
+  (Vec PathSuggestion)
+  (loop [(remaining (Vec PathSuggestion)) ranked
+         (result (Vec PathSuggestion)) []]
+    (if (or (empty? remaining) (>= (count result) limit))
+      result
+      (recur (rest remaining) (conj result (first remaining))))))
+
+(defn rank-path-suggestions
+  [(target String) (candidates (Vec String)) (limit Int)]
+  (Vec PathSuggestion)
+  (if (<= limit 0)
+    []
+    (let [(ranked (Vec PathSuggestion))
+          (loop [(remaining (Vec String)) candidates
+                 (result (Vec PathSuggestion)) []]
+            (if (empty? remaining)
+              result
+              (let [(candidate String) (first remaining)]
+                (recur
+                  (rest remaining)
+                  (insert-suggestion
+                    result
+                    (->PathSuggestion
+                      candidate
+                      (levenshtein-distance target candidate)))))))]
+      (first-suggestions ranked limit))))

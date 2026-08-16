@@ -1,0 +1,122 @@
+#lang beagle
+(ns native.nix-schema-path-fixture
+  (:require [beagle.nix-schema-path :as paths]))
+
+(def nested-source String
+  (str
+    "#lang beagle/nix\n"
+    "(ns fixture)\n"
+    "\n"
+    "(nix/module [config lib]\n"
+    "  {:config\n"
+    "    {:services.printing\n"
+    "      {:enable true\n"
+    "       :drivers [one two]}\n"
+    "     :boot.loader.systemd-boot\n"
+    "      {:enable true}\n"
+    "     :home-manager.users\n"
+    "      {username\n"
+    "       (nix/module [config]\n"
+    "         {:programs.git\n"
+    "           {:enable true}})}\n"
+    "     :home-manager.usersExtra.enable true\n"
+    "     \"services.literal.enable\" false\n"
+    "     :services.openssh.enable true\n"
+    "     :services.openssh.enable false}})\n"))
+
+(defn occurrence=?
+  [(occurrence paths/OptionPathOccurrence)
+   (path String)
+   (offset Int)]
+  Bool
+  (and (= "fixture.bnix"
+          (paths/optionpathoccurrence-source-id occurrence))
+       (= path (paths/optionpathoccurrence-path occurrence))
+       (= offset (paths/optionpathoccurrence-offset occurrence))))
+
+(defn extraction-case [] Bool
+  (match
+    (paths/extract-nix-option-paths
+      (paths/->SourceDocument "fixture.bnix" nested-source)
+      ["home-manager.users"])
+    [(OptionPaths occurrences)
+     (and (= 6 (count occurrences))
+          (occurrence=?
+            (nth occurrences 0) "services.printing.enable" 98)
+          (occurrence=?
+            (nth occurrences 1) "services.printing.drivers" 118)
+          (occurrence=?
+            (nth occurrences 2) "boot.loader.systemd-boot.enable" 176)
+          (occurrence=?
+            (nth occurrences 3) "home-manager.usersExtra.enable" 317)
+          (occurrence=?
+            (nth occurrences 4) "services.openssh.enable" 396)
+          (occurrence=?
+            (nth occurrences 5) "services.openssh.enable" 431))]
+    [(OptionPathError source-id offset message) false]))
+
+(defn removed-case [] Bool
+  (match
+    (paths/extract-nix-option-paths
+      (paths/->SourceDocument "fixture.bnix" nested-source)
+      ["home-manager.users"])
+    [(OptionPathError source-id offset message) false]
+    [(OptionPaths occurrences)
+     (let [(uses (Vec paths/RemovedPathUse))
+           (paths/removed-path-uses
+             ["services.openssh.enable"
+              "services.missing.enable"
+              "services.printing.enable"]
+             occurrences)
+           (openssh paths/RemovedPathUse) (nth uses 0)
+           (printing paths/RemovedPathUse) (nth uses 1)
+           (openssh-occurrences (Vec paths/OptionPathOccurrence))
+           (paths/removedpathuse-occurrences openssh)]
+       (and (= 2 (count uses))
+            (= "services.openssh.enable"
+               (paths/removedpathuse-path openssh))
+            (= 2 (count openssh-occurrences))
+            (= 396
+               (paths/optionpathoccurrence-offset
+                 (nth openssh-occurrences 0)))
+            (= 431
+               (paths/optionpathoccurrence-offset
+                 (nth openssh-occurrences 1)))
+            (= "services.printing.enable"
+               (paths/removedpathuse-path printing))
+            (= 1
+               (count (paths/removedpathuse-occurrences printing)))))]))
+
+(defn ranking-case [] Bool
+  (let [(ranked (Vec paths/PathSuggestion))
+        (paths/rank-path-suggestions "ab" ["ac" "zz" "aa" "abc"] 3)]
+    (and (= 3 (paths/levenshtein-distance "kitten" "sitting"))
+         (= 0 (paths/levenshtein-distance "same" "same"))
+         (= 4 (paths/levenshtein-distance "" "path"))
+         (= 3 (count ranked))
+         (= "aa" (paths/pathsuggestion-path (nth ranked 0)))
+         (= "abc" (paths/pathsuggestion-path (nth ranked 1)))
+         (= "ac" (paths/pathsuggestion-path (nth ranked 2)))
+         (= 1 (paths/pathsuggestion-distance (nth ranked 0)))
+         (= 1 (paths/pathsuggestion-distance (nth ranked 1)))
+         (= 1 (paths/pathsuggestion-distance (nth ranked 2)))
+         (empty? (paths/rank-path-suggestions "ab" ["aa"] 0)))))
+
+(defn malformed-map-case [] Bool
+  (match
+    (paths/extract-nix-option-paths
+      (paths/->SourceDocument "odd.bnix" "{:services.openssh.enable}")
+      [])
+    [(OptionPaths occurrences) false]
+    [(OptionPathError source-id offset message)
+     (and (= source-id "odd.bnix")
+          (= offset 25)
+          (= message "map requires an even number of forms"))]))
+
+(defn main [] Int
+  (if (and (extraction-case)
+           (removed-case)
+           (ranking-case)
+           (malformed-map-case))
+    0
+    1))
