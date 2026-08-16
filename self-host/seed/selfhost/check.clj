@@ -368,7 +368,7 @@
   (let [name (js-target-form-name value)]
   (and (not (nil? name)) (not (= (get (deref STATE) "target") "js")))))
 
-(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)}})
+(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)}})
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
@@ -915,10 +915,12 @@
    rest-t (get fn-t "rest")
    n-fixed (count fixed)
    n-args (count args)
-   check-slot (fn [i] (let [actual (infer-expr! (nth args i) env)
-   expected (if (< i n-fixed) (nth fixed i) rest-t)
+   check-slot (fn [i] (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
+   expected-atom? (check-atom-ctor! (nth args i) expected env)
+   actual (if expected-atom? expected (infer-expr! (nth args i) env))
    enum-violation (enum-member-violation expected (nth args i))]
-  (unify-inference-types! actual expected)
+  (if (not expected-atom?) (do
+  (unify-inference-types! actual expected)))
   (let [actual (prune-inference-type actual)
    expected (prune-inference-type expected)]
   (if (some? enum-violation) (do

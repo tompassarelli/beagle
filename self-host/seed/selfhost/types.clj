@@ -205,9 +205,15 @@
   (= kind "symbol") (make-prim "Symbol")
   :else nil)))
 
-(defn infer-type-var-bindings! [expected actual bindings]
+(def INVARIANT-TYPE-CONSTRUCTORS #{"Atom" "Buffer" "TransientVec"})
+
+(defn infer-type-var-bindings-context! [expected actual bindings ^Boolean invariant-context?]
   (cond
   (or (nil? expected) (nil? actual)) nil
+  (and invariant-context? (var-type? expected) (any-type? actual)) (do
+  (if (nil? (get (deref bindings) (get expected "name"))) (do
+  (obj-set! bindings (get expected "name") actual)))
+  nil)
   (any-type? actual) nil
   (var-type? expected) (do
   (if (nil? (get (deref bindings) (get expected "name"))) (do
@@ -216,16 +222,19 @@
   (and (fn-type? expected) (fn-type? actual)) (do
   (if (= (count (get expected "params")) (count (get actual "params"))) (do
   (doseq [i (range (count (get expected "params")))]
-  (infer-type-var-bindings! (nth (get expected "params") i) (nth (get actual "params") i) bindings))))
+  (infer-type-var-bindings-context! (nth (get expected "params") i) (nth (get actual "params") i) bindings invariant-context?))))
   (if (and (not (nil? (get expected "rest"))) (not (nil? (get actual "rest")))) (do
-  (infer-type-var-bindings! (get expected "rest") (get actual "rest") bindings)))
-  (infer-type-var-bindings! (get expected "ret") (get actual "ret") bindings)
+  (infer-type-var-bindings-context! (get expected "rest") (get actual "rest") bindings invariant-context?)))
+  (infer-type-var-bindings-context! (get expected "ret") (get actual "ret") bindings invariant-context?)
   nil)
-  (and (app-type? expected) (app-type? actual) (= (get expected "name") (get actual "name"))) (do
+  (and (app-type? expected) (app-type? actual) (= (get expected "name") (get actual "name"))) (let [nested-invariant? (or invariant-context? (contains? INVARIANT-TYPE-CONSTRUCTORS (get expected "name")))]
   (doseq [i (range (count (get expected "args")))]
-  (infer-type-var-bindings! (nth (get expected "args") i) (nth (get actual "args") i) bindings))
+  (infer-type-var-bindings-context! (nth (get expected "args") i) (nth (get actual "args") i) bindings nested-invariant?))
   nil)
   :else nil))
+
+(defn infer-type-var-bindings! [expected actual bindings]
+  (infer-type-var-bindings-context! expected actual bindings false))
 
 (defn apply-type-bindings [t bindings]
   (cond
