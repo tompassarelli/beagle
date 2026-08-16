@@ -674,9 +674,17 @@
 
 ;; --- polymorphic helpers (bindings is an atom holding a String->type map) -----
 
-(defn infer-type-var-bindings! [(expected Any) (actual Any) (bindings Any)] Nil
+(def INVARIANT-TYPE-CONSTRUCTORS Any
+  #{"Atom" "Buffer" "TransientVec"})
+
+(defn infer-type-var-bindings-context!
+  [(expected Any) (actual Any) (bindings Any) (invariant-context? Bool)] Nil
   (cond
     (or (nil? expected) (nil? actual)) nil
+    (and invariant-context? (var-type? expected) (any-type? actual))
+      (do (when (nil? (get (deref bindings) (get expected "name")))
+            (swap! bindings assoc (get expected "name") actual))
+          nil)
     (any-type? actual) nil
 
     (var-type? expected)
@@ -687,21 +695,31 @@
     (and (fn-type? expected) (fn-type? actual))
       (do (when (= (count (get expected "params")) (count (get actual "params")))
             (doseq [i (range (count (get expected "params")))]
-              (infer-type-var-bindings! (nth (get expected "params") i)
-                                        (nth (get actual "params") i) bindings)))
+              (infer-type-var-bindings-context! (nth (get expected "params") i)
+                                                (nth (get actual "params") i)
+                                                bindings invariant-context?)))
           (when (and (not (nil? (get expected "rest"))) (not (nil? (get actual "rest"))))
-            (infer-type-var-bindings! (get expected "rest") (get actual "rest") bindings))
-          (infer-type-var-bindings! (get expected "ret") (get actual "ret") bindings)
+            (infer-type-var-bindings-context! (get expected "rest") (get actual "rest")
+                                              bindings invariant-context?))
+          (infer-type-var-bindings-context! (get expected "ret") (get actual "ret")
+                                            bindings invariant-context?)
           nil)
 
     (and (app-type? expected) (app-type? actual)
          (= (get expected "name") (get actual "name")))
-      (do (doseq [i (range (count (get expected "args")))]
-            (infer-type-var-bindings! (nth (get expected "args") i)
-                                      (nth (get actual "args") i) bindings))
+      (let [nested-invariant? (or invariant-context?
+                                  (contains? INVARIANT-TYPE-CONSTRUCTORS
+                                             (get expected "name")))]
+        (doseq [i (range (count (get expected "args")))]
+          (infer-type-var-bindings-context! (nth (get expected "args") i)
+                                            (nth (get actual "args") i)
+                                            bindings nested-invariant?))
           nil)
 
     :else nil))
+
+(defn infer-type-var-bindings! [(expected Any) (actual Any) (bindings Any)] Nil
+  (infer-type-var-bindings-context! expected actual bindings false))
 
 (defn apply-type-bindings [(t Any) (bindings Any)] Any
   (cond
