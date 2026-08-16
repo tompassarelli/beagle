@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require rackunit
+         racket/file
          (for-syntax racket/base)
          beagle/private/parse
          beagle/private/check
@@ -44,6 +45,9 @@
 
 (define-syntax-rule (check-err/source name source form ...)
   (test-case name (check-exn exn:fail? (lambda () (check-prog/source source form ...)))))
+
+(define-syntax-rule (check-err/source/rx name rx source form ...)
+  (test-case name (check-exn rx (lambda () (check-prog/source source form ...)))))
 
 (define-syntax-rule (check-warns name rx form ...)
   (test-case name
@@ -387,7 +391,9 @@
   '(require mathlib)
   '(def x (mathlib/untyped-inc 1 2 3)))
 
-(check-ok/source "cross-file import: missing module silently skips" fixture-source
+(check-err/source/rx "cross-file import: missing module is rejected"
+  #rx"required namespace nonexistent\\.module could not be resolved"
+  fixture-source
   '(require nonexistent.module)
   '(def x 42))
 
@@ -1557,12 +1563,29 @@
   '(require babashka.fs :as fs)
   '(def x Any (fs/exits? "/tmp")))
 
-(check-warns "qualified: uncatalogued namespace notes once"
-  #rx"selmer\\.parser has no typed catalog entries"
-  '(define-target clj)
-  '(require selmer.parser :as tmpl)
-  (list 'def 'x 'Any (list 'tmpl/render "t" (mt)))
-  (list 'def 'y 'Any (list 'tmpl/render-file "f" (mt))))
+(test-case "qualified: explicit host provider externs are authorized"
+  (define scratch
+    (make-temporary-file "beagle-check-host-provider-~a" 'directory))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define provider-dir (build-path scratch "selmer"))
+     (make-directory* provider-dir)
+     (call-with-output-file (build-path provider-dir "parser.clj")
+       #:exists 'truncate/replace
+       (lambda (out) (display "(ns selmer.parser)\n" out)))
+     (define output (open-output-string))
+     (parameterize ([current-error-port output])
+       (check-prog/source
+        (build-path scratch "consumer.bclj")
+        '(define-target clj)
+        '(require selmer.parser :as tmpl)
+        `(declare-extern tmpl/render ,(fn-ty '(String Any) 'Any))
+        `(declare-extern tmpl/render-file ,(fn-ty '(String Any) 'Any))
+        (list 'def 'x 'Any (list 'tmpl/render "t" (mt)))
+        (list 'def 'y 'Any (list 'tmpl/render-file "f" (mt)))))
+     (check-equal? "" (get-output-string output)))
+   (lambda () (delete-directory/files scratch))))
 
 (check-ok "qualified: quoted data and clojure.* are exempt"
   '(define-target clj)

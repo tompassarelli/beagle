@@ -25,7 +25,7 @@
    'float      (fn-of '(Any) 'Float)
    'short      (fn-of '(Any) 'Int)
    'byte       (fn-of '(Any) 'Int)
-   'bigint     (fn-of '(Any) 'Any)
+   'bigint     (fn-of '(Any) 'Int)
    'biginteger (fn-of '(Any) 'Any)
    'bigdec     (fn-of '(Any) 'Any)
    'num        (fn-of '(Any) 'Any)
