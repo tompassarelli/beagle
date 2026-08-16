@@ -3030,6 +3030,36 @@
           variant
           (recur (+ position 1)))))))
 
+(defn payloadless-union-member-constructor
+  [(env BodyEnvV0) (resolved ResolvedSourceNameV0)] (U core/TypeDef Nil)
+  (let [(name String) (resolvedsourcenamev0-local-name resolved)]
+    (if (or (not (resolvedsourcenamev0-visible resolved))
+          (<= (count name) 2) (not (= "->" (subs name 0 2))))
+      nil
+      (let [(member String) (subs name 2 (count name))
+            (index SourceIndexV0) (bodyenvv0-index env)
+            (source-union (U core/NativeId Nil))
+            (source-union-for-member index
+              (resolvedsourcenamev0-module-name resolved) member)]
+        (if (nil? source-union)
+          nil
+          (let [(definition (U core/TypeDef Nil))
+                (lookup-type (bodyenvv0-types env)
+                  (source-type-id
+                    (str (resolvedsourcenamev0-module-name resolved) "/"
+                      (fact-text index source-union "name"))))]
+            (if (nil? definition)
+              nil
+              (let [(shape core/TypeShape) (core/typedef-shape definition)
+                    (variant (U core/TypeVariant Nil))
+                    (if (instance? native.core.UnionType shape)
+                      (variant-named (core/uniontype-variants shape) member)
+                      nil)]
+                (if (or (nil? variant)
+                      (some? (core/typevariant-payload-type variant)))
+                  nil
+                  definition)))))))))
+
 (defn compare-op-for [(callee String)] (U core/CompareOpV0 Nil)
   (cond
     (= "=" callee) (core/->CompareEqI64V0 true)
@@ -13825,6 +13855,8 @@
                     (if (nil? record)
                       (union-member-constructor env resolved-callee)
                       record))
+                  (payloadless-constructor (U core/TypeDef Nil))
+                  (payloadless-union-member-constructor env resolved-callee)
                   (signature (U TypedFunctionV0 Nil))
                   (find-signature env expr callee)
                   (lowered ArgsResultV0)
@@ -15661,6 +15693,43 @@
                     (fail-result current
                       (str "TODO-NATIVE-ACCESSOR-OPERAND: " callee
                         " was not applied to its own record type"))))
+
+                (some? payloadless-constructor)
+                (let [(shape core/TypeShape)
+                      (core/typedef-shape payloadless-constructor)
+                      (member-name String) (subs bare-callee 2 (count bare-callee))
+                      (variant (U core/TypeVariant Nil))
+                      (if (instance? native.core.UnionType shape)
+                        (variant-named (core/uniontype-variants shape) member-name)
+                        nil)]
+                  (cond
+                    (not (= 0 (count values)))
+                    (fail-result current
+                      (str "TODO-NATIVE-CONSTRUCTOR-ARGUMENTS: " callee
+                        " payloadless variant takes no arguments"))
+
+                    (nil? variant)
+                    (fail-result current
+                      (str "TODO-NATIVE-CONSTRUCTOR-VARIANT: " callee
+                        " has no payloadless native union variant"))
+
+                    (some? (core/typevariant-payload-type variant))
+                    (fail-result current
+                      (str "TODO-NATIVE-CONSTRUCTOR-VARIANT: " callee
+                        " unexpectedly carries a payload"))
+
+                    :else
+                    (let [(result-id core/NativeId)
+                          (state-id current owner "union-unit")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->UnionConstructInstruction
+                            (core/->SsaValueV0 result-id
+                              (core/typedef-id payloadless-constructor))
+                            (core/typevariant-id variant)
+                            nil))
+                        result-id (core/typedef-id payloadless-constructor)
+                        false))))
 
                 (some? constructor)
                 (let [(shape core/TypeShape) (core/typedef-shape constructor)

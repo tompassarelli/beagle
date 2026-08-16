@@ -1,0 +1,12 @@
+#lang beagle
+(ns native.zero-variant-action)
+
+(defunion Action
+  Start
+  Stop)
+
+(defn start [] Action
+  (->Start))
+
+(defn stop [] Action
+  (->Stop))
