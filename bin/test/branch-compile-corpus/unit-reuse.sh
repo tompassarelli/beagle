@@ -21,6 +21,7 @@ timeout --foreground 180s "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/unit_reuse.bclj" \
+  "$repo/native-core/src/native/unit_compile.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
   "$repo/native-core/src/native/body_c17.bclj" \
   "$repo/native-core/src/native/qbe.bclj" \

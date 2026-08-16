@@ -6,6 +6,7 @@
             [native.obligations :as obligations]
             [native.slice :as slice]
             [native.unit-reuse :as unit]
+            [native.unit-compile :as singleton]
             [native.body-slice :as body-slice]
             [native.body-c17 :as body]))
 
@@ -1239,6 +1240,319 @@
                  (unit/unitassemblyrejectedv0-code result))
               "non-defn corpus unit received the wrong rejection")))
 
+;; ---------------------------------------------------------------------------
+;; Singleton compilation: probes, mechanism self-test, and per-case assertions.
+;;
+;; The point of these assertions is to FAIL when body compilation is still
+;; whole-program.  A wrapper that calls the ordinary lowerer and discards eight
+;; of nine units would satisfy a reuse count while proving nothing, so the
+;; whole-stage entries throw and the singleton entries are counted.
+
+(def original-attach-body lower/attach-body)
+(def original-lower-ready-function lower/lower-ready-function)
+
+(def probe-calls (atom {:attach-body [] :lower-ready-function []}))
+(def probe-totals (atom {:attach-body 0 :lower-ready-function 0}))
+
+(defn probe-reset! []
+  (reset! probe-calls {:attach-body [] :lower-ready-function []}))
+
+(defn probe-seen [key] (get @probe-calls key))
+
+(defn probe-total [key] (get @probe-totals key))
+
+(defn probe-record! [key identity]
+  (swap! probe-calls update key conj identity)
+  (swap! probe-totals update key inc))
+
+(defn forbidden [symbol-name]
+  (fn [& _]
+    (throw (ex-info (str "whole-stage lowering called on the singleton path: "
+                         symbol-name)
+                    {:probe symbol-name}))))
+
+(defn with-singleton-probes [thunk]
+  (with-redefs
+   [lower/lower-typed-stage (forbidden "lower/lower-typed-stage")
+    lower/lower-native-stage (forbidden "lower/lower-native-stage")
+    lower/attach-bodies (forbidden "lower/attach-bodies")
+    lower/lower-ready-functions (forbidden "lower/lower-ready-functions")
+    lower/slice-abis (forbidden "lower/slice-abis")
+    unit/extract-unit-payloads (forbidden "unit/extract-unit-payloads")
+    lower/attach-body
+    (fn [env resolution source]
+      (probe-record! :attach-body
+                     (native-id-text
+                      (lower/typedfunctionv0-id
+                       (lower/functionresolutionv0-function resolution))))
+      (original-attach-body env resolution source))
+    lower/lower-ready-function
+    (fn [function]
+      (probe-record! :lower-ready-function
+                     (native-id-text (lower/typedfunctionv0-id function)))
+      (original-lower-ready-function function))]
+    (thunk)))
+
+;; A probe that cannot fire makes every assertion below pass vacuously, which
+;; is a worse outcome than having no gate at all.  with-redefs is used nowhere
+;; else in this repository, so the mechanism is proven here before anything
+;; relies on it: interception across namespaces, interception of the
+;; intra-namespace call attach-bodies makes to attach-body (which is what
+;; catches a facade that inlines the nine-body loop instead of calling
+;; attach-bodies), and restoration afterwards.
+(defn assert-probe-mechanism! []
+  (let [fired (atom false)]
+    (with-redefs [lower/attach-bodies (forbidden "lower/attach-bodies")]
+      (try
+        (lower/attach-bodies nil [] [])
+        (catch Exception e (reset! fired (some? (:probe (ex-data e)))))))
+    (require! @fired
+              (str "PROBE MECHANISM DEAD: a throwing probe on "
+                   "lower/attach-bodies did not intercept")))
+  (let [seen (atom [])]
+    (with-redefs [lower/attach-body
+                  (fn [_env resolution _source]
+                    (swap! seen conj resolution)
+                    resolution)]
+      (lower/attach-bodies :probe-env [:a :b :c] [:x :y :z]))
+    (require! (= [:a :b :c] @seen)
+              (str "PROBE MECHANISM DEAD: a counting probe on "
+                   "lower/attach-body saw " (pr-str @seen)
+                   ", expected three delegated calls")))
+  (require! (vector? (lower/attach-bodies :probe-env [] []))
+            (str "PROBE MECHANISM DEAD: with-redefs did not restore "
+                 "lower/attach-bodies"))
+  (println "branch-compile-corpus: unit reuse probe mechanism verified"))
+
+(defn decoded-typed [typed]
+  (let [result (typed-wire-result (unit/typedunitv0-encoding typed)
+                                  (unit/typedunitv0-unit-id typed))]
+    (require! (instance? native.unit_reuse.TypedUnitWireDecodedV1 result)
+              "an inherited typed payload did not decode through wire v1")
+    (unit/typedunitwiredecodedv1-unit result)))
+
+(defn decoded-native [native]
+  (let [result (native-wire-result (unit/nativeunitv0-encoding native)
+                                   (unit/nativeunitv0-unit-id native))]
+    (require! (instance? native.unit_reuse.NativeUnitWireDecodedV1 result)
+              "an inherited native payload did not decode through wire v1")
+    (unit/nativeunitwiredecodedv1-unit result)))
+
+(defn prepared-candidate [case-data compiler-context]
+  (let [result (singleton/prepare-unit-compilation
+                (:frozen-source case-data)
+                compiler-context
+                (:configuration case-data))]
+    (require!
+     (instance? native.unit_compile.UnitPreparationAcceptedV0 result)
+     (str (:id case-data) " unit preparation rejected"
+          (when (instance? native.unit_compile.UnitPreparationRejectedV0
+                           result)
+            (str ": " (singleton/unitpreparationrejectedv0-code result)
+                 " " (singleton/unitpreparationrejectedv0-detail result)))))
+    (singleton/unitpreparationacceptedv0-prepared result)))
+
+(defn assert-prepared-contracts! [case-data prepared]
+  (let [prepared-contracts (singleton/preparedcandidatev0-contracts prepared)
+        by-id (into {} (map (juxt #(native-id-text
+                                    (unit/unitcontractv0-unit-id %))
+                                  identity)
+                            prepared-contracts))]
+    (require! (= (count (:contracts case-data)) (count prepared-contracts))
+              (str (:id case-data) " signature-only preparation produced "
+                   (count prepared-contracts) " contracts, expected "
+                   (count (:contracts case-data))))
+    (doseq [contract (:contracts case-data)]
+      (let [identity-text (native-id-text
+                           (unit/unitcontractv0-unit-id contract))
+            match (get by-id identity-text)]
+        (require! (some? match)
+                  (str (:id case-data) " preparation omitted contract "
+                       identity-text))
+        (require! (= (unit/unitcontractv0-encoding contract)
+                     (unit/unitcontractv0-encoding match))
+                  (str (:id case-data) " prepared contract bytes differ from "
+                       "clean extraction for " identity-text))
+        (require! (= (unit/unitcontractv0-digest contract)
+                     (unit/unitcontractv0-digest match))
+                  (str (:id case-data) " prepared contract digest differs "
+                       "from clean extraction for " identity-text))))))
+
+(defn read-contracts-for [case-data source-unit]
+  (let [wanted (set (map native-id-text
+                         (stages/sourceunitv0-read-set source-unit)))]
+    (vec (filter #(contains? wanted
+                             (native-id-text (unit/unitcontractv0-unit-id %)))
+                 (:contracts case-data)))))
+
+(defn expected-result-key [case-data source-unit compiler-context]
+  (unit/unit-result-key compiler-context source-unit (:contracts case-data)))
+
+(defn singleton-typed! [candidate prepared row compiler-context]
+  (let [source-unit (:source row)
+        unit-id (stages/sourceunitv0-id source-unit)
+        function-text (native-id-text
+                       (lower/function-id
+                        unit-id (stages/sourceunitv0-name source-unit)))
+        key (expected-result-key candidate source-unit compiler-context)
+        _ (probe-reset!)
+        result (with-singleton-probes
+                (fn []
+                  (singleton/compile-typed-unit
+                   prepared
+                   unit-id
+                   (stages/sourceunitv0-semantic-digest source-unit)
+                   (stages/sourceunitv0-read-set source-unit)
+                   (read-contracts-for candidate source-unit)
+                   compiler-context
+                   key)))]
+    (require!
+     (instance? native.unit_compile.TypedUnitCompiledV0 result)
+     (str (:name row) " singleton typed compile rejected"
+          (when (instance? native.unit_compile.TypedUnitCompileRejectedV0
+                           result)
+            (str ": " (singleton/typedunitcompilerejectedv0-code result)
+                 " " (singleton/typedunitcompilerejectedv0-detail result)))))
+    (require! (= [function-text] (probe-seen :attach-body))
+              (str (:name row) " typed compile attached "
+                   (pr-str (probe-seen :attach-body))
+                   ", expected exactly [" function-text "]"))
+    (require! (= [] (probe-seen :lower-ready-function))
+              (str (:name row) " typed compile lowered a native function"))
+    (require! (= [unit-id] (singleton/typedunitcompiledv0-trace result))
+              (str (:name row) " typed trace was "
+                   (pr-str (map native-id-text
+                                (singleton/typedunitcompiledv0-trace result)))))
+    (require! (= key (singleton/typedunitcompiledv0-result-key result))
+              (str (:name row) " typed result key differs from the request"))
+    (let [produced (singleton/typedunitcompiledv0-unit result)]
+      (require! (= (unit/typedunitv0-encoding (:typed row))
+                   (unit/typedunitv0-encoding produced))
+                (str (:name row) " singleton typed bytes differ from clean "
+                     "extraction"))
+      (require! (= (unit/typedunitv0-digest (:typed row))
+                   (unit/typedunitv0-digest produced))
+                (str (:name row) " singleton typed digest differs from clean "
+                     "extraction"))
+      produced)))
+
+(defn singleton-native! [candidate prepared row typed-set compiler-context abi]
+  (let [source-unit (:source row)
+        unit-id (stages/sourceunitv0-id source-unit)
+        function-text (native-id-text
+                       (lower/function-id
+                        unit-id (stages/sourceunitv0-name source-unit)))
+        key (expected-result-key candidate source-unit compiler-context)
+        target (first (filter #(core/native-id= unit-id
+                                                (unit/typedunitv0-unit-id %))
+                              typed-set))
+        _ (probe-reset!)
+        result (with-singleton-probes
+                (fn []
+                  (singleton/compile-native-unit
+                   prepared unit-id target typed-set compiler-context key
+                   abi)))]
+    (require!
+     (instance? native.unit_compile.NativeUnitCompiledV0 result)
+     (str (:name row) " singleton native compile rejected"
+          (when (instance? native.unit_compile.NativeUnitCompileRejectedV0
+                           result)
+            (str ": " (singleton/nativeunitcompilerejectedv0-code result)
+                 " " (singleton/nativeunitcompilerejectedv0-detail result)))))
+    (require! (= [function-text] (probe-seen :lower-ready-function))
+              (str (:name row) " native compile lowered "
+                   (pr-str (probe-seen :lower-ready-function))
+                   ", expected exactly [" function-text "]"))
+    (require! (= [] (probe-seen :attach-body))
+              (str (:name row) " native compile attached a body"))
+    (require! (= [unit-id] (singleton/nativeunitcompiledv0-trace result))
+              (str (:name row) " native trace was "
+                   (pr-str
+                    (map native-id-text
+                         (singleton/nativeunitcompiledv0-trace result)))))
+    (let [produced (singleton/nativeunitcompiledv0-unit result)]
+      (require! (= (unit/nativeunitv0-encoding (:native row))
+                   (unit/nativeunitv0-encoding produced))
+                (str (:name row) " singleton native bytes differ from clean "
+                     "extraction"))
+      (require! (= (unit/nativeunitv0-digest (:native row))
+                   (unit/nativeunitv0-digest produced))
+                (str (:name row) " singleton native digest differs from clean "
+                     "extraction"))
+      produced)))
+
+(defn assert-singleton-case!
+  [baseline candidate expected compiler-context compiler-commit abi]
+  (let [expected-set (set expected)
+        candidate-rows (rows-by-name candidate)
+        baseline-rows (rows-by-name baseline)
+        attach-before (probe-total :attach-body)
+        lower-before (probe-total :lower-ready-function)
+        prepared (do (probe-reset!)
+                     (with-singleton-probes
+                      (fn [] (prepared-candidate candidate compiler-context))))]
+    (require! (= [] (probe-seen :attach-body))
+              (str (:id candidate) " signature-only preparation attached "
+                   (pr-str (probe-seen :attach-body))))
+    (require! (= [] (probe-seen :lower-ready-function))
+              (str (:id candidate)
+                   " signature-only preparation lowered a native function"))
+    (assert-prepared-contracts! candidate prepared)
+    (let [typed-by-name
+          (into {} (map (fn [name]
+                          [name (singleton-typed! candidate prepared
+                                                  (get candidate-rows name)
+                                                  compiler-context)])
+                        expected-set))
+          ;; Inherited units arrive through the wire, never from the clean
+          ;; build's heap, so a singleton that secretly needs a non-wire field
+          ;; fails here rather than in the cold-process harness.
+          typed-set (mapv (fn [row]
+                            (if (contains? expected-set (:name row))
+                              (get typed-by-name (:name row))
+                              (decoded-typed
+                               (:typed (get baseline-rows (:name row))))))
+                          (:rows candidate))
+          native-by-name
+          (into {} (map (fn [name]
+                          [name (singleton-native! candidate prepared
+                                                   (get candidate-rows name)
+                                                   typed-set compiler-context
+                                                   abi)])
+                        expected-set))
+          native-set (mapv (fn [row]
+                             (if (contains? expected-set (:name row))
+                               (get native-by-name (:name row))
+                               (decoded-native
+                                (:native (get baseline-rows (:name row))))))
+                           (:rows candidate))
+          mixed {:typed typed-set :native native-set}
+          assembly (assembly!
+                    (unit/assemble-unit-payloads
+                     (:frozen-source candidate)
+                     (:contracts candidate)
+                     typed-set
+                     native-set
+                     compiler-commit
+                     (:configuration candidate)
+                     abi)
+                    (str (:id candidate) " singleton"))]
+      (require! (= (count expected-set)
+                   (- (probe-total :attach-body) attach-before))
+                (str (:id candidate) " compiled "
+                     (- (probe-total :attach-body) attach-before)
+                     " bodies, expected exactly " (count expected-set)))
+      (require! (= (count expected-set)
+                   (- (probe-total :lower-ready-function) lower-before))
+                (str (:id candidate) " lowered "
+                     (- (probe-total :lower-ready-function) lower-before)
+                     " functions, expected exactly " (count expected-set)))
+      (assert-frozen-equality! candidate assembly)
+      (assert-obligations! candidate assembly)
+      (assert-c17! candidate assembly)
+      (assert-reversed! candidate mixed assembly compiler-commit abi)
+      assembly)))
+
 (defn -main [& args]
   (require! (= 2 (count args))
             "usage: unit_reuse_gate.clj BUILD_ROOT COMPILER_COMMIT")
@@ -1255,6 +1569,7 @@
         comment (load-case build-root "comment-layout" compiler-commit abi)
         private (load-case build-root "private-implementation" compiler-commit abi)
         public (load-case build-root "public-interface" compiler-commit abi)]
+    (assert-probe-mechanism!)
     (assert-contract-shape! baseline)
     (assert-wire-round-trips! baseline)
     (assert-v0-rejected! baseline)
@@ -1272,10 +1587,32 @@
                   ["corpus.foundation/adjust"
                    "corpus.feature/score-value"]
                   compiler-context compiler-commit abi)
+    (assert-prepared-contracts! baseline
+                                (prepared-candidate baseline compiler-context))
+    (assert-singleton-case! baseline comment [] compiler-context
+                            compiler-commit abi)
+    (assert-singleton-case! baseline private
+                            ["corpus.foundation/private-offset"]
+                            compiler-context compiler-commit abi)
+    (assert-singleton-case! baseline public
+                            ["corpus.foundation/adjust"
+                             "corpus.feature/score-value"]
+                            compiler-context compiler-commit abi)
+    (require! (= 3 (probe-total :attach-body))
+              (str "singleton cases attached " (probe-total :attach-body)
+                   " bodies in total, expected exactly 3 (0 + 1 + 2)"))
+    (require! (= 3 (probe-total :lower-ready-function))
+              (str "singleton cases lowered "
+                   (probe-total :lower-ready-function)
+                   " functions in total, expected exactly 3 (0 + 1 + 2)"))
     (assert-duplicate-identities-rejected! baseline compiler-commit abi)
     (assert-collision-rejected! baseline compiler-commit abi)
     (assert-layout-digest-rejected! baseline compiler-commit abi)
     (assert-unsupported-rejected! baseline compiler-commit abi)
-    (println "branch-compile-corpus: unit reuse PASS 9/9, 8/9, 7/9 exact reuse")))
+    (println "branch-compile-corpus: unit reuse PASS 9/9, 8/9, 7/9 exact reuse")
+    (println
+     (str "branch-compile-corpus: singleton PASS 0/1/2 compiled units, "
+          (probe-total :attach-body) " attach-body, "
+          (probe-total :lower-ready-function) " lower-ready-function"))))
 
 (apply -main *command-line-args*)
