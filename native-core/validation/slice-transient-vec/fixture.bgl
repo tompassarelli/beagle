@@ -1,0 +1,16 @@
+#lang beagle
+(ns native.transient-vec-fixture)
+
+(def append-count Int 32768)
+
+(defn build-ordered! [] (Vec Int)
+  (let [(seed (Vec Int)) []]
+    (loop [(index Int) 0
+           (builder (TransientVec Int)) (transient seed)]
+      (if (< index append-count)
+        (recur (inc index) (conj! builder index))
+        (persistent! builder)))))
+
+(defn copy-nonempty! [] (Vec Int)
+  (let [(seed (Vec Int)) [41]]
+    (persistent! (transient seed))))
