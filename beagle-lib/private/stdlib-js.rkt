@@ -28,7 +28,7 @@
    'Math/sqrt         (fn-of '(Number) 'Float)
    'Math/cbrt         (fn-of '(Any) 'Float)
    'Math/pow          (fn-of '(Number Number) 'Float)
-   'Math/exp          (fn-of '(Any) 'Float)
+   'Math/exp          (fn-of '(Number) 'Float)
    'Math/random       (fn-of '() 'Float)
    'Math/abs          (poly-fn '(A) (list (tv 'A)) (tv 'A)
                               #:bounds (hasheq 'A (p 'Number)))
@@ -205,6 +205,7 @@
             'floor (hash-ref STDLIB-JS 'Math/floor)
             'round (hash-ref STDLIB-JS 'Math/round)
             'abs (hash-ref STDLIB-JS 'Math/abs)
+            'exp (hash-ref STDLIB-JS 'Math/exp)
             'sin (hash-ref STDLIB-JS 'Math/sin)
             'cos (hash-ref STDLIB-JS 'Math/cos)))
    'JsDate

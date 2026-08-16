@@ -793,6 +793,7 @@
   {"Math"
    {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE)
+    "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
@@ -2346,6 +2347,28 @@
             true)))
     false))
 
+;; Fresh constructors may adopt an expected structural type before aliases
+;; exist. Recurse through unions and tuple literals without weakening the
+;; invariant Atom type seen by existing references.
+(defn fresh-value-compatible? [(value Any) (expected Any) (env Any)] Bool
+  (cond
+    (union-type? expected)
+    (boolean (some (fn [(alt Any)] Bool
+                     (fresh-value-compatible? value alt env))
+               (get expected "members")))
+
+    (and (app-type? expected) (= (get expected "name") "HVec")
+         (not (nil? value)) (= (get value "node") "vec"))
+    (let [items (get value "items")
+          elems (get expected "args")]
+      (and (= (count items) (count elems))
+           (every? true?
+             (mapv (fn [(i Int)] Bool
+                     (fresh-value-compatible? (nth items i) (nth elems i) env))
+               (range (count items))))))
+
+    :else (type-compatible? (infer-expr! value env) expected)))
+
 ;; G2b — annotation-directed Atom CONSTRUCTION. Mirrors the oracle check-atom-ctor
 ;; (check.rkt): a fresh cell checked against an expected (Atom T) adopts T when the
 ;; value IS the constructor call (atom init); the init is checked against T. Only
@@ -2358,8 +2381,9 @@
            (not (nil? value)) (= (call-fn-name value) "atom")
            (= (count (get value "args")) 1))
     (let [elem (nth (get expected "args") 0)
-          it (infer-expr! (nth (get value "args") 0) env)]
-      (when (not (type-compatible? it elem))
+          init (nth (get value "args") 0)
+          it (infer-expr! init env)]
+      (when (not (fresh-value-compatible? init elem env))
         (emit-diag! (str "beagle: atom init: expected " (type->string elem)
                          ", got " (type->string it))))
       true)

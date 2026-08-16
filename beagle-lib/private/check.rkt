@@ -3683,6 +3683,24 @@
                                (hasheq) #:src src)))
                #t)))))
 
+;; Fresh constructors may adopt an expected structural type before aliases
+;; exist.  Recurse through unions and tuple literals so an initializer such as
+;; `[0.0 0.0 0.0]` can inhabit `(U (HVec Float Float Float) Nil)` without
+;; weakening the invariant Atom type seen by existing references.
+(define (fresh-value-compatible? value expected env)
+  (cond
+    [(type-union? expected)
+     (for/or ([alt (in-list (type-union-alts expected))])
+       (fresh-value-compatible? value alt env))]
+    [(and (type-app? expected) (eq? (type-app-ctor expected) 'HVec)
+          (vec-form? value))
+     (define items (vec-form-items value))
+     (define elems (type-app-args expected))
+     (and (= (length items) (length elems))
+          (for/and ([item (in-list items)] [elem (in-list elems)])
+            (fresh-value-compatible? item elem env)))]
+    [else (type-compatible? (infer-expr value env) expected)]))
+
 ;; G2b — annotation-directed Atom CONSTRUCTION. A fresh cell checked against an
 ;; expected (Atom T) adopts T when the value IS the constructor call `(atom init)`:
 ;; the init is checked against T (raising pointedly), so `(atom nil)` can be born
@@ -3695,9 +3713,10 @@
        (= (length (type-app-args expected)) 1)
        (call-form? value) (eq? (call-form-fn value) 'atom)
        (= (length (call-form-args value)) 1)
-       (let ([elem (car (type-app-args expected))]
-             [it (infer-expr (car (call-form-args value)) env)])
-         (unless (type-compatible? it elem)
+       (let* ([elem (car (type-app-args expected))]
+              [init (car (call-form-args value))]
+              [it (infer-expr init env)])
+         (unless (fresh-value-compatible? init elem env)
            (raise-diag 'type-mismatch
                        (format "atom init: expected ~a, got ~a"
                                (type->string elem) (type->string it))
