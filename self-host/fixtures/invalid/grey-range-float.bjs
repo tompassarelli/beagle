@@ -1,0 +1,6 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-range-float)
+
+;; Range bounds are Int so the yielded sequence has the exact (List Int) type.
+(def invalid-range (List Int)
+  (range 3.5))
