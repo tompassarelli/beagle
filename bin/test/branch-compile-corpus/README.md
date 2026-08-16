@@ -1,8 +1,9 @@
 # Branch compilation corpus oracle
 
-This is Phase C of the bounded branch-native compiler experiment. It supplies
-four Native Core modules, three controlled mutations, and an independent clean
-full-build oracle. It does not implement or simulate incremental compilation.
+This directory contains the Phase-C clean-build oracle and the compiler-owned
+Phase-D unit seam for the bounded branch-native experiment. It supplies four
+Native Core modules, three controlled mutations, and an independent clean
+full-build oracle. It does not add a cache or Fram integration.
 
 The corpus has two dependency arms:
 
@@ -33,7 +34,9 @@ The three cases are deliberately narrow:
 `run.sh` copies each case into the same ignored, fixed logical source path,
 then runs `beagle ast-bundle` and a fresh full Native Core build with C17. Every
 case has explicit deadlines and visible start/end progress. A second baseline
-build must be byte-identical at every recorded identity.
+build must be byte-identical at every recorded identity. In check mode the
+focused unit gate then extracts exact compiler payloads, selects the expected
+9/9, 8/9, and 7/9 reuse sets, and assembles each candidate independently.
 
 The tracked oracle records:
 
@@ -73,10 +76,12 @@ incremental adapter or mutation cache hidden in the harness.
 interface modules. `units.tsv` actively checks every emitted unit kind and
 resolved direct read set in every case. The typed/native rows of
 `expected-cones.tsv` actively check the exact changed semantic-content set,
-and every mutation must preserve every semantic-unit ID. Its future assembled
-reuse rows remain expectations rather than simulated cache behavior. The
-tracked `oracle/churn.tsv` describes clean-full-build output; it does not turn
-whole-build churn into the incremental contract.
+and every mutation must preserve every semantic-unit ID. The unit gate now
+checks the corresponding assembled reuse rows, exact clean typed/native/epoch
+and C17 bytes, all ten obligations, canonical input ordering, collision
+rejection, and the nine-`defn` boundary. The tracked `oracle/churn.tsv`
+describes clean-full-build output; the gate is still a bounded compiler seam,
+not a production incremental cache.
 
 ## Current verdict
 
@@ -98,8 +103,8 @@ The corrected oracle was measured on semantic-unit compiler checkpoint
   arm and the downstream `corpus.app` callers whose consumed interface did not
   change.
 
-The emitted semantic identities and read sets now make those three assertions
-active falsifiers. A later compiler may use them for unit-level typed/native
-reuse before reassembling the ordinary dense whole program. The existing full
-build remains the artifact oracle; no result in this directory claims that an
-incremental cache or assembler already exists.
+The emitted semantic identities and read sets make those three assertions
+active falsifiers. The bounded unit seam uses them for exact typed/native
+payload selection before reassembling the ordinary dense whole program. The
+existing full build remains the artifact oracle; no result in this directory
+claims a production cache, durable projection, or incremental build path.

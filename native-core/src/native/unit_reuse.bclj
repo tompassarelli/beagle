@@ -1,0 +1,1358 @@
+#lang beagle/clj
+;; Corpus-bounded unit payloads for the Phase-D branch-reuse experiment.  The
+;; ordinary whole-program passes remain authoritative; this module only splits
+;; their accepted output and deterministically composes those exact values.
+(ns native.unit-reuse
+  (:require [native.core :as core]
+            [native.stages :as stages]
+            [native.lower :as lower]
+            [native.obligations :as obligations]))
+
+
+(defrecord UnitContractV0
+  [(unit-id core/NativeId)
+   (qualified-name String)
+   (visibility String)
+   (parameter-types (Vec core/NativeId))
+   (return-type core/NativeId)
+   (failure-type core/NativeId)
+   (generated-bindings (Vec String))
+   (encoding String)
+   (digest String)])
+
+(defrecord TypedUnitV0
+  [(unit-id core/NativeId)
+   (function lower/TypedFunctionV0)
+   (types (Vec core/TypeDef))
+   (effects (Vec core/EffectDef))
+   (capabilities (Vec core/CapabilityDef))
+   (encoding String)
+   (digest String)])
+
+(defrecord NativeUnitV0
+  [(unit-id core/NativeId)
+   (function core/FunctionDef)
+   (layouts (Vec core/LayoutDef))
+   (abis (Vec core/AbiDeclV0))
+   (regions (Vec core/RegionDef))
+   (encoding String)
+   (digest String)])
+
+(defunion UnitExtractionResultV0
+  (UnitExtractionAcceptedV0
+    [(contracts (Vec UnitContractV0))
+     (typed-units (Vec TypedUnitV0))
+     (native-units (Vec NativeUnitV0))])
+  (UnitExtractionRejectedV0 [(code String) (detail String)]))
+
+(defrecord UnitAssemblyV0
+  [(typed stages/FrozenTypedStageV0)
+   (typed-slice lower/TypedSliceV0)
+   (native stages/FrozenNativeStageV0)
+   (epoch stages/FrozenNativeStageV0)
+   (verdicts (Vec obligations/ObligationVerdictV0))])
+
+(defunion UnitAssemblyResultV0
+  (UnitAssemblyAcceptedV0 [(assembly UnitAssemblyV0)])
+  (UnitAssemblyRejectedV0 [(code String) (detail String)]))
+
+(defrecord PayloadClaimV0
+  [(category String) (identity core/NativeId) (encoding String)])
+
+(defrecord ClaimCheckV0
+  [(encodings (Map String String)) (valid Bool) (detail String)])
+
+(defn id-value [(identity core/NativeId)] String
+  (core/nativeid-value identity))
+
+(defn encode-id-vector
+  [(tag String) (identities (Vec core/NativeId))] String
+  (stages/canonical-record tag
+    (mapv (fn [(identity core/NativeId)] String (id-value identity))
+      identities)))
+
+(defn encode-capability-kind [(kind core/CapabilityKind)] String
+  (cond
+    (instance? native.core.ReadCapability kind) "read"
+    (instance? native.core.WriteCapability kind) "write"
+    (instance? native.core.AllocateCapability kind) "allocate"
+    :else "host"))
+
+(defn encode-capability [(capability core/CapabilityDef)] String
+  (let [(region (U core/NativeId Nil)) (core/capabilitydef-region capability)]
+    (stages/canonical-record "capability-def-v0"
+      [(id-value (core/capabilitydef-id capability))
+       (encode-capability-kind (core/capabilitydef-kind capability))
+       (if (nil? region) "no-region" (id-value region))
+       (if (core/capabilitydef-affine capability) "affine" "shared")])))
+
+(defn encode-readiness [(readiness lower/NativeReadinessV0)] String
+  (match readiness
+    [(lower/NativeReadyV0 operation)
+     (stages/canonical-record "typed-ready-v0" [operation])]
+    [(lower/NativeLoweredV0 entry-block blocks)
+     (stages/canonical-record "typed-lowered-v0"
+       [(id-value entry-block)
+        (stages/canonical-record "blocks"
+          (mapv (fn [(block core/BasicBlock)] String
+                  (lower/encode-basic-block block))
+            blocks))])]
+    [(lower/NativeTodoV0 code detail)
+     (stages/canonical-record "typed-pending-v0" [code detail])]))
+
+(defn encode-typed-function-payload
+  [(function lower/TypedFunctionV0)] String
+  (stages/canonical-record "typed-unit-function-v0"
+    [(lower/encode-typed-function
+       (lower/typedfunctionv0-id function)
+       (lower/typedfunctionv0-name function)
+       (lower/typedfunctionv0-abi-symbol function)
+       (lower/typedfunctionv0-parameters function)
+       (lower/typedfunctionv0-return-type function)
+       (lower/typedfunctionv0-failure-type function)
+       (lower/typedfunctionv0-effects function)
+       (lower/readiness-code (lower/typedfunctionv0-readiness function)))
+     (encode-readiness (lower/typedfunctionv0-readiness function))]))
+
+(defn encode-unit-contract-value
+  [(unit-id core/NativeId)
+   (qualified-name String)
+   (visibility String)
+   (parameter-types (Vec core/NativeId))
+   (return-type core/NativeId)
+   (failure-type core/NativeId)
+   (generated-bindings (Vec String))]
+  String
+  (stages/canonical-record "unit-contract-v0"
+    [(id-value unit-id)
+     qualified-name
+     visibility
+     (encode-id-vector "parameter-types" parameter-types)
+     (id-value return-type)
+     (id-value failure-type)
+     (stages/canonical-set "generated-bindings" generated-bindings)]))
+
+(defn make-unit-contract
+  [(unit-id core/NativeId)
+   (qualified-name String)
+   (visibility String)
+   (function lower/TypedFunctionV0)]
+  UnitContractV0
+  (let [(parameter-types (Vec core/NativeId))
+        (mapv (fn [(parameter core/Parameter)] core/NativeId
+                (core/parameter-type-id parameter))
+          (lower/typedfunctionv0-parameters function))
+        (generated-bindings (Vec String)) []
+        (encoding String)
+        (encode-unit-contract-value unit-id qualified-name visibility
+          parameter-types
+          (lower/typedfunctionv0-return-type function)
+          (lower/typedfunctionv0-failure-type function)
+          generated-bindings)]
+    (->UnitContractV0 unit-id qualified-name visibility parameter-types
+      (lower/typedfunctionv0-return-type function)
+      (lower/typedfunctionv0-failure-type function)
+      generated-bindings encoding (stages/content-digest encoding))))
+
+(defn encode-typed-unit-value
+  [(unit-id core/NativeId)
+   (function lower/TypedFunctionV0)
+   (types (Vec core/TypeDef))
+   (effects (Vec core/EffectDef))
+   (capabilities (Vec core/CapabilityDef))]
+  String
+  (stages/canonical-record "typed-unit-v0"
+    [(id-value unit-id)
+     (encode-typed-function-payload function)
+     (stages/canonical-set "types"
+       (mapv (fn [(definition core/TypeDef)] String
+               (lower/encode-type-def definition))
+         types))
+     (stages/canonical-set "effects"
+       (mapv (fn [(effect core/EffectDef)] String
+               (lower/encode-effect effect))
+         effects))
+     (stages/canonical-set "capabilities"
+       (mapv (fn [(capability core/CapabilityDef)] String
+               (encode-capability capability))
+         capabilities))]))
+
+(defn make-typed-unit
+  [(unit-id core/NativeId)
+   (function lower/TypedFunctionV0)
+   (types (Vec core/TypeDef))
+   (effects (Vec core/EffectDef))
+   (capabilities (Vec core/CapabilityDef))]
+  TypedUnitV0
+  (let [(encoding String)
+        (encode-typed-unit-value unit-id function types effects capabilities)]
+    (->TypedUnitV0 unit-id function types effects capabilities encoding
+      (stages/content-digest encoding))))
+
+(defn encode-native-unit-value
+  [(unit-id core/NativeId)
+   (function core/FunctionDef)
+   (layouts (Vec core/LayoutDef))
+   (abis (Vec core/AbiDeclV0))
+   (regions (Vec core/RegionDef))]
+  String
+  (stages/canonical-record "native-unit-v0"
+    [(id-value unit-id)
+     (lower/encode-native-function function)
+     (stages/canonical-set "layouts"
+       (mapv (fn [(layout core/LayoutDef)] String
+               (lower/encode-layout-def layout))
+         layouts))
+     (stages/canonical-set "abis"
+       (mapv (fn [(abi core/AbiDeclV0)] String (lower/encode-abi abi))
+         abis))
+     (stages/canonical-set "regions"
+       (mapv (fn [(region core/RegionDef)] String (stages/encode-region region))
+         regions))]))
+
+(defn make-native-unit
+  [(unit-id core/NativeId)
+   (function core/FunctionDef)
+   (layouts (Vec core/LayoutDef))
+   (abis (Vec core/AbiDeclV0))
+   (regions (Vec core/RegionDef))]
+  NativeUnitV0
+  (let [(encoding String)
+        (encode-native-unit-value unit-id function layouts abis regions)]
+    (->NativeUnitV0 unit-id function layouts abis regions encoding
+      (stages/content-digest encoding))))
+
+(defn dependency-context-digest
+  [(unit stages/SourceUnitV0)
+   (contracts (Vec UnitContractV0))]
+  String
+  (let [(rows (Vec String))
+        (mapv
+          (fn [(read-id core/NativeId)] String
+            (let [(contract (U UnitContractV0 Nil))
+                  (some
+                    (fn [(candidate UnitContractV0)] (U UnitContractV0 Nil)
+                      (if (core/native-id= read-id
+                            (unitcontractv0-unit-id candidate))
+                        candidate nil))
+                    contracts)]
+              (if (nil? contract)
+                (stages/canonical-record "missing-unit-contract-v0"
+                  [(id-value read-id)])
+                (stages/canonical-record "dependency-contract-v0"
+                  [(id-value read-id) (unitcontractv0-digest contract)]))))
+          (stages/sourceunitv0-read-set unit))]
+    (stages/content-digest
+      (stages/canonical-set "dependency-context-v0" rows))))
+
+(defn unit-result-key
+  [(compiler-context-digest String)
+   (unit stages/SourceUnitV0)
+   (contracts (Vec UnitContractV0))]
+  String
+  (stages/content-digest
+    (stages/canonical-record "beagle-unit-result-v0"
+      [compiler-context-digest
+       (id-value (stages/sourceunitv0-id unit))
+       (stages/sourceunitv0-semantic-digest unit)
+       (dependency-context-digest unit contracts)])))
+
+(defn conj-id
+  [(identities (Vec core/NativeId))
+   (candidate core/NativeId)]
+  (Vec core/NativeId)
+  (if (core/id-in? identities candidate) identities (conj identities candidate)))
+
+(defn type-references [(definition core/TypeDef)] (Vec core/NativeId)
+  (let [(shape core/TypeShape) (core/typedef-shape definition)]
+    (cond
+      (instance? native.core.RecordType shape)
+      (mapv (fn [(field core/TypeField)] core/NativeId
+              (core/typefield-type-id field))
+        (core/recordtype-fields shape))
+
+      (instance? native.core.UnionType shape)
+      (loop [(position Int) 0
+             (variants (Vec core/TypeVariant)) (core/uniontype-variants shape)
+             (collected (Vec core/NativeId)) [(lower/type-id "UnionTag")]]
+        (if (>= position (count variants))
+          collected
+          (let [(payload (U core/NativeId Nil))
+                (core/typevariant-payload-type (nth variants position))]
+            (recur (+ position 1) variants
+              (if (nil? payload) collected (conj-id collected payload))))))
+
+      (instance? native.core.VectorType shape)
+      [(core/vectortype-element-type shape)]
+
+      (instance? native.core.BufferTypeV0 shape)
+      [(core/buffertypev0-element-type shape)]
+
+      (instance? native.core.MapTypeV0 shape)
+      [(core/maptypev0-key-type shape) (core/maptypev0-value-type shape)]
+
+      (instance? native.core.SetTypeV0 shape)
+      [(core/settypev0-element-type shape)]
+
+      (instance? native.core.ReferenceType shape)
+      [(core/referencetype-target-type shape)]
+
+      (instance? native.core.AtomCellTypeV0 shape)
+      [(core/atomcelltypev0-content-type shape)]
+
+      (instance? native.core.FunctionType shape)
+      (let [(rest-type (U core/NativeId Nil))
+            (core/functiontype-rest-type shape)]
+        (vec (concat
+               (core/functiontype-parameter-types shape)
+               (if (nil? rest-type) [] [rest-type])
+               [(core/functiontype-return-type shape)])))
+
+      (instance? native.core.OutcomeType shape)
+      [(core/outcometype-value-type shape)
+       (core/outcometype-failure-type shape)
+       (lower/type-id "UnionTag")]
+
+      :else [])))
+
+(defn instruction-type [(instruction core/Instruction)] core/NativeId
+  (core/ssavaluev0-type-id (get instruction :result)))
+
+(defn typed-function-type-seeds
+  [(function lower/TypedFunctionV0)] (Vec core/NativeId)
+  (let [(with-parameters (Vec core/NativeId))
+        (mapv (fn [(parameter core/Parameter)] core/NativeId
+                (core/parameter-type-id parameter))
+          (lower/typedfunctionv0-parameters function))
+        (initial (Vec core/NativeId))
+        (conj-id
+          (conj-id with-parameters (lower/typedfunctionv0-return-type function))
+          (lower/typedfunctionv0-failure-type function))
+        (blocks (Vec core/BasicBlock))
+        (lower/readiness-blocks (lower/typedfunctionv0-readiness function))]
+    (loop [(position Int) 0 (collected (Vec core/NativeId)) initial]
+      (if (>= position (count blocks))
+        collected
+        (let [(block core/BasicBlock) (nth blocks position)
+              (with-block-parameters (Vec core/NativeId))
+              (loop [(inner Int) 0 (current (Vec core/NativeId)) collected]
+                (if (>= inner (count (core/basicblock-parameters block)))
+                  current
+                  (recur (+ inner 1)
+                    (conj-id current
+                      (core/parameter-type-id
+                        (nth (core/basicblock-parameters block) inner))))))]
+          (recur (+ position 1)
+            (loop [(inner Int) 0
+                   (current (Vec core/NativeId)) with-block-parameters]
+              (if (>= inner (count (core/basicblock-instructions block)))
+                current
+                (recur (+ inner 1)
+                  (conj-id current
+                    (instruction-type
+                      (nth (core/basicblock-instructions block) inner))))))))))))
+
+(defn find-type
+  [(types (Vec core/TypeDef))
+   (target core/NativeId)]
+  (U core/TypeDef Nil)
+  (some
+    (fn [(definition core/TypeDef)] (U core/TypeDef Nil)
+      (if (core/native-id= target (core/typedef-id definition))
+        definition nil))
+    types))
+
+(defn reachable-type-ids
+  [(types (Vec core/TypeDef))
+   (seeds (Vec core/NativeId))]
+  (Vec core/NativeId)
+  (loop [(round Int) 0 (current (Vec core/NativeId)) seeds]
+    (let [(grown (Vec core/NativeId))
+          (loop [(position Int) 0 (collected (Vec core/NativeId)) current]
+            (if (>= position (count current))
+              collected
+              (let [(definition (U core/TypeDef Nil))
+                    (find-type types (nth current position))
+                    (references (Vec core/NativeId))
+                    (if (nil? definition) [] (type-references definition))]
+                (recur (+ position 1)
+                  (loop [(inner Int) 0 (next (Vec core/NativeId)) collected]
+                    (if (>= inner (count references))
+                      next
+                      (recur (+ inner 1)
+                        (conj-id next (nth references inner)))))))))]
+      (if (or (= (count grown) (count current)) (> round (count types)))
+        grown
+        (recur (+ round 1) grown)))))
+
+(defn selected-types
+  [(types (Vec core/TypeDef))
+   (function lower/TypedFunctionV0)]
+  (Vec core/TypeDef)
+  (let [(function-seeds (Vec core/NativeId))
+        (typed-function-type-seeds function)
+        ;; The ordinary body pass publishes the checked arithmetic family as
+        ;; one generated support root whenever any checked operation appears.
+        ;; Keep that compiler-owned family with the unit that requested it so
+        ;; dense assembly reproduces the authoritative typed stage exactly.
+        (seeds (Vec core/NativeId))
+        (if (lower/readiness-uses-checked?
+              (lower/typedfunctionv0-readiness function))
+          (vec (concat function-seeds
+                 (mapv (fn [(definition core/TypeDef)] core/NativeId
+                         (core/typedef-id definition))
+                   (lower/checked-arithmetic-types))))
+          function-seeds)
+        (reachable (Vec core/NativeId))
+        (reachable-type-ids types seeds)]
+    (filterv (fn [(definition core/TypeDef)] Bool
+               (core/id-in? reachable (core/typedef-id definition)))
+      types)))
+
+(defn selected-effects
+  [(effects (Vec core/EffectDef))
+   (function lower/TypedFunctionV0)]
+  (Vec core/EffectDef)
+  (filterv (fn [(effect core/EffectDef)] Bool
+             (core/id-in? (lower/typedfunctionv0-effects function)
+               (core/effectdef-id effect)))
+    effects))
+
+(defn selected-capabilities
+  [(capabilities (Vec core/CapabilityDef))
+   (function lower/TypedFunctionV0)]
+  (Vec core/CapabilityDef)
+  (let [(required (Vec core/NativeId)) (lower/function-capabilities function)]
+    (filterv (fn [(capability core/CapabilityDef)] Bool
+               (core/id-in? required (core/capabilitydef-id capability)))
+      capabilities)))
+
+(defn source-module-for
+  [(modules (Vec stages/SourceModuleV1))
+   (target core/NativeId)]
+  (U stages/SourceModuleV1 Nil)
+  (some
+    (fn [(module stages/SourceModuleV1)] (U stages/SourceModuleV1 Nil)
+      (if (core/native-id= target (stages/sourcemodulev1-id module))
+        module nil))
+    modules))
+
+(defn typed-function-for
+  [(functions (Vec lower/TypedFunctionV0))
+   (target core/NativeId)]
+  (U lower/TypedFunctionV0 Nil)
+  (some
+    (fn [(function lower/TypedFunctionV0)] (U lower/TypedFunctionV0 Nil)
+      (if (core/native-id= target (lower/typedfunctionv0-id function))
+        function nil))
+    functions))
+
+(defn native-function-for
+  [(functions (Vec core/FunctionDef))
+   (target core/NativeId)]
+  (U core/FunctionDef Nil)
+  (some
+    (fn [(function core/FunctionDef)] (U core/FunctionDef Nil)
+      (if (core/native-id= target (core/functiondef-id function))
+        function nil))
+    functions))
+
+(defn selected-layouts
+  [(layouts (Vec core/LayoutDef))
+   (types (Vec core/TypeDef))]
+  (Vec core/LayoutDef)
+  (let [(type-ids (Vec core/NativeId))
+        (mapv (fn [(definition core/TypeDef)] core/NativeId
+                (core/typedef-id definition))
+          types)]
+    (filterv (fn [(layout core/LayoutDef)] Bool
+               (core/id-in? type-ids (core/layoutdef-type-id layout)))
+      layouts)))
+
+(defn selected-abis
+  [(abis (Vec core/AbiDeclV0))
+   (typed-function lower/TypedFunctionV0)
+   (native-function core/FunctionDef)]
+  (Vec core/AbiDeclV0)
+  (filterv
+    (fn [(abi core/AbiDeclV0)] Bool
+      (or (core/native-id= (core/functiondef-id native-function)
+            (core/abideclv0-function-id abi))
+          (lower/function-calls-abi? typed-function
+            (core/abideclv0-id abi))))
+    abis))
+
+(defn selected-regions
+  [(regions (Vec core/RegionDef))
+   (function core/FunctionDef)]
+  (Vec core/RegionDef)
+  (filterv (fn [(region core/RegionDef)] Bool
+             (core/id-in? (core/functiondef-regions function)
+               (core/regiondef-id region)))
+    regions))
+
+(defn extract-unit-payloads
+  [(source stages/SourceStageV1)
+   (typed-slice lower/TypedSliceV0)
+   (native-frozen stages/FrozenNativeStageV0)]
+  UnitExtractionResultV0
+  (let [(units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
+        (modules (Vec stages/SourceModuleV1))
+        (stages/sourcestagev1-modules source)
+        (index lower/SourceIndexV0)
+        (lower/build-source-index (stages/sourcestagev1-terms source) modules)
+        (typed-functions (Vec lower/TypedFunctionV0))
+        (lower/typedslicev0-functions typed-slice)
+        (native-program core/NativeCoreProgram)
+        (stages/nativestagev0-program
+          (stages/frozennativestagev0-stage native-frozen))]
+    (if (not= 9 (count units))
+      (->UnitExtractionRejectedV0 "UNIT-CORPUS-SIZE"
+        (str "expected exactly nine source units, found " (count units)))
+      (loop [(position Int) 0
+             (contracts (Vec UnitContractV0)) []
+             (typed-units (Vec TypedUnitV0)) []
+             (native-units (Vec NativeUnitV0)) []]
+        (if (>= position (count units))
+          (->UnitExtractionAcceptedV0 contracts typed-units native-units)
+          (let [(unit stages/SourceUnitV0) (nth units position)
+                (unit-id core/NativeId) (stages/sourceunitv0-id unit)
+                (function-id core/NativeId)
+                (lower/function-id unit-id (stages/sourceunitv0-name unit))
+                (module (U stages/SourceModuleV1 Nil))
+                (source-module-for modules (stages/sourceunitv0-module-id unit))
+                (typed-function (U lower/TypedFunctionV0 Nil))
+                (typed-function-for typed-functions function-id)
+                (native-function (U core/FunctionDef Nil))
+                (native-function-for
+                  (core/nativecoreprogram-functions native-program) function-id)
+                (private-text String) (lower/fact-text index unit-id "private")]
+            (cond
+              (not= "defn" (stages/sourceunitv0-kind unit))
+              (->UnitExtractionRejectedV0 "UNIT-CORPUS-KIND"
+                (str "unsupported source unit kind "
+                  (stages/sourceunitv0-kind unit) " for "
+                  (stages/sourceunitv0-name unit)))
+
+              (nil? module)
+              (->UnitExtractionRejectedV0 "UNIT-MODULE-MISSING"
+                (id-value (stages/sourceunitv0-module-id unit)))
+
+              (nil? typed-function)
+              (->UnitExtractionRejectedV0 "UNIT-TYPED-FUNCTION-MISSING"
+                (id-value function-id))
+
+              (nil? native-function)
+              (->UnitExtractionRejectedV0 "UNIT-NATIVE-FUNCTION-MISSING"
+                (id-value function-id))
+
+              (not (or (= "true" private-text) (= "false" private-text)))
+              (->UnitExtractionRejectedV0 "UNIT-VISIBILITY-MISSING"
+                (id-value unit-id))
+
+              :else
+              (let [(qualified-name String)
+                    (str (stages/sourcemodulev1-name module) "/"
+                      (stages/sourceunitv0-name unit))
+                    (visibility String)
+                    (if (= "true" private-text) "private" "public")
+                    (types (Vec core/TypeDef))
+                    (selected-types (lower/typedslicev0-types typed-slice)
+                      typed-function)
+                    (contract UnitContractV0)
+                    (make-unit-contract unit-id qualified-name visibility
+                      typed-function)
+                    (typed-unit TypedUnitV0)
+                    (make-typed-unit unit-id typed-function types
+                      (selected-effects (lower/typedslicev0-effects typed-slice)
+                        typed-function)
+                      (selected-capabilities
+                        (lower/typedslicev0-capabilities typed-slice)
+                        typed-function))
+                    (native-unit NativeUnitV0)
+                    (make-native-unit unit-id native-function
+                      (selected-layouts
+                        (core/nativecoreprogram-layouts native-program) types)
+                      (selected-abis (core/nativecoreprogram-abis native-program)
+                        typed-function native-function)
+                      (selected-regions
+                        (core/nativecoreprogram-regions native-program)
+                        native-function))]
+                (recur (+ position 1)
+                  (conj contracts contract)
+                  (conj typed-units typed-unit)
+                  (conj native-units native-unit))))))))))
+
+(defn claim-key [(claim PayloadClaimV0)] String
+  (stages/canonical-record "unit-payload-claim-v0"
+    [(payloadclaimv0-category claim)
+     (id-value (payloadclaimv0-identity claim))]))
+
+(defn check-payload-claims
+  [(claims (Vec PayloadClaimV0))] ClaimCheckV0
+  (loop [(position Int) 0
+         (encodings (Map String String)) {}
+         (valid Bool) true
+         (detail String) ""]
+    (if (or (>= position (count claims)) (not valid))
+      (->ClaimCheckV0 encodings valid detail)
+      (let [(claim PayloadClaimV0) (nth claims position)
+            (key String) (claim-key claim)
+            (prior (U String Nil)) (get encodings key)
+            (encoding String) (payloadclaimv0-encoding claim)]
+        (if (or (nil? prior) (= prior encoding))
+          (recur (+ position 1) (assoc encodings key encoding) true "")
+          (recur (+ position 1) encodings false
+            (str (payloadclaimv0-category claim) " "
+              (id-value (payloadclaimv0-identity claim))
+              " has unequal canonical payloads")))))))
+
+(defn contract-claims
+  [(contracts (Vec UnitContractV0))] (Vec PayloadClaimV0)
+  (mapv (fn [(contract UnitContractV0)] PayloadClaimV0
+          (->PayloadClaimV0 "unit-contract"
+            (unitcontractv0-unit-id contract)
+            (unitcontractv0-encoding contract)))
+    contracts))
+
+(defn typed-unit-claims
+  [(units (Vec TypedUnitV0))] (Vec PayloadClaimV0)
+  (loop [(position Int) 0 (claims (Vec PayloadClaimV0)) []]
+    (if (>= position (count units))
+      claims
+      (let [(unit TypedUnitV0) (nth units position)
+            (function lower/TypedFunctionV0) (typedunitv0-function unit)]
+        (recur (+ position 1)
+          (vec (concat claims
+            [(->PayloadClaimV0 "typed-unit" (typedunitv0-unit-id unit)
+               (typedunitv0-encoding unit))
+             (->PayloadClaimV0 "typed-function"
+               (lower/typedfunctionv0-id function)
+               (encode-typed-function-payload function))]
+            (mapv (fn [(definition core/TypeDef)] PayloadClaimV0
+                    (->PayloadClaimV0 "type" (core/typedef-id definition)
+                      (lower/encode-type-def definition)))
+              (typedunitv0-types unit))
+            (mapv (fn [(effect core/EffectDef)] PayloadClaimV0
+                    (->PayloadClaimV0 "effect" (core/effectdef-id effect)
+                      (lower/encode-effect effect)))
+              (typedunitv0-effects unit))
+            (mapv (fn [(capability core/CapabilityDef)] PayloadClaimV0
+                    (->PayloadClaimV0 "capability"
+                      (core/capabilitydef-id capability)
+                      (encode-capability capability)))
+              (typedunitv0-capabilities unit)))))))))
+
+(defn native-unit-claims
+  [(units (Vec NativeUnitV0))] (Vec PayloadClaimV0)
+  (loop [(position Int) 0 (claims (Vec PayloadClaimV0)) []]
+    (if (>= position (count units))
+      claims
+      (let [(unit NativeUnitV0) (nth units position)
+            (function core/FunctionDef) (nativeunitv0-function unit)]
+        (recur (+ position 1)
+          (vec (concat claims
+            [(->PayloadClaimV0 "native-unit" (nativeunitv0-unit-id unit)
+               (nativeunitv0-encoding unit))
+             (->PayloadClaimV0 "native-function"
+               (core/functiondef-id function)
+               (lower/encode-native-function function))]
+            (mapv (fn [(layout core/LayoutDef)] PayloadClaimV0
+                    (->PayloadClaimV0 "layout" (core/layoutdef-id layout)
+                      (lower/encode-layout-def layout)))
+              (nativeunitv0-layouts unit))
+            (mapv (fn [(abi core/AbiDeclV0)] PayloadClaimV0
+                    (->PayloadClaimV0 "abi" (core/abideclv0-id abi)
+                      (lower/encode-abi abi)))
+              (nativeunitv0-abis unit))
+            (mapv (fn [(region core/RegionDef)] PayloadClaimV0
+                    (->PayloadClaimV0 "region" (core/regiondef-id region)
+                      (stages/encode-region region)))
+              (nativeunitv0-regions unit)))))))))
+
+(defn support-claims
+  [(types (Vec core/TypeDef))
+   (effects (Vec core/EffectDef))
+   (capabilities (Vec core/CapabilityDef))
+   (regions (Vec core/RegionDef))
+   (layouts (Vec core/LayoutDef))]
+  (Vec PayloadClaimV0)
+  (vec (concat
+    (mapv (fn [(definition core/TypeDef)] PayloadClaimV0
+            (->PayloadClaimV0 "type" (core/typedef-id definition)
+              (lower/encode-type-def definition)))
+      types)
+    (mapv (fn [(effect core/EffectDef)] PayloadClaimV0
+            (->PayloadClaimV0 "effect" (core/effectdef-id effect)
+              (lower/encode-effect effect)))
+      effects)
+    (mapv (fn [(capability core/CapabilityDef)] PayloadClaimV0
+            (->PayloadClaimV0 "capability"
+              (core/capabilitydef-id capability)
+              (encode-capability capability)))
+      capabilities)
+    (mapv (fn [(region core/RegionDef)] PayloadClaimV0
+            (->PayloadClaimV0 "region" (core/regiondef-id region)
+              (stages/encode-region region)))
+      regions)
+    (mapv (fn [(layout core/LayoutDef)] PayloadClaimV0
+            (->PayloadClaimV0 "layout" (core/layoutdef-id layout)
+              (lower/encode-layout-def layout)))
+      layouts))))
+
+(defn id-before? [(left core/NativeId) (right core/NativeId)] Bool
+  (< (compare (id-value left) (id-value right)) 0))
+
+(defn insert-type
+  [(item core/TypeDef) (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/TypeDef)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/TypeDef) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/typedef-id item) (core/typedef-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-types [(values (Vec core/TypeDef))] (Vec core/TypeDef)
+  (loop [(position Int) 0 (result (Vec core/TypeDef)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1) (insert-type (nth values position) result)))))
+
+(defn insert-typed-function
+  [(item lower/TypedFunctionV0)
+   (sorted (Vec lower/TypedFunctionV0))]
+  (Vec lower/TypedFunctionV0)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec lower/TypedFunctionV0)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current lower/TypedFunctionV0) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (lower/typedfunctionv0-id item)
+                (lower/typedfunctionv0-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-typed-functions
+  [(values (Vec lower/TypedFunctionV0))] (Vec lower/TypedFunctionV0)
+  (loop [(position Int) 0 (result (Vec lower/TypedFunctionV0)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1)
+        (insert-typed-function (nth values position) result)))))
+
+(defn insert-native-function
+  [(item core/FunctionDef) (sorted (Vec core/FunctionDef))]
+  (Vec core/FunctionDef)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/FunctionDef)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/FunctionDef) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/functiondef-id item)
+                (core/functiondef-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-native-functions
+  [(values (Vec core/FunctionDef))] (Vec core/FunctionDef)
+  (loop [(position Int) 0 (result (Vec core/FunctionDef)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1)
+        (insert-native-function (nth values position) result)))))
+
+(defn insert-effect
+  [(item core/EffectDef) (sorted (Vec core/EffectDef))] (Vec core/EffectDef)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/EffectDef)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/EffectDef) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/effectdef-id item) (core/effectdef-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-effects [(values (Vec core/EffectDef))] (Vec core/EffectDef)
+  (loop [(position Int) 0 (result (Vec core/EffectDef)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1) (insert-effect (nth values position) result)))))
+
+(defn insert-capability
+  [(item core/CapabilityDef) (sorted (Vec core/CapabilityDef))]
+  (Vec core/CapabilityDef)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/CapabilityDef)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/CapabilityDef) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/capabilitydef-id item)
+                (core/capabilitydef-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-capabilities
+  [(values (Vec core/CapabilityDef))] (Vec core/CapabilityDef)
+  (loop [(position Int) 0 (result (Vec core/CapabilityDef)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1) (insert-capability (nth values position) result)))))
+
+(defn insert-region
+  [(item core/RegionDef) (sorted (Vec core/RegionDef))] (Vec core/RegionDef)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/RegionDef)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/RegionDef) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/regiondef-id item) (core/regiondef-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-regions [(values (Vec core/RegionDef))] (Vec core/RegionDef)
+  (loop [(position Int) 0 (result (Vec core/RegionDef)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1) (insert-region (nth values position) result)))))
+
+(defn insert-layout
+  [(item core/LayoutDef) (sorted (Vec core/LayoutDef))] (Vec core/LayoutDef)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/LayoutDef)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/LayoutDef) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/layoutdef-id item) (core/layoutdef-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-layouts [(values (Vec core/LayoutDef))] (Vec core/LayoutDef)
+  (loop [(position Int) 0 (result (Vec core/LayoutDef)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1) (insert-layout (nth values position) result)))))
+
+(defn insert-abi
+  [(item core/AbiDeclV0) (sorted (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
+  (loop [(position Int) 0 (inserted Bool) false
+         (result (Vec core/AbiDeclV0)) []]
+    (if (>= position (count sorted))
+      (if inserted result (conj result item))
+      (let [(current core/AbiDeclV0) (nth sorted position)]
+        (if (and (not inserted)
+              (id-before? (core/abideclv0-id item) (core/abideclv0-id current)))
+          (recur (+ position 1) true (conj (conj result item) current))
+          (recur (+ position 1) inserted (conj result current)))))))
+
+(defn ordered-abis [(values (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
+  (loop [(position Int) 0 (result (Vec core/AbiDeclV0)) []]
+    (if (>= position (count values)) result
+      (recur (+ position 1) (insert-abi (nth values position) result)))))
+
+(defn source-unit-ids
+  [(units (Vec stages/SourceUnitV0))] (Vec core/NativeId)
+  (mapv (fn [(unit stages/SourceUnitV0)] core/NativeId
+          (stages/sourceunitv0-id unit))
+    units))
+
+(defn contract-ids
+  [(contracts (Vec UnitContractV0))] (Vec core/NativeId)
+  (mapv (fn [(contract UnitContractV0)] core/NativeId
+          (unitcontractv0-unit-id contract))
+    contracts))
+
+(defn typed-unit-ids
+  [(units (Vec TypedUnitV0))] (Vec core/NativeId)
+  (mapv (fn [(unit TypedUnitV0)] core/NativeId (typedunitv0-unit-id unit))
+    units))
+
+(defn native-unit-ids
+  [(units (Vec NativeUnitV0))] (Vec core/NativeId)
+  (mapv (fn [(unit NativeUnitV0)] core/NativeId (nativeunitv0-unit-id unit))
+    units))
+
+(defn exact-id-set?
+  [(expected (Vec core/NativeId))
+   (actual (Vec core/NativeId))]
+  Bool
+  (and (= (count expected) (count actual))
+    (core/unique-ids? actual)
+    (core/ids-in? expected actual)
+    (core/ids-in? actual expected)))
+
+(defn contract-record-valid? [(contract UnitContractV0)] Bool
+  (and (= (unitcontractv0-digest contract)
+         (stages/content-digest (unitcontractv0-encoding contract)))
+    (= (unitcontractv0-encoding contract)
+      (encode-unit-contract-value
+        (unitcontractv0-unit-id contract)
+        (unitcontractv0-qualified-name contract)
+        (unitcontractv0-visibility contract)
+        (unitcontractv0-parameter-types contract)
+        (unitcontractv0-return-type contract)
+        (unitcontractv0-failure-type contract)
+        (unitcontractv0-generated-bindings contract)))))
+
+(defn typed-unit-record-valid? [(unit TypedUnitV0)] Bool
+  (and (= (typedunitv0-digest unit)
+         (stages/content-digest (typedunitv0-encoding unit)))
+    (= (typedunitv0-encoding unit)
+      (encode-typed-unit-value
+        (typedunitv0-unit-id unit)
+        (typedunitv0-function unit)
+        (typedunitv0-types unit)
+        (typedunitv0-effects unit)
+        (typedunitv0-capabilities unit)))))
+
+(defn native-unit-record-valid? [(unit NativeUnitV0)] Bool
+  (and (= (nativeunitv0-digest unit)
+         (stages/content-digest (nativeunitv0-encoding unit)))
+    (= (nativeunitv0-encoding unit)
+      (encode-native-unit-value
+        (nativeunitv0-unit-id unit)
+        (nativeunitv0-function unit)
+        (nativeunitv0-layouts unit)
+        (nativeunitv0-abis unit)
+        (nativeunitv0-regions unit)))))
+
+(defn source-unit-for
+  [(units (Vec stages/SourceUnitV0))
+   (target core/NativeId)]
+  (U stages/SourceUnitV0 Nil)
+  (some
+    (fn [(unit stages/SourceUnitV0)] (U stages/SourceUnitV0 Nil)
+      (if (core/native-id= target (stages/sourceunitv0-id unit)) unit nil))
+    units))
+
+(defn typed-unit-function-valid?
+  [(source-units (Vec stages/SourceUnitV0))
+   (unit TypedUnitV0)]
+  Bool
+  (let [(source (U stages/SourceUnitV0 Nil))
+        (source-unit-for source-units (typedunitv0-unit-id unit))]
+    (and (some? source)
+      (core/native-id=
+        (lower/typedfunctionv0-id (typedunitv0-function unit))
+        (lower/function-id (typedunitv0-unit-id unit)
+          (stages/sourceunitv0-name source))))))
+
+(defn native-unit-function-valid?
+  [(source-units (Vec stages/SourceUnitV0))
+   (unit NativeUnitV0)]
+  Bool
+  (let [(source (U stages/SourceUnitV0 Nil))
+        (source-unit-for source-units (nativeunitv0-unit-id unit))]
+    (and (some? source)
+      (core/native-id=
+        (core/functiondef-id (nativeunitv0-function unit))
+        (lower/function-id (nativeunitv0-unit-id unit)
+          (stages/sourceunitv0-name source))))))
+
+(defn unit-records-valid?
+  [(source-units (Vec stages/SourceUnitV0))
+   (contracts (Vec UnitContractV0))
+   (typed-units (Vec TypedUnitV0))
+   (native-units (Vec NativeUnitV0))]
+  Bool
+  (and (every? contract-record-valid? contracts)
+    (every? (fn [(unit TypedUnitV0)] Bool
+              (and (typed-unit-record-valid? unit)
+                (typed-unit-function-valid? source-units unit)))
+      typed-units)
+    (every? (fn [(unit NativeUnitV0)] Bool
+              (and (native-unit-record-valid? unit)
+                (native-unit-function-valid? source-units unit)))
+      native-units)))
+
+(defn append-effect
+  [(values (Vec core/EffectDef)) (item core/EffectDef)] (Vec core/EffectDef)
+  (if (core/id-in? (core/effect-ids values) (core/effectdef-id item))
+    values (conj values item)))
+
+(defn append-capability
+  [(values (Vec core/CapabilityDef))
+   (item core/CapabilityDef)]
+  (Vec core/CapabilityDef)
+  (if (core/id-in? (core/capability-ids values) (core/capabilitydef-id item))
+    values (conj values item)))
+
+(defn append-region
+  [(values (Vec core/RegionDef)) (item core/RegionDef)] (Vec core/RegionDef)
+  (if (core/id-in? (core/region-ids values) (core/regiondef-id item))
+    values (conj values item)))
+
+(defn append-layout
+  [(values (Vec core/LayoutDef)) (item core/LayoutDef)] (Vec core/LayoutDef)
+  (if (core/id-in? (core/layout-ids values) (core/layoutdef-id item))
+    values (conj values item)))
+
+(defn append-abi
+  [(values (Vec core/AbiDeclV0)) (item core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  (if (core/id-in? (core/abi-ids values) (core/abideclv0-id item))
+    values (conj values item)))
+
+(defn append-typed-function
+  [(values (Vec lower/TypedFunctionV0))
+   (item lower/TypedFunctionV0)]
+  (Vec lower/TypedFunctionV0)
+  (if (some?
+        (some (fn [(current lower/TypedFunctionV0)] Bool
+                (core/native-id= (lower/typedfunctionv0-id current)
+                  (lower/typedfunctionv0-id item)))
+          values))
+    values (conj values item)))
+
+(defn append-native-function
+  [(values (Vec core/FunctionDef))
+   (item core/FunctionDef)]
+  (Vec core/FunctionDef)
+  (if (core/id-in? (core/function-ids values) (core/functiondef-id item))
+    values (conj values item)))
+
+(defn collect-types [(units (Vec TypedUnitV0))] (Vec core/TypeDef)
+  (loop [(position Int) 0 (values (Vec core/TypeDef)) (lower/builtin-types [])]
+    (if (>= position (count units)) values
+      (recur (+ position 1)
+        (lower/append-type-defs values (typedunitv0-types (nth units position)))))))
+
+(defn collect-effects [(units (Vec TypedUnitV0))] (Vec core/EffectDef)
+  (loop [(position Int) 0
+         (values (Vec core/EffectDef))
+         (lower/slice-effects false false false false false false false)]
+    (if (>= position (count units)) values
+      (let [(additions (Vec core/EffectDef))
+            (typedunitv0-effects (nth units position))]
+        (recur (+ position 1)
+          (loop [(inner Int) 0 (current (Vec core/EffectDef)) values]
+            (if (>= inner (count additions)) current
+              (recur (+ inner 1) (append-effect current (nth additions inner))))))))))
+
+(defn collect-capabilities
+  [(units (Vec TypedUnitV0))] (Vec core/CapabilityDef)
+  (loop [(position Int) 0
+         (values (Vec core/CapabilityDef))
+         (lower/slice-capabilities false false false false false false false)]
+    (if (>= position (count units)) values
+      (let [(additions (Vec core/CapabilityDef))
+            (typedunitv0-capabilities (nth units position))]
+        (recur (+ position 1)
+          (loop [(inner Int) 0 (current (Vec core/CapabilityDef)) values]
+            (if (>= inner (count additions)) current
+              (recur (+ inner 1)
+                (append-capability current (nth additions inner))))))))))
+
+(defn collect-regions [(units (Vec NativeUnitV0))] (Vec core/RegionDef)
+  (loop [(position Int) 0
+         (values (Vec core/RegionDef)) (lower/slice-regions)]
+    (if (>= position (count units)) values
+      (let [(additions (Vec core/RegionDef))
+            (nativeunitv0-regions (nth units position))]
+        (recur (+ position 1)
+          (loop [(inner Int) 0 (current (Vec core/RegionDef)) values]
+            (if (>= inner (count additions)) current
+              (recur (+ inner 1) (append-region current (nth additions inner))))))))))
+
+(defn collect-typed-functions
+  [(units (Vec TypedUnitV0))] (Vec lower/TypedFunctionV0)
+  (loop [(position Int) 0 (values (Vec lower/TypedFunctionV0)) []]
+    (if (>= position (count units)) values
+      (recur (+ position 1)
+        (append-typed-function values (typedunitv0-function (nth units position)))))))
+
+(defn collect-native-functions
+  [(units (Vec NativeUnitV0))] (Vec core/FunctionDef)
+  (loop [(position Int) 0 (values (Vec core/FunctionDef)) []]
+    (if (>= position (count units)) values
+      (recur (+ position 1)
+        (append-native-function values
+          (nativeunitv0-function (nth units position)))))))
+
+(defn collect-layouts [(units (Vec NativeUnitV0))] (Vec core/LayoutDef)
+  (loop [(position Int) 0 (values (Vec core/LayoutDef)) []]
+    (if (>= position (count units)) values
+      (let [(additions (Vec core/LayoutDef))
+            (nativeunitv0-layouts (nth units position))]
+        (recur (+ position 1)
+          (loop [(inner Int) 0 (current (Vec core/LayoutDef)) values]
+            (if (>= inner (count additions)) current
+              (recur (+ inner 1) (append-layout current (nth additions inner))))))))))
+
+(defn collect-abis [(units (Vec NativeUnitV0))] (Vec core/AbiDeclV0)
+  (loop [(position Int) 0 (values (Vec core/AbiDeclV0)) []]
+    (if (>= position (count units)) values
+      (let [(additions (Vec core/AbiDeclV0))
+            (nativeunitv0-abis (nth units position))]
+        (recur (+ position 1)
+          (loop [(inner Int) 0 (current (Vec core/AbiDeclV0)) values]
+            (if (>= inner (count additions)) current
+              (recur (+ inner 1) (append-abi current (nth additions inner))))))))))
+
+(defn layout-for-type?
+  [(layouts (Vec core/LayoutDef))
+   (type-id core/NativeId)]
+  Bool
+  (some? (some (fn [(layout core/LayoutDef)] Bool
+                 (core/native-id= type-id (core/layoutdef-type-id layout)))
+           layouts)))
+
+(defn complete-layouts
+  [(types (Vec core/TypeDef))
+   (provided (Vec core/LayoutDef))
+   (abi core/AbiProfileV0)]
+  (Vec core/LayoutDef)
+  (loop [(position Int) 0 (layouts (Vec core/LayoutDef)) provided]
+    (if (>= position (count types)) layouts
+      (let [(definition core/TypeDef) (nth types position)]
+        (if (layout-for-type? layouts (core/typedef-id definition))
+          (recur (+ position 1) layouts)
+          (recur (+ position 1)
+            (append-layout layouts
+              (lower/layoutresolutionv0-layout
+                (lower/resolve-layout types definition abi)))))))))
+
+(defn bounded-functions?
+  [(typed-functions (Vec lower/TypedFunctionV0))
+   (native-functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))]
+  Bool
+  (and (= 9 (count typed-functions))
+    (= 9 (count native-functions))
+    (= 9 (count abis))
+    (every?
+      (fn [(function lower/TypedFunctionV0)] Bool
+        (and (= 1 (count (lower/typedfunctionv0-effects function)))
+          (core/native-id= (lower/pure-effect-id)
+            (nth (lower/typedfunctionv0-effects function) 0))
+          (= 0 (count (lower/function-capabilities function)))
+          (= 0 (count (lower/function-regions function)))))
+      typed-functions)
+    (every?
+      (fn [(abi core/AbiDeclV0)] Bool
+        (instance? native.core.AbiExportV0 (core/abideclv0-direction abi)))
+      abis)))
+
+(defn source-units-supported? [(units (Vec stages/SourceUnitV0))] Bool
+  (and (= 9 (count units))
+    (core/unique-ids? (source-unit-ids units))
+    (every? (fn [(unit stages/SourceUnitV0)] Bool
+              (= "defn" (stages/sourceunitv0-kind unit)))
+      units)))
+
+(defn make-frozen-typed
+  [(source-digest String)
+   (types (Vec core/TypeDef))
+   (functions (Vec lower/TypedFunctionV0))
+   (effects (Vec core/EffectDef))
+   (regions (Vec core/RegionDef))
+   (capabilities (Vec core/CapabilityDef))]
+  stages/FrozenTypedStageV0
+  (let [(root core/NativeId) (lower/lower-id "typed-stage" [source-digest])
+        (nodes (Vec stages/TermNodeV0))
+        (lower/typed-term-nodes types functions effects
+          false false false false false false false)
+        (terms stages/TermGraphV0)
+        (stages/->TermGraphV0 root
+          (conj nodes
+            (stages/->TermNodeV0 root
+              (stages/->TextTermV0 "typed-stage-v0"))))
+        (stage stages/TypedStageV0)
+        (stages/->TypedStageV0
+          terms
+          source-digest
+          (core/type-ids types)
+          (mapv (fn [(function lower/TypedFunctionV0)] core/NativeId
+                  (lower/typedfunctionv0-id function))
+            functions)
+          (core/effect-ids effects)
+          (core/region-ids regions)
+          (core/capability-ids capabilities)
+          [(lower/type-id "LowerFailure")])
+        (encoding String) (stages/encode-typed-stage stage)]
+    (stages/->FrozenTypedStageV0 stage encoding
+      (stages/content-digest encoding))))
+
+(defn make-native-program
+  [(typed-digest String)
+   (types (Vec core/TypeDef))
+   (effects (Vec core/EffectDef))
+   (regions (Vec core/RegionDef))
+   (capabilities (Vec core/CapabilityDef))
+   (layouts (Vec core/LayoutDef))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))]
+  core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (lower/lower-id "native-program" [typed-digest])
+    (lower/lower-id "typed-stage" [typed-digest])
+    "typed-to-native-v0"
+    types
+    effects
+    regions
+    capabilities
+    layouts
+    functions
+    (core/effect-ids effects)
+    (core/region-ids regions)
+    (core/capability-ids capabilities)
+    abis
+    []))
+
+(defn verdict-results
+  [(verdicts (Vec obligations/ObligationVerdictV0))]
+  (Vec core/ObligationResult)
+  (lower/native-obligation-results
+    (obligations/obligation-passed? (nth verdicts 0))
+    (obligations/obligation-passed? (nth verdicts 1))
+    (obligations/obligation-passed? (nth verdicts 2))
+    (obligations/obligation-passed? (nth verdicts 3))
+    (obligations/obligation-passed? (nth verdicts 4))
+    (obligations/obligation-passed? (nth verdicts 5))
+    (obligations/obligation-passed? (nth verdicts 6))
+    (obligations/obligation-passed? (nth verdicts 7))
+    (obligations/obligation-passed? (nth verdicts 8))
+    (obligations/obligation-passed? (nth verdicts 9))))
+
+(defn make-frozen-native
+  [(typed-digest String)
+   (program core/NativeCoreProgram)
+   (verdicts (Vec obligations/ObligationVerdictV0))]
+  stages/FrozenNativeStageV0
+  (let [(obligation-results (Vec core/ObligationResult))
+        (verdict-results verdicts)
+        (root core/NativeId) (lower/lower-id "native-terms" [typed-digest])
+        (obligation-roots (Vec core/NativeId))
+        (mapv
+          (fn [(result core/ObligationResult)] core/NativeId
+            (lower/lower-id "obligation"
+              [(core/obligationresult-detail result)]))
+          obligation-results)
+        (nodes (Vec stages/TermNodeV0))
+        (lower/native-term-nodes
+          (core/nativecoreprogram-types program)
+          (core/nativecoreprogram-effects program)
+          (core/nativecoreprogram-capabilities program)
+          (core/nativecoreprogram-layouts program)
+          (core/nativecoreprogram-functions program)
+          (core/nativecoreprogram-abis program)
+          obligation-results)
+        (terms stages/TermGraphV0)
+        (stages/->TermGraphV0 root
+          (conj nodes
+            (stages/->TermNodeV0 root
+              (stages/->TextTermV0 "native-stage-v0"))))
+        (stage stages/NativeStageV0)
+        (stages/->NativeStageV0 terms typed-digest program obligation-roots)
+        (encoding String) (stages/encode-native-stage stage)]
+    (stages/->FrozenNativeStageV0 stage encoding
+      (stages/content-digest encoding))))
+
+(defn unit-sets-exact?
+  [(source-units (Vec stages/SourceUnitV0))
+   (contracts (Vec UnitContractV0))
+   (typed-units (Vec TypedUnitV0))
+   (native-units (Vec NativeUnitV0))]
+  Bool
+  (let [(expected (Vec core/NativeId)) (source-unit-ids source-units)]
+    (and (exact-id-set? expected (contract-ids contracts))
+      (exact-id-set? expected (typed-unit-ids typed-units))
+      (exact-id-set? expected (native-unit-ids native-units)))))
+
+(defn assemble-unit-payloads
+  [(frozen-source stages/FrozenSourceStageV1)
+   (contracts (Vec UnitContractV0))
+   (typed-units (Vec TypedUnitV0))
+   (native-units (Vec NativeUnitV0))
+   (compiler-commit String)
+   (configuration (Vec String))
+   (abi core/AbiProfileV0)]
+  UnitAssemblyResultV0
+  (let [(source stages/SourceStageV1)
+        (stages/frozensourcestagev1-stage frozen-source)
+        (source-units (Vec stages/SourceUnitV0))
+        (stages/sourcestagev1-units source)]
+    (cond
+      (not (source-units-supported? source-units))
+      (->UnitAssemblyRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
+        "assembly accepts exactly the nine defn branch corpus units")
+
+      (not (unit-sets-exact? source-units contracts typed-units native-units))
+      (->UnitAssemblyRejectedV0 "UNIT-SET-MISMATCH"
+        "source, contract, typed, and native unit identities differ")
+
+      (not (unit-records-valid? source-units contracts typed-units native-units))
+      (->UnitAssemblyRejectedV0 "UNIT-PAYLOAD-CORRUPT"
+        "a unit encoding, digest, or function identity is inconsistent")
+
+      :else
+      (let [(types (Vec core/TypeDef))
+            (ordered-types (collect-types typed-units))
+            (typed-functions (Vec lower/TypedFunctionV0))
+            (ordered-typed-functions (collect-typed-functions typed-units))
+            (effects (Vec core/EffectDef))
+            (ordered-effects (collect-effects typed-units))
+            (capabilities (Vec core/CapabilityDef))
+            (ordered-capabilities (collect-capabilities typed-units))
+            (regions (Vec core/RegionDef))
+            (ordered-regions (collect-regions native-units))
+            (native-types (Vec core/TypeDef))
+            (ordered-types (lower/append-type-def types (lower/union-tag-type)))
+            (native-functions (Vec core/FunctionDef))
+            (ordered-native-functions (collect-native-functions native-units))
+            (layouts (Vec core/LayoutDef))
+            (ordered-layouts
+              (complete-layouts native-types (collect-layouts native-units) abi))
+            (abis (Vec core/AbiDeclV0))
+            (ordered-abis (collect-abis native-units))
+            (claims (Vec PayloadClaimV0))
+            (vec (concat
+              (contract-claims contracts)
+              (typed-unit-claims typed-units)
+              (native-unit-claims native-units)
+              (support-claims native-types effects capabilities regions layouts)))
+            (claim-check ClaimCheckV0) (check-payload-claims claims)]
+        (cond
+          (not (claimcheckv0-valid claim-check))
+          (->UnitAssemblyRejectedV0 "UNIT-PAYLOAD-COLLISION"
+            (claimcheckv0-detail claim-check))
+
+          (not (bounded-functions? typed-functions native-functions abis))
+          (->UnitAssemblyRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
+            "the branch corpus requires nine pure definitions and exports")
+
+          :else
+          (let [(frozen-typed stages/FrozenTypedStageV0)
+                (make-frozen-typed
+                  (stages/frozensourcestagev1-digest frozen-source)
+                  types typed-functions effects regions capabilities)
+                (typed-slice lower/TypedSliceV0)
+                (lower/->TypedSliceV0 types typed-functions effects regions
+                  capabilities [(lower/type-id "LowerFailure")])
+                (program core/NativeCoreProgram)
+                (make-native-program
+                  (stages/frozentypedstagev0-digest frozen-typed)
+                  native-types effects regions capabilities layouts
+                  native-functions abis)
+                (verdicts (Vec obligations/ObligationVerdictV0))
+                (obligations/validate-native-core-program program abi)
+                (obligations-pass Bool)
+                (and (= 10 (count verdicts))
+                  (every? obligations/obligation-passed? verdicts))]
+            (if (not obligations-pass)
+              (->UnitAssemblyRejectedV0 "UNIT-OBLIGATION-FAILED"
+                "the assembled Native Core program failed an obligation")
+              (let [(frozen-native stages/FrozenNativeStageV0)
+                    (make-frozen-native
+                      (stages/frozentypedstagev0-digest frozen-typed)
+                      program verdicts)
+                    (epoch-result lower/EpochLoweringResultV0)
+                    (lower/epoch-derived-stage frozen-native compiler-commit
+                      configuration abi)]
+                (if (not (lower/epoch-result-complete? epoch-result))
+                  (->UnitAssemblyRejectedV0 "UNIT-EPOCH-PENDING"
+                    "derived epoch lowering left an explicit obligation")
+                  (->UnitAssemblyAcceptedV0
+                    (->UnitAssemblyV0 frozen-typed typed-slice frozen-native
+                      (lower/epoch-result-frozen epoch-result)
+                      verdicts)))))))))))

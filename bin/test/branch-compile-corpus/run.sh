@@ -236,6 +236,7 @@ if [[ "$mode" == "--check" ]]; then
       exit 1
     fi
   done
+  timeout --foreground 360s "$here/unit-reuse.sh" "$scratch/build"
 fi
 
 echo "branch-compile-corpus: PASS clean full builds are deterministic"
