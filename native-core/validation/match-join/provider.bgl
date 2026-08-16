@@ -1,0 +1,7 @@
+#lang beagle
+(ns native.match-join-provider)
+
+(defrecord Item [(value Int)])
+
+(defn items [] (Vec Item)
+  [(->Item 7)])

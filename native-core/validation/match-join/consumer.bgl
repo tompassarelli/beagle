@@ -1,0 +1,35 @@
+#lang beagle
+(ns native.match-join-consumer
+  (:require [native.match-join-provider :as provider]))
+
+(defunion LoadResult
+  (LoadRejected [(errno Int)])
+  (LoadAccepted [(token Bool)]))
+
+(defunion Choice
+  ChoiceEmpty
+  (ChoiceNamed [(value String)]))
+
+(defn loaded [(result LoadResult)] (U (Vec provider/Item) Nil)
+  (match result
+    [(LoadRejected errno) (do (println "missing") nil)]
+    [(LoadAccepted token) (provider/items)]))
+
+(defn choose [(choice Choice)] (U String Nil)
+  (match choice
+    [(ChoiceEmpty) nil]
+    [(ChoiceNamed value) value]))
+
+(defn main [] Int
+  (let [(missing-items (U (Vec provider/Item) Nil))
+        (loaded (->LoadRejected 5))
+        (present-items (U (Vec provider/Item) Nil))
+        (loaded (->LoadAccepted true))
+        (missing-name (U String Nil)) (choose (->ChoiceEmpty))
+        (present-name (U String Nil)) (choose (->ChoiceNamed "value"))]
+    (if (and (nil? missing-items)
+             (some? present-items)
+             (nil? missing-name)
+             (some? present-name))
+      0
+      1)))

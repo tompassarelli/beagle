@@ -11440,7 +11440,8 @@
                 (loop [(position Int) 0
                        (current BodyStateV0) target-state
                        (result-type (U core/NativeId Nil)) nil
-                       (live-arms Int) 0]
+                       (arms (Vec LogicArmV0)) []
+                       (uniform Bool) true]
                   (if (>= position (count clauses))
                     (cond
                       (state-blocked? current) (dead-result current)
@@ -11448,11 +11449,15 @@
                       (->ExprResultV0 current
                         (lower-id "body" ["match-terminated"])
                         (type-id "LowerFailure") true)
-                      :else
+                      uniform
                       (->ExprResultV0
                         (state-open-block current join-id
                           [(core/->Parameter join-parameter result-type)])
-                        join-parameter result-type false))
+                        join-parameter result-type false)
+                      :else
+                      (finish-flow-logic-join types owner current arms
+                        join-id join-parameter
+                        outer-locals outer-refinements outer-values expected))
                     (let [(clause core/NativeId) (nth clauses position)
                           (pattern (U core/NativeId Nil))
                           (match-clause-pattern index clause)
@@ -11489,6 +11494,7 @@
                                 (bind-match-pattern env owner body-start
                                   (exprresultv0-value-id target)
                                   (exprresultv0-type-id target) pattern))
+                              (arm-start Int) (count (bodystatev0-blocks bound))
                               (body ExprResultV0)
                               (if (state-blocked? bound)
                                 (dead-result bound)
@@ -11504,53 +11510,43 @@
                               (recur (count clauses)
                                 (state-with-flow-context body-state
                                   outer-locals outer-refinements outer-values)
-                                result-type live-arms)
+                                result-type arms uniform)
                               (recur (+ position 1)
                                 (state-with-flow-context
                                   (state-open-block body-state next-id [])
                                   outer-locals outer-refinements outer-values)
-                                result-type live-arms))
+                                result-type arms uniform))
 
-                            (nil? result-type)
+                            :else
                             (let [(closed BodyStateV0)
                                   (state-close body-state
                                     (core/->JumpTerminator join-id
-                                      [(exprresultv0-value-id body)]))]
+                                      [(exprresultv0-value-id body)]))
+                                  (body-type core/NativeId)
+                                  (exprresultv0-type-id body)
+                                  (next-result-type core/NativeId)
+                                  (if (nil? result-type)
+                                    body-type result-type)
+                                  (live-arms (Vec LogicArmV0))
+                                  (conj arms
+                                    (->LogicArmV0 arm-start
+                                      (count (bodystatev0-blocks closed))
+                                      body-type))
+                                  (all-uniform Bool)
+                                  (and uniform
+                                    (or (nil? result-type)
+                                      (same-id? result-type body-type)))]
                               (if final
                                 (recur (count clauses)
                                   (state-with-flow-context closed
                                     outer-locals outer-refinements outer-values)
-                                  (exprresultv0-type-id body) (+ live-arms 1))
+                                  next-result-type live-arms all-uniform)
                                 (recur (+ position 1)
                                   (state-with-flow-context
                                     (state-open-block closed next-id [])
                                     outer-locals outer-refinements outer-values)
-                                  (exprresultv0-type-id body)
-                                  (+ live-arms 1))))
-
-                            :else
-                            (let [(settled ExprResultV0)
-                                  (lower-boundary-coerce types owner body-state
-                                    (exprresultv0-value-id body)
-                                    (exprresultv0-type-id body) result-type)
-                                  (settled-state BodyStateV0)
-                                  (exprresultv0-state settled)]
-                              (if (state-blocked? settled-state)
-                                (dead-result settled-state)
-                                (let [(closed BodyStateV0)
-                                      (state-close settled-state
-                                        (core/->JumpTerminator join-id
-                                          [(exprresultv0-value-id settled)]))]
-                                  (if final
-                                    (recur (count clauses)
-                                      (state-with-flow-context closed
-                                        outer-locals outer-refinements outer-values)
-                                      result-type (+ live-arms 1))
-                                    (recur (+ position 1)
-                                      (state-with-flow-context
-                                        (state-open-block closed next-id [])
-                                        outer-locals outer-refinements outer-values)
-                                      result-type (+ live-arms 1))))))))))))))))))))
+                                  next-result-type live-arms
+                                  all-uniform)))))))))))))))))
 
 (defn lower-static-update-call
   [(env BodyEnvV0)
