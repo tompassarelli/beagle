@@ -77,7 +77,7 @@
   (check-not-exn (lambda () (check-xmodule-file "narrow-xm.bclj"))))
 
 (test-case "an imported pattern binder still binds the field"
-  (check-exn #rx"call to p/circle-radius: arg 1 expected Circle, got Int"
+  (check-exn #rx"call to p/circle-radius: arg 1 expected prov/Circle, got Int"
              (lambda () (check-xmodule-file "bad-xm.bclj"))))
 
 (test-case "an imported parametric union keeps its substitution through narrowing"

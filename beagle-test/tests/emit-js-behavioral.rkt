@@ -557,7 +557,8 @@ console.log(JSON.stringify(snapshot()));"
          outer)
       `(def observations Any ,(br))
       '(defn observe-positive! [(candidate Int)] Bool
-         (do (js/call observations .push candidate) (> candidate 0)))
+         (do (js/set! observations (js/get observations .length) candidate)
+             (> candidate 0)))
       '(defn sequential-loop! [(start Int)] Int
          (loop [(left Int observe-positive!) start
                 (right Int (fn [(candidate Int)] Bool (> candidate left)))
@@ -1184,7 +1185,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      (list '(defn sum-until [(xs (Vec Int)) (limit Int)] Int
               (loop [i 0 total 0]
                 (if (>= i (count xs)) total
-                  (let [v (nth xs i)]
+                  (let [(v Int) (nth xs i)]
                     (if (>= (+ total v) limit) total
                       (recur (+ i 1) (+ total v))))))))
      "console.log(sum_until([1,2,3,4,5], 7));"

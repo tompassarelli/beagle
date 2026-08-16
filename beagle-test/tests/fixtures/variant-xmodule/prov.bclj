@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns prov)
+
 ;; Provider for the cross-module variant-registration tests: one defunion of
 ;; each shape a consumer must see identically to a same-module definition.
 

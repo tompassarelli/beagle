@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns prov)
+
 ;; Provider module for the cross-module dynamic-binding test (G-A).
 ;; *v* is ^:dynamic; plain is NOT — a requiring module may `binding` the former
 ;; but not the latter.

@@ -291,13 +291,13 @@
 
    (check-clj-output "let with map destructuring"
      (list `(defn f [(m (Map Keyword Int))] Int
-              (let [,(mt ':keys (br 'a 'b)) m]
+              (let [,(mt ':keys (br 'a 'b) ':or (mt 'a 0 'b 0)) m]
                 (+ a b))))
      "(println (f {:a 10 :b 20}))"
      "30")
 
    (check-clj-output "let with seq destructuring"
-     (list `(defn f [(xs (Vec Int))] Int
+     (list `(defn f [(xs (HVec Int Int Int))] Int
               (let [,(br 'a 'b 'c) xs]
                 (+ a (+ b c)))))
      "(println (f [1 2 3]))"
@@ -929,12 +929,14 @@
 
    (check-clj-output "if-let with map destructuring binds the keys"
      (list `(defn f [(m (Map Keyword Int))] Int
-              (if-let [,(mt ':keys (br 'a 'b)) m] (+ a b) 0)))
+              (if-let [,(mt ':keys (br 'a 'b) ':or (mt 'a 0 'b 0)) m]
+                (+ a b)
+                0)))
      "(println (f {:a 3 :b 4}))"
      "7")
 
    (check-clj-output "when-let with seq destructuring"
-     (list `(defn f [(xs (Vec Int))] Int?
+     (list `(defn f [(xs (HVec Int Int))] Int?
               (when-let [,(br 'a 'b) xs] (+ a b))))
      "(println (f [10 20]))"
      "30")
@@ -1313,7 +1315,7 @@
      ;; → runtime NPE from valid Clojure).
      (check-clj-output ":or destructure defaults apply at runtime"
        (list (list 'defn 'f
-                   (br (list (mt ':keys (br 'a 'b) ':or (mt 'b 2))
+                   (br (list (mt ':keys (br 'a 'b) ':or (mt 'a 0 'b 2))
                              '(Map Keyword Int)))
                    'Int
                    (list '+ 'a 'b))
@@ -1346,12 +1348,13 @@
 
      ;; Nested sequential destructure round-trips.
      (check-clj-output "nested seq destructure in let"
-       (list (list 'let
-                   (br (list (br 'a (br 'b 'c))
-                             '(HVec Int (Vec Int)))
-                       (br 1 (br 2 3)))
-                   (list 'println (list '+ 'a 'b 'c))))
-       "" "6")
+       (list (list 'defn 'nested-sum
+                   (br (list 'input '(HVec Int (HVec Int Int))))
+                   'Int
+                   (list 'let
+                         (br (br 'a (br 'b 'c)) 'input)
+                         (list '+ 'a 'b 'c))))
+       "(println (nested-sum [1 [2 3]]))" "6")
 
      (check-clj-output "doseq pair destructure over a map"
        (list (list 'doseq (br (br 'k 'v) (mt ':a 1))

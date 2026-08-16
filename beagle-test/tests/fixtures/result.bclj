@@ -1,6 +1,6 @@
 #lang beagle/clj
 
-(ns beagle.result)
+(ns result)
 
 (defunion (Result T E)
   (Ok [(value T)])

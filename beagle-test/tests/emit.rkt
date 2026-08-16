@@ -435,7 +435,7 @@
   (check-true (matches? #rx"\\(extend-type String" out))
   (check-true (matches? #rx"Showable" out))
   (check-true
-   (matches? #rx"\\(\\$beagle\\$protocol\\$Showable\\$show \\[self\\]" out)))
+   (matches? #rx"\\(\\$beagle\\$protocol\\$Showable\\$show \\[\\^String self\\]" out)))
 
 ;; --- threading macros: surface reconstruction at emit ------------------------
 ;;

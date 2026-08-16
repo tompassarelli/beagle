@@ -24,7 +24,7 @@
   (check-not-exn (lambda () (check-file "ok-refer.bclj"))))
 
 (test-case "exhaustiveness reaches an imported union named by its alias"
-  (check-exn #rx"not exhaustive; missing cases: Rect"
+  (check-exn #rx"not exhaustive; missing cases: prov/Rect"
              (lambda () (check-file "nonexhaustive.bclj"))))
 
 ;; The arm types as the FIELD's declared type (Int|String), never the variant

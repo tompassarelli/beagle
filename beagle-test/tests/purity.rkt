@@ -571,8 +571,6 @@
     (parse-program
      (list
       (datum->syntax #f '(ns t.app) (vector "purity-location.bclj" 1 0 #f #f))
-      (datum->syntax #f
-                     (vector "purity-location.bclj" 2 0 #f #f))
       (datum->syntax #f '(define-target clj)
                      (vector "purity-location.bclj" 3 0 #f #f))
       (datum->syntax #f `(defn save ,(br 'box 'v) Any (reset! box v))

@@ -763,13 +763,14 @@
    (list 'defn 'normalize (br (list 'value 'Int)) 'Int 'value)
    invocation))
 
-(define (check-imported-define-box prog expected-prefix expected-name)
+(define (check-imported-define-box prog expected-prefix expected-name
+                                   [expected-type-prefix expected-prefix])
   (check-not-exn (lambda () (type-check! prog)))
   (define generated (last (program-forms prog)))
   (check-true (def-form? generated))
   (check-eq? (def-form-name generated) expected-name)
   (check-eq? (type-prim-name (def-form-type generated))
-             (string->symbol (format "~a/Box" expected-prefix)))
+             (string->symbol (format "~a/Box" expected-type-prefix)))
   (define ctor-call (def-form-value generated))
   (check-true (call-form? ctor-call))
   (check-eq? (call-form-fn ctor-call)
@@ -809,7 +810,8 @@
     (br 'macro-definition-site ':as 'provider)
     '(provider/define-box aliased "provider"))
    'provider
-   'aliased))
+   'aliased
+   'macro-definition-site))
 
 (test-case "cross-file defmacro: :refer keeps provider definition-site references"
   (check-imported-define-box

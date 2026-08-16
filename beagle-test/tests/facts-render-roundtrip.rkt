@@ -118,6 +118,22 @@
     (check-equal? (render-roundtrip out) out
                   (format "render is not a fixed point (emitted text not re-readable):\n~a" out))))
 
+(define (reader-rejection-case name src)
+  (test-case name
+    (define path (make-temporary-file "facts-reader-rejection-~a.bclj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file path #:exists 'truncate
+          (lambda (out) (display src out)))
+        (define-values (status stdout stderr)
+          (run "--emit-edn" (path->string path)))
+        (check-equal? status 1)
+        (check-equal? stdout "")
+        (check-regexp-match #rx"bad syntax `#\\^`" stderr))
+      (lambda ()
+        (when (file-exists? path) (delete-file path))))))
+
 (run-tests
  (test-suite "facts render — EXP-025 reader-macro inversion (G1–G5)"
 
@@ -208,15 +224,12 @@
              "(def o #js {:a 1})\n"
              #:has '("#js {:a 1}") #:no '("#%js"))
 
-   ;; G12 #^ legacy metadata shorthand — reads as (#%meta …), same as `^`, and
-   ;; renders NORMALIZED to `^` (the legacy #^ spelling is not preserved; #^ → ^
-   ;; is the correct, desired inversion since both mean identical metadata).
-   (gap-case "G12 #^String param tag renders as ^String"
-             "(defn f [#^String s] s)\n"
-             #:has '("^String") #:no '("#^" "#%meta"))
-   (gap-case "G12 #^{:tag} longhand renders as ^{:tag …}"
-             "(def #^{:tag String} x 1)\n"
-             #:has '("^{:tag String}") #:no '("#^" "#%meta"))
+   ;; G12 was removed from the language. Keep the old spellings as negative
+   ;; fixtures so the facts path cannot silently resurrect them.
+   (reader-rejection-case "G12 #^String legacy metadata is rejected"
+                          "(defn f [#^String s] s)\n")
+   (reader-rejection-case "G12 #^{:tag} legacy metadata is rejected"
+                          "(def #^{:tag String} x 1)\n")
 
    ;; G11 symbolic values ##Inf / ##-Inf / ##NaN
    (gap-case "G11 ##NaN ##Inf ##-Inf"

@@ -161,7 +161,7 @@
       "  value)\n")))
   (when (beagle-diagnostic? error)
     (define details (beagle-diagnostic-details error))
-    (check-equal? (hash-ref details 'error-line #f) 6)
+    (check-equal? (hash-ref details 'error-line #f) 5)
     (check-equal? (hash-ref details 'error-col #f) 3)))
 
 (test-case "typed keyword access records its checked representation owner"
@@ -270,16 +270,16 @@
        PRELUDE
        "(defn gate [(value Int)] Bool true)\n"
        "(defn use [(gate Int) (value Int gate)] Int value)\n"))))
-  (define local-callees
+  (define local-dependencies
     (parameterize ([current-namespace
                     (module->namespace 'beagle/private/check)])
-      (namespace-variable-value 'definition-local-callees)))
+      (namespace-variable-value 'definition-local-dependencies)))
   (define use
     (for/first ([form (in-list (program-forms prog))]
                 #:when (and (defn-form? form)
                             (eq? (defn-form-name form) 'use)))
       form))
-  (check-equal? (local-callees use (seteq 'gate 'use)) '(gate)))
+  (check-equal? (local-dependencies use (seteq 'gate 'use)) '(gate)))
 
 (test-case "map destructuring defaults see incoming scope, not projected siblings"
   ;; `fallback` is both an incoming String and the first projected Int. The

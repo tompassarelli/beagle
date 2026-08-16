@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns prov)
+
 ;; Provider for the cross-module scrutinee-narrowing tests: narrowing must reach
 ;; an IMPORTED member exactly as it reaches a same-module one.
 

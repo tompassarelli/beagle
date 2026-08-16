@@ -325,6 +325,7 @@
    #rx"beagle-fields: record Missing not found in provided files"
    (lambda ()
      (with-query-file
+      ""
       (lambda (f) (run-query (list "fields" "Missing" f)))))))
 
 (test-case "fields: checked-program failure reports its path"

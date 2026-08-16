@@ -475,7 +475,7 @@
   '(def x String (first *command-line-args*)))
 
 (check-ok "undeclared interop returns Any (no error)"
-  '(def x (.someUnknownMethod obj)))
+  '(def x Any (.someUnknownMethod obj)))
 
 ;; =============================================================================
 ;; Tests — map literals
@@ -489,7 +489,8 @@
    (lambda ()
      (check-prog `(def m (Map Any Any) ,(mt ':a 1))))))
 
-(check-ok "empty map literal passes"
+(check-err/rx "empty map literal needs an explicit element type"
+  #rx"omitted type did not resolve to a concrete monomorphic type"
   `(def m ,(mt)))
 
 ;; =============================================================================
@@ -504,7 +505,8 @@
    (lambda ()
      (check-prog `(def s (Set Any) ,(st 1 2 3))))))
 
-(check-ok "empty set literal passes"
+(check-err/rx "empty set literal needs an explicit element type"
+  #rx"omitted type did not resolve to a concrete monomorphic type"
   `(def s ,(st)))
 
 ;; =============================================================================
@@ -547,10 +549,10 @@
 ;; =============================================================================
 
 (check-ok "constructor call passes type check"
-  '(def f (File. "/tmp")))
+  '(def f Any (File. "/tmp")))
 
 (check-ok "constructor with no args passes"
-  '(def x (ArrayList.)))
+  '(def x Any (ArrayList.)))
 
 ;; =============================================================================
 ;; Tests — (:keyword target) typed projection
@@ -1435,12 +1437,12 @@
 (check-err/rx "qualified: unresolved alias is an error naming the require"
   #rx"require babashka\\.fs :as fs"
   '(define-target clj)
-  '(def x (fs/exists? "/tmp")))
+  '(def x Any (fs/exists? "/tmp")))
 
 (check-err/rx "qualified: unresolved alias is an error for js"
   #rx"tgt/keep-target.*alias `tgt` is not required"
   '(define-target js)
-  '(def x (tgt/keep-target "" true true)))
+  '(def x Any (tgt/keep-target "" true true)))
 
 (check-err/rx "js: unresolved record accessor points at the canonical name"
   #rx"unresolved function `pointer-gesture-pointer-id`.*did you mean `pointergesture-pointer-id`"
@@ -1465,28 +1467,28 @@
   #rx"did you mean: fs/exists\\?"
   '(define-target clj)
   '(require babashka.fs :as fs)
-  '(def x (fs/exits? "/tmp")))
+  '(def x Any (fs/exits? "/tmp")))
 
 (check-warns "qualified: uncatalogued namespace notes once"
   #rx"selmer\\.parser has no typed catalog entries"
   '(define-target clj)
   '(require selmer.parser :as tmpl)
-  (list 'def 'x (list 'tmpl/render "t" (mt)))
-  (list 'def 'y (list 'tmpl/render-file "f" (mt))))
+  (list 'def 'x 'Any (list 'tmpl/render "t" (mt)))
+  (list 'def 'y 'Any (list 'tmpl/render-file "f" (mt))))
 
 (check-ok "qualified: quoted data and clojure.* are exempt"
   '(define-target clj)
-  '(def data (quote (fs/exists? other/thing)))
-  '(def y (clojure.core/identity 1)))
+  '(def data Any (quote (fs/exists? other/thing)))
+  '(def y Any (clojure.core/identity 1)))
 
 (check-ok "qualified: Java static prefixes are exempt"
   '(define-target clj)
   '(def t Int (System/currentTimeMillis))
-  '(def u (SomeUnknownClass/method 1)))
+  '(def u Any (SomeUnknownClass/method 1)))
 
 (check-ok "qualified: nix target is untouched by the pass"
   '(define-target nix)
-  '(def x (lib/mkDefault 1)))
+  '(def x Any (lib/mkDefault 1)))
 
 ;; =============================================================================
 ;; Tests — numeric-preserving arithmetic (cracks thread 20260613013145 #3)
