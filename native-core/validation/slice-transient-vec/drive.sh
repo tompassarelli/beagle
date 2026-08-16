@@ -63,6 +63,11 @@ paired_index="$(function_index 'build-paired!')"
   || die "copy-nonempty! function index is unresolved"
 [[ "$paired_index" =~ ^[0-9]+$ ]] \
   || die "build-paired! function index is unresolved"
+paired_type="$(sed -nE \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_$paired_index\\(.*/\\1/p" \
+  "$artifacts/module_0.h")"
+[[ "$paired_type" =~ ^native_m0_type_[0-9]+$ ]] \
+  || die "build-paired! return type is unresolved"
 
 gcc -std=c17 -pedantic -Wall -Wextra -Werror \
   -DBUILD_ORDERED_FN="native_m0_fn_$build_index" \
@@ -70,6 +75,58 @@ gcc -std=c17 -pedantic -Wall -Wextra -Werror \
   -I "$artifacts" "$artifacts/module_0.c" "$artifacts/native_shim.c" \
   "$here/main.c" -lm -o "$scratch/probe"
 timeout --foreground --kill-after=2s 20s "$scratch/probe"
+
+cat >"$scratch/paired-main.c" <<'C'
+#include "module_0.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifndef BUILD_PAIRED_FN
+#error "BUILD_PAIRED_FN must name the generated build-paired! function"
+#endif
+#ifndef PAIRED_BUILD_TYPE
+#error "PAIRED_BUILD_TYPE must name the generated PairedBuild type"
+#endif
+
+typedef PAIRED_BUILD_TYPE paired_build;
+
+_Alignas(max_align_t) static uint8_t paired_arena_storage[4096];
+
+int main(void) {
+  native_arena arena;
+  native_capability capability = {UINT64_C(1)};
+  paired_build built;
+  int64_t index;
+
+  native_arena_init(&arena, paired_arena_storage,
+                    sizeof(paired_arena_storage));
+  built = BUILD_PAIRED_FN(&arena, &capability);
+  if ((native_vec_length(built.field_0) != INT64_C(4)) ||
+      (native_vec_length(built.field_1) != INT64_C(4))) {
+    return 1;
+  }
+  for (index = INT64_C(0); index < INT64_C(4); index += INT64_C(1)) {
+    int64_t left = *(const int64_t *)native_vec_at(
+        built.field_0, index, (int64_t)sizeof(int64_t));
+    bool right = *(const bool *)native_vec_at(
+        built.field_1, index, (int64_t)sizeof(bool));
+    if ((left != index) || (right != (index < INT64_C(2)))) {
+      return 2;
+    }
+  }
+  native_arena_destroy(&arena);
+  return 0;
+}
+C
+
+gcc -std=c17 -pedantic -Wall -Wextra -Werror \
+  -DBUILD_PAIRED_FN="native_m0_fn_$paired_index" \
+  -DPAIRED_BUILD_TYPE="$paired_type" \
+  -I "$artifacts" "$artifacts/module_0.c" "$artifacts/native_shim.c" \
+  "$scratch/paired-main.c" -lm -o "$scratch/paired-probe"
+timeout --foreground --kill-after=2s 20s "$scratch/paired-probe"
 
 cat >"$negative_fixture" <<'BGL'
 #lang beagle
