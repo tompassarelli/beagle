@@ -2458,6 +2458,22 @@
             (core/functiondef-blocks function))))
       (core/nativecoreprogram-functions program))))
 
+(defn program-has-transient-vec? [(program core/NativeCoreProgram)] Bool
+  (some?
+    (some
+      (fn [(function core/FunctionDef)] Bool
+        (some?
+          (some
+            (fn [(block core/BasicBlock)] Bool
+              (some?
+                (some
+                  (fn [(instruction core/Instruction)] Bool
+                    (instance? native.core.TransientVecPushInstructionV0
+                      instruction))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      (core/nativecoreprogram-functions program))))
+
 (defn parameterless-target?
   [(blocks (Vec core/BasicBlock))
    (target core/NativeId)] Bool
@@ -2762,6 +2778,9 @@
       (program-has-host-extern? program)
       (->QbeFailure
         "QBE host extern ABI is unsupported: optional Text handles have no QBE representation")
+      (program-has-transient-vec? program)
+      (->QbeFailure
+        "QBE TransientVec builder is unsupported: transient vector operations have no QBE runtime representation")
       (program-has-vector-sort? program)
       (->QbeFailure
         "QBE vector sort is unsupported: sealed value descriptors have no QBE data representation")

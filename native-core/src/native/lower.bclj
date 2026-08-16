@@ -5960,6 +5960,10 @@
           (closed-transient-thread-expression? index else-node collection-kind
             owner)))
 
+      (and (= "vector" collection-kind)
+        (closed-transient-bang-body? index node collection-kind owner))
+      true
+
       (source-call-named? index node "reduce")
       (closed-transient-reduce? index node collection-kind owner)
 

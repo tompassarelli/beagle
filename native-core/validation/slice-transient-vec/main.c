@@ -1,9 +1,13 @@
 #include "module_0.h"
 
 #include <inttypes.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #ifndef BUILD_ORDERED_FN
 #error "BUILD_ORDERED_FN must name the generated build-ordered! function"
@@ -41,6 +45,51 @@ static int check_ordered(const native_vec *values) {
               index, observed, index);
       return 2;
     }
+  }
+  return 0;
+}
+
+static void provoke_frozen_use(bool freeze_again) {
+  _Alignas(max_align_t) uint8_t storage[1024];
+  native_arena arena;
+  native_vec *seed;
+  native_transient_vec *builder;
+  int64_t value = INT64_C(1);
+
+  native_arena_init(&arena, storage, sizeof(storage));
+  seed = native_vec_new(&arena, INT64_C(0), (int64_t)ELEMENT_STRIDE,
+                        _Alignof(int64_t));
+  builder = native_transient_vec_new(&arena, seed, (int64_t)ELEMENT_STRIDE,
+                                     _Alignof(int64_t));
+  (void)native_transient_vec_freeze(builder);
+  if (freeze_again) {
+    (void)native_transient_vec_freeze(builder);
+  } else {
+    (void)native_transient_vec_push(builder, &value);
+  }
+  _exit(0);
+}
+
+static int expect_frozen_trap(bool freeze_again) {
+  pid_t child = fork();
+  int status;
+
+  if (child < 0) {
+    perror("fork");
+    return 1;
+  }
+  if (child == 0) {
+    provoke_frozen_use(freeze_again);
+  }
+  if (waitpid(child, &status, 0) != child) {
+    perror("waitpid");
+    return 1;
+  }
+  if (!WIFSIGNALED(status) || (WTERMSIG(status) != SIGABRT)) {
+    fprintf(stderr,
+            "slice-transient-vec: frozen %s did not trap with SIGABRT\n",
+            freeze_again ? "freeze" : "push");
+    return 1;
   }
   return 0;
 }
@@ -101,6 +150,10 @@ int main(void) {
     fputs("slice-transient-vec: nonempty run changed fixed arena capacity\n",
           stderr);
     return 7;
+  }
+  if ((expect_frozen_trap(false) != 0) ||
+      (expect_frozen_trap(true) != 0)) {
+    return 8;
   }
 
   printf("slice-transient-vec PASS appends=%" PRId64
