@@ -16,12 +16,6 @@
 (defn clear-fresh! [] Nil
   (clear-prepared! (atom nil)))
 
-(defn dynamic-or-pair [(dynamic Any) (ready? Bool)] String
-  (if ready?
-    dynamic
-    (let [(pair (HVec Int String)) [1 "ready"]]
-      pair)))
-
 (defn maybe-pair [(ready? Bool)] (U (HVec Int String) Nil)
   (if ready?
     (let [(pair (HVec Int String)) [1 "ready"]]
