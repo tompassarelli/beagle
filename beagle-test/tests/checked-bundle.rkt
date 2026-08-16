@@ -205,13 +205,17 @@
     "(ns bundle.app (:require [bundle.provider :as provider]))\n"
     "(defn run [] Int (provider/answer))\n")))
 
-(define (run-file-bundle checkout)
+;; `reversed?` swaps the two --bundle arguments. The resolved closure is
+;; canonically ordered by logical source id, so argument order must not reach
+;; the response at all.
+(define (run-file-bundle checkout #:reversed? [reversed? #f])
+  (define provider
+    (path->string (build-path checkout "src" "bundle" "provider.bgl")))
+  (define app
+    (path->string (build-path checkout "src" "bundle" "app.bgl")))
   (run-command
    (root/ "bin/beagle-ast")
-   (list
-    "--bundle"
-    (path->string (build-path checkout "src" "bundle" "provider.bgl"))
-    (path->string (build-path checkout "src" "bundle" "app.bgl")))))
+   (cons "--bundle" (if reversed? (list app provider) (list provider app)))))
 
 (define (bundle->source-facts bundle-output directory)
   (define bundle (string->jsexpr bundle-output))
@@ -504,14 +508,17 @@
          (define-values (status-a bundle-a errors-a)
            (run-file-bundle checkout-a))
          (define-values (status-b bundle-b errors-b)
-           (run-file-bundle checkout-b))
+           (run-file-bundle checkout-b #:reversed? #t))
          (check-equal? status-a 0 errors-a)
          (check-equal? status-b 0 errors-b)
          (check-equal? bundle-a bundle-b)
+         ;; Canonical logical-source-id order, not argument or dependency
+         ;; order: the closed closure sorts by source id so the response is a
+         ;; function of the sources alone.
          (check-equal?
           (map (lambda (module) (hash-ref module 'source))
                (hash-ref (string->jsexpr bundle-a) 'modules))
-          '("src/bundle/provider.bgl" "src/bundle/app.bgl"))
+          '("src/bundle/app.bgl" "src/bundle/provider.bgl"))
          (define-values (facts-status-a facts-a facts-errors-a)
            (bundle->source-facts bundle-a checkout-a))
          (define-values (facts-status-b facts-b facts-errors-b)
