@@ -10,6 +10,9 @@
 # Requires: self-host/native/beagle-selfhost (run build.sh first), bb, the
 # checkout's pinned racket (resolved via bin/_beagle-racket).
 # BEAGLE_NATIVE_BIN overrides the binary under test (e.g. a nix-built result).
+#
+# Corpus rule: a module is byte-compared only when its requires can be served
+# under closed module resolution. See core_required_by below.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -33,9 +36,50 @@ mkdir -p "$collects"
 ln -sfn "$ROOT/beagle-lib" "$collects/beagle"
 export PLTCOLLECTS="$collects:"
 
-PASS=0; FAIL=0
-ok()  { echo "  PASS: $1"; PASS=$((PASS+1)); }
-bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+# The Core source extension is derived from the target table, never spelled here.
+source "$ROOT/share/targets.sh"
+CORE_EXT=".${BEAGLE_TARGET_SRC_EXT[core]}"
+
+# Closed module resolution serves a require from the explicit source bundle or
+# from a declared module root, and a root candidate always carries the
+# IMPORTER's profile extension (beagle-lib/private/module-source-root.rkt,
+# mirrored by self-host/src/selfhost/main.bclj). A Beagle Core provider is
+# therefore unreachable from a hosted importer through this one-file
+# invocation, in every leg — Racket oracle, bb seed, and native binary alike.
+# Fram moved fram.types/store/schema/... to Core, so those corpus modules
+# cannot be byte-compared here; the same rule already selects
+# self-host/verify-selfhost.sh's fram corpus. Read off disk rather than
+# hand-listed, so a corpus that moves a provider back to hosted source
+# re-enters this gate by itself.
+core_required_by() {           # <src> -> prints "NAMESPACE -> PATH", or fails
+    local src="$1" namespace relative root required required_relative
+    namespace="$(sed -nE 's/^[[:space:]]*\(ns[[:space:]]+([A-Za-z0-9._-]+).*/\1/p' \
+                     "$src" | head -1)"
+    [ -n "$namespace" ] || return 1
+    relative="$(printf '%s' "$namespace" | tr '.-' '/_')"
+    root="${src%/"$relative".*}"
+    [ "$root" != "$src" ] || return 1
+    for required in $(
+        {
+            grep -oE '\(:?require[[:space:]]+[A-Za-z0-9._-]+' "$src" \
+                | sed -E 's/.*[[:space:]]//'
+            grep -oE '\[[A-Za-z0-9._-]+[[:space:]]+:as' "$src" \
+                | sed -E 's/^\[//; s/[[:space:]]+:as$//'
+        } | sort -u
+    ); do
+        required_relative="$(printf '%s' "$required" | tr '.-' '/_')"
+        if [ -f "$root/$required_relative$CORE_EXT" ]; then
+            printf '%s -> %s\n' "$required" "$root/$required_relative$CORE_EXT"
+            return 0
+        fi
+    done
+    return 1
+}
+
+PASS=0; FAIL=0; SKIP=0
+ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
+bad()  { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+skip() { echo "  SKIP: $1"; SKIP=$((SKIP+1)); }
 
 for src in "${MODULES[@]}"; do
     name="$(basename "$src" .bclj)"
@@ -43,10 +87,16 @@ for src in "${MODULES[@]}"; do
     bbout="$LAB/$name-bb.clj"
     nativeout="$LAB/$name-native.clj"
 
-    BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$src" "$oracle" >/dev/null 2>&1 \
-        || { bad "$name racket oracle mint"; continue; }
-    bb -cp "$SEED" -m selfhost.main emit "$src" > "$bbout" 2>/dev/null \
-        || { bad "$name bb emit"; continue; }
+    if core_provider="$(core_required_by "$src")"; then
+        skip "$name — requires a Beagle Core provider ($core_provider); no leg resolves a Core provider for a hosted importer"
+        continue
+    fi
+
+    BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$src" "$oracle" \
+        >/dev/null 2>"$LAB/$name-oracle.err" \
+        || { bad "$name racket oracle mint — $(head -2 "$LAB/$name-oracle.err" | tr '\n' ' ')"; continue; }
+    bb -cp "$SEED" -m selfhost.main emit "$src" > "$bbout" 2>"$LAB/$name-bb.err" \
+        || { bad "$name bb emit — $(head -2 "$LAB/$name-bb.err" | tr '\n' ' ')"; continue; }
     "$NATIVE" emit "$src" > "$nativeout" 2>"$LAB/$name-native.err" \
         || { bad "$name native emit — $(head -2 "$LAB/$name-native.err" | tr '\n' ' ')"; continue; }
 
@@ -63,5 +113,5 @@ for src in "${MODULES[@]}"; do
 done
 
 echo ""
-echo "=== verify-native: $PASS passed, $FAIL failed ==="
+echo "=== verify-native: $PASS passed, $FAIL failed, $SKIP skipped ==="
 [ "$FAIL" -eq 0 ]
