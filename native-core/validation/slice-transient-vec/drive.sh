@@ -75,7 +75,7 @@ qbe_status=$?
 set -e
 [[ $qbe_status -ne 0 && $qbe_status -ne 124 ]] \
   || die "QBE did not fail closed for TransientVec"
-rg -E 'REFUSED .*QBE.*(TransientVec|transient vector)|QBE.*(TransientVec|transient vector).*unsupported' \
+rg -e 'REFUSED .*QBE.*(TransientVec|transient vector)|QBE.*(TransientVec|transient vector).*unsupported' \
   "$qbe_log" >/dev/null \
   || die "QBE refusal did not identify unsupported TransientVec materialization"
 [[ ! -e "$qbe_out/report.txt" && ! -e "$qbe_out/module_0.ssa" ]] \
