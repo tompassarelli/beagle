@@ -6101,8 +6101,12 @@
 ;; refinement only fires when the declared return is itself numeric-or-Any, so
 ;; a user-shadowed op with a different contract is untouched.
 
-(define NUMERIC-ARITHMETIC-OPS '(+ - * /))
 (define NUMERIC-PRESERVING-OPS '(+ - * inc dec min max abs))
+;; Every op whose declared numeric parameter is a real operand precondition,
+;; so an unchecked Any must be narrowed before it reaches one. Restricting
+;; this to the binary operators left (inc x) accepting an Any that (+ x 1)
+;; rejects, though it is the same operation with the same precondition.
+(define STRICT-NUMERIC-OPS '(+ - * / inc dec min max abs))
 
 (define (numeric-class t)
   (define current (prune-type t))
@@ -6302,7 +6306,7 @@
   ;; with every expected type. Arithmetic is stricter: its Number parameter is
   ;; a real operand precondition, so an unchecked value must be narrowed first.
   (define strict-numeric-operand?
-    (and (memq fn-name NUMERIC-ARITHMETIC-OPS)
+    (and (memq fn-name STRICT-NUMERIC-OPS)
          (memq (numeric-class expected-type) '(int float number))))
   (define compatible?
     (cond

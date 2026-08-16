@@ -453,21 +453,15 @@
    ;;    through guards; unguarded use in a non-nil position is a compile
    ;;    error pointing at the missing guard.
    ;; 2. Vec element flow via poly — (first (str/split s #",")) : String.
-   ;;    Deliberately NOT nullable: first-of-empty returning nil stays the
-   ;;    accepted Clojure prior in v0 (the honest (U A Nil) would flood
-   ;;    every call site with guards for marginal gain).
+   ;;    The element accessors themselves (first/second/last/peek/nth) now
+   ;;    live in STDLIB-PORTABLE, so every target inherits them; only the
+   ;;    collection-shaped forms below remain clj-local.
    'parse-long    (type-fn (list (p 'String)) #f
                            (type-union (list (p 'Int) (p 'Nil))))
    'parse-double  (type-fn (list (p 'String)) #f
                            (type-union (list (p 'Float) (p 'Nil))))
    'parse-boolean (type-fn (list (p 'String)) #f
                            (type-union (list (p 'Bool) (p 'Nil))))
-   'first  (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
-   'second (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
-   'last   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
-   'peek   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
-   'nth    (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))) (p 'Int)) (tv 'A)
-                    #:rest (p 'Any))
    'reverse  (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
                       (type-app 'Vec (list (tv 'A))))
    'distinct (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))

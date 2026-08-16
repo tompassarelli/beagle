@@ -10,13 +10,19 @@
 
 (define STDLIB-PORTABLE
   (hash
-   ;; --- collection access (parametric → Any in v0) --------------------------
-   'first      (fn-of '(Any) 'Any)
-   'second     (fn-of '(Any) 'Any)
-   'last       (fn-of '(Any) 'Any)
+   ;; --- collection access ---------------------------------------------------
+   ;; Element accessors are parametric over the element type so it survives the
+   ;; access. An Any return does not merely lose precision: it silently
+   ;; disables scrutinee-driven exhaustiveness checking, because Any resolves
+   ;; to no union in check-match-exhaustiveness. Deliberately NOT nullable:
+   ;; first-of-empty returning nil stays the accepted Clojure prior in v0.
+   'first      (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
+   'second     (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
+   'last       (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
    'rest       (fn-of '(Any) 'Any)
    'next       (fn-of '(Any) 'Any)
-   'nth        (fn-of '(Any Int) 'Any #:rest 'Any)
+   'nth        (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))) (p 'Int))
+                        (tv 'A) #:rest (p 'Any))
    'get        (fn-of '(Any Any) 'Any #:rest 'Any)
    'get-in     (fn-of '(Any Any) 'Any #:rest 'Any)
    'count      (fn-of '(Any) 'Int)
@@ -229,7 +235,7 @@
    'nfirst     (fn-of '(Any) 'Any)
    'nnext      (fn-of '(Any) 'Any)
    'fnext      (fn-of '(Any) 'Any)
-   'peek       (fn-of '(Any) 'Any)
+   'peek       (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
    'pop        (fn-of '(Any) 'Any)
    'rand-nth   (fn-of '(Any) 'Any)
    'shuffle    (fn-of '(Any) 'Any)

@@ -891,6 +891,93 @@
 (check-fixture-silent "match with wildcard and non-sibling records stays silent"
   "match-wildcard-non-sibling-silent.bclj")
 
+;; =============================================================================
+;; Tests — element accessors preserve the element type on EVERY target
+;;
+;; An erased (nth v i) : Any does not merely lose precision. Any is not a key of
+;; UNION-MEMBERS, so check-match-exhaustiveness resolves no union, skips its
+;; strict branch entirely, and a match missing a constructor compiles clean;
+;; what is left is the RECORD-FIELDS heuristic, which warns about every record
+;; in the program. The target is named explicitly in every case below because
+;; the default helper is clj, which already carried the parametric signatures
+;; and would therefore prove nothing.
+;; =============================================================================
+
+(define (check-prog/target target . forms)
+  (type-check!
+   (parse-program (map (lambda (f) (datum->syntax #f f))
+                       (cons (list 'define-target target) forms)))))
+
+(define (shape-union-forms . rest)
+  (append (list '(defrecord Circle [(radius Int)])
+                '(defrecord Square [(side Int)])
+                '(defunion Shape Circle Square))
+          rest))
+
+(define (check-target-silent target name forms)
+  (test-case (format "~a: ~a" target name)
+    (define output (open-output-string))
+    (parameterize ([current-error-port output])
+      (apply check-prog/target target forms))
+    (check-equal? "" (get-output-string output))))
+
+(for ([target (in-list '(core clj js nix))])
+  (check-target-silent target
+    "complete match over a union reached through nth is silent"
+    (shape-union-forms
+     `(defn measure [(shapes (Vec Shape))] Int
+        (match (nth shapes 0)
+          ,(br '(Circle radius) 'radius)
+          ,(br '(Square side) 'side)))))
+
+  (check-target-silent target
+    "complete match over a union reached through first is silent"
+    (shape-union-forms
+     `(defn measure [(shapes (Vec Shape))] Int
+        (match (first shapes)
+          ,(br '(Circle radius) 'radius)
+          ,(br '(Square side) 'side)))))
+
+  (test-case (format "~a: missing case behind nth is a non-exhaustive error" target)
+    (check-exn #rx"not exhaustive"
+      (lambda ()
+        (apply check-prog/target target
+               (shape-union-forms
+                `(defn measure [(shapes (Vec Shape))] Int
+                   (match (nth shapes 0)
+                     ,(br '(Circle radius) 'radius)
+                     ,(br '_ 0))))))))
+
+  ;; The downstream witness, both operand positions: + enforces every argument
+  ;; against Number, so an erased element rejects in either one.
+  (test-case (format "~a: (+ 1 (nth v 0)) on a (Vec Int) checks clean" target)
+    (check-not-exn
+     (lambda ()
+       (check-prog/target target
+                          '(defn total [(v (Vec Int))] Int (+ 1 (nth v 0)))))))
+
+  (test-case (format "~a: (+ (nth v 0) 1) on a (Vec Int) checks clean" target)
+    (check-not-exn
+     (lambda ()
+       (check-prog/target target
+                          '(defn total [(v (Vec Int))] Int (+ (nth v 0) 1)))))))
+
+;; inc/dec declare a Number operand, the same precondition + - * / declare.
+;; Only the binary operators reached the strict operand check, so (inc x) used
+;; to accept an Any that (+ x 1) rejected.
+(for ([target (in-list '(core clj js nix))])
+  (test-case (format "~a: inc rejects an unnarrowed Any operand" target)
+    (check-exn #rx"expected Number, got Any"
+      (lambda ()
+        (check-prog/target target
+                           '(defn total [(v (Vec Int))] Int (inc (get v 0)))))))
+
+  (test-case (format "~a: dec rejects an unnarrowed Any operand" target)
+    (check-exn #rx"expected Number, got Any"
+      (lambda ()
+        (check-prog/target target
+                           '(defn total [(v (Vec Int))] Int (dec (get v 0))))))))
+
 ;; --- or-pattern (literal alternatives, v1) ---
 
 (test-case "match with or-pattern of literals type-checks"
