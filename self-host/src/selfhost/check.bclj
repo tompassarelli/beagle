@@ -794,10 +794,16 @@
    {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE)
     "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
+    "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
+    "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE)
     "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE)
+    "min" (make-poly ["A"]
+            (make-fn [] (make-var "A") (make-var "A"))
+            {"A" NUMBER-TYPE})
     "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)
     "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
+    "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE)
     "abs" (make-poly ["A"]
             (make-fn [(make-var "A")] nil (make-var "A"))
             {"A" NUMBER-TYPE})}
