@@ -791,6 +791,7 @@
       (call-with-fresh-type-metas
        (lambda ()
          (set! env (build-initial-env prog))
+         (check-module-interface-resolution! prog)
          (define callable-sync
            (program-callable-synchronization-table prog))
          (define return-callable-sync
@@ -823,7 +824,6 @@
                               [current-unstable-bindings (collect-set!-targets form)])
                  (check-target-form form)
                  (check-form form env)))
-             (check-module-interface-resolution! prog)
              (check-qualified-resolution! prog env)
              (check-scalar-provenance! prog)
              (check-nix-free-dotted! prog)
@@ -6408,6 +6408,7 @@
                             (set! inference-ok? #f)
                             (error-handler failure #f))])
            (set! env (build-initial-env prog))
+           (check-module-interface-resolution! prog)
            (define callable-sync
              (program-callable-synchronization-table prog))
            (define return-callable-sync
@@ -6448,7 +6449,6 @@
              ;; violations into one diagnostic), so it reports through the same
              ;; handler with no specific form stx.
              (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
-               (check-module-interface-resolution! prog)
                (check-qualified-resolution! prog env))
              ;; Purity owns one boundary per definition. Its reporter receives
              ;; the original authored declaration syntax and continues after a
