@@ -7,6 +7,9 @@
 (defn global-size [] Int
   (if (= sample-values []) 99 (count sample-values)))
 
+(defn empty-first-global-size [] Int
+  (if (= [] sample-values) 99 (count sample-values)))
+
 (defn local-shadow-size [] Int
   (let [(sample-values (Vec Int)) [1 2 3]]
     (count sample-values)))

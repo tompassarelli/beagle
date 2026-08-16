@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Compile and execute one complete native module through both supported C17
-# frontends. The entry exercises the generated arena/capability ABI and returns
-# the two-element module-global vector length as its process status.
+# frontends. The entries exercise the generated arena/capability ABI and both
+# contextual empty-vector equality orientations, then return vector lengths as
+# their process status.
 
 set -euo pipefail
 
@@ -80,6 +81,7 @@ run_frontend() {
 }
 
 run_frontend gcc "$gcc_bin" global-size native_m0_fn_0 arena+capability 2
+run_frontend gcc-empty-first "$gcc_bin" empty-first-global-size native_m0_fn_0 arena+capability 2
 run_frontend clang "$clang_bin" local-shadow-size native_m0_fn_0 arena+capability 3
 
 cli_stage="$scratch/cli"

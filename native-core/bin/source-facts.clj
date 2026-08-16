@@ -468,6 +468,8 @@
   (if (= "threading" (get e "node"))
     (emit-expr (get e "desugared"))
     (let [n (nid)]
+    (when-let [inferred (get e "inferredType")]
+      (row! n "inferred-type" "n" (emit-ann inferred)))
     (case (get e "node")
       "literal" (do (row! n "form-kind" "t" "literal")
                     (row! n "literal-kind" "t" (str (get e "kind")))

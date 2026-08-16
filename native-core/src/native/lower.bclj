@@ -5785,6 +5785,15 @@
     nil
     (typeresolutionv0-type-id (resolve-source-type index annotation))))
 
+(defn checked-expression-type
+  [(env BodyEnvV0) (state BodyStateV0) (expression core/NativeId)]
+  (U core/NativeId Nil)
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (inferred (U core/NativeId Nil))
+        (annotation-native-type index
+          (index-first-object index expression "inferred-type"))]
+    (if (some? inferred) inferred (source-ref-type env state expression))))
+
 (defn contextual-argument-type
   [(constructor (U core/TypeDef Nil))
    (signature (U TypedFunctionV0 Nil))
@@ -5953,16 +5962,26 @@
 (defn equality-empty-argument-type
   [(types (Vec core/TypeDef))
    (index SourceIndexV0)
+   (env BodyEnvV0)
+   (state BodyStateV0)
    (callee String)
    (position Int)
    (prior-types (Vec core/NativeId))
+   (arguments (Vec core/NativeId))
    (argument core/NativeId)]
   (U core/NativeId Nil)
-  (if (and (= position 1)
-           (= 1 (count prior-types))
-           (or (= "=" callee) (= "not=" callee)))
-    (let [(peer core/NativeId) (nth prior-types 0)]
+  (if (or (= "=" callee) (= "not=" callee))
+    (let [(peer (U core/NativeId Nil))
+          (cond
+            (and (= position 1) (= 1 (count prior-types)))
+            (nth prior-types 0)
+
+            (and (= position 0) (= 2 (count arguments)))
+            (checked-expression-type env state (nth arguments 1))
+
+            :else nil)]
       (cond
+        (nil? peer) nil
         (and (empty-vector-form? index argument) (vector-type? types peer)) peer
         (and (empty-map-form? index argument) (map-type? types peer)) peer
         (and (empty-set-form? index argument) (set-type? types peer)) peer
@@ -13826,8 +13845,8 @@
                             (preserved-collection-argument-type types bare-callee
                               (count args) position expected)
                             (equality-expected (U core/NativeId Nil))
-                            (equality-empty-argument-type types index bare-callee
-                              position value-types argument-node)
+                            (equality-empty-argument-type types index env current
+                              bare-callee position value-types args argument-node)
                             (argument-expected (U core/NativeId Nil))
                             (if (some? declared-expected)
                               declared-expected
