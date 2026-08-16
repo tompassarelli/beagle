@@ -53,6 +53,21 @@ jobs:
             bash scripts/check-release-notes.sh "$notes_tag"
           done
 
+      # Tag-keyed on purpose, and a separate script rather than another check
+      # inside check-release-notes.sh: that script is replayed above over every
+      # committed notes file, so it runs with older tags against the current
+      # tree. A version assertion there would fail every push to main the moment
+      # a second notes file exists. Placed before the toolchain installs so a
+      # mistagged release dies in seconds rather than after a native-image build.
+      - name: Verify release tag matches declared versions (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/check-release-version.sh "${{ github.ref_name }}"
+
+      # The two release gates above are themselves tested; nothing globs
+      # bin/test/*/run.sh, so this explicit step is what makes that test run.
+      - name: Test the release gates
+        run: bin/test/release-gates/run.sh
+
       # GraalVM native-image links against a C toolchain + zlib at build time.
       # The ubuntu runner ships them, but install explicitly so a base-image
       # change can't silently break the image link step.
@@ -132,6 +147,7 @@ jobs:
         run: |
           notes_file=".github/release-notes/${{ github.ref_name }}.md"
           bash scripts/check-release-notes.sh "${{ github.ref_name }}"
+          bash scripts/check-release-version.sh "${{ github.ref_name }}"
           gh release create "${{ github.ref_name }}" \
             self-host/native/beagle-selfhost \
             self-host/native/beagle-selfhost.seed-nar-hash \

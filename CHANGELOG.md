@@ -4,7 +4,7 @@ All notable changes to beagle are recorded here. This file is the canonical vers
 
 Format: loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Entries are grouped by impact, not by commit. Bullets describe behavior visible to authors or downstream tooling — internal refactors only appear when they changed something observable. Commit SHAs are cited for headline items only.
 
-This file begins at v0.16.0. Prior history lives in git tags (v0.7.1 → v0.15.3).
+This file begins at v0.16.0. Prior history lives in git tags (v0.7.1 → v0.15.3). It is not continuous: v0.18.0 → v0.21.1 were released without sections here, and the gap is recorded below rather than reconstructed.
 
 ## [Unreleased]
 
@@ -16,6 +16,39 @@ This file begins at v0.16.0. Prior history lives in git tags (v0.7.1 → v0.15.3
 ### Added
 
 - **`beagle ts-externs ENTRY.d.ts`** — typed beagle wrappers generated from a package's TypeScript declarations. Beagle could not read `.d.ts`, so every npm dependency was hand-declared as `Any` and unchecked; the declaration corpus that already describes those packages was unreachable. The mapping is lossy by design and degrades rather than guesses: primitives, arrays, and promises map; classes, generics, tuples, and function types become `Any`. Optional parameters become clauses of one multi-arity `defn`, TS overloads collapse into the same name, variadic signatures become a rest param forwarded with `js/spread`, and primitive-typed properties get a reader and a writer. What survives is what beagle can enforce: arity, primitive argument types, and whether the member exists at all.
+
+## [0.22.0] — 2026-08-16
+
+Native Core becomes a practical substrate for standalone command programs and interactive Wasm engines, and the first compiler-owned semantic-unit reuse seam lands. Whole-program compilation remains the authoritative release path.
+
+### Added
+
+- **Wasm entry ABI v1** (db8949d, 2108b3b): repeated `--entry` flags now produce distinct, qualified `beagle_wasm_entry_v1__<ns>__<name>` exports. Resource-bearing entries share an instance arena, expose explicit reset, and retain the zero-import reactor contract. The v1 runtime I/O surface lets a host feed byte records through the exported environment mailbox and read registered Buffer storage directly from linear memory; entry results, seams, adapter source, and runtime policy stay bound into the build receipts.
+- **Native programs own their operating-system boundary** (c7c7465, 7886228, 9287f9f): typed capabilities now cover bounded filesystem inspection and reads, atomic writes, directory creation, append, wall-clock formatting, sleep, inherited and captured processes, and explicit streaming child-process lifecycles. `beagle native-exe` takes one typed `(Vec String)` argument vector as its entry boundary (a2cb465), so a command-line executable no longer needs hosted wrapper logic for arguments or output.
+- **Native data tooling** (9becba9, a880b23, 6f455f3): compiler-shipped Beagle libraries add datum reader events, strict JSON and EDN event codecs with structured failures, and structural Nix option-path extraction and suggestion utilities.
+- **Coherent multi-module native builds** (0ce9aa8): native lowering composes complete source bundles, resolves qualified cross-module calls, preserves imported unions and match context, and derives vector-literal types without downstream decoy declarations.
+- **Bounded semantic-unit reuse** (fa3ed1e, 4b04546, ab5803e): the compiler can extract, validate, select, and deterministically reassemble exact typed/native unit payloads across layout-only, private-body, and public-interface mutations, over a lossless unit wire and a host runtime lifecycle. This is compiler groundwork — not a production incremental cache and not a new artifact format.
+
+### Fixed
+
+- Nullable text-index results, imported union-member coercion, zero-variant constructors, callback lowering, scalar conversions, source provenance, root-arena lifetime, and Wasm/POSIX shim separation now fail or lower at their owning boundary (fb03973).
+- JavaScript emission preserves qualified aliases under local shadowing (d63de10) and detects asynchronous work nested inside emitted call and assignment forms.
+- Native build reports and semantic identities remain deterministic and fail closed when source, interface, obligation, or payload claims disagree.
+- The Nix package ships the complete native toolchain, including the native supervisor tools (ebff12f, 0e4b707).
+- The declared package version is the released version again. `beagle-lib/info.rkt`, `beagle/info.rkt`, and `flake.nix` had drifted to 0.21.1, 0.18.0, and 0.17.1 with nothing keeping them in step; a tag-keyed CI assertion now fails the release when any of the three disagrees with the tag.
+
+### Changed
+
+- **Breaking (pre-1.0).** The Wasm executable surface replaces the single `beagle_wasm_entry_v0` export with qualified v1 entry exports; a host using the old entry name must migrate. The new native host and codec surfaces are additive.
+
+## Gap: 0.18.0 through 0.21.1 — no sections in this file
+
+Five releases were tagged and published without a changelog section: v0.18.0 (2026-06-28), v0.19.0 (2026-07-27), v0.20.0 (2026-08-07), v0.21.0 and v0.21.1 (both 2026-08-15). They are deliberately not reconstructed here, because the surviving source material differs by version:
+
+- **0.18.0, 0.19.0, 0.20.0** — the published GitHub release bodies are substantive authored change summaries and are the source of record: [v0.18.0](https://github.com/tompassarelli/beagle/releases/tag/v0.18.0), [v0.19.0](https://github.com/tompassarelli/beagle/releases/tag/v0.19.0), [v0.20.0](https://github.com/tompassarelli/beagle/releases/tag/v0.20.0).
+- **0.21.0, 0.21.1** — the published release bodies describe only the attached `beagle-selfhost` binary and carry no change list. Nothing authored survives for either; their content exists only as `git log v0.20.0..v0.21.1`.
+
+The `[Unreleased]` entries above predate this gap and shipped in v0.21.0 — e7b2e01, c3a803e, and d2d70f5 are first contained in that tag. They are left where they are rather than relabelled, because they are not the whole of that release and promoting them would misstate what v0.21.0 was.
 
 ## [0.17.1] — 2026-06-16
 
