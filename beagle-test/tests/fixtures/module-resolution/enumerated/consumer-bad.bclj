@@ -1,0 +1,7 @@
+#lang beagle/clj
+
+;; The enumerated provider's types must still be ENFORCED, not merely present.
+(ns modres.enumerated-consumer-bad)
+(require modres.enumerated-provider :as ep)
+
+(defn go [] Int (ep/scale "three"))

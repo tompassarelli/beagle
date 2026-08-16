@@ -1,0 +1,6 @@
+#lang beagle/clj
+
+(ns modres.enumerated-consumer)
+(require modres.enumerated-provider :as ep)
+
+(defn go [] Int (ep/scale 3))

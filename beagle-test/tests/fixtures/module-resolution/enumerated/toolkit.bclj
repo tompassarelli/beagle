@@ -1,0 +1,9 @@
+#lang beagle/clj
+
+;; Deliberately at a path that encodes NOTHING about its namespace, so the only
+;; way a consumer reaches it is by being handed it in the same invocation.
+;; Downstream builds enumerate their providers exactly like this, and that path
+;; must keep behaving the way it does today.
+(ns modres.enumerated-provider)
+
+(defn scale [(n Int)] Int n)

@@ -1,0 +1,12 @@
+#lang beagle/clj
+
+;; A genuinely missing arm over an imported union must raise the real
+;; missing-case diagnostic naming the absent member. While the require went
+;; unresolved the union's member list never crossed the boundary, so this
+;; source produced a return-type complaint instead of an exhaustiveness one.
+(ns xmod.unhanded-nonexhaustive)
+(require xmod.shape-kinds :as p)
+
+(defn area [(s p/Shape)] Int
+  (match s
+    [(Circle radius) radius]))

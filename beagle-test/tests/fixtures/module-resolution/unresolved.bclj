@@ -1,0 +1,10 @@
+#lang beagle/clj
+
+;; Nothing provides `modres.nowhere`: it is not a candidate in the invocation,
+;; there is no source file declaring it, and it is not a host namespace. The
+;; require must be REJECTED. Accepting it registers a phantom alias, and every
+;; qualified call through that alias then types at an arbitrary type.
+(ns modres.solo)
+(require modres.nowhere :as gone)
+
+(defn use-it [(n Int)] Int (gone/absolutely-not-a-function n))

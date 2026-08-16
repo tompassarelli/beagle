@@ -1,0 +1,11 @@
+#lang beagle/clj
+
+;; Same union surface as prov.bclj, but published under a namespace whose file
+;; name munges the hyphen. A consumer reaches this union only when resolution
+;; finds a provider it was NOT handed, so these fixtures pin the imported-union
+;; surface to the RESOLUTION fix rather than to a hand-supplied candidate.
+(ns xmod.shape-kinds)
+
+(defunion Shape
+  (Circle [(radius Int)])
+  (Rect [(width Int) (height String)]))

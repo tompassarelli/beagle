@@ -13,6 +13,11 @@
          "macros.rkt"
          "extensions.rkt"
          "targets.rkt"
+         ;; The typed stdlib catalog is the authority on which required
+         ;; namespaces belong to the HOST runtime rather than to beagle
+         ;; source, so an unresolvable require can be rejected without
+         ;; rejecting `clojure.string` and friends.
+         (only-in "stdlib-types.rkt" stdlib-for-target)
          "ast.rkt"
          "module-interface.rkt"
          "parse-jst.rkt"
@@ -202,7 +207,44 @@
 (define (all-but-last xs)
   (if (null? (cdr xs)) '() (cons (car xs) (all-but-last (cdr xs)))))
 
-(define (resolve-module-path ns-sym source-path)
+;; A required namespace that resolves to no beagle source is either a mistake
+;; or a HOST runtime namespace the target loads for itself. The typed stdlib
+;; catalog already distinguishes them: a host namespace owns `ns/member` keys.
+;; `clojure.*` and `babashka.*` are exempt catalog-or-not — the clj runtime
+;; auto-loads them and the catalog is deliberately partial (see the
+;; qualified-call tiers in check.rkt).
+(define host-namespace-cache (make-hasheq))
+
+(define (host-namespace-set-for target)
+  (hash-ref!
+   host-namespace-cache target
+   (lambda ()
+     (for*/set ([key (in-hash-keys (stdlib-for-target target))]
+                [text (in-value (symbol->string key))]
+                [slash (in-value (let loop ([i 0])
+                                   (cond
+                                     [(= i (string-length text)) #f]
+                                     [(char=? (string-ref text i) #\/) i]
+                                     [else (loop (+ i 1))])))]
+                #:when (and slash (> slash 0)))
+       (substring text 0 slash)))))
+
+(define (host-namespace? ns-sym target)
+  (define text (symbol->string ns-sym))
+  (or (string-prefix? text "clojure.")
+      (string-prefix? text "babashka.")
+      (set-member? (host-namespace-set-for target) text)))
+
+;; Namespace segments are spelled with hyphens; the file names that carry them
+;; may munge each hyphen to an underscore (`beagle.datum-reader` lives in
+;; `beagle/datum_reader.bgl`). The literal spelling is always tried first at
+;; every root, so munging only ever ADDS a resolution where the literal
+;; spelling found nothing — it can never redirect one that already resolved.
+(define (munge-segment seg) (string-replace seg "-" "_"))
+
+(define (resolve-module-path ns-sym source-path
+                             #:extensions [extensions BEAGLE-EXTENSIONS]
+                             #:flat-fallback? [flat-fallback? #t])
   (and source-path
        (let ()
          (define segs (split-ns-segments ns-sym))
@@ -216,13 +258,16 @@
            (let-values ([(d _n _d?) (split-path abs-source)])
              d))
          (define (try-extensions dir-root dir-prefix)
-           (for/or ([ext BEAGLE-EXTENSIONS])
+           (for*/or ([munge? (in-list '(#f #t))]
+                     [ext extensions])
+             (define (spell seg) (if munge? (munge-segment seg) seg))
+             (define leaf (string-append (spell base-name) ext))
              (define p
                (if (null? dir-prefix)
-                   (build-path dir-root (string-append base-name ext))
+                   (build-path dir-root leaf)
                    (apply build-path dir-root
-                          (append dir-prefix
-                                  (list (string-append base-name ext))))))
+                          (append (map spell dir-prefix)
+                                  (list leaf)))))
              (and (file-exists? p) p)))
          (define (walk-roots find-at)
            (let walk ([cur source-dir])
@@ -247,6 +292,7 @@
           (walk-roots
            (lambda (root) (try-extensions root dir-segs)))
           (and
+           flat-fallback?
            (not (null? dir-segs))
            (walk-roots
             (lambda (root)
@@ -256,6 +302,18 @@
                                 (simplify-path abs-source)))
                    (declares-namespace? flat)
                    flat))))))))
+
+;; A namespace may be provided by a HOST-language file where the namespace says
+;; it should be: self-host's `selfhost.rt` is `selfhost/rt.clj` beside the
+;; beagle sources, typed by `declare-extern`. That require IS satisfied — just
+;; not by beagle source — so it must not be rejected as unresolvable. The flat
+;; fallback is beagle-only because it proves identity by reading an `ns` form.
+(define (host-module-path ns-sym source-path target)
+  (define descriptor (target-by-id target))
+  (and descriptor
+       (resolve-module-path ns-sym source-path
+                            #:extensions (list (target-out-ext descriptor))
+                            #:flat-fallback? #f)))
 
 (define (qualify-name prefix-sym name-sym)
   (string->symbol
@@ -1754,18 +1812,27 @@
          (hash-set! externs name (type-prim 'Any))
          (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
          (hash-set! imp-symbol-ns name prefix))]
-      [(and (eq? target 'js)
-            (let ([module-name (symbol->string rn)])
-              (not (string-contains? module-name "."))))
-       ;; Foreign package refers are runtime bindings with unknown types.
+      [(or (and (eq? target 'js)
+                (let ([module-name (symbol->string rn)])
+                  (not (string-contains? module-name "."))))
+           (host-namespace? rn target)
+           (host-module-path rn source-path target))
+       ;; Foreign package / host runtime refers are runtime bindings whose
+       ;; types come from the catalog or from `declare-extern`, not from
+       ;; beagle source.
        (for ([name (in-list (or refer-syms '()))])
          (hash-set! externs name (type-prim 'Any))
          (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
          (hash-set! imp-symbol-ns name prefix))]
-      [(and (eq? target 'js)
-            (string-contains? (symbol->string rn) "."))
-       (error 'beagle "required module ~a could not be resolved" rn)]
-      [else (void)])
+      ;; Nothing provides this namespace: not a candidate in this invocation,
+      ;; not beagle source on disk, not a host namespace or host-language
+      ;; file. Accepting it would register a phantom alias whose every
+      ;; qualified call then types at an arbitrary type — silently.
+      [else
+       (error 'beagle
+              "required namespace ~a could not be resolved (required by ~a); it is absent from this invocation and no source file declares it"
+              rn
+              (or source-path "<unknown source>"))])
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
 
   (define current-require-registration

@@ -45,3 +45,23 @@
 (test-case "an imported bare-record member's pattern binds the FIELD"
   (check-exn #rx"expected return Int, got String"
              (lambda () (check-file "bad-bare-record-member-field.bclj"))))
+
+;; --- unions from a provider the invocation was NOT handed -------------------
+;;
+;; The fixtures above are handed nothing either, but their provider's file name
+;; spells its namespace exactly. These reach a provider whose file name munges
+;; the namespace's hyphen, so the consumer only sees the union if resolution
+;; searches for a provider on its own. That distinction is load-bearing: while
+;; the require went unresolved the alias still registered, the union's members
+;; never crossed the boundary, and BOTH assertions below reported the variant
+;; instance instead — "got Circle" for the field, and a return-type complaint
+;; where the missing arm belonged. Neither is a separate checker defect; both
+;; are the resolution failure showing through.
+
+(test-case "an unhanded imported variant pattern binds the FIELD"
+  (check-exn #rx"expected return Int, got \\(U Int String\\)"
+             (lambda () (check-file "unhanded-field-type.bclj"))))
+
+(test-case "exhaustiveness reaches an unhanded imported union"
+  (check-exn #rx"not exhaustive; missing cases: xmod.shape-kinds/Rect"
+             (lambda () (check-file "unhanded-nonexhaustive.bclj"))))

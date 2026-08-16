@@ -1,0 +1,8 @@
+#lang beagle/clj
+
+;; Provider for the "found without being handed over" tests. The namespace is
+;; spelled with a hyphen and the FILE munges it to an underscore, so a consumer
+;; reaches this interface only if resolution searches the munged spelling.
+(ns modres.wire-format)
+
+(defn encode [(n Int)] String "wire")
