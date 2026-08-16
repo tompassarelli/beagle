@@ -6,7 +6,8 @@ export TZ=UTC
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
-scratch="$repo/.beagle/branch-compile-corpus"
+scratch_relative=".beagle/branch-compile-corpus"
+scratch="$repo/$scratch_relative"
 lock="$repo/.beagle/branch-compile-corpus.lock"
 mode="${1:---check}"
 
@@ -106,14 +107,16 @@ build_case() {
     entry_args+=(--entry "$entry")
   done
   for source in "${sources[@]}"; do
-    source_args+=("$scratch/sources/$source")
+    source_args+=("$scratch_relative/sources/$source")
   done
-  BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS=220 \
-    timeout --foreground 240s "$repo/bin/beagle" build \
-      --materializer c17 \
-      --out "$output" \
-      "${entry_args[@]}" "${source_args[@]}" \
-      >"$log" 2>&1
+  (
+    cd "$repo"
+    BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS=220 \
+      timeout --foreground 240s ./bin/beagle build \
+        --materializer c17 \
+        --out "$output" \
+        "${entry_args[@]}" "${source_args[@]}"
+  ) >"$log" 2>&1
   grep -Fqx 'result PASS' "$output/report.txt"
   timeout --foreground 30s bb "$here/inspect.clj" \
     "$case_id" "$output/module.native-program" "$output/source.facts" \
