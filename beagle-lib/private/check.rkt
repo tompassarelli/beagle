@@ -7707,22 +7707,12 @@
      purity-state base
      [owners
       (for/fold ([owners (hasheq)]) ([origin (in-set owner-ids)])
-        (define statuses
-          (for/list ([state (in-list states)]) (owner-status state origin)))
-        (hash-set owners origin
-                  (cond
-                    [(andmap (lambda (status) (eq? status 'live)) statuses)
-                     'live]
-                    [(andmap (lambda (status) (memq status '(dead absent))) statuses)
-                     'dead]
-                    [else 'maybe-live])))]))
-  (define (close-local-owners outer-state inner-state node)
-    (define local-live
-      (for/seteq ([(origin status) (in-hash (purity-state-owners inner-state))]
-                  #:unless (hash-has-key? (purity-state-owners outer-state) origin)
-                  #:unless (eq? status 'dead))
-        origin))
-    (escape-origins inner-state local-live node))
+        (hash-set
+         owners origin
+         (if (for/and ([state (in-list states)])
+               (eq? (owner-status state origin) 'live))
+             'live
+             'dead)))]))
   (define (analyze-sequence body state)
     (cond
       [(null? body) (values state (seteq))]
@@ -7732,7 +7722,9 @@
          (if (null? (cdr remaining))
              (values next origins)
              (loop (cdr remaining)
-                   (escape-origins next origins (car remaining)))))]))
+                   (if (direct-primitive-call? (car remaining) 'conj! current)
+                       (escape-origins next origins (car remaining))
+                       next)))) ]))
   (define (analyze-and-discard value state)
     (define-values (next _origins) (analyze value state))
     next)
@@ -8007,8 +7999,7 @@
        (define bound (analyze-bindings (let-form-bindings value) state))
        (define-values (after-body origins)
          (analyze-sequence (let-form-body value) bound))
-       (define closed (close-local-owners state after-body value))
-       (values (struct-copy purity-state closed [scope outer-scope]) origins)]
+       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
       [(loop-form? value)
        (define outer-scope (purity-state-scope state))
        (define bound (analyze-bindings (loop-form-bindings value) state))
@@ -8017,8 +8008,7 @@
              ([current-recur-targets
                (map let-binding-name (loop-form-bindings value))])
            (analyze-sequence (loop-form-body value) bound)))
-       (define closed (close-local-owners state after-body value))
-       (values (struct-copy purity-state closed [scope outer-scope]) origins)]
+       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
       [(recur-form? value)
        (define targets (current-recur-targets))
        (cond

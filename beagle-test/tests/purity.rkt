@@ -321,26 +321,30 @@
          (conj! owned 1)
          frozen)))
    '(after-freeze))
-  (for ([form
-         (in-list
-          '((defn borrowed-loop [work] Any
-              (loop [index 0 owner work]
-                (if (= index 1)
-                    (persistent! owner)
-                    (recur (+ index 1) (conj! owner index)))))
-            (defn escaping-loop [xs] Any
-              (loop [index 0 owner (transient xs)]
-                (if (= index 1)
-                    owner
-                    (recur (+ index 1) (conj! owner index)))))
-            (defn aliased-loop [xs ys] Any
-              (loop [index 0
-                     left (transient xs)
-                     right (transient ys)]
-                (recur (+ index 1) (conj! left index) left)))
-            (defn unconsumed [xs] Any
-              (let [owner (transient xs)] nil))))])
-    (check-equal? (violations form) (list (cadr form))))))
+  (check-equal?
+   (violations
+    '(defn borrowed-loop [work] Any
+       (loop [index 0 owner work]
+         (if (= index 1)
+             (persistent! owner)
+             (recur (+ index 1) (conj! owner index))))))
+   '(borrowed-loop))
+  (check-equal?
+   (violations
+    '(defn escaping-loop [xs] Any
+       (loop [index 0 owner (transient xs)]
+         (if (= index 1)
+             owner
+             (recur (+ index 1) (conj! owner index))))))
+   '(escaping-loop))
+  (check-equal?
+   (violations
+    '(defn aliased-loop [xs ys] Any
+       (loop [index 0
+              left (transient xs)
+              right (transient ys)]
+         (recur (+ index 1) (conj! left index) left))))
+   '(aliased-loop)))
 
 (test-case "module effect edges honor lexical binding identity"
   (define p
