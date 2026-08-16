@@ -21,13 +21,13 @@
    'JSON/stringify    (fn-of '(Any) 'String #:rest 'Any)
 
    ;; --- Math (statics) --------------------------------------------------------
-   'Math/floor        (fn-of '(Any) 'Int)
+   'Math/floor        (fn-of '(Number) 'Int)
    'Math/ceil         (fn-of '(Any) 'Int)
-   'Math/round        (fn-of '(Any) 'Int)
+   'Math/round        (fn-of '(Number) 'Int)
    'Math/trunc        (fn-of '(Any) 'Int)
-   'Math/sqrt         (fn-of '(Any) 'Float)
+   'Math/sqrt         (fn-of '(Number) 'Float)
    'Math/cbrt         (fn-of '(Any) 'Float)
-   'Math/pow          (fn-of '(Any Any) 'Float)
+   'Math/pow          (fn-of '(Number Number) 'Float)
    'Math/exp          (fn-of '(Any) 'Float)
    'Math/random       (fn-of '() 'Float)
    'Math/abs          (fn-of '(Any) 'Any)
@@ -143,12 +143,65 @@
    'Date/parse       (fn-of '(String) 'Int)
    'Date/UTC         (fn-of '(Int Int) 'Int #:rest 'Int)
 
+   ;; --- atom / ref ----------------------------------------------------------
+   ;; JS lowers these to `{value, watches}` cells.  Override the portable Any
+   ;; signatures so the already-real runtime representation preserves the
+   ;; invariant element type at the checker boundary.
+   'atom   (poly-fn '(A) (list (tv 'A)) (type-app 'Atom (list (tv 'A))))
+   'deref  (poly-fn '(A) (list (type-app 'Atom (list (tv 'A)))) (tv 'A))
+   'reset! (poly-fn '(A)
+                    (list (type-app 'Atom (list (tv 'A))) (tv 'A))
+                    (tv 'A))
+   'swap!  (poly-fn
+            '(A)
+            (list
+             (type-app 'Atom (list (tv 'A)))
+             (type-union
+              (list (type-fn (list (tv 'A)) #f (tv 'A))
+                    (type-fn (list (tv 'A) (p 'Any)) #f (tv 'A))
+                    (type-fn
+                     (list (tv 'A) (p 'Any) (p 'Any)) #f (tv 'A))
+                    (type-fn
+                     (list (tv 'A) (p 'Any) (p 'Any) (p 'Any))
+                     #f
+                     (tv 'A)))))
+            (tv 'A)
+            #:rest (p 'Any))
+
    ;; --- globals ---------------------------------------------------------------
+   'Math             (p 'JsMath)
    'globalThis       (p 'Any)
    ))
+
+;; Positive contracts for native members used by typed Beagle code.  This is
+;; not an exhaustive model of mutable JavaScript prototypes: an unlisted native
+;; member remains dynamic.  Registered Beagle records are closed separately in
+;; the checker.  `vars` bind left-to-right from a receiver type application's
+;; arguments before the member contract is used.
+(define JS-MEMBER-CONTRACTS
+  (hasheq
+   'Vec
+   (hasheq 'vars '(Element)
+           'members
+           (hasheq
+            'length (p 'Int)
+            'indexOf (type-fn (list (tv 'Element)) #f (p 'Int))))
+   'String
+   (hasheq 'vars '()
+           'members
+           (hasheq
+            'indexOf (type-fn (list (p 'String)) #f (p 'Int))))
+   'JsMath
+   (hasheq 'vars '()
+           'members
+           (hasheq
+            'sqrt (hash-ref STDLIB-JS 'Math/sqrt)
+            'pow (hash-ref STDLIB-JS 'Math/pow)
+            'floor (hash-ref STDLIB-JS 'Math/floor)
+            'round (hash-ref STDLIB-JS 'Math/round)))))
 
 (define JS-NO-EMIT
   (set-subtract (list->set (hash-keys STDLIB-PORTABLE))
                 JS-TRANSLATED))
 
-(provide JS-NO-EMIT STDLIB-JS)
+(provide JS-MEMBER-CONTRACTS JS-NO-EMIT STDLIB-JS)

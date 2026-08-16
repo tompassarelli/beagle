@@ -5165,15 +5165,10 @@
     [(jst-method? e)   (infer-jst-method e env)]
     [(jst-dot? e)      (infer-jst-dot-expr e env)]
     [(jst-selector? e) ANY]
-    [(jst-get? e)
-     (infer-jst-member (jst-get-receiver e) (jst-get-key e) '() env)
-     ANY]
-    [(jst-call? e)
-     (infer-jst-member
-      (jst-call-receiver e) (jst-call-key e) (jst-call-args e) env)
-     ANY]
+    [(jst-get? e)      (infer-jst-get e env)]
+    [(jst-call? e)     (infer-jst-call e env)]
     [(jst-set? e)
-     (infer-jst-member
+     (traverse-jst-member
       (jst-set-receiver e) (jst-set-key e) (list (jst-set-value e)) env)
      ANY]
     [(jst-new? e)
@@ -5181,11 +5176,11 @@
      (for-each (lambda (arg) (infer-expr arg env)) (jst-new-args e))
      ANY]
     [(jst-delete? e)
-     (infer-jst-member
+     (traverse-jst-member
       (jst-delete-receiver e) (jst-delete-key e) '() env)
      (type-prim 'Bool)]
     [(jst-in? e)
-     (infer-jst-member (jst-in-receiver e) (jst-in-key e) '() env)
+     (traverse-jst-member (jst-in-receiver e) (jst-in-key e) '() env)
      (type-prim 'Bool)]
     [(jst-spread? e)   (infer-expr (jst-spread-expr e) env)]
     [(jst-typeof? e)   (infer-expr (jst-typeof-expr e) env) (type-prim 'String)]
@@ -5889,11 +5884,113 @@
     [(+ - * / % **) (merge-types lt rt)]
     [else ANY]))
 
-(define (infer-jst-member receiver key trailing env)
+(define (traverse-jst-member receiver key trailing env)
   (infer-expr receiver env)
   (unless (jst-selector? key)
     (infer-expr key env))
   (for-each (lambda (value) (infer-expr value env)) trailing))
+
+(define (jst-receiver-type-head receiver-type)
+  (cond
+    [(type-app? receiver-type) (type-app-ctor receiver-type)]
+    [(type-prim? receiver-type) (type-prim-name receiver-type)]
+    [else #f]))
+
+(define (jst-native-member-contract receiver-type selector)
+  (define head (jst-receiver-type-head receiver-type))
+  (define entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f)))
+  (and entry
+       (let* ([member-name (string->symbol selector)]
+              [raw-contract
+               (hash-ref (hash-ref entry 'members) member-name #f)])
+         (and raw-contract
+              (let ([bindings (make-hasheq)]
+                    [args (if (type-app? receiver-type)
+                              (type-app-args receiver-type)
+                              '())])
+                (for ([var (in-list (hash-ref entry 'vars))]
+                      [arg (in-list args)])
+                  (hash-set! bindings var arg))
+                (apply-type-bindings raw-contract bindings))))))
+
+(define (jst-record-member-contract receiver-type selector)
+  (record-field-type-for
+   receiver-type
+   (string->symbol (string-append ":" selector))))
+
+(define (jst-static-member-contract receiver-type selector)
+  (or (jst-record-member-contract receiver-type selector)
+      (jst-native-member-contract receiver-type selector)))
+
+(define (raise-unknown-jst-record-member form-name receiver-type selector node)
+  (raise-diag
+   'type-mismatch
+   (format "~a: .~a is not a member of ~a"
+           form-name selector (type->string receiver-type))
+   (hasheq 'form form-name
+           'member selector
+           'receiver-type (type->string receiver-type))
+   #:src (src-for node)))
+
+(define (infer-jst-get e env)
+  (define receiver (jst-get-receiver e))
+  (define key (jst-get-key e))
+  (define receiver-type (infer-expr receiver env))
+  (cond
+    [(not (jst-selector? key))
+     (infer-expr key env)
+     ANY]
+    [else
+     (define selector (jst-selector-name key))
+     (cond
+       [(jst-static-member-contract receiver-type selector) => values]
+       [(record-field-map-for-type receiver-type)
+        (raise-unknown-jst-record-member
+         "js/get" receiver-type selector e)]
+       [else ANY])]))
+
+(define (infer-jst-call e env)
+  (define receiver (jst-call-receiver e))
+  (define key (jst-call-key e))
+  (define args (jst-call-args e))
+  (define receiver-type (infer-expr receiver env))
+  (cond
+    [(not (jst-selector? key))
+     (infer-expr key env)
+     (for-each (lambda (arg) (infer-expr arg env)) args)
+     ANY]
+    [else
+     (define selector (jst-selector-name key))
+     (define raw-contract
+       (jst-static-member-contract receiver-type selector))
+     (cond
+       [raw-contract
+        (define contract
+          (if (type-poly? raw-contract)
+              (resolve-poly-call raw-contract args env)
+              raw-contract))
+        (cond
+          [(type-fn? contract)
+           (check-args (string->symbol selector) contract args env e)
+           (zonk-type (type-fn-ret contract))]
+          [else
+           (raise-diag
+            'type-mismatch
+            (format "js/call: .~a on ~a has non-callable type ~a"
+                    selector
+                    (type->string receiver-type)
+                    (type->string contract))
+            (hasheq 'form "js/call"
+                    'member selector
+                    'receiver-type (type->string receiver-type)
+                    'actual (type->string contract))
+            #:src (src-for e))])]
+       [(record-field-map-for-type receiver-type)
+        (raise-unknown-jst-record-member
+         "js/call" receiver-type selector e)]
+       [else
+        (for-each (lambda (arg) (infer-expr arg env)) args)
+        ANY])]))
 
 (define (infer-jst-dot-expr e env)
   (infer-expr (jst-dot-object e) env)

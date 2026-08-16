@@ -1286,6 +1286,93 @@
 (define-syntax-rule (check-js-err/rx name rx form ...)
   (test-case name (check-exn rx (lambda () (check-js-prog form ...)))))
 
+;; Static JavaScript member contracts preserve the receiver-first surface.
+;; Authored records are closed; native JS prototypes are open but selected
+;; members carry precise positive contracts.
+
+(check-js-ok "js/get infers registered record property type"
+  '(defrecord Bounds [(width Float) (height Float)])
+  '(defn padded-width [(box Bounds)] Float
+     (+ (js/get box .width) 1.0)))
+
+(check-js-ok "js/call infers registered callable-field result"
+  `(defrecord Formatter ((render ,(fn-ty '(Int) 'String))))
+  '(defn rendered-index [(formatter Formatter)] Int
+     (+ (js/call (js/call formatter .render 1) .indexOf "x") 1)))
+
+(check-js-err/rx "js/call checks registered callable-field arguments"
+  #rx"arg 1 expected Int, got String"
+  `(defrecord Formatter ((render ,(fn-ty '(Int) 'String))))
+  '(defn render-wrong [(formatter Formatter)] String
+     (js/call formatter .render "wrong")))
+
+(check-js-err/rx "js/get rejects unknown member on a registered record"
+  #rx"js/get: \\.depth is not a member of Bounds"
+  '(defrecord Bounds [(width Float)])
+  '(defn read-depth [(box Bounds)] Any
+     (js/get box .depth)))
+
+(check-js-err/rx "js/call rejects a non-callable registered field"
+  #rx"js/call: \\.width on Bounds has non-callable type Float"
+  '(defrecord Bounds [(width Float)])
+  '(defn call-width [(box Bounds)] Any
+     (js/call box .width)))
+
+(check-js-ok "js/get leaves dynamic keys and Any receivers dynamic"
+  '(defn dynamic-read [(object Any) (key String)] Any
+     (js/get object key))
+  '(defn open-read [(object Any)] Any
+     (js/get object .notDeclared)))
+
+(check-js-ok "js members type Vec length and element-aware indexOf"
+  '(defn vec-position [(values (Vec String)) (target String)] Int
+     (+ (js/get values .length)
+        (js/call values .indexOf target))))
+
+(check-js-err/rx "Vec indexOf rejects a different element type"
+  #rx"arg 1 expected Int, got String"
+  '(defn wrong-index [(values (Vec Int))] Int
+     (js/call values .indexOf "wrong")))
+
+(check-js-ok "js member types String indexOf"
+  '(defn string-position [(value String) (needle String)] Int
+     (+ (js/call value .indexOf needle) 1)))
+
+(check-js-err/rx "String indexOf rejects a non-String needle"
+  #rx"arg 1 expected String, got Int"
+  '(defn wrong-string-index [(value String)] Int
+     (js/call value .indexOf 1)))
+
+(check-js-ok "js member types bounded Math numeric results"
+  '(defn float-math [(x Number) (y Number)] Float
+     (+ (js/call Math .sqrt x)
+        (js/call Math .pow x y)))
+  '(defn integer-math [(x Number)] Int
+     (+ (js/call Math .floor x)
+        (js/call Math .round x))))
+
+(check-js-err/rx "js Math member rejects a non-numeric argument"
+  #rx"expected .*Number.*got String"
+  '(defn wrong-math [] Float
+     (js/call Math .sqrt "wrong")))
+
+(check-js-ok "js atom family preserves its invariant element type"
+  '(defn update-cell! [] Int
+     (let [(cell (Atom Int)) (atom 1)]
+       (do (reset! cell 2)
+           (swap! cell (fn [(value Int)] Int (+ value 1)))
+           (deref cell)))))
+
+(check-js-err/rx "js reset! rejects a different atom element type"
+  #rx"expected Int, got String"
+  '(defn reset-wrong! [(cell (Atom Int))] Int
+     (reset! cell "wrong")))
+
+(check-js-err/rx "js swap! rejects a function returning another element type"
+  #rx"swap!"
+  '(defn swap-wrong! [(cell (Atom Int))] Int
+     (swap! cell (fn [(value Int)] String "wrong"))))
+
 ;; Helpers for Nix-target tests
 (define (check-nix-prog . forms)
   (define prog (parse-program
