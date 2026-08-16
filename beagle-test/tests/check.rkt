@@ -223,6 +223,13 @@
   `(defmacro id1 ,(br 'x) x)
   '(def y Int (id1 "string not Int")))
 
+(check-fixture-ok "macro expansion preserves expected-directed HVec let literals"
+  "macro-hvec-let.bclj")
+
+(check-fixture-err/rx "macro-expanded HVec let rejects a wrong position"
+  #rx"tuple element 0: expected Int"
+  "macro-hvec-let-wrong.bclj")
+
 ;; =============================================================================
 ;; Tests — variadic types
 ;; =============================================================================
@@ -559,6 +566,13 @@
 
 (check-ok "doseq with :when passes"
   '(doseq [x (range 10) :when (even? x)] (println x)))
+
+(check-ok "range over Int bounds has List Int element type"
+  '(defn indexes [] (List Int) (range 3)))
+
+(check-err/rx "range rejects a non-Int bound"
+  #rx"expected Int, got Float"
+  '(defn invalid-indexes [] (List Int) (range 3.5)))
 
 ;; case removed — folded into match + literal patterns; case-fold optimization
 ;; lowers literal-only dispatch to target-native case/switch in emit.
@@ -1353,6 +1367,12 @@
   '(defn string-position [(value String) (needle String)] Int
      (+ (js/call value .indexOf needle) 1)))
 
+(check-js-ok "js member types String trim and slice"
+  '(defn trimmed [(value String)] String
+     (js/call value .trim))
+  '(defn sliced [(value String)] String
+     (js/call value .slice 1 3)))
+
 (check-js-err/rx "String indexOf rejects a non-String needle"
   #rx"arg 1 expected String, got Int"
   '(defn wrong-string-index [(value String)] Int
@@ -1365,6 +1385,16 @@
   '(defn integer-math [(x Number)] Int
      (+ (js/call Math .floor x)
         (js/call Math .round x))))
+
+(check-js-ok "js Math abs preserves exact numeric type"
+  '(defn integer-magnitude [(value Int)] Int
+     (js/call Math .abs value))
+  '(defn float-magnitude [(value Float)] Float
+     (js/call Math .abs value)))
+
+(check-js-ok "js Date and performance clocks have numeric results"
+  '(defn wall-milliseconds [] Int (js/call Date .now))
+  '(defn monotonic-milliseconds [] Float (js/call performance .now)))
 
 (check-js-err/rx "js Math member rejects a non-numeric argument"
   #rx"expected .*Number.*got String"
@@ -1739,6 +1769,10 @@
 
 (check-ok "numeric: exact binary Float division produces Float"
   '(def float-ratio Float (/ 3.0 2.0)))
+
+(check-ok "numeric: mixed binary division produces Float"
+  '(def int-over-float Float (/ 3 2.0))
+  '(def float-over-int Float (/ 3.0 2)))
 
 (check-err/rx "numeric: exact binary Float division does NOT narrow into Int"
   #rx"expected Int, got Float"

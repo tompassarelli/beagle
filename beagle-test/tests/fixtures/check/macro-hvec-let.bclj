@@ -1,0 +1,6 @@
+(defmacro make-pair []
+  `(let [(candidate (HVec Int String)) [1 "ready"]]
+     candidate))
+
+(defn pair [] (HVec Int String)
+  (make-pair))
