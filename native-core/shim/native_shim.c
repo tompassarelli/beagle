@@ -15,6 +15,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #if !defined(__wasi__)
@@ -10125,6 +10126,102 @@ int32_t native_host_filesystem_append_text_v0(
   }
   return 0;
 }
+
+#ifdef __wasi__
+/* wasi-libc declares flock but never defines it, so any arm that calls it
+   fails a reactor link with an undefined symbol. Fail closed by name instead
+   of emulating a lease the platform cannot enforce. */
+int32_t native_host_filesystem_lock_exclusive_v0(
+    const native_capability *capability, uint64_t path_text, int64_t *out) {
+  if (!native_host_filesystem_capability_valid(capability) || (out == NULL)) {
+    return EINVAL;
+  }
+  *out = INT64_C(0);
+  (void)path_text;
+  return ENOTSUP;
+}
+
+int32_t native_host_filesystem_unlock_v0(
+    const native_capability *capability, int64_t descriptor) {
+  if (!native_host_filesystem_capability_valid(capability) ||
+      (descriptor <= (int64_t)STDERR_FILENO) ||
+      (descriptor > (int64_t)INT_MAX)) {
+    return EINVAL;
+  }
+  return ENOTSUP;
+}
+#else
+/* flock owns the lease on the open file description, so it survives closing
+   other descriptors for the same file and the kernel releases it on close or
+   on process death. fcntl(F_SETLK) cannot deliver that: its lock is dropped
+   when the process closes ANY descriptor for the file. */
+int32_t native_host_filesystem_lock_exclusive_v0(
+    const native_capability *capability, uint64_t path_text, int64_t *out) {
+  char *path = NULL;
+  int descriptor;
+  int replacement;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability) || (out == NULL)) {
+    return EINVAL;
+  }
+  *out = INT64_C(0);
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, (mode_t)0644);
+  free(path);
+  if (descriptor < 0) {
+    return native_host_filesystem_errno();
+  }
+  /* unlock refuses a standard descriptor, so the lease may never hold one. */
+  if (descriptor <= STDERR_FILENO) {
+    replacement = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    if (replacement < 0) {
+      status = native_host_filesystem_errno();
+      (void)close(descriptor);
+      return status;
+    }
+    (void)close(descriptor);
+    descriptor = replacement;
+  }
+  while (flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    status = (errno == EWOULDBLOCK) ? EAGAIN : native_host_filesystem_errno();
+    (void)close(descriptor);
+    return status;
+  }
+  *out = (int64_t)descriptor;
+  return 0;
+}
+
+int32_t native_host_filesystem_unlock_v0(
+    const native_capability *capability, int64_t descriptor) {
+  int fd;
+  if (!native_host_filesystem_capability_valid(capability) ||
+      (descriptor <= (int64_t)STDERR_FILENO) ||
+      (descriptor > (int64_t)INT_MAX)) {
+    return EINVAL;
+  }
+  fd = (int)descriptor;
+  /* Release before closing so a descriptor duplicated into a live child does
+     not keep the lease alive past the release the caller was promised. */
+  while (flock(fd, LOCK_UN) != 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    return native_host_filesystem_errno();
+  }
+  /* Do not retry close after EINTR: the descriptor may already be released,
+     and a retry could close an unrelated descriptor that reused the number. */
+  if (close(fd) != 0) {
+    return native_host_filesystem_errno();
+  }
+  return 0;
+}
+#endif /* __wasi__ */
 
 #if defined(__wasi__)
 int64_t native_host_process_exec_replace_v0(

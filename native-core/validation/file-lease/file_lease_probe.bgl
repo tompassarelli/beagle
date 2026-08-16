@@ -1,0 +1,12 @@
+#lang beagle
+(ns native.file-lease-probe)
+
+(defn release [(descriptor Int)] Int
+  (match (host.fs/unlock descriptor)
+    [(host.fs/UnlockOk) 0]
+    [(host.fs/UnlockError errno) errno]))
+
+(defn exercise [(path String)] Int
+  (match (host.fs/lock-exclusive path)
+    [(host.fs/LockExclusiveOk descriptor) (release descriptor)]
+    [(host.fs/LockExclusiveError errno) errno]))

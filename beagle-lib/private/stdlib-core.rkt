@@ -92,6 +92,19 @@
     (list (p 'String) (p 'String))
     #f
     (p 'host.fs/AppendTextResult))
+   ;; lock-exclusive transfers one descriptor holding a non-blocking exclusive
+   ;; lease on the path's open file description; unlock consumes it. The kernel
+   ;; releases the lease on close or on process death. Contention is EAGAIN.
+   'host.fs/lock-exclusive
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/LockExclusiveResult))
+   'host.fs/unlock
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'host.fs/UnlockResult))
    'host.clock/wall-nanoseconds
    (type-fn '() #f (p 'Int))
    'host.clock/format-iso8601
@@ -236,6 +249,19 @@
     (list
      (list 'host.fs/AppendTextOk '())
      (list 'host.fs/AppendTextError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/LockExclusiveResult
+    (list
+     (list 'host.fs/LockExclusiveOk
+           (list (cons ':descriptor (p 'Int))))
+     (list 'host.fs/LockExclusiveError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/UnlockResult
+    (list
+     (list 'host.fs/UnlockOk '())
+     (list 'host.fs/UnlockError
            (list (cons ':errno (p 'Int))))))
    (list
     'host.clock/FormatIso8601Result

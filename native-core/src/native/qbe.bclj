@@ -2666,7 +2666,9 @@
       (= symbol "native_host_filesystem_path_kind_v0")
       (= symbol "native_host_filesystem_write_text_atomic_v0")
       (= symbol "native_host_filesystem_make_parent_directories_v0")
-      (= symbol "native_host_filesystem_append_text_v0")))
+      (= symbol "native_host_filesystem_append_text_v0")
+      (= symbol "native_host_filesystem_lock_exclusive_v0")
+      (= symbol "native_host_filesystem_unlock_v0")))
 
 (defn program-has-filesystem-extern? [(program core/NativeCoreProgram)] Bool
   (some?

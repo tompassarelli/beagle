@@ -676,6 +676,13 @@ int32_t native_host_filesystem_make_parent_directories_v0(
     const native_capability *capability, uint64_t path);
 int32_t native_host_filesystem_append_text_v0(
     const native_capability *capability, uint64_t path, uint64_t text);
+/* Non-blocking exclusive lease on the path's open file description. The caller
+   owns the returned descriptor: unlock consumes it, and the kernel releases the
+   lease on close or on process death. A lease held elsewhere returns EAGAIN. */
+int32_t native_host_filesystem_lock_exclusive_v0(
+    const native_capability *capability, uint64_t path, int64_t *out);
+int32_t native_host_filesystem_unlock_v0(
+    const native_capability *capability, int64_t descriptor);
 /* Runs argv directly through PATH with inherited environment and stdio.
    Result: normal exit 0..255, signal 256+signal, spawn/wait failure -errno. */
 int64_t native_host_process_run_inherit_v0(

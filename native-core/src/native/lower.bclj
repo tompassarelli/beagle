@@ -1208,6 +1208,14 @@
       (= name "host.fs/AppendTextOk")) "ok"
     (and (same-id? target-type (filesystem-nil-outcome-type-id))
       (= name "host.fs/AppendTextError")) "error"
+    (and (same-id? target-type (filesystem-int-outcome-type-id))
+      (= name "host.fs/LockExclusiveOk")) "ok"
+    (and (same-id? target-type (filesystem-int-outcome-type-id))
+      (= name "host.fs/LockExclusiveError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/UnlockOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/UnlockError")) "error"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
       (= name "host.clock/FormatIso8601Ok")) "ok"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
@@ -1352,6 +1360,14 @@
       (filesystem-outcome-types) [] true)
 
     (= "host.fs/AppendTextResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/LockExclusiveResult" spelling)
+    (->TypeResolutionV0 (filesystem-int-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/UnlockResult" spelling)
     (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
@@ -2272,7 +2288,9 @@
       (= name "host.fs/path-kind")
       (= name "host.fs/write-text-atomic")
       (= name "host.fs/make-parent-directories")
-      (= name "host.fs/append-text")))
+      (= name "host.fs/append-text")
+      (= name "host.fs/lock-exclusive")
+      (= name "host.fs/unlock")))
 
 (defn host-filesystem-operation [(name String)] String
   (cond
@@ -2282,6 +2300,8 @@
     (= name "host.fs/write-text-atomic") "write-text-atomic"
     (= name "host.fs/make-parent-directories") "make-parent-directories"
     (= name "host.fs/append-text") "append-text"
+    (= name "host.fs/lock-exclusive") "lock-exclusive"
+    (= name "host.fs/unlock") "unlock"
     :else ""))
 
 (defn host-filesystem-abi-id? [(candidate core/NativeId)] Bool
@@ -2291,7 +2311,9 @@
       (same-id? candidate (host-filesystem-abi-id "write-text-atomic"))
       (same-id? candidate
         (host-filesystem-abi-id "make-parent-directories"))
-      (same-id? candidate (host-filesystem-abi-id "append-text"))))
+      (same-id? candidate (host-filesystem-abi-id "append-text"))
+      (same-id? candidate (host-filesystem-abi-id "lock-exclusive"))
+      (same-id? candidate (host-filesystem-abi-id "unlock"))))
 
 (defn host-process-effect-id [] core/NativeId
   (lower-id "effect" ["host-process-run-inherit-v0"]))
@@ -8502,7 +8524,8 @@
       (same-id? (nth value-types 1) (int-type-id)))
 
     (or (= callee "host.fs/path-kind")
-        (= callee "host.fs/make-parent-directories"))
+        (= callee "host.fs/make-parent-directories")
+        (= callee "host.fs/lock-exclusive"))
     (and (= 1 (count value-types))
       (text-operand? (nth value-types 0)))
 
@@ -8512,6 +8535,10 @@
       (text-operand? (nth value-types 0))
       (text-operand? (nth value-types 1)))
 
+    (= callee "host.fs/unlock")
+    (and (= 1 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id)))
+
     :else false))
 
 (defn host-filesystem-result-type [(callee String)] core/NativeId
@@ -8520,7 +8547,8 @@
     (filesystem-text-outcome-type-id)
     (= callee "host.fs/list-directory-bounded")
     (filesystem-paths-outcome-type-id)
-    (= callee "host.fs/path-kind")
+    (or (= callee "host.fs/path-kind")
+        (= callee "host.fs/lock-exclusive"))
     (filesystem-int-outcome-type-id)
     :else (filesystem-nil-outcome-type-id)))
 
@@ -8534,7 +8562,7 @@
   (if (not (host-filesystem-operands-valid? callee value-types))
     (fail-result state
       (str "TODO-NATIVE-HOST-FILESYSTEM-OPERANDS: " callee
-        " needs Text paths and payloads; bounded reads and listings also need an Int bound"))
+        " needs Text paths and payloads; bounded reads and listings also need an Int bound, and unlock needs an Int descriptor"))
     (let [(result-id core/NativeId)
           (state-id state owner "host-filesystem")
           (result-type core/NativeId) (host-filesystem-result-type callee)
@@ -18507,6 +18535,8 @@
               (index-has-callee? index "host.fs/write-text-atomic")
               (index-has-callee? index "host.fs/make-parent-directories")
               (index-has-callee? index "host.fs/append-text")
+              (index-has-callee? index "host.fs/lock-exclusive")
+              (index-has-callee? index "host.fs/unlock")
               (index-has-callee? index "host.clock/format-iso8601")
               (index-has-callee? index "host.system/hostname"))
           (append-type-defs text-index-source-types (filesystem-outcome-types))
@@ -19652,6 +19682,20 @@
       (borrowed-abi-value "text" (text-type-id))]
      (filesystem-nil-outcome-type-id)
      false
+     layouts-digest)
+   (host-filesystem-abi
+     "lock-exclusive"
+     "native_host_filesystem_lock_exclusive_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     (filesystem-int-outcome-type-id)
+     false
+     layouts-digest)
+   (host-filesystem-abi
+     "unlock"
+     "native_host_filesystem_unlock_v0"
+     [(borrowed-abi-value "descriptor" (int-type-id))]
+     (filesystem-nil-outcome-type-id)
+     false
      layouts-digest)])
 
 (defn host-process-direct-abi
@@ -19941,11 +19985,21 @@
               (host-filesystem-abi-id "make-parent-directories"))
           (conj with-filesystem-base (nth filesystem-abis 4))
           with-filesystem-base)
-        (with-filesystem (Vec core/AbiDeclV0))
+        (with-filesystem-append (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "append-text"))
           (conj with-filesystem-parents (nth filesystem-abis 5))
           with-filesystem-parents)
+        (with-filesystem-lock (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "lock-exclusive"))
+          (conj with-filesystem-append (nth filesystem-abis 6))
+          with-filesystem-append)
+        (with-filesystem (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "unlock"))
+          (conj with-filesystem-lock (nth filesystem-abis 7))
+          with-filesystem-lock)
         (process-abis (Vec core/AbiDeclV0)) (host-process-abis digest)
         (called-process-abis (Vec core/AbiDeclV0))
         (filterv
@@ -21368,6 +21422,10 @@
                      (host-filesystem-abi-id "make-parent-directories")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "append-text")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "lock-exclusive")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "unlock")) 1 0)
                (count
                  (filterv
                    (fn [(abi core/AbiDeclV0)] Bool
