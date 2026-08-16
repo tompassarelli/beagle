@@ -6,15 +6,96 @@
   (match (json/decode text)
     [(JsonDecoded events)
      (and (= 9 (count events))
-          (match (nth events 0) [(JsonObjectStart offset) (= offset 0)] [_ false])
-          (match (nth events 1) [(JsonKey offset value) (= value "key")] [_ false])
-          (match (nth events 2) [(JsonArrayStart offset) true] [_ false])
-          (match (nth events 3) [(JsonString offset value) (= value "value")] [_ false])
-          (match (nth events 4) [(JsonNumber offset value) (= value "-12.5e+2")] [_ false])
-          (match (nth events 5) [(JsonBoolean offset value) value] [_ false])
-          (match (nth events 6) [(JsonNull offset) true] [_ false])
-          (match (nth events 7) [(JsonArrayEnd offset) true] [_ false])
-          (match (nth events 8) [(JsonObjectEnd offset) true] [_ false]))]
+          (match (nth events 0)
+            [(JsonObjectStart offset) (= offset 0)]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false])
+          (match (nth events 1)
+            [(JsonKey offset value) (= value "key")]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false])
+          (match (nth events 2)
+            [(JsonArrayStart offset) true]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false])
+          (match (nth events 3)
+            [(JsonString offset value) (= value "value")]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false])
+          (match (nth events 4)
+            [(JsonNumber offset value) (= value "-12.5e+2")]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false])
+          (match (nth events 5)
+            [(JsonBoolean offset value) value]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonNull offset) false])
+          (match (nth events 6)
+            [(JsonNull offset) true]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false])
+          (match (nth events 7)
+            [(JsonArrayEnd offset) true]
+            [(JsonObjectStart offset) false]
+            [(JsonObjectEnd offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false])
+          (match (nth events 8)
+            [(JsonObjectEnd offset) true]
+            [(JsonObjectStart offset) false]
+            [(JsonArrayStart offset) false]
+            [(JsonArrayEnd offset) false]
+            [(JsonKey offset value) false]
+            [(JsonString offset value) false]
+            [(JsonNumber offset lexeme) false]
+            [(JsonBoolean offset value) false]
+            [(JsonNull offset) false]))]
     [(JsonDecodeError offset message) false]))
 
 (defn roundtrip [(text String)] String

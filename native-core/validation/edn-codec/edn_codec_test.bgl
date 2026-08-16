@@ -6,17 +6,116 @@
   (match (edn/decode text)
     [(EdnDecoded events)
      (and (= 14 (count events))
-          (match (nth events 0) [(EdnMapStart offset) (= offset 0)] [_ false])
-          (match (nth events 1) [(EdnKeyword offset value) (= value :tx)] [_ false])
-          (match (nth events 2) [(EdnInteger offset value) (= value 1)] [_ false])
-          (match (nth events 4) [(EdnString offset value) (= value "assert")] [_ false])
-          (match (nth events 6) [(EdnVectorStart offset) true] [_ false])
-          (match (nth events 7) [(EdnBoolean offset value) value] [_ false])
-          (match (nth events 8) [(EdnNil offset) true] [_ false])
-          (match (nth events 9) [(EdnInteger offset value) (= value -2)] [_ false])
-          (match (nth events 10) [(EdnVectorEnd offset) true] [_ false])
-          (match (nth events 12) [(EdnString offset value) (= value "line\n☺")] [_ false])
-          (match (nth events 13) [(EdnMapEnd offset) true] [_ false]))]
+          (match (nth events 0)
+            [(EdnMapStart offset) (= offset 0)]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 1)
+            [(EdnKeyword offset value) (= value :tx)]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 2)
+            [(EdnInteger offset value) (= value 1)]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 4)
+            [(EdnString offset value) (= value "assert")]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 6)
+            [(EdnVectorStart offset) true]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 7)
+            [(EdnBoolean offset value) value]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 8)
+            [(EdnNil offset) true]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false])
+          (match (nth events 9)
+            [(EdnInteger offset value) (= value -2)]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 10)
+            [(EdnVectorEnd offset) true]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 12)
+            [(EdnString offset value) (= value "line\n☺")]
+            [(EdnMapStart offset) false]
+            [(EdnMapEnd offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false])
+          (match (nth events 13)
+            [(EdnMapEnd offset) true]
+            [(EdnMapStart offset) false]
+            [(EdnVectorStart offset) false]
+            [(EdnVectorEnd offset) false]
+            [(EdnKeyword offset value) false]
+            [(EdnString offset value) false]
+            [(EdnInteger offset value) false]
+            [(EdnBoolean offset value) false]
+            [(EdnNil offset) false]))]
     [(EdnDecodeError offset message) false]))
 
 (defn roundtrip [(text String)] String

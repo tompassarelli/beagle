@@ -517,8 +517,27 @@
            [(JsonKey offset value)
             (recur (+ index 1) (str result (encode-string value) ":")
               (->EncodeObjectValue true) continuations)]
-           [_ (->JsonEncodeError index
-                "object expects a key or object end event")]))]
+           [(JsonObjectStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayEnd offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonString offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNumber offset lexeme)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonBoolean offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNull offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]))]
 
       [(EncodeObjectKeyNext token)
        (if (>= index (count events))
@@ -530,8 +549,27 @@
            [(JsonKey offset value)
             (recur (+ index 1) (str result "," (encode-string value) ":")
               (->EncodeObjectValue true) continuations)]
-           [_ (->JsonEncodeError index
-                "object expects a key or object end event")]))]
+           [(JsonObjectStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayEnd offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonString offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNumber offset lexeme)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonBoolean offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNull offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]))]
 
       [(EncodeObjectValue token)
        (if (>= index (count events))
@@ -547,34 +585,148 @@
       [(EncodeArrayValueFirst token)
        (if (>= index (count events))
          (->JsonEncodeError index "unterminated array event sequence")
-         (match (nth events index)
-           [(JsonArrayEnd offset)
-            (recur (+ index 1) (str result "]")
-              (peek continuations) (pop continuations))]
-           [event
-            (match (encode-value-step event ""
-                     (->EncodeArrayValueNext true) continuations)
-              [(ValueEncoded fragment next-expectation next-continuations)
-               (recur (+ index 1) (str result fragment)
-                 next-expectation next-continuations)]
-              [(ValueEncodeRejected message)
-               (->JsonEncodeError index message)])]))]
+         (let [(event JsonEvent) (nth events index)]
+           (match event
+             [(JsonArrayEnd offset)
+              (recur (+ index 1) (str result "]")
+                (peek continuations) (pop continuations))]
+             [(JsonObjectStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonObjectEnd offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonArrayStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonKey offset value)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonString offset value)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNumber offset lexeme)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonBoolean offset value)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNull offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])])))]
 
       [(EncodeArrayValueNext token)
        (if (>= index (count events))
          (->JsonEncodeError index "unterminated array event sequence")
-         (match (nth events index)
-           [(JsonArrayEnd offset)
-            (recur (+ index 1) (str result "]")
-              (peek continuations) (pop continuations))]
-           [event
-            (match (encode-value-step event ","
-                     (->EncodeArrayValueNext true) continuations)
-              [(ValueEncoded fragment next-expectation next-continuations)
-               (recur (+ index 1) (str result fragment)
-                 next-expectation next-continuations)]
-              [(ValueEncodeRejected message)
-               (->JsonEncodeError index message)])]))]
+         (let [(event JsonEvent) (nth events index)]
+           (match event
+             [(JsonArrayEnd offset)
+              (recur (+ index 1) (str result "]")
+                (peek continuations) (pop continuations))]
+             [(JsonObjectStart offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonObjectEnd offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonArrayStart offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonKey offset value)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonString offset value)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNumber offset lexeme)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonBoolean offset value)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNull offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])])))]
 
       [(EncodeDone token)
        (if (= index (count events))

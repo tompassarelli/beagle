@@ -257,34 +257,148 @@
       [(EncodeMapKeyFirst token)
        (if (>= index (count events))
          (->EdnEncodeError index "unterminated map event sequence")
-         (match (nth events index)
-           [(EdnMapEnd offset)
-            (recur (inc index) (str result "}")
-              (peek continuations) (pop continuations))]
-           [event
-            (match (encode-value-step event ""
-                     (->EncodeMapValue true) continuations)
-              [(ValueEncoded fragment next-expectation next-continuations)
-               (recur (inc index) (str result fragment)
-                 next-expectation next-continuations)]
-              [(ValueEncodeRejected message)
-               (->EdnEncodeError index message)])]))]
+         (let [(event EdnEvent) (nth events index)]
+           (match event
+             [(EdnMapEnd offset)
+              (recur (inc index) (str result "}")
+                (peek continuations) (pop continuations))]
+             [(EdnMapStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnVectorStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnVectorEnd offset)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnKeyword offset value)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnString offset value)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnInteger offset value)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnBoolean offset value)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnNil offset)
+              (match (encode-value-step event ""
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])])))]
 
       [(EncodeMapKeyNext token)
        (if (>= index (count events))
          (->EdnEncodeError index "unterminated map event sequence")
-         (match (nth events index)
-           [(EdnMapEnd offset)
-            (recur (inc index) (str result "}")
-              (peek continuations) (pop continuations))]
-           [event
-            (match (encode-value-step event ", "
-                     (->EncodeMapValue true) continuations)
-              [(ValueEncoded fragment next-expectation next-continuations)
-               (recur (inc index) (str result fragment)
-                 next-expectation next-continuations)]
-              [(ValueEncodeRejected message)
-               (->EdnEncodeError index message)])]))]
+         (let [(event EdnEvent) (nth events index)]
+           (match event
+             [(EdnMapEnd offset)
+              (recur (inc index) (str result "}")
+                (peek continuations) (pop continuations))]
+             [(EdnMapStart offset)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnVectorStart offset)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnVectorEnd offset)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnKeyword offset value)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnString offset value)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnInteger offset value)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnBoolean offset value)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnNil offset)
+              (match (encode-value-step event ", "
+                       (->EncodeMapValue true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])])))]
 
       [(EncodeMapValue token)
        (if (>= index (count events))
@@ -300,34 +414,148 @@
       [(EncodeVectorValueFirst token)
        (if (>= index (count events))
          (->EdnEncodeError index "unterminated vector event sequence")
-         (match (nth events index)
-           [(EdnVectorEnd offset)
-            (recur (inc index) (str result "]")
-              (peek continuations) (pop continuations))]
-           [event
-            (match (encode-value-step event ""
-                     (->EncodeVectorValueNext true) continuations)
-              [(ValueEncoded fragment next-expectation next-continuations)
-               (recur (inc index) (str result fragment)
-                 next-expectation next-continuations)]
-              [(ValueEncodeRejected message)
-               (->EdnEncodeError index message)])]))]
+         (let [(event EdnEvent) (nth events index)]
+           (match event
+             [(EdnVectorEnd offset)
+              (recur (inc index) (str result "]")
+                (peek continuations) (pop continuations))]
+             [(EdnMapStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnMapEnd offset)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnVectorStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnKeyword offset value)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnString offset value)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnInteger offset value)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnBoolean offset value)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnNil offset)
+              (match (encode-value-step event ""
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])])))]
 
       [(EncodeVectorValueNext token)
        (if (>= index (count events))
          (->EdnEncodeError index "unterminated vector event sequence")
-         (match (nth events index)
-           [(EdnVectorEnd offset)
-            (recur (inc index) (str result "]")
-              (peek continuations) (pop continuations))]
-           [event
-            (match (encode-value-step event " "
-                     (->EncodeVectorValueNext true) continuations)
-              [(ValueEncoded fragment next-expectation next-continuations)
-               (recur (inc index) (str result fragment)
-                 next-expectation next-continuations)]
-              [(ValueEncodeRejected message)
-               (->EdnEncodeError index message)])]))]
+         (let [(event EdnEvent) (nth events index)]
+           (match event
+             [(EdnVectorEnd offset)
+              (recur (inc index) (str result "]")
+                (peek continuations) (pop continuations))]
+             [(EdnMapStart offset)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnMapEnd offset)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnVectorStart offset)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnKeyword offset value)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnString offset value)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnInteger offset value)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnBoolean offset value)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])]
+             [(EdnNil offset)
+              (match (encode-value-step event " "
+                       (->EncodeVectorValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (inc index) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->EdnEncodeError index message)])])))]
 
       [(EncodeDone token)
        (if (= index (count events))
