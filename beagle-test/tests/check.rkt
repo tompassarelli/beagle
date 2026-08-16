@@ -1396,6 +1396,18 @@
   '(defn wall-milliseconds [] Int (js/call Date .now))
   '(defn monotonic-milliseconds [] Float (js/call performance .now)))
 
+(check-js-ok "closed records express typed host member interfaces"
+  `(defrecord HostNodeList
+     [(length Int) (item ,(fn-ty '(Number) 'Any))])
+  `(defrecord HostQueryRoot
+     [(querySelectorAll ,(fn-ty '(String) 'HostNodeList))
+      (contains ,(fn-ty '(Any) 'Bool))])
+  '(defn enabled-control-count [(panel HostQueryRoot)] Int
+     (let [controls (js/call panel .querySelectorAll "button:not(:disabled)")]
+       (if (js/call panel .contains nil)
+         (js/get controls .length)
+         0))))
+
 (check-js-err/rx "js Math member rejects a non-numeric argument"
   #rx"expected .*Number.*got String"
   '(defn wrong-math [] Float
