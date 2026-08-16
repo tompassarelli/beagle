@@ -1,0 +1,10 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-atom-alias)
+
+(defn dynamic-sink [(cell (Atom Any))] Nil
+  nil)
+
+;; Atom is invariant: aliasing an Atom Int as Atom Any would let another
+;; writer install a value that violates the original cell's contract.
+(defn invalid-alias [(cell (Atom Int))] Nil
+  (dynamic-sink cell))

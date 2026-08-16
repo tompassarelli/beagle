@@ -1,0 +1,33 @@
+#lang beagle/js
+(ns selfhost.fixtures.grey-second-order-state)
+
+(defrecord Prepared [(ticket Int)])
+(defrecord Holder [(prepared (Atom (U Prepared Nil)))])
+
+(defn write-concrete! [(cell (Atom Any))] Any
+  (reset! cell 1))
+
+(defn fresh-holder [] Holder
+  (->Holder (atom nil)))
+
+(defn clear-prepared! [(cell (Atom (U Prepared Nil)))] Nil
+  (do (reset! cell nil) nil))
+
+(defn clear-fresh! [] Nil
+  (clear-prepared! (atom nil)))
+
+(defn dynamic-or-pair [(dynamic Any) (ready? Bool)] String
+  (if ready?
+    dynamic
+    (let [(pair (HVec Int String)) [1 "ready"]]
+      pair)))
+
+(defn maybe-pair [(ready? Bool)] (U (HVec Int String) Nil)
+  (if ready?
+    (let [(pair (HVec Int String)) [1 "ready"]]
+      pair)
+    nil))
+
+(defn maybe-first [(ready? Bool)] Int
+  (let [pair (maybe-pair ready?)]
+    (if (nil? pair) -1 (nth pair 0))))

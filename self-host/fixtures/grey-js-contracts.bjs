@@ -16,6 +16,12 @@
 (def absolute-distance Float
   (js/call Math .abs -7.5))
 
+(def sine Float
+  (js/call Math .sin 0.5))
+
+(def cosine Float
+  (js/call Math .cos 0.5))
+
 (def wall-clock Int
   (js/call Date .now))
 
