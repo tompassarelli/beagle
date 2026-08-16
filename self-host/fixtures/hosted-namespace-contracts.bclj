@@ -1,0 +1,11 @@
+#lang beagle/clj
+(ns selfhost.fixtures.hosted-namespace-contracts
+  (:require [clojure.string :as str :refer [index-of]]))
+
+(defn qualified-index-after [(text String)] Int
+  (let [found (str/index-of text "/")]
+    (if (nil? found) -1 (+ found 1))))
+
+(defn referred-index-after [(text String)] Int
+  (let [found (index-of text "/")]
+    (if (nil? found) -1 (+ found 1))))
