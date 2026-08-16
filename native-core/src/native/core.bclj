@@ -671,6 +671,11 @@
     [(result SsaValueV0)
      (source-id NativeId)
      (arena-id NativeId)])
+  (TransientVecPushInstructionV0
+    [(result SsaValueV0)
+     (source-id NativeId)
+     (value-id NativeId)
+     (element-type NativeId)])
   (TransientMapAssocInstructionV0
     [(result SsaValueV0)
      (source-id NativeId)
@@ -1095,6 +1100,8 @@
     [(CollectionTransientOpenInstructionV0 result source-id arena-id)
      (ssavaluev0-id result)]
     [(CollectionPersistentCloseInstructionV0 result source-id arena-id)
+     (ssavaluev0-id result)]
+    [(TransientVecPushInstructionV0 result source-id value-id element-type)
      (ssavaluev0-id result)]
     [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
        key-equality)
@@ -2051,6 +2058,8 @@
     [(SetVectorInstructionV0 result source-id arena-id) true]
     [(CollectionTransientOpenInstructionV0 result source-id arena-id) true]
     [(CollectionPersistentCloseInstructionV0 result source-id arena-id) true]
+    [(TransientVecPushInstructionV0 result source-id value-id element-type)
+     (id-in? known-types element-type)]
     [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
        key-equality)
      (concrete-equality-refs-closed? key-equality known-types)]
@@ -2345,6 +2354,8 @@
      [arena-id source-id]]
     [(CollectionPersistentCloseInstructionV0 result source-id arena-id)
      [arena-id source-id]]
+    [(TransientVecPushInstructionV0 result source-id value-id element-type)
+     [source-id value-id]]
     [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
        key-equality)
      [arena-id source-id key-id value-id]]
@@ -2519,6 +2530,7 @@
     [(SetVectorInstructionV0 result source-id arena-id) true]
     [(CollectionTransientOpenInstructionV0 result source-id arena-id) true]
     [(CollectionPersistentCloseInstructionV0 result source-id arena-id) true]
+    [(TransientVecPushInstructionV0 result source-id value-id element-type) true]
     [(TransientMapAssocInstructionV0 result source-id key-id value-id arena-id
        key-equality) true]
     [(TransientSetConjInstructionV0 result source-id value-id arena-id
