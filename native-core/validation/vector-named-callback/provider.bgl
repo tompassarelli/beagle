@@ -1,0 +1,5 @@
+#lang beagle
+
+(ns native.vector-named-callback-provider)
+
+(defrecord Item [(value Int)])

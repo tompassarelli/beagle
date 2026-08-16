@@ -1,0 +1,10 @@
+#lang beagle
+
+(ns native.vector-named-callback
+  (:require [native.vector-named-callback-provider :as provider]))
+
+(defn -main [(args (Vec String))] Int
+  (let [(values (Vec provider/Item))
+        [(provider/->Item 4) (provider/->Item 9)]
+        (mapped (Vec Int)) (mapv provider/item-value values)]
+    (if (and (= (count mapped) 2) (= (nth mapped 1) 9)) 0 1)))

@@ -9541,8 +9541,9 @@
    (owner core/NativeId)
    (state BodyStateV0)
    (callee String)
-   (callback-body core/NativeId)
-   (callback-source-parameter core/NativeId)
+   (callback-body (U core/NativeId Nil))
+   (callback-source-parameter (U core/NativeId Nil))
+   (callback-accessor AccessorHitV0)
    (callback-return core/NativeId)
    (element-type core/NativeId)
    (collection-id core/NativeId)
@@ -9612,12 +9613,26 @@
                 (core/->VecGetInstruction
                   (core/->SsaValueV0 item-id element-type)
                   collection-id header-index)))
-            (callback-state BodyStateV0)
-            (bind-source-parameter-value env owner isolated
-              callback-source-parameter 0 item-id element-type)
             (callback-result ExprResultV0)
-            (lower-contextual-boundary env owner callback-state callback-body
-              callback-return callback-return)
+            (if (accessorhitv0-found callback-accessor)
+              (let [(result-id core/NativeId)
+                    (state-id isolated owner "mapv-accessor")]
+                (->ExprResultV0
+                  (state-emit (state-bump isolated)
+                    (core/->FieldInstruction
+                      (core/->SsaValueV0 result-id callback-return)
+                      item-id (accessorhitv0-field-id callback-accessor)))
+                  result-id callback-return false))
+              (if (or (nil? callback-body)
+                      (nil? callback-source-parameter))
+                (fail-result isolated
+                  (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
+                    " has no statically known callback body"))
+                (let [(callback-state BodyStateV0)
+                      (bind-source-parameter-value env owner isolated
+                        callback-source-parameter 0 item-id element-type)]
+                  (lower-contextual-boundary env owner callback-state callback-body
+                    callback-return callback-return))))
             (restored BodyStateV0)
             (with
               (state-with-flow-context (exprresultv0-state callback-result)
@@ -9904,6 +9919,56 @@
                                 [(core/->Parameter join-value result-type)])
                               join-value result-type false)))))))))))))))))
 
+(defn lower-eager-vector-accessor-map
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (callee String)
+   (collection-node core/NativeId)
+   (accessor AccessorHitV0)]
+  ExprResultV0
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (element-type core/NativeId) (accessorhitv0-owner-type accessor)
+        (return-type core/NativeId) (accessorhitv0-field-type accessor)
+        (collection-type (U core/NativeId Nil))
+        (vector-type-of types element-type)]
+    (cond
+      (not (= "mapv" callee))
+      (fail-result state
+        (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
+          " requires an anonymous function literal"))
+
+      (nil? collection-type)
+      (fail-result state
+        (str "TODO-NATIVE-VECTOR-HOF-COLLECTION-TYPE: " callee
+          " callback element has no declared Vec carrier"))
+
+      :else
+      (let [(collection ExprResultV0)
+            (lower-contextual-boundary env owner state collection-node
+              collection-type collection-type)
+            (collection-state BodyStateV0) (exprresultv0-state collection)]
+        (cond
+          (exprresultv0-terminated collection) collection
+          (state-blocked? collection-state) (dead-result collection-state)
+
+          (not (vector-type? types (exprresultv0-type-id collection)))
+          (fail-result collection-state
+            (str "TODO-NATIVE-VECTOR-HOF-COLLECTION: " callee
+              " requires a closed native Vec"))
+
+          (not (same-id? element-type
+                 (vector-element-of types (exprresultv0-type-id collection))))
+          (fail-result collection-state
+            (str "TODO-NATIVE-VECTOR-HOF-ELEMENT: " callee
+              " vector element must match its callback parameter"))
+
+          :else
+          (lower-eager-vector-collect env owner collection-state callee
+            nil nil accessor return-type element-type
+            (exprresultv0-value-id collection)
+            (exprresultv0-type-id collection)))))))
+
 (defn lower-eager-vector-hof
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -9919,6 +9984,13 @@
           " lowers only as (" callee " fn vector)"))
       (let [(callback-node core/NativeId) (nth args 0)
             (callback-kind String) (fact-text index callback-node "form-kind")
+            (callback-name String) (fact-text index callback-node "name")
+            (callback-accessor AccessorHitV0)
+            (if (= "ref" callback-kind)
+              (record-accessor types
+                (resolve-source-name index
+                  (source-module-name index callback-node) callback-name))
+              (accessor-miss))
             (callback-variadic Bool)
             (not (nil? (index-first-object index callback-node "rest")))
             (callback-body (U core/NativeId Nil))
@@ -9934,6 +10006,10 @@
             (callback-parameters (Vec core/Parameter))
             (parameterresolutionv0-parameters callback-resolution)]
         (cond
+          (accessorhitv0-found callback-accessor)
+          (lower-eager-vector-accessor-map env owner state callee
+            (nth args 1) callback-accessor)
+
           (not (= "fn" callback-kind))
           (fail-result state
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
@@ -10017,7 +10093,7 @@
                       (or (= "mapv" callee) (= "filterv" callee))
                       (lower-eager-vector-collect env owner collection-state callee
                         callback-body (nth callback-source-parameters 0)
-                        callback-return
+                        (accessor-miss) callback-return
                         element-type (exprresultv0-value-id collection)
                         (exprresultv0-type-id collection))
 
