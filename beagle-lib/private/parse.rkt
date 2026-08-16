@@ -5278,6 +5278,7 @@
  program-source-bytes
  read-beagle-datums
  read-beagle-syntax
+ read-beagle-syntax/bytes
  strip-target-export
  (struct-out layout-edit)
  signature-layout-edits

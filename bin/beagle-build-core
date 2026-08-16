@@ -18,6 +18,7 @@ AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
 source "$BIN/_beagle-racket"
+source "$BIN/_beagle-source-id"
 
 core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 [[ "$core_kill_grace" =~ ^[1-9][0-9]*$ ]] || {
@@ -286,10 +287,12 @@ wasm_checked_sources=()
 source_snapshot_paths=()
 source_snapshot_digests=()
 normalized_sources=()
+source_ids=()
 source_digest_befores=()
 for source in "${sources[@]}"; do
     source="$(realpath "$source")"
     normalized_sources+=("$source")
+    source_ids+=("$(beagle_source_id "$source")")
     source_digest_befores+=("$(sha256sum "$source" | awk '{print $1}')")
 done
 
@@ -297,28 +300,39 @@ bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
     "$BIN/beagle-ast" --bundle "${normalized_sources[@]}" >"$bundle_ast"
 
-python3 - "$bundle_ast" "$work" "${normalized_sources[@]}" <<'PY'
+python3 - "$bundle_ast" "$work" "${#normalized_sources[@]}" \
+    "${normalized_sources[@]}" "${source_ids[@]}" <<'PY'
 import json
 import pathlib
 import sys
 
 bundle_path = pathlib.Path(sys.argv[1])
 work = pathlib.Path(sys.argv[2])
-sources = [str(pathlib.Path(source).resolve()) for source in sys.argv[3:]]
+source_count = int(sys.argv[3])
+sources = [
+    str(pathlib.Path(source).resolve())
+    for source in sys.argv[4:4 + source_count]
+]
+source_ids = sys.argv[4 + source_count:]
+if len(source_ids) != source_count:
+    raise SystemExit("beagle build: internal source path/id pairing is malformed")
 bundle = json.loads(bundle_path.read_text())
 if bundle.get("schemaVersion") != 2:
     raise SystemExit(
         f"beagle build: expected bundle AST schemaVersion 2, got {bundle.get('schemaVersion')}"
     )
-modules = {module["source"]: module for module in bundle["modules"]}
-if set(modules) != set(sources):
-    missing = sorted(set(sources) - set(modules))
-    extra = sorted(set(modules) - set(sources))
+module_list = bundle["modules"]
+modules = {module["source"]: module for module in module_list}
+if len(modules) != len(module_list):
+    raise SystemExit("beagle build: bundle AST contains duplicate source ids")
+if set(modules) != set(source_ids):
+    missing = sorted(set(source_ids) - set(modules))
+    extra = sorted(set(modules) - set(source_ids))
     raise SystemExit(
         f"beagle build: bundle AST source mismatch: missing={missing} extra={extra}"
     )
-for index, source in enumerate(sources):
-    module = modules[source]
+for index, (source, source_id) in enumerate(zip(sources, source_ids)):
+    module = modules[source_id]
     destination = work / f"source_{index}.ast.json"
     destination.write_text(
         json.dumps(module["program"], sort_keys=True, separators=(",", ":")) + "\n"

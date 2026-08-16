@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+beagle_source_id() {
+    local source_abs source_root source_id
+    source_abs="$(realpath "$1")"
+    source_root="$(
+        git -C "$(dirname "$source_abs")" rev-parse --show-toplevel \
+            2>/dev/null || true
+    )"
+    source_id="$source_abs"
+    if [[ -n "$source_root" ]]; then
+        source_root="$(realpath "$source_root")"
+        case "$source_abs" in
+            "$source_root"/*) source_id="${source_abs#"$source_root"/}" ;;
+        esac
+    fi
+    printf '%s\n' "$source_id"
+}

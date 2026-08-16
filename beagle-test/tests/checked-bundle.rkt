@@ -168,6 +168,78 @@
     (subprocess-wait process)
     (values (subprocess-status process) output errors)))
 
+(define (run-command executable arguments #:directory [directory root])
+  (parameterize ([current-directory directory])
+    (define-values (process stdout stdin stderr)
+      (apply subprocess #f #f #f executable arguments))
+    (close-output-port stdin)
+    (define output (port->string stdout))
+    (define errors (port->string stderr))
+    (subprocess-wait process)
+    (values (subprocess-status process) output errors)))
+
+(define (write-source path text)
+  (make-parent-directory* path)
+  (call-with-output-file path #:exists 'truncate
+    (lambda (out) (display text out))))
+
+(define (make-file-bundle-checkout path)
+  (make-directory* path)
+  (define-values (status _output errors)
+    (run-command
+     (path->string (find-executable-path "git"))
+     (list "init" "--quiet")
+     #:directory path))
+  (unless (zero? status)
+    (error 'make-file-bundle-checkout "git init failed: ~a" errors))
+  (write-source
+   (build-path path "src" "bundle" "provider.bgl")
+   (string-append
+    "#lang beagle\n"
+    "(ns bundle.provider)\n"
+    "(defn answer [] Int 42)\n"))
+  (write-source
+   (build-path path "src" "bundle" "app.bgl")
+   (string-append
+    "#lang beagle\n"
+    "(ns bundle.app (:require [bundle.provider :as provider]))\n"
+    "(defn run [] Int (provider/answer))\n")))
+
+(define (run-file-bundle checkout)
+  (run-command
+   (root/ "bin/beagle-ast")
+   (list
+    "--bundle"
+    (path->string (build-path checkout "src" "bundle" "provider.bgl"))
+    (path->string (build-path checkout "src" "bundle" "app.bgl")))))
+
+(define (bundle->source-facts bundle-output directory)
+  (define bundle (string->jsexpr bundle-output))
+  (define arguments
+    (apply
+     append
+     (for/list ([module (in-list (hash-ref bundle 'modules))]
+                [index (in-naturals)])
+       (define ast-path (build-path directory (format "module-~a.json" index)))
+       (call-with-output-file ast-path #:exists 'truncate
+         (lambda (out)
+           (write-json (hash-ref module 'program) out)
+           (newline out)))
+       (define source-id (hash-ref module 'source))
+       (list
+        "--input" (format "~a=~a" ast-path source-id)
+        "--interface-sha256"
+        (format "~a=~a" source-id (hash-ref module 'interfaceSha256))))))
+  (define facts-path (build-path directory "source.facts"))
+  (define-values (status _output errors)
+    (run-command
+     (path->string (find-executable-path "bb"))
+     (append
+      (list (root/ "native-core/bin/source-facts.clj"))
+      arguments
+      (list "--output" (path->string facts-path) "--include-defs"))))
+  (values status (and (zero? status) (file->string facts-path)) errors))
+
 (define tests
   (test-suite
    "closed exact-byte checked bundle"
@@ -418,6 +490,38 @@
                    (canonical-sha
                     (hash-remove parsed 'checkedBundleSha256)))
      (check-true (string-suffix? output "\n")))
+
+   (test-case "file bundle and source facts are checkout-independent"
+     (define scratch
+       (make-temporary-file "beagle-file-bundle-checkouts-~a" 'directory))
+     (dynamic-wind
+       void
+       (lambda ()
+         (define checkout-a (build-path scratch "checkout-a"))
+         (define checkout-b (build-path scratch "checkout-b"))
+         (make-file-bundle-checkout checkout-a)
+         (make-file-bundle-checkout checkout-b)
+         (define-values (status-a bundle-a errors-a)
+           (run-file-bundle checkout-a))
+         (define-values (status-b bundle-b errors-b)
+           (run-file-bundle checkout-b))
+         (check-equal? status-a 0 errors-a)
+         (check-equal? status-b 0 errors-b)
+         (check-equal? bundle-a bundle-b)
+         (check-equal?
+          (map (lambda (module) (hash-ref module 'source))
+               (hash-ref (string->jsexpr bundle-a) 'modules))
+          '("src/bundle/provider.bgl" "src/bundle/app.bgl"))
+         (define-values (facts-status-a facts-a facts-errors-a)
+           (bundle->source-facts bundle-a checkout-a))
+         (define-values (facts-status-b facts-b facts-errors-b)
+           (bundle->source-facts bundle-b checkout-b))
+         (check-equal? facts-status-a 0 facts-errors-a)
+         (check-equal? facts-status-b 0 facts-errors-b)
+         (check-equal? facts-a facts-b)
+         (check-false (string-contains? facts-a (path->string checkout-a)))
+         (check-false (string-contains? facts-b (path->string checkout-b))))
+       (lambda () (delete-directory/files scratch))))
 
    (test-case "CLI failure leaves stdout empty"
      (define-values (status output errors)

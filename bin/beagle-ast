@@ -10,6 +10,7 @@
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-source-id"
 
 bundle=0
 interface_sha256_out=""
@@ -49,14 +50,7 @@ BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ $bundle -eq 0 ]]; then
     src_abs="$(realpath "$1")"
-    source_root="$(git -C "$(dirname "$src_abs")" rev-parse --show-toplevel 2>/dev/null || true)"
-    source_id="$src_abs"
-    if [[ -n "$source_root" ]]; then
-        source_root="$(realpath "$source_root")"
-        case "$src_abs" in
-            "$source_root"/*) source_id="${src_abs#"$source_root"/}" ;;
-        esac
-    fi
+    source_id="$(beagle_source_id "$src_abs")"
 
     "$RACKET" -e "
     (require (file \"$BEAGLE_ROOT/beagle-lib/private/parse.rkt\")
@@ -94,7 +88,8 @@ fi
 
 bundle_args=()
 for src in "$@"; do
-    bundle_args+=("$(realpath "$src")")
+    src_abs="$(realpath "$src")"
+    bundle_args+=("$src_abs" "$(beagle_source_id "$src_abs")")
 done
 
 "$RACKET" -e "
@@ -105,10 +100,24 @@ done
          (file \"$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt\")
          (file \"$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt\"))
 
-(define paths (vector->list (current-command-line-arguments)))
+(define arguments (vector->list (current-command-line-arguments)))
+(unless (even? (length arguments))
+  (error 'beagle-ast
+         \"bundle inputs must pair a physical path with a logical source id\"))
+(define inputs
+  (for/list ([index (in-range 0 (length arguments) 2)])
+    (define physical-path (list-ref arguments index))
+    (define source-id (list-ref arguments (add1 index)))
+    (vector physical-path source-id (file->bytes physical-path))))
+(define snapshots-by-source-id (make-hash))
 (define sources
-  (for/list ([path (in-list paths)])
-    (stxs->module-source (read-beagle-syntax path) path)))
+  (for/list ([input (in-list inputs)])
+    (define source-id (vector-ref input 1))
+    (define snapshot (vector-ref input 2))
+    (hash-set! snapshots-by-source-id source-id snapshot)
+    (stxs->module-source
+     (read-beagle-syntax/bytes source-id snapshot)
+     source-id)))
 (define checked
   (check-module-overlay
    sources
@@ -117,10 +126,10 @@ done
    #:closed? #t
    #:parse-source
    (lambda (source resolver)
-     (define path (format \"~a\" (module-source-source-id source)))
+     (define source-id (format \"~a\" (module-source-source-id source)))
      (parse-program/bytes
-      (file->bytes path)
-      #:source-path path
+      (hash-ref snapshots-by-source-id source-id)
+      #:source-path source-id
       #:module-resolver resolver))))
 (unless (overlay-check-result-ok? checked)
   (for ([diagnostic (in-list (overlay-check-result-diagnostics checked))])
