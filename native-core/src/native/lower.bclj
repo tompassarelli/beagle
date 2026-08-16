@@ -11105,7 +11105,8 @@
   [(env BodyEnvV0)
    (owner core/NativeId)
    (state BodyStateV0)
-   (expr core/NativeId)]
+   (expr core/NativeId)
+   (expected (U core/NativeId Nil))]
   ExprResultV0
   (let [(index SourceIndexV0) (bodyenvv0-index env)
         (types (Vec core/TypeDef)) (bodyenvv0-types env)
@@ -11193,7 +11194,8 @@
                               (body ExprResultV0)
                               (if (state-blocked? bound)
                                 (dead-result bound)
-                                (lower-expr env owner bound body-node))
+                                (lower-expr-expected env owner bound body-node
+                                  expected))
                               (body-state BodyStateV0) (exprresultv0-state body)
                               (body-live Bool) (not (exprresultv0-terminated body))]
                           (cond
@@ -12007,7 +12009,7 @@
                 (exprresultv0-terminated body)))))
 
         (= "match" kind)
-        (lower-match-expr env owner state expr)
+        (lower-match-expr env owner state expr expected)
 
         (= "if" kind)
         (let [(condition-node (U core/NativeId Nil))

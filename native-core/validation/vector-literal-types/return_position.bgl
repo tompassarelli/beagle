@@ -4,8 +4,20 @@
 ;; The literal in return position is typed by the return annotation; keep it
 ;; in its own module so the fixture module stays annotation-free for Int.
 
+(defunion Result
+  (Loaded [(values (Vec Int))])
+  (Rejected [(message String)]))
+
 (defn build [] (Vec Int)
   [4 5 6])
 
+(defn empty-from-match [] (Vec Int)
+  (match (->Rejected "no values")
+    [(Loaded values) values]
+    [(Rejected message) []]))
+
 (defn main [] Int
-  (if (= (nth (build) 2) 6) 0 1))
+  (if (and (= (nth (build) 2) 6)
+        (= (count (empty-from-match)) 0))
+    0
+    1))
