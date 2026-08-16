@@ -20,10 +20,12 @@ if [[ "${BEAGLE_PARALLEL_RUNTIME_BOUNDED:-0}" != "1" ]]; then
   else
     rc=$?
   fi
-  grep -Fqx "subtree-reaped-v0 exit status=$rc" "$receipt" || {
+  if ! grep -Fqx "subtree-reaped-v0 exit status=$rc" "$receipt" &&
+      ! { [[ "$rc" == "124" ]] &&
+          grep -Fqx "subtree-reaped-v0 timeout status=124" "$receipt"; }; then
     echo "parallel-runtime fixture: supervisor did not reap its subtree" >&2
     exit 125
-  }
+  fi
   exit "$rc"
 fi
 
