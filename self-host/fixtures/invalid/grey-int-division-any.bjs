@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-int-division-any)
+
+;; Integer division may produce a Ratio, so its nested result remains Any and
+;; cannot flow into strict numeric arithmetic without explicit narrowing.
+(def invalid-ratio Int
+  (+ (/ 3 2) 1))

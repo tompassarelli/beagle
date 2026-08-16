@@ -1,0 +1,33 @@
+#lang beagle/js
+(ns selfhost.fixtures.grey-js-contracts)
+
+(defmacro typed-pair []
+  [7 "north"])
+
+(defn canonical-prefix [(value String)] String
+  (js/call (js/call value .trim) .slice 0 5))
+
+(defn typed-index [(value String)] Int
+  (js/call value .indexOf "north"))
+
+(def absolute-count Int
+  (js/call Math .abs -7))
+
+(def absolute-distance Float
+  (js/call Math .abs -7.5))
+
+(def wall-clock Int
+  (js/call Date .now))
+
+(def monotonic-clock Float
+  (js/call performance .now))
+
+(def mixed-ratio Float
+  (/ 3 2.0))
+
+(def integer-range (List Int)
+  (range 0 4))
+
+(defn pair-first [] Int
+  (let [(pair (HVec Int String)) (typed-pair)]
+    (nth pair 0)))

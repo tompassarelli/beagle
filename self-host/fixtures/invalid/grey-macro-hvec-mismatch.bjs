@@ -1,0 +1,10 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-macro-hvec-mismatch)
+
+(defmacro mismatched-pair []
+  [7 "north"])
+
+;; Expected-directed checking must inspect the macro-expanded vector literal.
+(defn invalid-pair [] Int
+  (let [(pair (HVec Int Int)) (mismatched-pair)]
+    (nth pair 0)))

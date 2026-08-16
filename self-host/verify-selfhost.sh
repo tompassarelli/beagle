@@ -135,7 +135,7 @@ beagle_stage0_banner "$OUT"
 FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
-  MODULES=(self-host/fixtures/*.bclj)
+  MODULES=(self-host/fixtures/*.bclj self-host/fixtures/*.bjs)
   # Hosted fram modules whose require closure stays inside hosted beagle
   # source. fold/import/tools left this corpus when fram moved their providers
   # (fram.store, fram.types, fram.schema, ...) to Beagle Core (.bgl): a hosted
@@ -171,7 +171,8 @@ for m in ast types macros reader parse check emit-clj; do
 done
 
 for src in "${MODULES[@]}"; do
-  name="$(basename "$src" .bclj)"
+  name="$(basename "$src")"
+  name="${name%.*}"
   oracle="$LAB/$name-oracle.clj"
   astj="$LAB/$name-ast.json"
 
@@ -295,8 +296,9 @@ else
   bad "known-valid mixed-binding oracle control missing: $VALID_ORACLE_CONTROL"
 fi
 if [ -d "self-host/fixtures/invalid" ]; then
-  for inv in self-host/fixtures/invalid/*.bclj; do
-    iname="$(basename "$inv" .bclj)"
+  for inv in self-host/fixtures/invalid/*.bclj self-host/fixtures/invalid/*.bjs; do
+    iname="$(basename "$inv")"
+    iname="${iname%.*}"
     if [ "$oracle_builder_ready" -ne 1 ]; then
       bad "$iname oracle rejection not evaluated (known-valid build control failed)"
       continue
