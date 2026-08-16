@@ -1481,6 +1481,92 @@
                      "extraction"))
       produced)))
 
+(defn replace-typed-unit [typed-set replacement]
+  (mapv (fn [typed]
+          (if (core/native-id= (unit/typedunitv0-unit-id typed)
+                               (unit/typedunitv0-unit-id replacement))
+            replacement
+            typed))
+        typed-set))
+
+(defn require-native-not-settled! [label thunk]
+  (let [attach-before (probe-total :attach-body)
+        lower-before (probe-total :lower-ready-function)
+        _ (probe-reset!)
+        result (with-singleton-probes thunk)]
+    (require!
+     (instance? native.unit_compile.NativeUnitCompileRejectedV0 result)
+     (str label " was admitted outside the singleton settlement subset"))
+    (require! (= "UNIT-TARGET-NOT-SETTLED"
+                 (singleton/nativeunitcompilerejectedv0-code result))
+              (str label " received rejection "
+                   (singleton/nativeunitcompilerejectedv0-code result)
+                   ", expected UNIT-TARGET-NOT-SETTLED"))
+    (require! (= [] (probe-seen :attach-body))
+              (str label " rejection attached a body"))
+    (require! (= [] (probe-seen :lower-ready-function))
+              (str label " rejection lowered a native function"))
+    (require! (= attach-before (probe-total :attach-body))
+              (str label " rejection changed the body-attach total"))
+    (require! (= lower-before (probe-total :lower-ready-function))
+              (str label " rejection changed the native-lower total"))))
+
+(defn assert-singleton-subset-rejections!
+  [case-data compiler-context abi]
+  (let [prepared (prepared-candidate case-data compiler-context)
+        row (get (rows-by-name case-data)
+                 "corpus.foundation/private-offset")
+        source-unit (:source row)
+        unit-id (stages/sourceunitv0-id source-unit)
+        target (:typed row)
+        function (unit/typedunitv0-function target)
+        typed-set (:typed-units case-data)
+        result-key (expected-result-key case-data source-unit compiler-context)
+        invoke (fn [replacement]
+                 (singleton/compile-native-unit
+                  prepared unit-id replacement
+                  (replace-typed-unit typed-set replacement)
+                  compiler-context result-key abi))
+        not-ready
+        (assoc target :function
+               (assoc function :readiness
+                      (lower/->NativeTodoV0 "UNIT-TEST-NOT-READY"
+                                           "settlement rejection witness")))
+        not-pure
+        (assoc target :function
+               (assoc function :effects [(lower/write-effect-id)]))]
+    (require! (singleton/at-settlement-fixpoint? function)
+              "singleton rejection fixture is not at the settlement fixpoint")
+    (require-native-not-settled! "not-ready target"
+                                 (fn [] (invoke not-ready)))
+    (require-native-not-settled!
+     "non-pure target"
+     (fn []
+       (with-redefs [lower/function-regions (fn [_] [])
+                     lower/function-capabilities (fn [_] [])]
+         (invoke not-pure))))
+    (require-native-not-settled!
+     "region-bearing target"
+     (fn []
+       (with-redefs [lower/function-regions
+                     (fn [_] [(lower/arena-region-id)])
+                     lower/function-capabilities (fn [_] [])]
+         (invoke target))))
+    (require-native-not-settled!
+     "capability-bearing target"
+     (fn []
+       (with-redefs [lower/function-regions (fn [_] [])
+                     lower/function-capabilities
+                     (fn [_] [(lower/write-capability-id)])]
+         (invoke target))))
+    (println
+     (str "branch-compile-corpus: singleton subset rejection PASS "
+          "ready+pure+region-free+capability-free only"))))
+
+(defn assert-singleton-repetition! [label first-result second-result]
+  (require! (= first-result second-result)
+            (str label " singleton repetition changed the exact assembly")))
+
 (defn assert-singleton-case!
   [baseline candidate expected compiler-context compiler-commit abi]
   (let [expected-set (set expected)
@@ -1589,30 +1675,64 @@
                   compiler-context compiler-commit abi)
     (assert-prepared-contracts! baseline
                                 (prepared-candidate baseline compiler-context))
-    (assert-singleton-case! baseline comment [] compiler-context
-                            compiler-commit abi)
-    (assert-singleton-case! baseline private
-                            ["corpus.foundation/private-offset"]
-                            compiler-context compiler-commit abi)
-    (assert-singleton-case! baseline public
-                            ["corpus.foundation/adjust"
-                             "corpus.feature/score-value"]
-                            compiler-context compiler-commit abi)
-    (require! (= 3 (probe-total :attach-body))
-              (str "singleton cases attached " (probe-total :attach-body)
-                   " bodies in total, expected exactly 3 (0 + 1 + 2)"))
-    (require! (= 3 (probe-total :lower-ready-function))
-              (str "singleton cases lowered "
-                   (probe-total :lower-ready-function)
-                   " functions in total, expected exactly 3 (0 + 1 + 2)"))
-    (assert-duplicate-identities-rejected! baseline compiler-commit abi)
-    (assert-collision-rejected! baseline compiler-commit abi)
-    (assert-layout-digest-rejected! baseline compiler-commit abi)
-    (assert-unsupported-rejected! baseline compiler-commit abi)
-    (println "branch-compile-corpus: unit reuse PASS 9/9, 8/9, 7/9 exact reuse")
-    (println
-     (str "branch-compile-corpus: singleton PASS 0/1/2 compiled units, "
-          (probe-total :attach-body) " attach-body, "
-          (probe-total :lower-ready-function) " lower-ready-function"))))
+    (let [comment-first
+          (assert-singleton-case! baseline comment [] compiler-context
+                                  compiler-commit abi)
+          private-first
+          (assert-singleton-case! baseline private
+                                  ["corpus.foundation/private-offset"]
+                                  compiler-context compiler-commit abi)
+          public-first
+          (assert-singleton-case! baseline public
+                                  ["corpus.foundation/adjust"
+                                   "corpus.feature/score-value"]
+                                  compiler-context compiler-commit abi)]
+      (require! (= 3 (probe-total :attach-body))
+                (str "singleton first round attached "
+                     (probe-total :attach-body)
+                     " bodies in total, expected exactly 3 (0 + 1 + 2)"))
+      (require! (= 3 (probe-total :lower-ready-function))
+                (str "singleton first round lowered "
+                     (probe-total :lower-ready-function)
+                     " functions in total, expected exactly 3 (0 + 1 + 2)"))
+      (reset! probe-totals {:attach-body 0 :lower-ready-function 0})
+      (let [comment-second
+            (assert-singleton-case! baseline comment [] compiler-context
+                                    compiler-commit abi)
+            private-second
+            (assert-singleton-case! baseline private
+                                    ["corpus.foundation/private-offset"]
+                                    compiler-context compiler-commit abi)
+            public-second
+            (assert-singleton-case! baseline public
+                                    ["corpus.foundation/adjust"
+                                     "corpus.feature/score-value"]
+                                    compiler-context compiler-commit abi)]
+        (require! (= 3 (probe-total :attach-body))
+                  (str "singleton second round attached "
+                       (probe-total :attach-body)
+                       " bodies in total, expected exactly 3 (0 + 1 + 2)"))
+        (require! (= 3 (probe-total :lower-ready-function))
+                  (str "singleton second round lowered "
+                       (probe-total :lower-ready-function)
+                       " functions in total, expected exactly 3 (0 + 1 + 2)"))
+        (assert-singleton-repetition! "comment/layout"
+                                      comment-first comment-second)
+        (assert-singleton-repetition! "private implementation"
+                                      private-first private-second)
+        (assert-singleton-repetition! "public interface"
+                                      public-first public-second)
+        (assert-singleton-subset-rejections! baseline compiler-context abi)
+        (assert-duplicate-identities-rejected! baseline compiler-commit abi)
+        (assert-collision-rejected! baseline compiler-commit abi)
+        (assert-layout-digest-rejected! baseline compiler-commit abi)
+        (assert-unsupported-rejected! baseline compiler-commit abi)
+        (println
+         "branch-compile-corpus: unit reuse PASS 9/9, 8/9, 7/9 exact reuse")
+        (println
+         (str "branch-compile-corpus: singleton PASS 0/1/2 compiled units, "
+              (probe-total :attach-body) " attach-body, "
+              (probe-total :lower-ready-function)
+              " lower-ready-function, deterministic repetition"))))))
 
 (apply -main *command-line-args*)
