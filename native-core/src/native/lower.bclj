@@ -2806,10 +2806,18 @@
 ;; One live `loop`: the SSA header block whose block-parameters ARE the typed
 ;; accumulators. `recur` is a Jump back to this header, so the innermost frame
 ;; is the lexical recur target and a nested loop shadows its parent.
+(defrecord TransientLoopOwnerV0
+  [(slot Int)
+   (name String)
+   (type-id core/NativeId)
+   (current-id core/NativeId)
+   (live Bool)])
+
 (defrecord LoopFrameV0
   [(header-id core/NativeId)
    (parameters (Vec core/Parameter))
-   (bindings (Vec core/NativeId))])
+   (bindings (Vec core/NativeId))
+   (transient-owners (Vec TransientLoopOwnerV0))])
 
 ;; One in-flight function body: finished blocks, the open block being filled,
 ;; the lexical environment, and the first refusal that made lowering stop.
@@ -3089,6 +3097,121 @@
         (if (some? direct)
           direct
           (find-local (bodystatev0-locals state) canonical))))))
+
+(defn transient-loop-owner-position-in
+  [(owners (Vec TransientLoopOwnerV0)) (name String)] Int
+  (loop [(position Int) 0]
+    (if (>= position (count owners))
+      -1
+      (if (= name (transientloopownerv0-name (nth owners position)))
+        position
+        (recur (+ position 1))))))
+
+(defn current-transient-loop-owner-position
+  [(state BodyStateV0) (name String)] Int
+  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
+    (if (nil? frame)
+      -1
+      (transient-loop-owner-position-in
+        (loopframev0-transient-owners frame) name))))
+
+(defn current-transient-loop-owner
+  [(state BodyStateV0) (name String)] (U TransientLoopOwnerV0 Nil)
+  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)
+        (position Int) (current-transient-loop-owner-position state name)]
+    (if (or (nil? frame) (< position 0))
+      nil
+      (nth (loopframev0-transient-owners frame) position))))
+
+(defn state-replace-current-transient-loop-owner
+  [(state BodyStateV0)
+   (position Int)
+   (replacement TransientLoopOwnerV0)]
+  BodyStateV0
+  (let [(frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)]
+    (if (= 0 (count frames))
+      state
+      (let [(frame-position Int) (- (count frames) 1)
+            (frame LoopFrameV0) (nth frames frame-position)
+            (owners (Vec TransientLoopOwnerV0))
+            (loopframev0-transient-owners frame)
+            (updated LoopFrameV0)
+            (->LoopFrameV0 (loopframev0-header-id frame)
+              (loopframev0-parameters frame) (loopframev0-bindings frame)
+              (assoc owners position replacement))]
+        (with state [:loop-frames (assoc frames frame-position updated)])))))
+
+(defn state-update-current-transient-loop-owner
+  [(state BodyStateV0)
+   (position Int)
+   (current-id core/NativeId)
+   (live Bool)]
+  BodyStateV0
+  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
+    (if (nil? frame)
+      state
+      (let [(owner TransientLoopOwnerV0)
+            (nth (loopframev0-transient-owners frame) position)]
+        (state-replace-current-transient-loop-owner state position
+          (->TransientLoopOwnerV0
+            (transientloopownerv0-slot owner)
+            (transientloopownerv0-name owner)
+            (transientloopownerv0-type-id owner)
+            current-id live))))))
+
+(defn transient-loop-owner-compatible?
+  [(left TransientLoopOwnerV0) (right TransientLoopOwnerV0)] Bool
+  (and (= (transientloopownerv0-slot left)
+         (transientloopownerv0-slot right))
+    (= (transientloopownerv0-name left)
+       (transientloopownerv0-name right))
+    (same-id? (transientloopownerv0-type-id left)
+      (transientloopownerv0-type-id right))
+    (= (transientloopownerv0-live left)
+       (transientloopownerv0-live right))
+    (or (not (transientloopownerv0-live left))
+      (same-id? (transientloopownerv0-current-id left)
+        (transientloopownerv0-current-id right)))))
+
+(defn transient-loop-frames-compatible?
+  [(left (Vec LoopFrameV0)) (right (Vec LoopFrameV0))] Bool
+  (and (= (count left) (count right))
+    (loop [(frame-position Int) 0]
+      (if (>= frame-position (count left))
+        true
+        (let [(left-frame LoopFrameV0) (nth left frame-position)
+              (right-frame LoopFrameV0) (nth right frame-position)
+              (left-owners (Vec TransientLoopOwnerV0))
+              (loopframev0-transient-owners left-frame)
+              (right-owners (Vec TransientLoopOwnerV0))
+              (loopframev0-transient-owners right-frame)]
+          (if (and
+                (same-id? (loopframev0-header-id left-frame)
+                  (loopframev0-header-id right-frame))
+                (= (count left-owners) (count right-owners))
+                (loop [(owner-position Int) 0]
+                  (if (>= owner-position (count left-owners))
+                    true
+                    (if (transient-loop-owner-compatible?
+                          (nth left-owners owner-position)
+                          (nth right-owners owner-position))
+                      (recur (+ owner-position 1))
+                      false))))
+            (recur (+ frame-position 1))
+            false))))))
+
+(defn transient-loop-owners-closed? [(state BodyStateV0)] Bool
+  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
+    (if (nil? frame)
+      true
+      (let [(owners (Vec TransientLoopOwnerV0))
+            (loopframev0-transient-owners frame)]
+        (loop [(position Int) 0]
+          (if (>= position (count owners))
+            true
+            (if (transientloopownerv0-live (nth owners position))
+              false
+              (recur (+ position 1)))))))))
 
 (defn signature-position-at
   [(env BodyEnvV0) (resolved ResolvedSourceNameV0)] (U Int Nil)
@@ -3627,6 +3750,11 @@
    (values (Vec core/NativeId))
    (value-types (Vec core/NativeId))
    (terminated Bool)])
+
+(defrecord TransientLoopOwnerSpecV0
+  [(slot Int) (binding core/NativeId) (name String)])
+
+(defrecord TransientExitProofV0 [(closed (Vec Bool)) (valid Bool)])
 
 (defn index-child-nodes
   [(index SourceIndexV0) (subject core/NativeId)] (Vec core/NativeId)
@@ -5811,6 +5939,313 @@
       (or (source-any-annotation? index owner)
         (and (= "vector" collection-kind)
           (source-transient-vector-type? index annotation))))))
+
+(defn transient-loop-owner-specs
+  [(index SourceIndexV0)
+   (bindings (Vec core/NativeId))]
+  (Vec TransientLoopOwnerSpecV0)
+  (loop [(position Int) 0
+         (owners (Vec TransientLoopOwnerSpecV0)) []]
+    (if (>= position (count bindings))
+      owners
+      (let [(binding core/NativeId) (nth bindings position)
+            (annotation (U core/NativeId Nil))
+            (index-first-object index binding "ann")
+            (value (U core/NativeId Nil))
+            (index-first-object index binding "value")]
+        (recur (+ position 1)
+          (if (and (some? annotation) (some? value)
+                (source-transient-vector-type? index annotation)
+                (source-call-named? index value "transient")
+                (= 1 (count (source-call-arguments index value))))
+            (conj owners
+              (->TransientLoopOwnerSpecV0 position binding
+                (fact-text index binding "name")))
+            owners))))))
+
+(defn direct-transient-loop-init-count
+  [(index SourceIndexV0) (bindings (Vec core/NativeId))] Int
+  (loop [(position Int) 0 (found Int) 0]
+    (if (>= position (count bindings))
+      found
+      (let [(value (U core/NativeId Nil))
+            (index-first-object index (nth bindings position) "value")]
+        (recur (+ position 1)
+          (if (and (some? value) (source-call-named? index value "transient"))
+            (+ found 1)
+            found))))))
+
+(defn transient-owner-spec-position
+  [(owners (Vec TransientLoopOwnerSpecV0)) (name String)] Int
+  (loop [(position Int) 0]
+    (if (>= position (count owners))
+      -1
+      (if (= name
+            (transientloopownerspecv0-name (nth owners position)))
+        position
+        (recur (+ position 1))))))
+
+(defn transient-owner-ref-position
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))]
+  Int
+  (if (= "ref" (fact-text index node "form-kind"))
+    (transient-owner-spec-position owners (fact-text index node "name"))
+    -1))
+
+(defn multi-transient-neutral-expression?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))]
+  Bool
+  (and
+    (not (source-contains-transient-operator? index node
+      (+ 1 (index-facts index))))
+    (loop [(position Int) 0]
+      (if (>= position (count owners))
+        true
+        (if (source-excludes-ref-named? index node
+              (transientloopownerspecv0-name (nth owners position)))
+          (recur (+ position 1))
+          false)))))
+
+(defn transient-owner-thread-expression?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (owner-position Int)]
+  Bool
+  (let [(owner TransientLoopOwnerSpecV0) (nth owners owner-position)
+        (owner-name String) (transientloopownerspecv0-name owner)]
+    (cond
+      (source-ref-named? index node owner-name) true
+
+      (source-call-named? index node "conj!")
+      (let [(args (Vec core/NativeId)) (source-call-arguments index node)]
+        (and (= 2 (count args))
+          (transient-owner-thread-expression? index (nth args 0) owners
+            owner-position)
+          (multi-transient-neutral-expression? index (nth args 1) owners)))
+
+      :else false)))
+
+(defn transient-bool-vector
+  [(count-value Int) (value Bool)] (Vec Bool)
+  (loop [(position Int) 0 (values (Vec Bool)) []]
+    (if (>= position count-value)
+      values
+      (recur (+ position 1) (conj values value)))))
+
+(defn transient-all-closed? [(closed (Vec Bool))] Bool
+  (loop [(position Int) 0]
+    (if (>= position (count closed))
+      true
+      (if (nth closed position) (recur (+ position 1)) false))))
+
+(defn transient-exit-proof
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (closed (Vec Bool))
+   (fuel Int)]
+  TransientExitProofV0
+  (if (<= fuel 0)
+    (->TransientExitProofV0 closed false)
+    (let [(owner-position Int)
+          (transient-owner-ref-position index node owners)]
+      (cond
+        (>= owner-position 0)
+        (->TransientExitProofV0 closed false)
+
+        (source-call-named? index node "persistent!")
+        (let [(args (Vec core/NativeId)) (source-call-arguments index node)
+              (receiver-position Int)
+              (if (= 1 (count args))
+                (transient-owner-ref-position index (nth args 0) owners)
+                -1)]
+          (if (or (< receiver-position 0) (nth closed receiver-position))
+            (->TransientExitProofV0 closed false)
+            (->TransientExitProofV0
+              (assoc closed receiver-position true) true)))
+
+        (or (source-call-named? index node "transient")
+          (source-call-named? index node "conj!")
+          (source-call-named? index node "assoc!"))
+        (->TransientExitProofV0 closed false)
+
+        :else
+        (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
+          (loop [(position Int) 0
+                 (proof TransientExitProofV0)
+                 (->TransientExitProofV0 closed true)]
+            (if (or (>= position (count children))
+                  (not (transientexitproofv0-valid proof)))
+              proof
+              (recur (+ position 1)
+                (transient-exit-proof index (nth children position) owners
+                  (transientexitproofv0-closed proof) (- fuel 1))))))))))
+
+(defn transient-complete-exit?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (fuel Int)]
+  Bool
+  (let [(proof TransientExitProofV0)
+        (transient-exit-proof index node owners
+          (transient-bool-vector (count owners) false) fuel)]
+    (and (transientexitproofv0-valid proof)
+      (transient-all-closed? (transientexitproofv0-closed proof)))))
+
+(declare transient-loop-tail-owned?)
+
+(defn transient-let-tail-owned?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (binding-count Int)
+   (fuel Int)]
+  Bool
+  (let [(bindings-node (U core/NativeId Nil))
+        (index-first-object index node "bindings")
+        (bindings (Vec core/NativeId))
+        (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
+        (body (U core/NativeId Nil)) (index-first-object index node "body")]
+    (and (some? body)
+      (or
+        (and
+          (loop [(position Int) 0]
+            (if (>= position (count bindings))
+              true
+              (let [(binding core/NativeId) (nth bindings position)
+                    (value (U core/NativeId Nil))
+                    (index-first-object index binding "value")]
+                (if (and (some? value)
+                      (< (transient-owner-spec-position owners
+                           (fact-text index binding "name")) 0)
+                      (multi-transient-neutral-expression? index value owners))
+                  (recur (+ position 1))
+                  false))))
+          (transient-loop-tail-owned? index body owners binding-count
+            (- fuel 1)))
+        (let [(binding-proof TransientExitProofV0)
+              (loop [(position Int) 0
+                     (proof TransientExitProofV0)
+                     (->TransientExitProofV0
+                       (transient-bool-vector (count owners) false) true)]
+                (if (or (>= position (count bindings))
+                      (not (transientexitproofv0-valid proof)))
+                  proof
+                  (let [(value (U core/NativeId Nil))
+                        (index-first-object index (nth bindings position)
+                          "value")]
+                    (if (nil? value)
+                      (->TransientExitProofV0
+                        (transientexitproofv0-closed proof) false)
+                      (recur (+ position 1)
+                        (transient-exit-proof index value owners
+                          (transientexitproofv0-closed proof)
+                          (- fuel 1)))))))
+              (body-proof TransientExitProofV0)
+              (if (transientexitproofv0-valid binding-proof)
+                (transient-exit-proof index body owners
+                  (transientexitproofv0-closed binding-proof) (- fuel 1))
+                binding-proof)]
+          (and (transientexitproofv0-valid body-proof)
+            (transient-all-closed?
+              (transientexitproofv0-closed body-proof))))))))
+
+(defn transient-do-tail-owned?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (binding-count Int)
+   (fuel Int)]
+  Bool
+  (let [(body-node (U core/NativeId Nil))
+        (index-first-object index node "body")
+        (forms (Vec core/NativeId))
+        (if (nil? body-node) [] (index-sequence-items index body-node))]
+    (and (> (count forms) 0)
+      (loop [(position Int) 0]
+        (if (= (+ position 1) (count forms))
+          (transient-loop-tail-owned? index (nth forms position) owners
+            binding-count (- fuel 1))
+          (if (multi-transient-neutral-expression? index
+                (nth forms position) owners)
+            (recur (+ position 1))
+            false))))))
+
+(defn transient-recur-owned?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (binding-count Int)]
+  Bool
+  (let [(args-node (U core/NativeId Nil)) (index-first-object index node "args")
+        (args (Vec core/NativeId))
+        (if (nil? args-node) [] (index-sequence-items index args-node))]
+    (and (= binding-count (count args))
+      (loop [(position Int) 0]
+        (if (>= position (count args))
+          true
+          (let [(owner-position Int)
+                (loop [(candidate Int) 0]
+                  (if (>= candidate (count owners))
+                    -1
+                    (if (= position
+                          (transientloopownerspecv0-slot
+                            (nth owners candidate)))
+                      candidate
+                      (recur (+ candidate 1)))))]
+            (if (if (>= owner-position 0)
+                  (transient-owner-thread-expression? index
+                    (nth args position) owners owner-position)
+                  (multi-transient-neutral-expression? index
+                    (nth args position) owners))
+              (recur (+ position 1))
+              false)))))))
+
+(defn transient-loop-tail-owned?
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (owners (Vec TransientLoopOwnerSpecV0))
+   (binding-count Int)
+   (fuel Int)]
+  Bool
+  (if (<= fuel 0)
+    false
+    (let [(kind String) (fact-text index node "form-kind")]
+      (cond
+        (= "if" kind)
+        (let [(condition (U core/NativeId Nil))
+              (index-first-object index node "cond")
+              (then-node (U core/NativeId Nil))
+              (index-first-object index node "then")
+              (else-node (U core/NativeId Nil))
+              (index-first-object index node "else")]
+          (and (some? condition) (some? then-node) (some? else-node)
+            (multi-transient-neutral-expression? index condition owners)
+            (transient-loop-tail-owned? index then-node owners binding-count
+              (- fuel 1))
+            (transient-loop-tail-owned? index else-node owners binding-count
+              (- fuel 1))))
+
+        (= "let" kind)
+        (transient-let-tail-owned? index node owners binding-count fuel)
+
+        (= "do" kind)
+        (transient-do-tail-owned? index node owners binding-count fuel)
+
+        (= "recur" kind)
+        (transient-recur-owned? index node owners binding-count)
+
+        (or (= "cond" kind) (= "match" kind) (= "loop" kind))
+        false
+
+        :else
+        (transient-complete-exit? index node owners fuel)))))
 
 ;; A transient map may be borrowed only by exact `get`; every other occurrence
 ;; of its accumulator must remain on the single update thread.
@@ -12228,6 +12663,81 @@
                   (exprresultv0-value-id value) element-type))
               result-id active false)))))))
 
+(defn transient-call-root-owner-name
+  [(index SourceIndexV0) (node core/NativeId)] String
+  (cond
+    (= "ref" (fact-text index node "form-kind"))
+    (fact-text index node "name")
+
+    (source-call-named? index node "conj!")
+    (let [(args (Vec core/NativeId)) (source-call-arguments index node)]
+      (if (= 2 (count args))
+        (transient-call-root-owner-name index (nth args 0))
+        ""))
+
+    :else ""))
+
+(defn transient-call-owner-position
+  [(index SourceIndexV0)
+   (state BodyStateV0)
+   (args (Vec core/NativeId))]
+  Int
+  (if (= 0 (count args))
+    -1
+    (current-transient-loop-owner-position state
+      (transient-call-root-owner-name index (nth args 0)))))
+
+(defn lower-loop-transient-vector-conj
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (args (Vec core/NativeId))
+   (owner-position Int)]
+  ExprResultV0
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (frame (U LoopFrameV0 Nil)) (current-loop state)]
+    (if (or (nil? frame) (< owner-position 0)
+          (>= owner-position (count (loopframev0-transient-owners frame))))
+      (fail-result state
+        "TODO-NATIVE-TRANSIENT-STALE: conj! receiver has no live loop owner")
+      (let [(loop-owner TransientLoopOwnerV0)
+            (nth (loopframev0-transient-owners frame) owner-position)
+            (root-name String)
+            (if (= 0 (count args)) ""
+              (transient-call-root-owner-name index (nth args 0)))
+            (root-binding (U LocalBindingV0 Nil))
+            (find-local (bodystatev0-locals state) root-name)]
+        (cond
+          (not (transientloopownerv0-live loop-owner))
+          (fail-result state
+            "TODO-NATIVE-TRANSIENT-STALE: conj! uses a closed loop owner")
+
+          (or (nil? root-binding)
+            (not (same-id? (localbindingv0-value-id root-binding)
+                   (transientloopownerv0-current-id loop-owner))))
+          (fail-result state
+            "TODO-NATIVE-TRANSIENT-STALE: conj! receiver is not the current loop owner")
+
+          :else
+          (let [(prior (U core/NativeId Nil)) (bodystatev0-transient-type state)
+                (scoped BodyStateV0)
+                (with state [:transient-type
+                  (transientloopownerv0-type-id loop-owner)])
+                (lowered ExprResultV0)
+                (lower-transient-vector-conj env owner scoped args)
+                (restored BodyStateV0)
+                (with (exprresultv0-state lowered) [:transient-type prior])]
+            (if (or (exprresultv0-terminated lowered)
+                  (state-blocked? restored))
+              (->ExprResultV0 restored (exprresultv0-value-id lowered)
+                (exprresultv0-type-id lowered)
+                (exprresultv0-terminated lowered))
+              (->ExprResultV0
+                (state-update-current-transient-loop-owner restored
+                  owner-position (exprresultv0-value-id lowered) true)
+                (exprresultv0-value-id lowered)
+                (exprresultv0-type-id lowered) false))))))))
+
 (defn lower-transient-set-conj
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -12335,6 +12845,67 @@
                   (exprresultv0-value-id value)
                   (arena-value-id owner) equality))
               result-id active false)))))))
+
+(defn lower-loop-transient-persistent
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (args (Vec core/NativeId))
+   (expected (U core/NativeId Nil))
+   (owner-position Int)]
+  ExprResultV0
+  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
+    (if (or (nil? frame) (< owner-position 0)
+          (>= owner-position (count (loopframev0-transient-owners frame))))
+      (fail-result state
+        "TODO-NATIVE-TRANSIENT-STALE: persistent! receiver has no loop owner")
+      (let [(loop-owner TransientLoopOwnerV0)
+            (nth (loopframev0-transient-owners frame) owner-position)]
+        (cond
+          (not (= 1 (count args)))
+          (fail-result state
+            "TODO-NATIVE-PERSISTENT!-ARITY: persistent! takes one builder")
+
+          (not (transientloopownerv0-live loop-owner))
+          (fail-result state
+            "TODO-NATIVE-TRANSIENT-STALE: persistent! closes a dead loop owner")
+
+          (and (some? expected)
+            (not (same-id? expected
+                   (transientloopownerv0-type-id loop-owner))))
+          (fail-result state
+            "TODO-NATIVE-PERSISTENT!-TYPE: loop owner close has a mismatched result boundary")
+
+          :else
+          (let [(source ExprResultV0)
+                (lower-contextual-boundary env owner state (nth args 0)
+                  (transientloopownerv0-type-id loop-owner)
+                  (transientloopownerv0-type-id loop-owner))
+                (settled BodyStateV0) (exprresultv0-state source)]
+            (cond
+              (exprresultv0-terminated source) source
+              (state-blocked? settled) (dead-result settled)
+              (or
+                (not (same-id? (exprresultv0-value-id source)
+                       (transientloopownerv0-current-id loop-owner)))
+                (not (same-id? (exprresultv0-type-id source)
+                       (transientloopownerv0-type-id loop-owner))))
+              (fail-result settled
+                "TODO-NATIVE-TRANSIENT-STALE: persistent! receiver is not the current loop owner")
+              :else
+              (let [(result-id core/NativeId)
+                    (state-id settled owner "persistent-close")
+                    (closed BodyStateV0)
+                    (state-emit (state-bump settled)
+                      (core/->CollectionPersistentCloseInstructionV0
+                        (core/->SsaValueV0 result-id
+                          (transientloopownerv0-type-id loop-owner))
+                        (exprresultv0-value-id source) (arena-value-id owner)))]
+                (->ExprResultV0
+                  (state-update-current-transient-loop-owner closed
+                    owner-position (exprresultv0-value-id source) false)
+                  result-id (transientloopownerv0-type-id loop-owner)
+                  false)))))))))
 
 (defn lower-closed-persistent
   [(env BodyEnvV0)
@@ -12635,6 +13206,8 @@
                       (bodystatev0-keyword-refinements base)
                       (outer-values (Vec ValueFlowRefinementV0))
                       (bodystatev0-value-refinements base)
+                      (outer-frames (Vec LoopFrameV0))
+                      (bodystatev0-loop-frames base)
                       (then-id core/NativeId) (state-id base owner "then")
                       (else-id core/NativeId) (state-id base owner "else")
                       (join-id core/NativeId) (state-id base owner "join")
@@ -12660,7 +13233,8 @@
                       (else-start BodyStateV0)
                       (state-refine-for-condition env owner
                         (state-with-flow-context
-                          (state-open-block after-then else-id [])
+                          (with (state-open-block after-then else-id [])
+                            [:loop-frames outer-frames])
                           outer-locals outer-keywords outer-values)
                         condition-node false)
                       (else-block-start Int) (count (bodystatev0-blocks else-start))
@@ -12681,11 +13255,29 @@
                           (core/->JumpTerminator join-id
                             [(exprresultv0-value-id else-result)])))
                       (else-end Int) (count (bodystatev0-blocks after-else))
-                      (settled BodyStateV0)
-                      (state-with-flow-context after-else
-                        outer-locals outer-keywords outer-values)
                       (then-live Bool) (not (exprresultv0-terminated then-result))
                       (else-live Bool) (not (exprresultv0-terminated else-result))
+                      (then-frames (Vec LoopFrameV0))
+                      (bodystatev0-loop-frames (exprresultv0-state then-result))
+                      (else-frames (Vec LoopFrameV0))
+                      (bodystatev0-loop-frames (exprresultv0-state else-result))
+                      (selected-frames (Vec LoopFrameV0))
+                      (cond
+                        (and then-live else-live) then-frames
+                        then-live then-frames
+                        else-live else-frames
+                        :else outer-frames)
+                      (frames-compatible Bool)
+                      (or (not (and then-live else-live))
+                        (transient-loop-frames-compatible? then-frames else-frames))
+                      (settled BodyStateV0)
+                      (if frames-compatible
+                        (with
+                          (state-with-flow-context after-else
+                            outer-locals outer-keywords outer-values)
+                          [:loop-frames selected-frames])
+                        (state-fail after-else
+                          "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: live if arms disagree on transient ownership"))
                       (result-type core/NativeId)
                       (if then-live
                         (exprresultv0-type-id then-result)
@@ -12867,7 +13459,14 @@
               (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
               (body-node (U core/NativeId Nil)) (index-first-object index expr "body")
               (outer-locals (Vec LocalBindingV0)) (bodystatev0-locals state)
-              (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)]
+              (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)
+              (owner-specs (Vec TransientLoopOwnerSpecV0))
+              (transient-loop-owner-specs index items)
+              (direct-transient-count Int)
+              (direct-transient-loop-init-count index items)
+              (local-transient-loop Bool)
+              (and (nil? (bodystatev0-transient-type state))
+                (> direct-transient-count 0))]
           (cond
             (nil? body-node)
             (fail-result state "TODO-NATIVE-LOOP-BODY: loop form has no body")
@@ -12875,6 +13474,13 @@
             (not (recur-tail-only? index body-node true (+ 1 (index-facts index))))
             (fail-result state
               "TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop")
+
+            (and local-transient-loop
+              (or (not (= direct-transient-count (count owner-specs)))
+                (not (transient-loop-tail-owned? index body-node owner-specs
+                       (count items) (+ 1 (index-facts index))))))
+            (fail-result state
+              "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: loop transient owners must be fresh, transfer positionally, and close exactly once on every live exit")
 
             :else
             (let [(inits LoopInitsV0)
@@ -12903,16 +13509,42 @@
                                 (loopinitsv0-state accumulated)
                                 (active-transient (U core/NativeId Nil))
                                 (bodystatev0-transient-type current)
-                                (transient-owner Bool)
+                                (legacy-transient-owner Bool)
                                 (and (some? active-transient)
                                   (source-any-annotation? index item)
                                   (source-call-named? index value-node
                                     "transient"))
+                                (local-owner-position Int)
+                                (loop [(candidate Int) 0]
+                                  (if (>= candidate (count owner-specs))
+                                    -1
+                                    (if (= position
+                                          (transientloopownerspecv0-slot
+                                            (nth owner-specs candidate)))
+                                      candidate
+                                      (recur (+ candidate 1)))))
                                 (expected (U core/NativeId Nil))
-                                (if transient-owner active-transient
+                                (if legacy-transient-owner active-transient
                                   (annotation-native-type index annotation))
+                                (scoped-current BodyStateV0)
+                                (if (and local-transient-loop
+                                      (>= local-owner-position 0)
+                                      (some? expected))
+                                  (with current [:transient-type expected])
+                                  current)
+                                (raw-scoped ExprResultV0)
+                                (lower-expr-expected env owner scoped-current
+                                  value-node expected)
                                 (raw ExprResultV0)
-                                (lower-expr-expected env owner current value-node expected)
+                                (if (and local-transient-loop
+                                      (>= local-owner-position 0))
+                                  (->ExprResultV0
+                                    (with (exprresultv0-state raw-scoped)
+                                      [:transient-type active-transient])
+                                    (exprresultv0-value-id raw-scoped)
+                                    (exprresultv0-type-id raw-scoped)
+                                    (exprresultv0-terminated raw-scoped))
+                                  raw-scoped)
                                 (value ExprResultV0)
                                 (if (or (nil? expected)
                                       (exprresultv0-terminated raw)
@@ -13008,16 +13640,41 @@
                                     (project-binding-target env owner current target
                                       annotation (core/parameter-id parameter)
                                       (core/parameter-type-id parameter)))))))))
+                      (transient-owners (Vec TransientLoopOwnerV0))
+                      (if local-transient-loop
+                        (loop [(position Int) 0
+                               (collected (Vec TransientLoopOwnerV0)) []]
+                          (if (>= position (count owner-specs))
+                            collected
+                            (let [(spec TransientLoopOwnerSpecV0)
+                                  (nth owner-specs position)
+                                  (slot Int) (transientloopownerspecv0-slot spec)
+                                  (parameter core/Parameter) (nth parameters slot)]
+                              (recur (+ position 1)
+                                (conj collected
+                                  (->TransientLoopOwnerV0 slot
+                                    (transientloopownerspecv0-name spec)
+                                    (core/parameter-type-id parameter)
+                                    (core/parameter-id parameter) true))))))
+                        [])
                       (body ExprResultV0)
                       (lower-expr-expected env owner
                         (state-push-loop bound
                           (->LoopFrameV0 header-id parameters
-                            (loopinitsv0-bindings inits)))
-                        body-node expected)]
+                            (loopinitsv0-bindings inits) transient-owners))
+                        body-node expected)
+                      (body-state BodyStateV0) (exprresultv0-state body)
+                      (checked-body-state BodyStateV0)
+                      (if (and local-transient-loop
+                            (not (exprresultv0-terminated body))
+                            (not (transient-loop-owners-closed? body-state)))
+                        (state-fail body-state
+                          "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: live loop exit leaves a transient owner unconsumed")
+                        body-state)]
                   ;; the loop's value is the join value of the body exiting
                   ;; without recur, in whatever block that exit left open
                   (->ExprResultV0
-                    (with (with (exprresultv0-state body) [:locals outer-locals])
+                    (with (with checked-body-state [:locals outer-locals])
                       [:loop-frames outer-frames])
                     (exprresultv0-value-id body)
                     (exprresultv0-type-id body)
@@ -13050,7 +13707,32 @@
                             (conj value-types (exprresultv0-type-id argument)))))))
                   (current BodyStateV0) (argsresultv0-state lowered)
                   (values (Vec core/NativeId)) (argsresultv0-values lowered)
-                  (value-types (Vec core/NativeId)) (argsresultv0-value-types lowered)]
+                  (value-types (Vec core/NativeId)) (argsresultv0-value-types lowered)
+                  (current-frame (U LoopFrameV0 Nil)) (current-loop current)
+                  (current-owners (Vec TransientLoopOwnerV0))
+                  (if (nil? current-frame) []
+                    (loopframev0-transient-owners current-frame))
+                  (owner-transfer-valid Bool)
+                  (loop [(owner-position Int) 0]
+                    (if (>= owner-position (count current-owners))
+                      true
+                      (let [(loop-owner TransientLoopOwnerV0)
+                            (nth current-owners owner-position)
+                            (slot Int) (transientloopownerv0-slot loop-owner)]
+                        (if (and (transientloopownerv0-live loop-owner)
+                              (< slot (count values))
+                              (same-id? (nth values slot)
+                                (transientloopownerv0-current-id loop-owner))
+                              (loop [(position Int) 0]
+                                (if (>= position (count values))
+                                  true
+                                  (if (and (not (= position slot))
+                                        (same-id? (nth values position)
+                                          (transientloopownerv0-current-id loop-owner)))
+                                    false
+                                    (recur (+ position 1))))))
+                          (recur (+ owner-position 1))
+                          false))))]
               (cond
                 (argsresultv0-terminated lowered)
                 (->ExprResultV0 current (lower-id "body" ["unreachable"])
@@ -13069,6 +13751,10 @@
                   (str "TODO-NATIVE-RECUR-TYPES: recur argument "
                     (str (recur-type-mismatch parameters value-types))
                     " is not the native type its accumulator's init fixed"))
+
+                (not owner-transfer-valid)
+                (fail-result current
+                  "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: recur must transfer each live transient owner to its own slot exactly once")
 
                 :else
                 (let [(copied ArgsResultV0)
@@ -13106,12 +13792,26 @@
                                 (nth value-types position)))))]
                     (if (state-blocked? guarded)
                       (dead-result guarded)
-                      (->ExprResultV0
-                        (state-close guarded
+                      (let [(transferred BodyStateV0)
+                            (loop [(owner-position Int) 0
+                                   (transferred-state BodyStateV0) guarded]
+                              (if (>= owner-position (count current-owners))
+                                transferred-state
+                                (let [(loop-owner TransientLoopOwnerV0)
+                                      (nth current-owners owner-position)
+                                      (slot Int)
+                                      (transientloopownerv0-slot loop-owner)]
+                                  (recur (+ owner-position 1)
+                                    (state-update-current-transient-loop-owner
+                                      transferred-state owner-position
+                                      (core/parameter-id (nth parameters slot))
+                                      true)))))]
+                        (->ExprResultV0
+                        (state-close transferred
                           (core/->JumpTerminator (loopframev0-header-id frame)
                             (argsresultv0-values copied)))
                         (lower-id "body" ["recur"])
-                        (type-id "LowerFailure") true))))))))
+                        (type-id "LowerFailure") true)))))))))
 
         (= "doseq" kind)
         (let [(clauses-node (U core/NativeId Nil))
@@ -13780,16 +14480,28 @@
                                             record-type))))))))))))))))))
 
             (= "persistent!" callee)
-            (lower-closed-persistent env owner state args expected)
+            (let [(loop-owner-position Int)
+                  (transient-call-owner-position index state args)]
+              (if (>= loop-owner-position 0)
+                (lower-loop-transient-persistent env owner state args expected
+                  loop-owner-position)
+                (lower-closed-persistent env owner state args expected)))
 
             (= "transient" callee)
             (lower-transient-open env owner state args)
 
             (= "conj!" callee)
-            (let [(active (U core/NativeId Nil))
+            (let [(loop-owner-position Int)
+                  (transient-call-owner-position index state args)
+                  (active (U core/NativeId Nil))
                   (bodystatev0-transient-type state)]
-              (if (and (some? active) (vector-type? types active))
+              (cond
+                (>= loop-owner-position 0)
+                (lower-loop-transient-vector-conj env owner state args
+                  loop-owner-position)
+                (and (some? active) (vector-type? types active))
                 (lower-transient-vector-conj env owner state args)
+                :else
                 (lower-transient-set-conj env owner state args)))
 
             (= "assoc!" callee)
