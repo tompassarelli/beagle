@@ -117,6 +117,37 @@ grep -Fqx "$refusal" "$work/union-a/report.txt" \
        die "the wasm32 program did not draw the named QBE refusal"; }
 echo "wasm32/drive.sh: QBE refused the wasm32 program by name"
 
+# ---- TransientVec: two loop-owned builders through the public entry seam --
+transient_source="$here/transient_vec_two_owner.bgl"
+transient_entry="native.wasm32-transient-vec/two-owner-loop"
+transient_export="beagle_wasm_entry_v1__native_wasm32_transient_vec__two_owner_loop"
+transient_artifacts="$work/transient-vec"
+transient_log="$work/transient-vec.log"
+if ! "$repo/bin/beagle" build --materializer wasm --abi wasm32 \
+    --entry "$transient_entry" --out "$transient_artifacts" \
+    "$transient_source" >"$transient_log" 2>&1; then
+  sed -n '1,160p' "$transient_log" >&2
+  die "two-owner TransientVec entry did not build and run at wasm32"
+fi
+transient_report="$transient_artifacts/report.txt"
+for expected in \
+  'stage typed-to-native COMPLETE' \
+  "wasm-entry-contract PASS $transient_entry source-ast-to-lowered-header" \
+  "wasm-entry-export $transient_entry $transient_export" \
+  "wasm-entry-lowered-abi $transient_entry arena+capability" \
+  "wasm-entry-result $transient_entry 0" \
+  'wasm-determinism PASS repeated-identical-build' \
+  'wasm-validation PASS source-entries-invoked' \
+  'result PASS'; do
+  grep -Fqx "$expected" "$transient_report" \
+    || die "two-owner TransientVec report is missing: $expected"
+done
+[[ "$(grep -c '^obligation-projection PASS ' "$transient_report")" -eq 10 ]] \
+  || die "two-owner TransientVec program did not pass all ten obligations"
+[[ -s "$transient_artifacts/module_0.wasm" ]] \
+  || die "two-owner TransientVec build published no Wasm module"
+echo "wasm32/drive.sh: two-owner TransientVec entry build + run ok"
+
 # ---- seam report + materialization digests --------------------------------
 mkdir -p "$artifacts"
 for name in slice_fold slice_union; do
