@@ -88,7 +88,7 @@ refused_index="$(function_index 'reverse-copy!')"
    "$refused_index" =~ ^[0-9]+$ ]]
 
 echo "simd-f64 fixture: scalar-prefix, tail, fallback execute START"
-gcc -std=c17 -O0 -fno-tree-vectorize -pedantic -Wall -Wextra -Werror \
+gcc -std=c17 -O2 -fno-tree-vectorize -pedantic -Wall -Wextra -Werror \
   -DNATIVE_SIMD_F64_LANES=4 \
   "-DSIMD_COPY_FN=native_m0_fn_${copy_index}" \
   "-DSIMD_ADD_FN=native_m0_fn_${add_index}" \
