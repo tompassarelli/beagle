@@ -3548,6 +3548,16 @@ struct native_buffer_registration {
   native_buffer_registration *next;
 };
 
+struct native_transient_vec {
+  native_arena *arena;
+  void *elements;
+  int64_t length;
+  int64_t capacity;
+  int64_t stride;
+  size_t alignment;
+  bool frozen;
+};
+
 uint64_t native_vec_storage_allocations = UINT64_C(0);
 _Thread_local const native_parallel_access_v0 *native_parallel_access_current =
     NULL;
@@ -4382,6 +4392,101 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void 
          (size_t)stride);
   native_vec_set_length(fresh, vector->length + INT64_C(1));
   return fresh;
+}
+
+native_transient_vec *native_transient_vec_new(native_arena *arena,
+                                               const native_vec *source,
+                                               int64_t stride,
+                                               size_t alignment) {
+  native_transient_vec *builder;
+  size_t bytes;
+
+  if ((arena == NULL) || (source == NULL) || (stride <= INT64_C(0)) ||
+      (alignment == 0U) || ((alignment & (alignment - 1U)) != 0U) ||
+      (source->length < INT64_C(0)) ||
+      (source->length > source->capacity) ||
+      ((source->length > INT64_C(0)) && (source->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  bytes = native_dense_bytes(source->length, stride);
+  builder = (native_transient_vec *)native_arena_alloc(
+      arena, sizeof(*builder), _Alignof(native_transient_vec));
+  builder->arena = arena;
+  builder->elements =
+      (bytes == 0U) ? NULL : native_arena_alloc(arena, bytes, alignment);
+  builder->length = source->length;
+  builder->capacity = source->length;
+  builder->stride = stride;
+  builder->alignment = alignment;
+  builder->frozen = false;
+  if (bytes != 0U) {
+    native_vec_storage_allocations += UINT64_C(1);
+    memcpy(builder->elements, source->elements, bytes);
+  }
+  return builder;
+}
+
+native_transient_vec *native_transient_vec_push(
+    native_transient_vec *builder, const void *value) {
+  int64_t grown;
+  size_t existing_bytes;
+  size_t grown_bytes;
+  void *grown_elements;
+
+  if ((builder == NULL) || builder->frozen || (value == NULL) ||
+      (builder->arena == NULL) || (builder->stride <= INT64_C(0)) ||
+      (builder->alignment == 0U) ||
+      ((builder->alignment & (builder->alignment - 1U)) != 0U) ||
+      (builder->length < INT64_C(0)) ||
+      (builder->length > builder->capacity) ||
+      ((builder->length > INT64_C(0)) && (builder->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (builder->length == builder->capacity) {
+    if (builder->capacity > (INT64_MAX / INT64_C(2))) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    grown = builder->capacity * INT64_C(2);
+    if (grown < NATIVE_VEC_MIN_CAPACITY) {
+      grown = NATIVE_VEC_MIN_CAPACITY;
+    }
+    existing_bytes = native_dense_bytes(builder->length, builder->stride);
+    grown_bytes = native_dense_bytes(grown, builder->stride);
+    grown_elements = native_arena_alloc(builder->arena, grown_bytes,
+                                        builder->alignment);
+    native_vec_storage_allocations += UINT64_C(1);
+    if (existing_bytes != 0U) {
+      memcpy(grown_elements, builder->elements, existing_bytes);
+    }
+    builder->elements = grown_elements;
+    builder->capacity = grown;
+  }
+  memcpy((uint8_t *)builder->elements +
+             (size_t)(builder->length * builder->stride),
+         value, (size_t)builder->stride);
+  builder->length += INT64_C(1);
+  return builder;
+}
+
+native_vec *native_transient_vec_freeze(native_transient_vec *builder) {
+  native_vec *vector;
+  int64_t *watermark = NULL;
+
+  if ((builder == NULL) || builder->frozen || (builder->arena == NULL) ||
+      (builder->stride <= INT64_C(0)) || (builder->length < INT64_C(0)) ||
+      (builder->length > builder->capacity) ||
+      ((builder->length > INT64_C(0)) && (builder->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  builder->frozen = true;
+  if (builder->capacity > INT64_C(0)) {
+    watermark = (int64_t *)native_arena_alloc(
+        builder->arena, sizeof(*watermark), _Alignof(int64_t));
+    *watermark = builder->length;
+  }
+  vector = native_vec_header(builder->arena, builder->elements,
+                             builder->length, builder->capacity, watermark);
+  return vector;
 }
 
 native_vec *native_vec_concat(native_arena *arena, const native_vec *left,

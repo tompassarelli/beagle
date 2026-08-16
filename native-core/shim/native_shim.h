@@ -121,6 +121,8 @@ typedef struct native_vec {
   int64_t *watermark;
 } native_vec;
 
+typedef struct native_transient_vec native_transient_vec;
+
 /* Durable handle for fixed-length mutable dense storage owned by an arena.
    The public fields mirror immutable registration facts and are checked on
    every access; the backing span is invalidated by arena reset. This is
@@ -420,6 +422,15 @@ native_vec *native_vec_assoc(native_arena *arena, const native_vec *vector,
    a fresh header; subsequent growth moves that owned header and doubles. */
 native_vec *native_vec_push(native_arena *arena, native_vec *vector,
                             const void *value, int64_t stride, size_t alignment);
+native_transient_vec *native_transient_vec_new(native_arena *arena,
+                                               const native_vec *source,
+                                               int64_t stride,
+                                               size_t alignment);
+/* Returns the same active handle after appending. A frozen handle traps. */
+native_transient_vec *native_transient_vec_push(
+    native_transient_vec *builder, const void *value);
+/* Freezes exactly once into the persistent native_vec representation. */
+native_vec *native_transient_vec_freeze(native_transient_vec *builder);
 native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
                               const native_vec *right, int64_t stride,
                               size_t alignment);
