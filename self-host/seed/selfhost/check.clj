@@ -40,6 +40,16 @@
 
 (def FILTERV-POLY (make-poly ["A"] (make-fn [(make-fn [(make-var "A")] nil ANY) ANY] nil (make-app "Vec" [(make-var "A")])) nil))
 
+(def JS-ATOM-POLY (make-poly ["A"] (make-fn [(make-var "A")] nil (make-app "Atom" [(make-var "A")])) nil))
+
+(def JS-DEREF-POLY (make-poly ["A"] (make-fn [(make-app "Atom" [(make-var "A")])] nil (make-var "A")) nil))
+
+(def JS-RESET-POLY (make-poly ["A"] (make-fn [(make-app "Atom" [(make-var "A")]) (make-var "A")] nil (make-var "A")) nil))
+
+(def JS-SWAP-POLY (make-poly ["A"] (make-fn [(make-app "Atom" [(make-var "A")]) (make-union [(make-fn [(make-var "A")] nil (make-var "A")) (make-fn [(make-var "A") ANY] nil (make-var "A")) (make-fn [(make-var "A") ANY ANY] nil (make-var "A")) (make-fn [(make-var "A") ANY ANY ANY] nil (make-var "A"))])] ANY (make-var "A")) nil))
+
+(def JS-ATOM-STDLIB {"atom" JS-ATOM-POLY "deref" JS-DEREF-POLY "reset!" JS-RESET-POLY "swap!" JS-SWAP-POLY "Math" (make-prim "JsMath")})
+
 (def STATE (atom {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "definition-inference-counter" 0 "definition-inference-bindings" {} "diagnostics" []}))
 
 (defn ^Boolean prim? [t]
@@ -357,6 +367,8 @@
 (defn ^Boolean invalid-js-target-form? [value]
   (let [name (js-target-form-name value)]
   (and (not (nil? name)) (not (= (get (deref STATE) "target") "js")))))
+
+(def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "round" (make-fn [NUMBER-TYPE] nil INT-TYPE)} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE)}})
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
 
@@ -1032,13 +1044,80 @@
   (emit-diag! (str "beagle: atom init: expected " (type->string elem) ", got " (type->string it)))))
   true) false))
 
-(defn infer-js-member! [receiver key trailing env]
-  (infer-expr! receiver env)
-  (if (not (= (get key "node") "js-selector")) (do
-  (infer-expr! key env)))
+(defn js-selector-name [key]
+  (if (= (get key "node") "js-selector") (get key "name") nil))
+
+(defn ^Boolean js-vec-type? [receiver-type]
+  (and (app-type? receiver-type) (= (get receiver-type "name") "Vec") (= (count (get receiver-type "args")) 1)))
+
+(defn ^Boolean js-record-type? [receiver-type]
+  (or (not (nil? (record-field-map-for-type receiver-type))) (not (nil? (nominal-union-members receiver-type)))))
+
+(defn js-builtin-receiver-name [_receiver receiver-type]
+  (cond
+  (and (prim? receiver-type) (= (get receiver-type "name") "JsMath")) "Math"
+  (and (prim? receiver-type) (= (get receiver-type "name") "String")) "String"
+  :else nil))
+
+(defn lookup-js-static-member! [receiver receiver-type ^String selector]
+  (let [builtin (js-builtin-receiver-name receiver receiver-type)]
+  (cond
+  (js-record-type? receiver-type) {"closed" true "type" (record-field-type-for! receiver-type (str ":" selector)) "owner" (type->string receiver-type)}
+  (js-vec-type? receiver-type) (let [element (nth (get receiver-type "args") 0)
+   contract (cond
+  (= selector "length") INT-TYPE
+  (= selector "indexOf") (make-fn [element] nil INT-TYPE)
+  :else nil)]
+  {"closed" false "type" contract "owner" (type->string receiver-type)})
+  (not (nil? builtin)) {"closed" false "type" (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector]) "owner" builtin}
+  :else {"closed" false "type" nil "owner" nil})))
+
+(defn infer-js-member-call! [^String selector ^String owner member-type args env]
+  (cond
+  (poly-type? member-type) (let [resolved (resolve-poly-call! member-type args env)]
+  (if (fn-type? resolved) (do
+  (check-args! (str "js/call ." selector) resolved args env)
+  (get resolved "ret")) (do
+  (doseq [arg args]
+  (infer-expr! arg env))
+  ANY)))
+  (fn-type? member-type) (do
+  (check-args! (str "js/call ." selector) member-type args env)
+  (get member-type "ret"))
+  :else (do
+  (doseq [arg args]
+  (infer-expr! arg env))
+  (emit-diag! (str "beagle: js/call: ." selector " on " owner " has non-callable type " (type->string member-type)))
+  ANY)))
+
+(defn infer-js-member! [^String operation receiver key trailing env]
+  (let [receiver-type (infer-expr! receiver env)
+   selector (js-selector-name key)]
+  (cond
+  (nil? selector) (do
+  (infer-expr! key env)
   (doseq [value trailing]
   (infer-expr! value env))
-  nil)
+  ANY)
+  (and (not (= operation "get")) (not (= operation "call"))) (do
+  (doseq [value trailing]
+  (infer-expr! value env))
+  ANY)
+  :else (let [resolved (lookup-js-static-member! receiver receiver-type selector)
+   closed (get resolved "closed")
+   member-type (get resolved "type")]
+  (cond
+  (and (nil? member-type) (not closed)) (do
+  (doseq [value trailing]
+  (infer-expr! value env))
+  ANY)
+  (nil? member-type) (do
+  (doseq [value trailing]
+  (infer-expr! value env))
+  (emit-diag! (str "beagle: js/" operation ": ." selector " is not a member of " (get resolved "owner")))
+  ANY)
+  (= operation "get") member-type
+  :else (infer-js-member-call! selector (get resolved "owner") member-type trailing env))))))
 
 (defn infer-expr! [e env]
   (cond
@@ -1156,14 +1235,10 @@
   (= (get e "node") "await") (let [inner-type (infer-expr! (get e "expr") env)]
   (if (and (app-type? inner-type) (= (get inner-type "name") "Promise") (= (count (get inner-type "args")) 1)) (nth (get inner-type "args") 0) ANY))
   (= (get e "node") "js-selector") ANY
-  (= (get e "node") "js-get") (do
-  (infer-js-member! (get e "receiver") (get e "key") [] env)
-  ANY)
-  (= (get e "node") "js-call") (do
-  (infer-js-member! (get e "receiver") (get e "key") (get e "args") env)
-  ANY)
+  (= (get e "node") "js-get") (infer-js-member! "get" (get e "receiver") (get e "key") [] env)
+  (= (get e "node") "js-call") (infer-js-member! "call" (get e "receiver") (get e "key") (get e "args") env)
   (= (get e "node") "js-set") (do
-  (infer-js-member! (get e "receiver") (get e "key") [(get e "value")] env)
+  (infer-js-member! "set" (get e "receiver") (get e "key") [(get e "value")] env)
   ANY)
   (= (get e "node") "js-new") (do
   (infer-expr! (get e "callee") env)
@@ -1171,10 +1246,10 @@
   (infer-expr! arg env))
   ANY)
   (= (get e "node") "js-delete") (do
-  (infer-js-member! (get e "receiver") (get e "key") [] env)
+  (infer-js-member! "delete" (get e "receiver") (get e "key") [] env)
   BOOL-TYPE)
   (= (get e "node") "js-in") (do
-  (infer-js-member! (get e "receiver") (get e "key") [] env)
+  (infer-js-member! "in" (get e "receiver") (get e "key") [] env)
   BOOL-TYPE)
   (= (get e "node") "js-typeof") (do
   (infer-expr! (get e "expr") env)
@@ -1443,7 +1518,10 @@
 (defn build-initial-env! [prog]
   (let [externs (get prog "externs")
    forms (get prog "forms")
-   target-stdlib (if (= (get prog "target") "core") (merge STDLIB CORE-STDLIB) STDLIB)
+   target-stdlib (cond
+  (= (get prog "target") "core") (merge STDLIB CORE-STDLIB)
+  (= (get prog "target") "js") (merge STDLIB JS-ATOM-STDLIB)
+  :else STDLIB)
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
    dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
@@ -2327,6 +2405,15 @@
 (defn make-static-call [^String name args]
   {"node" "static-call" "name" name "args" args})
 
+(defn make-js-selector [^String name]
+  {"node" "js-selector" "name" name})
+
+(defn make-js-get-node [receiver key]
+  {"node" "js-get" "receiver" receiver "key" key})
+
+(defn make-js-call-node [receiver key args]
+  {"node" "js-call" "receiver" receiver "key" key "args" args})
+
 (defn make-if-node [cond-expr then-expr else-expr]
   {"node" "if" "cond" cond-expr "then" then-expr "else" else-expr})
 
@@ -2396,6 +2483,73 @@
   (expect! "infer: int literal" (json-eq (infer-expr! (make-lit "number" 99) {}) (make-prim "Int")))
   (expect! "infer: ref from env" (json-eq (infer-expr! (make-ref "x") {"x" (make-prim "Bool")}) (make-prim "Bool")))
   (expect! "infer: ref missing => Any" (any-type? (infer-expr! (make-ref "y") {})))
+  (expect! "js-member: nominal record property is typed" (let [record (make-record-node "Person" [(make-param "age" (make-prim "Int"))])
+   body (make-js-get-node (make-ref "person") (make-js-selector "age"))
+   prog (make-prog [record (make-defn-node "age-of" [(make-param "person" (make-prim "Person"))] (make-prim "Int") [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "js-member: callable record field checks args and returns result" (let [render-type (make-fn [(make-prim "Int")] nil (make-prim "String"))
+   record (make-record-node "Renderer" [(make-param "render" render-type)])
+   body (make-js-call-node (make-ref "renderer") (make-js-selector "render") [(make-lit "number" 2)])
+   prog (make-prog [record (make-defn-node "render-two" [(make-param "renderer" (make-prim "Renderer"))] (make-prim "String") [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "js-member: callable record field rejects a bad argument" (let [render-type (make-fn [(make-prim "Int")] nil (make-prim "String"))
+   record (make-record-node "Renderer" [(make-param "render" render-type)])
+   body (make-js-call-node (make-ref "renderer") (make-js-selector "render") [(make-lit "string" "wrong")])
+   prog (make-prog [record (make-defn-node "bad-render" [(make-param "renderer" (make-prim "Renderer"))] (make-prim "String") [body])])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "call to js/call .render: arg 1 expected Int, got String")))
+  (expect! "js-member: polymorphic callable record field resolves result" (let [identity-type (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) nil)
+   record (make-record-node "Callable" [(make-param "apply" identity-type)])
+   body (make-js-call-node (make-ref "callable") (make-js-selector "apply") [(make-lit "string" "value")])
+   prog (make-prog [record (make-defn-node "apply-string" [(make-param "callable" (make-prim "Callable"))] (make-prim "String") [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "js-member: Vec length and indexOf preserve element contract" (let [vec-type (make-app "Vec" [(make-prim "String")])
+   length-node (make-js-get-node (make-ref "values") (make-js-selector "length"))
+   index-node (make-js-call-node (make-ref "values") (make-js-selector "indexOf") [(make-ref "needle")])
+   prog (make-prog [(make-defn-node "length-of" [(make-param "values" vec-type)] (make-prim "Int") [length-node]) (make-defn-node "index-of" [(make-param "values" vec-type) (make-param "needle" (make-prim "String"))] (make-prim "Int") [index-node])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "js-member: String indexOf and Grey Math contracts are typed" (let [string-index (make-js-call-node (make-ref "text") (make-js-selector "indexOf") [(make-ref "needle")])
+   math-floor (make-js-call-node (make-ref "Math") (make-js-selector "floor") [(make-ref "value")])
+   math-sqrt (make-js-call-node (make-ref "Math") (make-js-selector "sqrt") [(make-ref "value")])
+   math-pow (make-js-call-node (make-ref "Math") (make-js-selector "pow") [(make-ref "base") (make-ref "exponent")])
+   math-round (make-js-call-node (make-ref "Math") (make-js-selector "round") [(make-ref "value")])
+   prog (make-prog-with-externs [(make-defn-node "text-index" [(make-param "text" (make-prim "String")) (make-param "needle" (make-prim "String"))] (make-prim "Int") [string-index]) (make-defn-node "floor-value" [(make-param "value" (make-prim "Float"))] (make-prim "Int") [math-floor]) (make-defn-node "root-value" [(make-param "value" (make-prim "Float"))] (make-prim "Float") [math-sqrt]) (make-defn-node "power-value" [(make-param "base" (make-prim "Int")) (make-param "exponent" (make-prim "Int"))] (make-prim "Float") [math-pow]) (make-defn-node "round-value" [(make-param "value" (make-prim "Float"))] (make-prim "Int") [math-round])] [{"name" "Math" "type" (make-prim "JsMath")}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "js-member: lexical Math binding shadows the global contract" (let [body (make-js-call-node (make-ref "Math") (make-js-selector "sqrt") [(make-lit "string" "dynamic")])
+   prog (make-prog [(make-defn-node "shadowed-math" [(make-param "Math" ANY)] ANY [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "js-member: unknown member on a closed receiver rejects" (let [record (make-record-node "Person" [(make-param "age" (make-prim "Int"))])
+   body (make-js-get-node (make-ref "person") (make-js-selector "missing"))
+   prog (make-prog [record (make-defn-node "missing" [(make-param "person" (make-prim "Person"))] ANY [body])])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "beagle: js/get: .missing is not a member of Person")))
+  (expect! "js-member: calling a non-callable record field rejects" (let [record (make-record-node "Person" [(make-param "age" (make-prim "Int"))])
+   body (make-js-call-node (make-ref "person") (make-js-selector "age") [])
+   prog (make-prog [record (make-defn-node "bad-age-call" [(make-param "person" (make-prim "Person"))] ANY [body])])
+   diagnostics (check-program! prog)]
+  (diagnostics-include? diagnostics "beagle: js/call: .age on Person has non-callable type Int")))
+  (expect! "js-member: open/Any receivers and dynamic key remain Any" (let [any-static (make-js-get-node (make-ref "dynamic") (make-js-selector "missing"))
+   vec-static (make-js-get-node (make-ref "values") (make-js-selector "nativeMethod"))
+   dynamic-key (make-js-get-node (make-ref "values") (make-ref "key"))]
+  (do
+  (check-program! (make-prog []))
+  (and (any-type? (infer-expr! any-static {"dynamic" ANY})) (any-type? (infer-expr! vec-static {"values" (make-app "Vec" [(make-prim "String")])})) (any-type? (infer-expr! dynamic-key {"values" (make-app "Vec" [(make-prim "String")]) "key" (make-prim "String")})) (= (count (get (deref STATE) "diagnostics")) 0)))))
+  (expect! "js-atom: atom/deref/reset!/swap! preserve the element type" (let [env (merge (build-initial-env! (make-prog [])) {"cell" (make-app "Atom" [(make-prim "Int")]) "step" (make-fn [(make-prim "Int") ANY] nil (make-prim "Int"))})
+   made (infer-expr! (make-call "atom" [(make-lit "number" 1)]) env)
+   read (infer-expr! (make-call "deref" [(make-ref "cell")]) env)
+   reset-result (infer-expr! (make-call "reset!" [(make-ref "cell") (make-lit "number" 2)]) env)
+   swap-result (infer-expr! (make-call "swap!" [(make-ref "cell") (make-ref "step") (make-lit "number" 3)]) env)]
+  (and (= made (make-app "Atom" [(make-prim "Int")])) (= read (make-prim "Int")) (= reset-result (make-prim "Int")) (= swap-result (make-prim "Int")))))
+  (expect! "js-atom: reset! rejects a different element type" (do
+  (check-program! (make-prog []))
+  (let [env (merge (build-initial-env! (make-prog [])) {"cell" (make-app "Atom" [(make-prim "Int")])})]
+  (infer-expr! (make-call "reset!" [(make-ref "cell") (make-lit "string" "wrong")]) env)
+  (diagnostics-include? (get (deref STATE) "diagnostics") "call to reset!: arg 2 expected Int, got String"))))
+  (expect! "js-atom: swap! rejects a callback returning another type" (do
+  (check-program! (make-prog []))
+  (let [env (merge (build-initial-env! (make-prog [])) {"cell" (make-app "Atom" [(make-prim "Int")]) "poison" (make-fn [(make-prim "Int")] nil (make-prim "String"))})]
+  (infer-expr! (make-call "swap!" [(make-ref "cell") (make-ref "poison")]) env)
+  (diagnostics-include? (get (deref STATE) "diagnostics") "call to swap!: arg 2 expected"))))
   (expect! "def: matching annotation" (let [prog (make-prog [(make-def-node "x" (make-prim "Int") (make-lit "number" 42))])
    result (type-check! prog)]
   (= (get result "count") 0)))

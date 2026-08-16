@@ -703,6 +703,8 @@
   (= fn-sym "min") (str "Math.min(" (emit-args-list args) ")")
   (= fn-sym "atom") (if (= n 1) (str "({value: " a0 ", watches: {}})") nil)
   (= fn-sym "deref") (if (= n 1) (str a0 ".value") nil)
+  (= fn-sym "reset!") (if (= n 2) (str "(() => { const _a = " a0 ", _v = " a1 "; const _old = _a.value; _a.value = _v; for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _v); return _v; })()") nil)
+  (= fn-sym "swap!") (if (>= n 2) (str "(() => { const _a = " a0 "; const _old = _a.value; _a.value = (" a1 ")(_old" (if (> n 2) (str ", " (emit-args-list (subvec args 2))) "") "); for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value); return _a.value; })()") nil)
   (= fn-sym "name") (if (= n 1) (str "String(" a0 ")") nil)
   (= fn-sym "keyword") (if (= n 1) a0 nil)
   :else nil)))
@@ -1681,6 +1683,12 @@
   (expect! "js/in? evaluates receiver then dynamic key exactly once" (let [emitted (emit-expr! {"node" "js-in" "receiver" {"node" "call" "fn" {"node" "ref" "name" "receiver!"} "args" []} "key" {"node" "call" "fn" {"node" "ref" "name" "key!"} "args" []}})]
   (and (appears-once? emitted "receiver_bang()") (appears-once? emitted "key_bang()") (appears-before? emitted "receiver_bang()" "key_bang()"))))
   (expect! "js/typeof" (= (emit-expr! {"node" "js-typeof" "expr" {"node" "ref" "name" "obj"}}) "typeof obj"))
+  (expect! "atom: reset! notifies watches and returns the installed value" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "reset!"} "args" [{"node" "ref" "name" "cell"} {"node" "literal" "kind" "number" "value" 2}]}) "(() => { const _a = cell, _v = 2; const _old = _a.value; _a.value = _v; for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _v); return _v; })()"))
+  (expect! "atom: swap! applies the callback, notifies watches, and returns the cell" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "swap!"} "args" [{"node" "ref" "name" "cell"} {"node" "ref" "name" "step"} {"node" "literal" "kind" "number" "value" 3}]}) "(() => { const _a = cell; const _old = _a.value; _a.value = (step)(_old, 3); for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value); return _a.value; })()"))
+  (expect! "atom: reset! evaluates cell then value exactly once" (let [emitted (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "reset!"} "args" [{"node" "call" "fn" {"node" "ref" "name" "cell!"} "args" []} {"node" "call" "fn" {"node" "ref" "name" "value!"} "args" []}]})]
+  (and (appears-once? emitted "cell_bang()") (appears-once? emitted "value_bang()") (appears-before? emitted "cell_bang()" "value_bang()"))))
+  (expect! "atom: swap! evaluates cell, callback, then args exactly once" (let [emitted (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "swap!"} "args" [{"node" "call" "fn" {"node" "ref" "name" "cell!"} "args" []} {"node" "call" "fn" {"node" "ref" "name" "step!"} "args" []} {"node" "call" "fn" {"node" "ref" "name" "arg!"} "args" []}]})]
+  (and (appears-once? emitted "cell_bang()") (appears-once? emitted "step_bang()") (appears-once? emitted "arg_bang()") (appears-before? emitted "cell_bang()" "step_bang()") (appears-before? emitted "step_bang()" "arg_bang()"))))
   (expect! "record factory + accessors" (= (emit-record! {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]}) "function Pt(x, y) {\n  return Object.freeze({_tag: \"Pt\", x, y});\n}\n\nfunction pt_x(r) { return r.x; }\n\nfunction pt_y(r) { return r.y; }"))
   (expect! "def -> const" (= (emit-form! {"node" "def" "name" "tax-rate" "value" {"node" "literal" "kind" "float" "value" 0.08}}) "const tax_rate = 0.08;"))
   (expect! "unary minus (- 1)" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "-"} "args" [{"node" "literal" "kind" "number" "value" 1}]}) "(-1)"))
