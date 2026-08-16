@@ -16,11 +16,12 @@ corpus.foundation/double-value -> corpus.feature/stable-score
 corpus.independent/independent-value -> corpus.app/run-independent
 ```
 
-`units.tsv` declares the direct semantic read set. `expected-cones.tsv` freezes
-the Phase B contract: module + definition kind/name owns unit identity; exact
-source hashes remain provenance; a private body edit changes only that unit's
-typed/native content; and a public signature edit invalidates its exact direct
-consumer until an unchanged interface stops propagation.
+`units.tsv` declares the exact direct semantic read set. `expected-cones.tsv`
+freezes the branch-compilation contract: module + definition kind/name owns
+unit identity; exact source hashes remain provenance; a private body edit
+changes only that unit's typed/native content; and a public signature edit
+invalidates its exact direct consumer until an unchanged interface stops
+propagation.
 
 The three cases are deliberately narrow:
 
@@ -37,6 +38,8 @@ build must be byte-identical at every recorded identity.
 The tracked oracle records:
 
 - exact module source and true module-interface-v8 digests from `ast-bundle`;
+- emitted semantic-unit IDs, provenance-free content digests, and resolved
+  direct read sets from `source.facts`;
 - source, typed, native, and epoch frozen-stage digests;
 - actual compiler-emitted `NativeId` values for every reachable function;
 - a harness-only SHA-256 of each canonical `native-function-v0` encoding, which
@@ -66,38 +69,37 @@ under `beagle:.beagle/branch-compile-corpus/` without comparing the tracked
 current-behavior snapshot. This is the only recording route; there is no
 incremental adapter or mutation cache hidden in the harness.
 
-`expected-boundaries.tsv` is an active falsifier today: the exact changed
-source modules and true interface modules must match it. `expected-cones.tsv`
-is the next falsifier for Phase B's unit index and dependency DAG. The tracked
-`oracle/churn.tsv` documents current whole-build over-invalidation rather than
-declaring it correct.
+`expected-boundaries.tsv` actively checks the exact changed source and true
+interface modules. `units.tsv` actively checks every emitted unit kind and
+resolved direct read set in every case. The typed/native rows of
+`expected-cones.tsv` actively check the exact changed semantic-content set,
+and every mutation must preserve every semantic-unit ID. Its future assembled
+reuse rows remain expectations rather than simulated cache behavior. The
+tracked `oracle/churn.tsv` describes clean-full-build output; it does not turn
+whole-build churn into the incremental contract.
 
 ## Current verdict
 
-The frozen oracle was measured at compiler baseline
-`fb6fdf8a5233c1bdb2916b2ddce005731a6ad93e`.
+The corrected oracle was measured on semantic-unit compiler checkpoint
+`b63f8f0a43391541598eac77d0830370c799a335`.
 
-- Comment/layout changes preserve every function ID and function encoding and
-  produce byte-identical C17, but churn all four whole-stage identities and the
-  frozen native program. Exact source provenance is still mixed into the
-  monolithic pipeline identity.
-- The private literal edit preserves the real public interface and every
-  function ID. It changes C17 as required, but the `private-offset`
-  `native-function-v0` encoding does not change. The current atom-instruction
-  encoding binds only its SSA result and omits the literal `NativeAtom` payload.
-  That encoding is therefore not a sound function-content identity.
-- The public-interface edit correctly changes only `corpus.foundation`'s true
-  interface. Nevertheless, the added parameter shifts global source-fact
-  ordinals and changes seven unrelated or logically stable function IDs:
-  `double-value`, `score-value`, `stable-score`, `independent-value`, and all
-  three `corpus.app` functions. Their encodings then churn transitively through
-  those unstable IDs. Only `adjust` and `score-value` belong to the expected
-  semantic recomputation cone.
+- Comment/layout changes exact source provenance only at the semantic-unit
+  layer: all nine unit IDs, content digests, and read sets remain identical.
+  Function IDs/encodings and C17 output also remain identical. The clean full
+  build still churns its provenance-bearing monolithic stages and frozen native
+  program; this corpus does not pretend that unit reuse exists yet.
+- The private literal edit changes exactly `private-offset`'s semantic content,
+  `native-function-v0` encoding, assembled native program, and C17 source. Its
+  unit/function IDs, direct reads, public interface, and every independent unit
+  remain stable.
+- The public-interface edit changes only `corpus.foundation`'s true interface
+  and exactly the `adjust` plus `score-value` semantic-content/function-encoding
+  cone. All nine unit and function IDs remain stable, including the independent
+  arm and the downstream `corpus.app` callers whose consumed interface did not
+  change.
 
-Phase B must replace preorder-derived unit identity with canonical module +
-definition kind/name identity, publish a provenance-free semantic-unit digest
-that still binds literal payloads, put the real module-interface digest in the
-source-unit record, and export canonical resolved direct read sets. Unit-level
-typed/native results can then be reused before reassembling the ordinary dense
-whole program. The existing full build remains the artifact oracle; no result
-in this directory claims that incremental assembly already exists.
+The emitted semantic identities and read sets now make those three assertions
+active falsifiers. A later compiler may use them for unit-level typed/native
+reuse before reassembling the ordinary dense whole program. The existing full
+build remains the artifact oracle; no result in this directory claims that an
+incremental cache or assembler already exists.

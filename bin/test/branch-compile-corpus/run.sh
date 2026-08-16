@@ -27,6 +27,7 @@ mkdir -p "$scratch/sources" "$scratch/build" "$scratch/bundles"
 raw_identities="$scratch/identities.raw.tsv"
 identities="$scratch/identities.tsv"
 churn="$scratch/churn.tsv"
+semantic_cones="$scratch/semantic-cones.tsv"
 context="$scratch/context.tsv"
 : >"$raw_identities"
 : >"$context"
@@ -115,7 +116,8 @@ build_case() {
       >"$log" 2>&1
   grep -Fqx 'result PASS' "$output/report.txt"
   timeout --foreground 30s bb "$here/inspect.clj" \
-    "$case_id" "$output/module.native-program" "$here/units.tsv" \
+    "$case_id" "$output/module.native-program" "$output/source.facts" \
+    "$here/units.tsv" \
     >>"$raw_identities"
   awk -v case_id="$case_id" '
     $1 == "native-provenance-v0" {
@@ -183,6 +185,42 @@ if ! diff -u "$scratch/expected-boundaries.tsv" "$scratch/boundaries.tsv"; then
   exit 1
 fi
 
+if awk -F '\t' '$2 == "semantic-unit-id" {found = 1} END {exit found ? 0 : 1}' \
+  "$churn"; then
+  echo "branch-compile-corpus: a semantic unit identity changed across mutations" >&2
+  exit 1
+fi
+
+: >"$semantic_cones"
+for case_id in comment-layout private-implementation public-interface; do
+  mapfile -t changed_units < <(
+    awk -F '\t' -v case_id="$case_id" '
+      $1 == "baseline" && $2 == "semantic-unit-content" {
+        baseline[$3] = $4
+      }
+      $1 == case_id && $2 == "semantic-unit-content" && baseline[$3] != $4 {
+        print $3
+      }
+    ' "$identities" | sort
+  )
+  if ((${#changed_units[@]} == 0)); then
+    changed="-"
+  else
+    changed="$(IFS=,; echo "${changed_units[*]}")"
+  fi
+  printf '%s\t%s\n' "$case_id" "$changed" >>"$semantic_cones"
+done
+
+for stage in typed-unit native-unit; do
+  awk -F '\t' -v stage="$stage" 'BEGIN {OFS="\t"}
+    $1 !~ /^#/ && $2 == stage {print $1, $3}
+  ' "$here/expected-cones.tsv" >"$scratch/expected-$stage.tsv"
+  if ! diff -u "$scratch/expected-$stage.tsv" "$semantic_cones"; then
+    echo "branch-compile-corpus: semantic content changes differ from the expected $stage cone" >&2
+    exit 1
+  fi
+done
+
 printf 'compiler-commit\t%s\n' "$(git -C "$repo" rev-parse HEAD)" \
   >"$scratch/context.head.tsv"
 cat "$context" >>"$scratch/context.head.tsv"
@@ -200,4 +238,5 @@ fi
 echo "branch-compile-corpus: PASS clean full builds are deterministic"
 echo "branch-compile-corpus: identities $identities"
 echo "branch-compile-corpus: churn $churn"
+echo "branch-compile-corpus: semantic cones $semantic_cones"
 echo "branch-compile-corpus: run context $context"
