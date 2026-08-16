@@ -517,7 +517,9 @@
 
 (defn merge-types [(t1 Any) (t2 Any)] Any
   (cond
-    (or (any-type? t1) (any-type? t2)) ANY
+    (and (any-type? t1) (any-type? t2)) ANY
+    (any-type? t1) t2
+    (any-type? t2) t1
     ;; JOIN, single-direction — mirror check.rkt merge-types: collapse only when
     ;; the SECOND type is a subtype of the first (t2 <: t1 ⇒ t1). The reverse
     ;; direction is deliberately NOT collapsed, so [Int Float] stays (U Int Float)

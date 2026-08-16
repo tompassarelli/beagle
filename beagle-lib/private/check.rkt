@@ -56,15 +56,15 @@
 (define current-purity-warning-port (make-parameter #f))
 
 (define (merge-types . ts)
+  (define non-any (filter (λ (t) (not (any-type? t))) ts))
   (cond
-    [(null? ts) ANY]
-    [(ormap any-type? ts) ANY]
-    [(= (length ts) 1) (car ts)]
-    [(andmap (λ (t) (type-compatible? t (car ts))) (cdr ts))
-     (car ts)]
+    [(null? non-any) ANY]
+    [(= (length non-any) 1) (car non-any)]
+    [(andmap (λ (t) (type-compatible? t (car non-any))) (cdr non-any))
+     (car non-any)]
     [else
      (define flat
-       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) ts))
+       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) non-any))
      (define deduped
        (for/fold ([acc '()]) ([t (in-list flat)])
          (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))

@@ -42,14 +42,6 @@
       '(defn preserve-bool! [(cell (Atom Bool))] Bool
          (do (poison! cell) (deref cell)))))))
 
-(test-case "a branch join containing authored Any remains Any"
-  (define merge-types
-    (parameterize ([current-namespace
-                    (module->namespace 'beagle/private/check)])
-      (namespace-variable-value 'merge-types)))
-  (check-true
-   (any-type? (merge-types (type-prim 'Nil) (type-prim 'Any)))))
-
 (test-case "a nil guard narrows a declared nullable HVec"
   (check-not-exn
    (lambda ()
