@@ -50,9 +50,11 @@
   (file-exists? gate-cache-wrapper))
 
 ;; The cache proves a traced filesystem closure. query.rkt deliberately probes
-;; live daemon/process/socket behavior, which is outside that proof, so a prior
-;; green result must never stand in for a fresh landing-gate execution.
-(define gate-cache-ineligible-files '("query.rkt"))
+;; live daemon/process/socket behavior, while tracing native-c17-parallel.rkt
+;; changes its owned process/deadline supervisor's timing semantics. A prior
+;; green result must never stand in for either fresh landing-gate execution.
+(define gate-cache-ineligible-files
+  '("query.rkt" "native-c17-parallel.rkt"))
 
 (define (gate-cache-eligible-file? fname)
   (not (member fname gate-cache-ineligible-files)))
@@ -553,6 +555,8 @@
   ;; A filesystem-closure cache cannot prove a live endpoint observation.
   (check-false (gate-cache-eligible-file? "query.rkt")
                "query tests always execute fresh")
+  (check-false (gate-cache-eligible-file? "native-c17-parallel.rkt")
+               "native parallel supervisor tests always execute fresh")
   (check-true (gate-cache-eligible-file? "parse.rkt")
               "ordinary filesystem-closed tests remain cacheable")
 
