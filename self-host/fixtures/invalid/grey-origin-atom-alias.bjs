@@ -1,0 +1,11 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-origin-atom-alias)
+
+(defalias RenderOrigin (HVec Float Float Float))
+
+(defn consume-origin [(origin (Atom (U RenderOrigin Nil)))] Nil
+  nil)
+
+;; Mutable cells stay invariant even when both element types share one alias.
+(defn invalid-alias [(origin (Atom RenderOrigin))] Nil
+  (consume-origin origin))

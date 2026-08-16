@@ -1,0 +1,11 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-fresh-atom-hvec-width)
+
+(defalias RenderOrigin (HVec Float Float Float))
+
+(defn consume-origin [(origin (Atom (U RenderOrigin Nil)))] Nil
+  nil)
+
+;; Expected context must reject a fresh cell whose HVec payload has wrong width.
+(defn invalid-origin [] Nil
+  (consume-origin (atom [0.0 0.0])))

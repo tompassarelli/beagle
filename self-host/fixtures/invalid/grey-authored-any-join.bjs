@@ -1,0 +1,9 @@
+#lang beagle/js
+(ns selfhost.fixtures.invalid.grey-authored-any-join)
+
+(defn need-int [(value Int)] Int
+  value)
+
+;; Authored Any is an actual public type, not the checker's inference bottom.
+(defn invalid-narrowing [(value Any) (choose-value? Bool)] Int
+  (need-int (if choose-value? value 1)))

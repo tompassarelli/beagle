@@ -3,6 +3,7 @@
 
 (defrecord Prepared [(ticket Int)])
 (defrecord Holder [(prepared (Atom (U Prepared Nil)))])
+(defalias RenderOrigin (HVec Float Float Float))
 
 (defn write-concrete! [(cell (Atom Any))] Any
   (reset! cell 1))
@@ -15,6 +16,18 @@
 
 (defn clear-fresh! [] Nil
   (clear-prepared! (atom nil)))
+
+(defn consume-origin [(origin (Atom (U RenderOrigin Nil)))] Nil
+  nil)
+
+(defn fresh-origin [] Nil
+  (consume-origin (atom [0.0 0.0 0.0])))
+
+(defn count-to-one [] Int
+  (loop [(value Int) 0]
+    (if (< value 1)
+      (recur (+ value 1))
+      value)))
 
 (defn maybe-pair [(ready? Bool)] (U (HVec Int String) Nil)
   (if ready?

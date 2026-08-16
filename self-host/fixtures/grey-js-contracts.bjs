@@ -22,6 +22,21 @@
 (def cosine Float
   (js/call Math .cos 0.5))
 
+(def arctangent Float
+  (js/call Math .atan 0.5))
+
+(def arctangent-two Float
+  (js/call Math .atan2 0.5 1.0))
+
+(def exponential Float
+  (js/call Math .exp 0.5))
+
+(def minimum Float
+  (js/call Math .min 0.5 1.0))
+
+(def tangent Float
+  (js/call Math .tan 0.5))
+
 (def wall-clock Int
   (js/call Date .now))
 
