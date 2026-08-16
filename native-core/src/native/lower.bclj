@@ -1518,6 +1518,14 @@
           diagnostics
           true))
 
+      (and (= "TransientVec" constructor) (= 1 (count ids)))
+      (let [(id core/NativeId) (closed-vector-type-id (nth ids 0))]
+        (->TypeResolutionV0 id
+          (append-type-def definitions
+            (closed-vector-type (nth ids 0)))
+          diagnostics
+          true))
+
       (and (= "Buffer" constructor)
         (= 1 (count ids))
         (same-id? (nth ids 0) (type-id "Float")))
@@ -5630,6 +5638,7 @@
       (instance? native.core.SetVectorInstructionV0 instruction)
       (instance? native.core.CollectionTransientOpenInstructionV0 instruction)
       (instance? native.core.CollectionPersistentCloseInstructionV0 instruction)
+      (instance? native.core.TransientVecPushInstructionV0 instruction)
       (instance? native.core.TransientMapAssocInstructionV0 instruction)
       (instance? native.core.TransientSetConjInstructionV0 instruction)
       (instance? native.core.RecordAssocInstructionV0 instruction)
@@ -5787,6 +5796,22 @@
       (= "type-prim" (fact-text index annotation "form-kind"))
       (= "Any" (fact-text index annotation "name")))))
 
+(defn source-transient-vector-type?
+  [(index SourceIndexV0) (annotation core/NativeId)] Bool
+  (= "TransientVec" (source-type-spelling index annotation)))
+
+(defn source-transient-owner-annotation?
+  [(index SourceIndexV0)
+   (owner core/NativeId)
+   (collection-kind String)]
+  Bool
+  (let [(annotation (U core/NativeId Nil))
+        (index-first-object index owner "ann")]
+    (and (some? annotation)
+      (or (source-any-annotation? index owner)
+        (and (= "vector" collection-kind)
+          (source-transient-vector-type? index annotation))))))
+
 ;; A transient map may be borrowed only by exact `get`; every other occurrence
 ;; of its accumulator must remain on the single update thread.
 (defn closed-transient-read-expression?
@@ -5843,6 +5868,12 @@
         (source-ref-named? index (nth args 0) accumulator)
         (closed-transient-neutral-expression? index (nth args 1) accumulator))
 
+      (= "vector" collection-kind)
+      (and (source-call-named? index body "conj!")
+        (= 2 (count args))
+        (source-ref-named? index (nth args 0) accumulator)
+        (closed-transient-neutral-expression? index (nth args 1) accumulator))
+
       (= "map" collection-kind)
       (and (source-call-named? index body "assoc!")
         (= 3 (count args))
@@ -5888,9 +5919,14 @@
                       (= 1 (count (source-call-arguments index initial))))
                     (source-ref-named? index initial initial-owner))]
               (and (> (count accumulator) 0)
-                (source-any-annotation? index accumulator-node)
-                (= "type-prim" (fact-text index callback-return "form-kind"))
-                (= "Any" (fact-text index callback-return "name"))
+                (source-transient-owner-annotation? index accumulator-node
+                  collection-kind)
+                (or
+                  (and (= "type-prim"
+                         (fact-text index callback-return "form-kind"))
+                    (= "Any" (fact-text index callback-return "name")))
+                  (and (= "vector" collection-kind)
+                    (source-transient-vector-type? index callback-return)))
                 initial-valid
                 (closed-transient-neutral-expression? index collection
                   accumulator)
@@ -6039,7 +6075,8 @@
               (initial (U core/NativeId Nil))
               (index-first-object index owner-binding "value")]
           (and (> (count owner) 0)
-            (source-any-annotation? index owner-binding)
+            (source-transient-owner-annotation? index owner-binding
+              collection-kind)
             (some? initial)
             (= 1 (count (source-call-arguments index initial)))
             (loop [(position Int) 0]
@@ -12090,9 +12127,14 @@
 (defn transient-collection-kind
   [(types (Vec core/TypeDef)) (target core/NativeId)] String
   (cond
+    (vector-type? types target) "vector"
     (map-type? types target) "map"
     (set-type? types target) "set"
     :else ""))
+
+(defn transient-value-type
+  [(types (Vec core/TypeDef)) (persistent-type core/NativeId)] core/NativeId
+  persistent-type)
 
 (defn lower-transient-open
   [(env BodyEnvV0)
@@ -12121,8 +12163,9 @@
           (not (same-id? active (exprresultv0-type-id seed)))
           (fail-result settled
             "TODO-NATIVE-TRANSIENT-SEED-TYPE: seed does not match its closed collection")
-          (not (state-defines-empty-collection? settled
-                 (exprresultv0-value-id seed) collection-kind))
+          (and (not (= "vector" collection-kind))
+            (not (state-defines-empty-collection? settled
+              (exprresultv0-value-id seed) collection-kind)))
           (fail-result settled
             "TODO-NATIVE-TRANSIENT-SEED-OWNERSHIP: v0 transient builders require a proven fresh empty seed")
           :else
@@ -12133,6 +12176,51 @@
                 (core/->CollectionTransientOpenInstructionV0
                   (core/->SsaValueV0 result-id active)
                   (exprresultv0-value-id seed) (arena-value-id owner)))
+              result-id active false)))))))
+
+(defn lower-transient-vector-conj
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (args (Vec core/NativeId))]
+  ExprResultV0
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (active (U core/NativeId Nil)) (bodystatev0-transient-type state)]
+    (cond
+      (or (nil? active) (not (vector-type? types active)))
+      (fail-result state
+        "TODO-NATIVE-CONJ!-SCOPE: conj! requires one closed TransientVec owner")
+      (not (= 2 (count args)))
+      (fail-result state "TODO-NATIVE-CONJ!-ARITY: conj! takes one value")
+      :else
+      (let [(element-type core/NativeId) (vector-element-of types active)
+            (source ExprResultV0)
+            (lower-contextual-boundary env owner state (nth args 0)
+              active active)
+            (value ExprResultV0)
+            (if (or (exprresultv0-terminated source)
+                  (state-blocked? (exprresultv0-state source)))
+              source
+              (lower-contextual-boundary env owner
+                (exprresultv0-state source) (nth args 1)
+                element-type element-type))
+            (settled BodyStateV0) (exprresultv0-state value)]
+        (cond
+          (exprresultv0-terminated value) value
+          (state-blocked? settled) (dead-result settled)
+          (or (not (same-id? active (exprresultv0-type-id source)))
+            (not (same-id? element-type (exprresultv0-type-id value))))
+          (fail-result settled
+            "TODO-NATIVE-CONJ!-OPERANDS: TransientVec operands do not match their closed types")
+          :else
+          (let [(result-id core/NativeId)
+                (state-id settled owner "transient-vec-push")]
+            (->ExprResultV0
+              (state-emit (state-bump settled)
+                (core/->TransientVecPushInstructionV0
+                  (core/->SsaValueV0 result-id active)
+                  (exprresultv0-value-id source)
+                  (exprresultv0-value-id value) element-type))
               result-id active false)))))))
 
 (defn lower-transient-set-conj
@@ -12263,7 +12351,8 @@
       (fail-result state
         "TODO-NATIVE-PERSISTENT!-TYPE: persistent! needs an exact collection boundary")
       :else
-      (let [(collection-kind String) (transient-collection-kind types expected)]
+      (let [(collection-kind String) (transient-collection-kind types expected)
+            (builder-type core/NativeId) (transient-value-type types expected)]
         (if (or (= "" collection-kind)
               (not (closed-transient-source? index (nth args 0)
                      collection-kind)))
@@ -12272,7 +12361,7 @@
           (let [(scoped BodyStateV0) (with state [:transient-type expected])
                 (source ExprResultV0)
                 (lower-contextual-boundary env owner scoped (nth args 0)
-                  expected expected)
+                  builder-type builder-type)
                 (restored BodyStateV0)
                 (with (exprresultv0-state source) [:transient-type prior])]
             (cond
@@ -12280,7 +12369,7 @@
               (->ExprResultV0 restored (exprresultv0-value-id source)
                 (exprresultv0-type-id source) true)
               (state-blocked? restored) (dead-result restored)
-              (not (same-id? expected (exprresultv0-type-id source)))
+              (not (same-id? builder-type (exprresultv0-type-id source)))
               (fail-result restored
                 "TODO-NATIVE-PERSISTENT!-RESULT: builder does not match its exact collection boundary")
               :else
@@ -13692,7 +13781,11 @@
             (lower-transient-open env owner state args)
 
             (= "conj!" callee)
-            (lower-transient-set-conj env owner state args)
+            (let [(active (U core/NativeId Nil))
+                  (bodystatev0-transient-type state)]
+              (if (and (some? active) (vector-type? types active))
+                (lower-transient-vector-conj env owner state args)
+                (lower-transient-set-conj env owner state args)))
 
             (= "assoc!" callee)
             (lower-transient-map-assoc env owner state args)
@@ -20803,6 +20896,16 @@
        (encode-concrete-equality
          (core/transientsetconjinstructionv0-element-equality instruction))])
 
+    (instance? native.core.TransientVecPushInstructionV0 instruction)
+    (stages/canonical-record "transient-vec-push-instruction-v0"
+      [(encode-ssa-value
+         (core/transientvecpushinstructionv0-result instruction))
+       (id-value
+         (core/transientvecpushinstructionv0-source-id instruction))
+       (id-value (core/transientvecpushinstructionv0-value-id instruction))
+       (id-value
+         (core/transientvecpushinstructionv0-element-type instruction))])
+
     (instance? native.core.ArenaInstruction instruction)
     (stages/canonical-record "arena-instruction"
       [(encode-ssa-value (core/arenainstruction-result instruction))
@@ -22077,6 +22180,12 @@
       (core/transientsetconjinstructionv0-value-id instruction)
       epoch-arena
       (core/transientsetconjinstructionv0-element-equality instruction))
+    (instance? native.core.TransientVecPushInstructionV0 instruction)
+    (core/->TransientVecPushInstructionV0
+      (core/transientvecpushinstructionv0-result instruction)
+      (core/transientvecpushinstructionv0-source-id instruction)
+      (core/transientvecpushinstructionv0-value-id instruction)
+      (core/transientvecpushinstructionv0-element-type instruction))
     (instance? native.core.TextSliceInstruction instruction)
     (core/->TextSliceInstruction
       (core/textsliceinstruction-result instruction)
