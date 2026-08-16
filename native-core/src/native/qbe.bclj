@@ -2588,19 +2588,26 @@
                     (core/abideclv0-symbol abi))
                 (or (= "native_host_clock_wall_nanoseconds_v0"
                       (core/abideclv0-symbol abi))
-                  (= "native_host_clock_format_iso8601_v0"
-                    (core/abideclv0-symbol abi))))))
+                  (or (= "native_host_clock_format_iso8601_v0"
+                        (core/abideclv0-symbol abi))
+                    (= "native_host_time_sleep_milliseconds_v0"
+                      (core/abideclv0-symbol abi)))))))
       (core/nativecoreprogram-abis program))))
+
+(defn process-extern-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_process_run_inherit_v0")
+      (= symbol "native_host_process_run_capture_v0")
+      (= symbol "native_host_process_spawn_stdout_v0")
+      (= symbol "native_host_process_read_line_bounded_v0")
+      (= symbol "native_host_process_wait_v0")
+      (= symbol "native_host_process_close_v0")))
 
 (defn program-has-process-extern? [(program core/NativeCoreProgram)] Bool
   (some?
     (some (fn [(abi core/AbiDeclV0)] Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
-              (or (= "native_host_process_run_inherit_v0"
-                    (core/abideclv0-symbol abi))
-                (= "native_host_process_run_capture_v0"
-                  (core/abideclv0-symbol abi)))))
+              (process-extern-symbol? (core/abideclv0-symbol abi))))
       (core/nativecoreprogram-abis program))))
 
 (defn socket-extern-symbol? [(symbol String)] Bool

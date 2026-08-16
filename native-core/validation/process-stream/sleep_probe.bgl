@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.process-stream-sleep-probe)
+
+
+(defn sleep-once [] Int
+  (host.time/sleep-milliseconds 0))

@@ -1086,10 +1086,100 @@
     (core/->OutcomeType (process-capture-reference-type-id)
       (process-capture-result-type-id))))
 
+(defn process-spawn-stdout-type-id [] core/NativeId
+  (type-id "HostProcessSpawnStdout"))
+
+(defn process-spawn-stdout-reference-type-id [] core/NativeId
+  (type-id "HostProcessSpawnStdoutReference"))
+
+(defn process-spawn-stdout-result-type-id [] core/NativeId
+  (type-id "HostProcessSpawnStdoutResult"))
+
+(defn process-spawn-stdout-outcome-type-id [] core/NativeId
+  (type-id "HostProcessSpawnStdoutOutcome"))
+
+(defn process-spawn-stdout-type [] core/TypeDef
+  (let [(record-key String) "host.process/SpawnStdoutOk"]
+    (core/->TypeDef (process-spawn-stdout-type-id) "HostProcessSpawnStdout"
+      (core/->RecordType
+        [(core/->TypeField (field-id record-key "pid") "pid"
+           (type-id "Int"))
+         (core/->TypeField (field-id record-key "stdout-fd") "stdout-fd"
+           (type-id "Int"))]))))
+
+(defn process-spawn-stdout-reference-type [] core/TypeDef
+  (core/->TypeDef (process-spawn-stdout-reference-type-id)
+    "HostProcessSpawnStdoutReference"
+    (core/->ReferenceType (process-spawn-stdout-type-id))))
+
+(defn process-spawn-stdout-result-type [] core/TypeDef
+  (core/->TypeDef (process-spawn-stdout-result-type-id)
+    "HostProcessSpawnStdoutResult"
+    (core/->UnionType
+      [(core/->TypeVariant
+         (variant-id "HostProcessSpawnStdoutResult" "ok") "ok"
+         (process-spawn-stdout-reference-type-id))
+       (core/->TypeVariant
+         (variant-id "HostProcessSpawnStdoutResult" "error") "error"
+         (type-id "Int"))])))
+
+(defn process-spawn-stdout-outcome-type [] core/TypeDef
+  (core/->TypeDef (process-spawn-stdout-outcome-type-id)
+    "HostProcessSpawnStdoutOutcome"
+    (core/->OutcomeType (process-spawn-stdout-reference-type-id)
+      (process-spawn-stdout-result-type-id))))
+
+(defn process-read-line-type-id [] core/NativeId
+  (type-id "HostProcessReadLine"))
+
+(defn process-read-line-reference-type-id [] core/NativeId
+  (type-id "HostProcessReadLineReference"))
+
+(defn process-read-line-result-type-id [] core/NativeId
+  (type-id "HostProcessReadLineResult"))
+
+(defn process-read-line-outcome-type-id [] core/NativeId
+  (type-id "HostProcessReadLineOutcome"))
+
+(defn process-read-line-type [] core/TypeDef
+  (let [(record-key String) "host.process/ReadLineOk"]
+    (core/->TypeDef (process-read-line-type-id) "HostProcessReadLine"
+      (core/->RecordType
+        [(core/->TypeField (field-id record-key "line") "line"
+           (type-id "String"))
+         (core/->TypeField (field-id record-key "eof") "eof"
+           (type-id "Bool"))]))))
+
+(defn process-read-line-reference-type [] core/TypeDef
+  (core/->TypeDef (process-read-line-reference-type-id)
+    "HostProcessReadLineReference"
+    (core/->ReferenceType (process-read-line-type-id))))
+
+(defn process-read-line-result-type [] core/TypeDef
+  (core/->TypeDef (process-read-line-result-type-id)
+    "HostProcessReadLineResult"
+    (core/->UnionType
+      [(core/->TypeVariant
+         (variant-id "HostProcessReadLineResult" "ok") "ok"
+         (process-read-line-reference-type-id))
+       (core/->TypeVariant
+         (variant-id "HostProcessReadLineResult" "error") "error"
+         (type-id "Int"))])))
+
+(defn process-read-line-outcome-type [] core/TypeDef
+  (core/->TypeDef (process-read-line-outcome-type-id)
+    "HostProcessReadLineOutcome"
+    (core/->OutcomeType (process-read-line-reference-type-id)
+      (process-read-line-result-type-id))))
+
 (defn process-outcome-types [] (Vec core/TypeDef)
-  [(i64-type) (text-type)
+  [(bool-type) (i64-type) (text-type)
    (process-capture-type) (process-capture-reference-type)
-   (process-capture-result-type) (process-capture-outcome-type)])
+   (process-capture-result-type) (process-capture-outcome-type)
+   (process-spawn-stdout-type) (process-spawn-stdout-reference-type)
+   (process-spawn-stdout-result-type) (process-spawn-stdout-outcome-type)
+   (process-read-line-type) (process-read-line-reference-type)
+   (process-read-line-result-type) (process-read-line-outcome-type)])
 
 (defn source-host-variant-role
   [(target-type core/NativeId) (name String)] String
@@ -1126,6 +1216,14 @@
       (= name "host.process/CaptureOk")) "ok"
     (and (same-id? target-type (process-capture-outcome-type-id))
       (= name "host.process/CaptureError")) "error"
+    (and (same-id? target-type (process-spawn-stdout-outcome-type-id))
+      (= name "host.process/SpawnStdoutOk")) "ok"
+    (and (same-id? target-type (process-spawn-stdout-outcome-type-id))
+      (= name "host.process/SpawnStdoutError")) "error"
+    (and (same-id? target-type (process-read-line-outcome-type-id))
+      (= name "host.process/ReadLineOk")) "ok"
+    (and (same-id? target-type (process-read-line-outcome-type-id))
+      (= name "host.process/ReadLineError")) "error"
     :else name))
 
 (defn type-def-in? [(definitions (Vec core/TypeDef)) (id core/NativeId)] Bool
@@ -1259,6 +1357,14 @@
 
     (= "host.process/CaptureResult" spelling)
     (->TypeResolutionV0 (process-capture-outcome-type-id)
+      (process-outcome-types) [] true)
+
+    (= "host.process/SpawnStdoutResult" spelling)
+    (->TypeResolutionV0 (process-spawn-stdout-outcome-type-id)
+      (process-outcome-types) [] true)
+
+    (= "host.process/ReadLineResult" spelling)
+    (->TypeResolutionV0 (process-read-line-outcome-type-id)
       (process-outcome-types) [] true)
 
     (= "Any" spelling)
@@ -2052,6 +2158,15 @@
       (= name "host.clock/wall-nanoseconds")
       (= name "host.clock/format-iso8601")))
 
+(defn host-time-sleep-abi-id [] core/NativeId
+  (lower-id "abi" ["host-time-sleep-milliseconds-v0"]))
+
+(defn host-time-sleep-function-id [] core/NativeId
+  (lower-id "extern" ["host-time-sleep-milliseconds-v0"]))
+
+(defn host-time-callee? [(name String)] Bool
+  (= name "host.time/sleep-milliseconds"))
+
 (defn host-wall-clock-abi-id [(operation String)] core/NativeId
   (lower-id "abi" [(str "host-clock-" operation "-v0")]))
 
@@ -2159,13 +2274,28 @@
 (defn host-process-capture-function-id [] core/NativeId
   (lower-id "extern" ["host-process-run-capture-v0"]))
 
+(defn host-process-lifecycle-abi-id [(operation String)] core/NativeId
+  (lower-id "abi" [(str "host-process-" operation "-v0")]))
+
+(defn host-process-lifecycle-function-id [(operation String)] core/NativeId
+  (lower-id "extern" [(str "host-process-" operation "-v0")]))
+
 (defn host-process-abi-id? [(candidate core/NativeId)] Bool
   (or (same-id? candidate (host-process-abi-id))
-      (same-id? candidate (host-process-capture-abi-id))))
+      (same-id? candidate (host-process-capture-abi-id))
+      (same-id? candidate (host-process-lifecycle-abi-id "spawn-stdout"))
+      (same-id? candidate
+        (host-process-lifecycle-abi-id "read-line-bounded"))
+      (same-id? candidate (host-process-lifecycle-abi-id "wait"))
+      (same-id? candidate (host-process-lifecycle-abi-id "close"))))
 
 (defn host-process-callee? [(name String)] Bool
   (or (= name "host.process/run-inherit")
-      (= name "host.process/run-capture")))
+      (= name "host.process/run-capture")
+      (= name "host.process/spawn-stdout")
+      (= name "host.process/read-line-bounded")
+      (= name "host.process/wait")
+      (= name "host.process/close")))
 
 (defn host-socket-effect-id [] core/NativeId
   (lower-id "effect" ["host-socket-peer-lifecycle-v0"]))
@@ -8364,6 +8494,62 @@
       (str "TODO-NATIVE-HOST-OUTPUT-OPERAND: " callee
         " takes one native Text value"))))
 
+(defn host-process-operands-valid?
+  [(types (Vec core/TypeDef))
+   (callee String)
+   (value-types (Vec core/NativeId))]
+  Bool
+  (cond
+    (or (= callee "host.process/run-inherit")
+        (= callee "host.process/spawn-stdout"))
+    (and (= 1 (count value-types))
+      (text-vector-value? types (nth value-types 0)))
+
+    (= callee "host.process/run-capture")
+    (and (= 3 (count value-types))
+      (text-vector-value? types (nth value-types 0))
+      (text-operand? (nth value-types 1))
+      (same-id? (nth value-types 2) (int-type-id)))
+
+    (= callee "host.process/read-line-bounded")
+    (and (= 2 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id))
+      (same-id? (nth value-types 1) (int-type-id)))
+
+    (or (= callee "host.process/wait")
+        (= callee "host.process/close"))
+    (and (= 1 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id)))
+
+    :else false))
+
+(defn host-process-call-result-type [(callee String)] core/NativeId
+  (cond
+    (= callee "host.process/run-capture")
+    (process-capture-outcome-type-id)
+    (= callee "host.process/spawn-stdout")
+    (process-spawn-stdout-outcome-type-id)
+    (= callee "host.process/read-line-bounded")
+    (process-read-line-outcome-type-id)
+    :else (int-type-id)))
+
+(defn host-process-call-abi-id [(callee String)] core/NativeId
+  (cond
+    (= callee "host.process/run-inherit") (host-process-abi-id)
+    (= callee "host.process/run-capture") (host-process-capture-abi-id)
+    (= callee "host.process/spawn-stdout")
+    (host-process-lifecycle-abi-id "spawn-stdout")
+    (= callee "host.process/read-line-bounded")
+    (host-process-lifecycle-abi-id "read-line-bounded")
+    (= callee "host.process/wait")
+    (host-process-lifecycle-abi-id "wait")
+    :else (host-process-lifecycle-abi-id "close")))
+
+(defn host-process-call-arena? [(callee String)] Bool
+  (or (= callee "host.process/run-capture")
+      (= callee "host.process/spawn-stdout")
+      (= callee "host.process/read-line-bounded")))
+
 (defn lower-host-process-call
   [(types (Vec core/TypeDef))
    (owner core/NativeId)
@@ -8372,36 +8558,21 @@
    (values (Vec core/NativeId))
    (value-types (Vec core/NativeId))]
   ExprResultV0
-  (if (not
-        (or
-          (and (= callee "host.process/run-inherit")
-            (= 1 (count value-types))
-            (text-vector-value? types (nth value-types 0)))
-          (and (= callee "host.process/run-capture")
-            (= 3 (count value-types))
-            (text-vector-value? types (nth value-types 0))
-            (text-operand? (nth value-types 1))
-            (same-id? (nth value-types 2) (int-type-id)))))
+  (if (not (host-process-operands-valid? types callee value-types))
     (fail-result state
-      "TODO-NATIVE-HOST-PROCESS-OPERANDS: run-inherit needs (Vec String); run-capture needs (Vec String), String stdin, and Int output bound")
-    (let [(capture Bool) (= callee "host.process/run-capture")
-          (result-id core/NativeId) (state-id state owner "host-process")]
+      "TODO-NATIVE-HOST-PROCESS-OPERANDS: run/spawn need (Vec String); capture also needs String stdin and Int bound; read-line-bounded needs fd and bound Ints; wait/close need one Int")
+    (let [(result-id core/NativeId) (state-id state owner "host-process")
+          (result-type core/NativeId) (host-process-call-result-type callee)
+          (arena-owned Bool) (host-process-call-arena? callee)]
       (->ExprResultV0
         (state-emit (state-bump state)
           (core/->ExternCallInstruction
-            (core/->SsaValueV0 result-id
-              (if capture
-                (process-capture-outcome-type-id)
-                (int-type-id)))
-            (if capture
-              (host-process-capture-abi-id)
-              (host-process-abi-id))
+            (core/->SsaValueV0 result-id result-type)
+            (host-process-call-abi-id callee)
             values
-            (if capture (arena-value-id owner) nil)
+            (if arena-owned (arena-value-id owner) nil)
             (core/->TokenFlowV0 [] [])))
-         result-id
-         (if capture (process-capture-outcome-type-id) (int-type-id))
-         false))))
+         result-id result-type false))))
 
 (defn lower-int-step
   [(types (Vec core/TypeDef))
@@ -13203,7 +13374,8 @@
                 (host-filesystem-callee? (fact-text index expr "callee"))
                 (host-process-callee? (fact-text index expr "callee"))
                 (host-socket-callee? (fact-text index expr "callee"))
-                (host-clock-callee? (fact-text index expr "callee")))))
+                (host-clock-callee? (fact-text index expr "callee"))
+                (host-time-callee? (fact-text index expr "callee")))))
         (let [(callee String) (fact-text index expr "callee")
               (callee-form (U core/NativeId Nil))
               (index-first-object index expr "callee-form")
@@ -14761,9 +14933,24 @@
                         (core/->TokenFlowV0 [] [])))
                     result-id (filesystem-text-outcome-type-id) false))
 
-                (host-clock-callee? callee)
+                (and (host-time-callee? callee)
+                  (= 1 (count values))
+                  (same-id? (nth value-types 0) (int-type-id)))
+                (let [(result-id core/NativeId)
+                      (state-id current owner "host-time-sleep")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ExternCallInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (host-time-sleep-abi-id)
+                        values
+                        nil
+                        (core/->TokenFlowV0 [] [])))
+                    result-id (int-type-id) false))
+
+                (or (host-clock-callee? callee) (host-time-callee? callee))
                 (fail-result current
-                  "TODO-NATIVE-HOST-CLOCK-OPERANDS: monotonic and wall clocks take no operands; ISO formatting takes one Int epoch nanoseconds")
+                  "TODO-NATIVE-HOST-CLOCK-OPERANDS: monotonic and wall clocks take no operands; ISO formatting and millisecond sleep take one Int")
 
                 (and (host-environment-callee? callee)
                   (= 1 (count values))
@@ -16836,6 +17023,8 @@
                 (or
                   (same-id? (core/externcallinstruction-abi-id instruction)
                     (host-clock-abi-id))
+                  (same-id? (core/externcallinstruction-abi-id instruction)
+                    (host-time-sleep-abi-id))
                   (host-wall-clock-abi-id?
                     (core/externcallinstruction-abi-id instruction)))))
             (core/basicblock-instructions block))))
@@ -17072,8 +17261,13 @@
                   (filesystem-outcome-types))
                 checked-definitions)]
           (let [(process-definitions (Vec core/TypeDef))
-                (if (readiness-calls-abi? readiness
-                      (host-process-capture-abi-id))
+                (if (or
+                      (readiness-calls-abi? readiness
+                        (host-process-capture-abi-id))
+                      (readiness-calls-abi? readiness
+                        (host-process-lifecycle-abi-id "spawn-stdout"))
+                      (readiness-calls-abi? readiness
+                        (host-process-lifecycle-abi-id "read-line-bounded")))
                   (append-type-defs filesystem-definitions
                     (process-outcome-types))
                   filesystem-definitions)]
@@ -17791,7 +17985,10 @@
           (append-type-defs base-source-types (filesystem-outcome-types))
           base-source-types)
         (process-source-types (Vec core/TypeDef))
-        (if (index-has-callee? index "host.process/run-capture")
+        (if (or
+              (index-has-callee? index "host.process/run-capture")
+              (index-has-callee? index "host.process/spawn-stdout")
+              (index-has-callee? index "host.process/read-line-bounded"))
           (append-type-defs source-types (process-outcome-types))
           source-types)
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)
@@ -18909,7 +19106,80 @@
      [(allocate-effect-id) (host-process-effect-id)]
      [(allocate-capability-id) (host-process-capability-id)]
      "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-lifecycle-abi-id "spawn-stdout")
+     (host-process-lifecycle-function-id "spawn-stdout")
+     "native_host_process_spawn_stdout_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCOutcomeOutAbiV0 true)
+     [(borrowed-abi-value "argv" (closed-vector-type-id (text-type-id)))]
+     (core/->AbiValueV0 "result" (process-spawn-stdout-outcome-type-id)
+       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+     (type-id "LowerFailure")
+     [(allocate-effect-id) (host-process-effect-id)]
+     [(allocate-capability-id) (host-process-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-lifecycle-abi-id "read-line-bounded")
+     (host-process-lifecycle-function-id "read-line-bounded")
+     "native_host_process_read_line_bounded_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCOutcomeOutAbiV0 true)
+     [(borrowed-abi-value "stdout-fd" (int-type-id))
+      (borrowed-abi-value "max-line-bytes" (int-type-id))]
+     (core/->AbiValueV0 "result" (process-read-line-outcome-type-id)
+       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+     (type-id "LowerFailure")
+     [(allocate-effect-id) (host-process-effect-id)]
+     [(allocate-capability-id) (host-process-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-lifecycle-abi-id "wait")
+     (host-process-lifecycle-function-id "wait")
+     "native_host_process_wait_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     [(borrowed-abi-value "pid" (int-type-id))]
+     (core/->AbiValueV0 "status" (int-type-id)
+       (core/->OwnedV0 true) nil)
+     (type-id "LowerFailure")
+     [(host-process-effect-id)]
+     [(host-process-capability-id)]
+     "v0"
+     layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-lifecycle-abi-id "close")
+     (host-process-lifecycle-function-id "close")
+     "native_host_process_close_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     [(borrowed-abi-value "fd" (int-type-id))]
+     (core/->AbiValueV0 "status" (int-type-id)
+       (core/->OwnedV0 true) nil)
+     (type-id "LowerFailure")
+     [(host-process-effect-id)]
+     [(host-process-capability-id)]
+     "v0"
      layouts-digest)])
+
+(defn host-time-sleep-abi [(layouts-digest String)] core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-time-sleep-abi-id)
+    (host-time-sleep-function-id)
+    "native_host_time_sleep_milliseconds_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    [(borrowed-abi-value "milliseconds" (int-type-id))]
+    (core/->AbiValueV0 "status" (int-type-id)
+      (core/->OwnedV0 true) nil)
+    (type-id "LowerFailure")
+    [(host-clock-effect-id)]
+    [(host-clock-capability-id)]
+    "v0"
+    layouts-digest))
 
 (defn host-wall-clock-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
   [(core/->AbiDeclV0
@@ -19008,15 +19278,39 @@
         (if (any-function-calls-abi? functions (host-process-abi-id))
           (conj with-filesystem (nth process-abis 0))
           with-filesystem)
-        (with-process (Vec core/AbiDeclV0))
+        (with-process-capture (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions
               (host-process-capture-abi-id))
           (conj with-process-inherit (nth process-abis 1))
           with-process-inherit)
+        (with-process-spawn (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-process-lifecycle-abi-id "spawn-stdout"))
+          (conj with-process-capture (nth process-abis 2))
+          with-process-capture)
+        (with-process-read (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-process-lifecycle-abi-id "read-line-bounded"))
+          (conj with-process-spawn (nth process-abis 3))
+          with-process-spawn)
+        (with-process-wait (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-process-lifecycle-abi-id "wait"))
+          (conj with-process-read (nth process-abis 4))
+          with-process-read)
+        (with-process (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-process-lifecycle-abi-id "close"))
+          (conj with-process-wait (nth process-abis 5))
+          with-process-wait)
+        (with-time-sleep (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
+          (conj with-process (host-time-sleep-abi digest))
+          with-process)
         (with-monotonic-clock (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions (host-clock-abi-id))
-          (conj with-process (host-clock-abi digest))
-          with-process)
+          (conj with-time-sleep (host-clock-abi digest))
+          with-time-sleep)
         (wall-clock-abis (Vec core/AbiDeclV0))
         (host-wall-clock-abis digest)
         (with-wall-clock (Vec core/AbiDeclV0))
@@ -20410,6 +20704,16 @@
                      (host-process-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-process-capture-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-process-lifecycle-abi-id "spawn-stdout")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-process-lifecycle-abi-id "read-line-bounded")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-process-lifecycle-abi-id "wait")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-process-lifecycle-abi-id "close")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-time-sleep-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-clock-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions

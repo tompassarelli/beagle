@@ -276,9 +276,15 @@
       (= symbol "native_host_filesystem_make_parent_directories_v0")
       (= symbol "native_host_filesystem_append_text_v0")))
 
-(defn host-process-symbol? [(symbol String)] Bool
+(defn host-process-direct-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_process_run_inherit_v0")
-      (= symbol "native_host_process_run_capture_v0")))
+      (= symbol "native_host_process_wait_v0")
+      (= symbol "native_host_process_close_v0")))
+
+(defn host-process-outcome-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_process_run_capture_v0")
+      (= symbol "native_host_process_spawn_stdout_v0")
+      (= symbol "native_host_process_read_line_bounded_v0")))
 
 (defn host-clock-outcome-symbol? [(symbol String)] Bool
   (= symbol "native_host_clock_format_iso8601_v0"))
@@ -289,7 +295,8 @@
       (= symbol "native_host_stderr_write_v0")
       (= symbol "native_host_stderr_write_line_v0")
       (= symbol "native_host_clock_monotonic_nanoseconds_v0")
-      (= symbol "native_host_clock_wall_nanoseconds_v0")))
+      (= symbol "native_host_clock_wall_nanoseconds_v0")
+      (= symbol "native_host_time_sleep_milliseconds_v0")))
 
 (defn program-supported? [(program core/NativeCoreProgram)] Bool
   (let [(layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)
@@ -310,12 +317,12 @@
             (and (instance? native.core.RestrictedCAbiV0
                    (core/abideclv0-convention abi))
               (or (host-direct-symbol? (core/abideclv0-symbol abi))
-                (host-process-symbol? (core/abideclv0-symbol abi))))
+                (host-process-direct-symbol? (core/abideclv0-symbol abi))))
             (and (instance? native.core.RestrictedCOutcomeOutAbiV0
                    (core/abideclv0-convention abi))
               (or (host-socket-symbol? (core/abideclv0-symbol abi))
                 (host-filesystem-symbol? (core/abideclv0-symbol abi))
-                (host-process-symbol? (core/abideclv0-symbol abi))
+                (host-process-outcome-symbol? (core/abideclv0-symbol abi))
                 (host-clock-outcome-symbol?
                   (core/abideclv0-symbol abi))))))
         (core/nativecoreprogram-abis program))

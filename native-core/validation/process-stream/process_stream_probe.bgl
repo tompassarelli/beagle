@@ -1,0 +1,50 @@
+#lang beagle
+(ns native.process-stream-probe)
+
+
+(defn finish
+  [(pid Int) (stdout-fd Int) (expected-status Int) (result Int)] Int
+  (let [(close-status Int) (host.process/close stdout-fd)
+        (wait-status Int) (host.process/wait pid)]
+    (if (and (= close-status 0) (= wait-status expected-status))
+      result
+      (+ result 100))))
+
+(defn finite [(argv (Vec String))] Int
+  (match (host.process/spawn-stdout argv)
+    [(host.process/SpawnStdoutOk pid stdout-fd)
+     (match (host.process/read-line-bounded stdout-fd 5)
+       [(host.process/ReadLineOk line eof)
+        (if (and (= line "alpha") (not eof))
+          (match (host.process/read-line-bounded stdout-fd 5)
+            [(host.process/ReadLineOk final-line final-eof)
+             (if (and (= final-line "omega") (not final-eof))
+               (match (host.process/read-line-bounded stdout-fd 5)
+                 [(host.process/ReadLineOk eof-line at-eof)
+                  (if (and (= eof-line "") at-eof)
+                    (finish pid stdout-fd 23 0)
+                    (finish pid stdout-fd 23 3))]
+                 [(host.process/ReadLineError errno)
+                  (finish pid stdout-fd 23 4)])
+               (finish pid stdout-fd 23 2))]
+            [(host.process/ReadLineError errno)
+             (finish pid stdout-fd 23 5)])
+          (finish pid stdout-fd 23 1))]
+       [(host.process/ReadLineError errno)
+        (finish pid stdout-fd 23 6)])]
+    [(host.process/SpawnStdoutError errno) 7]))
+
+(defn long-lived [(argv (Vec String))] Int
+  (match (host.process/spawn-stdout argv)
+    [(host.process/SpawnStdoutOk pid stdout-fd)
+     (match (host.process/read-line-bounded stdout-fd 4)
+       [(host.process/ReadLineOk line eof)
+        (if (and (= line "tick") (not eof))
+          (let [(sleep-status Int) (host.time/sleep-milliseconds 5)]
+            (if (= sleep-status 0)
+              (finish pid stdout-fd 269 0)
+              (finish pid stdout-fd 269 2)))
+          (finish pid stdout-fd 269 1))]
+       [(host.process/ReadLineError errno)
+        (finish pid stdout-fd 269 3)])]
+    [(host.process/SpawnStdoutError errno) 4]))

@@ -9392,6 +9392,39 @@ int32_t native_host_clock_format_iso8601_v0(
   return 0;
 }
 
+int64_t native_host_time_sleep_milliseconds_v0(
+    const native_capability *capability, int64_t milliseconds) {
+#if defined(__wasi__)
+  (void)capability;
+  (void)milliseconds;
+  return -((int64_t)ENOTSUP);
+#else
+  struct timespec remaining;
+  struct timespec interrupted;
+  int64_t seconds;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (milliseconds < INT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  seconds = milliseconds / INT64_C(1000);
+  remaining.tv_sec = (time_t)seconds;
+  if ((int64_t)remaining.tv_sec != seconds) {
+    return -((int64_t)EOVERFLOW);
+  }
+  remaining.tv_nsec = (long)((milliseconds % INT64_C(1000)) * INT64_C(1000000));
+  for (;;) {
+    if (nanosleep(&remaining, &interrupted) == 0) {
+      return INT64_C(0);
+    }
+    if (errno != EINTR) {
+      return -((int64_t)((errno == 0) ? EIO : errno));
+    }
+    remaining = interrupted;
+  }
+#endif
+}
+
 /* The embedding host may own the environment instead of the OS: the Wasm
    adapter defines this ABI over its exported mailbox and compiles the shim
    with NATIVE_HOST_ENVIRONMENT_LOOKUP_EXTERNAL so a zero-import reactor never
@@ -10016,6 +10049,45 @@ int32_t native_host_process_run_capture_v0(
   }
   return ENOTSUP;
 }
+
+int32_t native_host_process_spawn_stdout_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *argv_value, void **out) {
+  (void)arena;
+  (void)capability;
+  (void)argv_value;
+  if (out != NULL) {
+    *out = NULL;
+  }
+  return ENOTSUP;
+}
+
+int32_t native_host_process_read_line_bounded_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t stdout_fd, int64_t max_line_bytes, void **out) {
+  (void)arena;
+  (void)capability;
+  (void)stdout_fd;
+  (void)max_line_bytes;
+  if (out != NULL) {
+    *out = NULL;
+  }
+  return ENOTSUP;
+}
+
+int64_t native_host_process_wait_v0(
+    const native_capability *capability, int64_t pid) {
+  (void)capability;
+  (void)pid;
+  return -((int64_t)ENOTSUP);
+}
+
+int64_t native_host_process_close_v0(
+    const native_capability *capability, int64_t fd) {
+  (void)capability;
+  (void)fd;
+  return -((int64_t)ENOTSUP);
+}
 #else
 static void native_host_process_free_argv(char **argv, size_t count) {
   size_t index;
@@ -10099,6 +10171,41 @@ static int32_t native_host_process_wait(pid_t child, int64_t *out_status) {
     return 0;
   }
   return EIO;
+}
+
+int64_t native_host_process_wait_v0(
+    const native_capability *capability, int64_t pid) {
+  pid_t child;
+  int64_t child_status = INT64_C(0);
+  int32_t status;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (pid <= INT64_C(0))) {
+    return -((int64_t)EINVAL);
+  }
+  child = (pid_t)pid;
+  if ((int64_t)child != pid) {
+    return -((int64_t)EINVAL);
+  }
+  status = native_host_process_wait(child, &child_status);
+  return (status == 0) ? child_status : -((int64_t)status);
+}
+
+int64_t native_host_process_close_v0(
+    const native_capability *capability, int64_t fd) {
+  int descriptor;
+
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (fd <= (int64_t)STDERR_FILENO) || (fd > (int64_t)INT_MAX)) {
+    return -((int64_t)EINVAL);
+  }
+  descriptor = (int)fd;
+  if (close(descriptor) == 0) {
+    return INT64_C(0);
+  }
+  /* Do not retry close after EINTR: the descriptor may already be released,
+     and a retry could close an unrelated descriptor that reused the number. */
+  return -((int64_t)((errno == 0) ? EIO : errno));
 }
 
 int64_t native_host_process_run_inherit_v0(
@@ -10214,6 +10321,170 @@ static int32_t native_host_process_add_close(
   return (descriptor == target)
              ? 0
              : (int32_t)posix_spawn_file_actions_addclose(actions, descriptor);
+}
+
+int32_t native_host_process_spawn_stdout_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *argv_value, void **out) {
+  char **argv = NULL;
+  size_t argv_count = (size_t)0U;
+  int stdout_pipe[2] = {-1, -1};
+  posix_spawn_file_actions_t actions;
+  bool actions_ready = false;
+  pid_t child = (pid_t)-1;
+  int spawn_status;
+  int32_t status;
+  native_host_process_spawned_stdout_v0 *spawned;
+
+  if (out != NULL) {
+    *out = NULL;
+  }
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL)) {
+    return EINVAL;
+  }
+  spawned = (native_host_process_spawned_stdout_v0 *)native_arena_alloc(
+      arena, sizeof(*spawned),
+      _Alignof(native_host_process_spawned_stdout_v0));
+  status = native_host_process_build_argv(argv_value, &argv, &argv_count);
+  if (status != 0) {
+    return status;
+  }
+  status = native_host_process_pipe(stdout_pipe);
+  if (status != 0) {
+    goto cleanup;
+  }
+  spawn_status = posix_spawn_file_actions_init(&actions);
+  if (spawn_status != 0) {
+    status = (int32_t)spawn_status;
+    goto cleanup;
+  }
+  actions_ready = true;
+  spawn_status = posix_spawn_file_actions_adddup2(
+      &actions, stdout_pipe[1], STDOUT_FILENO);
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, stdout_pipe[0], STDOUT_FILENO);
+  }
+  if (spawn_status == 0) {
+    spawn_status = native_host_process_add_close(
+        &actions, stdout_pipe[1], STDOUT_FILENO);
+  }
+  if (spawn_status != 0) {
+    status = (int32_t)spawn_status;
+    goto cleanup;
+  }
+  spawn_status = posix_spawnp(&child, argv[0], &actions, NULL, argv, environ);
+  if (spawn_status != 0) {
+    status = (int32_t)spawn_status;
+    child = (pid_t)-1;
+    goto cleanup;
+  }
+  (void)posix_spawn_file_actions_destroy(&actions);
+  actions_ready = false;
+  native_host_process_free_argv(argv, argv_count);
+  argv = NULL;
+  argv_count = (size_t)0U;
+  (void)close(stdout_pipe[1]);
+  stdout_pipe[1] = -1;
+  spawned->pid = (int64_t)child;
+  spawned->stdout_fd = (int64_t)stdout_pipe[0];
+  stdout_pipe[0] = -1;
+  *out = spawned;
+  return 0;
+
+cleanup:
+  if (actions_ready) {
+    (void)posix_spawn_file_actions_destroy(&actions);
+  }
+  if (stdout_pipe[0] >= 0) {
+    (void)close(stdout_pipe[0]);
+  }
+  if (stdout_pipe[1] >= 0) {
+    (void)close(stdout_pipe[1]);
+  }
+  native_host_process_free_argv(argv, argv_count);
+  return status;
+}
+
+int32_t native_host_process_read_line_bounded_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t stdout_fd, int64_t max_line_bytes, void **out) {
+  int descriptor;
+  size_t bound;
+  size_t capacity;
+  size_t length = (size_t)0U;
+  uint8_t *buffer;
+  bool line_ended = false;
+  bool overflow = false;
+  bool eof = false;
+  native_host_process_line_v0 *line;
+  uint8_t *destination = NULL;
+
+  if (out != NULL) {
+    *out = NULL;
+  }
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL) ||
+      (stdout_fd <= (int64_t)STDERR_FILENO) ||
+      (stdout_fd > (int64_t)INT_MAX) ||
+      (max_line_bytes < INT64_C(0))) {
+    return EINVAL;
+  }
+  if (max_line_bytes > NATIVE_HOST_PROCESS_MAX_LINE_BYTES) {
+    return EFBIG;
+  }
+  descriptor = (int)stdout_fd;
+  bound = (size_t)max_line_bytes;
+  capacity = bound + (size_t)1U;
+  buffer = (uint8_t *)malloc(capacity);
+  if (buffer == NULL) {
+    return ENOMEM;
+  }
+
+  while (!line_ended) {
+    uint8_t byte;
+    ssize_t amount = read(descriptor, &byte, (size_t)1U);
+    if (amount > 0) {
+      if (byte == (uint8_t)'\n') {
+        line_ended = true;
+      } else if (length < capacity) {
+        buffer[length] = byte;
+        length += (size_t)1U;
+      } else {
+        overflow = true;
+      }
+    } else if (amount == 0) {
+      eof = (length == (size_t)0U) && !overflow;
+      break;
+    } else if (errno != EINTR) {
+      int32_t status = (errno == 0) ? EIO : (int32_t)errno;
+      free(buffer);
+      return status;
+    }
+  }
+  if (line_ended && (length != (size_t)0U) &&
+      (buffer[length - (size_t)1U] == (uint8_t)'\r')) {
+    length -= (size_t)1U;
+  }
+  if (overflow || (length > bound)) {
+    free(buffer);
+    return EFBIG;
+  }
+  if (!native_utf8_valid(buffer, (uint64_t)length)) {
+    free(buffer);
+    return EILSEQ;
+  }
+  line = (native_host_process_line_v0 *)native_arena_alloc(
+      arena, sizeof(*line), _Alignof(native_host_process_line_v0));
+  line->line_text = native_text_alloc(arena, (uint64_t)length, &destination);
+  if (length != (size_t)0U) {
+    memcpy(destination, buffer, length);
+  }
+  line->eof = eof;
+  free(buffer);
+  *out = line;
+  return 0;
 }
 
 int32_t native_host_process_run_capture_v0(

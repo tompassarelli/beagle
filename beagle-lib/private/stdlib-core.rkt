@@ -99,6 +99,11 @@
     (list (p 'Int))
     #f
     (p 'host.clock/FormatIso8601Result))
+   'host.time/sleep-milliseconds
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'Int))
    ;; Native process execution takes an already-tokenized argv vector. The
    ;; result encodes exit 0..255, signal 256+signal, or spawn/wait -errno.
    'host.process/run-inherit
@@ -112,7 +117,31 @@
           (p 'String)
           (p 'Int))
     #f
-    (p 'host.process/CaptureResult))))
+    (p 'host.process/CaptureResult))
+   ;; spawn-stdout transfers one child and one stdout descriptor to the
+   ;; caller. wait consumes the child relationship; close consumes the
+   ;; descriptor. read-line-bounded borrows the descriptor and bounds one
+   ;; decoded UTF-8 line in bytes.
+   'host.process/spawn-stdout
+   (type-fn
+    (list (type-app 'Vec (list (p 'String))))
+    #f
+    (p 'host.process/SpawnStdoutResult))
+   'host.process/read-line-bounded
+   (type-fn
+    (list (p 'Int) (p 'Int))
+    #f
+    (p 'host.process/ReadLineResult))
+   'host.process/wait
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'Int))
+   'host.process/close
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'Int))))
 
 (define CORE-RESULT-UNIONS
   (list
@@ -170,6 +199,22 @@
                  (cons ':stdout (p 'String))
                  (cons ':stderr (p 'String))))
      (list 'host.process/CaptureError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.process/SpawnStdoutResult
+    (list
+     (list 'host.process/SpawnStdoutOk
+           (list (cons ':pid (p 'Int))
+                 (cons ':stdout-fd (p 'Int))))
+     (list 'host.process/SpawnStdoutError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.process/ReadLineResult
+    (list
+     (list 'host.process/ReadLineOk
+           (list (cons ':line (p 'String))
+                 (cons ':eof (p 'Bool))))
+     (list 'host.process/ReadLineError
            (list (cons ':errno (p 'Int))))))))
 
 (provide STDLIB-CORE CORE-RESULT-UNIONS)

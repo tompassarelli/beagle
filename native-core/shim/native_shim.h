@@ -19,6 +19,7 @@
 #define NATIVE_HOST_SOCKET_PEER_CLOSED INT32_C(-1)
 #define NATIVE_HOST_SOCKET_INHERITED_FD INT64_C(3)
 #define NATIVE_HOST_SOCKET_MAX_IO INT64_C(1048576)
+#define NATIVE_HOST_PROCESS_MAX_LINE_BYTES INT64_C(16777216)
 
 typedef struct native_arena_chunk native_arena_chunk;
 typedef struct native_buffer_registry native_buffer_registry;
@@ -88,6 +89,16 @@ typedef struct native_host_process_capture_v0 {
   uint64_t stdout_text;
   uint64_t stderr_text;
 } native_host_process_capture_v0;
+
+typedef struct native_host_process_spawned_stdout_v0 {
+  int64_t pid;
+  int64_t stdout_fd;
+} native_host_process_spawned_stdout_v0;
+
+typedef struct native_host_process_line_v0 {
+  uint64_t line_text;
+  bool eof;
+} native_host_process_line_v0;
 
 /* The native representation of a (Vec T) value is a POINTER to this header,
    never the header by value: a vector-valued record field is therefore one
@@ -629,6 +640,10 @@ int64_t native_host_clock_wall_nanoseconds_v0(
 int32_t native_host_clock_format_iso8601_v0(
     native_arena *arena, const native_capability *capability,
     int64_t epoch_nanoseconds, uint64_t *out);
+/* Sleeps for a nonnegative, time_t-representable interval, resuming the
+   remaining interval after EINTR. Result is 0 or -errno. WASI is ENOTSUP. */
+int64_t native_host_time_sleep_milliseconds_v0(
+    const native_capability *capability, int64_t milliseconds);
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text);
 void native_host_stdout_write_v0(
@@ -664,6 +679,26 @@ int32_t native_host_process_run_capture_v0(
     native_arena *arena, const native_capability *capability,
     const native_vec *argv, uint64_t stdin_text, int64_t max_output_bytes,
     void **out);
+/* Spawns tokenized argv with inherited stdin, stderr, and environment. The
+   caller owns both returned values: wait consumes pid's child relationship,
+   and close consumes stdout_fd. Host failures are positive errno/out NULL. */
+int32_t native_host_process_spawn_stdout_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *argv, void **out);
+/* Borrows stdout_fd and reads through one LF (stripping LF and one preceding
+   CR). eof is 1 only when no bytes remain. The content bound is in bytes;
+   overflow drains that line and returns EFBIG. */
+int32_t native_host_process_read_line_bounded_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t stdout_fd, int64_t max_line_bytes, void **out);
+/* wait consumes the caller-owned child relationship. Result is exit 0..255,
+   signal 256+signal, or -errno; EINTR is retried. */
+int64_t native_host_process_wait_v0(
+    const native_capability *capability, int64_t pid);
+/* close consumes the caller-owned descriptor. It deliberately does not retry
+   EINTR because the descriptor number may already have been released/reused. */
+int64_t native_host_process_close_v0(
+    const native_capability *capability, int64_t fd);
 /* Listener ownership is inherited at FD 3; this ABI never creates a socket. */
 int32_t native_host_socket_inherited_listener_v0(
     const native_capability *capability, int64_t fd, int64_t *out);
