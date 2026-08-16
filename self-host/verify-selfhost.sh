@@ -444,6 +444,7 @@ purity_expected_names() { # purity_expected_names <fixture stem>
       printf '%s\n' borrowed global-mutation consumed-in-one-branch shadowed-allocator shadowed-owner
       ;;
     transient-propagation-reject) printf '%s\n' caller wrapper borrowed-mutator ;;
+    transient-recur-reject) printf '%s\n' borrowed-loop escaping-loop aliased-loop ;;
     transient-result-escape-reject) printf '%s\n' expose-result ;;
     *-accept) : ;;
     *) return 1 ;;

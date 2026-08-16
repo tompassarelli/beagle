@@ -1815,6 +1815,22 @@
 (defn ^Boolean purity-direct-transient-call? [value state]
   (and (= (get value "node") "call") (= (call-fn-name value) "transient") (not (contains? (get state "scope") "transient")) (not (contains? (get state "globals") "transient"))))
 
+(defn ^Boolean purity-direct-primitive-call? [value ^String name state]
+  (and (= (get value "node") "call") (= (call-fn-name value) name) (not (contains? (get state "scope") name)) (not (contains? (get state "globals") name))))
+
+(def FRESH-TRANSIENT-ROOT {"fresh-transient-root" true})
+
+(defn purity-conj-pipeline-root [value state]
+  (if (and (purity-direct-primitive-call? value "conj!" state) (> (count (get value "args")) 0)) (let [receiver (first (get value "args"))]
+  (cond
+  (purity-direct-transient-call? receiver state) FRESH-TRANSIENT-ROOT
+  (= (get receiver "node") "ref") (get receiver "name")
+  :else (purity-conj-pipeline-root receiver state))) nil))
+
+(defn ^Boolean purity-binding-acquires-owner? [target value state]
+  (and (string? target) (or (purity-direct-transient-call? value state) (let [root (purity-conj-pipeline-root value state)]
+  (or (= root FRESH-TRANSIENT-ROOT) (= root target))))))
+
 (defn purity-bind-target [state target origins node ^Boolean acquire]
   (let [names (destructure-bound-names target)
    simple (and (string? target) (= (count names) 1))
@@ -1972,10 +1988,47 @@
   (if (and (> (count origins) 0) (< (get binding "lambda-depth") (get state "lambda-depth"))) (purity-result (purity-escape-origins state origins value) {}) (purity-result state origins)))))
   (= node "call") (purity-analyze-call value state)
   (= node "threading") (purity-analyze (get value "desugared") state)
-  (or (= node "let") (= node "loop")) (let [outer-scope (get state "scope")
+  (= node "let") (let [outer-scope (get state "scope")
    bound (purity-analyze-bindings (get value "bindings") state true)
    result (purity-analyze-sequence (get value "body") bound)]
   (purity-result (purity-restore-scope (get result "state") outer-scope) (get result "origins")))
+  (= node "loop") (let [outer-scope (get state "scope")
+   outer-targets (get state "recur-targets")
+   bindings (get value "bindings")
+   bound (purity-analyze-bindings bindings state true)
+   targets (mapv (fn [binding] (get binding "name")) bindings)
+   nested (assoc bound "recur-targets" targets)
+   result (purity-analyze-sequence (get value "body") nested)
+   restored-scope (purity-restore-scope (get result "state") outer-scope)
+   restored-targets (assoc restored-scope "recur-targets" outer-targets)]
+  (purity-result restored-targets (get result "origins")))
+  (= node "recur") (let [targets (get state "recur-targets")]
+  (if (nil? targets) (purity-analyze-unknown value state) (let [analyzed (loop [remaining (get value "args")
+   next state
+   results []]
+  (if (= 0 (count remaining)) {"state" next "results" results} (let [arg (first remaining)
+   result (purity-analyze arg next)]
+  (recur (rest remaining) (get result "state") (conj results {"arg" arg "origins" (get result "origins")})))))
+   after-args (get analyzed "state")
+   transferred (loop [remaining-targets targets
+   remaining-results (get analyzed "results")
+   next after-args
+   seen {}]
+  (if (or (= 0 (count remaining-targets)) (= 0 (count remaining-results))) {"state" next "seen" seen} (let [target (first remaining-targets)
+   result (first remaining-results)
+   arg (get result "arg")
+   origins (get result "origins")
+   binding (if (string? target) (get (get state "scope") target) nil)
+   prior (if (nil? binding) {} (get binding "origins"))
+   prior-still-live (reduce (fn [live origin] (if (= (purity-owner-status next origin) "dead") live (assoc live origin true))) {} (keys prior))
+   disjoint (every? (fn [origin] (not (contains? seen origin))) (keys origins))
+   exact-target (and (= (get arg "node") "ref") (= (get arg "name") target))
+   safe-transfer (and (not (nil? binding)) (> (count prior) 0) (or exact-target (purity-binding-acquires-owner? target arg state)) disjoint)
+   without-abandoned (if (or (= 0 (count prior-still-live)) (= prior origins)) next (purity-escape-origins next prior-still-live value))
+   checked (if (or (= 0 (count origins)) safe-transfer) without-abandoned (purity-escape-origins without-abandoned origins value))
+   dead (purity-set-origin-status checked origins "dead")]
+  (recur (rest remaining-targets) (rest remaining-results) dead (origins-union seen origins)))))]
+  (purity-result (get transferred "state") {}))))
   (= node "fn") (let [lambda-depth (get state "lambda-depth")
    nested (assoc state "lambda-depth" (+ lambda-depth 1))
    bound (purity-bind-params nested (get value "params") (opt-field (get value "rest")))
@@ -2280,6 +2333,12 @@
 (defn make-let-node [bindings body]
   {"node" "let" "bindings" bindings "body" body})
 
+(defn make-loop-node [bindings body]
+  {"node" "loop" "bindings" bindings "body" body})
+
+(defn make-recur-node [args]
+  {"node" "recur" "args" args})
+
 (defn make-let-binding [name ann value]
   {"name" name "ann" ann "value" value})
 
@@ -2368,6 +2427,10 @@
   (expect! "purity: multi-arity clauses retain repeated witnesses in order" (let [definition {"name" "write-twice" "clauses" [{"params" [] "rest" nil "body" [(make-call "reset!" [])]} {"params" [] "rest" nil "body" [(make-call "reset!" [])]}]}]
   (= ["reset!" "reset!"] (definition-effect-markers definition {} {}))))
   (expect! "purity: an owned transient is externally pure" (= 0 (count (effective-markers [(make-let-node [(make-let-binding "work" nil (make-call "transient" [(make-vec-node [])]))] [(make-call "conj!" [(make-ref "work") (make-lit "number" 1)]) (make-call "persistent!" [(make-ref "work")])])] {}))))
+  (expect! "purity: recur transfers owned transients to their loop slots" (= 0 (count (effective-markers [(make-loop-node [(make-let-binding "index" nil (make-lit "number" 0)) (make-let-binding "left" nil (make-call "transient" [(make-ref "xs")])) (make-let-binding "right" nil (make-call "transient" [(make-ref "ys")]))] [(make-if-node (make-call "=" [(make-ref "index") (make-lit "number" 3)]) (make-vec-node [(make-call "persistent!" [(make-ref "left")]) (make-call "persistent!" [(make-ref "right")])]) (make-recur-node [(make-call "+" [(make-ref "index") (make-lit "number" 1)]) (make-call "conj!" [(make-ref "left") (make-ref "index")]) (make-call "conj!" [(make-ref "right") (make-ref "index")])]))])] {}))))
+  (expect! "purity: recur cannot acquire a borrowed transient" (> (count (effective-markers [(make-loop-node [(make-let-binding "index" nil (make-lit "number" 0)) (make-let-binding "owner" nil (make-ref "work"))] [(make-recur-node [(make-call "+" [(make-ref "index") (make-lit "number" 1)]) (make-call "conj!" [(make-ref "owner") (make-ref "index")])])])] {})) 0))
+  (expect! "purity: recur does not hide an escaping loop owner" (boolean (some (fn [marker] (= marker "transient-escape")) (effective-markers [(make-loop-node [(make-let-binding "index" nil (make-lit "number" 0)) (make-let-binding "owner" nil (make-call "transient" [(make-ref "xs")]))] [(make-if-node (make-call "=" [(make-ref "index") (make-lit "number" 1)]) (make-ref "owner") (make-recur-node [(make-call "+" [(make-ref "index") (make-lit "number" 1)]) (make-call "conj!" [(make-ref "owner") (make-ref "index")])]))])] {}))))
+  (expect! "purity: recur rejects an aliased owner transfer" (boolean (some (fn [marker] (= marker "transient-escape")) (effective-markers [(make-loop-node [(make-let-binding "index" nil (make-lit "number" 0)) (make-let-binding "left" nil (make-call "transient" [(make-ref "xs")])) (make-let-binding "right" nil (make-call "transient" [(make-ref "ys")]))] [(make-recur-node [(make-call "+" [(make-ref "index") (make-lit "number" 1)]) (make-call "conj!" [(make-ref "left") (make-ref "index")]) (make-ref "left")])])] {}))))
   (expect! "purity: mutation of a received transient still leaks" (> (count (effective-markers [(make-call "conj!" [(make-ref "work") (make-lit "number" 1)])] {})) 0))
   (expect! "purity: an owned transient cannot suppress a borrowed mutation" (let [body [(make-let-node [(make-let-binding "owned" nil (make-call "transient" [(make-ref "xs")]))] [(make-call "conj!" [(make-ref "borrowed") (make-lit "number" 1)]) (make-call "conj!" [(make-ref "owned") (make-lit "number" 2)]) (make-call "persistent!" [(make-ref "owned")])])]
    markers (effective-markers body {})]
