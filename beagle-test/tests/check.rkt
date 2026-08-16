@@ -1312,6 +1312,21 @@
   '(defn read-depth [(box Bounds)] Any
      (js/get box .depth)))
 
+(check-js-ok "js/get infers a common field across a nominal record union"
+  '(defrecord LeftBound [(width Float)])
+  '(defrecord RightBound [(width Float)])
+  '(defunion EitherBound LeftBound RightBound)
+  '(defn union-width [(box EitherBound)] Float
+     (+ (js/get box .width) 1.0)))
+
+(check-js-err/rx "js/get rejects unknown member on a nominal record union"
+  #rx"js/get: \\.depth is not a member of EitherBound"
+  '(defrecord LeftBound [(width Float)])
+  '(defrecord RightBound [(width Float)])
+  '(defunion EitherBound LeftBound RightBound)
+  '(defn union-depth [(box EitherBound)] Any
+     (js/get box .depth)))
+
 (check-js-err/rx "js/call rejects a non-callable registered field"
   #rx"js/call: \\.width on Bounds has non-callable type Float"
   '(defrecord Bounds [(width Float)])
@@ -1355,6 +1370,10 @@
   #rx"expected .*Number.*got String"
   '(defn wrong-math [] Float
      (js/call Math .sqrt "wrong")))
+
+(check-js-ok "a lexical Math binding shadows the JS global contract"
+  '(defn shadowed-math [(Math Any)] Any
+     (js/call Math .sqrt "dynamic")))
 
 (check-js-ok "js atom family preserves its invariant element type"
   '(defn update-cell! [] Int

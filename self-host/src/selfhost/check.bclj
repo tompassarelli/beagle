@@ -105,7 +105,8 @@
   {"atom" JS-ATOM-POLY
    "deref" JS-DEREF-POLY
    "reset!" JS-RESET-POLY
-   "swap!" JS-SWAP-POLY})
+   "swap!" JS-SWAP-POLY
+   "Math" (make-prim "JsMath")})
 
 ;; Registry state must exist before compatibility checks consult enum metadata.
 ;; The checker resets the complete map for each program.
@@ -2334,9 +2335,9 @@
   (or (not (nil? (record-field-map-for-type receiver-type)))
     (not (nil? (nominal-union-members receiver-type)))))
 
-(defn js-builtin-receiver-name [(receiver Any) (receiver-type Any)] Any
+(defn js-builtin-receiver-name [(_receiver Any) (receiver-type Any)] Any
   (cond
-    (and (= (get receiver "node") "ref") (= (get receiver "name") "Math"))
+    (and (prim? receiver-type) (= (get receiver-type "name") "JsMath"))
     "Math"
 
     (and (prim? receiver-type) (= (get receiver-type "name") "String"))
@@ -5214,7 +5215,16 @@
                   (make-defn-node "round-value"
                     [(make-param "value" (make-prim "Float"))]
                     (make-prim "Int") [math-round])]
-                 [{"name" "Math" "type" ANY}])]
+                 [{"name" "Math" "type" (make-prim "JsMath")}])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "js-member: lexical Math binding shadows the global contract"
+    (let [body (make-js-call-node
+                 (make-ref "Math") (make-js-selector "sqrt")
+                 [(make-lit "string" "dynamic")])
+          prog (make-prog
+                 [(make-defn-node "shadowed-math"
+                    [(make-param "Math" ANY)] ANY [body])])]
       (= (count (check-program! prog)) 0)))
 
   (expect! "js-member: unknown member on a closed receiver rejects"

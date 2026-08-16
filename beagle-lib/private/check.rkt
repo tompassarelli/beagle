@@ -5922,6 +5922,13 @@
   (or (jst-record-member-contract receiver-type selector)
       (jst-native-member-contract receiver-type selector)))
 
+(define (jst-closed-record-receiver? receiver-type)
+  (or (record-field-map-for-type receiver-type)
+      (and (type-prim? receiver-type)
+           (hash-ref UNION-MEMBERS (type-prim-name receiver-type) #f))
+      (and (type-app? receiver-type)
+           (hash-ref UNION-MEMBERS (type-app-ctor receiver-type) #f))))
+
 (define (raise-unknown-jst-record-member form-name receiver-type selector node)
   (raise-diag
    'type-mismatch
@@ -5944,7 +5951,7 @@
      (define selector (jst-selector-name key))
      (cond
        [(jst-static-member-contract receiver-type selector) => values]
-       [(record-field-map-for-type receiver-type)
+       [(jst-closed-record-receiver? receiver-type)
         (raise-unknown-jst-record-member
          "js/get" receiver-type selector e)]
        [else ANY])]))
@@ -5985,7 +5992,7 @@
                     'receiver-type (type->string receiver-type)
                     'actual (type->string contract))
             #:src (src-for e))])]
-       [(record-field-map-for-type receiver-type)
+       [(jst-closed-record-receiver? receiver-type)
         (raise-unknown-jst-record-member
          "js/call" receiver-type selector e)]
        [else
