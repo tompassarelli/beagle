@@ -669,6 +669,12 @@
   (check-true (def-form? f))
   (check-equal? (def-form-value f) 42))
 
+(test-case "defmacro: zero-argument raw adapter remains explicitly lossy"
+  (define reg (make-macro-registry))
+  (register-macro! reg 'answer 'defmacro '()
+                   '(quasiquote (+ 40 2)))
+  (check-equal? (expand-macro reg 'answer '()) '(+ 40 2)))
+
 ;; --- additional sanity: defmacro duplicate registration errors ------------
 
 (test-case "defmacro: duplicate definition errors"

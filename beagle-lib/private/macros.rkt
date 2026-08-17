@@ -164,7 +164,11 @@
 ;; syntax arguments; the raw-datum branch is an explicit adapter retained for
 ;; compiler tests and query tools.
 (define (expand-macro reg name args [ctx #f])
-  (define syntax-input? (andmap beagle-syntax? args))
+  (define syntax-input?
+    (and (andmap beagle-syntax? args)
+         (or (pair? args)
+             (and ctx
+                  (beagle-syntax? (expansion-ctx-call-syntax ctx))))))
   (define syntax-args
     (if syntax-input?
         args
