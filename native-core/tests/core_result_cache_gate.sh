@@ -14,7 +14,18 @@ git -C "$repo" diff --cached --quiet --ignore-submodules -- || {
 }
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/core-result-cache.XXXXXX")"
-cleanup() { rm -rf "${work:?}"; }
+cleanup() {
+    local rc=$? log
+    if [[ $rc -ne 0 ]]; then
+        for log in "$work"/*.stderr; do
+            [[ -f "$log" ]] || continue
+            echo "core_result_cache_gate.sh: failure log $log" >&2
+            sed -n '1,240p' "$log" >&2
+        done
+    fi
+    rm -rf "${work:?}"
+    return "$rc"
+}
 trap cleanup EXIT
 
 cache="$work/cache"
