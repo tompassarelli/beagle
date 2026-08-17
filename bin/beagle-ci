@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # beagle-ci: gate script — runs everything that must pass before a commit ships.
 #
+# This is not a fast check, and the number that said it was (~25s for layer 1)
+# was wrong by two orders of magnitude — wrong in the direction that makes
+# someone start it expecting to wait, then assume it hung. Layer 1 is TENS OF
+# MINUTES cold (order 10-30, depending on how much of the native path has to
+# build) and seconds warm, once the gate-result cache can replay every eligible
+# file. Nothing here is timed against a fixed budget; the honest expectation is
+# "cold is a coffee, warm is a breath", and a cold run that seems stuck is
+# usually just cold.
+#
 # Layers (in order, fastest first):
-#   1. raco test beagle-test/tests/           (~25s)
+#   1. raco test beagle-test/tests/           (tens of minutes cold, seconds
+#       warm — the gate-result cache decides which, per file)
 #   2. bin/test/gate-cache/run.sh             (gate-result cache under-key
 #       regression tests — the cache must re-run when any traced input
-#       changes; ~4s, self-skipping under an outer trace)
+#       changes; seconds, self-skipping under an outer trace)
 #   3. lint pass over fixtures                (catches stdlib drift)
 #   4. (optional) firn-build + firn-validate against ~/code/nixos-config
 #       — enabled with BEAGLE_VALIDATE_NIXOS_CONFIG=1
@@ -13,7 +23,8 @@
 #       (gjoa/wake/north/fram/nixos-config compiled with candidate ~/code/beagle
 #       into external scratch; byte-clean by construction) — enabled with
 #       BEAGLE_DOWNSTREAM_GATE=1. Fast local `bin/beagle-ci` runs with this OFF
-#       by default (the five-consumer compile is not a ~25s check); the
+#       by default (the five-consumer compile is a further cold build on top of
+#       everything above, and never replays from the gate-result cache); the
 #       release-verification path must set BEAGLE_DOWNSTREAM_GATE=1 so this
 #       layer is load-bearing there. BEAGLE_DOWNSTREAM_REGISTRY/_CONSUMER/
 #       _ALLOW_DIRTY forward to bin/beagle-downstream for probes/fixtures.
