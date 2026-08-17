@@ -266,7 +266,7 @@
   (let [entries (indexed-defaults p)]
   (loop [index 0]
   (if (>= index (count entries)) nil (let [indexed (nth entries index)]
-  (if (= key (get (get indexed "entry") "key")) (get indexed "index") (recur (+ index 1))))))))
+  (if (= key (get (get indexed "entry") "key")) key (recur (+ index 1))))))))
 
 (defn ^String emit-projected-binding [^String name ^String value ^String rest-str]
   (let [emitted (mangle-name name)]
@@ -300,10 +300,10 @@
    raw (if (and (string? target) (absent? constraint)) (mangle-name target) (raw-binding-name index))
    bound-rest (cond
   (string? target) (if (absent? constraint) rest-str (emit-projected-binding target raw rest-str))
-  (= (get target "type") "map-destructure") (emit-map-projections index p raw rest-str)
+  (= (get target "type") "map-destructure") (if (absent? constraint) rest-str (emit-map-projections index p raw rest-str))
   :else (throw (ex-info "sequential destructuring in params is not supported by the nix backend — nix functions destructure attrsets only; bind positionally" {})))
    guarded-rest (if (absent? constraint) bound-rest (str "let " (constraint-name index) " = " (constraint-thunk-name index) " null; in if " (constraint-name index) " " raw " then (" bound-rest ") else " (binding-constraint-failure p)))]
-  (str raw ": builtins.deepSeq " raw " (" guarded-rest ")"))))
+  (if (and (= (get target "type") "map-destructure") (absent? constraint)) (str (nix-param-pattern* p depth index) " " rest-str) (str raw ": builtins.deepSeq " raw " (" guarded-rest ")")))))
 
 (defn ^String wrap-constraint-thunks [indexed ^String body depth]
   (loop [i (- (count indexed) 1)
@@ -324,7 +324,7 @@
    inner result]
   (if (< j 0) inner (let [indexed-default (nth defaults j)
    default-entry (get indexed-default "entry")]
-  (recur (- j 1) (str "let " (default-thunk-name index (get indexed-default "index")) " = _: " (emit-expr* (get default-entry "value") depth) "; in " inner)))))]
+  (recur (- j 1) (str "let " (default-thunk-name index (get default-entry "key")) " = _: " (emit-expr* (get default-entry "value") depth) "; in " inner)))))]
   (recur (- i 1) with-defaults)))))
 
 (defn index-params [params]
@@ -1172,10 +1172,10 @@
   (expect! "nominal record map params may require fields without defaults" (let [param {"type" "param" "name" {"type" "map-destructure" "keys" ["x" "y"] "or" [] "as" false} "ann" {"kind" "prim" "name" "Point"}}
    prog {"forms" [{"node" "record" "name" "Point" "fields" []} {"node" "defn" "name" "sum" "params" [param] "rest" false "body" [{"node" "literal" "kind" "number" "value" 0}]}] "requires" []}]
   (let [emitted (emit-program! prog)]
-  (and (str/includes? emitted "builtins.getAttr \"x\" bgl____binding__0") (str/includes? emitted "builtins.getAttr \"y\" bgl____binding__0")))))
+  (str/includes? emitted "{ x, y, ... }:"))))
   (expect! "imported nominal record registry permits required fields" (let [param {"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [] "as" false} "ann" {"kind" "prim" "name" "Point"}}
    prog {"forms" [{"node" "defn" "name" "x-of" "params" [param] "rest" false "body" [{"node" "ref" "name" "x"}]}] "requires" [] "imported-record-fields" {"Point" {":x" {"kind" "prim" "name" "Int"}}}}]
-  (str/includes? (emit-program! prog) "builtins.getAttr \"x\" bgl____binding__0")))
+  (str/includes? (emit-program! prog) "{ x, ... }:")))
   (expect! "typed map param rejects missing-key semantic drift" (try
   (nix-param-pattern {"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [] "as" false} "ann" {"kind" "app" "name" "Map" "args" []}} 0)
   false
@@ -1201,7 +1201,7 @@
   (expect! "constrained parameter captures predicate before raw binding" (let [emitted (emit-param-chain [param] "x" 0)]
   (and (str/starts-with? emitted "let bgl____constraint__thunk__0 = _: positive_p; in ") (str/includes? emitted "bgl____constraint__0 bgl____binding__0 then (((x:"))))
   (expect! "constrained rest parameter uses the same binding chain" (str/includes? (emit-param-chain [(assoc param "name" "more")] "more" 0) "bgl____constraint__0 bgl____binding__0 then (((more:"))))
-  (expect! "map default thunk preserves prebinding scope" (= (emit-param-chain [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [{"key" "x" "value" {"node" "ref" "name" "x"}}] "as" false} "ann" {"kind" "app" "name" "Map" "args" []} "constraint" nil}] "x" 0) (str "let bgl____default__thunk__0__0 = _: x; in " "bgl____binding__0: builtins.deepSeq bgl____binding__0 " "(((x: builtins.deepSeq x (x)) " "(if builtins.hasAttr \"x\" bgl____binding__0 " "then builtins.getAttr \"x\" bgl____binding__0 " "else bgl____default__thunk__0__0 null)))")))
+  (expect! "map default thunk preserves prebinding scope" (= (emit-param-chain [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [{"key" "x" "value" {"node" "ref" "name" "x"}}] "as" false} "ann" {"kind" "app" "name" "Map" "args" []} "constraint" nil}] "x" 0) (str "let bgl____default__thunk__0__x = _: x; in " "{ x ? bgl____default__thunk__0__x null, ... }: x")))
   (do
   (reset! nix-record-types-ref {"Point" true})
   (expect! "destructured constraint validates the raw aggregate" (= (emit-param-chain [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [] "as" false} "ann" {"kind" "prim" "name" "Point"} "constraint" {"node" "ref" "name" "valid-point?"}}] "x" 0) (str "let bgl____constraint__thunk__0 = _: valid-point_p; in " "bgl____binding__0: builtins.deepSeq bgl____binding__0 " "(let bgl____constraint__0 = bgl____constraint__thunk__0 null; " "in if bgl____constraint__0 bgl____binding__0 then " "(((x: builtins.deepSeq x (x)) " "(builtins.getAttr \"x\" bgl____binding__0))) else builtins.throw " "\"Binding constraint failed: {:keys [x]}\")")))

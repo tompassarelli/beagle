@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns record-consumer)
+
 (require record-owner :as t)
 
 (defrecord Item [(value String)])

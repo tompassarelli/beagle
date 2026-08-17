@@ -1,5 +1,6 @@
 #lang beagle/clj
 
+(ns record-owner)
 
 (defrecord Item [(value Int)])
 (defalias Term (Dyn String Item))

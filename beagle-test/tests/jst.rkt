@@ -205,6 +205,8 @@
               (jst-parse
                (list '(ns test.app)
 
+                     '(define-target clj)
+
                      '(declare-extern object Any)
                      '(declare-extern key Any)
                      '(declare-extern Constructor Any)

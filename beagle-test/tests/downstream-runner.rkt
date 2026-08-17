@@ -163,12 +163,11 @@
                 (lambda () (run-consumers consumers scratch #:jobs 4 #:timeout 120)))))
   (delete-directory/files base))
 
-;; --- STAGING + ORDERING: north resolves store via external scratch link -------
-;; Exercises stage-consumer! (the north-specific store injection) and the
-;; store-before-north scheduler edge at jobs=1 (must not deadlock). north's
-;; module `(require store.thing)` type-checks ONLY because store's sources are
-;; linked as a sibling in scratch — never into north's tree.
-(test-case "staging: north compiles against store on the scratch resolve path"
+;; --- ROOTS + ORDERING: north resolves store from exact read-only roots --------
+;; Exercises the north-specific module roots and the store-before-north
+;; scheduler edge at jobs=1 (must not deadlock). Nothing is staged into or
+;; written under either consumer tree.
+(test-case "module roots: north compiles against store's exact source root"
   (define base (make-temporary-file "c2-stage-~a" 'directory))
   (define store-repo (build-path base "store"))
   (define north-repo (build-path base "north"))
@@ -196,7 +195,7 @@
                                     #:jobs 1 #:timeout 180))
      (check-equal? (run-result-status (result-named results "store")) "pass")
      (check-equal? (run-result-status (result-named results "north")) "pass"
-                   "north's (require store.thing) resolved via the scratch link")
+                   "north's (require store.thing) resolved via the Store root")
      (check-true (run-result-byteclean? (result-named results "north")))
      (check-true (run-result-byteclean? (result-named results "store")))))
   (delete-directory/files base))

@@ -801,16 +801,16 @@
                    (not (string? (car (call-form-args value)))))
           (store-regex-contract! value return-contract)))))
   (define aliases
-    (for/fold ([names (seteq 'clojure.string/split
-                            'clojure.string/replace)])
+    (for/fold ([names (set (qualified-ref 'clojure.string 'split #f)
+                             (qualified-ref 'clojure.string 'replace #f))])
               ([r (in-list (program-requires prog))])
       (if (eq? (require-entry-ns r) 'clojure.string)
           (let ([prefix (require-entry-alias r)])
             (if prefix
                 (set-add
                  (set-add names
-                          (string->symbol (format "~a/split" prefix)))
-                 (string->symbol (format "~a/replace" prefix)))
+                          (qualified-ref prefix 'split #f))
+                 (qualified-ref prefix 'replace #f))
                 names))
           names)))
   (values bindings aliases))
@@ -1811,10 +1811,18 @@
     (for ([(name binding) (in-hash (module-interface-bindings interface))]
           #:unless (eq? (interface-binding-kind binding) 'macro))
       (define binding-type (interface-binding-type binding))
+      (define prefix-type
+        (hash-ref (program-externs prog)
+                  (string->symbol (format "~a/~a" prefix name))
+                  binding-type))
+      (define namespace-type
+        (hash-ref (program-externs prog)
+                  (string->symbol (format "~a/~a" namespace name))
+                  binding-type))
       (reference-hash-set!
-       env (qualified-ref prefix name namespace) binding-type)
+       env (qualified-ref prefix name namespace) prefix-type)
       (reference-hash-set!
-       env (qualified-ref namespace name namespace) binding-type)))
+       env (qualified-ref namespace name namespace) namespace-type)))
   ;; Alias-qualified stdlib/extern access: (require babashka.fs :as fs)
   ;; makes fs/exists? resolve to the babashka.fs/exists? entry. Pre-populate
   ;; alias-prefixed bindings for every env key under the required namespace
@@ -3824,7 +3832,9 @@
 
 (define (infer-expr-with-expected e env expected)
   (if (and expected (jst-new? e))
-      (infer-jst-new e env expected)
+      (begin
+        (check-target-form e)
+        (infer-jst-new e env expected))
       (infer-expr e env)))
 
 (define (check-form form env)

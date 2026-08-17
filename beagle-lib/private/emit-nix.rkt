@@ -361,16 +361,11 @@
       [else #f]))
   (and name (set-member? (current-nix-record-types) name)))
 
-;; Emit curried lambdas through one raw aggregate per source parameter.
-;; Ordinary Nix parameters remain lazy; only an authored constraint forces its
-;; raw value. Predicate/default thunks are defined outside every authored
-;; binder (the checker's incoming callable scope) and invoked inside the
-;; corresponding parameter event.
-;;
-;; Map destructuring is deliberately not reconstructed as a Nix attrset formal:
-;; a formal cannot bind an authored key like `ready?` to the safe local name
-;; `ready_p`. Explicit getAttr/hasAttr projection keeps Map data spelling intact
-;; while nominal records continue to use their generated field spelling.
+;; Emit curried lambdas while keeping ordinary and unconstrained map parameters
+;; native and lazy. A constrained map alone needs a raw aggregate so its
+;; predicate runs before destructuring. Predicate/default thunks are defined
+;; outside every authored binder (the checker's incoming callable scope) and
+;; invoked inside the corresponding parameter event.
 (define (emit-param-chain params body depth)
   (define indexed
     (for/list ([p (in-list params)] [i (in-naturals)]) (cons i p)))
@@ -391,7 +386,7 @@
   (define (default-index-for p key)
     (for/first ([indexed-default (in-list (indexed-defaults p))]
                 #:when (eq? key (car (cdr indexed-default))))
-      (car indexed-default)))
+      key))
   (define (emit-projected-binding name value rest)
     (define emitted (mangle-name name))
     (format "((~a: ~a) (~a))" emitted rest value))
@@ -427,6 +422,8 @@
   (define (emit-one index p rest)
     (define target (param-binding-target p))
     (define constraint (checked-binding-constraint p))
+    (define native-map?
+      (and (map-destructure? target) (not constraint)))
     (define raw
       (if (and (symbol? target) (not constraint))
           (mangle-name target)
@@ -454,9 +451,17 @@
                   bound-rest
                   (binding-constraint-failure p))
           bound-rest))
-    (if constraint
-        (format "~a: builtins.deepSeq ~a (~a)" raw raw guarded-rest)
-        (format "~a: ~a" raw guarded-rest)))
+    (cond
+      [native-map?
+       (format "~a ~a"
+               (nix-param-pattern
+                p depth
+                (lambda (key _value)
+                  (format "~a null" (default-thunk-name index key))))
+               rest)]
+      [constraint
+       (format "~a: builtins.deepSeq ~a (~a)" raw raw guarded-rest)]
+      [else (format "~a: ~a" raw guarded-rest)]))
   (define (emit-params remaining)
     (cond
       [(null? remaining) body]
@@ -479,10 +484,9 @@
                ([entry (in-list (reverse indexed))]
                 [indexed-default
                  (in-list (reverse (indexed-defaults (cdr entry))))])
-      (define default-index (car indexed-default))
       (define default-entry (cdr indexed-default))
       (format "let ~a = _: ~a; in ~a"
-              (default-thunk-name (car entry) default-index)
+              (default-thunk-name (car entry) (car default-entry))
               (emit-expr (cdr default-entry) depth)
               result)))
   ;; Nix has no nullary lambda. Lower the source unit call boundary to one

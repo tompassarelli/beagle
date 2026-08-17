@@ -1,23 +1,53 @@
 #lang racket/base
 
 (require rackunit
+         racket/list
          racket/runtime-path
-         beagle/private/parse
-         beagle/private/check
-         beagle/private/ast-json)
+         racket/string
+         beagle/private/ast-json
+         beagle/private/module-overlay-check
+         beagle/private/parse)
 
 (define-runtime-path fixtures-dir "fixtures/imported-type-alias")
 
+(define fixture-dependencies
+  (hash "good.bclj" '("provider.bclj")
+        "any.bclj" '("provider.bclj")
+        "bad.bclj" '("provider.bclj")
+        "two-hop-claims.bclj" '("alias-owner.bclj" "two-hop-provider.bclj")
+        "two-hop-schema.bclj" '("alias-owner.bclj" "two-hop-provider.bclj")
+        "record-consumer.bclj" '("record-owner.bclj")))
+
+(define (fixture-namespace name)
+  (string->symbol (regexp-replace #rx"[.]bclj$" name "")))
+
+(define (checked-program name)
+  (define names (append (hash-ref fixture-dependencies name '()) (list name)))
+  (define result
+    (check-module-overlay
+     (for/list ([fixture (in-list names)])
+       (define src (build-path fixtures-dir fixture))
+       (stxs->module-source (read-beagle-syntax src) (path->string src)))
+     #:closed? #t
+     #:emit? #f))
+  (unless (overlay-check-result-ok? result)
+    (error 'imported-type-alias
+           "~a"
+           (string-join
+            (map overlay-diagnostic-message
+                 (overlay-check-result-diagnostics result))
+            "\n")))
+  (checked-overlay-module-program
+   (findf (lambda (module)
+            (eq? (checked-overlay-module-namespace module)
+                 (fixture-namespace name)))
+          (overlay-check-result-modules result))))
+
 (define (check-file name)
-  (define src (build-path fixtures-dir name))
-  (type-check! (parse-program (read-beagle-syntax src) #:source-path src)))
+  (checked-program name))
 
 (define (checked-json name)
-  (define src (build-path fixtures-dir name))
-  (define program
-    (parse-program (read-beagle-syntax src) #:source-path src))
-  (type-check! program)
-  (program->json program))
+  (program->json (checked-program name)))
 
 (test-case "the alias owner still type-checks"
   (check-not-exn (lambda () (check-file "provider.bclj"))))

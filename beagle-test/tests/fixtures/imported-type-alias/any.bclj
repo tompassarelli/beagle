@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns any)
+
 (require provider :as p)
 
 (def value Any "ready")

@@ -77,7 +77,6 @@
              (string->symbol (source-namespace (cdr module)))
              (path->string path)
              stxs
-             (map syntax->datum stxs)
              #f))
           #:capture-types? #t
           #:closed? #t)))
@@ -291,13 +290,13 @@ JS
        #<<BJS
 #lang beagle/js
 (ns oracle.types)
-(defrecord Person [(name String)])
-(defunion Choice (Chosen [(value Int)]))
-(defunion :throwable Failure (Bad [(message String)]))
-(defscalar Checked Int :where (>= 0))
-(def total Int 7)
-(defonce once Int 8)
-(defenum Color :red :blue)
+(js/export (defrecord Person [(name String)]))
+(js/export (defunion Choice (Chosen [(value Int)])))
+(js/export (defunion :throwable Failure (Bad [(message String)])))
+(js/export (defscalar Checked Int :where (>= 0)))
+(js/export (def total Int 7))
+(js/export (defonce once Int 8))
+(js/export (defenum Color :red :blue))
 BJS
        )
       (cons
@@ -305,7 +304,7 @@ BJS
        #<<BJS
 #lang beagle/js
 (ns oracle.scalar)
-(defscalar Amount Int)
+(js/export (defscalar Amount Int))
 BJS
        )
       (cons
@@ -313,8 +312,8 @@ BJS
        #<<BJS
 #lang beagle/js
 (ns oracle.functions)
-(defn ->Amount [(value Int)] Int (+ value 100))
-(defn amount-value [(value Int)] Int (+ value 200))
+(js/export (defn ->Amount [(value Int)] Int (+ value 100)))
+(js/export (defn amount-value [(value Int)] Int (+ value 200)))
 BJS
        )
       (cons

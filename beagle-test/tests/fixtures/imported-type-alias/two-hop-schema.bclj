@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns two-hop-schema)
+
 (require two-hop-provider :as c)
 (require alias-owner :as t)
 

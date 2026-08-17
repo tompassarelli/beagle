@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns two-hop-provider)
+
 (require alias-owner :as t)
 
 (defn accepts? [(value t/StoreValue)] Bool

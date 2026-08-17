@@ -9,7 +9,9 @@
          racket/file
          racket/runtime-path
          beagle/private/parse
+         beagle/private/check
          beagle/private/emit
+         beagle/private/types
          beagle/lang/reader-impl)
 
 (define-runtime-path fixtures-dir "fixtures")
@@ -27,7 +29,11 @@
         (let loop ([acc '()])
           (define d (beagle-read-syntax (path->string path) (current-input-port)))
           (if (eof-object? d) (reverse acc) (loop (cons d acc)))))))
-  (define prog (parse-program stxs))
+  (define prog (parse-program stxs #:source-path path))
+  (define type-table (make-hasheq))
+  (parameterize ([current-type-table type-table])
+    (type-check! prog))
+  (register-program-type-table! prog type-table)
   (string-trim (emit-program prog)))
 
 (define (js-fixture name)

@@ -11,9 +11,9 @@
 ;;
 ;; Invariants preserved (see the C2 thread bars):
 ;;   * external scratch, cleaned up on exit (dynamic-wind trap)
-;;   * store compiled BEFORE north, and store's sources linked onto north's
-;;     resolve path in scratch (never into north's tree) so `(require store.*)`
-;;     type-checks fully instead of degrading to Any
+;;   * store compiled BEFORE north, and north receives exact, read-only module
+;;     roots for its own source tree and Store's source tree so
+;;     `(require store.*)` type-checks fully instead of degrading to Any
 ;;   * gjoa purity: BEAGLE_PURITY=error check --profile 3 in addition to emit
 ;;   * firn: compiles the COMMITTED .bnix source of truth raw — no tag-resolve /
 ;;     flake-input splice / tag-strip (those mutate the tree; excluded honestly,
@@ -69,12 +69,7 @@
 (define (repo-dirty? repo)
   (not (string=? "" (string-trim (git* repo "status" "--porcelain")))))
 
-;; --- staging (cross-repo resolve deps, external, byte-clean) ------------------
-;; Only north needs it: its .bclj `(require store.*)` resolves by walking UP the
-;; source dir tree for `store/<mod>`. We mirror north's repo layout in scratch
-;; with symlinks and INJECT store's sources as a sibling of north's — so the
-;; walk finds store in scratch, never touching north's tree. Mirrors north's
-;; build.sh symlink, relocated outside the repo.
+;; --- source mapping (cross-repo resolve deps, read-only, byte-clean) ----------
 (define (store-repo-path consumers)
   ;; resolve store's repo the same way the registry does (env override + default)
   (define store (findf (lambda (c) (string=? (consumer-name c) "store")) consumers))
@@ -86,20 +81,6 @@
   (if (string-prefix? p "~/")
       (path->string (build-path (find-system-path 'home-dir) (substring p 2)))
       p))
-
-;; Returns a function relpath->staged-absolute-path, or #f for no staging.
-;; Creates the symlink mirror under scratch/stage/<name>/.
-(define (stage-consumer! name repo scratch consumers)
-  (cond
-    [(string=? name "north")
-     (define base (build-path scratch "stage" "north"))
-     (make-directory* (build-path base "src"))
-     (make-file-or-directory-link (build-path repo "src" "north")
-                                  (build-path base "src" "north"))
-     (make-file-or-directory-link (build-path (store-repo-path consumers) "src" "store")
-                                  (build-path base "src" "store"))
-     (lambda (rel) (build-path base rel))]
-    [else #f]))
 
 ;; --- compile subprocess ------------------------------------------------------
 ;; One racket process per consumer compiles the whole roster (emit, not just
@@ -168,9 +149,15 @@
   (define before (porcelain-sha repo))
   (define out-dir (build-path scratch "out" name))
   (make-directory* out-dir)
-  (define map-file (stage-consumer! name repo scratch consumers))
-  (define (abs-of rel) (if map-file (map-file rel) (build-path repo rel)))
+  (define (abs-of rel) (build-path repo rel))
   (define abs-files (for/list ([rel (in-list relpaths)]) (abs-of rel)))
+  (define module-root-args
+    (if (string=? name "north")
+        (list "--module-root" (format "north=~a" (build-path repo "src"))
+              "--module-root"
+              (format "store=~a"
+                      (build-path (store-repo-path consumers) "src")))
+        '()))
   (define t0 (current-inexact-milliseconds))
   ;; emit pass — grouped by per-file target override (registry file-targets),
   ;; each group a separate BUILD-EVAL invocation under its own `--target`.
@@ -187,7 +174,9 @@
         (values 0 "" #f)
         (for/fold ([status 0] [stderr ""] [timed-out? #f])
                   ([k (in-list group-keys)])
-          (define extra (if k (list "--target" (symbol->string k)) '()))
+          (define extra
+            (append module-root-args
+                    (if k (list "--target" (symbol->string k)) '())))
           (define-values (s e t?) (run-racket BUILD-EVAL (hash-ref groups k) extra out-dir '() timeout-secs))
           (values (if (equal? status 0) s status) (string-append stderr e) (or timed-out? t?)))))
   ;; gjoa: additionally its own stricter gate — purity check, profile 3

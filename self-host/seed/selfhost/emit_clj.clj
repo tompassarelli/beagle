@@ -95,7 +95,7 @@
   (if (nil? tag) "" (str "^" tag " "))))
 
 (defn param-binding-target [p]
-  (if (= (get p "type") "param") (get p "name") p))
+  (if (and (map? p) (contains? p "name")) (get p "name") p))
 
 (defn ^String emit-binding-form [target]
   (if (string? target) target (let [t (get target "type")]

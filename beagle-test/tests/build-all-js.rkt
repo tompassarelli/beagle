@@ -27,7 +27,7 @@
   (define entry (build-path src-dir "entry.bjs"))
   (write-source
    lib
-   "#lang beagle/js\n(ns smoke.lib)\n(defn triple [(n Int)] Int (* n 3))\n")
+   "#lang beagle/js\n(ns smoke.lib)\n(js/export (defn triple [(n Int)] Int (* n 3)))\n")
   (write-source
    entry
    (string-append
@@ -63,9 +63,7 @@
    (string-append
     "#lang beagle/js\n"
     "(ns net.protocol)\n"
-    (if single-file?
-        "(js/export (defn answer [] Int 42))\n"
-        "(defn answer [] Int 42)\n")))
+    "(js/export (defn answer [] Int 42))\n"))
   (write-source
    combat-log
    (string-append
@@ -88,6 +86,8 @@
                                     (path->string protocol))])
             (if (zero? protocol-code)
                 (system*/exit-code beagle "build" "--target" "js"
+                                   "--module-root"
+                                   (format "test=~a" src-dir)
                                    (path->string combat-log))
                 protocol-code))
           (system*/exit-code beagle "build"

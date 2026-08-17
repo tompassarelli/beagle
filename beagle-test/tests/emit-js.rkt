@@ -18,11 +18,12 @@
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
 
-(define (js-emit src-forms)
+(define (js-emit src-forms #:module-resolver [module-resolver #f])
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
-     #:source-path "test.bjs"))
+     #:source-path "test.bjs"
+     #:module-resolver module-resolver))
   ;; Mirror the real emit path (build-all/daemon pass #:capture-types? #t):
   ;; bind current-type-table during check so store-type! populates per-node
   ;; types, then register it on the program so emit reads it. Without this the
@@ -683,10 +684,36 @@
    ;; importer test.app lives at test/app.js, so a root-level sibling module
    ;; resolves importer-relative as ../inventory/core.js (not ./ — that only
    ;; works from the module root). See relative-js-module-path in emit-js.rkt.
-   (check-js-contains "dotted require -> importer-relative path"
-     "import * as core from '../inventory/core.js';"
-     '(require inventory.core)
-     '(defn f [] Any (core/init)))
+   (test-case "dotted require -> importer-relative path"
+     (define provider-stxs
+       (map (lambda (form) (datum->syntax #f form))
+            '((ns inventory.core)
+              (define-target js)
+              (js/export (defn init [] Int 42)))))
+     (define provider
+       (parse-program provider-stxs #:source-path "inventory/core.bjs"))
+     (type-check! provider)
+     (define provider-source
+       (module-source
+        'inventory.core
+        "inventory/core.bjs"
+        provider-stxs
+        (program->module-interface
+         provider
+         #:source-id "inventory/core.bjs")))
+     (define result
+       (js-emit
+        '((ns test.app)
+          (define-target js)
+          (require inventory.core)
+          (defn f [] Int (core/init)))
+        #:module-resolver
+        (lambda (namespace _importer-source)
+          (and (eq? namespace 'inventory.core) provider-source))))
+     (check-true
+      (string-contains? result
+                        "import * as core from '../inventory/core.js';")
+      result))
 
    ;; An alias-qualified class is a value imported from the namespace object.
    (check-js-contains "alias-qualified constructor -> new alias.Class()"
@@ -1086,7 +1113,7 @@
    ;; …but a let-binding that is NOT set!-mutated still emits `const` (no over-broadening).
    (check-js-contains "an unmutated let-binding stays `const`"
      "const total = "
-     '(defn g [(a Any) (b Any)] Any (let [total (+ a b)] total)))
+     '(defn g [(a Int) (b Int)] Int (let [total (+ a b)] total)))
 
    ;; --- map destructuring: :as whole-binding across all three let positions,
    ;;     plus :or defaults and single-evaluation. Regression net for the

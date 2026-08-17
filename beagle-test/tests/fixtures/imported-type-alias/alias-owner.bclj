@@ -1,4 +1,5 @@
 #lang beagle/clj
 
+(ns alias-owner)
 
 (defalias StoreValue (Dyn String Int Bool Keyword (Vec Int)))

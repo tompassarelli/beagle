@@ -1462,6 +1462,29 @@
        (module-interface-namespace interface)
        INTERFACE-SCHEMA-VERSION)))
 
+  (define (copy-type type)
+    (cond
+      [(type-prim? type) (type-prim (type-prim-name type))]
+      [(type-var? type) (type-var (type-var-name type))]
+      [(type-app? type)
+       (type-app (type-app-ctor type) (map copy-type (type-app-args type)))]
+      [(type-union? type)
+       (type-union (map copy-type (type-union-alts type)))]
+      [(type-fn? type)
+       (type-fn (map copy-type (type-fn-params type))
+                (and (type-fn-rest-type type)
+                     (copy-type (type-fn-rest-type type)))
+                (copy-type (type-fn-ret type)))]
+      [(type-poly? type)
+       (define bounds (type-poly-bounds type))
+       (type-poly
+        (type-poly-vars type)
+        (copy-type (type-poly-body type))
+        (and bounds
+             (for/hasheq ([(name bound) (in-hash bounds)])
+               (values name (copy-type bound)))))]
+      [else type]))
+
   (define (register-interface-types! interface prefix refer-syms)
     (validate-interface! interface)
     (define namespace (module-interface-namespace interface))
@@ -1484,7 +1507,9 @@
           (current-type-aliases
            (hash-set (current-type-aliases)
                      visible-name
-                     (interface-type-export-expansion export))))
+                     (register-type-alias-display!
+                      (copy-type (interface-type-export-expansion export))
+                      visible-name))))
         (when (eq? (interface-type-export-kind export) 'parametric-union)
           (current-user-parametric-arities
            (hash-set (current-user-parametric-arities)
@@ -1659,6 +1684,52 @@
 
   (define (import-interface! interface prefix refer-syms)
     (register-interface-types! interface prefix refer-syms)
+    (define alias-exports
+      (sort
+       (for/list ([(name export)
+                   (in-hash (module-interface-type-exports interface))]
+                  #:when
+                  (let ([expansion (interface-type-export-expansion export)])
+                    (and expansion (dynamic-type? expansion))))
+         (cons name export))
+       symbol<? #:key car))
+    (define (display-imported-aliases type)
+      (define alias
+        (for/first ([entry (in-list alias-exports)]
+                    #:when
+                    (equal? type
+                            (interface-type-export-expansion (cdr entry))))
+          entry))
+      (cond
+        [alias
+         (define visible-name
+           (car (interface-spellings
+                 interface prefix refer-syms (car alias))))
+         (register-type-alias-display! (copy-type type) visible-name)]
+        [(type-app? type)
+         (type-app (type-app-ctor type)
+                   (map display-imported-aliases (type-app-args type)))]
+        [(type-union? type)
+         (type-union (map display-imported-aliases
+                          (type-union-alts type)))]
+        [(type-fn? type)
+         (type-fn
+          (map display-imported-aliases (type-fn-params type))
+          (and (type-fn-rest-type type)
+               (display-imported-aliases (type-fn-rest-type type)))
+          (display-imported-aliases (type-fn-ret type)))]
+        [(type-poly? type)
+         (define bounds (type-poly-bounds type))
+         (define copied
+           (type-poly
+            (type-poly-vars type)
+            (display-imported-aliases (type-poly-body type))
+            (and bounds
+                 (for/hasheq ([(name bound) (in-hash bounds)])
+                   (values name (display-imported-aliases bound))))))
+         (set-type-poly-origin! copied (type-poly-origin type))
+         copied]
+        [else type]))
     (for ([name (in-list (or refer-syms '()))])
       (unless (or (module-interface-export? interface name)
                   (module-interface-type-export? interface name))
@@ -1668,7 +1739,8 @@
                name)))
     (for ([(name binding) (in-hash (module-interface-bindings interface))]
            #:unless (eq? (interface-binding-kind binding) 'macro))
-      (define binding-type (interface-binding-type binding))
+      (define binding-type
+        (display-imported-aliases (interface-binding-type binding)))
       (for ([spelling
              (in-list (interface-spellings
                        interface prefix refer-syms name))])
@@ -1761,7 +1833,8 @@
          (hash-set! imp-symbol-ns name prefix))]
       [(or (and (eq? target 'js)
                 (let ([module-name (symbol->string rn)])
-                  (not (string-contains? module-name "."))))
+                  (or (not (string-contains? module-name "."))
+                      (string-contains? module-name "/"))))
            (host-namespace? rn target)
            extern-authorized?)
        ;; Foreign package / host runtime refers are runtime bindings whose

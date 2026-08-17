@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns two-hop-claims)
+
 (require two-hop-provider :as c)
 
 (def value Any "ready")

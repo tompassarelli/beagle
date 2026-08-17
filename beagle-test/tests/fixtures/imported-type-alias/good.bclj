@@ -1,5 +1,7 @@
 #lang beagle/clj
 
+(ns good)
+
 (require provider :as p)
 
 (def accepted Bool (p/accepts? "ready"))

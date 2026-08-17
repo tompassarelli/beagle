@@ -329,7 +329,7 @@
   (define consumers (load-consumers))
   (check-equal? (length consumers) 5 "registry names exactly five consumers")
   (check-equal? (sort (map consumer-name consumers) string<?)
-                '("store" "gjoa" "nixos-config" "north" "wake"))
+                '("gjoa" "nixos-config" "north" "store" "wake"))
   (cond
     [(andmap (lambda (c) (directory-exists? (consumer-repo-path c))) consumers)
      (define run1 (derive-all))

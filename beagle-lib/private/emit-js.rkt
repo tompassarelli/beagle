@@ -3458,7 +3458,10 @@
                       (emit-scalar-predicate p))
                     " && ")])
       (format "~afunction ~a(v) {\n  if (!(~a)) throw new Error('scalar constraint violated');\n  return v;\n}"
-              (if (exported-binding? constructor-name) "export " "")
+              (if (or (current-js-export-marked?)
+                      (exported-binding? constructor-name))
+                  "export "
+                  "")
               ctor checks))))
 
 ;; --- quoted values ---------------------------------------------------------

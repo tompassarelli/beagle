@@ -1,5 +1,6 @@
 #lang beagle/clj
 
+(ns provider)
 
 (defalias StoreValue (Dyn String Int Bool Keyword (Vec Int)))
 

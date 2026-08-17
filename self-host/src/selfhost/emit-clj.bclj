@@ -168,7 +168,7 @@
 ;; --- params / binding names ----------------------------------------------------
 
 (defn param-binding-target [(p Any)] Any
-  (if (= (get p "type") "param") (get p "name") p))
+  (if (and (map? p) (contains? p "name")) (get p "name") p))
 
 (defn emit-binding-form [(target Any)] String
   (if (string? target)
