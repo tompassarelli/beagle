@@ -148,12 +148,16 @@ export async function runStage5ColdCompile({ sourceEdit } = {}) {
     const baselineOutput = path.join(scratch, 'baseline-build')
     const candidateOutput = path.join(scratch, 'candidate-build')
     const singletonOutput = path.join(scratch, 'singleton-build')
+    const baselineBehaviorOutput = path.join(scratch, 'baseline-behavior-build')
+    const candidateBehaviorOutput = path.join(scratch, 'candidate-behavior-build')
 
+    await build(baselineRoot, baselineOutput, 'baseline full cold compile')
+    await build(candidateRoot, candidateOutput, 'candidate full cold compile')
     const baselineExecutable = await buildExecutable(
-      baselineRoot, baselineOutput, 'baseline cold compile',
+      baselineRoot, baselineBehaviorOutput, 'baseline behavior cold compile',
     )
     const candidateExecutable = await buildExecutable(
-      candidateRoot, candidateOutput, 'candidate cold compile',
+      candidateRoot, candidateBehaviorOutput, 'candidate behavior cold compile',
     )
     await build(candidateRoot, singletonOutput, 'affected singleton cold compile', true)
 
