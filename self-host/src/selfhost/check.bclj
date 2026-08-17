@@ -2954,14 +2954,30 @@
 
     (= (get e "node") "if")
       (do (infer-expr! (get e "cond") env)
-          (let [narrowed (narrow-env-for-condition env (get e "cond"))
+          (let [condition (get e "cond")
+                narrowed (narrow-env-for-condition env condition)
                 then-env (get narrowed "then")
                 else-env (get narrowed "else")
                 tt (infer-expr! (get e "then") then-env)
                 et (if (or (nil? (get e "else")) (synthetic-absent-else? (get e "else")))
                      NIL-TYPE
-                     (infer-expr! (get e "else") else-env))]
-            (merge-types tt et)))
+                     (infer-expr! (get e "else") else-env))
+                literal-bool
+                (cond
+                  (and (map? condition)
+                       (= (get condition "node") "ref")
+                       (or (= (get condition "name") "true")
+                           (= (get condition "name") "false")))
+                    (get condition "name")
+                  (and (map? condition)
+                       (= (get condition "node") "literal")
+                       (= (get condition "kind") "bool"))
+                    (if (= (get condition "value") true) "true" "false")
+                  :else nil)]
+            (cond
+              (= literal-bool "true") tt
+              (= literal-bool "false") et
+              :else (merge-types tt et))))
 
     (= (get e "node") "when")
       (do (infer-expr! (get e "cond") env)

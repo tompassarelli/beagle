@@ -168,4 +168,5 @@
       "(defn answer [] Int (when true 42))\n")))
   (parameterize ([current-check-profile 2])
     (check-not-exn (lambda () (type-check! program))))
-  (check-equal? (length (program-forms program)) 2))
+  ;; `ns` and `defmacro` are compile-time metadata; only `answer` is emitted.
+  (check-equal? (length (program-forms program)) 1))
