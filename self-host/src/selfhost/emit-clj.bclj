@@ -9,6 +9,7 @@
 ;; No srcloc metadata is ever emitted (parity target minted BEAGLE_EMIT_SRCLOC=0).
 
 (require clojure.string :as str)
+(require selfhost.ast :as syntax)
 
 ;; --- module state (reset per emit-program!) -----------------------------------
 
@@ -1509,24 +1510,25 @@
   nil)
 
 (defn emit-program! [(prog Any)] String
-  (reset! emit-expr-ref emit-expr!)
-  (reset! record-fields
-    (structuralize-reference-table
-      (get prog "importedRecordFieldOrder" {})))
-  (reset! record-namespaces
-    (structuralize-reference-table
-      (get prog "importedRecordNamespaces" {})))
-  (reset! scalar-fns {})
-  (reset! match-counter 0)
-  (reset! loop-constraint-arity nil)
-  (reset! emit-target (get prog "target"))
-  (reset! checked-program-ref
-    (and (= (get prog "kind") "beagle.checked-program")
-         (= (get prog "schemaVersion") 4)
-         (= (get prog "phase") "checked")))
-  (register-tables! (get prog "forms"))
-  (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
-    (str (emit-ns-form prog body) "\n\n" body "\n")))
+  (let [prog (syntax/lower-binding-output-identities prog)]
+    (reset! emit-expr-ref emit-expr!)
+    (reset! record-fields
+      (structuralize-reference-table
+        (get prog "importedRecordFieldOrder" {})))
+    (reset! record-namespaces
+      (structuralize-reference-table
+        (get prog "importedRecordNamespaces" {})))
+    (reset! scalar-fns {})
+    (reset! match-counter 0)
+    (reset! loop-constraint-arity nil)
+    (reset! emit-target (get prog "target"))
+    (reset! checked-program-ref
+      (and (= (get prog "kind") "beagle.checked-program")
+           (= (get prog "schemaVersion") 4)
+           (= (get prog "phase") "checked")))
+    (register-tables! (get prog "forms"))
+    (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
+      (str (emit-ns-form prog body) "\n\n" body "\n"))))
 
 ;; --- self-tests ----------------------------------------------------------------
 
@@ -1585,6 +1587,41 @@
          {"node" "ref" "qualifier" "str" "name" "upper-case"
           "providerId" nil})
        "str/upper-case"))
+  (expect! "binding identities alpha-lower introduced capture only at output"
+    (let [caller-id "lexical:test:10:0:tmp"
+          introduced-id "introduced-lexical:test:20:1.0:tmp"
+          rendered
+          (emit-program!
+            {"namespace" "test.capture"
+             "target" "clj"
+             "gen-class" false
+             "requires" []
+             "imports" []
+             "externs" []
+             "forms"
+             [{"node" "defn"
+               "name" "capture"
+               "params"
+               [{"type" "param" "name" "tmp" "ann" nil
+                 "constraint" nil "bindingId" caller-id}]
+               "rest" false
+               "ret" nil
+               "private" false
+               "body"
+               [{"node" "let"
+                 "bindings"
+                 [{"name" "tmp" "ann" nil "constraint" nil
+                   "bindingId" introduced-id
+                   "value" {"node" "literal" "kind" "number" "value" 0}}]
+                 "body"
+                 [{"node" "do"
+                   "body"
+                   [{"node" "ref" "name" "tmp" "refersTo" introduced-id}
+                    {"node" "ref" "name" "tmp" "refersTo" caller-id}]}]}]}]})]
+      (and (str/includes? rendered "(defn capture [tmp]")
+           (str/includes? rendered "(let [tmp__scope_20_1_0 0]")
+           (str/includes? rendered "tmp__scope_20_1_0")
+           (not (str/includes? rendered "(let [tmp 0]")))))
   (expect! "reference: qualified call keeps structural callee identity"
     (= (emit-expr!
          {"node" "call"

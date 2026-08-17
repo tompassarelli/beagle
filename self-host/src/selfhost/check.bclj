@@ -23,6 +23,19 @@
     (and (map? ref) (= (get ref "node") "ref")
       (string? (get ref "name")))))
 
+(defn resolved-reference? [(ref Any)] Bool
+  (and (map? ref)
+       (= (get ref "node") "ref")
+       (string? (get ref "refersTo"))))
+
+(defn structural-reference-key [(ref Any)] Any
+  (if (qualified-reference? ref)
+    ["qualified-ref" (get ref "qualifier") (get ref "name")
+     (get ref "providerId")]
+    (if (and (map? ref) (= (get ref "node") "ref"))
+      (get ref "name")
+      ref)))
+
 (defn make-qualified-ref
   [(qualifier String) (name String) (provider-id Any)] Any
   {"node" "ref" "qualifier" qualifier "name" name
@@ -30,11 +43,8 @@
 
 (defn reference-key [(ref Any)] Any
   (cond
-    (qualified-reference? ref)
-    ["qualified-ref" (get ref "qualifier") (get ref "name")
-     (get ref "providerId")]
-    (and (map? ref) (= (get ref "node") "ref")) (get ref "name")
-    :else ref))
+    (resolved-reference? ref) (get ref "refersTo")
+    :else (structural-reference-key ref)))
 
 (defn reference-providerless-key [(ref Any)] Any
   (if (qualified-reference? ref)
@@ -45,11 +55,16 @@
   (let [exact (get table (reference-key ref))]
     (if (some? exact)
       exact
-      (if (and (qualified-reference? ref)
-            (some? (get ref "providerId")))
-        (let [providerless (get table (reference-providerless-key ref))]
-          (if (some? providerless) providerless fallback))
-        fallback))))
+      (let [structural
+            (if (resolved-reference? ref)
+              (get table (structural-reference-key ref)) nil)]
+        (if (some? structural)
+          structural
+          (if (and (qualified-reference? ref)
+                (some? (get ref "providerId")))
+            (let [providerless (get table (reference-providerless-key ref))]
+              (if (some? providerless) providerless fallback))
+            fallback))))))
 
 (defn string-qualified-reference [(spelling String)] Any
   (let [separator (str/last-index-of spelling "/")]
@@ -84,6 +99,19 @@
 
 (defn reference-leaf [(ref Any)] Any
   (if (map? ref) (get ref "name") ref))
+
+(defn binder-binding-id [(owner Any) (name String)] Any
+  (let [direct (get owner "bindingId")
+        identities (get owner "bindingIds")]
+    (if (string? direct) direct (get identities name))))
+
+(defn binder-env-assoc [(env Any) (owner Any) (name String) (value Any)] Any
+  (let [with-name (assoc env name value)
+        id (binder-binding-id owner name)]
+    (if (string? id) (assoc with-name id value) with-name)))
+
+(defn local-reference-key [(value Any)] Any
+  (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
 ;; --- type constructors (inlined from types.bjs) ------------------------------
 
@@ -1670,8 +1698,9 @@
                 (if (= (get pattern "type") "map-destructure") "map" "sequential")
                 ": " message " (aggregate type " (type->string aggregate) ")")))
 
-(defn bind-destructure-any! [(env Any) (pattern Any)] Any
-  (let [out (reduce (fn [(acc Any) (name String)] Any (assoc acc name ANY))
+(defn bind-destructure-any! [(env Any) (pattern Any) (owner Any)] Any
+  (let [out (reduce (fn [(acc Any) (name String)] Any
+                      (binder-env-assoc acc owner name ANY))
               env (destructure-bound-names pattern))]
     (doseq [default (destructure-default-exprs pattern)]
       (infer-expr! default out))
@@ -1681,13 +1710,13 @@
 ;; type recursively onto every bound name; do not collapse a typed pattern to
 ;; blanket Any. Explicit `(pattern Any)` remains the dynamic boundary.
 (defn bind-destructure-type!
-  [(env Any) (pattern Any) (aggregate Any) (where String)] Any
+  [(env Any) (pattern Any) (aggregate Any) (where String) (owner Any)] Any
   (cond
     (string? pattern)
-    (assoc env pattern aggregate)
+    (binder-env-assoc env owner pattern aggregate)
 
     (any-type? aggregate)
-    (bind-destructure-any! env pattern)
+    (bind-destructure-any! env pattern owner)
 
     (= (get pattern "type") "seq-destructure")
     (let [names (get pattern "names")
@@ -1700,14 +1729,14 @@
               (destructure-type-error! pattern aggregate where
                 (str "pattern requires " (count names)
                   " positional values, but the tuple has " (count elems)))
-              (bind-destructure-any! env pattern))
+              (bind-destructure-any! env pattern owner))
             (let [with-fixed (reduce
                                (fn [(out Any) (i Int)] Any
-                                 (bind-destructure-type! out (nth names i) (nth elems i) where))
+                                 (bind-destructure-type! out (nth names i) (nth elems i) where owner))
                                env (range (count names)))]
               (if (nil? rest-name)
                 with-fixed
-                (assoc with-fixed rest-name
+                (binder-env-assoc with-fixed owner rest-name
                   (make-app "HVec" (subvec (vec elems) (count names))))))))
 
         (and (app-type? aggregate)
@@ -1716,17 +1745,17 @@
         (let [elem-type (nullable-type (nth (get aggregate "args") 0))
               with-fixed (reduce
                            (fn [(out Any) (target Any)] Any
-                             (bind-destructure-type! out target elem-type where))
+                             (bind-destructure-type! out target elem-type where owner))
                            env names)]
           (if (nil? rest-name)
             with-fixed
-            (assoc with-fixed rest-name aggregate)))
+            (binder-env-assoc with-fixed owner rest-name aggregate)))
 
         :else
         (do
           (destructure-type-error! pattern aggregate where
             "positional patterns require a tuple or homogeneous sequential value; nominal records require {:keys [...]}")
-          (bind-destructure-any! env pattern))))
+          (bind-destructure-any! env pattern owner))))
 
     (= (get pattern "type") "map-destructure")
     (let [field-map (record-field-map-for-type aggregate)
@@ -1745,7 +1774,7 @@
         (do
           (destructure-type-error! pattern aggregate where
             "key patterns require a nominal record or homogeneous Map")
-          (bind-destructure-any! env pattern))
+          (bind-destructure-any! env pattern owner))
         (let [defaults (get pattern "or")
               projection (reduce
                            (fn [(state Any) (name String)] Any
@@ -1781,13 +1810,13 @@
                                                " destructuring default for " name
                                                ": expected " (type->string expected)
                                                ", got " (type->string actual))))
-                               {"env" (assoc (get state "env") name field-type)
+                               {"env" (binder-env-assoc (get state "env") owner name field-type)
                                 "types" (assoc (get state "types") name field-type)}))
                            {"env" env "types" {}} (get pattern "keys"))
               with-as (let [as-name (opt-field (get pattern "as"))]
                         (if (nil? as-name)
                           (get projection "env")
-                          (assoc (get projection "env") as-name aggregate)))]
+                          (binder-env-assoc (get projection "env") owner as-name aggregate)))]
           with-as)))
 
     :else env))
@@ -1870,8 +1899,8 @@
               target (param-binding-target p)
               effective (nth effective-types i)]
           (if (string? target)
-            (assoc out target effective)
-            (bind-destructure-type! out target effective "parameter"))))
+            (binder-env-assoc out p target effective)
+            (bind-destructure-type! out target effective "parameter" p))))
       env
       (range (count all-params)))))
 
@@ -1901,7 +1930,7 @@
                             (type->string declared) ", got " (type->string inferred))))
             (bind-destructure-type! out bname
               (if (not (nil? declared)) declared inferred)
-              "let binding"))
+              "let binding" b))
           (do
             (when (and (not (nil? declared))
                      (not (check-hvec-literal! (get b "value") declared out))
@@ -1909,7 +1938,8 @@
                      (not (type-compatible? inferred declared)))
               (emit-diag! (str "beagle: let binding " bname ": expected "
                              (type->string declared) ", got " (type->string inferred))))
-            (assoc out bname (if (not (nil? declared)) declared inferred))))))
+            (binder-env-assoc out b bname
+              (if (not (nil? declared)) declared inferred))))))
     env bindings))
 
 (defn collection-element-type [(collection-type Any)] Any
@@ -1975,7 +2005,7 @@
                (not (nil? (get TYPE-PREDICATES fn-name)))
                (= (count args) 1)
                (= (get (nth args 0) "node") "ref"))
-            (let [var-name (get (nth args 0) "name")
+            (let [var-name (local-reference-key (nth args 0))
                   narrowed
                     (predicate-narrowing-type
                       (get env var-name ANY)
@@ -1987,7 +2017,7 @@
           (and (not (nil? fn-name)) (= fn-name "some?")
                (= (count args) 1)
                (= (get (nth args 0) "node") "ref"))
-            {"var" (get (nth args 0) "name")
+            {"var" (local-reference-key (nth args 0))
              "type" (make-prim "Nil")
              "negated" true}
 
@@ -1998,10 +2028,10 @@
               (cond
                 (and (= (get a1 "node") "ref")
                      (= (get a2 "node") "literal") (= (get a2 "kind") "nil"))
-                  {"var" (get a1 "name") "type" (make-prim "Nil") "negated" neg}
+                  {"var" (local-reference-key a1) "type" (make-prim "Nil") "negated" neg}
                 (and (= (get a1 "node") "literal") (= (get a1 "kind") "nil")
                      (= (get a2 "node") "ref"))
-                  {"var" (get a2 "name") "type" (make-prim "Nil") "negated" neg}
+                  {"var" (local-reference-key a2) "type" (make-prim "Nil") "negated" neg}
                 :else {"var" nil "type" nil "negated" false}))
 
           (and (not (nil? fn-name)) (= fn-name "not")
@@ -2041,7 +2071,7 @@
              (= (get (nth args 0) "node") "ref")
              (= (get (nth args 1) "node") "ref"))
       (let [member-name (get (nth args 0) "name")
-            var-name (get (nth args 1) "name")
+            var-name (local-reference-key (nth args 1))
             current (get env var-name)
             members (if (union-type? current)
                       (get current "members")
@@ -2095,7 +2125,7 @@
         instance-result
 
       (= (get cond-expr "node") "ref")
-        (let [v (get cond-expr "name")
+        (let [v (local-reference-key cond-expr)
               cur (get env v)]
           (if (nil? cur)
             {"then" {} "else" {}}
@@ -2144,16 +2174,16 @@
                                        (get field-map kw)
                                        ANY)
                             bname (if (string? b) b (get b "name"))]
-                        (assoc arm-env bname raw-type)))
+                        (binder-env-assoc arm-env pat bname raw-type)))
                     env (range (count bindings)))
             (if (= (count bindings) 1)
               (let [b0 (nth bindings 0)
                     bname (if (string? b0) b0 (get b0 "name"))]
-                (assoc env bname (make-prim rec-name)))
+                (binder-env-assoc env pat bname (make-prim rec-name)))
               env)))
 
       (= (get pat "type") "var")
-        (assoc env (get pat "name") target-type)
+        (binder-env-assoc env pat (get pat "name") target-type)
 
       :else env)))
 
@@ -2914,7 +2944,8 @@
                                              (rest-param-call-element-type rp)
                                              nil)
                                      ret (if (not (nil? (get f "ret"))) (get f "ret") ANY)]
-                                 (assoc be (get f "name") (make-fn p-types rtype ret))))
+                                 (binder-env-assoc be f (get f "name")
+                                   (make-fn p-types rtype ret))))
                              env (get e "fns"))]
         (doseq [f (get e "fns")]
           (let [fn-env (extend-with-params! body-env (get f "params") (opt-field (get f "rest")))]
@@ -3122,8 +3153,8 @@
                                    be
                                    "for/doseq binding")
                                  (if (string? target)
-                                   (assoc be target effective)
-                                   (bind-destructure-type! be target effective "for/doseq binding")))
+                                   (binder-env-assoc be c target effective)
+                                   (bind-destructure-type! be target effective "for/doseq binding" c)))
                              (= ct "when")
                                (do (infer-expr! (get c "test") be) be)
                              (= ct "let")
@@ -3160,8 +3191,8 @@
                                    be
                                    "for/doseq binding")
                                  (if (string? target)
-                                   (assoc be target effective)
-                                   (bind-destructure-type! be target effective "for/doseq binding")))
+                                   (binder-env-assoc be c target effective)
+                                   (bind-destructure-type! be target effective "for/doseq binding" c)))
                              (= ct "when")
                                (do (infer-expr! (get c "test") be) be)
                              ;; :let clauses bind sequentially (check.rkt
@@ -3187,7 +3218,7 @@
       (let [body-type (last-expr-type! (get e "body") env)
             catch-types (mapv (fn [(c Any)] Any
                                 (let [catch-env (if (not (nil? (get c "name")))
-                                                  (assoc env (get c "name") ANY)
+                                                  (binder-env-assoc env c (get c "name") ANY)
                                                   env)]
                                   (last-expr-type! (get c "body") catch-env)))
                               (get e "catches"))
@@ -3423,7 +3454,7 @@
     (= (get e "node") "rescue")
       (let [inner-type (infer-expr! (get e "expr") env)
             fallback-env (if (not (nil? (get e "err")))
-                           (assoc env (get e "err") ANY)
+                           (binder-env-assoc env e (get e "err") ANY)
                            env)
             fallback-type (infer-expr! (get e "fallback") fallback-env)]
         (if (and (app-type? inner-type)
@@ -3703,8 +3734,8 @@
               target (param-binding-target parameter)
               effective (nth effective-types i)]
           (if (string? target)
-            (assoc out target effective)
-            (bind-destructure-type! out target effective "parameter"))))
+            (binder-env-assoc out parameter target effective)
+            (bind-destructure-type! out target effective "parameter" parameter))))
       env
       (range (count all-params)))))
 
@@ -5440,6 +5471,23 @@
     (json-eq (infer-expr! (make-lit "number" 99) {}) (make-prim "Int")))
   (expect! "infer: ref from env"
     (json-eq (infer-expr! (make-ref "x") {"x" (make-prim "Bool")}) (make-prim "Bool")))
+  (expect! "infer: resolved ref selects binding identity before authored spelling"
+    (json-eq
+      (infer-expr!
+        {"node" "ref" "name" "x" "refersTo" "lexical:test:2:0:x"}
+        {"x" (make-prim "Bool")
+         "lexical:test:2:0:x" (make-prim "Int")})
+      (make-prim "Int")))
+  (expect! "binder environments publish the resolver-selected identity"
+    (let [parameter
+          (assoc (make-param "x" (make-prim "String"))
+            "bindingId" "lexical:test:3:0:x")
+          env (extend-with-params! {} [parameter] nil)]
+      (json-eq
+        (infer-expr!
+          {"node" "ref" "name" "x" "refersTo" "lexical:test:3:0:x"}
+          env)
+        (make-prim "String"))))
   (expect! "infer: ref missing => Any"
     (any-type? (infer-expr! (make-ref "y") {})))
 

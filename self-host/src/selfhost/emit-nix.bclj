@@ -14,6 +14,7 @@
 ;; (so a `:k` key arrives as {node:literal,kind:keyword,value:"k"}, a bare-symbol
 ;; interp key as {node:ref}). emit-key / emit-datum here reverse-map that.
 (require clojure.string :as str)
+(require selfhost.ast :as syntax)
 
 ;; --- module state -------------------------------------------------------------
 ;; depth-threaded emitter hub (SCI rejects forward refs; helpers defined BEFORE
@@ -2173,6 +2174,7 @@
     {} requires))
 
 (defn emit-program! [(prog Any)] String
+  (let [prog (syntax/lower-binding-output-identities prog)]
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
   (reset! nix-require-prefixes-ref
@@ -2205,7 +2207,7 @@
         "\n"
         "in\n"
         body-str
-        "\n"))))
+        "\n")))))
 
 ;; --- self-tests --------------------------------------------------------------
 (def passes Any (atom []))

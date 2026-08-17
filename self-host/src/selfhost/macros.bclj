@@ -102,12 +102,9 @@
             bot (subvec all-lines (- n 4) n)]
         (str/join "\n" (into (conj (vec top) (str "  ... (" (- n 8) " more)")) bot))))))
 
-;; --- deterministic lowering temps (macros.rkt lowering-counter) ---------------
-;; ONE counter shared between macro-hygiene renames (here) and parse's
-;; lowering temps (selfhost.parse delegates to fresh-lowered-sym!), reset per
-;; parse-program — mirrors macros.rkt, where `lowering-counter` lives and
-;; parse.rkt imports it. Names are <base>__<n>; minted names depend only on
-;; module content.
+;; --- deterministic output-lowering temps ------------------------------------
+;; This counter is only for parser lowering temporaries. Lexical identity is a
+;; BindingId edge and never a printed fresh name.
 
 (def LOWERING-COUNTER Any (atom 0))
 
@@ -119,40 +116,6 @@
   (let [(n Int) (deref LOWERING-COUNTER)]
     (swap! LOWERING-COUNTER inc)
     (str base "__" n)))
-
-;; --- mode-2 hygiene context (macros.rkt current-module-def-names /
-;; current-hygiene-alias-table) --------------------------------------------------
-;; parse.bclj sets the def-name set (or nil = inert) + a fresh alias table
-;; around each parse-program; a free ref in a template that names a module
-;; definition is rewritten to its memoized alias `<orig>__hyg` (bumped while
-;; taken), and parse injects `(def alias orig)` after orig's definition.
-
-(def MODULE-DEF-NAMES Any (atom nil))
-(def HYGIENE-ALIASES Any (atom {}))
-
-(defn set-hygiene-context! [(def-names Any)] Nil
-  (reset! MODULE-DEF-NAMES def-names)
-  (reset! HYGIENE-ALIASES {})
-  nil)
-
-(defn hygiene-aliases [] Any
-  (deref HYGIENE-ALIASES))
-
-(defn module-def-name? [(s Any)] Bool
-  (and (some? (deref MODULE-DEF-NAMES))
-       (string? s)
-       (some? (get (deref MODULE-DEF-NAMES) s))))
-
-(defn hygiene-alias-for! [(orig String)] String
-  (let [existing (get (deref HYGIENE-ALIASES) orig)]
-    (if (some? existing)
-      existing
-      (let [alias (loop [cand (str orig "__hyg") n 1]
-                    (if (module-def-name? cand)
-                      (recur (str orig "__hyg" (str n)) (+ n 1))
-                      cand))]
-        (swap! HYGIENE-ALIASES assoc orig alias)
-        alias))))
 
 ;; --- datum helpers (arrays as cons lists) ------------------------------------
 
@@ -1034,252 +997,6 @@
     ;; Atom or empty list
     :else template))
 
-;; --- hygiene (safe macros only) ----------------------------------------------
-
-(defn unwrap-brackets [(form Any)] Any
-  (cond
-    (and (datum-pair? form) (= (datum-car form) BRACKET-TAG))
-      (datum-cdr form)
-    (vector? form) form
-    :else []))
-
-;; Structural binders are syntax trees. Collect their leaves recursively while
-;; leaving the aggregate type expression untouched: `(binding-form Type)` is
-;; one typed binder whether the form is a name, `[a [b c]]`, or `{:keys [x]}`.
-(defn typed-binding-datum? [(item Any)] Bool
-  (and (vector? item)
-    (or (= (count item) 2) (= (count item) 3))
-    (not (= (nth item 0) BRACKET-TAG))
-    (not (= (nth item 0) MAP-TAG))
-    (or (string? (nth item 0))
-      (and (vector? (nth item 0))
-        (> (count (nth item 0)) 0)
-        (or (= (nth (nth item 0) 0) BRACKET-TAG)
-          (= (nth (nth item 0) 0) MAP-TAG))))))
-
-(defn collect-binding-form-binders [(form Any)] (Vec String)
-  (cond
-    (string? form)
-    (if (= form "&") [] [form])
-
-    (and (vector? form) (> (count form) 0) (= (nth form 0) BRACKET-TAG))
-    (let [items (subvec form 1)]
-      (loop [(i Int) 0 (acc (Vec String)) []]
-        (cond
-          (>= i (count items)) acc
-          (= (nth items i) "&")
-          (if (< (+ i 1) (count items))
-            (into acc (collect-binding-form-binders (nth items (+ i 1))))
-            acc)
-          :else
-          (recur (+ i 1)
-            (into acc (collect-binding-form-binders (nth items i)))))))
-
-    (and (vector? form) (> (count form) 0) (= (nth form 0) MAP-TAG))
-    (let [items (subvec form 1)]
-      (loop [(i Int) 0 (acc (Vec String)) []]
-        (cond
-          (>= i (count items)) acc
-          (and (= (nth items i) ":keys")
-            (< (+ i 1) (count items)))
-          (recur (+ i 2)
-            (into acc (collect-binding-form-binders (nth items (+ i 1)))))
-          (and (= (nth items i) ":as")
-            (< (+ i 1) (count items))
-            (string? (nth items (+ i 1))))
-          (recur (+ i 2) (conj acc (nth items (+ i 1))))
-          ;; :or contains binder keys already collected through :keys; its
-          ;; values are expressions, never binding positions.
-          (= (nth items i) ":or")
-          (recur (+ i 2) acc)
-          :else
-          (recur (+ i 1) acc))))
-
-    :else []))
-
-(defn remove-macro-param-binders [(names Any) (macro-params Any)] Any
-  (let [mp (set macro-params)]
-    (filterv (fn [(name String)] Bool
-               (not (clojure.core/contains? mp name))) names)))
-
-(defn collect-param-binders
-  [(form Any) (macro-params (Vec String))] (Vec String)
-  (let [items (unwrap-brackets form) n (count items) mp (set macro-params)]
-    (loop [(i Int) 0 (acc (Vec String)) []]
-      (cond
-        (>= i n) acc
-        (typed-binding-datum? (nth items i))
-          (recur (+ i 1)
-            (into acc
-              (remove-macro-param-binders
-                (collect-binding-form-binders (nth (nth items i) 0))
-                macro-params)))
-        (and (vector? (nth items i))
-          (> (count (nth items i)) 0)
-          (or (= (nth (nth items i) 0) BRACKET-TAG)
-            (= (nth (nth items i) 0) MAP-TAG)))
-          (recur (+ i 1)
-            (into acc
-              (remove-macro-param-binders
-                (collect-binding-form-binders (nth items i)) macro-params)))
-        (and (string? (nth items i))
-             (not= (nth items i) "&")
-             (not (clojure.core/contains? mp (nth items i))))
-          (recur (+ i 1) (conj acc (nth items i)))
-        :else (recur (+ i 1) acc)))))
-
-(defn collect-let-binders [(form Any) (macro-params (Vec String))] (Vec String)
-  (let [items (unwrap-brackets form)]
-    (loop [(i Int) 0 (acc (Vec String)) []]
-      (cond
-        (>= i (count items)) acc
-        (and (< (+ i 1) (count items))
-             (typed-binding-datum? (nth items i)))
-          (recur
-            (+ i 2)
-            (into acc
-              (remove-macro-param-binders
-                (collect-binding-form-binders (nth (nth items i) 0))
-                macro-params)))
-        (and (< (+ i 1) (count items))
-          (vector? (nth items i))
-          (> (count (nth items i)) 0)
-          (or (= (nth (nth items i) 0) BRACKET-TAG)
-            (= (nth (nth items i) 0) MAP-TAG)))
-          (recur (+ i 2)
-            (into acc
-              (remove-macro-param-binders
-                (collect-binding-form-binders (nth items i)) macro-params)))
-        (and (< (+ i 1) (count items))
-             (string? (nth items i)))
-          (recur
-            (+ i 2)
-            (if (clojure.core/contains? (set macro-params) (nth items i))
-              acc
-              (conj acc (nth items i))))
-        :else
-          (recur (+ i 1) acc)))))
-
-;; (unquote X) / (unquote-splicing X) — expansion-time escapes; their payloads
-;; are user-supplied data, never template structure.
-(defn unquote-form? [(d Any)] Bool
-  (and (datum-pair? d)
-       (or (= (datum-car d) "unquote")
-           (= (datum-car d) "unquote-splicing"))))
-
-;; add-unique/walk thread the accumulator through the recursion instead of a
-;; mutable registry — the walk is a tree fold, not a cross-call registry.
-;; Returns binders in DISCOVERY order; Racket's collect-template-binders conses
-;; (reverse-discovery) and mints renames over that list, so mint over
-;; (reverse binders) for counter-number parity.
-(defn collect-template-binders
-  [(template Any) (macro-params (Vec String))] (Vec String)
-  (letfn [(add-unique [(acc (Vec String)) (name String)] (Vec String)
-            (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
-          (walk [(acc (Vec String)) (datum Any)] (Vec String)
-            (if (datum-pair? datum)
-              (let [head (datum-car datum)]
-                (cond
-                  ;; Don't descend into unquote payloads; quoted templates inert.
-                  (unquote-form? datum) acc
-                  (= head "quote") acc
-                  (= head "let")
-                    (let [acc2 (if (and (> (count datum) 2)
-                                        (not (unquote-form? (nth datum 1))))
-                                 (reduce add-unique acc (collect-let-binders (nth datum 1) macro-params))
-                                 acc)]
-                      (reduce walk acc2 (datum-cdr datum)))
-                  (= head "fn")
-                    (let [acc2 (if (and (> (count datum) 2)
-                                        (not (unquote-form? (nth datum 1))))
-                                 (reduce add-unique acc (collect-param-binders (nth datum 1) macro-params))
-                                 acc)]
-                      (reduce walk acc2 (datum-cdr datum)))
-                  (= head "defn")
-                    (let [acc1 (if (> (count datum) 3)
-                                 (let [name-item (nth datum 1)]
-                                   (if (and (string? name-item) (not (clojure.core/contains? (set macro-params) name-item)))
-                                     (add-unique acc name-item)
-                                     acc))
-                                 acc)
-                          acc2 (if (and (> (count datum) 3)
-                                        (not (unquote-form? (nth datum 2))))
-                                 (reduce add-unique acc1 (collect-param-binders (nth datum 2) macro-params))
-                                 acc1)]
-                      (reduce walk acc2 (datum-cdr datum)))
-                  :else (reduce walk acc datum)))
-              acc))]
-    (walk [] template)))
-
-;; Free references in TEMPLATE that name a module-level definition and are
-;; neither macro params nor template-introduced binders — the macro author's
-;; globals that must survive use-site shadowing (macros.rkt
-;; collect-template-free-refs). A name that is ALSO a registered macro is not
-;; aliased (renaming it would suppress the expansion). Discovery order; mint
-;; over (reverse refs) like binders.
-(defn collect-template-free-refs
-  [(template Any)
-   (macro-params (Vec String))
-   (binders (Vec String))
-   (reg Any)]
-  (Vec String)
-  (letfn [(add-unique [(acc (Vec String)) (name String)] (Vec String)
-            (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
-          (walk [(acc (Vec String)) (datum Any)] (Vec String)
-            (cond
-              (string? datum)
-                (if (and (module-def-name? datum)
-                         (not (clojure.core/contains? (set macro-params) datum))
-                         (not (clojure.core/contains? (set binders) datum))
-                         (nil? (lookup-macro reg datum)))
-                  (add-unique acc datum)
-                  acc)
-              (datum-pair? datum)
-                (cond
-                  (unquote-form? datum) acc
-                  (= (datum-car datum) "quote") acc
-                  :else (reduce walk acc datum))
-              :else acc))]
-    (walk [] template)))
-
-(defn rename-in-template [(template Any) (renames Any)] Any
-  (cond
-    (and (string? template) (not (nil? (get renames template))))
-      (get renames template)
-    (and (datum-pair? template) (= (datum-car template) "quote"))
-      (if (and (= (count template) 2)
-               (string? (nth template 1))
-               (not (nil? (get renames (nth template 1)))))
-        ["quote" (get renames (nth template 1))]
-        template)
-    (datum-pair? template)
-      (mapv (fn [(item Any)] Any (rename-in-template item renames)) template)
-    :else template))
-
-;; macros.rkt hygienize-template. Binders rename to fresh-lowered-sym! temps;
-;; free refs to module defs rename to memoized __hyg aliases (inert unless
-;; parse set the hygiene context). Racket's collectors cons (reverse-discovery
-;; order) and mint over that list — ours return discovery order, so mint over
-;; (reverse ...) for counter-number parity.
-(defn hygienize-template!
-  [(template Any) (fixed-params (Vec String)) (rest-param Any) (reg Any)] Any
-  (let [macro-params (if (nil? rest-param)
-                       fixed-params
-                       (into [rest-param] fixed-params))
-        binders (collect-template-binders template macro-params)
-        free-refs (if (some? (deref MODULE-DEF-NAMES))
-                    (collect-template-free-refs template macro-params binders reg)
-                    [])
-        renames0 (reduce (fn [(acc Any) (b String)] Any
-                           (assoc acc b (fresh-lowered-sym! b)))
-                         {} (reverse binders))
-        renames (reduce (fn [(acc Any) (r String)] Any
-                          (assoc acc r (hygiene-alias-for! r)))
-                        renames0 (reverse free-refs))]
-    (if (= (count renames) 0)
-      template
-      (rename-in-template template renames))))
-
 ;; --- expand-macro! (dispatch) ------------------------------------------------
 
 (defn expand-template-macro!
@@ -1287,24 +1004,32 @@
   (let [fixed (get m "fixed-params")
         rest-name (get m "rest-param")
         kind (get m "kind")
-        template (hygienize-template! (get m "template") fixed rest-name reg)
+        template (get m "template")
+        introduction-scope (ast/fresh-scope-id! "macro-introduction")
+        restorations (atom [])
+        scoped-args
+        (mapv
+          (fn [(arg Any)] Any
+            (ast/beagle-syntax-flip-scope!
+              arg introduction-scope restorations true))
+          args)
         output
         (cond
       ;; arity errors: record + return an INERT datum (Racket raises + aborts
       ;; here). Returning the form unexpanded would keep it a macro-application,
       ;; which parse-list-form! re-dispatches into expand-fully! forever (the
       ;; depth cap only bounds a single pass, not the outer parse retry).
-      (and (some? rest-name) (< (count args) (count fixed)))
+      (and (some? rest-name) (< (count scoped-args) (count fixed)))
         (macro-err!
           (str "macro " name ": expected at least " (str (count fixed))
-               " arg(s), got " (str (count args))))
-      (and (nil? rest-name) (not= (count args) (count fixed)))
+               " arg(s), got " (str (count scoped-args))))
+      (and (nil? rest-name) (not= (count scoped-args) (count fixed)))
         (macro-err!
           (str "macro " name ": expected " (str (count fixed))
-               " arg(s), got " (str (count args))))
+               " arg(s), got " (str (count scoped-args))))
       :else
-        (let [fixed-args (subvec args 0 (count fixed))
-              rest-args (subvec args (count fixed))]
+        (let [fixed-args (subvec scoped-args 0 (count fixed))
+              rest-args (subvec scoped-args (count fixed))]
           (if (= kind "defmacro")
             (let [env0 (make-macro-env)
                   env (reduce
@@ -1336,12 +1061,16 @@
         (if (some? reader)
           {"reader" reader "generated-by" name}
           {"generated-by" name})]
-    (ast/datum->beagle-syntax!
-      output
-      (if (nil? ctx) nil (get ctx "call-span"))
-      ast/EMPTY-SCOPE-SET
-      (if (nil? ctx) nil (get ctx "origin"))
-      properties)))
+    (ast/beagle-syntax-flip-scope!
+      (ast/datum->beagle-syntax!
+        output
+        (if (nil? ctx) nil (get ctx "call-span"))
+        ast/EMPTY-SCOPE-SET
+        (if (nil? ctx) nil (get ctx "origin"))
+        properties)
+      introduction-scope
+      restorations
+      false)))
 
 (defn expand-macro! [(reg Any) (name String) (args (Vec Any)) (ctx Any)] Any
   (let [syntax-input
@@ -1475,7 +1204,7 @@
   (reset! passes [])
   (reset! failures [])
   (reset-lowering-counter!)
-  (set-hygiene-context! nil)
+  (ast/reset-scope-counter!)
 
   ;; --- test: simple substitution ---
   (let [reg (make-macro-registry)]
@@ -1521,80 +1250,34 @@
     (expect! "unsafe kind rejected: not registered"
       (nil? (lookup-macro reg "raw"))))
 
-  ;; --- test: hygiene renames template-introduced let binders ---
+  ;; --- test: invocation scope flip keeps spelling and syntax identity ---
   (let [reg (make-macro-registry)]
-    (reset-lowering-counter!)
-    (register-macro! reg "with-tmp" "safe" ["body"]
-      ["let" ["tmp" 0] "body"])
-    (let [result (expand-macro! reg "with-tmp" [["println" "tmp"]] nil)
-          binds (nth result 1)
-          bind-name (nth binds 0)]
-      (expect! "hygiene: let result is let form"
-        (= (nth result 0) "let"))
-      (expect! "hygiene: let binder renamed to deterministic temp tmp__0"
-        (= bind-name "tmp__0"))
-      (expect! "hygiene: user ref to tmp preserved"
-        (= (nth result 2) ["println" "tmp"]))))
+    (register-macro! reg "with-tmp" "safe" []
+      ["let" [BRACKET-TAG "tmp" 0] "tmp"])
+    (let [call (ast/datum->beagle-syntax!
+                 ["with-tmp"] nil ast/EMPTY-SCOPE-SET nil {})
+          result (expand-macro! reg "with-tmp" [] (make-root-ctx! "with-tmp" call))
+          children (get result "payload")
+          bindings (nth children 1)
+          binder (nth (get bindings "payload") 0)
+          use (nth children 2)]
+      (expect! "scope hygiene keeps authored binder spelling"
+        (= (macro-datum binder) "tmp"))
+      (expect! "scope hygiene gives introduced binder and use one scope"
+        (and (= (count (ast/beagle-syntax-scopes binder)) 1)
+             (= (ast/beagle-syntax-scopes binder)
+                (ast/beagle-syntax-scopes use))))))
 
-  ;; --- test: hygiene renames fn params ---
-  (let [reg (make-macro-registry)]
-    (reset-lowering-counter!)
-    (register-macro! reg "with-fn" "safe" ["body"]
-      ["fn" ["x"] "Any" "body"])
-    (let [result (expand-macro! reg "with-fn" [["println" "x"]] nil)
-          params (nth result 1)
-          param-name (nth params 0)]
-      (expect! "hygiene: fn result is fn form"
-        (= (nth result 0) "fn"))
-      (expect! "hygiene: fn param renamed to deterministic temp x__0"
-        (= param-name "x__0"))
-      (expect! "hygiene: user ref to x preserved"
-        (= (nth result 3) ["println" "x"]))))
-
-  ;; --- test: structural typed binder hygiene ---
-  (expect! "hygiene: recursive structural binder collection"
-    (= (collect-param-binders
-         [BRACKET-TAG
-          [[BRACKET-TAG "a"
-            [MAP-TAG ":keys" [BRACKET-TAG "b"] ":as" "whole"]]
-           ["HVec" "Int" "Config"]]
-          "&" ["rest" ["Vec" "Any"]]]
-         [])
-      ["a" "b" "whole" "rest"]))
-  (let [reg (make-macro-registry)]
-    (reset-lowering-counter!)
-    (register-macro! reg "with-pattern" "safe" ["body"]
-      ["fn"
-       [BRACKET-TAG
-        [[BRACKET-TAG "x" [MAP-TAG ":keys" [BRACKET-TAG "y"]]]
-         ["HVec" "Int" "Config"]]]
-       "Any"
-       ["list" "x" "y" "body"]])
-    (let [result (expand-macro! reg "with-pattern" ["user"] nil)
-          typed (nth (nth result 1) 1)
-          pattern (nth typed 0)
-          x-name (nth pattern 1)
-          y-name (nth (nth (nth pattern 2) 2) 1)
-          body (nth result 3)]
-      (expect! "hygiene: structural sequence leaf renamed"
-        (and (not= x-name "x") (= (nth body 1) x-name)))
-      (expect! "hygiene: structural map leaf renamed"
-        (and (not= y-name "y") (= (nth body 2) y-name)))
-      (expect! "hygiene: structural aggregate type untouched"
-        (= (nth typed 1) ["HVec" "Int" "Config"]))))
-
-  ;; --- test: binder mint order matches Racket (reverse-discovery list) ---
-  (let [reg (make-macro-registry)]
-    (reset-lowering-counter!)
-    (register-macro! reg "two-lets" "safe" ["body"]
-      ["let" ["a" 1] ["let" ["b" 2] "body"]])
-    (let [result (expand-macro! reg "two-lets" [["+" "a" "b"]] nil)]
-      ;; discovery order [a b]; Racket mints over the consed (reversed) list,
-      ;; so b -> b__0, a -> a__1
-      (expect! "hygiene mint order: a -> a__1"
-        (= (nth (nth result 1) 0) "a__1"))
-      (expect! "hygiene mint order: b -> b__0"
-        (= (nth (nth (nth result 2) 1) 0) "b__0"))))
+  (let [reg (make-macro-registry)
+        caller (ast/datum->beagle-syntax!
+                 "tmp" nil ast/EMPTY-SCOPE-SET nil {})]
+    (register-macro! reg "identity" "safe" ["body"] "body")
+    (let [call (ast/datum->beagle-syntax!
+                 ["identity" caller] nil ast/EMPTY-SCOPE-SET nil {})
+          result (expand-macro! reg "identity" [caller]
+                   (make-root-ctx! "identity" call))]
+      (expect! "scope hygiene restores exact caller syntax"
+        (identical? result caller))))
 
   ;; --- test: expand-fully! (recursive expansion) ---
   (let [reg (make-macro-registry)]
@@ -1705,22 +1388,18 @@
     (register-macro! reg "quoted-local" "defmacro" []
       ["let" [BRACKET-TAG ["shifted" "Int"] 1]
        ["list" ["quote" "nth"] ["quote" "shifted"] 0]])
-    (expect! "quoted computed references follow typed local hygiene"
+    (expect! "quoted computed references keep authored local spelling"
       (= (expand-macro! reg "quoted-local" [] nil)
-         ["nth" "shifted__0" 0])))
+         ["nth" "shifted" 0])))
 
-  ;; --- test: mode-2 hygiene free-ref aliasing ---
+  ;; Macro-author references keep their authored spelling; scope resolution,
+  ;; not an injected alias, selects their definition.
   (let [reg (make-macro-registry)]
-    (reset-lowering-counter!)
-    (set-hygiene-context! {"helper" true "other" true})
     (register-macro! reg "call-helper" "defmacro" ["x"]
       ["quasiquote" ["helper" ["unquote" "x"]]])
     (let [result (expand-macro! reg "call-helper" [5] nil)]
-      (expect! "free ref to module def rewritten to __hyg alias"
-        (= result ["helper__hyg" 5]))
-      (expect! "alias table records helper -> helper__hyg"
-        (= (hygiene-aliases) {"helper" "helper__hyg"})))
-    (set-hygiene-context! nil))
+      (expect! "macro-author reference keeps authored spelling"
+        (= result ["helper" 5]))))
 
   ;; --- test: strip-reader-tags ---
   (expect! "strip: bracket tag removed"

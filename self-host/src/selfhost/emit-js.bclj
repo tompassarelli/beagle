@@ -17,6 +17,7 @@
 ;; forward/mutual calls through atom-held refs (emit-*-ref), set at emit time.
 
 (require clojure.string :as str)
+(require selfhost.ast :as syntax)
 
 ;; --- module state (reset per emit-program!) -----------------------------------
 
@@ -2672,6 +2673,7 @@
   nil)
 
 (defn emit-program! [(prog Any)] String
+  (let [prog (syntax/lower-binding-output-identities prog)]
   (install-refs!)
   (reset! record-fields
     (structuralize-reference-table
@@ -2708,7 +2710,7 @@
           runtime-import (if (= 0 (count runtime-bindings)) ""
                            (str "import { " (str/join ", " runtime-bindings)
                                 " } from 'beagle/core.js';\n"))]
-      (str header runtime-import "\n" body "\n"))))
+      (str header runtime-import "\n" body "\n")))))
 
 ;; --- self-tests ---------------------------------------------------------------
 
