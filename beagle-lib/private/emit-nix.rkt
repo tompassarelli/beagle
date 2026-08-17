@@ -8,30 +8,10 @@
          racket/format
          racket/list
          racket/set
-         (except-in "parse.rkt"
-                    call-form-fn
-                    static-call-class+method
-                    pat-record-type-name)
-         (only-in "parse.rkt"
-                  [call-form-fn raw-call-form-fn]
-                  [static-call-class+method raw-static-call-class+method]
-                  [pat-record-type-name raw-pat-record-type-name])
+         "parse.rkt"
          "types.rkt"
          "emit-dispatch.rkt"
          "emit-nix-strings.rkt")
-
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
-
-(define (static-call-class+method form)
-  (define ref (raw-static-call-class+method form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
-
-(define (pat-record-type-name pattern)
-  (define ref (raw-pat-record-type-name pattern))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 ;; --- indentation -----------------------------------------------------------
 
@@ -81,16 +61,30 @@
 ;; binding still needs ordinary host mangling.  Applying only `/` -> `.` left
 ;; qualified predicate names containing `?`, and the provider validator ABI's
 ;; `$` names, as invalid Nix identifiers.
-(define (mangle-qualified-name sym)
-  (define parts (string-split (symbol->string sym) "/"))
-  (define prefix (car parts))
+(define (mangle-qualified-parts qualifier name)
+  (define prefix (symbol->string qualifier))
   (define runtime-prefix
     (hash-ref (current-nix-require-prefixes) prefix #f))
   (string-join
    (cons (or runtime-prefix (mangle-name (string->symbol prefix)))
-         (for/list ([part (in-list (cdr parts))])
+         (for/list ([part (in-list (string-split (symbol->string name) "/"))])
            (mangle-name (string->symbol part))))
    "."))
+
+(define (mangle-qualified-name ref)
+  (mangle-qualified-parts
+   (qualified-ref-qualifier ref)
+   (qualified-ref-name ref)))
+
+;; Record-update contracts name compiler-owned validators as symbols rather
+;; than expression references.
+(define (mangle-record-validator-name validator)
+  (define parts (string-split (symbol->string validator) "/"))
+  (if (null? (cdr parts))
+      (mangle-name validator)
+      (mangle-qualified-parts
+       (string->symbol (car parts))
+       (string->symbol (string-join (cdr parts) "/")))))
 
 ;; Generated Nix modules live at the namespace path. Resolve one provider from
 ;; the importing module's directory, rather than repeating the common namespace
@@ -1060,7 +1054,7 @@
 
 (define (emit-expr e depth)
   (cond
-    [(qualified-ref? e) (emit-expr (qualified-ref->symbol e) depth)]
+    [(qualified-ref? e) (mangle-qualified-name e)]
     [(number? e) (emit-nix-number e)]
     [(string? e) (format "\"~a\"" (escape-nix e))]
     [(boolean? e) (if e "true" "false")]
@@ -1076,8 +1070,6 @@
        [(eq? e 'false) "false"]
        [(char=? (string-ref sym-str 0) #\:)
         (format "\"~a\"" (escape-nix (substring sym-str 1)))]
-       [(string-contains? sym-str "/")
-        (mangle-qualified-name e)]
        [(string-contains? sym-str ".")
         sym-str]
        [else (mangle-name e)])]
@@ -1745,13 +1737,17 @@
   (define fn-expr (call-form-fn e))
   (define args (call-form-args e))
   (define fn-name (and (symbol? fn-expr) fn-expr))
+  (define promote-ref?
+    (and (qualified-ref? fn-expr)
+         (eq? (qualified-ref-qualifier fn-expr) 'bgl)
+         (eq? (qualified-ref-name fn-expr) 'promote)))
 
   ;; Core stdlib translations
   (cond
     ;; `bgl/promote` copies a value into an older epoch's arena. Nix has one
     ;; GC-owned heap and no epochs, so the value already outlives every scope
     ;; that could name it: the form erases.
-    [(and fn-name (eq? fn-name 'bgl/promote) (= (length args) 1))
+    [(and promote-ref? (= (length args) 1))
      (emit-expr (car args) depth)]
 
     ;; Unary not → !
@@ -1927,8 +1923,8 @@
      (format "builtins.trace ~a null" (paren-wrap (emit-expr (car args) depth) (car args)))]
 
     ;; Nix-specific: qualified calls (lib/mkIf → lib.mkIf, pkgs/foo → pkgs.foo)
-    [(and fn-name (string-contains? (symbol->string fn-name) "/"))
-     (define nix-name (mangle-qualified-name fn-name))
+    [(qualified-ref? fn-expr)
+     (define nix-name (mangle-qualified-name fn-expr))
      (format "~a~a" nix-name
              (if (null? args) " null"
                  (string-append " " (string-join
@@ -2130,7 +2126,13 @@
                   body-str
                   (emit-match-clauses (cdr cs)))]
          [(pat-record? pat)
-          (define tag (string-downcase (symbol->string (pat-record-type-name pat))))
+          (define type-name (pat-record-type-name pat))
+          (define tag
+            (string-downcase
+             (symbol->string
+              (if (qualified-ref? type-name)
+                  (qualified-ref-name type-name)
+                  type-name))))
           (define bindings (pat-record-bindings pat))
           (define bind-str
             (if (null? bindings)
@@ -2228,7 +2230,9 @@
     (if validator
         ;; Keep one private candidate between merge and provider validation.
         ;; No user-visible selection or use occurs before the validator returns.
-        (format "(~a ~a)" (mangle-qualified-name validator) candidate-name)
+        (format "(~a ~a)"
+                (mangle-record-validator-name validator)
+                candidate-name)
         candidate-name))
   (define with-candidate
     (format "let ~a = ~a; in ~a" candidate-name updated result))

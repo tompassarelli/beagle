@@ -722,6 +722,20 @@
   (check-true (and out (string-contains? out "pkgs.hello")))
   (check-false (string-contains? out "pkgs/hello")))
 
+(test-case "qualified record pattern matches the provider's leaf tag"
+  (define out
+    (nix-emit-forms
+     '(define-target nix)
+     `(match value
+        ,(br '(models/Widget) 'value)
+        ,(br '_ 'nil))))
+  (check-true (and out (string-contains? out "_tag == \"widget\"")))
+  (check-false (string-contains? out "models/widget")))
+
+(test-case "bgl/promote remains an erased Nix operation"
+  (define out (nix-emit "(define-target nix) (bgl/promote value)"))
+  (check-equal? out "value"))
+
 ;; --- not -> ! -----------------------------------------------------------------
 
 (test-case "not emits ! prefix operator"
