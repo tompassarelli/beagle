@@ -14,10 +14,21 @@
   "../../native-core/validation/build-finalize.clj")
 (define-runtime-path gate-cache
   "../../bin/_gate-cache-run")
+(define-runtime-path beagle
+  "../../bin/beagle")
+(define-runtime-path supervisor
+  "../../native-core/bin/run-bounded.rkt")
+(define-runtime-path qualified-source
+  "../../native-core/validation/slice-parallel-runtime/qualified-parallel.bgl")
+(define-runtime-path constants-source
+  "../../native-core/validation/slice-parallel-runtime/constants.bgl")
 
 (define bb-command
   (or (find-executable-path "bb")
       (error 'native-c17-parallel "bb is unavailable")))
+(define racket-command
+  (or (find-executable-path (find-system-path 'exec-file))
+      (error 'native-c17-parallel "pinned Racket executable is unavailable")))
 
 (define base-artifacts
   '("source.facts" "module.native-program" "module.native-program.sha256"
@@ -72,10 +83,50 @@
         (list driver)))
   (apply system*/exit-code (car argv) (cdr argv)))
 
+(define (seed-parallel-checkpoint)
+  ;; The driver's 90-second contract starts at materialization. Publish the
+  ;; exact pre-materializer checkpoint under its own 90-second owner so a cold
+  ;; gate never spends that contract rebuilding the frozen Native Core stage.
+  (define scratch
+    (make-temporary-file "native-c17-parallel-checkpoint-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define out (build-path scratch "out"))
+      (make-directory out)
+      (define log (open-output-string))
+      (define env
+        (environment-variables-copy (current-environment-variables)))
+      (environment-variables-set!
+       env #"BEAGLE_CORE_BUILD_CACHE"
+       (path->bytes (path->directory-path core-build-cache)))
+      (environment-variables-set!
+       env #"BEAGLE_CORE_CHECKPOINT_FAILPOINT" #"after-stage")
+      (environment-variables-set! env #"NATIVE_PARALLEL_WORKERS" #"1")
+      (define status
+        (parameterize ([current-output-port log]
+                       [current-error-port log]
+                       [current-environment-variables env])
+          (system*/exit-code
+           racket-command supervisor "90" "5" "--"
+           beagle "build" "--materializer" "c17"
+           "--out" (path->string out)
+           (path->string qualified-source) (path->string constants-source))))
+      (define output (get-output-string log))
+      (unless (or (zero? status)
+                  (and (not (= status 124))
+                       (string-contains?
+                        output "Core checkpoint post-stage failpoint")))
+        (error 'native-c17-parallel
+               "cold checkpoint seed failed with status ~a:\n~a"
+               status output)))
+    (lambda () (delete-directory/files scratch))))
+
 (module+ test
   (make-directory* core-build-cache)
   (test-case
    "C17 parallel exports and optional artifacts remain an active contract"
+   (seed-parallel-checkpoint)
    (define driver-log (open-output-string))
    (define driver-status
      (parameterize ([current-output-port driver-log]
