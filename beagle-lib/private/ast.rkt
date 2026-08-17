@@ -698,11 +698,19 @@
     [(list? datum) 'paren]
     [else #f]))
 
+(define SOURCE-TEXT-BY-BYTES (make-weak-hasheq))
+
+(define (source-bytes->text source-bytes)
+  ;; Syntax positions are character offsets. Decode each immutable source
+  ;; snapshot once; decoding the whole module for every node is quadratic.
+  (hash-ref! SOURCE-TEXT-BY-BYTES source-bytes
+             (lambda () (bytes->string/utf-8 source-bytes))))
+
 (define (syntax-source-slice source-bytes stx)
   (and source-bytes
        (syntax-position stx)
        (syntax-span stx)
-       (let* ([source-text (bytes->string/utf-8 source-bytes)]
+       (let* ([source-text (source-bytes->text source-bytes)]
               [start (sub1 (syntax-position stx))]
               [end (+ start (syntax-span stx))])
          (and (<= 0 start end (string-length source-text))
