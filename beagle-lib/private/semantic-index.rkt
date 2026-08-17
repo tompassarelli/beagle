@@ -14,14 +14,13 @@
          "module-interface.rkt"
          "module-overlay-check.rkt"
          "module-source-root.rkt"
-         (except-in "parse.rkt" call-form-fn)
-         (only-in "parse.rkt" [call-form-fn raw-call-form-fn])
+         "parse.rkt"
          "validate-nix.rkt")
 
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (qualified-reference=? ref qualifier name)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (eq? (qualified-ref-name ref) name)))
 
 (define SEMANTIC-INDEX-SCHEMA-VERSION 1)
 
@@ -144,7 +143,8 @@
      (define body (let-form-body value))
      (and (pair? body) (unwrap-module-map (last body) (add1 depth)))]
     [(and (call-form? value)
-          (memq (call-form-fn value) '(lib/mkIf lib.mkIf))
+          (or (qualified-reference=? (call-form-fn value) 'lib 'mkIf)
+              (eq? (call-form-fn value) 'lib.mkIf))
           (pair? (call-form-args value)))
      (unwrap-module-map (last (call-form-args value)) (add1 depth))]
     [else #f]))

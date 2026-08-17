@@ -16,16 +16,20 @@
          racket/set
          racket/port
          json
-         (except-in "parse.rkt" call-form-fn)
-         (only-in "parse.rkt" [call-form-fn raw-call-form-fn])
+         "parse.rkt"
          "types.rkt"
          "nixos-schema.rkt"
          "diagnostic-kind.rkt")
 
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (qualified-reference=? ref qualifier name)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (eq? (qualified-ref-name ref) name)))
+
+(define (qualified-reference-member? ref qualifier names)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (memq (qualified-ref-name ref) names)))
 
 ;; ============================================================================
 ;; Error collection
@@ -627,7 +631,7 @@
 (define (mk-option-call? val)
   (and (call-form? val)
        (let ([fn (call-form-fn val)])
-         (and (symbol? fn) (eq? fn 'lib/mkOption)))))
+         (qualified-reference=? fn 'lib 'mkOption))))
 
 (define (mk-option-map val)
   (and (mk-option-call? val)
@@ -816,9 +820,9 @@
 (define (value-uses-priority? val)
   (and (call-form? val)
        (let ([fn (call-form-fn val)])
-         (and (symbol? fn)
-              (member fn '(lib/mkDefault lib/mkForce lib/mkMerge lib/mkOverride
-                           lib.mkDefault lib.mkForce lib.mkMerge lib.mkOverride))))))
+         (or (qualified-reference-member?
+              fn 'lib '(mkDefault mkForce mkMerge mkOverride))
+             (memq fn '(lib.mkDefault lib.mkForce lib.mkMerge lib.mkOverride))))))
 
 (define (detect-cross-file-conflicts all-file-keys schema)
   (define global-map (make-hash))

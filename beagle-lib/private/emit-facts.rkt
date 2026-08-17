@@ -15,14 +15,8 @@
 ;; minted integer node-id, pred a string, obj an int node-id or an inline literal.
 
 (require racket/string
-         (except-in "parse.rkt" call-form-fn)
-         (only-in "parse.rkt" [call-form-fn raw-call-form-fn])
+         "parse.rkt"
          "emit-dispatch.rkt")
-
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (provide facts-emit-program)
 
@@ -50,12 +44,11 @@
 
 ;; --- literals: inlined as triple objects, NOT minted as nodes (keep leaves compact) ---
 (define (lit? x)
-  (or (string? x) (number? x) (boolean? x) (symbol? x) (qualified-ref? x)
+  (or (string? x) (number? x) (boolean? x) (symbol? x)
       (keyword? x) (char? x) (null? x)))
 
 (define (lit->obj x)
   (cond
-    [(qualified-ref? x) (symbol->string (qualified-ref->symbol x))]
     [(keyword? x) (string-append ":" (keyword->string x))]
     [(symbol? x)  (symbol->string x)]
     [(char? x)    (string x)]

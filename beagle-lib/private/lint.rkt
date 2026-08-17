@@ -8,13 +8,23 @@
 (require racket/match
          racket/format
          racket/string
-         (except-in "parse.rkt" call-form-fn)
-         (only-in "parse.rkt" [call-form-fn raw-call-form-fn]))
+         "parse.rkt")
 
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (qualified-reference=? ref qualifier name)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (eq? (qualified-ref-name ref) name)))
+
+(define (qualified-reference-member? ref qualifier names)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (memq (qualified-ref-name ref) names)))
+
+(define (reference-display ref)
+  (if (qualified-ref? ref)
+      (format "~a/~a" (qualified-ref-qualifier ref)
+              (qualified-ref-name ref))
+      ref))
 
 (define (lint-program! prog)
   (lint-shadows prog)
@@ -548,7 +558,7 @@
 (define (collect-symbols form used)
   (match form
     [(? qualified-ref?)
-     (hash-set! used (qualified-ref->symbol form) #t)]
+     (hash-set! used form #t)]
     [(? symbol?) (hash-set! used form #t)]
     [(def-form _ _ value _ _) (collect-symbols value used)]
     [(defonce-form _ _ value _) (collect-symbols value used)]
@@ -1034,19 +1044,21 @@
   (define args (call-form-args e))
   (cond
     ;; (lib/mkIf false BODY) — dead code
-    [(and (eq? fn 'lib/mkIf) (= (length args) 2)
+    [(and (qualified-reference=? fn 'lib 'mkIf) (= (length args) 2)
           (or (eq? (car args) 'false) (eq? (car args) #f)))
      (warn "(lib/mkIf false ...) is dead code; remove the call or fix the condition")]
     ;; (lib/mkIf true BODY) — pointless wrapper
-    [(and (eq? fn 'lib/mkIf) (= (length args) 2)
+    [(and (qualified-reference=? fn 'lib 'mkIf) (= (length args) 2)
           (or (eq? (car args) 'true) (eq? (car args) #t)))
      (warn "(lib/mkIf true BODY) is always-on; inline BODY directly")]
     ;; (lib/mkIf x x) — typo: body is the condition
-    [(and (eq? fn 'lib/mkIf) (= (length args) 2)
+    [(and (qualified-reference=? fn 'lib 'mkIf) (= (length args) 2)
           (equal? (car args) (cadr args)))
      (warn "(lib/mkIf X X) — body equals condition; likely a typo")]
     ;; (lib/mkOption {:type T}) where T is a non-nullable primitive without :default
-    [(and (eq? fn 'lib/mkOption) (= (length args) 1) (map-form? (car args)))
+    [(and (qualified-reference=? fn 'lib 'mkOption)
+          (= (length args) 1)
+          (map-form? (car args)))
      (lint-mk-option-pairs (map-form-pairs (car args)))]
     ;; (merge {} x) or (merge x {}) — no-op
     [(and (eq? fn 'merge) (= (length args) 2))
@@ -1078,11 +1090,13 @@
     (for/or ([p (in-list pairs)])
       (and (symbol? (car p))
            (string=? (symbol->string (car p)) ":description"))))
-  (when (and type-val (symbol? type-val)
-             (member type-val '(lib/types.bool lib/types.str lib/types.int
-                                 lib/types.float lib/types.path))
+  (when (and type-val
+             (qualified-reference-member?
+              type-val 'lib
+              '(types.bool types.str types.int types.float types.path))
              (not has-default?))
-    (warn "lib/mkOption with :type ~a but no :default — will throw at eval time" type-val))
+    (warn "lib/mkOption with :type ~a but no :default — will throw at eval time"
+          (reference-display type-val)))
   (unless description?
     (warn "lib/mkOption missing :description — please document this option")))
 

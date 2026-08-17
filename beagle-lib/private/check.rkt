@@ -10,14 +10,7 @@
          racket/string
          racket/set
          racket/list
-         (except-in "parse.rkt"
-                    call-form-fn
-                    static-call-class+method
-                    pat-record-type-name)
-         (only-in "parse.rkt"
-                  [call-form-fn raw-call-form-fn]
-                  [static-call-class+method raw-static-call-class+method]
-                  [pat-record-type-name raw-pat-record-type-name])
+         "parse.rkt"
          "types.rkt"
          "stdlib-types.rkt"
          "stdlib-jvm.rkt"
@@ -25,24 +18,57 @@
          "macros.rkt"
          "diagnostic-kind.rkt")
 
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-;; Keep the checker on its legacy symbol contract until its conversion seam.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (named-reference? ref)
+  (or (symbol? ref) (qualified-ref? ref)))
 
-(define (static-call-class+method form)
-  (define ref (raw-static-call-class+method form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (qualified-reference-same-binding? left right)
+  (and (qualified-ref? left)
+       (qualified-ref? right)
+       (eq? (qualified-ref-qualifier left)
+            (qualified-ref-qualifier right))
+       (eq? (qualified-ref-name left) (qualified-ref-name right))
+       (or (not (qualified-ref-provider-id left))
+           (not (qualified-ref-provider-id right))
+           (eq? (qualified-ref-provider-id left)
+                (qualified-ref-provider-id right)))))
 
-(define (pat-record-type-name pattern)
-  (define ref (raw-pat-record-type-name pattern))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (reference-hash-ref table ref [fallback #f])
+  (or (hash-ref table ref #f)
+      (and (qualified-ref? ref)
+           (for/or ([candidate (in-hash-keys table)]
+                    #:when (qualified-reference-same-binding? candidate ref))
+             (hash-ref table candidate)))
+      fallback))
+
+(define (reference->string ref)
+  (cond
+    [(qualified-ref? ref)
+     (format "~a/~a" (qualified-ref-qualifier ref)
+             (qualified-ref-name ref))]
+    [(symbol? ref) (symbol->string ref)]
+    [else (format "~a" ref)]))
+
+(define (reference-leaf ref)
+  (if (qualified-ref? ref) (qualified-ref-name ref) ref))
+
+(define (symbol-qualified-reference sym)
+  (and
+   (symbol? sym)
+   (let* ([spelling (symbol->string sym)]
+          [separator
+           (for/last ([index (in-range (string-length spelling))]
+                      #:when (char=? (string-ref spelling index) #\/))
+             index)])
+     (and separator
+          (positive? separator)
+          (< separator (sub1 (string-length spelling)))
+          (qualified-ref
+           (string->symbol (substring spelling 0 separator))
+           (string->symbol (substring spelling (add1 separator)))
+           #f)))))
 
 (define (call-form-env-ref env form [fallback #f])
-  (define ref (raw-call-form-fn form))
-  (or (hash-ref env ref #f)
-      (hash-ref env (call-form-fn form) fallback)))
+  (reference-hash-ref env (call-form-fn form) fallback))
 
 (define (builtin-env-for-target target)
   (stdlib-for-target target))
@@ -445,16 +471,20 @@
 ;; --- "did you mean?" suggestions --------------------------------------------
 
 (define (extract-module-prefix sym)
-  (define s (symbol->string sym))
-  (let loop ([i 0])
-    (cond [(= i (string-length s)) #f]
-          [(char=? (string-ref s i) #\/) (substring s 0 i)]
-          [else (loop (+ i 1))])))
+  (cond
+    [(qualified-ref? sym)
+     (symbol->string (qualified-ref-qualifier sym))]
+    [else
+     (define s (symbol->string sym))
+     (let loop ([i 0])
+       (cond [(= i (string-length s)) #f]
+             [(char=? (string-ref s i) #\/) (substring s 0 i)]
+             [else (loop (+ i 1))]))]))
 
 (define (find-accessor-suggestions arg expected-type actual-type env)
   (cond
     [(and (call-form? arg)
-          (symbol? (call-form-fn arg)))
+          (named-reference? (call-form-fn arg)))
      (define fn-sym (call-form-fn arg))
      (define fn-type (call-form-env-ref env arg))
      (cond
@@ -468,7 +498,7 @@
            (define field-map (hash-ref RECORD-FIELDS rec-name))
            (define rec-lower (string-downcase (symbol->string rec-name)))
            (define prefix (extract-module-prefix fn-sym))
-           (define orig-str (symbol->string fn-sym))
+           (define orig-str (reference->string fn-sym))
            (define all
              (for/list ([(kw-sym field-type) (in-hash field-map)]
                         #:when (type-compatible? field-type expected-type)
@@ -889,7 +919,7 @@
     [(symbol? predicate)
      (hash-ref (current-callable-synchronous) predicate #f)]
     [(and (call-form? predicate)
-          (symbol? (call-form-fn predicate))
+          (named-reference? (call-form-fn predicate))
           (hash-ref (current-returns-synchronous-callable)
                     (call-form-fn predicate) #f)
           (constraint-expression-synchronous?
@@ -1418,7 +1448,7 @@
       (error-mode target)))))
 
 (define (qualified-interface-name prefix name)
-  (string->symbol (format "~a/~a" prefix name)))
+  (qualified-ref prefix name #f))
 
 (define (prepare-error-contracts! prog)
   (define table (program-semantic-contracts prog))
@@ -1458,7 +1488,7 @@
       (error-mode (program-target prog)))))
   (for ([(name form) (in-hash local-definitions)])
     (hash-set! table form (hash-ref contracts name)))
-  (define raising-functions (make-hasheq))
+  (define raising-functions (make-hash))
   ;; Effects cross the module boundary under the exact names consumers use.
   (for ([import (in-list (program-imported-module-interfaces prog))])
     (define interface (module-import-interface import))
@@ -1506,7 +1536,7 @@
 
 (define (raising-call-contract e)
   (and (call-form? e)
-       (symbol? (call-form-fn e))
+       (named-reference? (call-form-fn e))
        (hash-ref (current-raising-functions) (call-form-fn e) #f)))
 
 (define (keyword->field-name value)
@@ -1715,10 +1745,10 @@
           (error-contract-error
            e
            (format "call to ~a raises ~a and must be wrapped in check or rescue"
-                   (call-form-fn e)
+                   (reference->string (call-form-fn e))
                    (type->string (error-contract-error-type contract)))
            (hasheq
-            'function (symbol->string (call-form-fn e))
+            'function (reference->string (call-form-fn e))
             'raised (type->string (error-contract-error-type contract))
             'repair "(check (call ...)) or (rescue (call ...) ...)")))]
     [(call-form? e)
@@ -1758,7 +1788,22 @@
     (register-core-result-unions!))
   ;; user-declared external functions
   (for ([(name t) (in-hash (program-externs prog))])
-    (hash-set! env name t))
+    (hash-set! env name t)
+    (define qualified (symbol-qualified-reference name))
+    (when qualified (hash-set! env qualified t)))
+  ;; Imported interfaces are the structural authority for qualified call
+  ;; lookup. Program externs still include symbol spellings for referred and
+  ;; host-facing names, but qualified AST nodes never need to flatten to use
+  ;; them.
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define prefix (module-import-prefix import))
+    (define namespace (module-interface-namespace interface))
+    (for ([(name binding) (in-hash (module-interface-bindings interface))]
+          #:unless (eq? (interface-binding-kind binding) 'macro))
+      (define binding-type (interface-binding-type binding))
+      (hash-set! env (qualified-ref prefix name namespace) binding-type)
+      (hash-set! env (qualified-ref namespace name namespace) binding-type)))
   ;; Alias-qualified stdlib/extern access: (require babashka.fs :as fs)
   ;; makes fs/exists? resolve to the babashka.fs/exists? entry. Pre-populate
   ;; alias-prefixed bindings for every env key under the required namespace
@@ -1827,7 +1872,7 @@
                       (memq (string->symbol (format "->~a" name)) refer)))
              (list name)
              '())))
-      (for ([spelling (in-list (remove-duplicates spellings eq?))])
+      (for ([spelling (in-list (remove-duplicates spellings equal?))])
         (hash-set! RECORD-FIELDS spelling field-map)
         (hash-set! RECORD-FIELD-ORDER spelling field-order))))
   ;; union types imported from other modules (for exhaustive match checking)
@@ -2345,7 +2390,7 @@
            (and (jst-method? value) (jst-method-async? value)))
        #f]
       [(call-form? value)
-       (define callee (raw-call-form-fn value))
+       (define callee (call-form-fn value))
        (and
         (if (or (symbol? callee) (qualified-ref? callee))
             (hash-ref callable-proofs callee unknown-call-synchronous?)
@@ -2540,7 +2585,7 @@
         (constraint-expression-synchronous? current callable-proofs #f)
         'inline-function)]
       [(call-form? current)
-       (define callee (raw-call-form-fn current))
+       (define callee (call-form-fn current))
        (and
         (or (symbol? callee) (qualified-ref? callee))
         (hash-ref return-proofs callee #f)
@@ -4213,11 +4258,14 @@
     (if (or (char=? c #\.) (char=? c #\/)) i best)))
 
 (define (unqualified-member-name name)
-  (define spelling (symbol->string name))
-  (define separator (last-separator-index spelling))
-  (if (negative? separator)
-      name
-      (string->symbol (substring spelling (add1 separator)))))
+  (cond
+    [(qualified-ref? name) (qualified-ref-name name)]
+    [else
+     (define spelling (symbol->string name))
+     (define separator (last-separator-index spelling))
+     (if (negative? separator)
+         name
+         (string->symbol (substring spelling (add1 separator))))]))
 
 ;; Return the closed nominal alternatives represented by TYPE, including a
 ;; nominal union nested inside a structural union such as `(U TermV0 Nil)`.
@@ -4827,12 +4875,16 @@
 
 ;; Split Class/member on the LAST slash (java.security.KeyStore/getInstance).
 (define (split-static sym)
-  (define s (symbol->string sym))
-  (define m (regexp-match-positions #rx"/[^/]*$" s))
-  (if m
-    (values (string->symbol (substring s 0 (caar m)))
-            (string->symbol (substring s (add1 (caar m)))))
-    (values #f #f)))
+  (cond
+    [(qualified-ref? sym)
+     (values (qualified-ref-qualifier sym) (qualified-ref-name sym))]
+    [else
+     (define s (symbol->string sym))
+     (define m (regexp-match-positions #rx"/[^/]*$" s))
+     (if m
+         (values (string->symbol (substring s 0 (caar m)))
+                 (string->symbol (substring s (add1 (caar m)))))
+         (values #f #f))]))
 
 ;; Resolve a ctor/method/static call against an overload set: arity-select,
 ;; type-check args (reuse check-args → precise mismatch errors), return the
@@ -4903,7 +4955,7 @@
          (schema-type-for-config-sym e)
          ANY)]
     [(qualified-ref? e)
-     (hash-ref env e ANY)]
+     (reference-hash-ref env e ANY)]
     [(quoted? e) ANY]
     [(regex-lit? e)
      (regex-construction-contract e)
@@ -4919,7 +4971,7 @@
        (regex-contract-error
         e
         (format "~a expects Regex and String arguments" fn)
-        (hasheq 'function (symbol->string fn)
+        (hasheq 'function (reference->string fn)
                 'actual-arity (length args))))
      (define contract (check-regex-arg! (car args) env fn))
      (check-string-arg! (cadr args) env fn)
@@ -4927,14 +4979,14 @@
      (nullable-type (regex-contract-match-type contract))]
     [(and (call-form? e)
           (set-member? (current-regex-string-ops) (call-form-fn e))
-          (regexp-match? #rx"/split$" (symbol->string (call-form-fn e))))
+          (eq? (reference-leaf (call-form-fn e)) 'split))
      (define fn (call-form-fn e))
      (define args (call-form-args e))
      (unless (memq (length args) '(2 3))
        (regex-contract-error
         e
         (format "~a expects String, Regex, and optional Int limit" fn)
-        (hasheq 'function (symbol->string fn)
+        (hasheq 'function (reference->string fn)
                 'actual-arity (length args))))
      (check-string-arg! (car args) env fn)
      (define contract (check-regex-arg! (cadr args) env fn))
@@ -4949,14 +5001,14 @@
      (type-app 'Vec (list STRING))]
     [(and (call-form? e)
           (set-member? (current-regex-string-ops) (call-form-fn e))
-          (regexp-match? #rx"/replace$" (symbol->string (call-form-fn e))))
+          (eq? (reference-leaf (call-form-fn e)) 'replace))
      (define fn (call-form-fn e))
      (define args (call-form-args e))
      (unless (= (length args) 3)
        (regex-contract-error
         e
         (format "~a expects String, String-or-Regex, and String" fn)
-        (hasheq 'function (symbol->string fn)
+        (hasheq 'function (reference->string fn)
                 'actual-arity (length args))))
      (check-string-arg! (car args) env fn)
      (define pattern-type (infer-expr (cadr args) env))
@@ -5385,16 +5437,15 @@
            (for ([a (in-list (method-call-args e))]) (infer-expr a env))
            ANY])])]
     [(static-call? e)
-     (define ref (raw-static-call-class+method e))
-     (define sym (static-call-class+method e))
-     (warn-target-exclude sym e)
+     (define ref (static-call-class+method e))
+     (warn-target-exclude ref e)
      ;; Typed JVM static: if Class (after import-canonicalization) is a known
      ;; class with this static, resolve against its static overloads. Clojure
      ;; 1.12 also permits Class/method with the instance in position 1; when
      ;; the member is a known instance method, resolve that receiver separately.
      ;; Otherwise fall back to the flat stdlib table (System/*, Math/*,
      ;; ns-qualified, …).
-     (define-values (raw-cls member) (split-static sym))
+     (define-values (raw-cls member) (split-static ref))
      (define cls (and raw-cls (canon-class raw-cls env)))
      (define entry (and cls (hash-ref CLASS-TABLE cls #f)))
      (define statics (and entry (hash-ref (class-entry-statics entry) member #f)))
@@ -5414,20 +5465,19 @@
             (raise-diag 'type-mismatch
                         (format "~a/~a receiver: expected ~a, got ~a"
                                 cls member cls (type->string recv-type))
-                        (hasheq 'function (symbol->string sym))
+                        (hasheq 'function (reference->string ref))
                         #:src (src-for (car args)))))
         (resolve-jvm-call 'method cls member methods args env e)]
        [else
         (define raw-type
-          (or (and (qualified-ref? ref) (hash-ref env ref #f))
-              (hash-ref env sym ANY)))
+          (reference-hash-ref env ref ANY))
         (define fn-type
           (if (type-poly? raw-type)
             (resolve-poly-call raw-type (static-call-args e) env)
             raw-type))
         (cond
           [(type-fn? fn-type)
-           (check-args sym fn-type (static-call-args e) env e)
+           (check-args ref fn-type (static-call-args e) env e)
            (type-fn-ret fn-type)]
           [else
            (for ([a (in-list (static-call-args e))]) (infer-expr a env))
@@ -5756,10 +5806,10 @@
      (if nullable-tuple? (nullable-type selected) selected)]
 
     [(call-form? e)
-     (warn-target-exclude (raw-call-form-fn e) e)
+     (warn-target-exclude (call-form-fn e) e)
      (check-collection-order-use! e env)
-     (define ref (raw-call-form-fn e))
-     (define fn (call-form-fn e))
+     (define ref (call-form-fn e))
+     (define fn ref)
      (when (and (eq? (current-check-target) 'js)
                 (symbol? fn)
                 (not (hash-has-key? env fn))
@@ -5776,14 +5826,11 @@
         #:src (src-for e)))
      (define raw-type
        (cond
-         [(qualified-ref? ref)
-          (or (hash-ref env ref #f)
-              (and (symbol? fn) (hash-ref env fn #f))
-              ANY)]
+         [(qualified-ref? ref) (reference-hash-ref env ref ANY)]
          [(symbol? fn) (hash-ref env fn ANY)]
          [else (infer-expr ref env)]))
      (define call-name
-       (if (symbol? (call-form-fn e)) (call-form-fn e) '<function>))
+       (if (named-reference? ref) ref '<function>))
      (define fn-type
        (cond
          [(inferred-type-poly? raw-type) (instantiate-type raw-type)]
@@ -5807,11 +5854,11 @@
        [(type-fn? fn-type)
         (define arg-types
           (check-args call-name fn-type (call-form-args e) env e))
-        (when (and (symbol? (call-form-fn e))
+        (when (and (named-reference? ref)
                    (>= (current-check-profile) 2))
           (check-scalar-predicate-literal call-name (call-form-args e) e))
         (zonk-type
-         (if (symbol? (call-form-fn e))
+         (if (named-reference? ref)
              (numeric-refine call-name arg-types (type-fn-ret fn-type))
              (type-fn-ret fn-type)))]
        [(and (type-union? fn-type)
@@ -6438,7 +6485,7 @@
        (raise-diag 'arity
                     (format "call to ~a: expected at least ~a arg(s), got ~a"
                             fn-name n-fixed n-args)
-                    (hasheq 'function (symbol->string fn-name)
+                    (hasheq 'function (reference->string fn-name)
                             'signature (signature-string)
                             'expected-arity n-fixed
                             'actual-arity n-args
@@ -6471,7 +6518,7 @@
        (raise-diag 'arity
                     (format "call to ~a: expected ~a arg(s), got ~a"
                             fn-name n-fixed n-args)
-                    (hasheq 'function (symbol->string fn-name)
+                    (hasheq 'function (reference->string fn-name)
                             'signature (signature-string)
                             'expected-arity n-fixed
                             'actual-arity n-args
@@ -6511,7 +6558,9 @@
 ;; fills the registry for every record, union member, and error member before
 ;; any form is checked, so the lookup is total here.
 (define (record-constructor-operation? fn-name)
-  (define m (regexp-match #rx"(?:^|/)->([^/]+)$" (symbol->string fn-name)))
+  (define m
+    (regexp-match #rx"^->(.+)$"
+                  (symbol->string (reference-leaf fn-name))))
   (and m (hash-has-key? RECORD-FIELDS (string->symbol (cadr m)))))
 
 (define (dynamic-total-operation? fn-name)
@@ -6546,7 +6595,7 @@
      arg
      (format "call to ~a cannot consume ~a without narrowing to a declared alternative"
              fn-name (type->string a-type))
-     (hasheq 'function (symbol->string fn-name)
+     (hasheq 'function (reference->string fn-name)
              'declared (type->string a-type)
              'repair "guard the value with a type predicate before this operation")))
   (define inference-evidence?
@@ -6600,7 +6649,7 @@
                 (format "call to ~a: arg ~a expected ~a, got ~a"
                         fn-name i (type->string expected-type) (type->string a-type))
                 (hash-set* (type-mismatch-details expected-type a-type)
-                        'function (symbol->string fn-name)
+                        'function (reference->string fn-name)
                         'signature sig-str
                         'arg-position i
                         'arg-expr (or arg-expr-str 'null)
@@ -6757,13 +6806,20 @@
                      (substring s 1))))
 
 (define (qualified-name-parts name)
-  (define authored (symbol->string name))
-  (define slash
-    (for/fold ([last #f]) ([index (in-range (string-length authored))]
-                           #:when (char=? (string-ref authored index) #\/))
-      index))
-  (values (if slash (substring authored 0 (add1 slash)) "")
-          (if slash (substring authored (add1 slash)) authored)))
+  (cond
+    [(qualified-ref? name)
+     (values
+      (string-append
+       (symbol->string (qualified-ref-qualifier name)) "/")
+      (symbol->string (qualified-ref-name name)))]
+    [else
+     (define authored (symbol->string name))
+     (define slash
+       (for/fold ([last #f]) ([index (in-range (string-length authored))]
+                              #:when (char=? (string-ref authored index) #\/))
+         index))
+     (values (if slash (substring authored 0 (add1 slash)) "")
+             (if slash (substring authored (add1 slash)) authored))]))
 
 (define (scalar-constructor-name name)
   (define-values (prefix leaf) (qualified-name-parts name))
@@ -8768,7 +8824,7 @@
       [(qualified-ref? e) (visit! e l)]
       [(symbol? e) (visit! e l)]
       [(call-form? e)
-       (define fn (raw-call-form-fn e))
+       (define fn (call-form-fn e))
        (if (or (qualified-ref? fn) (symbol? fn))
            (visit! fn l)
            (go fn l))

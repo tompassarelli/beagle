@@ -904,7 +904,7 @@
   (check-true (qualified-ref? ref))
   (check-eq? (qualified-ref-qualifier ref) 'str)
   (check-eq? (qualified-ref-name ref) 'upper-case)
-  (check-eq? (qualified-ref->symbol ref) 'str/upper-case))
+  (check-false (qualified-ref-provider-id ref)))
 
 (test-case "qualified reference lowers once and preserves odd leaf characters"
   (define ref (car (parse-one 'odd.ns/->thing?!)))
