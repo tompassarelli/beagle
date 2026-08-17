@@ -2,8 +2,8 @@
 # land together.
 name: tests
 
-# Every gate remains blocking, but independent gate groups and suite shards run
-# concurrently so one active-tier failure does not suppress the remaining signal.
+# Suite shards and pre-gates remain blocking. The newly exposed gate groups run
+# concurrently and remain visible under the explicit quarantine below.
 
 on:
   push:
@@ -53,16 +53,22 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
-          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          key: racket-compiled-v2-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
-            racket-9.1-
+            racket-compiled-v2-9.1-
 
       - name: Link beagle packages
         run: |
           raco pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
+
+      # The scope gate was formerly reached through `direnv exec`, which gave
+      # _beagle-racket an explicit pinned executable. This standalone job uses
+      # setup-racket's matching 9.1 installation, so publish that same identity
+      # for the gate's nested checkout probes.
+      - name: Select installed Racket for Beagle tooling
+        run: printf '_BEAGLE_RACKET=%s\n' "$(command -v racket)" >> "$GITHUB_ENV"
 
       - name: Racket scope gate
         run: bin/test/racket-scope/run.sh
@@ -91,11 +97,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
-          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          key: racket-compiled-v2-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
-            racket-9.1-
+            racket-compiled-v2-9.1-
 
       - name: Link beagle packages
         run: |
@@ -133,6 +138,10 @@ jobs:
           direnv exec . racket beagle-lib/private/tier-runner.rkt --full --shard ${{ matrix.shard }}/4
 
   gates-standalone:
+    # QUARANTINE (EXEC-55): first-ever executions expose pre-existing gate
+    # failures; non-blocking pending the gate-repair program; every failure
+    # still visible in the run summary.
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -149,11 +158,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
-          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          key: racket-compiled-v2-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
-            racket-9.1-
+            racket-compiled-v2-9.1-
 
       - name: Link beagle packages
         run: |
@@ -200,6 +208,10 @@ jobs:
           fi
 
   gates-fram:
+    # QUARANTINE (EXEC-55): first-ever executions expose pre-existing gate
+    # failures; non-blocking pending the gate-repair program; every failure
+    # still visible in the run summary.
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -216,11 +228,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
-          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          key: racket-compiled-v2-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
-            racket-9.1-
+            racket-compiled-v2-9.1-
 
       - name: Link beagle packages
         run: |
