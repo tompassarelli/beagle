@@ -80,9 +80,12 @@
              "exhaustive-match-fix.rkt" ; missing-case clause-skeleton repair fix
              "repair-apply.rkt"         ; beagle-repair clause-insertion (python unit tests)
              "expected-errors.rkt"      ; inline #guard_msgs-style diagnostics
+             "macro-eval.rkt"            ; macro evaluator core primitives and typed binder constructors
+             "second-order-contracts.rkt" ; active JS checker-contract coverage
 
              "lint.rkt"
              "license-metadata.rkt"       ; root license files and package metadata stay in sync
+             "lsp-effective-signatures.rkt" ; finalized inferred signatures on the public LSP surface
              "macro-hygiene.rkt"
              "parse.rkt"
              "annotation-parse.rkt"   ; structural typed bindings and fixed return slots
@@ -102,6 +105,8 @@
              "test-tags.rkt"
              "threading.rkt"
              "threading-marker.rkt"
+             "repl.rkt"                 ; persistent REPL state and finalized signatures
+             "type-inference-core.rkt"  ; deterministic unification, generalization, and type JSON
              "type-view.rkt"            ; types-as-view delaborator (explain-type)
              "types.rkt"
              ;; Nix (load-bearing target — the live happy path)
@@ -117,6 +122,7 @@
              "nix-import-roundtrip.rkt"
              "validate-nix.rkt"
              "check-all-nix.rkt"
+             "build-all-nix-reader.rkt" ; Nix build/read dispatch regression coverage
              ;; Clojure — promoted Phase D (2026-05).
              ;; emit.rkt is the clj structural suite; emit-clj-behavioral.rkt
              ;; runs the emitted clj via bb (Babashka).
