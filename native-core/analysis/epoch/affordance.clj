@@ -255,46 +255,76 @@
 
 (def string-ns? #{"clojure.string"})
 
-(defn resolve-spelling
-  [ns- spelling]
-  (let [m (get @modules ns-)]
+(defn ref-node? [reference]
+  (and (map? reference) (= "ref" (get reference "node"))))
+
+(defn ref-name [reference]
+  (when (ref-node? reference) (get reference "name")))
+
+(defn ref-qualifier [reference]
+  (when (ref-node? reference) (get reference "qualifier")))
+
+(defn ref-provider-id [reference]
+  (when (ref-node? reference) (get reference "providerId")))
+
+(defn ref-key [reference]
+  [(ref-qualifier reference) (ref-name reference)])
+
+(defn ref-label [reference]
+  (let [qualifier (ref-qualifier reference)
+        name (ref-name reference)]
     (cond
-      (or (nil? spelling) (= "" spelling)) {:kind :unknown :name ""}
-      (= "/" spelling) {:kind :builtin :name "/"}
-      (str/includes? spelling "/")
-      (let [[a n] (str/split spelling #"/" 2)
-            target-ns (get (:aliases m) a)]
+      (nil? name) ""
+      (nil? qualifier) name
+      :else (str qualifier "/" name))))
+
+(defn unqualified-ref-name [reference]
+  (when (and (ref-node? reference) (nil? (ref-qualifier reference)))
+    (ref-name reference)))
+
+(defn resolve-reference
+  [ns- reference]
+  (let [m (get @modules ns-)
+        qualifier (ref-qualifier reference)
+        provider-id (ref-provider-id reference)
+        name (ref-name reference)
+        label (ref-label reference)]
+    (cond
+      (nil? name) {:kind :unknown :name ""}
+      (and (nil? qualifier) (= "/" name)) {:kind :builtin :name "/"}
+      qualifier
+      (let [target-ns (or provider-id (get (:aliases m) qualifier))]
         (cond
           (and target-ns (string-ns? target-ns))
-          {:kind :builtin :name (str "str/" n)}
-          (and (nil? target-ns) (= a "str"))
-          {:kind :builtin :name spelling}
-          (contains? #{"native.bytes" "System" "host.socket"} a)
-          {:kind :builtin :name spelling}
+          {:kind :builtin :name (str "str/" name)}
+          (and (nil? target-ns) (= qualifier "str"))
+          {:kind :builtin :name label}
+          (contains? #{"native.bytes" "System" "host.socket"} qualifier)
+          {:kind :builtin :name label}
           (and target-ns (get @modules target-ns))
           (let [tm (get @modules target-ns)]
             (cond
-              (get-in tm [:defns n]) {:kind :defn :ns target-ns :name n}
-              (and (str/starts-with? n "->")
-                   (get-in tm [:records (subs n 2)]))
-              {:kind :ctor :ns target-ns :record (subs n 2)}
-              (get-in tm [:accessors n])
-              {:kind :accessor :ns target-ns :spelling n}
-              (get-in tm [:defs n]) {:kind :def :ns target-ns :name n}
-              :else {:kind :unknown :name spelling}))
-          :else {:kind :unknown :name spelling}))
-      (get-in m [:defns spelling]) {:kind :defn :ns ns- :name spelling}
-      (and (str/starts-with? spelling "->")
-           (get-in m [:records (subs spelling 2)]))
-      {:kind :ctor :ns ns- :record (subs spelling 2)}
-      (get-in m [:accessors spelling]) {:kind :accessor :ns ns- :spelling spelling}
-      (get-in m [:defs spelling]) {:kind :def :ns ns- :name spelling}
-      (get (:refers m) spelling)
-      (let [tns (get (:refers m) spelling)]
-        (if (get-in @modules [tns :defns spelling])
-          {:kind :defn :ns tns :name spelling}
-          {:kind :unknown :name spelling}))
-      :else {:kind :builtin :name spelling})))
+              (get-in tm [:defns name]) {:kind :defn :ns target-ns :name name}
+              (and (str/starts-with? name "->")
+                   (get-in tm [:records (subs name 2)]))
+              {:kind :ctor :ns target-ns :record (subs name 2)}
+              (get-in tm [:accessors name])
+              {:kind :accessor :ns target-ns :spelling name}
+              (get-in tm [:defs name]) {:kind :def :ns target-ns :name name}
+              :else {:kind :unknown :name label}))
+          :else {:kind :unknown :name label}))
+      (get-in m [:defns name]) {:kind :defn :ns ns- :name name}
+      (and (str/starts-with? name "->")
+           (get-in m [:records (subs name 2)]))
+      {:kind :ctor :ns ns- :record (subs name 2)}
+      (get-in m [:accessors name]) {:kind :accessor :ns ns- :spelling name}
+      (get-in m [:defs name]) {:kind :def :ns ns- :name name}
+      (get (:refers m) name)
+      (let [tns (get (:refers m) name)]
+        (if (get-in @modules [tns :defns name])
+          {:kind :defn :ns tns :name name}
+          {:kind :unknown :name name}))
+      :else {:kind :builtin :name name})))
 
 ;; ---------------------------------------------------------------------------
 ;; Builtin behavior tables
@@ -418,21 +448,22 @@
 (defn set-typed-arg? [arg-json defn-m]
   (or (= "set" (get arg-json "node"))
       (and (= "ref" (get arg-json "node"))
-           (let [nm (get arg-json "name")
+           (let [nm (unqualified-ref-name arg-json)
                  anns (atom [])]
-             (doseq [p (get defn-m "params")]
-               (when (parameter-binds? p nm)
-                 (swap! anns conj (get p "ann"))))
-             (letfn [(scan [x]
-                       (cond (map? x)
-                             (do (when (= "let" (get x "node"))
-                                   (doseq [b (get x "bindings")]
-                                     (when (= nm (str (get b "name")))
-                                       (swap! anns conj (get b "ann")))))
-                                 (doseq [v (vals x)] (scan v)))
-                             (sequential? x) (doseq [v x] (scan v))))]
-               (scan (get defn-m "body")))
-             (some ann-set? @anns)))))
+             (when nm
+               (doseq [p (get defn-m "params")]
+                 (when (parameter-binds? p nm)
+                   (swap! anns conj (get p "ann"))))
+               (letfn [(scan [x]
+                         (cond (map? x)
+                               (do (when (= "let" (get x "node"))
+                                     (doseq [b (get x "bindings")]
+                                       (when (= nm (str (get b "name")))
+                                         (swap! anns conj (get b "ann")))))
+                                   (doseq [v (vals x)] (scan v)))
+                               (sequential? x) (doseq [v x] (scan v))))]
+                 (scan (get defn-m "body")))
+               (some ann-set? @anns))))))
 
 (defn classify-site* [id]
   (let [r (nrec id) m (:m r) kind (:kind r)]
@@ -442,9 +473,7 @@
       "set" {:construct "set-literal" :allocates "always"}
       "with" {:construct "record-assoc" :allocates "always"}
       "call"
-      (let [spelling (if (= "ref" (get-in m ["fn" "node"]))
-                       (get-in m ["fn" "name"]) "")
-            res (resolve-spelling (:module r) spelling)]
+      (let [res (resolve-reference (:module r) (get m "fn"))]
         (when (= :builtin (:kind res))
           (let [n (:name res)]
             (cond
@@ -476,15 +505,15 @@
 ;; Use collection (refs to a name), scope-aware.
 ;; ---------------------------------------------------------------------------
 
-;; ref name -> [ids], built after indexing
+;; [authored qualifier, leaf name] -> [ids], built after indexing
 (def ref-index (atom {}))
 (defn build-ref-index! []
   (reset! ref-index
           (persistent!
            (reduce (fn [acc [id r]]
                      (if (= "ref" (:kind r))
-                       (let [nm (get (:m r) "name")]
-                         (assoc! acc nm (conj (get acc nm []) id)))
+                       (let [key (ref-key (:m r))]
+                         (assoc! acc key (conj (get acc key []) id)))
                        acc))
                    (transient {}) @nodes))))
 
@@ -545,7 +574,7 @@
                         true
                         :else false))]
                 (recur p (not shadowed?)))))))
-   (get @ref-index nm [])))
+   (get @ref-index [nil nm] [])))
 
 (defn crossing-fn-between
   "First fn node strictly between use-id and root-id that is NOT a
@@ -619,8 +648,7 @@
          (= :arg (get (:role r) :k))
          (let [p (nrec (:parent r))]
            (and (= "call" (:kind p))
-                (let [sp (get-in (:m p) ["fn" "name"])
-                      res (resolve-spelling (:module p) sp)]
+                (let [res (resolve-reference (:module p) (get (:m p) "fn"))]
                   (and (= :builtin (:kind res))
                        (contains? single-extent-callback-callees
                                   (:name res)))))))))
@@ -631,8 +659,7 @@
          (= :arg (get (:role r) :k))
          (let [p (nrec (:parent r))]
            (and (= "call" (:kind p))
-                (let [sp (get-in (:m p) ["fn" "name"])
-                      res (resolve-spelling (:module p) sp)]
+                (let [res (resolve-reference (:module p) (get (:m p) "fn"))]
                   (and (= :builtin (:kind res))
                        (contains? iteration-primitives (:name res)))))))))
 
@@ -677,8 +704,8 @@
           (reduce (fn [acc [id r]]
                     (if (and (= "call" (:kind r))
                              (= "ref" (get-in (:m r) ["fn" "node"])))
-                      (let [res (resolve-spelling (:module r)
-                                                  (get-in (:m r) ["fn" "name"]))]
+                      (let [res (resolve-reference (:module r)
+                                                   (get (:m r) "fn"))]
                         (if (= :defn (:kind res))
                           (let [did (get-in @modules
                                             [(:ns res) :defns (:name res) :id])]
@@ -768,22 +795,24 @@
               (let [cm (:m call-rec)
                     tgt (get-in cm ["args" 0])]
                 (if (= "ref" (get tgt "node"))
-                  (let [tn (get tgt "name")
-                        cell-ann (render-ann (ann-of-name (:id call-rec) tn))
+                  (let [tn (unqualified-ref-name tgt)
+                        cell-ann (when tn
+                                   (render-ann (ann-of-name (:id call-rec) tn)))
                         retaining (or cell-ann held)
                         binder+i
-                        (loop [cur (:parent call-rec)]
-                          (when cur
-                            (let [r2 (nrec cur)]
-                              (if (contains? #{"let" "loop"} (:kind r2))
-                                (let [idx (some (fn [[k b]]
-                                                  (when (= tn (str (get b "name")))
-                                                    k))
-                                                (reverse
-                                                 (map-indexed vector
-                                                              (get (:m r2) "bindings"))))]
-                                  (if idx [cur idx] (recur (:parent r2))))
-                                (recur (:parent r2))))))]
+                        (when tn
+                          (loop [cur (:parent call-rec)]
+                            (when cur
+                              (let [r2 (nrec cur)]
+                                (if (contains? #{"let" "loop"} (:kind r2))
+                                  (let [idx (some (fn [[k b]]
+                                                    (when (= tn (str (get b "name")))
+                                                      k))
+                                                  (reverse
+                                                   (map-indexed vector
+                                                                (get (:m r2) "bindings"))))]
+                                    (if idx [cur idx] (recur (:parent r2))))
+                                  (recur (:parent r2)))))))]
                     (if binder+i
                       (let [[bid bi] binder+i]
                         (if (region-pred bid)
@@ -808,9 +837,9 @@
                       q))))
             (call-arg [q call-id role tag held]
               (let [cr (nrec call-id) cm (:m cr)
-                    spelling (if (= "ref" (get-in cm ["fn" "node"]))
-                               (get-in cm ["fn" "name"]) "")
-                    res (resolve-spelling (:module cr) spelling)
+                    reference (get cm "fn")
+                    spelling (ref-label reference)
+                    res (resolve-reference (:module cr) reference)
                     i (:i role)]
                 (case (:kind res)
                   :defn
@@ -890,12 +919,11 @@
                     ;; ordinary expression value.
                     q (if (and (= "call" (:kind r))
                                (= "ref" (get-in (:m r) ["fn" "node"]))
-                               (let [res (resolve-spelling
-                                          (:module r)
-                                          (get-in (:m r) ["fn" "name"]))]
+                               (let [res (resolve-reference
+                                          (:module r) (get (:m r) "fn"))]
                                  (and (= :builtin (:kind res))
                                       (contains? store-builtins (:name res)))))
-                        (store-into-atom q r (get-in (:m r) ["fn" "name"]) held)
+                        (store-into-atom q r (ref-label (get (:m r) "fn")) held)
                         q)]
                 (cond
                   ;; the value became the boundary node's own result value
@@ -1133,8 +1161,7 @@
                           _ (letfn [(scan [x]
                                       (cond
                                         (and (map? x) (= "call" (get x "node")))
-                                        (do (let [sp (get-in x ["fn" "name"])
-                                                  res (resolve-spelling ns- sp)]
+                                        (do (let [res (resolve-reference ns- (get x "fn"))]
                                               (when (and (= :defn (:kind res))
                                                          (contains? stage-fns
                                                                     [(:ns res) (:name res)]))
@@ -1172,7 +1199,7 @@
               (when (and e (< depth 6))
                 (cond
                   (= "ref" (get e "node"))
-                  (let [nm (get e "name")]
+                  (when-let [nm (unqualified-ref-name e)]
                     (if (contains? pnames nm)
                       (str "param:" nm)
                       (when-let [v (binding-value nm)]
@@ -1181,7 +1208,7 @@
                        (= "ref" (get-in e ["fn" "node"]))
                        (= 1 (count (get e "args"))))
                   (when-let [inner (canon (first (get e "args")) (inc depth))]
-                    (str (get-in e ["fn" "name"]) "(" inner ")"))
+                    (str (ref-label (get e "fn")) "(" inner ")"))
                   (and (map? e) (= "literal" (get e "node")))
                   (str "lit:" (get e "kind") ":" (get e "value"))
                   :else nil)))]
@@ -1190,7 +1217,7 @@
 (defn keyword-discriminant-test [test-json defn-id]
   (let [under-param #(when % (second (re-find #"param:([^)\s]+)" %)))]
     (when (and (map? test-json) (= "call" (get test-json "node")))
-      (let [callee (get-in test-json ["fn" "name"])
+      (let [callee (unqualified-ref-name (get test-json "fn"))
             args (get test-json "args")]
         (cond
           (and (contains? #{"=" "not="} callee) (= 2 (count args)))
@@ -1258,10 +1285,9 @@
                   (doseq [[_ cl] pairs
                           call (spine-end-calls (get cl "body"))]
                     (when (some #(and (= "ref" (get % "node"))
-                                      (= pname (get % "name")))
+                                      (= pname (unqualified-ref-name %)))
                                 (get call "args"))
-                      (let [res (resolve-spelling
-                                 ns- (get-in call ["fn" "name"]))]
+                      (let [res (resolve-reference ns- (get call "fn"))]
                         (when (= :defn (:kind res))
                           (swap! handlers assoc [(:ns res) (:name res)]
                                  {:of [ns- dn]}))))))))))))
@@ -1330,10 +1356,10 @@
         deref-of-acc?
         (fn [e]
           (and (map? e) (= "call" (get e "node"))
-               (= "deref" (get-in e ["fn" "name"]))
+               (= "deref" (unqualified-ref-name (get e "fn")))
                (let [a (first (get e "args"))]
                  (or (and (map? a) (= "call" (get a "node"))
-                          (contains? acc (strip-ns (get-in a ["fn" "name"]))))
+                          (contains? acc (ref-name (get a "fn"))))
                      (and (map? a) (= "kw-access" (get a "node"))
                           (contains? fields
                                      (str/replace (str (get a "kw"))
@@ -1345,7 +1371,7 @@
                    :when (or (deref-of-acc? e)
                              (and (map? e) (= "call" (get e "node"))
                                   (contains? #{"inc" "dec"}
-                                             (get-in e ["fn" "name"]))
+                                             (unqualified-ref-name (get e "fn")))
                                   (deref-of-acc? (first (get e "args")))))]
                [ns- dn]))
         wrappers
@@ -1353,8 +1379,7 @@
                    [dn d] (:defns m)
                    :let [e (body-spine (:m d))]
                    :when (and (map? e) (= "call" (get e "node"))
-                              (let [res (resolve-spelling
-                                         ns- (get-in e ["fn" "name"]))]
+                              (let [res (resolve-reference ns- (get e "fn"))]
                                 (and (= :defn (:kind res))
                                      (contains? direct
                                                 [(:ns res) (:name res)]))))]
@@ -1367,15 +1392,15 @@
              :let [spine (body-spine (:m d))]
              :when (and (map? spine) (= "call" (get spine "node"))
                         (str/starts-with?
-                         (or (strip-ns (get-in spine ["fn" "name"])) "") "->")
+                         (or (ref-name (get spine "fn")) "") "->")
                         (some (fn [a]
                                 (and (map? a) (= "call" (get a "node"))
-                                     (= "atom" (get-in a ["fn" "name"]))
+                                     (= "atom" (unqualified-ref-name (get a "fn")))
                                      (let [d1 (first (get a "args"))]
                                        (and (map? d1)
                                             (= "call" (get d1 "node"))
                                             (= "deref"
-                                               (get-in d1 ["fn" "name"]))))))
+                                               (unqualified-ref-name (get d1 "fn")))))))
                               (get spine "args")))]
          [ns- dn])))
 
@@ -1384,12 +1409,12 @@
              [dn d] (:defns m)
              :let [spine (body-spine (:m d))]
              :when (and (map? spine) (= "call" (get spine "node"))
-                        (= "reset!" (get-in spine ["fn" "name"]))
+                        (= "reset!" (unqualified-ref-name (get spine "fn")))
                         (let [found (atom false)]
                           (letfn [(scan [x]
                                     (cond
                                       (and (map? x) (= "call" (get x "node"))
-                                           (= "deref" (get-in x ["fn" "name"])))
+                                           (= "deref" (unqualified-ref-name (get x "fn"))))
                                       (reset! found true)
                                       (map? x) (doseq [v (vals x)] (scan v))
                                       (sequential? x) (doseq [v x] (scan v))))]
@@ -1447,8 +1472,7 @@
                    (letfn [(scan [x]
                              (cond
                                (and (map? x) (= "call" (get x "node")))
-                               (do (let [res (resolve-spelling
-                                              ns- (get-in x ["fn" "name"]))]
+                               (do (let [res (resolve-reference ns- (get x "fn"))]
                                      (when (= :defn (:kind res))
                                        (swap! called conj
                                               [(:ns res) (:name res)])))
@@ -1469,12 +1493,13 @@
             info (fn [id]
                    (let [r (nrec id) mm (:m r)]
                      (when (= "call" (:kind r))
-                       (let [res (resolve-spelling ns- (get-in mm ["fn" "name"]))]
+                       (let [reference (get mm "fn")
+                             res (resolve-reference ns- reference)]
                          {:res res
                           :counter? (and (= :defn (:kind res))
                                          (contains? counters
                                                     [(:ns res) (:name res)]))
-                          :canon (str (get-in mm ["fn" "name"]) "|"
+                          :canon (str (ref-label reference) "|"
                                       (str/join ","
                                                 (map #(canonical-expr % defn-id)
                                                      (get mm "args"))))}))))
@@ -1555,12 +1580,12 @@
               (scan [x]
                 (cond
                   (and (map? x) (= "call" (get x "node")))
-                  (do (bump (resolve-spelling ns- (get-in x ["fn" "name"])))
+                  (do (bump (resolve-reference ns- (get x "fn")))
                       (doseq [[k v] x :when (not= k "fn")] (scan v))
                       (when (not= "ref" (get-in x ["fn" "node"]))
                         (scan (get x "fn"))))
                   (and (map? x) (= "ref" (get x "node")))
-                  (bump (resolve-spelling ns- (get x "name")))
+                  (bump (resolve-reference ns- x))
                   (map? x) (doseq [v (vals x)] (scan v))
                   (sequential? x) (doseq [v x] (scan v))))]
         (scan (get (:m d) "body"))))
@@ -1773,7 +1798,7 @@
         (let [ar (nrec aid)]
           (cond
             (and (= "fn" (:kind ar)) (iteration-callback-fn? aid))
-            (let [prim (get-in (:m (nrec (:parent ar))) ["fn" "name"])]
+            (let [prim (ref-label (get (:m (nrec (:parent ar))) "fn"))]
               {:class "inline-callback-body"
                :name (str prim " callback")
                :node-id aid
@@ -1954,7 +1979,7 @@
       (or
        (case kind
          "call"
-         (let [sp (get-in m ["fn" "name"])]
+         (let [sp (ref-label (get m "fn"))]
            (when (and sp (not= "" sp))
              (token-line
               (re-pattern (str "\\(" (java.util.regex.Pattern/quote sp)
@@ -1966,8 +1991,8 @@
        (some (fn [aid]
                (let [ar (nrec aid)]
                  (when (and (= "call" (:kind ar))
-                            (not= "" (get-in (:m ar) ["fn" "name"] "")))
-                   (let [sp (get-in (:m ar) ["fn" "name"])
+                            (not= "" (ref-label (get (:m ar) "fn"))))
+                   (let [sp (ref-label (get (:m ar) "fn"))
                          hits (region-token-lines
                                fli defn-start defn-end
                                (re-pattern
@@ -2027,8 +2052,9 @@
          (keep (fn [[_ r]]
                  (when (and (= "call" (:kind r))
                             (= "ref" (get-in (:m r) ["fn" "node"])))
-                   (let [sp (get-in (:m r) ["fn" "name"])
-                         res (resolve-spelling (:module r) sp)]
+                   (let [reference (get (:m r) "fn")
+                         sp (ref-label reference)
+                         res (resolve-reference (:module r) reference)]
                      (cond
                        (and (= :builtin (:kind res))
                             (not (known (:name res)))) (:name res)
@@ -2105,7 +2131,7 @@
         ;; ordinal of each site among same-token nodes in the same defn/form:
         ;; for calls, among ALL same-spelling calls (text matches all of them);
         ;; for set/map/with, among same-kind literal sites.
-        call-key (fn [r] [(:defn r) (get-in (:m r) ["fn" "name"])])
+        call-key (fn [r] [(:defn r) (ref-key (get (:m r) "fn"))])
         all-calls-by-key
         (reduce (fn [acc [id r]]
                   (if (= "call" (:kind r))

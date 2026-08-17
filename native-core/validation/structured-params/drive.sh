@@ -18,6 +18,7 @@ constraint_ast="$scratch/constraint.ast.json"
 constraint_lower_facts="$scratch/constraint-lower.facts"
 tampered_constraint_ast="$scratch/tampered-constraint.ast.json"
 affordance_ast="$scratch/affordance.ast.json"
+affordance_facts="$scratch/affordance.facts"
 facts="$scratch/fixture.facts"
 mismatch_ast="$scratch/mismatch.ast.json"
 mismatch_facts="$scratch/mismatch.facts"
@@ -218,6 +219,42 @@ bb "$repo/native-core/bin/source-facts.clj" \
 
 "$repo/bin/beagle" check --agent "$affordance_source"
 "$repo/bin/beagle" ast "$affordance_source" >"$affordance_ast"
+# Exercise the consumer with W2e's structural ref wire shape even when this
+# isolated W2g lane is tested before the sibling serializer is integrated.
+bb -e '
+  (require (quote [cheshire.core :as json]))
+  (let [path (first *command-line-args*)
+        _ (load-file (second *command-line-args*))
+        ast (json/parse-string (slurp path))
+        qualified-ref {"node" "ref"
+                       "qualifier" "str"
+                       "name" "starts-with?"
+                       "providerId" nil}
+        structured (assoc-in ast ["forms" 1 "body" 0 "bindings" 0 "value" "fn"]
+                     qualified-ref)]
+    (assert (= qualified-ref
+               (get-in structured
+                 ["forms" 1 "body" 0 "bindings" 0 "value" "fn"])))
+    (spit path
+      (json/generate-string
+        (native.checked-program/with-projection-digest structured))))' \
+  "$affordance_ast" "$repo/native-core/bin/checked-program.clj"
+bb "$repo/native-core/validation/slice-vec/ast-facts.clj" \
+  "$affordance_ast=native-core/validation/structured-params/affordance_fixture.bgl" \
+  "$affordance_facts"
+bb -e '
+  (let [rows (map #(clojure.string/split % #"\t")
+                  (clojure.string/split-lines
+                    (slurp (first *command-line-args*))))
+        objects (into {} (map (fn [[s p _ o]] [[s p] o]) rows))
+        callee (some (fn [[_ p kind object]]
+                       (when (and (= "callee" p) (= "n" kind)) object))
+                 rows)]
+    (assert callee)
+    (assert (= "ref" (get objects [callee "form-kind"])))
+    (assert (= "str" (get objects [callee "qualifier"])))
+    (assert (= "starts-with?" (get objects [callee "name"]))))' \
+  "$affordance_facts"
 bb "$repo/native-core/analysis/epoch/affordance.clj" \
   --item structured-params \
   --ast "$affordance_ast=$affordance_source" \

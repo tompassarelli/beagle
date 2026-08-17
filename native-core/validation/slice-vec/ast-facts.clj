@@ -99,11 +99,6 @@
     (when-let [a (get p "ann")] (row! n "ann" "n" (emit-ann a)))
     n))
 
-;; A callee that is not a plain name is projected with an empty spelling, so the
-;; lowering refuses it by name instead of guessing.
-(defn callee-name [f]
-  (if (= "ref" (get f "node")) (get f "name") ""))
-
 (defn emit-binding [b]
   (let [n (nid)]
     (row! n "form-kind" "t" "binding")
@@ -112,20 +107,34 @@
     (row! n "value" "n" (emit-expr (get b "value")))
     n))
 
+(defn emit-reference! [n reference]
+  (row! n "form-kind" "t" "ref")
+  (when-let [qualifier (get reference "qualifier")]
+    (row! n "qualifier" "t" qualifier))
+  (row! n "name" "t" (get reference "name"))
+  (when-let [provider-id (get reference "providerId")]
+    (row! n "provider-id" "t" provider-id))
+  n)
+
+(defn emit-reference [reference]
+  (emit-reference! (nid) reference))
+
 (defn emit-expr [e]
   (let [n (nid)]
     (case (get e "node")
       "literal" (do (row! n "form-kind" "t" "literal")
                     (row! n "literal-kind" "t" (str (get e "kind")))
                     (row! n "value" "t" (str (get e "value"))))
-      "ref"     (if (#{"true" "false"} (get e "name"))
+      "ref"     (if (and (nil? (get e "qualifier"))
+                          (#{"true" "false"} (get e "name")))
                   (do (row! n "form-kind" "t" "literal")
                       (row! n "literal-kind" "t" "bool")
                       (row! n "value" "t" (get e "name")))
-                  (do (row! n "form-kind" "t" "ref")
-                      (row! n "name" "t" (get e "name"))))
+                  (emit-reference! n e))
       "call"    (do (row! n "form-kind" "t" "call")
-                    (row! n "callee" "t" (callee-name (get e "fn")))
+                    (if (= "ref" (get-in e ["fn" "node"]))
+                      (row! n "callee" "n" (emit-reference (get e "fn")))
+                      (row! n "callee-form" "n" (emit-expr (get e "fn"))))
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "if"      (do (row! n "form-kind" "t" "if")
                     (row! n "cond" "n" (emit-expr (get e "cond")))

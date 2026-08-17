@@ -3,6 +3,6 @@
 
 (defrecord Request [(port Int)])
 
-(defn retain-port
-  [({:keys [port]} Request)] (Vec Int)
-  [port])
+(defn retain-port [({:keys [port]} Request)] (Vec Int)
+  (let [prefix? (str/starts-with? "port" "p")]
+    [port]))
