@@ -162,6 +162,73 @@
 
 (define SPLICE-MARKER 'splice)
 
+(define (template-syntax-children value)
+  (cond
+    [(syntax-list? value) (syntax-list-children value)]
+    [(syntax-vector? value) (syntax-vector-children value)]
+    [else '()]))
+
+(define (raise-pattern-source-error failure pattern pattern-syntax)
+  (if (beagle-syntax? pattern-syntax)
+      (raise
+       (exn:fail:macro-source
+        (exn-message failure)
+        (exn-continuation-marks failure)
+        pattern
+        0
+        pattern-syntax
+        #f))
+      (raise failure)))
+
+(define (validate-template-syntax-matches! datum template-syntax)
+  (when (pair? datum)
+    (define syntax-children (template-syntax-children template-syntax))
+    (cond
+      [(eq? (car datum) 'syntax-match)
+       (define clause-syntaxes
+         (if (>= (length syntax-children) 2)
+             (drop syntax-children 2)
+             '()))
+       (for ([clause (in-list (cddr datum))]
+             [clause-syntax (in-list clause-syntaxes)])
+         (when (and (list? clause)
+                    (= (length clause) 3)
+                    (eq? (car clause) BRACKET-TAG))
+           (define pattern (cadr clause))
+           (define pattern-syntax
+             (and (syntax-vector? clause-syntax)
+                  (pair? (syntax-vector-children clause-syntax))
+                  (car (syntax-vector-children clause-syntax))))
+           (with-handlers
+               ([exn:fail?
+                 (lambda (failure)
+                   (raise-pattern-source-error
+                    failure pattern pattern-syntax))])
+             (validate-syntax-pattern pattern))))
+       (when (and (pair? (cdr datum))
+                  (>= (length syntax-children) 2))
+         (validate-template-syntax-matches!
+          (cadr datum) (cadr syntax-children)))
+       (for ([clause (in-list (cddr datum))]
+             [clause-syntax (in-list clause-syntaxes)])
+         (when (and (list? clause)
+                    (= (length clause) 3)
+                    (eq? (car clause) BRACKET-TAG)
+                    (syntax-vector? clause-syntax)
+                    (>= (length (syntax-vector-children clause-syntax)) 2))
+           (validate-template-syntax-matches!
+            (caddr clause)
+            (cadr (syntax-vector-children clause-syntax)))))]
+      [(memq (car datum) '(quote quasiquote)) (void)]
+      [else
+       (define raw-children
+         (if (memq (car datum) (list BRACKET-TAG MAP-TAG SET-TAG))
+             (cdr datum)
+             datum))
+       (for ([child (in-list raw-children)]
+             [child-syntax (in-list syntax-children)])
+         (validate-template-syntax-matches! child child-syntax))])))
+
 ;; Expand a single macro application. The real compiler supplies immutable
 ;; syntax arguments; the raw-datum branch is an explicit adapter retained for
 ;; compiler tests and query tools.
@@ -244,6 +311,8 @@
            (error 'beagle
                   "macro ~a: body raised an error:\n  ~a\n  input: ~a~a"
                   name (exn-message e) (truncate-datum (cons name args)) chain))])
+       (validate-template-syntax-matches!
+        template (macro-def-template-syntax m))
        (macro-eval template env+rest))]
     [else
      (define bindings

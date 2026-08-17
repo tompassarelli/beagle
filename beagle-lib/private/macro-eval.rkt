@@ -15,6 +15,7 @@
          (only-in "ast.rkt"
                   beagle-syntax?
                   beagle-syntax->datum
+                  syntax-ident?
                   syntax-list?
                   syntax-list-children
                   syntax-vector?
@@ -25,6 +26,7 @@
 (provide macro-eval
          macro-eval-body
          make-macro-env
+         validate-syntax-pattern
          (struct-out exn:fail:macro-source))
 
 ;; --- Closures ----------------------------------------------------------------
@@ -84,6 +86,7 @@
        [(eq? head 'cond)  (eval-cond (cdr expr) env)]
        [(eq? head 'fn)    (eval-fn (cdr expr) env)]
        [(eq? head 'do)    (eval-body (cdr expr) env)]
+       [(eq? head 'syntax-match) (eval-syntax-match (cdr expr) env)]
        [(eq? head 'quote) (cadr expr)]
        [(eq? head 'quasiquote) (eval-quasiquote (cadr expr) env 1)]
        [(eq? head BRACKET-TAG)
@@ -172,6 +175,169 @@
     [(and (pair? value) (eq? (car value) BRACKET-TAG)) (cdr value)]
     [(list? value) value]
     [else (error 'macro-eval "~a expected a list or vec, got: ~v" who value)]))
+
+;; --- syntax-match -----------------------------------------------------------
+
+(define (pattern-form? pattern head arity)
+  (and (list? pattern)
+       (= (length pattern) arity)
+       (eq? (car pattern) head)))
+
+(define (pattern-capture-name pattern who)
+  (unless (and (pattern-form? pattern who 2)
+               (symbol? (cadr pattern)))
+    (error 'syntax-match "invalid ~a pattern: ~v" who pattern))
+  (cadr pattern))
+
+(define (sequence-pattern pattern)
+  (cond
+    [(null? pattern) (values 'list '())]
+    [(not (list? pattern))
+     (error 'syntax-match "invalid pattern category: ~v" pattern)]
+    [(eq? (car pattern) 'list) (values 'list (cdr pattern))]
+    [(eq? (car pattern) BRACKET-TAG) (values 'vector (cdr pattern))]
+    [(eq? (car pattern) MAP-TAG) (values 'map (cdr pattern))]
+    [(pair? (car pattern)) (values 'list pattern)]
+    [else
+     (error 'syntax-match
+            "invalid pattern category: ~v"
+            (car pattern))]))
+
+(define (validate-syntax-pattern pattern [tail-position? #f])
+  (cond
+    [(pattern-form? pattern 'literal 2) (void)]
+    [(pattern-form? pattern 'capture 2)
+     (pattern-capture-name pattern 'capture)
+     (void)]
+    [(and (pair? pattern) (eq? (car pattern) 'capture))
+     (pattern-capture-name pattern 'capture)]
+    [(pattern-form? pattern 'identifier 2)
+     (unless (pattern-form? (cadr pattern) 'capture 2)
+       (error 'syntax-match
+              "invalid identifier pattern: ~v"
+              pattern))
+     (pattern-capture-name (cadr pattern) 'capture)
+     (void)]
+    [(and (pair? pattern) (eq? (car pattern) 'identifier))
+     (error 'syntax-match "invalid identifier pattern: ~v" pattern)]
+    [(and (pair? pattern) (eq? (car pattern) 'tail-splice))
+     (pattern-capture-name pattern 'tail-splice)
+     (unless tail-position?
+       (error 'syntax-match
+              "tail-splice must be the last list or vector pattern element"))]
+    [else
+     (define-values (category items) (sequence-pattern pattern))
+     (for ([item (in-list items)] [index (in-naturals)])
+       (define tail? (and (pair? item) (eq? (car item) 'tail-splice)))
+       (when (and tail?
+                  (or (eq? category 'map)
+                      (not (= index (- (length items) 1)))))
+         (error 'syntax-match
+                "tail-splice must be the last list or vector pattern element"))
+       (validate-syntax-pattern item tail?))]))
+
+(define (syntax-sequence value)
+  (cond
+    [(syntax-list? value)
+     (define children (syntax-list-children value))
+     (if (and (pair? children)
+              (eq? (macro-datum (car children)) MAP-TAG))
+         (values 'map (cdr children))
+         (values 'list children))]
+    [(syntax-vector? value)
+     (values 'vector (syntax-vector-children value))]
+    [(and (pair? value) (eq? (car value) BRACKET-TAG))
+     (values 'vector (cdr value))]
+    [(and (pair? value) (eq? (car value) MAP-TAG))
+     (values 'map (cdr value))]
+    [(list? value) (values 'list value)]
+    [else (values #f #f)]))
+
+(define (merge-captures left right)
+  (for/fold ([merged left]) ([(name value) (in-hash right)])
+    (hash-set merged name value)))
+
+(define (match-pattern-items patterns values)
+  (define tail?
+    (and (pair? patterns)
+         (let ([last-pattern (last patterns)])
+           (and (pair? last-pattern)
+                (eq? (car last-pattern) 'tail-splice)))))
+  (define fixed-patterns (if tail? (drop-right patterns 1) patterns))
+  (cond
+    [(if tail?
+         (< (length values) (length fixed-patterns))
+         (not (= (length values) (length fixed-patterns))))
+     #f]
+    [else
+     (define fixed-captures
+       (let loop ([remaining-patterns fixed-patterns]
+                  [remaining-values values]
+                  [captures #hasheq()])
+         (cond
+           [(null? remaining-patterns) captures]
+           [else
+            (define matched
+              (match-syntax-pattern
+               (car remaining-patterns) (car remaining-values)))
+            (and matched
+                 (loop (cdr remaining-patterns)
+                       (cdr remaining-values)
+                       (merge-captures captures matched)))])))
+     (and fixed-captures
+          (if tail?
+              (hash-set
+               fixed-captures
+               (pattern-capture-name (last patterns) 'tail-splice)
+               (drop values (length fixed-patterns)))
+              fixed-captures))]))
+
+(define (match-syntax-pattern pattern value)
+  (cond
+    [(pattern-form? pattern 'literal 2)
+     (and (macro-equal? value (cadr pattern)) #hasheq())]
+    [(pattern-form? pattern 'capture 2)
+     (hasheq (pattern-capture-name pattern 'capture) value)]
+    [(pattern-form? pattern 'identifier 2)
+     (and (syntax-ident? value)
+          (hasheq
+           (pattern-capture-name (cadr pattern) 'capture)
+           value))]
+    [else
+     (define-values (expected-category patterns) (sequence-pattern pattern))
+     (define-values (actual-category values) (syntax-sequence value))
+     (and (eq? expected-category actual-category)
+          (match-pattern-items patterns values))]))
+
+(define (syntax-match-clause clause)
+  (unless (and (list? clause)
+               (= (length clause) 3)
+               (eq? (car clause) BRACKET-TAG))
+    (error 'syntax-match "expected [pattern body], got: ~v" clause))
+  (values (cadr clause) (caddr clause)))
+
+(define (eval-syntax-match parts env)
+  (when (< (length parts) 2)
+    (error 'syntax-match "expected a subject and at least one [pattern body] clause"))
+  (define clauses (cdr parts))
+  (for ([clause (in-list clauses)])
+    (define-values (pattern body) (syntax-match-clause clause))
+    (validate-syntax-pattern pattern))
+  (define subject (macro-eval (car parts) env))
+  (let loop ([remaining clauses])
+    (cond
+      [(null? remaining)
+       (error 'syntax-match "no pattern matched: ~v" (macro-datum subject))]
+      [else
+       (define-values (pattern body) (syntax-match-clause (car remaining)))
+       (define captures (match-syntax-pattern pattern subject))
+       (if captures
+           (macro-eval
+            body
+            (for/fold ([matched-env env])
+                      ([(name value) (in-hash captures)])
+              (hash-set matched-env name value)))
+           (loop (cdr remaining)))])))
 
 ;; --- let ---------------------------------------------------------------------
 

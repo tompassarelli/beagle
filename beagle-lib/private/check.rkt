@@ -5216,14 +5216,18 @@
        (apply merge-types (infer-expr (condp-form-default e) env) clause-types)
        (if (null? clause-types) ANY (apply merge-types clause-types)))]
     [(if-form? e)
-     (infer-expr (if-form-cond-expr e) env)
-     (define-values (then-env else-env) (narrow-env-for-condition env (if-form-cond-expr e)))
+     (define condition (if-form-cond-expr e))
+     (infer-expr condition env)
+     (define-values (then-env else-env) (narrow-env-for-condition env condition))
      (define tt (infer-expr (if-form-then-expr e) then-env))
+     (define et
+       (if (if-form-else-expr e)
+           (infer-expr (if-form-else-expr e) else-env)
+           NIL))
      (cond
-       [(if-form-else-expr e)
-        (define et (infer-expr (if-form-else-expr e) else-env))
-        (merge-types tt et)]
-       [else (merge-types tt NIL)])]
+       [(or (eq? condition #t) (eq? condition 'true)) tt]
+       [(or (eq? condition #f) (eq? condition 'false)) et]
+       [else (merge-types tt et)])]
     [(when-form? e)
      (infer-expr (when-form-cond-expr e) env)
      (define-values (then-env _else) (narrow-env-for-condition env (when-form-cond-expr e)))

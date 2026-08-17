@@ -1343,12 +1343,20 @@
   (last-expr-type! (get e "body") body-env))
   (= (get e "node") "if") (do
   (infer-expr! (get e "cond") env)
-  (let [narrowed (narrow-env-for-condition env (get e "cond"))
+  (let [condition (get e "cond")
+   narrowed (narrow-env-for-condition env condition)
    then-env (get narrowed "then")
    else-env (get narrowed "else")
    tt (infer-expr! (get e "then") then-env)
-   et (if (or (nil? (get e "else")) (synthetic-absent-else? (get e "else"))) NIL-TYPE (infer-expr! (get e "else") else-env))]
-  (merge-types tt et)))
+   et (if (or (nil? (get e "else")) (synthetic-absent-else? (get e "else"))) NIL-TYPE (infer-expr! (get e "else") else-env))
+   literal-bool (cond
+  (and (map? condition) (= (get condition "node") "ref") (or (= (get condition "name") "true") (= (get condition "name") "false"))) (get condition "name")
+  (and (map? condition) (= (get condition "node") "literal") (= (get condition "kind") "bool")) (if (= (get condition "value") true) "true" "false")
+  :else nil)]
+  (cond
+  (= literal-bool "true") tt
+  (= literal-bool "false") et
+  :else (merge-types tt et))))
   (= (get e "node") "when") (do
   (infer-expr! (get e "cond") env)
   (let [narrowed (narrow-env-for-condition env (get e "cond"))
@@ -2803,8 +2811,10 @@
   (expect! "let: mismatched binding annotation" (let [prog (make-prog [(make-def-node "result" nil (make-let-node [(make-let-binding "x" (make-prim "String") (make-lit "number" 42))] [(make-ref "x")]))])
    result (type-check! prog)]
   (> (get result "count") 0)))
-  (expect! "infer: if merges branch types" (let [t1 (infer-expr! (make-if-node (make-lit "bool" true) (make-lit "string" "a") (make-lit "number" 1)) {})]
+  (expect! "infer: if merges branch types" (let [t1 (infer-expr! (make-if-node (make-ref "condition") (make-lit "string" "a") (make-lit "number" 1)) {"condition" BOOL-TYPE})]
   (union-type? t1)))
+  (expect! "infer: literal if selects reachable branch" (let [t1 (infer-expr! (make-if-node (make-lit "bool" true) (make-lit "string" "a") (make-lit "number" 1)) {})]
+  (type-equal? t1 (make-prim "String"))))
   (expect! "infer: if same type no union" (let [t1 (infer-expr! (make-if-node (make-lit "bool" true) (make-lit "string" "a") (make-lit "string" "b")) {})]
   (prim? t1)))
   (expect! "call: correct args" (let [prog {"namespace" "test" "target" "js" "forms" [(make-def-node "r" (make-prim "Int") (make-call "add" [(make-lit "number" 1) (make-lit "number" 2)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}

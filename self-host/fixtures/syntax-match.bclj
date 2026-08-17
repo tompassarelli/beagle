@@ -1,0 +1,11 @@
+#lang beagle/clj
+(ns selfhost.fixtures.syntax-match)
+
+;; W5c acceptance fixture. The oracle and seed must compile the same
+;; structural matcher once W5c lands; this is expected to fail before then.
+(defmacro when [test & body]
+  (syntax-match (cons test body)
+    [(list (capture test) (tail-splice body))
+     (list 'if test (cons 'do body))]))
+
+(defn answer [] Int (when true 42))
