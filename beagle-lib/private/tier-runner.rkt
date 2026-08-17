@@ -456,6 +456,13 @@
 ;; vector in manifest order, so the report is byte-identical to the sequential
 ;; report modulo timing — launch order never leaks into the output.
 ;;
+;; A sharded file cannot consume all K slots. Each phase is a separate process,
+;; so process-local setup that is memoized by the test module is rebuilt once
+;; per concurrent phase. Cap each sharded file at ceil(K/4), leaving most of
+;; the queue available to unrelated units. Claiming skips a
+;; temporarily saturated file instead of parking a worker on it, so the cap
+;; protects the child deadline without throwing away machine width.
+;;
 ;; Cancellation/crash cleanup is owned at the `run` level (see `teardown!`): a
 ;; single child custodian with subprocess-kill mode + process groups owns every
 ;; child of BOTH the sequential and the parallel path, so a break (SIGINT/
@@ -549,17 +556,64 @@
                 #:when (vector-ref keep idx))
        u)]))
 
+;; A sharded file may occupy at most ceil(K/4) worker slots. Ordinary files are
+;; one unit each, so their effective per-file cap remains K.
+(define (unit-concurrency-cap u k)
+  (if (hash-has-key? sharded-files (unit-file u))
+      (max 1 (quotient (+ k 3) 4))
+      k))
+
+(define (unit-claimable? u active-by-file k)
+  (< (hash-ref active-by-file (unit-file u) 0)
+     (unit-concurrency-cap u k)))
+
+;; Remove the first currently claimable index without disturbing the relative
+;; order of the rest. #f means work remains but every remaining unit belongs to
+;; a sharded file that is at its cap.
+(define (take-claimable order vec active-by-file k)
+  (let loop ([before '()] [after order])
+    (cond
+      [(null? after) (values #f order)]
+      [(unit-claimable? (vector-ref vec (car after)) active-by-file k)
+       (values (car after) (append (reverse before) (cdr after)))]
+      [else (loop (cons (car after) before) (cdr after))])))
+
 (define (run-units-parallel units k)
   (define vec (list->vector units))
   (define n (vector-length vec))
   (define results (make-vector n #f))
   (define pending (box (launch-order units)))   ; shared claim queue
+  (define active-by-file (make-hash))
   (define lock (make-semaphore 1))
+  (define available (make-semaphore 0))
   (define (claim!)
     (call-with-semaphore lock
       (lambda ()
-        (define o (unbox pending))
-        (and (pair? o) (begin (set-box! pending (cdr o)) (car o))))))
+        (define order (unbox pending))
+        (cond
+          [(null? order) #f]
+          [else
+           (define-values (idx rest)
+             (take-claimable order vec active-by-file k))
+           (cond
+             [idx
+              (define fname (unit-file (vector-ref vec idx)))
+              (set-box! pending rest)
+              (hash-update! active-by-file fname add1 0)
+              idx]
+             [else 'wait])]))))
+  (define (release! idx)
+    (define wake-count
+      (call-with-semaphore lock
+        (lambda ()
+          (define fname (unit-file (vector-ref vec idx)))
+          (define remaining (sub1 (hash-ref active-by-file fname)))
+          (if (zero? remaining)
+              (hash-remove! active-by-file fname)
+              (hash-set! active-by-file fname remaining))
+          ;; Once the queue is empty, wake every parked worker so it can exit.
+          (if (null? (unbox pending)) k 1))))
+    (for ([_ (in-range wake-count)]) (semaphore-post available)))
   ;; Workers inherit current-custodian = child-custodian and the subprocess
   ;; kill/process-group mode from `run`; `teardown!` reaps them on every exit.
   (define workers
@@ -568,9 +622,15 @@
        (lambda ()
          (let loop ()
            (define idx (claim!))
-           (when idx
-             (vector-set! results idx (run-test-unit (vector-ref vec idx)))
-             (loop)))))))
+           (cond
+             [(eq? idx 'wait) (semaphore-wait available) (loop)]
+             [idx
+              (dynamic-wind
+                void
+                (lambda ()
+                  (vector-set! results idx (run-test-unit (vector-ref vec idx))))
+                (lambda () (release! idx)))
+              (loop)]))))))
   (for-each thread-wait workers)
   (vector->list results))
 
@@ -871,6 +931,24 @@
                 "explicit --jobs overrides everything")
   (check-true (>= default-jobs 1) "default jobs is at least 1")
   (check-true (<= default-jobs 16) "default jobs is capped at 16")
+
+  ;; Sharded-file concurrency grows with K but can never monopolize it. A
+  ;; saturated sharded file is skipped in favor of the next unrelated unit.
+  (define wasm-one
+    (unit "wasm-materializer.rkt#one" "wasm-materializer.rkt" "one" #f))
+  (define wasm-two
+    (unit "wasm-materializer.rkt#two" "wasm-materializer.rkt" "two" #f))
+  (check-equal? (map (lambda (k) (unit-concurrency-cap wasm-one k))
+                     '(1 4 5 16))
+                '(1 1 2 4)
+                "a sharded file is capped at ceil(K/4)")
+  (let* ([ordinary (u "parse.rkt")]
+         [units (vector wasm-one wasm-two ordinary)]
+         [active (hash "wasm-materializer.rkt" 1)])
+    (define-values (idx rest)
+      (take-claimable '(0 1 2) units active 4))
+    (check-equal? idx 2 "a saturated sharded file does not park the worker")
+    (check-equal? rest '(0 1) "skipped phase units retain their launch order"))
 
   ;; A filesystem-closure cache cannot prove a live endpoint observation.
   (check-false (gate-cache-eligible-file? "query.rkt")
