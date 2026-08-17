@@ -305,6 +305,7 @@ build_committed=0
 commit_started=0
 work_cleaned=0
 core_result_staging=""
+core_result_alias_staging=""
 cleanup() {
     local rc=$?
     if [[ "$commit_started" == "1" && "$build_committed" != "1" ]]; then
@@ -318,6 +319,10 @@ cleanup() {
         rm -f -- "$marker_pending"
         if [[ -n "$core_result_staging" && -d "$core_result_staging" ]]; then
             rm -rf -- "${core_result_staging:?}"
+        fi
+        if [[ -n "$core_result_alias_staging" &&
+              -f "$core_result_alias_staging" ]]; then
+            rm -f -- "$core_result_alias_staging"
         fi
         if [[ "$work_cleaned" != "1" ]]; then
             rm -rf "${work:?}"
@@ -380,6 +385,192 @@ for ((closure_index = 0; closure_index < ${#closure_fields[@]}; closure_index +=
     source_snapshot_digests+=("$source_digest")
 done
 
+core_modules=(
+    native-core/src/native/core.bclj
+    native-core/src/native/stages.bclj
+    native-core/src/native/simd.bclj
+    native-core/src/native/lower.bclj
+    native-core/src/native/obligations.bclj
+    native-core/src/native/c11.bclj
+    native-core/src/native/slice.bclj
+    native-core/src/native/fold_c17.bclj
+    native-core/src/native/body_c17.bclj
+    native-core/src/native/body_slice.bclj
+    native-core/src/native/qbe.bclj
+)
+
+cache_key_material() {
+    local relative
+    for relative in "${core_modules[@]}" \
+                    bin/beagle-build-core \
+                    bin/beagle-build-all \
+                    bin/beagle-build \
+                    bin/_beagle-racket \
+                    share/targets.sh; do
+        printf '%s %s\n' "$relative" \
+            "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
+    done
+    find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
+        LC_ALL=C sort -z |
+        xargs -0 sha256sum |
+        awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+}
+
+cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
+compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
+compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
+core_result_cache_enabled=1
+if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
+   ! git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- ||
+   ! git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules --; then
+    core_result_cache_enabled=0
+fi
+
+write_core_result_early_manifest() {
+    local destination="$1" index tool_path bb_path racket_path
+    bb_path="$(realpath "$(command -v bb)")"
+    racket_path="$(realpath "$RACKET")"
+    {
+        printf 'beagle-core-result-early-input/v1\n'
+        printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
+        printf 'compiler-commit %s\n' "$compiler_commit"
+        printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
+        for tool_path in "$PROJECTOR" "$AST_VERIFIER" \
+                         "$MODULE_SOURCE_ROOT_CLI" "$BIN/beagle-ast"; do
+            printf 'tool %q %s\n' "${tool_path#"$BEAGLE_DIR/"}" \
+                "$(sha256sum "$tool_path" | awk '{print $1}')"
+        done
+        printf 'racket %q\n' "$($RACKET --version 2>&1 | sed -n '1p')"
+        printf 'racket-bin-sha256 %s\n' \
+            "$(sha256sum "$racket_path" | awk '{print $1}')"
+        printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
+        printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+        for index in "${!module_roots[@]}"; do
+            printf 'module-root %06d %q\n' "$index" "${module_roots[$index]}"
+        done
+        for index in "${!source_ids[@]}"; do
+            printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
+                "${source_digest_befores[$index]}"
+        done
+        for index in "${!entries[@]}"; do
+            printf 'entry %06d %q\n' "$index" "${entries[$index]}"
+        done
+        for index in "${!materializers[@]}"; do
+            printf 'materializer %06d %q\n' "$index" "${materializers[$index]}"
+        done
+    } >"$destination"
+}
+
+validate_core_result_early_closure() {
+    local expected_input="$1" current_input="$2" source_index current_digest
+    for source_index in "${!source_snapshot_paths[@]}"; do
+        current_digest="$(sha256sum "${source_snapshot_paths[$source_index]}" |
+            awk '{print $1}')"
+        [[ "$current_digest" == "${source_snapshot_digests[$source_index]}" ]] ||
+            return 1
+    done
+    [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
+       "$compiler_commit" ]] || return 1
+    git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- || return 1
+    git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules -- || return 1
+    [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
+       "$compiler_source_digest" ]] || return 1
+    write_core_result_early_manifest "$current_input"
+    cmp -s "$expected_input" "$current_input"
+}
+
+validate_core_result_entry_from_alias() {
+    local entry="$1" expected_key="$2" expected_input_digest="$3"
+    local artifact_manifest_digest expected_names actual_names required
+    [[ -d "$entry" && ! -L "$entry" &&
+       -f "$entry/input.manifest" && ! -L "$entry/input.manifest" &&
+       -f "$entry/artifacts.sha256" && ! -L "$entry/artifacts.sha256" &&
+       -f "$entry/READY" && ! -L "$entry/READY" &&
+       -d "$entry/artifacts" && ! -L "$entry/artifacts" ]] || return 1
+    [[ "$(sha256sum "$entry/input.manifest" | awk '{print $1}')" == \
+       "$expected_input_digest" ]] || return 1
+    if find "$entry/artifacts" -mindepth 1 -maxdepth 1 ! -type f -print -quit |
+        grep -q .; then
+        return 1
+    fi
+    expected_names="$(awk '{ print $2 }' "$entry/artifacts.sha256" | LC_ALL=C sort)"
+    actual_names="$(find "$entry/artifacts" -mindepth 1 -maxdepth 1 -type f \
+        -printf '%f\n' | LC_ALL=C sort)"
+    [[ -n "$expected_names" && "$expected_names" == "$actual_names" ]] || return 1
+    (cd "$entry/artifacts" &&
+        sha256sum --check --strict ../artifacts.sha256 >/dev/null 2>&1) || return 1
+    for required in source.facts report.txt module.native-program \
+                    native.receipts native.entry-map; do
+        [[ -f "$entry/artifacts/$required" ]] || return 1
+    done
+    if [[ -n "${seen_materializers[c17]:-}" ]]; then
+        for required in module_0.h module_0.c c17.receipt; do
+            [[ -f "$entry/artifacts/$required" ]] || return 1
+        done
+    fi
+    if [[ -n "${seen_materializers[qbe]:-}" ]]; then
+        [[ -f "$entry/artifacts/module_0.ssa" ]] || return 1
+    fi
+    artifact_manifest_digest="$(sha256sum "$entry/artifacts.sha256" | awk '{print $1}')"
+    [[ "$(<"$entry/READY")" == \
+       "beagle-core-result/v1 $expected_key $artifact_manifest_digest" ]]
+}
+
+core_result_early_input="$work/core-result-early-input.manifest"
+write_core_result_early_manifest "$core_result_early_input"
+core_result_early_key="$(sha256sum "$core_result_early_input" | awk '{print $1}')"
+core_result_alias_root="$cache_root/aliases"
+core_result_root="$cache_root/results"
+core_result_alias="$core_result_alias_root/$core_result_early_key"
+core_result_early_hit=0
+if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
+    mkdir -p "$core_result_alias_root" "$cache_root/.alias-locks" \
+        "$cache_root/.result-tmp"
+    exec {core_result_alias_lock_fd}>"$cache_root/.alias-locks/$core_result_early_key.lock"
+    run_phase_leaf core-result-alias-lock \
+        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_result_alias_lock_fd" || die "timed out acquiring the Core result alias lock"
+    validate_core_result_early_closure "$core_result_early_input" \
+        "$work/core-result-early-input.lookup" ||
+        die "Core result early input closure changed before alias lookup"
+    if [[ -e "$core_result_alias" ]]; then
+        alias_format=""
+        alias_early_key=""
+        alias_full_key=""
+        alias_input_digest=""
+        alias_extra=""
+        if [[ -f "$core_result_alias" && ! -L "$core_result_alias" ]]; then
+            read -r alias_format alias_early_key alias_full_key alias_input_digest \
+                alias_extra <"$core_result_alias" || true
+        fi
+        alias_entry="$core_result_root/$alias_full_key"
+        if [[ "$alias_format" == "beagle-core-result-alias/v1" &&
+              "$alias_early_key" == "$core_result_early_key" &&
+              "$alias_full_key" =~ ^[0-9a-f]{64}$ &&
+              "$alias_input_digest" =~ ^[0-9a-f]{64}$ &&
+              -z "${alias_extra:-}" ]] &&
+           validate_core_result_entry_from_alias "$alias_entry" "$alias_full_key" \
+               "$alias_input_digest"; then
+            cp -a "$alias_entry/artifacts/." "$work/artifacts/"
+            core_result_early_hit=1
+            echo "beagle build: core-result-alias HIT $core_result_early_key -> $alias_full_key" >&2
+        else
+            corrupt_alias="$cache_root/.result-tmp/corrupt-alias.$core_result_early_key.$$"
+            echo "beagle build: core-result-alias CORRUPT $core_result_early_key; retiring" >&2
+            mv "$core_result_alias" "$corrupt_alias"
+            rm -f -- "$corrupt_alias"
+        fi
+    fi
+    if [[ "$core_result_early_hit" != 1 ]]; then
+        echo "beagle build: core-result-alias MISS $core_result_early_key" >&2
+    fi
+    flock -u "$core_result_alias_lock_fd"
+else
+    echo "beagle build: core-result-alias BYPASS unavailable" >&2
+fi
+
+if [[ "$core_result_early_hit" != 1 ]]; then
 bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
     "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
@@ -453,44 +644,13 @@ for source in "${normalized_sources[@]}"; do
 done
 run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
     bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
-
-core_modules=(
-    native-core/src/native/core.bclj
-    native-core/src/native/stages.bclj
-    native-core/src/native/simd.bclj
-    native-core/src/native/lower.bclj
-    native-core/src/native/obligations.bclj
-    native-core/src/native/c11.bclj
-    native-core/src/native/slice.bclj
-    native-core/src/native/fold_c17.bclj
-    native-core/src/native/body_c17.bclj
-    native-core/src/native/body_slice.bclj
-    native-core/src/native/qbe.bclj
-)
+else
+    facts="$work/artifacts/source.facts"
+fi
 
 # The hosted Core compiler projection is content-addressed separately from a
-# program result. A result key below names the exact generated projection bytes
-# as well as these source inputs, so a damaged or differently-generated
-# projection can never hit a result produced by another compiler executable.
-cache_key_material() {
-    local relative
-    for relative in "${core_modules[@]}" \
-                    bin/beagle-build-core \
-                    bin/beagle-build-all \
-                    bin/beagle-build \
-                    bin/_beagle-racket \
-                    share/targets.sh; do
-        printf '%s %s\n' "$relative" \
-            "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
-    done
-    find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
-        LC_ALL=C sort -z |
-        xargs -0 sha256sum |
-        awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
-}
-
-cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
-compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
+# program result. A full result key below names the exact generated projection
+# bytes in addition to the early input closure.
 cache_entry="$cache_root/$compiler_source_digest"
 compiled="$cache_entry/compiled"
 
@@ -546,14 +706,6 @@ compiled_digest="$(
     find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum |
         sha256sum | awk '{print $1}'
 )"
-
-compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
-core_result_cache_enabled=1
-if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
-   ! git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- ||
-   ! git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules --; then
-    core_result_cache_enabled=0
-fi
 
 write_core_result_input_manifest() {
     local destination="$1" index tool_path bb_path racket_path
@@ -1885,6 +2037,45 @@ if [[ "$core_result_publish_pending" == 1 ]]; then
     mv "$core_result_staging" "$core_result_entry"
     core_result_staging=""
     core_result_publish_pending=0
+fi
+
+if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
+    validate_core_result_early_closure "$core_result_early_input" \
+        "$work/core-result-early-input.before-alias-publish" ||
+        die "Core result early input closure changed before alias publication"
+    core_result_input_digest="$(sha256sum "$core_result_input" | awk '{print $1}')"
+    validate_core_result_entry "$core_result_entry" "$core_result_input" \
+        "$core_result_key" || die "published Core result failed alias validation"
+    exec {core_result_alias_publish_lock_fd}>\
+        "$cache_root/.alias-locks/$core_result_early_key.lock"
+    run_phase_leaf core-result-alias-publish-lock \
+        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_result_alias_publish_lock_fd" ||
+        die "timed out acquiring the Core result alias publication lock"
+    core_result_alias_staging="$(mktemp \
+        "$cache_root/.result-tmp/$core_result_early_key.alias.XXXXXX")"
+    printf 'beagle-core-result-alias/v1 %s %s %s\n' \
+        "$core_result_early_key" "$core_result_key" "$core_result_input_digest" \
+        >"$core_result_alias_staging"
+    sync -f "$core_result_alias_staging"
+    if { [[ -e "$core_result_alias" ]] || [[ -L "$core_result_alias" ]]; } &&
+       { [[ ! -f "$core_result_alias" ]] || [[ -L "$core_result_alias" ]] ||
+         ! cmp -s "$core_result_alias_staging" "$core_result_alias"; }; then
+        corrupt_alias="$cache_root/.result-tmp/replaced-alias.$core_result_early_key.$$"
+        echo "beagle build: core-result-alias STALE $core_result_early_key; replacing" >&2
+        mv "$core_result_alias" "$corrupt_alias"
+        rm -f -- "$corrupt_alias"
+    fi
+    if [[ ! -e "$core_result_alias" ]]; then
+        mv "$core_result_alias_staging" "$core_result_alias"
+        core_result_alias_staging=""
+        sync -f "$core_result_alias_root"
+    else
+        rm -f -- "$core_result_alias_staging"
+        core_result_alias_staging=""
+    fi
+    flock -u "$core_result_alias_publish_lock_fd"
 fi
 
 commit_started=1
