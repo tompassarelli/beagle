@@ -232,7 +232,12 @@
           (recur (subvec remaining 1)
                  (inc index)
                  (:next-int child)
-                 (into (conj facts [root (str "f" index) (:root child)])
+                 (into (conj facts
+                             [root
+                              (resolve-core/ord-str
+                               [(* (inc index) resolve-core/ORD-STEP)]
+                               (module-node-int module (:root child)))
+                              (:root child)])
                        (:facts child))))))))
 
 (defn- mint-datum [module next-int datum]
@@ -304,11 +309,12 @@
         (reduce
          (fn [{:keys [facts next-int identities]} {:keys [name body]}]
            (let [match (definition-match facts module name)
-                 {:keys [body-start body-edges]} (body-edges facts name match)
+                 {:keys [body-edges]} (body-edges facts name match)
                  minted (mint-datum module next-int body)
                  retracts (set (map :fact body-edges))
                  asserts (conj (:facts minted)
-                               [(:definition match) (str "f" body-start)
+                               [(:definition match)
+                                (second (:fact (first body-edges)))
                                 (:root minted)])]
              {:facts (-> facts (set/difference retracts) (set/union asserts))
               :next-int (:next-int minted)
