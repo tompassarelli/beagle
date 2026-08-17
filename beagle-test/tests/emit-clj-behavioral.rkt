@@ -453,7 +453,7 @@
      "[2 3 4]\n[1 2 3]")
 
    (check-clj-output "some-> surface form executes correctly"
-     (list '(defn t-some [(x Any)] Any
+     (list '(defn t-some [(x (U Int Nil))] Any
               (some-> x inc inc)))
      "(println (t-some 5)) (println (t-some nil))"
      "7\nnil")
