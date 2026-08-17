@@ -6,7 +6,8 @@
 ;; module's AST into a per-repo native FRAMLOG, re-keying file-local integer
 ;; node labels only where the predicate declares a structural reference.
 ;;
-;; The log carries ONLY the AST (kind/v/fN/child/segN/commentN/tail + a per-module
+;; The log carries ONLY the AST (kind/v or qualified-symbol qualifier/name,
+;; fN/child/segN/commentN/tail + a per-module
 ;; @<mod>#root file "<path>" bookkeeping fact). refers_to + render markers are
 ;; DERIVED — they are materialized in-memory over the warm store at resolution
 ;; time (resolve-preds), never persisted. (See DESIGN.md §2.)
@@ -40,7 +41,8 @@
 (cp/add-classpath
  (str fram-root java.io.File/pathSeparator (io/file fram-root "out")))
 (require '[database :as database]
-         '[fram.types :as t])
+         '[fram.types :as t]
+         '[resolve-core :as rc])
 
 (defn- die [& xs] (binding [*out* *err*] (apply println xs)) (System/exit 1))
 (defn- log! [& xs] (binding [*out* *err*] (apply println xs)))
@@ -135,15 +137,38 @@
 ;; PLUS one bookkeeping fact @<mod>#root file "<path>" so render-from-log knows the
 ;; source path (the @file wrapper analogue; "root" never collides with an int id).
 (def ^:private node-reference-predicate-re
-  #"^(?:child|tail|f[0-9]+|seg[0-9]+|comment[0-9]+)$")
+  #"^(?:child|tail|seg[0-9]+|comment[0-9]+)$")
 
 (defn- node-reference-predicate? [predicate]
   (and (string? predicate)
-       (boolean (re-matches node-reference-predicate-re predicate))))
+       (or (rc/ord-pos? predicate)
+           (boolean (re-matches node-reference-predicate-re predicate)))))
+
+(defn- structural-reader-triples [triples]
+  (let [symbol-nodes
+        (into #{}
+              (keep (fn [[subject predicate object]]
+                      (when (and (= predicate "kind") (= object "symbol"))
+                        subject)))
+              triples)]
+    (into []
+          (mapcat
+           (fn [[subject predicate object :as triple]]
+             (if (and (= predicate "v")
+                      (contains? symbol-nodes subject)
+                      (string? object))
+               (let [reference (symbol object)
+                     qualifier (namespace reference)]
+                 (if qualifier
+                   [[subject "qualifier" qualifier]
+                    [subject "name" (name reference)]]
+                   [triple]))
+               [triple])))
+          triples)))
 
 (defn- module->propositions [root-segs path]
   (let [module (module-of root-segs path)
-        triples (emit-edn-triples path)
+        triples (structural-reader-triples (emit-edn-triples path))
         node-propositions
         (mapv (fn [[s p o]]
                 (t/triple (nodename module s)

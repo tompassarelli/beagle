@@ -3,7 +3,8 @@
          '[clojure.string :as str]
          '[fram.code-reader :as code-reader]
          '[fram.rt :as rt]
-         '[fram.types :as t])
+         '[fram.types :as t]
+         '[resolve-core :as rc])
 
 (load-file "server.clj")
 
@@ -62,7 +63,10 @@
 (def known-source
   (canonical-source!
    beagle
-   "#lang beagle/clj\n(ns known)\n(defn answer [] 42)\n"
+   (str "#lang beagle/clj\n"
+        "(ns known\n"
+        "  (:require [clojure.string :as str]))\n"
+        "(defn answer [] String (str/upper-case \"ok\"))\n")
    known-path))
 (canonical-source!
  beagle
@@ -97,6 +101,7 @@
            port space checkout-root "known" 20)
           citation (:snapshot module-snapshot)
           subjects (mapv t/triple-t1 (:triples module-snapshot))
+          snapshot-triples (:triples module-snapshot)
           projected (code-reader/project-module-edn module-snapshot)
           rendered (code-reader/render-module! beagle module-snapshot)]
       (check! "page drain spans multiple FRAMRPC responses"
@@ -109,6 +114,21 @@
               (every? #(str/starts-with? % "@known#") subjects))
       (check! "module filter excludes the @knownx# collision"
               (not-any? #(str/starts-with? % "@knownx#") subjects))
+      (check! "qualified source reference is structural in the store"
+              (and (some #(and (= "qualifier" (t/triple-t2 %))
+                                (= "str" (t/triple-t3 %)))
+                         snapshot-triples)
+                   (some #(and (= "name" (t/triple-t2 %))
+                                (= "upper-case" (t/triple-t3 %)))
+                         snapshot-triples)
+                   (not-any? #(and (= "v" (t/triple-t2 %))
+                                   (= "str/upper-case" (t/triple-t3 %)))
+                             snapshot-triples)))
+      (check! "ordered child edges retain store node identity"
+              (some #(and (rc/ord-pos? (t/triple-t2 %))
+                          (string? (t/triple-t3 %))
+                          (str/starts-with? (t/triple-t3 %) "@known#"))
+                    snapshot-triples))
       (check! "projected EDN cites the resolved root"
               (str/starts-with? projected (str "@file " (:root citation) "\n")))
       (check! "projected EDN uses numeric view coordinates for minted identities"
