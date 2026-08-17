@@ -11,6 +11,7 @@ src/store/text_search.bgl
 src/store/datalog.bgl
 src/store/query.bgl
 src/store/native_wire_codec.bgl
+src/store/chain_rules.bgl
 src/commit_plan.bgl
 src/store/log_codec.bgl
 src/store/snapshot_codec.bgl
