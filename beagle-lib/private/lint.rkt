@@ -8,7 +8,13 @@
 (require racket/match
          racket/format
          racket/string
-         "parse.rkt")
+         (except-in "parse.rkt" call-form-fn)
+         (only-in "parse.rkt" [call-form-fn raw-call-form-fn]))
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (define (lint-program! prog)
   (lint-shadows prog)
@@ -541,6 +547,8 @@
 
 (define (collect-symbols form used)
   (match form
+    [(? qualified-ref?)
+     (hash-set! used (qualified-ref->symbol form) #t)]
     [(? symbol?) (hash-set! used form #t)]
     [(def-form _ _ value _ _) (collect-symbols value used)]
     [(defonce-form _ _ value _) (collect-symbols value used)]
@@ -608,7 +616,7 @@
      (collect-symbols target used)
      (for ([a (in-list args)]) (collect-symbols a used))]
     [(static-call cm args)
-     (hash-set! used cm #t)
+     (collect-symbols cm used)
      (for ([a (in-list args)]) (collect-symbols a used))]
     [(dynamic-var name)
      (hash-set! used name #t)]

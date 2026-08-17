@@ -8,10 +8,30 @@
          racket/format
          racket/list
          racket/set
-         "parse.rkt"
+         (except-in "parse.rkt"
+                    call-form-fn
+                    static-call-class+method
+                    pat-record-type-name)
+         (only-in "parse.rkt"
+                  [call-form-fn raw-call-form-fn]
+                  [static-call-class+method raw-static-call-class+method]
+                  [pat-record-type-name raw-pat-record-type-name])
          "types.rkt"
          "emit-dispatch.rkt"
          "emit-nix-strings.rkt")
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (static-call-class+method form)
+  (define ref (raw-static-call-class+method form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (pat-record-type-name pattern)
+  (define ref (raw-pat-record-type-name pattern))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 ;; --- indentation -----------------------------------------------------------
 
@@ -1040,6 +1060,7 @@
 
 (define (emit-expr e depth)
   (cond
+    [(qualified-ref? e) (emit-expr (qualified-ref->symbol e) depth)]
     [(number? e) (emit-nix-number e)]
     [(string? e) (format "\"~a\"" (escape-nix e))]
     [(boolean? e) (if e "true" "false")]

@@ -279,6 +279,8 @@
 
 (define (jst-postfix-base? e)
   (or (symbol? e)
+      (and (qualified-ref? e)
+           (symbol? (qualified-ref->symbol e)))
       (string? e)
       (boolean? e)
       (char? e)
@@ -327,7 +329,11 @@
           (emit-jst-expr (jst-set-value e))))
 
 (define (jst-constructor-reference? e)
-  (or (symbol? e) (jst-dot? e) (jst-get? e)))
+  (or (symbol? e)
+      (and (qualified-ref? e)
+           (symbol? (qualified-ref->symbol e)))
+      (jst-dot? e)
+      (jst-get? e)))
 
 (define (emit-jst-new e)
   (define callee (jst-new-callee e))

@@ -16,10 +16,16 @@
          racket/set
          racket/port
          json
-         "parse.rkt"
+         (except-in "parse.rkt" call-form-fn)
+         (only-in "parse.rkt" [call-form-fn raw-call-form-fn])
          "types.rkt"
          "nixos-schema.rkt"
          "diagnostic-kind.rkt")
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 ;; ============================================================================
 ;; Error collection

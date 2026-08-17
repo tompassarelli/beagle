@@ -59,9 +59,29 @@
          racket/format
          racket/set
          racket/list
-         "parse.rkt"
+         (except-in "parse.rkt"
+                    call-form-fn
+                    static-call-class+method
+                    pat-record-type-name)
+         (only-in "parse.rkt"
+                  [call-form-fn raw-call-form-fn]
+                  [static-call-class+method raw-static-call-class+method]
+                  [pat-record-type-name raw-pat-record-type-name])
          "types.rkt"
          "emit-dispatch.rkt")
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (static-call-class+method form)
+  (define ref (raw-static-call-class+method form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (pat-record-type-name pattern)
+  (define ref (raw-pat-record-type-name pattern))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 ;; --- special float values ---------------------------------------------------
 
@@ -607,6 +627,7 @@ CLJ
 
 (define (emit-expr-core e)
   (cond
+    [(qualified-ref? e) (emit-expr-core (qualified-ref->symbol e))]
     [(string? e)        (emit-clj-string e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]

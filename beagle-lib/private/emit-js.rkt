@@ -8,12 +8,32 @@
          racket/list
          racket/set
          "types.rkt"          ; type-prim?/type-prim-name for scalar-=== dispatch
-         "parse.rkt"
+         (except-in "parse.rkt"
+                    call-form-fn
+                    static-call-class+method
+                    pat-record-type-name)
+         (only-in "parse.rkt"
+                  [call-form-fn raw-call-form-fn]
+                  [static-call-class+method raw-static-call-class+method]
+                  [pat-record-type-name raw-pat-record-type-name])
          "emit-dispatch.rkt"
          "js-capabilities.rkt"
          "js-emit-utils.rkt"
          "emit-jst.rkt"
          "emit-js-quote.rkt")
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (static-call-class+method form)
+  (define ref (raw-static-call-class+method form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (pat-record-type-name pattern)
+  (define ref (raw-pat-record-type-name pattern))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (define current-js-semantic-contracts (make-parameter #f))
 
@@ -1491,6 +1511,8 @@
 ;; there, while the qualified `state/f` symbol does not equal `state`.
 (define (tree-contains-symbol? node target)
   (cond
+    [(qualified-ref? node)
+     (tree-contains-symbol? (qualified-ref->symbol node) target)]
     [(symbol? node) (eq? node target)]
     [(pair? node)
      (or (tree-contains-symbol? (car node) target)
@@ -1970,6 +1992,7 @@
 
 (define (emit-expr-core e)
   (cond
+    [(qualified-ref? e) (emit-expr-core (qualified-ref->symbol e))]
     [(block-string? e)  (emit-js-block-string (block-string-text e))]
     [(string? e)        (js-string-lit e)]
     [(boolean? e)       (if e "true" "false")]

@@ -10,13 +10,34 @@
          racket/string
          racket/set
          racket/list
-         "parse.rkt"
+         (except-in "parse.rkt"
+                    call-form-fn
+                    static-call-class+method
+                    pat-record-type-name)
+         (only-in "parse.rkt"
+                  [call-form-fn raw-call-form-fn]
+                  [static-call-class+method raw-static-call-class+method]
+                  [pat-record-type-name raw-pat-record-type-name])
          "types.rkt"
          "stdlib-types.rkt"
          "stdlib-jvm.rkt"
          "nixos-schema.rkt"
          "macros.rkt"
          "diagnostic-kind.rkt")
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+;; Keep the checker on its legacy symbol contract until its conversion seam.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (static-call-class+method form)
+  (define ref (raw-static-call-class+method form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (pat-record-type-name pattern)
+  (define ref (raw-pat-record-type-name pattern))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (define (builtin-env-for-target target)
   (stdlib-for-target target))
@@ -4842,7 +4863,9 @@
 ;; is a no-op when no table is bound (the normal check path), so this adds
 ;; nothing to ordinary type-checking. The real cond body is infer-expr*.
 (define (infer-expr e env)
-  (define t (infer-expr* e env))
+  (define legacy-e
+    (if (qualified-ref? e) (qualified-ref->symbol e) e))
+  (define t (infer-expr* legacy-e env))
   (store-type! e t)
   t)
 
@@ -8710,6 +8733,7 @@
   (define (go e [loc #f])
     (define l (loc-of e loc))
     (cond
+      [(qualified-ref? e) (visit! (qualified-ref->symbol e) l)]
       [(symbol? e) (visit! e l)]
       [(call-form? e)
        (if (symbol? (call-form-fn e))

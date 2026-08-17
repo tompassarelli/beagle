@@ -12,12 +12,32 @@
          racket/format
          json
          openssl/sha1
-         "ast.rkt"
+         (except-in "ast.rkt"
+                    call-form-fn
+                    static-call-class+method
+                    pat-record-type-name)
+         (only-in "ast.rkt"
+                  [call-form-fn raw-call-form-fn]
+                  [static-call-class+method raw-static-call-class+method]
+                  [pat-record-type-name raw-pat-record-type-name])
          "types.rkt"
          "macros.rkt"
          (only-in "parse.rkt" program-source-bytes)
          (only-in "semantic-index.rkt" write-canonical-json)
          "js-emit-utils.rkt")
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+(define (call-form-fn form)
+  (define ref (raw-call-form-fn form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (static-call-class+method form)
+  (define ref (raw-static-call-class+method form))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+
+(define (pat-record-type-name pattern)
+  (define ref (raw-pat-record-type-name pattern))
+  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (define current-json-src-table (make-parameter #f))
 (define current-json-type-table (make-parameter #f))
@@ -420,6 +440,7 @@
 
 (define (expr->json/raw e)
   (cond
+    [(qualified-ref? e) (expr->json/raw (qualified-ref->symbol e))]
     [(string? e)  (hasheq 'node "literal" 'kind "string" 'value e)]
     ;; value is the integer code point: JSON has no char type, and the
     ;; selfhost consumer re-emits canonically from the value (emit-clj-char
