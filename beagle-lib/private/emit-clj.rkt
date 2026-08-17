@@ -75,6 +75,7 @@
 
 (define (reference->clj ref)
   (cond
+    [(resolved-ref? ref) (symbol->string (resolved-ref-output-symbol ref))]
     [(qualified-ref? ref) (qualified-ref->clj ref)]
     [(symbol? ref) (symbol->string ref)]
     [else (emit-expr ref)]))
@@ -700,6 +701,7 @@ CLJ
 
 (define (emit-expr-core e)
   (cond
+    [(resolved-ref? e) (symbol->string (resolved-ref-output-symbol e))]
     [(qualified-ref? e) (qualified-ref->clj e)]
     [(string? e)        (emit-clj-string e)]
     [(boolean? e)       (if e "true" "false")]
@@ -848,7 +850,8 @@ CLJ
             (parameterize ([current-clj-loop-recur-context #f])
               (emit-body (letfn-fn-body f) "    "))))
          (format "(~a [~a] ~a)"
-                 (symbol->string (letfn-fn-name f))
+                 (symbol->string
+                  (binder-output-symbol f (letfn-fn-name f)))
                  params-str
                  body-str)))
      (format "(letfn [~a]\n  ~a)"
@@ -951,7 +954,7 @@ CLJ
              (string-join (for/list ([c (try-form-catches e)])
                  (format "\n  (catch ~a ~a\n    ~a)"
                          (catch-clause-exception-type c)
-                         (catch-clause-name c)
+                         (binder-output-symbol c (catch-clause-name c))
                          (emit-body (catch-clause-body c) "    "))) "")
              (if (try-form-finally-body e)
                (format "\n  (finally\n    ~a)" (emit-body (try-form-finally-body e) "    "))
@@ -1372,7 +1375,9 @@ CLJ
       [(pat-var? (match-clause-pattern default-clause))
        (define var (pat-var-name default-clause))
        (format "\n    (let [~a ~a] ~a)"
-               (pat-var-name (match-clause-pattern default-clause))
+               (binder-output-symbol
+                (match-clause-pattern default-clause)
+                (pat-var-name (match-clause-pattern default-clause)))
                target-sym
                (emit-body (match-clause-body default-clause) "      "))]))
   (format "(case ~a\n    ~a~a)"
@@ -1441,7 +1446,8 @@ CLJ
     [(pat-wildcard? pat)
      (format ":else ~a" body-str)]
     [(pat-var? pat)
-     (format ":else (let [~a ~a] ~a)" (pat-var-name pat) target-sym body-str)]
+     (format ":else (let [~a ~a] ~a)"
+             (binder-output-symbol pat (pat-var-name pat)) target-sym body-str)]
     [(pat-literal? pat)
      (format "~a ~a" (emit-pat-literal-test pat target-sym) body-str)]
     ;; or-pattern (v1: literal-only alternatives). Combines per-alternative
@@ -1502,7 +1508,8 @@ CLJ
         (define let-pairs
           (for/list ([b (in-list bindings)]
                      [fname (in-list fields)])
-            (format "~a (:~a ~a)" b fname target-sym)))
+            (format "~a (:~a ~a)"
+                    (binder-output-symbol pat b) fname target-sym)))
         (format "~a (let [~a] ~a)" test (string-join let-pairs " ") body-str)])]
     [(pat-map? pat)
      (define tests
@@ -1526,7 +1533,8 @@ CLJ
      (define binds
        (for/list ([entry (in-list (pat-map-entries pat))]
                   #:when (pat-var? (cdr entry)))
-         (format "~a (~a ~a)" (pat-var-name (cdr entry))
+         (format "~a (~a ~a)"
+                 (binder-output-symbol pat (pat-var-name (cdr entry)))
                  (symbol->string (car entry)) target-sym)))
      (if (null? binds)
          (format "~a ~a" test body-str)
@@ -1654,20 +1662,27 @@ CLJ
               body-str)))
   (string-append proto-line "\n  " (string-join method-lines "\n  ")))
 
-(define (emit-seq-destructure d)
+(define (emit-seq-destructure d [owner #f])
   ;; Entries are symbols or nested destructure patterns — recurse through
   ;; emit-binding-name so [[k v] m]-style nesting round-trips.
   (define names-str
     (string-join
      (for/list ([n (in-list (seq-destructure-names d))])
-       (if (symbol? n) (symbol->string n) (emit-binding-name n)))
+       (emit-binding-name n owner))
      " "))
   (if (seq-destructure-rest-name d)
-    (format "[~a & ~a]" names-str (seq-destructure-rest-name d))
+    (format "[~a & ~a]"
+            names-str
+            (binder-output-symbol owner (seq-destructure-rest-name d)))
     (format "[~a]" names-str)))
 
-(define (emit-map-destructure d)
-  (define keys-str (string-join (map symbol->string (map-destructure-keys d)) " "))
+(define (emit-map-destructure d [owner #f])
+  (define keys-str
+    (string-join
+     (map (lambda (name)
+            (symbol->string (binder-output-symbol owner name)))
+          (map-destructure-keys d))
+     " "))
   (define or-str
     (if (null? (map-destructure-or-defaults d))
         ""
@@ -1678,18 +1693,20 @@ CLJ
                  " "))))
   (define as-str
     (if (map-destructure-as-name d)
-        (format " :as ~a" (map-destructure-as-name d))
+        (format " :as ~a"
+                (binder-output-symbol owner (map-destructure-as-name d)))
         ""))
   (format "{:keys [~a]~a~a}" keys-str or-str as-str))
 
 ;; Emit any binding name target — plain symbol, map destructure, or seq destructure.
 ;; Used by params, let-bindings, for-bindings.
-(define (emit-binding-name name)
+(define (emit-binding-name name [owner #f])
   (cond
-    [(param? name)           (emit-binding-name (param-name name))]
-    [(map-destructure? name) (emit-map-destructure name)]
-    [(seq-destructure? name) (emit-seq-destructure name)]
-    [(symbol? name)          (symbol->string name)]
+    [(param? name)           (emit-binding-name (param-name name) name)]
+    [(map-destructure? name) (emit-map-destructure name owner)]
+    [(seq-destructure? name) (emit-seq-destructure name owner)]
+    [(symbol? name)
+     (symbol->string (if owner (binder-output-symbol owner name) name))]
     [else (error 'beagle-clj "unsupported binding target: ~v" name)]))
 
 (define (emit-args args)
@@ -1697,7 +1714,7 @@ CLJ
     [(null? args) ""]
     [else (string-append " " (string-join (map emit-expr args) " "))]))
 
-(define (emit-param p) (emit-binding-name p))
+(define (emit-param p) (emit-binding-name p p))
 
 ;; --- binding constraints ---------------------------------------------------
 
@@ -1881,7 +1898,7 @@ CLJ
    (apply
     append
     (for/list ([b (in-list bindings)] [index (in-naturals)])
-      (define target (emit-binding-name (let-binding-name b)))
+      (define target (emit-binding-name (let-binding-name b) b))
       (define value (emit-expr (let-binding-value b)))
       (define constraint (let-binding-constraint b))
       (cond
@@ -1902,7 +1919,7 @@ CLJ
     [(null? bindings) body-str]
     [else
      (define b (car bindings))
-     (define target (emit-binding-name (let-binding-name b)))
+     (define target (emit-binding-name (let-binding-name b) b))
      (define value (emit-expr (let-binding-value b)))
      (define inner
        (emit-with-open-chain (cdr bindings) body-str (add1 index)))
@@ -1948,7 +1965,7 @@ CLJ
       (define constraint (let-binding-constraint binding))
       (format
        "~a ~a"
-       (emit-binding-name (let-binding-name binding))
+       (emit-binding-name (let-binding-name binding) binding)
        (if constraint
            (format "$beagle$constraint$checked-dynamic$~a" index)
            raw-name))))
@@ -1976,7 +1993,7 @@ CLJ
                    [raw (in-list raw-names)]
                    [index (in-naturals)])
           (define constraint (let-binding-constraint binding))
-          (define target (emit-binding-name (let-binding-name binding)))
+          (define target (emit-binding-name (let-binding-name binding) binding))
           (append
            (list (format "~a ~a" raw
                          (emit-expr (let-binding-value binding))))
@@ -2002,7 +2019,7 @@ CLJ
          (define constraint (let-binding-constraint binding))
          (format
           "~a ~a"
-          (emit-binding-name (let-binding-name binding))
+          (emit-binding-name (let-binding-name binding) binding)
           (if constraint
               (format
                (string-append
@@ -2047,11 +2064,11 @@ CLJ
                 (format
                  ":let [~a ~a\n         ~a ~a]"
                  predicate-name (emit-expr constraint)
-                 (emit-binding-name (for-binding-name c))
+                 (emit-binding-name (for-binding-name c) c)
                  (emit-guarded-binding-value c predicate-name raw-name))))
              (list
               (format "~a ~a"
-                      (emit-binding-name (for-binding-name c))
+                      (emit-binding-name (for-binding-name c) c)
                       (emit-expr (for-binding-expr c)))))]
         [(for-when? c)
          (list (format ":when ~a" (emit-expr (for-when-test c))))]

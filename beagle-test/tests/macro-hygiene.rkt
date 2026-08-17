@@ -11,6 +11,7 @@
 (require rackunit
          racket/set
          beagle/private/parse
+         beagle/private/ast-json
          beagle/private/macros
          beagle/private/tags
          (only-in beagle/private/ast
@@ -110,6 +111,53 @@
   (check-equal?
    (expand-fully reg '(with-tmp))
    (list 'let (br 'tmp 1) 'tmp)))
+
+(test-case "scope hygiene: compiler resolves caller, introduced, and nested tmp edges"
+  (define program
+    (parse-prog
+     (list
+      'defmacro 'around (br 'body)
+      (list
+       'quasiquote
+       (list 'let (br 'tmp 1)
+             (list 'do 'tmp (list 'unquote 'body)))))
+     (list
+      'defn 'capture-matrix (br (list 'tmp 'Int)) 'Int
+      (list 'around (list 'do 'tmp (list 'let (br 'tmp 2) 'tmp))))))
+  (define function (car (program-forms program)))
+  (define parameter (car (defn-form-params function)))
+  (define introduced-let (car (defn-form-body function)))
+  (define introduced-binding (car (let-form-bindings introduced-let)))
+  (define introduced-do (car (let-form-body introduced-let)))
+  (define introduced-use (car (do-form-body introduced-do)))
+  (define caller-do (cadr (do-form-body introduced-do)))
+  (define caller-use (car (do-form-body caller-do)))
+  (define nested-let (cadr (do-form-body caller-do)))
+  (define nested-binding (car (let-form-bindings nested-let)))
+  (define nested-use (car (let-form-body nested-let)))
+  (define parameter-id (binder-binding-id parameter 'tmp))
+  (define introduced-id (binder-binding-id introduced-binding 'tmp))
+  (define nested-id (binder-binding-id nested-binding 'tmp))
+  (check-true (and (binding-id? parameter-id)
+                   (binding-id? introduced-id)
+                   (binding-id? nested-id)))
+  (check-equal? (set-count (set parameter-id introduced-id nested-id)) 3)
+  (check-equal? (resolved-ref-binding-id introduced-use) introduced-id)
+  (check-equal? (resolved-ref-binding-id caller-use) parameter-id)
+  (check-equal? (resolved-ref-binding-id nested-use) nested-id)
+  (define wire (expr->json function))
+  (define parameter-wire (car (hash-ref wire 'params)))
+  (define introduced-wire (car (hash-ref wire 'body)))
+  (define introduced-binding-wire (car (hash-ref introduced-wire 'bindings)))
+  (define introduced-do-wire (car (hash-ref introduced-wire 'body)))
+  (define introduced-use-wire (car (hash-ref introduced-do-wire 'body)))
+  (check-equal? (hash-ref parameter-wire 'bindingId)
+                (binding-id-stable parameter-id))
+  (check-equal? (hash-ref introduced-binding-wire 'bindingId)
+                (binding-id-stable introduced-id))
+  (check-equal? (hash-ref introduced-use-wire 'refersTo)
+                (binding-id-stable introduced-id))
+  (check-equal? (hash-ref introduced-use-wire 'providerId) 'null))
 
 ;; --- recursive macro depth-cap --------------------------------------------
 ;;

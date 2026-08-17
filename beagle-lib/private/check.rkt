@@ -19,10 +19,21 @@
          "diagnostic-kind.rkt")
 
 (define (named-reference? ref)
-  (or (symbol? ref) (qualified-ref? ref)))
+  (or (symbol? ref) (qualified-ref? ref) (resolved-ref? ref)))
+
+(define (resolved-ref-structural-reference ref)
+  (define name (resolved-ref-name ref))
+  (if (structural-name-qualifier name)
+      (structural-name->qualified-ref name)
+      (structural-name-leaf name)))
 
 (define (reference-hash-ref table ref [fallback #f])
-  (or (hash-ref table ref #f)
+  (or (and (resolved-ref? ref)
+           (hash-ref table (resolved-ref-binding-id ref) #f))
+      (hash-ref table ref #f)
+      (and (resolved-ref? ref)
+           (reference-hash-ref
+            table (resolved-ref-structural-reference ref) #f))
       (and (qualified-ref? ref)
            (qualified-ref-provider-id ref)
            (hash-ref
@@ -51,6 +62,8 @@
 
 (define (reference->string ref)
   (cond
+    [(resolved-ref? ref)
+     (symbol->string (structural-name->symbol (resolved-ref-name ref)))]
     [(qualified-ref? ref)
      (format "~a/~a" (qualified-ref-qualifier ref)
              (qualified-ref-name ref))]
@@ -58,7 +71,21 @@
     [else (format "~a" ref)]))
 
 (define (reference-leaf ref)
-  (if (qualified-ref? ref) (qualified-ref-name ref) ref))
+  (cond
+    [(resolved-ref? ref) (structural-name-leaf (resolved-ref-name ref))]
+    [(qualified-ref? ref) (qualified-ref-name ref)]
+    [else ref]))
+
+(define (binder-env-set! table binder name value)
+  (hash-set! table name value)
+  (define id (binder-binding-id binder name #f))
+  (when id (hash-set! table id value)))
+
+(define (local-reference? value)
+  (or (symbol? value) (resolved-ref? value)))
+
+(define (local-reference-key value)
+  (if (resolved-ref? value) (resolved-ref-binding-id value) value))
 
 (define (symbol-qualified-reference sym)
   (and
@@ -824,7 +851,7 @@
     (cond
       [(set!-form? v)
        (define t (set!-form-target v))
-       (when (symbol? t) (set-add! out t))
+       (when (local-reference? t) (set-add! out (local-reference-key t)))
        (walk (set!-form-target v))
        (walk (set!-form-value v))]
       [(pair? v) (walk (car v)) (walk (cdr v))]
@@ -3402,13 +3429,13 @@
   (define (recur target target-type)
     (cond
       [(symbol? target)
-       (hash-set! out target target-type)
+       (binder-env-set! out binding-owner target target-type)
        (store-binder-type! binding-owner target target-type)
        (store-binder-type! pattern target target-type)]
       [(any-type? target-type)
        ;; Explicit `(pattern Any)` is the documented dynamic boundary.
        (for ([name (in-list (destructure-bound-names target))])
-         (hash-set! out name ANY)
+         (binder-env-set! out binding-owner name ANY)
          (store-binder-type! binding-owner name ANY)
          (store-binder-type! pattern name ANY))
        (for ([default (in-list (destructure-or-default-exprs target))])
@@ -3445,7 +3472,7 @@
          (recur name item-type))
        (when (seq-destructure-rest-name target)
          (define rest-name (seq-destructure-rest-name target))
-         (hash-set! out rest-name rest-type)
+         (binder-env-set! out binding-owner rest-name rest-type)
          (store-binder-type! binding-owner rest-name rest-type)
          (store-binder-type! pattern rest-name rest-type))]
       [(map-destructure? target)
@@ -3516,12 +3543,12 @@
          (hash-set! projected name field-type))
        (for ([name (in-list (map-destructure-keys target))])
          (define field-type (hash-ref projected name))
-         (hash-set! out name field-type)
+         (binder-env-set! out binding-owner name field-type)
          (store-binder-type! binding-owner name field-type)
          (store-binder-type! pattern name field-type))
        (when (map-destructure-as-name target)
          (define as-name (map-destructure-as-name target))
-         (hash-set! out as-name target-type)
+         (binder-env-set! out binding-owner as-name target-type)
          (store-binder-type! binding-owner as-name target-type)
          (store-binder-type! pattern as-name target-type))
        ]
@@ -4027,7 +4054,7 @@
       [(or (map-destructure? p) (seq-destructure? p))
        ;; destructure-bound-names flattens nested patterns.
        (for ([n (in-list (destructure-bound-names p))])
-         (hash-set! out n ANY))
+         (binder-env-set! out p n ANY))
        ;; :or default expressions are ordinary exprs — infer them so type
        ;; errors inside defaults fire.
        (for ([dex (in-list (destructure-or-default-exprs p))])
@@ -4038,7 +4065,7 @@
        (if (or (map-destructure? target) (seq-destructure? target))
            (bind-destructure-type! out target declared "parameter" (src-for p) p)
            (begin
-             (hash-set! out target declared)
+             (binder-env-set! out p target declared)
              (store-binder-type! p target declared)))]))
   out)
 
@@ -4199,20 +4226,20 @@
     [(and (call-form? cond-expr)
           (hash-has-key? TYPE-PREDICATES (call-form-fn cond-expr))
           (= (length (call-form-args cond-expr)) 1)
-          (symbol? (car (call-form-args cond-expr))))
+          (local-reference? (car (call-form-args cond-expr))))
      (define var (car (call-form-args cond-expr)))
      (define target
        (predicate-narrowing-type
-        (hash-ref env var ANY)
+        (reference-hash-ref env var ANY)
         (hash-ref TYPE-PREDICATES (call-form-fn cond-expr))))
      (if target
-         (values var target #f)
+         (values (local-reference-key var) target #f)
          (values #f #f #f))]
     [(and (call-form? cond-expr)
           (eq? (call-form-fn cond-expr) 'some?)
           (= (length (call-form-args cond-expr)) 1)
-          (symbol? (car (call-form-args cond-expr))))
-     (values (car (call-form-args cond-expr))
+          (local-reference? (car (call-form-args cond-expr))))
+     (values (local-reference-key (car (call-form-args cond-expr)))
              (type-prim 'Nil)
              #t)]
     ;; (= x nil) / (not= x nil), either argument order.
@@ -4222,8 +4249,10 @@
      (define fn (call-form-fn cond-expr))
      (define a1 (car (call-form-args cond-expr)))
      (define a2 (cadr (call-form-args cond-expr)))
-     (define v (cond [(and (symbol? a1) (eq? a2 'nil)) a1]
-                     [(and (eq? a1 'nil) (symbol? a2)) a2]
+     (define v (cond [(and (local-reference? a1) (eq? a2 'nil))
+                      (local-reference-key a1)]
+                     [(and (eq? a1 'nil) (local-reference? a2))
+                      (local-reference-key a2)]
                      [else #f]))
      (if v
          (values v (type-prim 'Nil) (eq? fn 'not=))
@@ -4257,7 +4286,7 @@
 
 (define (alist-set alist k v)
   (cons (cons k v)
-        (filter (lambda (p) (not (eq? (car p) k))) alist)))
+        (filter (lambda (p) (not (equal? (car p) k))) alist)))
 
 (define (apply-narrowings env alist)
   (cond
@@ -4355,15 +4384,16 @@
              [var (cadr (call-form-args cond-expr))])
          (and (symbol? written)
               (stable-scrutinee-var var env)
-              (let* ([cur (hash-ref env var #f)]
+              (let* ([key (local-reference-key var)]
+                     [cur (hash-ref env key #f)]
                      [member-name
                       (and cur
                            (canonical-union-member-name written cur))])
                 ;; true branch is type(x) ∩ Member, which for a nominal member
                 ;; is the member (with a parametric scrutinee's substitutions).
                 (and member-name
-                     (cons (list (cons var (member-view-type member-name cur)))
-                           (list (cons var (subtract-member cur member-name))))))))))
+                     (cons (list (cons key (member-view-type member-name cur)))
+                           (list (cons key (subtract-member cur member-name))))))))))
 
 (define (test-narrowings cond-expr env)
   (cond
@@ -4399,17 +4429,18 @@
             (values '() (fold-branch args #f)))]
        [(instance-narrowings cond-expr env)
         => (lambda (p) (values (car p) (cdr p)))]
-       ;; Bare-symbol truthiness.
-       [(symbol? cond-expr)
-        (define cur (hash-ref env cond-expr #f))
+       ;; Bare-local truthiness.
+       [(local-reference? cond-expr)
+        (define key (local-reference-key cond-expr))
+        (define cur (hash-ref env key #f))
         (cond
           [(not cur) (values '() '())]
           [else
            (define non-nil (remove-from-union cur (type-prim 'Nil)))
-           (values (list (cons cond-expr non-nil))
+           (values (list (cons key non-nil))
                    (if (type-could-be-false? non-nil)
                        '() ; falsy branch may be `false`, not nil
-                       (list (cons cond-expr (type-prim 'Nil)))))])]
+                       (list (cons key (type-prim 'Nil)))))])]
        [else
         (define-values (var ntype neg?) (extract-narrowing cond-expr env))
         (cond
@@ -4471,12 +4502,13 @@
 ;; can be rebound under the arm. Field/atom mutation does not participate — it
 ;; cannot change the value's nominal type.
 (define (stable-scrutinee-var target env)
-  (and (symbol? target)
-       (hash-has-key? env target)
-       (not (set-member? (current-unstable-bindings) target))
+  (define key (and (local-reference? target) (local-reference-key target)))
+  (and key
+       (hash-has-key? env key)
+       (not (set-member? (current-unstable-bindings) key))
        (not (let ([dyn (hash-ref env '#%dynamic-vars #f)])
-              (and dyn (set-member? dyn target))))
-       target))
+              (and dyn (set-member? dyn key))))
+       key))
 
 (define (narrow-env-for-match clause target-type env [scrutinee #f])
   (define pat (match-clause-pattern clause))
@@ -4498,10 +4530,12 @@
         (define field-order (hash-ref RECORD-FIELD-ORDER rec-name '()))
         (for ([b (in-list bindings)]
               [kw (in-list field-order)])
-          (define raw-type (hash-ref field-map kw ANY))
-          (hash-set! arm-env b (resolve-parametric-field-type raw-type target-type)))]
+        (define raw-type (hash-ref field-map kw ANY))
+          (binder-env-set!
+           arm-env pat b
+           (resolve-parametric-field-type raw-type target-type)))]
        [(= (length bindings) 1)
-        (hash-set! arm-env (car bindings) (type-prim rec-name))])
+        (binder-env-set! arm-env pat (car bindings) (type-prim rec-name))])
      arm-env]
     ;; G4-emit — map pattern {:k x}: narrow each VAR entry to its field type. Sound
     ;; now that emit binds the var (emit-clj/emit-js), and the arm is gated on
@@ -4511,12 +4545,13 @@
      (define arm-env (mut-copy env))
      (for ([entry (in-list (pat-map-entries pat))])
        (when (pat-var? (cdr entry))
-         (hash-set! arm-env (pat-var-name (cdr entry))
-                    (lookup-kw-field-type (car entry) target-type env))))
+         (binder-env-set!
+          arm-env pat (pat-var-name (cdr entry))
+          (lookup-kw-field-type (car entry) target-type env))))
      arm-env]
     [(pat-var? pat)
      (define arm-env (mut-copy env))
-     (hash-set! arm-env (pat-var-name pat) target-type)
+     (binder-env-set! arm-env pat (pat-var-name pat) target-type)
      arm-env]
     ;; or-pattern: v1 handles no-binding alternatives (literals, wildcards,
     ;; bare records with no bindings). All alternatives sharing bindings is
@@ -4980,6 +5015,8 @@
          ANY)]
     [(qualified-ref? e)
      (reference-hash-ref env e ANY)]
+    [(resolved-ref? e)
+     (reference-hash-ref env e ANY)]
     [(quoted? e) ANY]
     [(regex-lit? e)
      (regex-construction-contract e)
@@ -5240,7 +5277,7 @@
        (define signature (inference-clause-effective-type clause))
        (hash-set! clauses (letfn-fn-name f) clause)
        (hash-set! signatures (letfn-fn-name f) signature)
-       (hash-set! body-env (letfn-fn-name f) signature))
+       (binder-env-set! body-env f (letfn-fn-name f) signature))
      (for ([f (in-list (letfn-form-fns e))])
        (define name (letfn-fn-name f))
        (define clause (hash-ref clauses name))
@@ -5268,7 +5305,7 @@
        (define finalized
          (finalized-definition-type (hash-ref signatures name)))
        (hash-set! signatures name finalized)
-       (hash-set! body-env name finalized))
+       (binder-env-set! body-env f name finalized))
      (last-expr-type (letfn-form-body e) body-env)]
     [(loop-form? e)
      (define body-env (extend-with-let-bindings env (loop-form-bindings e)))
@@ -5287,7 +5324,7 @@
      ;; rather than a silent miscompile.
      (define target (set!-form-target e))
      (define js-target? (eq? (current-check-target) 'js))
-     (unless (or (symbol? target)
+     (unless (or (local-reference? target)
                  (and (not js-target?) (method-call? target)))
        (define target-desc
          (if (and (call-form? target) (symbol? (call-form-fn target)))
@@ -5555,7 +5592,7 @@
      (define catch-types
        (for/list ([c (in-list (try-form-catches e))])
          (define catch-env (mut-copy env))
-         (hash-set! catch-env (catch-clause-name c) ANY)
+         (binder-env-set! catch-env c (catch-clause-name c) ANY)
          (last-expr-type (catch-clause-body c) catch-env)))
      (when (try-form-finally-body e)
        (for ([expr (in-list (try-form-finally-body e))]) (infer-expr expr env)))
@@ -5850,7 +5887,8 @@
         #:src (src-for e)))
      (define raw-type
        (cond
-         [(qualified-ref? ref) (reference-hash-ref env ref ANY)]
+         [(or (qualified-ref? ref) (resolved-ref? ref))
+          (reference-hash-ref env ref ANY)]
          [(symbol? fn) (hash-ref env fn ANY)]
          [else (infer-expr ref env)]))
      (define call-name
@@ -6354,7 +6392,7 @@
             (type-mismatch-details declared inferred)
             #:src (src-for (let-binding-value b)))))
        (bind-destructure-type! out bname (or declared inferred)
-                               "let binding" (src-for (let-binding-value b)))]
+                               "let binding" (src-for (let-binding-value b)) b)]
       [else
        (when declared
          (unless (or (check-hvec-literal (let-binding-value b) declared out
@@ -6369,7 +6407,7 @@
                                  'name (symbol->string bname))
                        #:src (src-for (let-binding-value b)))))
        (check-binding-accessor-mismatch bname (let-binding-value b) out)
-       (hash-set! out bname (or declared inferred ANY))]))
+       (binder-env-set! out b bname (or declared inferred ANY))]))
   out)
 
 (define (collection-element-type collection-type)
@@ -6406,8 +6444,8 @@
    body-env "for/doseq binding" binding)
   (if (or (map-destructure? target) (seq-destructure? target))
       (bind-destructure-type! body-env target effective "for/doseq binding"
-                              (src-for binding))
-      (hash-set! body-env target effective)))
+                              (src-for binding) binding)
+      (binder-env-set! body-env binding target effective)))
 
 ;; Variadic-aware argument checking.
 ;; --- numeric-preserving arithmetic (cracks thread 20260613013145 #3) ---------
@@ -6475,7 +6513,9 @@
     (and (symbol? a)
          (let ([s (symbol->string a)]) (and (> (string-length s) 0) (char=? (string-ref s 0) #\:)))))
   (define (chk val-expr kw)
-    (when (and (symbol? val-expr) (not (kw-lit? val-expr)) (kw-lit? kw))
+    (when (and (local-reference? val-expr)
+               (not (kw-lit? val-expr))
+               (kw-lit? kw))
       (define vt (infer-expr val-expr env))
       (when (type-prim? vt)
         (define members (hash-ref ENUM-TYPES (type-prim-name vt) #f))
@@ -6853,17 +6893,21 @@
              (if slash (substring authored (add1 slash)) authored))]))
 
 (define (scalar-constructor-name name)
-  (define-values (prefix leaf) (qualified-name-parts name))
-  (and (string-prefix? leaf "->")
-       (> (string-length leaf) 2)
-       (string->symbol (string-append prefix (substring leaf 2)))))
+  (and
+   (not (resolved-ref? name))
+   (let-values ([(prefix leaf) (qualified-name-parts name)])
+     (and (string-prefix? leaf "->")
+          (> (string-length leaf) 2)
+          (string->symbol (string-append prefix (substring leaf 2)))))))
 
 (define (scalar-accessor-name name)
-  (define-values (prefix leaf) (qualified-name-parts name))
-  (and (string-suffix? leaf "-value")
-       (let ([base (substring leaf 0 (- (string-length leaf) 6))])
-         (string->symbol
-          (string-append prefix (string-titlecase-first base))))))
+  (and
+   (not (resolved-ref? name))
+   (let-values ([(prefix leaf) (qualified-name-parts name)])
+     (and (string-suffix? leaf "-value")
+          (let ([base (substring leaf 0 (- (string-length leaf) 6))])
+            (string->symbol
+             (string-append prefix (string-titlecase-first base))))))))
 
 (define (scalar-name-eq? a b)
   (string-ci=? (symbol->string a) (symbol->string b)))
@@ -8000,7 +8044,7 @@
          (let ([receiver (car (call-form-args value))])
            (cond
              [(direct-transient-call? receiver state) fresh-transient-root]
-             [(symbol? receiver) receiver]
+             [(local-reference? receiver) (reference-leaf receiver)]
              [else (conj-pipeline-root receiver state)]))))
   (define (binding-acquires-owner? target value state)
     (and (symbol? target)
@@ -8315,6 +8359,23 @@
       [(quoted? value) (values state (seteq))]
       [(symbol? value)
        (define binding (hash-ref (purity-state-scope state) value #f))
+       (cond
+         [(not binding) (values state (seteq))]
+         [(and (not (set-empty? (purity-binding-origins binding)))
+               (< (purity-binding-lambda-depth binding)
+                  (purity-state-lambda-depth state)))
+         (values
+           (escape-origins state (purity-binding-origins binding) value)
+           (seteq))]
+         [else (values state (purity-binding-origins binding))])]
+      [(resolved-ref? value)
+       (define binding
+         (or (hash-ref
+              (purity-state-scope state) (resolved-ref-binding-id value) #f)
+             (hash-ref
+              (purity-state-scope state)
+              (structural-name-leaf (resolved-ref-name value))
+              #f)))
        (cond
          [(not binding) (values state (seteq))]
          [(and (not (set-empty? (purity-binding-origins binding)))

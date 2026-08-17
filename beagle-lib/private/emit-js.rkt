@@ -1174,10 +1174,27 @@
 (define current-binder-types (make-parameter #f))
 
 (define (resolved-name name)
-  (if (qualified-ref? name)
-      (emit-qualified-reference name)
-      (hash-ref (current-rename-env) name
-                (lambda () (mangle-name name)))))
+  (cond
+    [(qualified-ref? name) (emit-qualified-reference name)]
+    [(resolved-ref? name)
+     (hash-ref
+      (current-rename-env)
+      (resolved-ref-binding-id name)
+      (lambda () (mangle-name (resolved-ref-output-symbol name))))]
+    [else
+     (hash-ref (current-rename-env) name
+               (lambda () (mangle-name name)))]))
+
+(define (rename-env-set-binder env binding name rendered)
+  (define with-name (hash-set env name rendered))
+  (define id (binder-binding-id binding name #f))
+  (if id (hash-set with-name id rendered) with-name))
+
+(define (resolved-binder-name binding name)
+  (define id (binder-binding-id binding name #f))
+  (or (and id (hash-ref (current-rename-env) id #f))
+      (hash-ref (current-rename-env) name #f)
+      (mangle-name (binder-output-symbol binding name))))
 
 ;; Typed-JS operators live in emit-jst.rkt, but their operands share this
 ;; emitter's lexical rename environment with every ordinary expression.
@@ -1258,9 +1275,10 @@
                           [index (in-naturals)])
     (for/fold ([inner env])
               ([name (in-list (names-from-binding-target binding))])
-      (hash-set inner name
-                (format "$beagle$~a$~a$~a"
-                        prefix index (mangle-name name))))))
+      (rename-env-set-binder
+       inner binding name
+       (format "$beagle$~a$~a$~a"
+               prefix index (mangle-name name))))))
 
 (define (binding-indexed-rename-env
          bindings prefix index [base (current-rename-env)])
@@ -1268,9 +1286,10 @@
             ([name (in-list
                     (names-from-binding-target
                      (list-ref bindings index)))])
-    (hash-set env name
-              (format "$beagle$~a$~a$~a"
-                      prefix index (mangle-name name)))))
+    (rename-env-set-binder
+     env (list-ref bindings index) name
+     (format "$beagle$~a$~a$~a"
+             prefix index (mangle-name name)))))
 
 (define (callable-param-rename-env params rest-param)
   (define bindings (param-bindings params rest-param))
@@ -2042,6 +2061,7 @@
 
 (define (emit-expr-core e)
   (cond
+    [(resolved-ref? e) (resolved-name e)]
     [(qualified-ref? e) (emit-qualified-reference e)]
     [(block-string? e)  (emit-js-block-string (block-string-text e))]
     [(string? e)        (js-string-lit e)]
@@ -2349,11 +2369,11 @@
                        (if (or (map-destructure? target)
                                (seq-destructure? target))
                            (emit-pattern-binding-statements
-                            target slot
+                            target slot binding
                             #:default-bound bound
                             #:default-rename-env rename-env)
                            (list (format "const ~a = ~a;"
-                                         (emit-binding-target target) slot)))))
+                                         (emit-binding-target binding) slot)))))
                    (define-values (type-env* rep-env*)
                      (extend-binding-type-envs
                       (list target) type-env rep-env))
@@ -2384,12 +2404,12 @@
                     (cond
                       [(or (map-destructure? target) (seq-destructure? target))
                        (emit-pattern-binding-statements
-                        target slot
+                        target slot b
                         #:default-bound default-bound
                         #:default-rename-env default-rename-env)]
                       [constrained-loop?
                        (list (format "let ~a = ~a;"
-                                     (emit-binding-target target) slot))]
+                                     (emit-binding-target b) slot))]
                       [else '()])))
                 installs)))
      (define-values (loop-type-env loop-rep-env)
@@ -2496,8 +2516,9 @@
      (define fn-names (map letfn-fn-name fns))
      (define letfn-rename-env
        (for/fold ([env (current-rename-env)])
-                 ([fn-name (in-list fn-names)])
-         (hash-set env fn-name (mangle-name fn-name))))
+                 ([fn (in-list fns)] [fn-name (in-list fn-names)])
+         (rename-env-set-binder
+          env fn fn-name (mangle-name (binder-output-symbol fn fn-name)))))
      ;; Nested functions own their async status. Their bodies must not make
      ;; the surrounding letfn IIFE async: declaring an async local while the
      ;; letfn body returns a plain value must still return that value directly.
@@ -2507,7 +2528,7 @@
         (lambda ()
          (define fn-strs
            (for/list ([f (in-list fns)])
-             (define name (mangle-name (letfn-fn-name f)))
+             (define name (resolved-binder-name f (letfn-fn-name f)))
              (define params
                (emit-js-params
                 (letfn-fn-params f) (letfn-fn-rest-param f)))
@@ -2612,10 +2633,16 @@
        (for/list ([c (try-form-catches e)])
          (with-bindings (list (catch-clause-name c))
            (lambda ()
-             (define name (mangle-name (catch-clause-name c)))
-             (format "catch (~a) {\n    ~a\n  }"
-                     name
-                     (emit-body-return (catch-clause-body c) "    "))))))
+             (define authored-name (catch-clause-name c))
+             (define name
+               (mangle-name (binder-output-symbol c authored-name)))
+             (parameterize
+                 ([current-rename-env
+                   (rename-env-set-binder
+                    (current-rename-env) c authored-name name)])
+               (format "catch (~a) {\n    ~a\n  }"
+                       name
+                       (emit-body-return (catch-clause-body c) "    ")))))))
      (define finally-str
        (if (try-form-finally-body e)
          (format " finally {\n    ~a\n  }"
@@ -2709,7 +2736,7 @@
     [(set!-form? e)
      (define target (set!-form-target e))
      (define val (emit-expr (set!-form-value e)))
-     (unless (symbol? target)
+     (unless (or (symbol? target) (resolved-ref? target))
        (error 'beagle-js "set! emission requires a lexical binding target"))
      (format "(~a = ~a)" (resolved-name target) val)]
 
@@ -2808,6 +2835,10 @@
                 (emit-qualified-reference
                  fn-sym
                  #:constructor? (qualified-member-constructor? fn-sym))
+                (string-join (map emit-expr args) ", "))]
+       [(resolved-ref? fn-sym)
+        (format "~a(~a)"
+                (resolved-name fn-sym)
                 (string-join (map emit-expr args) ", "))]
        [(not (symbol? fn-sym))
         ;; higher-order call: the callee is an arbitrary expression — e.g.
@@ -3118,7 +3149,8 @@
      (format "{ ~a }" (make-body-str))]
     [(pat-var? pat)
      (format "{ const ~a = ~a; ~a }"
-             (mangle-name (pat-var-name pat)) tmp (make-body-str (list (pat-var-name pat))))]
+             (mangle-name (binder-output-symbol pat (pat-var-name pat)))
+             tmp (make-body-str (list (pat-var-name pat))))]
     [(pat-literal? pat)
      (format "if (~a) { ~a } else" (emit-pat-literal-test-js pat tmp) (make-body-str))]
     ;; or-pattern (v1: literal-only alternatives). Combines per-alternative
@@ -3155,7 +3187,8 @@
             ;; `b` is a fresh BINDING (suffixed); the read reaches a record
             ;; PROPERTY (char-mangle only) -> must match factory storage.
             (format "const ~a = ~a.~a;"
-                    (mangle-name b) tmp (mangle-prop fname))))
+                    (mangle-name (binder-output-symbol pat b))
+                    tmp (mangle-prop fname))))
         (format "if (~a) { ~a ~a } else"
                 test (string-join let-strs " ") (make-body-str bindings))])]
     [(pat-map? pat)
@@ -3181,7 +3214,9 @@
      (define vnames (map (lambda (en) (pat-var-name (cdr en))) var-entries))
      (define let-strs
        (for/list ([en (in-list var-entries)])
-         (format "const ~a = ~a.~a;" (mangle-name (pat-var-name (cdr en)))
+         (format "const ~a = ~a.~a;"
+                 (mangle-name
+                  (binder-output-symbol pat (pat-var-name (cdr en))))
                  tmp (kw->prop (car en)))))
      (if (null? let-strs)
          (format "if (~a) { ~a } else" test (make-body-str))
@@ -3368,14 +3403,14 @@
                             (append
                              (list (format "const ~a = ~a" slot value))
                              (emit-pattern-binding-statements
-                              target slot
+                              target slot b
                               #:default-bound pre-bound
                               #:default-rename-env pre-rename-env))))
                         (parameterize ([current-js-bound post-bound]
                                        [current-rename-env post-rename-env])
                           (list
                            (format "const ~a = ~a"
-                                   (emit-binding-target target) value))))))))
+                                   (emit-binding-target b) value))))))))
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str contexts)))
@@ -3501,7 +3536,7 @@
     fixed))
 
 (define (emit-pattern-binding-statements
-         target source
+         target source [owner target]
          #:default-bound [default-bound (current-js-bound)]
          #:default-rename-env
          [default-rename-env (current-rename-env)])
@@ -3509,20 +3544,20 @@
     [(symbol? target)
      ;; `set!` may target any lexical binding. Pattern leaves therefore use
      ;; `let`; the hidden aggregate slot remains single-evaluation `const`.
-     (list (format "let ~a = ~a;" (resolved-name target) source))]
+     (list (format "let ~a = ~a;" (resolved-binder-name owner target) source))]
     [(seq-destructure? target)
      (append
       (apply append
              (for/list ([item (in-list (seq-destructure-names target))]
                         [i (in-naturals)])
                (emit-pattern-binding-statements
-                item (format "~a[~a]" source i)
+                item (format "~a[~a]" source i) owner
                 #:default-bound default-bound
                 #:default-rename-env default-rename-env)))
       (if (seq-destructure-rest-name target)
           (list
            (format "let ~a = ~a.slice(~a);"
-                   (resolved-name (seq-destructure-rest-name target))
+                   (resolved-binder-name owner (seq-destructure-rest-name target))
                    source
                    (length (seq-destructure-names target))))
           '()))]
@@ -3531,7 +3566,7 @@
      (append
       (if (map-destructure-as-name target)
           (list (format "let ~a = ~a;"
-                        (resolved-name (map-destructure-as-name target)) source))
+                        (resolved-binder-name owner (map-destructure-as-name target)) source))
           '())
       (for/list ([name (in-list (map-destructure-keys target))])
         (define property
@@ -3540,7 +3575,7 @@
         (define value (format "~a[~a]" source (js-string-lit property)))
         (define default (assq name defaults))
         (format "let ~a = ~a;"
-                (resolved-name name)
+                (resolved-binder-name owner name)
                 (if default
                     (parameterize ([current-js-bound default-bound]
                                    [current-rename-env default-rename-env])
@@ -3585,7 +3620,7 @@
       (cond
         [(pattern-param? binding)
          (emit-pattern-binding-statements
-          target source
+          target source binding
           #:default-bound constraint-bound
           #:default-rename-env constraint-rename-env)]
         [constrained?
@@ -3621,7 +3656,7 @@
                          [current-rename-env install-rename-env])
             (if (pattern-param? binding)
                 (emit-pattern-binding-statements
-                 target value
+                 target value binding
                 #:default-bound constraint-bound
                  #:default-rename-env constraint-rename-env)
                 (list (format "~a ~a = ~a;"
@@ -3668,8 +3703,8 @@
 
 ;; Render a destructuring pattern to its JS form. Returns #f for non-destructure
 ;; inputs so callers can fall through to their own handling.
-(define (emit-destructure p)
-  (define target (param-binding-target p))
+(define (emit-destructure p [owner p])
+  (define target (binding-target p))
   (cond
     [(map-destructure? target)
      (define or-alist (map-destructure-or-defaults target))
@@ -3677,32 +3712,33 @@
        (for/list ([k (in-list (map-destructure-keys target))])
          (define default-pair (assq k or-alist))
          (if default-pair
-             (format "~a = ~a" (resolved-name k) (emit-expr (cdr default-pair)))
-             (resolved-name k))))
+             (format "~a = ~a" (resolved-binder-name owner k) (emit-expr (cdr default-pair)))
+             (resolved-binder-name owner k))))
      (format "{~a}" (string-join key-strs ", "))]
     [(seq-destructure? target)
      (define mangled
        (for/list ([name (in-list (seq-destructure-names target))])
          (if (symbol? name)
-             (resolved-name name)
-             (emit-destructure name))))
+             (resolved-binder-name owner name)
+             (emit-destructure name owner))))
      (cond
        [(seq-destructure-rest-name target)
         (format "[~a, ...~a]" (string-join mangled ", ")
-                (resolved-name (seq-destructure-rest-name target)))]
+                (resolved-binder-name owner (seq-destructure-rest-name target)))]
        [else
         (format "[~a]" (string-join mangled ", "))])]
     [else #f]))
 
 (define (emit-js-param p)
-  (or (emit-destructure p)
-      (mangle-name (param-binding-target p))))
+  (or (emit-destructure p p)
+      (resolved-binder-name p (param-binding-target p))))
 
-(define (emit-binding-target name)
+(define (emit-binding-target name [owner name])
+  (define target (binding-target name))
   (cond
-    [(emit-destructure name) => values]
-    [(symbol? (param-binding-target name))
-     (resolved-name (param-binding-target name))]
+    [(emit-destructure target owner) => values]
+    [(symbol? target)
+     (resolved-binder-name owner target)]
     [else (error 'beagle-js "unsupported binding target: ~v" name)]))
 
 ;; Emit the JS const-binding statement(s) for one let-binding target, given
@@ -3722,7 +3758,11 @@
   (define (walk e)
     (cond
       [(set!-form? e)
-       (when (symbol? (set!-form-target e)) (note! (set!-form-target e)))
+       (define target (set!-form-target e))
+       (cond
+         [(resolved-ref? target)
+          (note! (structural-name-leaf (resolved-ref-name target)))]
+         [(symbol? target) (note! target)])
        (walk (set!-form-value e))]
       [(call-form? e) (walk (call-form-fn e)) (for-each walk (call-form-args e))]
       [(if-form? e) (walk (if-form-cond-expr e)) (walk (if-form-then-expr e))
@@ -3828,13 +3868,13 @@
       (if check (list check) '())
       (if (or (map-destructure? target) (seq-destructure? target))
           (emit-pattern-binding-statements
-           target aggregate-slot
+           target aggregate-slot binding
            #:default-bound constraint-bound
            #:default-rename-env constraint-rename-env)
           (list (format "~a ~a = ~a;"
-                        kw (emit-binding-target target) aggregate-slot))))]
+                        kw (emit-binding-target binding) aggregate-slot))))]
     [else
-     (define name (emit-binding-target target))
+     (define name (emit-binding-target binding))
      (define check (constraint-check name))
      (append
       (list (format "~a ~a = ~a;" kw name val-str))
@@ -3887,9 +3927,13 @@
               [constrained-sequence?
                (format "$beagle$constrained$binding$~a$~a"
                        constrained-id (mangle-name nm))]
-              [(zero? n) (mangle-name nm)]
-              [else (format "~a_shadow~a" (mangle-name nm) n)]))
-          (values (hash-set re nm js-name) (hash-set sn nm (add1 n)))))
+              [(zero? n)
+               (mangle-name (binder-output-symbol b nm))]
+              [else
+               (format "~a_shadow~a"
+                       (mangle-name (binder-output-symbol b nm)) n)]))
+          (values (rename-env-set-binder re b nm js-name)
+                  (hash-set sn nm (add1 n)))))
       (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
       (define stmts (parameterize ([current-rename-env rename-env*])
                       (emit-let-binding-stmts
@@ -3996,12 +4040,12 @@
                           (if (or (map-destructure? target)
                                   (seq-destructure? target))
                               (emit-pattern-binding-statements
-                               target source
+                               target source binding
                                #:default-bound constraint-bound
                                #:default-rename-env constraint-rename-env)
                               (list
                                (format "const ~a = ~a;"
-                                       (emit-binding-target target) source)))))
+                                       (emit-binding-target binding) source)))))
                       (append (if check (list check) '()) install)))])
         (format "{ ~a continue; }"
                 (string-join

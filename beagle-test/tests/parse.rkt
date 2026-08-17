@@ -727,7 +727,7 @@
 
 ;; --- macro hygiene --------------------------------------------------------
 
-(test-case "procedural macro: let binder is renamed to prevent capture"
+(test-case "procedural macro: let binder keeps authored spelling and gets identity"
   (define p (parse-prog
              `(defmacro with-temp ,(br 'val 'body)
                 ,(list 'quasiquote
@@ -738,9 +738,11 @@
   (define f (car (program-forms p)))
   (define val (def-form-value f))
   (check-true (let-form? val))
-  (check-false (eq? (let-binding-name (car (let-form-bindings val))) 'x)))
+  (define binder (car (let-form-bindings val)))
+  (check-eq? (let-binding-name binder) 'x)
+  (check-true (binding-id? (binder-binding-id binder 'x))))
 
-(test-case "procedural macro: fn param is renamed"
+(test-case "procedural macro: fn param keeps authored spelling and gets identity"
   (define p (parse-prog
              `(defmacro make-fn ,(br 'body)
                 ,(list 'quasiquote
@@ -749,7 +751,9 @@
   (define f (car (program-forms p)))
   (define val (def-form-value f))
   (check-true (fn-form? val))
-  (check-false (eq? (param-name (car (fn-form-params val))) 'x)))
+  (define parameter (car (fn-form-params val)))
+  (check-eq? (param-name parameter) 'x)
+  (check-true (binding-id? (binder-binding-id parameter 'x))))
 
 (test-case "procedural macro: no binders means no rename"
   (define p (parse-prog

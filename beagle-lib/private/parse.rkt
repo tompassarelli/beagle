@@ -11,6 +11,7 @@
          racket/set
          "types.rkt"
          "macros.rkt"
+         "scope-resolve.rkt"
          "extensions.rkt"
          "targets.rkt"
          ;; The typed stdlib catalog is the authority on which required
@@ -2085,8 +2086,38 @@
                           "malformed define-target — expected (define-target core|clj|js|nix), got: ~v" d)]
       [_ (void)]))
 
-  ;; Pass 2: parse each remaining form from syntax objects.
-  ;; Macro expansion happens inline during parsing (preserves inner locations).
+  ;; Expand macros and resolve lexical references before lowering to the AST.
+  ;; Keeping expansion and scope introduction in one traversal is load-bearing:
+  ;; generated syntax receives the macro's introduction scope, while exact
+  ;; antiquoted caller syntax retains the caller scopes it arrived with.
+  (define resolved-values
+    (with-handlers
+        ([exn:fail:scope-resolution?
+          (lambda (failure)
+            (raise-parse-error
+             'bad-form
+             "~a"
+             (exn-message failure)
+             #:details
+             (hasheq
+              'binding-ids
+              (for/list ([id (in-set
+                              (exn:fail:scope-resolution-binding-ids failure))])
+                (binding-id-stable id)))))])
+      (parameterize
+          ([current-scope-expansion-error-handler
+            (lambda (failure call-syntax)
+              (raise-macro-source-error
+               failure
+               (beagle-syntax->datum call-syntax)
+               (beagle-syntax->racket-syntax call-syntax)))])
+        (expand-and-resolve-program
+         registry
+         (for/list ([s (in-list stxs)])
+           (racket-syntax->beagle-syntax s (current-source-bytes)))))))
+  (define resolved-stxs (map beagle-syntax->racket-syntax resolved-values))
+
+  ;; Pass 2: lower each resolved form from syntax objects.
   ;; Proc macros with (Vec Form) output are expanded here and spliced into the
   ;; top-level form list — their output goes through full parse/check/emit.
   ;;
@@ -2109,6 +2140,8 @@
       (apply append
         (for/list ([d (in-list datums)]
                    [s (in-list stxs)]
+                   [resolved (in-list resolved-values)]
+                   [resolved-stx (in-list resolved-stxs)]
                    #:unless (meta-form? d))
           ;; Same unified resolver as parse-expr (head-meaning): the top-level
           ;; loop orders macro-first before parse-top -> parse-expr. The
@@ -2116,8 +2149,7 @@
           ;; is top-level-only and stays exactly as-is.
           (define from-macro?
             (and (pair? d) (eq? (head-meaning registry (car d)) 'macro)))
-          (define expanded
-            (and from-macro? (expand-fully/at-source registry d s)))
+          (define expanded (and from-macro? resolved))
           (define expanded-datum
             (and expanded (beagle-syntax->datum expanded)))
           (define expanded-children
@@ -2161,7 +2193,7 @@
              (for/list ([form-syntax (in-list (cdr expanded-children))])
                (cons (parse-macro-output form-syntax) s))]
             [(not from-macro?)
-             (list (cons (parse-top s) s))]
+             (list (cons (parse-top resolved-stx) s))]
             [from-macro?
              (list (cons (parse-macro-output expanded) s))]
             [else (error 'beagle "unreachable macro expansion state")])))))
@@ -2264,6 +2296,44 @@
         (datum->syntax ctx datum ctx)
         datum)))
 
+(define (syntax-binding-id value)
+  (and (syntax? value)
+       (syntax-property value 'beagle-binding-id)))
+
+(define (lower-reference datum [source-syntax #f])
+  (define lexical-id (syntax-binding-id source-syntax))
+  (if lexical-id
+      (resolved-ref (symbol->structural-name datum) lexical-id)
+      (or (lower-qualified-reference datum) datum)))
+
+(define (binder-target-syntax value)
+  (define datum (->datum value))
+  (define children (stx-subs value))
+  (if (and children (structured-binding? datum))
+      (stx-ref children 0)
+      value))
+
+(define (syntax-binder-identities value)
+  (define target (binder-target-syntax value))
+  (define (walk syntax-value identities)
+    (define datum (->datum syntax-value))
+    (define id (syntax-binding-id syntax-value))
+    (define with-id
+      (if (and id (symbol? datum) (not (eq? datum '&)))
+          (hash-set identities datum id)
+          identities))
+    (for/fold ([result with-id])
+              ([child (in-list (or (stx-subs syntax-value) '()))])
+      (walk child result)))
+  (walk target #hasheq()))
+
+(define (register-syntax-binder! binder source-syntax)
+  (register-binder-identities!
+   binder
+   (if source-syntax
+       (syntax-binder-identities source-syntax)
+       #hasheq())))
+
 (define (parse-expr x)
   (define loc (and (syntax? x) (stx->src-loc x)))
   (define d (->datum x))
@@ -2290,7 +2360,7 @@
      (parse-expr (list 'deref (string->symbol (substring (symbol->string d) 1))))]
     [(symbol? d)
      (validate-identifier! d)
-     (or (lower-qualified-reference d) d)]
+     (lower-reference d x)]
     [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
      (regex-lit (cadr d))]
     [(bracketed? d)
@@ -2572,9 +2642,11 @@
     (define rest (cddr item))
     (define-values (parsed rest-p)
       (parse-params (or (stx-ref item-subs 1) params-form)))
-    (letfn-fn name parsed rest-p
-              (parse-type (car rest))
-              (parse-body (or (stx-tail item-subs 3) (cdr rest))))))
+    (register-syntax-binder!
+     (letfn-fn name parsed rest-p
+               (parse-type (car rest))
+               (parse-body (or (stx-tail item-subs 3) (cdr rest))))
+     (stx-ref item-subs 0))))
 
 (define SCALAR-PRED-OPS '(>= <= > < = not=))
 
@@ -2785,6 +2857,10 @@
     (error 'beagle "~a: bindings must be written in `[binder expr]`, got: ~v"
            head bdatum))
   (define items (if bracketed? (cdr bdatum) bdatum))
+  (define binding-subs (stx-subs bindings-stx))
+  (define item-stxs
+    (and binding-subs
+         (if bracketed? (cdr binding-subs) binding-subs)))
   (unless (>= (length items) 2)
     (error 'beagle
            "~a: bindings must be [binder expr], got: ~v" head bdatum))
@@ -2793,6 +2869,10 @@
   (define rev (reverse items))
   (define value (car rev))
   (define binder-part (reverse (cdr rev)))
+  (define binder-part-source
+    (if (and item-stxs (= (length item-stxs) (length items)))
+        (take item-stxs (length binder-part))
+        binder-part))
   ;; Recover the value's syntax (the LAST sub) so its srcloc survives.
   (define val-stx
     (let ([bsubs (stx-subs bindings-stx)]
@@ -2821,8 +2901,9 @@
     ;; simple-case lowering byte-identical to the original.
     [(and (= (length binder-part) 1) (symbol? (car binder-part)))
      (define name (car binder-part))
-     (define binding (list BRACKET-TAG name val-stx))
-     (define test (success-test name))
+     (define name-source (car binder-part-source))
+     (define binding (list BRACKET-TAG name-source val-stx))
+     (define test (success-test name-source))
      (case head
        [(if-let if-some)
         (list 'let binding (list 'if test (car rest-items) (cadr rest-items)))]
@@ -2835,7 +2916,8 @@
     ;; and a destructure binder is out of scope on the false/else path (Clojure).
     [else
      (define g (fresh-lowered-sym 'bind))
-     (define inner-binding (append (list BRACKET-TAG) binder-part (list g)))
+     (define inner-binding
+       (append (list BRACKET-TAG) binder-part-source (list g)))
      (define test (success-test g))
      (case head
        [(if-let if-some)
@@ -4541,11 +4623,12 @@
 
     [(list (? symbol? f) args ...)
      (validate-identifier! f "call target")
-     (define ref (lower-qualified-reference f))
+     (define head-syntax (stx-ref subs 0))
+     (define ref (lower-reference f head-syntax))
      (define parsed-args (map parse-expr (or (stx-tail subs 1) args)))
-     (if (and ref (static-method-ref? ref))
+     (if (and (qualified-ref? ref) (static-method-ref? ref))
          (static-call ref parsed-args)
-         (call-form (or ref f) parsed-args))]
+         (call-form ref parsed-args))]
 
     ;; Higher-order call: function position is an expression, not a
     ;; bare symbol. Common in Nix where `(get target :attr)` returns
@@ -4802,8 +4885,13 @@
        (define ex-type (cadr binding))
        (parse-type ex-type)
        (define body (or (stx-tail clause-subs 2) (cddr clause-d)))
+       (define parsed-catch
+         (catch-clause ex-type name (map parse-expr body)))
+       (register-syntax-binder!
+        parsed-catch
+        (stx-ref clause-subs 1))
        (loop (cdr rest)
-             (cons (catch-clause ex-type name (map parse-expr body)) catches)
+             (cons parsed-catch catches)
              fin)]
       [(and (pair? first-d) (eq? (car first-d) 'finally))
        (define clause-d first-d)
@@ -4829,15 +4917,25 @@
 
 (define (parse-match-clause c)
   (define d (->datum c))
+  (define clause-subs (stx-subs c))
   (define items
     (cond
       [(bracketed? d) (bracket-body d)]
       [(and (pair? d) (pair? (cdr d))) d]
       [else (error 'beagle "match clause must be [pattern body...], got: ~v" d)]))
+  (define item-stxs
+    (and clause-subs
+         (if (bracketed? d) (cdr clause-subs) clause-subs)))
   (when (< (length items) 2)
     (error 'beagle "match clause needs a pattern and at least one body expression"))
-  (match-clause (parse-pattern (car items))
-                (map parse-expr (cdr items))))
+  (define pattern-source (or (and item-stxs (car item-stxs)) (car items)))
+  (define parsed-pattern (parse-pattern pattern-source))
+  (register-syntax-binder! parsed-pattern pattern-source)
+  (define parsed-clause
+    (match-clause
+     parsed-pattern
+     (map parse-expr (or (and item-stxs (cdr item-stxs)) (cdr items)))))
+  (register-syntax-binder! parsed-clause pattern-source))
 
 (define (record-pattern-name? value)
   (define name
@@ -4918,9 +5016,12 @@
     (and after-amp
          (cond
            [(and (= (length after-amp) 1) (symbol? (car after-amp)))
-            (store-src!
-             (param (car after-amp) #f #f)
-             (and after-amp-stxs (stx->src-loc (car after-amp-stxs))))]
+            (define source-stx (and after-amp-stxs (car after-amp-stxs)))
+            (register-syntax-binder!
+             (store-src!
+              (param (car after-amp) #f #f)
+              (and source-stx (stx->src-loc source-stx)))
+             source-stx)]
            [(and (= (length after-amp) 1)
                  (structured-binding? (car after-amp)))
             (define-values (name type constraint)
@@ -4932,9 +5033,12 @@
               (raise-parse-error
                'inline-type-annotation
                "rest parameter must bind one name, not a destructuring pattern"))
-            (store-src!
-             (param name type constraint)
-             (and after-amp-stxs (stx->src-loc (car after-amp-stxs))))]
+            (define source-stx (and after-amp-stxs (car after-amp-stxs)))
+            (register-syntax-binder!
+             (store-src!
+              (param name type constraint)
+              (and source-stx (stx->src-loc source-stx)))
+             source-stx)]
            [else
             (error 'beagle "bad rest parameter after &: ~v"
                    (if (= (length after-amp) 1) (car after-amp) after-amp))])))
@@ -4986,7 +5090,11 @@
             (error 'beagle
                    "bad parameter: ~v~nexpected name, (binding-form Type), or (binding-form Type constraint)"
                    item)]))
-       (loop (cdr rest) (and stxs (cdr stxs)) (cons parsed acc))])))
+       (define source-stx (and stxs (car stxs)))
+       (loop
+        (cdr rest)
+        (and stxs (cdr stxs))
+        (cons (register-syntax-binder! parsed source-stx) acc))])))
 
 (define (map-destructure-form? item)
   (and (map-tagged? item)
@@ -5063,18 +5171,24 @@
       [(and (>= (length rest) 2)
             (map-destructure-form? (car rest)))
        (define destr (parse-map-destructure (car rest)))
+       (define binder-stx (and stxs (car stxs)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (let-binding destr #f #f (parse-expr (or val-stx (cadr rest))))
+             (cons (register-syntax-binder!
+                    (let-binding destr #f #f (parse-expr (or val-stx (cadr rest))))
+                    binder-stx)
                    acc))]
       [(and (>= (length rest) 2)
             (bracketed? (car rest)))
        (define destr (parse-seq-destructure (car rest)))
+       (define binder-stx (and stxs (car stxs)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (let-binding destr #f #f (parse-expr (or val-stx (cadr rest))))
+             (cons (register-syntax-binder!
+                    (let-binding destr #f #f (parse-expr (or val-stx (cadr rest))))
+                    binder-stx)
                    acc))]
       [(and (>= (length rest) 2)
             (structured-binding? (car rest)))
@@ -5084,10 +5198,12 @@
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (store-src!
-                    (let-binding name type constraint
-                                 (parse-expr (or val-stx (cadr rest))))
-                    (and stxs (stx->src-loc (car stxs))))
+             (cons (register-syntax-binder!
+                    (store-src!
+                     (let-binding name type constraint
+                                  (parse-expr (or val-stx (cadr rest))))
+                     (and stxs (stx->src-loc (car stxs))))
+                    (and stxs (car stxs)))
                    acc))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
@@ -5095,7 +5211,10 @@
        (note-capitalized-binding! (car rest) "let binding")
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (let-binding (car rest) #f #f (parse-expr (or val-stx (cadr rest))))
+             (cons (register-syntax-binder!
+                    (let-binding (car rest) #f #f
+                                 (parse-expr (or val-stx (cadr rest))))
+                    (and stxs (car stxs)))
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
   parsed)
@@ -5313,17 +5432,25 @@
       [(and (>= (length rest) 2)
             (bracketed? (car rest)))
        (define destr (parse-seq-destructure (car rest)))
+       (define binder-stx (and stxs (car stxs)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (for-binding destr (parse-expr (or val-stx (cadr rest))) #f #f) acc))]
+             (cons (register-syntax-binder!
+                    (for-binding destr (parse-expr (or val-stx (cadr rest))) #f #f)
+                    binder-stx)
+                   acc))]
       [(and (>= (length rest) 2)
             (map-destructure-form? (car rest)))
        (define destr (parse-map-destructure (car rest)))
+       (define binder-stx (and stxs (car stxs)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (for-binding destr (parse-expr (or val-stx (cadr rest))) #f #f) acc))]
+             (cons (register-syntax-binder!
+                    (for-binding destr (parse-expr (or val-stx (cadr rest))) #f #f)
+                    binder-stx)
+                   acc))]
       [(and (>= (length rest) 2)
             (structured-binding? (car rest)))
        (define-values (name type constraint)
@@ -5332,16 +5459,21 @@
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (store-src!
-                    (for-binding name (parse-expr (or val-stx (cadr rest))) type constraint)
-                    (and stxs (stx->src-loc (car stxs))))
+             (cons (register-syntax-binder!
+                    (store-src!
+                     (for-binding name (parse-expr (or val-stx (cadr rest))) type constraint)
+                     (and stxs (stx->src-loc (car stxs))))
+                    (and stxs (car stxs)))
                    acc))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (for-binding (car rest) (parse-expr (or val-stx (cadr rest))) #f #f) acc))]
+             (cons (register-syntax-binder!
+                    (for-binding (car rest) (parse-expr (or val-stx (cadr rest))) #f #f)
+                    (and stxs (car stxs)))
+                   acc))]
       [else (error 'beagle "bad for clause: ~v" rest)])))
 
 

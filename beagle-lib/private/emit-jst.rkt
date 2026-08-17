@@ -13,6 +13,7 @@
 (define (emit-jst-expr e)
   (cond
     [(eq? e 'nil) "null"]
+    [(resolved-ref? e) (jst-resolved-name e)]
     [(qualified-ref? e) (jst-resolved-name e)]
     [(symbol? e) (jst-resolved-name e)]
     [(string? e) (~v e)]
@@ -103,6 +104,7 @@
 (define current-jst-rename-env (make-parameter (hash)))
 (define (jst-default-resolve-name name)
   (cond
+    [(resolved-ref? name) (mangle-name (resolved-ref-output-symbol name))]
     [(qualified-ref? name)
      (define member (mangle-name (qualified-ref-name name)))
      (if (eq? (qualified-ref-qualifier name) 'js)
@@ -116,7 +118,7 @@
   (make-parameter (lambda (_names _rename-env thunk) (thunk))))
 
 (define (jst-resolved-name name)
-  (if (qualified-ref? name)
+  (if (or (qualified-ref? name) (resolved-ref? name))
       ((current-jst-resolve-name) name)
       (hash-ref (current-jst-rename-env) name
                 (lambda () ((current-jst-resolve-name) name)))))
@@ -287,6 +289,7 @@
 
 (define (jst-postfix-base? e)
   (or (symbol? e)
+      (resolved-ref? e)
       (qualified-ref? e)
       (string? e)
       (boolean? e)
@@ -337,6 +340,7 @@
 
 (define (jst-constructor-reference? e)
   (or (symbol? e)
+      (resolved-ref? e)
       (qualified-ref? e)
       (jst-dot? e)
       (jst-get? e)))

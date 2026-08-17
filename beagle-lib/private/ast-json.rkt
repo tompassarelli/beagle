@@ -126,13 +126,16 @@
 (define (param->json p)
   (cond
     [(param? p)
-     (binding-contract->json
+     (binder-identities->json
       p
-      (param-constraint p)
-      (hasheq 'type "param"
-              'name (binding-target->json (param-name p))
-              'ann (type->json (param-type p))
-              'constraint (constraint->json (param-constraint p))))]
+      (param-name p)
+      (binding-contract->json
+       p
+       (param-constraint p)
+       (hasheq 'type "param"
+               'name (binding-target->json (param-name p))
+               'ann (type->json (param-type p))
+               'constraint (constraint->json (param-constraint p)))))]
     [(map-destructure? p)
      (hasheq 'type "map-destructure"
              'keys (map symbol->string (map-destructure-keys p))
@@ -170,13 +173,16 @@
     [else (error 'beagle-ast-json "unsupported binding target: ~v" target)]))
 
 (define (binding->json b)
-  (binding-contract->json
+  (binder-identities->json
    b
-   (let-binding-constraint b)
-   (hasheq 'name (binding-target->json (let-binding-name b))
-           'ann (type->json (let-binding-type b))
-           'constraint (constraint->json (let-binding-constraint b))
-           'value (expr->json (let-binding-value b)))))
+   (let-binding-name b)
+   (binding-contract->json
+    b
+    (let-binding-constraint b)
+    (hasheq 'name (binding-target->json (let-binding-name b))
+            'ann (type->json (let-binding-type b))
+            'constraint (constraint->json (let-binding-constraint b))
+            'value (expr->json (let-binding-value b))))))
 
 (define (field->json field)
   (binding-contract->json
@@ -187,14 +193,17 @@
            'constraint (constraint->json (param-constraint field)))))
 
 (define (for-binding->json binding)
-  (binding-contract->json
+  (binder-identities->json
    binding
-   (for-binding-constraint binding)
-   (hasheq 'type "binding"
-           'name (binding-target->json (for-binding-name binding))
-           'ann (type->json (for-binding-type binding))
-           'constraint (constraint->json (for-binding-constraint binding))
-           'expr (expr->json (for-binding-expr binding)))))
+   (for-binding-name binding)
+   (binding-contract->json
+    binding
+    (for-binding-constraint binding)
+    (hasheq 'type "binding"
+            'name (binding-target->json (for-binding-name binding))
+            'ann (type->json (for-binding-type binding))
+            'constraint (constraint->json (for-binding-constraint binding))
+            'expr (expr->json (for-binding-expr binding))))))
 
 (define (constraint->json constraint)
   (if constraint (expr->json constraint) 'null))
@@ -202,15 +211,41 @@
 (define (sym->js s)
   (if s (symbol->string s) 'null))
 
+(define (binding-id->json id)
+  (binding-id-stable id))
+
+(define (binder-identities->json owner target wire)
+  (define identities (binder-identities owner))
+  (cond
+    [(zero? (hash-count identities)) wire]
+    [(and (symbol? target) (hash-ref identities target #f))
+     => (lambda (id) (hash-set wire 'bindingId (binding-id->json id)))]
+    [else
+     (hash-set
+      wire
+      'bindingIds
+      (for/hasheq ([(name id) (in-hash identities)])
+        (values name (binding-id->json id))))]))
+
 (define (reference-fields ref)
   (cond
+    [(resolved-ref? ref)
+     (define name (resolved-ref-name ref))
+     (define base
+       (hasheq 'name (symbol->string (structural-name-leaf name))
+               'providerId (sym->js (structural-name-provider-id name))
+               'refersTo (binding-id->json (resolved-ref-binding-id ref))))
+     (if (structural-name-qualifier name)
+         (hash-set
+          base 'qualifier (symbol->string (structural-name-qualifier name)))
+         base)]
     [(qualified-ref? ref)
      (hasheq 'qualifier (symbol->string (qualified-ref-qualifier ref))
              'name (symbol->string (qualified-ref-name ref))
              'providerId (sym->js (qualified-ref-provider-id ref)))]
     [(symbol? ref) (hasheq 'name (symbol->string ref))]
     [else (raise-argument-error 'reference-fields
-                                "(or/c qualified-ref? symbol?)"
+                                "(or/c resolved-ref? qualified-ref? symbol?)"
                                 ref)]))
 
 (define (datum->json d)
@@ -431,7 +466,7 @@
 
 (define (expr->json/raw e)
   (cond
-    [(qualified-ref? e)
+    [(or (qualified-ref? e) (resolved-ref? e))
      (hash-set (reference-fields e) 'node "ref")]
     [(string? e)  (hasheq 'node "literal" 'kind "string" 'value e)]
     ;; value is the integer code point: JSON has no char type, and the
@@ -617,9 +652,12 @@
      (hasheq 'node "try"
              'body (map expr->json (try-form-body e))
              'catches (map (lambda (c)
-                             (hasheq 'type (sym->js (catch-clause-exception-type c))
-                                     'name (sym->js (catch-clause-name c))
-                                     'body (map expr->json (catch-clause-body c))))
+                             (binder-identities->json
+                              c
+                              (catch-clause-name c)
+                              (hasheq 'type (sym->js (catch-clause-exception-type c))
+                                      'name (sym->js (catch-clause-name c))
+                                      'body (map expr->json (catch-clause-body c)))))
                            (try-form-catches e))
              'finally (and (try-form-finally-body e)
                            (map expr->json (try-form-finally-body e))))]
@@ -750,11 +788,14 @@
     [(letfn-form? e)
      (hasheq 'node "letfn"
              'fns (map (lambda (f)
-                         (hasheq 'name (symbol->string (letfn-fn-name f))
-                                 'params (map param->json (letfn-fn-params f))
-                                 'rest (and (letfn-fn-rest-param f) (param->json (letfn-fn-rest-param f)))
-                                 'ret (type->json (letfn-fn-return-type f))
-                                 'body (map expr->json (letfn-fn-body f))))
+                         (binder-identities->json
+                          f
+                          (letfn-fn-name f)
+                          (hasheq 'name (symbol->string (letfn-fn-name f))
+                                  'params (map param->json (letfn-fn-params f))
+                                  'rest (and (letfn-fn-rest-param f) (param->json (letfn-fn-rest-param f)))
+                                  'ret (type->json (letfn-fn-return-type f))
+                                  'body (map expr->json (letfn-fn-body f)))))
                        (letfn-form-fns e))
              'body (map expr->json (letfn-form-body e)))]
 
@@ -1124,22 +1165,33 @@
     [(pat-wildcard? p) (hasheq 'type "wildcard")]
     [(pat-literal? p)  (hasheq 'type "literal" 'value (datum->json (pat-literal-value p)))]
     [(pat-record? p)
-     (hash-set*
-      (reference-fields (pat-record-type-name p))
-      'type "record"
-      'bindings
-      (map (lambda (b)
-             (if (symbol? b)
-                 (hasheq 'name (symbol->string b))
-                 (hasheq 'field (symbol->string (car b))
-                         'name (symbol->string (cdr b)))))
-           (pat-record-bindings p)))]
-    [(pat-map? p)      (hasheq 'type "map"
-                               'entries (map (lambda (e)
-                                               (hasheq 'key (datum->json (car e))
-                                                       'name (symbol->string (cdr e))))
-                                             (pat-map-entries p)))]
-    [(pat-var? p)      (hasheq 'type "var" 'name (symbol->string (pat-var-name p)))]
+     (binder-identities->json
+      p
+      (pat-record-bindings p)
+      (hash-set*
+       (reference-fields (pat-record-type-name p))
+       'type "record"
+       'bindings
+       (map (lambda (b)
+              (if (symbol? b)
+                  (hasheq 'name (symbol->string b))
+                  (hasheq 'field (symbol->string (car b))
+                          'name (symbol->string (cdr b)))))
+            (pat-record-bindings p))))]
+    [(pat-map? p)
+     (binder-identities->json
+      p
+      (pat-map-entries p)
+      (hasheq 'type "map"
+              'entries (map (lambda (e)
+                              (hasheq 'key (datum->json (car e))
+                                      'name (symbol->string (cdr e))))
+                            (pat-map-entries p))))]
+    [(pat-var? p)
+     (binder-identities->json
+      p
+      (pat-var-name p)
+      (hasheq 'type "var" 'name (symbol->string (pat-var-name p))))]
     [(pat-or? p)       (hasheq 'type "or"
                                'alternatives (map pattern->json (pat-or-alternatives p)))]
     [else (error 'beagle-ast-json "unsupported match pattern: ~v" p)]))

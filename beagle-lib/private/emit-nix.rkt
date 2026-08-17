@@ -238,7 +238,8 @@
   (define target (param-binding-target p))
   (define annotation (and (param? p) (param-type p)))
   (cond
-    [(symbol? target) (format "~a:" (mangle-name target))]
+    [(symbol? target)
+     (format "~a:" (mangle-name (binder-output-symbol p target)))]
     [(map-destructure? target)
      (define ors (map-destructure-or-defaults target))
      (define as-name (map-destructure-as-name target))
@@ -1058,6 +1059,7 @@
 
 (define (emit-expr e depth)
   (cond
+    [(resolved-ref? e) (mangle-name (resolved-ref-output-symbol e))]
     [(qualified-ref? e) (mangle-qualified-name e)]
     [(number? e) (emit-nix-number e)]
     [(string? e) (format "\"~a\"" (escape-nix e))]
@@ -1696,7 +1698,7 @@
          "\n" (indent depth) "in\n"
          (indent depth) rest-str)]
        [else
-        (define target-name (emit-binding-target n))
+        (define target-name (emit-binding-target b))
         (define value-str (emit-expr v (+ depth 1)))
         (define constraint (checked-binding-constraint b))
         (cond
@@ -1728,9 +1730,14 @@
                    target-name rest-str (paren-wrap value-str v))])])]))
 
 (define (emit-binding-target b)
-  (define target (param-binding-target b))
+  (define target
+    (cond
+      [(param? b) (param-name b)]
+      [(let-binding? b) (let-binding-name b)]
+      [(for-binding? b) (for-binding-name b)]
+      [else (param-binding-target b)]))
   (cond
-    [(symbol? target) (mangle-name target)]
+    [(symbol? target) (mangle-name (binder-output-symbol b target))]
     [else
      (error 'emit-nix
             "destructuring in let bindings is not supported by the nix backend — bind the aggregate to a name, then project its fields explicitly")]))
@@ -2144,10 +2151,11 @@
               (format "let ~a in ~a"
                       (string-join
                        (for/list ([b (in-list bindings)])
+                         (define name (if (pat-var? b) (pat-var-name b) b))
                          (format "~a = ~a.~a;"
-                                 (mangle-name (pat-var-name b))
+                                 (mangle-name (binder-output-symbol pat name))
                                  target
-                                 (mangle-name (pat-var-name b))))
+                                 (mangle-name name)))
                        " ")
                       body-str)))
           (format "if ~a._tag == \"~a\" then ~a else ~a"
@@ -2155,7 +2163,7 @@
                   (emit-match-clauses (cdr cs)))]
          [(pat-var? pat)
           (format "let ~a = ~a; in ~a"
-                  (mangle-name (pat-var-name pat))
+                  (mangle-name (binder-output-symbol pat (pat-var-name pat)))
                   target body-str)]
          ;; or-pattern (v1: literal-only alternatives). Combines tests
          ;; with `||` in a Nix `if`. Future operators slot in as sibling
@@ -2288,7 +2296,9 @@
                    "destructuring in for bindings is not supported by the nix backend — bind each element to a name, then project it in :let"))
           (define coll (emit-expr (for-binding-expr c) depth))
           (define parameter
-            (param target (for-binding-type c) (for-binding-constraint c)))
+            (register-binder-identities!
+             (param target (for-binding-type c) (for-binding-constraint c))
+             (binder-identities c)))
           (define lambda-str
             (parameterize
                 ([current-nix-constraint-owners
@@ -2331,9 +2341,11 @@
       (emit-body body depth)))
   (define loop-params
     (for/list ([b (in-list bindings)])
-      (param (let-binding-name b)
-             (let-binding-type b)
-             (let-binding-constraint b))))
+      (register-binder-identities!
+       (param (let-binding-name b)
+              (let-binding-type b)
+              (let-binding-constraint b))
+       (binder-identities b))))
   (define loop-constraint-owners
     (for/fold ([owners (current-nix-constraint-owners)])
               ([parameter (in-list loop-params)]
@@ -2341,11 +2353,13 @@
       (hash-set owners parameter binding)))
   (define raw-loop-params
     (for/list ([p (in-list loop-params)])
-      (param (param-name p) (param-type p) #f)))
+      (register-binder-identities!
+       (param (param-name p) (param-type p) #f)
+       (binder-identities p))))
   (define loop-args
     (string-join
      (for/list ([p (in-list loop-params)])
-       (mangle-name (param-name p)))
+       (mangle-name (binder-output-symbol p (param-name p))))
      " "))
   (define loop-body-fn
     (emit-param-chain raw-loop-params body-str depth))

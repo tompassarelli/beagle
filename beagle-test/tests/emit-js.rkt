@@ -758,10 +758,10 @@
      '(defn f [(xs Any)] Any (seq xs)))
 
    ;; value equality: = routes to $$bc$equiv (Clojure = semantics), so
-   ;; (not (= a b)) is !($$bc$equiv ...). P2 is unconditional (no compile-time
-   ;; scalar === fast-path; that's deferred to the type-table-threaded P3).
-   (check-js-contains "(not (= a b)) emits !($$bc$equiv) — value equality"
-     "!($$bc$equiv(a, b))"
+   ;; BindingId-keyed local references retain their checked scalar type, so
+   ;; the P3 scalar fast path applies to parameter occurrences too.
+   (check-js-contains "(not (= a b)) emits scalar identity comparison"
+     "!(a === b)"
      '(defn f [(a Int) (b Int)] Bool (not (= a b))))
 
    ;; value-semantic membership: contains? -> $$bc$contains(coll, x). The runtime
@@ -779,13 +779,8 @@
    (check-js-contains "= of two computed Ints -> bare === (no runtime equiv)"
      "(xs.length === ys.length)"
      '(defn f [(xs (Vec Int)) (ys (Vec Int))] Bool (= (count xs) (count ys))))
-   ;; KNOWN GAP (sound fallback): bare var/param refs are symbol AST leaves, which
-   ;; store-type! excludes from the type table, so they can't be proven scalar at
-   ;; emit and fall back to $$bc$equiv. Correct, just unoptimized — closing this
-   ;; needs an emit-side param/local type env (follow-up). Asserting current
-   ;; behavior so the follow-up flips it intentionally.
-   (check-js-contains "= of two Int VAR refs -> equiv (var-refs not yet type-keyed)"
-     "$$bc$equiv(a, b)"
+   (check-js-contains "= of two Int lexical refs -> bare ==="
+     "a === b"
      '(defn f [(a Int) (b Int)] Bool (= a b)))
    ;; non-scalar operands always use equiv (value semantics).
    (check-js-contains "= of two vectors -> equiv (non-scalar)"

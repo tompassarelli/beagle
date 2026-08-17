@@ -499,6 +499,9 @@
 (define (beagle-syntax-reader-metadata value)
   (beagle-syntax-property value 'reader #f))
 
+(define (beagle-syntax-binding-id value)
+  (beagle-syntax-property value 'binding-id #f))
+
 ;; Flip one scope throughout a syntax tree.  During macro input flipping,
 ;; RECORD-ORIGINAL? records each rebuilt node in RESTORATIONS.  The matching
 ;; output flip then returns an exact original node when an antiquote inserted
@@ -720,7 +723,17 @@
     (cond
       [(syntax-atom? value) (syntax-atom-datum value)]
       [(syntax-ident? value)
-       (structural-name->symbol (syntax-ident-name value))]
+       (define identifier
+         (datum->syntax
+          #f (structural-name->symbol (syntax-ident-name value)) source))
+       (define binding (beagle-syntax-binding-id value))
+       (define with-binding
+         (if binding
+             (syntax-property identifier 'beagle-binding-id binding)
+             identifier))
+       (syntax-property
+        with-binding 'beagle-scope-debug-count
+        (set-count (syntax-ident-scopes value)))]
       [(syntax-list? value)
        (map beagle-syntax->racket-syntax (syntax-list-children value))]
       [(syntax-vector? value)
@@ -890,6 +903,61 @@
 ;; the source spelling, NAME is the leaf, and PROVIDER-ID is #f until the
 ;; resolver attaches the canonical provider identity.
 (struct qualified-ref (qualifier name provider-id) #:transparent)
+
+;; An occurrence that selected a lexical definition edge.  NAME remains the
+;; authored StructuralName; BindingId, never a rendered suffix, is identity.
+(struct resolved-ref (name binding-id) #:transparent)
+
+;; Binder AST nodes retain their authored shapes.  This identity side table is
+;; safe because those nodes are fresh transparent structs, unlike interned
+;; symbol occurrences.  A destructuring binder maps each projected name to its
+;; own BindingId.
+(define BINDER->IDENTITIES (make-weak-hasheq))
+
+(define (register-binder-identities! binder identities)
+  (unless (hash? identities)
+    (raise-argument-error 'register-binder-identities! "hash?" identities))
+  (when (positive? (hash-count identities))
+    (hash-set! BINDER->IDENTITIES binder identities))
+  binder)
+
+(define (binder-identities binder)
+  (hash-ref BINDER->IDENTITIES binder #hasheq()))
+
+(define (binder-binding-id binder name [fallback #f])
+  (hash-ref (binder-identities binder) name fallback))
+
+(define (introduced-binding-id? id)
+  (and (binding-id? id)
+       (string-prefix? (binding-id-stable id) "introduced-")))
+
+;; Scope identity stays structural through checking and projection.  Only the
+;; output boundary needs an alpha spelling for introduced binders so a target
+;; language's name-based resolver cannot recapture caller syntax.
+(define (binding-id-output-symbol id authored-name)
+  (cond
+    [(not (introduced-binding-id? id)) authored-name]
+    [else
+     (define parts (string-split (binding-id-stable id) ":"))
+     (define reversed (reverse parts))
+     (define path (if (pair? (cdr reversed)) (cadr reversed) "0"))
+     (define position
+       (if (pair? (cddr reversed)) (caddr reversed) "0"))
+     (string->symbol
+      (format
+       "~a__scope_~a_~a"
+       authored-name
+       position
+       (regexp-replace* #rx"[^0-9]+" path "_"))) ]))
+
+(define (binder-output-symbol binder authored-name)
+  (define id (binder-binding-id binder authored-name #f))
+  (if id (binding-id-output-symbol id authored-name) authored-name))
+
+(define (resolved-ref-output-symbol ref)
+  (binding-id-output-symbol
+   (resolved-ref-binding-id ref)
+   (structural-name->symbol (resolved-ref-name ref))))
 
 ;; --- symbol predicates -----------------------------------------------------
 (define (dot-method-sym? sym)
@@ -1295,7 +1363,7 @@
  make-syntax-quote make-syntax-unquote
  beagle-syntax? beagle-syntax-span beagle-syntax-scopes
  beagle-syntax-origin beagle-syntax-properties beagle-syntax-property
- beagle-syntax-reader-metadata
+ beagle-syntax-reader-metadata beagle-syntax-binding-id
  beagle-syntax-flip-scope
  datum->beagle-syntax beagle-syntax->datum
  racket-syntax->beagle-syntax beagle-syntax->racket-syntax
@@ -1318,6 +1386,10 @@
  program-returns-synchronous-callable?
  ;; Symbol predicates
  dot-method-sym? static-method-ref? dynamic-var-sym? constructor-sym? keyword-sym?
+ (struct-out resolved-ref)
+ register-binder-identities! binder-identities binder-binding-id
+ introduced-binding-id? binding-id-output-symbol
+ binder-output-symbol resolved-ref-output-symbol
  ;; Parse injection
  current-parse-expr current-parse-params
  ;; Constants

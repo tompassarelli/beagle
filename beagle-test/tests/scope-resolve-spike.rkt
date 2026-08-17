@@ -3,7 +3,9 @@
 (require rackunit
          racket/list
          racket/set
-         "../../beagle-lib/private/ast.rkt")
+         "../../beagle-lib/private/ast.rkt"
+         "../../beagle-lib/private/macros.rkt"
+         "../../beagle-lib/private/scope-resolve.rkt")
 
 (define (identifier name scopes)
   (make-syntax-ident name #f scopes #f #hasheq()))
@@ -30,6 +32,34 @@
 
 (define (in-trial-order trial entries)
   (if (even? trial) entries (reverse entries)))
+
+(test-case "reader-produced nested binders resolve to the innermost occurrence edge"
+  (define source
+    (racket-syntax->beagle-syntax
+     (datum->syntax
+      #f
+      '(let (#%brackets x 1)
+         (let (#%brackets x 2) x)))
+     #""))
+  (define resolved
+    (car (expand-and-resolve-program (make-macro-registry) (list source))))
+  (define outer-children (syntax-list-children resolved))
+  (define outer-binding
+    (car (syntax-vector-children (cadr outer-children))))
+  (define inner (caddr outer-children))
+  (define inner-children (syntax-list-children inner))
+  (define inner-binding
+    (car (syntax-vector-children (cadr inner-children))))
+  (define occurrence (caddr inner-children))
+  (define outer-id (beagle-syntax-binding-id outer-binding))
+  (define inner-id (beagle-syntax-binding-id inner-binding))
+  (check-true (and (binding-id? outer-id) (binding-id? inner-id)))
+  (check-not-equal? outer-id inner-id)
+  (check-equal? (beagle-syntax-binding-id occurrence) inner-id)
+  (check-true
+   (scope-set-subset?
+    (beagle-syntax-scopes outer-binding)
+    (beagle-syntax-scopes inner-binding))))
 
 (test-case "fresh scopes use identity, and flip is an involution"
   (for ([trial (in-range 128)])
