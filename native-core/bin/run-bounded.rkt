@@ -19,6 +19,8 @@
 ;; reaped. The outcome distinguishes a child exit from a supervisor deadline.
 ;; BEAGLE_BOUNDED_UNSHARE_USABLE carries the host's namespace answer down a
 ;; process tree so it is probed once rather than once per invocation.
+;; BEAGLE_DEADLINE_SCALE (positive rational, default 1) multiplies the deadline
+;; for slower hardware; a scaled run says so in its START line.
 
 (require ffi/unsafe
          racket/list
@@ -67,6 +69,29 @@
 (define kill-grace (positive-seconds (list-ref arguments 1) "kill grace"))
 (define command (list-ref arguments 3))
 (define command-arguments (drop arguments 4))
+
+;; A deadline is a claim that the work TERMINATES, not a claim about how many
+;; seconds it deserves — and the second reading is the one that breaks when the
+;; same work runs on a quarter of the cores. Scaling the bound by the hardware
+;; ratio keeps exactly what the bound proves while letting slower hardware
+;; finish healthy work; it is environment isolation, not a timeout quietly
+;; growing. Two things keep it honest: the default is 1, so an unset scale
+;; leaves local behaviour and this log line byte-identical, and a scaled run
+;; SAYS it is scaled, so no one reads a 540s kill as a 180s deadline.
+;;
+;; A malformed scale is a contract failure, never a silent 1: a check whose
+;; bound came from a typo is not bounded.
+(define deadline-scale
+  (let ([raw (getenv "BEAGLE_DEADLINE_SCALE")])
+    (cond
+      [(or (not raw) (string=? raw "")) 1]
+      [else
+       (define parsed (string->number raw))
+       (unless (and (real? parsed) (positive? parsed) (not (eqv? parsed +inf.0)))
+         (fail (format "BEAGLE_DEADLINE_SCALE must be a positive rational: ~a" raw)))
+       parsed])))
+(define scaled? (not (= deadline-scale 1)))
+(define effective-seconds (* seconds deadline-scale))
 
 ;; Safety by construction: namespace mode may signal PID -1 because this
 ;; process is PID 1 there. Fallback mode never does; it signals only the
@@ -217,8 +242,12 @@
 
 (define timed-out? #f)
 (define status 2)
-(eprintf "beagle supervisor: ~a START deadline=~as kill-grace=~as\n"
-         command-label seconds kill-grace)
+(eprintf "beagle supervisor: ~a START deadline=~as~a kill-grace=~as\n"
+         command-label seconds
+         (if scaled?
+             (format " scale=~a effective-deadline=~as" deadline-scale effective-seconds)
+             "")
+         kill-grace)
 (flush-output (current-error-port))
 (dynamic-wind
  void
@@ -243,7 +272,7 @@
             (lambda ()
               (copy-port stderr (current-error-port))
               (close-input-port stderr)))))
-   (unless (sync/timeout seconds child)
+   (unless (sync/timeout effective-seconds child)
      (set! timed-out? #t)
      (signal-descendants SIGTERM)
      (unless (sync/timeout kill-grace child)

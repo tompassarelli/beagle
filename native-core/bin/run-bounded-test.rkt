@@ -228,6 +228,51 @@
    (check-equal? (subprocess-status canary) 'running
                  "the widened sweep reached a process outside the subtree")
 
+   ;; BEAGLE_DEADLINE_SCALE: the same bound, on slower hardware. What a
+   ;; deadline proves is that the work terminates, and that claim survives
+   ;; multiplication; what must not survive is a scaled run reading as an
+   ;; unscaled one, so the scale is asserted in the log, not just in the timing.
+   (define scale-receipt (build-path scratch "scale.receipt"))
+   (define (scale-env value)
+     (define copied (environment-variables-copy (current-environment-variables)))
+     (environment-variables-set!
+      copied #"BEAGLE_BOUNDED_COMPLETION_RECEIPT"
+      (string->bytes/utf-8 (path->string scale-receipt)))
+     (when value
+       (environment-variables-set! copied #"BEAGLE_DEADLINE_SCALE" value))
+     copied)
+
+   (define unscaled-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace (scale-env #f) (open-output-bytes) unscaled-err
+                      "2" "1" "--" "/bin/sh" "-c" "sleep 3; exit 7")
+    124
+    "unscaled, a 3s child must still lose to a 2s deadline")
+   (check-false
+    (string-contains? (bytes->string/utf-8 (get-output-bytes unscaled-err)) "scale=")
+    "an unset scale must leave the START line exactly as it was")
+
+   (define scaled-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace (scale-env #"2") (open-output-bytes) scaled-err
+                      "2" "1" "--" "/bin/sh" "-c" "sleep 3; exit 7")
+    7
+    "scale=2 must give the same child the 4s it needs")
+   (check-true
+    (string-contains? (bytes->string/utf-8 (get-output-bytes scaled-err))
+                      "deadline=2s scale=2 effective-deadline=4s")
+    "a scaled run must say that it is scaled")
+
+   ;; A bound that came from a typo is not a bound.
+   (define bad-scale-err (open-output-bytes))
+   (check-equal?
+    (run-in-namespace (scale-env #"nonsense") (open-output-bytes) bad-scale-err
+                      "2" "1" "--" "/bin/sh" "-c" "exit 0")
+    2)
+   (check-true
+    (string-contains? (bytes->string/utf-8 (get-output-bytes bad-scale-err))
+                      "BEAGLE_DEADLINE_SCALE must be a positive rational"))
+
    (subprocess-kill canary #t)
    (close-input-port canary-out)
    (close-input-port canary-err))
