@@ -374,6 +374,8 @@
   (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
   (expect! "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
   (expect! "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))
+  (expect! "qualified symbol stays intact for semantic parse lowering" (= (rd1 "odd.ns/->thing?!") "odd.ns/->thing?!"))
+  (expect! "quoted qualified symbol stays literal data" (= (rd1 "'odd.ns/->thing?!") ["quote" "odd.ns/->thing?!"]))
   (expect! "qualified require alias" (= (rd1 "(:tx a)") [":tx" "a"]))
   (expect! "threading macro" (= (rd1 "(-> x inc str)") ["->" "x" "inc" "str"]))
   (expect! "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))

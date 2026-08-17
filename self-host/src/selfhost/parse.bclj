@@ -207,11 +207,17 @@
     {"node" "js-selector" "name" (subs datum 1)}
     (parse-expr* datum)))
 
-(defn static-method-sym? [(sym String)] Bool
-  (let [slash-pos (str-index-of sym "/")]
-    (and (> slash-pos 0)
-      (< (+ slash-pos 1) (count sym))
-      (or (upper-case-start? sym) (str/starts-with? sym "js/")))))
+(defn qualified-ref? [(ref Any)] Bool
+  (and (map? ref)
+    (= (get ref "node") "ref")
+    (string? (get ref "qualifier"))
+    (string? (get ref "name"))))
+
+(defn static-method-ref? [(ref Any)] Bool
+  (and (qualified-ref? ref)
+    (let [qualifier (get ref "qualifier")]
+      (and (> (count qualifier) 0)
+        (or (upper-case-start? qualifier) (= qualifier "js"))))))
 
 (defn constructor-sym? [(sym String)] Bool
   (and (> (count sym) 1)
@@ -451,6 +457,24 @@
 
 (defn make-ref [(name String)] Any {"node" "ref" "name" name})
 
+(defn make-qualified-ref
+  [(qualifier String) (name String) (provider-id Any)] Any
+  {"node" "ref" "qualifier" qualifier "name" name
+   "providerId" provider-id})
+
+;; Reader symbols remain whole so quotes and macro data stay literal. This is
+;; the sole slash decomposition for semantic qualified references.
+(defn lower-qualified-reference [(sym String)] Any
+  (let [slash-pos (str-index-of sym "/")]
+    (if (and (not (keyword-sym? sym))
+          (> slash-pos 0)
+          (< (+ slash-pos 1) (count sym)))
+      (make-qualified-ref
+        (subs sym 0 slash-pos)
+        (subs sym (+ slash-pos 1))
+        nil)
+      nil)))
+
 (def NIL-LITERAL Any {"node" "literal" "kind" "nil"})
 
 (def FALSE-LITERAL Any {"node" "literal" "kind" "bool" "value" false})
@@ -560,8 +584,14 @@
 (defn make-method-call [(method String) (target Any) (args Any)] Any
   {"node" "method-call" "method" method "target" target "args" args})
 
-(defn make-static-call [(class-method String) (args Any)] Any
-  {"node" "static-call" "name" class-method "args" args})
+(defn make-static-call [(class-method Any) (args Any)] Any
+  (if (qualified-ref? class-method)
+    {"node" "static-call"
+     "qualifier" (get class-method "qualifier")
+     "name" (get class-method "name")
+     "providerId" (get class-method "providerId")
+     "args" args}
+    {"node" "static-call" "name" class-method "args" args}))
 
 (defn make-js-get [(receiver Any) (key Any)] Any
   {"node" "js-get" "receiver" receiver "key" key})
@@ -802,8 +832,14 @@
 
 (defn make-pat-literal [(value Any)] Any {"type" "literal" "value" value})
 
-(defn make-pat-record [(type-name String) (bindings Any)] Any
-  {"type" "record" "name" type-name "bindings" bindings})
+(defn make-pat-record [(type-name Any) (bindings Any)] Any
+  (if (qualified-ref? type-name)
+    {"type" "record"
+     "qualifier" (get type-name "qualifier")
+     "name" (get type-name "name")
+     "providerId" (get type-name "providerId")
+     "bindings" bindings}
+    {"type" "record" "name" type-name "bindings" bindings}))
 
 (defn make-pat-map [(entries Any)] Any {"type" "map" "entries" entries})
 
@@ -1307,7 +1343,17 @@
         (recur (+ i 1) acc)))))
 
 (defn parse-pattern [(p Any)] Any
-  (cond
+  (let [record-head
+        (if (and (vector? p)
+              (not (bracketed? p))
+              (> (count p) 0)
+              (string? (nth p 0)))
+          (let [lowered (lower-qualified-reference (nth p 0))]
+            (if (nil? lowered) (nth p 0) lowered))
+          nil)
+        record-name
+        (if (qualified-ref? record-head) (get record-head "name") record-head)]
+    (cond
     (= p "_")
     (make-pat-wildcard)
     (= p "nil")
@@ -1322,17 +1368,13 @@
     (make-pat-literal (extract-string p))
     (and (vector? p) (> (count p) 0) (= (nth p 0) MAP-TAG))
     (parse-map-pattern (subvec p 1))
-    (and (vector? p)
-      (not (bracketed? p))
-      (> (count p) 0)
-      (string? (nth p 0))
-      (upper-case-start? (nth p 0)))
-    (make-pat-record (nth p 0)
+    (and (string? record-name) (upper-case-start? record-name))
+    (make-pat-record record-head
       (mapv (fn [(b Any)] Any {"name" b}) (subvec p 1)))
     (string? p)
     (make-pat-var p)
     :else
-    (make-pat-literal (datum->json p))))
+    (make-pat-literal (datum->json p)))))
 
 (defn parse-match-form [(target-datum Any) (clauses Any)] Any
   (make-match (parse-expr* target-datum)
@@ -1552,8 +1594,10 @@
   (if (and (vector? form)
         (> (count form) 0)
         (receiver-first-js-thread-head? (nth form 0)))
-    (make-call (make-ref (nth form 0))
-      (mapv parse-expr* (subvec form 1)))
+    (let [head (nth form 0)
+          ref (lower-qualified-reference head)]
+      (make-call (if (nil? ref) (make-ref head) ref)
+        (mapv parse-expr* (subvec form 1))))
     (parse-expr* form)))
 
 (defn expand-thread-first [(init Any) (steps Any)] Any
@@ -2861,10 +2905,12 @@
       (make-method-call head
         (parse-expr* (nth rest-items 0))
         (mapv parse-expr* (subvec rest-items 1)))
-      (and (string? head) (static-method-sym? head))
-      (make-static-call head (mapv parse-expr* rest-items))
       (string? head)
-      (make-call (make-ref head) (mapv parse-expr* rest-items))
+      (let [ref (lower-qualified-reference head)
+            parsed-args (mapv parse-expr* rest-items)]
+        (if (and (not (nil? ref)) (static-method-ref? ref))
+          (make-static-call ref parsed-args)
+          (make-call (if (nil? ref) (make-ref head) ref) parsed-args)))
       (vector? head)
       (make-call (parse-expr* head) (mapv parse-expr* rest-items))
       :else
@@ -2896,7 +2942,8 @@
     (string? d)
     (do
       (validate-identifier! d "identifier")
-      (make-ref d))
+      (let [ref (lower-qualified-reference d)]
+        (if (nil? ref) (make-ref d) ref)))
     (and (vector? d) (= (count d) 2) (= (nth d 0) "#%regex"))
     (make-regex (nth d 1))
     (bracketed? d)
@@ -3609,8 +3656,18 @@
   (expect! "ref: symbol" (= (parse-expr* "x") {"node" "ref" "name" "x"}))
   (expect! "ref: hyphenated"
     (= (parse-expr* "my-var") {"node" "ref" "name" "my-var"}))
-  (expect! "ref: qualified lowercase stays ref (k/single?)"
-    (= (parse-expr* "k/single?") {"node" "ref" "name" "k/single?"}))
+  (expect! "ref: qualified lowercase lowers structurally"
+    (= (parse-expr* "k/single?")
+      {"node" "ref" "qualifier" "k" "name" "single?"
+       "providerId" nil}))
+  (expect! "ref: qualified odd leaf lowers exactly once"
+    (= (parse-expr* "odd.ns/->thing?!")
+      {"node" "ref" "qualifier" "odd.ns" "name" "->thing?!"
+       "providerId" nil}))
+  (expect! "quoted qualified symbol remains literal data"
+    (= (parse-expr* ["quote" "odd.ns/->thing?!"])
+      {"node" "quoted"
+       "datum" {"type" "symbol" "value" "odd.ns/->thing?!"}}))
   (expect! "def without annotation"
     (let [node (parse-expr* ["def" "x" 42])]
       (and (= (get node "node") "def")
@@ -3876,6 +3933,15 @@
     (let [node (parse-expr* ["match" "shape" [BRACKET-TAG ["Circle" "r"] ["*" 3.14 ["*" "r" "r"]]] [BRACKET-TAG ["Rect" "w" "h"] ["*" "w" "h"]]])]
       (and (= (get (get (nth (get node "clauses") 0) "pattern") "type") "record")
         (= (get (get (nth (get node "clauses") 0) "pattern") "name") "Circle"))))
+  (expect! "qualified record pattern keeps structural type name"
+    (let [node (parse-expr*
+                 ["match" "value"
+                  [BRACKET-TAG ["models/Widget" "item"] "item"]])
+          pattern (get (nth (get node "clauses") 0) "pattern")]
+      (and (= (get pattern "type") "record")
+        (= (get pattern "qualifier") "models")
+        (= (get pattern "name") "Widget")
+        (nil? (get pattern "providerId")))))
   (expect! "try with catch"
     (let [node (parse-expr* ["try" ["foo"] ["catch" ["e" "Exception"] ["bar" "e"]]])]
       (and (= (get node "node") "try")
@@ -4035,7 +4101,10 @@
     (= (get (parse-expr* ["get" "m" ["#%string" "k"]]) "node") "call"))
   (expect! "static-call"
     (let [node (parse-expr* ["Math/abs" -1])]
-      (and (= (get node "node") "static-call") (= (get node "name") "Math/abs"))))
+      (and (= (get node "node") "static-call")
+        (= (get node "qualifier") "Math")
+        (= (get node "name") "abs")
+        (nil? (get node "providerId")))))
   (expect! "constructor"
     (let [node (parse-expr* ["Date." 2024])]
       (and (= (get node "node") "new") (= (get node "class") "Date."))))

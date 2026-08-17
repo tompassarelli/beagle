@@ -19,6 +19,8 @@
 
 (def rename-env (atom {}))
 
+(def module-bindings (atom {}))
+
 (def loop-binding-contexts (atom nil))
 
 (def pattern-default-bound (atom nil))
@@ -160,9 +162,57 @@
 (defn ^String mangle-prop [^String s]
   (mangle-punctuation s))
 
-(defn ^String resolved-name [^String s]
-  (let [resolved (get (deref rename-env) s)]
-  (if (nil? resolved) (mangle-name s) resolved)))
+(defn ^Boolean qualified-reference? [ref]
+  (and (map? ref) (string? (get ref "qualifier")) (string? (get ref "name"))))
+
+(defn ^Boolean qualified-reference=? [ref ^String qualifier ^String name]
+  (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
+
+(defn ^Boolean qualified-reference-same-binding? [left right]
+  (and (qualified-reference? left) (qualified-reference? right) (= (get left "qualifier") (get right "qualifier")) (= (get left "name") (get right "name")) (or (nil? (get left "providerId")) (nil? (get right "providerId")) (= (get left "providerId") (get right "providerId")))))
+
+(defn ^Boolean qualified-member-constructor? [ref]
+  (and (qualified-reference? ref) (str/starts-with? (get ref "name") "->")))
+
+(defn qualified-module-binding [ref]
+  (let [provider (get ref "providerId")
+   by-provider (if (string? provider) (get (deref module-bindings) provider) nil)]
+  (if (some? by-provider) by-provider (get (deref module-bindings) (get ref "qualifier")))))
+
+(defn ^String emit-qualified-reference [ref ^Boolean constructor?]
+  (let [authored (get ref "name")
+   runtime-member (if (and constructor? (str/starts-with? authored "->")) (subs authored 2) authored)
+   member (mangle-str runtime-member)
+   qualifier (get ref "qualifier")
+   binding (qualified-module-binding ref)]
+  (cond
+  (= qualifier "js") member
+  (string? binding) (str binding "." member)
+  :else (str (mangle-name qualifier) "." member))))
+
+(defn reference-key [ref]
+  (if (qualified-reference? ref) ["qualified-ref" (get ref "qualifier") (get ref "name")] (if (map? ref) (get ref "name") ref)))
+
+(defn metadata-reference-key [key]
+  (if (string? key) (let [index (str/last-index-of key "/")]
+  (if (and (some? index) (> index 0) (< index (- (count key) 1))) ["qualified-ref" (subs key 0 index) (subs key (+ index 1))] key)) key))
+
+(defn metadata-reference [spelling]
+  (let [key (metadata-reference-key spelling)]
+  (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) {"node" "ref" "qualifier" (nth key 1) "name" (nth key 2) "providerId" nil} spelling)))
+
+(defn structuralize-reference-table [table]
+  (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (keys table)))
+
+(defn record-fields-ref [table ref]
+  (get table (reference-key ref)))
+
+(defn ^Boolean qualified-set-member? [values ref]
+  (contains? values (reference-key ref)))
+
+(defn ^String resolved-name [name]
+  (if (qualified-reference? name) (emit-qualified-reference name false) (let [resolved (get (deref rename-env) name)]
+  (if (nil? resolved) (mangle-name name) resolved))))
 
 (defn ^String kw->prop [^String kw]
   (if (str/starts-with? kw ":") (mangle-prop (subs kw 1)) (mangle-prop kw)))
@@ -300,7 +350,7 @@
   (vector? node) (> (count (filterv constraint-contains-async? node)) 0)
   (map? node) (let [ast-node (get node "node")
    jsk (get node "jsk")]
-  (or (= ast-node "await") (and (= ast-node "static-call") (= (get node "name") "js/await")) (= jsk "await") (and (or (= jsk "function") (= jsk "method")) (true? (get node "async"))) (> (count (filterv constraint-contains-async? (vec (vals node)))) 0)))
+  (or (= ast-node "await") (and (= ast-node "static-call") (qualified-reference=? node "js" "await")) (= jsk "await") (and (or (= jsk "function") (= jsk "method")) (true? (get node "async"))) (> (count (filterv constraint-contains-async? (vec (vals node)))) 0)))
   :else false))
 
 (defn ^Boolean binding-constraint-has-await? [binding]
@@ -325,7 +375,7 @@
   (if (not (map? e)) false (let [node (get e "node")
    anyb (fn [xs] (> (count (filterv (fn [x] (expr-has-await? x)) xs)) 0))]
   (cond
-  (= node "static-call") (= (get e "name") "js/await")
+  (= node "static-call") (qualified-reference=? e "js" "await")
   (= node "call") (anyb (get e "args"))
   (= node "if") (or (expr-has-await? (get e "cond")) (expr-has-await? (get e "then")) (let [el (get e "else")]
   (if (absent? el) false (expr-has-await? el))))
@@ -587,36 +637,20 @@
   (nil? d) "[]"
   :else (str d)))
 
-(defn ^String mangle-dotted-path [^String s]
-  (str/join "." (mapv mangle-str (str/split s #"/"))))
-
-(defn ^String static-dotted [^String s]
-  (let [slash (str/index-of s "/")]
-  (if (nil? slash) (mangle-str s) (let [slash-index slash]
-  (cond
-  (= (subs s 0 slash-index) "js") (mangle-str (subs s (+ slash-index 1)))
-  (and (> (count s) (+ slash-index 3)) (= (subs s (+ slash-index 1) (+ slash-index 3)) "->")) (mangle-str (str (subs s 0 slash-index) "." (subs s (+ slash-index 3))))
-  :else (mangle-str (str/replace s "/" ".")))))))
-
-(defn ^String emit-ref-name [^String name]
+(defn ^String emit-ref-name [ref]
+  (if (qualified-reference? ref) (emit-qualified-reference ref false) (let [name (if (map? ref) (get ref "name") ref)]
   (cond
   (= name "nil") "null"
-  (and (bound? name) (not (str/includes? name "/"))) (resolved-name name)
+  (bound? name) (resolved-name name)
   (contains? JS-VALUE-WRAPPERS name) (get JS-VALUE-WRAPPERS name)
-  :else (let [m (mangle-name name)]
-  (cond
-  (and (str/includes? m "/") (str/starts-with? name "js/")) (mangle-str (subs name 3))
-  (str/includes? m "/") (str/replace m "/" ".")
-  :else m))))
+  :else (mangle-name name)))))
 
-(defn ^String emit-call-fn-name [^String name]
+(defn ^String emit-call-fn-name [ref]
+  (if (qualified-reference? ref) (emit-qualified-reference ref (qualified-member-constructor? ref)) (let [name (if (map? ref) (get ref "name") ref)]
   (cond
-  (and (bound? name) (not (str/includes? name "/"))) (resolved-name name)
+  (bound? name) (resolved-name name)
   (str/starts-with? name "->") (mangle-str (subs name 2))
-  (str/includes? name "/->") (let [parts (str/split name #"/->")]
-  (str (mangle-name (nth parts 0)) "." (mangle-str (nth parts 1))))
-  (str/includes? name "/") (if (str/starts-with? name "js/") (mangle-str (subs name 3)) (str/replace (mangle-name name) "/" "."))
-  :else (mangle-name name)))
+  :else (mangle-name name)))))
 
 (defn ^String emit-args-list [args]
   (str/join ", " (mapv emit-expr*! args)))
@@ -738,9 +772,10 @@
   (= pt "literal") (str "if (" (emit-pat-literal-test-js pat tmp) ") { " (emit-match-body! body []) " } else")
   (= pt "or") (let [tests (mapv (fn [alt] (if (= (get alt "type") "wildcard") "true" (emit-pat-literal-test-js alt tmp))) (get pat "alternatives"))]
   (str "if (" (str/join " || " tests) ") { " (emit-match-body! body []) " } else"))
-  (= pt "record") (let [rec-name (get pat "name")
+  (= pt "record") (let [rec-ref pat
+   rec-name (get rec-ref "name")
    bindings (vec (get pat "bindings"))
-   fields (get (deref record-fields) rec-name)
+   fields (record-fields-ref (deref record-fields) rec-ref)
    test (str tmp "._tag === " (js-string-lit rec-name))]
   (if (or (= 0 (count bindings)) (nil? fields)) (str "if (" test ") { " (emit-match-body! body []) " } else") (let [let-strs (loop [i 0
    acc []]
@@ -780,7 +815,7 @@
   (if (not (some? (some (fn [^String field] (if (= field (get update "field")) (do
   field))) (get contract "fieldOrder")))) (do
   (throw (ex-info "checked with node updates a field outside its recordUpdate fieldOrder" {})))))))
-  (if (nil? validator) (str "Object.freeze(" candidate ")") (str "Object.freeze(" (emit-ref-name (str validator)) "(" candidate "))")))))
+  (if (nil? validator) (str "Object.freeze(" candidate ")") (str "Object.freeze(" (emit-ref-name (metadata-reference validator)) "(" candidate "))")))))
 
 (defn walk-set! [e acc]
   (if (not (map? e)) (if (vector? e) (reduce (fn [a x] (walk-set! x a)) acc e) acc) (let [node (get e "node")]
@@ -1284,10 +1319,12 @@
   (let [fn-expr (get e "fn")
    args (get e "args")
    n (count args)]
-  (if (= (get fn-expr "node") "ref") (let [fname (get fn-expr "name")]
+  (if (= (get fn-expr "node") "ref") (let [fname (get fn-expr "name")
+   qualified? (qualified-reference? fn-expr)]
   (cond
-  (and (contains? (deref scalar-fns) fname) (= 1 n)) (emit-expr*! (nth args 0))
-  (and (= "bgl/promote" fname) (= 1 n)) (emit-expr*! (nth args 0))
+  (and (qualified-set-member? (deref scalar-fns) fn-expr) (= 1 n)) (emit-expr*! (nth args 0))
+  (and (qualified-reference=? fn-expr "bgl" "promote") (= 1 n)) (emit-expr*! (nth args 0))
+  qualified? (str (emit-call-fn-name fn-expr) "(" (emit-args-list args) ")")
   (and (or (= fname "=") (= fname "==")) (>= n 2)) (str "(" (emit-eq-pairs! args) ")")
   (and (= fname "not=") (>= n 2)) (str "(!(" (emit-eq-pairs! args) "))")
   (and (js-infix? fname) (>= n 2)) (str "(" (str/join (str " " (get JS-INFIX-OPS fname) " ") (mapv emit-expr*! args)) ")")
@@ -1313,7 +1350,7 @@
   (= kind "keyword") (js-string-lit (kw->prop (get e "value")))
   (= kind "char") (js-string-lit (str (char (get e "value"))))
   :else "null"))
-  (= node "ref") (emit-ref-name (get e "name"))
+  (= node "ref") (emit-ref-name e)
   (= node "def") (str "const " (mangle-name (get e "name")) " = " (emit-expr*! (get e "value")) ";")
   (= node "defonce") (str "const " (mangle-name (get e "name")) " = " (emit-expr*! (get e "value")) ";")
   (= node "if") (let [el (get e "else")]
@@ -1403,11 +1440,10 @@
    key (get e "key")]
   (if (= (get key "node") "js-selector") (str "(" (js-string-lit (get key "name")) " in " (emit-js-postfix-base! receiver) ")") (str "(($beagle$jst$receiver, $beagle$jst$key) => " "($beagle$jst$key in $beagle$jst$receiver))(" (emit-expr*! receiver) ", " (emit-expr*! key) ")")))
   (= node "js-typeof") (str "typeof " (emit-js-unary-operand! (get e "expr")))
-  (= node "static-call") (let [name (get e "name")]
-  (cond
-  (= name "js/await") (str "await " (emit-expr*! (nth (get e "args") 0)))
-  (= name "js/export") (str "export " (emit-form* (nth (get e "args") 0)))
-  :else (str (static-dotted name) "(" (emit-args-list (get e "args")) ")")))
+  (= node "static-call") (cond
+  (qualified-reference=? e "js" "await") (str "await " (emit-expr*! (nth (get e "args") 0)))
+  (qualified-reference=? e "js" "export") (str "export " (emit-form* (nth (get e "args") 0)))
+  :else (str (emit-qualified-reference e (qualified-member-constructor? e)) "(" (emit-args-list (get e "args")) ")"))
   (= node "kw-access") (let [_contract (record-field-access-contract e)
    target-str (emit-expr*! (get e "target"))
    prop (kw->prop (get e "kw"))
@@ -1504,8 +1540,8 @@
   (= node "defscalar") (emit-defscalar f)
   (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
   (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
-  (and (= node "static-call") (= (get f "name") "js/export")) (str "export " (emit-form! (nth (get f "args") 0)))
-  (and (= node "static-call") (= (get f "name") "js/quote")) (emit-js-ast-node! (get f "js-body") 0)
+  (and (= node "static-call") (qualified-reference=? f "js" "export")) (str "export " (emit-form! (nth (get f "args") 0)))
+  (and (= node "static-call") (qualified-reference=? f "js" "quote")) (emit-js-ast-node! (get f "js-body") 0)
   (= node "js-quote") (emit-js-ast-node! (get f "body") 0)
   :else (emit-stmt-inline! f ""))))
 
@@ -1549,12 +1585,19 @@
   (let [from-forms (reduce (fn [acc f] (let [node (get f "node")]
   (cond
   (or (= node "def") (= node "defonce") (= node "defn") (= node "defn-multi") (= node "record") (= node "defenum") (= node "defunion") (= node "deferror") (= node "defscalar")) (assoc acc (get f "name") true)
-  (and (= node "static-call") (= (get f "name") "js/export")) (let [inner (nth (get f "args") 0)]
+  (and (= node "static-call") (qualified-reference=? f "js" "export")) (let [inner (nth (get f "args") 0)]
   (assoc acc (get inner "name") true))
   :else acc))) {} forms)
    with-refers (reduce (fn [acc r] (let [refer (get r "refer")]
   (if (and refer (not (false? refer))) (add-names acc refer) acc))) from-forms requires)]
   (if (absent? externs) with-refers (add-names with-refers (mapv (fn [x] (get x "name")) externs)))))
+
+(defn build-module-bindings [requires]
+  (reduce (fn [bindings entry] (let [namespace (get entry "ns")
+   alias0 (get entry "alias")
+   alias (if (absent? alias0) (last-seg namespace) alias0)
+   binding (mangle-name alias)]
+  (assoc (assoc bindings namespace binding) alias binding))) {} requires))
 
 (defn register-tables! [forms]
   (doseq [f forms]
@@ -1590,7 +1633,7 @@
 
 (defn ^String emit-program! [prog]
   (install-refs!)
-  (reset! record-fields {})
+  (reset! record-fields (structuralize-reference-table (get prog "importedRecordFieldOrder" {})))
   (reset! record-field-bindings {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
@@ -1598,6 +1641,7 @@
   (reset! constrained-binding-counter 0)
   (reset! type-env {})
   (reset! rename-env {})
+  (reset! module-bindings (build-module-bindings (get prog "requires")))
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! inline-scope {})
@@ -1645,6 +1689,7 @@
   (reset! bound-vars {})
   (reset! type-env {})
   (reset! rename-env {})
+  (reset! module-bindings {})
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! inline-scope {})
@@ -1678,7 +1723,20 @@
   (expect! "js/set! assigns through the member" (= (emit-expr! {"node" "js-set" "receiver" receiver "key" dynamic-key "value" {"node" "literal" "kind" "number" "value" 2}}) "(obj[key] = 2)"))
   (expect! "js/delete! emits the JavaScript primitive" (= (emit-expr! {"node" "js-delete" "receiver" receiver "key" selector}) "delete obj.raw_name"))
   (expect! "js/in? reverses its static receiver-first surface" (= (emit-expr! {"node" "js-in" "receiver" receiver "key" selector}) "(\"raw_name\" in obj)")))
-  (expect! "js/new preserves qualified constructor references" (= (emit-expr! {"node" "js-new" "callee" {"node" "ref" "name" "THREE/Scene"} "args" []}) "new THREE.Scene()"))
+  (expect! "js/new preserves qualified constructor references" (do
+  (reset! module-bindings {"three.core" "THREE" "T" "THREE"})
+  (let [result (= (emit-expr! {"node" "js-new" "callee" {"node" "ref" "qualifier" "T" "name" "Scene" "providerId" "three.core"} "args" []}) "new THREE.Scene()")]
+  (reset! module-bindings {})
+  result)))
+  (expect! "reference: qualified ref mangles only its member" (= (emit-expr! {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil}) "str.upper_case"))
+  (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "str.upper_case(value)"))
+  (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "Math.abs(-1)"))
+  (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
+  (expect! "reference: imported record pattern uses structural field lookup" (do
+  (reset! record-fields (structuralize-reference-table {"models/Account" ["id"]}))
+  (let [result (= (emit-match-arm! {"pattern" {"type" "record" "qualifier" "models" "name" "Account" "providerId" nil "bindings" [{"name" "id"}]} "body" [{"node" "ref" "name" "id"}]} "value") "if (value._tag === \"Account\") { const id = value.id; return id; } else")]
+  (reset! record-fields {})
+  result)))
   (expect! "js/new parenthesizes computed constructors" (= (emit-expr! {"node" "js-new" "callee" {"node" "call" "fn" {"node" "ref" "name" "factory"} "args" []} "args" []}) "new (factory())()"))
   (expect! "js/in? evaluates receiver then dynamic key exactly once" (let [emitted (emit-expr! {"node" "js-in" "receiver" {"node" "call" "fn" {"node" "ref" "name" "receiver!"} "args" []} "key" {"node" "call" "fn" {"node" "ref" "name" "key!"} "args" []}})]
   (and (appears-once? emitted "receiver_bang()") (appears-once? emitted "key_bang()") (appears-before? emitted "receiver_bang()" "key_bang()"))))
@@ -1762,7 +1820,7 @@
   (expect! "constraint: predicated scalar constructor remains live and compares" (= (emit-defscalar {"node" "defscalar" "name" "Percent" "predicates" [{"op" ">=" "value" 0} {"op" "not=" "value" 101}]}) "function __gtPercent(v) {\n  if (!(v >= 0 && v !== 101)) throw new Error('scalar constraint violated');\n  return v;\n}"))
   (expect! "constraint: async predicate is rejected" (try
   (do
-  (emit-binding-constraint-statement! {"name" "x" "constraint" {"node" "static-call" "name" "js/await" "args" []}} "$raw")
+  (emit-binding-constraint-statement! {"name" "x" "constraint" {"node" "static-call" "qualifier" "js" "name" "await" "providerId" nil "args" []}} "$raw")
   false)
   (catch Exception problem
     (str/includes? (ex-message problem) "synchronous unary predicate"))))

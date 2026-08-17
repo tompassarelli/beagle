@@ -2,6 +2,48 @@
   (:require [selfhost.rt :as rt]
             [clojure.string :as str]))
 
+(defn ^Boolean qualified-reference? [ref]
+  (and (map? ref) (string? (get ref "qualifier")) (string? (get ref "name"))))
+
+(defn ^Boolean named-reference? [ref]
+  (or (string? ref) (and (map? ref) (= (get ref "node") "ref") (string? (get ref "name")))))
+
+(defn make-qualified-ref [^String qualifier ^String name provider-id]
+  {"node" "ref" "qualifier" qualifier "name" name "providerId" provider-id})
+
+(defn reference-key [ref]
+  (cond
+  (qualified-reference? ref) ["qualified-ref" (get ref "qualifier") (get ref "name") (get ref "providerId")]
+  (and (map? ref) (= (get ref "node") "ref")) (get ref "name")
+  :else ref))
+
+(defn reference-providerless-key [ref]
+  (if (qualified-reference? ref) ["qualified-ref" (get ref "qualifier") (get ref "name") nil] (reference-key ref)))
+
+(defn reference-map-ref [table ref fallback]
+  (let [exact (get table (reference-key ref))]
+  (if (some? exact) exact (if (and (qualified-reference? ref) (some? (get ref "providerId"))) (let [providerless (get table (reference-providerless-key ref))]
+  (if (some? providerless) providerless fallback)) fallback))))
+
+(defn string-qualified-reference [^String spelling]
+  (let [separator (str/last-index-of spelling "/")]
+  (if (and (some? separator) (> separator 0) (< separator (- (count spelling) 1))) (make-qualified-ref (subs spelling 0 separator) (subs spelling (+ separator 1)) nil) nil)))
+
+(defn reference-map-assoc [table ref value]
+  (let [with-exact (assoc table (reference-key ref) value)
+   with-providerless (if (and (qualified-reference? ref) (some? (get ref "providerId"))) (assoc with-exact (reference-providerless-key ref) value) with-exact)
+   structural (if (string? ref) (string-qualified-reference ref) nil)]
+  (if (nil? structural) with-providerless (assoc with-providerless (reference-key structural) value))))
+
+(defn ^String reference->string [ref]
+  (cond
+  (qualified-reference? ref) (str (get ref "qualifier") "/" (get ref "name"))
+  (and (map? ref) (string? (get ref "name"))) (get ref "name")
+  :else (str ref)))
+
+(defn reference-leaf [ref]
+  (if (map? ref) (get ref "name") ref))
+
 (def ANY {"kind" "prim" "name" "Any"})
 
 (def NIL-TYPE {"kind" "prim" "name" "Nil"})
@@ -393,7 +435,7 @@
    alias (get require-spec "alias")
    prefix (if (string? alias) alias namespace)
    referred (get require-spec "refer")]
-  (if (nil? contracts) env (let [qualified (reduce (fn [out member] (assoc out (str prefix "/" member) (get contracts member))) env (keys contracts))]
+  (if (nil? contracts) env (let [qualified (reduce (fn [out member] (reference-map-assoc out (make-qualified-ref prefix member namespace) (get contracts member))) env (keys contracts))]
   (if (vector? referred) (reduce (fn [out member] (let [contract (get contracts member)]
   (if (nil? contract) out (assoc out member contract)))) qualified referred) qualified))))) {} requires))
 
@@ -401,10 +443,10 @@
 
 (def CORE-STDLIB {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)})
 
-(def JVM-INSTANCE-POSITION-METHODS {"Socket/connect" true "java.net.Socket/connect" true})
+(def JVM-INSTANCE-POSITION-METHODS {["Socket" "connect"] true ["java.net.Socket" "connect"] true})
 
-(defn ^Boolean jvm-instance-position-method? [^String sym]
-  (= true (get JVM-INSTANCE-POSITION-METHODS sym)))
+(defn ^Boolean jvm-instance-position-method? [ref]
+  (and (qualified-reference? ref) (= true (get JVM-INSTANCE-POSITION-METHODS [(get ref "qualifier") (get ref "name")]))))
 
 (defn opt-field [x]
   (if (= x false) nil x))
@@ -447,7 +489,7 @@
   (cond
   (= node "quoted") true
   (= node "await") false
-  (and (= node "static-call") (= (get value "name") "js/await")) false
+  (and (= node "static-call") (= (get value "qualifier") "js") (= (get value "name") "await")) false
   (= jsk "await") false
   (and (or (= jsk "function") (= jsk "method")) (= (get value "async") true)) false
   (and (= node "js-class") (boolean (some (fn [method] (= (get method "async") true)) (get value "methods")))) false
@@ -456,12 +498,12 @@
   (or (= (get key "node") "js-selector") (constraint-value-synchronous? key proofs))) (if (= node "js-set") (constraint-value-synchronous? (get value "value") proofs) true))
   (or (= node "js-call") (= node "js-new")) false
   (= node "call") (let [callee (get value "fn")
-   named? (and (map? callee) (= (get callee "node") "ref") (string? (get callee "name")))
-   callee-ok (if named? (= true (get proofs (get callee "name"))) (constraint-value-synchronous? callee proofs))]
+   named? (named-reference? callee)
+   callee-ok (if named? (= true (reference-map-ref proofs callee false)) (constraint-value-synchronous? callee proofs))]
   (and callee-ok (constraint-value-synchronous? (get value "args") proofs)))
-  (= node "static-call") (and (= true (get proofs (get value "name"))) (constraint-value-synchronous? (get value "args") proofs))
-  (= node "ref") (let [name (get value "name")]
-  (if (contains? proofs name) (= true (get proofs name)) true))
+  (= node "static-call") (and (= true (reference-map-ref proofs value false)) (constraint-value-synchronous? (get value "args") proofs))
+  (= node "ref") (let [key (reference-key value)]
+  (if (contains? proofs key) (= true (get proofs key)) true))
   :else (every? (fn [key] (constraint-value-synchronous? (get value key) proofs)) (keys value))))
   :else true))
 
@@ -480,8 +522,8 @@
    node (get form "node")]
   (if (or (= node "defn") (= node "defn-multi")) (assoc out (get form "name") form) out))) {} forms)
    imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
-   imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "synchronous"))) (assoc out (get entry "name") (get entry "synchronous")) out)) {} imported)
-   external-proofs (reduce (fn [out entry] (if (and (string? (get entry "name")) (not (contains? out (get entry "name")))) (assoc out (get entry "name") (not (= (get entry "synchronous") false))) out)) imported-proofs (get prog "externs"))
+   imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "synchronous"))) (reference-map-assoc out (get entry "name") (get entry "synchronous")) out)) {} imported)
+   external-proofs (reduce (fn [out entry] (if (and (string? (get entry "name")) (nil? (reference-map-ref out (get entry "name") nil))) (reference-map-assoc out (get entry "name") (not (= (get entry "synchronous") false))) out)) imported-proofs (get prog "externs"))
    builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (keys STDLIB))
    assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (keys local-definitions))]
   (loop [proofs assumed]
@@ -509,12 +551,12 @@
 
 (defn ^Boolean callable-value-synchronous? [value callable-proofs return-proofs aliases]
   (cond
-  (and (map? value) (= (get value "node") "ref")) (let [name (get value "name")]
-  (if (contains? aliases name) (= true (get aliases name)) (= true (get callable-proofs name))))
+  (and (map? value) (= (get value "node") "ref")) (let [key (reference-key value)]
+  (if (contains? aliases key) (= true (get aliases key)) (= true (reference-map-ref callable-proofs value false))))
   (and (map? value) (= (get value "node") "fn")) (constraint-value-synchronous? value callable-proofs)
   (and (map? value) (= (get value "node") "call")) (let [callee (get value "fn")
-   name (if (and (map? callee) (= (get callee "node") "ref")) (get callee "name") nil)]
-  (and (string? name) (= true (get return-proofs name)) (constraint-value-synchronous? value callable-proofs)))
+   named? (named-reference? callee)]
+  (and named? (= true (reference-map-ref return-proofs callee false)) (constraint-value-synchronous? value callable-proofs)))
   (and (map? value) (= (get value "node") "if")) (and (constraint-value-synchronous? (get value "cond") callable-proofs) (callable-value-synchronous? (get value "then") callable-proofs return-proofs aliases) (callable-value-synchronous? (get value "else") callable-proofs return-proofs aliases))
   (and (map? value) (= (get value "node") "cond")) (let [clauses (get value "clauses")]
   (and (vector? clauses) (> (count clauses) 0) (every? (fn [clause] (and (constraint-value-synchronous? (get clause "test") callable-proofs) (callable-body-tail-synchronous? (get clause "body") callable-proofs return-proofs aliases))) clauses)))
@@ -532,9 +574,9 @@
    local-definitions (reduce (fn [out raw-form] (let [form (if (= (get raw-form "node") "with-meta") (get raw-form "expr") raw-form)]
   (if (and (or (= (get form "node") "defn") (= (get form "node") "defn-multi")) (definition-returns-callable? form)) (assoc out (get form "name") form) out))) {} forms)
    imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
-   imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "returnsSynchronousCallable"))) (assoc out (get entry "name") (get entry "returnsSynchronousCallable")) out)) {} imported)
+   imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "returnsSynchronousCallable"))) (reference-map-assoc out (get entry "name") (get entry "returnsSynchronousCallable")) out)) {} imported)
    external-proofs (reduce (fn [out entry] (let [name (get entry "name")]
-  (if (and (string? name) (not (contains? out name))) (assoc out name (= true (get entry "returnsSynchronousCallable"))) out))) imported-proofs (get prog "externs"))
+  (if (and (string? name) (nil? (reference-map-ref out name nil))) (reference-map-assoc out name (= true (get entry "returnsSynchronousCallable"))) out))) imported-proofs (get prog "externs"))
    assumed (reduce (fn [out name] (assoc out name true)) external-proofs (keys local-definitions))]
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
@@ -547,8 +589,8 @@
   (let [proofs (get env "#%callable-synchronous")
    return-proofs (get env "#%returns-synchronous-callable")]
   (cond
-  (and (map? predicate) (= (get predicate "node") "ref") (string? (get predicate "name"))) (= true (get proofs (get predicate "name")))
-  (and (map? predicate) (= (get predicate "node") "call") (map? (get predicate "fn")) (= (get (get predicate "fn") "node") "ref") (string? (get (get predicate "fn") "name"))) (and (= true (get return-proofs (get (get predicate "fn") "name"))) (constraint-value-synchronous? predicate proofs))
+  (and (map? predicate) (= (get predicate "node") "ref") (string? (get predicate "name"))) (= true (reference-map-ref proofs predicate false))
+  (and (map? predicate) (= (get predicate "node") "call") (map? (get predicate "fn")) (= (get (get predicate "fn") "node") "ref") (string? (get (get predicate "fn") "name"))) (and (= true (reference-map-ref return-proofs (get predicate "fn") false)) (constraint-value-synchronous? predicate proofs))
   (and (map? predicate) (= (get predicate "node") "fn")) (constraint-value-synchronous? predicate proofs)
   :else false)))
 
@@ -803,8 +845,12 @@
   :else false))
 
 (defn call-fn-name [e]
+  (let [ref (if (= (get e "node") "call") (get e "fn") nil)]
+  (if (named-reference? ref) (reference-leaf ref) nil)))
+
+(defn call-fn-ref [e]
   (if (= (get e "node") "call") (let [fn-ref (get e "fn")]
-  (if (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref")) (get fn-ref "name") (if (string? fn-ref) fn-ref nil))) nil))
+  (if (named-reference? fn-ref) fn-ref nil)) nil))
 
 (defn instance-narrowings [cond-expr env]
   (let [fn-name (call-fn-name cond-expr)
@@ -914,7 +960,7 @@
   (resolve-poly-call-expected! poly-t args env nil false))
 
 (defn ^Boolean bare-swallowed-ref? [e env]
-  (and (= (get e "node") "ref") (nil? (get env (get e "name"))) (nil? (str/index-of (get e "name") "/")) (nil? (str/index-of (get e "name") "."))))
+  (and (= (get e "node") "ref") (not (qualified-reference? e)) (nil? (reference-map-ref env e nil)) (nil? (str/index-of (get e "name") "."))))
 
 (defn last-expr-type-expected! [body env expected-result]
   (let [n (count body)]
@@ -935,8 +981,9 @@
 (defn emit-enum-member-violation! [violation]
   (emit-diag! (str "beagle: " (get violation "value") " is not a member of enum " (get violation "enum") " (valid: " (str/join " " (get violation "members")) ")")))
 
-(defn check-enum-comparison! [^String fn-name args env]
-  (if (and (or (= fn-name "=") (= fn-name "not=")) (= (count args) 2)) (do
+(defn check-enum-comparison! [fn-name args env]
+  (let [leaf (reference-leaf fn-name)]
+  (if (and (or (= leaf "=") (= leaf "not=")) (= (count args) 2)) (do
   (let [check-side! (fn [value-expr keyword-expr] (if (= (get value-expr "node") "ref") (do
   (let [value-type (infer-expr! value-expr env)
    violation (enum-member-violation value-type keyword-expr)]
@@ -944,14 +991,16 @@
   (emit-enum-member-violation! violation))))))
   nil)]
   (check-side! (nth args 0) (nth args 1))
-  (check-side! (nth args 1) (nth args 0)))))
+  (check-side! (nth args 1) (nth args 0))))))
   nil)
 
-(defn check-args! [^String fn-name fn-t args env]
+(defn check-args! [fn-name fn-t args env]
   (let [fixed (get fn-t "params")
    rest-t (get fn-t "rest")
    n-fixed (count fixed)
    n-args (count args)
+   fn-display (reference->string fn-name)
+   fn-leaf (reference-leaf fn-name)
    check-slot (fn [i] (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
    expected-atom? (check-atom-ctor! (nth args i) expected env)
    actual (if expected-atom? expected (infer-expr! (nth args i) env))
@@ -962,18 +1011,18 @@
    expected (prune-inference-type expected)]
   (if (some? enum-violation) (do
   (emit-enum-member-violation! enum-violation)))
-  (if (not (and (type-compatible? actual expected) (or (not (and (numeric-arithmetic-op? fn-name) (= (numeric-class expected) "number"))) (not (= (numeric-class actual) "other"))))) (do
-  (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1) " expected " (type->string expected) ", got " (type->string actual)))))
+  (if (not (and (type-compatible? actual expected) (or (not (and (numeric-arithmetic-op? fn-leaf) (= (numeric-class expected) "number"))) (not (= (numeric-class actual) "other"))))) (do
+  (emit-diag! (str "beagle: call to " fn-display ": arg " (+ i 1) " expected " (type->string expected) ", got " (type->string actual)))))
   actual)))]
   (check-enum-comparison! fn-name args env)
   (cond
   (not (nil? rest-t)) (do
   (if (< n-args n-fixed) (do
-  (emit-diag! (str "beagle: call to " fn-name ": expected at least " n-fixed " arg(s), got " n-args))))
+  (emit-diag! (str "beagle: call to " fn-display ": expected at least " n-fixed " arg(s), got " n-args))))
   (mapv check-slot (range n-args)))
   :else (do
   (if (not= n-fixed n-args) (do
-  (emit-diag! (str "beagle: call to " fn-name ": expected " n-fixed " arg(s), got " n-args))))
+  (emit-diag! (str "beagle: call to " fn-display ": expected " n-fixed " arg(s), got " n-args))))
   (mapv check-slot (range (if (< n-fixed n-args) n-fixed n-args)))))))
 
 (defn infer-cond-clauses! [clauses env]
@@ -1201,7 +1250,7 @@
   (= (get e "node") "threading") (infer-expr! (get e "desugared") env)
   (= (get e "node") "literal") (let [t (infer-literal-type e)]
   (if (nil? t) ANY t))
-  (= (get e "node") "ref") (let [found (get env (get e "name"))]
+  (= (get e "node") "ref") (let [found (reference-map-ref env e nil)]
   (if (nil? found) ANY found))
   (= (get e "node") "def") (let [expected (get e "ann")]
   (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr-expected! (get e "value") env expected)]
@@ -1480,9 +1529,9 @@
   (doseq [a (get e "args")]
   (infer-expr! a env))
   ANY)))
-  (= (get e "node") "static-call") (let [sym (get e "name")
-   raw-type (get env sym)
-   instance-position (jvm-instance-position-method? sym)
+  (= (get e "node") "static-call") (let [ref e
+   raw-type (reference-map-ref env ref nil)
+   instance-position (jvm-instance-position-method? ref)
    all-args (get e "args")
    call-args (if (and instance-position (> (count all-args) 0)) (subvec all-args 1) all-args)]
   (if (and instance-position (> (count all-args) 0)) (do
@@ -1490,13 +1539,13 @@
   (cond
   (and (not (nil? raw-type)) (poly-type? raw-type)) (let [resolved (resolve-poly-call! raw-type call-args env)]
   (if (fn-type? resolved) (do
-  (check-args! sym resolved call-args env)
+  (check-args! ref resolved call-args env)
   (get resolved "ret")) (do
   (doseq [a call-args]
   (infer-expr! a env))
   ANY)))
   (and (not (nil? raw-type)) (fn-type? raw-type)) (do
-  (check-args! sym raw-type call-args env)
+  (check-args! ref raw-type call-args env)
   (get raw-type "ret"))
   :else (do
   (doseq [a call-args]
@@ -1520,17 +1569,14 @@
   :else nil)]
   (if (and (not (nil? idx)) (>= idx 0) (< idx (count elems))) (nth elems idx) (if (= (count elems) 0) ANY (merge-types-list elems))))
   (= (get e "node") "call") (let [fn-ref (get e "fn")
-   fn-name (cond
-  (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref")) (get fn-ref "name")
-  (string? fn-ref) fn-ref
-  :else nil)
+   fn-name (if (named-reference? fn-ref) fn-ref nil)
    args (get e "args")]
   (if (nil? fn-name) (do
   (if (not (nil? fn-ref)) (do
   (infer-expr! fn-ref env)))
   (doseq [a args]
   (infer-expr! a env))
-  ANY) (let [raw-type (get env fn-name)]
+  ANY) (let [raw-type (reference-map-ref env fn-name nil)]
   (cond
   (and (not (nil? raw-type)) (poly-type? raw-type)) (let [resolved (resolve-poly-call! raw-type args env)]
   (if (fn-type? resolved) (do
@@ -1540,13 +1586,13 @@
   (infer-expr! a env))
   ANY)))
   (and (not (nil? raw-type)) (fn-type? raw-type)) (let [arg-types (check-args! fn-name raw-type args env)]
-  (numeric-refine fn-name arg-types (get raw-type "ret")))
+  (numeric-refine (reference-leaf fn-name) arg-types (get raw-type "ret")))
   (and (not (nil? raw-type)) (union-type? raw-type) (every? (fn [m] (fn-type? m)) (get raw-type "members"))) (let [n-args (count args)
    matching (first (filter (fn [alt] (= (count (get alt "params")) n-args)) (get raw-type "members")))]
   (if (not (nil? matching)) (do
   (check-args! fn-name matching args env)
   (get matching "ret")) (do
-  (emit-diag! (str "beagle: call to " fn-name ": no arity accepts " n-args " arg(s)"))
+  (emit-diag! (str "beagle: call to " (reference->string fn-name) ": no arity accepts " n-args " arg(s)"))
   ANY)))
   :else (do
   (doseq [a args]
@@ -1592,7 +1638,7 @@
   (= (get prog "target") "js") (merge STDLIB JS-ATOM-STDLIB)
   :else STDLIB)
    target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])))
-   env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
+   env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (reference-map-assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
    dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
    env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
@@ -1838,8 +1884,9 @@
   (if (str/starts-with? s ":") nil (let [i (str/index-of s ".")]
   (if (or (nil? i) (= i 0)) nil (subs s 0 i)))))
 
-(defn ^Boolean nix-qualified? [^String s]
-  (or (str/includes? s "/") (< 0 (count (filterv (fn [^String p] (str/starts-with? s p)) NIX-QUALIFIED-PREFIXES)))))
+(defn ^Boolean nix-qualified? [ref]
+  (let [text (if (map? ref) (get ref "name") ref)]
+  (or (qualified-reference? ref) (and (string? text) (< 0 (count (filterv (fn [^String p] (str/starts-with? text p)) NIX-QUALIFIED-PREFIXES)))))))
 
 (defn nix-collect-bound [x acc]
   (cond
@@ -1857,7 +1904,7 @@
   (= node "quoted") nil
   (= node "ref") (let [nm (get x "name")
    root (nix-dotted-root nm)]
-  (if (and (some? root) (not under-with) (not (nix-qualified? nm)) (not (contains? bound root)) (not (= root "builtins"))) (do
+  (if (and (some? root) (not under-with) (not (nix-qualified? x)) (not (contains? bound root)) (not (= root "builtins"))) (do
   (emit-diag! (str "unbound name `" nm "` on the nix target: it descends into `" root "`, but `" root "` is not a nix/module formal, a let-binding, or any " "other binding in scope. It emits `${" nm "}`, which nix rejects as an " "undefined variable. Declare `" root "` as a `nix/module` formal, bind it " "with `let`, or fix the name. (Names inside `nix/with` are exempt — their " "scope is dynamic.)"))))
   nil)
   (= node "nix-with") (do
@@ -1887,12 +1934,11 @@
 (defn- ^Boolean lower-alpha-first? [^String s]
   (and (> (count s) 0) (some? (str/index-of LOWER-ALPHA (subs s 0 1)))))
 
-(defn collect-ref-names [x acc]
+(defn collect-references [x acc]
   (cond
-  (map? x) (let [acc1 (if (= (get x "node") "ref") (let [nm (get x "name")]
-  (if (string? nm) (conj acc nm) acc)) acc)]
-  (reduce (fn [a v] (collect-ref-names v a)) acc1 (vals x)))
-  (vector? x) (reduce (fn [a v] (collect-ref-names v a)) acc x)
+  (map? x) (let [acc1 (if (= (get x "node") "ref") (conj acc x) acc)]
+  (reduce (fn [a v] (collect-references v a)) acc1 (vals x)))
+  (vector? x) (reduce (fn [a v] (collect-references v a)) acc x)
   :else acc))
 
 (defn check-qualified-resolution! [prog env]
@@ -1902,16 +1948,17 @@
    alias (get r "alias")
    m1 (assoc m ns true)]
   (if (and (some? alias) (not (= alias false))) (assoc m1 alias true) m1))) {"str" true} (get prog "requires"))
-   names (reduce (fn [a f] (collect-ref-names f a)) [] (get prog "forms"))
+   refs (reduce (fn [a f] (collect-references f a)) [] (get prog "forms"))
    seen (atom {})
    bad (atom [])]
-  (doseq [s names]
-  (let [idx (str/index-of s "/")]
-  (if (and (some? idx) (> idx 0) (< idx (- (count s) 1)) (lower-alpha-first? s) (not (str/starts-with? s "clojure.")) (nil? (get env s))) (do
-  (let [p (subs s 0 idx)]
-  (if (and (nil? (get required p)) (not (= true (get (deref seen) s)))) (do
-  (swap! seen assoc s true)
-  (swap! bad conj {"sym" s "prefix" p}))))))))
+  (doseq [ref refs]
+  (if (qualified-reference? ref) (do
+  (let [prefix (get ref "qualifier")
+   display (reference->string ref)
+   key (reference-key ref)]
+  (if (and (lower-alpha-first? prefix) (not (str/starts-with? prefix "clojure.")) (nil? (reference-map-ref env ref nil)) (nil? (get required prefix)) (not (= true (get (deref seen) key)))) (do
+  (swap! seen assoc key true)
+  (swap! bad conj {"sym" display "prefix" prefix})))))))
   (if (> (count (deref bad)) 0) (do
   (let [vs (deref bad)
    plural (> (count vs) 1)
@@ -2087,17 +2134,20 @@
   (purity-result (reduce (fn [next child] (purity-analyze-and-escape child next value)) state (purity-unknown-children value)) {}))
 
 (defn purity-analyze-call [call state]
-  (let [name (call-fn-name call)
+  (let [ref (call-fn-ref call)
+   name (reference-leaf ref)
+   display (reference->string ref)
+   qualified? (qualified-reference? ref)
    args (get call "args")
-   lexical (and (string? name) (contains? (get state "scope") name))
-   primitive-shadowed (and (string? name) (or lexical (contains? (get state "globals") name)))]
+   lexical (and (not qualified?) (string? name) (contains? (get state "scope") name))
+   primitive-shadowed (and (string? name) (or lexical (and (not qualified?) (contains? (get state "globals") name))))]
   (cond
-  (and (= name "transient") (not primitive-shadowed)) (let [after-args (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) state args)
+  (and (not qualified?) (= name "transient") (not primitive-shadowed)) (let [after-args (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) state args)
    fresh (purity-fresh-id after-args)
    origin (get fresh "id")
    origins {origin true}]
   (purity-result (purity-set-origin-status (get fresh "state") origins "live") origins))
-  (and (string? name) (= true (get TRANSIENT-FAMILY name)) (not primitive-shadowed)) (let [owner-result (if (> (count args) 0) (purity-analyze (first args) state) (purity-result state {}))
+  (and (not qualified?) (string? name) (= true (get TRANSIENT-FAMILY name)) (not primitive-shadowed)) (let [owner-result (if (> (count args) 0) (purity-analyze (first args) state) (purity-result state {}))
    after-owner (get owner-result "state")
    owner-origins (get owner-result "origins")
    valid (purity-origins-live? after-owner owner-origins)
@@ -2107,7 +2157,7 @@
   (not valid) (purity-result (purity-escape-origins after-rest owner-origins call) {})
   (= name "persistent!") (purity-result (purity-set-origin-status after-rest owner-origins "dead") {})
   :else (purity-result after-rest owner-origins)))
-  :else (let [marked (if (and (not lexical) (or (bang-name? name) (= true (get (get state "known") name)))) (purity-note state name) state)
+  :else (let [marked (if (and (not lexical) (or (bang-name? name) (= true (get (get state "known") name)))) (purity-note state display) state)
    fn-expr (get call "fn")
    after-callee (if (and (string? name) (not lexical)) marked (purity-analyze-and-escape fn-expr marked call))
    after-args (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) after-callee args)]
@@ -2131,7 +2181,7 @@
   :else (let [node (get value "node")]
   (cond
   (= node "quoted") (purity-result state {})
-  (= node "ref") (let [binding (get (get state "scope") (get value "name"))]
+  (= node "ref") (let [binding (if (qualified-reference? value) nil (get (get state "scope") (get value "name")))]
   (if (nil? binding) (purity-result state {}) (let [origins (get binding "origins")]
   (if (and (> (count origins) 0) (< (get binding "lambda-depth") (get state "lambda-depth"))) (purity-result (purity-escape-origins state origins value) {}) (purity-result state origins)))))
   (= node "call") (purity-analyze-call value state)
@@ -2296,7 +2346,7 @@
   (let [node (get form "node")]
   (cond
   (or (= node "js-export") (= node "js-export-default")) (get form "form")
-  (and (= node "static-call") (or (= (get form "name") "js/export") (= (get form "name") "js/export-default")) (= (count (get form "args")) 1)) (nth (get form "args") 0)
+  (and (= node "static-call") (= (get form "qualifier") "js") (or (= (get form "name") "export") (= (get form "name") "export-default")) (= (count (get form "args")) 1)) (nth (get form "args") 0)
   :else form)))
 
 (defn collect-purity-defs [prog]
@@ -2472,8 +2522,8 @@
 (defn make-call [^String fn-name args]
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
 
-(defn make-static-call [^String name args]
-  {"node" "static-call" "name" name "args" args})
+(defn make-static-call [^String qualifier ^String name args]
+  {"node" "static-call" "qualifier" qualifier "name" name "providerId" nil "args" args})
 
 (defn make-js-selector [^String name]
   {"node" "js-selector" "name" name})
@@ -2751,13 +2801,13 @@
   (> (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: aset-double! wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "aset-double!" [(make-ref "missing") (make-lit "number" 0)]))]) "target" "core")]
   (> (get (type-check! prog) "count") 0)))
-  (expect! "JVM instance-position: receiver excluded from declared arity" (let [prog {"namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-timeout" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket/connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
+  (expect! "JVM instance-position: receiver excluded from declared arity" (let [prog {"namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-timeout" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket" "connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
    result (type-check! prog)]
   (= (get result "count") 0)))
-  (expect! "JVM instance-position: wrong Java arity rejected" (let [prog {"namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-too-many-args" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket/connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
+  (expect! "JVM instance-position: wrong Java arity rejected" (let [prog {"namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-too-many-args" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket" "connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
-  (expect! "JVM static gate-c: declared unknown static checks every argument" (let [prog {"namespace" "test" "target" "clj" "forms" [(make-def-node "quoted" (make-prim "String") (make-static-call "java.util.regex.Pattern/quote" [(make-lit "string" "x") (make-lit "string" "y")]))] "externs" [{"name" "java.util.regex.Pattern/quote" "type" (make-fn [(make-prim "String")] nil (make-prim "String"))}] "requires" []}
+  (expect! "JVM static gate-c: declared unknown static checks every argument" (let [prog {"namespace" "test" "target" "clj" "forms" [(make-def-node "quoted" (make-prim "String") (make-static-call "java.util.regex.Pattern" "quote" [(make-lit "string" "x") (make-lit "string" "y")]))] "externs" [{"name" "java.util.regex.Pattern/quote" "type" (make-fn [(make-prim "String")] nil (make-prim "String"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
   (expect! "binding: ^:dynamic def target accepted" (let [dyn-def (assoc (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0)) "dynamic" true)
@@ -2855,6 +2905,14 @@
    env (build-initial-env! prog)
    ft (get env "fetch")]
   (and (fn-type? ft) (= (count (get ft "params")) 1))))
+  (expect! "env: hosted require resolves structural qualified reference" (let [prog {"namespace" "test" "target" "clj" "forms" [] "externs" [] "requires" [{"ns" "clojure.string" "alias" "str" "refer" false}]}
+   env (build-initial-env! prog)
+   ft (reference-map-ref env (make-qualified-ref "str" "upper-case" nil) nil)]
+  (and (fn-type? ft) (= (get (get ft "ret") "name") "String"))))
+  (expect! "env: compound extern registers structural identity" (let [contract (make-fn [(make-prim "Int")] nil BOOL-TYPE)
+   prog {"namespace" "test" "target" "clj" "forms" [] "externs" [{"name" "remote/valid?" "type" contract}] "requires" []}
+   env (build-initial-env! prog)]
+  (= (reference-map-ref env (make-qualified-ref "remote" "valid?" nil) nil) contract)))
   (expect! "integration: multi-form program" (let [prog (make-prog [(make-defn-node "double" [(make-param "x" (make-prim "Int"))] (make-prim "Int") [(make-call "+" [(make-ref "x") (make-ref "x")])]) (make-def-node "result" (make-prim "Int") (make-call "double" [(make-lit "number" 21)]))])
    result (type-check! prog)]
   (= (get result "count") 0)))
@@ -2985,13 +3043,13 @@
    consumer (make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") predicate)] (make-prim "Int") [(make-ref "x")])
    diagnostics (check-program! (make-prog [left right consumer]))]
   (diagnostics-include? diagnostics "not proven synchronous")))
-  (expect! "constraint: unproved imported predicate rejected" (let [prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "remote/valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE) "synchronous" false}])
+  (expect! "constraint: unproved imported predicate rejected" (let [prog (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-qualified-ref "remote" "valid?" nil))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE) "synchronous" false}])
    diagnostics (check-program! prog)]
   (diagnostics-include? diagnostics "not proven synchronous")))
-  (expect! "constraint: checked imported predicate proof accepted" (let [base (make-prog-with-externs [(make-defn-node "keep" [(make-constrained-param "x" (make-prim "Int") (make-ref "remote/valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE) "synchronous" false}])
+  (expect! "constraint: checked imported predicate proof accepted" (let [base (make-prog-with-externs [(make-defn-node "keep" [(make-constrained-param "x" (make-prim "Int") (make-qualified-ref "remote" "valid?" nil))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE) "synchronous" false}])
    prog (assoc base IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [{"name" "remote/valid?" "synchronous" true}])]
   (= (count (check-program! prog)) 0)))
-  (expect! "constraint: checked imported negative proof remains authoritative" (let [base (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-ref "remote/valid?"))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])
+  (expect! "constraint: checked imported negative proof remains authoritative" (let [base (make-prog-with-externs [(make-defn-node "bad" [(make-constrained-param "x" (make-prim "Int") (make-qualified-ref "remote" "valid?" nil))] (make-prim "Int") [(make-ref "x")])] [{"name" "remote/valid?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}])
    prog (assoc base IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [{"name" "remote/valid?" "synchronous" false}])
    diagnostics (check-program! prog)]
   (diagnostics-include? diagnostics "not proven synchronous")))

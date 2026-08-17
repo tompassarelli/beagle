@@ -60,12 +60,18 @@
 (defn upper-case-char? [(code Int)] Bool
   (and (>= code 65) (<= code 90)))
 
-(defn static-method-sym? [(sym String)] Bool
-  (let [idx (str/index-of sym "/")
-        slash-pos (if (nil? idx) -1 idx)]
-    (and (> slash-pos 0) (< (+ slash-pos 1) (count sym))
-         (or (upper-case-char? (int (.charAt sym 0)))
-             (= (substring2 sym 0 3) "js/")))))
+(defn qualified-ref? [(ref Any)] Bool
+  (and (map? ref)
+       (= (get ref "node") "ref")
+       (string? (get ref "qualifier"))
+       (string? (get ref "name"))))
+
+(defn static-method-ref? [(ref Any)] Bool
+  (and (qualified-ref? ref)
+       (let [qualifier (get ref "qualifier")]
+         (and (> (count qualifier) 0)
+              (or (upper-case-char? (int (.charAt qualifier 0)))
+                  (= qualifier "js"))))))
 
 (defn dynamic-var-sym? [(sym String)] Bool
   (and (>= (count sym) 3)
@@ -129,6 +135,11 @@
 (defn make-call [(fn-name Any) (args (Vec Any))] Any
   {"node" "call" "fn" fn-name "args" args})
 
+(defn make-qualified-ref
+  [(qualifier String) (name String) (provider-id Any)] Any
+  {"node" "ref" "qualifier" qualifier "name" name
+   "providerId" provider-id})
+
 (defn make-ref [(name String)] Any
   {"node" "ref" "name" name})
 
@@ -162,7 +173,7 @@
 (defn make-method-call [(method String) (target Any) (args (Vec Any))] Any
   {"node" "method-call" "method" method "target" target "args" args})
 
-(defn make-static-call [(class-method String) (args (Vec Any))] Any
+(defn make-static-call [(class-method Any) (args (Vec Any))] Any
   {"node" "static-call" "class-method" class-method "args" args})
 
 (defn make-js-selector [(name String)] Any
@@ -293,7 +304,7 @@
 (defn make-pat-literal [(value Any)] Any
   {"pattern" "literal" "value" value})
 
-(defn make-pat-record [(type-name String) (bindings (Vec Any))] Any
+(defn make-pat-record [(type-name Any) (bindings (Vec Any))] Any
   {"pattern" "record" "type-name" type-name "bindings" bindings})
 
 (defn make-pat-map [(entries (Vec Any))] Any
@@ -408,9 +419,12 @@
   (expect! "dot-method: .foo" (dot-method-sym? ".foo"))
   (expect! "dot-method: not foo" (not (dot-method-sym? "foo")))
   (expect! "dot-method: not ." (not (dot-method-sym? ".")))
-  (expect! "static: Math/abs" (static-method-sym? "Math/abs"))
-  (expect! "static: js/console" (static-method-sym? "js/console"))
-  (expect! "static: not foo/bar" (not (static-method-sym? "foo/bar")))
+  (expect! "static: Math/abs"
+    (static-method-ref? (make-qualified-ref "Math" "abs" nil)))
+  (expect! "static: js/console"
+    (static-method-ref? (make-qualified-ref "js" "console" nil)))
+  (expect! "static: not foo/bar"
+    (not (static-method-ref? (make-qualified-ref "foo" "bar" nil))))
   (expect! "dynamic: *state*" (dynamic-var-sym? "*state*"))
   (expect! "dynamic: not *x" (not (dynamic-var-sym? "*x")))
   (expect! "constructor: Point." (constructor-sym? "Point."))
@@ -428,6 +442,13 @@
     (expect! "make-def node type" (= (get node "node") "def"))
     (expect! "make-def name" (= (get node "name") "x"))
     (expect! "make-def value" (= (get (get node "value") "kind") "number")))
+
+  (let [node (make-qualified-ref "odd.ns" "->thing?!" nil)]
+    (expect! "qualified ref node type" (= (get node "node") "ref"))
+    (expect! "qualified ref qualifier" (= (get node "qualifier") "odd.ns"))
+    (expect! "qualified ref leaf" (= (get node "name") "->thing?!"))
+    (expect! "qualified ref unresolved provider"
+      (nil? (get node "providerId"))))
 
   (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"} nil)]
                nil {"kind" "prim" "name" "String"}
@@ -512,7 +533,13 @@
 
   (expect! "pat-wildcard" (= (get (make-pat-wildcard) "pattern") "wildcard"))
   (expect! "pat-literal" (= (get (make-pat-literal 42) "value") 42))
-  (expect! "pat-record" (= (get (make-pat-record "Circle" ["r"]) "type-name") "Circle"))
+  (expect! "pat-record"
+    (= (get (make-pat-record "Circle" ["r"]) "type-name") "Circle"))
+  (expect! "qualified pat-record keeps structural type name"
+    (qualified-ref?
+      (get (make-pat-record
+             (make-qualified-ref "models" "Widget" nil) ["item"])
+        "type-name")))
   (expect! "pat-var" (= (get (make-pat-var "x") "name") "x"))
 
   ;; --- Nix constructors ---
