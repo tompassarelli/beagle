@@ -17,23 +17,23 @@ permissions:
   contents: write
 
 concurrency:
-  group: fram-release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  group: beagle-release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  # The full native server is built in publish with the pinned Beagle checkout
-  # and musl compiler. This job gates the bb suite, cc-only smokes, and all four
-  # normalized release envelopes before any release can exist.
+  # The branch server is built in publish with the in-tree Beagle compiler and
+  # musl compiler. This job gates the branch identity suite, cc-only smokes,
+  # and all four normalized release envelopes before any release can exist.
   gate:
     name: Gate the tag, smokes, and reproducible release receipts
     runs-on: ubuntu-latest
     env:
-      BEAGLE_HOME: ${{ github.workspace }}/.beagle
-      FRAM_BEAGLE: ${{ github.workspace }}/.beagle/bin/beagle
+      BEAGLE_HOME: ${{ github.workspace }}
+      FRAM_BEAGLE: ${{ github.workspace }}/bin/beagle
       FRAM_SERVER_RUNTIME: jvm-dev
     steps:
       - name: Check out the exact release candidate
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
           fetch-depth: 0
@@ -86,22 +86,13 @@ jobs:
             bash scripts/check-release-notes.sh "$notes_tag"
           done
 
-      # The release receipts name beagle-pin.txt's revision, so this job checks
-      # out that exact Beagle and its Racket runtime and proves the pin matches
-      # before any envelope is sealed. This workflow is the whole gate: no other
-      # workflow installs a toolchain for it.
-      - name: Checkout beagle
-        uses: actions/checkout@v4
-        with:
-          repository: tompassarelli/beagle
-          # Pin matches flake.nix's beagle.url rev; keep them in sync.
-          ref: b4f3081420a3be73d730802d2f4608d78d0c6cf4
-          path: .beagle
-
-      - name: Verify the checked-out Beagle compiler pin
-        run: |
-          test "$(cat beagle-pin.txt)" = \
-            "$(git -C "$BEAGLE_HOME" rev-parse 'HEAD^{commit}')"
+      # The branch-core npm packages keep independent artifact versions; only
+      # Beagle's three product-version literals must match the release tag.
+      - name: Verify release tag matches declared versions (tags only)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}
+        run: bash scripts/check-release-version.sh "$RELEASE_TAG"
 
       - name: Install Racket (Beagle graph-authoring runtime)
         uses: Bogdanp/setup-racket@v1.14
@@ -111,30 +102,30 @@ jobs:
           variant: CS
           version: '9.1'
 
-      - name: Link checked-out Beagle packages with pinned Racket
+      - name: Link in-tree Beagle packages with pinned Racket
         run: |
           _BEAGLE_RACKET="$(command -v racket)"
           export _BEAGLE_RACKET
           # Link first: sourcing _beagle-racket runs a raco-make gate that
           # cannot resolve the beagle collection until these links exist.
           "$(dirname "$_BEAGLE_RACKET")/raco" pkg install --auto --link \
-            "$BEAGLE_HOME/beagle-lib/" \
-            "$BEAGLE_HOME/beagle-test/" \
-            "$BEAGLE_HOME/beagle/"
+            beagle-lib/ beagle-test/ beagle/
           source "$BEAGLE_HOME/bin/_beagle-racket"
           echo "FRAM_RACKET=$RACKET" >> "$GITHUB_ENV"
           echo "_BEAGLE_RACKET=$RACKET" >> "$GITHUB_ENV"
 
       - name: Install babashka
-        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
 
       # out/ is committed, so the revision-identity suite needs only babashka.
       # It runs before the heavier toolchains because it covers the identity
       # contract this release is named for.
       - name: Prove branch revision identity
         run: |
-          bb -cp out tests/framref_codec_test.clj
-          bb -cp out tests/framlog_fork_test.clj
+          bb -cp branch-core/out branch-core/tests/framref_codec_test.clj
+          bb -cp branch-core/out branch-core/tests/framlog_fork_test.clj
 
       - name: Install Clojure CLI
         run: |
@@ -144,6 +135,7 @@ jobs:
           clojure --version
 
       - name: Warm JVM deps (cheshire) so the server boots fast
+        working-directory: branch-core
         run: clojure -P
 
       - name: Install pinned Bun for the client release gate
@@ -156,13 +148,13 @@ jobs:
 
       - name: Prove the Bun release package and declaration closure
         run: |
-          bash tests/bun_release_artifact_test.sh
-          bun test tests/bun_package_types_test.mjs
+          bash branch-core/tests/bun_release_artifact_test.sh
+          bun test branch-core/tests/bun_package_types_test.mjs
 
       - name: Prove the Cloudflare release envelopes
         run: |
-          bash tests/cloudflare_do_release_artifact_test.sh
-          bash tests/cloudflare_wasm_release_artifact_test.sh
+          bash branch-core/tests/cloudflare_do_release_artifact_test.sh
+          bash branch-core/tests/cloudflare_wasm_release_artifact_test.sh
 
       - name: Install static musl compiler for the release receipt gate
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
@@ -170,19 +162,19 @@ jobs:
       - name: Prove the normalized native release is cross-workdir reproducible
         env:
           CC: musl-gcc
-        run: bash tests/native_release_artifact_test.sh
+        run: bash branch-core/tests/native_release_artifact_test.sh
 
   publish:
     name: Publish the tagged release
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/')
     needs: gate
     runs-on: ubuntu-latest
     env:
-      BEAGLE_HOME: ${{ github.workspace }}/.beagle
-      FRAM_BEAGLE: ${{ github.workspace }}/.beagle/bin/beagle
+      BEAGLE_HOME: ${{ github.workspace }}
+      FRAM_BEAGLE: ${{ github.workspace }}/bin/beagle
     steps:
       - name: Check out the requested release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: refs/tags/${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
           fetch-depth: 0
@@ -211,20 +203,7 @@ jobs:
           echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
           echo "tag-object=$tag_object" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout Beagle at FRAM's pinned native compiler revision
-        uses: actions/checkout@v4
-        with:
-          repository: tompassarelli/beagle
-          # Pin matches flake.nix's beagle.url rev; keep them in sync.
-          ref: b4f3081420a3be73d730802d2f4608d78d0c6cf4
-          path: .beagle
-
-      - name: Verify the checked-out Beagle compiler pin
-        run: |
-          test "$(cat beagle-pin.txt)" = \
-            "$(git -C "$BEAGLE_HOME" rev-parse 'HEAD^{commit}')"
-
-      - name: Install Racket for the pinned Beagle compiler
+      - name: Install Racket for the in-tree Beagle compiler
         uses: Bogdanp/setup-racket@v1.14
         with:
           architecture: x64
@@ -232,23 +211,25 @@ jobs:
           variant: CS
           version: '9.1'
 
-      - name: Link the checked-out Beagle packages
+      - name: Link the in-tree Beagle packages
         run: |
           _BEAGLE_RACKET="$(command -v racket)"
           export _BEAGLE_RACKET
           "$(dirname "$_BEAGLE_RACKET")/raco" pkg install --auto --link \
-            "$BEAGLE_HOME/beagle-lib/" \
-            "$BEAGLE_HOME/beagle-test/" \
-            "$BEAGLE_HOME/beagle/"
+            beagle-lib/ beagle-test/ beagle/
           source "$BEAGLE_HOME/bin/_beagle-racket"
           echo "FRAM_RACKET=$RACKET" >> "$GITHUB_ENV"
           echo "_BEAGLE_RACKET=$RACKET" >> "$GITHUB_ENV"
 
       - name: Install babashka
-        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
 
-      - name: Install the static musl release compiler
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Install native build toolchains
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential libz-dev musl-tools
 
       - name: Install pinned Bun for the client artifact and shipped FRAMRPC smoke
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -260,6 +241,19 @@ jobs:
 
       - name: Install the pinned Nix release toolchain resolver
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      - name: Prove stale local stage0 artifacts cannot be selected
+        run: self-host/native/stage0-select-test.sh
+
+      - name: Build the Beagle self-host release assets
+        run: nix shell nixpkgs#graalvmPackages.graalvm-ce nixpkgs#clojure -c ./self-host/native/build.sh
+
+      - name: Verify native == bb seed == Racket oracle
+        run: |
+          _BEAGLE_RACKET="$(which racket)" \
+            self-host/native/verify-native.sh \
+              branch-core/src/fram/*.bclj \
+              self-host/fixtures/lowering-temps.bclj
 
       - name: Resolve and authorize the locked Fram development shell
         run: |
@@ -288,16 +282,16 @@ jobs:
           mkdir -p "$(dirname "$source_b")"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$source_a"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$source_b"
-          for source_root in "$source_a" "$source_b"; do
-            git -C "$source_root" checkout --quiet --detach "$RELEASE_COMMIT"
-            [[ -z "$(git -C "$source_root" status --porcelain=v1 --untracked-files=all)" ]]
-            [[ "$(git -C "$source_root" rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == \
+          for repo_root in "$source_a" "$source_b"; do
+            git -C "$repo_root" checkout --quiet --detach "$RELEASE_COMMIT"
+            [[ -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" ]]
+            [[ "$(git -C "$repo_root" rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == \
               "$RELEASE_COMMIT" ]]
-            [[ "$(git -C "$source_root" rev-parse "refs/tags/$RELEASE_TAG")" == \
+            [[ "$(git -C "$repo_root" rev-parse "refs/tags/$RELEASE_TAG")" == \
               "$RELEASE_TAG_OBJECT" ]]
           done
-          echo "first=$source_a" >> "$GITHUB_OUTPUT"
-          echo "second=$source_b" >> "$GITHUB_OUTPUT"
+          echo "first=$source_a/branch-core" >> "$GITHUB_OUTPUT"
+          echo "second=$source_b/branch-core" >> "$GITHUB_OUTPUT"
 
       - name: Build twice and seal the reproducible Bun client package
         id: bun_client
@@ -308,8 +302,8 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t package_files < <(
-            scripts/package-bun-release.sh \
-              --source-root "$GITHUB_WORKSPACE" \
+            branch-core/scripts/package-bun-release.sh \
+              --source-root "$GITHUB_WORKSPACE/branch-core" \
               --output "$RUNNER_TEMP/fram-bun-release" \
               --version "$RELEASE_TAG"
           )
@@ -322,8 +316,8 @@ jobs:
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$second_source"
           git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
           mapfile -t second_package_files < <(
-            scripts/package-bun-release.sh \
-              --source-root "$second_source" \
+            "$second_source/branch-core/scripts/package-bun-release.sh" \
+              --source-root "$second_source/branch-core" \
               --output "$RUNNER_TEMP/fram-bun-release-b" \
               --version "$RELEASE_TAG"
           )
@@ -396,9 +390,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/fram-cloudflare-wasm-cache
-          key: fram-cloudflare-wasm-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+          key: fram-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
           restore-keys: |
-            fram-cloudflare-wasm-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-
+            fram-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-
 
       - name: Build once, verify source identity, and seal the Cloudflare Wasm release
         id: cloudflare_wasm
@@ -472,16 +466,16 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/fram-cloudflare-wasm-cache
-          key: fram-cloudflare-wasm-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+          key: fram-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
 
       - name: Restore content-addressed native build cache
         id: native_cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/fram-native-release-cache
-          key: fram-native-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+          key: fram-native-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
           restore-keys: |
-            fram-native-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-
+            fram-native-${{ runner.os }}-${{ github.sha }}-
 
       - name: Build once, verify source identity, and seal the native release archive
         id: native
@@ -507,10 +501,10 @@ jobs:
           }
 
           cache="$RUNNER_TEMP/fram-native-release-cache"
-          artifact="$(build_native "$GITHUB_WORKSPACE" "$cache")"
+          artifact="$(build_native "$GITHUB_WORKSPACE/branch-core" "$cache")"
           mapfile -t release_files < <(
-            scripts/package-native-release.sh \
-              --source-root "$GITHUB_WORKSPACE" \
+            branch-core/scripts/package-native-release.sh \
+              --source-root "$GITHUB_WORKSPACE/branch-core" \
               --artifact "$artifact" \
               --output "$RUNNER_TEMP/fram-native-release" \
               --version "$RELEASE_TAG" \
@@ -524,14 +518,14 @@ jobs:
           second_source="$RUNNER_TEMP/fram-native-release-source-b"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$second_source"
           git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
-          second_artifact="$(build_native "$second_source" "$cache")"
+          second_artifact="$(build_native "$second_source/branch-core" "$cache")"
           [[ "$second_artifact" == "$artifact" ]] || {
             echo "native cache identity differs across source workdirs" >&2
             exit 1
           }
           mapfile -t second_release_files < <(
-            scripts/package-native-release.sh \
-              --source-root "$second_source" \
+            "$second_source/branch-core/scripts/package-native-release.sh" \
+              --source-root "$second_source/branch-core" \
               --artifact "$second_artifact" \
               --output "$RUNNER_TEMP/fram-native-release-b" \
               --version "$RELEASE_TAG" \
@@ -561,7 +555,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/fram-native-release-cache
-          key: fram-native-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+          key: fram-native-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
 
       - name: Revalidate and install the shipped Bun package before upload
         env:
@@ -707,7 +701,7 @@ jobs:
           [[ "$(wasm_value release-tag)" == "$RELEASE_TAG" ]]
           [[ "$(wasm_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
           [[ "$(wasm_value target)" == wasm32-wasm-embed ]]
-          [[ "$(wasm_value beagle-revision)" == "$(cat beagle-pin.txt)" ]]
+          [[ "$(wasm_value beagle-revision)" == "$RELEASE_COMMIT" ]]
           [[ "$(wasm_value native-build-closure-sha256)" =~ ^[0-9a-f]{64}$ ]]
           [[ "$(wasm_value wasm-path)" == "$release_root/lib/libfram.wasm" ]]
           [[ "$(wasm_value seams-path)" == "$release_root/wasm-embed.seams" ]]
@@ -829,7 +823,7 @@ jobs:
           [[ "$(receipt_value release-tag)" == "$RELEASE_TAG" ]]
           [[ "$(receipt_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
           [[ "$(receipt_value target)" == x86_64-linux-musl ]]
-          [[ "$(receipt_value beagle-revision)" == "$(cat beagle-pin.txt)" ]]
+          [[ "$(receipt_value beagle-revision)" == "$RELEASE_COMMIT" ]]
           [[ "$(receipt_value native-build-closure-sha256)" =~ ^[0-9a-f]{64}$ ]]
           [[ "$(receipt_value executable-path)" == "$expected_executable" ]]
           [[ "$(receipt_value archive-name)" == "$expected_archive" ]]
@@ -887,7 +881,7 @@ jobs:
               if (response.operation !== "rpc/version" || response.servedVersion !== 0n) {
                 throw new Error("unexpected rpc/version response");
               }
-            ' "$GITHUB_WORKSPACE/clients/bun/framrpc.mjs" "$port" \
+            ' "$GITHUB_WORKSPACE/branch-core/clients/bun/framrpc.mjs" "$port" \
                 >/dev/null 2>&1; then
               smoke_ok=1
               break
@@ -905,6 +899,7 @@ jobs:
           trap - EXIT INT TERM
 
       - name: Publish the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
@@ -920,6 +915,8 @@ jobs:
           bash scripts/check-release-notes.sh "$RELEASE_TAG"
           gh release create "$RELEASE_TAG" --verify-tag \
             --title "$RELEASE_TAG" --notes-file "$notes_file" \
+            self-host/native/beagle-selfhost \
+            self-host/native/beagle-selfhost.seed-nar-hash \
             "${{ steps.bun_client.outputs.archive }}" \
             "${{ steps.bun_client.outputs.receipt }}" \
             "${{ steps.cloudflare_do.outputs.archive }}" \

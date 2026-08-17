@@ -5,14 +5,13 @@ name: native
 # every PR builds the binary via self-host/native/build.sh and gates it with
 # self-host/native/verify-native.sh — the native binary's emit must be
 # byte-for-byte identical to BOTH the babashka seed emit AND the Racket oracle
-# emit, over the real fram/src corpus. On a version tag (v*) the built binary
-# is published as a GitHub release artifact.
+# emit, over the in-tree branch-core/src corpus. Release publication belongs
+# exclusively to release.yml.
 #
 # Why a workflow separate from test.yml: this pipeline needs the GraalVM +
 # Clojure toolchain (via nix) that the Racket test matrix does not, and it
-# carries the tag -> release logic. Keeping it standalone lets the native lane
-# evolve and fail independently of the Racket suite, and keeps a version tag
-# from spinning up the entire Racket conformance matrix. This file owns the
+# carries no release logic. Keeping it standalone lets the native lane
+# evolve and fail independently of the Racket suite. This file owns the
 # native/stage0 CI (test.yml keeps the self-host fixpoint + oracle gates).
 
 on:
@@ -25,9 +24,6 @@ on:
 jobs:
   native:
     runs-on: ubuntu-latest
-    # gh release create needs write access to repo contents (the release + asset).
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -107,26 +103,6 @@ jobs:
         with:
           babashka-version: '1.12.218'
 
-      # verify-native's default corpus is ~/code/fram/main/src/fram/*.bclj. Check out
-      # fram so the native binary is gated against the same real modules the
-      # local run uses, not just an in-repo fixture.
-      - name: Load current Fram revision
-        id: fram-revision
-        run: |
-          revision="$(tr -d '\r\n' < native-core/validation/fram.ref)"
-          if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "invalid Fram revision: $revision" >&2
-            exit 1
-          fi
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout fram (real-module corpus for verify-native)
-        uses: actions/checkout@v5
-        with:
-          repository: tompassarelli/fram
-          path: .fram
-          ref: ${{ steps.fram-revision.outputs.revision }}
-
       # native-image + AOT compile run under the ambient-registry nixpkgs
       # graalvm-ce + clojure. Build tools are intentionally unpinned here — the
       # byte-for-byte parity gate below is what certifies the binary; a build
@@ -135,22 +111,4 @@ jobs:
         run: nix shell nixpkgs#graalvmPackages.graalvm-ce nixpkgs#clojure -c ./self-host/native/build.sh
 
       - name: Verify native == bb seed == Racket oracle (byte-for-byte)
-        run: _BEAGLE_RACKET="$(which racket)" self-host/native/verify-native.sh .fram/src/fram/*.bclj self-host/fixtures/lowering-temps.bclj
-
-      # Version tag -> GitHub release with the built binary attached and the
-      # authored, checked body for that exact tag. gh is preinstalled on the
-      # runner (no third-party action); GH_TOKEN is the workflow token.
-      - name: Publish native binary as release artifact (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          notes_file=".github/release-notes/${{ github.ref_name }}.md"
-          bash scripts/check-release-notes.sh "${{ github.ref_name }}"
-          bash scripts/check-release-version.sh "${{ github.ref_name }}"
-          gh release create "${{ github.ref_name }}" \
-            self-host/native/beagle-selfhost \
-            self-host/native/beagle-selfhost.seed-nar-hash \
-            --verify-tag \
-            --title "${{ github.ref_name }}" \
-            --notes-file "$notes_file"
+        run: _BEAGLE_RACKET="$(which racket)" self-host/native/verify-native.sh branch-core/src/fram/*.bclj self-host/fixtures/lowering-temps.bclj

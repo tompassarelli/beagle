@@ -234,71 +234,52 @@ jobs:
 
       # Graph-native repair: beagle-cascade derives its call graph from the Fram
       # occurrence store (scope-correct), not regex over text. That runs on the Fram
-      # engine, so we check out fram's committed classpath and gate the
+      # engine folded into branch-core, so gate the
       # scope-correctness proof (a change to mod_a/helper must NOT blast mod_b's
       # same-named helper). This is the load-bearing test for the thesis that
       # graph-backed repair beats text-backed repair. (babashka installed above.)
-      - name: Load current Fram revision
-        id: fram-revision
-        run: |
-          revision="$(tr -d '\r\n' < native-core/validation/fram.ref)"
-          if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "invalid Fram revision: $revision" >&2
-            exit 1
-          fi
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout fram (the fact engine cascade runs on)
-        uses: actions/checkout@v5
-        with:
-          repository: tompassarelli/fram
-          path: .fram
-          ref: ${{ steps.fram-revision.outputs.revision }}
-
       # beagle-callgraph RENTS the scope-correct call-graph engine (resolve.clj),
       # which was FOLDED into the fram repo at fram/chartroom (beagle source
-      # code-intelligence, renting fram's public fact+Datalog API). No separate
-      # chartroom checkout — it ships inside the fram checkout, so CHARTROOM points
-      # at .fram/chartroom. (The fold is licensed by lockstep cadence + this very
-      # friction relief; fram's core_code_blind_test guards the seam stays clean.)
+      # code-intelligence, renting fram's public fact+Datalog API). The absorbed
+      # source ships inside branch-core, so CHARTROOM points at branch-core/chartroom.
       - name: Graph-native cascade — scope-correctness gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/cascade-graph/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" bin/test/cascade-graph/run.sh
 
       # Reasoning call-graph cross-module completeness: the call graph is derived from the
       # converged resolver (refers_to), so qualified cross-module calls (a/f, m/f) resolve
       # and the blast radius is NOT silently emptied. Guards the dangerous "0 callers" lie.
       - name: Reasoning call-graph — cross-module completeness gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/callgraph-xmodule/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" bin/test/callgraph-xmodule/run.sh
 
       # Move 3: code can be fact-canonical. The loop .bclj -> lossless facts ->
       # (through a real Fram store) -> facts -> byte-stable .bclj is datum-identical
       # through the engine AND recompiles to the IDENTICAL program (modulo srcloc
-      # debug pointers). Proven over fram/src. Needs racket + bb + fram's out/.
+      # debug pointers). Proven over branch-core/src. Needs racket + bb + branch-core/out/.
       - name: Code as canonical facts — recompile-identity gate
-        run: CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-facts/run.sh
+        run: CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/branch-core/src" FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" bin/test/code-as-facts/run.sh
 
       - name: Fram scope-correct rename
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-facts/rename.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/branch-core/src" bin/test/code-as-facts/rename.sh
 
       # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
       # the form + its subtree and renumbers siblings (no truncation); a delete that
       # would orphan a reference (this module or a consumer) is refused, fail-closed.
       - name: Delete as a graph op — no-orphaned-references invariant
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/delete.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" bin/test/code-as-facts/delete.sh
 
       # NL -> edit authoring layer: prose intent -> a structured edit (data an agent
       # emits) -> the engine (rename/delete) -> recompile-gated commit, else fail closed.
       - name: NL-to-edit authoring layer — recompile-gated transaction
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/authoring.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" bin/test/code-as-facts/authoring.sh
 
       # Graph-native AUTHORING (the dogfood at the root): upsert-form (add/replace a def)
       # and set-body are FACT operations on the AST-facts, not text patches — scope-correct
       # by identity (an authored ref resolves through refers_to), recompile-gated, fail-closed.
       - name: Authoring-as-facts — upsert-form + set-body verbs
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/authoring-verbs.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" bin/test/code-as-facts/authoring-verbs.sh
 
       # One engine, both pillars, on REAL code: the blast radius (REASON) of fram.store/value!
       # predicts the cross-module reach of renaming it (REPAIR), and the repaired tree
       # recompiles — both derived from the same converged refers_to resolver.
       - name: Engine demo — reason + repair consistent on real fram/src
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/engine-demo/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/branch-core/out" CHARTROOM="$GITHUB_WORKSPACE/branch-core/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/branch-core/src" bin/test/engine-demo/run.sh
