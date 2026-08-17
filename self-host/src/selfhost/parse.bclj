@@ -1351,8 +1351,63 @@
 
 (defn- scope-walk-params!
   [(params Any) (table Any) (path Any) (ctx Any)] Any
-  (let [scope (syntax/fresh-scope-id! "parameter")
-        children (scope-sequence-children params)
+  (let [children (scope-sequence-children params)
+        target-bound-names
+        (fn target-bound-names [(value Any)] Any
+          (let [variant (get value "variant")
+                nested (scope-sequence-children value)]
+            (cond
+              (= variant "ident")
+                (let [name (get (get value "payload") "leaf")]
+                  (if (= name "&") [] [name]))
+              (= variant "vector")
+                (reduce
+                  (fn [(names Any) (child Any)] Any
+                    (into names (target-bound-names child)))
+                  [] nested)
+              (and (= variant "list")
+                   (> (count nested) 0)
+                   (= (scope-syntax-datum! (nth nested 0)) MAP-TAG))
+                (loop [(index Int) 1 (names Any) []]
+                  (if (>= index (count nested))
+                    names
+                    (let [head (scope-syntax-datum! (nth nested index))]
+                      (cond
+                        (and (has-item? [":keys" ":as"] head)
+                             (< (+ index 1) (count nested)))
+                          (recur (+ index 2)
+                            (into names
+                              (target-bound-names (nth nested (+ index 1)))))
+                        (and (= head ":or")
+                             (< (+ index 1) (count nested)))
+                          (recur (+ index 2) names)
+                        :else (recur (+ index 1) names)))))
+              :else [])))
+        declaration-bound-names
+        (fn [(value Any)] Any
+          (if (scope-typed-declaration?! value)
+            (target-bound-names (nth (scope-sequence-children value) 0))
+            (target-bound-names value)))
+        all-bound
+        (reduce
+          (fn [(names Any) (item Any)] Any
+            (if (= (scope-syntax-datum! item) "&")
+              names
+              (into names (declaration-bound-names item))))
+          [] children)
+        duplicate
+        (loop [(remaining Any) all-bound (seen Any) {}]
+          (if (= (count remaining) 0)
+            nil
+            (let [name (nth remaining 0)]
+              (if (contains? seen name)
+                name
+                (recur (subvec (vec remaining) 1)
+                  (assoc seen name true))))))
+        _ (when (some? duplicate)
+            (err! (str "parameter list binds `" duplicate
+                    "` more than once; every nested destructuring name and :as alias must be unique")))
+        scope (syntax/fresh-scope-id! "parameter")
         state
         (reduce
           (fn [(current Any) (index Int)] Any
@@ -1615,6 +1670,45 @@
                 (nth children index) table (conj (vec path) index) ctx)))
         (range (count children))))))
 
+(defn- scope-walk-as-thread!
+  [(value Any) (table Any) (path Any) (ctx Any)] Any
+  (let [children (scope-sequence-children value)
+        init (nth children 1)
+        name (nth children 2)
+        steps (subvec (vec children) 3)
+        span (syntax/beagle-syntax-span value)
+        scopes (syntax/beagle-syntax-scopes value)
+        origin (syntax/beagle-syntax-origin value)
+        properties (syntax/beagle-syntax-properties value)
+        generated
+        (fn [(datum Any)] Any
+          (syntax/datum->beagle-syntax!
+            datum span scopes origin properties))
+        values (into [init] steps)
+        expansion
+        (loop [(index Int) (- (count values) 1) (result Any) name]
+          (if (< index 0)
+            result
+            (recur (- index 1)
+              (syntax/make-syntax-list!
+                [(generated "let")
+                 (syntax/make-syntax-vector!
+                   [name (nth values index)] span scopes origin properties)
+                 result]
+                span scopes origin properties))))
+        resolved (scope-walk* expansion table path ctx)
+        surface
+        (syntax/make-syntax-list!
+          (into
+            [(nth children 0)
+             (scope-walk* init table (conj (vec path) 1) ctx)
+             name]
+            steps)
+          span scopes origin properties)]
+    (syntax/make-syntax-list!
+      [(generated "#%resolved-as-thread") surface resolved]
+      span scopes origin properties)))
+
 (defn- scope-walk-pattern!
   [(pattern Any) (table Any) (scope Any) (path Any)] Any
   (let [variant (get pattern "variant")]
@@ -1731,8 +1825,9 @@
               (scope-walk-single-binder! value table path ctx 1 2 "catch")
             (and (= head "rescue") (= (count raw) 4))
               (scope-walk-single-binder! value table path ctx 2 3 "rescue")
-            (and (= head "as->") (>= (count raw) 4))
-              (scope-walk-single-binder! value table path ctx 2 3 "as-thread")
+            (and (= head "as->") (>= (count raw) 3))
+              (scope-walk-as-thread! value table path ctx)
+            (= head "js/quote") value
             (= head "match") (scope-walk-match! value table path ctx)
             :else (scope-walk-generic! value table path ctx)))
       :else value)))
@@ -3451,6 +3546,14 @@
             (deref CURRENT-REGISTRY-CELL)
             (syntax-for-datum! d)
             0 nil)))
+      (and (= head "#%resolved-as-thread")
+           (= (count rest-items) 2))
+      (let [surface (nth rest-items 0)
+            expansion (nth rest-items 1)
+            args (subvec (vec surface) 1)]
+        (make-threading "as->"
+          (mapv parse-thread-surface-expr! args)
+          (parse-expr* expansion)))
       (and (string? head) (= head "unsafe"))
       (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
       (and (string? head) (str/starts-with? head "unsafe-"))

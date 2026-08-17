@@ -2092,7 +2092,13 @@
   ;; antiquoted caller syntax retains the caller scopes it arrived with.
   (define resolved-values
     (with-handlers
-        ([exn:fail:scope-resolution?
+        ([exn:fail:duplicate-parameter?
+          (lambda (failure)
+            (raise-parse-error
+             'duplicate
+             "~a"
+             (exn-message failure)))]
+         [exn:fail:scope-resolution?
           (lambda (failure)
             (raise-parse-error
              'bad-form
@@ -2334,7 +2340,34 @@
        (syntax-binder-identities source-syntax)
        #hasheq())))
 
+(define (expansion-origin->ctx origin)
+  (define parent-origin (expansion-origin-parent origin))
+  (define parent-ctx
+    (and parent-origin (expansion-origin->ctx parent-origin)))
+  (define raw-name (expansion-origin-macro-id origin))
+  (define name (if (symbol? raw-name) raw-name (string->symbol raw-name)))
+  (expansion-ctx
+   name
+   (if parent-ctx (add1 (expansion-ctx-depth parent-ctx)) 0)
+   parent-ctx
+   (expansion-origin-call-span origin)
+   origin
+   (current-source-bytes)
+   #f))
+
 (define (parse-expr x)
+  (define origin
+    (and (syntax? x) (syntax-property x 'beagle-expansion-origin)))
+  (define ctx (and (expansion-origin? origin) (expansion-origin->ctx origin)))
+  (define parsed
+    (if ctx
+        (parameterize ([current-macro-expansion-ctx ctx])
+          (parse-expr* x))
+        (parse-expr* x)))
+  (when ctx (mark-macro-derived! parsed ctx))
+  parsed)
+
+(define (parse-expr* x)
   (define loc (and (syntax? x) (stx->src-loc x)))
   (define d (->datum x))
   (define subs (stx-subs x))
@@ -3619,10 +3652,14 @@
        (threading-marker
         'as->
         (map parse-thread-surface-expr orig-stxs)
-        (parse-expr (rewrite-as
-                     (expand-as-thread (or (stx-ref subs 1) init)
-                                       name
-                                       (or (and subs (stx-tail subs 3)) steps)))))]
+        (parse-expr
+         (or (and (syntax? (current-form-stx))
+                  (syntax-property
+                   (current-form-stx) 'beagle-as-thread-resolved))
+             (rewrite-as
+              (expand-as-thread (or (stx-ref subs 1) init)
+                                name
+                                (or (and subs (stx-tail subs 3)) steps))))))]
       [(list 'as-> _ _ _ ...)
        (raise-parse-error 'bad-form
                           "as-> expects a symbol placeholder: (as-> init name steps...)")]

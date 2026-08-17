@@ -729,14 +729,30 @@
 ;; count, or drop source/provenance properties.
 (struct syntax-ident-context (name span scopes origin properties))
 (define SYNTAX-IDENT-CONTEXT-KEY 'beagle-syntax-ident-context)
+(struct syntax-value-context (span scopes origin properties))
+(define SYNTAX-VALUE-CONTEXT-KEY 'beagle-syntax-value-context)
 
 (define (racket-syntax->beagle-syntax stx [source-bytes #f])
   (unless (syntax? stx)
     (raise-argument-error
      'racket-syntax->beagle-syntax "syntax?" stx))
   (define datum (syntax->datum stx))
-  (define span (stx->src-loc stx))
-  (define properties (reader-properties stx datum source-bytes))
+  (define value-context (syntax-property stx SYNTAX-VALUE-CONTEXT-KEY))
+  (define span
+    (if (syntax-value-context? value-context)
+        (syntax-value-context-span value-context)
+        (stx->src-loc stx)))
+  (define scopes
+    (if (syntax-value-context? value-context)
+        (syntax-value-context-scopes value-context)
+        empty-scope-set))
+  (define origin
+    (and (syntax-value-context? value-context)
+         (syntax-value-context-origin value-context)))
+  (define properties
+    (if (syntax-value-context? value-context)
+        (syntax-value-context-properties value-context)
+        (reader-properties stx datum source-bytes)))
   (define children (syntax->list stx))
   (cond
     [(and (symbol? datum) (not (syntax-keyword-symbol? datum)))
@@ -764,7 +780,7 @@
              properties))])]
     [(and (list? datum) (= (length datum) 2) (eq? (car datum) 'quote))
      (make-syntax-quote
-      (cadr datum) span empty-scope-set #f properties)]
+      (cadr datum) span scopes origin properties)]
     [(and (list? datum)
           (= (length datum) 2)
           (memq (car datum) '(unquote unquote-splicing)))
@@ -772,7 +788,7 @@
       (if (and children (= (length children) 2))
           (racket-syntax->beagle-syntax (cadr children) source-bytes)
           (datum->beagle-syntax (cadr datum) span))
-      span empty-scope-set #f properties
+      span scopes origin properties
       #:splicing? (eq? (car datum) 'unquote-splicing))]
     [(bracketed? datum)
      (make-syntax-vector
@@ -782,7 +798,7 @@
                (cdr children))
           (map (lambda (child) (datum->beagle-syntax child span))
                (bracket-body datum)))
-      span empty-scope-set #f properties)]
+      span scopes origin properties)]
     [(list? datum)
      (make-syntax-list
       (if children
@@ -790,9 +806,9 @@
                  (racket-syntax->beagle-syntax child source-bytes))
                children)
           (map (lambda (child) (datum->beagle-syntax child span)) datum))
-      span empty-scope-set #f properties)]
+      span scopes origin properties)]
     [else
-     (make-syntax-atom datum span empty-scope-set #f properties)]))
+     (make-syntax-atom datum span scopes origin properties)]))
 
 (define (src-loc->syntax-source loc)
   (and loc
@@ -845,7 +861,29 @@
                  'unquote)
              (beagle-syntax->racket-syntax
               (syntax-unquote-child value)))]))
-  (datum->syntax #f datum source))
+  (define adapted (datum->syntax #f datum source))
+  (define with-context
+    (syntax-property
+     adapted
+     SYNTAX-VALUE-CONTEXT-KEY
+     (syntax-value-context
+      (beagle-syntax-span value)
+      (beagle-syntax-scopes value)
+      (beagle-syntax-origin value)
+      (beagle-syntax-properties value))))
+  (define with-origin
+    (if (beagle-syntax-origin value)
+        (syntax-property
+         with-context 'beagle-expansion-origin (beagle-syntax-origin value))
+        with-context))
+  (define as-thread-resolved
+    (hash-ref (beagle-syntax-properties value) 'as-thread-resolved #f))
+  (if (beagle-syntax? as-thread-resolved)
+      (syntax-property
+       with-origin
+       'beagle-as-thread-resolved
+       (beagle-syntax->racket-syntax as-thread-resolved))
+      with-origin))
 
 (define (->datum x) (if (syntax? x) (syntax->datum x) x))
 (define (stx-subs x) (and (syntax? x) (syntax->list x)))

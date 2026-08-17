@@ -33,6 +33,27 @@
 (define (in-trial-order trial entries)
   (if (even? trial) entries (reverse entries)))
 
+(define (nested-binding-edges source-position)
+  (define span
+    (src-loc 1 0 'layout.bclj 'original #f source-position 1))
+  (define source
+    (datum->beagle-syntax
+     '(let (#%brackets x 1)
+        (let (#%brackets x 2) x))
+     span))
+  (define resolved
+    (car (expand-and-resolve-program (make-macro-registry) (list source))))
+  (define outer-children (syntax-list-children resolved))
+  (define outer-binding
+    (car (syntax-vector-children (cadr outer-children))))
+  (define inner-children
+    (syntax-list-children (caddr outer-children)))
+  (define inner-binding
+    (car (syntax-vector-children (cadr inner-children))))
+  (list (beagle-syntax-binding-id outer-binding)
+        (beagle-syntax-binding-id inner-binding)
+        (beagle-syntax-binding-id (caddr inner-children))))
+
 (test-case "reader-produced nested binders resolve to the innermost occurrence edge"
   (define source
     (racket-syntax->beagle-syntax
@@ -59,41 +80,18 @@
   (check-true
    (scope-set-subset?
     (beagle-syntax-scopes outer-binding)
-    (beagle-syntax-scopes inner-binding))))
-
-(define (nested-binding-edges source-position)
-  (define span
-    (src-loc 1 0 'layout.bclj 'original #f source-position 1))
-  (define source
-    (datum->beagle-syntax
-     '(let (#%brackets x 1)
-        (let (#%brackets x 2) x))
-     span))
-  (define resolved
-    (car (expand-and-resolve-program (make-macro-registry) (list source))))
-  (define outer-children (syntax-list-children resolved))
-  (define outer-binding
-    (car (syntax-vector-children (cadr outer-children))))
-  (define inner-children
-    (syntax-list-children (caddr outer-children)))
-  (define inner-binding
-    (car (syntax-vector-children (cadr inner-children))))
-  (list (beagle-syntax-binding-id outer-binding)
-        (beagle-syntax-binding-id inner-binding)
-        (beagle-syntax-binding-id (caddr inner-children))))
-
-(test-case "binding edges ignore layout offsets and retain structural identity"
+    (beagle-syntax-scopes inner-binding)))
   (define earlier (nested-binding-edges 10))
   (define later (nested-binding-edges 210))
-  (define outer-id (car earlier))
-  (define inner-id (cadr earlier))
+  (define stable-outer-id (car earlier))
+  (define stable-inner-id (cadr earlier))
   (check-equal? earlier later)
-  (check-equal? (binding-id-stable outer-id)
+  (check-equal? (binding-id-stable stable-outer-id)
                 "lexical:layout.bclj:0.1.0:x")
-  (check-equal? (binding-id-stable inner-id)
+  (check-equal? (binding-id-stable stable-inner-id)
                 "lexical:layout.bclj:0.2.1.0:x")
-  (check-not-equal? outer-id inner-id)
-  (check-equal? (caddr earlier) inner-id)
+  (check-not-equal? stable-outer-id stable-inner-id)
+  (check-equal? (caddr earlier) stable-inner-id)
   (check-equal?
    (binding-id-output-symbol
     (make-binding-id "introduced-lexical:layout.bclj:0.2.1.0:tmp")

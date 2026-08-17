@@ -14,9 +14,13 @@
 
 (provide expand-and-resolve-program
          current-scope-expansion-error-handler
-         (struct-out exn:fail:scope-resolution))
+         (struct-out exn:fail:scope-resolution)
+         (struct-out exn:fail:duplicate-parameter))
 
 (struct exn:fail:scope-resolution exn:fail (identifier binding-ids)
+  #:transparent)
+
+(struct exn:fail:duplicate-parameter exn:fail (identifier)
   #:transparent)
 
 (define current-scope-expansion-error-handler
@@ -301,6 +305,48 @@
        body-table (append path (list index)) ctx)))))
 
 (define (walk-params params table path ctx)
+  (define (target-bound-names value)
+    (cond
+      [(syntax-ident? value)
+       (define leaf (structural-name-leaf (syntax-ident-name value)))
+       (if (eq? leaf '&) '() (list leaf))]
+      [(syntax-vector? value)
+       (append-map target-bound-names (syntax-vector-children value))]
+      [(and (syntax-list? value)
+            (let ([children (syntax-list-children value)])
+              (and (pair? children)
+                   (eq? (syntax-datum (car children)) MAP-TAG))))
+       (let loop ([rest (cdr (syntax-list-children value))] [names '()])
+         (cond
+           [(null? rest) names]
+           [(and (memq (syntax-datum (car rest)) '(:keys :as))
+                 (pair? (cdr rest)))
+            (loop (cddr rest)
+                  (append names (target-bound-names (cadr rest))))]
+           [(and (eq? (syntax-datum (car rest)) ':or)
+                 (pair? (cdr rest)))
+            (loop (cddr rest) names)]
+           [else (loop (cdr rest) names)]))]
+      [else '()]))
+  (define (declaration-bound-names value)
+    (if (typed-declaration? value)
+        (target-bound-names (car (syntax-list-children value)))
+        (target-bound-names value)))
+  (define duplicate
+    (for/fold ([seen (seteq)] [found #f] #:result found)
+              ([item (in-list (sequence-children params))]
+               #:unless (eq? (syntax-datum item) '&)
+               [name (in-list (declaration-bound-names item))])
+      (values (set-add seen name)
+              (or found (and (set-member? seen name) name)))))
+  (when duplicate
+    (raise
+     (exn:fail:duplicate-parameter
+      (format
+       "parameter list binds `~a` more than once; every nested destructuring name and :as alias must be unique"
+       duplicate)
+      (current-continuation-marks)
+      duplicate)))
   (define scope (fresh-scope-id 'parameter))
   (define-values (rendered body-table identities)
     (for/fold ([out '()] [current table] [ids #hasheq()])
@@ -515,6 +561,42 @@
          body-table (append path (list index)) ctx)]
        [else (walk child table (append path (list index)) ctx)]))))
 
+(define (walk-as-thread value table path ctx)
+  (define children (syntax-list-children value))
+  (define init (cadr children))
+  (define name (caddr children))
+  (define steps (cdddr children))
+  (define span (beagle-syntax-span value))
+  (define scopes (beagle-syntax-scopes value))
+  (define origin (beagle-syntax-origin value))
+  (define properties (beagle-syntax-properties value))
+  (define (generated datum)
+    (datum->beagle-syntax datum span scopes origin properties))
+  (define (chain values)
+    (if (null? values)
+        name
+        (make-syntax-list
+         (list
+          (generated 'let)
+          (make-syntax-vector
+           (list name (car values)) span scopes origin properties)
+          (chain (cdr values)))
+         span scopes origin properties)))
+  (define resolved-expansion
+    (walk (chain (cons init steps)) table path ctx))
+  ;; The marker's surface copy remains authored syntax.  Only INIT is an
+  ;; expression in the surrounding lexical region; NAME and STEPS are kept
+  ;; opaque here because the resolved nested-let expansion above is the
+  ;; authoritative checked/emitted tree.
+  (make-syntax-list
+   (append
+    (list (car children)
+          (walk init table (append path (list 1)) ctx)
+          name)
+    steps)
+   span scopes origin
+   (hash-set properties 'as-thread-resolved resolved-expansion)))
+
 (define (walk-pattern pattern table scope path)
   (cond
     [(syntax-ident? pattern)
@@ -609,8 +691,11 @@
         (walk-single-binder-form value table path ctx 1 2 'catch)]
        [(and (eq? head 'rescue) (= (length raw) 4))
         (walk-single-binder-form value table path ctx 2 3 'rescue)]
-       [(and (eq? head 'as->) (>= (length raw) 4))
-        (walk-single-binder-form value table path ctx 2 3 'as-thread)]
+       [(and (eq? head 'as->) (>= (length raw) 3))
+        (walk-as-thread value table path ctx)]
+       ;; JavaScript quote data is owned by the JS parser.  In particular,
+       ;; `(let name value)` is a JS declaration, not a Beagle lexical form.
+       [(eq? head 'js/quote) value]
        [(eq? head 'match) (walk-match value table path ctx)]
        [else (walk-generic-sequence value table path ctx)])]
     [else value]))
