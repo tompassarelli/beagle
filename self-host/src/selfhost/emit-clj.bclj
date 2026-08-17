@@ -1588,8 +1588,8 @@
           "providerId" nil})
        "str/upper-case"))
   (expect! "binding identities alpha-lower introduced capture only at output"
-    (let [caller-id "lexical:test:10:0:tmp"
-          introduced-id "introduced-lexical:test:20:1.0:tmp"
+    (let [caller-id "lexical:test:0:tmp"
+          introduced-id "introduced-lexical:test:1.0:tmp"
           rendered
           (emit-program!
             {"namespace" "test.capture"
@@ -1619,8 +1619,8 @@
                    [{"node" "ref" "name" "tmp" "refersTo" introduced-id}
                     {"node" "ref" "name" "tmp" "refersTo" caller-id}]}]}]}]})]
       (and (str/includes? rendered "(defn capture [tmp]")
-           (str/includes? rendered "(let [tmp__scope_20_1_0 0]")
-           (str/includes? rendered "tmp__scope_20_1_0")
+           (str/includes? rendered "(let [tmp__scope_1_0 0]")
+           (str/includes? rendered "tmp__scope_1_0")
            (not (str/includes? rendered "(let [tmp 0]")))))
   (expect! "reference: qualified call keeps structural callee identity"
     (= (emit-expr!

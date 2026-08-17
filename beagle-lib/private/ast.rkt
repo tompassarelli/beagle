@@ -1039,13 +1039,10 @@
      (define parts (string-split (binding-id-stable id) ":"))
      (define reversed (reverse parts))
      (define path (if (pair? (cdr reversed)) (cadr reversed) "0"))
-     (define position
-       (if (pair? (cddr reversed)) (caddr reversed) "0"))
      (string->symbol
       (format
-       "~a__scope_~a_~a"
+       "~a__scope_~a"
        authored-name
-       position
        (regexp-replace* #rx"[^0-9]+" path "_"))) ]))
 
 (define (binder-output-symbol binder authored-name)

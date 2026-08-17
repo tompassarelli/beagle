@@ -514,9 +514,8 @@
     (let [parts (str/split id #":")
           reversed (vec (reverse parts))
           path (if (> (count reversed) 1) (nth reversed 1) "0")
-          position (if (> (count reversed) 2) (nth reversed 2) "0")
           clean-path (str/replace path #"[^0-9]+" "_")]
-      (str authored-name "__scope_" position "_" clean-path))))
+      (str authored-name "__scope_" clean-path))))
 
 ;; Checked AST keeps authored spellings and lexical edges. Target emitters call
 ;; this pure projection once, immediately before rendering, so only introduced
@@ -1041,9 +1040,9 @@
 
   (expect! "only introduced binding identities alpha-lower"
     (and (= (binding-id-output-name
-              "introduced-lexical:test:7:1.2:tmp" "tmp")
-            "tmp__scope_7_1_2")
-         (= (binding-id-output-name "lexical:test:7:1.2:tmp" "tmp")
+              "introduced-lexical:test:1.2:tmp" "tmp")
+            "tmp__scope_1_2")
+         (= (binding-id-output-name "lexical:test:1.2:tmp" "tmp")
             "tmp")))
 
   (let [node (make-def "x" nil (make-literal "number" 42))]

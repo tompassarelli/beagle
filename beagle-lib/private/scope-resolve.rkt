@@ -100,8 +100,8 @@
         (string->symbol (format "introduced-~a" kind))
         kind)
     (if span (or (src-loc-source span) "generated") "generated")
-    (if span (or (src-loc-pos span) 0) 0)
-    (string-append (path->text path) ":" (symbol->string name)))))
+    (path->text path)
+    (symbol->string name))))
 
 (define (syntax-ident-with-binding identifier id)
   (make-syntax-ident
