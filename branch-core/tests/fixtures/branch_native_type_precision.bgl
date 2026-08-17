@@ -1,0 +1,8 @@
+#lang beagle
+
+(ns fram.branch-native-type-precision)
+
+(defrecord NativeInputs [(bytes ByteSource) (position (Atom Int))])
+
+(defn borrowed-byte-at [(inputs NativeInputs)] Int
+  (nth (nativeinputs-bytes inputs) (deref (nativeinputs-position inputs))))

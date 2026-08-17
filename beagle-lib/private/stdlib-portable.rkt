@@ -235,7 +235,7 @@
    'throw      (fn-of '(Any) 'Any)
    ;; --- atom / ref (universal state management) ----------------------------
    'atom       (fn-of '(Any) 'Any)
-   'deref      (fn-of '(Any) 'Any)
+   'deref      (poly-fn '(A) (list (type-app 'Atom (list (tv 'A)))) (tv 'A))
    'reset!     (fn-of '(Any Any) 'Any)
    'swap!      (fn-of '(Any Any) 'Any #:rest 'Any)
    'compare-and-set! (fn-of '(Any Any Any) 'Bool)

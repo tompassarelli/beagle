@@ -370,7 +370,7 @@
       [(integer? term)
        (do (append-u8! encoder 2) (append-i64-le! encoder term))]
       [(and (number? term) (not (integer? term)))
-       (let [(float-term Float) term]
+       (let [(float-term Float) (double term)]
          (do
            (append-u8! encoder 3)
            (append-i64-le! encoder (float-to-bits float-term))))]

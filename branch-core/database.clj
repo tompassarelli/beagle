@@ -854,6 +854,13 @@
              "sealed FRAMLOG segment does not match its content address"
              {:path (:path source) :expected expected :actual actual}))))
 
+(defn- require-uncompressed-branch-source! [source]
+  (when (:deflate? (:parsed source))
+    (fail! :unsupported-branch-chain-encoding
+           "branch routing does not support Deflate-compressed FRAMLOG members"
+           {:path (:path source)}))
+  source)
+
 (defn- require-ref-chain! [store selected document]
   (let [segments (branch/refdocument-segments document)
         sealed
@@ -868,6 +875,9 @@
               (branch/branch-tail-path! store selected) true)
         fault (branch-chain-fault
                document (mapv (comp :member second) sealed) (:member tail))]
+    (doseq [[_ source] sealed]
+      (require-uncompressed-branch-source! source))
+    (require-uncompressed-branch-source! tail)
     (when fault
       (fail! :invalid-branch-chain fault
              {:branch selected :path (:path tail)
@@ -942,6 +952,7 @@
        (let [tail (read-chain-source! store false)
              parsed (:parsed tail)
              sequence (long (or (:tx-seq (last (:frames parsed))) 0))]
+         (require-uncompressed-branch-source! tail)
          (branch/branch-revision!
           (:space-id parsed) (history-sha256 [tail]) sequence))
 
@@ -965,6 +976,9 @@
              fault (branch-chain-fault
                     document (mapv (comp :member second) sealed)
                     (:member tail))]
+         (doseq [[_ source] sealed]
+           (require-uncompressed-branch-source! source))
+         (require-uncompressed-branch-source! tail)
          (when fault
            (fail! :invalid-branch-chain fault
                   {:branch selected :path (:path tail)
@@ -993,7 +1007,13 @@
          document (read-branch-ref store branch)]
      (cond
        (and (nil? document) (= branch branch/default-branch))
-       (open-database! store expected-space {:repair-torn? repair-torn?})
+       (do
+         ;; Reject the branch-only encoding boundary before open-database! can
+         ;; honor repair-torn? and mutate the file.
+         (require-uncompressed-branch-source!
+          (read-chain-source! store false))
+         (open-database! store expected-space
+                         {:repair-torn? repair-torn?}))
 
        (nil? document)
        (fail! :branch-missing "branch has no ref"
@@ -1272,6 +1292,10 @@
                  frames (:frames parsed)
                  base (or document (branch/empty-ref space-id))
                  chained? (pos? (count (branch/refdocument-segments base)))]
+             (when (:deflate? parsed)
+               (fail! :unsupported-branch-chain-encoding
+                      "branch routing does not support Deflate-compressed FRAMLOG members"
+                      {:path parent-tail :branch parent}))
              (when (:torn-tail parsed)
                (fail! :torn-tail-repair-required
                       "fork requires a parent tail with no torn trailing frame"

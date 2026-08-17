@@ -5639,6 +5639,29 @@
          (alist-set acc2 (car p) (cdr p))))
      ANY]
 
+    ;; ByteSource is a borrowed native octet view rather than a Vec. Native
+    ;; lowering already owns its count/nth operations; preserve that exact
+    ;; element type here without weakening parametric Vec nth.
+    [(and (call-form? e)
+          (eq? (call-form-fn e) 'nth)
+          (= 2 (length (call-form-args e)))
+          (let ([source-type
+                 (infer-expr (car (call-form-args e)) env)])
+            (and (type-prim? source-type)
+                 (eq? (type-prim-name source-type) 'ByteSource))))
+     (define index-expr (cadr (call-form-args e)))
+     (define index-type (infer-expr index-expr env))
+     (unless (type-compatible? index-type (type-prim 'Int))
+       (raise-diag
+        'type-mismatch
+        (format "call to nth: arg 2 expected Int, got ~a"
+                (type->string index-type))
+        (hash-set* (type-mismatch-details (type-prim 'Int) index-type)
+                   'function "nth"
+                   'argument-index 2)
+        #:src (src-for index-expr)))
+     (type-prim 'Int)]
+
     ;; G3 — (nth t K)/(first t)/(second t) on an (HVec ..) read the POSITIONAL element
     ;; type, but ONLY when the index is a CONSTANT in-bounds integer. A dynamic or
     ;; out-of-bounds index must NOT fabricate a position type — it degrades to the
