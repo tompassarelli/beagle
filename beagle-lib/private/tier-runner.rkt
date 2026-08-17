@@ -677,19 +677,21 @@
     (define owner (least-loaded phase-width))
     (vector-set! lanes owner (cons u (vector-ref lanes owner)))
     (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))
-  (define dedicated-whole-heavy? (> n phase-width))
+  (define whole-heavy-width
+    (min (length whole-heavy-units) (max 0 (- n phase-width))))
   (cond
-    [dedicated-whole-heavy?
-     (define owner phase-width)
-     (for ([u (in-list (heavier-first whole-heavy-units))])
+    [(positive? whole-heavy-width)
+     (for ([u (in-list (heavier-first whole-heavy-units))]
+           [position (in-naturals)])
+       (define owner
+         (+ phase-width (modulo position whole-heavy-width)))
        (vector-set! lanes owner (cons u (vector-ref lanes owner))))]
     [else
      (for ([u (in-list (heavier-first whole-heavy-units))])
        (define owner (least-loaded phase-width))
        (vector-set! lanes owner (cons u (vector-ref lanes owner)))
        (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))])
-  (define reserved-width
-    (+ phase-width (if dedicated-whole-heavy? 1 0)))
+  (define reserved-width (+ phase-width whole-heavy-width))
   (define light-workers (- n reserved-width))
   (define light-position 0)
   (for ([idx (in-list (launch-order units))]
@@ -1349,13 +1351,14 @@
     (check-equal? (sort (append* (vector->list partitions)) string<? #:key unit-label)
                   (sort heavy-units string<? #:key unit-label)
                   "the cold-build heavy pool remains an exact partition")
-    (check-true
-     (andmap (lambda (un)
-               (and (heavy-unit? un)
-                    (not (hash-has-key? sharded-files (unit-file un)))))
-             (vector-ref partitions 4))
-     "worker 4 carries only build-heavy whole modules")
-    (for ([i (in-range 5 16)])
+    (check-equal?
+     (for/list ([i (in-range 4 7)])
+       (map unit-label (vector-ref partitions i)))
+     '(("native-simd.rkt")
+       ("native-c17-parallel.rkt")
+       ("check-all-nix.rkt"))
+     "independent build-heavy whole modules own distinct worker lanes")
+    (for ([i (in-range 7 16)])
       (check-false (ormap heavy-unit? (vector-ref partitions i))
                    (format "worker ~a receives no compiler-heavy unit" i))))
 
