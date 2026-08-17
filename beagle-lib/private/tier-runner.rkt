@@ -610,26 +610,26 @@
 ;; weight rather than inheriting a stale estimate.
 (define historical-unit-weights
   (hash
-   "wasm-materializer.rkt#core-publication-preserv-db27b4" 296
-   "wasm-materializer.rkt#publication-failpoints-n-73fa24" 206
-   "wasm-materializer.rkt#multiple-arena-bearing-e-6a5145" 120
-   "wasm-materializer.rkt#generation-verifier-dete-579176" 113
-   "wasm-materializer.rkt#entry-contract-matrix-re-4ada49" 98
-   "wasm-materializer.rkt#provenance-splice-matrix-79516a" 94
-   "wasm-materializer.rkt#wasm-bootstrap-emits-a-r-eb4d66" 82
-   "wasm-materializer.rkt#entries-that-flatten-to-057b8d" 80
-   "wasm-materializer.rkt#missing-supported-enviro-4b6109" 76
-   "wasm-materializer.rkt#compiler-failure-remains-6c9aea" 68
-   "wasm-materializer.rkt#seam-validator-timeout-o-0d50b6" 67
-   "wasm-materializer.rkt#runtime-timeout-owns-and-1989ce" 63
-   "wasm-materializer.rkt#compiler-timeout-owns-an-10142c" 60
-   "wasm-materializer.rkt#entry-validator-timeout-c5fc3e" 58
-   "wasm-materializer.rkt#strict-source-entry-abi-7f42c4" 56
-   "wasm-materializer.rkt#tool-resolver-timeout-re-169242" 51
-   "wasm-materializer.rkt#unsupported-callable-ent-d4bc24" 19
+   "wasm-materializer.rkt#core-publication-preserv-db27b4" 380
+   "wasm-materializer.rkt#publication-failpoints-n-73fa24" 291
+   "wasm-materializer.rkt#multiple-arena-bearing-e-6a5145" 173
+   "wasm-materializer.rkt#generation-verifier-dete-579176" 139
+   "wasm-materializer.rkt#entry-contract-matrix-re-4ada49" 147
+   "wasm-materializer.rkt#provenance-splice-matrix-79516a" 68
+   "wasm-materializer.rkt#wasm-bootstrap-emits-a-r-eb4d66" 44
+   "wasm-materializer.rkt#entries-that-flatten-to-057b8d" 9
+   "wasm-materializer.rkt#missing-supported-enviro-4b6109" 21
+   "wasm-materializer.rkt#compiler-failure-remains-6c9aea" 29
+   "wasm-materializer.rkt#seam-validator-timeout-o-0d50b6" 16
+   "wasm-materializer.rkt#runtime-timeout-owns-and-1989ce" 41
+   "wasm-materializer.rkt#compiler-timeout-owns-an-10142c" 22
+   "wasm-materializer.rkt#entry-validator-timeout-c5fc3e" 12
+   "wasm-materializer.rkt#strict-source-entry-abi-7f42c4" 51
+   "wasm-materializer.rkt#tool-resolver-timeout-re-169242" 14
+   "wasm-materializer.rkt#unsupported-callable-ent-d4bc24" 34
    "wasm-materializer.rkt#runtime-io-surface-drive-7c1cab" 4
-   "wasm-materializer.rkt#supported-toolchain-buil-cfd33d" 3
-   "wasm-materializer.rkt#residual" 1
+   "wasm-materializer.rkt#supported-toolchain-buil-cfd33d" 4
+   "wasm-materializer.rkt#residual" 4
    "native-simd.rkt" 112
    "native-c17-parallel.rkt" 88
    "check-all-nix.rkt" 27))
@@ -1358,6 +1358,15 @@
     (for ([i (in-range 5 16)])
       (check-false (ormap heavy-unit? (vector-ref partitions i))
                    (format "worker ~a receives no compiler-heavy unit" i))))
+
+  (let-values ([(wasm-units refusals)
+                (file->units "wasm-materializer.rkt")])
+    (check-equal? refusals '() "the live Wasm file remains shardable")
+    (define partitions (worker-partitions wasm-units 16))
+    (check-equal?
+     (map unit-label (vector-ref partitions 0))
+     '("wasm-materializer.rkt#core-publication-preserv-db27b4")
+     "the measured Core publication straggler owns one process lane"))
 
   ;; Worker serialization preserves failure text byte-for-byte, and merging
   ;; restores manifest order independently of worker completion order.
