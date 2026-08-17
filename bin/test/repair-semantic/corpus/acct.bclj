@@ -1,3 +1,5 @@
+#lang beagle/clj
+
 ;; Two functions that both trip the semantic rule "name implies aggregation —
 ;; subtraction is suspicious" (rule fires on names matching total|sum-of|aggregate
 ;; that use `-` in computation context).
