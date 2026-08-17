@@ -101,7 +101,8 @@
                (every? #(str/includes? ingest %)
                        ["database/create-triple-log!" "database/open-database!"
                         "database/commit!" "replace-atomically!"])
-               (str/includes? status "\"$HERE/../bin/beagle\" store status")
+               (str/includes? status "BEAGLE_CLI=\"${BEAGLE_STORE_BEAGLE:-$HERE/../bin/beagle}\"")
+               (str/includes? status "\"$BEAGLE_CLI\" store status")
                (absent? status ["wc -l"]))
           nil))
 

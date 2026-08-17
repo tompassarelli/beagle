@@ -17,6 +17,7 @@ set -uo pipefail
 
 fallback() { echo "level=0 src=0 log=- triples=0 mcp=absent space=- port=- server=- canonical=0"; exit 0; }
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
+BEAGLE_CLI="${BEAGLE_STORE_BEAGLE:-$HERE/../bin/beagle}"
 DIR="${1:-$PWD}"
 DIR="$(cd "$DIR" 2>/dev/null && pwd)" || fallback
 [ -n "$DIR" ] || fallback
@@ -73,7 +74,7 @@ if [ "$NATIVE_LOG" = true ]; then
     # Same budget beagle-store-code-on's postcondition uses: a corpus-sized store answers
     # :rpc/status in ~2s, so a tighter cap reports a live server as dead.
     STATUS="$(BEAGLE_STORE_SERVER_PORT="$PORT" BEAGLE_STORE_SPACE_ID="$SPACE_ID" BEAGLE_STORE_LOG="$CODE_LOG" \
-      timeout 5 "$HERE/../bin/beagle" store status 2>/dev/null)" || STATUS=""
+      timeout 5 "$BEAGLE_CLI" store status 2>/dev/null)" || STATUS=""
     if [[ "$STATUS" =~ ^up\|[0-9]+\|([0-9]+)\|ready\|jvm$ ]]; then
       SERVER=alive
       TRIPLES="${BASH_REMATCH[1]}"

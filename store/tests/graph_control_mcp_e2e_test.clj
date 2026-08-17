@@ -167,7 +167,9 @@
              :beagle-store-graph-control {:command runtime :args ["mcp"]
                                   :env launch-env}}}))
     (let [status (shell/sh (str (io/file store-root "bin/beagle-store-code-status"))
-                           checkout-root)]
+                           checkout-root
+                           :env (assoc (into {} (System/getenv))
+                                       "BEAGLE_STORE_BEAGLE" beagle))]
       (check! "real sealed preflight earns beagle-store-code-status Level 3"
               (and (zero? (:exit status))
                    (str/starts-with? (:out status) "level=3 "))
