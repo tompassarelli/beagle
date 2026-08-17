@@ -1351,9 +1351,8 @@
 
 (defn- scope-walk-params!
   [(params Any) (table Any) (path Any) (ctx Any)] Any
-  (let [children (scope-sequence-children params)
-        target-bound-names
-        (fn target-bound-names [(value Any)] Any
+  (let [children (scope-sequence-children params)]
+    (letfn [(target-bound-names [(value Any)] Any
           (let [variant (get value "variant")
                 nested (scope-sequence-children value)]
             (cond
@@ -1383,12 +1382,11 @@
                           (recur (+ index 2) names)
                         :else (recur (+ index 1) names)))))
               :else [])))
-        declaration-bound-names
-        (fn [(value Any)] Any
+            (declaration-bound-names [(value Any)] Any
           (if (scope-typed-declaration?! value)
             (target-bound-names (nth (scope-sequence-children value) 0))
-            (target-bound-names value)))
-        all-bound
+            (target-bound-names value)))]
+      (let [all-bound
         (reduce
           (fn [(names Any) (item Any)] Any
             (if (= (scope-syntax-datum! item) "&")
@@ -1431,7 +1429,7 @@
     {"value" (rebuild-scope-sequence! params (get state "children"))
      "table" (get state "table")
      "scope" scope
-     "identities" (get state "identities")}))
+     "identities" (get state "identities")}))))
 
 (defn- scope-walk-function-clause!
   [(clause Any) (table Any) (path Any) (ctx Any)] Any

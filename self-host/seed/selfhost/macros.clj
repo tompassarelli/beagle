@@ -385,7 +385,7 @@
 (defn macro-syntax-error-at! [args]
   (if (< (count args) 2) (macro-eval-fail! "syntax-error-at expected a collection and index") (let [collection (nth args 0)
    items (macro-seq! collection "syntax-error-at")
-   index (nth args 1)]
+   index (macro-datum (nth args 1))]
   (if (not (and (int? index) (>= index 0) (< index (count items)))) (macro-eval-fail! (str "syntax-error-at: index " (str index) " out of range for a collection of " (str (count items)) " item(s)")) (let [form (nth items index)
    parts (subvec args 2)
    message (if (= (count parts) 0) (str "Invalid syntax: " (macro-display form)) (apply str (mapv macro-display parts)))]
@@ -696,8 +696,9 @@
   (expect! "syntax accessors preserve typed sequential destructuring heads" (and (= (macro-syntax-name! sequence-binding) (nth sequence-binding 0)) (= (macro-syntax-type! sequence-binding) "Point") (= (macro-syntax-constraint! sequence-binding) "valid-point?")))
   (expect! "syntax accessors preserve typed map destructuring heads" (and (= (macro-syntax-name! map-binding) (nth map-binding 0)) (= (macro-syntax-type! map-binding) "Point") (= (macro-syntax-constraint! map-binding) "valid-point?"))))
   (let [collection [BRACKET-TAG ["id" "String"] "valid-id-wire?"]
+   syntax-index (ast/make-syntax-atom! 1 nil ast/EMPTY-SCOPE-SET nil {})
    rejected (try
-  (macro-syntax-error-at! [collection 1 [STRING-TAG "Invalid field declaration"]])
+  (macro-syntax-error-at! [collection syntax-index [STRING-TAG "Invalid field declaration"]])
   false
   (catch Exception problem
     (let [data (ex-data problem)]
