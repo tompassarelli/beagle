@@ -676,9 +676,8 @@
    name (syntax/structural-name->symbol (get identifier "payload"))
    introduced (some? (syntax/beagle-syntax-origin identifier))
    source (if (nil? span) "generated" (let [value (get span "source")]
-  (if (nil? value) "generated" (str value))))
-   position (if (nil? span) 0 (+ (int (get span "start")) 1))]
-  (syntax/make-binding-id! (str (if introduced (str "introduced-" binding-kind) binding-kind) ":" source ":" position ":" (path->text path) ":" name))))
+  (if (nil? value) "generated" (str value))))]
+  (syntax/make-binding-id! (str (if introduced (str "introduced-" binding-kind) binding-kind) ":" source ":" (path->text path) ":" name))))
 
 (defn- syntax-ident-with-binding! [identifier id ^String role]
   (syntax/make-syntax-ident! (get identifier "payload") (syntax/beagle-syntax-span identifier) (syntax/beagle-syntax-scopes identifier) (syntax/beagle-syntax-origin identifier) (assoc (assoc (syntax/beagle-syntax-properties identifier) "binding-id" id) "binding-role" role)))
@@ -2390,6 +2389,13 @@
   (reset! PASSES 0)
   (reset! FAILURES [])
   (reset-errors!)
+  (expect! "binding identity ignores source offsets and keeps structural paths" (let [name (syntax/make-structural-name! nil "x" nil)
+   earlier (syntax/make-syntax-ident! name (syntax/make-source-span! "layout.bclj" 10 11 1 10) syntax/EMPTY-SCOPE-SET nil {})
+   later (syntax/make-syntax-ident! name (syntax/make-source-span! "layout.bclj" 210 211 8 4) syntax/EMPTY-SCOPE-SET nil {})
+   earlier-id (stable-binding-id! earlier [0 1 0] "lexical")
+   later-id (stable-binding-id! later [0 1 0] "lexical")
+   distinct-id (stable-binding-id! later [0 2 1 0] "lexical")]
+  (and (= (syntax/binding-id-stable earlier-id) "lexical:layout.bclj:0.1.0:x") (= earlier-id later-id) (not= earlier-id distinct-id))))
   (expect! "literal: number" (= (parse-expr* 42) {"node" "literal" "kind" "number" "value" 42}))
   (expect! "literal: float" (= (parse-expr* 3.14) {"node" "literal" "kind" "float" "value" 3.14}))
   (expect! "bare true normalizes to ref (oracle parity)" (= (parse-expr* true) {"node" "ref" "name" "true"}))

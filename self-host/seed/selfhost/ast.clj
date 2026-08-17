@@ -309,9 +309,8 @@
   (if (not (introduced-binding-id? id)) authored-name (let [parts (str/split id #":")
    reversed (vec (reverse parts))
    path (if (> (count reversed) 1) (nth reversed 1) "0")
-   position (if (> (count reversed) 2) (nth reversed 2) "0")
    clean-path (str/replace path #"[^0-9]+" "_")]
-  (str authored-name "__scope_" position "_" clean-path))))
+  (str authored-name "__scope_" clean-path))))
 
 (defn lower-binding-target-output [target identities]
   (cond
@@ -672,7 +671,7 @@
    output (make-syntax-list! [flipped] nil EMPTY-SCOPE-SET nil {})
    restored-output (beagle-syntax-flip-scope! output scope restorations false)]
   (expect! "macro scope flip restores exact caller syntax by identity" (identical? (nth (syntax-children restored-output) 0) caller)))
-  (expect! "only introduced binding identities alpha-lower" (and (= (binding-id-output-name "introduced-lexical:test:7:1.2:tmp" "tmp") "tmp__scope_7_1_2") (= (binding-id-output-name "lexical:test:7:1.2:tmp" "tmp") "tmp")))
+  (expect! "only introduced binding identities alpha-lower" (and (= (binding-id-output-name "introduced-lexical:test:1.2:tmp" "tmp") "tmp__scope_1_2") (= (binding-id-output-name "lexical:test:1.2:tmp" "tmp") "tmp")))
   (let [node (make-def "x" nil (make-literal "number" 42))]
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))

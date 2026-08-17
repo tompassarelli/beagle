@@ -809,10 +809,10 @@
   (expect! "float: whole" (= (emit-float 1.0) "1.0"))
   (expect! "float: frac" (= (emit-float 3.14) "3.14"))
   (expect! "reference: qualified ref renders only at output boundary" (= (emit-expr! {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil}) "str/upper-case"))
-  (expect! "binding identities alpha-lower introduced capture only at output" (let [caller-id "lexical:test:10:0:tmp"
-   introduced-id "introduced-lexical:test:20:1.0:tmp"
+  (expect! "binding identities alpha-lower introduced capture only at output" (let [caller-id "lexical:test:0:tmp"
+   introduced-id "introduced-lexical:test:1.0:tmp"
    rendered (emit-program! {"namespace" "test.capture" "target" "clj" "gen-class" false "requires" [] "imports" [] "externs" [] "forms" [{"node" "defn" "name" "capture" "params" [{"type" "param" "name" "tmp" "ann" nil "constraint" nil "bindingId" caller-id}] "rest" false "ret" nil "private" false "body" [{"node" "let" "bindings" [{"name" "tmp" "ann" nil "constraint" nil "bindingId" introduced-id "value" {"node" "literal" "kind" "number" "value" 0}}] "body" [{"node" "do" "body" [{"node" "ref" "name" "tmp" "refersTo" introduced-id} {"node" "ref" "name" "tmp" "refersTo" caller-id}]}]}]}]})]
-  (and (str/includes? rendered "(defn capture [tmp]") (str/includes? rendered "(let [tmp__scope_20_1_0 0]") (str/includes? rendered "tmp__scope_20_1_0") (not (str/includes? rendered "(let [tmp 0]")))))
+  (and (str/includes? rendered "(defn capture [tmp]") (str/includes? rendered "(let [tmp__scope_1_0 0]") (str/includes? rendered "tmp__scope_1_0") (not (str/includes? rendered "(let [tmp 0]")))))
   (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "(str/upper-case value)"))
   (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "(Math/abs -1)"))
   (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
