@@ -17,4 +17,3 @@ These are the boundaries that explain what Beagle is for:
 - **Not a universal idiomatic-native transpiler** — hosted emitters exist where
   generated source is a real interface; native code comes from one frozen
   native program and replaceable materializers.
-
