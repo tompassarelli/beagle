@@ -1,16 +1,19 @@
+# Requires tier-runner --full/--shard support from the gate-shard lane; the two
+# land together.
 name: tests
 
-# CI runs the full tiered suite (active + demoted). The CI=true env var
-# triggers bin/beagle-test to include the demoted tier. Active failures
-# block the build; demoted failures are advisory (logged in the run
-# output and surface-debt.md tracks accumulated debt). See
-# lab/journal/synthesis/design-principle.md "Test-cadence decomposition".
+# Every gate remains blocking, but independent gate groups and suite shards run
+# concurrently so one active-tier failure does not suppress the remaining signal.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Self-host bootstrap fixpoint: the seed .clj under self-host/seed/ IS the
@@ -33,7 +36,7 @@ jobs:
       - name: Remint fixpoint gate
         run: bin/beagle-remint
 
-  test:
+  pre-gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -46,43 +49,121 @@ jobs:
           variant: CS
           version: '9.1'
 
+      - name: Restore Racket compilation layer
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.local/share/racket
+            **/compiled
+          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          restore-keys: |
+            racket-9.1-
+
       - name: Link beagle packages
         run: |
           raco pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
 
-      # Babashka must be installed BEFORE the tiered suite: conformance.rkt's
-      # cross-target value-conformance harness uses bb as the real-Clojure ORACLE.
-      # Without it the oracle silently skips AND the pinned-divergence tests error
-      # (a missing #f exec path -> system* contract violation). It is also used by
-      # the graph-native gates further down. (Was installed too late, after the suite.)
+      - name: Racket scope gate
+        run: bin/test/racket-scope/run.sh
+
+      - name: Checkout-first gate
+        run: bin/test/checkout-first/run.sh
+
+  suite:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Restore Racket compilation layer
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.local/share/racket
+            **/compiled
+          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          restore-keys: |
+            racket-9.1-
+
+      - name: Link beagle packages
+        run: |
+          raco pkg install --auto --link \
+            beagle-lib/ beagle-test/ beagle/
+
+      # The suite's Clojure oracle resolves bb from the flake; this explicit
+      # install keeps the standalone executable available to suite tooling.
       - name: Install babashka (CLJ oracle + graph-native repair tooling)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
           babashka-version: '1.12.218'
 
-      # Rust toolchain for the nix-import-roundtrip active-tier test, which
-      # bootstraps tools/nix-parse-json (the rnix Nix-importer helper) from
-      # tracked source via `cargo build --locked`. Declared here so CI provides
-      # cargo/rustc rather than depending on whatever the runner ships — a
-      # missing toolchain would make the active suite fail loudly, so it must be
-      # explicit. (Ubuntu runners preinstall a rustup toolchain; this step is
-      # the declared, version-explicit surface.)
-      - name: Install Rust (nix-parse-json helper bootstrap)
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Install nix (pinned Beagle test environment)
         uses: cachix/install-nix-action@v31
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 7G
 
       - name: Install direnv from the flake's nixpkgs input
         run: nix profile install --inputs-from . nixpkgs#direnv
 
+      # Bounded-check contract: shared CI runners receive a 3x case-deadline
+      # scale; each check remains supervised by its existing explicit deadline.
       - name: Run tiered test suite
         env:
-          CI: 'true'
+          BEAGLE_DEADLINE_SCALE: '3'
         run: |
+          echo "nproc=$(nproc)"
           direnv allow .
-          direnv exec . bin/beagle-test
+          direnv exec . racket beagle-lib/private/tier-runner.rkt --full --shard ${{ matrix.shard }}/4
+
+  gates-standalone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Restore Racket compilation layer
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.local/share/racket
+            **/compiled
+          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          restore-keys: |
+            racket-9.1-
+
+      - name: Link beagle packages
+        run: |
+          raco pkg install --auto --link \
+            beagle-lib/ beagle-test/ beagle/
+
+      - name: Install babashka (CLJ oracle + graph-native repair tooling)
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
 
       # Self-host three-way agreement: the blessed seed (self-host/seed/), the
       # seed compiler's remint of its own sources, and the Racket oracle's
@@ -103,6 +184,53 @@ jobs:
       # match's temp was (random ...) -> non-reproducible; now a deterministic counter.
       - name: Build reproducibility — deterministic match temps
         run: bin/test/build-reproducible/run.sh
+
+      # Repair pipeline: beagle-repair consumes blame.rkt's semantic suspicions as
+      # STRUCTURED records, not by regex-scraping the prose SUSPECT line. Gates that
+      # a suspicion on a validly-named function the prose regex can't parse (e.g.
+      # `total=`) survives. (Needs racket + bb, both above; no fram.)
+      - name: Repair pipeline — structured semantic suspicions gate
+        run: bin/test/repair-semantic/run.sh
+
+      - name: Show accumulated surface debt
+        if: always()
+        run: |
+          if [ -f lab/surface-debt.md ]; then
+            head -20 lab/surface-debt.md
+          fi
+
+  gates-fram:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Restore Racket compilation layer
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.local/share/racket
+            **/compiled
+          key: racket-9.1-${{ hashFiles('**/*.rkt') }}
+          restore-keys: |
+            racket-9.1-
+
+      - name: Link beagle packages
+        run: |
+          raco pkg install --auto --link \
+            beagle-lib/ beagle-test/ beagle/
+
+      - name: Install babashka (CLJ oracle + graph-native repair tooling)
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
 
       # Graph-native repair: beagle-cascade derives its call graph from the Fram
       # occurrence store (scope-correct), not regex over text. That runs on the Fram
@@ -142,13 +270,6 @@ jobs:
       - name: Reasoning call-graph — cross-module completeness gate
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/callgraph-xmodule/run.sh
 
-      # Repair pipeline: beagle-repair consumes blame.rkt's semantic suspicions as
-      # STRUCTURED records, not by regex-scraping the prose SUSPECT line. Gates that
-      # a suspicion on a validly-named function the prose regex can't parse (e.g.
-      # `total=`) survives. (Needs racket + bb, both above; no fram.)
-      - name: Repair pipeline — structured semantic suspicions gate
-        run: bin/test/repair-semantic/run.sh
-
       # Move 3: code can be fact-canonical. The loop .bclj -> lossless facts ->
       # (through a real Fram store) -> facts -> byte-stable .bclj is datum-identical
       # through the engine AND recompiles to the IDENTICAL program (modulo srcloc
@@ -181,10 +302,3 @@ jobs:
       # recompiles — both derived from the same converged refers_to resolver.
       - name: Engine demo — reason + repair consistent on real fram/src
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/engine-demo/run.sh
-
-      - name: Show accumulated surface debt
-        if: always()
-        run: |
-          if [ -f lab/surface-debt.md ]; then
-            head -20 lab/surface-debt.md
-          fi
