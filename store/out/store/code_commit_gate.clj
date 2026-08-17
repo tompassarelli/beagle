@@ -4,6 +4,7 @@
             [clojure.java.shell :as shell]
             [clojure.set :as set]
             [clojure.string :as str]
+            [resolve-core :as resolve-core]
             [store.rpc :as rpc]
             [store.candidate-transformer :as transformer]
             [store.code-reader :as code-reader]
@@ -65,19 +66,33 @@
   (let [values (get index [node predicate] #{})]
     (when (= 1 (count values)) (first values))))
 
+(defn- ordered-values [facts node]
+  (->> facts
+       (keep (fn [[subject predicate object]]
+               (when (= subject node)
+                 (when-let [position (resolve-core/ord-parse predicate)]
+                   [position predicate object]))))
+       (sort (fn [[left-position left-predicate]
+                  [right-position right-predicate]]
+               (let [order (resolve-core/ord-cmp left-position right-position)]
+                 (if (zero? order)
+                   (compare left-predicate right-predicate)
+                   order))))
+       (mapv #(nth % 2))))
+
 (defn- candidate-namespace [facts]
   (let [index (reduce (fn [result [subject predicate object]]
                         (update result [subject predicate] (fnil conj #{}) object))
                       {} facts)
         matches
         (->> facts
-             (keep (fn [[subject predicate head]]
-                     (when (and (= "f0" predicate)
-                                (= "list" (only-value index subject "kind"))
-                                (= "ns" (only-value index head "v")))
-                       (when-let [namespace-node
-                                  (only-value index subject "f1")]
-                         (only-value index namespace-node "v")))))
+             (map first)
+             distinct
+             (keep (fn [subject]
+                     (when (= "list" (only-value index subject "kind"))
+                       (let [[head namespace-node] (ordered-values facts subject)]
+                         (when (= "ns" (only-value index head "v"))
+                           (only-value index namespace-node "v"))))))
              distinct
              vec)]
     (when-not (and (= 1 (count matches))

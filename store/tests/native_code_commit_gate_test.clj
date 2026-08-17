@@ -3,6 +3,7 @@
          '[store.candidate-transformer :as transformer]
          '[store.code-commit-gate :as gate]
          '[store.code-reader :as code-reader]
+         '[store.rpc :as rpc]
          '[store.rt :as rt]
          '[store.types :as t])
 
