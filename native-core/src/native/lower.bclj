@@ -166,9 +166,6 @@
 (defn index-facts [(index SourceIndexV0)] Int
   (sourceindexv0-fact-count index))
 
-(defn index-has-callee? [(index SourceIndexV0) (expected String)] Bool
-  (= true (get (sourceindexv0-callee-names index) expected)))
-
 (defn index-first-object
   [(index SourceIndexV0)
    (subject core/NativeId)
@@ -261,6 +258,31 @@
   [(index SourceIndexV0) (subject core/NativeId) (predicate String)] String
   (let [(value (U String Nil)) (index-first-text index subject predicate)]
     (if (nil? value) "" value)))
+
+(defn source-reference-spelling
+  [(index SourceIndexV0) (reference core/NativeId)] String
+  (if (not (= "ref" (fact-text index reference "form-kind")))
+    ""
+    (let [(name String) (fact-text index reference "name")
+          (qualifier String) (fact-text index reference "qualifier")]
+      (if (or (= "" name) (= "" qualifier))
+        name
+        (str qualifier "/" name)))))
+
+(defn source-callee-name
+  [(index SourceIndexV0) (source core/NativeId)] String
+  (let [(reference (U core/NativeId Nil))
+        (index-first-object index source "callee")]
+    (if (nil? reference) "" (source-reference-spelling index reference))))
+
+(defn index-has-callee? [(index SourceIndexV0) (expected String)] Bool
+  (let [(calls (Vec core/NativeId))
+        (vec (concat (index-form-ids index "call")
+               (index-form-ids index "static-call")))]
+    (some?
+      (some (fn [(source core/NativeId)] Bool
+              (= expected (source-callee-name index source)))
+        calls))))
 
 (defn module-root-named
   [(index SourceIndexV0) (module-name String)] (U core/NativeId Nil)
@@ -3314,7 +3336,7 @@
                 (index-first-object index (nth sources position) "body")]
             (and (some? body)
               (= "call" (fact-text index body "form-kind"))
-              (= "throw" (fact-text index body "callee")))))))))
+              (= "throw" (source-callee-name index body)))))))))
 
 (defn tail-parameters [(parameters (Vec core/Parameter))] (Vec core/Parameter)
   (loop [(position Int) 1 (collected (Vec core/Parameter)) []]
@@ -3892,7 +3914,7 @@
           (if (or (= "" name) (= "else" name) (string-member? bound name)) [] [name]))
 
         (or (= "call" kind) (= "static-call" kind))
-        (let [(callee String) (fact-text index node "callee")
+        (let [(callee String) (source-callee-name index node)
               (own (Vec String))
               (if (or (not include-callees) (= "" callee)
                       (string-member? bound callee))
@@ -5858,13 +5880,12 @@
 
 (defn source-ref-named?
   [(index SourceIndexV0) (node core/NativeId) (expected String)] Bool
-  (and (= "ref" (fact-text index node "form-kind"))
-    (= expected (fact-text index node "name"))))
+  (= expected (source-reference-spelling index node)))
 
 (defn source-call-named?
   [(index SourceIndexV0) (node core/NativeId) (expected String)] Bool
   (and (= "call" (fact-text index node "form-kind"))
-    (= expected (fact-text index node "callee"))))
+    (= expected (source-callee-name index node))))
 
 (defn source-call-arguments
   [(index SourceIndexV0) (node core/NativeId)] (Vec core/NativeId)
@@ -7274,7 +7295,7 @@
   (U Bool Nil)
   (let [(state BodyStateV0) (exprresultv0-state condition)
         (instructions (Vec core/Instruction)) (bodystatev0-instructions state)
-        (callee String) (fact-text index condition-node "callee")]
+        (callee String) (source-callee-name index condition-node)]
     (if (not (and (= "call" (fact-text index condition-node "form-kind"))
                (static-type-predicate? callee)
                (= 1 (count (source-call-arguments index condition-node)))
@@ -9947,7 +9968,7 @@
       (let [(args (Vec core/NativeId)) (source-call-arguments index source)
             (resolved ResolvedSourceNameV0)
             (resolve-source-name index (source-module-name index source)
-              (fact-text index source "callee"))
+              (source-callee-name index source))
             (accessor AccessorHitV0) (record-accessor types resolved)
             (binding (U LocalBindingV0 Nil))
             (if (= 1 (count args))
@@ -10057,7 +10078,7 @@
   (let [(index SourceIndexV0) (bodyenvv0-index env)]
     (if (not (= "call" (fact-text index condition "form-kind")))
       nil
-      (let [(callee String) (fact-text index condition "callee")
+      (let [(callee String) (source-callee-name index condition)
             (args-node (U core/NativeId Nil))
             (index-first-object index condition "args")
             (args (Vec core/NativeId))
@@ -10128,7 +10149,7 @@
   (let [(index SourceIndexV0) (bodyenvv0-index env)
         (args (Vec core/NativeId)) (source-call-arguments index call)]
     (if (and (= "call" (fact-text index call "form-kind"))
-          (= "instance?" (fact-text index call "callee"))
+          (= "instance?" (source-callee-name index call))
           (= 2 (count args)))
       (source-record-type env module-name (nth args 0))
       nil)))
@@ -10158,7 +10179,7 @@
           (let [(args (Vec core/NativeId)) (source-call-arguments index body)
                 (parameter-name String) (fact-text index (nth params 0) "name")]
             (if (and (= "call" (fact-text index body "form-kind"))
-                  (= "instance?" (fact-text index body "callee"))
+                  (= "instance?" (source-callee-name index body))
                   (= 2 (count args))
                   (source-ref-named? index (nth args 1) parameter-name))
               (source-record-type env (source-module-name index source)
@@ -10174,7 +10195,7 @@
   (let [(index SourceIndexV0) (bodyenvv0-index env)]
     (if (not (= "call" (fact-text index condition "form-kind")))
       nil
-      (let [(callee String) (fact-text index condition "callee")
+      (let [(callee String) (source-callee-name index condition)
             (args (Vec core/NativeId)) (source-call-arguments index condition)
             (instance-type (U core/NativeId Nil))
             (direct-instance-record-type env
@@ -10272,7 +10293,7 @@
         (kind String) (fact-text index condition "form-kind")]
     (if (not (= "call" kind))
       state
-      (let [(callee String) (fact-text index condition "callee")
+      (let [(callee String) (source-callee-name index condition)
             (args (Vec core/NativeId)) (source-call-arguments index condition)]
         (cond
           (and (= "and" callee) truth)
@@ -10323,7 +10344,7 @@
   (let [(index SourceIndexV0) (bodyenvv0-index env)
         (types (Vec core/TypeDef)) (bodyenvv0-types env)
         (kind String) (fact-text index expression "form-kind")
-        (callee String) (fact-text index expression "callee")
+        (callee String) (source-callee-name index expression)
         (args (Vec core/NativeId))
         (if (= "call" kind) (source-call-arguments index expression) [])]
     (cond
@@ -14362,14 +14383,14 @@
 
         (or (= "call" kind)
           (and (= "static-call" kind)
-            (or (host-environment-callee? (fact-text index expr "callee"))
-                (host-context-callee? (fact-text index expr "callee"))
-                (host-filesystem-callee? (fact-text index expr "callee"))
-                (host-process-callee? (fact-text index expr "callee"))
-                (host-socket-callee? (fact-text index expr "callee"))
-                (host-clock-callee? (fact-text index expr "callee"))
-                (host-time-callee? (fact-text index expr "callee")))))
-        (let [(callee String) (fact-text index expr "callee")
+            (or (host-environment-callee? (source-callee-name index expr))
+                (host-context-callee? (source-callee-name index expr))
+                (host-filesystem-callee? (source-callee-name index expr))
+                (host-process-callee? (source-callee-name index expr))
+                (host-socket-callee? (source-callee-name index expr))
+                (host-clock-callee? (source-callee-name index expr))
+                (host-time-callee? (source-callee-name index expr)))))
+        (let [(callee String) (source-callee-name index expr)
               (callee-form (U core/NativeId Nil))
               (index-first-object index expr "callee-form")
               (args-node (U core/NativeId Nil)) (index-first-object index expr "args")
