@@ -81,6 +81,7 @@
              "repair-apply.rkt"         ; beagle-repair clause-insertion (python unit tests)
              "expected-errors.rkt"      ; inline #guard_msgs-style diagnostics
              "macro-eval.rkt"            ; macro evaluator core primitives and typed binder constructors
+             "syntax-match.rkt"          ; W5c structural Syntax matcher and typed expansion acceptance
              "second-order-contracts.rkt" ; active JS checker-contract coverage
 
              "lint.rkt"
