@@ -41,8 +41,8 @@ async function runBeagle(args, phase) {
 async function copyCorpus(destination, sourceEdit) {
   await mkdir(destination, { recursive: true })
   for (const source of sources) {
-    const sourcePath = sourceEdit === 'comment-layout' && source === 'foundation.bgl'
-      ? path.join(corpus, 'mutations', 'comment-layout', source)
+    const sourcePath = sourceEdit === 'private-implementation' && source === 'foundation.bgl'
+      ? path.join(corpus, 'mutations', 'private-implementation', source)
       : path.join(corpus, 'corpus', source)
     await cp(sourcePath, path.join(destination, source))
   }
@@ -62,6 +62,35 @@ async function build(sourceRoot, output, label, singleton = false) {
     args.push(path.relative(root, path.join(sourceRoot, 'foundation.bgl')))
   }
   await runBeagle(args, label)
+}
+
+async function buildExecutable(sourceRoot, output, label) {
+  await mkdir(output, { recursive: true })
+  const executable = path.join(output, 'run-score')
+  await runBeagle([
+    'native-exe',
+    '--out', executable,
+    '--artifacts', output,
+    '--entry', 'corpus.app/run-score',
+    ...sources.map((source) => path.relative(root, path.join(sourceRoot, source))),
+  ], label)
+  return executable
+}
+
+function runExecutable(executable, label) {
+  return new Promise((resolve, reject) => {
+    execFile(executable, { cwd: root, timeout: 10_000 }, (error, stdout, stderr) => {
+      if (error === null) {
+        resolve({ status: 0, stdout, stderr })
+        return
+      }
+      if (typeof error.code === 'number' && error.signal === null) {
+        resolve({ status: error.code, stdout, stderr })
+        return
+      }
+      reject(new Error(`Stage 5 ${label} execution failed: ${error.message}`, { cause: error }))
+    })
+  })
 }
 
 async function readArtifact(output, name) {
@@ -108,49 +137,79 @@ async function compilerIdentity() {
 }
 
 export async function runStage5ColdCompile({ sourceEdit } = {}) {
-  if (sourceEdit !== 'comment-layout') {
-    throw new Error('Stage 5 Beagle driver accepts only sourceEdit=comment-layout')
+  if (sourceEdit !== 'private-implementation') {
+    throw new Error('Stage 5 Beagle driver accepts only sourceEdit=private-implementation')
   }
 
   const scratch = await mkdtemp(path.join(root, '.beagle-stage5-demo-'))
   try {
-    const sourceRoot = path.join(scratch, 'sources')
-    const baselineRoot = await copyCorpus(sourceRoot, 'baseline')
+    const baselineRoot = await copyCorpus(path.join(scratch, 'baseline-sources'), 'baseline')
+    const candidateRoot = await copyCorpus(path.join(scratch, 'candidate-sources'), sourceEdit)
     const baselineOutput = path.join(scratch, 'baseline-build')
     const candidateOutput = path.join(scratch, 'candidate-build')
     const singletonOutput = path.join(scratch, 'singleton-build')
 
-    await build(baselineRoot, baselineOutput, 'baseline cold compile')
-    await copyCorpus(sourceRoot, sourceEdit)
-    const candidateRoot = sourceRoot
-    await build(candidateRoot, candidateOutput, 'candidate cold compile')
+    const baselineExecutable = await buildExecutable(
+      baselineRoot, baselineOutput, 'baseline cold compile',
+    )
+    const candidateExecutable = await buildExecutable(
+      candidateRoot, candidateOutput, 'candidate cold compile',
+    )
     await build(candidateRoot, singletonOutput, 'affected singleton cold compile', true)
 
-    const [baselineFacts, candidateFacts, candidateSource, candidateProgram,
-      candidateNativeProgram, singletonProgram, candidateReport] = await Promise.all([
+    const [baselineFacts, candidateFacts, baselineSource, candidateSource, candidateProgram,
+      candidateNativeProgram, singletonProgram, candidateReport, singletonReport,
+      baselineBehavior, candidateBehavior] = await Promise.all([
       readRequiredText(baselineOutput, 'source.facts'),
       readRequiredText(candidateOutput, 'source.facts'),
+      readFile(path.join(baselineRoot, 'foundation.bgl')),
       readFile(path.join(candidateRoot, 'foundation.bgl')),
       readArtifact(candidateOutput, 'module.native-program'),
       readRequiredText(candidateOutput, 'module.native-program.sha256'),
       readArtifact(singletonOutput, 'module.native-program'),
       readRequiredText(candidateOutput, 'report.txt'),
+      readRequiredText(singletonOutput, 'report.txt'),
+      runExecutable(baselineExecutable, 'baseline behavior'),
+      runExecutable(candidateExecutable, 'candidate behavior'),
     ])
     const baselineUnits = semanticUnits(baselineFacts)
     const candidateUnits = semanticUnits(candidateFacts)
     const cone = exactCone(baselineUnits, candidateUnits)
+    const singleton = 'corpus.foundation/private-offset'
+    const baselineNames = baselineUnits.map((unit) => `${unit.module}/${unit.name}`)
+    const candidateNames = candidateUnits.map((unit) => `${unit.module}/${unit.name}`)
+    const unaffectedUnits = candidateNames.filter((unit) => !cone.includes(unit))
+    const baselineSourceOid = digest(baselineSource)
     const sourceOid = digest(candidateSource)
     const programOid = `sha256:${candidateNativeProgram.trim().replace(/^sha256:/, '')}`
     const singletonProgramOid = digest(singletonProgram.bytes)
 
-    if (!candidateReport.includes('result PASS')) {
-      throw new Error('candidate cold compile did not report result PASS')
+    if (!candidateReport.includes('result PASS') || !singletonReport.includes('result PASS')) {
+      throw new Error('candidate or affected singleton cold compile did not report result PASS')
     }
     if (programOid !== candidateProgram.digest) {
       throw new Error('candidate native program digest receipt does not match its bytes')
     }
-    if (cone.length !== 0) {
-      throw new Error(`comment-layout changed semantic units unexpectedly: ${cone.join(', ')}`)
+    if (baselineSourceOid === sourceOid) {
+      throw new Error('private-implementation did not change the source bytes')
+    }
+    if (JSON.stringify(baselineNames) !== JSON.stringify(candidateNames)) {
+      throw new Error('private-implementation changed semantic unit identities')
+    }
+    if (cone.length === 0) {
+      throw new Error('Stage 5 refuses an empty semantic invalidation cone')
+    }
+    if (cone.length !== 1 || cone[0] !== singleton) {
+      throw new Error(`private-implementation changed the wrong semantic cone: ${cone.join(', ')}`)
+    }
+    if (!cone.includes(singleton)) {
+      throw new Error(`affected singleton ${singleton} is outside the invalidation cone`)
+    }
+    if (baselineBehavior.status !== 16 || candidateBehavior.status !== 17) {
+      throw new Error(
+        `private-implementation behavior delta was ${baselineBehavior.status} -> ` +
+        `${candidateBehavior.status}, expected 16 -> 17`,
+      )
     }
 
     return {
@@ -160,8 +219,9 @@ export async function runStage5ColdCompile({ sourceEdit } = {}) {
       abi: 'lp64',
       unitPlan: {
         sourceModule: 'corpus.foundation',
-        singleton: 'corpus.foundation',
+        singleton,
         exactCone: cone,
+        unaffectedUnits,
         mode: 'cold',
       },
       coneInvalidation: {
@@ -173,11 +233,17 @@ export async function runStage5ColdCompile({ sourceEdit } = {}) {
       },
       coldCompile: {
         status: 'PASS',
-        singleton: 'corpus.foundation',
+        singleton,
         source: 'corpus.foundation/foundation.bgl',
         program: singletonProgramOid,
         byteLength: singletonProgram.byteLength,
         report: 'result PASS',
+      },
+      behaviorDelta: {
+        entry: 'corpus.app/run-score',
+        baseline: baselineBehavior.status,
+        candidate: candidateBehavior.status,
+        visible: true,
       },
     }
   } finally {
