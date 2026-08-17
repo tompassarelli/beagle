@@ -296,15 +296,20 @@
       "#lang beagle\n"
       "(ns portable.provider)\n"
       "(defn id [(value String)] String value)\n"))
+    (define source-module-root
+      (make-module-source-root-v0 "rooted" source-root))
     (define closure
       (resolve-module-source-closure
        (list (module-source-input "app/consumer.bclj" consumer-path))
-       (list (make-module-source-root-v0 "rooted" source-root))))
+       (list source-module-root)))
     (define provider
       (findf
        (lambda (snapshot)
          (equal? (module-source-snapshot-physical-path snapshot)
-                 provider-path))
+                 (build-path
+                  (module-source-root-v0-physical-directory source-module-root)
+                  "portable"
+                  "provider.bgl")))
        (module-source-closure-snapshots closure)))
     (check-not-false provider)
     (check-equal? (module-source-snapshot-source-id provider)
