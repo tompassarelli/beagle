@@ -2,13 +2,21 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
 
-**Typed Clojure with one canonical source shape, structured diagnostics, and a
-compiler-backed authoring loop.**
+**Beagle is an independent typed Lisp built from a Clojure-derived core.**
 
-Beagle is a typed Lisp for ordinary text editing and short feedback loops. Its
-purpose is not a large target count. It is one source language whose parser,
-checker, canonicalizer, and repair tools give people and agents the same
-answer: what went wrong, where it occurred, and what a valid next edit is.
+Derived: Clojure's vocabulary and structural authoring model — its form
+library, s-expressions, data literals, `defn`/`let`/destructuring/threading
+ergonomics. Independent: types, effects, execution model, and memory/data
+model — no JVM, lazy seqs, dynamic vars, or GC-backed persistence; Beagle uses
+the store and arenas instead.
+
+Design principle: "If Clojure already has a form whose semantics are correct
+for Beagle, inherit it. If the semantics differ, name the difference."
+
+Beagle preserves Clojure where preservation has semantic value, never for
+compatibility's sake. It is one source language whose parser, checker,
+canonicalizer, and repair tools give people and agents the same answer: what
+went wrong, where it occurred, and what a valid next edit is.
 
 Types exist to make that loop reliable. Static type information checks at
 compile time and erases before emit; an explicitly authored binding constraint
