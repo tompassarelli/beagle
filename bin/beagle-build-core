@@ -822,13 +822,21 @@ validate_core_result_entry() {
 }
 
 core_result_input="$work/core-result-input.manifest"
-write_core_result_input_manifest "$core_result_input"
-core_result_key="$(sha256sum "$core_result_input" | awk '{print $1}')"
-core_result_root="$cache_root/results"
-core_result_entry="$core_result_root/$core_result_key"
 core_result_cache_hit=0
 core_result_publish_pending=0
-if [[ "$core_result_cache_enabled" == 1 ]]; then
+if [[ "$core_result_early_hit" == 1 ]]; then
+    cp -- "$alias_entry/input.manifest" "$core_result_input"
+    core_result_key="$alias_full_key"
+    core_result_entry="$alias_entry"
+    core_result_cache_hit=1
+    echo "beagle build: core-result-cache HIT $core_result_key" >&2
+else
+    write_core_result_input_manifest "$core_result_input"
+    core_result_key="$(sha256sum "$core_result_input" | awk '{print $1}')"
+    core_result_entry="$core_result_root/$core_result_key"
+fi
+if [[ "$core_result_cache_enabled" == 1 &&
+      "$core_result_early_hit" != 1 ]]; then
     mkdir -p "$core_result_root" "$cache_root/.result-locks" \
         "$cache_root/.result-tmp"
     exec {core_result_lock_fd}>"$cache_root/.result-locks/$core_result_key.lock"
@@ -1793,9 +1801,15 @@ fi
 fi
 
 if [[ "$core_result_cache_enabled" == 1 ]]; then
-    validate_core_result_input_closure "$core_result_input" \
-        "$work/core-result-input.before-finalize" ||
-        die "Core result input closure changed before finalization"
+    if [[ "$core_result_early_hit" == 1 ]]; then
+        validate_core_result_early_closure "$core_result_early_input" \
+            "$work/core-result-early-input.before-finalize" ||
+            die "Core result early input closure changed before finalization"
+    else
+        validate_core_result_input_closure "$core_result_input" \
+            "$work/core-result-input.before-finalize" ||
+            die "Core result input closure changed before finalization"
+    fi
     if [[ "$core_result_cache_hit" != 1 ]]; then
         mkdir "$work/core-result-artifacts"
         cp -a "$work/artifacts/." "$work/core-result-artifacts/"
@@ -2014,9 +2028,15 @@ mapfile -t locked_manifest_digests <"$work/locked-manifest.digest"
     die "staged manifest identity changed before publication"
 
 if [[ "$core_result_cache_enabled" == 1 ]]; then
-    validate_core_result_input_closure "$core_result_input" \
-        "$work/core-result-input.before-cache-publish" ||
-        die "Core result input closure changed before cache publication"
+    if [[ "$core_result_early_hit" == 1 ]]; then
+        validate_core_result_early_closure "$core_result_early_input" \
+            "$work/core-result-early-input.before-cache-publish" ||
+            die "Core result early input closure changed before cache publication"
+    else
+        validate_core_result_input_closure "$core_result_input" \
+            "$work/core-result-input.before-cache-publish" ||
+            die "Core result input closure changed before cache publication"
+    fi
 fi
 if [[ "$core_result_publish_pending" == 1 ]]; then
     core_result_staging="$(mktemp -d \
@@ -2039,7 +2059,8 @@ if [[ "$core_result_publish_pending" == 1 ]]; then
     core_result_publish_pending=0
 fi
 
-if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
+if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false &&
+      "$core_result_early_hit" != 1 ]]; then
     validate_core_result_early_closure "$core_result_early_input" \
         "$work/core-result-early-input.before-alias-publish" ||
         die "Core result early input closure changed before alias publication"
