@@ -16,6 +16,7 @@
          racket/list
          racket/match
          racket/port
+         racket/promise
          racket/string
          racket/system
          file/sha1)
@@ -477,7 +478,8 @@
 ;; deletes the runner-owned temp root. The scheduler below therefore just runs
 ;; the worker threads; it inherits the custodian and kill mode from `run`.
 
-(define default-jobs (max 1 (min (processor-count) 16)))
+(define default-jobs
+  (max 1 (min 16 (max 1 (- (processor-count) 2)))))
 
 ;; #f => resolve from BEAGLE_TEST_JOBS, else default. --jobs sets it directly.
 (define jobs (make-parameter #f))
@@ -562,6 +564,150 @@
      (for/list ([u (in-list units)] [idx (in-naturals)]
                 #:when (vector-ref keep idx))
        u)]))
+
+;; A local process shard is one of the independently supervised workers that
+;; `bin/beagle-test` launches on one machine. Unlike a CI shard, its result is
+;; not a report: the coordinator merges every worker result back into one
+;; manifest-ordered report. Units therefore stay in heavy-first launch order
+;; inside each worker, while the merge restores manifest order by label.
+;;
+;; Phase-sharded files and the known build-heavy whole modules share the same
+;; machine-wide heavy pool. A cold run with four Wasm phase processes plus
+;; three native/Nix builds made an owned 90-second build deadline expire; the
+;; cap has to cover all units that contend for those compiler resources, not
+;; only multiple invocations of one file.
+;;
+;; Partitioning is deterministic greedy LPT. A phase's weight is derived from
+;; the size of its source form (the longest phases contain the most fixtures
+;; and checks); a build-heavy whole file receives one lane's average phase
+;; weight. Ties break by scheduling label and then worker index. This avoids a
+;; hand-maintained phase list or timing table while preventing the former
+;; source-order round robin from putting the three largest phases in one lane.
+(define phase-source-weights
+  (delay
+    (for*/hash ([(fname _) (in-hash sharded-files)]
+                [form (in-list (or (top-level-forms (build-path tests-dir fname)) '()))]
+                #:when (and (pair? form) (eq? (car form) 'phase-test)
+                            (pair? (cdr form)) (string? (cadr form))))
+      (values (cons fname (cadr form))
+              (string-length (format "~s" form))))))
+
+(define (phase-source-weight u)
+  (cond
+    [(string? (unit-phase u))
+     (hash-ref (force phase-source-weights)
+               (cons (unit-file u) (unit-phase u))
+               1)]
+    [else 1]))
+
+(define (heavy-unit? u)
+  (member (unit-file u) heavy-first-files))
+
+;; Cold scheduling hints from the most recent complete per-unit proofs. They
+;; affect placement only: coverage, cache validity, results, and exit status do
+;; not depend on them. Unit labels include a digest of the full phase name, so
+;; a renamed or new phase misses safely and falls back to its derived source
+;; weight rather than inheriting a stale estimate.
+(define historical-unit-weights
+  (hash
+   "wasm-materializer.rkt#core-publication-preserv-db27b4" 296
+   "wasm-materializer.rkt#publication-failpoints-n-73fa24" 206
+   "wasm-materializer.rkt#multiple-arena-bearing-e-6a5145" 120
+   "wasm-materializer.rkt#generation-verifier-dete-579176" 113
+   "wasm-materializer.rkt#entry-contract-matrix-re-4ada49" 98
+   "wasm-materializer.rkt#provenance-splice-matrix-79516a" 94
+   "wasm-materializer.rkt#wasm-bootstrap-emits-a-r-eb4d66" 82
+   "wasm-materializer.rkt#entries-that-flatten-to-057b8d" 80
+   "wasm-materializer.rkt#missing-supported-enviro-4b6109" 76
+   "wasm-materializer.rkt#compiler-failure-remains-6c9aea" 68
+   "wasm-materializer.rkt#seam-validator-timeout-o-0d50b6" 67
+   "wasm-materializer.rkt#runtime-timeout-owns-and-1989ce" 63
+   "wasm-materializer.rkt#compiler-timeout-owns-an-10142c" 60
+   "wasm-materializer.rkt#entry-validator-timeout-c5fc3e" 58
+   "wasm-materializer.rkt#strict-source-entry-abi-7f42c4" 56
+   "wasm-materializer.rkt#tool-resolver-timeout-re-169242" 51
+   "wasm-materializer.rkt#unsupported-callable-ent-d4bc24" 19
+   "wasm-materializer.rkt#runtime-io-surface-drive-7c1cab" 4
+   "wasm-materializer.rkt#supported-toolchain-buil-cfd33d" 3
+   "wasm-materializer.rkt#residual" 1
+   "native-simd.rkt" 112
+   "native-c17-parallel.rkt" 88
+   "check-all-nix.rkt" 27))
+
+(define (historical-or-source-weight u fallback)
+  (hash-ref historical-unit-weights (unit-label u)
+            (lambda ()
+              (if (string? (unit-phase u))
+                  (phase-source-weight u)
+                  fallback))))
+
+(define (worker-partitions units n)
+  (define lanes (make-vector n '()))
+  (define loads (make-vector n 0))
+  (define phase-width
+    (min n (max 1 (quotient (+ n 3) 4))))
+  (define phase-units
+    (filter (lambda (u) (hash-has-key? sharded-files (unit-file u))) units))
+  (define whole-heavy-units
+    (filter (lambda (u)
+              (and (heavy-unit? u)
+                   (not (hash-has-key? sharded-files (unit-file u)))))
+            units))
+  (define phase-total
+    (for/sum ([u (in-list phase-units)])
+      (historical-or-source-weight u 1)))
+  (define phase-lane-average
+    (max 1 (quotient (+ phase-total (sub1 phase-width)) phase-width)))
+  (define (weight u)
+    (historical-or-source-weight u phase-lane-average))
+  (define (heavier-first some-units)
+    (sort some-units
+          (lambda (a b)
+            (define wa (weight a))
+            (define wb (weight b))
+            (if (= wa wb)
+                (string<? (unit-label a) (unit-label b))
+                (> wa wb)))))
+  (define (least-loaded limit)
+    (for/fold ([best 0]) ([candidate (in-range 1 limit)])
+      (if (< (vector-ref loads candidate) (vector-ref loads best))
+          candidate
+          best)))
+  (for ([u (in-list (heavier-first phase-units))])
+    (define owner (least-loaded phase-width))
+    (vector-set! lanes owner (cons u (vector-ref lanes owner)))
+    (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))
+  (define dedicated-whole-heavy? (> n phase-width))
+  (cond
+    [dedicated-whole-heavy?
+     (define owner phase-width)
+     (for ([u (in-list (heavier-first whole-heavy-units))])
+       (vector-set! lanes owner (cons u (vector-ref lanes owner))))]
+    [else
+     (for ([u (in-list (heavier-first whole-heavy-units))])
+       (define owner (least-loaded phase-width))
+       (vector-set! lanes owner (cons u (vector-ref lanes owner)))
+       (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))])
+  (define reserved-width
+    (+ phase-width (if dedicated-whole-heavy? 1 0)))
+  (define light-workers (- n reserved-width))
+  (define light-position 0)
+  (for ([idx (in-list (launch-order units))]
+        #:do [(define u (list-ref units idx))]
+        #:unless (heavy-unit? u))
+    (define owner
+      (if (positive? light-workers)
+          (+ reserved-width (modulo light-position light-workers))
+          (modulo light-position n)))
+    (vector-set! lanes owner (cons u (vector-ref lanes owner)))
+    (set! light-position (add1 light-position)))
+  (for/vector ([lane (in-vector lanes)]) (reverse lane)))
+
+(define (units-for-worker-shard units spec)
+  (cond
+    [(not spec) units]
+    [else
+     (vector-ref (worker-partitions units (cdr spec)) (car spec))]))
 
 ;; A sharded file may occupy at most ceil(K/4) worker slots. Ordinary files are
 ;; one unit each, so their effective per-file cap remains K.
@@ -648,6 +794,119 @@
   (cond
     [(<= k 1) (map run-test-unit units)]   ; exact legacy sequential path
     [else (run-units-parallel units k)]))
+
+;; --- independently supervised process workers ------------------------------
+
+(define worker-shard (make-parameter #f))
+(define worker-result-path (make-parameter #f))
+(define merge-worker-root (make-parameter #f))
+(define print-worker-count? (make-parameter #f))
+
+(struct worker-output (index count active-only? include-gated?
+                             active demoted gated)
+  #:transparent)
+
+(define worker-result-version 'beagle-tier-worker-v1)
+
+(define (unit-result->datum r)
+  (list (unit-result-label r)
+        (unit-result-status r)
+        (unit-result-passed r)
+        (unit-result-total r)
+        (unit-result-stderr-lines r)
+        (unit-result-cached? r)
+        (unit-result-wall-seconds r)))
+
+(define (datum->unit-result d path)
+  (match d
+    [(list (? string? label)
+           (and status (or 'pass 'fail 'error 'skip))
+           (? exact-nonnegative-integer? passed)
+           (? exact-nonnegative-integer? total)
+           (and lines (list (? string?) ...))
+           (? boolean? cached?)
+           (? real? wall-seconds))
+     (unit-result label status passed total lines cached? wall-seconds)]
+    [_ (raise-user-error 'beagle-test "malformed worker result in ~a: ~s" path d)]))
+
+(define (write-worker-output path active demoted gated)
+  (define spec (worker-shard))
+  (unless spec
+    (raise-user-error 'beagle-test "--worker-result requires --worker-shard"))
+  (call-with-output-file path #:exists 'truncate
+    (lambda (out)
+      (write
+       (list worker-result-version
+             (car spec) (cdr spec) (active-only?) (include-gated?)
+             (map unit-result->datum active)
+             (map unit-result->datum demoted)
+             (map unit-result->datum gated))
+       out)
+      (newline out))))
+
+(define (read-worker-output path)
+  (define datum
+    (call-with-input-file path
+      (lambda (in)
+        (define first (read in))
+        (unless (eof-object? (read in))
+          (raise-user-error 'beagle-test
+                            "worker result has trailing data: ~a" path))
+        first)))
+  (match datum
+    [(list (== worker-result-version)
+           (? exact-nonnegative-integer? index)
+           (? exact-positive-integer? count)
+           (? boolean? active-only-value)
+           (? boolean? include-gated-value)
+           (and active (list active-datum ...))
+           (and demoted (list demoted-datum ...))
+           (and gated (list gated-datum ...)))
+     (unless (< index count)
+       (raise-user-error 'beagle-test
+                         "worker result has invalid shard ~a/~a: ~a"
+                         index count path))
+     (worker-output
+      index count active-only-value include-gated-value
+      (map (lambda (d) (datum->unit-result d path)) active)
+      (map (lambda (d) (datum->unit-result d path)) demoted)
+      (map (lambda (d) (datum->unit-result d path)) gated))]
+    [_ (raise-user-error 'beagle-test
+                         "unrecognized worker result envelope: ~a" path)]))
+
+(define (merge-tier-results expected outputs select-results label)
+  (define by-label (make-hash))
+  (define expected-labels (map unit-label expected))
+  (for* ([output (in-list outputs)]
+         [result (in-list (select-results output))])
+    (define result-label (unit-result-label result))
+    (unless (member result-label expected-labels)
+      (raise-user-error 'beagle-test
+                        "worker reported unknown ~a unit: ~a" label result-label))
+    (when (hash-has-key? by-label result-label)
+      (raise-user-error 'beagle-test
+                        "worker reported duplicate ~a unit: ~a" label result-label))
+    (hash-set! by-label result-label result))
+  (for/list ([u (in-list expected)])
+    (hash-ref by-label (unit-label u)
+              (lambda ()
+                (raise-user-error 'beagle-test
+                                  "worker results omitted ~a unit: ~a"
+                                  label (unit-label u))))))
+
+(define (read-all-worker-outputs root count)
+  (define outputs
+    (for/list ([i (in-range count)])
+      (read-worker-output (build-path root (format "worker-~a.rktd" i)))))
+  (for ([output (in-list outputs)] [i (in-naturals)])
+    (unless (and (= (worker-output-index output) i)
+                 (= (worker-output-count output) count)
+                 (equal? (worker-output-active-only? output) (active-only?))
+                 (equal? (worker-output-include-gated? output) (include-gated?)))
+      (raise-user-error
+       'beagle-test
+       "worker result contract mismatch for shard ~a/~a" i count)))
+  outputs)
 
 ;; --- debt file -------------------------------------------------------------
 
@@ -770,17 +1029,16 @@
                    [subprocess-group-enabled #t])
       (run-body))))
 
-(define (run-body)
+(struct tier-plan (active-files demoted-files gated-files
+                                all-active-units all-demoted-units all-gated-units
+                                active-units demoted-units gated-units)
+  #:transparent)
+
+(define (load-tier-plan)
   (define classification (read-manifest))
   (define active-files  (files-in 'active classification))
   (define demoted-files (files-in 'demoted classification))
   (define gated-files   (files-in 'gated classification))
-
-  (printf "=== Beagle tiered test runner ===\n\n")
-
-  ;; Expand every tier BEFORE running anything: a shard refusal means the units
-  ;; would not cover the file, so it fails the gate instead of running a
-  ;; partial set and reporting green.
   (define-values (all-active-units active-refusals) (expand-units active-files))
   (define-values (all-demoted-units demoted-refusals) (expand-units demoted-files))
   (define-values (all-gated-units gated-refusals) (expand-units gated-files))
@@ -790,46 +1048,40 @@
     (for ([r (in-list refusals)]) (printf "  ~a\n" r))
     (printf "\nBUILD FAILED — the scheduled units would not cover every test.\n")
     (exit 1))
-
-  ;; Every tier shards, so demoted and gated content is split without a second
-  ;; rule. Refusals above are computed over the WHOLE expansion, so a coverage
-  ;; break fails every shard, not only the one that happened to own the file.
   (define active-units  (units-for-shard all-active-units (ci-shard)))
   (define demoted-units (units-for-shard all-demoted-units (ci-shard)))
   (define gated-units   (units-for-shard all-gated-units (ci-shard)))
+  (tier-plan active-files demoted-files gated-files
+             all-active-units all-demoted-units all-gated-units
+             active-units demoted-units gated-units))
+
+(define (print-plan-header plan)
+  (printf "=== Beagle tiered test runner ===\n\n")
   (when (ci-shard)
     (printf "CI shard ~a of ~a — launch position p runs here when (p mod n) = i.\n"
             (car (ci-shard)) (cdr (ci-shard)))
     (printf "  active ~a/~a units, demoted ~a/~a, gated ~a/~a\n\n"
-            (length active-units) (length all-active-units)
-            (length demoted-units) (length all-demoted-units)
-            (length gated-units) (length all-gated-units)))
+            (length (tier-plan-active-units plan))
+            (length (tier-plan-all-active-units plan))
+            (length (tier-plan-demoted-units plan))
+            (length (tier-plan-all-demoted-units plan))
+            (length (tier-plan-gated-units plan))
+            (length (tier-plan-all-gated-units plan)))))
 
-  (define active-results  (run-test-units active-units))
+(define (report-results plan active-results demoted-results gated-results)
+  (print-plan-header plan)
   (print-tier-section "ACTIVE TIER (blocks iteration)" active-results)
-
-  (define demoted-results
-    (cond
-      [(active-only?) '()]
-      [else (run-test-units demoted-units)]))
-
   (cond
     [(active-only?)
      (printf "DEMOTED TIER: skipped (local default; set CI=true / BEAGLE_FULL_SUITE=1 / pass --full to include)\n\n")]
     [else
      (print-tier-section "DEMOTED TIER (advisory, no block)" demoted-results)])
-
-  (define gated-results
-    (cond
-      [(include-gated?) (run-test-units gated-units)]
-      [else '()]))
-
   (cond
     [(include-gated?)
      (print-tier-section "GATED TIER (opt-in, --include-gated)" gated-results)]
     [else
      (printf "GATED TIER: skipped (use --include-gated + appropriate env vars to run)\n")
-     (for ([f (in-list gated-files)])
+     (for ([f (in-list (tier-plan-gated-files plan))])
        (printf "  · ~a\n" f))
      (newline)])
 
@@ -874,6 +1126,70 @@
      (printf "BUILD OK — all active tests passing.\n")
      (exit 0)]))
 
+(define (run-worker plan)
+  (define spec (worker-shard))
+  (unless (and spec (worker-result-path))
+    (raise-user-error
+     'beagle-test
+     "process worker mode requires --worker-shard and --worker-result"))
+  ;; Each process is one sequential scheduling lane. The coordinator supplies
+  ;; the width by launching N such processes, each under its own supervisor.
+  (define active-results
+    (map run-test-unit
+         (units-for-worker-shard (tier-plan-active-units plan) spec)))
+  (define demoted-results
+    (if (active-only?)
+        '()
+        (map run-test-unit
+             (units-for-worker-shard (tier-plan-demoted-units plan) spec))))
+  (define gated-results
+    (if (include-gated?)
+        (map run-test-unit
+             (units-for-worker-shard (tier-plan-gated-units plan) spec))
+        '()))
+  (write-worker-output
+   (worker-result-path) active-results demoted-results gated-results)
+  (exit
+   (if (for/or ([r (in-list active-results)])
+         (eq? (unit-result-status r) 'fail))
+       1
+       0)))
+
+(define (merge-workers plan)
+  (define count (resolve-jobs))
+  (define outputs (read-all-worker-outputs (merge-worker-root) count))
+  (define active-results
+    (merge-tier-results (tier-plan-active-units plan)
+                        outputs worker-output-active "active"))
+  (define demoted-results
+    (if (active-only?)
+        '()
+        (merge-tier-results (tier-plan-demoted-units plan)
+                            outputs worker-output-demoted "demoted")))
+  (define gated-results
+    (if (include-gated?)
+        (merge-tier-results (tier-plan-gated-units plan)
+                            outputs worker-output-gated "gated")
+        '()))
+  (report-results plan active-results demoted-results gated-results))
+
+(define (run-body)
+  (define plan (load-tier-plan))
+  (cond
+    [(worker-result-path) (run-worker plan)]
+    [else
+     (define active-results
+       (run-test-units (tier-plan-active-units plan)))
+     (define demoted-results
+       (if (active-only?)
+           '()
+           (run-test-units (tier-plan-demoted-units plan))))
+     (define gated-results
+       (if (include-gated?)
+           (run-test-units (tier-plan-gated-units plan))
+           '()))
+     (report-results plan active-results demoted-results gated-results)]))
+
 ;; CLI entry lives in `main` so `raco test` (which runs the `test` submodule
 ;; below) does NOT fire the runner; `racket tier-runner.rkt` still runs it.
 (module+ main
@@ -881,7 +1197,7 @@
    #:program "beagle-test"
    #:once-each
    [("-j" "--jobs") n
-    "Parallel worker count (default min(nproc,16); 1 = legacy sequential)"
+    "Worker process count (default min(16, max(1, nproc-2)))"
     (let ([v (string->number n)])
       (unless (and v (exact-integer? v) (positive? v))
         (raise-user-error 'beagle-test "--jobs expects a positive integer, got: ~a" n))
@@ -896,8 +1212,23 @@
     (ci-shard (parse-shard-spec spec))]
    [("--include-gated") "Also run gated tier (requires env vars)"
                         (include-gated? #t)]
+   [("--worker-shard") spec
+    "Internal: run local process shard i/n"
+    (worker-shard (parse-shard-spec spec))]
+   [("--worker-result") path
+    "Internal: write one local process shard result"
+    (worker-result-path path)]
+   [("--merge-worker-results") root
+    "Internal: merge local process shard results from ROOT"
+    (merge-worker-root root)]
+   [("--print-worker-count")
+    "Internal: print the resolved local process worker count"
+    (print-worker-count? #t)]
    #:args ()
-   (run)))
+   (cond
+     [(print-worker-count?) (printf "~a\n" (resolve-jobs))]
+     [(merge-worker-root) (merge-workers (load-tier-plan))]
+     [else (run)])))
 
 ;; --- scheduler invariants (unit) -------------------------------------------
 ;; These exercise the pure scheduling logic — unit expansion, shard coverage,
@@ -957,6 +1288,9 @@
                 "explicit --jobs overrides everything")
   (check-true (>= default-jobs 1) "default jobs is at least 1")
   (check-true (<= default-jobs 16) "default jobs is capped at 16")
+  (check-equal? default-jobs
+                (max 1 (min 16 (max 1 (- (processor-count) 2))))
+                "default leaves two online processors free when possible")
 
   ;; Sharded-file concurrency grows with K but can never monopolize it. A
   ;; saturated sharded file is skipped in favor of the next unrelated unit.
@@ -975,6 +1309,73 @@
       (take-claimable '(0 1 2) units active 4))
     (check-equal? idx 2 "a saturated sharded file does not park the worker")
     (check-equal? rest '(0 1) "skipped phase units retain their launch order"))
+
+  ;; Local process shards partition the whole launch exactly once. A sharded
+  ;; file is dealt only across its machine-wide cap, so K=16 cannot recreate
+  ;; the measured sixteen-phase fixture contention.
+  (let* ([wasm-units
+          (for/list ([i (in-range 20)])
+            (unit (format "wasm-materializer.rkt#~a" i)
+                  "wasm-materializer.rkt" (format "phase-~a" i) #f))]
+         [ordinary-units (map u (list "parse.rkt" "check.rkt" "types.rkt"))]
+         [units (append ordinary-units wasm-units)]
+         [shards
+          (for/list ([i (in-range 16)])
+            (units-for-worker-shard units (cons i 16)))]
+         [union (append* shards)])
+    (check-equal? (length union) (length units)
+                  "local process shards do not duplicate units")
+    (check-equal? (sort union string<? #:key unit-label)
+                  (sort units string<? #:key unit-label)
+                  "local process shards cover the complete schedule")
+    (check-equal?
+     (for/list ([shard (in-list shards)])
+       (length (filter (lambda (un)
+                         (string=? (unit-file un) "wasm-materializer.rkt"))
+                       shard)))
+     '(5 5 5 5 0 0 0 0 0 0 0 0 0 0 0 0)
+     "K=16 deals the phase-sharded file across exactly four workers"))
+
+  (let* ([wasm-units
+          (for/list ([i (in-range 20)])
+            (unit (format "wasm-materializer.rkt#~a" i)
+                  "wasm-materializer.rkt" (format "phase-~a" i) #f))]
+         [heavy-units
+          (append wasm-units
+                  (map u '("native-simd.rkt"
+                           "native-c17-parallel.rkt"
+                           "check-all-nix.rkt")))]
+         [partitions (worker-partitions heavy-units 16)])
+    (check-equal? (sort (append* (vector->list partitions)) string<? #:key unit-label)
+                  (sort heavy-units string<? #:key unit-label)
+                  "the cold-build heavy pool remains an exact partition")
+    (check-true
+     (andmap (lambda (un)
+               (and (heavy-unit? un)
+                    (not (hash-has-key? sharded-files (unit-file un)))))
+             (vector-ref partitions 4))
+     "worker 4 carries only build-heavy whole modules")
+    (for ([i (in-range 5 16)])
+      (check-false (ormap heavy-unit? (vector-ref partitions i))
+                   (format "worker ~a receives no compiler-heavy unit" i))))
+
+  ;; Worker serialization preserves failure text byte-for-byte, and merging
+  ;; restores manifest order independently of worker completion order.
+  (let* ([first-result
+          (unit-result "a.rkt" 'fail 1 2 '("first line" "  exact spacing") #f 1.25)]
+         [second-result
+          (unit-result "b.rkt" 'pass 3 3 '() #t 0.5)]
+         [outputs
+          (list (worker-output 0 2 #t #f (list second-result) '() '())
+                (worker-output 1 2 #t #f (list first-result) '() '()))]
+         [merged
+          (merge-tier-results (list (u "a.rkt") (u "b.rkt"))
+                              outputs worker-output-active "active")])
+    (check-equal? (map unit-result-label merged) '("a.rkt" "b.rkt")
+                  "merge restores manifest order")
+    (check-equal? (unit-result-stderr-lines (car merged))
+                  '("first line" "  exact spacing")
+                  "merge preserves failure lines verbatim"))
 
   ;; A filesystem-closure cache cannot prove a live endpoint observation.
   (check-false (gate-cache-eligible-file? "query.rkt")
