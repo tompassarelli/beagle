@@ -5,6 +5,13 @@
 ;; the shapes the parser accepts.
 
 (require rackunit
+         (only-in beagle/private/ast
+                  beagle-syntax-span
+                  empty-scope-set
+                  make-structural-name
+                  make-syntax-ident
+                  reader-metadata
+                  src-loc)
          (only-in beagle/private/tags BRACKET-TAG MAP-TAG)
          beagle/private/macro-eval)
 
@@ -27,6 +34,22 @@
 (test-case "unquote evaluates in place"
   (check-equal? (ev-let '((x . 42)) '(quasiquote (+ (unquote x) 1)))
                 '(+ 42 1)))
+
+(test-case "unquote returns the original syntax child with its caller span"
+  (define caller-span (src-loc 7 11 'caller 'original #f 84 5))
+  (define caller-child
+    (make-syntax-ident
+     (make-structural-name #f 'value)
+     caller-span
+     empty-scope-set
+     #f
+     (hasheq 'reader (reader-metadata #"value" 'atom))))
+  (define output
+    (macro-eval
+     '(quasiquote (list (unquote form)))
+     (hash-set (make-macro-env) 'form caller-child)))
+  (check-eq? (cadr output) caller-child)
+  (check-equal? (beagle-syntax-span (cadr output)) caller-span))
 
 (test-case "unquote splices a computed symbol into a definition head"
   (check-equal? (ev-let '((base . speed))

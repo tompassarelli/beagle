@@ -519,6 +519,7 @@
 (define (stx-tail subs n) (and subs (>= (length subs) n) (list-tail subs n)))
 
 (define current-registry (make-parameter #f))
+(define current-source-bytes (make-parameter #f))
 (define current-src-table (make-parameter #f))
 ;; Side-table mapping the eq?-identity of a body list (e.g. defn-form's
 ;; body) to a parallel list of src-loc for each body element. Populated by
@@ -1063,7 +1064,7 @@
  beagle-syntax-reader-metadata
  datum->beagle-syntax beagle-syntax->datum
  racket-syntax->beagle-syntax beagle-syntax->racket-syntax
- current-registry current-src-table store-src!
+ current-registry current-source-bytes current-src-table store-src!
  current-body-locs-table body-loc-at
  register-program-body-locs-table! program-body-locs-table
  current-type-table store-type!

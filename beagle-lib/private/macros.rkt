@@ -3,8 +3,8 @@
 ;; Beagle's macro layer.
 ;;
 ;; `(defmacro name [params] body)` evaluates BODY in the pure compile-time
-;; evaluator with raw call forms bound to PARAMS. Quasiquote constructs output;
-;; runtime calls used as generated syntax are data, never host evaluation.
+;; evaluator with immutable syntax values bound to PARAMS. Quasiquote constructs
+;; output; runtime calls used as generated syntax are data, never host evaluation.
 
 (require racket/match
          racket/string
@@ -12,29 +12,76 @@
          "tags.rkt"
          "macro-eval.rkt"
          (only-in "ast.rkt"
+                  beagle-syntax?
+                  beagle-syntax->datum
+                  beagle-syntax-span
+                  beagle-syntax-scopes
+                  beagle-syntax-origin
+                  beagle-syntax-properties
+                  beagle-syntax-reader-metadata
+                  datum->beagle-syntax
+                  empty-scope-set
+                  make-expansion-origin
+                  make-syntax-list
+                  make-syntax-vector
+                  racket-syntax->beagle-syntax
+                  reader-metadata-source-bytes
+                  syntax-list?
+                  syntax-list-children
+                  syntax-vector?
+                  syntax-vector-children
                   current-registry
                   bracketed?
                   bracket-body
                   map-tagged?
                   map-body))
 
-(struct macro-def (kind fixed-params rest-param template) #:transparent)
+(struct macro-def
+  (kind fixed-params rest-param template template-syntax definition-span source-bytes)
+  #:transparent)
 ;; kind: 'safe (internal fixture) or 'defmacro (the authoring surface)
 ;; fixed-params: list of symbols (positional)
 ;; rest-param: symbol or #f (variadic catchall)
-;; template: datum tree or procedural defmacro body
+;; template: explicit lossy datum view consumed by the pure evaluator
+;; template-syntax: immutable syntax value when the definition came from source
+;; definition-span/source-bytes: source facts retained across expansion
 
 ;; Expansion provenance: tracks macro name chain through recursive expansion.
-(struct expansion-ctx (macro-name depth parent) #:transparent)
+(struct expansion-ctx
+  (macro-name depth parent call-span origin source-bytes call-syntax)
+  #:transparent)
 ;; macro-name: symbol — which macro is being expanded
 ;; depth: integer — current expansion depth
 ;; parent: expansion-ctx or #f
 
-(define (make-root-ctx name)
-  (expansion-ctx name 0 #f))
+(define (syntax-source-bytes value)
+  (define metadata
+    (and (beagle-syntax? value) (beagle-syntax-reader-metadata value)))
+  (and metadata (reader-metadata-source-bytes metadata)))
 
-(define (push-ctx parent name)
-  (expansion-ctx name (+ 1 (expansion-ctx-depth parent)) parent))
+(define (make-root-ctx name [call-syntax #f])
+  (define call-span
+    (and (beagle-syntax? call-syntax) (beagle-syntax-span call-syntax)))
+  (define origin (make-expansion-origin name call-span))
+  (expansion-ctx
+   name 0 #f call-span origin (syntax-source-bytes call-syntax) call-syntax))
+
+(define (push-ctx parent name [call-syntax #f])
+  (define call-span
+    (and (beagle-syntax? call-syntax) (beagle-syntax-span call-syntax)))
+  (define parent-origin
+    (or (and (beagle-syntax? call-syntax)
+             (beagle-syntax-origin call-syntax))
+        (expansion-ctx-origin parent)))
+  (define origin (make-expansion-origin name call-span parent-origin))
+  (expansion-ctx
+   name
+   (+ 1 (expansion-ctx-depth parent))
+   parent
+   call-span
+   origin
+   (syntax-source-bytes call-syntax)
+   call-syntax))
 
 (define (format-expansion-chain ctx [max-lines 10])
   (define all-lines
@@ -78,7 +125,8 @@
       [else
        (error 'beagle "macro params: bad parameter ~v" (car rest))])))
 
-(define (register-macro! reg name kind params template)
+(define (register-macro! reg name kind params template
+                         #:template-syntax [template-source #f])
   (when (hash-has-key? reg name)
     (error 'beagle "duplicate macro definition: ~a" name))
   (unless (or (eq? kind 'safe) (eq? kind 'defmacro))
@@ -88,7 +136,22 @@
   (unless (list? params)
     (error 'beagle "macro ~a: parameters must be a list, got ~v" name params))
   (define-values (fixed rest-name) (parse-macro-params params))
-  (hash-set! reg name (macro-def kind fixed rest-name template)))
+  (define template-syntax
+    (cond
+      [(beagle-syntax? template-source) template-source]
+      [(syntax? template-source) (racket-syntax->beagle-syntax template-source)]
+      [else #f]))
+  (hash-set!
+   reg
+   name
+   (macro-def
+    kind
+    fixed
+    rest-name
+    template
+    template-syntax
+    (and template-syntax (beagle-syntax-span template-syntax))
+    (syntax-source-bytes template-syntax))))
 
 (define (lookup-macro reg name)
   (hash-ref reg name #f))
@@ -97,13 +160,27 @@
 
 (define SPLICE-MARKER 'splice)
 
-;; Expand a single macro application. `args` are raw datums.
-;; Macro bodies never execute through the host language.
+;; Expand a single macro application. The real compiler supplies immutable
+;; syntax arguments; the raw-datum branch is an explicit adapter retained for
+;; compiler tests and query tools.
 (define (expand-macro reg name args [ctx #f])
+  (define syntax-input? (andmap beagle-syntax? args))
+  (define syntax-args
+    (if syntax-input?
+        args
+        (map (lambda (arg) (datum->beagle-syntax arg #f)) args)))
   (define m (lookup-macro reg name))
   (unless m
     (error 'beagle "no macro named ~a" name))
-  (expand-template-macro m name args ctx))
+  (define effective-ctx
+    (or ctx
+        (make-root-ctx
+         name
+         (make-syntax-list
+          (cons (datum->beagle-syntax name #f) syntax-args) #f))))
+  (define result
+    (expand-template-macro m name syntax-args effective-ctx))
+  (if syntax-input? result (beagle-syntax->datum result)))
 
 (define (expand-template-macro m name args [ctx #f])
   (define fixed (macro-def-fixed-params m))
@@ -128,7 +205,8 @@
                 "macro ~a: expected ~a arg(s), got ~a"
                 name (length fixed) (length args)))
        (values args '())]))
-  (cond
+  (define output
+    (cond
     [(eq? kind 'defmacro)
      (define env
        (for/fold ([e (make-macro-env)])
@@ -160,6 +238,18 @@
      (define bindings
        (make-bindings fixed fixed-args rest-name rest-args))
      (substitute template bindings rest-name)]))
+  (define call-syntax (and ctx (expansion-ctx-call-syntax ctx)))
+  (define properties
+    (cond
+      [(and call-syntax (beagle-syntax-reader-metadata call-syntax))
+       => (lambda (metadata) (hasheq 'reader metadata 'generated-by name))]
+      [else (hasheq 'generated-by name)]))
+  (datum->beagle-syntax
+   output
+   (and ctx (expansion-ctx-call-span ctx))
+   empty-scope-set
+   (and ctx (expansion-ctx-origin ctx))
+   properties))
 
 (define (make-bindings fixed-params fixed-args rest-name rest-args)
   (define h (make-hash))
@@ -215,9 +305,10 @@
     [else (cons head tail)]))
 
 (define (macro-application? reg datum)
-  (and (pair? datum)
-       (symbol? (car datum))
-       (hash-has-key? reg (car datum))))
+  (define raw (if (beagle-syntax? datum) (beagle-syntax->datum datum) datum))
+  (and (pair? raw)
+       (symbol? (car raw))
+       (hash-has-key? reg (car raw))))
 
 (define MAX-EXPANSION-DEPTH 64)
 
@@ -317,29 +408,72 @@
 (define (program-macro-derived-table prog)
   (hash-ref PROGRAM->MACRO-TABLE prog #f))
 
-(define (expand-fully reg datum [depth 0] [ctx #f])
+(define (rebuild-syntax-sequence value children)
+  (cond
+    [(syntax-list? value)
+     (make-syntax-list
+      children
+      (beagle-syntax-span value)
+      (beagle-syntax-scopes value)
+      (beagle-syntax-origin value)
+      (beagle-syntax-properties value))]
+    [(syntax-vector? value)
+     (make-syntax-vector
+      children
+      (beagle-syntax-span value)
+      (beagle-syntax-scopes value)
+      (beagle-syntax-origin value)
+      (beagle-syntax-properties value))]
+    [else value]))
+
+(define (expand-syntax-children reg value children depth ctx)
+  (define expanded
+    (map (lambda (child) (expand-fully/syntax reg child depth ctx)) children))
+  (if (andmap eq? children expanded)
+      value
+      (rebuild-syntax-sequence value expanded)))
+
+(define (expand-fully/syntax reg value depth ctx)
   (when (>= depth MAX-EXPANSION-DEPTH)
     (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
     (error 'beagle
            "macro expansion exceeded depth ~a (possible infinite recursion)~a"
            MAX-EXPANSION-DEPTH chain))
   (cond
-    [(macro-application? reg datum)
-     (define name (car datum))
-     (define next-ctx (if ctx (push-ctx ctx name) (make-root-ctx name)))
+    [(macro-application? reg value)
+     (define raw (beagle-syntax->datum value))
+     (define name (car raw))
+     (define args
+       (if (syntax-list? value)
+           (cdr (syntax-list-children value))
+           (map (lambda (arg) (datum->beagle-syntax arg (beagle-syntax-span value)))
+                (cdr raw))))
+     (define next-ctx
+       (if ctx (push-ctx ctx name value) (make-root-ctx name value)))
      (define m (lookup-macro reg name))
      (define handler (current-trace-handler))
-     (when handler (handler 'before name datum depth))
+     (when handler (handler 'before name raw depth))
      (define expanded
        (parameterize ([current-macro-expansion-ctx next-ctx])
-         (expand-macro reg name (cdr datum) next-ctx)))
-     (when handler (handler 'after name expanded depth))
+         (expand-macro reg name args next-ctx)))
+     (when handler
+       (handler 'after name (beagle-syntax->datum expanded) depth))
      (parameterize ([current-macro-expansion-ctx next-ctx])
-       (expand-fully reg expanded (+ depth 1) next-ctx))]
-    [(pair? datum)
-     (cons (expand-fully reg (car datum) depth ctx)
-           (expand-fully reg (cdr datum) depth ctx))]
-    [else datum]))
+       (expand-fully/syntax reg expanded (+ depth 1) next-ctx))]
+    [(syntax-list? value)
+     (expand-syntax-children
+      reg value (syntax-list-children value) depth ctx)]
+    [(syntax-vector? value)
+     (expand-syntax-children
+      reg value (syntax-vector-children value) depth ctx)]
+    [else value]))
+
+(define (expand-fully reg value [depth 0] [ctx #f])
+  (define syntax-input? (beagle-syntax? value))
+  (define syntax-value
+    (if syntax-input? value (datum->beagle-syntax value #f)))
+  (define expanded (expand-fully/syntax reg syntax-value depth ctx))
+  (if syntax-input? expanded (beagle-syntax->datum expanded)))
 
 ;; --- hygiene (safe macros only) -------------------------------------------
 ;;

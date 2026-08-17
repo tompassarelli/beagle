@@ -32,12 +32,50 @@
          beagle/private/types
          beagle/private/macros
          beagle/private/tags
-         (only-in beagle/private/ast program-forms def-form? def-form-name def-form-value))
+         (only-in beagle/private/ast
+                  beagle-syntax-origin
+                  beagle-syntax-span
+                  datum->beagle-syntax
+                  empty-scope-set
+                  expansion-origin-call-span
+                  expansion-origin-macro-id
+                  expansion-origin-parent
+                  reader-metadata
+                  src-loc
+                  program-forms
+                  def-form?
+                  def-form-name
+                  def-form-value))
 
 (define (parse-prog . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+
+(test-case "syntax membrane: nested expansion records call-site origin chain"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'inner 'defmacro '(x)
+   '(quasiquote (+ (unquote x) 1)))
+  (register-macro!
+   reg 'outer 'defmacro '(x)
+   '(quasiquote (inner (unquote x))))
+  (define call-span (src-loc 9 4 'caller 'original #f 101 15))
+  (define call
+    (datum->beagle-syntax
+     '(outer value)
+     call-span
+     empty-scope-set
+     #f
+     (hasheq 'reader (reader-metadata #"(outer value)" 'paren))))
+  (define expanded (expand-fully reg call))
+  (define inner-origin (beagle-syntax-origin expanded))
+  (define outer-origin (expansion-origin-parent inner-origin))
+  (check-eq? (expansion-origin-macro-id inner-origin) 'inner)
+  (check-eq? (expansion-origin-macro-id outer-origin) 'outer)
+  (check-equal? (expansion-origin-call-span inner-origin) call-span)
+  (check-equal? (expansion-origin-call-span outer-origin) call-span)
+  (check-equal? (beagle-syntax-span expanded) call-span))
 
 ;; --- 1. gensym binder check ------------------------------------------------
 ;;

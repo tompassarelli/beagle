@@ -96,12 +96,10 @@
           effective-kind
           details)))
 
-;; Build an identity-preserving bridge from a macro call's raw datum tree back
-;; to the parallel reader syntax tree. Macro arguments intentionally remain raw
-;; datums in the compile-time evaluator, so a procedural macro can retain the
-;; exact input collection (or any `rest` tail) but cannot itself own srclocs.
-;; Mapping every pair tail lets `syntax-error-at` address a zero-based logical
-;; element without flattening or reconstructing declaration groups.
+;; Legacy raw-datum callers still need a bridge back to the parallel Racket
+;; reader tree. The real compiler path carries Beagle Syntax directly, while
+;; this suffix map lets the adapter resolve a zero-based logical element without
+;; flattening or reconstructing declaration groups.
 (define (macro-call-source-suffixes call-datum call-stx)
   (define suffixes (make-hasheq))
   (define (walk datum stx)
@@ -117,7 +115,10 @@
   suffixes)
 
 (define (macro-source-error-stx error call-datum call-stx)
-  (and (syntax? call-stx)
+  (cond
+    [(beagle-syntax? (exn:fail:macro-source-form error))
+     (beagle-syntax->racket-syntax (exn:fail:macro-source-form error))]
+    [(syntax? call-stx)
        (let* ([collection (exn:fail:macro-source-collection error)]
               [suffixes (macro-call-source-suffixes call-datum call-stx)]
               [children (and (pair? collection)
@@ -132,7 +133,8 @@
          (and logical-children
               (exact-nonnegative-integer? index)
               (< index (length logical-children))
-              (list-ref logical-children index)))))
+              (list-ref logical-children index)))]
+    [else #f]))
 
 (define (source-detail-path stx)
   (define source (and (syntax? stx) (syntax-source stx)))
@@ -155,7 +157,11 @@
   (define stray-stx (macro-source-error-stx error call-datum call-stx))
   (define base-details
     (hasheq 'stray-form
-            (binding-datum->src (exn:fail:macro-source-form error))))
+            (binding-datum->src
+             (let ([form (exn:fail:macro-source-form error)])
+               (if (beagle-syntax? form)
+                   (beagle-syntax->datum form)
+                   form)))))
   (define details
     (if stray-stx
         (hash-set* base-details
@@ -182,7 +188,11 @@
       ([exn:fail:macro-source?
         (lambda (error)
           (raise-macro-source-error error datum stx))])
-    (expand-fully registry datum)))
+    (expand-fully
+     registry
+     (if (syntax? stx)
+         (racket-syntax->beagle-syntax stx (current-source-bytes))
+         (datum->beagle-syntax datum #f)))))
 
 ;; The beagle readtable (regex / raw-string / #(...) fn-shorthand / #? reader
 ;; conditionals / quote / quasiquote / unquote / [ ] { } #{ } containers) is
@@ -1289,15 +1299,16 @@
     (raise-argument-error 'parse-program/bytes "bytes?" source-bytes))
   (define snapshot (bytes->immutable-bytes source-bytes))
   (define prog
-    (parse-program
-     (let ([stxs
-            (read-beagle-syntax/bytes
-             source-path snapshot #:source-id source-id)])
-       (if target-override
-           (retarget-beagle-syntax stxs target-override)
-           stxs))
-     #:source-path (or source-id source-path)
-     #:module-resolver module-resolver))
+    (parameterize ([current-source-bytes snapshot])
+      (parse-program
+       (let ([stxs
+              (read-beagle-syntax/bytes
+               source-path snapshot #:source-id source-id)])
+         (if target-override
+             (retarget-beagle-syntax stxs target-override)
+             stxs))
+       #:source-path (or source-id source-path)
+       #:module-resolver module-resolver)))
   (hash-set! PROGRAM->SOURCE-BYTES prog snapshot)
   prog)
 
@@ -1980,7 +1991,7 @@
                           "defalias requires (defalias Name <type-expr>), got: ~v" d)]
       [_ (void)]))
 
-  (for ([d (in-list datums)])
+  (for ([d (in-list datums)] [s (in-list stxs)])
     (match d
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
@@ -2029,7 +2040,17 @@
          (raise-parse-error 'bad-meta-value
                             "macro ~a: parameters must be written in `[...]`" name))
        (define ps (bracket-body macro-params))
-       (register-macro! registry name 'defmacro ps template)
+       (define template-stx (stx-ref (stx-subs s) 3))
+       (register-macro!
+        registry
+        name
+        'defmacro
+        ps
+        template
+        #:template-syntax
+        (and template-stx
+             (racket-syntax->beagle-syntax
+              template-stx (current-source-bytes))))
        (hash-set! declared-macros name (hash-ref registry name))]
 
       [(list 'declare-extern (? bracketed? names-form) type-expr)
@@ -2146,8 +2167,12 @@
           (define from-macro?
             (and (pair? d) (eq? (head-meaning registry (car d)) 'macro)))
           (define expanded
-            (if from-macro? (expand-fully/at-source registry d s) d))
-          (define (parse-macro-output form-datum)
+            (and from-macro? (expand-fully/at-source registry d s)))
+          (define expanded-datum
+            (and expanded (beagle-syntax->datum expanded)))
+          (define expanded-children
+            (and (syntax-list? expanded) (syntax-list-children expanded)))
+          (define (parse-macro-output form-syntax)
             ;; Blame the macro CALL SITE for everything the expansion
             ;; produces. Macro output is generated code with no source of its
             ;; own, so a parse/type error in the expansion should point at
@@ -2157,30 +2182,39 @@
             ;; analog of Lean's withRef / fromRef-canonical, where synthesized
             ;; nodes inherit the reference position. (When `s` has no srcloc,
             ;; e.g. structurally-built test input, this is a graceful no-op.)
-            (define expansion-stx (datum->syntax #f form-datum s))
+            (define expansion-stx
+              (if (beagle-syntax? form-syntax)
+                  (beagle-syntax->racket-syntax form-syntax)
+                  (datum->syntax #f form-syntax s)))
             ;; Set current-macro-expansion-ctx so that any raise-parse-error
             ;; triggered while parsing this macro output rebuckets to
             ;; 'macro-expansion-parse-error. Also record the resulting AST
             ;; node so check.rkt can do the same for type errors.
-            (define ctx (make-root-ctx (car d)))
+            (define ctx
+              (make-root-ctx
+               (car d)
+               (racket-syntax->beagle-syntax s (current-source-bytes))))
             (define parsed-node
               (parameterize ([current-macro-expansion-ctx ctx])
                 (parse-top expansion-stx)))
             (mark-macro-derived! parsed-node ctx)
             parsed-node)
           (cond
-            [(and from-macro? (pair? expanded) (eq? (car expanded) 'do))
-             (for/list ([form-datum (in-list (cdr expanded))])
-               (cons (parse-macro-output form-datum) s))]
-            [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
-             (for/list ([form-datum (in-list (cdr expanded))])
-               (cons (parse-macro-output form-datum) s))]
-            [(eq? expanded d)
+            [(and from-macro?
+                  (pair? expanded-datum)
+                  (eq? (car expanded-datum) 'do))
+             (for/list ([form-syntax (in-list (cdr expanded-children))])
+               (cons (parse-macro-output form-syntax) s))]
+            [(and from-macro?
+                  (pair? expanded-datum)
+                  (eq? (car expanded-datum) '#%splice-forms))
+             (for/list ([form-syntax (in-list (cdr expanded-children))])
+               (cons (parse-macro-output form-syntax) s))]
+            [(not from-macro?)
              (list (cons (parse-top s) s))]
             [from-macro?
              (list (cons (parse-macro-output expanded) s))]
-            [else
-             (list (cons (parse-top (datum->syntax #f expanded)) s))])))))
+            [else (error 'beagle "unreachable macro expansion state")])))))
   (define parsed0 (map car pairs))
   (define form-stxs0 (map cdr pairs))
   ;; Mode-2 hygiene: splice in `(def alias orig)` after each original def for
@@ -2354,7 +2388,11 @@
         ;; bucketed as 'macro-expansion-parse-error. Also record the
         ;; resulting node in the macro-derived table so check.rkt
         ;; rebuckets later type errors as 'macro-expansion-type-error.
-        (define ctx (make-root-ctx (car d)))
+        (define call-syntax
+          (if (syntax? x)
+              (racket-syntax->beagle-syntax x (current-source-bytes))
+              (datum->beagle-syntax d #f)))
+        (define ctx (make-root-ctx (car d) call-syntax))
         (define parsed-node
           (parameterize ([current-macro-expansion-ctx ctx])
             ;; Blame the call site `x` for the expansion: tag the generated
@@ -2368,10 +2406,8 @@
             ;; call site only when `x` is real syntax, else #f (no srcloc, same
             ;; as the pre-blame behavior). Fixes a crash on nested macro calls.
             (parse-expr
-             (datum->syntax
-              #f
-              (expand-fully/at-source reg d (and (syntax? x) x))
-              (and (syntax? x) x)))))
+             (beagle-syntax->racket-syntax
+              (expand-fully/at-source reg d (and (syntax? x) x))))))
         (mark-macro-derived! parsed-node ctx)
         parsed-node]
        [else

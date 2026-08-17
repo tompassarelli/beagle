@@ -12,6 +12,13 @@
 (require racket/list
          racket/match
          racket/string
+         (only-in "ast.rkt"
+                  beagle-syntax?
+                  beagle-syntax->datum
+                  syntax-list?
+                  syntax-list-children
+                  syntax-vector?
+                  syntax-vector-children)
          (only-in "tags.rkt"
                   BRACKET-TAG MAP-TAG SET-TAG ann))
 
@@ -39,10 +46,30 @@
   (hash-ref env sym
     (lambda () (error 'macro-eval "unbound: ~a" sym))))
 
+;; Syntax values are first-class evaluator values at the macro boundary. Pure
+;; computation observes their datum view; constructors and quasiquote may pass
+;; the original value through, which lets the output adapter retain an
+;; antiquoted child by identity.
+(define (macro-datum value)
+  (if (beagle-syntax? value) (beagle-syntax->datum value) value))
+
+(define (macro-equal? left right)
+  (equal? (macro-datum left) (macro-datum right)))
+
+(define (macro-number value who)
+  (define datum (macro-datum value))
+  (unless (number? datum)
+    (error 'macro-eval "~a expected a number, got: ~v" who datum))
+  datum)
+
+(define (macro-truthy? value)
+  (not (eq? (macro-datum value) #f)))
+
 ;; --- Evaluator ---------------------------------------------------------------
 
 (define (macro-eval expr env)
   (cond
+    [(beagle-syntax? expr) expr]
     [(exact-integer? expr) expr]
     [(real? expr) expr]
     [(string? expr) expr]
@@ -120,22 +147,28 @@
      (macro-eval-body (cdr body) env)]))
 
 (define (macro-seq? value)
-  (or (list? value)
+  (or (syntax-list? value)
+      (syntax-vector? value)
+      (list? value)
       (and (pair? value) (eq? (car value) BRACKET-TAG))))
 
 ;; Reader delimiters are semantic at macro time.  Racket represents every
 ;; Beagle container as a list, so the reader tags -- not the host predicate --
 ;; distinguish `(field Type)` from `[field Type]`.
 (define (macro-list-datum? value)
-  (and (list? value)
-       (or (null? value)
-           (not (memq (car value) (list BRACKET-TAG MAP-TAG SET-TAG))))))
+  (or (syntax-list? value)
+      (and (list? value)
+           (or (null? value)
+               (not (memq (car value) (list BRACKET-TAG MAP-TAG SET-TAG)))))))
 
 (define (macro-vector-datum? value)
-  (and (pair? value) (eq? (car value) BRACKET-TAG)))
+  (or (syntax-vector? value)
+      (and (pair? value) (eq? (car value) BRACKET-TAG))))
 
 (define (macro-seq value who)
   (cond
+    [(syntax-list? value) (syntax-list-children value)]
+    [(syntax-vector? value) (syntax-vector-children value)]
     [(and (pair? value) (eq? (car value) BRACKET-TAG)) (cdr value)]
     [(list? value) value]
     [else (error 'macro-eval "~a expected a list or vec, got: ~v" who value)]))
@@ -166,7 +199,7 @@
 
 (define (eval-if parts env)
   (define test-val (macro-eval (car parts) env))
-  (if test-val
+  (if (macro-truthy? test-val)
       (macro-eval (cadr parts) env)
       (if (pair? (cddr parts))
           (macro-eval (caddr parts) env)
@@ -182,7 +215,7 @@
     [else
      (define test (car clauses))
      (define result (cadr clauses))
-     (if (or (eq? test ':else) (macro-eval test env))
+     (if (or (eq? test ':else) (macro-truthy? (macro-eval test env)))
          (macro-eval result env)
          (eval-flat-cond (cddr clauses) env))]))
 
@@ -197,7 +230,9 @@
      (when (< (length items) 2)
        (error 'macro-eval "cond clause needs a test and body: ~v" (car clauses)))
      (define test (car items))
-     (if (or (eq? test ':else) (eq? test 'else) (macro-eval test env))
+     (if (or (eq? test ':else)
+             (eq? test 'else)
+             (macro-truthy? (macro-eval test env)))
          (eval-body (cdr items) env)
          (eval-bracket-cond (cdr clauses) env))]))
 
@@ -335,13 +370,14 @@
 (define (macro-reverse xs) (reverse (macro-seq xs "reverse")))
 (define (macro-append . xss)
   (apply append (map (lambda (xs) (macro-seq xs "append")) xss)))
-(define (macro-distinct xs) (remove-duplicates (macro-seq xs "distinct") equal?))
+(define (macro-distinct xs)
+  (remove-duplicates (macro-seq xs "distinct") macro-equal?))
 (define (macro-distinct? . args)
   (define items
     (if (and (= (length args) 1) (macro-seq? (car args)))
         (macro-seq (car args) "distinct?")
         args))
-  (= (length items) (length (remove-duplicates items equal?))))
+  (= (length items) (length (remove-duplicates items macro-equal?))))
 (define (macro-every? pred xs)
   (andmap (callable pred) (macro-seq xs "every?")))
 (define (macro-error . parts)
@@ -379,16 +415,17 @@
 ;; --- Syntax constructors -----------------------------------------------------
 
 (define (syntax-binding-datum s)
+  (define value (macro-datum s))
   ;; A vector is a binding collection only when it contains one complete list
   ;; declaration.  Bare `[x Point]` is itself a sequential binding form, never
   ;; a flattened spelling of `(x Point)`.
-  (if (and (pair? s)
-           (eq? (car s) BRACKET-TAG)
-           (= (length (cdr s)) 1)
-           (list? (cadr s))
-           (memv (length (cadr s)) '(2 3)))
-      (cadr s)
-      s))
+  (if (and (pair? value)
+           (eq? (car value) BRACKET-TAG)
+           (= (length (cdr value)) 1)
+           (list? (cadr value))
+           (memv (length (cadr value)) '(2 3)))
+      (cadr value)
+      value))
 
 (define (syntax-binding-form? datum)
   (or (symbol? datum)
@@ -461,39 +498,41 @@
   (list 'get target field))
 
 (define (make-keyword sym)
-  (string->symbol (format ":~a" sym)))
+  (string->symbol (format ":~a" (macro-datum sym))))
 
 (define (format-symbol fmt . args)
-  (string->symbol (apply format fmt args)))
+  (string->symbol (apply format (macro-datum fmt) (map macro-datum args))))
 
 ;; --- str (coercing) ----------------------------------------------------------
 
 (define (beagle-datum->src datum)
+  (define value (macro-datum datum))
   (define (container open close items)
     (string-append open
                    (string-join (map beagle-datum->src items) " ")
                    close))
   (cond
-    [(and (pair? datum) (eq? (car datum) BRACKET-TAG))
-     (container "[" "]" (cdr datum))]
-    [(and (pair? datum) (eq? (car datum) MAP-TAG))
-     (container "{" "}" (cdr datum))]
-    [(and (pair? datum) (eq? (car datum) SET-TAG))
-     (container "#{" "}" (cdr datum))]
-    [(and (pair? datum) (list? datum))
-     (container "(" ")" datum)]
-    [(symbol? datum) (symbol->string datum)]
-    [(number? datum) (number->string datum)]
-    [else (format "~s" datum)]))
+    [(and (pair? value) (eq? (car value) BRACKET-TAG))
+     (container "[" "]" (cdr value))]
+    [(and (pair? value) (eq? (car value) MAP-TAG))
+     (container "{" "}" (cdr value))]
+    [(and (pair? value) (eq? (car value) SET-TAG))
+     (container "#{" "}" (cdr value))]
+    [(and (pair? value) (list? value))
+     (container "(" ")" value)]
+    [(symbol? value) (symbol->string value)]
+    [(number? value) (number->string value)]
+    [else (format "~s" value)]))
 
 (define (beagle-str . args)
   (apply string-append
          (map (lambda (v)
+                (define datum (macro-datum v))
                 (cond
-                  [(string? v) v]
-                  [(symbol? v) (symbol->string v)]
-                  [(number? v) (number->string v)]
-                  [else (beagle-datum->src v)]))
+                  [(string? datum) datum]
+                  [(symbol? datum) (symbol->string datum)]
+                  [(number? datum) (number->string datum)]
+                  [else (beagle-datum->src datum)]))
               args)))
 
 ;; --- Built-in environment ----------------------------------------------------
@@ -509,8 +548,8 @@
    'second macro-second
    'third macro-third
    'rest macro-rest
-   'null? null?
-   'pair? pair?
+   'null? (lambda (xs) (null? (macro-seq xs "null?")))
+   'pair? (lambda (xs) (pair? (macro-seq xs "pair?")))
    'list? macro-list-datum?
    'vector? macro-vector-datum?
    'empty? (lambda (xs) (null? (macro-seq xs "empty?")))
@@ -533,25 +572,34 @@
    'str beagle-str
    ;; A record's accessors are `<downcased-name>-<field>`, so a macro that
    ;; generates calls to them has to be able to downcase.
-   'lower-case (lambda (s) (string-downcase (if (symbol? s) (symbol->string s) s)))
-   'upper-case (lambda (s) (string-upcase (if (symbol? s) (symbol->string s) s)))
-   'string->symbol string->symbol
-   'symbol->string symbol->string
-   'format format
+   'lower-case (lambda (s)
+                 (define datum (macro-datum s))
+                 (string-downcase
+                  (if (symbol? datum) (symbol->string datum) datum)))
+   'upper-case (lambda (s)
+                 (define datum (macro-datum s))
+                 (string-upcase
+                  (if (symbol? datum) (symbol->string datum) datum)))
+   'string->symbol (lambda (s) (string->symbol (macro-datum s)))
+   'symbol->string (lambda (s) (symbol->string (macro-datum s)))
+   'format (lambda (fmt . args)
+             (apply format (macro-datum fmt) (map macro-datum args)))
    'format-symbol format-symbol
 
-   '= equal?
-   'not= (lambda (a b) (not (equal? a b)))
-   'not not
-   '< <
-   '> >
-   '<= <=
-   '>= >=
-   '+ +
-   '- -
-   '* *
-   'quot quotient
-   'mod modulo
+   '= macro-equal?
+   'not= (lambda (a b) (not (macro-equal? a b)))
+   'not (lambda (value) (not (macro-truthy? value)))
+   '< (lambda (a b) (< (macro-number a '<) (macro-number b '<)))
+   '> (lambda (a b) (> (macro-number a '>) (macro-number b '>)))
+   '<= (lambda (a b) (<= (macro-number a '<=) (macro-number b '<=)))
+   '>= (lambda (a b) (>= (macro-number a '>=) (macro-number b '>=)))
+   '+ (lambda args (apply + (map (lambda (v) (macro-number v '+)) args)))
+   '- (lambda args (apply - (map (lambda (v) (macro-number v '-)) args)))
+   '* (lambda args (apply * (map (lambda (v) (macro-number v '*)) args)))
+   'quot (lambda (a b)
+           (quotient (macro-number a 'quot) (macro-number b 'quot)))
+   'mod (lambda (a b)
+          (modulo (macro-number a 'mod) (macro-number b 'mod)))
 
    'true #t
    'false #f

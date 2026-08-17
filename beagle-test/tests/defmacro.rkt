@@ -36,6 +36,35 @@
 
 (define (br . xs) (cons BRACKET-TAG xs))
 
+(test-case "defmacro: real reader returns the caller Syntax unchanged"
+  (define source
+    (string->bytes/utf-8
+     (string-append
+      "#lang beagle/clj\n"
+      "(ns syntax.membrane)\n"
+      "(defmacro identity [form] form)\n"
+      "(def out (identity (+ 1 2)))\n")))
+  (define source-id "syntax-membrane.bclj")
+  (define prog
+    (parse-program/bytes source
+                         #:source-path source-id
+                         #:source-id source-id))
+  (define forms
+    (read-beagle-syntax/bytes source-id source #:source-id source-id))
+  (define out-stx
+    (for/first ([form (in-list forms)]
+                #:when (equal? (take (syntax->datum form) 2) '(def out)))
+      form))
+  (define call-stx (stx-ref (stx-subs out-stx) 2))
+  (define call-syntax (racket-syntax->beagle-syntax call-stx source))
+  (define caller-child (cadr (syntax-list-children call-syntax)))
+  (define expanded (expand-fully (program-macros prog) call-syntax))
+  (check-eq? expanded caller-child)
+  (check-equal?
+   (reader-metadata-source-bytes (beagle-syntax-reader-metadata expanded))
+   #"(+ 1 2)")
+  (check-equal? (beagle-syntax-span expanded) (stx->src-loc (stx-ref (stx-subs call-stx) 1))))
+
 ;; --- (a) basic unquote ----------------------------------------------------
 
 (test-case "defmacro: inc1 expands quasiquote+unquote"
