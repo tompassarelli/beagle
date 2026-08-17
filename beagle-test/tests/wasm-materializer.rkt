@@ -3,6 +3,7 @@
 (require rackunit
          openssl/sha1
          racket/file
+         racket/list
          racket/path
          racket/port
          racket/runtime-path
@@ -23,6 +24,9 @@
 (define bb-command
   (or (find-executable-path "bb")
       (error 'wasm-materializer-test "babashka is required")))
+(define git-command
+  (or (find-executable-path "git")
+      (error 'wasm-materializer-test "git is required")))
 
 (define (write-text path text)
   (make-parent-directory* path)
@@ -32,6 +36,166 @@
 (define (write-executable path text)
   (write-text path text)
   (file-or-directory-permissions path #o755))
+
+(define fixture-cache-format "beagle-wasm-test-fixture/v1")
+(define fixture-cache-root
+  (let ([override (getenv "BEAGLE_WASM_FIXTURE_CACHE")])
+    (if override
+        (path->complete-path override)
+        (build-path (find-system-path 'cache-dir)
+                    "beagle" "wasm-test-fixtures"))))
+
+(define (sha256-hex bytes)
+  (bytes->hex-string (sha256-bytes bytes)))
+
+(define (git-clean?)
+  (define sink (open-output-nowhere))
+  (parameterize ([current-output-port sink]
+                 [current-error-port sink])
+    (and (zero? (system*/exit-code git-command "-C" (path->string repo-root)
+                                    "diff" "--quiet" "--ignore-submodules" "--"))
+         (zero? (system*/exit-code git-command "-C" (path->string repo-root)
+                                    "diff" "--cached" "--quiet"
+                                    "--ignore-submodules" "--")))))
+
+(define clean-revision
+  (and (git-clean?)
+       (let ([out (open-output-string)])
+         (define status
+           (parameterize ([current-output-port out]
+                          [current-error-port (open-output-nowhere)])
+             (system*/exit-code git-command "-C" (path->string repo-root)
+                                "rev-parse" "--verify" "HEAD")))
+         (and (zero? status) (string-trim (get-output-string out))))))
+
+(define (fixture-cache-key kind source-text details)
+  (and clean-revision
+       (sha256-hex
+        (string->bytes/utf-8
+         (string-join
+          (list fixture-cache-format
+                clean-revision
+                kind
+                source-text
+                details
+                (path->string racket-command)
+                (path->string bb-command))
+          "\n")))))
+
+(define (fixture-tree-files root)
+  (define (walk directory)
+    (append-map
+     (lambda (name)
+       (define path (build-path directory name))
+       (cond
+         [(link-exists? path)
+          (error 'wasm-materializer-test
+                 "fixture cache contains a symbolic link: ~a" path)]
+         [(directory-exists? path) (walk path)]
+         [(file-exists? path)
+          (if (equal? path (build-path root "READY")) '() (list path))]
+         [else
+          (error 'wasm-materializer-test
+                 "fixture cache contains an unsupported entry: ~a" path)]))
+     (directory-list directory)))
+  (sort (walk root)
+        string<?
+        #:key (lambda (path)
+                (path->string (find-relative-path root path)))))
+
+(define (fixture-tree-digest root)
+  (sha256-hex
+   (string->bytes/utf-8
+    (string-join
+     (for/list ([path (in-list (fixture-tree-files root))])
+       (format "~a  ~a"
+               (sha256-hex (file->bytes path))
+               (path->string (find-relative-path root path))))
+     "\n"))))
+
+(define (fixture-cache-entry-valid? entry key required)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (and (directory-exists? entry)
+         (not (link-exists? entry))
+         (for/and ([relative (in-list required)])
+           (define path (apply build-path entry relative))
+           (and (file-exists? path) (not (link-exists? path))))
+         (let ([ready (build-path entry "READY")])
+           (and (file-exists? ready)
+                (not (link-exists? ready))
+                (equal? (file->string ready)
+                        (format "~a ~a ~a\n"
+                                fixture-cache-format key
+                                (fixture-tree-digest entry))))))))
+
+(define (shared-fixture kind source-text details required build! fixture-at)
+  (define key (fixture-cache-key kind source-text details))
+  (cond
+    [(not key)
+     (define root
+       (make-temporary-file (format "beagle-wasm-~a-fixture-~~a" kind)
+                            'directory))
+     (build! root)
+     (fixture-at root)]
+    [else
+     (make-directory* fixture-cache-root)
+     (define locks (build-path fixture-cache-root ".locks"))
+     (make-directory* locks)
+     (define entry (build-path fixture-cache-root key))
+     (define lock (build-path locks (string-append key ".lock")))
+     (call-with-file-lock/timeout
+      entry 'exclusive
+      (lambda ()
+        (cond
+          [(fixture-cache-entry-valid? entry key required)
+           (eprintf "wasm-fixture-cache: HIT ~a ~a\n" kind key)]
+          [else
+           (when (or (file-exists? entry)
+                     (directory-exists? entry)
+                     (link-exists? entry))
+             (eprintf "wasm-fixture-cache: CORRUPT ~a ~a; retiring\n" kind key)
+             (delete-directory/files entry))
+           (eprintf "wasm-fixture-cache: MISS ~a ~a\n" kind key)
+           (define staging
+             (make-temporary-file (string-append ".staging." key ".~a")
+                                  'directory fixture-cache-root))
+           (dynamic-wind
+             void
+             (lambda ()
+               (build! staging)
+               (write-text
+                (build-path staging "READY")
+                (format "~a ~a ~a\n"
+                        fixture-cache-format key
+                        (fixture-tree-digest staging)))
+               (unless (fixture-cache-entry-valid? staging key required)
+                 (error 'wasm-materializer-test
+                        "new shared fixture failed validation: ~a" kind))
+               (rename-file-or-directory staging entry)
+               (eprintf "wasm-fixture-cache: PUBLISHED ~a ~a\n" kind key))
+             (lambda ()
+               (when (directory-exists? staging)
+                 (delete-directory/files staging))))])
+        (fixture-at entry))
+      (lambda ()
+        (error 'wasm-materializer-test
+               "timed out acquiring shared ~a fixture lock" kind))
+      #:lock-file lock
+      #:max-delay 128.0)]))
+
+(define base-fixture-source
+  (string-append "#lang beagle\n"
+                 "(ns fixture.core)\n"
+                 "(defn entry [] Int 42)\n"))
+(define buffer-fixture-source
+  (string-append
+   "#lang beagle\n"
+   "(ns fixture.state)\n"
+   "(def cells (Buffer Float) (double-array 4))\n"
+   "(defn boot! [] Int\n"
+   "  (do (aset-double! cells 0 1.5) 0))\n"
+   "(defn step! [] Int\n"
+   "  (do (aset-double! cells 0 (+ (aget cells 0) 1.0)) 0))\n"))
 
 (define base-fixture #f)
 
@@ -140,38 +304,52 @@
   ;; Generate the compiler-owned evidence once. Tests copy this immutable C17
   ;; generation, rather than forging a second receipt or a fake classpath.
   (unless base-fixture
-    (define root (make-temporary-file "beagle-wasm-canonical-fixture-~a" 'directory))
-    (define source (build-path root "fixture.bgl"))
-    (define ast (build-path root "fixture.ast.json"))
-    (define artifacts (build-path root "artifacts"))
-    (define compiled (build-path root "compiled"))
-    (write-text source
-                (string-append "#lang beagle\n"
-                               "(ns fixture.core)\n"
-                               "(defn entry [] Int 42)\n"))
-    (check-equal?
-     (run-bounded beagle "build" "--materializer" "c17" "--abi" "wasm32"
-                  "--out" (path->string artifacts) (path->string source))
-     0 "canonical C17 fixture build failed")
-    (check-equal?
-     (run-bounded (build-path repo-root "bin" "beagle-build-all")
-                  (build-path repo-root "native-core/src/native/core.bclj")
-                  (build-path repo-root "native-core/src/native/stages.bclj")
-                  "--out" (path->string compiled))
-     0 "canonical receipt classpath build failed")
-    (define ast-output (open-output-string))
-    (define ast-error (open-output-string))
-    (define ast-code
-      (parameterize ([current-directory repo-root]
-                     [current-output-port ast-output]
-                     [current-error-port ast-error])
-        (run-owned/bounded 120 beagle-ast (path->string source))))
-    (check-equal? ast-code 0 (string-append (get-output-string ast-output)
-                                             (get-output-string ast-error)))
-    (write-text ast (get-output-string ast-output))
     (set! base-fixture
-          (hasheq 'root root 'artifacts artifacts 'compiled compiled
-                  'source source 'ast ast)))
+          (shared-fixture
+           "base" base-fixture-source "c17 wasm32; core+stages classpath"
+           '(("fixture.bgl") ("fixture.ast.json")
+             ("artifacts" "source.facts")
+             ("artifacts" "module.native-program")
+             ("artifacts" "native.receipts")
+             ("artifacts" "c17.receipt")
+             ("artifacts" "module_0.h")
+             ("artifacts" "module_0.c")
+             ("compiled" "native" "core.clj")
+             ("compiled" "native" "stages.clj"))
+           (lambda (root)
+             (define source (build-path root "fixture.bgl"))
+             (define ast (build-path root "fixture.ast.json"))
+             (define artifacts (build-path root "artifacts"))
+             (define compiled (build-path root "compiled"))
+             (write-text source base-fixture-source)
+             (check-equal?
+              (run-bounded beagle "build" "--materializer" "c17"
+                           "--abi" "wasm32" "--out" (path->string artifacts)
+                           (path->string source))
+              0 "canonical C17 fixture build failed")
+             (check-equal?
+              (run-bounded (build-path repo-root "bin" "beagle-build-all")
+                           (build-path repo-root "native-core/src/native/core.bclj")
+                           (build-path repo-root "native-core/src/native/stages.bclj")
+                           "--out" (path->string compiled))
+              0 "canonical receipt classpath build failed")
+             (define ast-output (open-output-string))
+             (define ast-error (open-output-string))
+             (define ast-code
+               (parameterize ([current-directory repo-root]
+                              [current-output-port ast-output]
+                              [current-error-port ast-error])
+                 (run-owned/bounded 120 beagle-ast (path->string source))))
+             (check-equal?
+              ast-code 0 (string-append (get-output-string ast-output)
+                                        (get-output-string ast-error)))
+             (write-text ast (get-output-string ast-output)))
+           (lambda (root)
+             (hasheq 'root root
+                     'artifacts (build-path root "artifacts")
+                     'compiled (build-path root "compiled")
+                     'source (build-path root "fixture.bgl")
+                     'ast (build-path root "fixture.ast.json"))))))
   base-fixture)
 
 (define (make-artifacts scratch)
@@ -203,41 +381,50 @@
   ;; so this fixture is the compiler-owned evidence for the adapter state
   ;; surface. Entries ride the C17 build so native.entry-map binds them.
   (unless buffer-fixture
-    (define root (make-temporary-file "beagle-wasm-buffer-fixture-~a" 'directory))
-    (define source (build-path root "state.bgl"))
-    (define ast (build-path root "state.ast.json"))
-    (define artifacts (build-path root "artifacts"))
-    (write-text source
-                (string-append
-                 "#lang beagle\n"
-                 "(ns fixture.state)\n"
-                 "(def cells (Buffer Float) (double-array 4))\n"
-                 "(defn boot! [] Int\n"
-                 "  (do (aset-double! cells 0 1.5) 0))\n"
-                 "(defn step! [] Int\n"
-                 "  (do (aset-double! cells 0 (+ (aget cells 0) 1.0)) 0))\n"))
-    (check-equal?
-     (apply run-bounded beagle "build" "--materializer" "c17" "--abi" "wasm32"
-            (append
-             (apply append (for/list ([entry (in-list buffer-fixture-entries)])
-                             (list "--entry" entry)))
-             (list "--out" (path->string artifacts) (path->string source))))
-     0 "canonical Buffer C17 fixture build failed")
-    (define ast-output (open-output-string))
-    (define ast-error (open-output-string))
-    (define ast-code
-      (parameterize ([current-directory repo-root]
-                     [current-output-port ast-output]
-                     [current-error-port ast-error])
-        (run-owned/bounded 120 beagle-ast (path->string source))))
-    (check-equal? ast-code 0 (string-append (get-output-string ast-output)
-                                            (get-output-string ast-error)))
-    (write-text ast (get-output-string ast-output))
+    (define base (canonical-base-fixture))
     (set! buffer-fixture
-          (hasheq 'root root
-                  'artifacts artifacts
-                  'compiled (fixture-path (canonical-base-fixture) 'compiled)
-                  'source source 'ast ast)))
+          (shared-fixture
+           "buffer" buffer-fixture-source
+           (string-join buffer-fixture-entries "\n")
+           '(("state.bgl") ("state.ast.json")
+             ("artifacts" "source.facts")
+             ("artifacts" "module.native-program")
+             ("artifacts" "native.receipts")
+             ("artifacts" "c17.receipt")
+             ("artifacts" "module_0.h")
+             ("artifacts" "module_0.c"))
+           (lambda (root)
+             (define source (build-path root "state.bgl"))
+             (define ast (build-path root "state.ast.json"))
+             (define artifacts (build-path root "artifacts"))
+             (write-text source buffer-fixture-source)
+             (check-equal?
+              (apply run-bounded beagle "build" "--materializer" "c17"
+                     "--abi" "wasm32"
+                     (append
+                      (apply append
+                             (for/list ([entry (in-list buffer-fixture-entries)])
+                               (list "--entry" entry)))
+                      (list "--out" (path->string artifacts)
+                            (path->string source))))
+              0 "canonical Buffer C17 fixture build failed")
+             (define ast-output (open-output-string))
+             (define ast-error (open-output-string))
+             (define ast-code
+               (parameterize ([current-directory repo-root]
+                              [current-output-port ast-output]
+                              [current-error-port ast-error])
+                 (run-owned/bounded 120 beagle-ast (path->string source))))
+             (check-equal?
+              ast-code 0 (string-append (get-output-string ast-output)
+                                        (get-output-string ast-error)))
+             (write-text ast (get-output-string ast-output)))
+           (lambda (root)
+             (hasheq 'root root
+                     'artifacts (build-path root "artifacts")
+                     'compiled (fixture-path base 'compiled)
+                     'source (build-path root "state.bgl")
+                     'ast (build-path root "state.ast.json"))))))
   buffer-fixture)
 
 (define (make-buffer-artifacts scratch)
