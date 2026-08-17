@@ -3,6 +3,8 @@
 (require rackunit
          racket/file
          (for-syntax racket/base)
+         beagle/private/module-overlay-check
+         beagle/private/module-source-root
          beagle/private/parse
          beagle/private/check
          beagle/private/blame
@@ -21,6 +23,28 @@
   (define prog (parse-program (map (lambda (f) (datum->syntax #f f)) forms)
                               #:source-path source-path))
   (type-check! prog))
+
+(define (check-mathlib . forms)
+  (define root (make-temporary-file "beagle-check-mathlib-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define consumer-path (build-path root "consumer.bclj"))
+      (call-with-output-file consumer-path
+        (lambda (out)
+          (display "#lang beagle/clj\n(ns check.consumer)\n" out)
+          (for ([form (in-list forms)])
+            (fprintf out "~s\n" form)))
+        #:exists 'truncate/replace)
+      (define result
+        (check-module-source-closure
+         (resolve-module-source-closure
+          (list (module-source-input "cases/consumer.bclj" consumer-path))
+          (list (make-module-source-root-v0 "fixtures" module-fixtures-dir)))
+         #:emit? #f))
+      (unless (overlay-check-result-ok? result)
+        (error 'check-mathlib "~a" (overlay-check-result-diagnostics result))))
+    (lambda () (delete-directory/files root))))
 
 (define (br . xs) (cons BRACKET-TAG xs))
 ;; Canonical function-type datum: (Fn [P ...] R).
@@ -70,6 +94,10 @@
 (define fixtures-dir
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "check")))
+
+(define module-fixtures-dir
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures")))
 
 ;; The real reader, never a local re-implementation: reader tags and container
 ;; forms are phase-stable compiler input, while retired punctuation is still
@@ -387,13 +415,19 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "app.bclj")))
 
-(check-ok/source "cross-file import: typed defn callable with prefix" fixture-source
-  '(require mathlib)
-  '(def x Int (mathlib/add 1 2)))
+(test-case "cross-file import: typed defn callable with prefix"
+  (check-not-exn
+   (lambda ()
+     (check-mathlib
+      '(require mathlib)
+      '(def x Int (mathlib/add 1 2))))))
 
-(check-ok/source "cross-file import: typed def accessible with prefix" fixture-source
-  '(require mathlib)
-  '(def x Float mathlib/pi))
+(test-case "cross-file import: typed def accessible with prefix"
+  (check-not-exn
+   (lambda ()
+     (check-mathlib
+      '(require mathlib)
+      '(def x Float mathlib/pi)))))
 
 (check-err/source "cross-file import: type error caught across files" fixture-source
   '(require mathlib)
