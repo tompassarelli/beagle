@@ -35,32 +35,12 @@
       (regexp-replace* (regexp (regexp-quote root-str)) s "")
       s))
 
-;; Replace the one target declaration supplied by the source reader. A
-;; target-specific #lang line is represented as an injected define-target by
-;; read-beagle-syntax, so retargeting never edits source text or builds a
-;; parallel reader path.
-(define (retarget-stxs stxs target)
-  (define (target-declaration? stx)
-    (define datum (syntax->datum stx))
-    (and (pair? datum) (eq? (car datum) 'define-target)))
-  (define declaration-count
-    (for/sum ([stx (in-list stxs)])
-      (if (target-declaration? stx) 1 0)))
-  (unless (= declaration-count 1)
-    (error 'compile-source
-           "#:target expected exactly one define-target declaration, found ~a"
-           declaration-count))
-  (for/list ([stx (in-list stxs)])
-    (if (target-declaration? stx)
-        (datum->syntax stx `(define-target ,target) stx stx)
-        stx)))
-
 ;; Retarget one source through the same production compiler stages used by
 ;; beagle-module-begin. The source path remains the original .b* path for
 ;; imports and diagnostics; only the parsed target declaration changes.
 (define (compile-source-for-target path-str target)
   (define stxs
-    (retarget-stxs (read-beagle-syntax path-str) target))
+    (retarget-beagle-syntax (read-beagle-syntax path-str) target))
   (define prog (parse-program stxs #:source-path path-str))
   (type-check-with-locs!
    prog

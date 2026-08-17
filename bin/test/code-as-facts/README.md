@@ -9,16 +9,15 @@ changing the compiler-visible program. The loop:
 
 - **import** = `facts-roundtrip --emit-edn` (the lossless datum-level projection,
   comments included — *not* the lossy query projection the call graph uses).
-- **the round-trip store** = a real Fram store (`through-fram.clj`, mirroring
-  chartroom's `roundtrip_fram`): facts loaded in, re-extracted out, entity ids
-  re-minted by the engine.
+- **the round-trip store** = Fram's shipped `roundtrip-fram` module: facts loaded
+  into its real term store and re-extracted from the live propositions.
 - **export** = byte-stable `datum->pretty` (`--render`, move 2).
 
 ## The two proofs (`run.sh`, over `fram/src`)
 
 1. **Datum-identical through the Fram store** — the program reconstructs
    datum-identically after a round-trip through a real Fram store (not just an
-   in-memory map). 11/11.
+   in-memory map).
 2. **Recompile-identity (modulo srcloc)** — `beagle build` of the regenerated tree
    is **byte-identical** to `beagle build` of the original, after stripping
    `^{:line N :file "..."}` srcloc metadata. So the emitted *program* is identical;

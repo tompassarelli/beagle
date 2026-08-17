@@ -18,7 +18,7 @@
   #:transparent)
 (struct module-source-input (source-id physical-path) #:transparent)
 (struct module-source-snapshot
-  (source-id physical-path bytes source target explicit?)
+  (source-id physical-path bytes target-override source target explicit?)
   #:transparent)
 (struct module-source-closure (snapshots explicit-source-ids) #:transparent)
 
@@ -233,13 +233,24 @@
      source-id))
   (define expected-target (expected-target-for-extension source-id))
   (define bytes (bytes->immutable-bytes (file->bytes physical)))
-  (define stxs
+  (define declared-stxs
     (read-beagle-syntax/bytes
      physical
      bytes
      #:source-id source-id))
+  (define declared-target (stxs-target declared-stxs source-id))
+  (define physical-extension (source-extension (path-string physical)))
+  (define target-override
+    (and (not (eq? declared-target expected-target))
+         (equal? physical-extension ".bgl")
+         (eq? declared-target 'core)
+         expected-target))
+  (define stxs
+    (if target-override
+        (retarget-beagle-syntax declared-stxs target-override)
+        declared-stxs))
   (define target (stxs-target stxs source-id))
-  (unless (eq? target expected-target)
+  (unless (or (eq? target expected-target) target-override)
     (error
      'module-source-root
      "extension/header mismatch for ~a: extension requires #lang ~a, found #lang ~a"
@@ -264,7 +275,18 @@
      source-id
      (or (module-source-namespace source) "no namespace")))
   (module-source-snapshot
-   source-id physical bytes source target explicit?))
+   source-id physical bytes target-override source target explicit?))
+
+(define (snapshot-syntax snapshot)
+  (define stxs
+    (read-beagle-syntax/bytes
+     (module-source-snapshot-physical-path snapshot)
+     (module-source-snapshot-bytes snapshot)
+     #:source-id (module-source-snapshot-source-id snapshot)))
+  (if (module-source-snapshot-target-override snapshot)
+      (retarget-beagle-syntax
+       stxs (module-source-snapshot-target-override snapshot))
+      stxs))
 
 (define (resolve-module-source-closure explicit-inputs roots)
   (unless (and (list? explicit-inputs)
@@ -341,12 +363,15 @@
        (module-source-snapshot-target snapshot)))
     snapshot)
 
-  (define (root-candidates namespace importer-extension)
+  (define (root-candidates namespace importer-extension
+                           [physical-extension importer-extension])
     (define relative-id
       (namespace-relative-source-id namespace importer-extension))
+    (define physical-relative-id
+      (namespace-relative-source-id namespace physical-extension))
     (for/list ([root (in-list roots)]
                #:do
-               [(define relative (string->path relative-id))
+               [(define relative (string->path physical-relative-id))
                 (define candidate
                   (build-path
                    (module-source-root-v0-lexical-directory root)
@@ -417,7 +442,13 @@
           (assert-target!
            snapshot importer-target namespace importer-id)))]
       [else
-       (define candidates (root-candidates namespace importer-extension))
+       (define same-target-candidates
+         (root-candidates namespace importer-extension))
+       (define candidates
+         (if (or (pair? same-target-candidates)
+                 (equal? importer-extension ".bgl"))
+             same-target-candidates
+             (root-candidates namespace importer-extension ".bgl")))
        (cond
          [(null? candidates) #f]
          [(pair? (cdr candidates))
@@ -451,10 +482,9 @@
       (define snapshot (car pending))
       (set! pending (cdr pending))
       (define program
-        (parse-program/bytes
-         (module-source-snapshot-bytes snapshot)
+        (parse-program
+         (snapshot-syntax snapshot)
          #:source-path (module-source-snapshot-source-id snapshot)
-         #:source-id (module-source-snapshot-source-id snapshot)
          #:module-resolver resolver))
       (unless (eq? (program-target program)
                    (module-source-snapshot-target snapshot))
@@ -499,10 +529,9 @@
   (define source-id (path-string (module-source-source-id source)))
   (define snapshot
     (module-source-closure-snapshot-ref closure source-id))
-  (parse-program/bytes
-   (module-source-snapshot-bytes snapshot)
+  (parse-program
+   (snapshot-syntax snapshot)
    #:source-path source-id
-   #:source-id source-id
    #:module-resolver resolver))
 
 (provide

@@ -250,6 +250,7 @@
 (define (build-text-overlay files roots out-dir json? in-place?)
   (define captured '())
   (define source->file (make-hash))
+  (define source->profile-path (make-hash))
   (define (capture! source _phase value location)
     (set! captured (cons (list source value location) captured)))
   (define (report! source value location)
@@ -281,6 +282,12 @@
   (when closure
     (for ([snapshot (in-list (module-source-closure-snapshots closure))])
       (define source-id (module-source-snapshot-source-id snapshot))
+      (hash-set!
+       source->profile-path
+       source-id
+       (if (module-source-snapshot-target-override snapshot)
+           source-id
+           (path->string (module-source-snapshot-physical-path snapshot))))
       (unless (hash-has-key? source->file source-id)
         (hash-set!
          source->file
@@ -320,6 +327,8 @@
                ([module (in-list modules)])
        (define source-id (format "~a" (checked-overlay-module-source module)))
        (define path (hash-ref source->file source-id source-id))
+       (define profile-path
+         (hash-ref source->profile-path source-id path))
        (if (with-handlers
                ([exn:fail?
                  (lambda (error)
@@ -327,7 +336,7 @@
                    #f)])
              (emit-checked-program
               (checked-overlay-module-program module)
-              path out-dir in-place? export-plan))
+              profile-path out-dir in-place? export-plan))
            (values (add1 built) errors)
            (values built (add1 errors))))]))
 

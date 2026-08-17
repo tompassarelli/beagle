@@ -266,6 +266,25 @@
     [(list (or 'js/export 'js/export-default) inner) (strip-target-export inner)]
     [_ d]))
 
+;; Project one portable source snapshot onto a hosted target without rewriting
+;; its bytes. Module-source closures use this for rooted .bgl providers; batch
+;; compilation uses the same operation for explicit --target builds.
+(define (retarget-beagle-syntax stxs target)
+  (define (target-declaration? stx)
+    (define datum (syntax->datum stx))
+    (and (pair? datum) (eq? (car datum) 'define-target)))
+  (define declaration-count
+    (for/sum ([stx (in-list stxs)])
+      (if (target-declaration? stx) 1 0)))
+  (unless (= declaration-count 1)
+    (error 'retarget-beagle-syntax
+           "expected exactly one define-target declaration, found ~a"
+           declaration-count))
+  (for/list ([stx (in-list stxs)])
+    (if (target-declaration? stx)
+        (datum->syntax stx `(define-target ,target) stx stx)
+        stx)))
+
 (define (read-beagle-datums path)
   (require-beagle-source-extension! path 'read-beagle-datums)
   (with-input-from-file path
@@ -5279,6 +5298,7 @@
  read-beagle-datums
  read-beagle-syntax
  read-beagle-syntax/bytes
+ retarget-beagle-syntax
  current-module-resolution-closed?
  strip-target-export
  (struct-out layout-edit)

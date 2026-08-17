@@ -512,6 +512,8 @@
       (hash-set! source->file source-id path)
       (module-source-input source-id path)))
 
+  (define source->profile-path (make-hash))
+
   (define closure
     (with-handlers
         ([exn:fail?
@@ -523,6 +525,12 @@
   (when closure
     (for ([snapshot (in-list (module-source-closure-snapshots closure))])
       (define source-id (module-source-snapshot-source-id snapshot))
+      (hash-set!
+       source->profile-path
+       source-id
+       (if (module-source-snapshot-target-override snapshot)
+           source-id
+           (path->string (module-source-snapshot-physical-path snapshot))))
       (unless (hash-has-key? source->file source-id)
         (hash-set!
          source->file
@@ -561,17 +569,19 @@
     (for ([module (in-list (overlay-check-result-modules checked))])
       (define source-id (format "~a" (checked-overlay-module-source module)))
       (define path (hash-ref source->file source-id source-id))
+      (define profile-path
+        (hash-ref source->profile-path source-id path))
       (define prog (checked-overlay-module-program module))
       (set! parsed-programs (cons (cons path prog) parsed-programs))
       (with-handlers ([exn:fail? (lambda (error) (report-error path error #f))])
-        (when (extension-target-mismatch? path (program-target prog))
+        (when (extension-target-mismatch? profile-path (program-target prog))
           (define ext-str
-            (car (findf (lambda (pair) (string-suffix? path (car pair)))
+            (car (findf (lambda (pair) (string-suffix? profile-path (car pair)))
                         EXTENSION-TARGET-MAP)))
           (error
            (format "extension/header mismatch: ~a expects #lang ~a, found #lang ~a"
                    ext-str
-                   (lang-for-target-id (expected-target-for-extension path))
+                   (lang-for-target-id (expected-target-for-extension profile-path))
                    (lang-for-target-id (program-target prog)))))
         (when (>= profile 1)
           (if agent?

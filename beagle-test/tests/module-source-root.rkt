@@ -277,6 +277,47 @@
          '())))))))
 
 (test-case
+ "a rooted portable provider is projected to the importer's target profile"
+ (with-source-tree
+  (lambda (tree)
+    (define consumer-path (build-path tree "consumer.bclj"))
+    (define source-root (build-path tree "source-root"))
+    (define provider-path
+      (build-path source-root "portable" "provider.bgl"))
+    (write-source!
+     consumer-path
+     (string-append
+      "#lang beagle/clj\n"
+      "(ns portable.consumer (:require [portable.provider :as provider]))\n"
+      "(defn use [(value String)] String (provider/id value))\n"))
+    (write-source!
+     provider-path
+     (string-append
+      "#lang beagle\n"
+      "(ns portable.provider)\n"
+      "(defn id [(value String)] String value)\n"))
+    (define closure
+      (resolve-module-source-closure
+       (list (module-source-input "app/consumer.bclj" consumer-path))
+       (list (make-module-source-root-v0 "rooted" source-root))))
+    (define provider
+      (findf
+       (lambda (snapshot)
+         (equal? (module-source-snapshot-physical-path snapshot)
+                 provider-path))
+       (module-source-closure-snapshots closure)))
+    (check-not-false provider)
+    (check-equal? (module-source-snapshot-source-id provider)
+                  "rooted/portable/provider.bclj")
+    (check-equal? (module-source-snapshot-target provider) 'clj)
+    (check-equal? (module-source-snapshot-bytes provider)
+                  (file->bytes provider-path))
+    (define result (check-module-source-closure closure))
+    (check-true
+     (overlay-check-result-ok? result)
+     (format "~a" (overlay-check-result-diagnostics result))))))
+
+(test-case
  "zero roots fail closed for an unresolved namespace"
  (with-source-tree
   (lambda (tree)
