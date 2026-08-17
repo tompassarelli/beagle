@@ -1,7 +1,15 @@
-# Fram
+# branch-core
 
-*Fram is a persistent engine for recursive, typed triples with neutral,
-position-addressed structure.*
+*branch-core — Beagle's slot-addressable, typed-triple store engine (formerly the standalone Fram project).*
+
+branch-core is an engine inside Beagle, not a separately installed or released
+product. Its compiler pin, build, tests, deployment surfaces, and release work
+are coordinated with the enclosing Beagle tree.
+
+**Honesty clause.** The CLI, binaries, and namespaces still carry the `fram`
+name until a coordinated cross-repo rename wave. This README uses `branch-core`
+for the engine identity and retains `fram` only where it names a current
+command, file, protocol, or namespace.
 
 [![license](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
 
@@ -33,8 +41,9 @@ Assertion identity    occurrence coordinate
 
 A Triple takes the role of proposition content when an occurrence carries it
 as an assertion or retraction. A profile may constrain which Triple structures
-it admits and how it interprets their positions. Fram records that a writer
-asserted content; Fram does not certify it as true. A nested Triple may instead
+it admits and how it interprets their positions. branch-core records that a
+writer asserted content; branch-core does not certify it as true. A nested
+Triple may instead
 be a compound value, and nesting never asserts it independently.
 
 In a profile that reads the middle position as a relation, the relation must
@@ -96,10 +105,11 @@ primitive or a code type. See the [naming ledger](docs/naming.md).
 
 The checkout runtime needs Babashka for the CLI and Clojure/JVM for the server.
 Beagle is needed only when rebuilding graph-authored source; compiled Clojure is
-committed under `out/`.
+committed under `out/`. branch-core is used from the enclosing Beagle checkout;
+there is no standalone install step.
+Run these commands from the `branch-core/` directory in that checkout.
 
 ```console
-$ git clone https://github.com/Autonymy/fram && cd fram
 $ export FRAM_SPACE_ID=fram-demo
 $ export FRAM_LOG=/tmp/fram-demo.framlog
 $ export FRAM_SERVER_RUNTIME=jvm-dev  # explicit checkout fallback
@@ -123,7 +133,7 @@ engine wire is binary FRAMRPC.
 
 - `bin/fram-server` is the native-first server launcher. Its default route
   requires `FRAM_NATIVE_ARTIFACT_DIR` to name a READY artifact containing
-  `bin/fram-server-native`; it never falls back silently. `jvm-oracle` and
+  the native server executable; it never falls back silently. `jvm-oracle` and
   `jvm-dev` are explicit retained routes. The launched server owns one database
   (`SpaceId` plus `history.framlog`), accepts FRAMRPC v2's closed data surface
   of thirteen operations (exact wire version 2.0), and holds writer authority
@@ -161,9 +171,9 @@ engine wire is binary FRAMRPC.
   answers byte-for-byte what the native library answers. See
   [isolation and deployment](docs/isolation-and-deployment.md#the-wasm-embed-contract).
 
-## Why own the engine?
+## Why branch-core exists in Beagle
 
-Fram's differentiator is not “a triple plus an id.” It is the uniform recursive
+branch-core's differentiator is not “a triple plus an id.” It is the uniform recursive
 term model: a Triple is itself a Term, so relationships, compound values,
 identity coordinates, and domain metadata can use the same three positions
 without a privileged attribute position or bolt-on statement entity. Assertion
@@ -177,13 +187,13 @@ withdrawal. The exact executable contracts live in
 [`tests/database_test.clj`](tests/database_test.clj), and
 [`tests/triple_query_test.clj`](tests/triple_query_test.clj).
 
-Fram is pre-1.0. There is no engine access control: isolate by process, network,
-SpaceId, and FRAMLOG, and put authenticated public edges in front. The
-concurrency receipts cover one machine and one writer; they are not distributed
-consensus.
+The engine is pre-1.0. There is no engine access control: isolate by process,
+network, SpaceId, and FRAMLOG, and put authenticated public edges in front.
+The concurrency receipts cover one machine and one writer; they are not
+distributed consensus.
 
 ## License
 
-Fram is dual-licensed under your choice of the [MIT License](LICENSE-MIT) or
-the [Apache License, Version 2.0](LICENSE-APACHE)
+This component is dual-licensed under your choice of the [MIT License](LICENSE-MIT)
+or the [Apache License, Version 2.0](LICENSE-APACHE)
 (`MIT OR Apache-2.0`).
