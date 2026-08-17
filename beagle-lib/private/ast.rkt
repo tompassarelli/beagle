@@ -499,6 +499,69 @@
 (define (beagle-syntax-reader-metadata value)
   (beagle-syntax-property value 'reader #f))
 
+;; Flip one scope throughout a syntax tree.  During macro input flipping,
+;; RECORD-ORIGINAL? records each rebuilt node in RESTORATIONS.  The matching
+;; output flip then returns an exact original node when an antiquote inserted
+;; that flipped node unchanged.  Generated syntax is not present in the table,
+;; so its output flip gains the introduction scope normally.
+(define (beagle-syntax-flip-scope value scope
+                                  [restorations #f]
+                                  #:record-original? [record-original? #f])
+  (unless (beagle-syntax? value)
+    (raise-argument-error
+     'beagle-syntax-flip-scope "beagle-syntax?" value))
+  (check-scope-id 'beagle-syntax-flip-scope scope)
+  (define restored
+    (and restorations
+         (not record-original?)
+         (hash-ref restorations value #f)))
+  (cond
+    [restored restored]
+    [else
+     (define scopes (scope-set-flip (beagle-syntax-scopes value) scope))
+     (define span (beagle-syntax-span value))
+     (define origin (beagle-syntax-origin value))
+     (define properties (beagle-syntax-properties value))
+     (define rebuilt
+       (cond
+         [(syntax-atom? value)
+          (make-syntax-atom
+           (syntax-atom-datum value) span scopes origin properties)]
+         [(syntax-ident? value)
+          (make-syntax-ident
+           (syntax-ident-name value) span scopes origin properties)]
+         [(syntax-list? value)
+          (make-syntax-list
+           (map
+            (lambda (child)
+              (beagle-syntax-flip-scope
+               child scope restorations
+               #:record-original? record-original?))
+            (syntax-list-children value))
+           span scopes origin properties)]
+         [(syntax-vector? value)
+          (make-syntax-vector
+           (map
+            (lambda (child)
+              (beagle-syntax-flip-scope
+               child scope restorations
+               #:record-original? record-original?))
+            (syntax-vector-children value))
+           span scopes origin properties)]
+         [(syntax-quote? value)
+          (make-syntax-quote
+           (syntax-quote-datum value) span scopes origin properties)]
+         [(syntax-unquote? value)
+          (make-syntax-unquote
+           (beagle-syntax-flip-scope
+            (syntax-unquote-child value) scope restorations
+            #:record-original? record-original?)
+           span scopes origin properties
+           #:splicing? (syntax-unquote-splicing? value))]))
+     (when (and restorations record-original?)
+       (hash-set! restorations rebuilt value))
+     rebuilt]))
+
 (define (syntax-keyword-symbol? value)
   (and (symbol? value)
        (let ([text (symbol->string value)])
@@ -1233,6 +1296,7 @@
  beagle-syntax? beagle-syntax-span beagle-syntax-scopes
  beagle-syntax-origin beagle-syntax-properties beagle-syntax-property
  beagle-syntax-reader-metadata
+ beagle-syntax-flip-scope
  datum->beagle-syntax beagle-syntax->datum
  racket-syntax->beagle-syntax beagle-syntax->racket-syntax
  current-registry current-source-bytes current-src-table store-src!

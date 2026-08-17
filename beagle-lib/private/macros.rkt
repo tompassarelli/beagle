@@ -19,8 +19,10 @@
                   beagle-syntax-origin
                   beagle-syntax-properties
                   beagle-syntax-reader-metadata
+                  beagle-syntax-flip-scope
                   datum->beagle-syntax
                   empty-scope-set
+                  fresh-scope-id
                   make-expansion-origin
                   make-syntax-list
                   make-syntax-vector
@@ -190,25 +192,30 @@
   (define fixed (macro-def-fixed-params m))
   (define rest-name (macro-def-rest-param m))
   (define kind (macro-def-kind m))
-  (define hygienic? (or (eq? kind 'safe) (eq? kind 'defmacro)))
-  (define template
-    (if hygienic?
-      (hygienize-template (macro-def-template m) fixed rest-name)
-      (macro-def-template m)))
+  (define template (macro-def-template m))
+  (define introduction-scope (fresh-scope-id 'macro-introduction))
+  (define restorations (make-weak-hasheq))
+  (define scoped-args
+    (map
+     (lambda (arg)
+       (beagle-syntax-flip-scope
+        arg introduction-scope restorations #:record-original? #t))
+     args))
   (define-values (fixed-args rest-args)
     (cond
       [rest-name
-       (when (< (length args) (length fixed))
+       (when (< (length scoped-args) (length fixed))
          (error 'beagle
                 "macro ~a: expected at least ~a arg(s), got ~a"
-                name (length fixed) (length args)))
-       (values (take args (length fixed)) (drop args (length fixed)))]
+                name (length fixed) (length scoped-args)))
+       (values (take scoped-args (length fixed))
+               (drop scoped-args (length fixed)))]
       [else
-       (unless (= (length args) (length fixed))
+       (unless (= (length scoped-args) (length fixed))
          (error 'beagle
                 "macro ~a: expected ~a arg(s), got ~a"
-                name (length fixed) (length args)))
-       (values args '())]))
+                name (length fixed) (length scoped-args)))
+       (values scoped-args '())]))
   (define output
     (cond
     [(eq? kind 'defmacro)
@@ -248,12 +255,15 @@
       [(and call-syntax (beagle-syntax-reader-metadata call-syntax))
        => (lambda (metadata) (hasheq 'reader metadata 'generated-by name))]
       [else (hasheq 'generated-by name)]))
-  (datum->beagle-syntax
-   output
-   (and ctx (expansion-ctx-call-span ctx))
-   empty-scope-set
-   (and ctx (expansion-ctx-origin ctx))
-   properties))
+  (beagle-syntax-flip-scope
+   (datum->beagle-syntax
+    output
+    (and ctx (expansion-ctx-call-span ctx))
+    empty-scope-set
+    (and ctx (expansion-ctx-origin ctx))
+    properties)
+   introduction-scope
+   restorations))
 
 (define (make-bindings fixed-params fixed-args rest-name rest-args)
   (define h (make-hash))
@@ -334,19 +344,6 @@
 ;; post-expansion parse of the result; set by check.rkt for each
 ;; check-form that touches a macro-derived program form.
 (define current-macro-expansion-ctx (make-parameter #f))
-
-;; Mode-2 hygiene (definition-site free-var resolution). `current-module-def-names`
-;; is the set (a hasheq) of the current program's top-level definition names;
-;; `current-hygiene-alias-table` maps a macro free reference that names such a
-;; definition to its hygienic alias. parse.rkt pre-scans the name set and a
-;; fresh alias table around expansion, then injects `(def alias orig)` top-level
-;; forms for each entry. A free ref in a defmacro template that names a module
-;; definition is rewritten to its alias, so a use-site binder of the same name
-;; cannot capture it — the cross-target-safe version of Lean's
-;; preresolve-globals-at-definition-time. When unset (e.g. expand-fully called
-;; standalone), free-ref resolution is inert and expansion is unchanged.
-(define current-module-def-names (make-parameter #f))
-(define current-hygiene-alias-table (make-parameter #f))
 
 ;; Per-program macro-derived form tracking. parse.rkt populates this
 ;; (mutable) hash with the top-level AST nodes produced by macro
@@ -479,11 +476,11 @@
   (define expanded (expand-fully/syntax reg syntax-value depth ctx))
   (if syntax-input? expanded (beagle-syntax->datum expanded)))
 
-;; --- hygiene (safe macros only) -------------------------------------------
+;; --- imported-template qualification --------------------------------------
 ;;
-;; Gensym-based: template-introduced binders (let names, fn/defn params)
-;; are renamed to gensyms before parameter substitution so they can't
-;; capture variables at the expansion site. Unsafe macros skip this.
+;; Imported macro templates still need provider qualification before ordinary
+;; expansion.  This walk preserves binder regions while rewriting only free
+;; provider references.  It does not provide lexical identity; scope sets do.
 
 (define (unwrap-brackets* form)
   (cond
@@ -541,9 +538,6 @@
        (or (eq? (car d) 'unquote)
            (eq? (car d) 'unquote-splicing))))
 
-(struct hygiene-inert (datum) #:transparent)
-(struct hygiene-deferred (datum forbidden) #:transparent)
-
 (define (binding-form-binders form macro-params)
   (define names '())
   (binding-form-binders!
@@ -557,35 +551,15 @@
   (for/fold ([result env]) ([(name replacement) (in-hash additions)])
     (hash-set result name replacement)))
 
-;; Transform one macro template while carrying the lexical meaning of every
-;; introduced binder.  Binding metadata is handled at its owning declaration:
-;; the target extends only the body scope, the Type slot is inert, and an
-;; optional constraint is transformed in the same pre-binding scope as the
-;; incoming value.
-(define (transform-template/scoped template macro-params
-                                   #:freshen-binders? freshen-binders?
-                                   #:resolve-free resolve-free
-                                   #:preserve-unquotes? preserve-unquotes?)
-  (define binder-renames (make-hasheq))
-
-  (define (remember-binder! name replacement)
-    (when freshen-binders?
-      (hash-update! binder-renames name
-                    (lambda (replacements)
-                      (if (memq replacement replacements)
-                          replacements
-                          (cons replacement replacements)))
-                    '())))
-
+;; Binding metadata is handled at its owning declaration: the target extends
+;; only the body scope, an optional constraint is transformed in the same
+;; pre-binding scope as the incoming value, and unquotes remain caller-owned.
+(define (qualify-template/scoped template macro-params
+                                  #:resolve-free resolve-free
+                                  #:preserve-unquotes? preserve-unquotes?)
   (define (fresh-binding-map names)
     (for/fold ([renames (hasheq)]) ([name (in-list names)])
-      (cond
-        [(hash-has-key? renames name) renames]
-        [else
-         (define replacement
-           (if freshen-binders? (fresh-lowered-sym name) name))
-         (remember-binder! name replacement)
-         (hash-set renames name replacement)])))
+      (hash-set renames name name)))
 
   (define (resolve-symbol datum env)
     (cond
@@ -593,9 +567,8 @@
       [(memq datum macro-params) datum]
       [else (resolve-free datum)]))
 
-  ;; Value binders do not shadow the type namespace. During local hygiene type
-  ;; syntax remains inert, while imported templates resolve every free type
-  ;; name in its own structural slot against the provider definition context.
+  ;; Value binders do not shadow the type namespace. Imported templates resolve
+  ;; every free type name in its structural slot against the provider context.
   ;; Unquotes stay owned by the macro caller and are never traversed here.
   (define (transform-type datum [bound '()])
     (cond
@@ -628,15 +601,9 @@
        (cons (transform-type (car datum) bound)
              (transform-type (cdr datum) bound))]))
 
-  (define (protect-type datum)
-    (if freshen-binders?
-        (hygiene-inert datum)
-        (transform-type datum)))
+  (define (protect-type datum) (transform-type datum))
 
-  (define (defer-forward-quotes datum forbidden)
-    (if freshen-binders?
-        (hygiene-deferred datum forbidden)
-        datum))
+  (define (defer-forward-quotes datum _forbidden) datum)
 
   (define (rewrap original items)
     (if (bracketed? original)
@@ -821,10 +788,7 @@
                 macro-params))))
     (define pinned
       (for/fold ([result (hasheq)]) ([name (in-list dynamic-names)])
-        (hash-set result name
-                  (if freshen-binders?
-                      name
-                      (resolve-symbol name env)))))
+        (hash-set result name (resolve-symbol name env))))
     (define pinned-env (scope-extend env pinned))
     (define rendered-bindings
       (let loop ([rest items] [result '()])
@@ -1114,34 +1078,7 @@
       [else
        (for/list ([form (in-list datum)]) (walk form env))]))
 
-  ;; `(quote name)` can be used by a procedural macro to assemble a reference
-  ;; to a binder that appears in a later quasiquoted template.  Retain that
-  ;; supported bridge when the source name identifies exactly one introduced
-  ;; binder, while each pre-binding region carries the names it must not see.
-  (define (unique-binder-rename name)
-    (define replacements (hash-ref binder-renames name '()))
-    (and (= (length replacements) 1) (car replacements)))
-
-  (define (finish datum [forbidden '()])
-    (cond
-      [(hygiene-inert? datum) (hygiene-inert-datum datum)]
-      [(hygiene-deferred? datum)
-       (finish (hygiene-deferred-datum datum)
-               (append (hygiene-deferred-forbidden datum) forbidden))]
-      [(and (list? datum)
-            (= (length datum) 2)
-            (eq? (car datum) 'quote)
-            (symbol? (cadr datum))
-            (not (memq (cadr datum) forbidden)))
-       (define replacement (unique-binder-rename (cadr datum)))
-       (if replacement (list 'quote replacement) datum)]
-      [(and (pair? datum) (eq? (car datum) 'quote)) datum]
-      [(pair? datum)
-       (cons (finish (car datum) forbidden)
-             (finish (cdr datum) forbidden))]
-      [else datum]))
-
-  (finish (walk template (hasheq))))
+  (walk template (hasheq)))
 
 ;; Imported macros expand in the consumer, but their free references were
 ;; written in the provider. Resolve only lexically free references against the
@@ -1155,29 +1092,10 @@
     (if (hash-has-key? provider-names datum)
         (string->symbol (format "~a/~a" prefix datum))
         datum))
-  (transform-template/scoped
+  (qualify-template/scoped
    template macro-params
-   #:freshen-binders? #f
    #:resolve-free qualify-free
    #:preserve-unquotes? #t))
-
-;; Is `s` a top-level definition name of the program being compiled?
-(define (module-def-name? s)
-  (define names (current-module-def-names))
-  (and names (symbol? s) (hash-has-key? names s)))
-
-;; Deterministic hygienic alias for a free ref, memoized in the alias table so
-;; every expansion referencing `orig` shares ONE alias (hence one injected
-;; `(def alias orig)`). `<orig>__hyg`, bumped if that name is itself taken.
-(define (hygiene-alias-for! orig)
-  (define tbl (current-hygiene-alias-table))
-  (or (hash-ref tbl orig #f)
-      (let ([alias (let loop ([cand (string->symbol (format "~a__hyg" orig))] [n 1])
-                     (if (module-def-name? cand)
-                         (loop (string->symbol (format "~a__hyg~a" orig n)) (add1 n))
-                         cand))])
-        (hash-set! tbl orig alias)
-        alias)))
 
 ;; Deterministic lowering temps — build reproducibility, not just uniqueness.
 ;; Racket's `gensym` numbers from a process-global counter, so a minted name
@@ -1195,25 +1113,6 @@
   (set-box! b (add1 n))
   (string->symbol (format "~a__~a" base n)))
 
-(define (hygienize-template template fixed-params rest-param)
-  (define macro-params
-    (if rest-param (cons rest-param fixed-params) fixed-params))
-  (define (resolve-free datum)
-    (cond
-      [(and (module-def-name? datum)
-            (current-hygiene-alias-table)
-            ;; A name that is ALSO a registered macro must retain its head so
-            ;; recursive expansion still sees it.
-            (not (and (current-registry)
-                      (lookup-macro (current-registry) datum))))
-       (hygiene-alias-for! datum)]
-      [else datum]))
-  (transform-template/scoped
-   template macro-params
-   #:freshen-binders? #t
-   #:resolve-free resolve-free
-   #:preserve-unquotes? #f))
-
 (provide
  (struct-out macro-def)
  (struct-out expansion-ctx)
@@ -1225,8 +1124,6 @@
  expand-fully
  current-trace-handler
  current-macro-expansion-ctx
- current-module-def-names
- current-hygiene-alias-table
  qualify-imported-macro-template
  lowering-counter
  fresh-lowered-sym
