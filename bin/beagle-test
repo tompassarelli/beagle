@@ -32,10 +32,11 @@ BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Each phase has its own deadline and log. run-bounded.rkt is the accountable
 # process supervisor: it owns the phase subtree, publishes START/END/TIMEOUT
-# progress, and reaps descendants before returning. These budgets come from
-# the current quiet-box measurements (56.617s, 0.605s, 0.022s, 77.944s, and
-# the existing 357s active-tier baseline) with modest headroom. The inner
-# test/build deadlines remain unchanged.
+# progress, and reaps descendants before returning. These budgets originate
+# from the quiet-box measurements (56.617s, 0.605s, 0.022s, 77.944s, and the
+# existing 357s active-tier baseline). Consumer smoke performs two sequential,
+# commit-keyed native builds, so the complete cold pair gets the fleet's
+# three-minute phase ceiling. The inner test/build deadlines remain unchanged.
 BEAGLE_TEST_SUPERVISOR="$BEAGLE_ROOT/native-core/bin/run-bounded.rkt"
 BEAGLE_TEST_LOG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/beagle-test-phase.XXXXXX")"
 BEAGLE_TEST_KEEP_LOGS=0
@@ -241,6 +242,6 @@ run_beagle_test_phase "checkout-first" 5 \
     "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit 1
 run_beagle_test_phase "qualified-ref-scaffold" 2 \
     "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit 1
-run_beagle_test_phase "consumer-smoke" 100 \
+run_beagle_test_phase "consumer-smoke" 180 \
     "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit 1
 run_beagle_test_shards 420 "$@" || exit $?
