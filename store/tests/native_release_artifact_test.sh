@@ -30,12 +30,12 @@ cp "$repo/beagle-pin.txt" "$source_seed/"
 cp "$repo/bin/beagle-store-native-build" "$source_seed/bin/"
 git -C "$source_seed" add source.txt server.c LICENSE LICENSE-MIT LICENSE-APACHE \
   beagle-pin.txt bin/beagle-store-native-build
-GIT_AUTHOR_NAME=Beagle Store GIT_AUTHOR_EMAIL=store@example.invalid \
+GIT_AUTHOR_NAME='Beagle Store' GIT_AUTHOR_EMAIL=store@example.invalid \
 GIT_AUTHOR_DATE='2026-01-02T03:04:05Z' \
-GIT_COMMITTER_NAME=Beagle Store GIT_COMMITTER_EMAIL=store@example.invalid \
+GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
 GIT_COMMITTER_DATE='2026-01-02T03:04:05Z' \
   git -C "$source_seed" commit -q -m release
-GIT_COMMITTER_NAME=Beagle Store GIT_COMMITTER_EMAIL=store@example.invalid \
+GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
 GIT_COMMITTER_DATE='2026-01-02T04:05:06Z' \
   git -C "$source_seed" tag -a v1.2.3 -m release
 git -C "$source_seed" tag v1.2.4
@@ -116,7 +116,7 @@ grep -Fxq "executable-sha256 $executable_sha256" "${files_a[1]}" ||
   fail "receipt does not hash the executable extracted from the archive"
 
 archive_entries="$(tar -tzf "${files_a[0]}")"
-[[ "$archive_entries" == $'store-v1.2.3-x86_64-linux-musl/\nbeagle-store-v1.2.3-x86_64-linux-musl/LICENSE\nbeagle-store-v1.2.3-x86_64-linux-musl/LICENSE-APACHE\nbeagle-store-v1.2.3-x86_64-linux-musl/LICENSE-MIT\nbeagle-store-v1.2.3-x86_64-linux-musl/bin/\nbeagle-store-v1.2.3-x86_64-linux-musl/bin/beagle-store-server-native' ]] ||
+[[ "$archive_entries" == $'store-v1.2.3-x86_64-linux-musl/\nstore-v1.2.3-x86_64-linux-musl/LICENSE\nstore-v1.2.3-x86_64-linux-musl/LICENSE-APACHE\nstore-v1.2.3-x86_64-linux-musl/LICENSE-MIT\nstore-v1.2.3-x86_64-linux-musl/bin/\nstore-v1.2.3-x86_64-linux-musl/bin/beagle-store-server-native' ]] ||
   fail "archive member set or order is not canonical"
 
 # Artifact and executable paths are identity-bearing inputs, never links that

@@ -33,12 +33,12 @@ printf '%s\n' '#lang beagle' '(ns synthetic.a)' >"$source_seed/src/core-a.bgl"
 printf '%s\n' '#lang beagle' '(ns synthetic.b)' >"$source_seed/src/core-b.bgl"
 git -C "$source_seed" init -q
 git -C "$source_seed" add LICENSE LICENSE-MIT LICENSE-APACHE beagle-pin.txt bin native src
-GIT_AUTHOR_NAME=Beagle Store GIT_AUTHOR_EMAIL=store@example.invalid \
+GIT_AUTHOR_NAME='Beagle Store' GIT_AUTHOR_EMAIL=store@example.invalid \
 GIT_AUTHOR_DATE='2026-01-02T03:04:05Z' \
-GIT_COMMITTER_NAME=Beagle Store GIT_COMMITTER_EMAIL=store@example.invalid \
+GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
 GIT_COMMITTER_DATE='2026-01-02T03:04:05Z' \
   git -C "$source_seed" commit -q -m release
-GIT_COMMITTER_NAME=Beagle Store GIT_COMMITTER_EMAIL=store@example.invalid \
+GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
 GIT_COMMITTER_DATE='2026-01-02T04:05:06Z' \
   git -C "$source_seed" tag -a v1.2.3 -m release
 git -C "$source_seed" tag v1.2.4

@@ -784,7 +784,7 @@ C
 "$scratch/embed-static" || fail "static embed library did not run"
 "${CC:-cc}" -std=c17 -pedantic -Wall -Wextra -Werror -pthread \
   -I"$embed_artifact/include" "$scratch/embed-consumer.c" \
-  -L"$embed_artifact/lib" -Wl,-rpath,"$embed_artifact/lib" -lfram \
+  -L"$embed_artifact/lib" -Wl,-rpath,"$embed_artifact/lib" -lbeagle_store \
   -o "$scratch/embed-shared"
 "$scratch/embed-shared" || fail "shared embed library did not run"
 embed_hit="$("${build_env[@]}" "$builder" --host embed \
