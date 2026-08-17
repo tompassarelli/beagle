@@ -60,6 +60,9 @@
 (defn- sv [^Walk w e]
   (rr/sym-val (:ctx w) (:view w) e))
 
+(defn- sq [^Walk w e]
+  (rr/sym-qualifier (:ctx w) (:view w) e))
+
 (defn- kd [^Walk w e]
   (rr/kind-of (:ctx w) (:view w) e))
 
@@ -75,9 +78,9 @@
 (defn- ^Boolean list? [^Walk w e]
   (= "list" (kd w e)))
 
-(defn- xr [^Walk w nm]
+(defn- xr [^Walk w node nm]
   (let [f (:xres w)]
-  (f nm)))
+  (f (sq w node) nm)))
 
 (defn- tr [^Walk w nm]
   (let [f (:tres w)]
@@ -105,10 +108,8 @@
    acc (:accessor x)]
   (do
   (bind! w node (:target x))
-  (cond
-  (= :fixed mode) (ri/assert! (:ctx w) (nn node) (:FIXED w) (ri/literal! "1"))
-  (= :qual mode) (ri/assert! (:ctx w) (nn node) (:QUAL w) (ri/literal! (:alias x)))
-  :else nil)
+  (if (= :fixed mode) (do
+  (ri/assert! (:ctx w) (nn node) (:FIXED w) (ri/literal! "1"))))
   (if (some? acc) (do
   (ri/assert! (:ctx w) (nn node) (:ACC w) (ri/literal! acc))))
   (swap! (:nxmod w) (fn [n] (inc n)))
@@ -117,7 +118,7 @@
 (defn bound-render! [^Walk w node nm bt]
   (do
   (bind! w node bt)
-  (let [x (xr w nm)
+  (let [x (xr w node nm)
    pfx (rc/ctor-prefix (if (string? nm) nm nil))
    acc (ar w nm)
    stripped (if (nil? pfx) nil (str/replace (str nm) pfx ""))]
@@ -125,24 +126,23 @@
   (and (some? x) (some? (:target x))) (let [mode (:mode x)
    xacc (:accessor x)]
   (do
-  (cond
-  (= :fixed mode) (ri/assert! (:ctx w) (nn node) (:FIXED w) (ri/literal! "1"))
-  (= :qual mode) (ri/assert! (:ctx w) (nn node) (:QUAL w) (ri/literal! (:alias x)))
-  :else nil)
+  (if (= :fixed mode) (do
+  (ri/assert! (:ctx w) (nn node) (:FIXED w) (ri/literal! "1"))))
   (if (some? xacc) (do
   (ri/assert! (:ctx w) (nn node) (:ACC w) (ri/literal! xacc))))))
-  (and (some? pfx) (or (some? (tr w stripped)) (some? (:target (xr w stripped))))) (ri/assert! (:ctx w) (nn node) (:CTOR w) (ri/literal! pfx))
+  (and (some? pfx) (or (some? (tr w stripped)) (some? (:target (xr w node stripped))))) (ri/assert! (:ctx w) (nn node) (:CTOR w) (ri/literal! pfx))
   (some? acc) (ri/assert! (:ctx w) (nn node) (:ACC w) (ri/literal! (nth acc 1)))
   :else nil))))
 
 (defn walk-type! [^Walk w node]
   (cond
   (some? (sv w node)) (let [nm (sv w node)
-   b (tr w nm)]
+   qualifier (sq w node)
+   b (if (nil? qualifier) (tr w nm) nil)]
   (if (some? b) (do
   (bind! w node b)
   (swap! (:ntype w) (fn [n] (inc n)))
-  true) (bind-xmod! w node (xr w nm))))
+  true) (bind-xmod! w node (xr w node nm))))
   (= "list" (kd w node)) (doseq [ch (kids w node)]
   (walk-type! w ch))
   (brk? w node) (doseq [ch (vec (rest (kids w node)))]
@@ -192,14 +192,15 @@
   (cond
   (some? (sv w node)) (if (not quoted?) (do
   (let [nm (sv w node)
+   qualifier (sq w node)
    outer (if (empty? scope) [] (vec (butlast scope)))
    modframe (if (empty? scope) nil (last scope))
-   inner (scope-lookup outer nm)
-   mod-hit (get modframe nm)]
+   inner (if (nil? qualifier) (scope-lookup outer nm) nil)
+   mod-hit (if (nil? qualifier) (get modframe nm) nil)]
   (cond
   (some? inner) nil
   (some? mod-hit) (bind! w node mod-hit)
-  (some? (bind-xmod! w node (xr w nm))) nil
+  (some? (bind-xmod! w node (xr w node nm))) nil
   :else nil))))
   (= "list" (kd w node)) (let [h (hd w node)]
   (cond
@@ -226,14 +227,15 @@
   true))))
 
 (defn- ^Boolean try-ctor! [^Walk w node nm]
-  (let [pfx (rc/ctor-prefix (if (string? nm) nm nil))]
+  (let [pfx (rc/ctor-prefix (if (string? nm) nm nil))
+   qualifier (sq w node)]
   (if (nil? pfx) false (let [stripped (str/replace (str nm) pfx "")
-   b (tr w stripped)]
+   b (if (nil? qualifier) (tr w stripped) nil)]
   (if (some? b) (do
   (bind! w node b)
   (ri/assert! (:ctx w) (nn node) (:CTOR w) (ri/literal! pfx))
   (swap! (:ntype w) (fn [n] (inc n)))
-  true) (if (some? (bind-xmod! w node (xr w stripped))) (do
+  true) (if (some? (bind-xmod! w node (xr w node stripped))) (do
   (ri/assert! (:ctx w) (nn node) (:CTOR w) (ri/literal! pfx))
   true) false))))))
 
@@ -343,12 +345,15 @@
   (let [k (kd w node)]
   (cond
   (= "symbol" k) (let [nm (sv w node)
-   local (scope-lookup scope nm)
+   qualifier (sq w node)
+   local (if (nil? qualifier) (scope-lookup scope nm) nil)
    bt (rr/bound-target (:ctx w) (:view w) (:BOUND w) node)]
   (cond
   (some? bt) (bound-render! w node nm bt)
   (some? local) (bind! w node local)
-  (some? (bind-xmod! w node (xr w nm))) nil
+  (some? (bind-xmod! w node (xr w node nm))) nil
+  (and (some? qualifier) (try-ctor! w node nm)) nil
+  (some? qualifier) (swap! (:nunres w) (fn [n] (inc n)))
   (try-type! w node nm) nil
   (try-ctor! w node nm) nil
   (try-accessor! w node nm) nil
@@ -438,8 +443,9 @@
 (defn resolve-comment! [^Walk w ^Corpus cp e src]
   (doseq [seg (vec (filter (fn [s] (= "symbol" (kd w s))) (rr/ordered-segs (:ctx w) e)))]
   (let [nm (sv w seg)
-   local (def-binding cp src nm)
-   b (if (some? local) local (:target (xr w nm)))]
+   qualifier (sq w seg)
+   local (if (nil? qualifier) (def-binding cp src nm) nil)
+   b (if (some? local) local (:target (xr w seg nm)))]
   (if (some? b) (do
   (cbind! w seg b))))))
 

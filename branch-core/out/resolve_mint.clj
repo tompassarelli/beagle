@@ -57,6 +57,16 @@
   (ri/commit! ctx builder)
   e)))
 
+(defn- mint-symbol-on! [^Mint m builder ^String src d]
+  (let [qualifier (namespace d)]
+  (if (nil? qualifier) (mint-leaf-on! m builder src "symbol" (name d)) (let [ctx (:ctx m)
+   e (register! m src (ri/mint! ctx builder))]
+  (do
+  (ri/assert-on! builder e (:KIND m) (ri/literal! "symbol"))
+  (ri/assert-on! builder e "qualifier" (ri/literal! qualifier))
+  (ri/assert-on! builder e "name" (ri/literal! (name d)))
+  e)))))
+
 (defn- clj-meta->beagle-meta [mt]
   (cond
   (and (= 1 (count mt)) (contains? mt :tag) (symbol? (:tag mt))) (:tag mt)
@@ -71,7 +81,7 @@
   (if (some? mt) (mint-datum-on! m builder src (list (symbol "#%meta") (clj-meta->beagle-meta mt) (with-meta d nil))) (let [reuse-node (rc/reuse-node-id d)]
   (if (some? reuse-node) reuse-node (cond
   (nil? d) (mint-leaf-on! m builder src "symbol" "nil")
-  (symbol? d) (mint-leaf-on! m builder src "symbol" (str d))
+  (symbol? d) (mint-symbol-on! m builder src d)
   (keyword? d) (mint-leaf-on! m builder src "symbol" (str d))
   (string? d) (mint-leaf-on! m builder src "string" d)
   (boolean? d) (mint-leaf-on! m builder src "symbol" (if d "true" "false"))
@@ -256,21 +266,8 @@
   (cond
   (and (some? wrap) (= e wrap) (string? ps) (rc/ord-pos? ps) (not= ps "f0")) nil
   (contains? INTERNAL-PREDS (str ps)) nil
-  (and (= ps "v") (some? (rr/refers-target ctx view (:BOUND m) (:REFERS m) e))) (let [D (rr/refers-target ctx view (:BOUND m) (:REFERS m) e)
-   fixed? (not (empty? (ri/by-subject-predicate ctx e (:FIXED m))))
-   qual (rr/pred-val ctx view e "qualifier")
-   cpfx (rr/pred-val ctx view e "ctor_prefix")
-   afield (rr/pred-val ctx view e "accessor_field")
-   nm0 (rv/binding-name ctx view (:BOUND m) (:REFERS m) D)
-   nm (if (nil? nm0) nil (cond
-  (some? cpfx) (str cpfx nm0)
-  (some? afield) (str (str/lower-case (str nm0)) "-" afield)
-  :else nm0))]
-  (str "[" (ri/ordinal! ctx e) " \"v\" " (pr-str (cond
-  (nil? nm0) (rr/pred-val ctx view e "v")
-  fixed? r
-  (some? qual) (str qual "/" nm)
-  :else nm)) "]"))
+  (and (= ps "name") (= "symbol" (rr/kind-of ctx view e))) (str "[" (ri/ordinal! ctx e) " \"v\" " (pr-str (rv/render-sym ctx view (:BOUND m) (:REFERS m) (:FIXED m) e)) "]")
+  (and (= ps "v") (some? (rr/refers-target ctx view (:BOUND m) (:REFERS m) e))) (str "[" (ri/ordinal! ctx e) " \"v\" " (pr-str (rv/render-sym ctx view (:BOUND m) (:REFERS m) (:FIXED m) e)) "]")
   (ri/literal? r) (str "[" (ri/ordinal! ctx e) " " (pr-str ps) " " (pr-str r) "]")
   :else (str "[" (ri/ordinal! ctx e) " " (pr-str ps) " " (ri/ordinal! ctx r) "]"))))
 
@@ -286,9 +283,15 @@
    ents (vec (get (:ents m) src []))
    rows (reduce (fn [acc e] (if (or (contains? dsub e) (and (some? live) (not (contains? live e)))) acc (reduce (fn [a cid] (let [line (emit-line! m wrap e cid)]
   (if (nil? line) a (conj a line)))) acc (ri/by-subject ctx e)))) [] ents)
-   forms (if (some? wrap) (vec (remove (fn [f] (contains? dforms f)) (vec (rest (rr/ordered-children ctx wrap))))) [])
-   formlines (mapv (fn [i] (str "[" (ri/ordinal! ctx wrap) " \"f" (+ i 1) "\" " (ri/ordinal! ctx (nth forms i)) "]")) (vec (range (count forms))))]
-  (into (into [(str "@file " src)] rows) formlines)))
+   children (if (some? wrap) (rr/ordered-children ctx wrap) [])
+   head (first children)
+   forms (vec (remove (fn [f] (contains? dforms f)) (vec (rest children))))
+   projected-children (if (some? head) (into [head] forms) forms)
+   structural-lines (mapv (fn [i] (let [child (nth projected-children i)
+   child-ordinal (ri/ordinal! ctx child)
+   predicate (rc/ord-str [(* (+ i 1) rc/ORD-STEP)] child-ordinal)]
+  (str "[" (ri/ordinal! ctx wrap) " " (pr-str predicate) " " child-ordinal "]"))) (vec (range (count projected-children))))]
+  (into (into [(str "@file " src)] rows) structural-lines)))
 
 (defn author-emit-lines [op detail srcs outp]
   (let [f outp]

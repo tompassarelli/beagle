@@ -9,7 +9,7 @@
 ;;   render-sym  the spelling a symbol node RENDERS as. A resolved reference
 ;;               shows its BINDING's current name (mode-adjusted: ctor prefix,
 ;;               x/qualifier, :rename keep-spelling); an unresolved or literal
-;;               symbol shows its stored v. This is the whole point of Turtle #5:
+;;               symbol joins its authored qualifier and leaf name. This is the whole point of Turtle #5:
 ;;               a reference stores identity, so it renders the current name even
 ;;               after a graph rename it never heard about.
 ;;   node->str   a compact, copy-pastable source string for a node.
@@ -60,11 +60,11 @@
    (FIXED Any)
    (e Any)]
   Any
-  (let [v (rr/pred-val ctx view e "v") D (rr/refers-target ctx view BOUND REFERS e)]
+  (let [leaf (rr/sym-val ctx view e) qual (rr/sym-qualifier ctx view e) authored (if (some? qual) (str (str qual) "/" (str leaf)) leaf) D (rr/refers-target ctx view BOUND REFERS e)]
     (if (nil? D)
-      v
-      (let [fixed? (and (some? ctx) (some? FIXED) (some? e) (not (empty? (ri/by-subject-predicate ctx e FIXED)))) qual (rr/pred-val ctx view e "qualifier") cpfx (rr/pred-val ctx view e "ctor_prefix") afield (rr/pred-val ctx view e "accessor_field") nm0 (binding-name ctx view BOUND REFERS D) nm (cond (some? cpfx) (str (str cpfx) (str nm0)) (some? afield) (str (str/lower-case (str nm0)) "-" (str afield)) :else nm0)]
-        (cond fixed? v (some? qual) (str (str qual) "/" (str nm)) :else nm)))))
+      authored
+      (let [fixed? (and (some? ctx) (some? FIXED) (some? e) (not (empty? (ri/by-subject-predicate ctx e FIXED)))) cpfx (rr/pred-val ctx view e "ctor_prefix") afield (rr/pred-val ctx view e "accessor_field") nm0 (binding-name ctx view BOUND REFERS D) nm (cond (some? cpfx) (str (str cpfx) (str nm0)) (some? afield) (str (str/lower-case (str nm0)) "-" (str afield)) :else nm0)]
+        (cond (nil? nm0) authored fixed? authored (some? qual) (str (str qual) "/" (str nm)) :else nm)))))
 
 (defn ord-edges [(ctx (U ri/Graph Nil)) (n Any)] (Vec Any)
   (if (or (nil? ctx) (nil? n))
@@ -84,10 +84,13 @@
     (cond
       (= "list" k)
       (let [kids (rr/ordered-children ctx n) h (nth kids 0 nil) hs (if (and (some? h) (= "symbol" (rr/kind-of ctx view h))) (render-sym ctx view BOUND REFERS FIXED h) nil) kidstr (fn
-                                                                                                                                                                                     [(ks (Vec Any))]
+                                                                                                                                                                                     [(ks
+                                                                                                                                                                                       (Vec
+                                                                                                                                                                                        Any))]
                                                                                                                                                                                      String
                                                                                                                                                                                      (str/join " " (mapv (fn
-                                                                                                                                                                                                           [(c Any)]
+                                                                                                                                                                                                           [(c
+                                                                                                                                                                                                             Any)]
                                                                                                                                                                                                            String
                                                                                                                                                                                                            (node->str ctx view BOUND REFERS FIXED c)) ks)))]
         (cond

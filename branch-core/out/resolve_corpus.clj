@@ -1,13 +1,14 @@
 (ns resolve-corpus
   (:require [clojure.string :as str]
             [resolve-ident :as ri]
+            [resolve-core :as rc]
             [resolve-read :as rr]
             [resolve-modules :as rm]
             [resolve-walk :as rw]))
 
 (def MODULE-NAME-RE (re-pattern "@([^#]+)#\\d+"))
 
-(def SLASH-RE (re-pattern "/"))
+(def NODE-REFERENCE-PREDICATE-RE (re-pattern "(?:seg|comment)\\d+"))
 
 (defrecord CorpusState [ctx view KIND BOUND REFERS file-ents corpus-cache corpus-scope resolve-walk? srcs install-srcs install-tables install-warm run-all run-over profile])
 
@@ -62,16 +63,10 @@
   (let [{:keys [refer as rename]} (rm/parse-require ctx view (vec (get ents-of src [])))
    xport (fn [m n] (or (get-in exports [m n]) (get-in type-exports [m n])))
    xacc (fn [m n] (get-in accessor-exports [m n]))]
-  (fn [nm] (cond
+  (fn [qualifier nm] (cond
   (nil? nm) nil
-  (get refer nm) (let [m (get refer nm)]
-  (let [target (xport m nm)]
-  (if target {:target target :mode :tracking} (let [accessor (xacc m nm)]
-  (if accessor (do
-  {:target (first accessor) :mode :tracking :accessor (second accessor)}))))))
-  (get rename nm) (let [[m source-name] (get rename nm)]
-  {:target (xport m source-name) :mode :fixed})
-  (str/includes? nm "/") (let [[alias public-name] (str/split nm SLASH-RE 2)
+  (some? qualifier) (let [alias qualifier
+   public-name nm
    module (or (get as alias) (if (some (fn [table] (contains? table alias)) [exports type-exports accessor-exports]) (do
   alias)))]
   (if module (do
@@ -79,6 +74,13 @@
   (if target {:target target :mode :qual :alias alias} (let [accessor (xacc module public-name)]
   (if accessor (do
   {:target (first accessor) :mode :qual :alias alias :accessor (second accessor)}))))))))
+  (get refer nm) (let [m (get refer nm)]
+  (let [target (xport m nm)]
+  (if target {:target target :mode :tracking} (let [accessor (xacc m nm)]
+  (if accessor (do
+  {:target (first accessor) :mode :tracking :accessor (second accessor)}))))))
+  (get rename nm) (let [[m source-name] (get rename nm)]
+  {:target (xport m source-name) :mode :fixed})
   :else nil))))
 
 (defn module-export-set [ctx view ents-of src]
@@ -121,8 +123,9 @@
   (do
   (install groups tables)
   (if (= "1" (System/getenv "FRAM_PROF")) (do
-  (let [profile (:profile state)]
-  (profile (format "  corpus-from-store!: groups=%.1fms frames+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- (System/nanoTime) t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state)))))))
+  (let [profile (:profile state)
+   t-done (System/nanoTime)]
+  (profile (format "  corpus-from-store!: groups=%.1fms frames+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state)))))))
   tables)))
 
 (def ^String RESOLVE-SPACE "resolve")
@@ -187,11 +190,24 @@
 (defn corpus-predicate-ids [ctx]
   corpus-predicates)
 
+(defn- ^Boolean node-reference-predicate? [predicate]
+  (and (string? predicate) (or (= "child" predicate) (= "tail" predicate) (rc/ord-pos? predicate) (boolean (re-matches NODE-REFERENCE-PREDICATE-RE predicate)))))
+
+(defn- structural-reader-rows [rows]
+  (let [symbol-nodes (reduce (fn [nodes row] (if (and (= "kind" (nth row 1 nil)) (= "symbol" (nth row 2 nil))) (conj nodes (nth row 0)) nodes)) #{} rows)]
+  (reduce (fn [result row] (let [subject (nth row 0 nil)
+   predicate (nth row 1 nil)
+   object (nth row 2 nil)]
+  (if (and (= "v" predicate) (contains? symbol-nodes subject) (string? object)) (let [reference (symbol object)
+   qualifier (namespace reference)]
+  (if (nil? qualifier) (conj result row) (into result [[subject "qualifier" qualifier] [subject "name" (name reference)]]))) (conj result row)))) [] rows)))
+
 (defn load-edn! [ctx file-ents path]
   (let [lines (str/split-lines (slurp path))
    src (-> (first (filter (fn [line] (str/starts-with? line "@file")) lines)) (subs 6))
    local (atom {})
    read-edn (requiring-resolve 'clojure.edn/read-string)
+   rows (structural-reader-rows (mapv read-edn (filter (fn [line] (str/starts-with? line "[")) lines)))
    builder (ri/open ctx)
    ent (fn [lid] (or (get (deref local) lid) (let [e (ri/mint! ctx builder)]
   (do
@@ -199,9 +215,8 @@
   (swap! file-ents update src (fnil conj []) e)
   e))))]
   (do
-  (doseq [line lines
-   :when (str/starts-with? line "[")]
-  (let [[s p o] (read-edn line)]
-  (ri/assert-on! builder (ent s) p (if (integer? o) (ent o) (ri/literal! o)))))
+  (doseq [row rows]
+  (let [[s p o] row]
+  (ri/assert-on! builder (ent s) p (if (node-reference-predicate? p) (if (integer? o) (ent o) (throw (ex-info "resolve: structural edge target must be a local integer id" {:predicate p :target o}))) (ri/literal! o)))))
   (ri/commit! ctx builder)
   src)))

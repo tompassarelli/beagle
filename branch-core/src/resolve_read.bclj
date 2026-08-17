@@ -85,8 +85,14 @@
 (defn kind-of [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
   (pred-val ctx view e "kind"))
 
+(defn sym-qualifier [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
+  (if (= "symbol" (kind-of ctx view e)) (pred-val ctx view e "qualifier") nil))
+
 (defn sym-val [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
-  (if (= "symbol" (kind-of ctx view e)) (pred-val ctx view e "v") nil))
+  (if (= "symbol" (kind-of ctx view e))
+    (let [name (pred-val ctx view e "name")]
+      (if (some? name) name (pred-val ctx view e "v")))
+    nil))
 
 (defn ordered-children [(ctx (U ri/Graph Nil)) (e Any)] (Vec Any)
   (if (or (nil? ctx) (nil? e))
@@ -104,7 +110,8 @@
 
 (defn head-sym [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
   (if (= "list" (kind-of ctx view e))
-    (sym-val ctx view (first (ordered-children ctx e)))
+    (let [head (first (ordered-children ctx e))]
+      (if (nil? (sym-qualifier ctx view head)) (sym-val ctx view head) nil))
     nil))
 
 (defn unwrap-meta [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
