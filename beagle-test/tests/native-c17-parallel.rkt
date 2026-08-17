@@ -87,6 +87,31 @@
 
 (struct checkpoint-result (label status output) #:transparent)
 
+(define (seed-compiler-projection scratch)
+  ;; A cold checkpoint is measured after its content-addressed compiler
+  ;; projection exists. Use a different program identity for that prerequisite
+  ;; so each checkpoint below still starts absent and keeps its 90-second owner.
+  (define out (build-path scratch "compiler-projection"))
+  (make-directory out)
+  (define log (open-output-string))
+  (define env
+    (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set!
+   env #"BEAGLE_CORE_BUILD_CACHE"
+   (path->bytes (path->directory-path core-build-cache)))
+  (define status
+    (parameterize ([current-output-port log]
+                   [current-error-port log]
+                   [current-environment-variables env])
+      (system*/exit-code
+       racket-command supervisor "180" "5" "--"
+       beagle "build" "--materializer" "c17"
+       "--out" (path->string out) (path->string parallel-source))))
+  (unless (zero? status)
+    (error 'native-c17-parallel
+           "cold compiler projection prerequisite failed with status ~a:\n~a"
+           status (get-output-string log))))
+
 (define (run-checkpoint-seed scratch label materializer abi sources)
   (define out (build-path scratch label))
   (make-directory out)
@@ -132,6 +157,7 @@
   (dynamic-wind
     void
     (lambda ()
+      (seed-compiler-projection scratch)
       (check-checkpoint-seed
        (run-checkpoint-seed
         scratch "c17-lp64" "c17" "lp64"
