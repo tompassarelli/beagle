@@ -1,5 +1,6 @@
 (ns selfhost.reader
   (:require [selfhost.rt :as rt]
+            [selfhost.ast :as ast]
             [clojure.string :as str]))
 
 (def ^String STRING-TAG "#%string")
@@ -236,6 +237,117 @@
    text (get sym-result "value")]
   (make-result (classify-atom text) (get sym-result "pos"))))))))
 
+(declare read-syntax-datum!)
+
+(def SOURCE-LOCATIONS (atom []))
+
+(defn- build-source-locations [^String src]
+  (loop [i 0
+   line 1
+   column 0
+   locations [[1 0]]]
+  (if (>= i (count src)) locations (if (newline? (char-at src i)) (recur (+ i 1) (+ line 1) 0 (conj locations [(+ line 1) 0])) (recur (+ i 1) line (+ column 1) (conj locations [line (+ column 1)]))))))
+
+(defn- source-line-column [^String src pos]
+  (let [locations (deref SOURCE-LOCATIONS)]
+  (if (and (>= pos 0) (< pos (count locations))) (nth locations pos) [1 pos])))
+
+(defn- syntax-span! [^String src source-id start end]
+  (let [location (source-line-column src start)]
+  (ast/make-source-span! source-id start end (nth location 0) (nth location 1))))
+
+(defn- syntax-properties [^String src start end delimiter]
+  {"reader" (ast/make-reader-metadata (subs src start end) delimiter)})
+
+(defn- syntax-head! [^String name span properties]
+  (ast/datum->beagle-syntax! name span ast/EMPTY-SCOPE-SET nil properties))
+
+(defn- attach-syntax! [^String src source-id start result]
+  (if (nil? result) nil (let [end (get result "pos")
+   value (get result "value")
+   ch (char-at src start)
+   children (or (get result "syntaxChildren") [])
+   delimiter (cond
+  (= ch "(") "paren"
+  (= ch "[") "bracket"
+  (= ch "{") "brace"
+  (and (= ch "#") (= (char-at src (+ start 1)) "{")) "set"
+  (= ch "'") "quote"
+  (= ch "`") "quasiquote"
+  (and (= ch "~") (= (char-at src (+ start 1)) "@")) "unquote-splicing"
+  (= ch "~") "unquote"
+  :else "atom")
+   span (syntax-span! src source-id start end)
+   properties (syntax-properties src start end delimiter)
+   syntax (cond
+  (= ch "(") (ast/make-syntax-list! children span ast/EMPTY-SCOPE-SET nil properties)
+  (= ch "[") (ast/make-syntax-vector! children span ast/EMPTY-SCOPE-SET nil properties)
+  (= ch "{") (ast/make-syntax-list! (into [(syntax-head! MAP-TAG span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
+  (and (= ch "#") (= (char-at src (+ start 1)) "{")) (ast/make-syntax-list! (into [(syntax-head! SET-TAG span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
+  (= ch "'") (ast/make-syntax-quote! (if (> (count value) 1) (nth value 1) nil) span ast/EMPTY-SCOPE-SET nil properties)
+  (or (= ch "~") (and (= ch "~") (= (char-at src (+ start 1)) "@"))) (ast/make-syntax-unquote! (if (> (count children) 0) (nth children 0) (ast/datum->beagle-syntax! nil span ast/EMPTY-SCOPE-SET nil properties)) (= delimiter "unquote-splicing") span ast/EMPTY-SCOPE-SET nil properties)
+  (or (= ch "`") (= ch "@") (= ch "^")) (let [head (nth value 0)]
+  (ast/make-syntax-list! (into [(syntax-head! head span properties)] children) span ast/EMPTY-SCOPE-SET nil properties))
+  :else (ast/datum->beagle-syntax! value span ast/EMPTY-SCOPE-SET nil properties))]
+  (assoc result "syntax" syntax))))
+
+(defn- read-syntax-delimited! [^String src pos ^String close source-id]
+  (let [len (count src)]
+  (loop [p (skip-ws src pos)
+   items []
+   syntaxes []]
+  (cond
+  (>= p len) (do
+  (selfhost.rt/eprint (str "beagle reader: expected " close " before EOF\n"))
+  (assoc (make-result items p) "syntaxChildren" syntaxes))
+  (= (char-at src p) close) (assoc (make-result items (+ p 1)) "syntaxChildren" syntaxes)
+  :else (let [result (read-syntax-datum! src p source-id)]
+  (if (nil? result) (assoc (make-result items p) "syntaxChildren" syntaxes) (recur (skip-ws src (get result "pos")) (conj items (get result "value")) (conj syntaxes (get result "syntax")))))))))
+
+(defn- read-syntax-hash-dispatch! [^String src pos source-id]
+  (let [len (count src)]
+  (if (>= (+ pos 1) len) (make-result "#" (+ pos 1)) (let [nxt (char-at src (+ pos 1))]
+  (cond
+  (= nxt "{") (let [result (read-syntax-delimited! src (+ pos 2) "}" source-id)]
+  (assoc (make-result (into [SET-TAG] (get result "value")) (get result "pos")) "syntaxChildren" (get result "syntaxChildren")))
+  (= nxt "\"") (read-regex-literal src (+ pos 1))
+  (= nxt "r") (read-raw-string src (+ pos 2))
+  :else (let [sym-result (read-symbol-text src pos)]
+  (make-result (get sym-result "value") (get sym-result "pos"))))))))
+
+(defn read-syntax-datum! [^String src pos source-id]
+  (let [p (skip-ws src pos)
+   len (count src)]
+  (if (>= p len) nil (let [ch (char-at src p)
+   result (cond
+  (= ch "(") (read-syntax-delimited! src (+ p 1) ")" source-id)
+  (= ch "[") (let [inner (read-syntax-delimited! src (+ p 1) "]" source-id)]
+  (assoc (make-result (into [BRACKET-TAG] (get inner "value")) (get inner "pos")) "syntaxChildren" (get inner "syntaxChildren")))
+  (= ch "{") (let [inner (read-syntax-delimited! src (+ p 1) "}" source-id)]
+  (assoc (make-result (into [MAP-TAG] (get inner "value")) (get inner "pos")) "syntaxChildren" (get inner "syntaxChildren")))
+  (= ch "\"") (read-string-literal src p)
+  (= ch "#") (read-syntax-hash-dispatch! src p source-id)
+  (= ch "'") (let [inner (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? inner) (make-result ["quote" nil] (+ p 1)) (assoc (make-result ["quote" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "`") (let [inner (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? inner) (make-result ["quasiquote" nil] (+ p 1)) (assoc (make-result ["quasiquote" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "@") (let [inner (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? inner) (make-result ["deref" nil] (+ p 1)) (assoc (make-result ["deref" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "~") (let [splicing (= (char-at src (+ p 1)) "@")
+   inner (read-syntax-datum! src (+ p (if splicing 2 1)) source-id)]
+  (if (nil? inner) (make-result [(if splicing "unquote-splicing" "unquote") nil] (+ p (if splicing 2 1))) (assoc (make-result [(if splicing "unquote-splicing" "unquote") (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "^") (let [meta-r (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? meta-r) nil (let [form-r (read-syntax-datum! src (get meta-r "pos") source-id)]
+  (if (nil? form-r) nil (assoc (make-result ["#%meta" (get meta-r "value") (get form-r "value")] (get form-r "pos")) "syntaxChildren" [(get meta-r "syntax") (get form-r "syntax")])))))
+  (or (digit? ch) (and (= ch "-") (< (+ p 1) len) (digit? (char-at src (+ p 1))))) (read-number src p)
+  (or (= ch ")") (= ch "]") (= ch "}")) nil
+  (= ch "\\") (let [sfx-result (read-symbol-text src (+ p 1))
+   code (decode-char-lit (get sfx-result "value"))]
+  (make-result [CHAR-TAG code] (get sfx-result "pos")))
+  :else (let [sym-result (read-symbol-text src p)]
+  (make-result (classify-atom (get sym-result "value")) (get sym-result "pos"))))]
+  (attach-syntax! src source-id p result)))))
+
 (defn lang-target [^String lang-text]
   (cond
   (= lang-text "beagle") "core"
@@ -274,6 +386,20 @@
    target (get all "target")
    datums (get all "datums")]
   (if (and (some? target) (not= target "clj") (not (has-define-target? datums))) (into [["define-target" target]] datums) datums)))
+
+(defn read-program-with-syntax! [^String src source-id]
+  (reset! SOURCE-LOCATIONS (build-source-locations src))
+  (let [lang-info (parse-lang-line src)
+   target (get lang-info "target")
+   start-pos (get lang-info "pos")
+   read-result (loop [p (skip-ws src start-pos)
+   datums []
+   syntaxes []]
+  (if (>= p (count src)) {"datums" datums "syntaxes" syntaxes} (let [result (read-syntax-datum! src p source-id)]
+  (if (nil? result) {"datums" datums "syntaxes" syntaxes} (recur (skip-ws src (get result "pos")) (conj datums (get result "value")) (conj syntaxes (get result "syntax")))))))
+   datums (get read-result "datums")
+   syntaxes (get read-result "syntaxes")]
+  (if (and (some? target) (not= target "clj") (not (has-define-target? datums))) {"datums" (into [["define-target" target]] datums) "syntaxes" (into [(ast/datum->beagle-syntax! ["define-target" target] nil ast/EMPTY-SCOPE-SET nil {"reader" (ast/make-reader-metadata "" "synthetic")})] syntaxes)} {"datums" datums "syntaxes" syntaxes})))
 
 (def passes (atom []))
 
@@ -404,6 +530,13 @@
   (expect! "read-program: explicit define-target present -> no double injection" (= (read-program "#lang beagle/js\n(define-target js)\n(ns app)") [["define-target" "js"] ["ns" "app"]]))
   (expect! "read-datum returns value+pos" (let [r (read-datum "42 rest" 0)]
   (and (= (get r "value") 42) (= (get r "pos") 2))))
+  (expect! "syntax reader keeps exact caller bytes and child span" (let [source "#lang beagle/clj\n(identity (+ 1 2))"
+   result (read-program-with-syntax! source "reader-fixture.bclj")
+   call-syntax (nth (get result "syntaxes") 0)
+   child (nth (get call-syntax "payload") 1)
+   reader (get (ast/beagle-syntax-properties child) "reader")
+   span (ast/beagle-syntax-span child)]
+  (and (= (get reader "sourceBytes") "(+ 1 2)") (= (get span "start") 27) (= (get span "end") 34))))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  READER: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

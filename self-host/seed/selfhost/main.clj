@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [selfhost.rt :as rt]
             [selfhost.reader :as rd]
+            [selfhost.ast :as syntax]
             [selfhost.parse :as p]
             [selfhost.check :as c]
             [selfhost.emit-clj :as e]
@@ -227,16 +228,20 @@
 (defn- parse-file-target! [^String path ^String target]
   (let [source-snapshot (selfhost.rt/read-source-snapshot path)
    source-text (get source-snapshot "text")
-   datums0 (rd/read-program source-text)
+   source-id (selfhost.rt/source-id path)
+   reader-output (rd/read-program-with-syntax! source-text source-id)
+   datums0 (get reader-output "datums")
+   syntaxes0 (get reader-output "syntaxes")
    datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
+   syntaxes (if (has-define-target? datums0) syntaxes0 (into [(syntax/datum->beagle-syntax! ["define-target" target] nil syntax/EMPTY-SCOPE-SET nil {"reader" (syntax/make-reader-metadata "" "synthetic")})] syntaxes0))
    surfaces (load-import-surfaces! (p/discover-requires! datums) path target datums)
    imported-arities (import-parametric-arities! surfaces)
    imported-aliases (import-type-aliases surfaces)
-   prog (resolve-imports! (p/parse-program-with-imports! datums imported-arities imported-aliases) surfaces)
+   prog (resolve-imports! (p/parse-program-with-syntax-and-imports! datums syntaxes imported-arities imported-aliases) surfaces)
    perrs (p/parse-errors)]
   (if (> (count perrs) 0) (do
   (selfhost.rt/exit 1)
-  prog) {"program" prog "datums" datums "source-text" source-text "source-sha256" (get source-snapshot "sourceSha256") "source-id" (selfhost.rt/source-id path)})))
+  prog) {"program" prog "datums" datums "source-text" source-text "source-sha256" (get source-snapshot "sourceSha256") "source-id" source-id})))
 
 (defn- imported-record-field-order [prog]
   (reduce (fn [out contract] (assoc out (get contract "name") (mapv (fn [^String field] (if (str/starts-with? field ":") (subs field 1) field)) (get contract "field-order")))) {} (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))

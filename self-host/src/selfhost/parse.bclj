@@ -27,14 +27,16 @@
 ;; record (needs the oracle's per-record field table), and parametric-union
 ;; member ctors/accessors (only the union name is imported).
 ;;
-;; Also unported: source locations (this chain carries none; seed emission
-;; is srcloc-free by construction) and non-clj target surfaces (nix reader
-;; macros / nix-* forms — the selfhost chain emits the clj target only).
+;; Source spans enter through the immutable syntax membrane used by macro
+;; expansion; ordinary AST emission remains source-location free by contract.
+;; Non-clj target surfaces (nix reader macros / nix-* forms) remain outside the
+;; self-host emitter's current clj-only responsibility.
 (require clojure.string :as str)
 
 (require selfhost.rt)
 
 (require selfhost.macros :as mac)
+(require selfhost.ast :as syntax)
 
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
@@ -859,6 +861,78 @@
 ;; consult it through this cell (parse.rkt parameterizes current-registry).
 ;; nil = no program context (bare parse-expr* in tests) — macro-inert.
 (def CURRENT-REGISTRY-CELL Any (atom nil))
+
+;; The parser remains datum-oriented after expansion, but macro calls recover
+;; the reader-produced syntax value from this per-program occurrence queue.
+;; Equal repeated forms are consumed in source traversal order.
+(def PROGRAM-SYNTAXES-PENDING Any (atom nil))
+(def PROGRAM-SYNTAXES Any (atom []))
+(def PROGRAM-SYNTAX-QUEUES Any (atom {}))
+
+(defn- syntax-sequence-head [(value Any)] Any
+  (if (and (syntax/beagle-syntax? value)
+           (or (= (get value "variant") "list")
+               (= (get value "variant") "vector"))
+           (> (count (get value "payload")) 0))
+    (mac/macro-datum (nth (get value "payload") 0))
+    nil))
+
+(defn- enqueue-syntax! [(datum Any) (value Any)] Nil
+  (let [queue (or (get (deref PROGRAM-SYNTAX-QUEUES) datum) [])]
+    (swap! PROGRAM-SYNTAX-QUEUES assoc datum (conj queue value)))
+  nil)
+
+(defn- index-macro-call-tree! [(reg Any) (value Any)] Nil
+  (when (syntax/beagle-syntax? value)
+    (let [variant (get value "variant")]
+      (when (or (= variant "list") (= variant "vector"))
+        (let [head (syntax-sequence-head value)]
+          (when (and (string? head) (some? (mac/lookup-macro reg head)))
+            (enqueue-syntax! (mac/macro-datum value) value))
+          (doseq [child (get value "payload")]
+            (index-macro-call-tree! reg child))))))
+  nil)
+
+(defn- install-program-syntaxes! [(datums Any)] Nil
+  (let [provided (deref PROGRAM-SYNTAXES-PENDING)
+        syntaxes
+        (if (and (vector? provided) (= (count provided) (count datums)))
+          provided
+          (mapv
+            (fn [(datum Any)] Any
+              (syntax/datum->beagle-syntax!
+                datum nil syntax/EMPTY-SCOPE-SET nil {}))
+            datums))]
+    (reset! PROGRAM-SYNTAXES-PENDING nil)
+    (reset! PROGRAM-SYNTAXES syntaxes)
+    (reset! PROGRAM-SYNTAX-QUEUES {})
+    ;; Macro definitions need their exact template before the registry exists.
+    ;; Index only those top-level forms here; ordinary call indexing waits until
+    ;; registration is complete and then visits registered macro heads only.
+    (doseq [i (range (count datums))]
+      (let [datum (nth datums i) value (nth syntaxes i)]
+        (when (and (vector? datum)
+                   (> (count datum) 0)
+                   (= (nth datum 0) "defmacro"))
+          (enqueue-syntax! datum value)))))
+  nil)
+
+(defn- install-macro-call-syntaxes! [(reg Any)] Nil
+  (reset! PROGRAM-SYNTAX-QUEUES {})
+  (doseq [value (deref PROGRAM-SYNTAXES)]
+    (let [head (syntax-sequence-head value)]
+      (when (not (and (string? head) (has-item? META-FORMS head)))
+        (index-macro-call-tree! reg value))))
+  nil)
+
+(defn- syntax-for-datum! [(datum Any)] Any
+  (let [queue (get (deref PROGRAM-SYNTAX-QUEUES) datum)]
+    (if (and (vector? queue) (> (count queue) 0))
+      (do
+        (swap! PROGRAM-SYNTAX-QUEUES assoc datum (subvec queue 1))
+        (nth queue 0))
+      (syntax/datum->beagle-syntax!
+        datum nil syntax/EMPTY-SCOPE-SET nil {}))))
 
 ;; --- datum->json (quoted datums / case values; ast-json.rkt encoding) ----------
 ;; Symbols tag as {"type" "symbol"}, keywords as {"type" "keyword"} (colon
@@ -2512,7 +2586,12 @@
       (and (string? head)
         (some? (deref CURRENT-REGISTRY-CELL))
         (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d))
-      (parse-expr* (mac/expand-fully! (deref CURRENT-REGISTRY-CELL) d 0 nil))
+      (parse-expr*
+        (mac/macro-datum
+          (mac/expand-fully!
+            (deref CURRENT-REGISTRY-CELL)
+            (syntax-for-datum! d)
+            0 nil)))
       (and (string? head) (= head "unsafe"))
       (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
       (and (string? head) (str/starts-with? head "unsafe-"))
@@ -3071,6 +3150,7 @@
 (defn parse-program! [(datums Any)] Any
   (reset-errors!)
   (mac/reset-lowering-counter!)
+  (install-program-syntaxes! datums)
   (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
   (reset! USER-PARAMETRIC-ARITIES (deref PRELOADED-PARAMETRIC-ARITIES))
   (reset! PRELOADED-PARAMETRIC-ARITIES {})
@@ -3145,13 +3225,21 @@
                     nil))))
             (= head "defmacro")
             (if (and (= (count d) 4) (string? (nth d 1)) (or (bracketed? (nth d 2)) (vector? (nth d 2))))
-              (do
+              (let [definition-syntax (syntax-for-datum! d)
+                    template-syntax
+                    (if (and (syntax/beagle-syntax? definition-syntax)
+                             (= (get definition-syntax "variant") "list")
+                             (> (count (get definition-syntax "payload")) 3))
+                      (nth (get definition-syntax "payload") 3)
+                      nil)]
                 (validate-identifier! (nth d 1) "macro")
-                (mac/register-macro! (deref CURRENT-REGISTRY-CELL)
+                (mac/register-macro-with-syntax!
+                  (deref CURRENT-REGISTRY-CELL)
                   (nth d 1)
                   "defmacro"
                   (unwrap-items (nth d 2))
-                  (nth d 3)))
+                  (nth d 3)
+                  template-syntax))
               (do
                 (err! (str "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: " (str d)))
                 nil))
@@ -3181,6 +3269,7 @@
               (swap! imports into (parse-import-spec! spec "import")))
             :else
             nil))))
+    (install-macro-call-syntaxes! (deref CURRENT-REGISTRY-CELL))
     (let [hygiene-capable (has-item? ["clj" "nix" "js"] (deref target))
           def-names
           (if hygiene-capable
@@ -3199,7 +3288,13 @@
       (mac/set-hygiene-context! def-names))
     (doseq [d datums]
       (when (not (meta-form? d))
-        (let [reg (deref CURRENT-REGISTRY-CELL) from-macro (mac/macro-application? reg d) expanded (if from-macro (mac/expand-fully! reg d 0 nil) d)]
+        (let [reg (deref CURRENT-REGISTRY-CELL)
+              from-macro (mac/macro-application? reg d)
+              expanded-value
+              (if from-macro
+                (mac/expand-fully! reg (syntax-for-datum! d) 0 nil)
+                d)
+              expanded (mac/macro-datum expanded-value)]
           (cond
             (and from-macro
                  (vector? expanded)
@@ -3245,6 +3340,22 @@
 
 (defn parse-program-with-imports!
   [(datums Any) (imported-arities Any) (imported-aliases Any)] Any
+  (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
+  (reset! PRELOADED-TYPE-ALIASES imported-aliases)
+  (parse-program! datums))
+
+(defn parse-program-with-syntax!
+  [(datums Any) (syntaxes Any)] Any
+  (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
+  (parse-program! datums))
+
+(defn parse-program-with-syntax-and-imports!
+  [(datums Any)
+   (syntaxes Any)
+   (imported-arities Any)
+   (imported-aliases Any)]
+  Any
+  (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
   (reset! PRELOADED-TYPE-ALIASES imported-aliases)
   (parse-program! datums))
@@ -4374,6 +4485,21 @@
         (= (get (nth (get prog "forms") 0) "node") "def")
         (= (count (get prog "externs")) 1)
         (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "parse-program syntax membrane expands a nested caller form"
+    (let [datums
+          [["defmacro" "identity" [BRACKET-TAG "form"] "form"]
+           ["def" "out" ["identity" ["+" 1 2]]]]
+          syntaxes
+          (mapv
+            (fn [(datum Any)] Any
+              (syntax/datum->beagle-syntax!
+                datum nil syntax/EMPTY-SCOPE-SET nil {}))
+            datums)
+          prog (parse-program-with-syntax! datums syntaxes)
+          value (get (nth (get prog "forms") 0) "value")]
+      (and (= (get value "node") "call")
+           (= (get (get value "fn") "name") "+")
+           (= (count (get value "args")) 2))))
   (expect! "parse-program! reserves compiler prefix across metadata binders"
     (let [_ (parse-program!
               [["ns" "$beagle$ns"]

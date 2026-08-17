@@ -1,6 +1,7 @@
 (ns selfhost.macros
   (:require [clojure.string :as str]
-            [selfhost.rt :as rt]))
+            [selfhost.rt :as rt]
+            [selfhost.ast :as ast]))
 
 (def ^String BRACKET-TAG "#%brackets")
 
@@ -28,12 +29,23 @@
   (selfhost.rt/eprint (str "beagle: " msg "\n"))
   "nil")
 
-(defn make-root-ctx [^String name]
-  {"macro-name" name "depth" 0 "parent" nil})
+(defn- syntax-source-bytes [value]
+  (let [properties (if (ast/beagle-syntax? value) (ast/beagle-syntax-properties value) nil)
+   reader (if (map? properties) (get properties "reader") nil)]
+  (if (map? reader) (get reader "sourceBytes") nil)))
 
-(defn push-ctx [parent ^String name]
-  (let [parent-depth (get parent "depth")]
-  {"macro-name" name "depth" (+ 1 parent-depth) "parent" parent}))
+(defn make-root-ctx! [^String name call-syntax]
+  (let [call-span (if (ast/beagle-syntax? call-syntax) (ast/beagle-syntax-span call-syntax) nil)
+   origin (ast/make-expansion-origin! name call-span nil)]
+  {"macro-name" name "depth" 0 "parent" nil "call-span" call-span "origin" origin "source-bytes" (syntax-source-bytes call-syntax) "call-syntax" call-syntax}))
+
+(defn push-ctx! [parent ^String name call-syntax]
+  (let [parent-depth (get parent "depth")
+   call-span (if (ast/beagle-syntax? call-syntax) (ast/beagle-syntax-span call-syntax) nil)
+   call-origin (if (ast/beagle-syntax? call-syntax) (ast/beagle-syntax-origin call-syntax) nil)
+   parent-origin (if (some? call-origin) call-origin (get parent "origin"))
+   origin (ast/make-expansion-origin! name call-span parent-origin)]
+  {"macro-name" name "depth" (+ 1 parent-depth) "parent" parent "call-span" call-span "origin" origin "source-bytes" (syntax-source-bytes call-syntax) "call-syntax" call-syntax}))
 
 (defn collect-chain-lines [ctx]
   (if (nil? ctx) [] (into [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")] (collect-chain-lines (get ctx "parent")))))
@@ -79,14 +91,34 @@
   (swap! HYGIENE-ALIASES assoc orig alias)
   alias))))
 
+(defn macro-datum [value]
+  (if (not (ast/beagle-syntax? value)) value (let [variant (get value "variant")
+   payload (get value "payload")]
+  (cond
+  (= variant "atom") payload
+  (= variant "ident") (ast/structural-name->symbol payload)
+  (= variant "list") (mapv macro-datum payload)
+  (= variant "vector") (into [BRACKET-TAG] (mapv macro-datum payload))
+  (= variant "quote") ["quote" payload]
+  (= variant "unquote") ["unquote" (macro-datum payload)]
+  (= variant "unquote-splicing") ["unquote-splicing" (macro-datum payload)]
+  :else value))))
+
+(defn ^Boolean syntax-list? [value]
+  (and (ast/beagle-syntax? value) (= (get value "variant") "list")))
+
+(defn ^Boolean syntax-vector? [value]
+  (and (ast/beagle-syntax? value) (= (get value "variant") "vector")))
+
 (defn ^Boolean datum-pair? [d]
-  (and (vector? d) (> (count d) 0)))
+  (let [datum (macro-datum d)]
+  (and (vector? datum) (> (count datum) 0))))
 
 (defn datum-car [d]
-  (nth d 0))
+  (if (or (syntax-list? d) (syntax-vector? d)) (macro-datum (nth (get d "payload") 0)) (nth d 0)))
 
 (defn datum-cdr [d]
-  (subvec d 1))
+  (if (or (syntax-list? d) (syntax-vector? d)) (subvec (get d "payload") 1) (subvec d 1)))
 
 (defn datum-cons [h t]
   (if (vector? t) (into [h] t) [h t]))
@@ -106,7 +138,7 @@
 (defn make-macro-registry []
   (atom {}))
 
-(defn register-macro! [reg ^String name ^String kind params template]
+(defn register-macro-with-syntax! [reg ^String name ^String kind params template template-syntax]
   (if (not (nil? (get (deref reg) name))) (do
   (selfhost.rt/eprint (str "beagle: duplicate macro definition: " name "\n"))))
   (if (and (not= kind "safe") (not= kind "defmacro")) (do
@@ -114,8 +146,11 @@
   nil) (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i ^String x] (if (= x "&") i nil)) params)) -1)
    fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
    rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
-  (swap! reg assoc name {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template})
+  (swap! reg assoc name {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template "template-syntax" template-syntax "definition-span" (if (ast/beagle-syntax? template-syntax) (ast/beagle-syntax-span template-syntax) nil) "source-bytes" (syntax-source-bytes template-syntax)})
   nil)))
+
+(defn register-macro! [reg ^String name ^String kind params template]
+  (register-macro-with-syntax! reg name kind params template nil))
 
 (defn lookup-macro [reg ^String name]
   (get (deref reg) name))
@@ -130,34 +165,45 @@
   (throw (ex-info (str "macro-eval: " msg) {})))
 
 (defn ^Boolean macro-string? [value]
-  (and (datum-pair? value) (= (count value) 2) (= (datum-car value) STRING-TAG) (string? (nth value 1))))
+  (let [datum (macro-datum value)]
+  (and (datum-pair? datum) (= (count datum) 2) (= (datum-car datum) STRING-TAG) (string? (nth datum 1)))))
 
 (defn ^String macro-string! [value ^String who]
+  (let [datum (macro-datum value)]
   (cond
-  (macro-string? value) (nth value 1)
-  (string? value) value
-  :else (macro-eval-fail! (str who " expected a string or symbol, got: " (str value)))))
+  (macro-string? datum) (nth datum 1)
+  (string? datum) datum
+  :else (macro-eval-fail! (str who " expected a string or symbol, got: " (str datum))))))
 
 (defn ^String macro-display [value]
+  (let [datum (macro-datum value)]
   (cond
-  (macro-string? value) (nth value 1)
-  (string? value) value
-  :else (str value)))
+  (macro-string? datum) (nth datum 1)
+  (string? datum) datum
+  :else (str datum))))
+
+(defn ^Boolean macro-truthy? [value]
+  (let [datum (macro-datum value)]
+  (and (some? datum) (not= datum false))))
 
 (defn ^Boolean macro-seq? [value]
-  (vector? value))
+  (or (syntax-list? value) (syntax-vector? value) (vector? value)))
 
 (defn ^Boolean reader-tagged-datum? [value]
   (and (datum-pair? value) (or (= (datum-car value) BRACKET-TAG) (= (datum-car value) MAP-TAG) (= (datum-car value) SET-TAG) (= (datum-car value) STRING-TAG))))
 
 (defn ^Boolean macro-list-datum? [value]
-  (and (vector? value) (not (reader-tagged-datum? value))))
+  (or (syntax-list? value) (let [datum (macro-datum value)]
+  (and (vector? datum) (not (reader-tagged-datum? datum))))))
 
 (defn ^Boolean macro-vector-datum? [value]
-  (and (datum-pair? value) (= (datum-car value) BRACKET-TAG)))
+  (or (syntax-vector? value) (let [datum (macro-datum value)]
+  (and (datum-pair? datum) (= (datum-car datum) BRACKET-TAG)))))
 
 (defn macro-seq! [value ^String who]
   (cond
+  (syntax-list? value) (get value "payload")
+  (syntax-vector? value) (get value "payload")
   (and (datum-pair? value) (= (datum-car value) BRACKET-TAG)) (datum-cdr value)
   (vector? value) value
   :else (macro-eval-fail! (str who " expected a list or vec, got: " (str value)))))
@@ -212,7 +258,7 @@
   (macro-eval-body! body bound))))
 
 (defn macro-eval-if! [parts env]
-  (if (< (count parts) 2) (macro-eval-fail! "if needs a test and then expression") (if (macro-eval! (nth parts 0) env) (macro-eval! (nth parts 1) env) (if (> (count parts) 2) (macro-eval! (nth parts 2) env) nil))))
+  (if (< (count parts) 2) (macro-eval-fail! "if needs a test and then expression") (if (macro-truthy? (macro-eval! (nth parts 0) env)) (macro-eval! (nth parts 1) env) (if (> (count parts) 2) (macro-eval! (nth parts 2) env) nil))))
 
 (defn ^Boolean macro-cond-else? [form]
   (or (= form ":else") (= form "else")))
@@ -223,11 +269,11 @@
   (= (count clauses) 1) (macro-eval-fail! (str "cond needs an expression after test: " (str (nth clauses 0))))
   :else (let [test-form (nth clauses 0)
    result-form (nth clauses 1)]
-  (if (or (macro-cond-else? test-form) (macro-eval! test-form env)) (macro-eval! result-form env) (macro-eval-flat-cond! (subvec clauses 2) env)))))
+  (if (or (macro-cond-else? test-form) (macro-truthy? (macro-eval! test-form env))) (macro-eval! result-form env) (macro-eval-flat-cond! (subvec clauses 2) env)))))
 
 (defn macro-eval-bracket-cond! [clauses env]
   (if (= (count clauses) 0) nil (let [clause (datum-cdr (nth clauses 0))]
-  (if (< (count clause) 2) (macro-eval-fail! (str "cond clause needs a test and expression: " (str (nth clauses 0)))) (if (or (macro-cond-else? (nth clause 0)) (macro-eval! (nth clause 0) env)) (macro-eval-body! (subvec clause 1) env) (macro-eval-bracket-cond! (subvec clauses 1) env))))))
+  (if (< (count clause) 2) (macro-eval-fail! (str "cond clause needs a test and expression: " (str (nth clauses 0)))) (if (or (macro-cond-else? (nth clause 0)) (macro-truthy? (macro-eval! (nth clause 0) env))) (macro-eval-body! (subvec clause 1) env) (macro-eval-bracket-cond! (subvec clauses 1) env))))))
 
 (defn macro-eval-cond! [clauses env]
   (let [bracket-count (count (filterv (fn [clause] (and (datum-pair? clause) (= (datum-car clause) BRACKET-TAG))) clauses))]
@@ -252,6 +298,7 @@
 
 (defn macro-eval! [expr env]
   (cond
+  (ast/beagle-syntax? expr) expr
   (or (number? expr) (boolean? expr) (nil? expr)) expr
   (macro-string? expr) expr
   (string? expr) (if (str/starts-with? expr ":") expr (macro-env-lookup! env expr))
@@ -293,7 +340,7 @@
   (mapv (fn [i] (macro-apply-fn! fn-value (mapv (fn [xs] (nth xs i)) seqs))) (range width))))
 
 (defn macro-distinct-values [items]
-  (reduce (fn [result item] (if (some? (some (fn [seen] (if (= seen item) true nil)) result)) result (conj result item))) [] items))
+  (reduce (fn [result item] (if (some? (some (fn [seen] (if (= (macro-datum seen) (macro-datum item)) true nil)) result)) result (conj result item))) [] items))
 
 (defn ^Boolean macro-all-distinct? [items]
   (= (count items) (count (macro-distinct-values items))))
@@ -311,18 +358,19 @@
   :else (recur (+ i 1) arg-i (str out ch)))) (recur (+ i 1) arg-i (str out ch))))))))
 
 (defn macro-number-fold! [^String name args]
+  (let [numbers (mapv macro-datum args)]
   (cond
-  (= name "+") (reduce + 0 args)
-  (= name "*") (reduce * 1 args)
+  (= name "+") (reduce + 0 numbers)
+  (= name "*") (reduce * 1 numbers)
   (= name "-") (cond
-  (= (count args) 0) (macro-eval-fail! "- expected at least one argument")
-  (= (count args) 1) (let [arg (nth args 0)]
+  (= (count numbers) 0) (macro-eval-fail! "- expected at least one argument")
+  (= (count numbers) 1) (let [arg (nth numbers 0)]
   (- 0 arg))
-  :else (reduce - (nth args 0) (subvec args 1)))
-  :else (macro-eval-fail! (str "unknown numeric function: " name))))
+  :else (reduce - (nth numbers 0) (subvec numbers 1)))
+  :else (macro-eval-fail! (str "unknown numeric function: " name)))))
 
 (defn ^Boolean macro-ordered? [^String name args]
-  (loop [items args]
+  (loop [items (mapv macro-datum args)]
   (if (< (count items) 2) true (let [a (nth items 0)
    b (nth items 1)
    ok (cond
@@ -333,7 +381,8 @@
   (if ok (recur (subvec items 1)) false)))))
 
 (defn macro-syntax-binding-datum [raw]
-  (if (and (macro-vector-datum? raw) (= (count raw) 2) (vector? (nth raw 1)) (or (= (count (nth raw 1)) 2) (= (count (nth raw 1)) 3))) (nth raw 1) raw))
+  (let [datum (macro-datum raw)]
+  (if (and (macro-vector-datum? datum) (= (count datum) 2) (vector? (nth datum 1)) (or (= (count (nth datum 1)) 2) (= (count (nth datum 1)) 3))) (nth datum 1) datum)))
 
 (defn ^Boolean macro-syntax-binding-form? [syntax]
   (or (string? syntax) (macro-vector-datum? syntax) (and (datum-pair? syntax) (= (datum-car syntax) MAP-TAG))))
@@ -389,7 +438,7 @@
   (if (> (count items) 0) (subvec items 1) (macro-eval-fail! "rest needs a non-empty collection"))))
   (= name "null?") (do
   (macro-require-arity! name args 1)
-  (and (vector? (nth args 0)) (= (count (nth args 0)) 0)))
+  (= (count (macro-seq! (nth args 0) name)) 0))
   (= name "pair?") (do
   (macro-require-arity! name args 1)
   (datum-pair? (nth args 0)))
@@ -418,7 +467,7 @@
   :else (macro-eval-fail! "reduce expected (reduce f coll) or (reduce f init coll)"))
   (= name "range") (do
   (macro-require-arity! name args 1)
-  (let [n (nth args 0)]
+  (let [n (macro-datum (nth args 0))]
   (if (and (int? n) (>= n 0)) (vec (range n)) (macro-eval-fail! (str "range: expected a non-negative integer, got: " (str n))))))
   (= name "filter") (do
   (macro-require-arity! name args 2)
@@ -430,7 +479,7 @@
   (if (not (macro-seq? tail)) (macro-eval-fail! (str "apply: the final argument must be a list or vec, got: " (str tail))) (macro-apply-fn! (nth args 0) (into (subvec args 1 (- (count args) 1)) (macro-seq! tail "apply: final argument"))))))
   (= name "partition") (do
   (macro-require-arity! name args 2)
-  (let [size (nth args 0)
+  (let [size (macro-datum (nth args 0))
    items (macro-seq! (nth args 1) name)]
   (if (not (and (int? size) (> size 0))) (macro-eval-fail! (str "partition: size must be a positive integer, got: " (str size))) (loop [rest-items items
    result []]
@@ -438,7 +487,7 @@
   (= name "nth") (do
   (macro-require-arity! name args 2)
   (let [items (macro-seq! (nth args 0) name)
-   index (nth args 1)]
+   index (macro-datum (nth args 1))]
   (if (and (int? index) (>= index 0) (< index (count items))) (nth items index) (macro-eval-fail! (str "nth: index " (str index) " out of range for a list of " (str (count items)))))))
   (= name "reverse") (do
   (macro-require-arity! name args 1)
@@ -461,21 +510,21 @@
   (if (= name "format-symbol") (nth formatted 1) formatted)))
   (= name "=") (do
   (macro-require-arity! name args 2)
-  (= (nth args 0) (nth args 1)))
+  (= (macro-datum (nth args 0)) (macro-datum (nth args 1))))
   (= name "not=") (do
   (macro-require-arity! name args 2)
-  (not= (nth args 0) (nth args 1)))
+  (not= (macro-datum (nth args 0)) (macro-datum (nth args 1))))
   (= name "not") (do
   (macro-require-arity! name args 1)
-  (not (nth args 0)))
+  (not (macro-truthy? (nth args 0))))
   (or (= name "<") (= name ">") (= name "<=") (= name ">=")) (macro-ordered? name args)
   (or (= name "+") (= name "-") (= name "*")) (macro-number-fold! name args)
   (= name "quot") (do
   (macro-require-arity! name args 2)
-  (quot (nth args 0) (nth args 1)))
+  (quot (macro-datum (nth args 0)) (macro-datum (nth args 1))))
   (= name "mod") (do
   (macro-require-arity! name args 2)
-  (mod (nth args 0) (nth args 1)))
+  (mod (macro-datum (nth args 0)) (macro-datum (nth args 1))))
   (= name "syntax-name") (do
   (macro-require-arity! name args 1)
   (macro-syntax-name! (nth args 0)))
@@ -628,8 +677,8 @@
   (let [fixed (get m "fixed-params")
    rest-name (get m "rest-param")
    kind (get m "kind")
-   template (hygienize-template! (get m "template") fixed rest-name reg)]
-  (cond
+   template (hygienize-template! (get m "template") fixed rest-name reg)
+   output (cond
   (and (some? rest-name) (< (count args) (count fixed))) (macro-err! (str "macro " name ": expected at least " (str (count fixed)) " arg(s), got " (str (count args))))
   (and (nil? rest-name) (not= (count args) (count fixed))) (macro-err! (str "macro " name ": expected " (str (count fixed)) " arg(s), got " (str (count args))))
   :else (let [fixed-args (subvec args 0 (count fixed))
@@ -642,27 +691,54 @@
   (catch Exception problem
     (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
   (macro-err! (str "macro " name ": body raised an error:\n  " (ex-message problem) "\n  input: " (str (datum-cons name args)) chain)))))) (let [bindings (make-bindings fixed fixed-args rest-name rest-args)]
-  (substitute template bindings rest-name)))))))
+  (substitute template bindings rest-name)))))
+   call-syntax (if (nil? ctx) nil (get ctx "call-syntax"))
+   reader (if (ast/beagle-syntax? call-syntax) (get (ast/beagle-syntax-properties call-syntax) "reader") nil)
+   properties (if (some? reader) {"reader" reader "generated-by" name} {"generated-by" name})]
+  (ast/datum->beagle-syntax! output (if (nil? ctx) nil (get ctx "call-span")) ast/EMPTY-SCOPE-SET (if (nil? ctx) nil (get ctx "origin")) properties)))
 
 (defn expand-macro! [reg ^String name args ctx]
-  (let [m (lookup-macro reg name)]
+  (let [syntax-input (and (every? ast/beagle-syntax? args) (or (> (count args) 0) (and (some? ctx) (ast/beagle-syntax? (get ctx "call-syntax")))))
+   syntax-args (if syntax-input args (mapv (fn [arg] (ast/datum->beagle-syntax! arg nil ast/EMPTY-SCOPE-SET nil {})) args))
+   call-syntax (if (and (some? ctx) (ast/beagle-syntax? (get ctx "call-syntax"))) (get ctx "call-syntax") (ast/make-syntax-list! (into [(ast/datum->beagle-syntax! name nil ast/EMPTY-SCOPE-SET nil {})] syntax-args) nil ast/EMPTY-SCOPE-SET nil {}))
+   effective-ctx (if (some? ctx) ctx (make-root-ctx! name call-syntax))
+   m (lookup-macro reg name)]
   (if (nil? m) (do
   (selfhost.rt/eprint (str "beagle: no macro named " name "\n"))
-  (datum-cons name args)) (expand-template-macro! reg m name args ctx))))
+  (datum-cons name args)) (let [result (expand-template-macro! reg m name syntax-args effective-ctx)]
+  (if syntax-input result (macro-datum result))))))
 
 (defn ^Boolean macro-application? [reg datum]
-  (and (datum-pair? datum) (string? (datum-car datum)) (not (nil? (lookup-macro reg (datum-car datum))))))
+  (let [raw (macro-datum datum)]
+  (and (datum-pair? raw) (string? (datum-car raw)) (not (nil? (lookup-macro reg (datum-car raw)))))))
 
-(defn expand-fully! [reg datum depth ctx]
+(declare expand-fully-syntax!)
+
+(defn- ^Boolean syntax-children-identical? [before after]
+  (and (= (count before) (count after)) (every? (fn [i] (identical? (nth before i) (nth after i))) (range (count before)))))
+
+(defn- expand-syntax-children! [reg value depth ctx]
+  (let [children (get value "payload")
+   expanded (mapv (fn [child] (expand-fully-syntax! reg child depth ctx)) children)]
+  (if (syntax-children-identical? children expanded) value (if (syntax-vector? value) (ast/make-syntax-vector! expanded (ast/beagle-syntax-span value) (get value "scopes") (ast/beagle-syntax-origin value) (ast/beagle-syntax-properties value)) (ast/make-syntax-list! expanded (ast/beagle-syntax-span value) (get value "scopes") (ast/beagle-syntax-origin value) (ast/beagle-syntax-properties value))))))
+
+(defn expand-fully-syntax! [reg value depth ctx]
   (cond
   (>= depth MAX-EXPANSION-DEPTH) (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
   (macro-err! (str "macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) " (possible infinite recursion)" chain)))
-  (macro-application? reg datum) (let [name (datum-car datum)
-   next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
-   expanded (expand-macro! reg name (datum-cdr datum) next-ctx)]
-  (expand-fully! reg expanded (+ depth 1) next-ctx))
-  (datum-pair? datum) (mapv (fn [item] (expand-fully! reg item depth ctx)) datum)
-  :else datum))
+  (macro-application? reg value) (let [name (datum-car value)
+   args (if (syntax-list? value) (subvec (get value "payload") 1) (mapv (fn [arg] (ast/datum->beagle-syntax! arg (ast/beagle-syntax-span value) ast/EMPTY-SCOPE-SET nil {})) (datum-cdr (macro-datum value))))
+   next-ctx (if (nil? ctx) (make-root-ctx! name value) (push-ctx! ctx name value))
+   expanded (expand-macro! reg name args next-ctx)]
+  (expand-fully-syntax! reg expanded (+ depth 1) next-ctx))
+  (or (syntax-list? value) (syntax-vector? value)) (expand-syntax-children! reg value depth ctx)
+  :else value))
+
+(defn expand-fully! [reg datum depth ctx]
+  (let [syntax-input (ast/beagle-syntax? datum)
+   syntax-value (if syntax-input datum (ast/datum->beagle-syntax! datum nil ast/EMPTY-SCOPE-SET nil {}))
+   expanded (expand-fully-syntax! reg syntax-value depth ctx)]
+  (if syntax-input expanded (macro-datum expanded))))
 
 (def passes (atom []))
 
@@ -805,6 +881,25 @@
   (expect! "arity halt: returns inert non-macro datum" (not (macro-application? reg result)))
   (expect! "arity halt: records a macro error" (= (count (macro-errors)) 1)))
   (reset-macro-errors!))
+  (let [reg (make-macro-registry)
+   call-span (ast/make-source-span! "caller.bclj" 20 38 2 0)
+   child-span (ast/make-source-span! "caller.bclj" 30 37 2 10)
+   child (ast/datum->beagle-syntax! ["+" 1 2] child-span ast/EMPTY-SCOPE-SET nil {"reader" (ast/make-reader-metadata "(+ 1 2)" "paren")})
+   call (ast/make-syntax-list! [(ast/datum->beagle-syntax! "identity" call-span ast/EMPTY-SCOPE-SET nil {}) child] call-span ast/EMPTY-SCOPE-SET nil {"reader" (ast/make-reader-metadata "(identity (+ 1 2))" "paren")})]
+  (register-macro! reg "identity" "defmacro" ["form"] "form")
+  (let [expanded (expand-fully! reg call 0 nil)
+   reader (get (ast/beagle-syntax-properties expanded) "reader")]
+  (expect! "syntax membrane: antiquotation returns exact caller child" (identical? expanded child))
+  (expect! "syntax membrane: exact child bytes and span survive" (and (= (get reader "sourceBytes") "(+ 1 2)") (= (ast/beagle-syntax-span expanded) child-span)))))
+  (let [reg (make-macro-registry)
+   call-span (ast/make-source-span! "caller.bclj" 40 53 4 2)
+   call (ast/datum->beagle-syntax! ["outer" "value"] call-span ast/EMPTY-SCOPE-SET nil {"reader" (ast/make-reader-metadata "(outer value)" "paren")})]
+  (register-macro! reg "inner" "defmacro" ["x"] ["quasiquote" ["+" ["unquote" "x"] 1]])
+  (register-macro! reg "outer" "defmacro" ["x"] ["quasiquote" ["inner" ["unquote" "x"]]])
+  (let [expanded (expand-fully! reg call 0 nil)
+   inner-origin (ast/beagle-syntax-origin expanded)
+   outer-origin (get inner-origin "parent")]
+  (expect! "syntax membrane: nested expansion records origin ancestry" (and (= (get inner-origin "macroId") "inner") (= (get outer-origin "macroId") "outer") (= (get inner-origin "callSpan") call-span) (= (get outer-origin "callSpan") call-span)))))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  MACROS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

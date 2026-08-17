@@ -1,7 +1,8 @@
 (ns selfhost.parse
   (:require [clojure.string :as str]
             [selfhost.rt :as rt]
-            [selfhost.macros :as mac]))
+            [selfhost.macros :as mac]
+            [selfhost.ast :as syntax]))
 
 (def ^String BRACKET-TAG "#%brackets")
 
@@ -527,6 +528,58 @@
   (mac/fresh-lowered-sym! base))
 
 (def CURRENT-REGISTRY-CELL (atom nil))
+
+(def PROGRAM-SYNTAXES-PENDING (atom nil))
+
+(def PROGRAM-SYNTAXES (atom []))
+
+(def PROGRAM-SYNTAX-QUEUES (atom {}))
+
+(defn- syntax-sequence-head [value]
+  (if (and (syntax/beagle-syntax? value) (or (= (get value "variant") "list") (= (get value "variant") "vector")) (> (count (get value "payload")) 0)) (mac/macro-datum (nth (get value "payload") 0)) nil))
+
+(defn- enqueue-syntax! [datum value]
+  (let [queue (or (get (deref PROGRAM-SYNTAX-QUEUES) datum) [])]
+  (swap! PROGRAM-SYNTAX-QUEUES assoc datum (conj queue value)))
+  nil)
+
+(defn- index-macro-call-tree! [reg value]
+  (if (syntax/beagle-syntax? value) (do
+  (let [variant (get value "variant")]
+  (if (or (= variant "list") (= variant "vector")) (do
+  (let [head (syntax-sequence-head value)]
+  (if (and (string? head) (some? (mac/lookup-macro reg head))) (do
+  (enqueue-syntax! (mac/macro-datum value) value)))
+  (doseq [child (get value "payload")]
+  (index-macro-call-tree! reg child))))))))
+  nil)
+
+(defn- install-program-syntaxes! [datums]
+  (let [provided (deref PROGRAM-SYNTAXES-PENDING)
+   syntaxes (if (and (vector? provided) (= (count provided) (count datums))) provided (mapv (fn [datum] (syntax/datum->beagle-syntax! datum nil syntax/EMPTY-SCOPE-SET nil {})) datums))]
+  (reset! PROGRAM-SYNTAXES-PENDING nil)
+  (reset! PROGRAM-SYNTAXES syntaxes)
+  (reset! PROGRAM-SYNTAX-QUEUES {})
+  (doseq [i (range (count datums))]
+  (let [datum (nth datums i)
+   value (nth syntaxes i)]
+  (if (and (vector? datum) (> (count datum) 0) (= (nth datum 0) "defmacro")) (do
+  (enqueue-syntax! datum value))))))
+  nil)
+
+(defn- install-macro-call-syntaxes! [reg]
+  (reset! PROGRAM-SYNTAX-QUEUES {})
+  (doseq [value (deref PROGRAM-SYNTAXES)]
+  (let [head (syntax-sequence-head value)]
+  (if (not (and (string? head) (has-item? META-FORMS head))) (do
+  (index-macro-call-tree! reg value)))))
+  nil)
+
+(defn- syntax-for-datum! [datum]
+  (let [queue (get (deref PROGRAM-SYNTAX-QUEUES) datum)]
+  (if (and (vector? queue) (> (count queue) 0)) (do
+  (swap! PROGRAM-SYNTAX-QUEUES assoc datum (subvec queue 1))
+  (nth queue 0)) (syntax/datum->beagle-syntax! datum nil syntax/EMPTY-SCOPE-SET nil {}))))
 
 (defn datum->json [d]
   (cond
@@ -1382,7 +1435,7 @@
   (let [head (nth d 0)
    rest-items (subvec d 1)]
   (cond
-  (and (string? head) (some? (deref CURRENT-REGISTRY-CELL)) (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d)) (parse-expr* (mac/expand-fully! (deref CURRENT-REGISTRY-CELL) d 0 nil))
+  (and (string? head) (some? (deref CURRENT-REGISTRY-CELL)) (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d)) (parse-expr* (mac/macro-datum (mac/expand-fully! (deref CURRENT-REGISTRY-CELL) (syntax-for-datum! d) 0 nil)))
   (and (string? head) (= head "unsafe")) (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
   (and (string? head) (str/starts-with? head "unsafe-")) (err! (str "(" head " \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead"))
   (= head "fmt") (err! "(fmt ...) is not supported — use str / format")
@@ -1638,6 +1691,7 @@
 (defn parse-program! [datums]
   (reset-errors!)
   (mac/reset-lowering-counter!)
+  (install-program-syntaxes! datums)
   (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
   (reset! USER-PARAMETRIC-ARITIES (deref PRELOADED-PARAMETRIC-ARITIES))
   (reset! PRELOADED-PARAMETRIC-ARITIES {})
@@ -1698,9 +1752,10 @@
   :else (do
   (err! (str "(ns " (nth d 1) " ...): unsupported ns clause " (str clause)))
   nil))))
-  (= head "defmacro") (if (and (= (count d) 4) (string? (nth d 1)) (or (bracketed? (nth d 2)) (vector? (nth d 2)))) (do
+  (= head "defmacro") (if (and (= (count d) 4) (string? (nth d 1)) (or (bracketed? (nth d 2)) (vector? (nth d 2)))) (let [definition-syntax (syntax-for-datum! d)
+   template-syntax (if (and (syntax/beagle-syntax? definition-syntax) (= (get definition-syntax "variant") "list") (> (count (get definition-syntax "payload")) 3)) (nth (get definition-syntax "payload") 3) nil)]
   (validate-identifier! (nth d 1) "macro")
-  (mac/register-macro! (deref CURRENT-REGISTRY-CELL) (nth d 1) "defmacro" (unwrap-items (nth d 2)) (nth d 3))) (do
+  (mac/register-macro-with-syntax! (deref CURRENT-REGISTRY-CELL) (nth d 1) "defmacro" (unwrap-items (nth d 2)) (nth d 3) template-syntax)) (do
   (err! (str "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: " (str d)))
   nil))
   (= head "defalias") nil
@@ -1728,6 +1783,7 @@
   (= head "import") (doseq [spec (subvec d 1)]
   (swap! imports into (parse-import-spec! spec "import")))
   :else nil)))))
+  (install-macro-call-syntaxes! (deref CURRENT-REGISTRY-CELL))
   (let [hygiene-capable (has-item? ["clj" "nix" "js"] (deref target))
    def-names (if hygiene-capable (reduce (fn [acc dd] (if (and (vector? dd) (not (bracketed? dd)) (>= (count dd) 2) (has-item? ["def" "defn" "defonce"] (nth dd 0)) (string? (nth dd 1))) (assoc acc (nth dd 1) true) acc)) {} datums) nil)]
   (mac/set-hygiene-context! def-names))
@@ -1735,7 +1791,8 @@
   (if (not (meta-form? d)) (do
   (let [reg (deref CURRENT-REGISTRY-CELL)
    from-macro (mac/macro-application? reg d)
-   expanded (if from-macro (mac/expand-fully! reg d 0 nil) d)]
+   expanded-value (if from-macro (mac/expand-fully! reg (syntax-for-datum! d) 0 nil) d)
+   expanded (mac/macro-datum expanded-value)]
   (cond
   (and from-macro (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "do")) (doseq [f (subvec expanded 1)]
   (swap! forms conj (parse-expr* f)))
@@ -1758,6 +1815,16 @@
   (parse-program! datums))
 
 (defn parse-program-with-imports! [datums imported-arities imported-aliases]
+  (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
+  (reset! PRELOADED-TYPE-ALIASES imported-aliases)
+  (parse-program! datums))
+
+(defn parse-program-with-syntax! [datums syntaxes]
+  (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
+  (parse-program! datums))
+
+(defn parse-program-with-syntax-and-imports! [datums syntaxes imported-arities imported-aliases]
+  (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
   (reset! PRELOADED-TYPE-ALIASES imported-aliases)
   (parse-program! datums))
@@ -2288,6 +2355,11 @@
   (and (= (count errors) 1) (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
   (and (= (get prog "namespace") "my.app") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "parse-program syntax membrane expands a nested caller form" (let [datums [["defmacro" "identity" [BRACKET-TAG "form"] "form"] ["def" "out" ["identity" ["+" 1 2]]]]
+   syntaxes (mapv (fn [datum] (syntax/datum->beagle-syntax! datum nil syntax/EMPTY-SCOPE-SET nil {})) datums)
+   prog (parse-program-with-syntax! datums syntaxes)
+   value (get (nth (get prog "forms") 0) "value")]
+  (and (= (get value "node") "call") (= (get (get value "fn") "name") "+") (= (count (get value "args")) 2))))
   (expect! "parse-program! reserves compiler prefix across metadata binders" (let [_ (parse-program! [["ns" "$beagle$ns"] ["defmacro" "$beagle$macro" [BRACKET-TAG] 1] ["declare-extern" "$beagle$extern" "Any"]])
    errors (parse-errors)]
   (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))

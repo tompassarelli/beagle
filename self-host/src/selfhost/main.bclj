@@ -11,6 +11,7 @@
 (require clojure.string :as str)
 (require selfhost.rt)
 (require selfhost.reader :as rd)
+(require selfhost.ast :as syntax)
 (require selfhost.parse :as p)
 (require selfhost.check :as c)
 (require selfhost.emit-clj :as e)
@@ -475,8 +476,22 @@
 (defn- parse-file-target! [(path String) (target String)] Any
   (let [(source-snapshot Any) (selfhost.rt/read-source-snapshot path)
         (source-text String) (get source-snapshot "text")
-        (datums0 Any) (rd/read-program source-text)
+        (source-id String) (selfhost.rt/source-id path)
+        (reader-output Any)
+          (rd/read-program-with-syntax! source-text source-id)
+        (datums0 Any) (get reader-output "datums")
+        (syntaxes0 Any) (get reader-output "syntaxes")
         (datums Any) (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
+        (syntaxes Any)
+          (if (has-define-target? datums0)
+            syntaxes0
+            (into
+              [(syntax/datum->beagle-syntax!
+                 ["define-target" target]
+                 nil syntax/EMPTY-SCOPE-SET nil
+                 {"reader"
+                  (syntax/make-reader-metadata "" "synthetic")})]
+              syntaxes0))
         (surfaces Any) (load-import-surfaces!
                          (p/discover-requires! datums)
                          path
@@ -485,8 +500,8 @@
         (imported-arities Any) (import-parametric-arities! surfaces)
         (imported-aliases Any) (import-type-aliases surfaces)
         (prog Any) (resolve-imports!
-                    (p/parse-program-with-imports!
-                      datums imported-arities imported-aliases)
+                    (p/parse-program-with-syntax-and-imports!
+                      datums syntaxes imported-arities imported-aliases)
                     surfaces)
         (perrs Any) (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
@@ -499,7 +514,7 @@
        "datums" datums
        "source-text" source-text
        "source-sha256" (get source-snapshot "sourceSha256")
-       "source-id" (selfhost.rt/source-id path)})))
+       "source-id" source-id})))
 
 (defn- imported-record-field-order [(prog Any)] Any
   (reduce

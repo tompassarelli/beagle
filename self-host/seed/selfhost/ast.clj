@@ -63,6 +63,136 @@
 (defn ^Boolean keyword-sym? [^String sym]
   (and (> (count sym) 1) (= (char-at sym 0) ":")))
 
+(def EMPTY-SCOPE-SET [])
+
+(declare beagle-syntax?)
+
+(defn- syntax-contract-error! [^String who ^String message]
+  (throw (ex-info (str who ": " message) {})))
+
+(defn make-source-span! [source start end line column]
+  (if (or (< start 0) (< end start) (< line 0) (< column 0)) (do
+  (syntax-contract-error! "make-source-span" "invalid source range")))
+  {"kind" "source-span" "source" source "start" start "end" end "line" line "column" column})
+
+(defn ^Boolean source-span? [value]
+  (and (map? value) (= (get value "kind") "source-span")))
+
+(defn make-reader-metadata [^String source-bytes delimiter]
+  {"kind" "reader-metadata" "sourceBytes" source-bytes "delimiter" delimiter})
+
+(defn make-structural-name! [qualifier ^String leaf provider-id]
+  (if (or (not (string? leaf)) (= leaf "")) (do
+  (syntax-contract-error! "make-structural-name" "leaf must be a name")))
+  {"kind" "structural-name" "qualifier" qualifier "leaf" leaf "providerId" provider-id})
+
+(defn ^Boolean structural-name? [value]
+  (and (map? value) (= (get value "kind") "structural-name") (string? (get value "leaf"))))
+
+(defn symbol->structural-name! [^String symbol]
+  (let [slash (str/index-of symbol "/")]
+  (if (and (some? slash) (> slash 0) (< (+ slash 1) (count symbol))) (make-structural-name! (subs symbol 0 slash) (subs symbol (+ slash 1)) nil) (make-structural-name! nil symbol nil))))
+
+(defn ^String structural-name->symbol [name]
+  (if (some? (get name "qualifier")) (str (get name "qualifier") "/" (get name "leaf")) (get name "leaf")))
+
+(defn make-expansion-origin! [^String macro-id call-span parent]
+  (if (and (some? call-span) (not (source-span? call-span))) (do
+  (syntax-contract-error! "make-expansion-origin" "call span must be a source span")))
+  (if (and (some? parent) (not (= (get parent "kind") "expansion-origin"))) (do
+  (syntax-contract-error! "make-expansion-origin" "parent must be an expansion origin")))
+  {"kind" "expansion-origin" "macroId" macro-id "callSpan" call-span "parent" parent})
+
+(defn- ensure-syntax-context! [^String who span scopes origin properties]
+  (if (and (some? span) (not (source-span? span))) (do
+  (syntax-contract-error! who "span must be a source span")))
+  (if (not (vector? scopes)) (do
+  (syntax-contract-error! who "scope set must be a persistent vector")))
+  (if (and (some? origin) (not (= (get origin "kind") "expansion-origin"))) (do
+  (syntax-contract-error! who "origin must be an expansion origin")))
+  (if (not (map? properties)) (do
+  (syntax-contract-error! who "properties must be a persistent map")))
+  nil)
+
+(defn- make-syntax-value! [^String variant payload span scopes origin properties]
+  (ensure-syntax-context! variant span scopes origin properties)
+  {"kind" "syntax" "variant" variant "payload" payload "span" span "scopes" scopes "origin" origin "properties" properties})
+
+(defn make-syntax-atom! [datum span scopes origin properties]
+  (make-syntax-value! "atom" datum span scopes origin properties))
+
+(defn make-syntax-ident! [name span scopes origin properties]
+  (if (not (structural-name? name)) (do
+  (syntax-contract-error! "make-syntax-ident" "name must be a structural name")))
+  (make-syntax-value! "ident" name span scopes origin properties))
+
+(defn make-syntax-list! [children span scopes origin properties]
+  (if (or (not (vector? children)) (not (every? beagle-syntax? children))) (do
+  (syntax-contract-error! "make-syntax-list" "children must all be syntax values")))
+  (make-syntax-value! "list" children span scopes origin properties))
+
+(defn make-syntax-vector! [children span scopes origin properties]
+  (if (or (not (vector? children)) (not (every? beagle-syntax? children))) (do
+  (syntax-contract-error! "make-syntax-vector" "children must all be syntax values")))
+  (make-syntax-value! "vector" children span scopes origin properties))
+
+(defn make-syntax-quote! [datum span scopes origin properties]
+  (make-syntax-value! "quote" datum span scopes origin properties))
+
+(defn make-syntax-unquote! [child ^Boolean splicing span scopes origin properties]
+  (if (not (beagle-syntax? child)) (do
+  (syntax-contract-error! "make-syntax-unquote" "child must be a syntax value")))
+  (make-syntax-value! (if splicing "unquote-splicing" "unquote") child span scopes origin properties))
+
+(defn ^Boolean beagle-syntax? [value]
+  (and (map? value) (= (get value "kind") "syntax")))
+
+(defn beagle-syntax-span [value]
+  (get value "span"))
+
+(defn beagle-syntax-origin [value]
+  (get value "origin"))
+
+(defn beagle-syntax-properties [value]
+  (get value "properties"))
+
+(defn beagle-syntax-property [value ^String key]
+  (get (beagle-syntax-properties value) key))
+
+(defn syntax-children [value]
+  (let [variant (get value "variant")]
+  (if (or (= variant "list") (= variant "vector")) (get value "payload") [])))
+
+(defn ^Boolean string-literal-datum? [datum]
+  (and (vector? datum) (= (count datum) 2) (= (nth datum 0) "#%string")))
+
+(defn ^Boolean inert-atom-datum? [datum]
+  (or (string-literal-datum? datum) (and (vector? datum) (> (count datum) 0) (or (= (nth datum 0) "#%regex") (= (nth datum 0) "#%char")))))
+
+(defn datum->beagle-syntax! [datum span scopes origin properties]
+  (cond
+  (beagle-syntax? datum) datum
+  (and (string? datum) (not (keyword-sym? datum))) (make-syntax-ident! (symbol->structural-name! datum) span scopes origin properties)
+  (inert-atom-datum? datum) (make-syntax-atom! datum span scopes origin properties)
+  (and (vector? datum) (= (count datum) 2) (= (nth datum 0) "quote")) (make-syntax-quote! (nth datum 1) span scopes origin properties)
+  (and (vector? datum) (= (count datum) 2) (or (= (nth datum 0) "unquote") (= (nth datum 0) "unquote-splicing"))) (make-syntax-unquote! (datum->beagle-syntax! (nth datum 1) span scopes origin properties) (= (nth datum 0) "unquote-splicing") span scopes origin properties)
+  (bracketed? datum) (make-syntax-vector! (mapv (fn [child] (datum->beagle-syntax! child span scopes origin properties)) (bracket-body datum)) span scopes origin properties)
+  (vector? datum) (make-syntax-list! (mapv (fn [child] (datum->beagle-syntax! child span scopes origin properties)) datum) span scopes origin properties)
+  :else (make-syntax-atom! datum span scopes origin properties)))
+
+(defn beagle-syntax->datum! [value]
+  (let [variant (get value "variant")
+   payload (get value "payload")]
+  (cond
+  (= variant "atom") payload
+  (= variant "ident") (structural-name->symbol payload)
+  (= variant "list") (mapv beagle-syntax->datum! payload)
+  (= variant "vector") (into [BRACKET-TAG] (mapv beagle-syntax->datum! payload))
+  (= variant "quote") ["quote" payload]
+  (= variant "unquote") ["unquote" (beagle-syntax->datum! payload)]
+  (= variant "unquote-splicing") ["unquote-splicing" (beagle-syntax->datum! payload)]
+  :else (syntax-contract-error! "beagle-syntax->datum" "unknown syntax variant"))))
+
 (defn make-ns-decl [^String name]
   {"node" "ns" "name" name})
 
@@ -352,6 +482,25 @@
   (expect! "keyword: not name" (not (keyword-sym? "name")))
   (expect! "identifier: compiler prefix reserved" (not (validate-identifier "$beagle$param$0")))
   (expect! "identifier: ordinary dollar name remains valid" (validate-identifier "$value"))
+  (let [span (make-source-span! "caller.bclj" 40 56 3 2)
+   child-span (make-source-span! "caller.bclj" 48 51 3 10)
+   child (make-syntax-ident! (make-structural-name! nil "caller-value" nil) child-span EMPTY-SCOPE-SET nil {"reader" (make-reader-metadata "arg" "atom")})
+   origin (make-expansion-origin! "with-temp" span nil)
+   generated (datum->beagle-syntax! ["list" child] span EMPTY-SCOPE-SET origin {})
+   inserted (nth (syntax-children generated) 1)]
+  (expect! "syntax structural name keeps leaf" (= (get (get child "payload") "leaf") "caller-value"))
+  (expect! "syntax child survives generated construction by identity" (identical? inserted child))
+  (expect! "syntax child keeps exact source bytes" (= (get (get (beagle-syntax-properties inserted) "reader") "sourceBytes") "arg"))
+  (expect! "generated syntax keeps expansion origin" (identical? (beagle-syntax-origin generated) origin)))
+  (let [quoted (datum->beagle-syntax! ["quote" "service/run"] nil EMPTY-SCOPE-SET nil {})
+   antiquoted (datum->beagle-syntax! ["unquote" "argument"] nil EMPTY-SCOPE-SET nil {})]
+  (expect! "syntax quote remains inert datum" (and (= (get quoted "variant") "quote") (= (get quoted "payload") "service/run")))
+  (expect! "syntax unquote owns identifier syntax" (and (= (get antiquoted "variant") "unquote") (= (get (get antiquoted "payload") "variant") "ident"))))
+  (expect! "malformed syntax identifier fails at construction" (try
+  (make-syntax-ident! "not-structural" nil EMPTY-SCOPE-SET nil {})
+  false
+  (catch Exception problem
+    (str/includes? (ex-message problem) "structural name"))))
   (let [node (make-def "x" nil (make-literal "number" 42))]
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))

@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns selfhost.fixtures.syntax-membrane)
+
+(defmacro identity [form] form)
+
+(def out (identity (+ 1 2)))
