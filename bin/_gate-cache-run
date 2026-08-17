@@ -29,6 +29,10 @@
 #   absent.list     paths probed and not found (as spelled) -> still absent
 #   nixpaths.list   /nix/store inputs (immutable by path)   -> still present
 #
+# The pinned Racket install is stated by its store root alone, not by the
+# hundreds of paths a module load probes inside it; `racket_prefix` below
+# carries the invariant that makes the two statements equivalent.
+#
 # A file whose BYTES name the checkout is hashed over its NORMALIZED content
 # (see `normalize_content`), so the same file in two checkouts hashes alike.
 # It stays a full member of the closure; only the location spelling is dropped.
@@ -104,6 +108,45 @@ launch_cwd="$(pwd)"
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/gate-cache.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
+
+# --- the pinned Racket install, collapsed to its store root -------------------
+# The interpreter accounts for most of what a Racket gate touches, and nearly
+# all of it is a miss: Racket derives a compiled-file probe by appending an
+# absolute source path to each collects root, so one module load fans out into
+# hundreds of ENOENTs inside the install. On a small tier file that is 2640 of
+# 3251 stored records, every one of them re-probed on every lookup.
+#
+# All of them collapse into ONE record — the install's store root — WITHOUT
+# weakening the key, because every record under that root is already keyed on
+# presence alone and presence of the root already implies all of them:
+#
+#   1. A /nix/store path never enters files.sha256. Class R/W/L goes to
+#      nixpaths.list, revalidated by `[[ -e ]]`; class A goes to absent.list,
+#      revalidated by `[[ ! -e ]]`. The closure therefore asserts nothing about
+#      the BYTES of anything under the install, only about which paths exist.
+#   2. /nix/store is a read-only mount and a store path is realized whole and
+#      never mutated in place; the only transition available to it is whole-path
+#      deletion by the collector. So while the root exists, every path under it
+#      has exactly the existence it had during the proving run — the present
+#      ones present, the probed-absent ones still absent.
+#   3. Which install is in play is keyed independently of the closure:
+#      _BEAGLE_RACKET is part of env_material and the interpreter's store path
+#      is spelled in argv, so a different Racket is a different IDENTITY and
+#      cannot reach this entry's directory at all.
+#
+# (1) and (2) make the root's presence equivalent to the whole subtree's
+# recorded state, so the collapsed key admits exactly the same runs as the
+# expanded one; (3) closes the remaining door, an upgraded interpreter reusing
+# a proof earned under the old one. A collapse is only ever as sound as its
+# invariant, so it is taken only for a path that is under /nix/store — never
+# for a mutable prefix — and only for the install actually selected.
+racket_prefix=""
+if [[ "${_BEAGLE_RACKET:-}" == /nix/store/*/* ]]; then
+    _rk="${_BEAGLE_RACKET#/nix/store/}"
+    _rk="/nix/store/${_rk%%/*}"
+    [[ -d "$_rk" ]] && racket_prefix="$_rk"
+    unset _rk
+fi
 
 # --- path normalization ------------------------------------------------------
 # Global (not line-anchored): env values and argv lines embed paths mid-line.
@@ -455,7 +498,7 @@ fi
 # uncacheable. The first pid IS launch_cwd (strace'"'"'s direct child, and the
 # wrapper never chdirs), which is knowledge, not a guess, so it is seeded.
 
-awk -v launch_cwd="$launch_cwd" '
+awk -v launch_cwd="$launch_cwd" -v rkpfx="$racket_prefix" '
     function resolve(p, base) {
         if (p ~ /^\//) return p
         if (base == "") { unplaceable[p] = 1; return "" }
@@ -466,8 +509,15 @@ awk -v launch_cwd="$launch_cwd" '
     function emit(c, p) {
         if (p == "") return
         if (p ~ /(pipe|socket|anon_inode|memfd):/) return
+        # Every access inside the pinned Racket install is stated once, by the
+        # install root: see the racket_prefix derivation for why that is the
+        # same assertion and not a weaker one.
+        if (rkpfx != "" && (p == rkpfx || index(p, rkslash) == 1)) {
+            rkseen = 1; return
+        }
         print c "\t" p
     }
+    BEGIN { if (rkpfx != "") rkslash = rkpfx "/" }
     {
         pid = $1
         if (!seeded) { cwd[pid] = launch_cwd; seeded = 1 }
@@ -535,7 +585,10 @@ awk -v launch_cwd="$launch_cwd" '
             if (ok && nq >= 2) { emit("W", resolve(quotes[1], b1)); emit("W", resolve(quotes[2], b2)) }
         }
     }
-    END { for (p in unplaceable) print "U\t" p }
+    END {
+        if (rkseen) print "R\t" rkpfx
+        for (p in unplaceable) print "U\t" p
+    }
 ' "$trace" | sort -u > "$scratch/records.raw"
 
 # Aggregate with precedence U > W > L > R > A per path. U outranks everything:
