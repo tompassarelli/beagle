@@ -13,6 +13,10 @@
 ;;
 ;; Output: newline-separated EDN triples  [<subj> "<pred>" <obj>]  where subj is a
 ;; minted integer node-id, pred a string, obj an int node-id or an inline literal.
+;; Existing compact nodes and triples are emitted first and retain their ids.
+;; Lexical identifier leaves are then appended: `bindingIdent` / `occurrenceIdent`
+;; attach them to the existing AST owner, `bindingId` retains compiler identity,
+;; and `refersTo` directly names the selected binding-identifier node.
 
 (require racket/string
          "parse.rkt"
@@ -23,6 +27,9 @@
 ;; --- per-program state (fresh per emit) ---
 (define cur-triples (make-parameter #f))   ; box of (listof (list subj pred obj))
 (define cur-id      (make-parameter #f))   ; box of int
+(define cur-binding-owners (make-parameter #f)) ; box of (owner name stable-id)
+(define cur-binding-owner-index (make-parameter #f)) ; stable-id -> owner
+(define cur-occurrence-owners (make-parameter #f)) ; box of (owner name stable-id)
 
 (define (fresh-id!)
   (define b (cur-id))
@@ -31,6 +38,38 @@
 
 (define (emit! s p o)
   (set-box! (cur-triples) (cons (list s p o) (unbox (cur-triples)))))
+
+(define (lexical-entry<? left right)
+  (or (< (car left) (car right))
+      (and (= (car left) (car right))
+           (string<? (caddr left) (caddr right)))))
+
+(define (record-lexical-owners! owner x)
+  ;; A match clause repeats its pattern's identities in the side table.  Since
+  ;; the reflective walk finishes children before their container, first-wins
+  ;; selects the actual pattern owner rather than collapsing onto the clause.
+  (define identities
+    (sort
+     (for/list ([(name id) (in-hash (binder-identities x))])
+       (list name (binding-id-stable id)))
+     string<?
+     #:key cadr))
+  (for ([identity (in-list identities)])
+    (define name (car identity))
+    (define stable (cadr identity))
+    (unless (hash-has-key? (cur-binding-owner-index) stable)
+      (hash-set! (cur-binding-owner-index) stable owner)
+      (set-box! (cur-binding-owners)
+                (cons (list owner name stable)
+                      (unbox (cur-binding-owners))))))
+  (when (resolved-ref? x)
+    (set-box!
+     (cur-occurrence-owners)
+     (cons
+      (list owner
+            (structural-name-leaf (resolved-ref-name x))
+            (binding-id-stable (resolved-ref-binding-id x)))
+      (unbox (cur-occurrence-owners))))))
 
 ;; Emit a field edge AND, when the value is a MINTED node (a compound, not an
 ;; inlined literal), a uniform `child` edge. This makes structural containment a
@@ -95,23 +134,26 @@
 
 ;; --- semantic overlays for graph-meaningful forms ---
 (define (emit-struct! x)
-  (cond
-    [(with-meta? x)   (val->obj (with-meta-expr x))]   ; unwrap metadata noise
-    [(defn-form? x)   (emit-defn! x)]
-    [(def-form? x)    (emit-def! x)]
-    [(call-form? x)   (emit-call! x)]
-    [(record-form? x) (emit-record! x)]
-    [(defunion-form? x) (emit-defunion! x)]
-    [(deferror-form? x) (emit-deferror! x)]
-    [(param? x)       (emit-param! x)]
-    [(let-binding? x) (emit-let-binding! x)]
-    [(for-binding? x) (emit-for-binding! x)]
-    [(protocol-form? x) (emit-protocol! x)]
-    [(protocol-method? x) (emit-protocol-method! x)]
-    [(extend-type-form? x) (emit-extend-type! x)]
-    [(type-impl? x) (emit-type-impl! x)]
-    [(impl-method? x) (emit-impl-method! x)]
-    [else             (emit-generic! x)]))
+  (define id
+    (cond
+      [(with-meta? x)   (val->obj (with-meta-expr x))] ; unwrap metadata noise
+      [(defn-form? x)   (emit-defn! x)]
+      [(def-form? x)    (emit-def! x)]
+      [(call-form? x)   (emit-call! x)]
+      [(record-form? x) (emit-record! x)]
+      [(defunion-form? x) (emit-defunion! x)]
+      [(deferror-form? x) (emit-deferror! x)]
+      [(param? x)       (emit-param! x)]
+      [(let-binding? x) (emit-let-binding! x)]
+      [(for-binding? x) (emit-for-binding! x)]
+      [(protocol-form? x) (emit-protocol! x)]
+      [(protocol-method? x) (emit-protocol-method! x)]
+      [(extend-type-form? x) (emit-extend-type! x)]
+      [(type-impl? x) (emit-type-impl! x)]
+      [(impl-method? x) (emit-impl-method! x)]
+      [else             (emit-generic! x)]))
+  (record-lexical-owners! id x)
+  id)
 
 ;; Signature vocabulary mirrors ast-json.rkt's param->json / defn-form case.
 ;; `name` is one discriminated value: text for a scalar binding, a structured
@@ -281,10 +323,51 @@
   id)
 
 ;; --- entry point (backend contract: prog -> String) ---
+(define (emit-lexical-identifiers!)
+  (define binding-nodes (make-hash))
+  (for ([entry
+         (in-list
+          (sort (unbox (cur-binding-owners)) lexical-entry<?))])
+    (define owner (car entry))
+    (define name (cadr entry))
+    (define stable (caddr entry))
+    (define id (fresh-id!))
+    (hash-set! binding-nodes stable id)
+    (emit! id "form-kind" "lexical-binding-ident")
+    (emit! id "name" (symbol->string name))
+    (emit! id "bindingId" stable)
+    (emit! owner "bindingIdent" id))
+  (for ([entry
+         (in-list
+          (sort (unbox (cur-occurrence-owners)) lexical-entry<?))])
+    (define owner (car entry))
+    (define name (cadr entry))
+    (define stable (caddr entry))
+    (define id (fresh-id!))
+    (emit! id "form-kind" "lexical-occurrence-ident")
+    (emit! id "name" (symbol->string name))
+    (emit!
+     id
+     "refersTo"
+     (hash-ref
+      binding-nodes
+      stable
+      (lambda ()
+        (error
+         'emit-facts
+         "resolved lexical occurrence has no emitted binding identifier: ~a"
+         stable))))
+    (emit! owner "occurrenceIdent" id)))
+
 (define (facts-emit-program prog)
-  (parameterize ([cur-triples (box '())] [cur-id (box 0)])
+  (parameterize ([cur-triples (box '())]
+                 [cur-id (box 0)]
+                 [cur-binding-owners (box '())]
+                 [cur-binding-owner-index (make-hash)]
+                 [cur-occurrence-owners (box '())])
     (for ([form (in-list (program-forms prog))])
       (val->obj form))
+    (emit-lexical-identifiers!)
     (define ts (reverse (unbox (cur-triples))))
     (string-join (map triple->string ts) "\n")))
 

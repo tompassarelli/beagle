@@ -11,6 +11,10 @@
 ;;   [<subj> "<pred>" <obj>]      ; node-ids are per-file (reset each @file block)
 ;;   ...
 ;;
+;; W5b lexical edges are Store-ready in that same node-id space: existing AST
+;; owners point to appended `bindingIdent` / `occurrenceIdent` leaves, binders
+;; carry stable `bindingId`, and occurrence `refersTo` objects are binder nodes.
+;;
 ;; The downstream loader (chartroom) namespaces node-ids by file and folds the
 ;; triples into a Beagle Store fact store.
 
