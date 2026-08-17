@@ -135,11 +135,26 @@
 ;; identifiers.
 
 (struct reader-metadata (source-bytes delimiter) #:transparent)
-(struct structural-name (qualifier leaf provider-id) #:transparent)
+(struct structural-name (qualifier leaf provider-id)
+  #:transparent
+  #:guard
+  (lambda (qualifier leaf provider-id type-name)
+    (unless (or (symbol? qualifier) (not qualifier))
+      (raise-argument-error type-name "(or/c symbol? #f)" qualifier))
+    (unless (symbol? leaf)
+      (raise-argument-error type-name "symbol?" leaf))
+    (values qualifier leaf provider-id)))
 (struct expansion-origin (macro-id call-span parent) #:transparent)
 
 (struct syntax-atom (datum span scopes origin properties) #:transparent)
-(struct syntax-ident (name span scopes origin properties) #:transparent)
+(struct syntax-ident (name span scopes origin properties)
+  #:transparent
+  #:guard
+  (lambda (name span scopes origin properties type-name)
+    (unless (structural-name? name)
+      (raise-argument-error type-name "structural-name?" name))
+    (ensure-syntax-context type-name span scopes origin properties)
+    (values name span scopes origin properties)))
 (struct syntax-list (children span scopes origin properties) #:transparent)
 (struct syntax-vector (children span scopes origin properties) #:transparent)
 (struct syntax-quote (datum span scopes origin properties) #:transparent)
@@ -218,7 +233,13 @@
 
 ;; BindingId crosses checked-AST and store boundaries, so unlike ScopeId it is
 ;; stable data supplied by the lexical pass (source path plus syntax path).
-(struct binding-id (stable) #:transparent)
+(struct binding-id (stable)
+  #:transparent
+  #:guard
+  (lambda (stable type-name)
+    (unless (string? stable)
+      (raise-argument-error type-name "string?" stable))
+    stable))
 
 (define (make-binding-id stable)
   (unless (or (string? stable) (symbol? stable))
@@ -269,9 +290,41 @@
   (binding-table
    (hash-set by-name name (hash-set by-scopes scopes new-binding))))
 
-(struct resolution-resolved (binding-id) #:transparent)
-(struct resolution-unbound (name) #:transparent)
-(struct resolution-ambiguous (name binding-ids) #:transparent)
+(struct resolution-resolved (binding-id)
+  #:transparent
+  #:guard
+  (lambda (binding-id type-name)
+    (unless (binding-id? binding-id)
+      (raise-argument-error type-name "binding-id?" binding-id))
+    binding-id))
+
+(struct resolution-unbound (name)
+  #:transparent
+  #:guard
+  (lambda (name type-name)
+    (unless (structural-name? name)
+      (raise-argument-error type-name "structural-name?" name))
+    name))
+
+(define (ambiguous-binding-id-set? value)
+  (and (set? value)
+       (not (set-mutable? value))
+       (>= (set-count value) 2)
+       (for/and ([id (in-set value)])
+         (binding-id? id))))
+
+(struct resolution-ambiguous (name binding-ids)
+  #:transparent
+  #:guard
+  (lambda (name binding-ids type-name)
+    (unless (structural-name? name)
+      (raise-argument-error type-name "structural-name?" name))
+    (unless (ambiguous-binding-id-set? binding-ids)
+      (raise-argument-error
+       type-name
+       "immutable set containing at least two BindingIds"
+       binding-ids))
+    (values name binding-ids)))
 
 (define (proper-scope-subset? left right)
   (and (subset? left right) (not (set=? left right))))
@@ -662,6 +715,13 @@
     (or (syntax-source-slice source-bytes stx) #"")
     (syntax-delimiter datum))))
 
+;; Racket syntax is an adapter inside the parser, not a second identifier
+;; model.  Keep the full SyntaxIdent context on that adapter so returning to
+;; Beagle syntax does not render/reparse StructuralName, reduce ScopeSet to a
+;; count, or drop source/provenance properties.
+(struct syntax-ident-context (name span scopes origin properties))
+(define SYNTAX-IDENT-CONTEXT-KEY 'beagle-syntax-ident-context)
+
 (define (racket-syntax->beagle-syntax stx [source-bytes #f])
   (unless (syntax? stx)
     (raise-argument-error
@@ -672,8 +732,28 @@
   (define children (syntax->list stx))
   (cond
     [(and (symbol? datum) (not (syntax-keyword-symbol? datum)))
-     (make-syntax-ident
-      (symbol->structural-name datum) span empty-scope-set #f properties)]
+     (define context (syntax-property stx SYNTAX-IDENT-CONTEXT-KEY))
+     (cond
+       [(and (syntax-ident-context? context)
+             (eq? datum
+                  (structural-name->symbol
+                   (syntax-ident-context-name context))))
+        (make-syntax-ident
+         (syntax-ident-context-name context)
+         (syntax-ident-context-span context)
+         (syntax-ident-context-scopes context)
+         (syntax-ident-context-origin context)
+         (syntax-ident-context-properties context))]
+       [else
+        (define binding (syntax-property stx 'beagle-binding-id))
+        (make-syntax-ident
+         (symbol->structural-name datum)
+         span
+         empty-scope-set
+         #f
+         (if (binding-id? binding)
+             (hash-set properties 'binding-id binding)
+             properties))])]
     [(and (list? datum) (= (length datum) 2) (eq? (car datum) 'quote))
      (make-syntax-quote
       (cadr datum) span empty-scope-set #f properties)]
@@ -726,11 +806,21 @@
        (define identifier
          (datum->syntax
           #f (structural-name->symbol (syntax-ident-name value)) source))
+       (define with-context
+         (syntax-property
+          identifier
+          SYNTAX-IDENT-CONTEXT-KEY
+          (syntax-ident-context
+           (syntax-ident-name value)
+           (syntax-ident-span value)
+           (syntax-ident-scopes value)
+           (syntax-ident-origin value)
+           (syntax-ident-properties value))))
        (define binding (beagle-syntax-binding-id value))
        (define with-binding
          (if binding
-             (syntax-property identifier 'beagle-binding-id binding)
-             identifier))
+             (syntax-property with-context 'beagle-binding-id binding)
+             with-context))
        (syntax-property
         with-binding 'beagle-scope-debug-count
         (set-count (syntax-ident-scopes value)))]
@@ -1348,7 +1438,7 @@
  empty-scope-set
  scope-set scope-set? scope-set-add scope-set-remove scope-set-flip
  scope-set-member? scope-set-subset?
- (struct-out binding-id) make-binding-id
+ binding-id? binding-id-stable make-binding-id
  (struct-out scope-binding)
  (struct-out binding-table) empty-binding-table binding-table-add
  binding-table-bindings-for

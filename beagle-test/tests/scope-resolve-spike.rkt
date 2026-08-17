@@ -72,6 +72,55 @@
     (check-equal? (scope-set-flip (scope-set-flip original right) right)
                   original)))
 
+(test-case "SyntaxIdent survives the Racket adapter with distinct identity axes"
+  (define lexical (fresh-scope-id 'lexical))
+  (define scopes (scope-set lexical))
+  (define span (src-loc 4 6 'fixture 'synthetic #t 31 9))
+  (define origin (make-expansion-origin 'introduce span))
+  (define provider-id '(provider fixture))
+  (define name (make-structural-name 'models 'Widget provider-id))
+  (define lexical-id (make-binding-id "fixture:31:Widget"))
+  (define properties
+    (hasheq 'reader (reader-metadata #"models/Widget" 'atom)
+            'binding-id lexical-id
+            'custom 'retained))
+  (define identifier
+    (make-syntax-ident name span scopes origin properties))
+  (define restored-form
+    (racket-syntax->beagle-syntax
+     (beagle-syntax->racket-syntax
+      (make-syntax-list (list identifier) span))))
+  (define restored (car (syntax-list-children restored-form)))
+  (check-equal? (syntax-ident-name restored) name)
+  (check-equal? (syntax-ident-scopes restored) scopes)
+  (check-equal? (syntax-ident-span restored) span)
+  (check-equal? (syntax-ident-origin restored) origin)
+  (check-equal? (syntax-ident-properties restored) properties)
+  (check-equal?
+   (structural-name-provider-id (syntax-ident-name restored))
+   provider-id)
+  (check-equal? (beagle-syntax-binding-id restored) lexical-id)
+  (check-not-equal?
+   (structural-name-provider-id (syntax-ident-name restored))
+   (beagle-syntax-binding-id restored)))
+
+(test-case "scope, binding, and resolution constructors enforce their contracts"
+  (check-exn exn:fail:contract?
+             (lambda () (fresh-scope-id "not-a-kind")))
+  (check-exn exn:fail:contract?
+             (lambda () (make-binding-id 17)))
+  (check-equal? (binding-id-stable (make-binding-id 'stable)) "stable")
+  (check-exn exn:fail:contract?
+             (lambda () (resolution-resolved 'not-a-binding-id)))
+  (check-exn exn:fail:contract?
+             (lambda () (resolution-unbound 'not-a-structural-name)))
+  (check-exn
+   exn:fail:contract?
+   (lambda ()
+     (resolution-ambiguous
+      (local-name 'item)
+      (set (make-binding-id "only-one"))))))
+
 (test-case "macro-introduced binding cannot capture a use-site identifier"
   (for ([trial (in-range 128)])
     (define shared (fresh-scope-id 'outer-lexical))
