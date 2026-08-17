@@ -143,7 +143,7 @@
   (cond
   (string? value) (t/->AtomRow :string value nil nil nil nil nil)
   (integer? value) (t/->AtomRow :int nil value nil nil nil nil)
-  (number? value) (t/->AtomRow :float nil nil value nil nil nil)
+  (number? value) (t/->AtomRow :float nil nil (double value) nil nil nil)
   (boolean? value) (t/->AtomRow :bool nil nil nil value nil nil)
   (keyword? value) (t/->AtomRow :keyword nil nil nil nil value nil)
   (t/instant? value) (t/->AtomRow :instant nil nil nil nil nil value)
