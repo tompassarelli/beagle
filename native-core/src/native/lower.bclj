@@ -3111,11 +3111,12 @@
     (if (not (= "ref" (fact-text index source "form-kind")))
       nil
       (let [(name String) (fact-text index source "name")
+            (spelling String) (source-reference-spelling index source)
             (direct (U LocalBindingV0 Nil))
             (find-local (bodystatev0-locals state) name)
             (canonical String)
-            (resolved-source-key
-              (resolve-source-name index (source-module-name index source) name))]
+            (resolved-source-key (resolve-source-name index
+              (source-module-name index source) spelling))]
         (if (some? direct)
           direct
           (find-local (bodystatev0-locals state) canonical))))))
@@ -3910,8 +3911,10 @@
     (let [(kind String) (fact-text index node "form-kind")]
       (cond
         (= "ref" kind)
-        (let [(name String) (fact-text index node "name")]
-          (if (or (= "" name) (= "else" name) (string-member? bound name)) [] [name]))
+        (let [(name String) (fact-text index node "name")
+              (spelling String) (source-reference-spelling index node)]
+          (if (or (= "" name) (= "else" name) (string-member? bound name))
+            [] [spelling]))
 
         (or (= "call" kind) (= "static-call" kind))
         (let [(callee String) (source-callee-name index node)

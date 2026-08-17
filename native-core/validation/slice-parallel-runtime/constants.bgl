@@ -1,0 +1,4 @@
+#lang beagle
+(ns native.parallel-constants)
+
+(def buffer-width Int 1)

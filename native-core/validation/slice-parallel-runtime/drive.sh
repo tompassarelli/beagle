@@ -32,11 +32,13 @@ fi
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-parallel-runtime.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 source_file="$here/parallel.bgl"
+qualified_source_file="$here/qualified-parallel.bgl"
+constants_file="$here/constants.bgl"
 
 echo "parallel-runtime fixture: source C17 build START"
 mkdir -p "$scratch/c17"
 NATIVE_PARALLEL_WORKERS=1 "$repo/bin/beagle" build --materializer c17 \
-  --out "$scratch/c17" "$source_file"
+  --out "$scratch/c17" "$qualified_source_file" "$constants_file"
 
 test -s "$scratch/c17/build.manifest.sha256"
 grep -Fq 'native_parallel.h' "$scratch/c17/build.manifest"
