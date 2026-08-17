@@ -559,7 +559,7 @@ if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
             corrupt_alias="$cache_root/.result-tmp/corrupt-alias.$core_result_early_key.$$"
             echo "beagle build: core-result-alias CORRUPT $core_result_early_key; retiring" >&2
             mv "$core_result_alias" "$corrupt_alias"
-            rm -f -- "$corrupt_alias"
+            rm -rf -- "${corrupt_alias:?}"
         fi
     fi
     if [[ "$core_result_early_hit" != 1 ]]; then
@@ -2065,7 +2065,7 @@ if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
         corrupt_alias="$cache_root/.result-tmp/replaced-alias.$core_result_early_key.$$"
         echo "beagle build: core-result-alias STALE $core_result_early_key; replacing" >&2
         mv "$core_result_alias" "$corrupt_alias"
-        rm -f -- "$corrupt_alias"
+        rm -rf -- "${corrupt_alias:?}"
     fi
     if [[ ! -e "$core_result_alias" ]]; then
         mv "$core_result_alias_staging" "$core_result_alias"

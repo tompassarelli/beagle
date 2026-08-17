@@ -31,7 +31,7 @@ trap cleanup EXIT
 cache="$work/cache"
 source_file="$work/cache-fixture.bgl"
 mkdir -p "$work/out-miss" "$work/out-hit" "$work/out-invalidated" \
-    "$work/out-alias-corrupt" "$work/out-corrupt"
+    "$work/out-alias-corrupt" "$work/out-alias-directory" "$work/out-corrupt"
 
 write_fixture() {
     local value="$1"
@@ -126,6 +126,27 @@ grep -Fqx "beagle build: core-result-cache HIT $miss_key" \
 [[ "$(tree_digest "$work/out-miss")" == \
    "$(tree_digest "$work/out-alias-corrupt")" ]] || {
     echo "core_result_cache_gate.sh: alias recovery changed artifacts" >&2
+    exit 1
+}
+
+rm -f -- "$cache/aliases/$miss_early_key"
+mkdir "$cache/aliases/$miss_early_key"
+run_build "$work/out-alias-directory" "$work/alias-directory"
+grep -Fqx "beagle build: core-result-alias CORRUPT $miss_early_key; retiring" \
+    "$work/alias-directory.stderr" || {
+    echo "core_result_cache_gate.sh: directory alias was not visibly retired" >&2
+    sed -n '1,200p' "$work/alias-directory.stderr" >&2
+    exit 1
+}
+grep -Fqx "beagle build: core-result-cache HIT $miss_key" \
+    "$work/alias-directory.stderr" || {
+    echo "core_result_cache_gate.sh: directory alias did not fall back to the full result" >&2
+    sed -n '1,200p' "$work/alias-directory.stderr" >&2
+    exit 1
+}
+[[ "$(tree_digest "$work/out-miss")" == \
+   "$(tree_digest "$work/out-alias-directory")" ]] || {
+    echo "core_result_cache_gate.sh: directory alias recovery changed artifacts" >&2
     exit 1
 }
 
