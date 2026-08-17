@@ -7,7 +7,7 @@
 ;; module proves temp NAMING and NUMBERING match the Racket compiler. Run:
 ;;   self-host/verify-selfhost.sh self-host/fixtures/lowering-temps.bclj
 ;; (cond->/some-> temp advancement + surface preservation live in
-;; threading.bclj; hygiene-rename interleave lives in user-macros.bclj.)
+;; threading.bclj; scope/BindingId interleave lives in user-macros.bclj.)
 
 (defn first-int [(xs (Vec Int))] Any
   (if (> (count xs) 0) (nth xs 0) nil))

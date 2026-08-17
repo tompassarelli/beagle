@@ -63,8 +63,8 @@
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
 
-;; HYGIENE: gensym-renaming must touch the binder only, never the type name.
-(test-case "template param hygiene renames the binder, not the type"
+;; Scope identity distinguishes the introduced binder without changing its type.
+(test-case "template param hygiene preserves binder spelling, type, and identity"
   (define src
     (string-append
      "(defmacro mk [] `(defn h [(x Int)] Int x))\n"
@@ -72,12 +72,18 @@
   (define f (car (program-forms (parse-src src))))
   (check-true (defn-form? f))
   (define p0 (car (defn-form-params f)))
+  (define x-id (binder-binding-id p0 'x))
+  (define x-use (car (defn-form-body f)))
+  (check-eq? (param-name p0) 'x)
+  (check-true (binding-id? x-id))
+  (check-true (resolved-ref? x-use))
+  (check-equal? (resolved-ref-binding-id x-use) x-id)
   (check-eq? (type-prim-name (param-type p0)) 'Int
-             "the TYPE datum must survive hygiene unrenamed")
+             "the type datum must stay distinct from binder identity")
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int)
   (check-equal? (length (defn-form-params f)) 1))
 
-(test-case "template hygiene recursively renames typed destructuring binders"
+(test-case "template hygiene resolves typed destructuring with BindingIds"
   (define src
     (string-append
      "(defrecord Config [(host String) (port Int)])\n"
@@ -88,14 +94,26 @@
      "     host))\n"
      "(mk)\n"))
   (define f (cadr (program-forms (parse-src src))))
-  (define target (param-name (car (defn-form-params f))))
+  (define parameter (car (defn-form-params f)))
+  (define target (param-name parameter))
   (define nested-seq (car (seq-destructure-names target)))
   (define nested-map (cadr (seq-destructure-names target)))
   (define left-name (car (seq-destructure-names nested-seq)))
   (define host-name (car (map-destructure-keys nested-map)))
-  (check-false (eq? left-name 'left))
-  (check-false (eq? host-name 'host))
-  (check-false (eq? (map-destructure-as-name nested-map) 'cfg))
+  (define left-id (binder-binding-id parameter 'left))
+  (define host-id (binder-binding-id parameter 'host))
+  (define cfg-id (binder-binding-id parameter 'cfg))
+  (define host-use (car (defn-form-body f)))
+  (check-eq? left-name 'left)
+  (check-eq? host-name 'host)
+  (check-eq? (map-destructure-as-name nested-map) 'cfg)
+  (check-true (and (binding-id? left-id)
+                   (binding-id? host-id)
+                   (binding-id? cfg-id)))
+  (check-not-equal? left-id host-id)
+  (check-not-equal? host-id cfg-id)
+  (check-true (resolved-ref? host-use))
+  (check-equal? (resolved-ref-binding-id host-use) host-id)
   (check-eq? (type-app-ctor (param-type (car (defn-form-params f)))) 'HVec))
 
 ;; --- (2) canonical constructor: ann in a procedural defmacro ----------------

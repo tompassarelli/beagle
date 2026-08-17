@@ -482,7 +482,7 @@
     [_ (void)]))
 
 ;; Compiler-minted lowering temps (fresh-lowered-sym in macros.rkt):
-;; `<base>__<n>` — cond-thread__0, bind__3, macro-hygiene renames, match__N.
+;; `<base>__<n>` — cond-thread__0, bind__3, match__N.
 ;; Shadow warnings on these would blame the lowering, not the user.
 (define (gensym-name? n)
   (and (symbol? n) (regexp-match? #rx"__[0-9]+$" (symbol->string n))))

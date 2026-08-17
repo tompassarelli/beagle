@@ -219,7 +219,7 @@ chk "legitimate sequential rename succeeds (total->grand)" "grep -qF '(* s grand
 
 # --- 8. quasiquote templates + bare :refer + import collision --------------------
 echo "--- 8. quasiquote macro templates + bare :refer + import collision ---"
-# 8a. a quasiquote template ref to a module def renames (Clojure ` qualifies it / beagle hygiene-aliases)
+# 8a. a quasiquote template ref keeps its definition-site provider edge and renames
 printf '#lang beagle/clj\n(ns qq)\n(def base Int 1)\n(defmacro add-base [n] (quasiquote (+ base (unquote n))))\n' > "$W/qq.bclj"
 "$RACKET" "$RT" --emit-edn "$W/qq.bclj" 2>/dev/null > "$W/qq.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename base base2 qq "$W/qq.edn" 2>/dev/null

@@ -78,8 +78,9 @@
 ;;                call whose head and args are all references.
 ;;   walk-quasi!  inside a quasiquote template most symbols are DATA, but a bare
 ;;                template symbol naming a module def or import IS live (Clojure
-;;                ns-qualifies it, beagle hygiene-aliases it), so a rename must
-;;                follow it. `quoted?` tracks an inner (quote ..) — there a bare
+;;                ns-qualifies it and Beagle preserves its definition-site
+;;                provider edge), so a rename must follow it. `quoted?` tracks
+;;                an inner (quote ..) — there a bare
 ;;                symbol is inert — but an unquote escapes to live code at ANY
 ;;                quote depth.
 ;;   walk-quasi-seq!  scans template siblings for beagle's bare `~`/`,` token

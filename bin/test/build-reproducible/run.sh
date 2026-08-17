@@ -46,12 +46,13 @@ if [ -z "$ja" ] || [ -z "$jb" ]; then echo "  FAIL  js fixtures did not build"; 
 fi
 
 # --- lowering temps: content-deterministic, never build-context-dependent -----
-# parse.rkt lowers typed if-let / cond-> / some-> and macro-hygiene binder
-# renames through minted temps. Those used Racket's process-global gensym, so
-# the SAME module emitted different bytes depending on what else the process
-# had parsed before it (daemon / build-all / standalone). Now a per-program
-# counter (fresh-lowered-sym, parameterized in parse-program). Assert: module
-# built ALONE == module built AFTER another module, byte-identical.
+# parse.rkt lowers typed if-let / cond-> / some-> through minted output temps;
+# macro-introduced binders use scope/BindingId identity and alpha-render only at
+# output. The lowering temps once used Racket's process-global gensym, so the
+# SAME module emitted different bytes depending on what else the process had
+# parsed before it (daemon / build-all / standalone). Now a per-program counter
+# (fresh-lowered-sym, parameterized in parse-program). Assert: module built ALONE
+# == module built AFTER another module, byte-identical.
 echo "================ build reproducibility — lowering temps content-deterministic ================"
 "$ROOT/bin/beagle-build-all" "$HERE/lowering-fixture.bclj" --out "$W/l1" >/dev/null 2>&1
 "$ROOT/bin/beagle-build-all" "$HERE/context-pad.bclj" "$HERE/lowering-fixture.bclj" --out "$W/l2" >/dev/null 2>&1

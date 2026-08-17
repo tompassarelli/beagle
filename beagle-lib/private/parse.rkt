@@ -1229,7 +1229,7 @@
     [else #f]))
 
 ;; Wrapper: fresh lowering-temp counter per program, so minted names
-;; (cond-thread__N / some-thread__N / bind__N / macro-hygiene renames) depend
+;; (cond-thread__N / some-thread__N / bind__N) depend
 ;; only on THIS module's content, never on what else the process parsed
 ;; before it (daemon, build-all, check-all). Byte-reproducible builds.
 (define PROGRAM->SOURCE-BYTES (make-weak-hasheq))
