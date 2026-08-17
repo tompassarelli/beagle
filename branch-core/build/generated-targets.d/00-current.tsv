@@ -26,6 +26,7 @@ beagle-core	src/fram/text_index.bgl	out/fram/text_index.clj
 beagle-core	src/fram/text_search.bgl	out/fram/text_search.clj
 beagle-core	src/commit_plan.bgl	out/commit_plan.clj
 beagle-core	src/fram/kernel_classify.bgl	out/fram/kernel_classify.clj
+beagle-core	src/fram/chain_rules.bgl	out/fram/chain_rules.clj
 beagle	src/fram/branch.bclj	out/fram/branch.clj
 beagle	src/fram/fold.bclj	out/fram/fold.clj
 beagle	src/fram/import.bclj	out/fram/import.clj

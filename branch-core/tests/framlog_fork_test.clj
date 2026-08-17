@@ -149,10 +149,10 @@
 (check! "sibling post-fork occurrences can have the same coordinate"
         (= parent-coordinate child-coordinate))
 (check! "coordinate-colliding sibling appends have distinct branch revisions"
-        (and (= (branch/branchrevision-segments parent-revision)
-                (branch/branchrevision-segments child-revision))
-             (= (branch/branchrevision-sequence parent-revision)
+        (and (= (branch/branchrevision-sequence parent-revision)
                 (branch/branchrevision-sequence child-revision))
+             (not= (branch/branchrevision-history-sha256 parent-revision)
+                   (branch/branchrevision-history-sha256 child-revision))
              (not= (branch/branchrevision-identity parent-revision)
                    (branch/branchrevision-identity child-revision))))
 (check! "a durable branch revision repeats exactly without intervening writes"
@@ -328,6 +328,9 @@
 (check! "a well-formed sealed segment under the wrong content address is refused"
         (= :segment-digest-mismatch
            (error-code #(database/branch-revision! tampered-log "lane"))))
+(check! "cold branch open also verifies every sealed content address"
+        (= :segment-digest-mismatch
+           (error-code #(database/open-branch! tampered-log "lane" space))))
 
 ;; ------------------------------------------------------ interrupted forks
 ;; Put a completed fork back to the state it passes through between writing its

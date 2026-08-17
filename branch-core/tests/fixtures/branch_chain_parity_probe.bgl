@@ -1,0 +1,56 @@
+#lang beagle
+
+(ns fram.branch-chain-parity-probe
+  (:require [fram.chain-rules :as chain-rules]))
+
+(defn parse-corpus-int [(value String)] Int
+  (cond
+    [(= value "0") 0]
+    [(= value "1") 1]
+    [(= value "2") 2]
+    [(= value "3") 3]
+    [(= value "7") 7]
+    [(= value "8") 8]
+    [(= value "9") 9]
+    [(= value "10") 10]
+    [(= value "11") 11]
+    [(= value "12") 12]
+    [(= value "14") 14]
+    [(= value "40") 40]
+    [(= value "41") 41]
+    [(= value "95") 95]
+    [(= value "96") 96]
+    [(= value "128") 128]
+    [(= value "4095") 4095]
+    [(= value "4096") 4096]
+    [:else -1]))
+
+(defn parse-corpus-bool [(value String)] Bool
+  (= value "true"))
+
+(defn main [(args (Vec String))] Int
+  (if (not= 13 (count args))
+    2
+    (let [route (nth args 0)
+          position (parse-corpus-int (nth args 1))
+          expected-space (nth args 2)
+          actual-space (nth args 3)
+          recorded-start (parse-corpus-int (nth args 4))
+          actual-start (parse-corpus-int (nth args 5))
+          recorded-end (parse-corpus-int (nth args 6))
+          actual-end (parse-corpus-int (nth args 7))
+          recorded-bytes (parse-corpus-int (nth args 8))
+          actual-bytes (parse-corpus-int (nth args 9))
+          continuation (parse-corpus-bool (nth args 10))
+          torn (parse-corpus-bool (nth args 11))
+          expected-next (parse-corpus-int (nth args 12))
+          fault
+          (if (= route "sealed")
+            (chain-rules/sealed-member-fault
+             position expected-space actual-space recorded-start actual-start
+             recorded-end actual-end recorded-bytes actual-bytes continuation
+             torn expected-next)
+            (chain-rules/tail-member-fault
+             position expected-space actual-space actual-start continuation
+             expected-next))]
+      (if (nil? fault) 0 1))))

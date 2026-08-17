@@ -8,6 +8,7 @@
   (:require [clojure.string :as str]
             [framrpc :as framrpc]
             [fram.branch :as branch]
+            [fram.chain-rules :as chain-rules]
             [fram.store :as term-store]
             [fram.types :as t]))
 
@@ -456,9 +457,13 @@
 
 (def ^:private fork-marker-suffix ".fork")
 (def ^:private fork-pending-suffix ".fork-new")
+(def ^:private reseal-marker-suffix ".reseal")
+(def ^:private reseal-pending-suffix ".reseal-new")
 
 (defn- fork-marker-path [store] (str store fork-marker-suffix))
 (defn- fork-pending-path [path] (str path fork-pending-suffix))
+(defn- reseal-marker-path [store] (str store reseal-marker-suffix))
+(defn- reseal-pending-path [path] (str path reseal-pending-suffix))
 
 (defn- read-fork-marker [store]
   (let [file (java.io.File. (str (fork-marker-path store)))]
@@ -467,11 +472,22 @@
        (strict-utf8-string (java.nio.file.Files/readAllBytes (.toPath file))
                            "fork marker")))))
 
+(defn- read-reseal-marker [store]
+  (let [file (java.io.File. (str (reseal-marker-path store)))]
+    (when (.isFile file)
+      (branch/parse-reseal-marker
+       (strict-utf8-string (java.nio.file.Files/readAllBytes (.toPath file))
+                           "reseal marker")))))
+
 (defn- require-no-pending-fork! [store]
   (when (.exists (java.io.File. (str (fork-marker-path store))))
     (fail! :fork-incomplete
            "a fork of this store was interrupted and has not been completed"
-           {:path (str store) :marker (fork-marker-path store)})))
+           {:path (str store) :marker (fork-marker-path store)}))
+  (when (.exists (java.io.File. (str (reseal-marker-path store))))
+    (fail! :reseal-incomplete
+           "a reseal of this store was interrupted and has not been completed"
+           {:path (str store) :marker (reseal-marker-path store)})))
 
 (defn open-database!
   "Open a FRAMLOG-backed TermStore. A passive reader reports a torn trailing
@@ -500,14 +516,12 @@
         :torn-tail (when-not repair-torn? (:torn-tail parsed))
         :recovered-tail (when repair-torn? (:torn-tail parsed))}))))
 
-(defn- sha256-hex [^bytes content]
-  (apply str (map #(format "%02x" (bit-and % 255))
-                  (.digest (java.security.MessageDigest/getInstance "SHA-256")
-                           content))))
+(defn- bytes-hex [^bytes content]
+  (apply str (map #(format "%02x" (bit-and % 255)) content)))
 
-(defn- sha256-prefix-hex [^bytes content byte-count]
-  (sha256-hex
-   (java.util.Arrays/copyOfRange content 0 (int byte-count))))
+(defn- sha256-hex [^bytes content]
+  (bytes-hex
+   (.digest (java.security.MessageDigest/getInstance "SHA-256") content)))
 
 (defn- ensure-directory! [path]
   (java.nio.file.Files/createDirectories
@@ -526,6 +540,15 @@
 (defn- write-text-durable! [path text]
   (let [^bytes content (strict-utf8-bytes text "branch ref")
         temporary (str path ".tmp")]
+    (with-open [file-out (java.io.FileOutputStream. (str temporary))
+                out (java.io.BufferedOutputStream. file-out)]
+      (.write out content)
+      (.flush out)
+      (.force (.getChannel file-out) true))
+    (move-atomically! temporary path)))
+
+(defn- write-bytes-durable! [path ^bytes content]
+  (let [temporary (str path ".tmp")]
     (with-open [file-out (java.io.FileOutputStream. (str temporary))
                 out (java.io.BufferedOutputStream. file-out)]
       (.write out content)
@@ -769,6 +792,43 @@
    (:space-id parsed)
    (some? (:torn-tail parsed))))
 
+(defn branch-chain-fault
+  "Validate hosted branch metadata through the canonical Native Core rules."
+  [document members tail]
+  (if (not= (count (branch/refdocument-segments document)) (count members))
+    "FRAMLOG branch ref does not name the segments that were read"
+    (loop [index 0 expected-next 1]
+      (if (>= index (count members))
+        (chain-rules/tail-member-fault
+         (count members)
+         (branch/refdocument-space-id document)
+         (branch/chainmember-space-id tail)
+         (branch/chainmember-start-sequence tail)
+         (branch/chainmember-continuation tail)
+         expected-next)
+        (let [segment (nth (branch/refdocument-segments document) index)
+              member (nth members index)
+              fault
+              (chain-rules/sealed-member-fault
+               index
+               (branch/refdocument-space-id document)
+               (branch/chainmember-space-id member)
+               (branch/segmentrecord-start-sequence segment)
+               (branch/chainmember-start-sequence member)
+               (branch/segmentrecord-end-sequence segment)
+               (branch/chainmember-end-sequence member)
+               (branch/segmentrecord-byte-count segment)
+               (branch/chainmember-byte-count member)
+               (branch/chainmember-continuation member)
+               (branch/chainmember-torn member)
+               expected-next)]
+          (if fault
+            fault
+            (recur (inc index)
+                   (chain-rules/next-expected
+                    (branch/chainmember-end-sequence member)
+                    expected-next))))))))
+
 (defn- read-chain-source! [path allow-continuation?]
   (let [file (.getCanonicalFile (java.io.File. (str path)))]
     (when-not (.isFile file)
@@ -806,7 +866,7 @@
               segments)
         tail (read-chain-source!
               (branch/branch-tail-path! store selected) true)
-        fault (branch/chain-fault
+        fault (branch-chain-fault
                document (mapv (comp :member second) sealed) (:member tail))]
     (when fault
       (fail! :invalid-branch-chain fault
@@ -815,6 +875,15 @@
     (doseq [[segment source] sealed]
       (require-segment-identity! segment source))
     {:sealed sealed :tail tail}))
+
+(defn- history-sha256 [sources]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
+    (doseq [source sources]
+      (let [parsed (:parsed source)
+            start (int (:header-bytes parsed))
+            end (int (:valid-bytes parsed))]
+        (.update digest ^bytes (:bytes source) start (- end start))))
+    (bytes-hex (.digest digest))))
 
 (defn compare-and-set-branch-ref!
   "Replace one branch ref only when EXPECTED-IDENTITY still names its exact
@@ -872,12 +941,9 @@
        (and (nil? document) (= selected branch/default-branch))
        (let [tail (read-chain-source! store false)
              parsed (:parsed tail)
-             valid-bytes (:valid-bytes parsed)
              sequence (long (or (:tx-seq (last (:frames parsed))) 0))]
          (branch/branch-revision!
-          (:space-id parsed) []
-          (sha256-prefix-hex (:bytes tail) valid-bytes)
-          (long valid-bytes) sequence))
+          (:space-id parsed) (history-sha256 [tail]) sequence))
 
        (nil? document)
        (fail! :branch-missing "branch has no ref"
@@ -896,7 +962,7 @@
              tail (read-chain-source!
                    (branch/branch-tail-path! store selected) true)
              parsed (:parsed tail)
-             fault (branch/chain-fault
+             fault (branch-chain-fault
                     document (mapv (comp :member second) sealed)
                     (:member tail))]
          (when fault
@@ -905,15 +971,13 @@
                    :ref (branch/ref-path! store selected)}))
          (doseq [[segment source] sealed]
            (require-segment-identity! segment source))
-         (let [valid-bytes (:valid-bytes parsed)
-               sequence
+         (let [sequence
                (long (or (:tx-seq (last (:frames parsed)))
                          (branch/chain-end-sequence document)))]
            (branch/branch-revision!
             (branch/refdocument-space-id document)
-            (mapv branch/segmentrecord-sha256 segments)
-            (sha256-prefix-hex (:bytes tail) valid-bytes)
-            (long valid-bytes) sequence)))))))
+            (history-sha256 (conj (mapv second sealed) tail))
+            sequence)))))))
 
 (defn open-branch!
   "Open one branch of a store: fold its sealed segment chain in ref order, then
@@ -938,23 +1002,14 @@
        :else
        (let [tail-path (branch/branch-tail-path! store branch)
              space-id (branch/refdocument-space-id document)
-             sealed (mapv (fn [segment]
-                            (read-chain-member!
-                             (branch/segment-path
-                              store (branch/segmentrecord-sha256 segment))))
-                          (branch/refdocument-segments document))
-             [tail-parsed tail-member] (read-chain-member! tail-path)
-             fault (branch/chain-fault document (mapv second sealed) tail-member)]
+             {:keys [sealed tail]} (require-ref-chain! store branch document)
+             tail-parsed (:parsed tail)]
          (when (and expected-space (not= expected-space space-id))
            (fail! :space-mismatch "FRAMLOG belongs to a different SpaceId"
                   {:expected expected-space :actual space-id :branch branch}))
-         (when fault
-           (fail! :invalid-branch-chain fault
-                  {:branch branch :path tail-path
-                   :ref (branch/ref-path! store branch)}))
          (let [context (term-store/new-term-store space-id)]
-           (doseq [[parsed _] sealed]
-             (replay-frames! context (:frames parsed)))
+           (doseq [[_ source] sealed]
+             (replay-frames! context (:frames (:parsed source))))
            (replay-frames! context (:frames tail-parsed))
            (when (and (:torn-tail tail-parsed) repair-torn?)
              (truncate-log! tail-path (:valid-bytes tail-parsed)))
@@ -976,6 +1031,59 @@
 (defn- install-pending! [pending target]
   (when (.exists (java.io.File. (str pending)))
     (move-atomically! pending target)))
+
+(defn- complete-reseal! [store marker]
+  (let [selected (branch/resealmarker-branch marker)
+        tail-path (branch/branch-tail-path! store selected)
+        ref-path (branch/ref-path! store selected)
+        pending-tail (reseal-pending-path tail-path)
+        pending-ref (reseal-pending-path ref-path)
+        candidate-tail-path
+        (if (.isFile (java.io.File. pending-tail)) pending-tail tail-path)
+        candidate-ref-path
+        (if (.isFile (java.io.File. pending-ref)) pending-ref ref-path)
+        document
+        (branch/parse-ref
+         (strict-utf8-string
+          (java.nio.file.Files/readAllBytes
+           (.toPath (java.io.File. candidate-ref-path)))
+          "reseal candidate ref"))
+        expected-segment (branch/resealmarker-segment marker)
+          expected-ref (branch/resealmarker-ref-identity marker)
+        segments (branch/refdocument-segments document)]
+    (when-not (and (= expected-ref (branch/ref-identity document))
+                     (= 1 (count segments))
+                     (= expected-segment
+                        (branch/segmentrecord-sha256 (first segments))))
+      (fail! :invalid-reseal-recovery
+             "reseal recovery files do not match the durable marker"
+             {:branch selected :segment expected-segment
+              :ref-identity expected-ref}))
+    ;; Validate every candidate byte before the first recovery rename. A stale
+    ;; or corrupt marker therefore cannot replace either live routing file.
+    (let [segment (first segments)
+          segment-source
+          (read-chain-source!
+           (branch/segment-path store expected-segment) true)
+          tail-source (read-chain-source! candidate-tail-path true)
+          fault (branch-chain-fault
+                 document [(:member segment-source)] (:member tail-source))]
+      (require-segment-identity! segment segment-source)
+      (when fault
+        (fail! :invalid-reseal-recovery fault
+               {:branch selected :segment expected-segment
+                :ref-identity expected-ref})))
+    (install-pending! pending-tail tail-path)
+    (install-pending! pending-ref ref-path)
+    (require-ref-chain! store selected document)
+    (reconcile-watch! store selected expected-ref)
+    (delete-file! (branch/snapshot-path tail-path))
+    (delete-file! (reseal-marker-path store))
+    {:branch selected
+     :segments 1
+     :segment expected-segment
+     :ref-identity expected-ref
+     :recovered? true}))
 
 ;; Every file a fork installs is prepared before its marker is written, so a
 ;; fork interrupted at any point finishes by replaying the renames below in
@@ -1012,6 +1120,107 @@
                 {:path path :lock (writer-authority/authority-path path)}))))
    [] paths))
 
+(defn- combined-history-bytes [sources]
+  (let [first-source (first sources)
+        first-parsed (:parsed first-source)
+        deflate? (:deflate? first-parsed)
+        out (java.io.ByteArrayOutputStream.)]
+    (when (some #(not= deflate? (:deflate? (:parsed %))) sources)
+      (fail! :incompatible-chain-encoding
+             "reseal requires one frame encoding across the branch chain" {}))
+    (.write out ^bytes (:bytes first-source) 0
+            (int (:header-bytes first-parsed)))
+    (doseq [source sources]
+      (let [parsed (:parsed source)
+            start (int (:header-bytes parsed))
+            end (int (:valid-bytes parsed))]
+        (.write out ^bytes (:bytes source) start (- end start))))
+    (.toByteArray out)))
+
+(defn- reseal-branch-under-authority! [store selected]
+  (let [held-control (acquire-branch-control! store)]
+    (try
+      (if-let [pending (read-reseal-marker store)]
+        (if (= selected (branch/resealmarker-branch pending))
+          (complete-reseal! store pending)
+          (fail! :reseal-incomplete
+                 "another branch has an interrupted reseal"
+                 {:branch selected
+                  :pending-branch (branch/resealmarker-branch pending)
+                  :marker (reseal-marker-path store)}))
+        (do
+          (require-no-pending-fork! store)
+          (let [document (read-branch-ref store selected)]
+        (when (nil? document)
+          (fail! :branch-missing "reseal requires a branch ref"
+                 {:branch selected :path (branch/ref-path! store selected)}))
+        (let [{:keys [sealed tail]}
+              (require-ref-chain! store selected document)
+              sources (conj (mapv second sealed) tail)
+              tail-parsed (:parsed tail)]
+          (when (:torn-tail tail-parsed)
+            (fail! :torn-tail-repair-required
+                   "reseal requires a branch tail with no torn trailing frame"
+                   {:branch selected :path (:path tail)}))
+          (let [^bytes content (combined-history-bytes sources)
+                parsed (parse-triple-log-bytes content "resealed segment")
+                frames (:frames parsed)
+                record (branch/->SegmentRecord
+                        (sha256-hex content)
+                        (long (or (:tx-seq (first frames)) 0))
+                        (long (or (:tx-seq (last frames)) 0))
+                        (long (alength content)))
+                candidate (branch/->RefDocument
+                           (branch/refdocument-space-id document) [record])
+                current-identity (branch/ref-identity document)
+                candidate-identity (branch/ref-identity candidate)
+                marker (branch/->ResealMarker
+                        selected (branch/segmentrecord-sha256 record)
+                        candidate-identity)
+                tail-path (branch/branch-tail-path! store selected)
+                ref-path (branch/ref-path! store selected)
+                pending-tail (reseal-pending-path tail-path)
+                pending-ref (reseal-pending-path ref-path)
+                segment-path
+                (branch/segment-path store
+                                     (branch/segmentrecord-sha256 record))]
+            (ensure-directory! (branch/segments-directory store))
+            (doseq [path [pending-tail pending-ref]] (delete-file! path))
+            (write-bytes-durable! segment-path content)
+            (create-triple-log! pending-tail
+                                (branch/refdocument-space-id document)
+                                {:deflate? (:deflate? parsed)
+                                 :continuation? true})
+            (write-text-durable! pending-ref (branch/print-ref candidate))
+            (prepare-watch-transition! store selected current-identity
+                                       candidate-identity)
+            (write-text-durable!
+             (reseal-marker-path store)
+             (branch/print-reseal-marker marker))
+            (assoc (complete-reseal! store marker)
+                   :previous-segments
+                   (count (branch/refdocument-segments document))
+                   :sequence (long (or (:tx-seq (last frames)) 0))
+                   :recovered? false))))))
+      (finally
+        (writer-authority/release! held-control)))))
+
+(defn reseal-branch!
+  "Compact one branch's complete committed history into one content-addressed
+   base segment and a fresh continuation tail. Runs offline under store and
+   tail writer authority; the v2 branch revision is unchanged."
+  ([store-path]
+   (reseal-branch! store-path branch/default-branch))
+  ([store-path branch-name]
+   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
+         selected (branch/require-branch-name! branch-name)
+         tail (branch/branch-tail-path! store selected)
+         held (acquire-fork-authority! (distinct [store tail]))]
+     (try
+       (reseal-branch-under-authority! store selected)
+       (finally
+         (doseq [handle held] (writer-authority/release! handle)))))))
+
 (defn fork-store!
   "Seal the parent branch's tail into the shared segment chain and give parent
    and child fresh continuation tails that both begin at the next sequence.
@@ -1031,13 +1240,30 @@
      (let [held (acquire-fork-authority!
                  (distinct [store parent-tail child-tail]))]
        (try
+         (when-let [pending (read-reseal-marker store)]
+           (if (= parent (branch/resealmarker-branch pending))
+             (let [held-control (acquire-branch-control! store)]
+               (try
+                 (complete-reseal! store pending)
+                 (finally
+                   (writer-authority/release! held-control))))
+             (fail! :reseal-incomplete
+                    "another branch has an interrupted reseal"
+                    {:branch parent
+                     :pending-branch (branch/resealmarker-branch pending)
+                     :marker (reseal-marker-path store)})))
          (when-let [pending (read-fork-marker store)]
            (complete-fork! store pending))
          (doseq [path [child-tail (branch/ref-path! store child)]]
            (when (.exists (java.io.File. (str path)))
              (fail! :branch-exists "fork child branch already exists"
                     {:branch child :path path})))
-         (let [document (read-branch-ref store parent)]
+         (let [known (read-branch-ref store parent)
+               _ (when (and known
+                            (>= (count (branch/refdocument-segments known))
+                                branch/reseal-chain-length))
+                   (reseal-branch-under-authority! store parent))
+               document (read-branch-ref store parent)]
            (when (and (nil? document) (not= parent branch/default-branch))
              (fail! :branch-missing "branch has no ref"
                     {:branch parent :path (branch/ref-path! store parent)}))

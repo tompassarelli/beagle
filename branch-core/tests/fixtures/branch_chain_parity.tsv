@@ -1,0 +1,17 @@
+# name route position expected-space actual-space recorded-start actual-start recorded-end actual-end recorded-bytes actual-bytes continuation torn expected-next expected-verdict
+sealed-ok	sealed	0	space	space	1	1	8	8	4096	4096	false	false	1	accept
+sealed-space	sealed	0	space	other	1	1	8	8	4096	4096	false	false	1	reject
+sealed-size	sealed	0	space	space	1	1	8	8	4096	4095	false	false	1	reject
+sealed-start	sealed	0	space	space	1	2	8	8	4096	4096	false	false	1	reject
+sealed-end	sealed	0	space	space	1	1	8	7	4096	4096	false	false	1	reject
+sealed-torn	sealed	0	space	space	1	1	8	8	4096	4096	false	true	1	reject
+sealed-base-continuation	sealed	0	space	space	1	1	8	8	4096	4096	true	false	1	reject
+sealed-next-ok	sealed	1	space	space	9	9	11	11	128	128	true	false	9	accept
+sealed-next-gap	sealed	1	space	space	9	10	11	11	128	128	true	false	9	reject
+sealed-next-flag	sealed	1	space	space	9	9	11	11	128	128	false	false	9	reject
+tail-ok	tail	2	space	space	0	12	0	14	0	96	true	false	12	accept
+tail-space	tail	2	space	other	0	12	0	14	0	96	true	false	12	reject
+tail-gap	tail	2	space	space	0	40	0	41	0	96	true	false	12	reject
+tail-flag	tail	2	space	space	0	12	0	14	0	96	false	false	12	reject
+base-tail-ok	tail	0	space	space	0	1	0	3	0	96	false	false	1	accept
+base-tail-flag	tail	0	space	space	0	1	0	3	0	96	true	false	1	reject

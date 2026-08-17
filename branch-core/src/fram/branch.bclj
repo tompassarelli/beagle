@@ -11,11 +11,12 @@
 
 (def ref-format String "framref/v1")
 (def fork-marker-format String "framfork/v1")
-(def branch-revision-format String "frambranch-revision/v1")
+(def reseal-marker-format String "framreseal/v1")
+(def branch-revision-format String "frambranch-revision/v2")
 ;; The unnamed tail at <log> keeps this spelling in <log>.refs/.
 (def default-branch String "main")
 (def max-branch-name-length Int 64)
-(def max-chain-length Int 64)
+(def reseal-chain-length Int 64)
 
 ;; start-sequence and end-sequence are 0 together when the segment holds no
 ;; transaction; the ref is the only cheap record of where a sealed chain ends
@@ -28,12 +29,7 @@
 ;; A branch name is mutable routing and is deliberately absent. Equal history
 ;; on two refs has one identity; their first different tail prefix separates it.
 (defrecord BranchRevision
-  [(space-id String)
-   (segments (Vec String))
-   (tail-prefix-sha256 String)
-   (tail-prefix-byte-count Int)
-   (sequence Int)
-   (identity String)])
+  [(space-id String) (history-sha256 String) (sequence Int) (identity String)])
 
 ;; What a folded chain member turned out to be on disk, as the caller read it.
 (defrecord ChainMember
@@ -50,6 +46,11 @@
 ;; A fork prepares every file it installs before it writes this marker, so the
 ;; marker's presence means the remaining renames may be replayed as they stand.
 (defrecord ForkMarker [(parent String) (child String) (segment String)])
+
+;; A reseal prepares its segment, tail, ref, and watch transition before this
+;; marker becomes durable. Its presence authorizes replaying the remaining
+;; renames and binds recovery to the exact candidate ref.
+(defrecord ResealMarker [(branch String) (segment String) (ref-identity String)])
 
 (defn- fail [(message String) (code Keyword)] Any
   (throw (ex-info message {:type code :fram/code code})))
@@ -129,52 +130,27 @@
                  (format "%02x" (bit-and (int value) 255)))
                (vec (.digest (MessageDigest/getInstance "SHA-256") bytes)))))
 
-;; The preimage is domain text, SpaceId, segment count and ordered segment
-;; identities, tail prefix byte count and digest, then sequence. Text values
-;; carry u32 little-endian byte lengths; counts are u32 and positions are i64.
+;; V2 binds the exact ordered committed frame bytes through history-sha256.
+;; Physical segment identities and boundaries are deliberately absent, so a
+;; lossless reseal preserves revision identity. Text values carry u32
+;; little-endian byte lengths and the sequence is i64.
 (defn- branch-revision-preimage!
-  [(space-id String)
-   (segments (Vec String))
-   (tail-prefix-sha256 String)
-   (tail-prefix-byte-count Int)
-   (sequence Int)]
-  Any
+  [(space-id String) (history-sha256 String) (sequence Int)] Any
   (let [(out ByteArrayOutputStream) (ByteArrayOutputStream.)]
     (revision-write-text! out branch-revision-format)
     (revision-write-text! out space-id)
-    (revision-write-u32-le! out (count segments))
-    (doseq [segment segments]
-      (revision-write-text! out segment))
-    (revision-write-i64-le! out tail-prefix-byte-count)
-    (revision-write-text! out tail-prefix-sha256)
+    (revision-write-text! out history-sha256)
     (revision-write-i64-le! out sequence)
     (.toByteArray out)))
 
 (defn branch-revision!
-  [(space-id String)
-   (segments (Vec String))
-   (tail-prefix-sha256 String)
-   (tail-prefix-byte-count Int)
-   (sequence Int)]
-  BranchRevision
+  [(space-id String) (history-sha256 String) (sequence Int)] BranchRevision
   (cond
     [(zero? (count space-id))
      (fail "branch revision SpaceId must be nonempty"
            :invalid-branch-revision)]
-    [(> (count segments) max-chain-length)
-     (fail "branch revision chain exceeds the supported segment count"
-           :invalid-branch-revision)]
-    [(not (every? valid-segment-name? segments))
-     (fail "branch revision contains an invalid sealed segment identity"
-           :invalid-branch-revision)]
-    [(not= (count segments) (count (set segments)))
-     (fail "branch revision lists the same sealed segment twice"
-           :invalid-branch-revision)]
-    [(not (valid-segment-name? tail-prefix-sha256))
-     (fail "branch revision tail prefix is not a SHA-256 hex digest"
-           :invalid-branch-revision)]
-    [(neg? tail-prefix-byte-count)
-     (fail "branch revision tail prefix byte count must not be negative"
+    [(not (valid-segment-name? history-sha256))
+     (fail "branch revision history is not a SHA-256 hex digest"
            :invalid-branch-revision)]
     [(neg? sequence)
      (fail "branch revision sequence must not be negative"
@@ -184,10 +160,8 @@
            (str "sha256:"
                 (sha256-hex
                  (branch-revision-preimage!
-                  space-id segments tail-prefix-sha256
-                  tail-prefix-byte-count sequence)))]
-       (->BranchRevision space-id segments tail-prefix-sha256
-                         tail-prefix-byte-count sequence identity))]))
+                  space-id history-sha256 sequence)))]
+       (->BranchRevision space-id history-sha256 sequence identity))]))
 
 (defn- segment-line [(segment SegmentRecord)] String
   (str "segment " (segmentrecord-sha256 segment) " "
@@ -285,10 +259,7 @@
                             (recur (inc index)
                                    (conj known (segmentrecord-sha256 segment))
                                    (conj acc segment)))))))]
-              (if (> (count segments) max-chain-length)
-                (fail "branch ref chain exceeds the supported segment count"
-                      :invalid-branch-ref)
-                (->RefDocument space-id segments)))]))])))
+              (->RefDocument space-id segments))]))])))
 
 (defn empty-ref [(space-id String)] RefDocument
   (->RefDocument space-id []))
@@ -346,6 +317,52 @@
                   :invalid-fork-marker)]
            [:else (->ForkMarker parent child segment)]))])))
 
+(defn print-reseal-marker [(marker ResealMarker)] String
+  (let [(body String)
+        (str reseal-marker-format "\n"
+             "branch " (resealmarker-branch marker) "\n"
+             "segment " (resealmarker-segment marker) "\n"
+             "ref " (resealmarker-ref-identity marker) "\n")]
+    (str body "crc " (format "%08x" (crc32-of body)) "\n")))
+
+(defn parse-reseal-marker [(text String)] ResealMarker
+  (let [(lines (Vec String)) (vec (str/split-lines text))]
+    (cond
+      [(not= 5 (count lines))
+       (fail "reseal marker does not carry its three fields and CRC"
+             :invalid-reseal-marker)]
+      [(not= reseal-marker-format (nth lines 0))
+       (fail (str "reseal marker format is unsupported: " (nth lines 0))
+             :unsupported-reseal-marker-version)]
+      [(not (and (str/starts-with? (nth lines 1) "branch ")
+                 (str/starts-with? (nth lines 2) "segment ")
+                 (str/starts-with? (nth lines 3) "ref ")))
+       (fail "reseal marker does not name its branch, segment, and ref"
+             :invalid-reseal-marker)]
+      [:else
+       (let [(body String)
+             (apply str
+                    (mapv (fn [(line String)] String (str line "\n"))
+                          (subvec lines 0 4)))
+             (branch String) (subs (nth lines 1) 7)
+             (segment String) (subs (nth lines 2) 8)
+             (identity String) (subs (nth lines 3) 4)]
+         (cond
+           [(not= (nth lines 4)
+                  (str "crc " (format "%08x" (crc32-of body))))
+            (fail "reseal marker CRC does not match"
+                  :invalid-reseal-marker)]
+           [(not (valid-branch-name? branch))
+            (fail "reseal marker does not name a usable branch"
+                  :invalid-reseal-marker)]
+           [(not (valid-segment-name? segment))
+            (fail "reseal marker segment is not a SHA-256 hex digest"
+                  :invalid-reseal-marker)]
+           [(not (some? (re-matches #"sha256:[0-9a-f]{64}" identity)))
+            (fail "reseal marker ref identity is not a SHA-256 digest"
+                  :invalid-reseal-marker)]
+           [:else (->ResealMarker branch segment identity)]))])))
+
 ;; Fork appends one sealed segment to the parent chain; parent and child then
 ;; name the identical chain and diverge only in their tails.
 (defn fork-plan
@@ -361,9 +378,6 @@
              segments)
        (fail "sealed segment is already named by the parent chain"
              :segment-already-sealed)]
-      [(>= (count segments) max-chain-length)
-       (fail "branch chain exceeds the supported segment count"
-             :chain-too-long)]
       [(neg? fork-sequence)
        (fail "fork sequence must not be negative" :invalid-fork-sequence)]
       [:else
@@ -371,65 +385,3 @@
                                   (conj segments sealed))
                    sealed
                    fork-sequence)])))
-
-(defn- member-fault
-  [(document RefDocument)
-   (index Int)
-   (member ChainMember)
-   (expected-next Int)]
-  String?
-  (let [(segment SegmentRecord) (nth (refdocument-segments document) index)]
-    (cond
-      [(not= (refdocument-space-id document) (chainmember-space-id member))
-       "FRAMLOG segment belongs to a different SpaceId"]
-      [(not= (segmentrecord-byte-count segment) (chainmember-byte-count member))
-       "FRAMLOG segment size does not match its branch ref record"]
-      [(not= (segmentrecord-start-sequence segment)
-             (chainmember-start-sequence member))
-       "FRAMLOG segment does not begin at its recorded transaction sequence"]
-      [(not= (segmentrecord-end-sequence segment)
-             (chainmember-end-sequence member))
-       "FRAMLOG segment does not end at its recorded transaction sequence"]
-      [(chainmember-torn member)
-       "FRAMLOG segment ends inside a transaction frame"]
-      [(and (pos? index) (not (chainmember-continuation member)))
-       "FRAMLOG chain segment after the base segment must carry the continuation flag"]
-      [(and (zero? index) (chainmember-continuation member))
-       "FRAMLOG base chain segment must not carry the continuation flag"]
-      [(and (pos? (chainmember-start-sequence member))
-            (not= expected-next (chainmember-start-sequence member)))
-       "FRAMLOG chain segment does not continue the previous transaction sequence"]
-      [:else nil])))
-
-(defn- next-after [(member ChainMember) (expected-next Int)] Int
-  (if (pos? (chainmember-end-sequence member))
-    (inc (chainmember-end-sequence member))
-    expected-next))
-
-;; nil means the chain folds; any other result is the first fault, by position.
-(defn chain-fault
-  [(document RefDocument)
-   (members (Vec ChainMember))
-   (tail ChainMember)]
-  String?
-  (if (not= (count (refdocument-segments document)) (count members))
-    "FRAMLOG branch ref does not name the segments that were read"
-    (loop [(index Int) 0 (expected-next Int) 1]
-      (if (>= index (count members))
-        (let [(continuation Bool) (chainmember-continuation tail)]
-          (cond
-            [(not= (refdocument-space-id document) (chainmember-space-id tail))
-             "FRAMLOG tail belongs to a different SpaceId"]
-            [(and (pos? (count members)) (not continuation))
-             "FRAMLOG branch tail must carry the continuation flag"]
-            [(and (zero? (count members)) continuation)
-             "FRAMLOG version or flags are unsupported"]
-            [(and (pos? (chainmember-start-sequence tail))
-                  (not= expected-next (chainmember-start-sequence tail)))
-             "FRAMLOG branch tail does not continue the sealed chain"]
-            [:else nil]))
-        (let [(member ChainMember) (nth members index)
-              (fault String?) (member-fault document index member expected-next)]
-          (if (some? fault)
-            fault
-            (recur (inc index) (next-after member expected-next))))))))

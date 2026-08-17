@@ -1,7 +1,8 @@
 #lang beagle
 
 (ns fram.log-codec
-  (:require [fram.native-wire-codec :as wire]
+  (:require [fram.chain-rules :as chain-rules]
+            [fram.native-wire-codec :as wire]
             [fram.store :as term-store]
             [fram.types :as t]))
 
@@ -44,9 +45,15 @@
 ;; start-sequence and end-sequence are the ref's record of the member's span,
 ;; 0 when it records none; the tail is named by no ref and carries 0 for both.
 (defrecord ChainPiece
-  [(bytes ByteSource) (start-sequence Int) (end-sequence Int)])
+  [(bytes ByteSource) (start-sequence Int) (end-sequence Int) (byte-count Int)])
 
-(defrecord ChainFold [(ok Bool) (valid-bytes Int) (error String?)])
+(defrecord ChainFold
+  [(ok Bool)
+   (valid-bytes Int)
+   (start-sequence Int)
+   (end-sequence Int)
+   (torn Bool)
+   (error String?)])
 
 (defrecord HeaderFields
   [(ok Bool) (space-id String) (flags Int) (header-bytes Int) (error String?)])
@@ -667,25 +674,18 @@
   ChainFold
   (loop [(position Int) header-bytes
          (first-frame Bool) true
+         (first-sequence Int) 0
          (last-sequence Int) 0]
     (let [remaining (- (count bytes) position)
           short-piece
           (if sealed
             (->ChainFold
-             false position "FRAMLOG segment ends inside a transaction frame")
-            (->ChainFold true position nil))]
+             false position first-sequence last-sequence true
+             "FRAMLOG segment ends inside a transaction frame")
+            (->ChainFold true position first-sequence last-sequence true nil))]
       (cond
         [(= remaining 0)
-         (cond
-           [(and first-frame (> start-sequence 0))
-            (->ChainFold
-             false position
-             "FRAMLOG segment does not begin at its recorded transaction sequence")]
-           [(and sealed (not= last-sequence end-sequence))
-            (->ChainFold
-             false position
-             "FRAMLOG segment does not end at its recorded transaction sequence")]
-           [:else (->ChainFold true position nil)])]
+         (->ChainFold true position first-sequence last-sequence false nil)]
         [(< remaining 4) short-piece]
         [:else
          (let [payload-length (u32-le-at bytes position)
@@ -693,7 +693,8 @@
            (cond
              [(> payload-length framlog-stream-max-payload-bytes)
               (->ChainFold
-               false position "FRAMLOG frame exceeds the supported byte range")]
+               false position first-sequence last-sequence false
+               "FRAMLOG frame exceeds the supported byte range")]
              [(< remaining frame-length) short-piece]
              [:else
               (let [payload-start (+ position 4)
@@ -707,37 +708,28 @@
                 (cond
                   [(not= stored-crc actual-crc)
                    (->ChainFold
-                    false position "FRAMLOG frame CRC does not match")]
+                    false position first-sequence last-sequence false
+                    "FRAMLOG frame CRC does not match")]
                   [(framedecoderesult-error decoded)
                    (->ChainFold
-                    false position
+                    false position first-sequence last-sequence false
                     (str "FRAMLOG transaction decode failed: "
                          (framedecoderesult-error decoded)))]
                   [(nil? frame)
                    (->ChainFold
-                    false position
+                    false position first-sequence last-sequence false
                     "FRAMLOG transaction decoder returned no frame")]
-                  [(and first-frame
-                        (not= (t/transactionframe-sequence frame)
-                              (term-store/next-sequence root)))
-                   (->ChainFold
-                    false position
-                    "FRAMLOG chain member does not continue the previous transaction sequence")]
-                  [(and first-frame
-                        (> start-sequence 0)
-                        (not= (t/transactionframe-sequence frame)
-                              start-sequence))
-                   (->ChainFold
-                    false position
-                    "FRAMLOG segment does not begin at its recorded transaction sequence")]
                   [:else
                    (let [replayed
                          (term-store/replay-transaction-result! root frame)]
                      (if (term-store/transactionreplayresult-ok replayed)
                        (recur (+ position frame-length) false
+                              (if first-frame
+                                (t/transactionframe-sequence frame)
+                                first-sequence)
                               (t/transactionframe-sequence frame))
                        (->ChainFold
-                        false position
+                        false position first-sequence last-sequence false
                         (or (term-store/transactionreplayresult-message replayed)
                             "FRAMLOG transaction sequence does not advance"))))]))]))]))))
 
@@ -747,7 +739,7 @@
 
 ;; Fold a branch: every sealed segment in ref order, then its tail. A sealed
 ;; segment must consume exactly; only the tail may end inside a frame.
-;; fram.branch/chain-fault states the same rule hosted; both must move together.
+;; Hosted ref folding and this native path share fram.chain-rules.
 (defn boot-framlog-chain!
   [(configured-space-id String)
    (segments (Vec ChainPiece))
@@ -762,9 +754,6 @@
       [(and (not= 0 (count configured-space-id))
             (not= configured-space-id (headerfields-space-id first-header)))
        (failed-boot "FRAMLOG belongs to a different SpaceId")]
-      [(not= framlog-flags (headerfields-flags first-header))
-       (failed-boot
-        "FRAMLOG base chain member must not carry the continuation flag")]
       [:else
        (let [(total Int) (+ (count segments) 1)
              (chain-bytes Int)
@@ -779,7 +768,9 @@
              (term-store/open-fold!
               (term-store/new-term-store-for-log
                (headerfields-space-id first-header) chain-bytes))]
-         (loop [(index Int) 0 (tail-valid-bytes Int) 0]
+         (loop [(index Int) 0
+                (tail-valid-bytes Int) 0
+                (expected-next Int) 1]
            (if (>= index total)
              (successful-boot! root tail-valid-bytes [])
              (let [piece (chain-piece-at segments tail index)
@@ -790,14 +781,6 @@
                   (failed-boot
                    (error-or (headerfields-error header)
                              "FRAMLOG header is unreadable"))]
-                 [(not= (headerfields-space-id header)
-                        (term-store/space-id root))
-                  (failed-boot "FRAMLOG belongs to a different SpaceId")]
-                 [(and (> index 0)
-                       (not= framlog-continuation-flag
-                             (headerfields-flags header)))
-                  (failed-boot
-                   "FRAMLOG chain member after the base segment must carry the continuation flag")]
                  [:else
                   (let [folded
                         (fold-chain-piece!
@@ -806,7 +789,39 @@
                          (chainpiece-start-sequence piece)
                          (chainpiece-end-sequence piece) sealed)]
                     (if (chainfold-ok folded)
-                      (recur (+ index 1) (chainfold-valid-bytes folded))
+                      (let [continuation
+                            (= framlog-continuation-flag
+                               (headerfields-flags header))
+                            fault
+                            (if sealed
+                              (chain-rules/sealed-member-fault
+                               index
+                               (term-store/space-id root)
+                               (headerfields-space-id header)
+                               (chainpiece-start-sequence piece)
+                               (chainfold-start-sequence folded)
+                               (chainpiece-end-sequence piece)
+                               (chainfold-end-sequence folded)
+                               (chainpiece-byte-count piece)
+                               (count (chainpiece-bytes piece))
+                               continuation
+                               (chainfold-torn folded)
+                               expected-next)
+                              (chain-rules/tail-member-fault
+                               (count segments)
+                               (term-store/space-id root)
+                               (headerfields-space-id header)
+                               (chainfold-start-sequence folded)
+                               continuation
+                               expected-next))]
+                        (if fault
+                          (failed-boot fault)
+                          (recur
+                           (+ index 1)
+                           (chainfold-valid-bytes folded)
+                           (chain-rules/next-expected
+                            (chainfold-end-sequence folded)
+                            expected-next))))
                       (failed-boot
                        (error-or (chainfold-error folded)
                                  "FRAMLOG chain fold failed"))))])))))])))

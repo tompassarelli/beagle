@@ -3,6 +3,8 @@
 ;; Run from the repository root: bb -cp out tests/framref_codec_test.clj
 (require '[fram.branch :as branch])
 
+(load-file "database.clj")
+
 (def checks (atom []))
 (defn check! [label ok]
   (println (str (if ok "  [PASS] " "  [FAIL] ") label))
@@ -62,35 +64,35 @@
 
 (def revision
   (branch/branch-revision!
-   "ref-codec-space" [hash-a hash-b] hash-c 96 14))
+   "ref-codec-space" hash-c 14))
 
 (check! "a branch revision is exactly repeatable"
         (= revision
            (branch/branch-revision!
-            "ref-codec-space" [hash-a hash-b] hash-c 96 14)))
-(check! "the canonical branch revision has its stable v1 digest"
-        (= "sha256:e83468c950e386c152e9f563107bfc4aa829ece42b7ff00dbc437043e8275800"
+            "ref-codec-space" hash-c 14)))
+(check! "the canonical branch revision has its stable v2 digest"
+        (= "sha256:34c985a63c3baffac8de78e908933381f5ef53c10d53f4ea0ae0de3b83fd6881"
            (branch/branchrevision-identity revision)))
-(check! "sealed segment order is part of branch revision identity"
+(check! "committed history bytes are part of branch revision identity"
         (not= (branch/branchrevision-identity revision)
               (branch/branchrevision-identity
                (branch/branch-revision!
-                "ref-codec-space" [hash-b hash-a] hash-c 96 14))))
-(check! "tail prefix and sequence are independent revision inputs"
+                "ref-codec-space" hash-a 14))))
+(check! "history and sequence are independent revision inputs"
         (= 3
            (count
             (set
              (mapv branch/branchrevision-identity
                    [revision
                     (branch/branch-revision!
-                     "ref-codec-space" [hash-a hash-b] hash-a 96 14)
+                     "ref-codec-space" hash-a 14)
                     (branch/branch-revision!
-                     "ref-codec-space" [hash-a hash-b] hash-c 96 15)])))))
-(check! "a malformed tail prefix identity is refused"
+                     "ref-codec-space" hash-c 15)])))))
+(check! "a malformed history identity is refused"
         (= :invalid-branch-revision
            (error-code
             #(branch/branch-revision!
-              "ref-codec-space" [hash-a hash-b] (subs hash-c 1) 96 14))))
+              "ref-codec-space" (subs hash-c 1) 14))))
 
 (check! "an unknown ref format is refused by name"
         (= :unsupported-branch-ref-version
@@ -172,48 +174,48 @@
   (branch/->ChainMember start end bytes continuation space torn))
 
 (check! "a sound chain reports no fault"
-        (nil? (branch/chain-fault
+        (nil? (database/branch-chain-fault
                document
                [(member 1 8 4096 false "ref-codec-space" false)
                 (member 9 11 128 true "ref-codec-space" false)]
                (member 12 14 96 true "ref-codec-space" false))))
 (check! "a segment from another SpaceId is refused"
         (= "FRAMLOG segment belongs to a different SpaceId"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "other-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a tail from another SpaceId is refused"
         (= "FRAMLOG tail belongs to a different SpaceId"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "other-space" false))))
 (check! "a segment whose end sequence differs from its record is refused"
         (= "FRAMLOG segment does not end at its recorded transaction sequence"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 7 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a segment whose size differs from its record is refused"
         (= "FRAMLOG segment size does not match its branch ref record"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4095 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a chain the ref does not name is refused"
         (= "FRAMLOG branch ref does not name the segments that were read"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a segment that does not continue the previous one is refused"
         (= "FRAMLOG chain segment does not continue the previous transaction sequence"
-           (branch/chain-fault
+           (database/branch-chain-fault
             (branch/->RefDocument
              "ref-codec-space"
              [(branch/->SegmentRecord hash-a 1 8 4096)
@@ -223,35 +225,35 @@
             (member 15 15 96 true "ref-codec-space" false))))
 (check! "a tail that does not continue the sealed chain is refused"
         (= "FRAMLOG branch tail does not continue the sealed chain"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 40 41 96 true "ref-codec-space" false))))
 (check! "a torn sealed segment is refused"
         (= "FRAMLOG segment ends inside a transaction frame"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" true)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a chained segment without the continuation flag is refused"
         (= "FRAMLOG chain segment after the base segment must carry the continuation flag"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 false "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a base segment carrying the continuation flag is refused"
         (= "FRAMLOG base chain segment must not carry the continuation flag"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 true "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a chained tail without the continuation flag is refused"
         (= "FRAMLOG branch tail must carry the continuation flag"
-           (branch/chain-fault
+           (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
@@ -315,6 +317,39 @@
            (error-code
             #(branch/parse-fork-marker
               (sealed-text "framfork/v1\nparent default\nchild lane\n")))))
+
+(def reseal-marker
+  (branch/->ResealMarker "lane" hash-b
+                         (str "sha256:" hash-c)))
+(def reseal-marker-text (branch/print-reseal-marker reseal-marker))
+
+(check! "a printed reseal marker parses back to the identical marker"
+        (= reseal-marker
+           (branch/parse-reseal-marker reseal-marker-text)))
+(check! "the reseal marker binds its branch, segment, ref, and CRC"
+        (= ["framreseal/v1" "branch lane" (str "segment " hash-b)
+            (str "ref sha256:" hash-c)]
+           (vec (butlast (clojure.string/split-lines reseal-marker-text)))))
+(check! "an edited reseal marker whose CRC no longer matches is refused"
+        (= :invalid-reseal-marker
+           (error-code
+            #(branch/parse-reseal-marker
+              (clojure.string/replace reseal-marker-text
+                                      "branch lane" "branch other")))))
+(check! "a reseal marker without a valid candidate ref is refused"
+        (= :invalid-reseal-marker
+           (error-code
+            #(branch/parse-reseal-marker
+              (sealed-text
+               (str "framreseal/v1\nbranch lane\nsegment " hash-b
+                    "\nref sha256:" (subs hash-c 1) "\n"))))))
+(check! "a reseal marker missing a field is refused"
+        (= :invalid-reseal-marker
+           (error-code
+            #(branch/parse-reseal-marker
+              (sealed-text
+               (str "framreseal/v1\nbranch lane\nsegment " hash-b
+                    "\n"))))))
 
 (check! "branch names that cannot address a ref file are refused"
         (= [false false false false false true true]
