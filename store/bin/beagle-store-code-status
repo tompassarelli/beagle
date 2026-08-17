@@ -55,7 +55,7 @@ if [ -f "$CODE_LOG" ] && \
 fi
 MCP=absent
 # .mcp.json counts only if it actually wires the Beagle Store server.
-[ -f "$DIR/.mcp.json" ] && grep -q '"store"' "$DIR/.mcp.json" 2>/dev/null && MCP=present
+[ -f "$DIR/.mcp.json" ] && grep -q '"beagle-store"' "$DIR/.mcp.json" 2>/dev/null && MCP=present
 
 # --- server port + liveness (probe only; no connection state kept) -------
 SPACE_ID="-" PORT="-" SERVER="-"
@@ -98,7 +98,7 @@ config_path, checkout, code_log, port = sys.argv[1:]
 try:
     with open(config_path, "r", encoding="utf-8") as handle:
         config = json.load(handle)
-    server = config.get("mcpServers", {}).get("store-graph-control")
+    server = config.get("mcpServers", {}).get("beagle-store-graph-control")
     if not isinstance(server, dict):
         raise ValueError("graph-control MCP is absent")
     command = server.get("command")
