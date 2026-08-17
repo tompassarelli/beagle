@@ -168,7 +168,12 @@
     (for*/list ([(node ty) (in-hash ty-tbl)]
                 [loc (in-value (hash-ref src-tbl node #f))]
                 [abs (in-value (loc-offset loc))]
-                #:when (and abs (>= abs start) (< abs end)))
+                ;; A resolved-ref is the checker's identity-bearing adapter for
+                ;; an authored symbol, not a new surface interior node.  Bare
+                ;; symbols were deliberately absent from this view before
+                ;; resolution, so the adapter must preserve that boundary.
+                #:when (and (not (resolved-ref? node))
+                            abs (>= abs start) (< abs end)))
       (cons (- abs start) (string-append "^" (type->string ty) " "))))
   (apply-edits (form-source text form-stx) edits))
 
