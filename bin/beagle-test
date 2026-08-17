@@ -6,8 +6,8 @@
 # on active failures only. Demoted failures are advisory.
 #
 # Usage:
-#   bin/beagle-test                         # run active + demoted
-#   bin/beagle-test --active-only           # active tier only (fast loop)
+#   bin/beagle-test                         # active tier only (fast loop)
+#   bin/beagle-test --full                  # active + demoted tiers
 #   bin/beagle-test --include-gated         # also run gated tier (needs env vars)
 #
 # Exits 0 if all active tests pass, 1 if any active failure.
@@ -30,8 +30,85 @@ source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-"$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || exit 1
-"$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit 1
-"$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit 1
-"$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit 1
-exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt" "$@"
+# Each phase has its own deadline and log. run-bounded.rkt is the accountable
+# process supervisor: it owns the phase subtree, publishes START/END/TIMEOUT
+# progress, and reaps descendants before returning. These budgets come from
+# the current quiet-box measurements (56.617s, 0.605s, 0.022s, 77.944s, and
+# the existing 357s active-tier baseline) with modest headroom. The inner
+# test/build deadlines remain unchanged.
+BEAGLE_TEST_SUPERVISOR="$BEAGLE_ROOT/native-core/bin/run-bounded.rkt"
+BEAGLE_TEST_LOG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/beagle-test-phase.XXXXXX")"
+BEAGLE_TEST_KEEP_LOGS=0
+
+beagle_test_cleanup() {
+    local status=$?
+    if [[ "$BEAGLE_TEST_KEEP_LOGS" == 1 ]]; then
+        echo "beagle-test: preserved phase logs at $BEAGLE_TEST_LOG_ROOT" >&2
+    else
+        rm -rf -- "${BEAGLE_TEST_LOG_ROOT:?}"
+    fi
+    exit "$status"
+}
+trap beagle_test_cleanup EXIT
+
+beagle_test_slug() {
+    printf '%s' "$1" | tr '[:upper:] /' '[:lower:]__' | tr -cd '[:alnum:]_-'
+}
+
+run_beagle_test_phase() {
+    local label="$1"
+    local deadline="$2"
+    shift 2
+    local slug log receipt status tee_status
+    local -a pipeline_status
+    slug="$(beagle_test_slug "$label")"
+    log="$BEAGLE_TEST_LOG_ROOT/$slug.log"
+    receipt="$BEAGLE_TEST_LOG_ROOT/$slug.receipt"
+
+    echo "beagle-test: phase $label START deadline=${deadline}s log=$log receipt=$receipt" >&2
+    set +e
+    BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
+        "$RACKET" "$BEAGLE_TEST_SUPERVISOR" "$deadline" 5 -- "$@" 2>&1 |
+        tee "$log"
+    pipeline_status=("${PIPESTATUS[@]}")
+    status="${pipeline_status[0]}"
+    tee_status="${pipeline_status[1]}"
+    set -e
+
+    if [[ "$tee_status" -ne 0 ]]; then
+        status="$tee_status"
+    fi
+    if [[ "$status" -eq 124 ]]; then
+        BEAGLE_TEST_KEEP_LOGS=1
+        echo "beagle-test: phase $label TIMEOUT status=124; stopping gate" >&2
+    elif [[ "$status" -ne 0 ]]; then
+        BEAGLE_TEST_KEEP_LOGS=1
+        echo "beagle-test: phase $label FAILED status=$status; stopping gate" >&2
+    else
+        echo "beagle-test: phase $label END status=0" >&2
+    fi
+    return "$status"
+}
+
+# A deterministic, opt-in probe for the release-bar timeout contract. It is
+# not part of any normal tier; it leaves the child PID in the preserved log
+# directory so a caller can prove that the supervisor reaped it.
+if [[ "${BEAGLE_TEST_SYNTHETIC_TIMEOUT:-0}" == 1 ]]; then
+    synthetic_pid_file="$BEAGLE_TEST_LOG_ROOT/synthetic-child.pid"
+    BEAGLE_TEST_KEEP_LOGS=1
+    run_beagle_test_phase "synthetic-timeout" 1 \
+        "$BASH" -c 'sleep 30 & child=$!; printf "%s\n" "$child" >"$1"; wait "$child"' \
+        bash "$synthetic_pid_file" || exit 1
+    exit 0
+fi
+
+run_beagle_test_phase "racket-scope" 70 \
+    "$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || exit 1
+run_beagle_test_phase "checkout-first" 5 \
+    "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit 1
+run_beagle_test_phase "qualified-ref-scaffold" 2 \
+    "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit 1
+run_beagle_test_phase "consumer-smoke" 100 \
+    "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit 1
+run_beagle_test_phase "tier-runner" 420 \
+    "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt" "$@" || exit 1

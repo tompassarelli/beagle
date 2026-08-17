@@ -47,6 +47,15 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 source "$(dirname "${BASH_SOURCE[0]}")/_beagle-racket"
 
+# The release preflight is the only caller that opts into the extended Beagle
+# tier. Ordinary `bin/beagle-test` remains the fast local path; the existing
+# downstream-gate switch is the release-bar contract and is already required
+# by release verification.
+if [[ "${BEAGLE_DOWNSTREAM_GATE:-0}" == "1" ]]; then
+    echo "=== release preflight: extended Beagle tier ==="
+    bin/beagle-test --full --include-gated
+fi
+
 echo "=== 1/5: raco test beagle-test/tests/ ==="
 "$RACO" test beagle-test/tests/ 2>&1 | tail -5
 
