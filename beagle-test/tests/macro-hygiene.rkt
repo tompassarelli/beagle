@@ -25,9 +25,11 @@
                   expansion-origin-parent
                   fresh-scope-id
                   make-syntax-list
+                  racket-syntax->beagle-syntax
                   reader-metadata
                   scope-set
                   scope-set-member?
+                  scope-set-subset?
                   src-loc
                   structural-name-leaf
                   syntax-ident?
@@ -37,6 +39,11 @@
 
 (define (parse-prog . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
+
+(define (parse-source-text source-id source)
+  (parse-program/bytes (string->bytes/utf-8 source)
+                       #:source-path source-id
+                       #:source-id source-id))
 
 (define (br . xs) (cons BRACKET-TAG xs))
 
@@ -112,18 +119,51 @@
    (expand-fully reg '(with-tmp))
    (list 'let (br 'tmp 1) 'tmp)))
 
-(test-case "scope hygiene: compiler resolves caller, introduced, and nested tmp edges"
-  (define program
-    (parse-prog
-     (list
-      'defmacro 'around (br 'body)
-      (list
-       'quasiquote
-       (list 'let (br 'tmp 1)
-             (list 'do 'tmp (list 'unquote 'body)))))
-     (list
-      'defn 'capture-matrix (br (list 'tmp 'Int)) 'Int
-      (list 'around (list 'do 'tmp (list 'let (br 'tmp 2) 'tmp))))))
+(test-case "scope hygiene: real source keeps caller, introduced, and nested tmp edges distinct"
+  (define source-id "capture-matrix.bclj")
+  (define source
+    (string-append
+     "#lang beagle/clj\n"
+     "(ns capture.matrix)\n"
+     "(defmacro around [body]\n"
+     "  `(let [tmp 1]\n"
+     "     (do tmp ~body)))\n"
+     "(defn capture-matrix [(tmp Int)] Int\n"
+     "  (around (do tmp (let [tmp 2] tmp))))\n"))
+  (define source-bytes (string->bytes/utf-8 source))
+  (define program (parse-source-text source-id source))
+  ;; Expand the invocation that the real reader produced.  This keeps the
+  ;; scope assertion on Syntax while the AST assertions below cover its
+  ;; BindingId/refersTo projection.
+  (define reader-forms
+    (read-beagle-syntax/bytes source-id source-bytes #:source-id source-id))
+  (define reader-function
+    (for/first ([form (in-list reader-forms)]
+                #:when (equal? (car (syntax->datum form)) 'defn))
+      form))
+  (define reader-call (stx-ref (stx-subs reader-function) 4))
+  (define reader-call-syntax
+    (racket-syntax->beagle-syntax reader-call source-bytes))
+  (define caller-body (cadr (syntax-list-children reader-call-syntax)))
+  (define expanded
+    (expand-fully (program-macros program) reader-call-syntax))
+  (define expanded-children (syntax-list-children expanded))
+  (define expanded-binding-children
+    (syntax-vector-children (cadr expanded-children)))
+  (define introduced-syntax-binder (car expanded-binding-children))
+  (define expanded-do (caddr expanded-children))
+  (define expanded-do-children (syntax-list-children expanded-do))
+  (define introduced-syntax-use (cadr expanded-do-children))
+  (define antiquoted-caller (caddr expanded-do-children))
+  (check-eq? antiquoted-caller caller-body)
+  (check-equal? (beagle-syntax-scopes introduced-syntax-binder)
+                (beagle-syntax-scopes introduced-syntax-use))
+  (check-true
+   (scope-set-subset?
+    (beagle-syntax-scopes antiquoted-caller)
+    (beagle-syntax-scopes introduced-syntax-binder)))
+  (check-not-equal? (beagle-syntax-scopes introduced-syntax-binder)
+                    (beagle-syntax-scopes antiquoted-caller))
   (define function (car (program-forms program)))
   (define parameter (car (defn-form-params function)))
   (define introduced-let (car (defn-form-body function)))
@@ -151,12 +191,23 @@
   (define introduced-binding-wire (car (hash-ref introduced-wire 'bindings)))
   (define introduced-do-wire (car (hash-ref introduced-wire 'body)))
   (define introduced-use-wire (car (hash-ref introduced-do-wire 'body)))
+  (define caller-do-wire (cadr (hash-ref introduced-do-wire 'body)))
+  (define caller-use-wire (car (hash-ref caller-do-wire 'body)))
+  (define nested-wire (cadr (hash-ref caller-do-wire 'body)))
+  (define nested-binding-wire (car (hash-ref nested-wire 'bindings)))
+  (define nested-use-wire (car (hash-ref nested-wire 'body)))
   (check-equal? (hash-ref parameter-wire 'bindingId)
                 (binding-id-stable parameter-id))
   (check-equal? (hash-ref introduced-binding-wire 'bindingId)
                 (binding-id-stable introduced-id))
   (check-equal? (hash-ref introduced-use-wire 'refersTo)
                 (binding-id-stable introduced-id))
+  (check-equal? (hash-ref caller-use-wire 'refersTo)
+                (binding-id-stable parameter-id))
+  (check-equal? (hash-ref nested-binding-wire 'bindingId)
+                (binding-id-stable nested-id))
+  (check-equal? (hash-ref nested-use-wire 'refersTo)
+                (binding-id-stable nested-id))
   (check-equal? (hash-ref introduced-use-wire 'providerId) 'null))
 
 ;; --- recursive macro depth-cap --------------------------------------------
