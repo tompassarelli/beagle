@@ -13,6 +13,7 @@
          beagle/private/parse
          beagle/private/check
          beagle/private/types
+         beagle/private/module-interface
          beagle/private/macros)
 
 (define (parse-prog . forms)
@@ -754,14 +755,34 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "macro-definition-site.bjs")))
 
+(define macro-definition-site-provider
+  (let ([prog
+         (parse-program
+          (read-beagle-syntax macro-definition-site-fixture-source)
+          #:source-path macro-definition-site-fixture-source)])
+    (type-check! prog)
+    (module-source
+     'macro-definition-site
+     macro-definition-site-fixture-source
+     #f
+     (program->module-interface
+      prog
+      #:source-id macro-definition-site-fixture-source))))
+
 (define (parse-imported-define-box require-spec invocation)
-  (parse-prog/source
-   macro-definition-site-fixture-source
-   '(define-target js)
-   (list 'ns 'test-consumer (list ':require require-spec))
-   (list 'defrecord 'Box (br (list 'value 'Int)))
-   (list 'defn 'normalize (br (list 'value 'Int)) 'Int 'value)
-   invocation))
+  (parse-program
+   (map (lambda (form) (datum->syntax #f form))
+        (list
+         '(define-target js)
+         (list 'ns 'test-consumer (list ':require require-spec))
+         (list 'defrecord 'Box (br (list 'value 'Int)))
+         (list 'defn 'normalize (br (list 'value 'Int)) 'Int 'value)
+         invocation))
+   #:source-path "test-consumer.bjs"
+   #:module-resolver
+   (lambda (namespace _importer)
+     (and (eq? namespace 'macro-definition-site)
+          macro-definition-site-provider))))
 
 (define (check-imported-define-box prog expected-prefix expected-name
                                    [expected-type-prefix expected-prefix])
