@@ -10,8 +10,10 @@
 (load-file "server.clj")
 
 (def checks (atom []))
-(defn check! [label value]
+(defn check! [label value & [details]]
   (println (str (if value "[PASS] " "[FAIL] ") label))
+  (when (and (not value) details)
+    (println details))
   (swap! checks conj [label (boolean value)]))
 
 (defn eventually [f]
@@ -118,7 +120,8 @@
             {:name "beta" :body '(+ 40 2)}]
            gate-options)]
       (check! "reader snapshot feeds a successful sealed batch commit"
-              (= :committed (:type outcome)))
+              (= :committed (:type outcome))
+              (pr-str outcome))
       (check! "commit uses the reader's pinned base version"
               (= (get-in before [:snapshot :version])
                  (:base-version outcome)))
