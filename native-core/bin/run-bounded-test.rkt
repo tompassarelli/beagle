@@ -179,6 +179,55 @@
                  "subtree-reaped-v0 timeout status=124\n")
    (check-equal? (subprocess-status canary) 'running
                  "process-group fallback swept an unrelated process")
+
+   ;; The process group is not the containment boundary it looks like. A
+   ;; descendant that calls setsid() leaves the group, so a group-scoped sweep
+   ;; never reaches it: the deadline fired, the grandchild kept running, and
+   ;; the phase reported the supervisor contract failure (2, no receipt)
+   ;; instead of a timeout. Observed in CI as "descendants remained after
+   ;; SIGKILL" alongside "supervisor did not reap its subtree".
+   ;;
+   ;; The heartbeat is the real assertion. A PID means nothing across a
+   ;; namespace boundary, but a file that stops growing means the writer is
+   ;; gone wherever it was.
+   (define setsid-executable
+     (or (find-executable-path "setsid")
+         (error 'run-bounded-test "util-linux setsid is unavailable")))
+   (define heartbeat (build-path scratch "escapee.heartbeat"))
+   (define escapee-receipt (build-path scratch "escapee.receipt"))
+   (environment-variables-set!
+    bare-env #"BEAGLE_BOUNDED_COMPLETION_RECEIPT"
+    (string->bytes/utf-8 (path->string escapee-receipt)))
+   (define escapee-out (open-output-bytes))
+   (define escapee-err (open-output-bytes))
+   (define escapee-status
+     (run-bare bare-env escapee-out escapee-err "2" "1" "--" "/bin/sh" "-c"
+               (format
+                (string-append
+                 "trap '' TERM\n"
+                 "~a /bin/sh -c \"trap '' TERM; while :; do echo b >> ~a;"
+                 " sleep 0.2; done\" &\n"
+                 "while :; do sleep 0.2; done")
+                (path->string setsid-executable)
+                (path->string heartbeat))))
+   (check-equal? escapee-status 124
+                 "a setsid'd descendant must not turn a timeout into a contract failure")
+   (check-equal? (file->string escapee-receipt)
+                 "subtree-reaped-v0 timeout status=124\n")
+   (define escapee-stderr (bytes->string/utf-8 (get-output-bytes escapee-err)))
+   (check-true (string-contains? escapee-stderr "TIMEOUT status=124\n"))
+   (check-false (string-contains? escapee-stderr "descendants remained")
+                "the sweep must reach a descendant that left the process group")
+   (define heartbeat-at-return
+     (if (file-exists? heartbeat) (file-size heartbeat) 0))
+   (check-true (positive? heartbeat-at-return)
+               "the escaping grandchild never ran, so nothing was proved")
+   (sleep 1)
+   (check-equal? (file-size heartbeat) heartbeat-at-return
+                 "a descendant outlived the deadline that was supposed to contain it")
+   (check-equal? (subprocess-status canary) 'running
+                 "the widened sweep reached a process outside the subtree")
+
    (subprocess-kill canary #t)
    (close-input-port canary-out)
    (close-input-port canary-err))

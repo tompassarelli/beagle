@@ -69,9 +69,11 @@
 (define command-arguments (drop arguments 4))
 
 ;; Safety by construction: namespace mode may signal PID -1 because this
-;; process is PID 1 there. Fallback mode signals only the process group it
-;; created and adopts orphaned descendants as a subreaper.
-(define namespace-mode? (= (getpid) 1))
+;; process is PID 1 there. Fallback mode never does; it signals only the
+;; process group it created plus the processes the kernel has reparented to
+;; this subreaper, each by explicit PID. Both sets are its own descendants.
+(define self-pid (getpid))
+(define namespace-mode? (= self-pid 1))
 (define force-process-group?
   (equal? "1" (getenv "BEAGLE_BOUNDED_FORCE_PROCESS_GROUP")))
 ;; Whether this host lets an unprivileged process open a user+PID namespace is
@@ -132,16 +134,51 @@
 (define stderr-thread #f)
 (define child-group-id #f)
 
+;; Every process currently reparented to this supervisor. The process group is
+;; NOT the containment boundary it looks like: a descendant that calls setsid()
+;; or setpgid() — anything that starts a job-control shell, which build drivers
+;; routinely do — leaves the group, and a group-scoped kill never reaches it.
+;; What does hold is the subreaper contract: an orphaned descendant is
+;; reparented HERE, so /proc names it as a child of this process.
+(define (parent-of pid)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (call-with-input-file (format "/proc/~a/status" pid)
+      (lambda (in)
+        (let loop ()
+          (define line (read-line in))
+          (cond
+            [(eof-object? line) #f]
+            [(regexp-match #rx"^PPid:[ \t]+([0-9]+)" line)
+             => (lambda (match) (string->number (cadr match)))]
+            [else (loop)]))))))
+
+(define (adopted-children)
+  (with-handlers ([exn:fail? (lambda (_) '())])
+    (for*/list ([entry (in-list (directory-list "/proc"))]
+                [name (in-value (path->string entry))]
+                #:when (regexp-match? #rx"^[0-9]+$" name)
+                [pid (in-value (string->number name))]
+                #:when (and (not (= pid self-pid))
+                            (eqv? self-pid (parent-of pid))))
+      pid)))
+
 (define (signal-descendants signal)
   (cond
     [namespace-mode?
      ;; PID -1 addresses every signalable process in this private namespace
      ;; except this PID-1 supervisor.
      (void (kill-processes -1 signal))]
-    [child-group-id
-     ;; subprocess-group-enabled makes the child's PID its process-group ID.
-     ;; A negative target reaches that group only, even if its leader exited.
-     (void (kill-processes (- child-group-id) signal))]))
+    [else
+     (when child-group-id
+       ;; subprocess-group-enabled makes the child's PID its process-group ID.
+       ;; A negative target reaches that group only, even if its leader exited.
+       (void (kill-processes (- child-group-id) signal)))
+     ;; …and everything that left that group. Without this the fallback lets a
+     ;; setsid'd grandchild outlive the deadline: observed as a timed-out phase
+     ;; reporting the supervisor contract failure below instead of 124, with
+     ;; the grandchild still running.
+     (for ([pid (in-list (adopted-children))])
+       (void (kill-processes pid signal)))]))
 
 (define (reap-adopted-children)
   (define status (malloc _int 'atomic))
@@ -151,7 +188,13 @@
       [(positive? result) (loop 0)]
       [(zero? result)
        (if (< quiet-rounds 100)
-           (begin (sleep 0.01) (loop (add1 quiet-rounds)))
+           (begin
+             ;; A descendant becomes visible as ours only once its own parent
+             ;; dies, so the sweep repeats rather than fires once: each round
+             ;; kills what the previous round orphaned into this process.
+             (signal-descendants SIGKILL)
+             (sleep 0.01)
+             (loop (add1 quiet-rounds)))
            (fail "descendants remained after SIGKILL"))]
       [else (void)])))
 
