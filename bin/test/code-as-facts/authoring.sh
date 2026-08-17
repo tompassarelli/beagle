@@ -19,6 +19,7 @@ export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
+source "$ROOT/bin/_beagle-racket"
 FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
 FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
 CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
@@ -32,16 +33,16 @@ apply_edit() {
   local outdir="$1" corpus="$2" op="$3"; shift 3
   local W; W="$(mktemp -d)"; local E="$W/e"; mkdir -p "$E" "$W/regen"
   local edns=() f b
-  for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done
+  for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done
   case "$op" in
     rename)  # the one engine: scope-correct across collision + shadowing + cross-module
       bb -cp "$FRAM_OUT" "$RES" rename "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
-      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
+      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     delete)  # the second verb: remove a def IFF no reference would orphan, else refuse (fail closed)
       bb -cp "$FRAM_OUT" "$RES" delete "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
-      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
+      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     *) echo REJECTED; rm -rf "$W"; return ;;
   esac
   if "$ROOT/bin/beagle-build-all" "$W/regen" --out "$W/o" 2>&1 | grep -q '0 error'; then
@@ -58,7 +59,10 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 echo '--- NL: "rename the helper function to add-one" -> the agent emits a structured edit ---'
 echo '    spec: {op rename, old "helper", new "add-one", scope "mod"}  (scope-correct via refers_to)'
 r="$(apply_edit "$T/a" "$HERE/shadow-corpus" rename helper add-one mod)"
-if [ "$r" = COMMITTED ] && grep -q 'add-one' "$T/a/mod.bclj" 2>/dev/null && grep -qE 'other \[helper' "$T/a/mod.bclj"; then
+if [ "$r" = COMMITTED ] \
+   && grep -qF '(defn add-one' "$T/a/mod.bclj" 2>/dev/null \
+   && grep -qF '(add-one y)' "$T/a/mod.bclj" \
+   && grep -qF '(defn other [(helper Int)] Int' "$T/a/mod.bclj"; then
   echo "  PASS  committed; def+ref renamed, shadowing param untouched, recompiled"
 else echo "  FAIL  ($r)"; fail=1; fi
 
