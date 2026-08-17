@@ -165,7 +165,7 @@ static native_parallel_access_v0 native_parallel_partition_access(
                                       &access.read_hi_0);
   } else {
     int64_t span_lo = lo - runtime->left_halo;
-    int64_t span_hi;
+    int64_t span_hi = hi;
     (void)native_parallel_add_clamped(hi, runtime->right_halo, INT64_MAX,
                                       &span_hi);
     if (runtime->left_halo >= length || runtime->right_halo >= length ||
