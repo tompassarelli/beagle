@@ -110,7 +110,7 @@
       str
       (str/replace File/separator "/")))
 
-(defn tree-manifest-digest [^File root]
+(defn tree-manifest-digest [^File root include-compiled?]
   (let [rows
         (->> (file-seq root)
              (filter #(.isFile ^File %))
@@ -122,8 +122,8 @@
                   ;; them makes the measured closure match reality and prevents
                   ;; another Racket version's cache maintenance from creating
                   ;; false toolchain drift.
-                  (when-not
-                      (re-find #"(?:^|/)compiled(?:/|$)" relative)
+                  (when (or include-compiled?
+                            (not (re-find #"(?:^|/)compiled(?:/|$)" relative)))
                     [relative (.length file) (digest-file file)]))))
              (sort-by first)
              vec)]
@@ -176,6 +176,11 @@
                      (canonical-file! executable-path
                                       "current verifier interpreter"
                                       :executable))
+        freshness (io/file beagle-home ".beagle/zo-fresh")
+        use-compiled?
+        (and (str/starts-with? (.getPath beagle-home) "/nix/store/")
+             (.isFile freshness)
+             (= (.getPath racket) (str/trim (slurp freshness))))
         identity
         [toolchain-schema
          ["interpreter"
@@ -183,12 +188,15 @@
           (some-> executable digest-file)
           (System/getProperty "babashka.version")]
          ["racket" (.getPath racket) (digest-file racket)]
-         ["beagle-lib" beagle-lib-path (tree-manifest-digest beagle-lib)]
+         ["beagle-lib" beagle-lib-path
+          (tree-manifest-digest beagle-lib use-compiled?)]
+         ["compiled" use-compiled?]
          ["checker" (relative-path beagle-lib checker) (digest-file checker)]]]
     {:digest (digest-string (pr-str identity))
      :racket (.getPath racket)
      :beagle-lib beagle-lib-path
-     :checker checker-path}))
+     :checker checker-path
+     :use-compiled use-compiled?}))
 
 (defn validate-namespace! [value label]
   (require! (or (nil? value)
@@ -350,12 +358,13 @@
         (mapcat (fn [source] ["--check-source" source])
                 (:checked-modules request))
         command
-        ;; `-c` is deliberate: a mutable checkout may be shared by Racket
-        ;; versions whose in-tree compiled caches are mutually incompatible.
-        ;; Proofs trade a little load time for source-authentic, race-free
-        ;; checking. `-U` also excludes user-specific collection roots.
-        (into [(:racket toolchain) "-U" "-c" "-S" collects
-               (:checker toolchain)]
+        ;; Mutable checkouts disable compiled files because their caches can be
+        ;; shared by incompatible Racket versions. Immutable Nix packages may
+        ;; use bytecode only when .beagle/zo-fresh names this exact Racket; that
+        ;; bytecode is included in the measured toolchain digest above.
+        (into (cond-> [(:racket toolchain) "-U"]
+                (not (:use-compiled toolchain)) (conj "-c")
+                true (conj "-S" collects (:checker toolchain)))
               (concat selectors paths))
         builder
         (ProcessBuilder.
@@ -488,9 +497,9 @@
 (defn verify-request [request]
   ;; A mutable development checkout can change while the checker is running.
   ;; Never bless that drifting run: retry once and issue a proof only when the
-  ;; measured source/toolchain closure is identical before and after. Racket
-  ;; caches are not inputs because run-checker uses `-c`; immutable Nix closures
-  ;; therefore take the single-pass path.
+  ;; measured source/toolchain closure is identical before and after. Mutable
+  ;; checkout caches are not inputs because run-checker uses `-c`; immutable
+  ;; package bytecode is measured with the source closure.
   (loop [attempt 0
          before (toolchain-snapshot)]
     (let [checker-result
