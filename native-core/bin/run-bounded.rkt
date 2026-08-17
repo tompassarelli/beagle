@@ -17,6 +17,8 @@
 ;; Set BEAGLE_BOUNDED_COMPLETION_RECEIPT to receive a `subtree-reaped-v0`
 ;; outcome only after the direct child and every adopted descendant have been
 ;; reaped. The outcome distinguishes a child exit from a supervisor deadline.
+;; BEAGLE_BOUNDED_UNSHARE_USABLE carries the host's namespace answer down a
+;; process tree so it is probed once rather than once per invocation.
 
 (require ffi/unsafe
          racket/list
@@ -72,21 +74,43 @@
 (define namespace-mode? (= (getpid) 1))
 (define force-process-group?
   (equal? "1" (getenv "BEAGLE_BOUNDED_FORCE_PROCESS_GROUP")))
+;; Whether this host lets an unprivileged process open a user+PID namespace is
+;; a property of the KERNEL, not of the command, so it is worth exactly one
+;; probe per process tree. It used to cost a throwaway `unshare ... true` fork
+;; on every single invocation, and a build fans this file out across every
+;; phase — the answer was re-derived dozens of times per build and hundreds of
+;; times across concurrent suites, each time by forking.
+;;
+;; The answer travels in the environment, so descendants inherit it: a
+;; supervised build sets it once and every phase supervisor below reads it.
+;; Only an affirmative memo is trusted for the fast path; the probe that wrote
+;; it ran in this same tree on this same kernel, so its answer cannot have gone
+;; stale underneath a descendant.
+(define unshare-memo-variable "BEAGLE_BOUNDED_UNSHARE_USABLE")
+
 (when (and (not namespace-mode?) (not force-process-group?))
   (define unshare-executable (find-executable-path "unshare"))
   (define racket-executable
     (or (find-executable-path (find-system-path 'exec-file))
         (find-system-path 'exec-file)))
   (define self (path->complete-path (find-system-path 'run-file)))
-  (define true-executable (find-executable-path "true"))
-  (define unshare-usable?
-    (and unshare-executable true-executable
+  (define (probe-unshare)
+    (define true-executable (find-executable-path "true"))
+    (and true-executable
          (parameterize ([current-output-port (open-output-nowhere)]
                         [current-error-port (open-output-nowhere)])
            (zero? (system*/exit-code
                    unshare-executable
                    "--user" "--map-current-user" "--pid" "--fork"
                    "--kill-child" true-executable)))))
+  (define unshare-usable?
+    (and unshare-executable
+         (case (getenv unshare-memo-variable)
+           [("1") #t]
+           [("0") #f]
+           [else (define probed (probe-unshare))
+                 (putenv unshare-memo-variable (if probed "1" "0"))
+                 probed])))
   (when unshare-usable?
     (exit (apply system*/exit-code unshare-executable
                  "--user" "--map-current-user" "--pid" "--fork"

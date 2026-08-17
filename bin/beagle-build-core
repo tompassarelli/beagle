@@ -88,6 +88,36 @@ run_phase() {
     run_phase_with_grace "$name" "$seconds" "$core_kill_grace" "$@"
 }
 
+# A LEAF phase: a command that is one process and can never acquire a
+# descendant. The Racket supervisor exists to contain a process TREE — it
+# prefers a private PID namespace and re-execs itself into it, so it costs two
+# Racket VMs — and a command with no tree to contain buys nothing for that.
+# `timeout` enforces the same contract at the same boundary: SIGTERM at the
+# deadline, SIGKILL after the same kill grace, exit 124 when the deadline is
+# what ended it. Containment is not weakened, it is trivially satisfied: the
+# signal reaches the whole of what the phase ever created.
+#
+# The leaf claim is the caller's obligation and is NOT a guess about the
+# command's name. Use this only where the command is known to be a single
+# execve that spawns nothing (flock taking an already-open fd is the case this
+# exists for); anything that might fork stays on the supervisor.
+run_phase_leaf() {
+    local name="$1"
+    local seconds="$2"
+    shift 2
+    echo "beagle build: phase $name START (leaf, deadline=${seconds}s kill-grace=${core_kill_grace}s)" >&2
+    local rc=0
+    timeout -k "$core_kill_grace" "$seconds" "$@" || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "beagle build: phase $name END" >&2
+    elif [[ $rc -eq 124 ]]; then
+        echo "beagle build: phase $name TIMEOUT ($rc)" >&2
+    else
+        echo "beagle build: phase $name ERROR ($rc)" >&2
+    fi
+    return "$rc"
+}
+
 out=""
 abi="lp64"
 materializers=()
@@ -218,7 +248,7 @@ for source in "${sources[@]}"; do
         die "$source must begin with bare #lang beagle"
 done
 
-for command in bb flock python3 sha256sum sync; do
+for command in bb flock python3 sha256sum sync timeout; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
@@ -1627,7 +1657,8 @@ marker_digest="${staged_manifest_digests[0]}"
 printf '%s\n' "$marker_digest" >"$install/build.manifest.sha256"
 
 exec {publish_lock_fd}>"$out/.beagle-publish.lock"
-run_phase publish-lock "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+# flock on an already-open fd is one execve that forks nothing: a leaf phase.
+run_phase_leaf publish-lock "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
     flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" "$publish_lock_fd" ||
     die "timed out acquiring the output commit lock"
 for source_index in "${!source_snapshot_paths[@]}"; do
